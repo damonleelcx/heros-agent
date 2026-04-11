@@ -1,0 +1,6 @@
+/heros-data/
+/.heros-data/
+/agentd
+/collectived
+/heros-mcp
+*.exe

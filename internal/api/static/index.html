@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Heros Agent — 审批队列</title>
+  <style>
+    :root { --bg: #0f1419; --card: #1a2332; --text: #e7ecf3; --muted: #8b9cb3; --accent: #3d8bfd; --ok: #3ecf8e; --warn: #f0c14b; }
+    * { box-sizing: border-box; }
+    body { font-family: ui-sans-serif, system-ui, sans-serif; background: var(--bg); color: var(--text); margin: 0; line-height: 1.5; }
+    header { padding: 1.25rem 1.5rem; border-bottom: 1px solid #2a3545; }
+    h1 { font-size: 1.15rem; font-weight: 600; margin: 0; }
+    p.sub { margin: 0.35rem 0 0; color: var(--muted); font-size: 0.9rem; }
+    main { max-width: 960px; margin: 0 auto; padding: 1.5rem; }
+    .card { background: var(--card); border-radius: 10px; padding: 1rem 1.25rem; margin-bottom: 1rem; border: 1px solid #2a3545; }
+    .layer { display: inline-block; font-size: 0.75rem; padding: 0.2rem 0.5rem; border-radius: 4px; background: #243044; color: var(--muted); }
+    pre.diff { white-space: pre-wrap; word-break: break-word; font-size: 0.8rem; background: #0d1117; padding: 0.75rem; border-radius: 6px; overflow-x: auto; }
+    button { cursor: pointer; border: none; border-radius: 6px; padding: 0.45rem 0.85rem; font-weight: 500; margin-right: 0.5rem; }
+    .approve { background: var(--ok); color: #0a1628; }
+    .reject { background: #3a2a32; color: #f5a9b8; }
+    .empty { color: var(--muted); }
+    a { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>自进化代理 — 人工审批</h1>
+    <p class="sub">所有变更以提案 + diff 进入队列；批准后才写入运行时（文档 Layer 1–4 共用脊柱）。</p>
+  </header>
+  <main>
+    <p class="empty" id="status">加载中…</p>
+    <div id="list"></div>
+  </main>
+  <script>
+    async function load() {
+      const st = document.getElementById('status');
+      const list = document.getElementById('list');
+      try {
+        const r = await fetch('/api/proposals/pending');
+        const data = await r.json();
+        st.textContent = data.length ? `待审批：${data.length} 条` : '暂无待审批提案';
+        list.innerHTML = '';
+        for (const p of data) {
+          const el = document.createElement('div');
+          el.className = 'card';
+          el.innerHTML = `
+            <div><span class="layer">${p.layer}</span></div>
+            <h2 style="font-size:1rem;margin:0.5rem 0">${escapeHtml(p.title)}</h2>
+            <p style="color:var(--muted);font-size:0.9rem">${escapeHtml(p.rationale)}</p>
+            <pre class="diff">${escapeHtml(p.diff_text)}</pre>
+            <div>
+              <button class="approve" data-id="${p.id}">批准</button>
+              <button class="reject" data-id="${p.id}">拒绝</button>
+            </div>`;
+          list.appendChild(el);
+        }
+        list.querySelectorAll('.approve').forEach(btn => btn.addEventListener('click', () => act(btn.dataset.id, 'approve')));
+        list.querySelectorAll('.reject').forEach(btn => btn.addEventListener('click', () => act(btn.dataset.id, 'reject')));
+      } catch (e) {
+        st.textContent = '无法连接 API（守护进程是否在运行？）';
+      }
+    }
+    function escapeHtml(s) {
+      return (s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    }
+    async function act(id, op) {
+      const path = op === 'approve' ? `/api/proposals/${id}/approve` : `/api/proposals/${id}/reject`;
+      const r = await fetch(path, { method: 'POST' });
+      if (!r.ok) alert(await r.text());
+      load();
+    }
+    load();
+    setInterval(load, 15000);
+  </script>
+</body>
+</html>

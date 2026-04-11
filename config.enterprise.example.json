@@ -1,0 +1,39 @@
+{
+  "listen_addr": "127.0.0.1:8787",
+  "data_dir": ".heros-data",
+  "openai_base_url": "https://api.openai.com/v1",
+  "openai_api_key": "",
+  "openai_model": "gpt-4o-mini",
+  "embedding_model": "text-embedding-3-small",
+  "embedding_dims": 256,
+  "collective_url": "",
+  "node_id": "enterprise-node-1",
+  "allow_high_risk_cli": false,
+  "qdrant_url": "http://127.0.0.1:6333",
+  "qdrant_api_key": "",
+  "qdrant_collection": "heros_memory",
+  "neo4j_uri": "neo4j://127.0.0.1:7687",
+  "neo4j_user": "neo4j",
+  "neo4j_password": "enterprise-change-me",
+  "neo4j_database": "neo4j",
+  "nats_url": "nats://127.0.0.1:4222",
+  "jetstream_enabled": true,
+  "jetstream_stream_name": "HEROS",
+  "jetstream_max_age_hours": 168,
+  "auth_mode": "off",
+  "metrics_enabled": true,
+  "tenant_credentials": [
+    {
+      "tenant_id": "demo",
+      "api_key": "change-me-demo-key",
+      "role": "member",
+      "key_id": "demo-1"
+    },
+    {
+      "tenant_id": "platform",
+      "api_key": "change-me-admin-key",
+      "role": "admin",
+      "key_id": "admin-1"
+    }
+  ]
+}

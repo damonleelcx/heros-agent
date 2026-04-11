@@ -1,0 +1,10 @@
+{
+  "listen_addr": "127.0.0.1:8787",
+  "data_dir": ".heros-data",
+  "openai_base_url": "https://api.openai.com/v1",
+  "openai_api_key": "",
+  "openai_model": "gpt-4o-mini",
+  "collective_url": "",
+  "node_id": "dev-node-1",
+  "allow_high_risk_cli": false
+}
