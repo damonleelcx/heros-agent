@@ -124,7 +124,7 @@ Then copy and edit **`config.enterprise.example.json`** and run:
 
 **Default way to run the terminal agent:** `heros` starts **agentd** (HTTP API, SQLite, seeds, optional enterprise backends) **in the same process**, waits for **`/health`**, then opens the REPL. **`data_dir`** persists skills, memory, and DB across runs; use **`/exit`** or **Ctrl+D** to stop the server and exit.
 
-**No flags required for typical use:** **`cd`** into your project and run **`heros`**. Config is **auto-discovered** (`config.json` in cwd or parents, then `%APPDATA%\heros\config.json` / `~/.heros/config.json` / `~/.heros-agent/config.json`, else defaults). The LLM key is taken from **`OPENAI_API_KEY`**, or **`openai_api_key`** in that config. **Workspace** for **`heros_shell`** is the **current working directory** (override with **`-workdir`** only if needed).
+**No flags required for typical use:** **`cd`** into your project and run **`heros`**. Config is **auto-discovered** (`config.json` in cwd or parents, then `%APPDATA%\heros\config.json` / `~/.heros/config.json` / `~/.heros-agent/config.json`, else defaults). The LLM key is taken from **`OPENAI_API_KEY`**, or **`openai_api_key`** in that config; if still missing, **`heros`** prompts once for a paste (hidden on a TTY) and **writes it** to **`%APPDATA%\heros\config.json`** (or the Unix equivalent under `UserConfigDir`) for the next run. **Workspace** for **`heros_shell`** is the **current working directory** (override with **`-workdir`** only if needed).
 
 **Global install** (add `$(go env GOPATH)/bin` to `PATH`):
 

@@ -62,6 +62,8 @@ For **base URL** and **model** (when you do not pass flags):
 
 You can rely on **only** a global `config.json` with `openai_api_key` set and run plain **`heros`** with no env vars.
 
+On **first run**, if no key is found anywhere, **`heros`** prompts you to **paste the key interactively** (hidden on a real terminal). That key is then **saved** to **`%APPDATA%\heros\config.json`** on Windows (or **`$XDG_CONFIG_HOME/heros/config.json`** / `~/.config/heros/config.json` on Unix), merged with any existing keys in that file. Empty input still fails until you set env, config, or `-openai-api-key`.
+
 ### Step 4 — Workspace (current directory)
 
 **`heros_shell`** uses the **current working directory** as the workspace root. **`cd`** into your repo (or any folder) and run **`heros`** — no **`-workdir`**. Use **`-workdir`** only to override.
