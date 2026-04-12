@@ -1,3 +1,6 @@
+# Local daemon config (may contain secrets; use config.example.json as template)
+/config.json
+
 /heros-data/
 /.heros-data/
 /agentd
