@@ -27,6 +27,9 @@ func SystemPromptPath(dataDir string) string {
 
 // SanitizeTenantScope normalizes a tenant id for path segments; empty becomes _global.
 func SanitizeTenantScope(tenantID string) string {
+	if strings.TrimSpace(tenantID) == "" {
+		return "_global"
+	}
 	s := SanitizeSlug(tenantID)
 	if s == "" {
 		return "_global"

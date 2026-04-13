@@ -17,8 +17,14 @@ type ToolCall struct {
 	Arguments string // raw JSON object string
 }
 
+// ChatOptions configures one chat/completions call (tool policy, etc.).
+type ChatOptions struct {
+	// ToolChoice is sent as JSON field "tool_choice" when non-nil (e.g. "required" on OpenAI forces ≥1 tool call).
+	ToolChoice any
+}
+
 // ChatCompletion calls OpenAI-compatible POST .../chat/completions.
-func ChatCompletion(ctx context.Context, baseURL, apiKey, model string, messages []map[string]any, tools []map[string]any) (content string, toolCalls []ToolCall, err error) {
+func ChatCompletion(ctx context.Context, baseURL, apiKey, model string, messages []map[string]any, tools []map[string]any, opt *ChatOptions) (content string, toolCalls []ToolCall, err error) {
 	if model == "" {
 		model = "gpt-4o-mini"
 	}
@@ -28,6 +34,9 @@ func ChatCompletion(ctx context.Context, baseURL, apiKey, model string, messages
 	}
 	if len(tools) > 0 {
 		body["tools"] = tools
+	}
+	if opt != nil && opt.ToolChoice != nil {
+		body["tool_choice"] = opt.ToolChoice
 	}
 	b, err := json.Marshal(body)
 	if err != nil {
@@ -92,7 +101,7 @@ func OpenAITools(opts ToolOptions) []map[string]any {
 		"type": "function",
 		"function": map[string]any{
 			"name":        "heros_shell",
-			"description": "Run a shell command on THIS machine (the CLI process), with cwd set to the configured workspace root. Use for git, builds, local file inspection. Prefer read-only commands first.",
+			"description": "PRIMARY way to observe the user's project: runs on THIS machine with cwd = workspace root. REQUIRED before answering questions about repo layout, purpose, stack, or files (use dir/ls, type/cat README*, package.json, src/, etc.). Do not claim you lack context without calling this first. Prefer read-only commands first; Windows: dir, type, where; Unix: ls, cat, find.",
 			"parameters": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -121,7 +130,7 @@ func OpenAITools(opts ToolOptions) []map[string]any {
 			"type": "function",
 			"function": map[string]any{
 				"name":        "heros_memory_search",
-				"description": "Semantic / episodic memory search via agentd (Qdrant when configured, else SQLite).",
+				"description": "Search prior facts and this session (episodic + vectors). REQUIRED when the user asks what you remember / what is in memory — never claim empty memory without calling this. Also use at the start of long-horizon work. Current chat is indexed for search without heros_memory_save.",
 				"parameters": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
@@ -151,7 +160,7 @@ func OpenAITools(opts ToolOptions) []map[string]any {
 			"type": "function",
 			"function": map[string]any{
 				"name":        "heros_read_skill",
-				"description": "Load full SKILL.md body for a logical skill name from the folder-backed catalog.",
+				"description": "Load full SKILL.md from the agent catalog (file lives under heros data_dir/skills/..., not the workspace). Call when a listed skill matches the task instead of guessing paths or procedures.",
 				"parameters": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
@@ -178,19 +187,72 @@ func OpenAITools(opts ToolOptions) []map[string]any {
 		{
 			"type": "function",
 			"function": map[string]any{
+				"name": "heros_run_harness",
+				"description": "Run the built-in multi-actor harness (leader decomposes goal → rotating specialists → critic) in the same heros process as POST /api/harness/run. Use when the user wants a structured multi-perspective pass, risk/quality review, or explicit decomposition—not for trivial one-liner questions. Slower and more LLM calls than normal chat; prefer heros_shell for simple file inspection.",
+				"parameters": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"goal": map[string]any{"type": "string", "description": "High-level objective to plan and execute through the harness pipeline"},
+					},
+					"required": []string{"goal"},
+				},
+			},
+		},
+		{
+			"type": "function",
+			"function": map[string]any{
+				"name":        "heros_list_pending_proposals",
+				"description": "List proposals awaiting approval (same as REPL /pending). Returns a numbered list for the user to pick from. Always use first when the user says approve/reject without giving an id, or when multiple proposals exist.",
+				"parameters": map[string]any{
+					"type":       "object",
+					"properties": map[string]any{},
+				},
+			},
+		},
+		{
+			"type": "function",
+			"function": map[string]any{
+				"name":        "heros_approve_proposal",
+				"description": "Apply one pending proposal by id (same as REPL /approve and the web UI). If several are pending, list first and wait until the user picks a number or id — do not guess. If exactly one is pending and the user clearly means that queue, you may approve that id.",
+				"parameters": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"proposal_id": map[string]any{"type": "string", "description": "id field from heros_submit_proposal response or heros_list_pending_proposals"},
+					},
+					"required": []string{"proposal_id"},
+				},
+			},
+		},
+		{
+			"type": "function",
+			"function": map[string]any{
+				"name":        "heros_reject_proposal",
+				"description": "Reject a pending proposal (same as REPL /reject <id>).",
+				"parameters": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"proposal_id": map[string]any{"type": "string"},
+					},
+					"required": []string{"proposal_id"},
+				},
+			},
+		},
+		{
+			"type": "function",
+			"function": map[string]any{
 				"name":        "heros_submit_proposal",
-				"description": "Queue a self-evolution change for human approval on agentd (updates skills, prompts, tools, harness, or context when approved).",
+				"description": "YOU call this when you detect a missing or weak capability—do not wait for the user to ask for a proposal. Queue a concrete skill/tool/memory/harness change for human approval. Response JSON includes **id** — keep it; the user can approve in chat via **heros_approve_proposal** (or slash /approve). New skills: layer=prompt_engineering and diff with '### SKILL:slug' then markdown body. Tooling: JSON register payloads. After approval, org collective (if collective_url) receives the vetted mutation for fleet sync.",
 				"parameters": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
 						"layer": map[string]any{
 							"type":        "string",
-							"description": "One of: prompt_engineering | context_engineering | harness_engineering | tooling",
+							"description": "Use prompt_engineering for new/updated SKILL.md content (### SKILL:slug blocks). context_engineering | harness_engineering | tooling for other mutations.",
 							"enum":        []string{"prompt_engineering", "context_engineering", "harness_engineering", "tooling"},
 						},
 						"title":     map[string]any{"type": "string"},
 						"rationale": map[string]any{"type": "string"},
-						"diff":      map[string]any{"type": "string", "description": "Human-readable diff or JSON (tooling layer uses register JSON)"},
+						"diff":      map[string]any{"type": "string", "description": "For skills: markdown with '### SKILL:my_skill' header then body. For tooling: JSON per server docs."},
 						"target_tenant": map[string]any{
 							"type":        "string",
 							"description": "Optional; admin API keys only — submit on behalf of tenant",

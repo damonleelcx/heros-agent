@@ -46,6 +46,23 @@ type Config struct {
 
 	// ToolRegistrySync rules for tools/*/tool.yaml ↔ SQLite tool_registry (see toolindex.SyncPolicy).
 	ToolRegistrySync ToolRegistrySync `json:"tool_registry_sync"`
+
+	// KnowledgeVaults indexes Obsidian-style Markdown trees into semantic_chunks (+ optional Qdrant).
+	// Paths are usually absolute and may live outside data_dir; tenant_id scopes rows and retrieval.
+	KnowledgeVaults []KnowledgeVault `json:"knowledge_vaults"`
+}
+
+// KnowledgeVault configures one vault root on disk (read-only indexing + optional note append).
+type KnowledgeVault struct {
+	Path               string   `json:"path"`
+	TenantID           string   `json:"tenant_id"`
+	IncludeGlobs       []string `json:"include_globs"`
+	ExcludeGlobs       []string `json:"exclude_globs"`
+	PollSeconds        int      `json:"poll_seconds"` // 0 = no periodic reindex (still startup + POST /api/memory/vault/reindex)
+	FollowSymlinks     bool     `json:"follow_symlinks"`
+	AgentNotesSubdir   string   `json:"agent_notes_subdir"`    // relative to vault root; default Agent/heros-notes
+	VaultAppendEnabled bool     `json:"vault_append_enabled"`  // mirror role=note episodic writes into the vault
+	AgentNotesMode     string   `json:"agent_notes_mode"`      // daily | session (default daily)
 }
 
 // ToolRegistrySync configures disk/registry merge behavior.

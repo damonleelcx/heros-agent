@@ -1,0 +1,5 @@
+id: evolution-reminder
+risk_tier: low
+description: Catalog hint- any durable change to skills, prompts, memory graph ops, harness, or tool registry must use heros_submit_proposal after reading skill self-evolution-via-proposals.
+skills:
+  - self-evolution-via-proposals

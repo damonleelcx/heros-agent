@@ -6,8 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"os"
+	"path/filepath"
 	"strings"
+
+	"github.com/heros-foreal/agentd/internal/config"
 )
 
 // Session holds multi-turn chat state for one terminal session.
@@ -29,6 +33,8 @@ type Session struct {
 	TargetTenant string
 	// LogTurnsToEpisodic appends user+assistant lines to agentd episodic memory each turn.
 	LogTurnsToEpisodic bool
+	// DataDir is the agent filesystem root (skills/, tools/, system/, memory/); not the workspace.
+	DataDir string
 
 	Messages []map[string]any
 }
@@ -39,7 +45,7 @@ func (s *Session) PrimeSystem(ctx context.Context) error {
 	if err != nil {
 		base = ""
 	}
-	block, err := s.Agentd.BuildContextBlock(ctx)
+	block, err := s.Agentd.BuildContextBlock(ctx, s.DataDir)
 	if err != nil {
 		return err
 	}
@@ -47,13 +53,60 @@ func (s *Session) PrimeSystem(ctx context.Context) error {
 	if wd == "" {
 		wd = "."
 	}
-	instructions := fmt.Sprintf(`You are the Heros OS-level agent CLI. You help with real work (code, pipelines, creative/production tasks).
-Workspace root on this machine: %s
-- heros_shell runs locally in that directory (git, builds, file ops on the developer machine).
-- heros_agent_shell (if available) runs on the agentd server under server policy — use only when the task must execute there.
-You have folder-backed skills and tool catalog from agentd, semantic memory, optional Neo4j graph, and heros_submit_proposal to queue self-evolution changes for human approval.
-Use tools when they reduce error or fetch ground truth. Be concise in the terminal; say briefly what you are doing when invoking shell or graph calls.`,
-		wd)
+	dataDirAbs := ""
+	if d := strings.TrimSpace(s.DataDir); d != "" {
+		if abs, err := filepath.Abs(d); err == nil {
+			dataDirAbs = filepath.Clean(abs)
+		} else {
+			dataDirAbs = filepath.Clean(d)
+		}
+	}
+	if dataDirAbs == "" {
+		dataDirAbs = "(not set — match agentd `data_dir` from the heros startup log)"
+	}
+	harnessLine := ""
+	if topo, err := s.Agentd.FetchTopology(ctx); err == nil {
+		harnessLine = fmt.Sprintf(
+			"\n**Harness (built into heros):** specialists=%v, leader_model=%q, critic_threshold=%.2f.\n"+
+				"For multi-actor runs use tool **heros_run_harness** with a **goal** (equivalent to REPL /harness). "+
+				"Use when decomposition, specialist angles, and critic review help; skip for trivial asks. "+
+				"Otherwise use **heros_shell** across multiple turns.\n",
+			topo.Specialists, topo.LeaderModel, topo.CriticThreshold)
+	}
+	instructions := fmt.Sprintf(`You are the **Heros OS agent** (not a passive chatbot): you **drive** work with **tools**, **catalog skills**, and **memory** — all inside the **heros** process (embedded daemon + data_dir). There is no separate product the user must start for daily use.
+
+Workspace root on this machine: **%s**
+- **heros_shell** — cwd is that directory. This is how you **see** the project (dir/ls, type/cat README*, package.json, src/, git status, etc.).
+- **heros_agent_shell** — only when a command must run under the **embedded HTTP daemon’s** server-side CLI policy (same machine as heros), not your local shell defaults.
+
+**Agent data_dir** on this machine: **%s**
+- **Skills**, **tools**, **system/** (e.g. prompt.md), and **memory/** trees live under **this** heros home — **not** under the workspace root above.
+- Catalog **rel_path** values (example: skills/_global/foo/SKILL.md) are relative to **data_dir** only. When the user asks for the filesystem path to a skill, give **data_dir** plus that rel_path (see **abs** in the catalog block) or **heros_read_skill** — **do not** prepend the workspace path unless **heros_shell** proves a copy exists there.
+
+**Non‑negotiable grounding:** If the user asks what the project/repo/app **is**, does, or contains, you **must** use **heros_shell** (and optionally **heros_read_skill** / **heros_memory_search**) **before** answering. It is a **failure** to reply with generic “I need you to tell me…” or “I have no information” while a workspace path is set — inspect the tree first.
+
+**Long‑horizon tasks:** Break work into steps; after substantive progress call **heros_memory_save** or rely on session episodic logs; use **heros_memory_search** to recall earlier decisions in the same thread.
+
+**Memory questions:** If the user asks what you remember / what is in memory / episodic recall, call **heros_memory_search** with a short query — do not invent “no memory” without querying.
+
+**Governance (skills/tools):** Missing capability → **heros_submit_proposal** (response includes **id**).
+
+**Approving / rejecting (user may not know /pending):** If they say "approve the skill" (or similar) without an id:
+1) Call **heros_list_pending_proposals** — the tool returns a **numbered list** + JSON.
+2) **Show them the numbered list** in your reply (title, layer, id per row).
+3) If **more than one** pending, **do not** call **heros_approve_proposal** until they disambiguate — ask them to reply **"approve 2"**, **"reject 3"**, or paste the **id**. Only auto-pick when there is **exactly one** pending and they said "approve it" clearly referring to that queue.
+4) Same pattern for reject. After approve, suggest **heros_read_skill** or **/refresh**.
+
+Slash **/pending** lists pending; **/approve** plus proposal id, or **/reject** plus id, matches the tools. **/approve** or **/reject** alone re-lists pending and prints usage.
+
+Collective sync when **collective_url** is set.
+
+Skill proposal shape (layer **prompt_engineering**):
+### SKILL:skill_slug_here
+(markdown body)
+
+Be concise in the terminal; one short line before heavy tool use is enough.%s`,
+		wd, dataDirAbs, harnessLine)
 
 	full := strings.TrimSpace(base) + "\n\n" + instructions + "\n\n" + block
 	s.Messages = []map[string]any{
@@ -67,7 +120,7 @@ func (s *Session) RefreshContext(ctx context.Context) error {
 	if len(s.Messages) == 0 {
 		return s.PrimeSystem(ctx)
 	}
-	block, err := s.Agentd.BuildContextBlock(ctx)
+	block, err := s.Agentd.BuildContextBlock(ctx, s.DataDir)
 	if err != nil {
 		return err
 	}
@@ -88,17 +141,29 @@ func (s *Session) RunUserTurn(ctx context.Context, user string, out io.Writer) e
 	s.Messages = append(s.Messages, map[string]any{"role": "user", "content": user})
 
 	tools := OpenAITools(ToolOptions{AgentShell: s.AgentShell})
-	for step := 0; step < 48; step++ {
+	var firstToolChoice any
+	switch {
+	case WorkspaceGroundingRequired(user, s.WorkDir):
+		firstToolChoice = "required"
+	case MemoryGroundingRequired(user):
+		// Prefer memory search over guessing when user asks what is stored.
+		firstToolChoice = map[string]any{"type": "function", "function": map[string]any{"name": "heros_memory_search"}}
+	}
+	for step := 0; step < 64; step++ {
+		var cc *ChatOptions
+		if step == 0 && firstToolChoice != nil {
+			cc = &ChatOptions{ToolChoice: firstToolChoice}
+		}
 		var content string
 		var calls []ToolCall
 		var err error
 		if s.Stream {
-			content, calls, err = ChatCompletionStream(ctx, s.OpenAIBase, s.OpenAIKey, s.Model, s.Messages, tools, func(d string) error {
+			content, calls, err = ChatCompletionStream(ctx, s.OpenAIBase, s.OpenAIKey, s.Model, s.Messages, tools, cc, func(d string) error {
 				_, werr := fmt.Fprint(out, d)
 				return werr
 			})
 		} else {
-			content, calls, err = ChatCompletion(ctx, s.OpenAIBase, s.OpenAIKey, s.Model, s.Messages, tools)
+			content, calls, err = ChatCompletion(ctx, s.OpenAIBase, s.OpenAIKey, s.Model, s.Messages, tools, cc)
 		}
 		if err != nil {
 			return err
@@ -134,8 +199,12 @@ func (s *Session) RunUserTurn(ctx context.Context, user string, out io.Writer) e
 				_, _ = fmt.Fprint(out, "\n")
 			}
 			if s.LogTurnsToEpisodic {
-				_ = s.Agentd.MemoryEpisodic(ctx, s.SessionID, "user", user, 0.2)
-				_ = s.Agentd.MemoryEpisodic(ctx, s.SessionID, "assistant", content, 0.3)
+				if err := s.Agentd.MemoryEpisodic(ctx, s.SessionID, "user", user, 0.2); err != nil {
+					log.Printf("heros-cli: episodic user turn: %v", err)
+				}
+				if err := s.Agentd.MemoryEpisodic(ctx, s.SessionID, "assistant", content, 0.3); err != nil {
+					log.Printf("heros-cli: episodic assistant turn: %v", err)
+				}
 			}
 			return nil
 		}
@@ -166,7 +235,7 @@ func (s *Session) DispatchTool(ctx context.Context, tc ToolCall) (string, error)
 	}
 	switch tc.Name {
 	case "heros_shell":
-		cmd, _ := args["command"].(string)
+		cmd := ArgString(args, "command")
 		if strings.TrimSpace(cmd) == "" {
 			return "", fmt.Errorf("missing command")
 		}
@@ -177,7 +246,7 @@ func (s *Session) DispatchTool(ctx context.Context, tc ToolCall) (string, error)
 		out, shellErr := RunLocalShell(ctx, wd, cmd)
 		return LocalShellResult(out, shellErr), nil
 	case "heros_agent_shell":
-		cmd, _ := args["command"].(string)
+		cmd := ArgString(args, "command")
 		if strings.TrimSpace(cmd) == "" {
 			return "", fmt.Errorf("missing command")
 		}
@@ -188,12 +257,12 @@ func (s *Session) DispatchTool(ctx context.Context, tc ToolCall) (string, error)
 		b, _ := json.Marshal(r)
 		return string(b), nil
 	case "heros_memory_search":
-		q, _ := args["query"].(string)
+		q := ArgString(args, "query")
 		k := 8
 		if v, ok := args["k"].(float64); ok && v > 0 {
 			k = int(v)
 		}
-		chunks, backend, err := s.Agentd.MemoryRetrieve(ctx, q, k)
+		chunks, backend, err := s.Agentd.MemoryRetrieve(ctx, s.SessionID, q, k)
 		if err != nil {
 			return "", err
 		}
@@ -201,7 +270,7 @@ func (s *Session) DispatchTool(ctx context.Context, tc ToolCall) (string, error)
 		b, _ := json.Marshal(out)
 		return string(b), nil
 	case "heros_memory_save":
-		note, _ := args["note"].(string)
+		note := ArgString(args, "note")
 		imp := 0.4
 		if v, ok := args["importance"].(float64); ok {
 			imp = v
@@ -212,26 +281,68 @@ func (s *Session) DispatchTool(ctx context.Context, tc ToolCall) (string, error)
 		}
 		return `{"status":"saved"}`, nil
 	case "heros_read_skill":
-		name, _ := args["name"].(string)
+		name := ArgString(args, "name")
 		body, err := s.Agentd.SkillBody(ctx, name)
 		if err != nil {
 			return "", err
 		}
 		return body, nil
 	case "heros_graph_neighbors":
-		id, _ := args["entity_id"].(string)
+		id := ArgString(args, "entity_id")
 		g, err := s.Agentd.GraphNeighbors(ctx, id)
 		if err != nil {
 			return fmt.Sprintf(`{"error":%q}`, err.Error()), nil
 		}
 		b, _ := json.Marshal(g)
 		return string(b), nil
+	case "heros_run_harness":
+		goal := ArgString(args, "goal")
+		if strings.TrimSpace(goal) == "" {
+			return "", fmt.Errorf("heros_run_harness requires goal")
+		}
+		res, err := s.Agentd.HarnessRun(ctx, goal)
+		if err != nil {
+			return "", err
+		}
+		b, err := json.Marshal(res)
+		if err != nil {
+			return "", err
+		}
+		return string(b), nil
+	case "heros_list_pending_proposals":
+		list, err := s.Agentd.ListPendingProposals(ctx)
+		if err != nil {
+			return "", err
+		}
+		return FormatPendingProposalsToolResult(list), nil
+	case "heros_approve_proposal":
+		pid := ArgString(args, "proposal_id")
+		if strings.TrimSpace(pid) == "" {
+			return "", fmt.Errorf("heros_approve_proposal requires proposal_id")
+		}
+		out, err := s.Agentd.ApproveProposalJSON(ctx, strings.TrimSpace(pid))
+		if err != nil {
+			return "", err
+		}
+		b, _ := json.Marshal(out)
+		return string(b) + "\n(note: skill catalog updated on disk; you may heros_read_skill for the new slug or user can /refresh)", nil
+	case "heros_reject_proposal":
+		pid := ArgString(args, "proposal_id")
+		if strings.TrimSpace(pid) == "" {
+			return "", fmt.Errorf("heros_reject_proposal requires proposal_id")
+		}
+		out, err := s.Agentd.RejectProposalJSON(ctx, strings.TrimSpace(pid))
+		if err != nil {
+			return "", err
+		}
+		b, _ := json.Marshal(out)
+		return string(b), nil
 	case "heros_submit_proposal":
-		layer, _ := args["layer"].(string)
-		title, _ := args["title"].(string)
-		rationale, _ := args["rationale"].(string)
-		diff, _ := args["diff"].(string)
-		target, _ := args["target_tenant"].(string)
+		layer := ArgString(args, "layer")
+		title := ArgString(args, "title")
+		rationale := ArgString(args, "rationale")
+		diff := ArgString(args, "diff")
+		target := ArgString(args, "target_tenant")
 		if strings.TrimSpace(target) == "" {
 			target = s.TargetTenant
 		}
@@ -254,7 +365,8 @@ func RunREPL(ctx context.Context, s *Session, in io.Reader, out io.Writer, errOu
 	if err := s.PrimeSystem(ctx); err != nil {
 		return fmt.Errorf("prime system: %w", err)
 	}
-	_, _ = fmt.Fprintf(out, "heros-cli — session=%s  workdir=%s  stream=%v (Ctrl+D or /exit to quit)\n",
+	_, _ = fmt.Fprintf(out, "heros — session=%s  workdir=%s  stream=%v  (/exit to quit)\n"+
+		"  Tip: /pending | approve N | approve all | /approve <id>\n",
 		s.SessionID, s.WorkDir, s.Stream)
 	br := bufio.NewReader(in)
 	for {
@@ -265,6 +377,7 @@ func RunREPL(ctx context.Context, s *Session, in io.Reader, out io.Writer, errOu
 				if strings.TrimSpace(line) != "" {
 					_ = s.RunUserTurn(ctx, strings.TrimSpace(line), out)
 				}
+				_ = config.SaveCLIWorkdir(s.WorkDir)
 				_, _ = fmt.Fprintln(out, "\nbye")
 				return nil
 			}
@@ -274,22 +387,16 @@ func RunREPL(ctx context.Context, s *Session, in io.Reader, out io.Writer, errOu
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
-		switch {
-		case line == "/exit", line == "/quit":
-			_, _ = fmt.Fprintln(out, "bye")
-			return nil
-		case line == "/help":
-			printHelp(out)
+		if s.TryBulkApproveCommand(ctx, line, out, errOut) {
 			continue
-		case line == "/refresh":
-			if err := s.RefreshContext(ctx); err != nil {
-				_, _ = fmt.Fprintf(errOut, "refresh: %v\n", err)
-			} else {
-				_, _ = fmt.Fprintln(out, "(catalog block appended to context)")
+		}
+		if s.TryApprovalNumberCommand(ctx, line, out, errOut) {
+			continue
+		}
+		if c, q := s.DispatchReplSlash(ctx, line, out, errOut); c {
+			if q {
+				return nil
 			}
-			continue
-		case strings.HasPrefix(line, "/"):
-			_, _ = fmt.Fprintf(errOut, "unknown command %q (try /help)\n", line)
 			continue
 		}
 		if err := s.RunUserTurn(ctx, line, out); err != nil {
@@ -300,11 +407,20 @@ func RunREPL(ctx context.Context, s *Session, in io.Reader, out io.Writer, errOu
 
 func printHelp(out io.Writer) {
 	fmt.Fprintln(out, `Commands:
-  /exit, /quit  — leave
-  /refresh      — re-fetch folder skill + tool catalog from agentd
-  /help         — this text
+  /exit, /quit   — leave (saves default workspace for next launch)
+  /cd <dir>      — change workspace + save as default (%APPDATA%\heros\config.json → cli_workdir)
+  /pwd           — print current workspace
+  /harness <goal>— multi-actor run (leader → specialists → critic) inside heros; uses your LLM config
+  /pending       — numbered list of proposals waiting for approval (ids on each line)
+  /approve       — alone: reprints that list + usage; /approve <id> applies one proposal
+  /reject        — alone: reprints list; /reject <id> rejects one
+  /refresh       — re-fetch folder skill + tool catalog from the embedded daemon
+  /help          — this text
+Non-slash: **approve N** / **reject N** (number from /pending), or **approve all** / **approve all proposals** — handled locally without the LLM.
+
 Anything else is sent to the model (OpenAI-compatible API).
-heros_shell runs on this machine in -workdir; use heros_agent_shell only for server-side execution (flag -agent-shell).`)
+Skills & memory live under heros’s data_dir; heros_memory_search includes this session’s auto-logged turns.
+Env: HEROS_NO_TOOL_FORCE=1 disables forcing tool use on “tell me about this project”-style questions (for APIs that reject tool_choice=required).`)
 }
 
 // StdioREPL runs on os.Stdin/Stdout/Stderr.

@@ -120,11 +120,15 @@ func LoadSkillMarkdown(dataDir string, db *sql.DB, tenantID, name string) (strin
 }
 
 func defaultSystemPrompt() string {
-	return `You are a careful assistant backed by folder skills and tools under skills/ and tools/ on the agent node.
+	return `You are an **agent** on the Heros node: you **use tools** (shell, memory, skills catalog) — not a chatbot that only asks the user for paragraphs of context.
 
-You improve over time through **human-approved proposals only**: durable changes to prompts, skills, memory structure, harness topology, or the tool registry are queued (e.g. via heros_submit_proposal from the CLI) and applied after review—never silently rewrite disk.
+**Workspace:** When the CLI gives a workdir, you **must** ground repo/product questions with **heros_shell** (list/read files) before claiming you lack information.
 
-Between proposals, use episodic memory tools to remember and retrieve user-specific facts across turns. Load specialized skills with heros_read_skill when evolving behavior or packaging recurring workflows.`
+**Skills & memory:** Call **heros_read_skill** when a catalog skill matches the task. Use **heros_memory_search** on multi-step work to recall prior decisions.
+
+**You spot your own gaps:** Initiate **heros_submit_proposal** with a concrete diff; humans approve/deny. Vetted changes can sync via **collective** when configured.
+
+Never silently write durable files; proposals → approval → apply.`
 }
 
 // SeedIfEmpty creates default folders, seed files, and rebuilds indexes (no skill body in DB).
@@ -133,26 +137,20 @@ func SeedIfEmpty(db *sql.DB, dataDir string) error {
 		return err
 	}
 	sp := agentlayout.SystemPromptPath(dataDir)
+	if err := seedEmbeddedDefaults(dataDir); err != nil {
+		return err
+	}
 	if _, err := os.Stat(sp); os.IsNotExist(err) {
 		if err := os.WriteFile(sp, []byte(defaultSystemPrompt()), 0o644); err != nil {
 			return err
 		}
 	}
+
 	var n int
 	_ = db.QueryRow(`SELECT COUNT(*) FROM system_prompt_versions`).Scan(&n)
 	if n == 0 {
 		body, _ := os.ReadFile(sp)
 		if _, err := db.Exec(`INSERT INTO system_prompt_versions (version, body) VALUES (1, ?)`, string(body)); err != nil {
-			return err
-		}
-	}
-	for _, sd := range defaultSkillSeeds() {
-		if err := seedSkillIfMissing(dataDir, "_global", sd); err != nil {
-			return err
-		}
-	}
-	for _, td := range defaultToolSeeds() {
-		if err := seedToolIfMissing(dataDir, "_global", td); err != nil {
 			return err
 		}
 	}
@@ -216,200 +214,6 @@ func ApplyMutation(db *sql.DB, dataDir string, tenantScope string, proposalID st
 	}
 	b, _ := json.Marshal(roll)
 	return string(b), nil
-}
-
-// --- Default seeds (Hermes-inspired: memory loop + proposal-gated self-evolution) ---
-
-type skillDef struct {
-	Slug      string
-	Name      string
-	Title     string
-	DependsOn []string
-	Tools     []string
-	Body      string
-}
-
-type toolDef struct {
-	Slug        string
-	ID          string
-	RiskTier    string
-	Description string
-	Skills      []string
-}
-
-func formatSkillFrontmatter(d skillDef) string {
-	dep := "[]"
-	if len(d.DependsOn) > 0 {
-		dep = "[" + strings.Join(d.DependsOn, ", ") + "]"
-	}
-	tools := "[]"
-	if len(d.Tools) > 0 {
-		tools = "[" + strings.Join(d.Tools, ", ") + "]"
-	}
-	return fmt.Sprintf("---\nname: %s\ntitle: %s\ndepends_on: %s\ntools: %s\n---\n\n%s\n",
-		d.Name, d.Title, dep, tools, strings.TrimSpace(d.Body))
-}
-
-func seedSkillIfMissing(dataDir, tenant string, d skillDef) error {
-	p := agentlayout.SkillMarkdownPathForTenant(dataDir, tenant, d.Slug)
-	if _, err := os.Stat(p); err == nil {
-		return nil
-	} else if !os.IsNotExist(err) {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(p, []byte(formatSkillFrontmatter(d)), 0o644)
-}
-
-func seedToolIfMissing(dataDir, tenant string, t toolDef) error {
-	dir := agentlayout.ToolDirForTenant(dataDir, tenant, t.Slug)
-	yamlPath := filepath.Join(dir, agentlayout.ToolConfig)
-	if _, err := os.Stat(yamlPath); err == nil {
-		return nil
-	} else if !os.IsNotExist(err) {
-		return err
-	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	var b strings.Builder
-	_, _ = fmt.Fprintf(&b, "id: %s\nrisk_tier: %s\ndescription: %s\n", t.ID, t.RiskTier, t.Description)
-	if len(t.Skills) > 0 {
-		b.WriteString("skills:\n")
-		for _, s := range t.Skills {
-			_, _ = fmt.Fprintf(&b, "  - %s\n", s)
-		}
-	}
-	return os.WriteFile(yamlPath, []byte(b.String()), 0o644)
-}
-
-func defaultSkillSeeds() []skillDef {
-	return []skillDef{
-		{
-			Slug: "core-reasoning", Name: "core-reasoning", Title: "Core reasoning",
-			DependsOn: nil, Tools: []string{"echo-safe"},
-			Body: `Break problems into steps. Prefer evidence over speculation. Output structured JSON when asked by harness.
-
-Before contradicting something the user may have said earlier, call **heros_memory_search** with a short query.
-
-When the user wants **lasting** changes to how you behave, how the system prompt works, or new reusable procedures, you cannot edit disk yourself: use **heros_read_skill** to load **interaction-learning-loop**, **self-evolution-via-proposals**, or **agentskills-packaging**, then **heros_submit_proposal** so a human can approve.`,
-		},
-		{
-			Slug: "interaction-learning-loop", Name: "interaction-learning-loop", Title: "Learn from interactions (memory loop)",
-			DependsOn: []string{"core-reasoning"}, Tools: nil,
-			Body: `Inspired by closed-loop assistants (e.g. Hermes-style): turn **repeated or high-value** user signals into **durable** state.
-
-**During conversation**
-- Save stable facts, preferences, and project constraints with **heros_memory_save** (short notes; include enough context to retrieve later).
-- Before answering “what did I say”, “last time”, or “my preference”, search with **heros_memory_search**.
-- If the catalog on agentd may be stale after disk edits elsewhere, the user can **slash /refresh** in heros-cli; remind them if skills or tools seem missing.
-
-**When to escalate to evolution (not just memory)**
-- The same correction or workflow appears **multiple times** → consider a **new or updated skill** (layer **prompt_engineering**).
-- The user agrees a **global** behavior change belongs in **system/prompt.md** → **prompt_engineering** with a **### SYSTEM_PROMPT** block.
-- You need new **structured memory/graph** ops → **context_engineering** JSON (see **self-evolution-via-proposals**).
-- Multi-agent **harness** tuning → **harness_engineering**.
-- A new **registered tool** on agentd → **tooling** JSON **register** object.
-
-Never imply that memory or chat alone changed approved files; only **approved proposals** do.`,
-		},
-		{
-			Slug: "self-evolution-via-proposals", Name: "self-evolution-via-proposals", Title: "Self-evolution via proposals",
-			DependsOn: []string{"core-reasoning", "interaction-learning-loop"}, Tools: []string{"evolution-reminder"},
-			Body: `Use **heros_submit_proposal** to queue changes. Every mutation is reviewed; treat the **diff** as the contract.
-
-## Layer: prompt_engineering (skills + system prompt on disk)
-
-Use a **single text document** with one or more blocks:
-
-` + "```" + `
-### SKILL:my-skill-slug
-Markdown body only here (no frontmatter in the diff; the server adds YAML on apply).
-
-### SYSTEM_PROMPT
-Full replacement text for system/prompt.md (only if you intend to change global behavior).
-` + "```" + `
-
-At least one **### SKILL:name** or **### SYSTEM_PROMPT** section is required. Slugs should be kebab-case.
-
-## Layer: context_engineering
-
-**diff** must be **JSON**:
-
-` + "```json" + `
-{
-  "promote": [{"session_id": "<uuid-or-session-id>", "threshold": 0.35}],
-  "links": [
-    {"entity_id": "user:acme", "name": "Acme", "kind": "org", "props": {}},
-    {"edge_id": "e1", "src": "user:acme", "dst": "project:foo", "rel": "OWNS", "props": {}}
-  ]
-}
-` + "```" + `
-
-Arrays may be empty. Use **promote** to consolidate episodic session content into longer-lived memory when policy allows.
-
-## Layer: harness_engineering
-
-**diff** is **JSON** partial **Topology** (only non-empty fields override):
-
-` + "```json" + `
-{
-  "specialists": ["researcher", "coder", "writer"],
-  "critic_threshold": 0.55,
-  "max_critic_retries": 2,
-  "leader_model": "gpt-4o-mini"
-}
-` + "```" + `
-
-## Layer: tooling
-
-**diff** is **JSON**:
-
-` + "```json" + `
-{
-  "register": {
-    "name": "my-tool-id",
-    "description": "What it does; linked skills for catalog graph",
-    "risk_tier": "low",
-    "script_path": "",
-    "skills": ["core-reasoning"]
-  }
-}
-` + "```" + `
-
-**rationale** should name risk, rollback mindset, and who benefits. **title** is a one-line summary for the reviewer UI.`,
-		},
-		{
-			Slug: "agentskills-packaging", Name: "agentskills-packaging", Title: "Packaging skills (agentskills-style)",
-			DependsOn: []string{"core-reasoning"}, Tools: nil,
-			Body: `Align new skills with small, composable **procedural memory** (similar in spirit to [agentskills.io](https://agentskills.io)):
-
-- **One skill = one job** (e.g. “how we run migrations here”, “how we format API errors”).
-- **Frontmatter** on disk: ` + "`name`" + `, ` + "`title`" + `, ` + "`depends_on`" + `, ` + "`tools`" + ` — keep ` + "`depends_on`" + ` minimal and real.
-- Prefer **updating** an existing skill via **### SKILL:existing-slug** proposals over duplicating overlapping skills.
-- Include **triggers**: when to apply this skill (keywords, repo areas, user roles).
-- After approval, remind the user they can **reindex** if their deployment requires **POST /api/catalog/reindex**.
-
-Proposal path for *new* on-disk skills still goes through **prompt_engineering** diffs as above, not by writing files from the chat model directly.`,
-		},
-	}
-}
-
-func defaultToolSeeds() []toolDef {
-	return []toolDef{
-		{
-			Slug: "echo-safe", ID: "echo-safe", RiskTier: "low",
-			Description: "Example low-risk tool placeholder; replace script_path with a real command when you add automation.",
-			Skills:      []string{"core-reasoning"},
-		},
-		{
-			Slug: "evolution-reminder", ID: "evolution-reminder", RiskTier: "low",
-			Description: "Catalog hint- any durable change to skills, prompts, memory graph ops, harness, or tool registry must use heros_submit_proposal after reading skill self-evolution-via-proposals.",
-			Skills:      []string{"self-evolution-via-proposals"},
-		},
-	}
 }
 
 // FullCatalogGraphJSON merges skill + tool index graphs (filesystem-backed).

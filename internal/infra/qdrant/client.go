@@ -88,6 +88,19 @@ type SearchHit struct {
 }
 
 // UpsertPoints writes vectors + payload (id must be UUID or unsigned int per Qdrant rules — we use string UUIDs).
+// DeletePointsByFilter removes points matching a Qdrant filter (e.g. vault_file_key + tenant_id).
+func (c *Client) DeletePointsByFilter(ctx context.Context, collection string, filter map[string]any) error {
+	body := map[string]any{"filter": filter}
+	rb, code, err := c.do(ctx, http.MethodPost, "/collections/"+collection+"/points/delete?wait=true", body)
+	if err != nil {
+		return err
+	}
+	if code < 200 || code >= 300 {
+		return fmt.Errorf("qdrant delete filter: %s %s", http.StatusText(code), string(rb))
+	}
+	return nil
+}
+
 func (c *Client) UpsertPoints(ctx context.Context, collection string, points []Point) error {
 	body := map[string]any{"points": points}
 	rb, code, err := c.do(ctx, http.MethodPut, "/collections/"+collection+"/points?wait=true", body)

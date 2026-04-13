@@ -6,7 +6,9 @@ import (
 	"embed"
 	"encoding/json"
 	"io/fs"
+	"log"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -17,6 +19,7 @@ import (
 	"github.com/heros-foreal/agentd/internal/evolve"
 	"github.com/heros-foreal/agentd/internal/harness"
 	"github.com/heros-foreal/agentd/internal/indexsync"
+	"github.com/heros-foreal/agentd/internal/infra/neo4jstore"
 	"github.com/heros-foreal/agentd/internal/memorylayer"
 	"github.com/heros-foreal/agentd/internal/memorytree"
 	"github.com/heros-foreal/agentd/internal/observability"
@@ -26,6 +29,7 @@ import (
 	"github.com/heros-foreal/agentd/internal/skillindex"
 	"github.com/heros-foreal/agentd/internal/toolindex"
 	"github.com/heros-foreal/agentd/internal/tooling"
+	"github.com/heros-foreal/agentd/internal/vaultindex"
 )
 
 //go:embed static/*
@@ -82,6 +86,7 @@ func (s *Server) routes() {
 	s.Mux.HandleFunc("POST /api/harness/run", s.handleHarnessRun)
 	s.Mux.HandleFunc("POST /api/memory/episodic", s.handleEpisodic)
 	s.Mux.HandleFunc("POST /api/memory/retrieve", s.handleRetrieve)
+	s.Mux.HandleFunc("POST /api/memory/vault/reindex", s.handleVaultReindex)
 	s.Mux.HandleFunc("POST /api/memory/consolidate", s.handleConsolidate)
 	s.Mux.HandleFunc("POST /api/memory/optimize-session", s.handleOptimizeSession)
 	s.Mux.HandleFunc("POST /api/graph/entity", s.handleGraphEntity)
@@ -173,6 +178,7 @@ func (s *Server) handleSubmitProposal(w http.ResponseWriter, r *http.Request) {
 	}
 	p, err := approval.Submit(s.DB, submitTenant, approval.Layer(b.Layer), b.Title, b.Rationale, b.Diff)
 	if err != nil {
+		log.Printf("api: POST /api/proposals submit failed: %v", err)
 		http.Error(w, err.Error(), 500)
 		return
 	}
@@ -208,6 +214,11 @@ func (s *Server) handleApprove(w http.ResponseWriter, r *http.Request) {
 	p, _ := approval.Get(s.DB, id)
 	if s.RT.Bus != nil && p != nil {
 		_ = s.RT.Bus.PublishProposalApproved(*p)
+	}
+	if p != nil && strings.TrimSpace(s.Cfg.CollectiveURL) != "" {
+		if err := collective.PushApprovedMutation(s.Cfg.CollectiveURL, *p); err != nil {
+			log.Printf("api: collective approved-mutation push: %v", err)
+		}
 	}
 	writeJSON(w, p)
 }
@@ -404,12 +415,75 @@ func (s *Server) handleEpisodic(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 500)
 		return
 	}
+	if strings.EqualFold(strings.TrimSpace(b.Role), "note") {
+		if err := vaultindex.AppendNoteToVault(s.Cfg, tid, b.SessionID, b.Content); err != nil {
+			http.Error(w, "vault append: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
 	writeJSON(w, map[string]string{"id": id})
 }
 
 type retrieveBody struct {
-	Query string `json:"query"`
-	K     int    `json:"k"`
+	Query     string `json:"query"`
+	K         int    `json:"k"`
+	SessionID string `json:"session_id,omitempty"` // when set, recent episodic turns from this session are merged into results
+}
+
+type vaultReindexBody struct {
+	Path string `json:"path"` // optional: absolute or as-configured vault path; empty = all allowed vaults
+}
+
+func (s *Server) handleVaultReindex(w http.ResponseWriter, r *http.Request) {
+	var b vaultReindexBody
+	_ = json.NewDecoder(r.Body).Decode(&b)
+	tid, admin := s.tenantFrom(r)
+	var inf *memorylayer.VectorInfra
+	if s.RT != nil {
+		inf = s.RT.VectorInfra()
+	}
+	want := strings.TrimSpace(b.Path)
+	var agg vaultindex.Result
+	var n int
+	for _, v := range s.Cfg.KnowledgeVaults {
+		if want != "" {
+			vp, err := filepath.Abs(strings.TrimSpace(v.Path))
+			if err != nil {
+				continue
+			}
+			wp, err := filepath.Abs(want)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if !strings.EqualFold(filepath.Clean(vp), filepath.Clean(wp)) {
+				continue
+			}
+		}
+		if !admin && strings.TrimSpace(v.TenantID) != tid {
+			continue
+		}
+		var neo *neo4jstore.Store
+		if s.RT != nil {
+			neo = s.RT.Neo
+		}
+		res, err := vaultindex.IndexVault(r.Context(), s.DB, inf, neo, v)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		agg.FilesSeen += res.FilesSeen
+		agg.FilesIndexed += res.FilesIndexed
+		agg.FilesSkipped += res.FilesSkipped
+		agg.ChunksWritten += res.ChunksWritten
+		agg.OrphansRemoved += res.OrphansRemoved
+		n++
+	}
+	if n == 0 {
+		http.Error(w, "no matching knowledge_vaults entry", http.StatusNotFound)
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true, "vaults": n, "result": agg})
 }
 
 func (s *Server) handleRetrieve(w http.ResponseWriter, r *http.Request) {
@@ -423,12 +497,20 @@ func (s *Server) handleRetrieve(w http.ResponseWriter, r *http.Request) {
 		inf = s.RT.VectorInfra()
 	}
 	tid, _ := s.tenantFrom(r)
-	chunks, err := memorylayer.RetrieveSemantic(r.Context(), s.DB, inf, tid, b.Query, b.K)
+	var chunks []string
+	var backend string
+	var err error
+	if strings.TrimSpace(b.SessionID) != "" {
+		chunks, backend, err = memorylayer.RetrieveMemory(r.Context(), s.DB, inf, tid, b.SessionID, b.Query, b.K)
+	} else {
+		chunks, err = memorylayer.RetrieveSemantic(r.Context(), s.DB, inf, tid, b.Query, b.K)
+		backend = retrieveBackend(inf)
+	}
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
 	}
-	writeJSON(w, map[string]any{"chunks": chunks, "backend": retrieveBackend(inf)})
+	writeJSON(w, map[string]any{"chunks": chunks, "backend": backend})
 }
 
 func retrieveBackend(inf *memorylayer.VectorInfra) string {

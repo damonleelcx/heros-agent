@@ -1,0 +1,9 @@
+#!/bin/sh
+# AppImage entry: run the bundled heros binary with the same argv.
+SELF="${0}"
+case "${SELF}" in
+*AppRun) ;;
+*) SELF=$(command -v "$0") ;;
+esac
+HERE=$(dirname "$(readlink -f "${SELF}" 2>/dev/null || realpath "${SELF}" 2>/dev/null || echo "${SELF}")")
+exec "${HERE}/usr/bin/heros" "$@"

@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -26,6 +27,12 @@ func TestLoadAuto_explicit(t *testing.T) {
 
 func TestLoadAuto_defaults(t *testing.T) {
 	dir := t.TempDir()
+	// Isolate from developer machine %APPDATA%/heros/config.json (API key file).
+	if runtime.GOOS == "windows" {
+		t.Setenv("APPDATA", filepath.Join(dir, "Roaming"))
+	} else {
+		t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "xdg"))
+	}
 	wd, _ := os.Getwd()
 	if err := os.Chdir(dir); err != nil {
 		t.Fatal(err)

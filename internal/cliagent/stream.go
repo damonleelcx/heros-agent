@@ -20,7 +20,7 @@ type streamToolAcc struct {
 
 // ChatCompletionStream calls chat/completions with stream:true, prints deltas via onDelta,
 // and returns final aggregated content and tool calls (if any).
-func ChatCompletionStream(ctx context.Context, baseURL, apiKey, model string, messages []map[string]any, tools []map[string]any, onDelta func(string) error) (content string, toolCalls []ToolCall, err error) {
+func ChatCompletionStream(ctx context.Context, baseURL, apiKey, model string, messages []map[string]any, tools []map[string]any, opt *ChatOptions, onDelta func(string) error) (content string, toolCalls []ToolCall, err error) {
 	if model == "" {
 		model = "gpt-4o-mini"
 	}
@@ -31,6 +31,9 @@ func ChatCompletionStream(ctx context.Context, baseURL, apiKey, model string, me
 	}
 	if len(tools) > 0 {
 		body["tools"] = tools
+	}
+	if opt != nil && opt.ToolChoice != nil {
+		body["tool_choice"] = opt.ToolChoice
 	}
 	b, err := json.Marshal(body)
 	if err != nil {

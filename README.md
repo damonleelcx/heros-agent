@@ -16,7 +16,7 @@ A **self-improving OS agent** that people **work in**, not only **configure**: e
 
 ## What it can do (in this repo)
 
-- **Daily work surfaces**: **`heros`** — **one command** starts **agentd in-process** plus the **terminal REPL** (optional **readline**, **SSE streaming**, folder **skills** / **tools** / **memory** / graph when configured, **`heros_shell`** on the CLI machine under **`-workdir`**, optional **`heros_agent_shell`** with **`-agent-shell`**, **`heros_submit_proposal`**) for **long-running sessions** without a second terminal. **`heros-cli`** remains for split mode (remote `agentd`). HTTP APIs for harness, memory, catalog, CLI; optional **`heros-mcp`** for MCP-only hosts.
+- **Daily work surfaces**: **`heros`** — **one command** (clone: `go run ./cmd/heros` / `go install ./cmd/heros`; published: `go install …/cmd/heros@latest`) starts the **full stack in-process** (embedded HTTP daemon + `data_dir` + REPL). You do **not** need a second terminal running **`agentd`** for normal use. REPL: readline, streaming, skills/tools/memory/graph, **`heros_shell`** in **cwd**, optional **`heros_agent_shell`**, **`heros_submit_proposal`**, and **`/harness <goal>`** for bundled **multi-actor** (leader → specialists → critic). Optional **`heros-mcp`** for IDE hosts; standalone **`agentd`** is for headless HTTP-only setups.
 - **Skills & prompts**: On-disk `SKILL.md` + `system/prompt.md`, indexed and tenant-aware; served to any client you build on top of `agentd`.
 - **Tools**: `tools/*/tool.yaml` + `tool_registry` with sync rules; extensible for domain-specific actions (build, deploy, DCC hooks, etc.).
 - **Memory**: Session episodic storage, consolidation/retrieve paths, optional **Qdrant** + **Neo4j** for org-grade retrieval and graph views.
@@ -38,52 +38,70 @@ Full detail and diagrams: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). At a h
 
 **Cross-cutting principles**: **local node** where people work (IDE + MCP + APIs) vs **federated collective** where orgs merge **evolved** skills/memory/tools; **human approval** only on **mutations** to the durable agent stack, not on every chat turn; metrics and buses close the loop.
 
-The **recommended stack sketch** in the architecture doc (Go daemon, LLM API, SQLite + vectors, graph DB, NATS, optional governance UI) matches this repo: **agentd** is the **local OS-node** daemon; enterprise samples add graph, vectors, and messaging. A **first-party Claude Code–class UI** sits on **`heros-cli`** (terminal) plus the same HTTP APIs; **MCP** (`heros-mcp`) remains optional for IDE hosts that prefer it—not to be confused with the small **`/`** proposal reviewer.
+The **recommended stack sketch** in the architecture doc (Go daemon, LLM API, SQLite + vectors, graph DB, NATS, optional governance UI) matches this repo: **agentd** is the **local OS-node** daemon (embedded inside **`heros`** for normal use). A **first-party terminal UI** is **`heros`**; **MCP** (`heros-mcp`) is optional for IDE hosts—not to be confused with the small **`/`** proposal reviewer.
 
 ## How users interact (vision vs this repo)
 
 | | **Target experience** (Claude Code / Codex–class) | **What this repo ships today** |
 |---|-----------------------------------------------|--------------------------------|
-| **Admin & employee** | Same agent runtime: everyone drives real work through terminal CLI, IDE, or internal apps wired to `agentd`. | **`heros`** (one binary: embedded agentd + REPL) or **`heros-cli`** + remote **`agentd`**; **local shell** under `-workdir`, optional **server shell** with `-agent-shell`. Optional **`heros-mcp`** for MCP-only IDEs; full HTTP API for custom UIs. |
+| **Admin & employee** | Same agent runtime: everyone drives real work through terminal CLI, IDE, or internal apps wired to `agentd`. | **`heros`** (one binary: embedded agentd + REPL). Optional **`heros-mcp`** to `agentd`; optional **`heros-cli`** only if `agentd` already runs elsewhere. **Local shell** = process cwd; **server shell** = `-agent-shell`. |
 | **Skills / memory / tools** | Grown from daily tasks; reused automatically; promoted org-wide after policy. | **On-disk + SQLite + optional Qdrant/Neo4j**; indexing and sync **rules** exist; **full collective merge/push** still a roadmap item ([`TODO-BUSINESS.md`](TODO-BUSINESS.md)). |
 | **Self-evolution** | Agent proposes durable changes (new skill, tool, topology); human/org policy approves. | **Proposal + approve/reject** flow + `evolve` apply; **`/`** is one lightweight reviewer, not the main workspace. |
 | **Collective** | Sync evolved skills, memory, progress across the company. | **Stubs + NATS**; not a finished org-wide state sync product. |
 
 ## Requirements
 
-- [Go](https://go.dev/dl/) 1.22 or newer
+- **From source / `go install`:** [Go](https://go.dev/dl/) 1.22 or newer  
+- **Prebuilt (no Go):** download **`heros-*-windows-*.zip`** or **`heros-*-x86_64.AppImage`** / **`.tar.gz`** from [GitHub Releases](https://github.com/heros-foreal/agentd/releases) (tags `v*`). Details: [`install/README.md`](install/README.md).
 
 ## How to run
 
-Run commands from the **repository root**. On Windows you can use Git Bash, PowerShell, or `cmd`; built binaries are often named `agentd.exe`, `collectived.exe`, etc.
+### Install once — then only type **`heros`** (local or production)
 
-### 1. Prerequisites
-
-Install Go 1.22+, clone or copy this repo, and `cd` into it.
-
-### 2. Main daemon: `agentd` (required for headless / split setups)
-
-**Typical interactive use:** go straight to **[§5 `heros`](#5-recommended-heros--one-process-daemon--repl)** — it starts this stack **in-process** with the REPL. This section is for running **HTTP only** (servers, automation, or **`heros-cli`** against a remote daemon).
-
-This is the long-lived **local control plane**: HTTP API, approval UI, on-disk skills/tools/memory, SQLite, and optional enterprise backends.
+Same workflow everywhere: put the **`heros`** binary on your **`PATH`**, then open any terminal and run:
 
 ```bash
-cp config.example.json config.json
-# Optional: edit config.json — set openai_api_key, data_dir, listen_addr, etc.
-
-go build -o agentd ./cmd/agentd
-./agentd -config config.json
+heros
 ```
 
-- **Without `-config`**: built-in defaults apply (default data dir is under the user home, e.g. `~/.heros-agent`). Environment variables can still override pieces of config after load (e.g. `HEROS_TOOL_REGISTRY_SYNC_*` for tool registry sync — see [`docs/AGENT_LAYOUT.md`](docs/AGENT_LAYOUT.md)).
-- After start, **`listen_addr`** defaults to `127.0.0.1:8787` unless changed in config.
+That starts **agentd + REPL** in one process. No second daemon, no `go run` after install.
 
-**Sanity checks**
+**One-time install (pick one):**
 
-- Browser: `http://127.0.0.1:8787/` — static approval UI  
-- `GET http://127.0.0.1:8787/health` — SQLite plus optional Qdrant / Neo4j / NATS status  
+| Situation | Command |
+|-----------|---------|
+| **Published module** (public repo, Go proxy can see it) | `go install github.com/heros-foreal/agentd/cmd/heros@latest` then **`heros -add-path`** (see below) |
+| **You have this repo cloned** | `bash scripts/install-heros.sh` or **`pwsh scripts/install-heros.ps1`** — runs `go install` and updates your user **`PATH`**; or manually: `go install ./cmd/heros` then **`heros -add-path`** |
+| **Double-click / GUI (clone)** | **Windows:** `install/Install-Heros-Windows.cmd`. **Linux:** `bash install/generate-linux-desktop.sh` then open the **Install Heros** desktop entry, or run `bash install/Install-Heros-Linux.sh` — see [`install/README.md`](install/README.md) |
+| **Prebuilt binary (no Go)** | Download from [Releases](https://github.com/heros-foreal/agentd/releases): unzip and run **`heros.exe`**, or chmod +x the Linux binary / AppImage. Run **`heros -add-path`** once so the folder containing the binary is on your **user** PATH (Windows: registry; Linux/macOS: `~/.zshrc` or `~/.profile`). If you installed via **`go install`** and run **`heros` from `GOPATH/bin`**, the same flag adds that Go bin dir instead. |
 
-For day-to-day development, **running only `agentd`** and hitting `/` and `/health` is enough.
+`go install` itself **cannot** change environment variables (Go has no install hook). **`heros -add-path`** updates the **current user’s** PATH, then exits. **Open a new terminal** so PATH reloads. Check **`heros -version`** on release builds.
+
+Alternatively, add Go’s bin dir to **`PATH`** by hand (once per machine):
+
+- **Windows (PowerShell):** `[Environment]::SetEnvironmentVariable('Path', $env:Path + ';' + (go env GOPATH) + '\bin', 'User')`  
+  Or put **`%USERPROFILE%\go\bin`** on your user PATH if that’s where `go install` writes.
+- **macOS / Linux:** `export PATH="$(go env GOPATH)/bin:$PATH"` (add that line to `~/.bashrc` or `~/.zshrc`).
+
+**First run:** if no API key is configured, **`heros`** prompts for one and saves it under **`%APPDATA%\heros\config.json`** (Windows) or the Unix equivalent — same file also stores your saved shell workspace **`cli_workdir`** after you use **`/cd`** in the REPL.
+
+**Workspace:** Skills and memory always use **agentd `data_dir`** (default under your home). The **local shell** (`heros_shell`) uses **`cli_workdir`** if set, else the current directory. Run **`/cd D:\your\project`** once; after that you can start **`heros`** from anywhere and still land in the right folder.
+
+**Optional overrides** (same binary, dev or prod): `-config`, `-workdir`, `-openai-base`, `-model`, `-no-stream`, `-agent-shell`, `-api-key` (when `auth_mode=required`). Details: [`docs/STEP-BY-STEP-RUN.md`](docs/STEP-BY-STEP-RUN.md).
+
+**In the REPL:** chat in natural language; tools include **`heros_shell`**, **`heros_memory_*`**, **`heros_read_skill`**, **`heros_run_harness`** (multi-actor, same as **`/harness`**), **`heros_submit_proposal`**, **`heros_list_pending_proposals`**, **`heros_approve_proposal`**, **`heros_reject_proposal`** (so “approve that skill” works without typing slash commands), etc. Slash commands: **`/help`**, **`/harness`**, **`/pending`**, **`/approve`**, **`/reject`**, **`/cd`**, **`/refresh`**, **`/exit`**. The **`/`** page is optional. Some local LLM servers need **`-no-stream`**.
+
+**Without installing** (contributors only): from repo root, `go run ./cmd/heros` — still one command, but slower startup; prefer **`go install ./cmd/heros`** for daily use.
+
+### 2. Optional: `agentd` only (headless HTTP)
+
+Only if you need the HTTP API **without** the terminal agent (automation, tests, or a remote box). Same config discovery as **`heros`** (`-config` or defaults).
+
+```bash
+go build -o agentd ./cmd/agentd && ./agentd
+```
+
+Sanity: `/` and `/health` on **`listen_addr`**.
 
 ### 3. Optional: `collectived` (collective ingest stub)
 
@@ -103,94 +121,26 @@ go build -o collectived ./cmd/collectived
 "collective_url": "http://127.0.0.1:8790"
 ```
 
-**Terminal B — `agentd`** (as above). When clients call `POST /api/proposals`, `agentd` will **POST** the proposal to `collectived` (still a minimal reference implementation).
+**Terminal B — `heros`** or **`agentd`** with `collective_url` set. When clients call `POST /api/proposals`, `agentd` will **POST** the proposal to `collectived` (still a minimal reference implementation). After a proposal is **approved**, agentd also POSTs **`/v1/ingest/approved-mutation`** so the collective can broadcast **vetted** changes.
+
+**Fleet nodes:** run **`fleet-skill-worker`** to subscribe to **`heros.fleet.proposals.approved`**, write **`skills/`** under each machine’s **`data_dir`**, and optionally **`git pull`** + **`POST /api/catalog/reindex`**. See [`docs/FLEET-SKILL-WORKER.md`](docs/FLEET-SKILL-WORKER.md).
 
 ### 4. Optional: Enterprise stack (Qdrant, Neo4j, NATS)
 
-For vector search, graph mirror, and messaging, start Docker services and point `agentd` at them:
+For vector search, graph mirror, and messaging, start Docker services and point the daemon at them:
 
 ```bash
 # See docs/ENTERPRISE.md for env file and passwords
 docker compose -f deploy/docker-compose.enterprise.yml --env-file deploy/.env.enterprise up -d
 ```
 
-Then copy and edit **`config.enterprise.example.json`** and run:
+Then copy and edit **`config.enterprise.example.json`** and run **`heros`** (or **`agentd`**) with that file:
 
 ```bash
-./agentd -config config.enterprise.example.json
+heros -config config.enterprise.example.json
 ```
 
-### 5. Recommended: `heros` — one process (daemon + REPL)
-
-**Default way to run the terminal agent:** `heros` starts **agentd** (HTTP API, SQLite, seeds, optional enterprise backends) **in the same process**, waits for **`/health`**, then opens the REPL. **`data_dir`** persists skills, memory, and DB across runs; use **`/exit`** or **Ctrl+D** to stop the server and exit.
-
-**No flags required for typical use:** **`cd`** into your project and run **`heros`**. Config is **auto-discovered** (`config.json` in cwd or parents, then `%APPDATA%\heros\config.json` / `~/.heros/config.json` / `~/.heros-agent/config.json`, else defaults). The LLM key is taken from **`OPENAI_API_KEY`**, or **`openai_api_key`** in that config; if still missing, **`heros`** prompts once for a paste (hidden on a TTY) and **writes it** to **`%APPDATA%\heros\config.json`** (or the Unix equivalent under `UserConfigDir`) for the next run. **Workspace** for **`heros_shell`** is the **current working directory** (override with **`-workdir`** only if needed).
-
-**Global install** (add `$(go env GOPATH)/bin` to `PATH`):
-
-```bash
-go install github.com/heros-foreal/agentd/cmd/heros@latest
-heros
-```
-
-From a clone: `go install ./cmd/heros` or `go run ./cmd/heros`.
-
-Optional env: **`OPENAI_BASE_URL`**, **`OPENAI_MODEL`** / **`HEROS_MODEL`**, **`HEROS_CONFIG`**. Same **REPL flags** as **`heros-cli`** when you need overrides. Approval UI: **`http://<listen_addr>/`**.
-
-### 6. Split mode: `heros-cli` (remote or long-lived `agentd`)
-
-**Requires `agentd` already running** in another terminal (or machine). The CLI calls **OpenAI-compatible** `POST …/chat/completions` with your key (same host as the terminal), and calls **agentd** for cataloged **folder skills**, **tools**, **memory** (`/api/memory/*`), **graph neighbors** (`/api/graph/neighbors` when Neo4j is enabled), **`POST /api/proposals`** when the model uses **`heros_submit_proposal`**, and—**only if you pass `-agent-shell`**—**`/api/cli/exec`** on the **agentd host** under server risk policy.
-
-**Shell and workspace (important)**
-
-- **`heros_shell`** runs on **the machine where `heros-cli` runs**, with working directory **`-workdir`** (default `.`, resolved to an absolute path). Use this for `git`, local builds, and inspecting the repo on your laptop.
-- **`heros_agent_shell`** runs on the **agentd server**. It is **not** registered unless you pass **`-agent-shell`**, because the trust model is different (server policy + audit). Prefer local shell unless the task must execute on the daemon host.
-
-**Streaming and TUI**
-
-- By default the CLI uses **SSE streaming** (`stream: true`) so assistant text appears incrementally. Some OpenAI-compatible servers mishandle **streaming + tools**; if you see errors or empty turns, add **`-no-stream`**.
-- By default the REPL uses **readline** (line editing + history in `~/.heros-cli.history`). Use **`-no-readline`** for a plain stdin loop (e.g. minimal environments).
-
-**Local LLMs (e.g. Ollama)**
-
-Point **`-openai-base`** at a compatible endpoint (must expose `…/v1/chat/completions`). Example:
-
-```bash
-./heros-cli -openai-base=http://127.0.0.1:11434/v1 -model=llama3.2
-```
-
-**Flags reference**
-
-| Flag | Default | Meaning |
-|------|---------|---------|
-| `-agentd-url` | `http://127.0.0.1:8787` | Running agentd base URL |
-| `-api-key` | (empty) | `X-API-Key` when `agentd` `auth_mode=required` |
-| `-openai-base` | `https://api.openai.com/v1` | OpenAI-compatible API base (trailing `/v1` as required by the provider) |
-| `-openai-api-key` | env `OPENAI_API_KEY` | Bearer token for the LLM |
-| `-model` | `gpt-4o-mini` | Chat model id |
-| `-session` | random UUID | Episodic memory session id |
-| `-no-session-log` | off | Do not auto-append each user/assistant turn to episodic memory |
-| **`-workdir`** | **`.`** | **Workspace root for `heros_shell` (local machine)** |
-| **`-no-stream`** | off | Disable streaming; single JSON response per model step |
-| **`-agent-shell`** | off | Register **`heros_agent_shell`** (server-side `/api/cli/exec`) |
-| **`-no-readline`** | off | Disable readline; use simple stdin |
-| **`-target-tenant`** | (empty) | Default `target_tenant` for **`heros_submit_proposal`** when the model omits it (admin keys only) |
-
-```bash
-go build -o heros-cli ./cmd/heros-cli
-export OPENAI_API_KEY=sk-...
-./heros-cli -agentd-url=http://127.0.0.1:8787 -workdir=/path/to/your/repo
-# auth_mode=required:
-#   ./heros-cli -api-key=YOUR_AGENTD_KEY ...
-# Ollama (example):
-#   ./heros-cli -openai-base=http://127.0.0.1:11434/v1 -model=llama3.2 -no-stream
-```
-
-Inside the REPL: type natural language; the model may call tools (`heros_shell`, `heros_memory_search`, `heros_read_skill`, `heros_graph_neighbors`, `heros_submit_proposal`, and optionally `heros_agent_shell`). Slash commands: `/help`, `/refresh` (re-fetch skill/tool catalog from agentd), `/exit`.
-
-**`heros_submit_proposal`** sends **`POST /api/proposals`** to agentd (layer, title, rationale, diff, optional `target_tenant`). Approved proposals follow your existing evolve / governance flow (e.g. UI at `/`).
-
-### 7. Optional: `heros-mcp` (MCP → agentd)
+### 5. Optional: `heros-mcp` (MCP → agentd)
 
 For IDEs that only speak MCP, build the stdio bridge:
 
@@ -200,35 +150,35 @@ go build -o heros-mcp ./cmd/heros-mcp
 # If auth_mode is required: add -api-key=...
 ```
 
-Configure your MCP client to execute that command.
+Configure your MCP client to execute that command. The MCP server expects **`agentd` HTTP** already listening—run **`agentd`** headlessly, or point it at the URL **`heros`** prints when it starts (same machine).
 
-### 8. Where data lives
+**`heros-cli`** (source: `cmd/heros-cli`) exists only for the rare case where **`agentd` already runs on another host** and you want a REPL against that URL. Use **`heros -h`** / **`heros-cli -h`** for flags; you do not need **`heros-cli`** for normal local development or installed **`heros`**.
 
-`data_dir` in config (e.g. **`.heros-data`** in `config.example.json`) is resolved **relative to the process working directory** when you start `agentd`, unless you use an absolute path. Under it you will see:
+### 6. Where data lives
+
+`data_dir` in config (e.g. **`.heros-data`** in `config.example.json`) is resolved **relative to the process working directory** when you start **`heros`** or **`agentd`**, unless you use an absolute path. Under it you will see:
 
 - `agent.db` — SQLite ledger and indexes  
 - `skills/`, `tools/`, `memory/`, `system/` — authoritative files (see [`docs/AGENT_LAYOUT.md`](docs/AGENT_LAYOUT.md))  
 
-First boot on an empty directory **seeds** default `system/prompt.md`, a sample skill, and a sample tool.
+First boot **copies** bundled defaults from **`internal/promptlayer/embedded_defaults/`** (also in the binary via `go:embed`) into `data_dir` for any missing paths. List: [docs/DEFAULT-AGENT-FILES.md](docs/DEFAULT-AGENT-FILES.md).
 
-### 9. Programs at a glance
+### 7. Programs at a glance
 
 | Binary | Role | Typical invocation |
 |--------|------|--------------------|
-| **heros** | **Daemon + terminal agent (one command)** | `OPENAI_API_KEY=... ./heros -workdir=.` |
-| **agentd** | Main HTTP service only | `./agentd -config config.json` |
-| **heros-cli** | Terminal agent → existing agentd | `OPENAI_API_KEY=... ./heros-cli -agentd-url=...` |
+| **heros** | **Default: daemon + terminal agent** | `heros` (from install) or `go run ./cmd/heros` |
+| **agentd** | HTTP only (optional) | `go build -o agentd ./cmd/agentd && ./agentd` |
+| **heros-cli** | REPL → remote `agentd` only (optional) | `heros-cli -agentd-url=…` |
 | **collectived** | Example collective HTTP ingest | `./collectived` |
-| **heros-mcp** | Optional MCP stdio → agentd | `./heros-mcp -agentd-url=http://127.0.0.1:8787` |
+| **fleet-skill-worker** | NATS → local `skills/` (+ optional `git pull`, reindex) | `go build -o fleet-skill-worker ./cmd/fleet-skill-worker` |
+| **heros-mcp** | MCP stdio → `agentd` URL | `./heros-mcp -agentd-url=…` |
 
-Build:
+Build (only **`heros`** required for daily use):
 
 ```bash
 go build -o heros ./cmd/heros
-go build -o agentd ./cmd/agentd
-go build -o heros-cli ./cmd/heros-cli
-go build -o collectived ./cmd/collectived
-go build -o heros-mcp ./cmd/heros-mcp
+# optional: agentd, heros-cli, collectived, fleet-skill-worker, heros-mcp
 ```
 
 ## Configuration
@@ -242,6 +192,10 @@ Use `-config <path>` to load JSON. Omitting `-config` uses defaults plus any sup
 
 ## Documentation
 
+- [Markdown / Obsidian vault as memory source of truth (design)](docs/MEMORY-VAULT.md)
+- [Bundled default skills & tools (repo paths)](docs/DEFAULT-AGENT-FILES.md)
+- [Run from a local clone (no global install)](docs/RUN-LOCAL-REPO.md)
+- [Fleet skill worker (NATS approved proposals → `skills/`)](docs/FLEET-SKILL-WORKER.md)
 - [Step-by-step: run the project](docs/STEP-BY-STEP-RUN.md)
 - [Agent framework architecture (authoritative design)](docs/ARCHITECTURE.md)
 - [On-disk agent layout & catalog APIs](docs/AGENT_LAYOUT.md)

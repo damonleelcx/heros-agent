@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/chzyer/readline"
+	"github.com/heros-foreal/agentd/internal/config"
 )
 
 // RunReadlineREPL is a line-editing REPL (history in ~/.heros-cli.history).
@@ -29,7 +30,8 @@ func RunReadlineREPL(ctx context.Context, s *Session, out, errOut io.Writer) err
 	}
 	defer func() { _ = rl.Close() }()
 
-	_, _ = fmt.Fprintf(out, "heros-cli — session=%s  workdir=%s  (streaming=%v  /exit to quit)\n",
+	_, _ = fmt.Fprintf(out, "heros — session=%s  workdir=%s  (streaming=%v  /exit to quit)\n"+
+		"  Tip: /pending | approve N | approve all | /approve <id>  (/help)\n",
 		s.SessionID, s.WorkDir, s.Stream)
 
 	for {
@@ -39,6 +41,7 @@ func RunReadlineREPL(ctx context.Context, s *Session, out, errOut io.Writer) err
 				continue
 			}
 			if errors.Is(err, io.EOF) {
+				_ = config.SaveCLIWorkdir(s.WorkDir)
 				_, _ = fmt.Fprintln(out, "bye")
 				return nil
 			}
@@ -48,22 +51,16 @@ func RunReadlineREPL(ctx context.Context, s *Session, out, errOut io.Writer) err
 		if line == "" {
 			continue
 		}
-		switch {
-		case line == "/exit", line == "/quit":
-			_, _ = fmt.Fprintln(out, "bye")
-			return nil
-		case line == "/help":
-			printHelp(out)
+		if s.TryBulkApproveCommand(ctx, line, out, errOut) {
 			continue
-		case line == "/refresh":
-			if err := s.RefreshContext(ctx); err != nil {
-				_, _ = fmt.Fprintf(errOut, "refresh: %v\n", err)
-			} else {
-				_, _ = fmt.Fprintln(out, "(catalog block appended to context)")
+		}
+		if s.TryApprovalNumberCommand(ctx, line, out, errOut) {
+			continue
+		}
+		if c, q := s.DispatchReplSlash(ctx, line, out, errOut); c {
+			if q {
+				return nil
 			}
-			continue
-		case strings.HasPrefix(line, "/"):
-			_, _ = fmt.Fprintf(errOut, "unknown command %q (try /help)\n", line)
 			continue
 		}
 		if err := s.RunUserTurn(ctx, line, out); err != nil {

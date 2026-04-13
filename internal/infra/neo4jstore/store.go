@@ -66,6 +66,23 @@ SET e.name = $name, e.kind = $kind, e.props_json = coalesce($props_json, "")`
 }
 
 // Link creates (src)-[:LINK {edge_id, name: rel}]->(dst).
+// DeleteOutgoingLinksNamed removes relationships from src whose LINK.name matches relName (e.g. WIKILINK).
+func (s *Store) DeleteOutgoingLinksNamed(ctx context.Context, srcID, relName string) error {
+	cypher := `MATCH (a:Entity {id: $src})-[r:LINK]->() WHERE r.name = $rel DELETE r`
+	_, err := neo4j.ExecuteQuery(ctx, s.Driver, cypher, map[string]any{
+		"src": srcID,
+		"rel": relName,
+	}, neo4j.EagerResultTransformer, neo4j.ExecuteQueryWithDatabase(s.Database))
+	return err
+}
+
+// DeleteEntityDetach removes a node and all its relationships.
+func (s *Store) DeleteEntityDetach(ctx context.Context, id string) error {
+	cypher := `MATCH (e:Entity {id: $id}) DETACH DELETE e`
+	_, err := neo4j.ExecuteQuery(ctx, s.Driver, cypher, map[string]any{"id": id}, neo4j.EagerResultTransformer, neo4j.ExecuteQueryWithDatabase(s.Database))
+	return err
+}
+
 func (s *Store) Link(ctx context.Context, edgeID, src, dst, rel, propsJSON string) error {
 	cypher := `
 MATCH (a:Entity {id: $src}), (b:Entity {id: $dst})

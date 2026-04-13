@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/heros-foreal/agentd/internal/embeddings"
@@ -88,15 +89,21 @@ func RetrieveSemantic(ctx context.Context, db *sql.DB, inf *VectorInfra, tenantI
 	if k <= 0 {
 		k = 5
 	}
-	if inf != nil && inf.Qdrant != nil && inf.Emb != nil {
+	var qVec []float64
+	if inf != nil && inf.Emb != nil {
 		vecs, err := inf.Emb.Embed(ctx, []string{query})
-		if err != nil {
+		if err != nil && inf.Qdrant != nil {
 			return nil, err
 		}
-		if len(vecs) == 0 {
+		if err == nil && len(vecs) > 0 {
+			qVec = vecs[0]
+		}
+	}
+	if inf != nil && inf.Qdrant != nil && inf.Emb != nil {
+		if len(qVec) == 0 {
 			return nil, nil
 		}
-		hits, err := inf.Qdrant.Search(ctx, inf.Collection, vecs[0], k*3, true)
+		hits, err := inf.Qdrant.Search(ctx, inf.Collection, qVec, k*3, true)
 		if err != nil {
 			return nil, err
 		}
@@ -107,12 +114,9 @@ func RetrieveSemantic(ctx context.Context, db *sql.DB, inf *VectorInfra, tenantI
 					continue
 				}
 			}
-			if h.Text != "" {
-				out = append(out, h.Text)
-			} else if h.Payload != nil {
-				if t, ok := h.Payload["text"].(string); ok {
-					out = append(out, t)
-				}
+			line := qdrantHitLine(h)
+			if line != "" {
+				out = append(out, line)
 			}
 			if len(out) >= k {
 				break
@@ -122,5 +126,79 @@ func RetrieveSemantic(ctx context.Context, db *sql.DB, inf *VectorInfra, tenantI
 			return out, nil
 		}
 	}
-	return retrieveSemanticSQLiteLegacy(db, tenantID, query, k)
+	return retrieveSemanticSQLiteLegacy(ctx, db, tenantID, query, k, qVec)
+}
+
+// RetrieveMemory runs semantic retrieval and prepends recent episodic lines from the same session
+// so heros_memory_search sees auto-logged conversation without a separate save call.
+func RetrieveMemory(ctx context.Context, db *sql.DB, inf *VectorInfra, tenantID, sessionID, query string, k int) ([]string, string, error) {
+	if k <= 0 {
+		k = 8
+	}
+	epiSlots := k / 3
+	if epiSlots < 2 {
+		epiSlots = 2
+	}
+	if epiSlots > 10 {
+		epiSlots = 10
+	}
+	if k <= 4 {
+		epiSlots = 1
+	}
+	semK := k - epiSlots
+	if semK < 1 {
+		semK = 1
+	}
+
+	var epi []string
+	var err error
+	if strings.TrimSpace(sessionID) != "" {
+		epi, err = RecentEpisodicForRetrieve(db, tenantID, sessionID, epiSlots)
+		if err != nil {
+			return nil, "", err
+		}
+	}
+
+	sem, err := RetrieveSemantic(ctx, db, inf, tenantID, query, semK)
+	if err != nil {
+		return nil, "", err
+	}
+
+	backend := "sqlite"
+	if inf != nil && inf.Qdrant != nil && inf.Emb != nil {
+		backend = "qdrant"
+	}
+	if len(epi) > 0 {
+		backend = backend + "+episodic"
+	}
+
+	out := append(epi, sem...)
+	if len(out) > k {
+		out = out[:k]
+	}
+	return out, backend, nil
+}
+
+func qdrantHitLine(h qdrant.SearchHit) string {
+	var text string
+	if h.Text != "" {
+		text = h.Text
+	} else if h.Payload != nil {
+		if t, ok := h.Payload["text"].(string); ok {
+			text = t
+		}
+	}
+	if text == "" {
+		return ""
+	}
+	if h.Payload == nil {
+		return text
+	}
+	if sk, ok := h.Payload["source_kind"].(string); ok && sk == "vault" {
+		rel, _ := h.Payload["vault_rel_path"].(string)
+		if rel != "" {
+			return "[vault:" + rel + "] " + text
+		}
+	}
+	return text
 }

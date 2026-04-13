@@ -22,6 +22,7 @@ import (
 	"github.com/heros-foreal/agentd/internal/platform"
 	"github.com/heros-foreal/agentd/internal/promptlayer"
 	"github.com/heros-foreal/agentd/internal/scheduler"
+	"github.com/heros-foreal/agentd/internal/vaultindex"
 )
 
 // Server is a running agentd instance (HTTP API + background scheduler).
@@ -31,6 +32,7 @@ type Server struct {
 	RT         *platform.Runtime
 	HTTPServer *http.Server
 	schCancel  context.CancelFunc
+	vaultCancel context.CancelFunc
 }
 
 // AgentdBaseURL returns the HTTP origin for in-process clients (e.g. heros-cli).
@@ -96,6 +98,21 @@ func StartAgentd(ctx context.Context, cfg config.Config) (*Server, error) {
 	schCtx, schCancel := context.WithCancel(context.Background())
 	go scheduler.Run(schCtx, database, rt.Bus, 30*time.Second)
 
+	vaultCtx, vaultCancel := context.WithCancel(context.Background())
+	if len(cfg.KnowledgeVaults) > 0 {
+		go vaultindex.RunPoller(vaultCtx, database, rt, cfg)
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 45*time.Minute)
+			defer cancel()
+			inf := rt.VectorInfra()
+			for _, v := range cfg.KnowledgeVaults {
+				if _, err := vaultindex.IndexVault(ctx, database, inf, rt.Neo, v); err != nil {
+					log.Printf("vault startup index %q: %v", v.Path, err)
+				}
+			}
+		}()
+	}
+
 	httpServer := &http.Server{
 		Handler:           srvHandler.Handler,
 		ReadHeaderTimeout: 10 * time.Second,
@@ -117,11 +134,12 @@ func StartAgentd(ctx context.Context, cfg config.Config) (*Server, error) {
 	}()
 
 	return &Server{
-		Config:     cfg,
-		DB:         database,
-		RT:         rt,
-		HTTPServer: httpServer,
-		schCancel:  schCancel,
+		Config:      cfg,
+		DB:          database,
+		RT:          rt,
+		HTTPServer:  httpServer,
+		schCancel:   schCancel,
+		vaultCancel: vaultCancel,
 	}, nil
 }
 
@@ -157,6 +175,9 @@ func (s *Server) Shutdown(parent context.Context) error {
 		return nil
 	}
 	s.schCancel()
+	if s.vaultCancel != nil {
+		s.vaultCancel()
+	}
 	ctx, cancel := context.WithTimeout(parent, 8*time.Second)
 	defer cancel()
 	_ = s.HTTPServer.Shutdown(ctx)

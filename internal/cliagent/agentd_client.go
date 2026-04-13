@@ -9,8 +9,11 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/heros-foreal/agentd/internal/harness"
 )
 
 // AgentdClient calls agentd HTTP APIs (folder skills, tools, memory, graph, CLI policy).
@@ -155,16 +158,91 @@ func (c *AgentdClient) SkillBody(ctx context.Context, name string) (string, erro
 	return r.Body, nil
 }
 
-func (c *AgentdClient) MemoryRetrieve(ctx context.Context, query string, k int) ([]string, string, error) {
+func (c *AgentdClient) MemoryRetrieve(ctx context.Context, sessionID, query string, k int) ([]string, string, error) {
 	if k <= 0 {
 		k = 8
 	}
+	body := map[string]any{"query": query, "k": k}
+	if strings.TrimSpace(sessionID) != "" {
+		body["session_id"] = strings.TrimSpace(sessionID)
+	}
 	var r retrieveResp
-	err := c.PostJSON(ctx, "/api/memory/retrieve", map[string]any{"query": query, "k": k}, &r)
+	err := c.PostJSON(ctx, "/api/memory/retrieve", body, &r)
 	if err != nil {
 		return nil, "", err
 	}
 	return r.Chunks, r.Backend, nil
+}
+
+// ListPendingProposals returns pending proposals (CLI approval flow).
+func (c *AgentdClient) ListPendingProposals(ctx context.Context) ([]map[string]any, error) {
+	resp, err := c.req(ctx, http.MethodGet, "/api/proposals/pending", nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	b, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("agentd /api/proposals/pending: %s: %s", resp.Status, string(b))
+	}
+	var list []map[string]any
+	if err := json.Unmarshal(b, &list); err != nil {
+		return nil, fmt.Errorf("parse pending: %w", err)
+	}
+	return list, nil
+}
+
+// ApproveProposal applies a pending proposal (equivalent to the web UI approve button).
+func (c *AgentdClient) ApproveProposal(ctx context.Context, id string) error {
+	_, err := c.ApproveProposalJSON(ctx, id)
+	return err
+}
+
+// ApproveProposalJSON applies a proposal and returns the updated proposal JSON (for tools / UI).
+func (c *AgentdClient) ApproveProposalJSON(ctx context.Context, id string) (map[string]any, error) {
+	path := "/api/proposals/" + url.PathEscape(id) + "/approve"
+	resp, err := c.req(ctx, http.MethodPost, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	rb, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("agentd %s: %s: %s", path, resp.Status, string(rb))
+	}
+	var out map[string]any
+	if len(rb) > 0 && json.Unmarshal(rb, &out) == nil && out != nil {
+		return out, nil
+	}
+	return map[string]any{"status": "approved", "id": id}, nil
+}
+
+// RejectProposal marks a proposal rejected.
+func (c *AgentdClient) RejectProposal(ctx context.Context, id string) error {
+	_, err := c.RejectProposalJSON(ctx, id)
+	return err
+}
+
+// RejectProposalJSON rejects a proposal and returns the updated proposal JSON.
+func (c *AgentdClient) RejectProposalJSON(ctx context.Context, id string) (map[string]any, error) {
+	path := "/api/proposals/" + url.PathEscape(id) + "/reject"
+	resp, err := c.req(ctx, http.MethodPost, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	rb, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("agentd %s: %s: %s", path, resp.Status, string(rb))
+	}
+	var out map[string]any
+	if len(rb) > 0 && json.Unmarshal(rb, &out) == nil && out != nil {
+		return out, nil
+	}
+	return map[string]any{"status": "rejected", "id": id}, nil
 }
 
 func (c *AgentdClient) MemoryEpisodic(ctx context.Context, sessionID, role, content string, importance float64) error {
@@ -208,8 +286,26 @@ func (c *AgentdClient) GraphNeighbors(ctx context.Context, entityID string) (*gr
 	return &r, nil
 }
 
+// FetchTopology returns harness config from agentd (Layer 3); used for CLI doctrine text.
+func (c *AgentdClient) FetchTopology(ctx context.Context) (harness.Topology, error) {
+	var t harness.Topology
+	err := c.GetJSON(ctx, "/api/config/topology", &t)
+	return t, err
+}
+
+// HarnessRun executes Layer-3 leader → specialists → critic inside the same heros process (in-process HTTP handler).
+func (c *AgentdClient) HarnessRun(ctx context.Context, goal string) (*harness.RunResult, error) {
+	var res harness.RunResult
+	err := c.PostJSON(ctx, "/api/harness/run", map[string]string{"goal": goal}, &res)
+	if err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
 // BuildContextBlock refreshes folder skills + tool registry view for the system prompt.
-func (c *AgentdClient) BuildContextBlock(ctx context.Context) (string, error) {
+// dataDir is the agent home (skills/, tools/, …); rel_path values are relative to it, not the workspace.
+func (c *AgentdClient) BuildContextBlock(ctx context.Context, dataDir string) (string, error) {
 	sk, err := c.CatalogSkills(ctx)
 	if err != nil {
 		return "", fmt.Errorf("catalog skills: %w", err)
@@ -220,8 +316,21 @@ func (c *AgentdClient) BuildContextBlock(ctx context.Context) (string, error) {
 	}
 	var b strings.Builder
 	b.WriteString("## Folder skills (indexed on agentd from disk)\n")
+	b.WriteString("Each **`rel_path`** is under the agent **data_dir**, not the workspace. **`abs`** is the on-disk SKILL.md path when data_dir is known to this CLI.\n")
+	if root := strings.TrimSpace(dataDir); root != "" {
+		if absRoot, err := filepath.Abs(root); err == nil {
+			b.WriteString(fmt.Sprintf("**data_dir (absolute):** `%s`\n", filepath.Clean(absRoot)))
+		}
+	}
 	for _, e := range sk.Skills {
-		b.WriteString(fmt.Sprintf("- **%s** — %s (`tenant_scope=%s`, path `%s`)\n", e.Name, e.Title, e.TenantScope, e.RelPath))
+		line := fmt.Sprintf("- **%s** — %s (`tenant_scope=%s`, rel `%s`)", e.Name, e.Title, e.TenantScope, e.RelPath)
+		if root := strings.TrimSpace(dataDir); root != "" {
+			if absSkill, err := filepath.Abs(filepath.Join(root, filepath.FromSlash(e.RelPath))); err == nil {
+				line += fmt.Sprintf(", abs `%s`", filepath.Clean(absSkill))
+			}
+		}
+		line += ")\n"
+		b.WriteString(line)
 	}
 	if len(sk.Skills) == 0 {
 		b.WriteString("(none)\n")
@@ -233,6 +342,11 @@ func (c *AgentdClient) BuildContextBlock(ctx context.Context) (string, error) {
 	if len(tl.Tools) == 0 {
 		b.WriteString("(none)\n")
 	}
+	b.WriteString("\n## Operating doctrine (CLI)\n")
+	b.WriteString("- Ground answers about **this workspace** with **heros_shell** (list/read files) before claiming ignorance.\n")
+	b.WriteString("- Catalog skills live under **data_dir**, not the workspace; use **abs** paths above or **heros_read_skill** — never guess `workspace/skills/...`.\n")
+	b.WriteString("- If a skill name above fits the task, call **heros_read_skill** before long improvised playbooks.\n")
+	b.WriteString("- For work spanning many steps, call **heros_memory_search** early to recall prior decisions in this session/org memory.\n")
 	return b.String(), nil
 }
 

@@ -69,6 +69,8 @@ Sync to the collective extracts and optionally anonymizes memories
 before pushing them to the federated graph, where they become available
 (with access controls) across the organization.
 
+**Optional vault path:** an **Obsidian-style Markdown vault** on disk can be indexed via **`knowledge_vaults`** into the same semantic retrieval path (Qdrant/SQLite), with **wikilinks** mirrored to **`graph_edges`** / Neo4j and optional **append-to-vault** for `role: note` episodic writes. See [`MEMORY-VAULT.md`](MEMORY-VAULT.md).
+
 ## **Layer 3 --- Self-Evolving Harness Engineering**
 
 This is a hybrid of two proven patterns. The **Leader--Follower** model

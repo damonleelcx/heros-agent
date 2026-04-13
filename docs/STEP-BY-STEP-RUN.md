@@ -1,114 +1,76 @@
 # Step-by-step: run this project
 
-**Recommended path:** a single binary **`heros`** starts the local agent daemon **and** the terminal REPL in one process—suitable for **long-running work** (memory, skills, proposals stay in `data_dir` until you exit). For layout and APIs, see [ARCHITECTURE.md](ARCHITECTURE.md) and [AGENT_LAYOUT.md](AGENT_LAYOUT.md). Overview: [README](../README.md).
+You only need the **`heros`** command: one binary starts the local agent daemon **and** the terminal REPL (long-running memory, skills, proposals in `data_dir`). Same flow for **clone + `go run`** or **`go install`** — no second terminal, no `agentd` + `heros-cli` split unless you choose it.
+
+Layout and APIs: [ARCHITECTURE.md](ARCHITECTURE.md), [AGENT_LAYOUT.md](AGENT_LAYOUT.md). Overview: [README](../README.md).
 
 ---
 
 ## 0. Requirements
 
-1. **[Go 1.22+](https://go.dev/dl/)**
-2. Shell at the **repository root** (where `go.mod` lives)
-3. On Windows: **PowerShell**, **cmd**, or **Git Bash** (`.\heros.exe` after build)
+1. **[Go 1.22+](https://go.dev/dl/)** (for `go install` / `go run`), or a prebuilt **`heros`**
+2. Shell with **`heros`** on **`PATH`** (after install), or repo root for `go run ./cmd/heros`
+3. Windows: **PowerShell**, **cmd**, or **Git Bash**
 
 ---
 
-## 1. One command: `heros` (daemon + agent REPL)
+## 1. Install and run **`heros`**
 
-This is the default way to run: **no separate `agentd` terminal**, **no `-config` or `-workdir` required** for normal use.
+### Install
 
-### Step 1 — Install globally (recommended)
-
-From anywhere, after [Go](https://go.dev/dl/) is installed:
+**Published module (global):**
 
 ```bash
 go install github.com/heros-foreal/agentd/cmd/heros@latest
 ```
 
-Ensure **`GOBIN`** or **`GOPATH/bin`** is on your **`PATH`** (default `go install` puts the binary in `$(go env GOPATH)/bin` — e.g. `%USERPROFILE%\go\bin` on Windows).
+Add **`$(go env GOPATH)/bin`** to **`PATH`** (Windows: often **`%USERPROFILE%\go\bin`**).
 
-From a **clone** of the repo:
+**From a clone:**
 
 ```bash
 go install ./cmd/heros
+# or without installing:
+go run ./cmd/heros
 ```
 
-Then run **`heros`** from any directory.
+More detail (paths, `cd` vs project folder, `go build`): [RUN-LOCAL-REPO.md](RUN-LOCAL-REPO.md).
 
-### Step 2 — Config (automatic)
+### Config (automatic)
 
-If you pass **`-config /path/to/config.json`**, that file wins. Otherwise **`heros`** searches, in order:
+Unless you pass **`-config`**, **`heros`** discovers `config.json` in **cwd → parents**, then **`%APPDATA%\heros\config.json`**, **`~/.heros/`**, **`~/.heros-agent/`**, else defaults. See **`HEROS_CONFIG`** / **`HEROS_CONFIG_PATH`** to force a path.
 
-1. **`HEROS_CONFIG`** or **`HEROS_CONFIG_PATH`** (full path to `config.json`)
-2. **`config.json`** starting in the **current working directory**, then each parent folder up to the filesystem root
-3. **`%APPDATA%\heros\config.json`** on Windows (`os.UserConfigDir()/heros/config.json`)
-4. **`~/.heros/config.json`**
-5. **`~/.heros-agent/config.json`**
-6. Built-in defaults (data dir usually **`~/.heros-agent`**)
+### API key (automatic + first-run prompt)
 
-So a project can ship **`config.json`** next to your code; a user machine can use a **single global file** under AppData or home.
+Order: **`-openai-api-key`** → **`OPENAI_API_KEY`** → **`openai_api_key`** in config → interactive prompt (hidden on TTY). After prompt, key is **merged** into **`%APPDATA%\heros\config.json`** (or Unix `UserConfigDir/heros/config.json`).
 
-### Step 3 — API key & model (automatic)
+### Workspace
 
-Resolution order for the **LLM bearer token**:
+**`heros_shell`** uses the **current working directory**. **`cd`** into your repo, then **`heros`**. Optional **`-workdir`** to override.
 
-1. **`-openai-api-key`**
-2. Environment **`OPENAI_API_KEY`**
-3. **`openai_api_key`** in the loaded `config.json`
-
-For **base URL** and **model** (when you do not pass flags):
-
-- **Base:** **`OPENAI_BASE_URL`**, then **`openai_base_url`** in config, then default OpenAI-compatible URL.
-- **Model:** **`OPENAI_MODEL`** or **`HEROS_MODEL`**, then **`openai_model`** in config, then default model.
-
-You can rely on **only** a global `config.json` with `openai_api_key` set and run plain **`heros`** with no env vars.
-
-On **first run**, if no key is found anywhere, **`heros`** prompts you to **paste the key interactively** (hidden on a real terminal). That key is then **saved** to **`%APPDATA%\heros\config.json`** on Windows (or **`$XDG_CONFIG_HOME/heros/config.json`** / `~/.config/heros/config.json` on Unix), merged with any existing keys in that file. Empty input still fails until you set env, config, or `-openai-api-key`.
-
-### Step 4 — Workspace (current directory)
-
-**`heros_shell`** uses the **current working directory** as the workspace root. **`cd`** into your repo (or any folder) and run **`heros`** — no **`-workdir`**. Use **`-workdir`** only to override.
-
-### Step 5 — Run
+### Run
 
 ```bash
 cd /path/to/your/project
 heros
 ```
 
-Or from a clone without `go install`:
+**Stop:** **`/exit`** or **Ctrl+D** (stops HTTP + SQLite).
 
-```bash
-go run ./cmd/heros
-```
+**Approval UI:** **`http://127.0.0.1:8787/`** (or your `listen_addr`).
 
-**What happens**
-
-1. **agentd** stack starts **in-process**: SQLite, seeded `skills/` / `tools/` if empty, optional Qdrant/Neo4j/NATS from config, HTTP API on **`listen_addr`**.
-2. The process waits until **`GET /health`** succeeds.
-3. The **same process** opens the **terminal agent REPL** (readline, streaming, tools).
-
-**Long-running tasks**
-
-- Leave the REPL open; use **`heros_memory_save`** / **`heros_memory_search`**, **`heros_shell`** under **`-workdir`**, and **`heros_submit_proposal`** as usual.
-- State persists under **`data_dir`** across runs.
-- Open [http://127.0.0.1:8787/](http://127.0.0.1:8787/) anytime for the **proposal approval UI** (same port as `listen_addr`).
-
-**Stop cleanly**
-
-- Type **`/exit`** or **Ctrl+D** in the REPL → HTTP server and database shut down and the process exits.
-
-### Useful overrides (optional)
+### Overrides (optional)
 
 | Flag / env | Role |
 |------------|------|
-| `-config` | Force a specific `config.json` |
-| `-workdir` | Override workspace (default: **cwd**) |
-| `-openai-base`, `-model`, `-openai-api-key` | Override discovered LLM settings |
-| `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_MODEL` | Env overrides |
+| `-config` | Force a `config.json` path |
+| `-workdir` | Override workspace |
+| `-openai-base`, `-model`, `-openai-api-key` | LLM overrides |
+| `OPENAI_BASE_URL`, `OPENAI_MODEL`, `HEROS_MODEL` | Env |
 | `-api-key` | `X-API-Key` if `auth_mode=required` |
-| `-no-stream`, `-agent-shell`, `-session`, … | Same as **heros-cli** |
+| `-no-stream`, `-agent-shell`, `-session`, … | Advanced |
 
-**Ollama example** (env or flags)
+**Ollama example:**
 
 ```bash
 set OPENAI_BASE_URL=http://127.0.0.1:11434/v1
@@ -118,90 +80,66 @@ heros -no-stream
 
 ---
 
-## 2. Split mode (advanced): `agentd` + `heros-cli`
+## 2. Optional: `agentd` only (no REPL)
 
-Use this when the daemon should run **on another host** or **outlive** the REPL.
-
-1. Start **`agentd`** (see below).
-2. Build **`heros-cli`** and pass **`-agentd-url=http://…`** explicitly.
+Headless HTTP (tests, automation, remote server). Same config discovery.
 
 ```bash
-go build -o agentd ./cmd/agentd
-./agentd -config config.json
-
-# other terminal
-go build -o heros-cli ./cmd/heros-cli
-export OPENAI_API_KEY=sk-...
-./heros-cli -agentd-url=http://127.0.0.1:8787 -workdir=/path/to/repo
+go build -o agentd ./cmd/agentd && ./agentd
 ```
 
 ---
 
-## 3. Daemon only: `agentd`
+## 3. Optional: `collectived`
 
-Headless HTTP service (no REPL):
+Set **`collective_url`** in config; run **`heros`** or **`agentd`** with that config. See [README](../README.md) §4.
+
+---
+
+## 4. Optional: Enterprise stack
+
+Docker + **`config.enterprise.example.json`** — [ENTERPRISE.md](ENTERPRISE.md). Prefer:
 
 ```bash
-go build -o agentd ./cmd/agentd
-./agentd -config config.json
+heros -config config.enterprise.example.json
 ```
 
-Stop with **Ctrl+C**. Sanity checks: `/` and `/health` on **`listen_addr`**.
-
 ---
 
-## 4. (Optional) Collective stub — `collectived`
+## 5. Optional: `heros-mcp`
 
-Forward proposals to a second process: run **`collectived`**, set **`collective_url`** in config, restart **`agentd`** (or restart **`heros`** with that config).
-
----
-
-## 5. (Optional) Enterprise stack
-
-Docker + **`config.enterprise.example.json`** — see [ENTERPRISE.md](ENTERPRISE.md). Run **`heros -config config.enterprise.example.json ...`** or **`agentd`** with the same file.
-
----
-
-## 6. (Optional) `heros-mcp`
+Needs **`agentd` HTTP** reachable (headless **`agentd`**, or the URL from a running **`heros`**).
 
 ```bash
 go build -o heros-mcp ./cmd/heros-mcp
 ./heros-mcp -agentd-url=http://127.0.0.1:8787
 ```
 
-(Requires a running **`agentd`** — e.g. started separately, or use **`heros`** only for the all-in-one terminal path.)
+---
+
+## 6. Optional: `heros-cli` (remote `agentd` only)
+
+Only if **`agentd` already runs elsewhere** (another host or long-lived process). Not part of the default workflow. Flags: **`heros-cli -h`**.
 
 ---
 
-## 7. Build all binaries
-
-```bash
-go build -o heros ./cmd/heros
-go build -o agentd ./cmd/agentd
-go build -o heros-cli ./cmd/heros-cli
-go build -o collectived ./cmd/collectived
-go build -o heros-mcp ./cmd/heros-mcp
-```
-
----
-
-## 8. Troubleshooting
+## 7. Troubleshooting
 
 | Symptom | What to check |
 |--------|----------------|
-| `heros` exits immediately on “not ready” | Port **`listen_addr`** in use; change port or stop the other process. |
-| Missing LLM key | `OPENAI_API_KEY` or **`-openai-api-key`**. |
-| Ollama weirdness | **`-no-stream`**. |
-| `auth_mode=required` | **`-api-key`** matching a tenant key in config. |
-| Stale catalog after disk edits | **`POST /api/catalog/reindex`** while **`heros`** / **`agentd`** is running. |
+| “not ready” | Port **`listen_addr`** in use |
+| No LLM key | Env, config, or first-run prompt |
+| Ollama issues | **`-no-stream`** |
+| `auth_mode=required` | **`-api-key`** |
+| Stale catalog | **`POST /api/catalog/reindex`** |
 
 ---
 
-## 9. Read next
+## 8. Read next
 
 | Topic | Doc |
 |--------|-----|
-| Folders, SKILL.md, tool.yaml | [AGENT_LAYOUT.md](AGENT_LAYOUT.md) |
-| Enterprise Docker stack | [ENTERPRISE.md](ENTERPRISE.md) |
+| Folders, SKILL.md | [AGENT_LAYOUT.md](AGENT_LAYOUT.md) |
+| Enterprise | [ENTERPRISE.md](ENTERPRISE.md) |
 | Architecture | [ARCHITECTURE.md](ARCHITECTURE.md) |
 | Roadmap | [TODO.md](../TODO.md), [TODO-BUSINESS.md](../TODO-BUSINESS.md) |

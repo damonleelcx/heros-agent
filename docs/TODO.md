@@ -15,10 +15,9 @@
    本质是 **`go build` 出二进制 + `-config`**（或空配置 + 默认目录），在本机跑进程。README 中的「OS-level」指**设计取向**（长期进程、盘上技能/记忆、受控 CLI），**并非**仓库内已提供 systemd / launchd / Windows Service 安装包或应用商店分发——需自行打包或写安装脚本。
 
 3. **与「集体」的关系（当前较薄）**  
-   - 配置 **`collective_url`** 后，**提交提案**时会 **HTTP POST** 到集体侧（`internal/collective/sync.go` 的 `PushProposal`）。
-   - **`collectived`** 为示例：内存收提案、打日志，可选往 **NATS** 发 `heros.fleet.proposals.pending`；**`GET /v1/skills/graph` 仍为占位 JSON**。
-   - 企业文档建议生产使用 **NATS + 自建消费者**，而非依赖极简 HTTP 集体。
-   - **没有**「整棵技能树 / 记忆库自动打包同步到集体」的完整产品闭环；记忆侧以本机 + 可选 Qdrant 为主，辅以 NATS **事件**（如 promotion），**不是**「工作站记忆自动上收集体存储」的端到端实现。
+   - 配置 **`collective_url`** 后：**提交待审提案**时 **HTTP POST** `PushProposal` → `/v1/ingest/proposal`；**审批通过并落盘之后**再 **POST** `PushApprovedMutation` → `/v1/ingest/approved-mutation`（便于下游只同步**已批准**变更）。
+   - **`collectived`** 示例：对上述两路由收 JSON、打日志；**pending** 发 NATS `heros.fleet.proposals.pending`，**approved-mutation** 发 `heros.fleet.proposals.approved`。**`GET /v1/skills/graph` 仍为占位**。
+   - 企业侧仍需 **自建消费者**（或对象存储镜像）把 NATS 事件转成「全公司技能/工具/记忆制品库」——仓库内**尚未**实现自动双向镜像与冲突合并产品闭环。
 
 **小结**：集体侧当前 = **提案/信号上送 + NATS 桩**；**不是**「每台工作站与组织集体自动双向同步技能与记忆」的成品。
 

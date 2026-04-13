@@ -1,0 +1,5 @@
+id: echo-safe
+risk_tier: low
+description: Example low-risk tool placeholder; replace script_path with a real command when you add automation.
+skills:
+  - core-reasoning

@@ -3,10 +3,13 @@ module github.com/heros-foreal/agentd
 go 1.22
 
 require (
+	github.com/bmatcuk/doublestar/v4 v4.6.1
 	github.com/chzyer/readline v1.5.1
 	github.com/google/uuid v1.6.0
 	github.com/nats-io/nats.go v1.37.0
 	github.com/neo4j/neo4j-go-driver/v5 v5.26.0
+	golang.org/x/sys v0.29.0
+	golang.org/x/term v0.28.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.29.6
 )
@@ -21,8 +24,6 @@ require (
 	github.com/ncruces/go-strftime v0.1.9 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	golang.org/x/crypto v0.18.0 // indirect
-	golang.org/x/sys v0.29.0 // indirect
-	golang.org/x/term v0.28.0 // indirect
 	modernc.org/gc/v3 v3.0.0-20240107210532-573471604cb6 // indirect
 	modernc.org/libc v1.41.0 // indirect
 	modernc.org/mathutil v1.6.0 // indirect

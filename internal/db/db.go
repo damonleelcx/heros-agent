@@ -238,6 +238,18 @@ func migrate(d *sql.DB) error {
 			tenant_scope TEXT NOT NULL DEFAULT '_global'
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_tool_fs_id ON tool_fs_index(tool_id)`,
+		`CREATE TABLE IF NOT EXISTS vault_index_state (
+			vault_root TEXT NOT NULL,
+			rel_path TEXT NOT NULL,
+			tenant_id TEXT NOT NULL DEFAULT '',
+			file_key TEXT NOT NULL,
+			content_sha256 TEXT NOT NULL,
+			mtime_unix INTEGER NOT NULL,
+			chunk_count INTEGER NOT NULL,
+			indexed_at TEXT NOT NULL DEFAULT (datetime('now')),
+			PRIMARY KEY (vault_root, rel_path, tenant_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_vault_state_tenant ON vault_index_state(tenant_id)`,
 	}
 	for i, s := range stmts {
 		if _, err := d.Exec(s); err != nil {

@@ -72,17 +72,20 @@ func cosine(a, b []float64) float64 {
 	return dot / (math.Sqrt(na) * math.Sqrt(nb))
 }
 
-func retrieveSemanticSQLiteLegacy(db *sql.DB, tenantID, query string, k int) ([]string, error) {
+func retrieveSemanticSQLiteLegacy(ctx context.Context, db *sql.DB, tenantID, query string, k int, qvec []float64) ([]string, error) {
 	if k <= 0 {
 		k = 5
 	}
-	q := naiveEmbedding(query)
+	q := qvec
+	if len(q) == 0 {
+		q = naiveEmbedding(query)
+	}
 	var rows *sql.Rows
 	var err error
 	if tenantID == "" {
-		rows, err = db.Query(`SELECT text, embedding_json FROM semantic_chunks`)
+		rows, err = db.QueryContext(ctx, `SELECT source, text, embedding_json FROM semantic_chunks`)
 	} else {
-		rows, err = db.Query(`SELECT text, embedding_json FROM semantic_chunks WHERE tenant_id = ?`, tenantID)
+		rows, err = db.QueryContext(ctx, `SELECT source, text, embedding_json FROM semantic_chunks WHERE tenant_id = ?`, tenantID)
 	}
 	if err != nil {
 		return nil, err
@@ -94,15 +97,19 @@ func retrieveSemanticSQLiteLegacy(db *sql.DB, tenantID, query string, k int) ([]
 	}
 	var all []scored
 	for rows.Next() {
-		var text, ej string
-		if err := rows.Scan(&text, &ej); err != nil {
+		var source, text, ej string
+		if err := rows.Scan(&source, &text, &ej); err != nil {
 			return nil, err
 		}
 		var emb []float64
 		if ej != "" {
 			_ = json.Unmarshal([]byte(ej), &emb)
 		}
-		all = append(all, scored{text: text, score: cosine(q, emb)})
+		if len(emb) > 0 && len(q) > 0 && len(emb) != len(q) {
+			continue // dimension mismatch (mixed embedders); skip row
+		}
+		line := formatSemanticLine(source, text)
+		all = append(all, scored{text: line, score: cosine(q, emb)})
 	}
 	sort.Slice(all, func(i, j int) bool { return all[i].score > all[j].score })
 	var out []string
@@ -110,6 +117,55 @@ func retrieveSemanticSQLiteLegacy(db *sql.DB, tenantID, query string, k int) ([]
 		out = append(out, all[i].text)
 	}
 	return out, rows.Err()
+}
+
+// formatSemanticLine prefixes vault chunks so the model can cite Obsidian paths.
+// RecentEpisodicForRetrieve returns newest-first lines from this session for memory search merge.
+func RecentEpisodicForRetrieve(db *sql.DB, tenantID, sessionID string, limit int) ([]string, error) {
+	if limit <= 0 {
+		limit = 6
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return nil, nil
+	}
+	var rows *sql.Rows
+	var err error
+	if tenantID == "" {
+		rows, err = db.Query(`SELECT role, content FROM episodic_memory WHERE session_id = ? ORDER BY datetime(created_at) DESC LIMIT ?`, sessionID, limit)
+	} else {
+		rows, err = db.Query(`SELECT role, content FROM episodic_memory WHERE session_id = ? AND tenant_id = ? ORDER BY datetime(created_at) DESC LIMIT ?`, sessionID, tenantID, limit)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var role, content string
+		if err := rows.Scan(&role, &content); err != nil {
+			return nil, err
+		}
+		content = strings.TrimSpace(content)
+		if content == "" {
+			continue
+		}
+		line := "[episodic:" + strings.TrimSpace(role) + "] " + content
+		out = append(out, line)
+	}
+	return out, rows.Err()
+}
+
+func formatSemanticLine(source, body string) string {
+	if strings.HasPrefix(source, "vault:") {
+		rest := strings.TrimPrefix(source, "vault:")
+		pathPart := rest
+		if i := strings.Index(rest, "#c"); i >= 0 {
+			pathPart = rest[:i]
+		}
+		return "[vault:" + pathPart + "] " + body
+	}
+	return body
 }
 
 // UpsertEntity / Link for structural knowledge graph (SQLite-backed).

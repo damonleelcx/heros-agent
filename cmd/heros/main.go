@@ -16,9 +16,13 @@ import (
 	"github.com/google/uuid"
 	"github.com/heros-foreal/agentd/internal/cliagent"
 	"github.com/heros-foreal/agentd/internal/config"
+	"github.com/heros-foreal/agentd/internal/installpath"
 	"github.com/heros-foreal/agentd/internal/launch"
 	"golang.org/x/term"
 )
+
+// Set at link time by release builds, e.g. -ldflags "-X main.version=v1.2.3"
+var version = "dev"
 
 // promptOpenAIKey asks for a key interactively when none was configured.
 // Uses hidden input on a terminal; otherwise reads a line from stdin.
@@ -41,7 +45,25 @@ func promptOpenAIKey() (string, error) {
 	return strings.TrimSpace(s), nil
 }
 
+func firstNonEmptyEnv(keys ...string) string {
+	for _, k := range keys {
+		if v := strings.TrimSpace(os.Getenv(k)); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
 func main() {
+	// Go's flag package does not treat --version as -version; handle common aliases here.
+	for _, a := range os.Args[1:] {
+		switch a {
+		case "--version", "-V":
+			fmt.Println(version)
+			return
+		}
+	}
+
 	cfgPath := flag.String("config", "", "override path to config.json (optional; otherwise auto-discover: cwd parents, %APPDATA%/heros/, ~/.heros/, ~/.heros-agent/, or defaults)")
 
 	apiKey := flag.String("api-key", "", "X-API-Key when agentd auth_mode=required")
@@ -55,8 +77,28 @@ func main() {
 	agentShell := flag.Bool("agent-shell", false, "expose heros_agent_shell on agentd host")
 	noReadline := flag.Bool("no-readline", false, "simple stdin REPL")
 	targetTenant := flag.String("target-tenant", "", "default target_tenant for heros_submit_proposal (admin keys)")
+	addPath := flag.Bool("add-path", false, "add this binary's directory (or Go install bin if you run from GOPATH/bin) to user PATH and exit")
+	showVer := flag.Bool("version", false, "print version and exit")
 
 	flag.Parse()
+
+	if *showVer {
+		fmt.Println(version)
+		return
+	}
+
+	if *addPath {
+		dir, err := installpath.AddPathTargetDir()
+		if err != nil {
+			log.Fatalf("add-path: %v", err)
+		}
+		if err := installpath.AddUserPATH(dir); err != nil {
+			log.Fatalf("add-path: %v", err)
+		}
+		_, _ = fmt.Fprintf(os.Stderr, "heros: added %q to your user PATH.\n", dir)
+		_, _ = fmt.Fprintln(os.Stderr, "heros: open a new terminal window, then run: heros")
+		return
+	}
 
 	cfg, cfgSrc, err := config.LoadAuto(*cfgPath)
 	if err != nil {
@@ -142,9 +184,31 @@ func main() {
 			log.Fatalf("workdir: %v", err)
 		}
 	} else {
-		wd, err = os.Getwd()
-		if err != nil {
-			log.Fatalf("getwd: %v", err)
+		// Env overrides, then last-saved workspace (%APPDATA%/heros/config.json → cli_workdir), then cwd.
+		if env := firstNonEmptyEnv("HEROS_WORKDIR", "INIT_CWD"); env != "" {
+			wd, err = filepath.Abs(env)
+			if err != nil {
+				log.Fatalf("workdir from env: %v", err)
+			}
+		} else if cw, _ := config.GetCLIWorkdir(); strings.TrimSpace(cw) != "" {
+			if aw, e2 := filepath.Abs(strings.TrimSpace(cw)); e2 == nil {
+				if st, e3 := os.Stat(aw); e3 == nil && st.IsDir() {
+					wd = aw
+				}
+			}
+		}
+		if wd == "" {
+			wd, err = os.Getwd()
+			if err != nil {
+				log.Fatalf("getwd: %v", err)
+			}
+			base := strings.ToLower(filepath.Base(wd))
+			if base == "heros-foreal" || base == "agentd" {
+				if h, e2 := os.UserHomeDir(); e2 == nil {
+					log.Printf("heros: cwd is clone root %q — using home as workspace; run /cd <your-project> once to persist", wd)
+					wd = h
+				}
+			}
 		}
 	}
 
@@ -171,6 +235,7 @@ func main() {
 		OpenAIKey:          openaiKey,
 		Model:              modelStr,
 		SessionID:          sid,
+		DataDir:            cfg.DataDir,
 		WorkDir:            wd,
 		AgentShell:         *agentShell,
 		Stream:             !*noStream,

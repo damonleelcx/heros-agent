@@ -70,11 +70,11 @@ func Submit(db *sql.DB, tenantID string, layer Layer, title, rationale, diff str
 
 func Get(db *sql.DB, id string) (*Proposal, error) {
 	var p Proposal
-	var created, reviewed sql.NullString
+	var created, reviewed, rollback sql.NullString
 	err := db.QueryRow(`
 		SELECT id, tenant_id, layer, title, rationale, diff_text, status, created_at, reviewed_at, content_hash, rollback_ref
 		FROM proposals WHERE id = ?`, id).Scan(
-		&p.ID, &p.TenantID, &p.Layer, &p.Title, &p.Rationale, &p.DiffText, &p.Status, &created, &reviewed, &p.ContentHash, &p.RollbackRef)
+		&p.ID, &p.TenantID, &p.Layer, &p.Title, &p.Rationale, &p.DiffText, &p.Status, &created, &reviewed, &p.ContentHash, &rollback)
 	if err != nil {
 		return nil, err
 	}
@@ -82,6 +82,9 @@ func Get(db *sql.DB, id string) (*Proposal, error) {
 	if reviewed.Valid {
 		t := sqltime.Parse(reviewed.String)
 		p.ReviewedAt = &t
+	}
+	if rollback.Valid {
+		p.RollbackRef = rollback.String
 	}
 	return &p, nil
 }
@@ -145,14 +148,17 @@ func scanProposalRows(rows *sql.Rows) ([]Proposal, error) {
 	var out []Proposal
 	for rows.Next() {
 		var p Proposal
-		var created, reviewed sql.NullString
-		if err := rows.Scan(&p.ID, &p.TenantID, &p.Layer, &p.Title, &p.Rationale, &p.DiffText, &p.Status, &created, &reviewed, &p.ContentHash, &p.RollbackRef); err != nil {
+		var created, reviewed, rollback sql.NullString
+		if err := rows.Scan(&p.ID, &p.TenantID, &p.Layer, &p.Title, &p.Rationale, &p.DiffText, &p.Status, &created, &reviewed, &p.ContentHash, &rollback); err != nil {
 			return nil, err
 		}
 		p.CreatedAt = sqltime.Parse(created.String)
 		if reviewed.Valid {
 			t := sqltime.Parse(reviewed.String)
 			p.ReviewedAt = &t
+		}
+		if rollback.Valid {
+			p.RollbackRef = rollback.String
 		}
 		out = append(out, p)
 	}
