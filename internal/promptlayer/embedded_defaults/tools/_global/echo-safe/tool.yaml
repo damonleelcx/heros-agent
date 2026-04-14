@@ -1,5 +1,7 @@
 id: echo-safe
 risk_tier: low
-description: Example low-risk tool placeholder; replace script_path with a real command when you add automation.
+description: Example low-risk tool placeholder.
 skills:
-  - core-reasoning
+  - runtime-tools
+implementation_language: go
+implementation_entrypoint: internal/promptlayer/embedded_defaults/tools/_global/echo-safe/tool.go:Execute

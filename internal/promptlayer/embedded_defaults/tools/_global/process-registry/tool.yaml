@@ -1,0 +1,8 @@
+id: process-registry
+risk_tier: medium
+description: List or terminate local processes by pid.
+skills:
+  - systematic-debugging
+  - runtime-tools
+implementation_language: go
+implementation_entrypoint: internal/promptlayer/embedded_defaults/tools/_global/process-registry/tool.go:Execute

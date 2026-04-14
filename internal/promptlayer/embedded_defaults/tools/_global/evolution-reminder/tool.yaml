@@ -1,5 +1,9 @@
 id: evolution-reminder
 risk_tier: low
-description: Catalog hint- any durable change to skills, prompts, memory graph ops, harness, or tool registry must use heros_submit_proposal after reading skill self-evolution-via-proposals.
+description: Nudge to use proposals for durable changes.
 skills:
   - self-evolution-via-proposals
+  - long-running-work
+  - runtime-tools
+implementation_language: go
+implementation_entrypoint: internal/promptlayer/embedded_defaults/tools/_global/evolution-reminder/tool.go:Execute

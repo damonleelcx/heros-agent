@@ -1,0 +1,9 @@
+id: budget-config
+risk_tier: medium
+description: Get/set workspace-local budget configuration JSON.
+skills:
+  - self-evolution-via-proposals
+  - long-running-work
+  - runtime-tools
+implementation_language: go
+implementation_entrypoint: internal/promptlayer/embedded_defaults/tools/_global/budget-config/tool.go:Execute

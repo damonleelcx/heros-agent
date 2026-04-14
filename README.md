@@ -152,6 +152,25 @@ go build -o heros-mcp ./cmd/heros-mcp
 
 Configure your MCP client to execute that command. The MCP server expects **`agentd` HTTP** already listening—run **`agentd`** headlessly, or point it at the URL **`heros`** prints when it starts (same machine).
 
+### 5b. Optional: `heros-desktop` (desktop GUI)
+
+If you want a desktop chat window (instead of terminal REPL), install and run:
+
+```bash
+go install ./cmd/heros-desktop
+heros-desktop -add-path   # one time
+heros-desktop
+```
+
+`heros-desktop` starts `agentd` in-process (same pattern as `heros`), then opens a GUI where you can send prompts, view responses, and refresh catalog context.  
+It uses the same config discovery and LLM settings (`OPENAI_API_KEY`, `openai_api_key`, `-config`, `-model`, `-workdir`, etc.).
+
+Clickable installers from a local clone:
+
+- **Windows:** `install/Install-Heros-Desktop-Windows.cmd`
+- **Linux / Ubuntu:** `install/Install-Heros-Desktop-Linux.sh` or `bash install/generate-linux-desktop-heros-desktop.sh`
+- **macOS:** `install/Install-Heros-Desktop-macOS.command`
+
 **`heros-cli`** (source: `cmd/heros-cli`) exists only for the rare case where **`agentd` already runs on another host** and you want a REPL against that URL. Use **`heros -h`** / **`heros-cli -h`** for flags; you do not need **`heros-cli`** for normal local development or installed **`heros`**.
 
 ### 6. Where data lives
@@ -169,6 +188,7 @@ First boot **copies** bundled defaults from **`internal/promptlayer/embedded_def
 |--------|------|--------------------|
 | **heros** | **Default: daemon + terminal agent** | `heros` (from install) or `go run ./cmd/heros` |
 | **agentd** | HTTP only (optional) | `go build -o agentd ./cmd/agentd && ./agentd` |
+| **heros-desktop** | Desktop GUI (embedded daemon + chat window) | `go build -o heros-desktop ./cmd/heros-desktop && ./heros-desktop` |
 | **heros-cli** | REPL → remote `agentd` only (optional) | `heros-cli -agentd-url=…` |
 | **collectived** | Example collective HTTP ingest | `./collectived` |
 | **fleet-skill-worker** | NATS → local `skills/` (+ optional `git pull`, reindex) | `go build -o fleet-skill-worker ./cmd/fleet-skill-worker` |
@@ -178,7 +198,7 @@ Build (only **`heros`** required for daily use):
 
 ```bash
 go build -o heros ./cmd/heros
-# optional: agentd, heros-cli, collectived, fleet-skill-worker, heros-mcp
+# optional: agentd, heros-desktop, heros-cli, collectived, fleet-skill-worker, heros-mcp
 ```
 
 ## Configuration
@@ -196,6 +216,7 @@ Use `-config <path>` to load JSON. Omitting `-config` uses defaults plus any sup
 - [Bundled default skills & tools (repo paths)](docs/DEFAULT-AGENT-FILES.md)
 - [Run from a local clone (no global install)](docs/RUN-LOCAL-REPO.md)
 - [Fleet skill worker (NATS approved proposals → `skills/`)](docs/FLEET-SKILL-WORKER.md)
+- [External skills/tools bulk import](docs/SKILLS-TOOLS-IMPORT.md)
 - [Step-by-step: run the project](docs/STEP-BY-STEP-RUN.md)
 - [Agent framework architecture (authoritative design)](docs/ARCHITECTURE.md)
 - [On-disk agent layout & catalog APIs](docs/AGENT_LAYOUT.md)

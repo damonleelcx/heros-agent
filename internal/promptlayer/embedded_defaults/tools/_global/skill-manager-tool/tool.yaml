@@ -1,0 +1,9 @@
+id: skill-manager-tool
+risk_tier: medium
+description: Manage skills catalog views (list/read) through agentd APIs.
+skills:
+  - self-evolution-via-proposals
+  - long-running-work
+  - runtime-tools
+implementation_language: go
+implementation_entrypoint: internal/promptlayer/embedded_defaults/tools/_global/skill-manager-tool/tool.go:Execute

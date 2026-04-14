@@ -1,0 +1,9 @@
+id: session-search-tool
+risk_tier: medium
+description: Search current/related session memory chunks with top-k retrieval.
+skills:
+  - self-evolution-via-proposals
+  - long-running-work
+  - runtime-tools
+implementation_language: go
+implementation_entrypoint: internal/promptlayer/embedded_defaults/tools/_global/session-search-tool/tool.go:Execute

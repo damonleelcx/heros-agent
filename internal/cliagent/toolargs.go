@@ -39,3 +39,24 @@ func ArgString(args map[string]any, key string) string {
 		return strings.TrimSpace(string(b))
 	}
 }
+
+// ArgJSONObject returns a JSON object argument; accepts a map or a JSON object string.
+func ArgJSONObject(args map[string]any, key string) map[string]any {
+	if args == nil {
+		return map[string]any{}
+	}
+	v, ok := args[key]
+	if !ok || v == nil {
+		return map[string]any{}
+	}
+	if m, ok := v.(map[string]any); ok {
+		return m
+	}
+	if s, ok := v.(string); ok {
+		var m map[string]any
+		if json.Unmarshal([]byte(strings.TrimSpace(s)), &m) == nil && m != nil {
+			return m
+		}
+	}
+	return map[string]any{}
+}

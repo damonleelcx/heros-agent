@@ -1,0 +1,9 @@
+id: skills-guard
+risk_tier: medium
+description: Inspect skill availability and guardrail-related catalog state.
+skills:
+  - self-evolution-via-proposals
+  - long-running-work
+  - runtime-tools
+implementation_language: go
+implementation_entrypoint: internal/promptlayer/embedded_defaults/tools/_global/skills-guard/tool.go:Execute

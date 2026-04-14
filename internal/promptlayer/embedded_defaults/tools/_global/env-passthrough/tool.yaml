@@ -1,0 +1,8 @@
+id: env-passthrough
+risk_tier: medium
+description: Read selected environment variables with secret masking.
+skills:
+  - systematic-debugging
+  - runtime-tools
+implementation_language: go
+implementation_entrypoint: internal/promptlayer/embedded_defaults/tools/_global/env-passthrough/tool.go:Execute

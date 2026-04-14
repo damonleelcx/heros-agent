@@ -5,7 +5,7 @@ depends_on: [core-reasoning]
 tools: []
 ---
 
-Inspired by closed-loop assistants (e.g. Hermes-style): turn **repeated or high-value** user signals into **durable** state.
+Inspired by closed-loop assistants: turn **repeated or high-value** user signals into **durable** state.
 
 **During conversation**
 - Save stable facts, preferences, and project constraints with **heros_memory_save** (short notes; include enough context to retrieve later).

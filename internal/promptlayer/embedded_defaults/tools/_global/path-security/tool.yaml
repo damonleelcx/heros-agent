@@ -1,0 +1,8 @@
+id: path-security
+risk_tier: medium
+description: Validate whether a path is inside the configured workspace root.
+skills:
+  - systematic-debugging
+  - runtime-tools
+implementation_language: go
+implementation_entrypoint: internal/promptlayer/embedded_defaults/tools/_global/path-security/tool.go:Execute

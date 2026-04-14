@@ -5,7 +5,7 @@ depends_on: [core-reasoning, interaction-learning-loop]
 tools: []
 ---
 
-Hermes-style posture: the user may keep **one REPL session open** for a long time or return across days—treat the job as a **durable thread**, not a single reply.
+Long-running posture: the user may keep **one REPL session open** for a long time or return across days—treat the job as a **durable thread**, not a single reply.
 
 **Planning**
 - Name **milestones** (e.g. investigate → fix → test → document). State the current milestone before heavy tool use.

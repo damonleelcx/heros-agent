@@ -1,0 +1,8 @@
+id: environments-singularity
+risk_tier: medium
+description: Execute commands and track Singularity environment metadata.
+skills:
+  - runtime-tools
+  - long-running-work
+implementation_language: go
+implementation_entrypoint: internal/promptlayer/embedded_defaults/tools/_global/environments-singularity/tool.go:Execute

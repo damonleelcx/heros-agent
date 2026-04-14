@@ -1,0 +1,8 @@
+id: browser-providers-base
+risk_tier: medium
+description: Manage shared browser provider configuration and defaults.
+skills:
+  - native-mcp
+  - runtime-tools
+implementation_language: go
+implementation_entrypoint: internal/promptlayer/embedded_defaults/tools/_global/browser-providers-base/tool.go:Execute

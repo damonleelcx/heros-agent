@@ -1,6 +1,6 @@
 # On-disk agent layout (source of truth)
 
-Skills, tools, and episodic memory **live in folders** under `data_dir`. SQLite holds **indexes** (`skill_fs_index`, `tool_fs_index`, episodic rows with pointers) and `**tool_registry`** (approval + script metadata). Scanning `tools/*/tool.yaml` **upserts** `tool_registry` while preserving `approved`. Approving a tooling proposal **writes** `tool.yaml` from the registry. Neo4j mirrors **the same graph** for queries (`HerosSkill`, `HerosTool`, `DEPENDS_ON`, `USES_TOOL`); skill node `id` is `tenant_scope/name`, tool node `id` is `tenant_scope/tool_id`.
+Skills and episodic memory **live in folders** under `data_dir`. Runtime tool execution is **Go-native** (`internal/cliagent/*`) and exposed through built-in OpenAI tool definitions. SQLite still stores catalog/index state (`skill_fs_index`, `tool_fs_index`, episodic rows with pointers, `tool_registry`) for governance and graph linking. Neo4j mirrors **the same graph** for queries (`HerosSkill`, `HerosTool`, `DEPENDS_ON`, `USES_TOOL`); skill node `id` is `tenant_scope/name`, tool node `id` is `tenant_scope/tool_id`.
 
 **Repo copy of bundled defaults:** the same tree is versioned at `**internal/promptlayer/embedded_defaults/`** and copied into `data_dir` on first run (missing files only). See [DEFAULT-AGENT-FILES.md](DEFAULT-AGENT-FILES.md).
 
@@ -47,18 +47,17 @@ tools: [echo-safe]
 Markdown instructions for the model…
 ```
 
-## tool.yaml
+## tool.yaml (legacy metadata only)
 
 ```yaml
-id: echo-safe
+id: my-tool-id
 risk_tier: low
-description: What this tool does
-script_path: optional/path/or/command
+description: Catalog metadata only; runtime behavior must exist in Go code.
 skills:
   - core-reasoning
 ```
 
-Linking is **bidirectional in meaning**: skills list `tools:` and tools list `skills:`; the graph includes edges from both. After editing files, call `POST /api/catalog/reindex` (and Neo4j syncs if configured). That rescan **merges** filesystem tools into `tool_registry` (keyed by `tenant_id` + `name`) without clearing `approved`. To push registry rows back to disk, use `POST /api/catalog/tools/registry-to-disk` (scope controlled by config below).
+Linking is **bidirectional in meaning**: skills list `tools:` and catalog tool rows list `skills:`; the graph includes edges from both. After editing files, call `POST /api/catalog/reindex` (and Neo4j syncs if configured). That rescan **merges** filesystem tool metadata into `tool_registry` (keyed by `tenant_id` + `name`) without clearing `approved`. Runtime tool behavior is not loaded from `script_path`.
 
 ## `tool_registry` sync rules (config)
 

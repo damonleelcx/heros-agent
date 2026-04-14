@@ -36,9 +36,11 @@
 
 ## 建议后续待办（可拆 issue）
 
+- [ ] **专题待办（memory + observability）**：见 [TODO-MEMORY-OBSERVABILITY.md](TODO-MEMORY-OBSERVABILITY.md)（包含 memory 目录树、文件互链规范、logging/tracing 落地清单）。
 - [ ] **安装与运维**：systemd / launchd / Windows Service 单元、安装包或脚本、升级路径。
 - [ ] **集体 — 技能**：同步协议（版本、租户、冲突）、集体存储与 API、工作站 **pull/push** 任务。
 - [ ] **集体 — 记忆**：上收范围（租户/会话/脱敏）、存储后端、与现有 Qdrant/SQLite 的分工。
+- [ ] **Agent 间通信与收件箱**：为每个个人 agent 增加 **P2P 通道** 或 **inbox**（由 admin board / collective 下发），可接收并应用经审批的 **skill/tool/memory** 包，支持签名校验、幂等消费、ACK/重试与审计日志。
 - [ ] **collectived 或替代实现**：从占位 ingest 演进为可运行的合并与分发服务（或文档化「仅用 NATS + Worker」的参考实现）。
 - [ ] **观测与策略**：跨节点审批、回滚、审计与配额。
 

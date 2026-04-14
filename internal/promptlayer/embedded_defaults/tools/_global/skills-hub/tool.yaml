@@ -1,0 +1,9 @@
+id: skills-hub
+risk_tier: medium
+description: Query available skills and related catalog metadata.
+skills:
+  - self-evolution-via-proposals
+  - long-running-work
+  - runtime-tools
+implementation_language: go
+implementation_entrypoint: internal/promptlayer/embedded_defaults/tools/_global/skills-hub/tool.go:Execute

@@ -1,0 +1,8 @@
+id: environments-modal-utils
+risk_tier: medium
+description: Inspect and transform Modal environment utility settings.
+skills:
+  - runtime-tools
+  - long-running-work
+implementation_language: go
+implementation_entrypoint: internal/promptlayer/embedded_defaults/tools/_global/environments-modal-utils/tool.go:Execute

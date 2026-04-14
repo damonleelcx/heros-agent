@@ -1,0 +1,8 @@
+id: debug-helpers
+risk_tier: medium
+description: Return session/workdir/model debug metadata.
+skills:
+  - systematic-debugging
+  - runtime-tools
+implementation_language: go
+implementation_entrypoint: internal/promptlayer/embedded_defaults/tools/_global/debug-helpers/tool.go:Execute

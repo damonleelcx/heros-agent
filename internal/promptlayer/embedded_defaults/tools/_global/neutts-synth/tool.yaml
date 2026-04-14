@@ -1,0 +1,8 @@
+id: neutts-synth
+risk_tier: medium
+description: Queue text-to-speech synthesis payload metadata.
+skills:
+  - runtime-tools
+  - long-running-work
+implementation_language: go
+implementation_entrypoint: internal/promptlayer/embedded_defaults/tools/_global/neutts-synth/tool.go:Execute

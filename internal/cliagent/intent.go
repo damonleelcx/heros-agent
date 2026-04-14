@@ -22,6 +22,14 @@ var (
 		`what\s+('s|is)\s+in\s+(your\s+)?memory|` +
 		`memory\s+you\s+have|episodic|semantic\s+memory` +
 		`)`)
+
+	reFileActionGrounding = regexp.MustCompile(`(?i)(` +
+		`(create|add|write|update|edit|modify|delete|remove|read|open|show)\s+.*(file|folder|directory|test|spec)|` +
+		`(file|folder|directory|test|spec)\s+.*(create|add|write|update|edit|modify|delete|remove|read|open|show)|` +
+		`help\s+me\s+(add|create|write|update|edit|delete|remove)|` +
+		`make\s+(a|an)\s+.*(file|test)|` +
+		`point\s+out\s+the\s+file\s+path` +
+		`)`)
 )
 
 // WorkspaceGroundingRequired is true when the user is asking about the local workspace / product
@@ -51,4 +59,17 @@ func MemoryGroundingRequired(userLine string) bool {
 		return false
 	}
 	return reMemoryGrounding.MatchString(u)
+}
+
+// FileActionGroundingRequired is true when the user asks to create/update/delete/read files.
+// Force at least one tool call so the agent acts instead of giving only instructions.
+func FileActionGroundingRequired(userLine string) bool {
+	if os.Getenv("HEROS_NO_TOOL_FORCE") == "1" {
+		return false
+	}
+	u := strings.TrimSpace(userLine)
+	if u == "" || strings.HasPrefix(u, "/") {
+		return false
+	}
+	return reFileActionGrounding.MatchString(u)
 }

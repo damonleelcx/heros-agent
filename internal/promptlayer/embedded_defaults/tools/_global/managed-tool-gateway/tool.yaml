@@ -1,0 +1,9 @@
+id: managed-tool-gateway
+risk_tier: medium
+description: Forward a request to another extension tool id.
+skills:
+  - self-evolution-via-proposals
+  - long-running-work
+  - runtime-tools
+implementation_language: go
+implementation_entrypoint: internal/promptlayer/embedded_defaults/tools/_global/managed-tool-gateway/tool.go:Execute

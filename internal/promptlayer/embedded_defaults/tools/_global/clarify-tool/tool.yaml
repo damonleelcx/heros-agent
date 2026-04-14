@@ -1,0 +1,8 @@
+id: clarify-tool
+risk_tier: medium
+description: Generate clarification questions for ambiguous requests.
+skills:
+  - core-reasoning
+  - runtime-tools
+implementation_language: go
+implementation_entrypoint: internal/promptlayer/embedded_defaults/tools/_global/clarify-tool/tool.go:Execute

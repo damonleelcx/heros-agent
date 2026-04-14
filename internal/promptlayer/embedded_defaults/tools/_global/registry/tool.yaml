@@ -1,0 +1,9 @@
+id: registry
+risk_tier: medium
+description: List catalog tools currently indexed by agentd.
+skills:
+  - self-evolution-via-proposals
+  - long-running-work
+  - runtime-tools
+implementation_language: go
+implementation_entrypoint: internal/promptlayer/embedded_defaults/tools/_global/registry/tool.go:Execute

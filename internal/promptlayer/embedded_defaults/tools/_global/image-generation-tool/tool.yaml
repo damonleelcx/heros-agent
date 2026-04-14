@@ -1,0 +1,8 @@
+id: image-generation-tool
+risk_tier: medium
+description: Inspect local image path metadata for image workflows.
+skills:
+  - runtime-tools
+  - long-running-work
+implementation_language: go
+implementation_entrypoint: internal/promptlayer/embedded_defaults/tools/_global/image-generation-tool/tool.go:Execute

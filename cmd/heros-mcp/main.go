@@ -1,4 +1,4 @@
-// heros-mcp: stdio MCP server that bridges to a running agentd HTTP API (for Hermes / IDE tool hosts).
+// heros-mcp: stdio MCP server that bridges to a running agentd HTTP API (for IDE tool hosts).
 package main
 
 import (

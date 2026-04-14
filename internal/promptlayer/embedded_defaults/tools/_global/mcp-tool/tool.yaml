@@ -1,0 +1,8 @@
+id: mcp-tool
+risk_tier: medium
+description: Return MCP bridge guidance and arguments echo.
+skills:
+  - native-mcp
+  - runtime-tools
+implementation_language: go
+implementation_entrypoint: internal/promptlayer/embedded_defaults/tools/_global/mcp-tool/tool.go:Execute

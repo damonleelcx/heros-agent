@@ -36,3 +36,24 @@ func TestWorkspaceGroundingRequired(t *testing.T) {
 		}
 	}
 }
+
+func TestFileActionGroundingRequired(t *testing.T) {
+	t.Setenv("HEROS_NO_TOOL_FORCE", "")
+	cases := []struct {
+		line string
+		want bool
+	}{
+		{"help me add a test file for canvas testing", true},
+		{"create src/tests/canvas.test.ts", true},
+		{"delete that file", true},
+		{"show the file path", true},
+		{"what is this project about", false},
+		{"/pending", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		if got := FileActionGroundingRequired(tc.line); got != tc.want {
+			t.Errorf("%q: got %v want %v", tc.line, got, tc.want)
+		}
+	}
+}

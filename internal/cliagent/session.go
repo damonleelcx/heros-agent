@@ -7,9 +7,12 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"time"
 
 	"github.com/heros-foreal/agentd/internal/config"
 )
@@ -85,6 +88,8 @@ Workspace root on this machine: **%s**
 
 **Non‑negotiable grounding:** If the user asks what the project/repo/app **is**, does, or contains, you **must** use **heros_shell** (and optionally **heros_read_skill** / **heros_memory_search**) **before** answering. It is a **failure** to reply with generic “I need you to tell me…” or “I have no information” while a workspace path is set — inspect the tree first.
 
+**File operation requests are execution tasks:** If user asks to create, edit, update, delete, or read files, call file tools (**heros_list_files / heros_read_file / heros_write_file / heros_make_dir / heros_delete_path**) and perform the action. Do **not** only return instructions unless the user explicitly asks for instructions only.
+
 **Long‑horizon tasks:** Break work into steps; after substantive progress call **heros_memory_save** or rely on session episodic logs; use **heros_memory_search** to recall earlier decisions in the same thread.
 
 **Memory questions:** If the user asks what you remember / what is in memory / episodic recall, call **heros_memory_search** with a short query — do not invent “no memory” without querying.
@@ -126,7 +131,7 @@ func (s *Session) RefreshContext(ctx context.Context) error {
 	}
 	// Prepend refreshed catalog as a synthetic system note (simplest without re-parsing first message).
 	s.Messages = append(s.Messages, map[string]any{
-		"role": "system",
+		"role":    "system",
 		"content": "[catalog refresh]\n" + block,
 	})
 	return nil
@@ -139,17 +144,25 @@ func (s *Session) RunUserTurn(ctx context.Context, user string, out io.Writer) e
 		return nil
 	}
 	s.Messages = append(s.Messages, map[string]any{"role": "user", "content": user})
+	toolUsed := map[string]bool{}
+	skillUsed := map[string]bool{}
+	memoryUsed := false
 
 	tools := OpenAITools(ToolOptions{AgentShell: s.AgentShell})
 	var firstToolChoice any
 	switch {
 	case WorkspaceGroundingRequired(user, s.WorkDir):
 		firstToolChoice = "required"
+	case FileActionGroundingRequired(user):
+		firstToolChoice = "required"
 	case MemoryGroundingRequired(user):
 		// Prefer memory search over guessing when user asks what is stored.
 		firstToolChoice = map[string]any{"type": "function", "function": map[string]any{"name": "heros_memory_search"}}
 	}
 	for step := 0; step < 64; step++ {
+		modelStart := time.Now().UTC()
+		_, _ = fmt.Fprint(out, "\n")
+		emitHarnessStart(out, "assistant", "", "", modelStart)
 		var cc *ChatOptions
 		if step == 0 && firstToolChoice != nil {
 			cc = &ChatOptions{ToolChoice: firstToolChoice}
@@ -166,8 +179,12 @@ func (s *Session) RunUserTurn(ctx context.Context, user string, out io.Writer) e
 			content, calls, err = ChatCompletion(ctx, s.OpenAIBase, s.OpenAIKey, s.Model, s.Messages, tools, cc)
 		}
 		if err != nil {
+			modelEnd := time.Now().UTC()
+			emitHarnessEnd(out, "assistant", "", "", "error", modelStart, modelEnd)
 			return err
 		}
+		modelEnd := time.Now().UTC()
+		emitHarnessEnd(out, "assistant", "", "", "ok", modelStart, modelEnd)
 
 		assistantMsg := map[string]any{"role": "assistant"}
 		if strings.TrimSpace(content) != "" {
@@ -199,6 +216,10 @@ func (s *Session) RunUserTurn(ctx context.Context, user string, out io.Writer) e
 				_, _ = fmt.Fprint(out, "\n")
 			}
 			if s.LogTurnsToEpisodic {
+				memoryUsed = true // automatic user/assistant turn logging into episodic memory
+			}
+			_, _ = fmt.Fprintln(out, FormatUsageDisclosure(toolUsed, skillUsed, memoryUsed))
+			if s.LogTurnsToEpisodic {
 				if err := s.Agentd.MemoryEpisodic(ctx, s.SessionID, "user", user, 0.2); err != nil {
 					log.Printf("heros-cli: episodic user turn: %v", err)
 				}
@@ -210,9 +231,29 @@ func (s *Session) RunUserTurn(ctx context.Context, user string, out io.Writer) e
 		}
 
 		for _, c := range calls {
+			toolStart := time.Now().UTC()
+			_, _ = fmt.Fprint(out, "\n")
+			emitHarnessStart(out, "tool", c.ID, c.Name, toolStart)
+			toolUsed[c.Name] = true
+			if strings.HasPrefix(c.Name, "heros_memory_") {
+				memoryUsed = true
+			}
+			if c.Name == "heros_read_skill" && strings.TrimSpace(c.Arguments) != "" {
+				var a map[string]any
+				if err := json.Unmarshal([]byte(c.Arguments), &a); err == nil {
+					if n := strings.TrimSpace(ArgString(a, "name")); n != "" {
+						skillUsed[n] = true
+					}
+				}
+			}
 			result, err := s.DispatchTool(ctx, c)
 			if err != nil {
 				result = "error: " + err.Error()
+				toolEnd := time.Now().UTC()
+				emitHarnessEnd(out, "tool", c.ID, c.Name, "error", toolStart, toolEnd)
+			} else {
+				toolEnd := time.Now().UTC()
+				emitHarnessEnd(out, "tool", c.ID, c.Name, "ok", toolStart, toolEnd)
 			}
 			s.Messages = append(s.Messages, map[string]any{
 				"role":         "tool",
@@ -222,6 +263,25 @@ func (s *Session) RunUserTurn(ctx context.Context, user string, out io.Writer) e
 		}
 	}
 	return fmt.Errorf("tool loop exceeded step limit")
+}
+
+// FormatUsageDisclosure prints a deterministic transparency line for each turn.
+func FormatUsageDisclosure(toolUsed, skillUsed map[string]bool, memoryUsed bool) string {
+	toolList := slices.Sorted(maps.Keys(toolUsed))
+	skillList := slices.Sorted(maps.Keys(skillUsed))
+	toolsPart := "none"
+	if len(toolList) > 0 {
+		toolsPart = strings.Join(toolList, ",")
+	}
+	skillsPart := "none"
+	if len(skillList) > 0 {
+		skillsPart = strings.Join(skillList, ",")
+	}
+	memoryPart := "none"
+	if memoryUsed {
+		memoryPart = "used"
+	}
+	return fmt.Sprintf("[usage] tools=%s | skills=%s | memory=%s", toolsPart, skillsPart, memoryPart)
 }
 
 // DispatchTool executes one model tool call against agentd.
@@ -245,6 +305,16 @@ func (s *Session) DispatchTool(ctx context.Context, tc ToolCall) (string, error)
 		}
 		out, shellErr := RunLocalShell(ctx, wd, cmd)
 		return LocalShellResult(out, shellErr), nil
+	case "heros_list_files":
+		return listFilesJSON(s.WorkDir, args)
+	case "heros_read_file":
+		return readFileJSON(s.WorkDir, args)
+	case "heros_write_file":
+		return writeFileJSON(s.WorkDir, args)
+	case "heros_make_dir":
+		return makeDirJSON(s.WorkDir, args)
+	case "heros_delete_path":
+		return deletePathJSON(s.WorkDir, args)
 	case "heros_agent_shell":
 		cmd := ArgString(args, "command")
 		if strings.TrimSpace(cmd) == "" {
@@ -355,6 +425,13 @@ func (s *Session) DispatchTool(ctx context.Context, tc ToolCall) (string, error)
 		}
 		b, _ := json.Marshal(resp)
 		return string(b), nil
+	case "heros_extension_tool":
+		tid := strings.TrimSpace(ArgString(args, "tool_id"))
+		if tid == "" {
+			return "", fmt.Errorf("heros_extension_tool requires tool_id")
+		}
+		inner := ArgJSONObject(args, "arguments")
+		return s.runImportedCatalogTool(ctx, tid, inner)
 	default:
 		return "", fmt.Errorf("unknown tool %q", tc.Name)
 	}
@@ -420,6 +497,7 @@ Non-slash: **approve N** / **reject N** (number from /pending), or **approve all
 
 Anything else is sent to the model (OpenAI-compatible API).
 Skills & memory live under heros’s data_dir; heros_memory_search includes this session’s auto-logged turns.
+File edits are executable: the agent can call heros_read_file/heros_write_file/heros_delete_path instead of only giving instructions.
 Env: HEROS_NO_TOOL_FORCE=1 disables forcing tool use on “tell me about this project”-style questions (for APIs that reject tool_choice=required).`)
 }
 

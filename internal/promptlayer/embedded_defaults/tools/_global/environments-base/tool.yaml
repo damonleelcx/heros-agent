@@ -1,0 +1,8 @@
+id: environments-base
+risk_tier: medium
+description: Manage workspace environment profile metadata.
+skills:
+  - runtime-tools
+  - long-running-work
+implementation_language: go
+implementation_entrypoint: internal/promptlayer/embedded_defaults/tools/_global/environments-base/tool.go:Execute

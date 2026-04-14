@@ -1,0 +1,8 @@
+id: ansi-strip
+risk_tier: medium
+description: Remove ANSI escape sequences from terminal text output.
+skills:
+  - systematic-debugging
+  - runtime-tools
+implementation_language: go
+implementation_entrypoint: internal/promptlayer/embedded_defaults/tools/_global/ansi-strip/tool.go:Execute

@@ -2,7 +2,7 @@
 name: self-evolution-via-proposals
 title: Self-evolution via proposals
 depends_on: [core-reasoning, interaction-learning-loop]
-tools: [evolution-reminder]
+tools: []
 ---
 
 Use **heros_submit_proposal** to queue changes. Every mutation is reviewed; treat the **diff** as the contract.
@@ -58,6 +58,13 @@ Arrays may be empty. Use **promote** to consolidate episodic session content int
 
 ## Layer: tooling
 
+**GO-ONLY CONSTRAINT (non-negotiable):**
+
+- New tools must be implemented in **Go source code** under `internal/cliagent/` (or other in-repo Go packages).
+- Do **not** introduce Python/Node/bash runtime dependencies as primary tool implementations.
+- Do **not** rely on `script_path` wrappers for production behavior.
+- Include/extend Go tests for any new tool behavior.
+
 **diff** must be **valid JSON** (strict): one top-level object with a **`register`** key. Prose explanations belong in **`rationale`** / chat—not in **`diff`**.
 
 - **Required shape**: `{"register":{...}}`. Omitting `register` or using non-JSON text causes apply to error after approval.
@@ -70,7 +77,6 @@ Arrays may be empty. Use **promote** to consolidate episodic session content int
     "name": "my-tool-id",
     "description": "What it does; linked skills for catalog graph",
     "risk_tier": "low",
-    "script_path": "",
     "skills": ["core-reasoning"]
   }
 }

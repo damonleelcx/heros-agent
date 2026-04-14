@@ -12,8 +12,8 @@ import (
 
 // ToolCall is one OpenAI-style function call from the model.
 type ToolCall struct {
-	ID       string
-	Name     string
+	ID        string
+	Name      string
 	Arguments string // raw JSON object string
 }
 
@@ -129,6 +129,84 @@ func OpenAITools(opts ToolOptions) []map[string]any {
 		{
 			"type": "function",
 			"function": map[string]any{
+				"name":        "heros_list_files",
+				"description": "List files/directories on the local machine. Use this first when user asks to inspect project files or locate where to create/edit files.",
+				"parameters": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"path":        map[string]any{"type": "string", "description": "Absolute path or path relative to workspace root"},
+						"recursive":   map[string]any{"type": "boolean", "description": "Walk subdirectories recursively (default false)"},
+						"max_entries": map[string]any{"type": "integer", "description": "Result cap, default 200, max 5000"},
+					},
+				},
+			},
+		},
+		{
+			"type": "function",
+			"function": map[string]any{
+				"name":        "heros_read_file",
+				"description": "Read file content from local filesystem. Supports text and base64. Use this before answering detailed file questions.",
+				"parameters": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"path":     map[string]any{"type": "string", "description": "Absolute path or path relative to workspace root"},
+						"encoding": map[string]any{"type": "string", "description": "text (default) or base64"},
+					},
+					"required": []string{"path"},
+				},
+			},
+		},
+		{
+			"type": "function",
+			"function": map[string]any{
+				"name":        "heros_write_file",
+				"description": "Create or update files directly on local filesystem. Use this to implement requested file changes instead of only describing steps.",
+				"parameters": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"path":        map[string]any{"type": "string", "description": "Absolute path or path relative to workspace root"},
+						"content":     map[string]any{"type": "string", "description": "File content. For binary use base64 in content with encoding=base64"},
+						"encoding":    map[string]any{"type": "string", "description": "text (default) or base64"},
+						"append":      map[string]any{"type": "boolean", "description": "Append instead of overwrite (default false)"},
+						"create_dirs": map[string]any{"type": "boolean", "description": "Auto-create parent dirs (default true)"},
+					},
+					"required": []string{"path", "content"},
+				},
+			},
+		},
+		{
+			"type": "function",
+			"function": map[string]any{
+				"name":        "heros_make_dir",
+				"description": "Create directories on local filesystem.",
+				"parameters": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"path":      map[string]any{"type": "string"},
+						"recursive": map[string]any{"type": "boolean", "description": "mkdir -p behavior (default true)"},
+					},
+					"required": []string{"path"},
+				},
+			},
+		},
+		{
+			"type": "function",
+			"function": map[string]any{
+				"name":        "heros_delete_path",
+				"description": "Delete a file or directory from local filesystem.",
+				"parameters": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"path":      map[string]any{"type": "string"},
+						"recursive": map[string]any{"type": "boolean", "description": "required for non-empty directories"},
+					},
+					"required": []string{"path"},
+				},
+			},
+		},
+		{
+			"type": "function",
+			"function": map[string]any{
 				"name":        "heros_memory_search",
 				"description": "Search prior facts and this session (episodic + vectors). REQUIRED when the user asks what you remember / what is in memory — never claim empty memory without calling this. Also use at the start of long-horizon work. Current chat is indexed for search without heros_memory_save.",
 				"parameters": map[string]any{
@@ -187,7 +265,7 @@ func OpenAITools(opts ToolOptions) []map[string]any {
 		{
 			"type": "function",
 			"function": map[string]any{
-				"name": "heros_run_harness",
+				"name":        "heros_run_harness",
 				"description": "Run the built-in multi-actor harness (leader decomposes goal → rotating specialists → critic) in the same heros process as POST /api/harness/run. Use when the user wants a structured multi-perspective pass, risk/quality review, or explicit decomposition—not for trivial one-liner questions. Slower and more LLM calls than normal chat; prefer heros_shell for simple file inspection.",
 				"parameters": map[string]any{
 					"type": "object",
@@ -259,6 +337,27 @@ func OpenAITools(opts ToolOptions) []map[string]any {
 						},
 					},
 					"required": []string{"layer", "title", "rationale", "diff"},
+				},
+			},
+		},
+		{
+			"type": "function",
+			"function": map[string]any{
+				"name":        "heros_extension_tool",
+				"description": "Run additional catalog tools (Go-backed) registered under tools/_global/<id>/tool.yaml. Pass tool_id matching the yaml id and an arguments object. Examples: tool_id=terminal-tool & {command}; tool_id=file-operations & {action:\"read\",path:\"README.md\"}; tool_id=memory-tool & {action:\"search\",query:\"...\"}; tool_id=web-tools & {url:\"https://...\"}.",
+				"parameters": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"tool_id": map[string]any{
+							"type":        "string",
+							"description": "Catalog tool id (directory name under tools/_global)",
+						},
+						"arguments": map[string]any{
+							"type":        "object",
+							"description": "Tool-specific parameters",
+						},
+					},
+					"required": []string{"tool_id"},
 				},
 			},
 		},

@@ -1,0 +1,8 @@
+id: terminal-tool
+risk_tier: medium
+description: Execute local workspace shell commands with policy-aware output JSON.
+skills:
+  - systematic-debugging
+  - runtime-tools
+implementation_language: go
+implementation_entrypoint: internal/promptlayer/embedded_defaults/tools/_global/terminal-tool/tool.go:Execute

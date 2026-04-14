@@ -1,0 +1,8 @@
+id: binary-extensions
+risk_tier: medium
+description: Classify file extensions as binary-oriented or text-oriented.
+skills:
+  - systematic-debugging
+  - runtime-tools
+implementation_language: go
+implementation_entrypoint: internal/promptlayer/embedded_defaults/tools/_global/binary-extensions/tool.go:Execute

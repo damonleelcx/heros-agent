@@ -1,0 +1,9 @@
+id: approval
+risk_tier: medium
+description: List pending governance proposals for review workflows.
+skills:
+  - self-evolution-via-proposals
+  - long-running-work
+  - runtime-tools
+implementation_language: go
+implementation_entrypoint: internal/promptlayer/embedded_defaults/tools/_global/approval/tool.go:Execute
