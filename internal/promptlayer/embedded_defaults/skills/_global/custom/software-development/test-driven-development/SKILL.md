@@ -59,29 +59,42 @@ Write one minimal test showing what should happen.
 
 **Good test:**
 ```go
-def test_retries_failed_operations_3_times():
-    attempts = 0
-    def operation():
-        nonlocal attempts
-        attempts += 1
-        if attempts < 3:
-            raise Exception('fail')
-        return 'success'
+func TestRetryOperation_RetriesFailedOperations3Times(t *testing.T) {
+	attempts := 0
+	operation := func() (string, error) {
+		attempts++
+		if attempts < 3 {
+			return "", errors.New("fail")
+		}
+		return "success", nil
+	}
 
-    result = retry_operation(operation)
-
-    assert result == 'success'
-    assert attempts == 3
+	result, err := retryOperation(operation)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "success" {
+		t.Fatalf("expected success, got %q", result)
+	}
+	if attempts != 3 {
+		t.Fatalf("expected 3 attempts, got %d", attempts)
+	}
+}
 ```
 Clear name, tests real behavior, one thing.
 
 **Bad test:**
 ```go
-def test_retry_works():
-    mock = MagicMock()
-    mock.side_effect = [Exception(), Exception(), 'success']
-    result = retry_operation(mock)
-    assert result == 'success'  # What about retry count? Timing?
+func TestRetryOperation_Works(t *testing.T) {
+	mock := func() (string, error) { return "success", nil }
+	result, err := retryOperation(mock)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "success" {
+		t.Fatalf("expected success, got %q", result)
+	}
+}
 ```
 Vague name, tests mock not real code.
 
@@ -115,16 +128,18 @@ Write the simplest code to pass the test. Nothing more.
 
 **Good:**
 ```go
-def add(a, b):
-    return a + b  # Nothing extra
+func add(a, b int) int {
+	return a + b // Nothing extra
+}
 ```
 
 **Bad:**
 ```go
-def add(a, b):
-    result = a + b
-    logging.info(f"Adding {a} + {b} = {result}")  # Extra!
-    return result
+func add(a, b int) int {
+	result := a + b
+	log.Printf("Adding %d + %d = %d", a, b, result) // Extra!
+	return result
+}
 ```
 
 Don't add features, refactor other code, or "improve" beyond the test.
@@ -287,13 +302,13 @@ Use the `terminal` tool to run tests at each step:
 
 ```go
 # RED — verify failure
-terminal("go test tests/test_feature.py::test_name -v")
+terminal("go test ./tests/... -run TestFeatureName -v")
 
 # GREEN — verify pass
-terminal("go test tests/test_feature.py::test_name -v")
+terminal("go test ./tests/... -run TestFeatureName -v")
 
 # Full suite — verify no regressions
-terminal("go test tests/ -q")
+terminal("go test ./...")
 ```
 
 ### With delegate_task

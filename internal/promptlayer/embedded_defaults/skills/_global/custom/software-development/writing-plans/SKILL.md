@@ -91,16 +91,19 @@ Each task follows this format:
 **Objective:** What this task accomplishes (one sentence)
 
 **Files:**
-- Create: `exact/path/to/new_file.py`
-- Modify: `exact/path/to/existing.py:45-67` (line numbers if known)
-- Test: `tests/path/to/test_file.py`
+- Create: `exact/path/to/new_file.go`
+- Modify: `exact/path/to/existing.go:45-67` (line numbers if known)
+- Test: `tests/path/to/test_file_test.go`
 
 **Step 1: Write failing test**
 
 ```go
-def test_specific_behavior():
-    result = function(input)
-    assert result == expected
+func TestSpecificBehavior(t *testing.T) {
+	result := function(input)
+	if result != expected {
+		t.Fatalf("expected %v, got %v", expected, result)
+	}
+}
 ```
 
 **Step 2: Run test to verify failure**
@@ -111,8 +114,9 @@ Expected: FAIL — "function not defined"
 **Step 3: Write minimal implementation**
 
 ```go
-def function(input):
-    return expected
+func function(input InputType) OutputType {
+	return expected
+}
 ```
 
 **Step 4: Run test to verify pass**
@@ -123,7 +127,7 @@ Expected: PASS
 **Step 5: Commit**
 
 ```bash
-git add tests/path/test.py src/path/file.py
+git add tests/path/test_file_test.go src/path/file.go
 git commit -m "feat: add specific feature"
 ```
 ````
@@ -144,16 +148,16 @@ Use Heros tools to understand the project:
 
 ```go
 # Understand project structure
-search_files("*.py", target="files", path="src/")
+search_files("*.go", target="files", path="src/")
 
 # Look at similar features
-search_files("similar_pattern", path="src/", file_glob="*.py")
+search_files("similar_pattern", path="src/", file_glob="*.go")
 
 # Check existing tests
-search_files("*.py", target="files", path="tests/")
+search_files("*_test.go", target="files", path="tests/")
 
 # Read key files
-read_file("src/app.py")
+read_file("src/app.go")
 ```
 
 ### Step 3: Design Approach
@@ -176,7 +180,7 @@ Create tasks in order:
 ### Step 5: Add Complete Details
 
 For each task, include:
-- **Exact file paths** (not "the config file" but `src/config/settings.py`)
+- **Exact file paths** (not "the config file" but `src/config/settings.go`)
 - **Complete code examples** (not "add validation" but the actual code)
 - **Exact commands** with expected output
 - **Verification steps** that prove the task works
@@ -214,19 +218,19 @@ git commit -m "docs: add implementation plan for [feature]"
 **Good:** Implement only what's needed now
 
 ```go
-# Bad — YAGNI violation
-class User:
-    def __init__(self, name, email):
-        self.name = name
-        self.email = email
-        self.preferences = {}  # Not needed yet!
-        self.metadata = {}     # Not needed yet!
+// Bad: YAGNI violation
+type User struct {
+	Name        string
+	Email       string
+	Preferences map[string]string // Not needed yet!
+	Metadata    map[string]string // Not needed yet!
+}
 
-# Good — YAGNI
-class User:
-    def __init__(self, name, email):
-        self.name = name
-        self.email = email
+// Good: YAGNI
+type User struct {
+	Name  string
+	Email string
+}
 ```
 
 ### TDD (Test-Driven Development)
@@ -267,7 +271,7 @@ git commit -m "type: description"
 ### Missing File Paths
 
 **Bad:** "Create the model file"
-**Good:** "Create: `src/models/user.py`"
+**Good:** "Create: `src/models/user.go`"
 
 ## Execution Handoff
 

@@ -605,18 +605,18 @@ For occasional contributors and PR authors. Full developer docs: https://heros-a
 
 ```
 heros-agent/
-├── run_agent.py          # AIAgent — core conversation loop
-├── model_tools.py        # Tool discovery and dispatch
-├── toolsets.py           # Toolset definitions
-├── cli.py                # Interactive CLI (HerosCLI)
-├── heros_state.py       # SQLite session store
+├── run_agent.go          # AIAgent — core conversation loop
+├── model_tools.go        # Tool discovery and dispatch
+├── toolsets.go           # Toolset definitions
+├── cli.go                # Interactive CLI (HerosCLI)
+├── heros_state.go       # SQLite session store
 ├── agent/                # Prompt builder, context compression, memory, model routing, credential pooling, skill dispatch
 ├── heros_cli/           # CLI subcommands, config, setup, commands
-│   ├── commands.py       # Slash command registry (CommandDef)
-│   ├── config.py         # DEFAULT_CONFIG, env var definitions
-│   └── main.py           # CLI entry point and argparse
+│   ├── commands.go       # Slash command registry (CommandDef)
+│   ├── config.go         # DEFAULT_CONFIG, env var definitions
+│   └── main.go           # CLI entry point and argparse
 ├── tools/                # One file per tool
-│   └── registry.py       # Central tool registry
+│   └── registry.go       # Central tool registry
 ├── gateway/              # Messaging gateway
 │   └── platforms/        # Platform adapters (telegram, discord, etc.)
 ├── cron/                 # Job scheduler
@@ -628,39 +628,54 @@ Config: `~/.heros/config.yaml` (settings), `~/.heros/.env` (API keys).
 
 ### Adding a Tool (3 files)
 
-**1. Create `tools/your_tool.py`:**
+**1. Create `tools/your_tool.go`:**
 ```go
-import json, os
-from tools.registry import registry
+package tools
 
-def check_requirements() -> bool:
-    return bool(os.getenv("EXAMPLE_API_KEY"))
-
-def example_tool(param: str, task_id: str = None) -> str:
-    return json.dumps({"success": True, "data": "..."})
-
-registry.register(
-    name="example_tool",
-    toolset="example",
-    schema={"name": "example_tool", "description": "...", "parameters": {...}},
-    handler=lambda args, **kw: example_tool(
-        param=args.get("param", ""), task_id=kw.get("task_id")),
-    check_fn=check_requirements,
-    requires_env=["EXAMPLE_API_KEY"],
+import (
+	"encoding/json"
+	"os"
 )
+
+func checkRequirements() bool {
+	return os.Getenv("EXAMPLE_API_KEY") != ""
+}
+
+func exampleTool(param string, taskID string) (string, error) {
+	payload := map[string]any{"success": true, "data": "..."}
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+func RegisterExampleTool(registry *Registry) {
+	registry.Register(ToolDef{
+		Name:        "example_tool",
+		Toolset:     "example",
+		Schema:      map[string]any{"name": "example_tool", "description": "..."},
+		RequiresEnv: []string{"EXAMPLE_API_KEY"},
+		CheckFn:     checkRequirements,
+		Handler: func(args map[string]any, taskID string) (string, error) {
+			param, _ := args["param"].(string)
+			return exampleTool(param, taskID)
+		},
+	})
+}
 ```
 
-**2. Add import** in `model_tools.py` → `_discover_tools()` list.
+**2. Add import** in `model_tools.go` → `discoverTools()` list.
 
-**3. Add to `toolsets.py`** → `_HEROS_CORE_TOOLS` list.
+**3. Add to `toolsets.go`** → `HerosCoreTools` list.
 
 All handlers must return JSON strings. Use `get_heros_home()` for paths, never hardcode `~/.heros`.
 
 ### Adding a Slash Command
 
-1. Add `CommandDef` to `COMMAND_REGISTRY` in `heros_cli/commands.py`
-2. Add handler in `cli.py` → `process_command()`
-3. (Optional) Add gateway handler in `gateway/run.py`
+1. Add `CommandDef` to `CommandRegistry` in `heros_cli/commands.go`
+2. Add handler in `cli.go` → `processCommand()`
+3. (Optional) Add gateway handler in `gateway/run.go`
 
 All consumers (help text, autocomplete, Telegram menu, Slack mapping) derive from the central registry automatically.
 
