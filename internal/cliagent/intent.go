@@ -30,6 +30,17 @@ var (
 		`make\s+(a|an)\s+.*(file|test)|` +
 		`point\s+out\s+the\s+file\s+path` +
 		`)`)
+
+	reLongHorizonHarness = regexp.MustCompile(`(?i)(` +
+		`i\s+want\s+to\s+(build|create|design|implement)|` +
+		`let'?s\s+(build|design|implement)|` +
+		`production-?ready|` +
+		`architecture|orchestrat(e|ion)|` +
+		`distributed\s+system|` +
+		`multi-?step|long-?running|long-?horizon|` +
+		`agent\s+harness|` +
+		`template` +
+		`)`)
 )
 
 // WorkspaceGroundingRequired is true when the user is asking about the local workspace / product
@@ -72,4 +83,17 @@ func FileActionGroundingRequired(userLine string) bool {
 		return false
 	}
 	return reFileActionGrounding.MatchString(u)
+}
+
+// LongHorizonHarnessRequired is true when the request is a likely multi-step build/design task.
+// In that case, the first action should be heros_run_harness instead of a one-shot assistant reply.
+func LongHorizonHarnessRequired(userLine string) bool {
+	if os.Getenv("HEROS_NO_TOOL_FORCE") == "1" {
+		return false
+	}
+	u := strings.TrimSpace(userLine)
+	if u == "" || strings.HasPrefix(u, "/") {
+		return false
+	}
+	return reLongHorizonHarness.MatchString(u)
 }

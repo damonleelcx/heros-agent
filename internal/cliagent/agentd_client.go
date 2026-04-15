@@ -2,6 +2,7 @@
 package cliagent
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -301,6 +302,55 @@ func (c *AgentdClient) HarnessRun(ctx context.Context, goal string) (*harness.Ru
 		return nil, err
 	}
 	return &res, nil
+}
+
+// HarnessRunWithProgress streams per-phase harness events while running and returns the final result.
+func (c *AgentdClient) HarnessRunWithProgress(ctx context.Context, goal string, onProgress func(harness.ProgressEvent)) (*harness.RunResult, error) {
+	resp, err := c.req(ctx, http.MethodPost, "/api/harness/run?stream=1", map[string]string{"goal": goal})
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("agentd /api/harness/run?stream=1: %s: %s", resp.Status, string(body))
+	}
+	sc := bufio.NewScanner(resp.Body)
+	sc.Buffer(make([]byte, 0, 64*1024), 2*1024*1024)
+	var final *harness.RunResult
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" {
+			continue
+		}
+		var frame struct {
+			Type   string                `json:"type"`
+			Event  harness.ProgressEvent `json:"event"`
+			Result harness.RunResult     `json:"result"`
+			Error  string                `json:"error"`
+		}
+		if err := json.Unmarshal([]byte(line), &frame); err != nil {
+			continue
+		}
+		switch frame.Type {
+		case "event":
+			if onProgress != nil {
+				onProgress(frame.Event)
+			}
+		case "result":
+			cp := frame.Result
+			final = &cp
+		case "error":
+			return nil, fmt.Errorf("harness stream: %s", frame.Error)
+		}
+	}
+	if err := sc.Err(); err != nil {
+		return nil, err
+	}
+	if final == nil {
+		return nil, fmt.Errorf("harness stream: missing final result")
+	}
+	return final, nil
 }
 
 // BuildContextBlock refreshes folder skills + tool registry view for the system prompt.

@@ -7,3 +7,6 @@
 /collectived
 /heros-mcp
 *.exe
+
+# Local runtime state (must never be versioned)
+/internal/cliagent/.heros/

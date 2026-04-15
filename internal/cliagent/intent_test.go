@@ -57,3 +57,24 @@ func TestFileActionGroundingRequired(t *testing.T) {
 		}
 	}
 }
+
+func TestLongHorizonHarnessRequired(t *testing.T) {
+	t.Setenv("HEROS_NO_TOOL_FORCE", "")
+	cases := []struct {
+		line string
+		want bool
+	}{
+		{"I want to build a rocket emulator", true},
+		{"design a production-ready agent harness", true},
+		{"let's implement a multi-step orchestration engine", true},
+		{"template for distributed system agent architecture", true},
+		{"show the file path", false},
+		{"/harness build x", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		if got := LongHorizonHarnessRequired(tc.line); got != tc.want {
+			t.Errorf("%q: got %v want %v", tc.line, got, tc.want)
+		}
+	}
+}

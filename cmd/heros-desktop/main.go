@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -28,13 +29,92 @@ import (
 
 type uiStreamWriter struct {
 	writeFn func(string)
+	mu      sync.Mutex
+	pending string
 }
 
 func (w *uiStreamWriter) Write(p []byte) (int, error) {
-	if w != nil && w.writeFn != nil && len(p) > 0 {
-		w.writeFn(string(p))
+	if w == nil || w.writeFn == nil || len(p) == 0 {
+		return len(p), nil
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.pending += string(p)
+	for {
+		i := strings.IndexByte(w.pending, '\n')
+		if i < 0 {
+			break
+		}
+		line := strings.TrimRight(w.pending[:i], "\r")
+		w.pending = w.pending[i+1:]
+		if rendered, ok := renderHarnessEventLine(line); ok {
+			w.writeFn(rendered + "\n")
+			continue
+		}
+		w.writeFn(line + "\n")
 	}
 	return len(p), nil
+}
+
+func renderHarnessEventLine(line string) (string, bool) {
+	line = strings.TrimSpace(line)
+	if !strings.HasPrefix(line, cliagent.HarnessEventPrefix) {
+		return "", false
+	}
+	raw := strings.TrimSpace(strings.TrimPrefix(line, cliagent.HarnessEventPrefix))
+	var ev cliagent.HarnessEvent
+	if err := json.Unmarshal([]byte(raw), &ev); err != nil {
+		return "", false
+	}
+	phase := strings.TrimPrefix(strings.TrimSpace(ev.Phase), "harness_")
+	switch phase {
+	case "leader":
+		if ev.Stage == "start" {
+			return "[harness] leader planning", true
+		}
+		if ev.Stage == "end" {
+			if ev.Total > 0 {
+				return fmt.Sprintf("[harness] leader ready (%d steps)", ev.Total), true
+			}
+			return "[harness] leader ready", true
+		}
+	case "specialist":
+		n := ""
+		if ev.Index > 0 && ev.Total > 0 {
+			n = fmt.Sprintf(" %d/%d", ev.Index, ev.Total)
+		}
+		role := strings.TrimSpace(ev.Role)
+		if role != "" {
+			role = " " + role
+		}
+		return fmt.Sprintf("[harness] specialist%s%s %s", n, role, ev.Stage), true
+	case "critic":
+		if ev.Stage == "retry" {
+			if ev.Attempt > 0 {
+				return fmt.Sprintf("[harness] critic retry %d", ev.Attempt), true
+			}
+			return "[harness] critic retry", true
+		}
+		if ev.Stage == "end" && ev.Attempt > 0 {
+			return fmt.Sprintf("[harness] critic attempt %d score %.2f", ev.Attempt, ev.Score), true
+		}
+		if ev.Stage == "start" && ev.Attempt > 0 {
+			return fmt.Sprintf("[harness] critic attempt %d", ev.Attempt), true
+		}
+	case "refine":
+		if ev.Attempt > 0 {
+			return fmt.Sprintf("[harness] refine %s %d", ev.Stage, ev.Attempt), true
+		}
+		return fmt.Sprintf("[harness] refine %s", ev.Stage), true
+	case "harness":
+		if ev.Stage == "start" {
+			return "[harness] run started", true
+		}
+		if ev.Stage == "end" {
+			return fmt.Sprintf("[harness] run complete (score %.2f)", ev.Score), true
+		}
+	}
+	return fmt.Sprintf("[harness] %s %s", phase, ev.Stage), true
 }
 
 // Set at link time by release builds, e.g. -ldflags "-X main.version=v1.2.3"

@@ -15,16 +15,16 @@ import (
 
 // Topology describes Leader-Follower + Team+Critic (Layer 3).
 type Topology struct {
-	Specialists       []string `json:"specialists"`
-	CriticThreshold   float64  `json:"critic_threshold"`
-	MaxCriticRetries  int      `json:"max_critic_retries"`
-	LeaderModel       string   `json:"leader_model"`
+	Specialists      []string `json:"specialists"`
+	CriticThreshold  float64  `json:"critic_threshold"`
+	MaxCriticRetries int      `json:"max_critic_retries"`
+	LeaderModel      string   `json:"leader_model"`
 }
 
 func DefaultTopology() Topology {
 	return Topology{
 		Specialists:      []string{"researcher", "coder", "writer", "analyst"},
-		CriticThreshold: 0.55,
+		CriticThreshold:  0.55,
 		MaxCriticRetries: 2,
 	}
 }
@@ -81,22 +81,46 @@ type LLMConfig struct {
 }
 
 type Orchestrator struct {
-	DB     *sql.DB
+	DB      *sql.DB
 	DataDir string
-	LLM    LLMConfig
+	LLM     LLMConfig
 }
 
 type RunResult struct {
-	Goal           string            `json:"goal"`
-	Plan           []string          `json:"plan"`
-	SubResults     map[string]string `json:"sub_results"`
-	CriticScores   map[string]float64 `json:"critic_scores"`
-	Final          string            `json:"final"`
-	Retries        int               `json:"retries"`
+	Goal         string             `json:"goal"`
+	Plan         []string           `json:"plan"`
+	SubResults   map[string]string  `json:"sub_results"`
+	CriticScores map[string]float64 `json:"critic_scores"`
+	Final        string             `json:"final"`
+	Retries      int                `json:"retries"`
+}
+
+// ProgressEvent is a structured lifecycle event emitted while harness execution is in-flight.
+type ProgressEvent struct {
+	Phase     string  `json:"phase"`
+	Stage     string  `json:"stage"`
+	Detail    string  `json:"detail,omitempty"`
+	Index     int     `json:"index,omitempty"`
+	Total     int     `json:"total,omitempty"`
+	Role      string  `json:"role,omitempty"`
+	Attempt   int     `json:"attempt,omitempty"`
+	Score     float64 `json:"score,omitempty"`
+	Threshold float64 `json:"threshold,omitempty"`
 }
 
 // Run executes leader decomposition, parallel specialist stubs, critic loop.
 func (o *Orchestrator) Run(ctx context.Context, goal string) (*RunResult, error) {
+	return o.RunWithProgress(ctx, goal, nil)
+}
+
+// RunWithProgress executes leader decomposition, specialist passes, and critic/retry loop with optional progress callbacks.
+func (o *Orchestrator) RunWithProgress(ctx context.Context, goal string, onProgress func(ProgressEvent)) (*RunResult, error) {
+	emit := func(ev ProgressEvent) {
+		if onProgress != nil {
+			onProgress(ev)
+		}
+	}
+	emit(ProgressEvent{Phase: "harness", Stage: "start", Detail: "starting harness run"})
 	topo, err := LoadTopology(o.DB)
 	if err != nil {
 		return nil, err
@@ -107,42 +131,71 @@ func (o *Orchestrator) Run(ctx context.Context, goal string) (*RunResult, error)
 	}
 
 	// Leader: break into sub-tasks (LLM or heuristic)
+	emit(ProgressEvent{Phase: "leader", Stage: "start", Detail: "planning sub-tasks"})
 	plan, err := o.leaderPlan(ctx, sys, topo, goal)
 	if err != nil {
 		plan = []string{goal}
 	}
+	emit(ProgressEvent{Phase: "leader", Stage: "end", Total: len(plan), Detail: "plan ready"})
 
 	res := &RunResult{Goal: goal, Plan: plan, SubResults: map[string]string{}, CriticScores: map[string]float64{}}
 
 	// Followers: one pass per plan step with specialist rotation
 	for i, step := range plan {
 		spec := topo.Specialists[i%len(topo.Specialists)]
+		emit(ProgressEvent{
+			Phase:  "specialist",
+			Stage:  "start",
+			Index:  i + 1,
+			Total:  len(plan),
+			Role:   spec,
+			Detail: step,
+		})
 		out, err := o.specialist(ctx, sys, spec, step)
 		if err != nil {
 			out = fmt.Sprintf("(specialist %s error: %v)", spec, err)
 		}
 		key := fmt.Sprintf("%s:%d", spec, i)
 		res.SubResults[key] = out
+		emit(ProgressEvent{
+			Phase: "specialist",
+			Stage: "end",
+			Index: i + 1,
+			Total: len(plan),
+			Role:  spec,
+		})
 	}
 
 	merged := mergeSubResults(res.SubResults)
 	retries := 0
 	for {
+		emit(ProgressEvent{Phase: "critic", Stage: "start", Attempt: retries + 1, Detail: "scoring merged draft"})
 		score, rationale, err := o.critic(ctx, sys, topo, goal, merged)
 		if err != nil {
 			score = 0.6
 			rationale = err.Error()
 		}
 		res.CriticScores[fmt.Sprintf("attempt_%d", retries)] = score
+		emit(ProgressEvent{
+			Phase:     "critic",
+			Stage:     "end",
+			Attempt:   retries + 1,
+			Score:     score,
+			Threshold: topo.CriticThreshold,
+		})
 		if score >= topo.CriticThreshold || retries >= topo.MaxCriticRetries {
 			res.Final = merged + "\n\n[critic score=" + fmt.Sprintf("%.2f", score) + "] " + rationale
 			res.Retries = retries
+			emit(ProgressEvent{Phase: "harness", Stage: "end", Attempt: retries + 1, Score: score, Threshold: topo.CriticThreshold})
 			return res, nil
 		}
+		emit(ProgressEvent{Phase: "critic", Stage: "retry", Attempt: retries + 1, Score: score, Threshold: topo.CriticThreshold})
+		emit(ProgressEvent{Phase: "refine", Stage: "start", Attempt: retries + 1, Detail: "refining draft from critique"})
 		merged, err = o.refine(ctx, sys, goal, merged, rationale)
 		if err != nil {
 			merged = merged + "\n" + rationale
 		}
+		emit(ProgressEvent{Phase: "refine", Stage: "end", Attempt: retries + 1})
 		retries++
 	}
 }

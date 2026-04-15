@@ -388,7 +388,29 @@ func (s *Server) handleHarnessRun(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
 	defer cancel()
-	res, err := o.Run(ctx, strings.TrimSpace(b.Goal))
+	goal := strings.TrimSpace(b.Goal)
+	if r.URL.Query().Get("stream") == "1" {
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		w.Header().Set("Cache-Control", "no-cache")
+		flusher, _ := w.(http.Flusher)
+		writeLine := func(v any) {
+			b, _ := json.Marshal(v)
+			_, _ = w.Write(append(b, '\n'))
+			if flusher != nil {
+				flusher.Flush()
+			}
+		}
+		res, err := o.RunWithProgress(ctx, goal, func(ev harness.ProgressEvent) {
+			writeLine(map[string]any{"type": "event", "event": ev})
+		})
+		if err != nil {
+			writeLine(map[string]any{"type": "error", "error": err.Error()})
+			return
+		}
+		writeLine(map[string]any{"type": "result", "result": res})
+		return
+	}
+	res, err := o.Run(ctx, goal)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return

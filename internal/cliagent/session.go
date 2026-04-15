@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/heros-foreal/agentd/internal/config"
+	"github.com/heros-foreal/agentd/internal/harness"
 )
 
 // Session holds multi-turn chat state for one terminal session.
@@ -40,6 +41,7 @@ type Session struct {
 	DataDir string
 
 	Messages []map[string]any
+	turnOut  io.Writer
 }
 
 // PrimeSystem loads server system prompt + folder catalog block into Messages.
@@ -144,6 +146,8 @@ func (s *Session) RunUserTurn(ctx context.Context, user string, out io.Writer) e
 		return nil
 	}
 	s.Messages = append(s.Messages, map[string]any{"role": "user", "content": user})
+	s.turnOut = out
+	defer func() { s.turnOut = nil }()
 	toolUsed := map[string]bool{}
 	skillUsed := map[string]bool{}
 	memoryUsed := false
@@ -158,6 +162,9 @@ func (s *Session) RunUserTurn(ctx context.Context, user string, out io.Writer) e
 	case MemoryGroundingRequired(user):
 		// Prefer memory search over guessing when user asks what is stored.
 		firstToolChoice = map[string]any{"type": "function", "function": map[string]any{"name": "heros_memory_search"}}
+	case LongHorizonHarnessRequired(user):
+		// Force harness kickoff for inherently multi-step tasks to avoid one-shot-only replies.
+		firstToolChoice = map[string]any{"type": "function", "function": map[string]any{"name": "heros_run_harness"}}
 	}
 	for step := 0; step < 64; step++ {
 		modelStart := time.Now().UTC()
@@ -265,6 +272,20 @@ func (s *Session) RunUserTurn(ctx context.Context, user string, out io.Writer) e
 	return fmt.Errorf("tool loop exceeded step limit")
 }
 
+func emitHarnessProgressEvent(out io.Writer, ev harness.ProgressEvent) {
+	emitHarnessEvent(out, HarnessEvent{
+		Phase:     "harness_" + strings.TrimSpace(ev.Phase),
+		Stage:     ev.Stage,
+		Message:   ev.Detail,
+		Index:     ev.Index,
+		Total:     ev.Total,
+		Attempt:   ev.Attempt,
+		Role:      ev.Role,
+		Score:     ev.Score,
+		Threshold: ev.Threshold,
+	})
+}
+
 // FormatUsageDisclosure prints a deterministic transparency line for each turn.
 func FormatUsageDisclosure(toolUsed, skillUsed map[string]bool, memoryUsed bool) string {
 	toolList := slices.Sorted(maps.Keys(toolUsed))
@@ -370,7 +391,9 @@ func (s *Session) DispatchTool(ctx context.Context, tc ToolCall) (string, error)
 		if strings.TrimSpace(goal) == "" {
 			return "", fmt.Errorf("heros_run_harness requires goal")
 		}
-		res, err := s.Agentd.HarnessRun(ctx, goal)
+		res, err := s.Agentd.HarnessRunWithProgress(ctx, goal, func(ev harness.ProgressEvent) {
+			emitHarnessProgressEvent(s.turnOut, ev)
+		})
 		if err != nil {
 			return "", err
 		}
