@@ -142,4 +142,4 @@ Only if **`agentd` already runs elsewhere** (another host or long-lived process)
 | Folders, SKILL.md | [AGENT_LAYOUT.md](AGENT_LAYOUT.md) |
 | Enterprise | [ENTERPRISE.md](ENTERPRISE.md) |
 | Architecture | [ARCHITECTURE.md](ARCHITECTURE.md) |
-| Roadmap | [TODO.md](../TODO.md), [TODO-BUSINESS.md](../TODO-BUSINESS.md) |
+| Roadmap | [TODO.md](TODO.md) |

@@ -14,7 +14,7 @@ The agent is **not** “an approval-queue product.” It is an **operating-syste
 
 ## Implementation note (this repository)
 
-The **`agentd`** codebase implements a **subset** of this architecture: folder-first skills/tools/memory, HTTP control plane, **`heros-cli`** (terminal LLM + tools against agentd), optional MCP (**`heros-mcp`**), optional Qdrant/Neo4j/NATS, proposal/approve flows, and collective **stubs**. It does **not** yet ship OS installers, streaming TUI polish, or end-to-end **org-wide sync** of skills and memory. Treat the sections below as **target behavior**; for an honest gap list see [`../TODO.md`](../TODO.md) and [`../TODO-BUSINESS.md`](../TODO-BUSINESS.md).
+The **`agentd`** codebase implements a **subset** of this architecture: folder-first skills/tools/memory, HTTP control plane, **`heros-cli`** (terminal LLM + tools against agentd), optional MCP (**`heros-mcp`**), optional Qdrant/Neo4j/NATS, proposal/approve flows, and collective **stubs**. It does **not** yet ship OS installers, streaming TUI polish, or end-to-end **org-wide sync** of skills and memory. Treat the sections below as **target behavior**; for an honest gap list see [`TODO.md`](TODO.md).
 
 ## **Core design principles**
 

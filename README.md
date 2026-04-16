@@ -6,7 +6,7 @@ This project targets an **operating-system-level agent** in the same **work post
 
 **Human approval** is **not** “what the product is.” It is the **governance spine** for **self-modification**: when the agent (or an automation) wants to **change** the live skill library, tool registry, harness topology, or other durable config, that mutation is proposed as a **diff**, reviewed, then committed—so the agent can grow **without silent drift**. Day-to-day assistance does not need to feel like “opening a queue.”
 
-**Collective sync** (skills + memory + progress **across** machines) is the **org-scale layer** this architecture is built for; today the repo ships **hooks** (HTTP ingest, NATS subjects) and **policy-ready** indexing—not a finished “Dropbox for agent state” product. See [`TODO-BUSINESS.md`](TODO-BUSINESS.md) for an honest gap list.
+**Collective sync** (skills + memory + progress **across** machines) is the **org-scale layer** this architecture is built for; today the repo ships **hooks** (HTTP ingest, NATS subjects) and **policy-ready** indexing—not a finished “Dropbox for agent state” product. See [`docs/TODO.md`](docs/TODO.md) for an honest gap list.
 
 The authoritative design—including OS install posture and the four self-evolving layers—is in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
@@ -45,7 +45,7 @@ The **recommended stack sketch** in the architecture doc (Go daemon, LLM API, SQ
 | | **Target experience** (Claude Code / Codex–class) | **What this repo ships today** |
 |---|-----------------------------------------------|--------------------------------|
 | **Admin & employee** | Same agent runtime: everyone drives real work through terminal CLI, IDE, or internal apps wired to `agentd`. | **`heros`** (one binary: embedded agentd + REPL). Optional **`heros-mcp`** to `agentd`; optional **`heros-cli`** only if `agentd` already runs elsewhere. **Local shell** = process cwd; **server shell** = `-agent-shell`. |
-| **Skills / memory / tools** | Grown from daily tasks; reused automatically; promoted org-wide after policy. | **On-disk + SQLite + optional Qdrant/Neo4j**; indexing and sync **rules** exist; **full collective merge/push** still a roadmap item ([`TODO-BUSINESS.md`](TODO-BUSINESS.md)). |
+| **Skills / memory / tools** | Grown from daily tasks; reused automatically; promoted org-wide after policy. | **On-disk + SQLite + optional Qdrant/Neo4j**; indexing and sync **rules** exist; **full collective merge/push** still a roadmap item ([`docs/TODO.md`](docs/TODO.md)). |
 | **Self-evolution** | Agent proposes durable changes (new skill, tool, topology); human/org policy approves. | **Proposal + approve/reject** flow + `evolve` apply; **`/`** is one lightweight reviewer, not the main workspace. |
 | **Collective** | Sync evolved skills, memory, progress across the company. | **Stubs + NATS**; not a finished org-wide state sync product. |
 
@@ -222,7 +222,7 @@ Use `-config <path>` to load JSON. Omitting `-config` uses defaults plus any sup
 - [On-disk agent layout & catalog APIs](docs/AGENT_LAYOUT.md)
 - [Enterprise stack (Docker, Qdrant, Neo4j, NATS)](docs/ENTERPRISE.md)
 - Deployment samples: `deploy/`
-- [Engineering roadmap / gaps](TODO.md) · [Business scenario vs collective sync](TODO-BUSINESS.md)
+- [Unified roadmap / gaps](docs/TODO.md)
 
 ## License
 
