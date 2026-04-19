@@ -383,17 +383,21 @@ func main() {
 			APIKey:     *apiKey,
 			HTTPClient: cliagent.DefaultHTTPClient(),
 		},
-		OpenAIBase:         openaiBaseStr,
-		OpenAIKey:          openaiKey,
-		Model:              modelStr,
-		SessionID:          sid,
-		DataDir:            cfg.DataDir,
-		WorkDir:            wd,
-		AgentShell:         *agentShell,
-		Stream:             true,
-		UseReadline:        false,
-		TargetTenant:       *targetTenant,
-		LogTurnsToEpisodic: !*noSessionLog,
+		OpenAIBase:               openaiBaseStr,
+		OpenAIKey:                openaiKey,
+		Model:                    modelStr,
+		SessionID:                sid,
+		DataDir:                  cfg.DataDir,
+		WorkDir:                  wd,
+		AgentShell:               *agentShell,
+		Stream:                   true,
+		UseReadline:              false,
+		TargetTenant:             *targetTenant,
+		LogTurnsToEpisodic:       !*noSessionLog,
+		AutoInjectMemory:         true,
+		AutoInjectTopK:           3,
+		AutoConsolidateEvery:     6,
+		AutoConsolidateThreshold: 0.45,
 	}
 
 	ctx := context.Background()
@@ -626,10 +630,13 @@ func main() {
 	clear := widget.NewButton("Clear Output", func() {
 		output.SetText("")
 	})
+	copyOutput := widget.NewButton("Copy Output", func() {
+		w.Clipboard().SetContent(output.Text)
+	})
 
 	refreshFiles := widget.NewButton("Refresh Files", refreshWorkspaceViews)
 
-	controls := container.NewHBox(send, refresh, browseWorkdir, refreshFiles, clear)
+	controls := container.NewHBox(send, refresh, browseWorkdir, refreshFiles, copyOutput, clear)
 	chatPane := container.NewBorder(status, controls, nil, nil, container.NewVSplit(outputBox, input))
 	leftPane := container.NewVSplit(explorerBox, gitChangesBox)
 	leftPane.SetOffset(0.62)

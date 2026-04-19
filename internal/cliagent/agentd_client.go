@@ -118,6 +118,16 @@ type retrieveResp struct {
 	Backend string   `json:"backend"`
 }
 
+type consolidateResp struct {
+	Promoted int `json:"promoted"`
+}
+
+type profileResp struct {
+	UserID      string `json:"user_id"`
+	TenantID    string `json:"tenant_id"`
+	ProfileText string `json:"profile_text"`
+}
+
 type cliExecResp struct {
 	RiskTier string `json:"risk_tier"`
 	Outcome  string `json:"outcome"`
@@ -253,6 +263,30 @@ func (c *AgentdClient) MemoryEpisodic(ctx context.Context, sessionID, role, cont
 		"content":    content,
 		"importance": importance,
 	}, nil)
+}
+
+func (c *AgentdClient) MemoryConsolidate(ctx context.Context, sessionID string, threshold float64) (int, error) {
+	var r consolidateResp
+	err := c.PostJSON(ctx, "/api/memory/consolidate", map[string]any{
+		"session_id": sessionID,
+		"threshold":  threshold,
+	}, &r)
+	if err != nil {
+		return 0, err
+	}
+	return r.Promoted, nil
+}
+
+func (c *AgentdClient) MemoryProfile(ctx context.Context, userID string) (string, error) {
+	path := "/api/memory/profile"
+	if strings.TrimSpace(userID) != "" {
+		path += "?user_id=" + url.QueryEscape(strings.TrimSpace(userID))
+	}
+	var r profileResp
+	if err := c.GetJSON(ctx, path, &r); err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(r.ProfileText), nil
 }
 
 func (c *AgentdClient) CLIExec(ctx context.Context, command string) (*cliExecResp, error) {

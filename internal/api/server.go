@@ -86,6 +86,7 @@ func (s *Server) routes() {
 	s.Mux.HandleFunc("POST /api/harness/run", s.handleHarnessRun)
 	s.Mux.HandleFunc("POST /api/memory/episodic", s.handleEpisodic)
 	s.Mux.HandleFunc("POST /api/memory/retrieve", s.handleRetrieve)
+	s.Mux.HandleFunc("GET /api/memory/profile", s.handleProfile)
 	s.Mux.HandleFunc("POST /api/memory/vault/reindex", s.handleVaultReindex)
 	s.Mux.HandleFunc("POST /api/memory/consolidate", s.handleConsolidate)
 	s.Mux.HandleFunc("POST /api/memory/optimize-session", s.handleOptimizeSession)
@@ -420,6 +421,7 @@ func (s *Server) handleHarnessRun(w http.ResponseWriter, r *http.Request) {
 
 type episodicBody struct {
 	SessionID  string  `json:"session_id"`
+	UserID     string  `json:"user_id,omitempty"`
 	Role       string  `json:"role"`
 	Content    string  `json:"content"`
 	Importance float64 `json:"importance"`
@@ -436,6 +438,12 @@ func (s *Server) handleEpisodic(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
+	}
+	if strings.EqualFold(strings.TrimSpace(b.Role), "user") && strings.TrimSpace(b.UserID) != "" {
+		if err := memorylayer.UpdateUserProfileFromEpisodic(s.DB, tid, b.UserID, b.SessionID, b.Content); err != nil {
+			http.Error(w, "profile update: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
 	}
 	if strings.EqualFold(strings.TrimSpace(b.Role), "note") {
 		if err := vaultindex.AppendNoteToVault(s.Cfg, tid, b.SessionID, b.Content); err != nil {
@@ -533,6 +541,25 @@ func (s *Server) handleRetrieve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]any{"chunks": chunks, "backend": backend})
+}
+
+func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
+	tid, _ := s.tenantFrom(r)
+	userID := strings.TrimSpace(r.URL.Query().Get("user_id"))
+	if userID == "" {
+		userID = memorylayer.DefaultUserID
+	}
+	p, err := memorylayer.GetUserProfile(s.DB, tid, userID)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	writeJSON(w, map[string]any{
+		"user_id":      strings.TrimSpace(userID),
+		"tenant_id":    tid,
+		"profile":      p,
+		"profile_text": memorylayer.ProfileSummary(p, 6),
+	})
 }
 
 func retrieveBackend(inf *memorylayer.VectorInfra) string {

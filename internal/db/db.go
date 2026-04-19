@@ -163,6 +163,13 @@ func migrate(d *sql.DB) error {
 			embedding_json TEXT,
 			created_at TEXT NOT NULL DEFAULT (datetime('now'))
 		)`,
+		`CREATE TABLE IF NOT EXISTS user_profiles (
+			tenant_id TEXT NOT NULL DEFAULT '',
+			user_id TEXT NOT NULL DEFAULT 'default',
+			profile_json TEXT NOT NULL DEFAULT '{}',
+			updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+			PRIMARY KEY (tenant_id, user_id)
+		)`,
 		`CREATE TABLE IF NOT EXISTS graph_entities (
 			id TEXT PRIMARY KEY,
 			name TEXT NOT NULL,

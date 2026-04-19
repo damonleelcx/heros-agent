@@ -31,7 +31,13 @@ func AppendEpisodic(db *sql.DB, dataDir, tenantID, sessionID, role, content stri
 	}
 	_, err := db.Exec(`INSERT OR REPLACE INTO episodic_memory (id, tenant_id, session_id, role, content, importance, memory_session_rel) VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		id, tenantID, sessionID, role, content, importance, memRel)
-	return id, err
+	if err != nil {
+		return "", err
+	}
+	if strings.EqualFold(strings.TrimSpace(role), "user") {
+		_ = UpdateUserProfileFromEpisodic(db, tenantID, DefaultUserID, sessionID, content)
+	}
+	return id, nil
 }
 
 // naiveEmbedding is a deterministic stub until pgvector/Qdrant is wired; good for local demos.

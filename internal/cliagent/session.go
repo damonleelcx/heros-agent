@@ -39,9 +39,20 @@ type Session struct {
 	LogTurnsToEpisodic bool
 	// DataDir is the agent filesystem root (skills/, tools/, system/, memory/); not the workspace.
 	DataDir string
+	// UserID scopes long-term profile retrieval; empty maps to server default profile.
+	UserID string
+	// AutoInjectMemory prepends small retrieved memory context each user turn.
+	AutoInjectMemory bool
+	// AutoInjectTopK controls retrieval size for per-turn memory injection.
+	AutoInjectTopK int
+	// AutoConsolidateEvery runs /api/memory/consolidate every N user turns (0 disables).
+	AutoConsolidateEvery int
+	// AutoConsolidateThreshold is the importance threshold for periodic consolidation.
+	AutoConsolidateThreshold float64
 
 	Messages []map[string]any
 	turnOut  io.Writer
+	turnN    int
 }
 
 // PrimeSystem loads server system prompt + folder catalog block into Messages.
@@ -90,7 +101,16 @@ Workspace root on this machine: **%s**
 
 **Non‑negotiable grounding:** If the user asks what the project/repo/app **is**, does, or contains, you **must** use **heros_shell** (and optionally **heros_read_skill** / **heros_memory_search**) **before** answering. It is a **failure** to reply with generic “I need you to tell me…” or “I have no information” while a workspace path is set — inspect the tree first.
 
-**File operation requests are execution tasks:** If user asks to create, edit, update, delete, or read files, call file tools (**heros_list_files / heros_read_file / heros_write_file / heros_make_dir / heros_delete_path**) and perform the action. Do **not** only return instructions unless the user explicitly asks for instructions only.
+**Artifact-first filesystem rule (global):** Any request to create, update, delete, move, inspect, or read files/folders is an execution task. Use tools and perform the operation on disk; do not respond with instructions-only unless explicitly requested.
+Use **heros_list_files / heros_read_file / heros_write_file / heros_make_dir / heros_delete_path** for direct filesystem work, and **heros_shell** when conversion/generation tooling is needed.
+When a user asks for a deliverable (pptx/docx/xlsx/pdf/image/zip/etc), create the real artifact file in the workspace whenever possible and return its path. Do not stop at outline text.
+For binary/container formats (for example **.pptx/.docx/.xlsx/.pdf/.png/.jpg/.zip**), do **not** write plain text bytes with **heros_write_file** to that extension. Use a generator path (for example **heros_shell** with a real exporter such as python-pptx, pandoc, libreoffice, etc.) that produces valid binary bytes. Only fall back to .md/.txt when generation is impossible.
+For binary reads/writes with file tools, use encoding=base64 when needed instead of refusing.
+
+**Presentation requests:** If the user asks for a PowerPoint or says "I need ppt/pptx file", generate an actual **.pptx** in the workspace (for example via **heros_shell** + python-pptx), verify the file exists with **heros_list_files** or **heros_read_file** metadata, then respond with the produced file path.
+
+**Chat output style:** default to plain text status updates and results. Avoid markdown formatting (no headings, bold markers, fenced code) unless the user explicitly asks for markdown.
+Before substantial tool work, print one short progress line describing what you are doing now.
 
 **Long‑horizon tasks:** Break work into steps; after substantive progress call **heros_memory_save** or rely on session episodic logs; use **heros_memory_search** to recall earlier decisions in the same thread.
 
@@ -112,7 +132,7 @@ Skill proposal shape (layer **prompt_engineering**):
 ### SKILL:skill_slug_here
 (markdown body)
 
-Be concise in the terminal; one short line before heavy tool use is enough.%s`,
+Be concise in the terminal; one short plain-text status line before heavy tool use is enough.%s`,
 		wd, dataDirAbs, harnessLine)
 
 	full := strings.TrimSpace(base) + "\n\n" + instructions + "\n\n" + block
@@ -146,6 +166,9 @@ func (s *Session) RunUserTurn(ctx context.Context, user string, out io.Writer) e
 		return nil
 	}
 	s.Messages = append(s.Messages, map[string]any{"role": "user", "content": user})
+	if note := s.buildAutoMemoryInjection(ctx, user); strings.TrimSpace(note) != "" {
+		s.Messages = append(s.Messages, map[string]any{"role": "system", "content": note})
+	}
 	s.turnOut = out
 	defer func() { s.turnOut = nil }()
 	toolUsed := map[string]bool{}
@@ -233,6 +256,8 @@ func (s *Session) RunUserTurn(ctx context.Context, user string, out io.Writer) e
 				if err := s.Agentd.MemoryEpisodic(ctx, s.SessionID, "assistant", content, 0.3); err != nil {
 					log.Printf("heros-cli: episodic assistant turn: %v", err)
 				}
+				s.turnN++
+				s.maybeAutoConsolidate(ctx)
 			}
 			return nil
 		}
@@ -270,6 +295,60 @@ func (s *Session) RunUserTurn(ctx context.Context, user string, out io.Writer) e
 		}
 	}
 	return fmt.Errorf("tool loop exceeded step limit")
+}
+
+func (s *Session) buildAutoMemoryInjection(ctx context.Context, user string) string {
+	if !s.AutoInjectMemory {
+		return ""
+	}
+	q := strings.TrimSpace(user)
+	if q == "" {
+		return ""
+	}
+	k := s.AutoInjectTopK
+	if k <= 0 {
+		k = 3
+	}
+	chunks, backend, err := s.Agentd.MemoryRetrieve(ctx, s.SessionID, q, k)
+	if err != nil {
+		return ""
+	}
+	profileText, _ := s.Agentd.MemoryProfile(ctx, s.UserID)
+	if len(chunks) == 0 && strings.TrimSpace(profileText) == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("[auto-memory]\n")
+	if strings.TrimSpace(profileText) != "" {
+		b.WriteString("user_profile: " + strings.TrimSpace(profileText) + "\n")
+	}
+	if len(chunks) > 0 {
+		b.WriteString("retrieval_backend: " + strings.TrimSpace(backend) + "\n")
+		for i := 0; i < len(chunks) && i < k; i++ {
+			b.WriteString(fmt.Sprintf("- %s\n", strings.TrimSpace(chunks[i])))
+		}
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func (s *Session) maybeAutoConsolidate(ctx context.Context) {
+	every := s.AutoConsolidateEvery
+	if every <= 0 {
+		every = 6
+	}
+	if s.turnN <= 0 || s.turnN%every != 0 {
+		return
+	}
+	threshold := s.AutoConsolidateThreshold
+	if threshold <= 0 {
+		threshold = 0.45
+	}
+	promoted, err := s.Agentd.MemoryConsolidate(ctx, s.SessionID, threshold)
+	if err != nil {
+		log.Printf("heros-cli: auto consolidate: %v", err)
+		return
+	}
+	log.Printf("heros-cli: auto consolidate session=%s threshold=%.2f promoted=%d", s.SessionID, threshold, promoted)
 }
 
 func emitHarnessProgressEvent(out io.Writer, ev harness.ProgressEvent) {
