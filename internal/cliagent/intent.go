@@ -34,6 +34,13 @@ var (
 	reLongHorizonHarness = regexp.MustCompile(`(?i)(` +
 		`i\s+want\s+to\s+(build|create|design|implement)|` +
 		`let'?s\s+(build|design|implement)|` +
+		`add\s+more\s+backend\s+functionalit(y|ies)|` +
+		`connect\s+(the\s+)?front\s*end\s+to\s+(the\s+)?back\s*end|` +
+		`connect\s+(the\s+)?backend\s+to\s+(the\s+)?frontend|` +
+		`frontend\s+.*backend\s+integration|` +
+		`backend\s+.*frontend\s+integration|` +
+		`full[\s-]?stack|` +
+		`crud\s+api|` +
 		`production-?ready|` +
 		`architecture|orchestrat(e|ion)|` +
 		`distributed\s+system|` +

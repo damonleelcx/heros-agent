@@ -48,10 +48,18 @@ func (w *uiStreamWriter) Write(p []byte) (int, error) {
 		line := strings.TrimRight(w.pending[:i], "\r")
 		w.pending = w.pending[i+1:]
 		if rendered, ok := renderHarnessEventLine(line); ok {
-			w.writeFn(rendered + "\n")
+			if strings.TrimSpace(rendered) != "" {
+				w.writeFn(rendered + "\n")
+			}
 			continue
 		}
 		w.writeFn(line + "\n")
+	}
+	// Do not wait for newline for regular assistant text; stream it live.
+	// Keep buffering only potential harness_event JSON lines until newline.
+	if strings.TrimSpace(w.pending) != "" && !strings.HasPrefix(strings.TrimSpace(w.pending), cliagent.HarnessEventPrefix) {
+		w.writeFn(w.pending)
+		w.pending = ""
 	}
 	return len(p), nil
 }
@@ -68,13 +76,30 @@ func renderHarnessEventLine(line string) (string, bool) {
 	}
 	phase := strings.TrimPrefix(strings.TrimSpace(ev.Phase), "harness_")
 	switch phase {
+	case "assistant":
+		// Hide generic assistant runtime chatter in desktop UI.
+		return "", true
+	case "tool":
+		name := strings.TrimSpace(ev.ToolName)
+		if name == "" {
+			name = "tool"
+		}
+		if ev.Stage == "start" {
+			return fmt.Sprintf("[exec] running %s", name), true
+		}
+		if ev.Stage == "end" {
+			if ev.DurationMS > 0 {
+				return fmt.Sprintf("[exec] done %s status=%s (%dms)", name, strings.TrimSpace(ev.Status), ev.DurationMS), true
+			}
+			return fmt.Sprintf("[exec] done %s status=%s", name, strings.TrimSpace(ev.Status)), true
+		}
 	case "leader":
 		if ev.Stage == "start" {
-			return "[harness] leader planning", true
+			return "[harness] main-agent defining goal + todo list", true
 		}
 		if ev.Stage == "end" {
 			if ev.Total > 0 {
-				return fmt.Sprintf("[harness] leader ready (%d steps)", ev.Total), true
+				return fmt.Sprintf("[harness] main-agent todo list ready (%d todos)", ev.Total), true
 			}
 			return "[harness] leader ready", true
 		}
@@ -87,7 +112,38 @@ func renderHarnessEventLine(line string) (string, bool) {
 		if role != "" {
 			role = " " + role
 		}
-		return fmt.Sprintf("[harness] specialist%s%s %s", n, role, ev.Stage), true
+		todo := strings.TrimSpace(ev.TodoID)
+		if todo != "" {
+			todo = " " + todo
+		}
+		usage := ""
+		if len(ev.Tools) > 0 || len(ev.Skills) > 0 || len(ev.Memory) > 0 {
+			usage = fmt.Sprintf(" | tools=%s skills=%s memory=%s",
+				strings.Join(ev.Tools, ","),
+				strings.Join(ev.Skills, ","),
+				strings.Join(ev.Memory, ","),
+			)
+		}
+		return fmt.Sprintf("[harness] sub-agent%s%s%s %s%s", n, role, todo, ev.Stage, usage), true
+	case "todo":
+		if ev.Stage == "created" && strings.TrimSpace(ev.TodoID) != "" {
+			msg := strings.TrimSpace(ev.Message)
+			if msg != "" {
+				return fmt.Sprintf("[harness] todo created %s: %s", ev.TodoID, msg), true
+			}
+			return fmt.Sprintf("[harness] todo created %s", ev.TodoID), true
+		}
+		if ev.Stage == "iteration_start" && ev.Attempt > 0 {
+			return fmt.Sprintf("[harness] main-agent distributing todos (iteration %d)", ev.Attempt), true
+		}
+		if ev.Stage == "iteration_end" && ev.Attempt > 0 {
+			return fmt.Sprintf("[harness] sub-agents completed iteration %d", ev.Attempt), true
+		}
+	case "verify":
+		if ev.Attempt > 0 {
+			return fmt.Sprintf("[harness] main-agent test/preview attempt %d %s", ev.Attempt, ev.Status), true
+		}
+		return fmt.Sprintf("[harness] verify %s", ev.Status), true
 	case "critic":
 		if ev.Stage == "retry" {
 			if ev.Attempt > 0 {
@@ -418,9 +474,28 @@ func main() {
 	}
 	status := widget.NewLabel(statusLine(wd, " | ready"))
 
-	output := widget.NewLabel("Heros Desktop is ready.\n")
+	outputMD := "Heros Desktop is ready.\n"
+	output := widget.NewRichTextFromMarkdown(outputMD)
 	output.Wrapping = fyne.TextWrapWord
 	outputBox := container.NewVScroll(output)
+	var outputMu sync.Mutex
+	pendingRender := ""
+	renderScheduled := false
+	flushRender := func() {
+		outputMu.Lock()
+		if pendingRender == "" {
+			renderScheduled = false
+			outputMu.Unlock()
+			return
+		}
+		outputMD += pendingRender
+		pendingRender = ""
+		renderScheduled = false
+		cur := outputMD
+		outputMu.Unlock()
+		output.ParseMarkdown(cur)
+		outputBox.ScrollToBottom()
+	}
 
 	input := widget.NewMultiLineEntry()
 	input.SetMinRowsVisible(5)
@@ -438,14 +513,26 @@ func main() {
 	}
 
 	appendOutput := func(text string) {
-		output.SetText(output.Text + text)
+		outputMu.Lock()
+		outputMD += text
+		cur := outputMD
+		outputMu.Unlock()
+		output.ParseMarkdown(cur)
 		outputBox.ScrollToBottom()
 	}
 	appendOutputAsync := func(text string) {
-		fyne.Do(func() {
-			output.SetText(output.Text + text)
-			outputBox.ScrollToBottom()
-		})
+		outputMu.Lock()
+		pendingRender += text
+		if renderScheduled {
+			outputMu.Unlock()
+			return
+		}
+		renderScheduled = true
+		outputMu.Unlock()
+		go func() {
+			time.Sleep(80 * time.Millisecond)
+			fyne.Do(flushRender)
+		}()
 	}
 
 	setBusy := func(v bool, msg string) {
@@ -547,6 +634,7 @@ func main() {
 				setBusyAsync(false, statusLine(sess.WorkDir, " | ready"))
 				return
 			}
+			fyne.Do(flushRender)
 			appendOutputAsync("\n")
 			setBusyAsync(false, statusLine(sess.WorkDir, " | ready"))
 			refreshWorkspaceViews()
@@ -628,10 +716,18 @@ func main() {
 	})
 
 	clear := widget.NewButton("Clear Output", func() {
-		output.SetText("")
+		outputMu.Lock()
+		pendingRender = ""
+		outputMD = ""
+		renderScheduled = false
+		outputMu.Unlock()
+		output.ParseMarkdown("")
 	})
 	copyOutput := widget.NewButton("Copy Output", func() {
-		w.Clipboard().SetContent(output.Text)
+		outputMu.Lock()
+		cur := outputMD + pendingRender
+		outputMu.Unlock()
+		w.Clipboard().SetContent(cur)
 	})
 
 	refreshFiles := widget.NewButton("Refresh Files", refreshWorkspaceViews)

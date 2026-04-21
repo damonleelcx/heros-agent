@@ -109,8 +109,11 @@ For binary reads/writes with file tools, use encoding=base64 when needed instead
 
 **Presentation requests:** If the user asks for a PowerPoint or says "I need ppt/pptx file", generate an actual **.pptx** in the workspace (for example via **heros_shell** + python-pptx), verify the file exists with **heros_list_files** or **heros_read_file** metadata, then respond with the produced file path.
 
-**Chat output style:** default to plain text status updates and results. Avoid markdown formatting (no headings, bold markers, fenced code) unless the user explicitly asks for markdown.
+**Chat output style:** always return markdown suitable for UI preview rendering. Use fenced code blocks for code by default.
 Before substantial tool work, print one short progress line describing what you are doing now.
+When the user asks to implement/build/edit, execute autonomously without confirmation loops. Ask a question only when blocked by missing required input or a risky/destructive action.
+Do not ask "shall I continue" / "would you like me to proceed" after partial progress; continue until the requested implementation and validation are complete.
+When the user asks to run tests, do not assume repository root has the test manifest. First inspect workspace structure and detect test entrypoints in subdirectories (for example backend/frontend, go.mod, package.json, pyproject.toml, Cargo.toml). Run the relevant test commands in each detected project folder, then report a consolidated result.
 
 **Long‑horizon tasks:** Break work into steps; after substantive progress call **heros_memory_save** or rely on session episodic logs; use **heros_memory_search** to recall earlier decisions in the same thread.
 
@@ -174,20 +177,24 @@ func (s *Session) RunUserTurn(ctx context.Context, user string, out io.Writer) e
 	toolUsed := map[string]bool{}
 	skillUsed := map[string]bool{}
 	memoryUsed := false
+	toolCalls := []ToolCallUsage{}
+	requireExecution := FileActionGroundingRequired(user)
+	harnessUsed := false
+	executionPromptInjected := false
 
 	tools := OpenAITools(ToolOptions{AgentShell: s.AgentShell})
 	var firstToolChoice any
 	switch {
 	case WorkspaceGroundingRequired(user, s.WorkDir):
 		firstToolChoice = "required"
+	case LongHorizonHarnessRequired(user):
+		// Prefer harness for complex implementation/integration asks to show todo + sub-agent flow.
+		firstToolChoice = map[string]any{"type": "function", "function": map[string]any{"name": "heros_run_harness"}}
 	case FileActionGroundingRequired(user):
 		firstToolChoice = "required"
 	case MemoryGroundingRequired(user):
 		// Prefer memory search over guessing when user asks what is stored.
 		firstToolChoice = map[string]any{"type": "function", "function": map[string]any{"name": "heros_memory_search"}}
-	case LongHorizonHarnessRequired(user):
-		// Force harness kickoff for inherently multi-step tasks to avoid one-shot-only replies.
-		firstToolChoice = map[string]any{"type": "function", "function": map[string]any{"name": "heros_run_harness"}}
 	}
 	for step := 0; step < 64; step++ {
 		modelStart := time.Now().UTC()
@@ -196,6 +203,9 @@ func (s *Session) RunUserTurn(ctx context.Context, user string, out io.Writer) e
 		var cc *ChatOptions
 		if step == 0 && firstToolChoice != nil {
 			cc = &ChatOptions{ToolChoice: firstToolChoice}
+		} else if requireExecution && harnessUsed {
+			// After planning, force concrete execution tools instead of final prose-only replies.
+			cc = &ChatOptions{ToolChoice: "required"}
 		}
 		var content string
 		var calls []ToolCall
@@ -248,7 +258,7 @@ func (s *Session) RunUserTurn(ctx context.Context, user string, out io.Writer) e
 			if s.LogTurnsToEpisodic {
 				memoryUsed = true // automatic user/assistant turn logging into episodic memory
 			}
-			_, _ = fmt.Fprintln(out, FormatUsageDisclosure(toolUsed, skillUsed, memoryUsed))
+			_, _ = fmt.Fprintln(out, FormatUsageDisclosure(toolUsed, skillUsed, memoryUsed, toolCalls))
 			if s.LogTurnsToEpisodic {
 				if err := s.Agentd.MemoryEpisodic(ctx, s.SessionID, "user", user, 0.2); err != nil {
 					log.Printf("heros-cli: episodic user turn: %v", err)
@@ -279,19 +289,35 @@ func (s *Session) RunUserTurn(ctx context.Context, user string, out io.Writer) e
 				}
 			}
 			result, err := s.DispatchTool(ctx, c)
+			toolEnd := time.Now().UTC()
+			status := "ok"
 			if err != nil {
 				result = "error: " + err.Error()
-				toolEnd := time.Now().UTC()
+				status = "error"
 				emitHarnessEnd(out, "tool", c.ID, c.Name, "error", toolStart, toolEnd)
 			} else {
-				toolEnd := time.Now().UTC()
 				emitHarnessEnd(out, "tool", c.ID, c.Name, "ok", toolStart, toolEnd)
+			}
+			toolCalls = append(toolCalls, ToolCallUsage{
+				Name:       c.Name,
+				Status:     status,
+				DurationMS: toolEnd.Sub(toolStart).Milliseconds(),
+			})
+			if c.Name == "heros_run_harness" {
+				harnessUsed = true
 			}
 			s.Messages = append(s.Messages, map[string]any{
 				"role":         "tool",
 				"tool_call_id": c.ID,
 				"content":      result,
 			})
+			if requireExecution && c.Name == "heros_run_harness" && !executionPromptInjected {
+				s.Messages = append(s.Messages, map[string]any{
+					"role":    "system",
+					"content": "Execution required now. Do the work in the repository: create/modify files, run tests/build commands, fix failures, and only finish when validation passes or you are blocked by a hard external dependency. Do not ask the user for confirmation mid-task.",
+				})
+				executionPromptInjected = true
+			}
 		}
 	}
 	return fmt.Errorf("tool loop exceeded step limit")
@@ -360,13 +386,24 @@ func emitHarnessProgressEvent(out io.Writer, ev harness.ProgressEvent) {
 		Total:     ev.Total,
 		Attempt:   ev.Attempt,
 		Role:      ev.Role,
+		TodoID:    ev.TodoID,
 		Score:     ev.Score,
 		Threshold: ev.Threshold,
+		Status:    ev.Status,
+		Tools:     ev.Tools,
+		Skills:    ev.Skills,
+		Memory:    ev.Memory,
 	})
 }
 
 // FormatUsageDisclosure prints a deterministic transparency line for each turn.
-func FormatUsageDisclosure(toolUsed, skillUsed map[string]bool, memoryUsed bool) string {
+type ToolCallUsage struct {
+	Name       string
+	Status     string
+	DurationMS int64
+}
+
+func FormatUsageDisclosure(toolUsed, skillUsed map[string]bool, memoryUsed bool, toolCalls []ToolCallUsage) string {
 	toolList := slices.Sorted(maps.Keys(toolUsed))
 	skillList := slices.Sorted(maps.Keys(skillUsed))
 	toolsPart := "none"
@@ -381,7 +418,23 @@ func FormatUsageDisclosure(toolUsed, skillUsed map[string]bool, memoryUsed bool)
 	if memoryUsed {
 		memoryPart = "used"
 	}
-	return fmt.Sprintf("[usage] tools=%s | skills=%s | memory=%s", toolsPart, skillsPart, memoryPart)
+	callsPart := "none"
+	if len(toolCalls) > 0 {
+		parts := make([]string, 0, len(toolCalls))
+		for i, c := range toolCalls {
+			name := strings.TrimSpace(c.Name)
+			if name == "" {
+				name = "unknown_tool"
+			}
+			status := strings.TrimSpace(c.Status)
+			if status == "" {
+				status = "ok"
+			}
+			parts = append(parts, fmt.Sprintf("%d:%s(%s,%dms)", i+1, name, status, c.DurationMS))
+		}
+		callsPart = strings.Join(parts, " -> ")
+	}
+	return fmt.Sprintf("[usage] tools=%s | calls=%s | skills=%s | memory=%s", toolsPart, callsPart, skillsPart, memoryPart)
 }
 
 // DispatchTool executes one model tool call against agentd.

@@ -124,12 +124,29 @@ func (s *Session) DispatchReplSlash(ctx context.Context, line string, out, errOu
 		for i, step := range res.Plan {
 			_, _ = fmt.Fprintf(out, "%d. %s\n", i+1, step)
 		}
+		_, _ = fmt.Fprintf(out, "\n--- todo progress (%d/%d done) ---\n", res.CompletedTodos, res.TotalTodos)
+		for _, td := range res.Todos {
+			_, _ = fmt.Fprintf(out, "- %s [%s] role=%s attempt=%d :: %s\n", td.ID, td.Status, td.Assignee, td.Attempt, td.Title)
+			if strings.TrimSpace(td.Feedback) != "" {
+				_, _ = fmt.Fprintf(out, "  feedback: %s\n", td.Feedback)
+			}
+		}
 		_, _ = fmt.Fprintln(out, "\n--- merged draft (before final critic line) ---")
 		var merged strings.Builder
 		for k, v := range res.SubResults {
 			_, _ = fmt.Fprintf(&merged, "### %s\n%s\n\n", k, v)
 		}
 		_, _ = fmt.Fprintln(out, strings.TrimSpace(merged.String()))
+		_, _ = fmt.Fprintln(out, "\n--- agent visibility (memory/skills/tools) ---")
+		for _, v := range res.AgentVisibility {
+			_, _ = fmt.Fprintf(out, "- %s | tools=%s | skills=%s | memory=%s\n",
+				v.Role, strings.Join(v.ToolsUsed, ","), strings.Join(v.SkillsUsed, ","), strings.Join(v.MemoryUsed, ","))
+		}
+		_, _ = fmt.Fprintln(out, "\n--- verification (test + preview) ---")
+		_, _ = fmt.Fprintf(out, "passed=%v summary=%s\n", res.Verification.Passed, res.Verification.Summary)
+		for _, c := range res.Verification.Checks {
+			_, _ = fmt.Fprintf(out, "- %s\n", c)
+		}
 		_, _ = fmt.Fprintln(out, "\n--- final ---")
 		_, _ = fmt.Fprintln(out, res.Final)
 		return true, false

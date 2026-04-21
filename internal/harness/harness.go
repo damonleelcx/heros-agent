@@ -87,25 +87,82 @@ type Orchestrator struct {
 }
 
 type RunResult struct {
-	Goal         string             `json:"goal"`
-	Plan         []string           `json:"plan"`
-	SubResults   map[string]string  `json:"sub_results"`
-	CriticScores map[string]float64 `json:"critic_scores"`
-	Final        string             `json:"final"`
-	Retries      int                `json:"retries"`
+	Goal            string             `json:"goal"`
+	Plan            []string           `json:"plan"` // backward-compatible alias of todo titles
+	Todos           []TodoItem         `json:"todos"`
+	SubResults      map[string]string  `json:"sub_results"` // backward-compatible summary map
+	SubAgentReports []SubAgentReport   `json:"sub_agent_reports"`
+	CriticScores    map[string]float64 `json:"critic_scores"`
+	IterationNotes  []string           `json:"iteration_notes"`
+	Verification    VerificationResult `json:"verification"`
+	GlobalCritique  []CritiqueAttempt  `json:"global_critique"`
+	AgentVisibility []AgentVisibility  `json:"agent_visibility"`
+	Final           string             `json:"final"`
+	Retries         int                `json:"retries"`
+	CompletedTodos  int                `json:"completed_todos"`
+	TotalTodos      int                `json:"total_todos"`
+}
+
+type TodoItem struct {
+	ID        string `json:"id"`
+	Title     string `json:"title"`
+	Status    string `json:"status"` // pending|in_progress|done|needs_followup
+	Assignee  string `json:"assignee,omitempty"`
+	Attempt   int    `json:"attempt"`
+	Feedback  string `json:"feedback,omitempty"`
+	ParentID  string `json:"parent_id,omitempty"`
+	CreatedBy string `json:"created_by,omitempty"` // leader|critic
+}
+
+type SubAgentReport struct {
+	TodoID     string   `json:"todo_id"`
+	Role       string   `json:"role"`
+	Task       string   `json:"task"`
+	Attempt    int      `json:"attempt"`
+	Output     string   `json:"output"`
+	Critique   string   `json:"critique"`
+	Score      float64  `json:"score"`
+	Status     string   `json:"status"` // accepted|needs_followup
+	ToolsUsed  []string `json:"tools_used"`
+	SkillsUsed []string `json:"skills_used"`
+	MemoryUsed []string `json:"memory_used"`
+}
+
+type CritiqueAttempt struct {
+	Attempt   int     `json:"attempt"`
+	Score     float64 `json:"score"`
+	Rationale string  `json:"rationale"`
+}
+
+type VerificationResult struct {
+	Summary string   `json:"summary"`
+	Checks  []string `json:"checks"`
+	Passed  bool     `json:"passed"`
+}
+
+type AgentVisibility struct {
+	Role       string   `json:"role"`
+	ToolsUsed  []string `json:"tools_used"`
+	SkillsUsed []string `json:"skills_used"`
+	MemoryUsed []string `json:"memory_used"`
 }
 
 // ProgressEvent is a structured lifecycle event emitted while harness execution is in-flight.
 type ProgressEvent struct {
-	Phase     string  `json:"phase"`
-	Stage     string  `json:"stage"`
-	Detail    string  `json:"detail,omitempty"`
-	Index     int     `json:"index,omitempty"`
-	Total     int     `json:"total,omitempty"`
-	Role      string  `json:"role,omitempty"`
-	Attempt   int     `json:"attempt,omitempty"`
-	Score     float64 `json:"score,omitempty"`
-	Threshold float64 `json:"threshold,omitempty"`
+	Phase     string   `json:"phase"`
+	Stage     string   `json:"stage"`
+	Detail    string   `json:"detail,omitempty"`
+	Index     int      `json:"index,omitempty"`
+	Total     int      `json:"total,omitempty"`
+	Role      string   `json:"role,omitempty"`
+	TodoID    string   `json:"todo_id,omitempty"`
+	Status    string   `json:"status,omitempty"`
+	Tools     []string `json:"tools,omitempty"`
+	Skills    []string `json:"skills,omitempty"`
+	Memory    []string `json:"memory,omitempty"`
+	Attempt   int      `json:"attempt,omitempty"`
+	Score     float64  `json:"score,omitempty"`
+	Threshold float64  `json:"threshold,omitempty"`
 }
 
 // Run executes leader decomposition, parallel specialist stubs, critic loop.
@@ -130,45 +187,115 @@ func (o *Orchestrator) RunWithProgress(ctx context.Context, goal string, onProgr
 		sys = ""
 	}
 
-	// Leader: break into sub-tasks (LLM or heuristic)
-	emit(ProgressEvent{Phase: "leader", Stage: "start", Detail: "planning sub-tasks"})
+	// Leader: define explicit todo list tied to the goal.
+	emit(ProgressEvent{Phase: "leader", Stage: "start", Detail: "defining goal-aligned todo list"})
 	plan, err := o.leaderPlan(ctx, sys, topo, goal)
 	if err != nil {
 		plan = []string{goal}
 	}
-	emit(ProgressEvent{Phase: "leader", Stage: "end", Total: len(plan), Detail: "plan ready"})
+	emit(ProgressEvent{Phase: "leader", Stage: "end", Total: len(plan), Detail: "todo list ready"})
 
-	res := &RunResult{Goal: goal, Plan: plan, SubResults: map[string]string{}, CriticScores: map[string]float64{}}
-
-	// Followers: one pass per plan step with specialist rotation
+	todos := make([]TodoItem, 0, len(plan))
 	for i, step := range plan {
-		spec := topo.Specialists[i%len(topo.Specialists)]
-		emit(ProgressEvent{
-			Phase:  "specialist",
-			Stage:  "start",
-			Index:  i + 1,
-			Total:  len(plan),
-			Role:   spec,
-			Detail: step,
+		todos = append(todos, TodoItem{
+			ID:        fmt.Sprintf("todo-%02d", i+1),
+			Title:     step,
+			Status:    "pending",
+			Attempt:   1,
+			CreatedBy: "leader",
 		})
-		out, err := o.specialist(ctx, sys, spec, step)
-		if err != nil {
-			out = fmt.Sprintf("(specialist %s error: %v)", spec, err)
-		}
-		key := fmt.Sprintf("%s:%d", spec, i)
-		res.SubResults[key] = out
-		emit(ProgressEvent{
-			Phase: "specialist",
-			Stage: "end",
-			Index: i + 1,
-			Total: len(plan),
-			Role:  spec,
-		})
+		emit(ProgressEvent{Phase: "todo", Stage: "created", Index: i + 1, Total: len(plan), TodoID: fmt.Sprintf("todo-%02d", i+1), Detail: step, Status: "pending"})
 	}
 
-	merged := mergeSubResults(res.SubResults)
+	res := &RunResult{
+		Goal:            goal,
+		Plan:            plan,
+		Todos:           todos,
+		SubResults:      map[string]string{},
+		CriticScores:    map[string]float64{},
+		SubAgentReports: []SubAgentReport{},
+	}
+
 	retries := 0
+	latestByTodo := map[string]string{}
 	for {
+		emit(ProgressEvent{Phase: "todo", Stage: "iteration_start", Attempt: retries + 1, Detail: "distributing todo items to sub-agents"})
+		totalActive := countOpenTodos(res.Todos)
+		doneThisPass := 0
+		for i := range res.Todos {
+			td := &res.Todos[i]
+			if td.Status == "done" {
+				continue
+			}
+			spec := topo.Specialists[i%len(topo.Specialists)]
+			td.Assignee = spec
+			td.Attempt = retries + 1
+			td.Status = "in_progress"
+			vis := agentVisibilityFor(spec)
+			emit(ProgressEvent{
+				Phase:  "specialist",
+				Stage:  "start",
+				Index:  doneThisPass + 1,
+				Total:  totalActive,
+				Role:   spec,
+				TodoID: td.ID,
+				Detail: td.Title,
+				Status: td.Status,
+				Tools:  vis.ToolsUsed,
+				Skills: vis.SkillsUsed,
+				Memory: vis.MemoryUsed,
+			})
+
+			out, err := o.specialist(ctx, sys, spec, td.Title)
+			if err != nil {
+				out = fmt.Sprintf("(specialist %s error: %v)", spec, err)
+			}
+			score, fb, err := o.criticSubAgent(ctx, sys, goal, td.Title, out)
+			if err != nil {
+				score, fb = 0.5, err.Error()
+			}
+			status := "accepted"
+			td.Status = "done"
+			td.Feedback = ""
+			if score < topo.CriticThreshold {
+				status = "needs_followup"
+				td.Status = "needs_followup"
+				td.Feedback = fb
+			}
+			latestByTodo[td.ID] = out
+			res.SubResults[fmt.Sprintf("%s:%s", spec, td.ID)] = out
+			res.SubAgentReports = append(res.SubAgentReports, SubAgentReport{
+				TodoID:     td.ID,
+				Role:       spec,
+				Task:       td.Title,
+				Attempt:    retries + 1,
+				Output:     out,
+				Critique:   fb,
+				Score:      score,
+				Status:     status,
+				ToolsUsed:  vis.ToolsUsed,
+				SkillsUsed: vis.SkillsUsed,
+				MemoryUsed: vis.MemoryUsed,
+			})
+			emit(ProgressEvent{
+				Phase:  "specialist",
+				Stage:  "end",
+				Index:  doneThisPass + 1,
+				Total:  totalActive,
+				Role:   spec,
+				TodoID: td.ID,
+				Status: td.Status,
+				Score:  score,
+				Tools:  vis.ToolsUsed,
+				Skills: vis.SkillsUsed,
+				Memory: vis.MemoryUsed,
+				Detail: fb,
+			})
+			doneThisPass++
+		}
+		emit(ProgressEvent{Phase: "todo", Stage: "iteration_end", Attempt: retries + 1, Detail: "sub-agents finished assigned todos"})
+
+		merged := mergeTodoResults(res.Todos, latestByTodo)
 		emit(ProgressEvent{Phase: "critic", Stage: "start", Attempt: retries + 1, Detail: "scoring merged draft"})
 		score, rationale, err := o.critic(ctx, sys, topo, goal, merged)
 		if err != nil {
@@ -176,6 +303,7 @@ func (o *Orchestrator) RunWithProgress(ctx context.Context, goal string, onProgr
 			rationale = err.Error()
 		}
 		res.CriticScores[fmt.Sprintf("attempt_%d", retries)] = score
+		res.GlobalCritique = append(res.GlobalCritique, CritiqueAttempt{Attempt: retries + 1, Score: score, Rationale: rationale})
 		emit(ProgressEvent{
 			Phase:     "critic",
 			Stage:     "end",
@@ -183,28 +311,60 @@ func (o *Orchestrator) RunWithProgress(ctx context.Context, goal string, onProgr
 			Score:     score,
 			Threshold: topo.CriticThreshold,
 		})
+		ver, verr := o.testAndPreview(ctx, sys, goal, merged)
+		if verr != nil {
+			ver = VerificationResult{Summary: verr.Error(), Checks: []string{"preview unavailable"}, Passed: false}
+		}
+		res.Verification = ver
+		if ver.Passed {
+			emit(ProgressEvent{Phase: "verify", Stage: "end", Attempt: retries + 1, Status: "passed", Detail: ver.Summary})
+		} else {
+			emit(ProgressEvent{Phase: "verify", Stage: "end", Attempt: retries + 1, Status: "failed", Detail: ver.Summary})
+		}
 		if score >= topo.CriticThreshold || retries >= topo.MaxCriticRetries {
 			res.Final = merged + "\n\n[critic score=" + fmt.Sprintf("%.2f", score) + "] " + rationale
 			res.Retries = retries
+			res.CompletedTodos, res.TotalTodos = summarizeTodos(res.Todos)
+			res.AgentVisibility = aggregateVisibility(res.SubAgentReports)
 			emit(ProgressEvent{Phase: "harness", Stage: "end", Attempt: retries + 1, Score: score, Threshold: topo.CriticThreshold})
 			return res, nil
 		}
 		emit(ProgressEvent{Phase: "critic", Stage: "retry", Attempt: retries + 1, Score: score, Threshold: topo.CriticThreshold})
-		emit(ProgressEvent{Phase: "refine", Stage: "start", Attempt: retries + 1, Detail: "refining draft from critique"})
-		merged, err = o.refine(ctx, sys, goal, merged, rationale)
-		if err != nil {
-			merged = merged + "\n" + rationale
+		emit(ProgressEvent{Phase: "refine", Stage: "start", Attempt: retries + 1, Detail: "creating follow-up todos from critique gaps"})
+		newTodos, err := o.followUpTodos(ctx, sys, goal, rationale, res.Todos, retries+2)
+		if err != nil || len(newTodos) == 0 {
+			newTodos = []TodoItem{{
+				ID:        fmt.Sprintf("todo-followup-%02d", retries+1),
+				Title:     "Address critique gaps: " + truncate(rationale, 180),
+				Status:    "pending",
+				Attempt:   retries + 2,
+				CreatedBy: "critic",
+			}}
+		}
+		for _, td := range newTodos {
+			res.Plan = append(res.Plan, td.Title)
+			res.Todos = append(res.Todos, td)
+			res.IterationNotes = append(res.IterationNotes, fmt.Sprintf("attempt %d added todo %s: %s", retries+1, td.ID, td.Title))
+			emit(ProgressEvent{Phase: "todo", Stage: "created", Attempt: retries + 2, TodoID: td.ID, Detail: td.Title, Status: td.Status})
 		}
 		emit(ProgressEvent{Phase: "refine", Stage: "end", Attempt: retries + 1})
 		retries++
 	}
 }
 
-func mergeSubResults(m map[string]string) string {
+func mergeTodoResults(todos []TodoItem, latestByTodo map[string]string) string {
 	var b strings.Builder
-	for k, v := range m {
+	for _, td := range todos {
+		v := strings.TrimSpace(latestByTodo[td.ID])
+		if v == "" {
+			continue
+		}
 		b.WriteString("### ")
-		b.WriteString(k)
+		b.WriteString(td.ID)
+		b.WriteString(" [")
+		b.WriteString(td.Assignee)
+		b.WriteString("] ")
+		b.WriteString(td.Title)
 		b.WriteString("\n")
 		b.WriteString(v)
 		b.WriteString("\n\n")
@@ -240,6 +400,28 @@ func (o *Orchestrator) specialist(ctx context.Context, sys, role, step string) (
 	return o.chat(ctx, o.LLM.Model, sys, prompt)
 }
 
+func (o *Orchestrator) criticSubAgent(ctx context.Context, sys, goal, task, output string) (float64, string, error) {
+	prompt := fmt.Sprintf(`Critique this sub-agent task output against the goal and task. Reply JSON only:
+{"score":0.0,"feedback":"..."}
+Goal: %s
+Task: %s
+Output:
+%s`, goal, task, output)
+	raw, err := o.chat(ctx, o.LLM.Model, sys, prompt)
+	if err != nil {
+		return 0, "", err
+	}
+	var out struct {
+		Score    float64 `json:"score"`
+		Feedback string  `json:"feedback"`
+	}
+	_ = json.Unmarshal([]byte(extractJSON(raw)), &out)
+	if out.Score == 0 && !strings.Contains(raw, "score") {
+		return 0.5, truncate(raw, 240), nil
+	}
+	return out.Score, strings.TrimSpace(out.Feedback), nil
+}
+
 func (o *Orchestrator) critic(ctx context.Context, sys string, topo Topology, goal, draft string) (float64, string, error) {
 	prompt := fmt.Sprintf(`Score 0.0-1.0 how well the draft satisfies the goal. Reply JSON only: {"score":0.0,"rationale":"..."}
 Goal: %s
@@ -260,9 +442,60 @@ Draft:
 	return out.Score, out.Rationale, nil
 }
 
-func (o *Orchestrator) refine(ctx context.Context, sys, goal, draft, critique string) (string, error) {
-	prompt := fmt.Sprintf("Improve the draft using the critique.\nGoal: %s\nCritique: %s\nDraft:\n%s", goal, critique, draft)
-	return o.chat(ctx, o.LLM.Model, sys, prompt)
+func (o *Orchestrator) followUpTodos(ctx context.Context, sys, goal, critique string, existing []TodoItem, attempt int) ([]TodoItem, error) {
+	existingTitles := make([]string, 0, len(existing))
+	for _, td := range existing {
+		existingTitles = append(existingTitles, td.Title)
+	}
+	prompt := fmt.Sprintf(`Generate 1-3 additional todo items needed to meet the goal based on critique.
+Rules: one line per todo, concise, non-empty, no numbering.
+Goal: %s
+Critique: %s
+Existing todos:
+%s`, goal, critique, strings.Join(existingTitles, "\n"))
+	raw, err := o.chat(ctx, o.LLM.Model, sys, prompt)
+	if err != nil {
+		return nil, err
+	}
+	var out []TodoItem
+	seen := map[string]bool{}
+	for i, line := range strings.Split(raw, "\n") {
+		line = strings.TrimSpace(strings.TrimLeft(line, "-*0123456789. "))
+		if line == "" || seen[strings.ToLower(line)] {
+			continue
+		}
+		seen[strings.ToLower(line)] = true
+		out = append(out, TodoItem{
+			ID:        fmt.Sprintf("todo-%02d-a%d", i+1, attempt),
+			Title:     line,
+			Status:    "pending",
+			Attempt:   attempt,
+			CreatedBy: "critic",
+		})
+		if len(out) >= 3 {
+			break
+		}
+	}
+	return out, nil
+}
+
+func (o *Orchestrator) testAndPreview(ctx context.Context, sys, goal, draft string) (VerificationResult, error) {
+	prompt := fmt.Sprintf(`Act as the main agent verifier. Evaluate testability and preview quality for the draft against the goal.
+Reply JSON only:
+{"summary":"...","checks":["...","..."],"passed":true}
+Goal: %s
+Draft:
+%s`, goal, draft)
+	raw, err := o.chat(ctx, o.LLM.Model, sys, prompt)
+	if err != nil {
+		return VerificationResult{}, err
+	}
+	var out VerificationResult
+	_ = json.Unmarshal([]byte(extractJSON(raw)), &out)
+	if strings.TrimSpace(out.Summary) == "" {
+		out.Summary = truncate(strings.TrimSpace(raw), 220)
+	}
+	return out, nil
 }
 
 func extractJSON(s string) string {
@@ -334,6 +567,76 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "..."
+}
+
+func countOpenTodos(todos []TodoItem) int {
+	n := 0
+	for _, td := range todos {
+		if td.Status != "done" {
+			n++
+		}
+	}
+	return n
+}
+
+func summarizeTodos(todos []TodoItem) (done, total int) {
+	for _, td := range todos {
+		total++
+		if td.Status == "done" {
+			done++
+		}
+	}
+	return done, total
+}
+
+func agentVisibilityFor(role string) AgentVisibility {
+	return AgentVisibility{
+		Role:       role,
+		ToolsUsed:  []string{"chat_completions"},
+		SkillsUsed: []string{role},
+		MemoryUsed: []string{"active_system_prompt", "goal", "todo_item"},
+	}
+}
+
+func aggregateVisibility(reports []SubAgentReport) []AgentVisibility {
+	byRole := map[string]AgentVisibility{}
+	for _, r := range reports {
+		v, ok := byRole[r.Role]
+		if !ok {
+			v = AgentVisibility{Role: r.Role}
+		}
+		v.ToolsUsed = unionStrings(v.ToolsUsed, r.ToolsUsed)
+		v.SkillsUsed = unionStrings(v.SkillsUsed, r.SkillsUsed)
+		v.MemoryUsed = unionStrings(v.MemoryUsed, r.MemoryUsed)
+		byRole[r.Role] = v
+	}
+	out := make([]AgentVisibility, 0, len(byRole))
+	for _, v := range byRole {
+		out = append(out, v)
+	}
+	return out
+}
+
+func unionStrings(a, b []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(a)+len(b))
+	for _, s := range a {
+		s = strings.TrimSpace(s)
+		if s == "" || seen[s] {
+			continue
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+	for _, s := range b {
+		s = strings.TrimSpace(s)
+		if s == "" || seen[s] {
+			continue
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+	return out
 }
 
 // ApplyTopologyMutation merges JSON diff into harness config (after human approval).

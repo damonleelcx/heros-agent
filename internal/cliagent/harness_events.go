@@ -12,21 +12,25 @@ const HarnessEventPrefix = "[harness_event] "
 // HarnessEvent is a normalized streaming event for harness-style timeline views.
 // One event is emitted per line with a stable prefix + JSON payload.
 type HarnessEvent struct {
-	Phase      string  `json:"phase"`
-	Stage      string  `json:"stage"`
-	Message    string  `json:"message,omitempty"`
-	Index      int     `json:"index,omitempty"`
-	Total      int     `json:"total,omitempty"`
-	Attempt    int     `json:"attempt,omitempty"`
-	Role       string  `json:"role,omitempty"`
-	Score      float64 `json:"score,omitempty"`
-	Threshold  float64 `json:"threshold,omitempty"`
-	Start      string  `json:"start,omitempty"`
-	End        string  `json:"end,omitempty"`
-	DurationMS int64   `json:"duration_ms,omitempty"`
-	ToolID     string  `json:"tool_id,omitempty"`
-	ToolName   string  `json:"tool_name,omitempty"`
-	Status     string  `json:"status,omitempty"`
+	Phase      string   `json:"phase"`
+	Stage      string   `json:"stage"`
+	Message    string   `json:"message,omitempty"`
+	Index      int      `json:"index,omitempty"`
+	Total      int      `json:"total,omitempty"`
+	Attempt    int      `json:"attempt,omitempty"`
+	Role       string   `json:"role,omitempty"`
+	TodoID     string   `json:"todo_id,omitempty"`
+	Score      float64  `json:"score,omitempty"`
+	Threshold  float64  `json:"threshold,omitempty"`
+	Tools      []string `json:"tools,omitempty"`
+	Skills     []string `json:"skills,omitempty"`
+	Memory     []string `json:"memory,omitempty"`
+	Start      string   `json:"start,omitempty"`
+	End        string   `json:"end,omitempty"`
+	DurationMS int64    `json:"duration_ms,omitempty"`
+	ToolID     string   `json:"tool_id,omitempty"`
+	ToolName   string   `json:"tool_name,omitempty"`
+	Status     string   `json:"status,omitempty"`
 }
 
 func emitHarnessEvent(out io.Writer, ev HarnessEvent) {
