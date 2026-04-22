@@ -378,21 +378,34 @@ func (s *Session) maybeAutoConsolidate(ctx context.Context) {
 }
 
 func emitHarnessProgressEvent(out io.Writer, ev harness.ProgressEvent) {
+	if out == nil {
+		return
+	}
+	if HarnessProgressWriterPrefersPlainText(out) {
+		if s := FormatHarnessProgressLine(ev); strings.TrimSpace(s) != "" {
+			_, _ = fmt.Fprintln(out, s)
+		}
+		return
+	}
 	emitHarnessEvent(out, HarnessEvent{
-		Phase:     "harness_" + strings.TrimSpace(ev.Phase),
-		Stage:     ev.Stage,
-		Message:   ev.Detail,
-		Index:     ev.Index,
-		Total:     ev.Total,
-		Attempt:   ev.Attempt,
-		Role:      ev.Role,
-		TodoID:    ev.TodoID,
-		Score:     ev.Score,
-		Threshold: ev.Threshold,
-		Status:    ev.Status,
-		Tools:     ev.Tools,
-		Skills:    ev.Skills,
-		Memory:    ev.Memory,
+		Phase:             "harness_" + strings.TrimSpace(ev.Phase),
+		Stage:             ev.Stage,
+		Message:           ev.Detail,
+		Index:             ev.Index,
+		Total:             ev.Total,
+		Attempt:           ev.Attempt,
+		Role:              ev.Role,
+		TodoID:            ev.TodoID,
+		Score:             ev.Score,
+		Threshold:         ev.Threshold,
+		Status:            ev.Status,
+		Tools:             ev.Tools,
+		Skills:            ev.Skills,
+		Memory:            ev.Memory,
+		Section:           ev.Section,
+		SectionLabel:      ev.SectionLabel,
+		SectionStep:       ev.SectionStep,
+		SectionStepsTotal: ev.SectionStepsTotal,
 	})
 }
 

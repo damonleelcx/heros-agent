@@ -93,82 +93,8 @@ func renderHarnessEventLine(line string) (string, bool) {
 			}
 			return fmt.Sprintf("[exec] done %s status=%s", name, strings.TrimSpace(ev.Status)), true
 		}
-	case "leader":
-		if ev.Stage == "start" {
-			return "[harness] main-agent defining goal + todo list", true
-		}
-		if ev.Stage == "end" {
-			if ev.Total > 0 {
-				return fmt.Sprintf("[harness] main-agent todo list ready (%d todos)", ev.Total), true
-			}
-			return "[harness] leader ready", true
-		}
-	case "specialist":
-		n := ""
-		if ev.Index > 0 && ev.Total > 0 {
-			n = fmt.Sprintf(" %d/%d", ev.Index, ev.Total)
-		}
-		role := strings.TrimSpace(ev.Role)
-		if role != "" {
-			role = " " + role
-		}
-		todo := strings.TrimSpace(ev.TodoID)
-		if todo != "" {
-			todo = " " + todo
-		}
-		usage := ""
-		if len(ev.Tools) > 0 || len(ev.Skills) > 0 || len(ev.Memory) > 0 {
-			usage = fmt.Sprintf(" | tools=%s skills=%s memory=%s",
-				strings.Join(ev.Tools, ","),
-				strings.Join(ev.Skills, ","),
-				strings.Join(ev.Memory, ","),
-			)
-		}
-		return fmt.Sprintf("[harness] sub-agent%s%s%s %s%s", n, role, todo, ev.Stage, usage), true
-	case "todo":
-		if ev.Stage == "created" && strings.TrimSpace(ev.TodoID) != "" {
-			msg := strings.TrimSpace(ev.Message)
-			if msg != "" {
-				return fmt.Sprintf("[harness] todo created %s: %s", ev.TodoID, msg), true
-			}
-			return fmt.Sprintf("[harness] todo created %s", ev.TodoID), true
-		}
-		if ev.Stage == "iteration_start" && ev.Attempt > 0 {
-			return fmt.Sprintf("[harness] main-agent distributing todos (iteration %d)", ev.Attempt), true
-		}
-		if ev.Stage == "iteration_end" && ev.Attempt > 0 {
-			return fmt.Sprintf("[harness] sub-agents completed iteration %d", ev.Attempt), true
-		}
-	case "verify":
-		if ev.Attempt > 0 {
-			return fmt.Sprintf("[harness] main-agent test/preview attempt %d %s", ev.Attempt, ev.Status), true
-		}
-		return fmt.Sprintf("[harness] verify %s", ev.Status), true
-	case "critic":
-		if ev.Stage == "retry" {
-			if ev.Attempt > 0 {
-				return fmt.Sprintf("[harness] critic retry %d", ev.Attempt), true
-			}
-			return "[harness] critic retry", true
-		}
-		if ev.Stage == "end" && ev.Attempt > 0 {
-			return fmt.Sprintf("[harness] critic attempt %d score %.2f", ev.Attempt, ev.Score), true
-		}
-		if ev.Stage == "start" && ev.Attempt > 0 {
-			return fmt.Sprintf("[harness] critic attempt %d", ev.Attempt), true
-		}
-	case "refine":
-		if ev.Attempt > 0 {
-			return fmt.Sprintf("[harness] refine %s %d", ev.Stage, ev.Attempt), true
-		}
-		return fmt.Sprintf("[harness] refine %s", ev.Stage), true
-	case "harness":
-		if ev.Stage == "start" {
-			return "[harness] run started", true
-		}
-		if ev.Stage == "end" {
-			return fmt.Sprintf("[harness] run complete (score %.2f)", ev.Score), true
-		}
+	case "leader", "specialist", "feedback", "todo", "verify", "critic", "refine", "harness":
+		return cliagent.FormatHarnessProgressLine(cliagent.HarnessEventToProgressEvent(ev)), true
 	}
 	return fmt.Sprintf("[harness] %s %s", phase, ev.Stage), true
 }

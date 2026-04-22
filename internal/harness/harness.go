@@ -147,22 +147,53 @@ type AgentVisibility struct {
 	MemoryUsed []string `json:"memory_used"`
 }
 
+// Harness pipeline sections (1–5) for progress displays.
+const (
+	SectionPlanning  = 1 // planning, todo, goal
+	SectionSubagents = 2 // sub-agents execute work
+	SectionFeedback  = 3 // feedback, critic, score
+	SectionRetry     = 4 // retry, redo
+	SectionRepeat    = 5 // repeat until done
+)
+
+const (
+	SectionLabelPlanning  = "planning"
+	SectionLabelSubagents = "subagents"
+	SectionLabelFeedback  = "feedback"
+	SectionLabelRetry     = "retry"
+	SectionLabelRepeat    = "repeat"
+)
+
+func progressSection(ev ProgressEvent, section int, label string, step, stepsTotal int) ProgressEvent {
+	ev.Section = section
+	ev.SectionLabel = label
+	if step > 0 && stepsTotal > 0 {
+		ev.SectionStep = step
+		ev.SectionStepsTotal = stepsTotal
+	}
+	return ev
+}
+
 // ProgressEvent is a structured lifecycle event emitted while harness execution is in-flight.
 type ProgressEvent struct {
-	Phase     string   `json:"phase"`
-	Stage     string   `json:"stage"`
-	Detail    string   `json:"detail,omitempty"`
-	Index     int      `json:"index,omitempty"`
-	Total     int      `json:"total,omitempty"`
-	Role      string   `json:"role,omitempty"`
-	TodoID    string   `json:"todo_id,omitempty"`
-	Status    string   `json:"status,omitempty"`
-	Tools     []string `json:"tools,omitempty"`
-	Skills    []string `json:"skills,omitempty"`
-	Memory    []string `json:"memory,omitempty"`
-	Attempt   int      `json:"attempt,omitempty"`
-	Score     float64  `json:"score,omitempty"`
-	Threshold float64  `json:"threshold,omitempty"`
+	Phase             string   `json:"phase"`
+	Stage             string   `json:"stage"`
+	Detail            string   `json:"detail,omitempty"`
+	Index             int      `json:"index,omitempty"`
+	Total             int      `json:"total,omitempty"`
+	Role              string   `json:"role,omitempty"`
+	TodoID            string   `json:"todo_id,omitempty"`
+	Status            string   `json:"status,omitempty"`
+	Tools             []string `json:"tools,omitempty"`
+	Skills            []string `json:"skills,omitempty"`
+	Memory            []string `json:"memory,omitempty"`
+	Attempt           int      `json:"attempt,omitempty"`
+	Score             float64  `json:"score,omitempty"`
+	Threshold         float64  `json:"threshold,omitempty"`
+	Section           int      `json:"section,omitempty"`
+	SectionLabel      string   `json:"section_label,omitempty"`
+	SectionStep       int      `json:"section_step,omitempty"`
+	SectionStepsTotal int      `json:"section_steps_total,omitempty"`
 }
 
 // Run executes leader decomposition, parallel specialist stubs, critic loop.
@@ -177,23 +208,32 @@ func (o *Orchestrator) RunWithProgress(ctx context.Context, goal string, onProgr
 			onProgress(ev)
 		}
 	}
-	emit(ProgressEvent{Phase: "harness", Stage: "start", Detail: "starting harness run"})
 	topo, err := LoadTopology(o.DB)
 	if err != nil {
 		return nil, err
+	}
+	maxPasses := topo.MaxCriticRetries + 1
+	if maxPasses < 1 {
+		maxPasses = 1
 	}
 	sys, _, err := promptlayer.LoadActiveSystemPrompt(o.DB, o.DataDir)
 	if err != nil {
 		sys = ""
 	}
 
+	g := strings.TrimSpace(goal)
+	if g == "" {
+		g = "(empty goal)"
+	}
+	emit(progressSection(ProgressEvent{Phase: "harness", Stage: "start", Detail: g}, SectionPlanning, SectionLabelPlanning, 1, 3))
+
 	// Leader: define explicit todo list tied to the goal.
-	emit(ProgressEvent{Phase: "leader", Stage: "start", Detail: "defining goal-aligned todo list"})
+	emit(progressSection(ProgressEvent{Phase: "leader", Stage: "start", Detail: "defining goal-aligned todo list"}, SectionPlanning, SectionLabelPlanning, 2, 3))
 	plan, err := o.leaderPlan(ctx, sys, topo, goal)
 	if err != nil {
 		plan = []string{goal}
 	}
-	emit(ProgressEvent{Phase: "leader", Stage: "end", Total: len(plan), Detail: "todo list ready"})
+	emit(progressSection(ProgressEvent{Phase: "leader", Stage: "end", Total: len(plan), Detail: "todo list ready"}, SectionPlanning, SectionLabelPlanning, 2, 3))
 
 	todos := make([]TodoItem, 0, len(plan))
 	for i, step := range plan {
@@ -204,7 +244,15 @@ func (o *Orchestrator) RunWithProgress(ctx context.Context, goal string, onProgr
 			Attempt:   1,
 			CreatedBy: "leader",
 		})
-		emit(ProgressEvent{Phase: "todo", Stage: "created", Index: i + 1, Total: len(plan), TodoID: fmt.Sprintf("todo-%02d", i+1), Detail: step, Status: "pending"})
+		emit(progressSection(ProgressEvent{
+			Phase:  "todo",
+			Stage:  "created",
+			Index:  i + 1,
+			Total:  len(plan),
+			TodoID: fmt.Sprintf("todo-%02d", i+1),
+			Detail: step,
+			Status: "pending",
+		}, SectionPlanning, SectionLabelPlanning, 3, 3))
 	}
 
 	res := &RunResult{
@@ -219,7 +267,14 @@ func (o *Orchestrator) RunWithProgress(ctx context.Context, goal string, onProgr
 	retries := 0
 	latestByTodo := map[string]string{}
 	for {
-		emit(ProgressEvent{Phase: "todo", Stage: "iteration_start", Attempt: retries + 1, Detail: "distributing todo items to sub-agents"})
+		emit(progressSection(ProgressEvent{
+			Phase:   "todo",
+			Stage:   "iteration_start",
+			Attempt: retries + 1,
+			Detail:  "distributing todo items to sub-agents",
+			Index:   retries + 1,
+			Total:   maxPasses,
+		}, SectionRepeat, SectionLabelRepeat, retries+1, maxPasses))
 		totalActive := countOpenTodos(res.Todos)
 		doneThisPass := 0
 		for i := range res.Todos {
@@ -232,7 +287,7 @@ func (o *Orchestrator) RunWithProgress(ctx context.Context, goal string, onProgr
 			td.Attempt = retries + 1
 			td.Status = "in_progress"
 			vis := agentVisibilityFor(spec)
-			emit(ProgressEvent{
+			emit(progressSection(ProgressEvent{
 				Phase:  "specialist",
 				Stage:  "start",
 				Index:  doneThisPass + 1,
@@ -244,12 +299,38 @@ func (o *Orchestrator) RunWithProgress(ctx context.Context, goal string, onProgr
 				Tools:  vis.ToolsUsed,
 				Skills: vis.SkillsUsed,
 				Memory: vis.MemoryUsed,
-			})
+			}, SectionSubagents, SectionLabelSubagents, 0, 0))
 
 			out, err := o.specialist(ctx, sys, spec, td.Title)
 			if err != nil {
 				out = fmt.Sprintf("(specialist %s error: %v)", spec, err)
 			}
+			emit(progressSection(ProgressEvent{
+				Phase:  "specialist",
+				Stage:  "end",
+				Index:  doneThisPass + 1,
+				Total:  totalActive,
+				Role:   spec,
+				TodoID: td.ID,
+				Status: "output_ready",
+				Tools:  vis.ToolsUsed,
+				Skills: vis.SkillsUsed,
+				Memory: vis.MemoryUsed,
+				Detail: "sub-agent output ready",
+			}, SectionSubagents, SectionLabelSubagents, 0, 0))
+
+			emit(progressSection(ProgressEvent{
+				Phase:  "feedback",
+				Stage:  "start",
+				Index:  doneThisPass + 1,
+				Total:  totalActive,
+				Role:   spec,
+				TodoID: td.ID,
+				Detail: "critic scoring sub-agent output",
+				Tools:  vis.ToolsUsed,
+				Skills: vis.SkillsUsed,
+				Memory: vis.MemoryUsed,
+			}, SectionFeedback, SectionLabelFeedback, 0, 0))
 			score, fb, err := o.criticSubAgent(ctx, sys, goal, td.Title, out)
 			if err != nil {
 				score, fb = 0.5, err.Error()
@@ -277,26 +358,39 @@ func (o *Orchestrator) RunWithProgress(ctx context.Context, goal string, onProgr
 				SkillsUsed: vis.SkillsUsed,
 				MemoryUsed: vis.MemoryUsed,
 			})
-			emit(ProgressEvent{
-				Phase:  "specialist",
-				Stage:  "end",
-				Index:  doneThisPass + 1,
-				Total:  totalActive,
-				Role:   spec,
-				TodoID: td.ID,
-				Status: td.Status,
-				Score:  score,
-				Tools:  vis.ToolsUsed,
-				Skills: vis.SkillsUsed,
-				Memory: vis.MemoryUsed,
-				Detail: fb,
-			})
+			emit(progressSection(ProgressEvent{
+				Phase:     "feedback",
+				Stage:     "end",
+				Index:     doneThisPass + 1,
+				Total:     totalActive,
+				Role:      spec,
+				TodoID:    td.ID,
+				Status:    td.Status,
+				Score:     score,
+				Threshold: topo.CriticThreshold,
+				Tools:     vis.ToolsUsed,
+				Skills:    vis.SkillsUsed,
+				Memory:    vis.MemoryUsed,
+				Detail:    fb,
+			}, SectionFeedback, SectionLabelFeedback, 0, 0))
 			doneThisPass++
 		}
-		emit(ProgressEvent{Phase: "todo", Stage: "iteration_end", Attempt: retries + 1, Detail: "sub-agents finished assigned todos"})
+		emit(progressSection(ProgressEvent{
+			Phase:   "todo",
+			Stage:   "iteration_end",
+			Attempt: retries + 1,
+			Detail:  "sub-agents finished assigned todos",
+			Index:   retries + 1,
+			Total:   maxPasses,
+		}, SectionRepeat, SectionLabelRepeat, retries+1, maxPasses))
 
 		merged := mergeTodoResults(res.Todos, latestByTodo)
-		emit(ProgressEvent{Phase: "critic", Stage: "start", Attempt: retries + 1, Detail: "scoring merged draft"})
+		emit(progressSection(ProgressEvent{
+			Phase:   "critic",
+			Stage:   "start",
+			Attempt: retries + 1,
+			Detail:  "scoring merged draft",
+		}, SectionFeedback, SectionLabelFeedback, 1, 2))
 		score, rationale, err := o.critic(ctx, sys, topo, goal, merged)
 		if err != nil {
 			score = 0.6
@@ -304,33 +398,61 @@ func (o *Orchestrator) RunWithProgress(ctx context.Context, goal string, onProgr
 		}
 		res.CriticScores[fmt.Sprintf("attempt_%d", retries)] = score
 		res.GlobalCritique = append(res.GlobalCritique, CritiqueAttempt{Attempt: retries + 1, Score: score, Rationale: rationale})
-		emit(ProgressEvent{
+		emit(progressSection(ProgressEvent{
 			Phase:     "critic",
 			Stage:     "end",
 			Attempt:   retries + 1,
 			Score:     score,
 			Threshold: topo.CriticThreshold,
-		})
+			Detail:    truncate(strings.TrimSpace(rationale), 240),
+		}, SectionFeedback, SectionLabelFeedback, 1, 2))
+		emit(progressSection(ProgressEvent{
+			Phase:   "verify",
+			Stage:   "start",
+			Attempt: retries + 1,
+			Detail:  "test and preview",
+		}, SectionFeedback, SectionLabelFeedback, 2, 2))
 		ver, verr := o.testAndPreview(ctx, sys, goal, merged)
 		if verr != nil {
 			ver = VerificationResult{Summary: verr.Error(), Checks: []string{"preview unavailable"}, Passed: false}
 		}
 		res.Verification = ver
 		if ver.Passed {
-			emit(ProgressEvent{Phase: "verify", Stage: "end", Attempt: retries + 1, Status: "passed", Detail: ver.Summary})
+			emit(progressSection(ProgressEvent{Phase: "verify", Stage: "end", Attempt: retries + 1, Status: "passed", Detail: ver.Summary}, SectionFeedback, SectionLabelFeedback, 2, 2))
 		} else {
-			emit(ProgressEvent{Phase: "verify", Stage: "end", Attempt: retries + 1, Status: "failed", Detail: ver.Summary})
+			emit(progressSection(ProgressEvent{Phase: "verify", Stage: "end", Attempt: retries + 1, Status: "failed", Detail: ver.Summary}, SectionFeedback, SectionLabelFeedback, 2, 2))
 		}
 		if score >= topo.CriticThreshold || retries >= topo.MaxCriticRetries {
 			res.Final = merged + "\n\n[critic score=" + fmt.Sprintf("%.2f", score) + "] " + rationale
 			res.Retries = retries
 			res.CompletedTodos, res.TotalTodos = summarizeTodos(res.Todos)
 			res.AgentVisibility = aggregateVisibility(res.SubAgentReports)
-			emit(ProgressEvent{Phase: "harness", Stage: "end", Attempt: retries + 1, Score: score, Threshold: topo.CriticThreshold})
+			emit(progressSection(ProgressEvent{
+				Phase:     "harness",
+				Stage:     "end",
+				Attempt:   retries + 1,
+				Score:     score,
+				Threshold: topo.CriticThreshold,
+				Detail:    "done",
+				Index:     retries + 1,
+				Total:     maxPasses,
+			}, SectionRepeat, SectionLabelRepeat, retries+1, maxPasses))
 			return res, nil
 		}
-		emit(ProgressEvent{Phase: "critic", Stage: "retry", Attempt: retries + 1, Score: score, Threshold: topo.CriticThreshold})
-		emit(ProgressEvent{Phase: "refine", Stage: "start", Attempt: retries + 1, Detail: "creating follow-up todos from critique gaps"})
+		emit(progressSection(ProgressEvent{
+			Phase:     "critic",
+			Stage:     "retry",
+			Attempt:   retries + 1,
+			Score:     score,
+			Threshold: topo.CriticThreshold,
+			Detail:    "below threshold; redo with follow-up todos",
+		}, SectionRetry, SectionLabelRetry, 1, 2))
+		emit(progressSection(ProgressEvent{
+			Phase:   "refine",
+			Stage:   "start",
+			Attempt: retries + 1,
+			Detail:  "creating follow-up todos from critique gaps",
+		}, SectionRetry, SectionLabelRetry, 2, 2))
 		newTodos, err := o.followUpTodos(ctx, sys, goal, rationale, res.Todos, retries+2)
 		if err != nil || len(newTodos) == 0 {
 			newTodos = []TodoItem{{
@@ -341,13 +463,22 @@ func (o *Orchestrator) RunWithProgress(ctx context.Context, goal string, onProgr
 				CreatedBy: "critic",
 			}}
 		}
-		for _, td := range newTodos {
+		for j, td := range newTodos {
 			res.Plan = append(res.Plan, td.Title)
 			res.Todos = append(res.Todos, td)
 			res.IterationNotes = append(res.IterationNotes, fmt.Sprintf("attempt %d added todo %s: %s", retries+1, td.ID, td.Title))
-			emit(ProgressEvent{Phase: "todo", Stage: "created", Attempt: retries + 2, TodoID: td.ID, Detail: td.Title, Status: td.Status})
+			emit(progressSection(ProgressEvent{
+				Phase:   "todo",
+				Stage:   "created",
+				Attempt: retries + 2,
+				TodoID:  td.ID,
+				Detail:  td.Title,
+				Status:  td.Status,
+				Index:   j + 1,
+				Total:   len(newTodos),
+			}, SectionRetry, SectionLabelRetry, 2, 2))
 		}
-		emit(ProgressEvent{Phase: "refine", Stage: "end", Attempt: retries + 1})
+		emit(progressSection(ProgressEvent{Phase: "refine", Stage: "end", Attempt: retries + 1}, SectionRetry, SectionLabelRetry, 2, 2))
 		retries++
 	}
 }

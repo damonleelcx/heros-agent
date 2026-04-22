@@ -111,10 +111,10 @@ func (s *Session) DispatchReplSlash(ctx context.Context, line string, out, errOu
 	case "/harness":
 		rest := strings.TrimSpace(line[len(parts[0]):])
 		if rest == "" {
-			_, _ = fmt.Fprintln(errOut, "usage: /harness <goal>  — runs leader → rotating specialists → critic (same process as heros; uses your LLM config)")
+			_, _ = fmt.Fprintln(errOut, "usage: /harness <goal>  — 规划→子代理→反馈/评分→（必要时）重试→循环直到完成（与 heros 相同流程；使用当前 LLM 配置）")
 			return true, false
 		}
-		_, _ = fmt.Fprintln(out, "(harness running — leader, specialists, critic; may take a minute…) ")
+		_, _ = fmt.Fprintln(out, "（harness 运行中：① 规划/目标/待办 ② 子代理执行 ③ 反馈与评分 ④ 必要时重试与重做 ⑤ 循环直到完成；可能需要一分钟…）")
 		res, err := s.Agentd.HarnessRun(ctx, rest)
 		if err != nil {
 			_, _ = fmt.Fprintf(errOut, "harness: %v\n", err)
