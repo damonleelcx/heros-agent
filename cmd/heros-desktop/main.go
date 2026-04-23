@@ -17,8 +17,8 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/storage"
 	"fyne.io/fyne/v2/widget"
@@ -31,6 +31,7 @@ import (
 
 type uiStreamWriter struct {
 	writeFn func(string)
+	eventFn func(cliagent.HarnessEvent)
 	mu      sync.Mutex
 	pending string
 }
@@ -49,10 +50,18 @@ func (w *uiStreamWriter) Write(p []byte) (int, error) {
 		}
 		line := strings.TrimRight(w.pending[:i], "\r")
 		w.pending = w.pending[i+1:]
-		if rendered, ok := renderHarnessEventLine(line); ok {
-			if strings.TrimSpace(rendered) != "" {
-				w.writeFn(rendered + "\n")
+		if ev, ok := parseHarnessEventLine(line); ok {
+			if w.eventFn != nil {
+				w.eventFn(ev)
 			}
+			rendered := renderHarnessEvent(ev)
+			if strings.TrimSpace(rendered) != "" {
+				w.writeFn(rendered + "\n\n")
+			}
+			continue
+		}
+		if rendered, ok := renderUsageLine(line); ok {
+			w.writeFn(rendered + "\n\n")
 			continue
 		}
 		w.writeFn(line + "\n")
@@ -66,39 +75,101 @@ func (w *uiStreamWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func renderHarnessEventLine(line string) (string, bool) {
+func parseHarnessEventLine(line string) (cliagent.HarnessEvent, bool) {
 	line = strings.TrimSpace(line)
 	if !strings.HasPrefix(line, cliagent.HarnessEventPrefix) {
-		return "", false
+		return cliagent.HarnessEvent{}, false
 	}
 	raw := strings.TrimSpace(strings.TrimPrefix(line, cliagent.HarnessEventPrefix))
 	var ev cliagent.HarnessEvent
 	if err := json.Unmarshal([]byte(raw), &ev); err != nil {
-		return "", false
+		return cliagent.HarnessEvent{}, false
 	}
+	return ev, true
+}
+
+func harnessPercent(ev cliagent.HarnessEvent) int {
 	phase := strings.TrimPrefix(strings.TrimSpace(ev.Phase), "harness_")
+	if phase == "harness" && ev.Stage == "end" {
+		return 100
+	}
+	if ev.Section > 0 && ev.Section <= 5 {
+		base := (ev.Section - 1) * 20
+		if ev.SectionStep > 0 && ev.SectionStepsTotal > 0 {
+			if ev.SectionStep > ev.SectionStepsTotal {
+				ev.SectionStep = ev.SectionStepsTotal
+			}
+			return base + (ev.SectionStep * 20 / ev.SectionStepsTotal)
+		}
+		if ev.Index > 0 && ev.Total > 0 {
+			if ev.Index > ev.Total {
+				ev.Index = ev.Total
+			}
+			return base + (ev.Index * 20 / ev.Total)
+		}
+		return base + 5
+	}
+	if phase == "tool" {
+		if ev.Stage == "start" {
+			return 15
+		}
+		if ev.Stage == "end" {
+			return 25
+		}
+	}
+	return 0
+}
+
+func renderHarnessEvent(ev cliagent.HarnessEvent) string {
+	phase := strings.TrimPrefix(strings.TrimSpace(ev.Phase), "harness_")
+	pct := harnessPercent(ev)
+	prefix := ""
+	if pct > 0 {
+		prefix = fmt.Sprintf("[%d%%] ", pct)
+	}
 	switch phase {
 	case "assistant":
 		// Hide generic assistant runtime chatter in desktop UI.
-		return "", true
+		return ""
 	case "tool":
 		name := strings.TrimSpace(ev.ToolName)
 		if name == "" {
 			name = "tool"
 		}
 		if ev.Stage == "start" {
-			return fmt.Sprintf("[exec] running %s", name), true
+			msg := strings.TrimSpace(ev.Message)
+			if msg != "" {
+				return fmt.Sprintf("%s[exec] running %s\n`%s`", prefix, name, msg)
+			}
+			return fmt.Sprintf("%s[exec] running %s", prefix, name)
 		}
 		if ev.Stage == "end" {
+			out := strings.TrimSpace(ev.Message)
+			status := strings.TrimSpace(ev.Status)
 			if ev.DurationMS > 0 {
-				return fmt.Sprintf("[exec] done %s status=%s (%dms)", name, strings.TrimSpace(ev.Status), ev.DurationMS), true
+				if out != "" {
+					return fmt.Sprintf("%s[exec] done %s status=%s (%dms)\n```text\n%s\n```", prefix, name, status, ev.DurationMS, out)
+				}
+				return fmt.Sprintf("%s[exec] done %s status=%s (%dms)", prefix, name, status, ev.DurationMS)
 			}
-			return fmt.Sprintf("[exec] done %s status=%s", name, strings.TrimSpace(ev.Status)), true
+			if out != "" {
+				return fmt.Sprintf("%s[exec] done %s status=%s\n```text\n%s\n```", prefix, name, status, out)
+			}
+			return fmt.Sprintf("%s[exec] done %s status=%s", prefix, name, status)
 		}
 	case "leader", "specialist", "feedback", "todo", "verify", "critic", "refine", "harness":
-		return cliagent.FormatHarnessProgressLine(cliagent.HarnessEventToProgressEvent(ev)), true
+		return prefix + cliagent.FormatHarnessProgressLine(cliagent.HarnessEventToProgressEvent(ev))
 	}
-	return fmt.Sprintf("[harness] %s %s", phase, ev.Stage), true
+	return prefix + fmt.Sprintf("[harness] %s %s", phase, ev.Stage)
+}
+
+func renderUsageLine(line string) (string, bool) {
+	line = strings.TrimSpace(line)
+	if !strings.HasPrefix(line, "[usage] ") {
+		return "", false
+	}
+	body := strings.TrimSpace(strings.TrimPrefix(line, "[usage]"))
+	return fmt.Sprintf("\n### Summary\n%s\n", body), true
 }
 
 // Set at link time by release builds, e.g. -ldflags "-X main.version=v1.2.3"
@@ -444,13 +515,22 @@ func main() {
 	activity := widget.NewActivity()
 	activity.Hide()
 	statusRow := container.NewHBox(activity, status)
+	progressBar := widget.NewProgressBar()
+	progressBar.Min = 0
+	progressBar.Max = 100
+	progressBar.SetValue(0)
+	progressLabel := widget.NewLabel("")
+	progressBar.Hide()
+	progressLabel.Hide()
+	progressRow := container.NewBorder(nil, nil, nil, nil, container.NewVBox(progressBar, progressLabel))
 
 	outputMD := "## Welcome to Heros Desktop\n\n" +
 		"Everything here runs **locally**: skills, tools, memory, and long harness runs stay on your machine.\n\n" +
 		"> **Try this:** choose a workspace folder on the left, describe what you want to build or fix, then hit **Send**. " +
 		"Git changes refresh after each assistant turn.\n\n" +
-		"*Tip: **Ctrl+Enter** (Windows/Linux) or **⌘+Enter** (macOS) sends from the prompt.*\n\n" +
-		"*Look & feel:* **Appearance** syncs to `heros_desktop` in the agent `config.json` (discovered e.g. next to the repo, `HEROS_CONFIG`, or `~/.heros-agent/config.json`), and to `~/.heros-desktop.json` as a mirror. Per-run overrides: `-theme`, then `HEROS_DESKTOP_*` env.\n\n"
+		"*Tip: **Ctrl+Enter** (Windows/Linux) or **Cmd+Enter** (macOS) sends from the prompt.*\n\n" +
+		"*Look & feel:* **Appearance** is saved under the key `heros_desktop` in the same agent **config.json** the stack discovers (e.g. next to the project, or via `HEROS_CONFIG`, or under **.heros-agent** in the user home). A second copy is mirrored to **.heros-desktop.json** in the user home. " +
+		"Per session you can still override with the **-theme** flag, then **HEROS_DESKTOP_THEME** and **HEROS_DESKTOP_ACCENT** (and similar env names).\n\n"
 	output := widget.NewRichTextFromMarkdown(outputMD)
 	output.Wrapping = fyne.TextWrapWord
 	outputBox := container.NewVScroll(output)
@@ -464,36 +544,35 @@ func main() {
 			outputMu.Unlock()
 			return
 		}
-		outputMD += pendingRender
+		chunk := pendingRender
+		outputMD += chunk
 		pendingRender = ""
 		renderScheduled = false
-		cur := outputMD
 		outputMu.Unlock()
-		output.ParseMarkdown(cur)
+		output.AppendMarkdown(chunk)
 		outputBox.ScrollToBottom()
 	}
 
 	input := widget.NewMultiLineEntry()
 	input.SetMinRowsVisible(6)
 	input.Wrapping = fyne.TextWrapWord
-	input.SetPlaceHolder("Ask in plain language — e.g. “add tests for the parser”, “explain this repo”, or “run a harness plan for …”")
+	input.SetPlaceHolder("Ask in plain language - e.g. \"add tests for the parser\", \"explain this repo\", or \"run a harness plan for ...\"")
 
 	var (
-		sessMu sync.Mutex
+		sessMu sync.RWMutex
 		busy   bool
 	)
 	getWorkdir := func() string {
-		sessMu.Lock()
-		defer sessMu.Unlock()
+		sessMu.RLock()
+		defer sessMu.RUnlock()
 		return sess.WorkDir
 	}
 
 	appendOutput := func(text string) {
 		outputMu.Lock()
 		outputMD += text
-		cur := outputMD
 		outputMu.Unlock()
-		output.ParseMarkdown(cur)
+		output.AppendMarkdown(text)
 		outputBox.ScrollToBottom()
 	}
 	appendOutputAsync := func(text string) {
@@ -517,10 +596,16 @@ func main() {
 			input.Disable()
 			activity.Show()
 			activity.Start()
+			progressBar.Show()
+			progressLabel.Show()
 		} else {
 			input.Enable()
 			activity.Stop()
 			activity.Hide()
+			progressBar.Hide()
+			progressLabel.Hide()
+			progressBar.SetValue(0)
+			progressLabel.SetText("")
 		}
 		status.SetText(msg)
 	}
@@ -531,10 +616,16 @@ func main() {
 				input.Disable()
 				activity.Show()
 				activity.Start()
+				progressBar.Show()
+				progressLabel.Show()
 			} else {
 				input.Enable()
 				activity.Stop()
 				activity.Hide()
+				progressBar.Hide()
+				progressLabel.Hide()
+				progressBar.SetValue(0)
+				progressLabel.SetText("")
 			}
 			status.SetText(msg)
 		})
@@ -604,6 +695,39 @@ func main() {
 	refreshWorkspaceViews()
 
 	var runUserMessage func()
+	updateProgressFromEvent := func(ev cliagent.HarnessEvent) {
+		phase := strings.TrimPrefix(strings.TrimSpace(ev.Phase), "harness_")
+		pct := harnessPercent(ev)
+		action := strings.TrimSpace(ev.Message)
+		if action == "" {
+			switch phase {
+			case "tool":
+				if strings.TrimSpace(ev.ToolName) != "" {
+					action = strings.TrimSpace(ev.ToolName) + " " + strings.TrimSpace(ev.Stage)
+				}
+			default:
+				action = phase + " " + strings.TrimSpace(ev.Stage)
+			}
+		}
+		fyne.Do(func() {
+			if pct > 0 {
+				progressBar.SetValue(float64(pct))
+			}
+			if strings.TrimSpace(action) != "" {
+				if pct > 0 {
+					progressLabel.SetText(fmt.Sprintf("%d%% • %s", pct, action))
+				} else {
+					progressLabel.SetText(action)
+				}
+			}
+			if phase == "harness" && ev.Stage == "end" {
+				progressBar.SetValue(100)
+				if strings.TrimSpace(action) == "" {
+					progressLabel.SetText("100% • run complete")
+				}
+			}
+		})
+	}
 	runUserMessage = func() {
 		if busy {
 			return
@@ -616,18 +740,39 @@ func main() {
 		appendOutput("\n### You\n" + user + "\n\n### Assistant\n")
 		setBusy(true, "✦ Assistant is thinking…")
 		go func(prompt string) {
-			streamOut := &uiStreamWriter{writeFn: appendOutputAsync}
-			sessMu.Lock()
+			started := time.Now()
+			doneCh := make(chan struct{})
+			go func() {
+				t := time.NewTicker(1 * time.Second)
+				defer t.Stop()
+				for {
+					select {
+					case <-doneCh:
+						return
+					case <-t.C:
+						secs := int(time.Since(started).Seconds())
+						fyne.Do(func() {
+							if busy {
+								status.SetText(statusLine(getWorkdir(), fmt.Sprintf(" | running • %ds", secs)))
+							}
+						})
+					}
+				}
+			}()
+			streamOut := &uiStreamWriter{
+				writeFn: appendOutputAsync,
+				eventFn: updateProgressFromEvent,
+			}
 			err := sess.RunUserTurn(ctx, prompt, streamOut)
-			sessMu.Unlock()
+			close(doneCh)
 			if err != nil {
 				appendOutputAsync("**Error:** " + err.Error() + "\n")
-				setBusyAsync(false, statusLine(sess.WorkDir, " | ready"))
+				setBusyAsync(false, statusLine(getWorkdir(), " | ready"))
 				return
 			}
 			fyne.Do(flushRender)
 			appendOutputAsync("\n")
-			setBusyAsync(false, statusLine(sess.WorkDir, " | ready"))
+			setBusyAsync(false, statusLine(getWorkdir(), " | ready"))
 			refreshWorkspaceViews()
 		}(user)
 	}
@@ -640,15 +785,13 @@ func main() {
 		}
 		setBusy(true, "✦ Syncing skills & tools…")
 		go func() {
-			sessMu.Lock()
 			err := sess.RefreshContext(ctx)
-			sessMu.Unlock()
 			if err != nil {
 				appendOutputAsync("\n[refresh error] " + err.Error() + "\n")
 			} else {
 				appendOutputAsync("\n*Catalog refreshed — skills and tools are up to date.*\n")
 			}
-			setBusyAsync(false, statusLine(sess.WorkDir, " | ready"))
+			setBusyAsync(false, statusLine(getWorkdir(), " | ready"))
 			refreshWorkspaceViews()
 		}()
 	})
@@ -687,9 +830,9 @@ func main() {
 			go func(newWD string) {
 				sessMu.Lock()
 				sess.WorkDir = newWD
+				sessMu.Unlock()
 				saveErr := config.SaveCLIWorkdir(newWD)
 				refreshErr := sess.RefreshContext(ctx)
-				sessMu.Unlock()
 				appendOutputAsync(fmt.Sprintf("\n[workdir] switched to %s\n", newWD))
 				if saveErr != nil {
 					appendOutputAsync(fmt.Sprintf("[workdir warning] could not persist default workspace: %v\n", saveErr))
@@ -732,7 +875,7 @@ func main() {
 	chatSplit := container.NewVSplit(outputBox, input)
 	chatSplit.SetOffset(0.62)
 	chatCard := widget.NewCard("Conversation", "Streaming replies, tools, and harness progress land here", chatSplit)
-	chatPane := container.NewBorder(statusRow, controls, nil, nil, chatCard)
+	chatPane := container.NewBorder(container.NewVBox(statusRow, progressRow), controls, nil, nil, chatCard)
 
 	leftPane := container.NewVSplit(explorerCard, gitCard)
 	leftPane.SetOffset(0.62)

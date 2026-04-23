@@ -13,8 +13,8 @@ func TestEmitHarnessToolEventsStructured(t *testing.T) {
 	start := time.Date(2026, 4, 14, 10, 0, 0, 0, time.UTC)
 	end := start.Add(1250 * time.Millisecond)
 
-	emitHarnessStart(&buf, "tool", "toolcall_1", "heros_shell", start)
-	emitHarnessEnd(&buf, "tool", "toolcall_1", "heros_shell", "ok", start, end)
+	emitHarnessStart(&buf, "tool", "toolcall_1", "heros_shell", "go test ./...", start)
+	emitHarnessEnd(&buf, "tool", "toolcall_1", "heros_shell", "ok", "PASS", start, end)
 
 	raw := strings.TrimSpace(buf.String())
 	lines := strings.Split(raw, "\n")

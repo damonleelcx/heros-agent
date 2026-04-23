@@ -114,6 +114,8 @@ Before substantial tool work, print one short progress line describing what you 
 When the user asks to implement/build/edit, execute autonomously without confirmation loops. Ask a question only when blocked by missing required input or a risky/destructive action.
 Do not ask "shall I continue" / "would you like me to proceed" after partial progress; continue until the requested implementation and validation are complete.
 When the user asks to run tests, do not assume repository root has the test manifest. First inspect workspace structure and detect test entrypoints in subdirectories (for example backend/frontend, go.mod, package.json, pyproject.toml, Cargo.toml). Run the relevant test commands in each detected project folder, then report a consolidated result.
+If any command fails, do not stop at the first error. Inspect the workspace tree/files, infer likely cause (wrong folder, wrong command, missing flags, build/test prereq), try corrective commands, and continue until success or a true external blocker is proven.
+For JavaScript test commands, prefer non-watch mode in automation (for example CI=true and --watch=false) so runs terminate.
 
 **Long‑horizon tasks:** Break work into steps; after substantive progress call **heros_memory_save** or rely on session episodic logs; use **heros_memory_search** to recall earlier decisions in the same thread.
 
@@ -179,14 +181,20 @@ func (s *Session) RunUserTurn(ctx context.Context, user string, out io.Writer) e
 	memoryUsed := false
 	toolCalls := []ToolCallUsage{}
 	requireExecution := FileActionGroundingRequired(user)
+	testExecution := TestExecutionRequired(user)
+	mustConverge := requireExecution || testExecution
 	harnessUsed := false
 	executionPromptInjected := false
+	lastBatchHadFailures := false
 
 	tools := OpenAITools(ToolOptions{AgentShell: s.AgentShell})
 	var firstToolChoice any
 	switch {
 	case WorkspaceGroundingRequired(user, s.WorkDir):
 		firstToolChoice = "required"
+	case testExecution:
+		// Test runs are multi-step by nature: discover layout, run, fix, rerun until pass.
+		firstToolChoice = map[string]any{"type": "function", "function": map[string]any{"name": "heros_run_harness"}}
 	case LongHorizonHarnessRequired(user):
 		// Prefer harness for complex implementation/integration asks to show todo + sub-agent flow.
 		firstToolChoice = map[string]any{"type": "function", "function": map[string]any{"name": "heros_run_harness"}}
@@ -199,11 +207,11 @@ func (s *Session) RunUserTurn(ctx context.Context, user string, out io.Writer) e
 	for step := 0; step < 64; step++ {
 		modelStart := time.Now().UTC()
 		_, _ = fmt.Fprint(out, "\n")
-		emitHarnessStart(out, "assistant", "", "", modelStart)
+		emitHarnessStart(out, "assistant", "", "", "", modelStart)
 		var cc *ChatOptions
 		if step == 0 && firstToolChoice != nil {
 			cc = &ChatOptions{ToolChoice: firstToolChoice}
-		} else if requireExecution && harnessUsed {
+		} else if mustConverge && harnessUsed {
 			// After planning, force concrete execution tools instead of final prose-only replies.
 			cc = &ChatOptions{ToolChoice: "required"}
 		}
@@ -220,11 +228,11 @@ func (s *Session) RunUserTurn(ctx context.Context, user string, out io.Writer) e
 		}
 		if err != nil {
 			modelEnd := time.Now().UTC()
-			emitHarnessEnd(out, "assistant", "", "", "error", modelStart, modelEnd)
+			emitHarnessEnd(out, "assistant", "", "", "error", "", modelStart, modelEnd)
 			return err
 		}
 		modelEnd := time.Now().UTC()
-		emitHarnessEnd(out, "assistant", "", "", "ok", modelStart, modelEnd)
+		emitHarnessEnd(out, "assistant", "", "", "ok", "", modelStart, modelEnd)
 
 		assistantMsg := map[string]any{"role": "assistant"}
 		if strings.TrimSpace(content) != "" {
@@ -249,6 +257,13 @@ func (s *Session) RunUserTurn(ctx context.Context, user string, out io.Writer) e
 		s.Messages = append(s.Messages, assistantMsg)
 
 		if len(calls) == 0 {
+			if mustConverge && lastBatchHadFailures {
+				s.Messages = append(s.Messages, map[string]any{
+					"role":    "system",
+					"content": "A previous execution step failed. Continue automatically: inspect files, fix root causes, rerun relevant tests, and only stop when tests pass or a hard external blocker is proven.",
+				})
+				continue
+			}
 			if !s.Stream && content != "" {
 				_, _ = fmt.Fprintln(out, content)
 			}
@@ -272,31 +287,35 @@ func (s *Session) RunUserTurn(ctx context.Context, user string, out io.Writer) e
 			return nil
 		}
 
+		batchHadFailures := false
 		for _, c := range calls {
 			toolStart := time.Now().UTC()
 			_, _ = fmt.Fprint(out, "\n")
-			emitHarnessStart(out, "tool", c.ID, c.Name, toolStart)
+			args := parseToolArguments(c.Arguments)
+			emitHarnessStart(out, "tool", c.ID, c.Name, toolStartMessage(c.Name, args), toolStart)
 			toolUsed[c.Name] = true
 			if strings.HasPrefix(c.Name, "heros_memory_") {
 				memoryUsed = true
 			}
-			if c.Name == "heros_read_skill" && strings.TrimSpace(c.Arguments) != "" {
-				var a map[string]any
-				if err := json.Unmarshal([]byte(c.Arguments), &a); err == nil {
-					if n := strings.TrimSpace(ArgString(a, "name")); n != "" {
-						skillUsed[n] = true
-					}
+			if c.Name == "heros_read_skill" {
+				if n := strings.TrimSpace(ArgString(args, "name")); n != "" {
+					skillUsed[n] = true
 				}
 			}
 			result, err := s.DispatchTool(ctx, c)
 			toolEnd := time.Now().UTC()
 			status := "ok"
-			if err != nil {
-				result = "error: " + err.Error()
+			callFailed := err != nil || toolResultHasFailure(c.Name, result)
+			endMsg := toolEndMessage(c.Name, result)
+			if callFailed {
+				if err != nil {
+					result = "error: " + err.Error()
+				}
 				status = "error"
-				emitHarnessEnd(out, "tool", c.ID, c.Name, "error", toolStart, toolEnd)
+				emitHarnessEnd(out, "tool", c.ID, c.Name, "error", endMsg, toolStart, toolEnd)
+				batchHadFailures = true
 			} else {
-				emitHarnessEnd(out, "tool", c.ID, c.Name, "ok", toolStart, toolEnd)
+				emitHarnessEnd(out, "tool", c.ID, c.Name, "ok", endMsg, toolStart, toolEnd)
 			}
 			toolCalls = append(toolCalls, ToolCallUsage{
 				Name:       c.Name,
@@ -311,7 +330,7 @@ func (s *Session) RunUserTurn(ctx context.Context, user string, out io.Writer) e
 				"tool_call_id": c.ID,
 				"content":      result,
 			})
-			if requireExecution && c.Name == "heros_run_harness" && !executionPromptInjected {
+			if mustConverge && c.Name == "heros_run_harness" && !executionPromptInjected {
 				s.Messages = append(s.Messages, map[string]any{
 					"role":    "system",
 					"content": "Execution required now. Do the work in the repository: create/modify files, run tests/build commands, fix failures, and only finish when validation passes or you are blocked by a hard external dependency. Do not ask the user for confirmation mid-task.",
@@ -319,6 +338,7 @@ func (s *Session) RunUserTurn(ctx context.Context, user string, out io.Writer) e
 				executionPromptInjected = true
 			}
 		}
+		lastBatchHadFailures = batchHadFailures
 	}
 	return fmt.Errorf("tool loop exceeded step limit")
 }
@@ -450,6 +470,164 @@ func FormatUsageDisclosure(toolUsed, skillUsed map[string]bool, memoryUsed bool,
 	return fmt.Sprintf("[usage] tools=%s | calls=%s | skills=%s | memory=%s", toolsPart, callsPart, skillsPart, memoryPart)
 }
 
+func parseToolArguments(raw string) map[string]any {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	var args map[string]any
+	if err := json.Unmarshal([]byte(raw), &args); err != nil {
+		return nil
+	}
+	return args
+}
+
+func summarizeForHarness(msg string, max int) string {
+	s := strings.TrimSpace(msg)
+	if s == "" {
+		return ""
+	}
+	if max <= 0 {
+		max = 320
+	}
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "..."
+}
+
+func toolStartMessage(name string, args map[string]any) string {
+	switch strings.TrimSpace(name) {
+	case "heros_shell", "heros_agent_shell":
+		return summarizeForHarness(ArgString(args, "command"), 220)
+	case "heros_run_harness":
+		return summarizeForHarness(ArgString(args, "goal"), 220)
+	default:
+		return ""
+	}
+}
+
+func toolEndMessage(name, result string) string {
+	switch strings.TrimSpace(name) {
+	case "heros_shell", "heros_agent_shell":
+		return summarizeForHarness(result, 700)
+	default:
+		return ""
+	}
+}
+
+func adaptShellCommandForTests(cmd string) string {
+	c := strings.TrimSpace(cmd)
+	lc := strings.ToLower(c)
+	if strings.HasPrefix(lc, "npm test") && !strings.Contains(lc, "watch") && !strings.Contains(lc, "ci=") && !strings.Contains(lc, "$env:ci") && !strings.Contains(lc, "set ci=") {
+		// Avoid hanging watch mode in common frontend test runners.
+		return "set CI=true&& " + c + " -- --watch=false"
+	}
+	return c
+}
+
+func extractNpmPrefix(cmd string) string {
+	fields := strings.Fields(strings.TrimSpace(cmd))
+	for i := 0; i < len(fields)-1; i++ {
+		if strings.TrimSpace(strings.ToLower(fields[i])) == "--prefix" {
+			return strings.Trim(strings.TrimSpace(fields[i+1]), "\"")
+		}
+	}
+	return ""
+}
+
+func retryGoTestInSubdirIfNeeded(ctx context.Context, workDir, originalCmd, out string, shellErr error) (string, error, string) {
+	if shellErr == nil {
+		return out, nil, ""
+	}
+	cmd := strings.TrimSpace(originalCmd)
+	lc := strings.ToLower(cmd)
+	lout := strings.ToLower(out)
+	if !strings.HasPrefix(lc, "go test ") || !strings.Contains(lout, "go.mod file not found") {
+		return out, shellErr, ""
+	}
+	fields := strings.Fields(cmd)
+	if len(fields) < 3 {
+		return out, shellErr, ""
+	}
+	target := strings.TrimSpace(fields[2])
+	if target == "" || strings.HasPrefix(target, "-") {
+		return out, shellErr, ""
+	}
+	target = strings.TrimPrefix(target, "./")
+	target = strings.Trim(target, "\"")
+	if target == "" {
+		return out, shellErr, ""
+	}
+	abs := filepath.Clean(filepath.Join(workDir, filepath.FromSlash(target)))
+	if st, err := os.Stat(abs); err != nil || !st.IsDir() {
+		return out, shellErr, ""
+	}
+	retryCmd := "go test ./..."
+	retryOut, retryErr := RunLocalShell(ctx, abs, retryCmd)
+	note := fmt.Sprintf("auto-retry: `%s` in `%s`", retryCmd, target)
+	if retryErr != nil {
+		return out + "\n" + note + "\n" + retryOut, retryErr, note
+	}
+	return out + "\n" + note + "\n" + retryOut, nil, note
+}
+
+func retryNpmTestInSubdirIfNeeded(ctx context.Context, workDir, originalCmd, out string, shellErr error) (string, error, string) {
+	if shellErr == nil {
+		return out, nil, ""
+	}
+	cmd := strings.TrimSpace(originalCmd)
+	lc := strings.ToLower(cmd)
+	if !strings.Contains(lc, "npm test") {
+		return out, shellErr, ""
+	}
+	lout := strings.ToLower(out)
+	prefix := extractNpmPrefix(cmd)
+	if prefix == "" {
+		// common layout fallback
+		if st, err := os.Stat(filepath.Join(workDir, "frontend", "package.json")); err == nil && !st.IsDir() {
+			prefix = "frontend"
+		}
+	}
+	if prefix == "" {
+		return out, shellErr, ""
+	}
+	abs := filepath.Clean(filepath.Join(workDir, filepath.FromSlash(prefix)))
+	// If npm prefix points to a Go module, recover by running Go tests there.
+	if st, err := os.Stat(filepath.Join(abs, "go.mod")); err == nil && !st.IsDir() && strings.Contains(lout, "package.json") {
+		retryCmd := "go test ./..."
+		retryOut, retryErr := RunLocalShell(ctx, abs, retryCmd)
+		note := fmt.Sprintf("auto-retry: `%s` in `%s`", retryCmd, prefix)
+		if retryErr != nil {
+			return out + "\n" + note + "\n" + retryOut, retryErr, note
+		}
+		return out + "\n" + note + "\n" + retryOut, nil, note
+	}
+	if st, err := os.Stat(filepath.Join(abs, "package.json")); err != nil || st.IsDir() {
+		return out, shellErr, ""
+	}
+	retryCmd := "set CI=true&& npm test -- --watch=false"
+	retryOut, retryErr := RunLocalShell(ctx, abs, retryCmd)
+	note := fmt.Sprintf("auto-retry: `%s` in `%s`", retryCmd, prefix)
+	if retryErr != nil {
+		return out + "\n" + note + "\n" + retryOut, retryErr, note
+	}
+	return out + "\n" + note + "\n" + retryOut, nil, note
+}
+
+func toolResultHasFailure(toolName, result string) bool {
+	name := strings.TrimSpace(toolName)
+	if name != "heros_shell" && name != "heros_agent_shell" {
+		return false
+	}
+	var r map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimSpace(result)), &r); err != nil {
+		return false
+	}
+	errVal := strings.TrimSpace(ArgString(r, "error"))
+	return errVal != ""
+}
+
 // DispatchTool executes one model tool call against agentd.
 func (s *Session) DispatchTool(ctx context.Context, tc ToolCall) (string, error) {
 	var args map[string]any
@@ -469,7 +647,10 @@ func (s *Session) DispatchTool(ctx context.Context, tc ToolCall) (string, error)
 		if wd == "" {
 			wd = "."
 		}
+		cmd = adaptShellCommandForTests(cmd)
 		out, shellErr := RunLocalShell(ctx, wd, cmd)
+		out, shellErr, _ = retryGoTestInSubdirIfNeeded(ctx, wd, cmd, out, shellErr)
+		out, shellErr, _ = retryNpmTestInSubdirIfNeeded(ctx, wd, cmd, out, shellErr)
 		return LocalShellResult(out, shellErr), nil
 	case "heros_list_files":
 		return listFilesJSON(s.WorkDir, args)

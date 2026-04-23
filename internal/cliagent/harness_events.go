@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 )
 
@@ -48,20 +49,22 @@ func emitHarnessEvent(out io.Writer, ev HarnessEvent) {
 	_, _ = fmt.Fprintf(out, "%s%s\n", HarnessEventPrefix, string(b))
 }
 
-func emitHarnessStart(out io.Writer, phase, toolID, toolName string, start time.Time) {
+func emitHarnessStart(out io.Writer, phase, toolID, toolName, message string, start time.Time) {
 	emitHarnessEvent(out, HarnessEvent{
 		Phase:    phase,
 		Stage:    "start",
+		Message:  strings.TrimSpace(message),
 		Start:    start.UTC().Format(time.RFC3339Nano),
 		ToolID:   toolID,
 		ToolName: toolName,
 	})
 }
 
-func emitHarnessEnd(out io.Writer, phase, toolID, toolName, status string, start, end time.Time) {
+func emitHarnessEnd(out io.Writer, phase, toolID, toolName, status, message string, start, end time.Time) {
 	emitHarnessEvent(out, HarnessEvent{
 		Phase:      phase,
 		Stage:      "end",
+		Message:    strings.TrimSpace(message),
 		Start:      start.UTC().Format(time.RFC3339Nano),
 		End:        end.UTC().Format(time.RFC3339Nano),
 		DurationMS: end.Sub(start).Milliseconds(),

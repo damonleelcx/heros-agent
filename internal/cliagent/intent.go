@@ -48,6 +48,18 @@ var (
 		`agent\s+harness|` +
 		`template` +
 		`)`)
+
+	reTestExecution = regexp.MustCompile(`(?i)(` +
+		`\brun\b.*\btests?\b|` +
+		`\btests?\b.*\brun\b|` +
+		`\bgo\s+test\b|` +
+		`\bnpm\s+test\b|` +
+		`\bjest\b|` +
+		`\bvitest\b|` +
+		`\bpytest\b|` +
+		`\bunit\s+tests?\b|` +
+		`\bintegration\s+tests?\b` +
+		`)`)
 )
 
 // WorkspaceGroundingRequired is true when the user is asking about the local workspace / product
@@ -103,4 +115,17 @@ func LongHorizonHarnessRequired(userLine string) bool {
 		return false
 	}
 	return reLongHorizonHarness.MatchString(u)
+}
+
+// TestExecutionRequired is true when user intent is to execute tests.
+// These requests should keep executing/fixing until pass or a real external blocker is found.
+func TestExecutionRequired(userLine string) bool {
+	if os.Getenv("HEROS_NO_TOOL_FORCE") == "1" {
+		return false
+	}
+	u := strings.TrimSpace(userLine)
+	if u == "" || strings.HasPrefix(u, "/") {
+		return false
+	}
+	return reTestExecution.MatchString(u)
 }
