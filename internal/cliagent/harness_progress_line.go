@@ -167,6 +167,14 @@ func FormatHarnessProgressLine(ev harness.ProgressEvent) string {
 		if ev.Stage == "end" {
 			return p + fmt.Sprintf("run complete (score %.2f)", ev.Score)
 		}
+	case "summary":
+		if ev.Stage == "iteration_end" {
+			msg := strings.TrimSpace(ev.Detail)
+			if msg == "" {
+				msg = "iteration summary ready"
+			}
+			return p + msg
+		}
 	}
 	if ev.Section > 0 {
 		return harnessProgressPrefixFromEvent(ev) + fmt.Sprintf("%s %s", phase, ev.Stage)

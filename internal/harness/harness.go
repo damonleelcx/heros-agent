@@ -9,6 +9,8 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/heros-foreal/agentd/internal/promptlayer"
 )
@@ -104,14 +106,16 @@ type RunResult struct {
 }
 
 type TodoItem struct {
-	ID        string `json:"id"`
-	Title     string `json:"title"`
-	Status    string `json:"status"` // pending|in_progress|done|needs_followup
-	Assignee  string `json:"assignee,omitempty"`
-	Attempt   int    `json:"attempt"`
-	Feedback  string `json:"feedback,omitempty"`
-	ParentID  string `json:"parent_id,omitempty"`
-	CreatedBy string `json:"created_by,omitempty"` // leader|critic
+	ID        string   `json:"id"`
+	Title     string   `json:"title"`
+	Status    string   `json:"status"` // pending|in_progress|done|needs_followup
+	Assignee  string   `json:"assignee,omitempty"`
+	Tools     []string `json:"tools,omitempty"`
+	Skills    []string `json:"skills,omitempty"`
+	Attempt   int      `json:"attempt"`
+	Feedback  string   `json:"feedback,omitempty"`
+	ParentID  string   `json:"parent_id,omitempty"`
+	CreatedBy string   `json:"created_by,omitempty"` // leader|critic
 }
 
 type SubAgentReport struct {
@@ -194,6 +198,129 @@ type ProgressEvent struct {
 	SectionLabel      string   `json:"section_label,omitempty"`
 	SectionStep       int      `json:"section_step,omitempty"`
 	SectionStepsTotal int      `json:"section_steps_total,omitempty"`
+	StageIndex        int      `json:"stage_index,omitempty"`
+	StageTotal        int      `json:"stage_total,omitempty"`
+	IterationSummary  string   `json:"iteration_summary,omitempty"`
+	Offset            int64    `json:"offset,omitempty"`
+}
+
+const (
+	HarnessStagePlanning = 1
+	HarnessStageAssign   = 2
+	HarnessStageFeedback = 3
+	HarnessStageRetry    = 4
+	HarnessStageRepeat   = 5
+	HarnessStageSummary  = 6
+)
+
+type KafkaStageMessage struct {
+	RunID     string `json:"run_id"`
+	Iteration int    `json:"iteration"`
+	Stage     int    `json:"stage"`
+	Phase     string `json:"phase"`
+	Status    string `json:"status"`
+	Summary   string `json:"summary,omitempty"`
+	Offset    int64  `json:"offset"`
+}
+
+type KafkaStageBus interface {
+	Publish(KafkaStageMessage) error
+}
+
+type InMemoryKafkaStageBus struct {
+	mu      sync.Mutex
+	offset  int64
+	records []KafkaStageMessage
+}
+
+func (b *InMemoryKafkaStageBus) Publish(m KafkaStageMessage) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.offset++
+	m.Offset = b.offset
+	b.records = append(b.records, m)
+	return nil
+}
+
+type stageController struct {
+	bus       KafkaStageBus
+	runID     string
+	iteration int
+	stage     int
+	offset    int64
+}
+
+func newStageController() *stageController {
+	return &stageController{
+		bus:   &InMemoryKafkaStageBus{},
+		runID: fmt.Sprintf("run-%d", timeNowUnixNano()),
+	}
+}
+
+func (c *stageController) transition(iteration, stage int, phase, status, summary string) (int64, error) {
+	if iteration <= 0 {
+		return 0, fmt.Errorf("invalid iteration %d", iteration)
+	}
+	if stage < HarnessStagePlanning || stage > HarnessStageSummary {
+		return 0, fmt.Errorf("invalid stage %d", stage)
+	}
+	if c.iteration == 0 {
+		if stage != HarnessStagePlanning {
+			return 0, fmt.Errorf("first stage must be planning")
+		}
+	} else {
+		if iteration < c.iteration {
+			return 0, fmt.Errorf("iteration moved backwards")
+		}
+		if iteration == c.iteration {
+			if !validStageTransition(c.stage, stage) {
+				return 0, fmt.Errorf("invalid stage transition %d->%d", c.stage, stage)
+			}
+		} else {
+			// New iteration can start only after repeat stage.
+			if c.stage != HarnessStageRepeat || stage != HarnessStageAssign {
+				return 0, fmt.Errorf("invalid iteration transition %d(stage=%d)->%d(stage=%d)", c.iteration, c.stage, iteration, stage)
+			}
+		}
+	}
+	c.iteration = iteration
+	c.stage = stage
+	msg := KafkaStageMessage{
+		RunID:     c.runID,
+		Iteration: iteration,
+		Stage:     stage,
+		Phase:     strings.TrimSpace(phase),
+		Status:    strings.TrimSpace(status),
+		Summary:   strings.TrimSpace(summary),
+	}
+	if err := c.bus.Publish(msg); err != nil {
+		return 0, err
+	}
+	c.offset++
+	return c.offset, nil
+}
+
+func validStageTransition(prev, next int) bool {
+	switch prev {
+	case HarnessStagePlanning:
+		return next == HarnessStageAssign
+	case HarnessStageAssign:
+		return next == HarnessStageFeedback
+	case HarnessStageFeedback:
+		return next == HarnessStageSummary
+	case HarnessStageSummary:
+		return next == HarnessStageRetry
+	case HarnessStageRetry:
+		return next == HarnessStageRepeat
+	case HarnessStageRepeat:
+		return next == HarnessStageAssign
+	default:
+		return false
+	}
+}
+
+func timeNowUnixNano() int64 {
+	return time.Now().UnixNano()
 }
 
 // Run executes leader decomposition, parallel specialist stubs, critic loop.
@@ -203,10 +330,22 @@ func (o *Orchestrator) Run(ctx context.Context, goal string) (*RunResult, error)
 
 // RunWithProgress executes leader decomposition, specialist passes, and critic/retry loop with optional progress callbacks.
 func (o *Orchestrator) RunWithProgress(ctx context.Context, goal string, onProgress func(ProgressEvent)) (*RunResult, error) {
+	stageCtl := newStageController()
 	emit := func(ev ProgressEvent) {
 		if onProgress != nil {
 			onProgress(ev)
 		}
+	}
+	emitStage := func(iteration, stage int, ev ProgressEvent, status, summary string) error {
+		off, err := stageCtl.transition(iteration, stage, ev.Phase, status, summary)
+		if err != nil {
+			return err
+		}
+		ev.StageIndex = stage
+		ev.StageTotal = HarnessStageSummary
+		ev.Offset = off
+		emit(ev)
+		return nil
 	}
 	topo, err := LoadTopology(o.DB)
 	if err != nil {
@@ -215,6 +354,9 @@ func (o *Orchestrator) RunWithProgress(ctx context.Context, goal string, onProgr
 	maxPasses := topo.MaxCriticRetries + 1
 	if maxPasses < 1 {
 		maxPasses = 1
+	}
+	if maxPasses < 8 {
+		maxPasses = 8
 	}
 	sys, _, err := promptlayer.LoadActiveSystemPrompt(o.DB, o.DataDir)
 	if err != nil {
@@ -225,7 +367,9 @@ func (o *Orchestrator) RunWithProgress(ctx context.Context, goal string, onProgr
 	if g == "" {
 		g = "(empty goal)"
 	}
-	emit(progressSection(ProgressEvent{Phase: "harness", Stage: "start", Detail: g}, SectionPlanning, SectionLabelPlanning, 1, 3))
+	if err := emitStage(1, HarnessStagePlanning, progressSection(ProgressEvent{Phase: "harness", Stage: "start", Detail: g}, SectionPlanning, SectionLabelPlanning, 1, 3), "start", "planning goal and todo decomposition"); err != nil {
+		return nil, err
+	}
 
 	// Leader: define explicit todo list tied to the goal.
 	emit(progressSection(ProgressEvent{Phase: "leader", Stage: "start", Detail: "defining goal-aligned todo list"}, SectionPlanning, SectionLabelPlanning, 2, 3))
@@ -243,6 +387,8 @@ func (o *Orchestrator) RunWithProgress(ctx context.Context, goal string, onProgr
 			Status:    "pending",
 			Attempt:   1,
 			CreatedBy: "leader",
+			Tools:     inferToolsForTodo(step),
+			Skills:    inferSkillsForTodo(step),
 		})
 		emit(progressSection(ProgressEvent{
 			Phase:  "todo",
@@ -250,7 +396,7 @@ func (o *Orchestrator) RunWithProgress(ctx context.Context, goal string, onProgr
 			Index:  i + 1,
 			Total:  len(plan),
 			TodoID: fmt.Sprintf("todo-%02d", i+1),
-			Detail: step,
+			Detail: fmt.Sprintf("%s | tools=%s skills=%s", step, strings.Join(inferToolsForTodo(step), ","), strings.Join(inferSkillsForTodo(step), ",")),
 			Status: "pending",
 		}, SectionPlanning, SectionLabelPlanning, 3, 3))
 	}
@@ -267,6 +413,17 @@ func (o *Orchestrator) RunWithProgress(ctx context.Context, goal string, onProgr
 	retries := 0
 	latestByTodo := map[string]string{}
 	for {
+		iteration := retries + 1
+		if err := emitStage(iteration, HarnessStageAssign, progressSection(ProgressEvent{
+			Phase:   "todo",
+			Stage:   "iteration_start",
+			Attempt: retries + 1,
+			Detail:  "assigning todos to sub-agents",
+			Index:   retries + 1,
+			Total:   maxPasses,
+		}, SectionSubagents, SectionLabelSubagents, 1, 1), "start", "assigning todos to sub-agents"); err != nil {
+			return nil, err
+		}
 		emit(progressSection(ProgressEvent{
 			Phase:   "todo",
 			Stage:   "iteration_start",
@@ -383,6 +540,16 @@ func (o *Orchestrator) RunWithProgress(ctx context.Context, goal string, onProgr
 			Index:   retries + 1,
 			Total:   maxPasses,
 		}, SectionRepeat, SectionLabelRepeat, retries+1, maxPasses))
+		if err := emitStage(iteration, HarnessStageFeedback, progressSection(ProgressEvent{
+			Phase:   "feedback",
+			Stage:   "iteration_scored",
+			Attempt: iteration,
+			Detail:  "feedback/critic scoring complete",
+			Index:   iteration,
+			Total:   maxPasses,
+		}, SectionFeedback, SectionLabelFeedback, 1, 1), "ok", "feedback and critic scoring complete"); err != nil {
+			return nil, err
+		}
 
 		merged := mergeTodoResults(res.Todos, latestByTodo)
 		emit(progressSection(ProgressEvent{
@@ -422,7 +589,25 @@ func (o *Orchestrator) RunWithProgress(ctx context.Context, goal string, onProgr
 		} else {
 			emit(progressSection(ProgressEvent{Phase: "verify", Stage: "end", Attempt: retries + 1, Status: "failed", Detail: ver.Summary}, SectionFeedback, SectionLabelFeedback, 2, 2))
 		}
-		if score >= topo.CriticThreshold || retries >= topo.MaxCriticRetries {
+		verifyStatus := "failed"
+		if ver.Passed {
+			verifyStatus = "passed"
+		}
+		iterSummary := fmt.Sprintf("iteration %d summary: score=%.2f threshold=%.2f verify=%s open_todos=%d", iteration, score, topo.CriticThreshold, verifyStatus, countOpenTodos(res.Todos))
+		res.IterationNotes = append(res.IterationNotes, iterSummary)
+		if err := emitStage(iteration, HarnessStageSummary, progressSection(ProgressEvent{
+			Phase:            "summary",
+			Stage:            "iteration_end",
+			Attempt:          iteration,
+			Detail:           iterSummary,
+			IterationSummary: iterSummary,
+			Index:            iteration,
+			Total:            maxPasses,
+		}, SectionRepeat, SectionLabelRepeat, iteration, maxPasses), "ok", iterSummary); err != nil {
+			return nil, err
+		}
+
+		if score >= topo.CriticThreshold && ver.Passed {
 			res.Final = merged + "\n\n[critic score=" + fmt.Sprintf("%.2f", score) + "] " + rationale
 			res.Retries = retries
 			res.CompletedTodos, res.TotalTodos = summarizeTodos(res.Todos)
@@ -438,6 +623,19 @@ func (o *Orchestrator) RunWithProgress(ctx context.Context, goal string, onProgr
 				Total:     maxPasses,
 			}, SectionRepeat, SectionLabelRepeat, retries+1, maxPasses))
 			return res, nil
+		}
+		if retries >= maxPasses-1 {
+			return nil, fmt.Errorf("harness did not reach successful results after %d iterations", maxPasses)
+		}
+		if err := emitStage(iteration, HarnessStageRetry, progressSection(ProgressEvent{
+			Phase:     "critic",
+			Stage:     "retry",
+			Attempt:   retries + 1,
+			Score:     score,
+			Threshold: topo.CriticThreshold,
+			Detail:    "retry/redo due to score or verification failure",
+		}, SectionRetry, SectionLabelRetry, 1, 2), "retry", "retry and redo triggered"); err != nil {
+			return nil, err
 		}
 		emit(progressSection(ProgressEvent{
 			Phase:     "critic",
@@ -479,6 +677,16 @@ func (o *Orchestrator) RunWithProgress(ctx context.Context, goal string, onProgr
 			}, SectionRetry, SectionLabelRetry, 2, 2))
 		}
 		emit(progressSection(ProgressEvent{Phase: "refine", Stage: "end", Attempt: retries + 1}, SectionRetry, SectionLabelRetry, 2, 2))
+		if err := emitStage(iteration, HarnessStageRepeat, progressSection(ProgressEvent{
+			Phase:   "todo",
+			Stage:   "repeat",
+			Attempt: iteration,
+			Detail:  "repeat loop with new/follow-up todos",
+			Index:   iteration,
+			Total:   maxPasses,
+		}, SectionRepeat, SectionLabelRepeat, iteration, maxPasses), "repeat", "repeat until success"); err != nil {
+			return nil, err
+		}
 		retries++
 	}
 }
@@ -501,6 +709,50 @@ func mergeTodoResults(todos []TodoItem, latestByTodo map[string]string) string {
 		b.WriteString("\n\n")
 	}
 	return strings.TrimSpace(b.String())
+}
+
+func inferToolsForTodo(title string) []string {
+	t := strings.ToLower(strings.TrimSpace(title))
+	tools := []string{"heros_shell"}
+	if strings.Contains(t, "file") || strings.Contains(t, "edit") || strings.Contains(t, "write") || strings.Contains(t, "create") {
+		tools = append(tools, "heros_read_file", "heros_write_file")
+	}
+	if strings.Contains(t, "test") || strings.Contains(t, "build") {
+		tools = append(tools, "heros_shell")
+	}
+	if strings.Contains(t, "memory") || strings.Contains(t, "recall") {
+		tools = append(tools, "heros_memory_search")
+	}
+	return dedupeStrings(tools)
+}
+
+func inferSkillsForTodo(title string) []string {
+	t := strings.ToLower(strings.TrimSpace(title))
+	var skills []string
+	if strings.Contains(t, "test") || strings.Contains(t, "failing") {
+		skills = append(skills, "test-driven-development")
+	}
+	if strings.Contains(t, "plan") || strings.Contains(t, "architecture") {
+		skills = append(skills, "writing-plans")
+	}
+	if len(skills) == 0 {
+		skills = append(skills, "core-reasoning")
+	}
+	return dedupeStrings(skills)
+}
+
+func dedupeStrings(in []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(in))
+	for _, v := range in {
+		v = strings.TrimSpace(v)
+		if v == "" || seen[v] {
+			continue
+		}
+		seen[v] = true
+		out = append(out, v)
+	}
+	return out
 }
 
 func (o *Orchestrator) leaderPlan(ctx context.Context, sys string, topo Topology, goal string) ([]string, error) {
