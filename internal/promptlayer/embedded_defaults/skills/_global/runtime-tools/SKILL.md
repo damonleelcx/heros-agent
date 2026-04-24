@@ -5,7 +5,7 @@ depends_on: [core-reasoning]
 tools: []
 ---
 
-Many skills under `skills/_global/custom/` describe workflows that used to rely on external script runtimes. In Heros, **executable** access is unified through Go-backed surfaces:
+Many skills under `skills/_global/` describe workflows that used to rely on external script runtimes. In Heros, **executable** access is unified through Go-backed surfaces:
 
 - **Workspace shell:** `heros_shell` (local cwd = workspace).
 - **First-party file APIs:** `heros_list_files`, `heros_read_file`, `heros_write_file`, `heros_delete_path`, `heros_make_dir`.

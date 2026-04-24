@@ -140,6 +140,9 @@ func SeedIfEmpty(db *sql.DB, dataDir string) error {
 	if err := seedEmbeddedDefaults(dataDir); err != nil {
 		return err
 	}
+	if err := migrateLegacyCustomSkillsPath(dataDir); err != nil {
+		return err
+	}
 	if _, err := os.Stat(sp); os.IsNotExist(err) {
 		if err := os.WriteFile(sp, []byte(defaultSystemPrompt()), 0o644); err != nil {
 			return err
@@ -158,6 +161,40 @@ func SeedIfEmpty(db *sql.DB, dataDir string) error {
 		return err
 	}
 	return toolindex.Rebuild(db, dataDir, toolindex.DefaultSyncPolicy())
+}
+
+// migrateLegacyCustomSkillsPath moves skills/_global/custom/* -> skills/_global/*
+// during startup so a plain restart reflects the new layout without manual API steps.
+func migrateLegacyCustomSkillsPath(dataDir string) error {
+	src := filepath.Join(dataDir, "skills", "_global", "custom")
+	st, err := os.Stat(src)
+	if err != nil || !st.IsDir() {
+		return nil
+	}
+	dst := filepath.Join(dataDir, "skills", "_global")
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		name := strings.TrimSpace(e.Name())
+		if name == "" {
+			continue
+		}
+		from := filepath.Join(src, name)
+		to := filepath.Join(dst, name)
+		if _, err := os.Stat(to); err == nil {
+			// Already migrated or replaced; keep destination.
+			continue
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+		if err := os.Rename(from, to); err != nil {
+			return err
+		}
+	}
+	_ = os.Remove(src)
+	return nil
 }
 
 // ApplyMutation writes approved changes to disk and updates skill index rows (not full skill blobs in DB).

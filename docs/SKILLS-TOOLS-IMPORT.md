@@ -5,7 +5,7 @@ This repo includes a bulk importer that can bring external skills and tool metad
 ## What is included
 
 - **Skills:** markdown files from `skills/` into  
-  `internal/promptlayer/embedded_defaults/skills/_global/custom/`
+  `internal/promptlayer/embedded_defaults/skills/_global/`
 - **Tools folder entries:** generated in  
   `internal/promptlayer/embedded_defaults/tools/_global/<tool-id>/` with:
   - `tool.yaml` (catalog metadata)
