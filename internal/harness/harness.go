@@ -91,6 +91,8 @@ type Orchestrator struct {
 type RunResult struct {
 	Goal            string             `json:"goal"`
 	Plan            []string           `json:"plan"` // backward-compatible alias of todo titles
+	Planning        ExecutionPlan      `json:"planning"`
+	DependencyGraph DependencyGraph    `json:"dependency_graph"`
 	Todos           []TodoItem         `json:"todos"`
 	SubResults      map[string]string  `json:"sub_results"` // backward-compatible summary map
 	SubAgentReports []SubAgentReport   `json:"sub_agent_reports"`
@@ -99,10 +101,45 @@ type RunResult struct {
 	Verification    VerificationResult `json:"verification"`
 	GlobalCritique  []CritiqueAttempt  `json:"global_critique"`
 	AgentVisibility []AgentVisibility  `json:"agent_visibility"`
+	ClaimLog        []ClaimEvent       `json:"claim_log"`
+	MissingFindings []MissingFinding   `json:"missing_findings"`
+	PlanTracking    []PlanSnapshot     `json:"plan_tracking"`
+	Notifications   []HarnessNotice    `json:"notifications"`
+	IntensityTrace  []IntensityState   `json:"intensity_trace"`
 	Final           string             `json:"final"`
 	Retries         int                `json:"retries"`
 	CompletedTodos  int                `json:"completed_todos"`
 	TotalTodos      int                `json:"total_todos"`
+}
+
+type ExecutionPlan struct {
+	Summary   string     `json:"summary"`
+	Strategy  string     `json:"strategy"`
+	Milestone []PlanStep `json:"milestone"`
+}
+
+type PlanStep struct {
+	ID        string   `json:"id"`
+	Title     string   `json:"title"`
+	DependsOn []string `json:"depends_on,omitempty"`
+	Priority  int      `json:"priority,omitempty"`
+}
+
+type DependencyGraph struct {
+	Nodes []DependencyNode `json:"nodes"`
+	Edges []DependencyEdge `json:"edges"`
+}
+
+type DependencyNode struct {
+	ID       string `json:"id"`
+	Title    string `json:"title"`
+	Priority int    `json:"priority,omitempty"`
+}
+
+type DependencyEdge struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+	Type string `json:"type,omitempty"` // blocks|soft
 }
 
 type TodoItem struct {
@@ -110,6 +147,8 @@ type TodoItem struct {
 	Title     string   `json:"title"`
 	Status    string   `json:"status"` // pending|in_progress|done|needs_followup
 	Assignee  string   `json:"assignee,omitempty"`
+	DependsOn []string `json:"depends_on,omitempty"`
+	Priority  int      `json:"priority,omitempty"`
 	Tools     []string `json:"tools,omitempty"`
 	Skills    []string `json:"skills,omitempty"`
 	Attempt   int      `json:"attempt"`
@@ -119,17 +158,18 @@ type TodoItem struct {
 }
 
 type SubAgentReport struct {
-	TodoID     string   `json:"todo_id"`
-	Role       string   `json:"role"`
-	Task       string   `json:"task"`
-	Attempt    int      `json:"attempt"`
-	Output     string   `json:"output"`
-	Critique   string   `json:"critique"`
-	Score      float64  `json:"score"`
-	Status     string   `json:"status"` // accepted|needs_followup
-	ToolsUsed  []string `json:"tools_used"`
-	SkillsUsed []string `json:"skills_used"`
-	MemoryUsed []string `json:"memory_used"`
+	TodoID     string          `json:"todo_id"`
+	Role       string          `json:"role"`
+	Task       string          `json:"task"`
+	Attempt    int             `json:"attempt"`
+	Output     string          `json:"output"`
+	Critique   string          `json:"critique"`
+	Score      float64         `json:"score"`
+	Status     string          `json:"status"` // accepted|needs_followup
+	ToolsUsed  []string        `json:"tools_used"`
+	SkillsUsed []string        `json:"skills_used"`
+	MemoryUsed []string        `json:"memory_used"`
+	Sandbox    SubAgentSandbox `json:"sandbox"`
 }
 
 type CritiqueAttempt struct {
@@ -149,6 +189,56 @@ type AgentVisibility struct {
 	ToolsUsed  []string `json:"tools_used"`
 	SkillsUsed []string `json:"skills_used"`
 	MemoryUsed []string `json:"memory_used"`
+}
+
+type ClaimEvent struct {
+	Iteration int    `json:"iteration"`
+	Role      string `json:"role"`
+	TodoID    string `json:"todo_id"`
+	Action    string `json:"action"` // claimed|skipped|forced
+	Reason    string `json:"reason,omitempty"`
+}
+
+type SubAgentSandbox struct {
+	Role            string   `json:"role"`
+	TodoID          string   `json:"todo_id"`
+	Scope           string   `json:"scope"`
+	AllowedTools    []string `json:"allowed_tools"`
+	AllowedSkills   []string `json:"allowed_skills"`
+	Forbidden       []string `json:"forbidden"`
+	RequireEvidence bool     `json:"require_evidence"`
+}
+
+type MissingFinding struct {
+	TodoID   string `json:"todo_id,omitempty"`
+	Source   string `json:"source"` // specialist_error|sub_critic|global_critic|verification
+	Detail   string `json:"detail"`
+	Severity string `json:"severity"` // low|medium|high
+}
+
+type PlanSnapshot struct {
+	Iteration   int `json:"iteration"`
+	Total       int `json:"total"`
+	Pending     int `json:"pending"`
+	InProgress  int `json:"in_progress"`
+	Done        int `json:"done"`
+	NeedsFollow int `json:"needs_followup"`
+}
+
+type HarnessNotice struct {
+	Iteration int    `json:"iteration"`
+	Level     string `json:"level"` // info|warn
+	Title     string `json:"title"`
+	Detail    string `json:"detail"`
+}
+
+type IntensityState struct {
+	Iteration           int     `json:"iteration"`
+	Mode                string  `json:"mode"` // low|normal|high
+	Score               float64 `json:"score"`
+	Threshold           float64 `json:"threshold"`
+	FollowUpMax         int     `json:"follow_up_max"`
+	MissingBoostApplied bool    `json:"missing_boost_applied"`
 }
 
 // Harness pipeline sections (1–5) for progress displays.
@@ -378,25 +468,29 @@ func (o *Orchestrator) RunWithProgress(ctx context.Context, goal string, onProgr
 		plan = []string{goal}
 	}
 	emit(progressSection(ProgressEvent{Phase: "leader", Stage: "end", Total: len(plan), Detail: "todo list ready"}, SectionPlanning, SectionLabelPlanning, 2, 3))
+	planning := buildExecutionPlan(goal, plan)
+	depGraph := planningToDependencyGraph(planning)
 
-	todos := make([]TodoItem, 0, len(plan))
-	for i, step := range plan {
+	todos := make([]TodoItem, 0, len(planning.Milestone))
+	for i, step := range planning.Milestone {
 		todos = append(todos, TodoItem{
-			ID:        fmt.Sprintf("todo-%02d", i+1),
-			Title:     step,
+			ID:        step.ID,
+			Title:     step.Title,
 			Status:    "pending",
 			Attempt:   1,
 			CreatedBy: "leader",
-			Tools:     inferToolsForTodo(step),
-			Skills:    inferSkillsForTodo(step),
+			DependsOn: append([]string{}, step.DependsOn...),
+			Priority:  step.Priority,
+			Tools:     inferToolsForTodo(step.Title),
+			Skills:    inferSkillsForTodo(step.Title),
 		})
 		emit(progressSection(ProgressEvent{
 			Phase:  "todo",
 			Stage:  "created",
 			Index:  i + 1,
-			Total:  len(plan),
-			TodoID: fmt.Sprintf("todo-%02d", i+1),
-			Detail: fmt.Sprintf("%s | tools=%s skills=%s", step, strings.Join(inferToolsForTodo(step), ","), strings.Join(inferSkillsForTodo(step), ",")),
+			Total:  len(planning.Milestone),
+			TodoID: step.ID,
+			Detail: fmt.Sprintf("%s | deps=%s tools=%s skills=%s", step.Title, strings.Join(step.DependsOn, ","), strings.Join(inferToolsForTodo(step.Title), ","), strings.Join(inferSkillsForTodo(step.Title), ",")),
 			Status: "pending",
 		}, SectionPlanning, SectionLabelPlanning, 3, 3))
 	}
@@ -404,16 +498,47 @@ func (o *Orchestrator) RunWithProgress(ctx context.Context, goal string, onProgr
 	res := &RunResult{
 		Goal:            goal,
 		Plan:            plan,
+		Planning:        planning,
+		DependencyGraph: depGraph,
 		Todos:           todos,
 		SubResults:      map[string]string{},
 		CriticScores:    map[string]float64{},
 		SubAgentReports: []SubAgentReport{},
+		ClaimLog:        []ClaimEvent{},
+		MissingFindings: []MissingFinding{},
+		PlanTracking:    []PlanSnapshot{},
+		Notifications:   []HarnessNotice{},
+		IntensityTrace:  []IntensityState{},
 	}
 
 	retries := 0
 	latestByTodo := map[string]string{}
+	dyn := newDynamicIntensity(topo.CriticThreshold)
 	for {
 		iteration := retries + 1
+		snap := computePlanSnapshot(iteration, res.Todos)
+		res.PlanTracking = append(res.PlanTracking, snap)
+		emit(progressSection(ProgressEvent{
+			Phase:  "plan",
+			Stage:  "tracking",
+			Detail: fmt.Sprintf("plan tracking: total=%d done=%d pending=%d in_progress=%d needs_followup=%d", snap.Total, snap.Done, snap.Pending, snap.InProgress, snap.NeedsFollow),
+			Index:  snap.Done,
+			Total:  snap.Total,
+		}, SectionPlanning, SectionLabelPlanning, 3, 3))
+		note := HarnessNotice{
+			Iteration: iteration,
+			Level:     "info",
+			Title:     "Background update",
+			Detail:    fmt.Sprintf("Pass %d/%d in progress (%d done of %d todos)", iteration, maxPasses, snap.Done, snap.Total),
+		}
+		res.Notifications = append(res.Notifications, note)
+		emit(progressSection(ProgressEvent{
+			Phase:  "notify",
+			Stage:  "background",
+			Detail: note.Detail,
+			Index:  iteration,
+			Total:  maxPasses,
+		}, SectionRepeat, SectionLabelRepeat, iteration, maxPasses))
 		if err := emitStage(iteration, HarnessStageAssign, progressSection(ProgressEvent{
 			Phase:   "todo",
 			Stage:   "iteration_start",
@@ -434,103 +559,144 @@ func (o *Orchestrator) RunWithProgress(ctx context.Context, goal string, onProgr
 		}, SectionRepeat, SectionLabelRepeat, retries+1, maxPasses))
 		totalActive := countOpenTodos(res.Todos)
 		doneThisPass := 0
-		for i := range res.Todos {
-			td := &res.Todos[i]
-			if td.Status == "done" {
-				continue
-			}
-			spec := topo.Specialists[i%len(topo.Specialists)]
-			td.Assignee = spec
-			td.Attempt = retries + 1
-			td.Status = "in_progress"
-			vis := agentVisibilityFor(spec)
-			emit(progressSection(ProgressEvent{
-				Phase:  "specialist",
-				Stage:  "start",
-				Index:  doneThisPass + 1,
-				Total:  totalActive,
-				Role:   spec,
-				TodoID: td.ID,
-				Detail: td.Title,
-				Status: td.Status,
-				Tools:  vis.ToolsUsed,
-				Skills: vis.SkillsUsed,
-				Memory: vis.MemoryUsed,
-			}, SectionSubagents, SectionLabelSubagents, 0, 0))
+		for doneThisPass < totalActive {
+			progressMade := false
+			for _, spec := range topo.Specialists {
+				claimIdx, claimReason := claimNextTodoIndex(spec, res.Todos)
+				if claimIdx < 0 {
+					res.ClaimLog = append(res.ClaimLog, ClaimEvent{Iteration: iteration, Role: spec, Action: "skipped", Reason: "no claimable todo"})
+					continue
+				}
+				td := &res.Todos[claimIdx]
+				res.ClaimLog = append(res.ClaimLog, ClaimEvent{Iteration: iteration, Role: spec, TodoID: td.ID, Action: "claimed", Reason: claimReason})
+				progressMade = true
+				td.Assignee = spec
+				td.Attempt = retries + 1
+				td.Status = "in_progress"
+				vis := agentVisibilityFor(spec)
+				emit(progressSection(ProgressEvent{
+					Phase:  "todo",
+					Stage:  "claimed",
+					Role:   spec,
+					TodoID: td.ID,
+					Detail: claimReason,
+					Status: td.Status,
+				}, SectionSubagents, SectionLabelSubagents, 0, 0))
+				emit(progressSection(ProgressEvent{
+					Phase:  "specialist",
+					Stage:  "start",
+					Index:  doneThisPass + 1,
+					Total:  totalActive,
+					Role:   spec,
+					TodoID: td.ID,
+					Detail: td.Title,
+					Status: td.Status,
+					Tools:  vis.ToolsUsed,
+					Skills: vis.SkillsUsed,
+					Memory: vis.MemoryUsed,
+				}, SectionSubagents, SectionLabelSubagents, 0, 0))
 
-			out, err := o.specialist(ctx, sys, spec, td.Title)
-			if err != nil {
-				out = fmt.Sprintf("(specialist %s error: %v)", spec, err)
-			}
-			emit(progressSection(ProgressEvent{
-				Phase:  "specialist",
-				Stage:  "end",
-				Index:  doneThisPass + 1,
-				Total:  totalActive,
-				Role:   spec,
-				TodoID: td.ID,
-				Status: "output_ready",
-				Tools:  vis.ToolsUsed,
-				Skills: vis.SkillsUsed,
-				Memory: vis.MemoryUsed,
-				Detail: "sub-agent output ready",
-			}, SectionSubagents, SectionLabelSubagents, 0, 0))
+				sbx := buildSubAgentSandbox(spec, *td)
+				out, err := o.specialist(ctx, sys, sbx, td.Title)
+				if err != nil {
+					out = fmt.Sprintf("(specialist %s error: %v)", spec, err)
+					res.MissingFindings = append(res.MissingFindings, MissingFinding{
+						TodoID:   td.ID,
+						Source:   "specialist_error",
+						Detail:   truncate(err.Error(), 220),
+						Severity: "high",
+					})
+				}
+				emit(progressSection(ProgressEvent{
+					Phase:  "specialist",
+					Stage:  "end",
+					Index:  doneThisPass + 1,
+					Total:  totalActive,
+					Role:   spec,
+					TodoID: td.ID,
+					Status: "output_ready",
+					Tools:  vis.ToolsUsed,
+					Skills: vis.SkillsUsed,
+					Memory: vis.MemoryUsed,
+					Detail: "sub-agent output ready",
+				}, SectionSubagents, SectionLabelSubagents, 0, 0))
 
-			emit(progressSection(ProgressEvent{
-				Phase:  "feedback",
-				Stage:  "start",
-				Index:  doneThisPass + 1,
-				Total:  totalActive,
-				Role:   spec,
-				TodoID: td.ID,
-				Detail: "critic scoring sub-agent output",
-				Tools:  vis.ToolsUsed,
-				Skills: vis.SkillsUsed,
-				Memory: vis.MemoryUsed,
-			}, SectionFeedback, SectionLabelFeedback, 0, 0))
-			score, fb, err := o.criticSubAgent(ctx, sys, goal, td.Title, out)
-			if err != nil {
-				score, fb = 0.5, err.Error()
+				emit(progressSection(ProgressEvent{
+					Phase:  "feedback",
+					Stage:  "start",
+					Index:  doneThisPass + 1,
+					Total:  totalActive,
+					Role:   spec,
+					TodoID: td.ID,
+					Detail: "critic scoring sub-agent output",
+					Tools:  vis.ToolsUsed,
+					Skills: vis.SkillsUsed,
+					Memory: vis.MemoryUsed,
+				}, SectionFeedback, SectionLabelFeedback, 0, 0))
+				score, fb, err := o.criticSubAgent(ctx, sys, goal, td.Title, out)
+				if err != nil {
+					score, fb = 0.5, err.Error()
+				}
+				status := "accepted"
+				td.Status = "done"
+				td.Feedback = ""
+				if score < dyn.Threshold {
+					status = "needs_followup"
+					td.Status = "needs_followup"
+					td.Feedback = fb
+					res.MissingFindings = append(res.MissingFindings, inferMissingFromCritique(td.ID, "sub_critic", fb)...)
+				}
+				latestByTodo[td.ID] = out
+				res.SubResults[fmt.Sprintf("%s:%s", spec, td.ID)] = out
+				res.SubAgentReports = append(res.SubAgentReports, SubAgentReport{
+					TodoID:     td.ID,
+					Role:       spec,
+					Task:       td.Title,
+					Attempt:    retries + 1,
+					Output:     out,
+					Critique:   fb,
+					Score:      score,
+					Status:     status,
+					ToolsUsed:  vis.ToolsUsed,
+					SkillsUsed: vis.SkillsUsed,
+					MemoryUsed: vis.MemoryUsed,
+					Sandbox:    sbx,
+				})
+				emit(progressSection(ProgressEvent{
+					Phase:     "feedback",
+					Stage:     "end",
+					Index:     doneThisPass + 1,
+					Total:     totalActive,
+					Role:      spec,
+					TodoID:    td.ID,
+					Status:    td.Status,
+					Score:     score,
+					Threshold: dyn.Threshold,
+					Tools:     vis.ToolsUsed,
+					Skills:    vis.SkillsUsed,
+					Memory:    vis.MemoryUsed,
+					Detail:    fb,
+				}, SectionFeedback, SectionLabelFeedback, 0, 0))
+				doneThisPass++
+				if doneThisPass >= totalActive {
+					break
+				}
 			}
-			status := "accepted"
-			td.Status = "done"
-			td.Feedback = ""
-			if score < topo.CriticThreshold {
-				status = "needs_followup"
-				td.Status = "needs_followup"
-				td.Feedback = fb
+			if !progressMade {
+				for i := range res.Todos {
+					if res.Todos[i].Status == "pending" || res.Todos[i].Status == "needs_followup" {
+						res.ClaimLog = append(res.ClaimLog, ClaimEvent{
+							Iteration: iteration,
+							Role:      topo.Specialists[0],
+							TodoID:    res.Todos[i].ID,
+							Action:    "forced",
+							Reason:    "dependency deadlock fallback",
+						})
+						res.Todos[i].DependsOn = nil
+						break
+					}
+				}
 			}
-			latestByTodo[td.ID] = out
-			res.SubResults[fmt.Sprintf("%s:%s", spec, td.ID)] = out
-			res.SubAgentReports = append(res.SubAgentReports, SubAgentReport{
-				TodoID:     td.ID,
-				Role:       spec,
-				Task:       td.Title,
-				Attempt:    retries + 1,
-				Output:     out,
-				Critique:   fb,
-				Score:      score,
-				Status:     status,
-				ToolsUsed:  vis.ToolsUsed,
-				SkillsUsed: vis.SkillsUsed,
-				MemoryUsed: vis.MemoryUsed,
-			})
-			emit(progressSection(ProgressEvent{
-				Phase:     "feedback",
-				Stage:     "end",
-				Index:     doneThisPass + 1,
-				Total:     totalActive,
-				Role:      spec,
-				TodoID:    td.ID,
-				Status:    td.Status,
-				Score:     score,
-				Threshold: topo.CriticThreshold,
-				Tools:     vis.ToolsUsed,
-				Skills:    vis.SkillsUsed,
-				Memory:    vis.MemoryUsed,
-				Detail:    fb,
-			}, SectionFeedback, SectionLabelFeedback, 0, 0))
-			doneThisPass++
 		}
 		emit(progressSection(ProgressEvent{
 			Phase:   "todo",
@@ -565,12 +731,15 @@ func (o *Orchestrator) RunWithProgress(ctx context.Context, goal string, onProgr
 		}
 		res.CriticScores[fmt.Sprintf("attempt_%d", retries)] = score
 		res.GlobalCritique = append(res.GlobalCritique, CritiqueAttempt{Attempt: retries + 1, Score: score, Rationale: rationale})
+		if score < dyn.Threshold {
+			res.MissingFindings = append(res.MissingFindings, inferMissingFromCritique("", "global_critic", rationale)...)
+		}
 		emit(progressSection(ProgressEvent{
 			Phase:     "critic",
 			Stage:     "end",
 			Attempt:   retries + 1,
 			Score:     score,
-			Threshold: topo.CriticThreshold,
+			Threshold: dyn.Threshold,
 			Detail:    truncate(strings.TrimSpace(rationale), 240),
 		}, SectionFeedback, SectionLabelFeedback, 1, 2))
 		emit(progressSection(ProgressEvent{
@@ -584,6 +753,9 @@ func (o *Orchestrator) RunWithProgress(ctx context.Context, goal string, onProgr
 			ver = VerificationResult{Summary: verr.Error(), Checks: []string{"preview unavailable"}, Passed: false}
 		}
 		res.Verification = ver
+		if !ver.Passed {
+			res.MissingFindings = append(res.MissingFindings, inferMissingFromVerification(ver)...)
+		}
 		if ver.Passed {
 			emit(progressSection(ProgressEvent{Phase: "verify", Stage: "end", Attempt: retries + 1, Status: "passed", Detail: ver.Summary}, SectionFeedback, SectionLabelFeedback, 2, 2))
 		} else {
@@ -593,7 +765,16 @@ func (o *Orchestrator) RunWithProgress(ctx context.Context, goal string, onProgr
 		if ver.Passed {
 			verifyStatus = "passed"
 		}
-		iterSummary := fmt.Sprintf("iteration %d summary: score=%.2f threshold=%.2f verify=%s open_todos=%d", iteration, score, topo.CriticThreshold, verifyStatus, countOpenTodos(res.Todos))
+		dyn = adjustDynamicIntensity(dyn, iteration, score, ver.Passed, len(res.MissingFindings))
+		res.IntensityTrace = append(res.IntensityTrace, IntensityState{
+			Iteration:           iteration,
+			Mode:                dyn.Mode,
+			Score:               score,
+			Threshold:           dyn.Threshold,
+			FollowUpMax:         dyn.FollowUpMax,
+			MissingBoostApplied: dyn.MissingBoostApplied,
+		})
+		iterSummary := fmt.Sprintf("iteration %d summary: score=%.2f threshold=%.2f verify=%s open_todos=%d intensity=%s", iteration, score, dyn.Threshold, verifyStatus, countOpenTodos(res.Todos), dyn.Mode)
 		res.IterationNotes = append(res.IterationNotes, iterSummary)
 		if err := emitStage(iteration, HarnessStageSummary, progressSection(ProgressEvent{
 			Phase:            "summary",
@@ -607,7 +788,7 @@ func (o *Orchestrator) RunWithProgress(ctx context.Context, goal string, onProgr
 			return nil, err
 		}
 
-		if score >= topo.CriticThreshold && ver.Passed {
+		if score >= dyn.Threshold && ver.Passed {
 			res.Final = merged + "\n\n[critic score=" + fmt.Sprintf("%.2f", score) + "] " + rationale
 			res.Retries = retries
 			res.CompletedTodos, res.TotalTodos = summarizeTodos(res.Todos)
@@ -617,7 +798,7 @@ func (o *Orchestrator) RunWithProgress(ctx context.Context, goal string, onProgr
 				Stage:     "end",
 				Attempt:   retries + 1,
 				Score:     score,
-				Threshold: topo.CriticThreshold,
+				Threshold: dyn.Threshold,
 				Detail:    "done",
 				Index:     retries + 1,
 				Total:     maxPasses,
@@ -632,7 +813,7 @@ func (o *Orchestrator) RunWithProgress(ctx context.Context, goal string, onProgr
 			Stage:     "retry",
 			Attempt:   retries + 1,
 			Score:     score,
-			Threshold: topo.CriticThreshold,
+			Threshold: dyn.Threshold,
 			Detail:    "retry/redo due to score or verification failure",
 		}, SectionRetry, SectionLabelRetry, 1, 2), "retry", "retry and redo triggered"); err != nil {
 			return nil, err
@@ -642,7 +823,7 @@ func (o *Orchestrator) RunWithProgress(ctx context.Context, goal string, onProgr
 			Stage:     "retry",
 			Attempt:   retries + 1,
 			Score:     score,
-			Threshold: topo.CriticThreshold,
+			Threshold: dyn.Threshold,
 			Detail:    "below threshold; redo with follow-up todos",
 		}, SectionRetry, SectionLabelRetry, 1, 2))
 		emit(progressSection(ProgressEvent{
@@ -651,7 +832,7 @@ func (o *Orchestrator) RunWithProgress(ctx context.Context, goal string, onProgr
 			Attempt: retries + 1,
 			Detail:  "creating follow-up todos from critique gaps",
 		}, SectionRetry, SectionLabelRetry, 2, 2))
-		newTodos, err := o.followUpTodos(ctx, sys, goal, rationale, res.Todos, retries+2)
+		newTodos, err := o.followUpTodos(ctx, sys, goal, rationale, res.Todos, retries+2, res.MissingFindings, dyn.FollowUpMax)
 		if err != nil || len(newTodos) == 0 {
 			newTodos = []TodoItem{{
 				ID:        fmt.Sprintf("todo-followup-%02d", retries+1),
@@ -659,11 +840,30 @@ func (o *Orchestrator) RunWithProgress(ctx context.Context, goal string, onProgr
 				Status:    "pending",
 				Attempt:   retries + 2,
 				CreatedBy: "critic",
+				Priority:  inferPriorityForTodo(rationale),
 			}}
 		}
 		for j, td := range newTodos {
 			res.Plan = append(res.Plan, td.Title)
 			res.Todos = append(res.Todos, td)
+			res.Planning.Milestone = append(res.Planning.Milestone, PlanStep{
+				ID:        td.ID,
+				Title:     td.Title,
+				DependsOn: append([]string{}, td.DependsOn...),
+				Priority:  td.Priority,
+			})
+			res.DependencyGraph.Nodes = append(res.DependencyGraph.Nodes, DependencyNode{
+				ID:       td.ID,
+				Title:    td.Title,
+				Priority: td.Priority,
+			})
+			for _, dep := range td.DependsOn {
+				res.DependencyGraph.Edges = append(res.DependencyGraph.Edges, DependencyEdge{
+					From: dep,
+					To:   td.ID,
+					Type: "blocks",
+				})
+			}
 			res.IterationNotes = append(res.IterationNotes, fmt.Sprintf("attempt %d added todo %s: %s", retries+1, td.ID, td.Title))
 			emit(progressSection(ProgressEvent{
 				Phase:   "todo",
@@ -741,6 +941,325 @@ func inferSkillsForTodo(title string) []string {
 	return dedupeStrings(skills)
 }
 
+func buildExecutionPlan(goal string, plan []string) ExecutionPlan {
+	steps := make([]PlanStep, 0, len(plan))
+	for i, title := range plan {
+		id := fmt.Sprintf("todo-%02d", i+1)
+		steps = append(steps, PlanStep{
+			ID:       id,
+			Title:    strings.TrimSpace(title),
+			Priority: inferPriorityForTodo(title),
+		})
+	}
+	edges := inferDependencyEdges(steps)
+	depByTo := map[string][]string{}
+	for _, e := range edges {
+		if e.Type == "blocks" {
+			depByTo[e.To] = append(depByTo[e.To], e.From)
+		}
+	}
+	for i := range steps {
+		steps[i].DependsOn = dedupeStrings(depByTo[steps[i].ID])
+	}
+	return ExecutionPlan{
+		Summary:   truncate(strings.TrimSpace(goal), 240),
+		Strategy:  "dependency-aware decomposition with autonomous claiming",
+		Milestone: steps,
+	}
+}
+
+func planningToDependencyGraph(p ExecutionPlan) DependencyGraph {
+	nodes := make([]DependencyNode, 0, len(p.Milestone))
+	for _, s := range p.Milestone {
+		nodes = append(nodes, DependencyNode{
+			ID:       s.ID,
+			Title:    s.Title,
+			Priority: s.Priority,
+		})
+	}
+	return DependencyGraph{
+		Nodes: nodes,
+		Edges: inferDependencyEdges(p.Milestone),
+	}
+}
+
+func inferDependencyEdges(steps []PlanStep) []DependencyEdge {
+	edges := []DependencyEdge{}
+	for i := range steps {
+		if i > 0 {
+			edges = append(edges, DependencyEdge{
+				From: steps[i-1].ID,
+				To:   steps[i].ID,
+				Type: "soft",
+			})
+		}
+	}
+	for i := range steps {
+		ti := strings.ToLower(steps[i].Title)
+		for j := range steps {
+			if i == j {
+				continue
+			}
+			tj := strings.ToLower(steps[j].Title)
+			if dependsByKeyword(ti, tj) {
+				edges = append(edges, DependencyEdge{
+					From: steps[j].ID,
+					To:   steps[i].ID,
+					Type: "blocks",
+				})
+			}
+		}
+	}
+	return dedupeEdges(edges)
+}
+
+func dependsByKeyword(target, candidateDep string) bool {
+	if strings.Contains(target, "test") && (strings.Contains(candidateDep, "build") || strings.Contains(candidateDep, "implement") || strings.Contains(candidateDep, "code")) {
+		return true
+	}
+	if strings.Contains(target, "deploy") && (strings.Contains(candidateDep, "build") || strings.Contains(candidateDep, "package")) {
+		return true
+	}
+	if strings.Contains(target, "document") && (strings.Contains(candidateDep, "implement") || strings.Contains(candidateDep, "finalize")) {
+		return true
+	}
+	return false
+}
+
+func dedupeEdges(in []DependencyEdge) []DependencyEdge {
+	seen := map[string]bool{}
+	out := make([]DependencyEdge, 0, len(in))
+	for _, e := range in {
+		if strings.TrimSpace(e.From) == "" || strings.TrimSpace(e.To) == "" || e.From == e.To {
+			continue
+		}
+		k := e.From + "->" + e.To + ":" + e.Type
+		if seen[k] {
+			continue
+		}
+		seen[k] = true
+		out = append(out, e)
+	}
+	return out
+}
+
+func inferPriorityForTodo(title string) int {
+	t := strings.ToLower(strings.TrimSpace(title))
+	switch {
+	case strings.Contains(t, "blocker"), strings.Contains(t, "critical"), strings.Contains(t, "urgent"):
+		return 1
+	case strings.Contains(t, "test"), strings.Contains(t, "verify"), strings.Contains(t, "qa"):
+		return 3
+	default:
+		return 2
+	}
+}
+
+func claimNextTodoIndex(role string, todos []TodoItem) (int, string) {
+	bestIdx := -1
+	bestScore := -9999
+	bestReason := ""
+	for i := range todos {
+		td := todos[i]
+		if td.Status != "pending" && td.Status != "needs_followup" {
+			continue
+		}
+		if !todoDependenciesSatisfied(td, todos) {
+			continue
+		}
+		score := todoClaimScore(role, td)
+		if score > bestScore {
+			bestIdx = i
+			bestScore = score
+			bestReason = fmt.Sprintf("eligible with role-score=%d priority=%d", score, td.Priority)
+		}
+	}
+	return bestIdx, bestReason
+}
+
+func todoDependenciesSatisfied(td TodoItem, todos []TodoItem) bool {
+	if len(td.DependsOn) == 0 {
+		return true
+	}
+	byID := map[string]TodoItem{}
+	for _, t := range todos {
+		byID[t.ID] = t
+	}
+	for _, dep := range td.DependsOn {
+		d, ok := byID[dep]
+		if !ok || d.Status != "done" {
+			return false
+		}
+	}
+	return true
+}
+
+func todoClaimScore(role string, td TodoItem) int {
+	r := strings.ToLower(strings.TrimSpace(role))
+	t := strings.ToLower(strings.TrimSpace(td.Title))
+	score := 100 - (td.Priority * 10)
+	switch {
+	case strings.Contains(r, "coder") && (strings.Contains(t, "implement") || strings.Contains(t, "code") || strings.Contains(t, "build")):
+		score += 25
+	case strings.Contains(r, "research") && (strings.Contains(t, "research") || strings.Contains(t, "analy")):
+		score += 25
+	case strings.Contains(r, "writer") && (strings.Contains(t, "document") || strings.Contains(t, "write")):
+		score += 25
+	case strings.Contains(r, "analyst") && (strings.Contains(t, "test") || strings.Contains(t, "verify") || strings.Contains(t, "measure")):
+		score += 25
+	}
+	if td.Status == "needs_followup" {
+		score += 15
+	}
+	return score
+}
+
+func buildSubAgentSandbox(role string, td TodoItem) SubAgentSandbox {
+	return SubAgentSandbox{
+		Role:            strings.TrimSpace(role),
+		TodoID:          strings.TrimSpace(td.ID),
+		Scope:           truncate(strings.TrimSpace(td.Title), 180),
+		AllowedTools:    dedupeStrings(append([]string{}, td.Tools...)),
+		AllowedSkills:   dedupeStrings(append([]string{}, td.Skills...)),
+		Forbidden:       []string{"destructive_actions_without_review", "out_of_scope_changes", "secret_exfiltration"},
+		RequireEvidence: true,
+	}
+}
+
+func inferMissingFromCritique(todoID, source, critique string) []MissingFinding {
+	lines := splitSignalLines(critique)
+	out := make([]MissingFinding, 0, len(lines))
+	for _, l := range lines {
+		if !missingSignalLine(l) {
+			continue
+		}
+		out = append(out, MissingFinding{
+			TodoID:   strings.TrimSpace(todoID),
+			Source:   strings.TrimSpace(source),
+			Detail:   truncate(strings.TrimSpace(l), 200),
+			Severity: "medium",
+		})
+	}
+	if len(out) == 0 && strings.TrimSpace(critique) != "" {
+		out = append(out, MissingFinding{
+			TodoID:   strings.TrimSpace(todoID),
+			Source:   strings.TrimSpace(source),
+			Detail:   truncate(strings.TrimSpace(critique), 200),
+			Severity: "medium",
+		})
+	}
+	return out
+}
+
+func inferMissingFromVerification(v VerificationResult) []MissingFinding {
+	if v.Passed {
+		return nil
+	}
+	out := []MissingFinding{}
+	for _, c := range v.Checks {
+		if missingSignalLine(c) {
+			out = append(out, MissingFinding{Source: "verification", Detail: truncate(strings.TrimSpace(c), 200), Severity: "high"})
+		}
+	}
+	if len(out) == 0 && strings.TrimSpace(v.Summary) != "" {
+		out = append(out, MissingFinding{Source: "verification", Detail: truncate(strings.TrimSpace(v.Summary), 200), Severity: "high"})
+	}
+	return out
+}
+
+func splitSignalLines(s string) []string {
+	raw := strings.Split(strings.ReplaceAll(strings.TrimSpace(s), "\r", ""), "\n")
+	out := make([]string, 0, len(raw))
+	for _, l := range raw {
+		l = strings.TrimSpace(strings.TrimLeft(l, "-*0123456789. "))
+		if l != "" {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+func missingSignalLine(s string) bool {
+	l := strings.ToLower(strings.TrimSpace(s))
+	if l == "" {
+		return false
+	}
+	for _, k := range []string{"missing", "not covered", "gap", "lack", "needs", "todo", "follow-up", "incomplete", "failed"} {
+		if strings.Contains(l, k) {
+			return true
+		}
+	}
+	return false
+}
+
+type dynamicIntensity struct {
+	Mode                string
+	Threshold           float64
+	FollowUpMax         int
+	MissingBoostApplied bool
+}
+
+func newDynamicIntensity(baseThreshold float64) dynamicIntensity {
+	if baseThreshold <= 0 {
+		baseThreshold = 0.55
+	}
+	return dynamicIntensity{
+		Mode:        "normal",
+		Threshold:   baseThreshold,
+		FollowUpMax: 3,
+	}
+}
+
+func adjustDynamicIntensity(cur dynamicIntensity, iteration int, score float64, verifyPassed bool, missingCount int) dynamicIntensity {
+	next := cur
+	next.MissingBoostApplied = false
+	if (!verifyPassed || score < cur.Threshold) && iteration >= 2 {
+		next.Mode = "high"
+		next.Threshold = clampFloat(cur.Threshold-0.03, 0.45, 0.80)
+		next.FollowUpMax = 5
+	}
+	if verifyPassed && score >= cur.Threshold+0.1 {
+		next.Mode = "low"
+		next.Threshold = clampFloat(cur.Threshold+0.02, 0.45, 0.85)
+		next.FollowUpMax = 2
+	}
+	if missingCount >= 5 {
+		next.Mode = "high"
+		next.FollowUpMax = 5
+		next.MissingBoostApplied = true
+	}
+	return next
+}
+
+func computePlanSnapshot(iteration int, todos []TodoItem) PlanSnapshot {
+	s := PlanSnapshot{Iteration: iteration, Total: len(todos)}
+	for _, td := range todos {
+		switch strings.TrimSpace(td.Status) {
+		case "pending":
+			s.Pending++
+		case "in_progress":
+			s.InProgress++
+		case "needs_followup":
+			s.NeedsFollow++
+		case "done":
+			s.Done++
+		default:
+			s.Pending++
+		}
+	}
+	return s
+}
+
+func clampFloat(v, lo, hi float64) float64 {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
+}
+
 func dedupeStrings(in []string) []string {
 	seen := map[string]bool{}
 	out := make([]string, 0, len(in))
@@ -778,8 +1297,17 @@ func (o *Orchestrator) leaderPlan(ctx context.Context, sys string, topo Topology
 	return lines, nil
 }
 
-func (o *Orchestrator) specialist(ctx context.Context, sys, role, step string) (string, error) {
-	prompt := fmt.Sprintf("You are the %s specialist. Execute this sub-task briefly and practically:\n%s", role, step)
+func (o *Orchestrator) specialist(ctx context.Context, sys string, sandbox SubAgentSandbox, step string) (string, error) {
+	prompt := fmt.Sprintf(
+		"You are the %s specialist running in a sandbox.\nScope: %s\nAllowed tools: %s\nAllowed skills: %s\nForbidden: %s\nRequire evidence: %t\nExecute this sub-task briefly and practically, and call out what's missing if blocked:\n%s",
+		sandbox.Role,
+		sandbox.Scope,
+		strings.Join(sandbox.AllowedTools, ", "),
+		strings.Join(sandbox.AllowedSkills, ", "),
+		strings.Join(sandbox.Forbidden, ", "),
+		sandbox.RequireEvidence,
+		step,
+	)
 	return o.chat(ctx, o.LLM.Model, sys, prompt)
 }
 
@@ -825,10 +1353,17 @@ Draft:
 	return out.Score, out.Rationale, nil
 }
 
-func (o *Orchestrator) followUpTodos(ctx context.Context, sys, goal, critique string, existing []TodoItem, attempt int) ([]TodoItem, error) {
+func (o *Orchestrator) followUpTodos(ctx context.Context, sys, goal, critique string, existing []TodoItem, attempt int, missing []MissingFinding, maxFollowUps int) ([]TodoItem, error) {
+	if maxFollowUps <= 0 {
+		maxFollowUps = 3
+	}
 	existingTitles := make([]string, 0, len(existing))
+	lastDoneID := ""
 	for _, td := range existing {
 		existingTitles = append(existingTitles, td.Title)
+		if td.Status == "done" {
+			lastDoneID = td.ID
+		}
 	}
 	prompt := fmt.Sprintf(`Generate 1-3 additional todo items needed to meet the goal based on critique.
 Rules: one line per todo, concise, non-empty, no numbering.
@@ -854,8 +1389,34 @@ Existing todos:
 			Status:    "pending",
 			Attempt:   attempt,
 			CreatedBy: "critic",
+			Priority:  inferPriorityForTodo(line),
+			DependsOn: nil,
 		})
-		if len(out) >= 3 {
+		if lastDoneID != "" {
+			out[len(out)-1].DependsOn = []string{lastDoneID}
+		}
+		if len(out) >= maxFollowUps {
+			break
+		}
+	}
+	for _, m := range missing {
+		detail := strings.TrimSpace(m.Detail)
+		if detail == "" {
+			continue
+		}
+		out = append(out, TodoItem{
+			ID:        fmt.Sprintf("todo-missing-%02d-a%d", len(out)+1, attempt),
+			Title:     "Address missing: " + truncate(detail, 140),
+			Status:    "pending",
+			Attempt:   attempt,
+			CreatedBy: "critic",
+			Priority:  1,
+			DependsOn: nil,
+		})
+		if lastDoneID != "" {
+			out[len(out)-1].DependsOn = []string{lastDoneID}
+		}
+		if len(out) >= maxFollowUps {
 			break
 		}
 	}

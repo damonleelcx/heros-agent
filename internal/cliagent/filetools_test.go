@@ -106,3 +106,59 @@ func TestDispatchFileToolsAbsolutePath(t *testing.T) {
 		t.Fatalf("unexpected read absolute result: %s", r)
 	}
 }
+
+func TestDispatchEditGlobGrepAndWriteTodos(t *testing.T) {
+	tmp := t.TempDir()
+	s := &Session{WorkDir: tmp}
+	ctx := context.Background()
+
+	_, err := s.DispatchTool(ctx, ToolCall{
+		Name:      "write_file",
+		Arguments: mustArgs(t, map[string]any{"path": "src/app.txt", "content": "alpha\nbeta\n"}),
+	})
+	if err != nil {
+		t.Fatalf("write_file alias: %v", err)
+	}
+	_, err = s.DispatchTool(ctx, ToolCall{
+		Name:      "edit_file",
+		Arguments: mustArgs(t, map[string]any{"path": "src/app.txt", "old_string": "beta", "new_string": "gamma"}),
+	})
+	if err != nil {
+		t.Fatalf("edit_file: %v", err)
+	}
+	grepRes, err := s.DispatchTool(ctx, ToolCall{
+		Name:      "grep",
+		Arguments: mustArgs(t, map[string]any{"path": "src", "query": "gamma", "recursive": true}),
+	})
+	if err != nil {
+		t.Fatalf("grep: %v", err)
+	}
+	if !strings.Contains(grepRes, "gamma") {
+		t.Fatalf("grep expected gamma, got: %s", grepRes)
+	}
+	globRes, err := s.DispatchTool(ctx, ToolCall{
+		Name:      "glob",
+		Arguments: mustArgs(t, map[string]any{"path": ".", "pattern": "src/*.txt"}),
+	})
+	if err != nil {
+		t.Fatalf("glob: %v", err)
+	}
+	if !strings.Contains(globRes, "app.txt") {
+		t.Fatalf("glob expected app.txt, got: %s", globRes)
+	}
+	todoRes, err := s.DispatchTool(ctx, ToolCall{
+		Name: "write_todos",
+		Arguments: mustArgs(t, map[string]any{
+			"todos": []map[string]any{
+				{"content": "inspect workspace", "status": "completed"},
+				{"content": "run tests", "status": "pending"},
+			},
+		}),
+	})
+	if err != nil {
+		t.Fatalf("write_todos: %v", err)
+	}
+	if !strings.Contains(todoRes, ".heros") {
+		t.Fatalf("write_todos expected persisted path, got: %s", todoRes)
+	}
+}

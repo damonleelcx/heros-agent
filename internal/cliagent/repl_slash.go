@@ -39,6 +39,22 @@ func (s *Session) DispatchReplSlash(ctx context.Context, line string, out, errOu
 			_, _ = fmt.Fprintln(out, "(catalog block appended to context)")
 		}
 		return true, false
+	case "/skills":
+		sk, err := s.Agentd.CatalogSkills(ctx)
+		if err != nil {
+			_, _ = fmt.Fprintf(errOut, "skills: %v\n", err)
+			return true, false
+		}
+		_, _ = fmt.Fprintln(out, FormatSkillsListMarkdown(sk, s.DataDir))
+		return true, false
+	case "/tools":
+		tl, err := s.Agentd.CatalogTools(ctx)
+		if err != nil {
+			_, _ = fmt.Fprintf(errOut, "tools: %v\n", err)
+			return true, false
+		}
+		_, _ = fmt.Fprintln(out, FormatToolsListMarkdown(tl))
+		return true, false
 	case "/pwd":
 		_, _ = fmt.Fprintln(out, s.WorkDir)
 		return true, false

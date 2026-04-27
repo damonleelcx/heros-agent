@@ -129,6 +129,148 @@ func OpenAITools(opts ToolOptions) []map[string]any {
 		{
 			"type": "function",
 			"function": map[string]any{
+				"name":        "write_todos",
+				"description": "Plan tracking tool. Write the current task breakdown as todos with statuses (pending|in_progress|completed). Use at the start of multi-step work and update as progress changes.",
+				"parameters": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"path":  map[string]any{"type": "string", "description": "Optional output JSON path; default .heros/todos.json"},
+						"todos": map[string]any{"type": "array", "description": "Todo items with content/status", "items": map[string]any{"type": "object"}},
+					},
+					"required": []string{"todos"},
+				},
+			},
+		},
+		{
+			"type": "function",
+			"function": map[string]any{
+				"name":        "execute",
+				"description": "Execute shell command in the workspace with local sandboxing rules. Use for tests/build/run and command-line inspection.",
+				"parameters": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"command": map[string]any{"type": "string"},
+					},
+					"required": []string{"command"},
+				},
+			},
+		},
+		{
+			"type": "function",
+			"function": map[string]any{
+				"name":        "read_file",
+				"description": "Read file contents from workspace (alias of heros_read_file).",
+				"parameters": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"path":     map[string]any{"type": "string"},
+						"encoding": map[string]any{"type": "string"},
+					},
+					"required": []string{"path"},
+				},
+			},
+		},
+		{
+			"type": "function",
+			"function": map[string]any{
+				"name":        "write_file",
+				"description": "Write file contents in workspace (alias of heros_write_file).",
+				"parameters": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"path":        map[string]any{"type": "string"},
+						"content":     map[string]any{"type": "string"},
+						"encoding":    map[string]any{"type": "string"},
+						"append":      map[string]any{"type": "boolean"},
+						"create_dirs": map[string]any{"type": "boolean"},
+					},
+					"required": []string{"path", "content"},
+				},
+			},
+		},
+		{
+			"type": "function",
+			"function": map[string]any{
+				"name":        "edit_file",
+				"description": "Text edit helper: replace old_string with new_string in a file (single replace by default; set replace_all=true for all occurrences).",
+				"parameters": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"path":        map[string]any{"type": "string"},
+						"old_string":  map[string]any{"type": "string"},
+						"new_string":  map[string]any{"type": "string"},
+						"replace_all": map[string]any{"type": "boolean"},
+					},
+					"required": []string{"path", "old_string", "new_string"},
+				},
+			},
+		},
+		{
+			"type": "function",
+			"function": map[string]any{
+				"name":        "ls",
+				"description": "List files/folders in workspace (alias of heros_list_files).",
+				"parameters": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"path":        map[string]any{"type": "string"},
+						"recursive":   map[string]any{"type": "boolean"},
+						"max_entries": map[string]any{"type": "integer"},
+					},
+				},
+			},
+		},
+		{
+			"type": "function",
+			"function": map[string]any{
+				"name":        "glob",
+				"description": "Find paths by wildcard pattern under the workspace.",
+				"parameters": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"path":    map[string]any{"type": "string"},
+						"pattern": map[string]any{"type": "string"},
+					},
+					"required": []string{"pattern"},
+				},
+			},
+		},
+		{
+			"type": "function",
+			"function": map[string]any{
+				"name":        "grep",
+				"description": "Search file contents for query text under workspace.",
+				"parameters": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"path":           map[string]any{"type": "string"},
+						"query":          map[string]any{"type": "string"},
+						"recursive":      map[string]any{"type": "boolean"},
+						"case_sensitive": map[string]any{"type": "boolean"},
+						"max_matches":    map[string]any{"type": "integer"},
+					},
+					"required": []string{"query"},
+				},
+			},
+		},
+		{
+			"type": "function",
+			"function": map[string]any{
+				"name":        "task",
+				"description": "Delegate substantial work to the harness as a sub-agent task with isolated context window hint. Use for complex multi-step tasks.",
+				"parameters": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"description":    map[string]any{"type": "string"},
+						"context_window": map[string]any{"type": "integer", "description": "optional hint for isolated context size"},
+						"goal":           map[string]any{"type": "string"},
+					},
+				},
+			},
+		},
+		{
+			"type": "function",
+			"function": map[string]any{
 				"name":        "heros_list_files",
 				"description": "List files/directories on the local machine. Use this first when user asks to inspect project files or locate where to create/edit files.",
 				"parameters": map[string]any{

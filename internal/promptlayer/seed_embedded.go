@@ -8,7 +8,9 @@ import (
 	"strings"
 )
 
-//go:embed embedded_defaults
+// Include underscore-prefixed folders like skills/_global and tools/_global.
+//
+//go:embed all:embedded_defaults
 var embeddedDefaults embed.FS
 
 const embeddedRoot = "embedded_defaults"

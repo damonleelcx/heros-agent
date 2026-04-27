@@ -7,6 +7,14 @@ import (
 )
 
 var (
+	reSmallTalk = regexp.MustCompile(`(?i)^\s*(hi|hello|hey|thanks|thank you|ok|okay|cool|great|nice)\s*[!.]?\s*$`)
+
+	reAmbiguousIntent = regexp.MustCompile(`(?i)^\s*(` +
+		`do\s+it|fix\s+it|make\s+it\s+better|improve\s+it|` +
+		`continue|go\s+on|same\s+thing|same\s+for\s+this|` +
+		`help|please\s+help|not\s+sure|idk` +
+		`)\s*[!.]?\s*$`)
+
 	reProjectGrounding = regexp.MustCompile(`(?i)(` +
 		`tell\s+me\s+about|what\s+('s|is|are)\s+this|about\s+this\s+project|this\s+project|the\s+project|our\s+project|` +
 		`codebase|repo(sitory)?|what\s+do(es)?\s+it\s+do|` +
@@ -61,6 +69,34 @@ var (
 		`\bintegration\s+tests?\b` +
 		`)`)
 )
+
+// ClarificationRequired is true when the request is too ambiguous to execute safely.
+// In this case, the assistant should ask one concise clarification question first.
+func ClarificationRequired(userLine string) bool {
+	if os.Getenv("HEROS_NO_TOOL_FORCE") == "1" {
+		return false
+	}
+	u := strings.TrimSpace(userLine)
+	if u == "" || strings.HasPrefix(u, "/") {
+		return false
+	}
+	if reSmallTalk.MatchString(u) {
+		return false
+	}
+	if reAmbiguousIntent.MatchString(u) {
+		return true
+	}
+	words := strings.Fields(strings.ToLower(u))
+	if len(words) <= 2 {
+		for _, w := range words {
+			switch w {
+			case "help", "fix", "do", "make", "build", "update", "change", "continue", "that", "this", "it":
+				return true
+			}
+		}
+	}
+	return false
+}
 
 // WorkspaceGroundingRequired is true when the user is asking about the local workspace / product
 // and the model should not answer from imagination — tools must run first.

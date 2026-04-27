@@ -81,3 +81,27 @@ func TestLongHorizonHarnessRequired(t *testing.T) {
 		}
 	}
 }
+
+func TestClarificationRequired(t *testing.T) {
+	t.Setenv("HEROS_NO_TOOL_FORCE", "")
+	cases := []struct {
+		line string
+		want bool
+	}{
+		{"fix it", true},
+		{"continue", true},
+		{"help", true},
+		{"build this", true},
+		{"thanks", false},
+		{"hello", false},
+		{"create src/main.go", false},
+		{"run tests", false},
+		{"/help", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		if got := ClarificationRequired(tc.line); got != tc.want {
+			t.Errorf("%q: got %v want %v", tc.line, got, tc.want)
+		}
+	}
+}

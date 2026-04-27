@@ -1,6 +1,7 @@
 package cliagent
 
 import (
+	"bufio"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -312,4 +313,227 @@ func makeDirJSON(workDir string, args map[string]any) (string, error) {
 	}
 	b, _ := json.Marshal(resp)
 	return string(b), nil
+}
+
+func editFileJSON(workDir string, args map[string]any) (string, error) {
+	p := ArgString(args, "path")
+	abs, err := resolveUserPath(workDir, p)
+	if err != nil {
+		return "", err
+	}
+	oldS := ArgString(args, "old_string")
+	if strings.TrimSpace(oldS) == "" {
+		return "", fmt.Errorf("edit_file requires old_string")
+	}
+	newS := ArgString(args, "new_string")
+	replaceAll := argBool(args, "replace_all", false)
+	b, err := os.ReadFile(abs)
+	if err != nil {
+		return "", err
+	}
+	if !utf8.Valid(b) {
+		return "", fmt.Errorf("edit_file supports text files only")
+	}
+	src := string(b)
+	count := strings.Count(src, oldS)
+	if count == 0 {
+		return "", fmt.Errorf("old_string not found")
+	}
+	replCount := 1
+	if replaceAll {
+		replCount = count
+	}
+	out := strings.Replace(src, oldS, newS, replCount)
+	if err := os.WriteFile(abs, []byte(out), 0o644); err != nil {
+		return "", err
+	}
+	resp := map[string]any{
+		"path":      filepath.Clean(abs),
+		"replaced":  replCount,
+		"old_count": count,
+	}
+	j, _ := json.Marshal(resp)
+	return string(j), nil
+}
+
+func globJSON(workDir string, args map[string]any) (string, error) {
+	pat := strings.TrimSpace(ArgString(args, "pattern"))
+	if pat == "" {
+		return "", fmt.Errorf("glob requires pattern")
+	}
+	base := strings.TrimSpace(ArgString(args, "path"))
+	if base == "" {
+		base = "."
+	}
+	baseAbs, err := resolveUserPath(workDir, base)
+	if err != nil {
+		return "", err
+	}
+	fullPattern := filepath.Join(baseAbs, filepath.FromSlash(pat))
+	matches, err := filepath.Glob(fullPattern)
+	if err != nil {
+		return "", err
+	}
+	out := make([]map[string]any, 0, len(matches))
+	for _, m := range matches {
+		st, serr := os.Stat(m)
+		typ := "file"
+		if serr == nil && st.IsDir() {
+			typ = "dir"
+		}
+		out = append(out, map[string]any{
+			"path": filepath.Clean(m),
+			"type": typ,
+		})
+	}
+	resp := map[string]any{
+		"base":    filepath.Clean(baseAbs),
+		"pattern": pat,
+		"matches": out,
+	}
+	j, _ := json.Marshal(resp)
+	return string(j), nil
+}
+
+func grepJSON(workDir string, args map[string]any) (string, error) {
+	query := strings.TrimSpace(ArgString(args, "query"))
+	if query == "" {
+		return "", fmt.Errorf("grep requires query")
+	}
+	base := strings.TrimSpace(ArgString(args, "path"))
+	if base == "" {
+		base = "."
+	}
+	baseAbs, err := resolveUserPath(workDir, base)
+	if err != nil {
+		return "", err
+	}
+	recursive := argBool(args, "recursive", true)
+	caseSensitive := argBool(args, "case_sensitive", false)
+	maxMatches := argInt(args, "max_matches", 200)
+	if maxMatches <= 0 {
+		maxMatches = 200
+	}
+	qcmp := query
+	if !caseSensitive {
+		qcmp = strings.ToLower(query)
+	}
+	matches := make([]map[string]any, 0, 32)
+	matchCount := 0
+	appendMatchesFromFile := func(path string) error {
+		f, err := os.Open(path)
+		if err != nil {
+			return nil
+		}
+		defer f.Close()
+		sc := bufio.NewScanner(f)
+		lineNo := 0
+		for sc.Scan() {
+			lineNo++
+			line := sc.Text()
+			lcmp := line
+			if !caseSensitive {
+				lcmp = strings.ToLower(line)
+			}
+			if strings.Contains(lcmp, qcmp) {
+				matches = append(matches, map[string]any{
+					"path": filepath.Clean(path),
+					"line": lineNo,
+					"text": line,
+				})
+				matchCount++
+				if matchCount >= maxMatches {
+					return fs.SkipAll
+				}
+			}
+		}
+		return nil
+	}
+	if recursive {
+		err = filepath.WalkDir(baseAbs, func(path string, d fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return nil
+			}
+			if d.IsDir() {
+				return nil
+			}
+			return appendMatchesFromFile(path)
+		})
+		if err != nil && err != fs.SkipAll {
+			return "", err
+		}
+	} else {
+		ents, err := os.ReadDir(baseAbs)
+		if err != nil {
+			return "", err
+		}
+		for _, e := range ents {
+			if e.IsDir() {
+				continue
+			}
+			if err := appendMatchesFromFile(filepath.Join(baseAbs, e.Name())); err == fs.SkipAll {
+				break
+			}
+		}
+	}
+	resp := map[string]any{
+		"path":           filepath.Clean(baseAbs),
+		"query":          query,
+		"recursive":      recursive,
+		"case_sensitive": caseSensitive,
+		"matches":        matches,
+	}
+	j, _ := json.Marshal(resp)
+	return string(j), nil
+}
+
+func writeTodosJSON(workDir string, args map[string]any) (string, error) {
+	rawTodos, ok := args["todos"].([]any)
+	if !ok || len(rawTodos) == 0 {
+		return "", fmt.Errorf("write_todos requires non-empty todos array")
+	}
+	type todo struct {
+		Content string `json:"content"`
+		Status  string `json:"status"`
+	}
+	out := make([]todo, 0, len(rawTodos))
+	for _, rv := range rawTodos {
+		m, ok := rv.(map[string]any)
+		if !ok {
+			continue
+		}
+		content := strings.TrimSpace(ArgString(m, "content"))
+		status := strings.TrimSpace(strings.ToLower(ArgString(m, "status")))
+		if content == "" {
+			continue
+		}
+		if status == "" {
+			status = "pending"
+		}
+		out = append(out, todo{Content: content, Status: status})
+	}
+	if len(out) == 0 {
+		return "", fmt.Errorf("write_todos found no valid todo entries")
+	}
+	target := strings.TrimSpace(ArgString(args, "path"))
+	if target == "" {
+		target = ".heros/todos.json"
+	}
+	abs, err := resolveUserPath(workDir, target)
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+		return "", err
+	}
+	b, _ := json.MarshalIndent(map[string]any{"todos": out}, "", "  ")
+	if err := os.WriteFile(abs, b, 0o644); err != nil {
+		return "", err
+	}
+	resp := map[string]any{
+		"path":  filepath.Clean(abs),
+		"todos": out,
+	}
+	j, _ := json.Marshal(resp)
+	return string(j), nil
 }

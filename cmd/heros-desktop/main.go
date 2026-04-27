@@ -439,21 +439,27 @@ func main() {
 			APIKey:     *apiKey,
 			HTTPClient: cliagent.DefaultHTTPClient(),
 		},
-		OpenAIBase:               openaiBaseStr,
-		OpenAIKey:                openaiKey,
-		Model:                    modelStr,
-		SessionID:                sid,
-		DataDir:                  cfg.DataDir,
-		WorkDir:                  wd,
-		AgentShell:               *agentShell,
-		Stream:                   true,
-		UseReadline:              false,
-		TargetTenant:             *targetTenant,
-		LogTurnsToEpisodic:       !*noSessionLog,
-		AutoInjectMemory:         true,
-		AutoInjectTopK:           3,
-		AutoConsolidateEvery:     6,
-		AutoConsolidateThreshold: 0.45,
+		OpenAIBase:                    openaiBaseStr,
+		OpenAIKey:                     openaiKey,
+		Model:                         modelStr,
+		SessionID:                     sid,
+		DataDir:                       cfg.DataDir,
+		WorkDir:                       wd,
+		AgentShell:                    *agentShell,
+		Stream:                        true,
+		UseReadline:                   false,
+		TargetTenant:                  *targetTenant,
+		LogTurnsToEpisodic:            !*noSessionLog,
+		AutoInjectMemory:              true,
+		OnDemandMemoryInjection:       true,
+		AutoInjectTopK:                3,
+		ContextIsolation:              true,
+		ContextIsolationWindow:        28,
+		ContextCompression:            true,
+		ContextCompressionMaxMessages: 90,
+		ContextCompressionKeepRecent:  28,
+		AutoConsolidateEvery:          6,
+		AutoConsolidateThreshold:      0.45,
 	}
 
 	ctx := context.Background()
@@ -549,7 +555,7 @@ func main() {
 		pendingRender = ""
 		renderScheduled = false
 		outputMu.Unlock()
-		output.AppendMarkdown(chunk)
+		output.ParseMarkdown(outputMD)
 		outputBox.ScrollToBottom()
 	}
 
@@ -572,7 +578,7 @@ func main() {
 		outputMu.Lock()
 		outputMD += text
 		outputMu.Unlock()
-		output.AppendMarkdown(text)
+		output.ParseMarkdown(outputMD)
 		outputBox.ScrollToBottom()
 	}
 	appendOutputAsync := func(text string) {
@@ -795,6 +801,36 @@ func main() {
 			refreshWorkspaceViews()
 		}()
 	})
+	listSkills := widget.NewButton("List skills", func() {
+		if busy {
+			return
+		}
+		setBusy(true, "✦ Loading skills catalog…")
+		go func() {
+			sk, err := sess.Agentd.CatalogSkills(ctx)
+			if err != nil {
+				appendOutputAsync("\n[skills error] " + err.Error() + "\n")
+			} else {
+				appendOutputAsync("\n" + cliagent.FormatSkillsListMarkdown(sk, sess.DataDir) + "\n")
+			}
+			setBusyAsync(false, statusLine(getWorkdir(), " | ready"))
+		}()
+	})
+	listTools := widget.NewButton("List tools", func() {
+		if busy {
+			return
+		}
+		setBusy(true, "✦ Loading tools catalog…")
+		go func() {
+			tl, err := sess.Agentd.CatalogTools(ctx)
+			if err != nil {
+				appendOutputAsync("\n[tools error] " + err.Error() + "\n")
+			} else {
+				appendOutputAsync("\n" + cliagent.FormatToolsListMarkdown(tl) + "\n")
+			}
+			setBusyAsync(false, statusLine(getWorkdir(), " | ready"))
+		}()
+	})
 
 	browseWorkdir := widget.NewButton("Workspace folder…", func() {
 		if busy {
@@ -867,10 +903,10 @@ func main() {
 	})
 
 	refreshFiles := widget.NewButton("Refresh tree", refreshWorkspaceViews)
-	for _, b := range []*widget.Button{refresh, browseWorkdir, refreshFiles, copyOutput, clear} {
+	for _, b := range []*widget.Button{refresh, listSkills, listTools, browseWorkdir, refreshFiles, copyOutput, clear} {
 		b.Importance = widget.LowImportance
 	}
-	controls := container.NewHBox(layout.NewSpacer(), refresh, browseWorkdir, refreshFiles, copyOutput, clear, send)
+	controls := container.NewHBox(layout.NewSpacer(), refresh, listSkills, listTools, browseWorkdir, refreshFiles, copyOutput, clear, send)
 
 	chatSplit := container.NewVSplit(outputBox, input)
 	chatSplit.SetOffset(0.62)

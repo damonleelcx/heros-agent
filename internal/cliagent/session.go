@@ -43,8 +43,20 @@ type Session struct {
 	UserID string
 	// AutoInjectMemory prepends small retrieved memory context each user turn.
 	AutoInjectMemory bool
+	// OnDemandMemoryInjection injects memory only when intent indicates recall/long-horizon need.
+	OnDemandMemoryInjection bool
 	// AutoInjectTopK controls retrieval size for per-turn memory injection.
 	AutoInjectTopK int
+	// ContextIsolation constrains model-visible history to a recent rolling window.
+	ContextIsolation bool
+	// ContextIsolationWindow is max number of latest messages (excluding first system) visible to the model.
+	ContextIsolationWindow int
+	// ContextCompression compacts older chat into a short synthetic summary note.
+	ContextCompression bool
+	// ContextCompressionMaxMessages is the threshold above which compression runs.
+	ContextCompressionMaxMessages int
+	// ContextCompressionKeepRecent is number of latest messages retained uncompressed.
+	ContextCompressionKeepRecent int
 	// AutoConsolidateEvery runs /api/memory/consolidate every N user turns (0 disables).
 	AutoConsolidateEvery int
 	// AutoConsolidateThreshold is the importance threshold for periodic consolidation.
@@ -110,6 +122,7 @@ For binary reads/writes with file tools, use encoding=base64 when needed instead
 **Presentation requests:** If the user asks for a PowerPoint or says "I need ppt/pptx file", generate an actual **.pptx** in the workspace (for example via **heros_shell** + python-pptx), verify the file exists with **heros_list_files** or **heros_read_file** metadata, then respond with the produced file path.
 
 **Chat output style:** always return markdown suitable for UI preview rendering. Use fenced code blocks for code by default.
+**Smart tool defaults:** For multi-step tasks, start with **write_todos** and keep statuses updated. Prefer filesystem tools (**ls/read_file/write_file/edit_file/glob/grep**) for context and edits; use **execute** for commands/tests; use **task** (or **heros_run_harness**) when delegation/sub-agent flow is useful.
 Before substantial tool work, print one short progress line describing what you are doing now.
 When the user asks to implement/build/edit, execute autonomously without confirmation loops. Ask a question only when blocked by missing required input or a risky/destructive action.
 Do not ask "shall I continue" / "would you like me to proceed" after partial progress; continue until the requested implementation and validation are complete.
@@ -170,6 +183,7 @@ func (s *Session) RunUserTurn(ctx context.Context, user string, out io.Writer) e
 	if user == "" {
 		return nil
 	}
+	s.compressConversationContext()
 	s.Messages = append(s.Messages, map[string]any{"role": "user", "content": user})
 	if note := s.buildAutoMemoryInjection(ctx, user); strings.TrimSpace(note) != "" {
 		s.Messages = append(s.Messages, map[string]any{"role": "system", "content": note})
@@ -189,20 +203,29 @@ func (s *Session) RunUserTurn(ctx context.Context, user string, out io.Writer) e
 
 	tools := OpenAITools(ToolOptions{AgentShell: s.AgentShell})
 	var firstToolChoice any
-	switch {
-	case WorkspaceGroundingRequired(user, s.WorkDir):
-		firstToolChoice = "required"
-	case testExecution:
-		// Test runs are multi-step by nature: discover layout, run, fix, rerun until pass.
-		firstToolChoice = map[string]any{"type": "function", "function": map[string]any{"name": "heros_run_harness"}}
-	case LongHorizonHarnessRequired(user):
-		// Prefer harness for complex implementation/integration asks to show todo + sub-agent flow.
-		firstToolChoice = map[string]any{"type": "function", "function": map[string]any{"name": "heros_run_harness"}}
-	case FileActionGroundingRequired(user):
-		firstToolChoice = "required"
-	case MemoryGroundingRequired(user):
-		// Prefer memory search over guessing when user asks what is stored.
-		firstToolChoice = map[string]any{"type": "function", "function": map[string]any{"name": "heros_memory_search"}}
+	if ClarificationRequired(user) {
+		s.Messages = append(s.Messages, map[string]any{
+			"role":    "system",
+			"content": "User intent is ambiguous. Ask exactly one concise clarification question before using tools or making assumptions.",
+		})
+		firstToolChoice = "none"
+	}
+	if firstToolChoice == nil {
+		switch {
+		case WorkspaceGroundingRequired(user, s.WorkDir):
+			firstToolChoice = "required"
+		case testExecution:
+			// Test runs are multi-step by nature: discover layout, run, fix, rerun until pass.
+			firstToolChoice = map[string]any{"type": "function", "function": map[string]any{"name": "heros_run_harness"}}
+		case LongHorizonHarnessRequired(user):
+			// Prefer harness for complex implementation/integration asks to show todo + sub-agent flow.
+			firstToolChoice = map[string]any{"type": "function", "function": map[string]any{"name": "heros_run_harness"}}
+		case FileActionGroundingRequired(user):
+			firstToolChoice = "required"
+		case MemoryGroundingRequired(user):
+			// Prefer memory search over guessing when user asks what is stored.
+			firstToolChoice = map[string]any{"type": "function", "function": map[string]any{"name": "heros_memory_search"}}
+		}
 	}
 	for step := 0; step < 64; step++ {
 		modelStart := time.Now().UTC()
@@ -218,13 +241,14 @@ func (s *Session) RunUserTurn(ctx context.Context, user string, out io.Writer) e
 		var content string
 		var calls []ToolCall
 		var err error
+		modelMessages := s.modelMessagesForStep()
 		if s.Stream {
-			content, calls, err = ChatCompletionStream(ctx, s.OpenAIBase, s.OpenAIKey, s.Model, s.Messages, tools, cc, func(d string) error {
+			content, calls, err = ChatCompletionStream(ctx, s.OpenAIBase, s.OpenAIKey, s.Model, modelMessages, tools, cc, func(d string) error {
 				_, werr := fmt.Fprint(out, d)
 				return werr
 			})
 		} else {
-			content, calls, err = ChatCompletion(ctx, s.OpenAIBase, s.OpenAIKey, s.Model, s.Messages, tools, cc)
+			content, calls, err = ChatCompletion(ctx, s.OpenAIBase, s.OpenAIKey, s.Model, modelMessages, tools, cc)
 		}
 		if err != nil {
 			modelEnd := time.Now().UTC()
@@ -328,7 +352,7 @@ func (s *Session) RunUserTurn(ctx context.Context, user string, out io.Writer) e
 			s.Messages = append(s.Messages, map[string]any{
 				"role":         "tool",
 				"tool_call_id": c.ID,
-				"content":      result,
+				"content":      s.contextSafeToolResult(c.Name, result),
 			})
 			if mustConverge && c.Name == "heros_run_harness" && !executionPromptInjected {
 				s.Messages = append(s.Messages, map[string]any{
@@ -339,12 +363,16 @@ func (s *Session) RunUserTurn(ctx context.Context, user string, out io.Writer) e
 			}
 		}
 		lastBatchHadFailures = batchHadFailures
+		s.compressConversationContext()
 	}
 	return fmt.Errorf("tool loop exceeded step limit")
 }
 
 func (s *Session) buildAutoMemoryInjection(ctx context.Context, user string) string {
 	if !s.AutoInjectMemory {
+		return ""
+	}
+	if s.OnDemandMemoryInjection && !s.shouldInjectMemory(user) {
 		return ""
 	}
 	q := strings.TrimSpace(user)
@@ -373,6 +401,126 @@ func (s *Session) buildAutoMemoryInjection(ctx context.Context, user string) str
 		for i := 0; i < len(chunks) && i < k; i++ {
 			b.WriteString(fmt.Sprintf("- %s\n", strings.TrimSpace(chunks[i])))
 		}
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func (s *Session) shouldInjectMemory(user string) bool {
+	u := strings.TrimSpace(strings.ToLower(user))
+	if u == "" {
+		return false
+	}
+	if MemoryGroundingRequired(user) || LongHorizonHarnessRequired(user) || TestExecutionRequired(user) {
+		return true
+	}
+	for _, k := range []string{"remember", "recall", "earlier", "previous", "history", "context", "continue from"} {
+		if strings.Contains(u, k) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Session) modelMessagesForStep() []map[string]any {
+	msgs := s.Messages
+	if !s.ContextIsolation {
+		return msgs
+	}
+	if len(msgs) <= 1 {
+		return msgs
+	}
+	win := s.ContextIsolationWindow
+	if win <= 0 {
+		win = 28
+	}
+	if len(msgs)-1 <= win {
+		return msgs
+	}
+	start := len(msgs) - win
+	out := make([]map[string]any, 0, win+1)
+	out = append(out, msgs[0])
+	out = append(out, msgs[start:]...)
+	return out
+}
+
+func (s *Session) contextSafeToolResult(toolName, result string) string {
+	if !s.ContextIsolation {
+		return result
+	}
+	max := 1200
+	switch strings.TrimSpace(toolName) {
+	case "heros_shell", "heros_agent_shell":
+		return summarizeForHarness(result, max)
+	default:
+		return summarizeForHarness(result, 800)
+	}
+}
+
+func (s *Session) compressConversationContext() {
+	if !s.ContextCompression || len(s.Messages) <= 2 {
+		return
+	}
+	maxMsgs := s.ContextCompressionMaxMessages
+	if maxMsgs <= 0 {
+		maxMsgs = 90
+	}
+	keepRecent := s.ContextCompressionKeepRecent
+	if keepRecent <= 0 {
+		keepRecent = 28
+	}
+	if len(s.Messages) <= maxMsgs {
+		return
+	}
+	base := s.Messages[0]
+	rest := make([]map[string]any, 0, len(s.Messages)-1)
+	for _, m := range s.Messages[1:] {
+		if strings.TrimSpace(ArgString(m, "role")) == "system" && strings.HasPrefix(strings.TrimSpace(ArgString(m, "content")), "[compressed-context]") {
+			continue
+		}
+		rest = append(rest, m)
+	}
+	if len(rest) <= keepRecent {
+		s.Messages = append([]map[string]any{base}, rest...)
+		return
+	}
+	cut := len(rest) - keepRecent
+	head := rest[:cut]
+	tail := rest[cut:]
+	summary := map[string]any{
+		"role":    "system",
+		"content": buildCompressedContextNote(head),
+	}
+	next := make([]map[string]any, 0, 2+len(tail))
+	next = append(next, base, summary)
+	next = append(next, tail...)
+	s.Messages = next
+}
+
+func buildCompressedContextNote(msgs []map[string]any) string {
+	if len(msgs) == 0 {
+		return "[compressed-context] none"
+	}
+	maxLines := 24
+	if len(msgs) < maxLines {
+		maxLines = len(msgs)
+	}
+	var b strings.Builder
+	b.WriteString("[compressed-context]\n")
+	b.WriteString("Older conversation compressed for context efficiency:\n")
+	for i := 0; i < maxLines; i++ {
+		m := msgs[i]
+		role := strings.TrimSpace(ArgString(m, "role"))
+		if role == "" {
+			role = "unknown"
+		}
+		c := strings.TrimSpace(ArgString(m, "content"))
+		if c == "" {
+			c = "(no text content)"
+		}
+		b.WriteString(fmt.Sprintf("- %s: %s\n", role, summarizeForHarness(c, 180)))
+	}
+	if len(msgs) > maxLines {
+		b.WriteString(fmt.Sprintf("- ... %d additional message(s) omitted\n", len(msgs)-maxLines))
 	}
 	return strings.TrimSpace(b.String())
 }
@@ -509,11 +657,39 @@ func toolStartMessage(name string, args map[string]any) string {
 
 func toolEndMessage(name, result string) string {
 	switch strings.TrimSpace(name) {
-	case "heros_shell", "heros_agent_shell":
+	case "heros_shell", "heros_agent_shell", "execute":
 		return summarizeForHarness(result, 700)
 	default:
 		return ""
 	}
+}
+
+func saveLargeToolOutput(workDir, toolName, output string) (string, error) {
+	if strings.TrimSpace(output) == "" {
+		return output, nil
+	}
+	limit := 12000
+	if len(output) <= limit {
+		return output, nil
+	}
+	ts := time.Now().UTC().Format("20060102-150405")
+	base := strings.TrimSpace(workDir)
+	if base == "" {
+		base = "."
+	}
+	dir := filepath.Join(base, ".heros", "outputs")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return output, err
+	}
+	name := strings.ReplaceAll(strings.TrimSpace(toolName), " ", "_")
+	if name == "" {
+		name = "output"
+	}
+	path := filepath.Join(dir, fmt.Sprintf("%s-%s.txt", name, ts))
+	if err := os.WriteFile(path, []byte(output), 0o644); err != nil {
+		return output, err
+	}
+	return fmt.Sprintf("Output was large (%d chars) and saved to: %s\n\nPreview:\n%s", len(output), filepath.Clean(path), summarizeForHarness(output, 1500)), nil
 }
 
 func adaptShellCommandForTests(cmd string) string {
@@ -617,7 +793,7 @@ func retryNpmTestInSubdirIfNeeded(ctx context.Context, workDir, originalCmd, out
 
 func toolResultHasFailure(toolName, result string) bool {
 	name := strings.TrimSpace(toolName)
-	if name != "heros_shell" && name != "heros_agent_shell" {
+	if name != "heros_shell" && name != "heros_agent_shell" && name != "execute" {
 		return false
 	}
 	var r map[string]any
@@ -638,7 +814,7 @@ func (s *Session) DispatchTool(ctx context.Context, tc ToolCall) (string, error)
 		args = map[string]any{}
 	}
 	switch tc.Name {
-	case "heros_shell":
+	case "heros_shell", "execute":
 		cmd := ArgString(args, "command")
 		if strings.TrimSpace(cmd) == "" {
 			return "", fmt.Errorf("missing command")
@@ -651,13 +827,24 @@ func (s *Session) DispatchTool(ctx context.Context, tc ToolCall) (string, error)
 		out, shellErr := RunLocalShell(ctx, wd, cmd)
 		out, shellErr, _ = retryGoTestInSubdirIfNeeded(ctx, wd, cmd, out, shellErr)
 		out, shellErr, _ = retryNpmTestInSubdirIfNeeded(ctx, wd, cmd, out, shellErr)
+		if shrunk, err := saveLargeToolOutput(wd, tc.Name, out); err == nil {
+			out = shrunk
+		}
 		return LocalShellResult(out, shellErr), nil
-	case "heros_list_files":
+	case "heros_list_files", "ls":
 		return listFilesJSON(s.WorkDir, args)
-	case "heros_read_file":
+	case "heros_read_file", "read_file":
 		return readFileJSON(s.WorkDir, args)
-	case "heros_write_file":
+	case "heros_write_file", "write_file":
 		return writeFileJSON(s.WorkDir, args)
+	case "edit_file":
+		return editFileJSON(s.WorkDir, args)
+	case "glob":
+		return globJSON(s.WorkDir, args)
+	case "grep":
+		return grepJSON(s.WorkDir, args)
+	case "write_todos":
+		return writeTodosJSON(s.WorkDir, args)
 	case "heros_make_dir":
 		return makeDirJSON(s.WorkDir, args)
 	case "heros_delete_path":
@@ -712,10 +899,16 @@ func (s *Session) DispatchTool(ctx context.Context, tc ToolCall) (string, error)
 		}
 		b, _ := json.Marshal(g)
 		return string(b), nil
-	case "heros_run_harness":
+	case "heros_run_harness", "task":
 		goal := ArgString(args, "goal")
 		if strings.TrimSpace(goal) == "" {
-			return "", fmt.Errorf("heros_run_harness requires goal")
+			goal = ArgString(args, "description")
+		}
+		if strings.TrimSpace(goal) == "" {
+			return "", fmt.Errorf("%s requires goal/description", tc.Name)
+		}
+		if w, ok := args["context_window"].(float64); ok && w > 0 {
+			goal = fmt.Sprintf("%s\n\n[delegation context window hint=%d messages]", goal, int(w))
 		}
 		res, err := s.Agentd.HarnessRunWithProgress(ctx, goal, func(ev harness.ProgressEvent) {
 			emitHarnessProgressEvent(s.turnOut, ev)
@@ -840,6 +1033,8 @@ func printHelp(out io.Writer) {
   /pending       — numbered list of proposals waiting for approval (ids on each line)
   /approve       — alone: reprints that list + usage; /approve <id> applies one proposal
   /reject        — alone: reprints list; /reject <id> rejects one
+  /skills        — list indexed catalog skills from agentd
+  /tools         — list registered catalog tools from agentd
   /refresh       — re-fetch folder skill + tool catalog from the embedded daemon
   /help          — this text
 Non-slash: **approve N** / **reject N** (number from /pending), or **approve all** / **approve all proposals** — handled locally without the LLM.
