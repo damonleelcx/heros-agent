@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,6 +30,32 @@ import (
 	"github.com/heros-foreal/agentd/internal/installpath"
 	"github.com/heros-foreal/agentd/internal/launch"
 )
+
+func isTransientNetworkError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var ne net.Error
+	if errors.As(err, &ne) {
+		return true
+	}
+	s := strings.ToLower(strings.TrimSpace(err.Error()))
+	for _, k := range []string{
+		"connection reset",
+		"connection refused",
+		"broken pipe",
+		"timeout",
+		"temporarily unavailable",
+		"eof",
+		"server closed",
+		"no such host",
+	} {
+		if strings.Contains(s, k) {
+			return true
+		}
+	}
+	return false
+}
 
 type uiStreamWriter struct {
 	writeFn func(string)
@@ -136,31 +164,60 @@ func renderHarnessEvent(ev cliagent.HarnessEvent) string {
 		if name == "" {
 			name = "tool"
 		}
+		reasoningLabel := classifyReasoningStep(phase, ev.ToolName)
 		if ev.Stage == "start" {
 			msg := strings.TrimSpace(ev.Message)
 			if msg != "" {
-				return fmt.Sprintf("%s[exec] running %s\n`%s`", prefix, name, msg)
+				return fmt.Sprintf("%s[%s] running %s\n`%s`", prefix, reasoningLabel, name, msg)
 			}
-			return fmt.Sprintf("%s[exec] running %s", prefix, name)
+			return fmt.Sprintf("%s[%s] running %s", prefix, reasoningLabel, name)
 		}
 		if ev.Stage == "end" {
 			out := strings.TrimSpace(ev.Message)
 			status := strings.TrimSpace(ev.Status)
 			if ev.DurationMS > 0 {
 				if out != "" {
-					return fmt.Sprintf("%s[exec] done %s status=%s (%dms)\n```text\n%s\n```", prefix, name, status, ev.DurationMS, out)
+					return fmt.Sprintf("%s[%s] done %s status=%s (%dms)\n```text\n%s\n```", prefix, reasoningLabel, name, status, ev.DurationMS, out)
 				}
-				return fmt.Sprintf("%s[exec] done %s status=%s (%dms)", prefix, name, status, ev.DurationMS)
+				return fmt.Sprintf("%s[%s] done %s status=%s (%dms)", prefix, reasoningLabel, name, status, ev.DurationMS)
 			}
 			if out != "" {
-				return fmt.Sprintf("%s[exec] done %s status=%s\n```text\n%s\n```", prefix, name, status, out)
+				return fmt.Sprintf("%s[%s] done %s status=%s\n```text\n%s\n```", prefix, reasoningLabel, name, status, out)
 			}
-			return fmt.Sprintf("%s[exec] done %s status=%s", prefix, name, status)
+			return fmt.Sprintf("%s[%s] done %s status=%s", prefix, reasoningLabel, name, status)
 		}
 	case "leader", "specialist", "feedback", "todo", "verify", "critic", "refine", "harness":
+		if label := classifyReasoningStep(phase, ev.ToolName); label != "" && label != "workflow" {
+			return prefix + fmt.Sprintf("[%s] %s", label, cliagent.FormatHarnessProgressLine(cliagent.HarnessEventToProgressEvent(ev)))
+		}
 		return prefix + cliagent.FormatHarnessProgressLine(cliagent.HarnessEventToProgressEvent(ev))
 	}
 	return prefix + fmt.Sprintf("[harness] %s %s", phase, ev.Stage)
+}
+
+func classifyReasoningStep(phase, toolName string) string {
+	p := strings.ToLower(strings.TrimSpace(phase))
+	t := strings.ToLower(strings.TrimSpace(toolName))
+	if p == "leader" || p == "critic" || p == "specialist" || p == "feedback" {
+		return "llm thinking"
+	}
+	if strings.Contains(t, "memory") || strings.Contains(t, "retrieve") {
+		return "dig in memory"
+	}
+	if strings.Contains(t, "web") || strings.Contains(t, "search") || strings.Contains(t, "browser") {
+		return "search online"
+	}
+	return "workflow"
+}
+
+func timelineBucketForEvent(ev cliagent.HarnessEvent) string {
+	label := classifyReasoningStep(strings.TrimPrefix(strings.TrimSpace(ev.Phase), "harness_"), ev.ToolName)
+	switch label {
+	case "llm thinking", "dig in memory", "search online":
+		return label
+	default:
+		return ""
+	}
 }
 
 func renderUsageLine(line string) (string, bool) {
@@ -683,6 +740,10 @@ func main() {
 	gitChanges.SetText("Loading git changes…")
 	gitScroll := container.NewVScroll(gitChanges)
 	gitCard := widget.NewCard("Git", "Created, modified, and removed paths — refreshes after each reply", gitScroll)
+	researchTimeline := widget.NewTextGrid()
+	researchTimeline.SetText("Research Timeline\n\nWaiting for events…")
+	researchScroll := container.NewVScroll(researchTimeline)
+	researchCard := widget.NewCard("Research Timeline", "Chronological flow: llm thinking, dig in memory, search online", researchScroll)
 
 	refreshWorkspaceViews := func() {
 		go func() {
@@ -701,6 +762,27 @@ func main() {
 	refreshWorkspaceViews()
 
 	var runUserMessage func()
+	var timelineLines []string
+	var timelineMu sync.Mutex
+	appendTimelineEvent := func(ev cliagent.HarnessEvent) {
+		bucket := timelineBucketForEvent(ev)
+		if bucket == "" {
+			return
+		}
+		msg := strings.TrimSpace(ev.Message)
+		if msg == "" {
+			msg = strings.TrimSpace(ev.ToolName)
+		}
+		line := fmt.Sprintf("%s | %s | %s %s", time.Now().Format("15:04:05"), bucket, strings.TrimSpace(ev.Stage), msg)
+		timelineMu.Lock()
+		timelineLines = append(timelineLines, line)
+		if len(timelineLines) > 250 {
+			timelineLines = timelineLines[len(timelineLines)-250:]
+		}
+		txt := "Research Timeline\n\n" + strings.Join(timelineLines, "\n")
+		timelineMu.Unlock()
+		fyne.Do(func() { researchTimeline.SetText(txt) })
+	}
 	updateProgressFromEvent := func(ev cliagent.HarnessEvent) {
 		phase := strings.TrimPrefix(strings.TrimSpace(ev.Phase), "harness_")
 		pct := harnessPercent(ev)
@@ -767,9 +849,26 @@ func main() {
 			}()
 			streamOut := &uiStreamWriter{
 				writeFn: appendOutputAsync,
-				eventFn: updateProgressFromEvent,
+				eventFn: func(ev cliagent.HarnessEvent) {
+					updateProgressFromEvent(ev)
+					appendTimelineEvent(ev)
+				},
 			}
-			err := sess.RunUserTurn(ctx, prompt, streamOut)
+			var err error
+			const maxAttempts = 3
+			for attempt := 1; attempt <= maxAttempts; attempt++ {
+				err = sess.RunUserTurn(ctx, prompt, streamOut)
+				if err == nil {
+					break
+				}
+				if !isTransientNetworkError(err) || attempt == maxAttempts {
+					break
+				}
+				backoff := time.Duration(attempt) * time.Second
+				appendOutputAsync(fmt.Sprintf("\n[network] transient failure detected; reconnecting (attempt %d/%d) in %ds...\n", attempt+1, maxAttempts, int(backoff.Seconds())))
+				setBusyAsync(true, fmt.Sprintf("✦ Reconnecting... (%d/%d)", attempt+1, maxAttempts))
+				time.Sleep(backoff)
+			}
 			close(doneCh)
 			if err != nil {
 				appendOutputAsync("**Error:** " + err.Error() + "\n")
@@ -913,8 +1012,10 @@ func main() {
 	chatCard := widget.NewCard("Conversation", "Streaming replies, tools, and harness progress land here", chatSplit)
 	chatPane := container.NewBorder(container.NewVBox(statusRow, progressRow), controls, nil, nil, chatCard)
 
-	leftPane := container.NewVSplit(explorerCard, gitCard)
-	leftPane.SetOffset(0.62)
+	leftTop := container.NewVSplit(explorerCard, gitCard)
+	leftTop.SetOffset(0.62)
+	leftPane := container.NewVSplit(leftTop, researchCard)
+	leftPane.SetOffset(0.70)
 	mainPane := container.NewHSplit(leftPane, chatPane)
 	mainPane.SetOffset(0.34)
 

@@ -106,6 +106,8 @@ type RunResult struct {
 	PlanTracking    []PlanSnapshot     `json:"plan_tracking"`
 	Notifications   []HarnessNotice    `json:"notifications"`
 	IntensityTrace  []IntensityState   `json:"intensity_trace"`
+	Evaluation      []EvaluationResult `json:"evaluation"`
+	EarlyStopReason string             `json:"early_stop_reason,omitempty"`
 	Final           string             `json:"final"`
 	Retries         int                `json:"retries"`
 	CompletedTodos  int                `json:"completed_todos"`
@@ -239,6 +241,27 @@ type IntensityState struct {
 	Threshold           float64 `json:"threshold"`
 	FollowUpMax         int     `json:"follow_up_max"`
 	MissingBoostApplied bool    `json:"missing_boost_applied"`
+}
+
+type EvaluationResult struct {
+	Iteration  int                 `json:"iteration"`
+	Metrics    EvaluationMetrics   `json:"metrics"`
+	Decision   EarlyStopDecision   `json:"decision"`
+	Successful bool                `json:"successful"`
+}
+
+type EvaluationMetrics struct {
+	SuccessRate float64 `json:"success_rate"`
+	Efficiency  float64 `json:"efficiency"`
+	Cost        float64 `json:"cost"`
+	Robustness  float64 `json:"robustness"`
+	Safety      float64 `json:"safety"`
+	Consistency float64 `json:"consistency"`
+}
+
+type EarlyStopDecision struct {
+	Stop   bool   `json:"stop"`
+	Reason string `json:"reason,omitempty"`
 }
 
 // Harness pipeline sections (1–5) for progress displays.
@@ -461,9 +484,21 @@ func (o *Orchestrator) RunWithProgress(ctx context.Context, goal string, onProgr
 		return nil, err
 	}
 
-	// Leader: define explicit todo list tied to the goal.
+	// Research-first: run a web-search grounding pass before todo generation.
+	emit(progressSection(ProgressEvent{Phase: "research", Stage: "start", Detail: "web search before generating todos"}, SectionPlanning, SectionLabelPlanning, 2, 3))
+	researchBrief, rerr := o.preTodoWebResearch(ctx, sys, goal)
+	if rerr != nil {
+		researchBrief = ""
+	}
+	emit(progressSection(ProgressEvent{Phase: "research", Stage: "end", Detail: "web research grounding completed"}, SectionPlanning, SectionLabelPlanning, 2, 3))
+
+	// Leader: define explicit todo list tied to the goal and web-grounded context.
 	emit(progressSection(ProgressEvent{Phase: "leader", Stage: "start", Detail: "defining goal-aligned todo list"}, SectionPlanning, SectionLabelPlanning, 2, 3))
-	plan, err := o.leaderPlan(ctx, sys, topo, goal)
+	planGoal := goal
+	if strings.TrimSpace(researchBrief) != "" {
+		planGoal = goal + "\n\nWeb research briefing:\n" + researchBrief
+	}
+	plan, err := o.leaderPlan(ctx, sys, topo, planGoal)
 	if err != nil {
 		plan = []string{goal}
 	}
@@ -509,6 +544,7 @@ func (o *Orchestrator) RunWithProgress(ctx context.Context, goal string, onProgr
 		PlanTracking:    []PlanSnapshot{},
 		Notifications:   []HarnessNotice{},
 		IntensityTrace:  []IntensityState{},
+		Evaluation:      []EvaluationResult{},
 	}
 
 	retries := 0
@@ -775,6 +811,16 @@ func (o *Orchestrator) RunWithProgress(ctx context.Context, goal string, onProgr
 			MissingBoostApplied: dyn.MissingBoostApplied,
 		})
 		iterSummary := fmt.Sprintf("iteration %d summary: score=%.2f threshold=%.2f verify=%s open_todos=%d intensity=%s", iteration, score, dyn.Threshold, verifyStatus, countOpenTodos(res.Todos), dyn.Mode)
+		eval := evaluateIteration(iteration, score, dyn.Threshold, ver, res.Todos, res.SubAgentReports, res.MissingFindings, retries+1)
+		res.Evaluation = append(res.Evaluation, eval)
+		if eval.Decision.Stop {
+			res.EarlyStopReason = eval.Decision.Reason
+			res.Final = merged + "\n\n[early stop] " + eval.Decision.Reason
+			res.Retries = retries
+			res.CompletedTodos, res.TotalTodos = summarizeTodos(res.Todos)
+			res.AgentVisibility = aggregateVisibility(res.SubAgentReports)
+			return res, nil
+		}
 		res.IterationNotes = append(res.IterationNotes, iterSummary)
 		if err := emitStage(iteration, HarnessStageSummary, progressSection(ProgressEvent{
 			Phase:            "summary",
@@ -1258,6 +1304,104 @@ func clampFloat(v, lo, hi float64) float64 {
 		return hi
 	}
 	return v
+}
+
+func evaluateIteration(iteration int, score float64, threshold float64, ver VerificationResult, todos []TodoItem, reports []SubAgentReport, missing []MissingFinding, passNumber int) EvaluationResult {
+	m := EvaluationMetrics{
+		SuccessRate: calcSuccessRate(todos),
+		Efficiency:  clampFloat(1.0/float64(maxInt(passNumber, 1)), 0, 1),
+		Cost:        clampFloat(float64(len(reports))/float64(maxInt(len(todos), 1)), 0, 1),
+		Robustness:  clampFloat(1.0-float64(len(missing))/float64(maxInt(len(todos), 1)), 0, 1),
+		Safety:      1.0,
+		Consistency: calcConsistency(reports),
+	}
+	if !ver.Passed {
+		m.Safety = 0.5
+	}
+	for _, mf := range missing {
+		if mf.Severity == "high" {
+			m.Safety = clampFloat(m.Safety-0.2, 0, 1)
+		}
+	}
+	// Lower cost is better; normalize to quality-like score.
+	costQuality := clampFloat(1.0-m.Cost, 0, 1)
+	passed := score >= threshold && ver.Passed
+	if passed {
+		return EvaluationResult{
+			Iteration: iteration,
+			Metrics:   m,
+			Decision:  EarlyStopDecision{Stop: true, Reason: "quality gates met"},
+			Successful: true,
+		}
+	}
+	if m.Safety < 0.3 {
+		return EvaluationResult{
+			Iteration: iteration,
+			Metrics:   m,
+			Decision:  EarlyStopDecision{Stop: true, Reason: "early stop: safety risk exceeded"},
+		}
+	}
+	if iteration >= 3 && m.SuccessRate < 0.35 && m.Consistency < 0.35 {
+		return EvaluationResult{
+			Iteration: iteration,
+			Metrics:   m,
+			Decision:  EarlyStopDecision{Stop: true, Reason: "early stop: low success and consistency after repeated attempts"},
+		}
+	}
+	_ = costQuality
+	return EvaluationResult{Iteration: iteration, Metrics: m}
+}
+
+func calcSuccessRate(todos []TodoItem) float64 {
+	if len(todos) == 0 {
+		return 0
+	}
+	done := 0
+	for _, td := range todos {
+		if td.Status == "done" {
+			done++
+		}
+	}
+	return clampFloat(float64(done)/float64(len(todos)), 0, 1)
+}
+
+func calcConsistency(reports []SubAgentReport) float64 {
+	if len(reports) == 0 {
+		return 1
+	}
+	sum := 0.0
+	for _, r := range reports {
+		sum += clampFloat(r.Score, 0, 1)
+	}
+	mean := sum / float64(len(reports))
+	variance := 0.0
+	for _, r := range reports {
+		d := clampFloat(r.Score, 0, 1) - mean
+		variance += d * d
+	}
+	variance /= float64(len(reports))
+	return clampFloat(1.0-variance, 0, 1)
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func (o *Orchestrator) preTodoWebResearch(ctx context.Context, sys, goal string) (string, error) {
+	sb := SubAgentSandbox{
+		Role:            "researcher",
+		TodoID:          "todo-research-00",
+		Scope:           "web research grounding before planning",
+		AllowedTools:    []string{"heros_web_search", "heros_memory_search"},
+		AllowedSkills:   []string{"research"},
+		Forbidden:       []string{"shell", "write_file"},
+		RequireEvidence: true,
+	}
+	prompt := "Search the web first and return a short planning brief: key facts, latest constraints, risks, and links/sources relevant to this goal.\nGoal: " + strings.TrimSpace(goal)
+	return o.specialist(ctx, sys, sb, prompt)
 }
 
 func dedupeStrings(in []string) []string {

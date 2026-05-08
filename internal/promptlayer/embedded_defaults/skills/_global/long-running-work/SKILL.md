@@ -24,5 +24,6 @@ Long-running posture: the user may keep **one REPL session open** for a long tim
 **Across sessions**
 - On wrap-up, save a **handoff note** to memory (goal, done, next step, branch/commit hints).
 - Load **interaction-learning-loop** when user preferences or project rules accumulate.
+- After a long-running task, workflow, or sustained session, ask whether the user wants to turn the accumulated context into a reusable skill.
 
 This skill does **not** bypass governance: durable stack changes still go through **heros_submit_proposal** and human review.

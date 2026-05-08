@@ -93,3 +93,42 @@ func TestAdjustDynamicIntensity(t *testing.T) {
 		t.Fatalf("expected low intensity on strong pass: %#v", low)
 	}
 }
+
+func TestEvaluateIterationSuccessStop(t *testing.T) {
+	e := evaluateIteration(
+		1,
+		0.9,
+		0.55,
+		VerificationResult{Passed: true},
+		[]TodoItem{{Status: "done"}, {Status: "done"}},
+		[]SubAgentReport{{Score: 0.8}, {Score: 0.9}},
+		nil,
+		1,
+	)
+	if !e.Decision.Stop || !e.Successful {
+		t.Fatalf("expected successful stop, got %#v", e)
+	}
+	if e.Metrics.SuccessRate <= 0 || e.Metrics.Consistency <= 0 {
+		t.Fatalf("expected non-zero metrics: %#v", e.Metrics)
+	}
+}
+
+func TestEvaluateIterationSafetyStop(t *testing.T) {
+	e := evaluateIteration(
+		2,
+		0.4,
+		0.55,
+		VerificationResult{Passed: false},
+		[]TodoItem{{Status: "needs_followup"}},
+		[]SubAgentReport{{Score: 0.2}},
+		[]MissingFinding{
+			{Severity: "high"},
+			{Severity: "high"},
+			{Severity: "high"},
+		},
+		2,
+	)
+	if !e.Decision.Stop {
+		t.Fatalf("expected safety stop, got %#v", e)
+	}
+}
