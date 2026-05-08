@@ -196,6 +196,7 @@ func (s *Session) RunUserTurn(ctx context.Context, user string, out io.Writer) e
 	toolCalls := []ToolCallUsage{}
 	requireExecution := FileActionGroundingRequired(user)
 	testExecution := TestExecutionRequired(user)
+	imageGeneration := ImageGenerationRequired(user)
 	mustConverge := requireExecution || testExecution
 	harnessUsed := false
 	executionPromptInjected := false
@@ -212,6 +213,9 @@ func (s *Session) RunUserTurn(ctx context.Context, user string, out io.Writer) e
 	}
 	if firstToolChoice == nil {
 		switch {
+		case imageGeneration:
+			// Force tool mode and steer model to native image generation path.
+			firstToolChoice = "required"
 		case WorkspaceGroundingRequired(user, s.WorkDir):
 			firstToolChoice = "required"
 		case testExecution:
@@ -228,6 +232,12 @@ func (s *Session) RunUserTurn(ctx context.Context, user string, out io.Writer) e
 		}
 	}
 	for step := 0; step < 64; step++ {
+		if step == 0 && imageGeneration {
+			s.Messages = append(s.Messages, map[string]any{
+				"role": "system",
+				"content": "Image-generation request detected. Use native image tooling only: call heros_extension_tool with tool_id=image-generation-tool. Do not call heros_shell, heros_agent_shell, or execute for image generation.",
+			})
+		}
 		modelStart := time.Now().UTC()
 		_, _ = fmt.Fprint(out, "\n")
 		emitHarnessStart(out, "assistant", "", "", "", modelStart)

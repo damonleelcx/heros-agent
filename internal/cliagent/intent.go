@@ -68,6 +68,12 @@ var (
 		`\bunit\s+tests?\b|` +
 		`\bintegration\s+tests?\b` +
 		`)`)
+
+	reImageGeneration = regexp.MustCompile(`(?i)(` +
+		`\b(generate|create|make|draw|render)\b.*\b(image|picture|photo|illustration|artwork|avatar)\b|` +
+		`\b(image|picture|photo|illustration|artwork|avatar)\b.*\b(of|for)\b|` +
+		`\btext[-\s]?to[-\s]?image\b` +
+		`)`)
 )
 
 // ClarificationRequired is true when the request is too ambiguous to execute safely.
@@ -164,4 +170,17 @@ func TestExecutionRequired(userLine string) bool {
 		return false
 	}
 	return reTestExecution.MatchString(u)
+}
+
+// ImageGenerationRequired is true when user asks to generate an image.
+// Route these requests to native image tooling, not shell.
+func ImageGenerationRequired(userLine string) bool {
+	if os.Getenv("HEROS_NO_TOOL_FORCE") == "1" {
+		return false
+	}
+	u := strings.TrimSpace(userLine)
+	if u == "" || strings.HasPrefix(u, "/") {
+		return false
+	}
+	return reImageGeneration.MatchString(u)
 }
