@@ -1,6 +1,7 @@
 package cliagent
 
 import (
+	"bytes"
 	"context"
 	"strings"
 	"testing"
@@ -41,10 +42,12 @@ func TestModelMessagesForStepIsolation(t *testing.T) {
 }
 
 func TestCompressConversationContext(t *testing.T) {
+	var out bytes.Buffer
 	s := &Session{
 		ContextCompression:            true,
 		ContextCompressionMaxMessages: 6,
 		ContextCompressionKeepRecent:  3,
+		turnOut:                       &out,
 	}
 	s.Messages = []map[string]any{
 		{"role": "system", "content": "sys"},
@@ -67,6 +70,13 @@ func TestCompressConversationContext(t *testing.T) {
 	}
 	if ArgString(s.Messages[2], "content") != "a2" || ArgString(s.Messages[4], "content") != "a3" {
 		t.Fatalf("tail messages should be preserved")
+	}
+	got := out.String()
+	if !strings.Contains(got, `"phase":"context_compression"`) {
+		t.Fatalf("expected context_compression event, got: %q", got)
+	}
+	if !strings.Contains(got, "Compressed 3 older message(s); kept 3 recent message(s).") {
+		t.Fatalf("expected compression detail message, got: %q", got)
 	}
 }
 

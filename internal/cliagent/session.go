@@ -16,6 +16,7 @@ import (
 
 	"github.com/heros-foreal/agentd/internal/config"
 	"github.com/heros-foreal/agentd/internal/harness"
+	"github.com/heros-foreal/agentd/internal/memoryfs"
 )
 
 // Session holds multi-turn chat state for one terminal session.
@@ -315,6 +316,7 @@ func (s *Session) RunUserTurn(ctx context.Context, user string, out io.Writer) e
 				if err := s.Agentd.MemoryEpisodic(ctx, s.SessionID, "assistant", content, 0.3); err != nil {
 					log.Printf("heros-cli: episodic assistant turn: %v", err)
 				}
+				s.updateSessionAgentMemory(user, content)
 				s.turnN++
 				s.maybeAutoConsolidate(ctx)
 			}
@@ -398,8 +400,11 @@ func (s *Session) buildAutoMemoryInjection(ctx context.Context, user string) str
 		return ""
 	}
 	profileText, _ := s.Agentd.MemoryProfile(ctx, s.UserID)
+	sessionAgentMemory, _ := memoryfs.ReadSessionAgentMemory(s.DataDir, "_global", s.SessionID)
 	if len(chunks) == 0 && strings.TrimSpace(profileText) == "" {
-		return ""
+		if strings.TrimSpace(sessionAgentMemory) == "" {
+			return ""
+		}
 	}
 	var b strings.Builder
 	b.WriteString("[auto-memory]\n")
@@ -412,7 +417,36 @@ func (s *Session) buildAutoMemoryInjection(ctx context.Context, user string) str
 			b.WriteString(fmt.Sprintf("- %s\n", strings.TrimSpace(chunks[i])))
 		}
 	}
+	if strings.TrimSpace(sessionAgentMemory) != "" {
+		b.WriteString("session_agent_memory:\n")
+		b.WriteString(summarizeForHarness(sessionAgentMemory, 1200))
+		b.WriteString("\n")
+	}
 	return strings.TrimSpace(b.String())
+}
+
+func (s *Session) updateSessionAgentMemory(user, assistant string) {
+	if strings.TrimSpace(s.DataDir) == "" || strings.TrimSpace(s.SessionID) == "" {
+		return
+	}
+	prior, _ := memoryfs.ReadSessionAgentMemory(s.DataDir, "_global", s.SessionID)
+	var b strings.Builder
+	if strings.TrimSpace(prior) != "" {
+		b.WriteString(prior)
+		b.WriteString("\n")
+	}
+	b.WriteString("- user: ")
+	b.WriteString(summarizeForHarness(user, 240))
+	b.WriteString("\n- assistant: ")
+	b.WriteString(summarizeForHarness(assistant, 360))
+	b.WriteString("\n")
+	text := strings.TrimSpace(b.String())
+	if len(text) > 5000 {
+		text = text[len(text)-5000:]
+	}
+	if err := memoryfs.UpsertSessionAgentMemory(s.DataDir, "_global", s.SessionID, text); err != nil {
+		log.Printf("heros-cli: session agent memory write: %v", err)
+	}
 }
 
 func (s *Session) shouldInjectMemory(user string) bool {
@@ -494,6 +528,7 @@ func (s *Session) compressConversationContext() {
 		return
 	}
 	cut := len(rest) - keepRecent
+	removed := cut
 	head := rest[:cut]
 	tail := rest[cut:]
 	summary := map[string]any{
@@ -504,6 +539,17 @@ func (s *Session) compressConversationContext() {
 	next = append(next, base, summary)
 	next = append(next, tail...)
 	s.Messages = next
+	s.emitContextCompressionEvent(removed, len(tail))
+}
+
+func (s *Session) emitContextCompressionEvent(removed, keptRecent int) {
+	if removed <= 0 {
+		return
+	}
+	msg := fmt.Sprintf("Compressed %d older message(s); kept %d recent message(s).", removed, keptRecent)
+	now := time.Now().UTC()
+	emitHarnessStart(s.turnOut, "context_compression", "", "", msg, now)
+	emitHarnessEnd(s.turnOut, "context_compression", "", "", "ok", msg, now, now)
 }
 
 func buildCompressedContextNote(msgs []map[string]any) string {

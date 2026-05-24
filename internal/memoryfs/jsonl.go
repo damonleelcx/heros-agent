@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/heros-foreal/agentd/internal/agentlayout"
@@ -49,4 +50,27 @@ func AppendTurn(dataDir, tenantID, sessionID, turnID, role, content string, impo
 		return "", err
 	}
 	return filepath.ToSlash(rel), nil
+}
+
+// UpsertSessionAgentMemory overwrites session-scoped agent memory notes.
+func UpsertSessionAgentMemory(dataDir, tenantID, sessionID, body string) error {
+	dir := agentlayout.SessionDir(dataDir, tenantID, sessionID)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	p := agentlayout.SessionAgentMemoryPath(dataDir, tenantID, sessionID)
+	return os.WriteFile(p, []byte(strings.TrimSpace(body)), 0o644)
+}
+
+// ReadSessionAgentMemory returns session-scoped agent memory notes.
+func ReadSessionAgentMemory(dataDir, tenantID, sessionID string) (string, error) {
+	p := agentlayout.SessionAgentMemoryPath(dataDir, tenantID, sessionID)
+	b, err := os.ReadFile(p)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", err
+	}
+	return strings.TrimSpace(string(b)), nil
 }

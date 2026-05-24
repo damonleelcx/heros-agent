@@ -99,6 +99,11 @@ func SessionMetaPath(dataDir, tenantID, sessionID string) string {
 	return filepath.Join(SessionDir(dataDir, tenantID, sessionID), "meta.json")
 }
 
+// SessionAgentMemoryPath stores session-scoped agent notes/summary for recall.
+func SessionAgentMemoryPath(dataDir, tenantID, sessionID string) string {
+	return filepath.Join(SessionDir(dataDir, tenantID, sessionID), "agent_memory.md")
+}
+
 // SanitizeSlug keeps a safe single path segment.
 func SanitizeSlug(s string) string {
 	var b strings.Builder
