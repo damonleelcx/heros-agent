@@ -182,6 +182,100 @@ func FormatHarnessProgressLine(ev harness.ProgressEvent) string {
 	return fmt.Sprintf("[harness] %s %s", phase, ev.Stage)
 }
 
+// FormatStreamProgressLine renders a compact step/status line for non-harness streaming turns.
+func FormatStreamProgressLine(section, stepInSection, stepTotal int, label, detail string) string {
+	p := harnessProgressPrefix(section, label, stepInSection, stepTotal, 0, 0)
+	msg := strings.TrimSpace(detail)
+	if msg == "" {
+		return strings.TrimSpace(p)
+	}
+	return strings.TrimSpace(p + msg)
+}
+
+// StreamProgressState maps turn state and tool selection to a stable user-facing label.
+func StreamProgressState(step int, awaitingTool bool, toolName string, toolChoice any, content string) (section int, label string, detail string, stepInSection int, stepTotal int) {
+	section = 1
+	stepInSection = step + 1
+	stepTotal = 5
+	if awaitingTool {
+		switch {
+		case strings.Contains(strings.ToLower(toolName), "read") || strings.Contains(strings.ToLower(toolName), "search") || strings.Contains(strings.ToLower(toolName), "grep") || strings.Contains(strings.ToLower(toolName), "glob"):
+			label = "searching"
+			detail = strings.TrimSpace(toolName)
+		case strings.Contains(strings.ToLower(toolName), "write") || strings.Contains(strings.ToLower(toolName), "edit"):
+			label = "editing"
+			detail = strings.TrimSpace(toolName)
+		case strings.Contains(strings.ToLower(toolName), "test") || strings.Contains(strings.ToLower(toolName), "verify") || strings.Contains(strings.ToLower(toolName), "critic"):
+			label = "verifying"
+			detail = strings.TrimSpace(toolName)
+		case strings.Contains(strings.ToLower(toolName), "harness") || strings.Contains(strings.ToLower(toolName), "task"):
+			label = "planning"
+			detail = "delegating deeper work"
+		default:
+			label = "thinking"
+			detail = strings.TrimSpace(toolName)
+		}
+		return
+	}
+	if step == 0 {
+		switch toolChoice.(type) {
+		case string:
+			if strings.EqualFold(strings.TrimSpace(toolChoice.(string)), "required") {
+				label = "planning"
+				detail = "tool-backed turn starting"
+				return
+			}
+		case map[string]any:
+			label = "planning"
+			detail = "delegating structured work"
+			return
+		}
+		label = "planning"
+		detail = "reviewing context and choosing a next action"
+		return
+	}
+	if strings.TrimSpace(content) != "" {
+		text := strings.ToLower(strings.TrimSpace(content))
+		switch {
+		case strings.Contains(text, "verify") || strings.Contains(text, "test"):
+			label = "verifying"
+			detail = "checking response quality"
+		case strings.Contains(text, "search") || strings.Contains(text, "find"):
+			label = "searching"
+			detail = "gathering missing context"
+		case strings.Contains(text, "write") || strings.Contains(text, "edit") || strings.Contains(text, "update"):
+			label = "editing"
+			detail = "adjusting the plan or output"
+		default:
+			label = "thinking"
+			detail = "continuing the task"
+		}
+		return
+	}
+	label = "thinking"
+	detail = "continuing the task"
+	return
+}
+
+// StreamPhaseForTool classifies a tool call into a turn phase.
+func StreamPhaseForTool(toolName string) string {
+	t := strings.ToLower(strings.TrimSpace(toolName))
+	switch {
+	case t == "":
+		return ""
+	case strings.Contains(t, "read") || strings.Contains(t, "search") || strings.Contains(t, "grep") || strings.Contains(t, "glob") || strings.Contains(t, "find"):
+		return "searching"
+	case strings.Contains(t, "write") || strings.Contains(t, "edit") || strings.Contains(t, "patch"):
+		return "editing"
+	case strings.Contains(t, "test") || strings.Contains(t, "verify") || strings.Contains(t, "critic") || strings.Contains(t, "check"):
+		return "verifying"
+	case strings.Contains(t, "harness") || strings.Contains(t, "task") || strings.Contains(t, "plan"):
+		return "planning"
+	default:
+		return "thinking"
+	}
+}
+
 // HarnessProgressWriterPrefersPlainText is true when harness run progress should be printed as [1/5·planning …] lines
 // instead of [harness_event] JSON. Default: stdout is a terminal. Override with HEROS_HARNESS_PROGRESS=json|text.
 func HarnessProgressWriterPrefersPlainText(out io.Writer) bool {

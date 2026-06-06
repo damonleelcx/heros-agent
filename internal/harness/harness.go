@@ -1400,7 +1400,7 @@ func (o *Orchestrator) preTodoWebResearch(ctx context.Context, sys, goal string)
 		Forbidden:       []string{"shell", "write_file"},
 		RequireEvidence: true,
 	}
-	prompt := "Search the web first and return a short planning brief: key facts, latest constraints, risks, and links/sources relevant to this goal.\nGoal: " + strings.TrimSpace(goal)
+	prompt := "<research_brief>Search the web first and return a short planning brief: key facts, latest constraints, risks, and links/sources relevant to this goal.\nGoal: " + strings.TrimSpace(goal) + "<research_brief>"
 	return o.specialist(ctx, sys, sb, prompt)
 }
 
@@ -1423,7 +1423,7 @@ func (o *Orchestrator) leaderPlan(ctx context.Context, sys string, topo Topology
 	if model == "" {
 		model = o.LLM.Model
 	}
-	prompt := `Decompose the user goal into 2-5 concrete sub-tasks, one per line, no numbering. Goal: ` + goal
+	prompt := `<plan_tasks>Decompose the user goal into 2-5 concrete sub-tasks, one per line, no numbering. Goal: ` + goal + `<plan_tasks>`
 	raw, err := o.chat(ctx, model, sys, prompt)
 	if err != nil {
 		return nil, err
@@ -1443,7 +1443,7 @@ func (o *Orchestrator) leaderPlan(ctx context.Context, sys string, topo Topology
 
 func (o *Orchestrator) specialist(ctx context.Context, sys string, sandbox SubAgentSandbox, step string) (string, error) {
 	prompt := fmt.Sprintf(
-		"You are the %s specialist running in a sandbox.\nScope: %s\nAllowed tools: %s\nAllowed skills: %s\nForbidden: %s\nRequire evidence: %t\nExecute this sub-task briefly and practically, and call out what's missing if blocked:\n%s",
+		"<specialist_run>You are the %s specialist running in a sandbox.\nScope: %s\nAllowed tools: %s\nAllowed skills: %s\nForbidden: %s\nRequire evidence: %t\nExecute this sub-task briefly and practically, and call out what's missing if blocked:\n%s<specialist_run>",
 		sandbox.Role,
 		sandbox.Scope,
 		strings.Join(sandbox.AllowedTools, ", "),
@@ -1456,12 +1456,12 @@ func (o *Orchestrator) specialist(ctx context.Context, sys string, sandbox SubAg
 }
 
 func (o *Orchestrator) criticSubAgent(ctx context.Context, sys, goal, task, output string) (float64, string, error) {
-	prompt := fmt.Sprintf(`Critique this sub-agent task output against the goal and task. Reply JSON only:
+	prompt := fmt.Sprintf(`<critic_review>Critique this sub-agent task output against the goal and task. Reply JSON only:
 {"score":0.0,"feedback":"..."}
 Goal: %s
 Task: %s
 Output:
-%s`, goal, task, output)
+%s<critic_review>`, goal, task, output)
 	raw, err := o.chat(ctx, o.LLM.Model, sys, prompt)
 	if err != nil {
 		return 0, "", err
@@ -1478,10 +1478,10 @@ Output:
 }
 
 func (o *Orchestrator) critic(ctx context.Context, sys string, topo Topology, goal, draft string) (float64, string, error) {
-	prompt := fmt.Sprintf(`Score 0.0-1.0 how well the draft satisfies the goal. Reply JSON only: {"score":0.0,"rationale":"..."}
+	prompt := fmt.Sprintf(`<critic_score>Score 0.0-1.0 how well the draft satisfies the goal. Reply JSON only: {"score":0.0,"rationale":"..."}
 Goal: %s
 Draft:
-%s`, goal, draft)
+%s<critic_score>`, goal, draft)
 	raw, err := o.chat(ctx, o.LLM.Model, sys, prompt)
 	if err != nil {
 		return 0, "", err
@@ -1509,12 +1509,12 @@ func (o *Orchestrator) followUpTodos(ctx context.Context, sys, goal, critique st
 			lastDoneID = td.ID
 		}
 	}
-	prompt := fmt.Sprintf(`Generate 1-3 additional todo items needed to meet the goal based on critique.
+	prompt := fmt.Sprintf(`<followup_todos>Generate 1-3 additional todo items needed to meet the goal based on critique.
 Rules: one line per todo, concise, non-empty, no numbering.
 Goal: %s
 Critique: %s
 Existing todos:
-%s`, goal, critique, strings.Join(existingTitles, "\n"))
+%s<followup_todos>`, goal, critique, strings.Join(existingTitles, "\n"))
 	raw, err := o.chat(ctx, o.LLM.Model, sys, prompt)
 	if err != nil {
 		return nil, err
@@ -1568,12 +1568,12 @@ Existing todos:
 }
 
 func (o *Orchestrator) testAndPreview(ctx context.Context, sys, goal, draft string) (VerificationResult, error) {
-	prompt := fmt.Sprintf(`Act as the main agent verifier. Evaluate testability and preview quality for the draft against the goal.
+	prompt := fmt.Sprintf(`<verify_draft>Act as the main agent verifier. Evaluate testability and preview quality for the draft against the goal.
 Reply JSON only:
 {"summary":"...","checks":["...","..."],"passed":true}
 Goal: %s
 Draft:
-%s`, goal, draft)
+%s<verify_draft>`, goal, draft)
 	raw, err := o.chat(ctx, o.LLM.Model, sys, prompt)
 	if err != nil {
 		return VerificationResult{}, err

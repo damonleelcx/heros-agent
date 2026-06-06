@@ -102,7 +102,7 @@ func (s *Session) PrimeSystem(ctx context.Context) error {
 				"Otherwise use **heros_shell** across multiple turns.\n",
 			topo.Specialists, topo.LeaderModel, topo.CriticThreshold)
 	}
-	instructions := fmt.Sprintf(`You are the **Heros OS agent** (not a passive chatbot): you **drive** work with **tools**, **catalog skills**, and **memory** — all inside the **heros** process (embedded daemon + data_dir). There is no separate product the user must start for daily use.
+	instructions := fmt.Sprintf(`<session_prompt>You are the **Heros OS agent** (not a passive chatbot): you **drive** work with **tools**, **catalog skills**, and **memory** — all inside the **heros** process (embedded daemon + data_dir). There is no separate product the user must start for daily use.
 
 Workspace root on this machine: **%s**
 - **heros_shell** — cwd is that directory. This is how you **see** the project (dir/ls, type/cat README*, package.json, src/, git status, etc.).
@@ -151,7 +151,7 @@ Skill proposal shape (layer **prompt_engineering**):
 ### SKILL:skill_slug_here
 (markdown body)
 
-Be concise in the terminal; one short plain-text status line before heavy tool use is enough.%s`,
+Be concise in the terminal; one short plain-text status line before heavy tool use is enough.<session_prompt>%s`,
 		wd, dataDirAbs, harnessLine)
 
 	full := strings.TrimSpace(base) + "\n\n" + instructions + "\n\n" + block
@@ -205,6 +205,30 @@ func (s *Session) RunUserTurn(ctx context.Context, user string, out io.Writer) e
 
 	tools := OpenAITools(ToolOptions{AgentShell: s.AgentShell})
 	var firstToolChoice any
+	currentPhase := ""
+	phaseChain := []string{}
+	emitPhase := func(nextPhase, detail string, step int) {
+		if !s.Stream {
+			return
+		}
+		nextPhase = strings.TrimSpace(nextPhase)
+		if nextPhase == "" {
+			nextPhase = "thinking"
+		}
+		if nextPhase == currentPhase {
+			return
+		}
+		currentPhase = nextPhase
+		nextLine := FormatStreamProgressLine(1, step+1, 5, nextPhase, detail)
+		phaseChain = append(phaseChain, nextLine)
+		_, _ = fmt.Fprintf(out, "\r%s", strings.Join(phaseChain, " -> "))
+	}
+	flushPhaseChain := func() {
+		if !s.Stream || len(phaseChain) == 0 {
+			return
+		}
+		_, _ = fmt.Fprintln(out, strings.Join(phaseChain, " -> "))
+	}
 	if ClarificationRequired(user) {
 		s.Messages = append(s.Messages, map[string]any{
 			"role":    "system",
@@ -233,6 +257,10 @@ func (s *Session) RunUserTurn(ctx context.Context, user string, out io.Writer) e
 		}
 	}
 	for step := 0; step < 64; step++ {
+		if s.Stream && step == 0 {
+			_, label, detail, _, _ := StreamProgressState(step, false, "", firstToolChoice, "")
+			emitPhase(label, detail, step)
+		}
 		if step == 0 && imageGeneration {
 			s.Messages = append(s.Messages, map[string]any{
 				"role": "system",
@@ -268,6 +296,10 @@ func (s *Session) RunUserTurn(ctx context.Context, user string, out io.Writer) e
 		}
 		modelEnd := time.Now().UTC()
 		emitHarnessEnd(out, "assistant", "", "", "ok", "", modelStart, modelEnd)
+		if s.Stream && strings.TrimSpace(content) != "" {
+			_, label, detail, _, _ := StreamProgressState(step, false, "", firstToolChoice, content)
+			emitPhase(label, detail, step)
+		}
 
 		assistantMsg := map[string]any{"role": "assistant"}
 		if strings.TrimSpace(content) != "" {
@@ -305,6 +337,7 @@ func (s *Session) RunUserTurn(ctx context.Context, user string, out io.Writer) e
 			if s.Stream && content != "" {
 				_, _ = fmt.Fprint(out, "\n")
 			}
+			flushPhaseChain()
 			if s.LogTurnsToEpisodic {
 				memoryUsed = true // automatic user/assistant turn logging into episodic memory
 			}
@@ -343,6 +376,13 @@ func (s *Session) RunUserTurn(ctx context.Context, user string, out io.Writer) e
 			status := "ok"
 			callFailed := err != nil || toolResultHasFailure(c.Name, result)
 			endMsg := toolEndMessage(c.Name, result)
+			if s.Stream {
+				phase := StreamPhaseForTool(c.Name)
+				detail := strings.TrimSpace(c.Name)
+				if phase != "" {
+					emitPhase(phase, detail, step)
+				}
+			}
 			if callFailed {
 				if err != nil {
 					result = "error: " + err.Error()
@@ -377,6 +417,7 @@ func (s *Session) RunUserTurn(ctx context.Context, user string, out io.Writer) e
 		lastBatchHadFailures = batchHadFailures
 		s.compressConversationContext()
 	}
+	flushPhaseChain()
 	return fmt.Errorf("tool loop exceeded step limit")
 }
 
