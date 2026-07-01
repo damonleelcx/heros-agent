@@ -162,6 +162,24 @@ func (b *Bus) PublishJobFired(jobID, tenantID, action string, payload []byte) er
 	return b.publish(b.subjectFleet("scheduler.fired"), data)
 }
 
+// PublishSnapshotSynced signals that a node imported or exported a sync snapshot.
+func (b *Bus) PublishSnapshotSynced(direction, source string) error {
+	if b == nil || b.Conn == nil {
+		return nil
+	}
+	m := map[string]any{
+		"direction": direction,
+		"source":    source,
+		"node_id":   b.NodeID,
+		"ts":        time.Now().UTC().Format(time.RFC3339),
+	}
+	data, err := json.Marshal(m)
+	if err != nil {
+		return err
+	}
+	return b.publish(b.subjectFleet("sync.snapshot"), data)
+}
+
 // SubscribeFleet subscribes to fleet events (JetStream-aware).
 func (b *Bus) SubscribeFleet(pattern string, handler func(subject string, data []byte)) (*nats.Subscription, error) {
 	if b == nil || b.Conn == nil {

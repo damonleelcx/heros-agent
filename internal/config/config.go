@@ -43,6 +43,7 @@ type Config struct {
 
 	// Observability
 	MetricsEnabled bool `json:"metrics_enabled"` // GET /metrics Prometheus text
+	InboxSigningKey string `json:"inbox_signing_key"` // optional HMAC secret for inbox payload verification
 
 	// ToolRegistrySync rules for tools/*/tool.yaml ↔ SQLite tool_registry (see toolindex.SyncPolicy).
 	ToolRegistrySync ToolRegistrySync `json:"tool_registry_sync"`

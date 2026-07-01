@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/heros-foreal/agentd/internal/approval"
+	"github.com/heros-foreal/agentd/internal/syncsnapshot"
 )
 
 // PushProposal sends a pending proposal to org collective (stub HTTP); nodes push signals up.
@@ -63,4 +64,53 @@ func PullSkillGraph(baseURL string) ([]byte, error) {
 	}
 	defer resp.Body.Close()
 	return io.ReadAll(resp.Body)
+}
+
+func PullSnapshot(baseURL string) (*syncsnapshot.Snapshot, error) {
+	base := strings.TrimSpace(baseURL)
+	if base == "" {
+		return nil, nil
+	}
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Get(strings.TrimRight(base, "/") + "/v1/sync/export")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("collective snapshot %s: %s", resp.Status, string(body))
+	}
+	var snap syncsnapshot.Snapshot
+	if err := json.NewDecoder(resp.Body).Decode(&snap); err != nil {
+		return nil, err
+	}
+	return &snap, nil
+}
+
+func PushSnapshot(baseURL string, snap syncsnapshot.Snapshot) error {
+	base := strings.TrimSpace(baseURL)
+	if base == "" {
+		return nil
+	}
+	client := &http.Client{Timeout: 15 * time.Second}
+	b, err := json.Marshal(snap)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequest(http.MethodPost, strings.TrimRight(base, "/")+"/v1/sync/import", bytes.NewReader(b))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("collective snapshot import %s: %s", resp.Status, string(body))
+	}
+	return nil
 }

@@ -1,0 +1,14 @@
+[Unit]
+Description=Heros local agent daemon
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/heros -config /etc/heros-agent/config.json
+Restart=on-failure
+RestartSec=3
+User=heros
+Group=heros
+
+[Install]
+WantedBy=multi-user.target

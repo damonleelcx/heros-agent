@@ -17,10 +17,10 @@ const (
 	PromptFile = "prompt.md"
 )
 
-func SkillsRoot(dataDir string) string  { return filepath.Join(dataDir, SkillsDir) }
-func ToolsRoot(dataDir string) string   { return filepath.Join(dataDir, ToolsDir) }
-func MemoryRoot(dataDir string) string  { return filepath.Join(dataDir, MemoryDir) }
-func SystemRoot(dataDir string) string  { return filepath.Join(dataDir, SystemDir) }
+func SkillsRoot(dataDir string) string { return filepath.Join(dataDir, SkillsDir) }
+func ToolsRoot(dataDir string) string  { return filepath.Join(dataDir, ToolsDir) }
+func MemoryRoot(dataDir string) string { return filepath.Join(dataDir, MemoryDir) }
+func SystemRoot(dataDir string) string { return filepath.Join(dataDir, SystemDir) }
 func SystemPromptPath(dataDir string) string {
 	return filepath.Join(SystemRoot(dataDir), PromptFile)
 }
@@ -97,6 +97,18 @@ func TurnsPath(dataDir, tenantID, sessionID string) string {
 
 func SessionMetaPath(dataDir, tenantID, sessionID string) string {
 	return filepath.Join(SessionDir(dataDir, tenantID, sessionID), "meta.json")
+}
+
+func SessionLinksPath(dataDir, tenantID, sessionID string) string {
+	return filepath.Join(SessionDir(dataDir, tenantID, sessionID), "links.json")
+}
+
+func SessionsIndexPath(dataDir, tenantID string) string {
+	return filepath.Join(MemoryRoot(dataDir), SanitizeSlug(tenantID), "indexes", "sessions.index.json")
+}
+
+func EntitiesIndexPath(dataDir, tenantID string) string {
+	return filepath.Join(MemoryRoot(dataDir), SanitizeSlug(tenantID), "indexes", "entities.index.json")
 }
 
 // SessionAgentMemoryPath stores session-scoped agent notes/summary for recall.

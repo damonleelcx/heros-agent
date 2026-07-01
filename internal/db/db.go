@@ -33,6 +33,13 @@ func Open(path string) (*sql.DB, error) {
 	return d, nil
 }
 
+func EnsureInboxState(d *sql.DB) error {
+	_, err := d.Exec(`UPDATE inbox_messages SET state = CASE
+		WHEN state IN ('received','verified','applied','acked','retry','dead-letter') THEN state
+		ELSE 'received' END`)
+	return err
+}
+
 func ensureTenantColumns(d *sql.DB) error {
 	alters := []string{
 		`ALTER TABLE proposals ADD COLUMN tenant_id TEXT NOT NULL DEFAULT ''`,
@@ -218,6 +225,32 @@ func migrate(d *sql.DB) error {
 			last_fired_at TEXT
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_sched_tenant ON scheduled_jobs(tenant_id)`,
+		`CREATE TABLE IF NOT EXISTS inbox_messages (
+			message_id TEXT PRIMARY KEY,
+			tenant_id TEXT NOT NULL DEFAULT '',
+			payload_type TEXT NOT NULL,
+			payload_version INTEGER NOT NULL DEFAULT 1,
+			signature TEXT NOT NULL,
+			payload_json TEXT NOT NULL,
+			state TEXT NOT NULL DEFAULT 'received',
+			retry_count INTEGER NOT NULL DEFAULT 0,
+			dead_letter_reason TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL DEFAULT (datetime('now')),
+			expire_at TEXT
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_inbox_tenant_state ON inbox_messages(tenant_id, state)`,
+		`CREATE TABLE IF NOT EXISTS sync_ledger (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			direction TEXT NOT NULL,
+			source TEXT NOT NULL,
+			version INTEGER NOT NULL DEFAULT 1,
+			applied INTEGER NOT NULL DEFAULT 0,
+			conflict_count INTEGER NOT NULL DEFAULT 0,
+			conflicts_json TEXT,
+			snapshot_json TEXT,
+			snapshot_sha256 TEXT,
+			created_at TEXT NOT NULL DEFAULT (datetime('now'))
+		)`,
 		`CREATE TABLE IF NOT EXISTS skill_fs_index (
 			rel_path TEXT PRIMARY KEY,
 			name TEXT NOT NULL,

@@ -19,9 +19,12 @@ import (
 	"github.com/heros-foreal/agentd/internal/db"
 	"github.com/heros-foreal/agentd/internal/harness"
 	"github.com/heros-foreal/agentd/internal/indexsync"
+	"github.com/heros-foreal/agentd/internal/collective"
 	"github.com/heros-foreal/agentd/internal/platform"
 	"github.com/heros-foreal/agentd/internal/promptlayer"
+	"github.com/heros-foreal/agentd/internal/memorylayer"
 	"github.com/heros-foreal/agentd/internal/scheduler"
+	"github.com/heros-foreal/agentd/internal/syncsnapshot"
 	"github.com/heros-foreal/agentd/internal/vaultindex"
 )
 
@@ -93,6 +96,14 @@ func StartAgentd(ctx context.Context, cfg config.Config) (*Server, error) {
 		}
 		scancel()
 	}
+	if strings.TrimSpace(cfg.CollectiveURL) != "" {
+		syncCtx, syncCancel := context.WithCancel(context.Background())
+		go runCollectivePoller(syncCtx, database, cfg, rt)
+		go func() {
+			<-ctx.Done()
+			syncCancel()
+		}()
+	}
 
 	srvHandler := api.New(database, cfg, rt)
 	schCtx, schCancel := context.WithCancel(context.Background())
@@ -112,6 +123,21 @@ func StartAgentd(ctx context.Context, cfg config.Config) (*Server, error) {
 			}
 		}()
 	}
+	go func() {
+		t := time.NewTicker(12 * time.Hour)
+		defer t.Stop()
+		_ = memorylayer.SweepMemorySpace(database, cfg.DataDir)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				if err := memorylayer.SweepMemorySpace(database, cfg.DataDir); err != nil {
+					log.Printf("memory sweep: %v", err)
+				}
+			}
+		}
+	}()
 
 	httpServer := &http.Server{
 		Handler:           srvHandler.Handler,
@@ -141,6 +167,39 @@ func StartAgentd(ctx context.Context, cfg config.Config) (*Server, error) {
 		schCancel:   schCancel,
 		vaultCancel: vaultCancel,
 	}, nil
+}
+
+func runCollectivePoller(ctx context.Context, database *sql.DB, cfg config.Config, rt *platform.Runtime) {
+	t := time.NewTicker(5 * time.Minute)
+	defer t.Stop()
+	pullOnce := func() {
+		snap, err := collective.PullSnapshot(cfg.CollectiveURL)
+		if err != nil || snap == nil {
+			return
+		}
+		if _, err := syncsnapshot.Import(database, *snap, syncsnapshot.ImportPolicy{Conflict: cfg.ToolRegistrySync.Conflict}); err != nil {
+			log.Printf("collective sync import: %v", err)
+			return
+		}
+		if err := promptlayer.SeedIfEmpty(database, cfg.DataDir); err != nil {
+			log.Printf("collective sync seed: %v", err)
+		}
+		if err := indexsync.SyncSkillsTools(context.Background(), rt.Neo, database); err != nil {
+			log.Printf("collective sync graph: %v", err)
+		}
+		if rt.Bus != nil {
+			_ = rt.Bus.PublishSnapshotSynced("pull", cfg.CollectiveURL)
+		}
+	}
+	pullOnce()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			pullOnce()
+		}
+	}
 }
 
 // WaitReady polls GET /health until success or ctx is done.

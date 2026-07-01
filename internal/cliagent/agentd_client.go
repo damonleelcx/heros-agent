@@ -122,6 +122,11 @@ type consolidateResp struct {
 	Promoted int `json:"promoted"`
 }
 
+type memoryLinkResp struct {
+	Status string `json:"status"`
+	ID     string `json:"id"`
+}
+
 type profileResp struct {
 	UserID      string `json:"user_id"`
 	TenantID    string `json:"tenant_id"`
@@ -275,6 +280,36 @@ func (c *AgentdClient) MemoryConsolidate(ctx context.Context, sessionID string, 
 		return 0, err
 	}
 	return r.Promoted, nil
+}
+
+func (c *AgentdClient) MemoryLink(ctx context.Context, sessionID, source, target, rel, provenance string, confidence float64) (string, error) {
+	var r memoryLinkResp
+	err := c.PostJSON(ctx, "/api/memory/links", map[string]any{
+		"session_id": sessionID,
+		"source":     source,
+		"target":     target,
+		"rel":        rel,
+		"provenance": provenance,
+		"confidence": confidence,
+	}, &r)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(r.ID), nil
+}
+
+func (c *AgentdClient) MemoryLinks(ctx context.Context, sessionID string) ([]map[string]any, error) {
+	path := "/api/memory/links"
+	if strings.TrimSpace(sessionID) != "" {
+		path += "?session_id=" + url.QueryEscape(strings.TrimSpace(sessionID))
+	}
+	var r struct {
+		Links []map[string]any `json:"links"`
+	}
+	if err := c.GetJSON(ctx, path, &r); err != nil {
+		return nil, err
+	}
+	return r.Links, nil
 }
 
 func (c *AgentdClient) MemoryProfile(ctx context.Context, userID string) (string, error) {

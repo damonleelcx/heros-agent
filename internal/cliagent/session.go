@@ -132,6 +132,7 @@ If any command fails, do not stop at the first error. Inspect the workspace tree
 For JavaScript test commands, prefer non-watch mode in automation (for example CI=true and --watch=false) so runs terminate.
 
 **Long‑horizon tasks:** Break work into steps; after substantive progress call **heros_memory_save** or rely on session episodic logs; use **heros_memory_search** to recall earlier decisions in the same thread.
+For multi-step implementation, debugging, or research work, explicitly run the **loop-engineering** pattern: frame the goal, ground the current state, plan the next step, execute, verify, then iterate or stop. Start with **write_todos** and keep them current.
 
 **Memory questions:** If the user asks what you remember / what is in memory / episodic recall, call **heros_memory_search** with a short query — do not invent “no memory” without querying.
 
@@ -263,7 +264,7 @@ func (s *Session) RunUserTurn(ctx context.Context, user string, out io.Writer) e
 		}
 		if step == 0 && imageGeneration {
 			s.Messages = append(s.Messages, map[string]any{
-				"role": "system",
+				"role":    "system",
 				"content": "Image-generation request detected. Use native image tooling only: call heros_extension_tool with tool_id=image-generation-tool. Do not call heros_shell, heros_agent_shell, or execute for image generation.",
 			})
 		}
@@ -350,6 +351,7 @@ func (s *Session) RunUserTurn(ctx context.Context, user string, out io.Writer) e
 					log.Printf("heros-cli: episodic assistant turn: %v", err)
 				}
 				s.updateSessionAgentMemory(user, content)
+				s.saveLoopCheckpoint(ctx, user, content, toolCalls, false, false)
 				s.turnN++
 				s.maybeAutoConsolidate(ctx)
 			}
@@ -487,6 +489,37 @@ func (s *Session) updateSessionAgentMemory(user, assistant string) {
 	}
 	if err := memoryfs.UpsertSessionAgentMemory(s.DataDir, "_global", s.SessionID, text); err != nil {
 		log.Printf("heros-cli: session agent memory write: %v", err)
+	}
+}
+
+func (s *Session) saveLoopCheckpoint(ctx context.Context, user, assistant string, toolCalls []ToolCallUsage, hadFailures bool, blocked bool) {
+	if strings.TrimSpace(s.SessionID) == "" {
+		return
+	}
+	var toolNames []string
+	for _, tc := range toolCalls {
+		if name := strings.TrimSpace(tc.Name); name != "" {
+			toolNames = append(toolNames, name)
+		}
+	}
+	status := "progress"
+	switch {
+	case blocked:
+		status = "blocked"
+	case hadFailures:
+		status = "retry"
+	case len(toolNames) > 0:
+		status = "verified"
+	}
+	note := fmt.Sprintf(
+		"[loop-checkpoint]\nstatus=%s\nuser=%s\nassistant=%s\ntools=%s",
+		status,
+		summarizeForHarness(user, 220),
+		summarizeForHarness(assistant, 320),
+		strings.Join(toolNames, ","),
+	)
+	if err := s.Agentd.MemoryEpisodic(ctx, s.SessionID, "note", note, 0.45); err != nil {
+		log.Printf("heros-cli: loop checkpoint write: %v", err)
 	}
 }
 
@@ -981,6 +1014,39 @@ func (s *Session) DispatchTool(ctx context.Context, tc ToolCall) (string, error)
 			return "", err
 		}
 		return `{"status":"saved"}`, nil
+	case "heros_memory_link":
+		source := ArgString(args, "source")
+		target := ArgString(args, "target")
+		rel := ArgString(args, "rel")
+		provenance := ArgString(args, "provenance")
+		sessionID := ArgString(args, "session_id")
+		if strings.TrimSpace(sessionID) == "" {
+			sessionID = s.SessionID
+		}
+		confidence := 0.8
+		if v, ok := args["confidence"].(float64); ok && v >= 0 {
+			confidence = v
+		}
+		if strings.TrimSpace(source) == "" || strings.TrimSpace(target) == "" || strings.TrimSpace(rel) == "" {
+			return "", fmt.Errorf("heros_memory_link requires source, target, rel")
+		}
+		id, err := s.Agentd.MemoryLink(ctx, sessionID, source, target, rel, provenance, confidence)
+		if err != nil {
+			return "", err
+		}
+		b, _ := json.Marshal(map[string]any{"status": "linked", "id": id})
+		return string(b), nil
+	case "heros_memory_links_list":
+		sessionID := ArgString(args, "session_id")
+		if strings.TrimSpace(sessionID) == "" {
+			sessionID = s.SessionID
+		}
+		links, err := s.Agentd.MemoryLinks(ctx, sessionID)
+		if err != nil {
+			return "", err
+		}
+		b, _ := json.Marshal(map[string]any{"session_id": sessionID, "links": links})
+		return string(b), nil
 	case "heros_read_skill":
 		name := ArgString(args, "name")
 		body, err := s.Agentd.SkillBody(ctx, name)

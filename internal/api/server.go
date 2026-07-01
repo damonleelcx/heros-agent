@@ -2,13 +2,17 @@ package api
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
 	"database/sql"
 	"embed"
+	"encoding/hex"
 	"encoding/json"
 	"io/fs"
 	"log"
 	"net/http"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,8 +22,10 @@ import (
 	"github.com/heros-foreal/agentd/internal/config"
 	"github.com/heros-foreal/agentd/internal/evolve"
 	"github.com/heros-foreal/agentd/internal/harness"
+	"github.com/heros-foreal/agentd/internal/inbox"
 	"github.com/heros-foreal/agentd/internal/indexsync"
 	"github.com/heros-foreal/agentd/internal/infra/neo4jstore"
+	"github.com/heros-foreal/agentd/internal/memoryfs"
 	"github.com/heros-foreal/agentd/internal/memorylayer"
 	"github.com/heros-foreal/agentd/internal/memorytree"
 	"github.com/heros-foreal/agentd/internal/observability"
@@ -27,6 +33,7 @@ import (
 	"github.com/heros-foreal/agentd/internal/promptlayer"
 	"github.com/heros-foreal/agentd/internal/scheduler"
 	"github.com/heros-foreal/agentd/internal/skillindex"
+	"github.com/heros-foreal/agentd/internal/syncsnapshot"
 	"github.com/heros-foreal/agentd/internal/toolindex"
 	"github.com/heros-foreal/agentd/internal/tooling"
 	"github.com/heros-foreal/agentd/internal/vaultindex"
@@ -85,11 +92,31 @@ func (s *Server) routes() {
 	s.Mux.HandleFunc("GET /api/prompt/system", s.handleSystemPrompt)
 	s.Mux.HandleFunc("POST /api/harness/run", s.handleHarnessRun)
 	s.Mux.HandleFunc("POST /api/memory/episodic", s.handleEpisodic)
+	s.Mux.HandleFunc("POST /api/memory/links", s.handleMemoryLink)
+	s.Mux.HandleFunc("GET /api/memory/links", s.handleMemoryLinks)
 	s.Mux.HandleFunc("POST /api/memory/retrieve", s.handleRetrieve)
 	s.Mux.HandleFunc("GET /api/memory/profile", s.handleProfile)
 	s.Mux.HandleFunc("POST /api/memory/vault/reindex", s.handleVaultReindex)
 	s.Mux.HandleFunc("POST /api/memory/consolidate", s.handleConsolidate)
 	s.Mux.HandleFunc("POST /api/memory/optimize-session", s.handleOptimizeSession)
+	s.Mux.HandleFunc("GET /api/inbox/messages", s.handleInboxList)
+	s.Mux.HandleFunc("GET /api/inbox/messages/{id}", s.handleInboxGet)
+	s.Mux.HandleFunc("POST /api/inbox/messages", s.handleInboxSubmit)
+	s.Mux.HandleFunc("POST /api/inbox/messages/{id}/verify", s.handleInboxVerify)
+	s.Mux.HandleFunc("POST /api/inbox/messages/{id}/apply", s.handleInboxApply)
+	s.Mux.HandleFunc("POST /api/inbox/messages/{id}/ack", s.handleInboxAck)
+	s.Mux.HandleFunc("POST /api/inbox/messages/{id}/retry", s.handleInboxRetry)
+	s.Mux.HandleFunc("POST /api/inbox/messages/{id}/dead-letter", s.handleInboxDeadLetter)
+	s.Mux.HandleFunc("POST /api/memory/prune", s.handleMemoryPrune)
+	s.Mux.HandleFunc("GET /api/sync/export", s.handleSyncExport)
+	s.Mux.HandleFunc("GET /api/sync/history", s.handleSyncHistory)
+	s.Mux.HandleFunc("POST /api/sync/import", s.handleSyncImport)
+	s.Mux.HandleFunc("POST /api/sync/rollback", s.handleSyncRollback)
+	s.Mux.HandleFunc("POST /api/sync/pull-collective", s.handleSyncPullCollective)
+	s.Mux.HandleFunc("POST /api/sync/push-collective", s.handleSyncPushCollective)
+	s.Mux.HandleFunc("GET /api/status", s.handleStatus)
+	s.Mux.HandleFunc("GET /api/observability/dashboard", s.handleObservabilityDashboard)
+	s.Mux.HandleFunc("POST /api/ops/run", s.handleOpsRun)
 	s.Mux.HandleFunc("POST /api/graph/entity", s.handleGraphEntity)
 	s.Mux.HandleFunc("POST /api/graph/link", s.handleGraphLink)
 	s.Mux.HandleFunc("GET /api/graph/neighbors", s.handleGraphNeighbors)
@@ -166,6 +193,22 @@ type submitBody struct {
 	TargetTenant string `json:"target_tenant,omitempty"` // admin only: submit on behalf of tenant
 }
 
+func inboxSignatureFor(secret string, m inbox.Message) string {
+	secret = strings.TrimSpace(secret)
+	if secret == "" {
+		return m.Signature
+	}
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(m.MessageID))
+	mac.Write([]byte("\n"))
+	mac.Write([]byte(m.TenantID))
+	mac.Write([]byte("\n"))
+	mac.Write([]byte(m.PayloadType))
+	mac.Write([]byte("\n"))
+	mac.Write(m.PayloadJSON)
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
 func (s *Server) handleSubmitProposal(w http.ResponseWriter, r *http.Request) {
 	var b submitBody
 	if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
@@ -189,6 +232,7 @@ func (s *Server) handleSubmitProposal(w http.ResponseWriter, r *http.Request) {
 	if s.RT != nil && s.RT.Bus != nil {
 		_ = s.RT.Bus.PublishProposalSubmitted(*p)
 	}
+	logEvent("proposal_submitted", map[string]any{"proposal_id": p.ID, "tenant_id": p.TenantID, "layer": p.Layer, "title": p.Title})
 	writeJSON(w, p)
 }
 
@@ -221,6 +265,7 @@ func (s *Server) handleApprove(w http.ResponseWriter, r *http.Request) {
 			log.Printf("api: collective approved-mutation push: %v", err)
 		}
 	}
+	logEvent("proposal_approved", map[string]any{"proposal_id": id, "tenant_id": tid})
 	writeJSON(w, p)
 }
 
@@ -427,6 +472,16 @@ type episodicBody struct {
 	Importance float64 `json:"importance"`
 }
 
+type memoryLinkBody struct {
+	SessionID  string         `json:"session_id"`
+	Source     string         `json:"source"`
+	Target     string         `json:"target"`
+	Rel        string         `json:"rel"`
+	Confidence float64        `json:"confidence"`
+	Provenance string         `json:"provenance"`
+	Props      map[string]any `json:"props,omitempty"`
+}
+
 func (s *Server) handleEpisodic(w http.ResponseWriter, r *http.Request) {
 	var b episodicBody
 	if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
@@ -452,6 +507,55 @@ func (s *Server) handleEpisodic(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, map[string]string{"id": id})
+}
+
+func (s *Server) handleMemoryLink(w http.ResponseWriter, r *http.Request) {
+	var b memoryLinkBody
+	if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+	tid, _ := s.tenantFrom(r)
+	linkID := strings.TrimSpace(r.URL.Query().Get("id"))
+	if linkID == "" {
+		linkID = strings.TrimSpace(b.Source + "::" + b.Rel + "::" + b.Target)
+	}
+	if linkID == "" {
+		http.Error(w, "missing link id", 400)
+		return
+	}
+	if err := memoryfs.AppendLink(s.Cfg.DataDir, tid, b.SessionID, linkID, b.Source, b.Target, b.Rel, b.Provenance, b.Confidence); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	props, _ := json.Marshal(map[string]any{
+		"confidence": b.Confidence,
+		"provenance": b.Provenance,
+		"session_id": b.SessionID,
+	})
+	if err := memorylayer.Link(s.DB, linkID, b.Source, b.Target, b.Rel, string(props)); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	if s.RT != nil && s.RT.Neo != nil {
+		if err := s.RT.Neo.Link(r.Context(), linkID, b.Source, b.Target, b.Rel, string(props)); err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+	}
+	logEvent("memory_link_created", map[string]any{"tenant_id": tid, "session_id": b.SessionID, "link_id": linkID, "source": b.Source, "target": b.Target, "rel": b.Rel})
+	writeJSON(w, map[string]string{"status": "linked", "id": linkID})
+}
+
+func (s *Server) handleMemoryLinks(w http.ResponseWriter, r *http.Request) {
+	tid, _ := s.tenantFrom(r)
+	sessionID := strings.TrimSpace(r.URL.Query().Get("session_id"))
+	links, err := memoryfs.ListLinks(s.Cfg.DataDir, tid, sessionID)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	writeJSON(w, map[string]any{"tenant_id": tid, "session_id": sessionID, "links": links})
 }
 
 type retrieveBody struct {
@@ -611,6 +715,18 @@ func (s *Server) handleGraphEntity(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 500)
 		return
 	}
+	tid, _ := s.tenantFrom(r)
+	if err := memoryfs.WriteEntityIndex(s.Cfg.DataDir, tid, memoryfs.EntityIndexEntry{
+		EntityID:      b.ID,
+		TenantID:      tid,
+		Name:          b.Name,
+		Kind:          b.Kind,
+		UpdatedAt:     time.Now().UTC().Format(time.RFC3339Nano),
+		SchemaVersion: 1,
+	}); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
 	if s.RT != nil && s.RT.Neo != nil {
 		if err := s.RT.Neo.UpsertEntity(r.Context(), b.ID, b.Name, b.Kind, string(pj)); err != nil {
 			http.Error(w, err.Error(), 500)
@@ -684,6 +800,351 @@ func (s *Server) handleOptimizeSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]any{"summary": sum, "fragments": fr})
+}
+
+func (s *Server) handleInboxList(w http.ResponseWriter, r *http.Request) {
+	tid, _ := s.tenantFrom(r)
+	list, err := inbox.List(s.DB, tid)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	writeJSON(w, list)
+}
+
+func (s *Server) handleInboxGet(w http.ResponseWriter, r *http.Request) {
+	m, err := inbox.Get(s.DB, r.PathValue("id"))
+	if err != nil {
+		http.Error(w, err.Error(), 404)
+		return
+	}
+	tid, admin := s.tenantFrom(r)
+	if !admin && strings.TrimSpace(m.TenantID) != tid {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	writeJSON(w, m)
+}
+
+func (s *Server) handleInboxSubmit(w http.ResponseWriter, r *http.Request) {
+	var m inbox.Message
+	if err := json.NewDecoder(r.Body).Decode(&m); err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+	tid, _ := s.tenantFrom(r)
+	if m.TenantID == "" {
+		m.TenantID = tid
+	}
+	if !inbox.VerifySignature(s.Cfg.InboxSigningKey, m) {
+		http.Error(w, "invalid signature", http.StatusUnauthorized)
+		return
+	}
+	if err := inbox.Submit(s.DB, m); err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+	logEvent("inbox_message_received", map[string]any{"message_id": m.MessageID, "tenant_id": m.TenantID, "payload_type": m.PayloadType, "payload_version": m.PayloadVersion, "state": m.State})
+	writeJSON(w, m)
+}
+
+func (s *Server) handleInboxVerify(w http.ResponseWriter, r *http.Request) {
+	if err := inbox.Transition(s.DB, r.PathValue("id"), inbox.StateVerified, "signature verified"); err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+	logEvent("inbox_message_verified", map[string]any{"message_id": r.PathValue("id")})
+	writeJSON(w, map[string]string{"status": "verified"})
+}
+
+func (s *Server) handleInboxApply(w http.ResponseWriter, r *http.Request) {
+	if err := inbox.Transition(s.DB, r.PathValue("id"), inbox.StateApplied, "applied locally"); err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+	logEvent("inbox_message_applied", map[string]any{"message_id": r.PathValue("id")})
+	writeJSON(w, map[string]string{"status": "applied"})
+}
+
+func (s *Server) handleInboxAck(w http.ResponseWriter, r *http.Request) {
+	if err := inbox.Transition(s.DB, r.PathValue("id"), inbox.StateAcked, "acked by consumer"); err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+	logEvent("inbox_message_acked", map[string]any{"message_id": r.PathValue("id")})
+	writeJSON(w, map[string]string{"status": "acked"})
+}
+
+func (s *Server) handleInboxRetry(w http.ResponseWriter, r *http.Request) {
+	if err := inbox.Retry(s.DB, r.PathValue("id"), "retry requested"); err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+	logEvent("inbox_message_retry", map[string]any{"message_id": r.PathValue("id")})
+	writeJSON(w, map[string]string{"status": "retry"})
+}
+
+func (s *Server) handleInboxDeadLetter(w http.ResponseWriter, r *http.Request) {
+	if err := inbox.DeadLetter(s.DB, r.PathValue("id"), "dead-lettered"); err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+	logEvent("inbox_message_dead_lettered", map[string]any{"message_id": r.PathValue("id")})
+	writeJSON(w, map[string]string{"status": "dead-letter"})
+}
+
+func (s *Server) handleMemoryPrune(w http.ResponseWriter, r *http.Request) {
+	var b struct {
+		SessionID     string  `json:"session_id"`
+		OlderThanDays int     `json:"older_than_days"`
+		MinImportance float64 `json:"min_importance"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+	n, err := memorylayer.PruneEpisodic(s.DB, strings.TrimSpace(b.SessionID), b.OlderThanDays, b.MinImportance)
+	if err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+	writeJSON(w, map[string]any{"deleted": n})
+}
+
+func (s *Server) handleSyncExport(w http.ResponseWriter, r *http.Request) {
+	snap, err := syncsnapshot.Export(s.DB)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	writeJSON(w, snap)
+}
+
+func (s *Server) handleSyncHistory(w http.ResponseWriter, r *http.Request) {
+	limit := 50
+	if v := strings.TrimSpace(r.URL.Query().Get("limit")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	entries, err := syncsnapshot.ListLedger(s.DB, limit)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	writeJSON(w, map[string]any{"entries": entries})
+}
+
+func (s *Server) handleSyncImport(w http.ResponseWriter, r *http.Request) {
+	var snap syncsnapshot.Snapshot
+	if err := json.NewDecoder(r.Body).Decode(&snap); err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+	rep, err := syncsnapshot.Import(s.DB, snap, syncsnapshot.ImportPolicy{Conflict: s.Cfg.ToolRegistrySync.Conflict})
+	if err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+	_ = syncsnapshot.RecordLedgerSnapshot(s.DB, "import", "api", rep, snap)
+	if err := skillindex.Rebuild(s.DB, s.Cfg.DataDir); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	if err := toolindex.Rebuild(s.DB, s.Cfg.DataDir, toolindex.SyncPolicyFromConfig(s.Cfg)); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	writeJSON(w, map[string]any{"status": "imported", "applied": rep.Applied, "conflicts": rep.Conflicts})
+}
+
+func (s *Server) handleSyncRollback(w http.ResponseWriter, r *http.Request) {
+	snap, ledgerID, err := syncsnapshot.LatestSnapshot(s.DB)
+	if err != nil {
+		http.Error(w, "no rollback snapshot available: "+err.Error(), http.StatusNotFound)
+		return
+	}
+	rep, err := syncsnapshot.Restore(s.DB, *snap)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	_ = syncsnapshot.RecordLedgerSnapshot(s.DB, "rollback", "ledger", rep, *snap)
+	if err := skillindex.Rebuild(s.DB, s.Cfg.DataDir); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	if err := toolindex.Rebuild(s.DB, s.Cfg.DataDir, toolindex.SyncPolicyFromConfig(s.Cfg)); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	writeJSON(w, map[string]any{"status": "rolled_back", "ledger_id": ledgerID, "applied": rep.Applied, "conflicts": rep.Conflicts})
+}
+
+func (s *Server) handleSyncPullCollective(w http.ResponseWriter, r *http.Request) {
+	snap, err := collective.PullSnapshot(s.Cfg.CollectiveURL)
+	if err != nil {
+		http.Error(w, err.Error(), 502)
+		return
+	}
+	if snap == nil {
+		writeJSON(w, map[string]string{"status": "noop"})
+		return
+	}
+	rep, err := syncsnapshot.Import(s.DB, *snap, syncsnapshot.ImportPolicy{Conflict: s.Cfg.ToolRegistrySync.Conflict})
+	if err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+	_ = syncsnapshot.RecordLedgerSnapshot(s.DB, "pull", s.Cfg.CollectiveURL, rep, *snap)
+	if err := skillindex.Rebuild(s.DB, s.Cfg.DataDir); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	if err := toolindex.Rebuild(s.DB, s.Cfg.DataDir, toolindex.SyncPolicyFromConfig(s.Cfg)); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	writeJSON(w, map[string]any{"status": "pulled", "applied": rep.Applied, "conflicts": rep.Conflicts})
+}
+
+func (s *Server) handleSyncPushCollective(w http.ResponseWriter, r *http.Request) {
+	snap, err := syncsnapshot.Export(s.DB)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	if err := collective.PushSnapshot(s.Cfg.CollectiveURL, snap); err != nil {
+		http.Error(w, err.Error(), 502)
+		return
+	}
+	_ = syncsnapshot.RecordLedgerSnapshot(s.DB, "push", s.Cfg.CollectiveURL, syncsnapshot.ImportReport{
+		Applied: len(snap.Proposals) + len(snap.InboxMessages) + len(snap.UserProfiles) + len(snap.EpisodicMemory) + len(snap.SkillIndex) + len(snap.ToolIndex),
+	}, snap)
+	if s.RT != nil && s.RT.Bus != nil {
+		_ = s.RT.Bus.PublishSnapshotSynced("push", s.Cfg.CollectiveURL)
+	}
+	writeJSON(w, map[string]string{"status": "pushed"})
+}
+
+func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
+	tid, admin := s.tenantFrom(r)
+	proposals, _ := approval.ListPending(s.DB, tid, admin)
+	messages, _ := inbox.List(s.DB, tid)
+	sessions, _ := memorytree.ListSessions(s.Cfg.DataDir, tid)
+	stats := map[string]any{
+		"tenant_id":         tid,
+		"pending_proposals": len(proposals),
+		"inbox_messages":    len(messages),
+		"memory_sessions":   len(sessions),
+		"sync": map[string]any{
+			"collective_url": strings.TrimSpace(s.Cfg.CollectiveURL) != "",
+			"nats":           s.RT != nil && s.RT.Bus != nil && s.RT.Bus.Conn != nil && s.RT.Bus.Conn.IsConnected(),
+			"neo4j":          s.RT != nil && s.RT.Neo != nil,
+			"qdrant":         s.RT != nil && s.RT.Qdrant != nil,
+		},
+	}
+	writeJSON(w, stats)
+}
+
+func (s *Server) handleObservabilityDashboard(w http.ResponseWriter, r *http.Request) {
+	tid, admin := s.tenantFrom(r)
+	pending, _ := approval.ListPending(s.DB, tid, admin)
+	inboxMsgs, _ := inbox.List(s.DB, tid)
+	sessions, _ := memorytree.ListSessions(s.Cfg.DataDir, tid)
+	ledger, err := syncsnapshot.ListLedger(s.DB, 20)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	writeJSON(w, map[string]any{
+		"tenant_id":     tid,
+		"observability": observability.Snapshot(),
+		"slo":           observability.SLOStatus(),
+		"status": map[string]any{
+			"pending_proposals": len(pending),
+			"inbox_messages":    len(inboxMsgs),
+			"memory_sessions":   len(sessions),
+		},
+		"sync_history": ledger,
+		"runbook": map[string]string{
+			"metrics":  "/metrics",
+			"status":   "/api/status",
+			"history":  "/api/sync/history",
+			"rollback": "/api/sync/rollback",
+		},
+	})
+}
+
+type opsBody struct {
+	Action        string  `json:"action"`
+	SessionID     string  `json:"session_id,omitempty"`
+	OlderThanDays int     `json:"older_than_days,omitempty"`
+	MinImportance float64 `json:"min_importance,omitempty"`
+}
+
+func (s *Server) handleOpsRun(w http.ResponseWriter, r *http.Request) {
+	var b opsBody
+	if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+	switch strings.TrimSpace(strings.ToLower(b.Action)) {
+	case "sync-pull":
+		snap, err := collective.PullSnapshot(s.Cfg.CollectiveURL)
+		if err != nil {
+			http.Error(w, err.Error(), 502)
+			return
+		}
+		if snap == nil {
+			writeJSON(w, map[string]string{"status": "noop"})
+			return
+		}
+		rep, err := syncsnapshot.Import(s.DB, *snap, syncsnapshot.ImportPolicy{Conflict: s.Cfg.ToolRegistrySync.Conflict})
+		if err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		_ = syncsnapshot.RecordLedgerSnapshot(s.DB, "pull", s.Cfg.CollectiveURL, rep, *snap)
+		if err := skillindex.Rebuild(s.DB, s.Cfg.DataDir); err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		if err := toolindex.Rebuild(s.DB, s.Cfg.DataDir, toolindex.SyncPolicyFromConfig(s.Cfg)); err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		writeJSON(w, map[string]any{"status": "pulled", "applied": rep.Applied, "conflicts": rep.Conflicts})
+	case "sync-push":
+		snap, err := syncsnapshot.Export(s.DB)
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		if err := collective.PushSnapshot(s.Cfg.CollectiveURL, snap); err != nil {
+			http.Error(w, err.Error(), 502)
+			return
+		}
+		_ = syncsnapshot.RecordLedgerSnapshot(s.DB, "push", s.Cfg.CollectiveURL, syncsnapshot.ImportReport{
+			Applied: len(snap.Proposals) + len(snap.InboxMessages) + len(snap.UserProfiles) + len(snap.EpisodicMemory) + len(snap.SkillIndex) + len(snap.ToolIndex),
+		}, snap)
+		writeJSON(w, map[string]string{"status": "pushed"})
+	case "memory-prune":
+		n, err := memorylayer.PruneEpisodic(s.DB, strings.TrimSpace(b.SessionID), b.OlderThanDays, b.MinImportance)
+		if err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		writeJSON(w, map[string]any{"deleted": n})
+	case "memory-sweep":
+		if err := memorylayer.SweepMemorySpace(s.DB, s.Cfg.DataDir); err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		writeJSON(w, map[string]string{"status": "swept"})
+	default:
+		http.Error(w, "unknown action", 400)
+	}
 }
 
 type cliBody struct {
@@ -765,4 +1226,18 @@ func errString(e error) string {
 		return ""
 	}
 	return e.Error()
+}
+
+func logEvent(event string, fields map[string]any) {
+	if fields == nil {
+		fields = map[string]any{}
+	}
+	fields["event"] = event
+	fields["ts"] = time.Now().UTC().Format(time.RFC3339Nano)
+	b, err := json.Marshal(fields)
+	if err != nil {
+		log.Printf("event=%s marshal_error=%v", event, err)
+		return
+	}
+	log.Printf("%s", string(b))
 }

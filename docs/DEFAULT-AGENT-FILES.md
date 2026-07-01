@@ -20,6 +20,7 @@ They are compiled into the **`heros` / `agentd`** binary with `go:embed` and cop
 | Skill | `core-reasoning` | Steps, memory search, when to propose changes |
 | Skill | `interaction-learning-loop` | Closed-loop memory save/search + when to evolve |
 | Skill | `long-running-work` | Milestones, checkpoints, shell for sustained tasks |
+| Skill | `loop-engineering` | Explicit discover/act/verify loop for multi-step work |
 | Skill | `self-evolution-via-proposals` | `heros_submit_proposal` layers and diff formats |
 | Skill | `agentskills-packaging` | Small composable skills ([agentskills.io](https://agentskills.io) spirit) |
 | Skill | `runtime-tools` | How to run catalog extension tools via `heros_extension_tool` (Go) |

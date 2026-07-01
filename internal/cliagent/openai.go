@@ -379,6 +379,38 @@ func OpenAITools(opts ToolOptions) []map[string]any {
 		{
 			"type": "function",
 			"function": map[string]any{
+				"name":        "heros_memory_link",
+				"description": "Create a provenance-backed memory link in the session trail and graph store.",
+				"parameters": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"session_id": map[string]any{"type": "string", "description": "memory session id"},
+						"source":     map[string]any{"type": "string"},
+						"target":     map[string]any{"type": "string"},
+						"rel":        map[string]any{"type": "string", "description": "relation label"},
+						"confidence": map[string]any{"type": "number", "description": "0-1 confidence"},
+						"provenance": map[string]any{"type": "string", "description": "source/tool/event trail"},
+					},
+					"required": []string{"source", "target", "rel"},
+				},
+			},
+		},
+		{
+			"type": "function",
+			"function": map[string]any{
+				"name":        "heros_memory_links_list",
+				"description": "List memory links for a session so the agent can audit provenance and graph edges.",
+				"parameters": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"session_id": map[string]any{"type": "string"},
+					},
+				},
+			},
+		},
+		{
+			"type": "function",
+			"function": map[string]any{
 				"name":        "heros_read_skill",
 				"description": "Load full SKILL.md from the agent catalog (file lives under heros data_dir/skills/..., not the workspace). Call when a listed skill matches the task instead of guessing paths or procedures.",
 				"parameters": map[string]any{
