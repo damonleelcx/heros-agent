@@ -991,6 +991,15 @@ func (s *Server) handleSyncPullCollective(w http.ResponseWriter, r *http.Request
 		writeJSON(w, map[string]string{"status": "noop"})
 		return
 	}
+	seen, hash, err := syncsnapshot.SnapshotSeen(s.DB, *snap)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	if seen {
+		writeJSON(w, map[string]any{"status": "noop", "snapshot_sha256": hash})
+		return
+	}
 	rep, err := syncsnapshot.Import(s.DB, *snap, syncsnapshot.ImportPolicy{Conflict: s.Cfg.ToolRegistrySync.Conflict})
 	if err != nil {
 		http.Error(w, err.Error(), 400)
@@ -1098,6 +1107,15 @@ func (s *Server) handleOpsRun(w http.ResponseWriter, r *http.Request) {
 		}
 		if snap == nil {
 			writeJSON(w, map[string]string{"status": "noop"})
+			return
+		}
+		seen, hash, err := syncsnapshot.SnapshotSeen(s.DB, *snap)
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		if seen {
+			writeJSON(w, map[string]any{"status": "noop", "snapshot_sha256": hash})
 			return
 		}
 		rep, err := syncsnapshot.Import(s.DB, *snap, syncsnapshot.ImportPolicy{Conflict: s.Cfg.ToolRegistrySync.Conflict})

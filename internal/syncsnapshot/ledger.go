@@ -1,10 +1,10 @@
 package syncsnapshot
 
 import (
-	"database/sql"
-	"encoding/json"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 )
 
 func RecordLedger(db *sql.DB, direction, source string, rep ImportReport) error {
@@ -41,15 +41,15 @@ func LatestSnapshot(db *sql.DB) (*Snapshot, int64, error) {
 }
 
 type LedgerEntry struct {
-	ID            int64    `json:"id"`
-	Direction     string   `json:"direction"`
-	Source        string   `json:"source"`
-	Version       int      `json:"version"`
-	Applied       int      `json:"applied"`
-	ConflictCount int      `json:"conflict_count"`
-	Conflicts     []string `json:"conflicts,omitempty"`
-	CreatedAt     string   `json:"created_at"`
-	HasSnapshot   bool     `json:"has_snapshot"`
+	ID             int64    `json:"id"`
+	Direction      string   `json:"direction"`
+	Source         string   `json:"source"`
+	Version        int      `json:"version"`
+	Applied        int      `json:"applied"`
+	ConflictCount  int      `json:"conflict_count"`
+	Conflicts      []string `json:"conflicts,omitempty"`
+	CreatedAt      string   `json:"created_at"`
+	HasSnapshot    bool     `json:"has_snapshot"`
 	SnapshotSHA256 string   `json:"snapshot_sha256,omitempty"`
 }
 
@@ -78,4 +78,21 @@ func ListLedger(db *sql.DB, limit int) ([]LedgerEntry, error) {
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+func SnapshotSeen(db *sql.DB, snap Snapshot) (bool, string, error) {
+	payload, err := json.Marshal(snap)
+	if err != nil {
+		return false, "", err
+	}
+	sum := sha256.Sum256(payload)
+	hash := hex.EncodeToString(sum[:])
+	var dummy int
+	if err := db.QueryRow(`SELECT 1 FROM sync_ledger WHERE snapshot_sha256 = ? LIMIT 1`, hash).Scan(&dummy); err != nil {
+		if err == sql.ErrNoRows {
+			return false, hash, nil
+		}
+		return false, "", err
+	}
+	return true, hash, nil
 }

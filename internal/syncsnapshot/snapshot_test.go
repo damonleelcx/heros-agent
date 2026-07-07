@@ -45,3 +45,48 @@ func TestImportConflictPolicies(t *testing.T) {
 		t.Fatalf("expected remote row applied, got %s", got)
 	}
 }
+
+func TestSnapshotSeen(t *testing.T) {
+	database, err := db.Open(t.TempDir() + string(rune('\\')) + "sync.db")
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer database.Close()
+
+	snap := Snapshot{
+		Version: 1,
+		UserProfiles: []map[string]any{
+			{"tenant_id": "tenant-a", "user_id": "user-1", "profile_json": `{"name":"remote"}`, "updated_at": "2026-01-02T00:00:00Z"},
+		},
+	}
+
+	seen, hash, err := SnapshotSeen(database, snap)
+	if err != nil {
+		t.Fatalf("snapshot seen before record: %v", err)
+	}
+	if seen {
+		t.Fatalf("expected not seen before record")
+	}
+	if hash == "" {
+		t.Fatalf("expected hash")
+	}
+
+	rep, err := Import(database, snap, ImportPolicy{Conflict: "remote_wins"})
+	if err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	if err := RecordLedgerSnapshot(database, "pull", "test", rep, snap); err != nil {
+		t.Fatalf("record ledger: %v", err)
+	}
+
+	seen, hash2, err := SnapshotSeen(database, snap)
+	if err != nil {
+		t.Fatalf("snapshot seen after record: %v", err)
+	}
+	if !seen {
+		t.Fatalf("expected seen after record")
+	}
+	if hash != hash2 {
+		t.Fatalf("expected same hash, got %s vs %s", hash, hash2)
+	}
+}
