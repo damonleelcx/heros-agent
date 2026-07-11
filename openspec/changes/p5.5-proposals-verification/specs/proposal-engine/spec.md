@@ -3,16 +3,22 @@
 Product rationale: [`../../../../docs/prd/P5.5-proposals-verification.md`](../../../../docs/prd/P5.5-proposals-verification.md) §6 (FR1–FR5).
 
 Covers the diagnosis→operator mapping (the change-operator catalog), grounded prompt optimization,
-pattern- and contract-gated operator emission, ranking by expected gain / cost-of-change under hard
-constraints, and diff-with-evidence presentation.
+pattern- and contract-gated operator emission, the deterministic AST-level codemod that turns each
+candidate Variant Spec into a **concrete source diff** (ADR-001), the **build-preserving** gate that
+rejects a non-building diff before it is surfaced, ranking by expected gain / cost-of-change under
+hard constraints, and reviewable-source-diff-with-evidence presentation.
 
 ## ADDED Requirements
 
-### Requirement: Each diagnosis SHALL map to change operators that emit candidate Variant Specs
+### Requirement: Each diagnosis SHALL map to change operators that emit candidate Variant Specs and a concrete source diff
 
 Each P4.5 diagnosis SHALL map to one or more **change operators** per the catalog, and each operator
 SHALL emit one or more **candidate Variant Specs**, content-hashed and referencing registry entries
-by ID: reasoning-heavy-node-on-weak-model → upgrade model / enable extended thinking;
+by ID, **and the concrete source diff produced by a deterministic AST-level codemod** that rewrites
+the discovered call site(s) to the candidate's values (ADR-001). The same `config_hash` against the
+same source SHALL produce a **byte-identical diff**, and the diff SHALL change only the configured
+dimension(s) at the targeted call site(s). Diagnosis→operator mapping:
+reasoning-heavy-node-on-weak-model → upgrade model / enable extended thinking;
 cheap-task-on-expensive-model → downgrade; prompt/output-contract violation → rewrite prompt + add
 format constraints/schema; context overflow / lost-in-middle → switch context policy (summarization
 / sliding window) or reorder; RAG relevance low → tune top-k / swap retriever/embedding / add
@@ -26,6 +32,13 @@ prune / merge.
   baseline only in node N's `model_ref` (a stronger model and/or an enabled extended-thinking budget)
 - **AND** the candidate is content-hashed with its own `config_hash`
 - **AND** it references the upgraded model by registry ID, not by inlined configuration
+- **AND** its codemod emits a concrete source diff that rewrites only node N's model argument at the
+  discovered call site, leaving every other call site unchanged
+
+#### Scenario: The codemod is deterministic
+
+- **WHEN** the same candidate `config_hash` is compiled against the same source twice
+- **THEN** both runs produce a byte-identical source diff (content-hashed to the same value)
 
 #### Scenario: A RAG-relevance diagnosis emits a rerank candidate
 
@@ -71,6 +84,26 @@ SHALL NOT be emitted.
 - **THEN** the candidate is not emitted
 - **AND** the engine records the contract violation rather than surfacing a broken Variant Spec
 
+### Requirement: A proposed source diff SHALL build before it is surfaced
+
+Each candidate's source diff SHALL be applied to an **isolated worktree/branch** (never the user's
+working tree in place) and SHALL **build/compile the target** before the candidate is surfaced.
+A candidate whose diff fails to build SHALL be **rejected before surfacing** — it SHALL NOT be ranked,
+verified, or presented as a recommendation.
+
+#### Scenario: A proposed change that fails to build is rejected before surfacing
+
+- **WHEN** an operator emits a candidate whose codemod produces a source diff that does not
+  compile/build the target
+- **THEN** the candidate is marked `build_failed` and is not ranked, verified, or surfaced
+- **AND** the failure is recorded for diagnostics rather than shown to the user as a recommendation
+
+#### Scenario: The transform is applied to an isolated worktree, not the user's tree
+
+- **WHEN** a candidate's source diff is applied for the build check
+- **THEN** it is applied to an isolated worktree/branch
+- **AND** the user's working tree is not mutated in place
+
 ### Requirement: Candidates SHALL be ranked by expected gain / cost of change and SHALL respect hard constraints
 
 Candidates SHALL be ranked by **expected gain / cost of change**, and SHALL respect the user's hard
@@ -92,15 +125,16 @@ constraint-excluded with the violated constraint named.
   change
 - **THEN** the candidate with the lower cost of change is ranked ahead of the other
 
-### Requirement: Each candidate SHALL be presented as a diff against the current Variant Spec with the diagnosis and failing cases as evidence
+### Requirement: Each candidate SHALL be presented as a reviewable source diff with the diagnosis and failing cases as evidence
 
-Each candidate SHALL be presented as a **diff against the current (baseline) Variant Spec**, with the
-originating diagnosis and the **specific failing cases** attached as evidence.
+Each candidate SHALL be presented as a **reviewable source diff** (the codemod output against the
+user's source), paired with the Variant-Spec diff against the baseline, with the originating diagnosis
+and the **specific failing cases** attached as evidence.
 
-#### Scenario: A candidate carries its diff and evidence
+#### Scenario: A candidate carries its source diff and evidence
 
 - **WHEN** a candidate Variant Spec is prepared for presentation
-- **THEN** the candidate is rendered as a diff against the baseline Variant Spec showing exactly which
-  node dimension(s) changed
+- **THEN** the candidate is rendered as a reviewable source diff showing exactly which call-site
+  code changed, paired with the Variant-Spec diff showing which node dimension(s) changed
 - **AND** the originating diagnosis is attached
 - **AND** the specific failing cases that motivated the diagnosis are attached as evidence

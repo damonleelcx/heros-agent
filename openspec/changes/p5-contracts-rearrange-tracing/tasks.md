@@ -16,20 +16,38 @@
       as a runnable Variant Spec.
 - [ ] 1.6 A coherent (possibly adapter-augmented) ordering produces a new Variant Spec + new
       `config_hash` with lineage to the parent.
-- [ ] 1.7 Test: a known-incoherent reorder (consumer before its producer) → **rejected**, not coherent;
-      determinism — same reorder over same IR yields same verdict + adapters twice.
+- [ ] 1.7 **Validation gates transform generation (ADR-001):** the verdict runs **before any codemod is
+      generated** — a rejected ordering yields no source transformation (codemod/diff/PR); only a
+      coherent verdict is handed to the source-transformation engine (§2).
+- [ ] 1.8 Test: a known-incoherent reorder (consumer before its producer) → **rejected**, not coherent,
+      and **no diff generated**; determinism — same reorder over same IR yields same verdict + adapters
+      twice.
 
-## 2. Backend — Typed adapter catalog + inserter
+## 2. Backend — Typed adapter catalog + source-transformation engine (ADR-001)
 - [ ] 2.1 Define the **fixed adapter catalog**: field rename, projection, wrap/unwrap, default-fill,
-      declared format coercion — each an `Adapter{kind, in_schema, out_schema, apply}` carrying its own
-      `io_contract`.
+      declared format coercion — each an `Adapter{kind, in_schema, out_schema, emit_codemod}` carrying
+      its own `io_contract` and **emitting a deterministic codemod**, not a runtime coercion.
 - [ ] 2.2 Insert an adapter as an **explicit, inspectable node** on the mismatching edge in the
-      resulting Variant Spec (not a hidden coercion).
+      resulting Variant Spec **and materialize it as a generated code change** (the adapter node's source
+      is inserted and the call sites rewired) — not a hidden coercion.
 - [ ] 2.3 **Validate the adapter itself**: its input satisfied by the upstream producer, its output
       satisfying the downstream consumer; **refuse** any adapter that would silently drop a consumer-
-      required field or lose data without flagging the loss.
-- [ ] 2.4 Test: an adaptable rename → adapter inserted, committed spec **runs end-to-end without a
-      runtime contract halt**; an adapter that would drop a required field → **refused**, not inserted.
+      required field or lose data without flagging the loss (and generate no code change for it).
+- [ ] 2.4 Implement `GenerateTransform(ir, variant_spec, source)` — a **deterministic, AST-level codemod**
+      that rewrites the affected call sites / node wiring to match the spec; same `config_hash` + same
+      source → **byte-identical, content-hashed diff**.
+- [ ] 2.5 **Build-preserving gate:** a codemod that fails to compile/build the target is **rejected
+      before it is proposed** (`RejectedTransform(build_error)`); no broken diff reaches the user.
+      **Behavior-preserving:** only the reordered wiring + any inserted adapter change — no incidental
+      edits.
+- [ ] 2.6 **Isolated + reviewable + revertible:** apply the codemod to a **worktree/branch** (never the
+      user's working tree in place); deliver as a **reviewable diff/PR**; rollback is a single
+      `git revert`. Below the P6 Autonomous level, no diff merges without human approval + the build/eval
+      verification gate.
+- [ ] 2.7 Test: an adaptable rename → adapter inserted **as a reviewable diff that builds**, the
+      transformed working copy **runs end-to-end without a runtime contract halt**; an adapter that would
+      drop a required field → **refused**, not inserted; a codemod that fails to build → **rejected before
+      proposal**, not applied; the diff is byte-identical on re-generation.
 
 ## 3. Frontend + Product — Interactive graph editor (unhappy path first)
 - [ ] 3.1 Product: design the **invalid-reorder UX first** — the mismatch legible on the offending
@@ -37,17 +55,22 @@
       **explained in plain language** when not. Content is the interface (name the adapter, name the
       breakage).
 - [ ] 3.2 Frontend: editor exposes the IR; **add/remove/reorder/swap** nodes → a **candidate** Variant
-      Spec, validated through `typed-contracts` **before commit**; never silently committed broken.
-- [ ] 3.3 First-class states: loading / valid / **adapter-inserted** (preview + accept/reject) /
-      **rejected** (blocked, edge-anchored diagnostic) — each visually distinct, **not color-only**.
+      Spec, validated through `typed-contracts` **before commit** (and before any codemod is generated);
+      never silently committed broken.
+- [ ] 3.3 First-class states: loading / valid / **adapter-inserted** (preview the adapter **and the
+      source diff it would generate** + accept/reject) / **rejected** (blocked, edge-anchored diagnostic)
+      / **rejected-transform** (the codemod would not build) — each visually distinct, **not color-only**.
 - [ ] 3.4 **Keyboard-operable**: full add/remove/reorder/swap without a pointer; labeled controls;
       managed focus across a reorder; **screen-reader announcement** of the validation verdict.
 - [ ] 3.5 **Responsive on large IRs**: virtualized/canvas rendering; **incremental per-edge
       re-validation** (< 200 ms perceived on a single reorder), not whole-graph re-validation.
-- [ ] 3.6 A committed edit produces a new Variant Spec with **lineage + diff** for P4 comparison.
+- [ ] 3.6 A committed edit produces a new Variant Spec with **lineage + diff** for P4 comparison **and a
+      reviewable source diff (an AST-level codemod rewriting node wiring)** that must **build** before it
+      is proposed and is applied on an isolated worktree/branch, never the user's working tree in place.
 - [ ] 3.7 Verify: drive the editor against a live IR — reorder into an incoherent state (blocked +
-      legible), into an adaptable state (adapter previews, committed spec runs with no contract halt),
-      and perform every edit **by keyboard only**.
+      legible, **no diff generated**), into an adaptable state (adapter + **generated diff** preview,
+      committed reorder emits a reviewable diff that builds and whose transformed copy runs with no
+      contract halt), and perform every edit **by keyboard only**.
 
 ## 4. Backend + DevOps — Dynamic-tracing interceptor
 - [ ] 4.1 Implement an **OTel-style interceptor** wrapping the signature-registry SDK entrypoints;
@@ -116,9 +139,14 @@
 - [ ] 9.1 Fixtures: an **incoherent-reorder** chain (consumer requires a field the swapped-in producer
       lacks); an **adaptable** pair (field rename); a **loop/self-edge** with variable runtime iteration
       count; a **conditional router** with a runtime-only branch; a **never-improving** reflection loop.
-- [ ] 9.2 Typed-contract tests: incoherent reorder rejected + not runnable; adaptable → explicit
-      adapter, runs with **no runtime contract halt**; drop-required-field adapter refused; verdict
-      determinism.
+- [ ] 9.2 Typed-contract tests: incoherent reorder rejected + not runnable **+ no diff generated**;
+      adaptable → explicit adapter emitted as a **reviewable diff that builds**, transformed copy runs with
+      **no runtime contract halt**; drop-required-field adapter refused; verdict determinism.
+- [ ] 9.2a Source-transformation tests (ADR-001): a coherent reorder → **deterministic, byte-identical
+      diff** on re-generation; a codemod that fails to build → **rejected before proposal**, not applied;
+      the change is applied on an isolated worktree/branch (user tree untouched) and is revertible by a
+      single `git revert`; the diff touches only reordered wiring + any inserted adapter (behavior-
+      preserving).
 - [ ] 9.3 Re-arrangement UX tests: incoherent drag blocked + edge-legible + announced; adaptable drag
       previews adapter (accept/decline both never commit broken); full keyboard operation; large-IR
       responsiveness (per-edge re-validation < 200 ms).

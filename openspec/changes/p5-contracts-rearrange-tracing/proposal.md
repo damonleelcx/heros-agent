@@ -45,18 +45,29 @@ harness that scores re-arranged variants).
   silently drops a consumer-required field. **No silently-broken reorder:** an incoherent, un-adaptable
   ordering is **rejected** with a typed diagnostic naming producer, consumer, and mismatching fields,
   and is never persisted as a runnable Variant Spec. The verdict is **pure, deterministic, and total**
-  over all edges. A coherent (possibly adapter-augmented) ordering yields a new Variant Spec + new
-  `config_hash`.
+  over all edges, and it runs **before any source transformation is generated** (ADR-001) — a rejected
+  ordering yields no codemod, diff, or PR. A coherent (possibly adapter-augmented) ordering yields a new
+  Variant Spec + new `config_hash` **and** a **deterministic, AST-level source transformation (codemod)**
+  that rewrites the affected call sites / node wiring to match the spec, delivered as a **reviewable
+  diff/PR**. The transform is **build-preserving** — a codemod that fails to build the target is rejected
+  before it is ever proposed, so there is **no silently-broken diff** — applied to an **isolated
+  worktree/branch** (never the user's tree in place), revertible by a single `git revert`. Where a
+  mismatch is adaptable, adapter auto-insertion is itself a **generated code change** (the adapter node's
+  code is inserted and the call sites rewired), never a hidden runtime coercion.
 - **New capability `rearrangement`.** An **interactive graph editor** exposes the IR; users
   **add/remove/reorder/swap** nodes to produce a **candidate** new Variant Spec, validated through
   `typed-contracts` **before commit** — never silently committed broken. **The unhappy path is
   first-class:** an invalid reordering is **legible** — the contract mismatch is attached to the
-  offending edge (both nodes + the specific fields), the auto-inserted adapter is **previewed** when
-  the mismatch is adaptable, and the breakage is **explained in plain language** when it is not. The
+  offending edge (both nodes + the specific fields), the auto-inserted adapter — and the **source change
+  it would generate** — is **previewed** when the mismatch is adaptable, and the breakage is
+  **explained in plain language** when it is not; an invalid reorder is legible in the UI as a **rejected
+  or adapted diff that is never applied** (ADR-001). The
   editor is **fully keyboard-operable**, screen-reader-announces the validation state
   (coherent / adapter-inserted / rejected), and stays **responsive on large IRs** (virtualized canvas,
   incremental per-edge re-validation). A committed edit produces a new Variant Spec with lineage +
-  diff for P4 comparison.
+  diff for P4 comparison **and** a **reviewable source diff (an AST-level codemod that rewrites node
+  wiring)** that must **build** before it is proposed and is applied on an isolated worktree/branch,
+  never the user's working tree in place.
 - **New capability `dynamic-tracing`.** An **OTel-style interceptor** wraps the signature-registry SDK
   entrypoints and logs **every real LLM call, its inputs, and its call stack**, tagged with the P0 tag
   set — **passive and async** (never alters the run's outputs; a logging failure never fails the run;
@@ -77,8 +88,9 @@ harness that scores re-arranged variants).
   reconciled, behaviorally-labeled IR. Node `io_contract` schemas MAY be **refined** from observed
   trace shapes additively (tightening coherence without a schema-version break).
 - **Deferred:** change operators + proposal generation + held-out verification gate (**P5.5**);
-  automated search over orderings / autonomous optimizer (**P6**); LLM-authored adapter *code* that
-  executes arbitrary transforms (out of scope — would need sandboxing + P5.5 verification); new
+  automated search over orderings / autonomous optimizer (**P6**); LLM-authored, free-form adapter
+  *transform code* beyond the fixed, deterministic catalog codemods (out of scope — would need sandboxing
+  + P5.5 verification); autonomous **merge** of a generated PR without human approval (**P6**); new
   metric-set *definitions* (P5 wires existing ones).
 
 ## Impact
@@ -90,8 +102,11 @@ harness that scores re-arranged variants).
   structural pattern candidates + pattern→metric-set mapping (P3.5), and the eval-set generator's seed
   interface + coverage machinery (P4).
 - **Affected code/systems:** ordering-coherence validator (`Satisfies` + `ValidateOrdering`, shared
-  with the P2 Executor's runtime check), typed adapter catalog + adapter inserter, React interactive
-  graph editor with invalid-state/adapter-preview UX (keyboard + a11y + virtualized canvas), OTel-style
+  with the P2 Executor's runtime check), typed adapter catalog + adapter inserter (emitting adapter code
+  as a codemod), the **source-transformation engine** that turns a coherent Variant Spec into a
+  deterministic AST-level codemod / reviewable diff with a build-preserving gate on an isolated worktree
+  (ADR-001), React interactive
+  graph editor with invalid-state/adapter-preview/diff-preview UX (keyboard + a11y + virtualized canvas), OTel-style
   interceptor extending the P2.5 substrate, reconciler (confirmed/unconfirmed/runtime-only + static-def
   ↔ invocation mapping), behavioral pattern classifier (rules-first over trace signatures + constrained
   LLM residue) + anti-pattern detectors, eval-set seed-from-traces + per-path targeting wired into the

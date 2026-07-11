@@ -18,7 +18,7 @@ layer are P4/P5.
 
 ## Decision 1 — Auto-instrument at the single gateway seam; zero user code
 
-**Decision.** OpenTelemetry attaches at the P2 provider gateway and shim. Every `Gateway.Complete`
+**Decision.** OpenTelemetry attaches at the P2 provider gateway. Every `Gateway.Complete`
 call emits operational metrics; every node execution emits a span. A workflow author adds nothing.
 
 **Why.** P2 deliberately funnelled all model calls through one gateway; that seam is the payoff
@@ -29,7 +29,7 @@ defining NFR. Instrumenting at the seam makes un-instrumented execution *impossi
 discouraged.
 
 **Alternative rejected.** Per-call-site annotation / a user-facing metrics API — reintroduces the
-toil the shim exists to remove and guarantees coverage gaps. SDK-level monkey-patching outside the
+toil the gateway-seam auto-instrumentation exists to remove and guarantees coverage gaps. SDK-level monkey-patching outside the
 gateway — the gateway already normalizes provider shapes, so it is the correct, single place.
 
 ## Decision 2 — A collector chokepoint enforces the three cross-cutting disciplines
@@ -145,10 +145,10 @@ interface.
 ```mermaid
 graph LR
   subgraph Runtime P2
-    SH[Shim] --> GW[Provider Gateway]
+    EX[Executor<br/>transformed working copy] --> GW[Provider Gateway]
   end
   GW -->|auto-instrument, zero user code| OT[OTel SDK<br/>GenAI conventions]
-  SH -->|node span| OT
+  EX -->|node span| OT
   OT --> COL[OTel Collector<br/>1. tag-completeness gate<br/>2. cardinality/label filter<br/>3. secret/PII scrubber]
   COL -->|spans| SPAN[(Span store)]
   COL -->|metrics, low-card labels| TSDB[(TSDB)]

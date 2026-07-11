@@ -28,7 +28,8 @@ scaffold the repo + CI so later phases add rather than re-litigate.
   *K* cases × *S* seeds × *nodes* → metric event count and span volume per optimization run.
   This is what tells you TSDB vs. Postgres vs. span store, not reflex.
 - **Design the two contracts:**
-  1. **Workflow IR** — JSON graph of nodes with metadata: call site, current model, prompt
+  1. **Workflow IR** — JSON graph of nodes with metadata: call site as a precise source span
+     (file, line, AST path) so later phases can rewrite it, current model, prompt
      template, tools/skills, context-assembly logic; **static nodes** (definition) distinct from
      **runtime invocations** (execution instances). Node count reported *per-definition*.
   2. **Metric event schema** — every event tagged `{variant_id, run_id, node_id, case_id, seed,
@@ -72,7 +73,8 @@ green.
   mandatory **user-declared entrypoints** via `llm-eval.yaml` — real codebases wrap the SDK, so
   signature matching alone misses nodes. This is not optional.
 - **Implement.** Parse with `go/ast` (tree-sitter as the language-agnostic path later). For each
-  call site extract: model arg, messages/prompt construction, tools/skills passed, and upstream
+  call site capture a precise source span (file, line, AST path) so later phases can rewrite it,
+  and extract: model arg, messages/prompt construction, tools/skills passed, and upstream
   data flow feeding the prompt. Build the call graph: a node = an LLM-invoking function/agent
   step; edges = data/control flow. Special-case framework DAGs (LangGraph/CrewAI) by reading
   their declarative graph rather than inferring it.
@@ -98,15 +100,18 @@ wrapper nodes found via user-declared entrypoints.
 
 ## Phase 2 — Configuration Layer + Runtime · ~Weeks 6–11 · **Milestone M2**
 
-> Make nodes configurable and executable without regenerating source. Overlaps P1's tail.
+> Make nodes configurable and executable by generating and applying a reviewable source change
+> (patch/PR). Overlaps P1's tail.
 
 **Goal.** Execute a (initially hardcoded) graph with per-node model/prompt overrides resolved
-from registries through a shim.
+from registries and applied by rewriting the call sites via a deterministic AST transformation,
+delivered as a reviewable diff.
 
 ### Backend (lead)
-- **Configuration Layer / shim.** The system can't edit arbitrary source safely, so discovered
-  call sites are **wrapped** to resolve parameters from a config store at runtime instead of
-  hardcoded values. Per-node dimensions: **Model** (provider + id + params, backed by a Model
+- **Configuration Layer / source-transformation engine.** The system rewrites the discovered
+  call sites via a deterministic AST transformation, delivered as a reviewable diff, setting the
+  hardcoded parameters at each call site to the Variant Spec's values. Per-node dimensions:
+  **Model** (provider + id + params, backed by a Model
   Registry), **Prompt** (versioned templates with variable slots, git-like Prompt Registry),
   **Skills/Tools** (Skill Registry: name → schema + impl, JSON-schema contract), **Context
   strategy** (pluggable policy — full/sliding-window/summarization/RAG/compaction).
@@ -114,8 +119,8 @@ from registries through a shim.
   ordering/graph. Registries are shared, versioned, referenced by ID.
 - **Runtime.** *Loader* resolves every `*_ref` against registries at invocation time; models via
   a unified provider gateway (LiteLLM-style so provider swaps are transparent); prompts rendered;
-  skills bound; context policy instantiated. *Executor* walks the node graph through the shim,
-  node I/O passing through the typed contract.
+  skills bound; context policy instantiated. *Executor* runs the transformed working copy in an
+  isolated sandbox, node I/O passing through the typed contract.
 - **Idempotency & reproducibility.** Same `config_hash` + seed replays reproducibly; provider
   calls carry timeouts + backoff; no double-writes.
 - **Storage.** Variant Specs + registries in Postgres; blobs content-hashed in object store.
@@ -130,10 +135,11 @@ from registries through a shim.
 - A bare run/inspect view: submit a Variant Spec, watch a run, see node I/O — loading/error/empty
   states first-class.
 
-**Deliverables:** registries (model/prompt/skill/context), shim, Variant Spec type, Runtime
-loader+executor, provider gateway.
+**Deliverables:** registries (model/prompt/skill/context), source-transformation engine (codemod),
+Variant Spec type, Runtime loader+executor, provider gateway.
 **Exit criteria (M2):** a hardcoded graph runs end to end with per-node model/prompt overrides
-through the shim.
+applied as a source transformation (reviewable diff), running the transformed working copy in a
+sandbox.
 
 ---
 
@@ -146,7 +152,7 @@ through the shim.
 metric stores.
 
 ### DevOps (lead)
-- **Collection.** Auto-instrument at the shim/gateway layer so operational metrics require zero
+- **Collection.** Auto-instrument at the provider gateway so operational metrics require zero
   user effort: latency (total/TTFT/tokens-per-sec), cost (in/out/cache tokens × price), tokens
   (prompt/completion/thinking/cache-hit, context-window utilization), reliability (error/timeout/
   retry/rate-limit), throughput/concurrency.

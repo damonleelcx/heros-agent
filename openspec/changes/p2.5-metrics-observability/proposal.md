@@ -1,7 +1,7 @@
 ## Why
 
-After P2, a hardcoded workflow *runs* through the shim and provider gateway — but the run is
-opaque. The Runtime persists bare per-node status for its inspect UI; it does not measure what a
+After P2, a hardcoded workflow *runs* — its transformed working copy executes in a sandbox and its
+provider calls flow through the provider gateway — but the run is opaque. The Runtime persists bare per-node status for its inspect UI; it does not measure what a
 run cost, how long each node took, how many tokens it burned, or how often a provider failed. Every
 measurement-driven subsystem downstream is blocked on this: the eval harness (P4) has no
 operational metrics to compare variants, the improvement engine (P4.5) has no spans to decompose
@@ -10,7 +10,7 @@ budget on. "If it isn't observable, it isn't done" — so the telemetry substrat
 the first Runtime, not late.
 
 P2.5 turns P0's frozen contracts into running infrastructure. Collection is **auto-instrumented at
-the shim/gateway layer** so operational metrics require zero user code: every provider call is
+the provider gateway** so operational metrics require zero user code: every provider call is
 measured for latency, cost, tokens, and reliability, and every node execution emits an OpenTelemetry
 span. Each metric is a **typed event carrying the full seven-tag set** `{variant_id, run_id,
 node_id, case_id, seed, timestamp, config_hash}`, routed by shape to the three P0 stores — spans →
@@ -21,7 +21,7 @@ phase also ships the **evaluator-plugin interface stub** (built-in + user-define
 without re-plumbing collection, tagging, or storage.
 
 Depends on P0 (`metric-event.schema.json`, `config_hash`/lineage scheme, storage decision record,
-OTel GenAI conventions doc, secrets baseline) and P2 (the shim + gateway as the single
+OTel GenAI conventions doc, secrets baseline) and P2 (the provider gateway as the single
 instrumentation seam, the run queue, and the run/`node_execution` records eval results FK to).
 Quality/eval metrics, the statistical layer, trend/regression/leaderboard, dashboards, and budget
 gates are explicitly out of scope (P4/P4.5+); operational metrics only here.
@@ -30,7 +30,7 @@ gates are explicitly out of scope (P4/P4.5+); operational metrics only here.
 
 - **New capability `metrics-observability`.** A shared telemetry substrate consumed by the eval
   harness, improvement engine, and autonomous loop — designed once.
-- **Auto-instrumentation at the shim/gateway.** Every provider call and node execution emits
+- **Auto-instrumentation at the provider gateway.** Every provider call and node execution emits
   operational metrics and spans with **zero user code**; no operational metric requires a workflow
   author to annotate a call site. This is a first-class requirement, not a convenience.
 - **Operational metric taxonomy.** Latency (total, TTFT, tokens-per-sec), cost (input/output/cache
@@ -66,13 +66,13 @@ gates are explicitly out of scope (P4/P4.5+); operational metrics only here.
 - **Affected capabilities:** `metrics-observability` (new). Consumes the `metric-event-schema`,
   `storage-and-lineage`, and `config_hash` contracts from P0 and the `runtime`/`config-layer`
   gateway seam from P2.
-- **Affected code/systems:** OTel instrumentation attached at the P2 shim/gateway; an OTel Collector
+- **Affected code/systems:** OTel instrumentation attached at the P2 provider gateway; an OTel Collector
   (tag-completeness gate + cardinality/label filter + secret/PII scrubber); a span store
   (Tempo/Jaeger); a TSDB (Prometheus/ClickHouse); Postgres eval-results tables (expand-only, `NOT
   NULL` tags + FKs to variant/node/case); the evaluator-plugin interface + one built-in reference
   evaluator; a minimal React live run-monitoring view; retention/sampling configuration.
 - **Dependencies:** requires **P0** (metric-event schema, `config_hash`/lineage, storage decision,
-  OTel conventions doc, secrets baseline) and **P2** (shim/gateway instrumentation seam, run queue,
+  OTel conventions doc, secrets baseline) and **P2** (provider gateway instrumentation seam, run queue,
   run/node records). Unblocks **P4** (evaluators register through the stub; operational metrics drive
   comparison), **P4.5** (per-node attribution from spans), and **P6** (budget gates read live
   `config_hash`-keyed cost/latency/error metrics).

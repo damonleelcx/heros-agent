@@ -38,8 +38,8 @@ both in P0. Both are cheap to design early and ruinously expensive to retrofit.
 ## 2. Senior Backend Dev — *explore → design → implement → test → harden → review*
 
 **Owns:** the Discovery Engine (AST parsing, signature registry, user-declared entrypoints),
-the Configuration Layer shim, the registries (model/prompt/skill/context), the Runtime
-loader+executor, and all persistence code.
+the Configuration Layer source-transformation engine (codemod), the registries
+(model/prompt/skill/context), the Runtime loader+executor, and all persistence code.
 
 Its seven phases apply per service. The playbook's four backend realities — *shared persistent
 state, concurrency, partial failure, contracts outlive code* — are exactly this system's hazards:

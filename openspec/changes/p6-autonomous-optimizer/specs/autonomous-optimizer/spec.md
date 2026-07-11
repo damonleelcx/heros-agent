@@ -2,11 +2,15 @@
 
 Product rationale: [`../../../../docs/prd/P6-autonomous-optimizer.md`](../../../../docs/prd/P6-autonomous-optimizer.md) §6 (FR1–FR16).
 
-Covers the closed analyze → propose → verify → apply loop: a diagnosis-guided search whose objective
-is the P4 composite score and whose hard constraints are the P4 gates; the enumerated hard-constraint
-gates that bound the run; kill switch + audit trail + rollback as mandatory prerequisites before any
-apply; regression and budget halts; stall/stop discipline; the feedback loop that re-seeds the eval
-set from production failures; and the Autonomous-level authority-grant, live-monitor, and stop UX.
+Covers the closed analyze → propose → verify → apply loop where, per **ADR-001**, "apply" means the
+loop **opens a pull request and — under the hard constraints, with every gate green — MERGES it**: a
+diagnosis-guided search whose objective is the P4 composite score and whose hard constraints are the
+P4 gates; the enumerated hard-constraint gates that bound the run; kill switch + audit trail (**git
+history + a change ledger**) + rollback (**`git revert`**) as mandatory prerequisites before any
+merge; every merge gated by **build + eval + regression**; regression and budget halts; stall/stop
+discipline; the feedback loop that re-seeds the eval set from production failures; and the
+Autonomous-level authority-grant, live-monitor, and stop UX. Every automation level below Autonomous
+still requires a human to review and merge.
 
 ## ADDED Requirements
 
@@ -17,11 +21,11 @@ objective function its search maximizes, and SHALL treat the P4 gates (budget ce
 allowlist, min quality, latency SLA) as hard constraints. A candidate Variant Spec that fails any
 gate SHALL NOT be applied, regardless of how high its composite score is.
 
-#### Scenario: A higher-scoring but gate-failing candidate is never applied
+#### Scenario: A higher-scoring but gate-failing candidate is never merged
 
 - **WHEN** the search evaluates a candidate whose composite score exceeds the current best but which
   violates a P4 gate (e.g. it exceeds the provider allowlist or the latency SLA)
-- **THEN** the optimizer does not apply that candidate
+- **THEN** the optimizer does not merge that candidate's pull request
 - **AND** it prefers a lower-scoring candidate that passes every gate over the gate-failing one
 
 #### Scenario: The objective is the composite score, not a bespoke reward
@@ -51,28 +55,37 @@ the motivating diagnosis that produced it.
 - **THEN** the candidate's record references the `diagnosis_id` that motivated it
 - **AND** an auditor can reconstruct which diagnosis each candidate was intended to address
 
-### Requirement: The optimizer SHALL apply a candidate only on a held-out verified gain
+### Requirement: The optimizer SHALL merge a candidate's PR only on a build-passing, held-out verified gain
 
-The optimizer SHALL apply a candidate only after the P5.5 held-out verification (multi-seed,
+Autonomous "apply" SHALL mean the loop **opens a pull request and merges it**. The optimizer SHALL
+merge a candidate's pull request only after **build + eval + regression** all pass: the candidate's
+codemod source diff compiles (the P5.5 build gate), and the P5.5 held-out verification (multi-seed,
 mean + confidence interval, significance test versus the current best, and regression check) confirms
-a statistically real improvement on a held-out slice. Diagnosis proposes; verification decides — even
-with no human in the seat. A candidate SHALL NOT be applied on an unverified delta or on the cases
-that generated it.
+a statistically real improvement on a held-out slice run against the **transformed working copy**.
+Diagnosis proposes; verification decides — even with no human in the seat. A candidate SHALL NOT be
+merged on a non-building diff, on an unverified delta, or on the cases that generated it. Every level
+below Autonomous SHALL require a human to review and merge.
 
-#### Scenario: An unverified candidate is not applied
+#### Scenario: An unverified candidate is not merged
 
 - **WHEN** the search produces a candidate whose measured gain over the held-out slice is within the
   confidence interval of the current best (not significant)
-- **THEN** the optimizer does not apply it
+- **THEN** the optimizer does not merge its pull request
 - **AND** it records the verification verdict (delta, CI, non-significant) in the audit trail
+
+#### Scenario: A non-building candidate is not merged
+
+- **WHEN** a candidate's codemod produces a source diff that fails to compile/build the target
+- **THEN** the candidate is rejected by the build gate and its pull request is not merged
+- **AND** no verification run or merge proceeds for it
 
 #### Scenario: Verification runs on held-out cases, not the generating cases
 
-- **WHEN** a candidate is verified before apply
-- **THEN** the verification is computed over a held-out slice distinct from the cases that produced
-  the proposal
+- **WHEN** a candidate is verified before merge
+- **THEN** the verification is computed over the transformed working copy on a held-out slice distinct
+  from the cases that produced the proposal
 - **AND** a candidate that improves only the generating cases but not the held-out slice is not
-  applied
+  merged
 
 ### Requirement: The loop SHALL enforce budget ceiling, provider allowlist, min-improvement threshold, and max iterations as hard constraints
 
@@ -111,94 +124,100 @@ remain.
 - **THEN** the loop stops with state `max_iter`
 - **AND** no further candidate is evaluated or applied
 
-### Requirement: The loop SHALL apply no change unless a kill switch, an audit trail, and a rollback capability are all armed
+### Requirement: The loop SHALL merge no change unless a kill switch, an audit trail, and a rollback capability are all armed
 
-The loop SHALL NOT apply any change unless a kill switch, an audit trail, and a rollback capability
-are all present and armed for the run. If any one is absent, the apply step SHALL be disabled and the
-loop MAY run only in a propose/verify dry-run mode that applies nothing.
+The loop SHALL NOT merge any change unless a **kill switch**, an **audit trail** (**git history + a
+change ledger**), and a **rollback** capability (**`git revert`**) are all present and armed for the
+run. If any one is absent, the merge step SHALL be disabled and the loop MAY run only in a
+propose/verify dry-run mode that opens draft pull requests but merges nothing.
 
-#### Scenario: A missing prerequisite disables apply entirely
+#### Scenario: A missing prerequisite disables merge entirely
 
 - **WHEN** the loop is started for a run in which the rollback capability is not armed (or the audit
   trail, or the kill switch is absent)
-- **THEN** the apply step is disabled
-- **AND** the loop runs only in propose/verify dry-run mode and applies zero changes
-- **AND** no Variant Spec swap occurs for the run
+- **THEN** the merge step is disabled
+- **AND** the loop runs only in propose/verify dry-run mode and merges zero changes
+- **AND** no pull request is merged and no live Variant Spec swap occurs for the run
 
-#### Scenario: Apply proceeds only with all three prerequisites armed
+#### Scenario: Merge proceeds only with all three prerequisites armed
 
-- **WHEN** the kill switch, audit trail, and rollback are all armed and a verified, gate-passing
-  candidate is selected
-- **THEN** the loop is permitted to apply the candidate
-- **AND** the apply is recorded in the audit trail before the Variant Spec is swapped
+- **WHEN** the kill switch, audit trail, and rollback are all armed and a build-passing, verified,
+  gate-passing candidate is selected
+- **THEN** the loop is permitted to merge the candidate's pull request
+- **AND** the merge is recorded in the change ledger (write-ahead) and git history before the live
+  Variant Spec changes
 
-### Requirement: The audit trail SHALL record every loop decision as an append-only, attributable record
+### Requirement: The audit trail SHALL be git history plus an append-only change ledger recording every loop decision
 
-The audit trail SHALL record every decision the loop makes — authority grant, candidate considered
-(with its motivating diagnosis), verification verdict, gate evaluation, apply, halt, stop, and
-rollback — as an append-only record keyed by the P0 tag set (`config_hash`, `variant_id`, `run_id`,
-timestamp), sufficient to reconstruct what changed, why, and with what measured effect. The apply
-SHALL be write-ahead-audited: the audit event for an apply SHALL be committed before the Variant Spec
-is swapped, so no applied change can escape the trail.
+The audit trail SHALL be **git history** (the merge commits) plus an append-only **change ledger**
+that records every decision the loop makes — authority grant, candidate considered (with its
+motivating diagnosis), verification verdict, gate evaluation, apply (open + merge PR), halt, stop, and
+revert — keyed by the P0 tag set (`config_hash`, `variant_id`, `run_id`, timestamp) with the PR ref
+and merge commit, sufficient to reconstruct what changed, why, and with what measured effect. The
+merge SHALL be write-ahead-audited: the change-ledger event for a merge SHALL be committed before the
+pull request is merged, so no applied change can escape the trail.
 
-#### Scenario: An apply is written to the audit trail before it takes effect
+#### Scenario: A merge is written to the change ledger before it takes effect
 
-- **WHEN** the loop applies a candidate
-- **THEN** the audit event for that apply is committed before the live Variant Spec is swapped
-- **AND** the record includes the from/to `config_hash`, the motivating diagnosis, and the verified
-  delta
+- **WHEN** the loop merges a candidate's pull request
+- **THEN** the change-ledger event for that merge is committed before the pull request is merged (and
+  the merge is then recorded in git history)
+- **AND** the record includes the from/to `config_hash`, the merge commit ref, the motivating
+  diagnosis, and the verified delta
 
-#### Scenario: The audit store being unavailable prevents the apply
+#### Scenario: The change-ledger store being unavailable prevents the merge
 
-- **WHEN** the audit store is unavailable at the moment an apply would occur
-- **THEN** the apply does not proceed (it fails closed)
-- **AND** the last-good Variant Spec remains live and no unaudited change is applied
+- **WHEN** the change-ledger store is unavailable at the moment a merge would occur
+- **THEN** the merge does not proceed (it fails closed)
+- **AND** the last-good Variant Spec remains live and no unaudited change is merged
 
-### Requirement: Any applied change SHALL be reversible to the exact prior Variant Spec via the audit trail
+### Requirement: Any applied change SHALL be reversible to the exact prior Variant Spec via git revert
 
-Any change the loop applies SHALL be reversible to the exact prior Variant Spec using the audit trail,
-and the rollback SHALL itself be recorded in the audit trail.
+Any change the loop merges SHALL be reversible to the exact prior Variant Spec via **`git revert`** of
+the merge commit (git history plus the change ledger being the audit trail), and the revert SHALL
+itself be recorded in the change ledger.
 
 #### Scenario: An applied change is rolled back to the byte-identical prior spec
 
-- **WHEN** a user (or an operator) rolls back a change the loop applied
-- **THEN** the live Variant Spec is restored to the exact prior spec, matching the prior `config_hash`
-- **AND** the rollback is recorded in the audit trail as its own event
+- **WHEN** a user (or an operator) rolls back a change the loop merged
+- **THEN** `git revert` of the merge commit restores the live Variant Spec to the exact prior spec,
+  matching the prior `config_hash`
+- **AND** the revert is recorded in the change ledger as its own event
 
-### Requirement: Regression detection and budget alerts SHALL halt the loop and disarm apply
+### Requirement: Regression detection and budget alerts SHALL halt the loop and disarm merge
 
 The loop SHALL halt automatically when regression detection finds any tracked metric degraded beyond
 its configured threshold versus the current best, or when a budget alert fires because cumulative run
-spend breaches the budget ceiling. A halt SHALL disarm the apply step until a human explicitly re-arms
-it; no candidate SHALL be applied after a halt until re-armed.
+spend breaches the budget ceiling. A halt SHALL disarm the merge step until a human explicitly re-arms
+it; no candidate SHALL be merged after a halt until re-armed.
 
 #### Scenario: A budget breach halts the loop mid-run
 
 - **WHEN** the cumulative provider spend of the run breaches the budget ceiling during a search
 - **THEN** the loop halts with state `halted_budget`
-- **AND** no further candidate is applied
-- **AND** the apply step is disarmed until a human re-arms it
+- **AND** no further candidate is merged
+- **AND** the merge step is disarmed until a human re-arms it
 - **AND** the halt is recorded in the audit trail
 
-#### Scenario: A regression halts the loop and disarms apply
+#### Scenario: A regression halts the loop and disarms merge
 
 - **WHEN** regression detection finds a tracked metric degraded beyond its threshold versus the
   current best after an iteration
 - **THEN** the loop halts with state `halted_regression`
-- **AND** the apply step is disarmed until a human explicitly re-arms it
+- **AND** the merge step is disarmed until a human explicitly re-arms it
 
-### Requirement: The kill switch SHALL stop the loop immediately with no further apply
+### Requirement: The kill switch SHALL stop the loop immediately with no further merge
 
 A user or an automated halt SHALL be able to stop the loop on demand via the kill switch. After the
-kill switch fires, no further candidate SHALL be applied, the in-flight iteration SHALL finish or be
+kill switch fires, no further candidate SHALL be merged, the in-flight iteration SHALL finish or be
 abandoned leaving the last-good Variant Spec live, and the stop SHALL be recorded in the audit trail.
 
-#### Scenario: Firing the kill switch mid-iteration applies nothing further
+#### Scenario: Firing the kill switch mid-iteration merges nothing further
 
 - **WHEN** a user fires the kill switch while an iteration is verifying a candidate
-- **THEN** no candidate is applied after the stop
+- **THEN** no candidate is merged after the stop
 - **AND** the last-good Variant Spec remains live
-- **AND** any in-flight verification result is discarded rather than applied
+- **AND** any in-flight verification result is discarded rather than merged
 - **AND** the stop is recorded in the audit trail
 
 ### Requirement: The loop SHALL detect stall/no-progress and stop rather than wander
@@ -229,36 +248,36 @@ is measured against it. The eval set is the living memory of the system.
 ### Requirement: Autonomous SHALL be a distinct automation level with an explicit, recorded authority grant
 
 Autonomous SHALL be a distinct automation level (above Advisory and Assisted) in which the user
-explicitly grants the loop authority to apply changes, setting the hard constraints (budget ceiling,
-provider allowlist, min-improvement threshold, max iterations) at grant time. The grant SHALL be
-recorded in the audit trail.
+explicitly grants the loop authority to **open and merge pull requests** on its own, setting the hard
+constraints (budget ceiling, provider allowlist, min-improvement threshold, max iterations) at grant
+time. The grant SHALL be recorded in the audit trail.
 
 #### Scenario: Granting Autonomous authority records the constraints
 
 - **WHEN** a user grants Autonomous authority and sets the budget ceiling, provider allowlist,
   min-improvement threshold, and max iterations
 - **THEN** those constraints govern the run and the grant is recorded in the audit trail
-- **AND** the user is shown that the loop may apply changes on its own within those limits before the
-  grant is confirmed
+- **AND** the user is shown that the loop may open and merge pull requests on its own within those
+  limits before the grant is confirmed
 
 ### Requirement: The Autonomous UI SHALL provide a live monitor and an always-available stop control
 
 While a loop runs, the UI SHALL present a live monitor showing the current iteration, cumulative spend
-against the budget ceiling, candidates applied, and the streaming audit trail, together with an
-always-available stop control wired to the kill switch, and a rollback control for every applied
-change.
+against the budget ceiling, **pull requests merged**, and the streaming audit trail (change ledger +
+git history), together with an always-available stop control wired to the kill switch, and a
+**`git revert` rollback** control for every merged change.
 
 #### Scenario: The user monitors a running loop and stops it
 
 - **WHEN** an Autonomous loop is running
 - **THEN** the live monitor shows the current iteration, cumulative spend against the ceiling, the
-  changes applied so far, and the streaming audit trail
+  pull requests merged so far, and the streaming audit trail
 - **AND** a stop control wired to the kill switch is visible and reachable at all times
-- **AND** activating it halts the loop immediately with no further apply
+- **AND** activating it halts the loop immediately with no further merge
 
-#### Scenario: Every applied change exposes a rollback control
+#### Scenario: Every merged change exposes a rollback control
 
-- **WHEN** the loop has applied one or more changes
-- **THEN** each applied change is shown with its motivating diagnosis, its verified delta, and its
+- **WHEN** the loop has merged one or more changes
+- **THEN** each merged change is shown with its motivating diagnosis, its verified delta, and its
   cost/latency impact
-- **AND** each exposes a rollback control that reverts the change via the audit trail
+- **AND** each exposes a rollback control that reverts the change via `git revert` of the merge commit

@@ -12,12 +12,27 @@
       **add-skill / fix-schema-binding** (missing/erroring tool),
       **prune / merge** (redundant node).
 - [ ] 1.3 Each operator emits one or more **candidate Variant Specs**, content-hashed (`config_hash`),
-      referencing registry entries by ID (never injecting code).
+      referencing registry entries by ID (never injecting code), **and the concrete source diff its
+      deterministic AST-level codemod produces** at the discovered call site(s) (ADR-001). The same
+      `config_hash` + same source SHALL yield a byte-identical diff that changes only the configured
+      dimension(s) at the targeted call site(s).
 - [ ] 1.4 **Operator gating:** emit an operator only where its candidate satisfies the P5 typed I/O
       contract (call `ContractValidate`; carry any flagged adapters) **and** the operator is admissible
       for the node's pattern label. Refuse to emit an inadmissible or contract-violating candidate.
 - [ ] 1.5 Test: `add rerank` is emitted on a `Retrieval (RAG)` node and **not** on a `Routing` node;
       a candidate that would violate the typed I/O contract is **not** emitted.
+
+## 1b. AI Engineer + DevOps — Codemod build gate & isolated application (ADR-001)
+- [ ] 1b.1 Apply each candidate's source diff to an **isolated worktree/branch** (never the user's
+      working tree in place) and **build/compile the target** before the candidate is surfaced.
+- [ ] 1b.2 **Build-preserving gate:** a candidate whose diff fails to build is marked `build_failed`
+      and is **rejected before surfacing** — never ranked, verified, or presented as a recommendation.
+- [ ] 1b.3 Assert **determinism**: the same `config_hash` against the same source produces a
+      byte-identical, content-hashed source diff; **behavior-preservation**: only the targeted call
+      site(s) change.
+- [ ] 1b.4 Test: a candidate whose diff fails to compile is rejected before surfacing (build gate); a
+      building candidate proceeds to ranking/verification; re-compiling the same candidate yields a
+      byte-identical diff.
 
 ## 2. AI Engineer — Grounded prompt optimization
 - [ ] 2.1 Implement `PromptOptimize(node, failing_cases) → PromptEdit`: a **DSPy-style / self-refine**
@@ -36,16 +51,17 @@
 - [ ] 3.2 **Respect hard constraints:** a candidate that would violate the budget ceiling, latency
       SLA, or provider allowlist is **constraint-excluded** — not ranked as a recommendation; it MAY
       be listed separately with the violated constraint named.
-- [ ] 3.3 Present each candidate as a **diff against the current Variant Spec** (reuse the P5
-      Variant-Spec diff), with the originating **diagnosis** and the **specific failing cases**
+- [ ] 3.3 Present each candidate as a **reviewable source diff** (the codemod output), paired with the
+      P5 Variant-Spec diff, with the originating **diagnosis** and the **specific failing cases**
       attached as evidence.
 - [ ] 3.4 Test: ranking orders by expected gain / cost-of-change; a budget/latency/provider-violating
       candidate is constraint-excluded, not ranked #1.
 
 ## 4. AI Engineer — Verification gate (held-out + significance + regression)
-- [ ] 4.1 Implement `Verify(proposal, eval_set, split) → Verdict`: **auto-execute** the candidate
-      through the **P4 eval harness**, multi-seed, on the **held-out split** (cases the proposal was
-      not generated from) when one exists; flag the result **not held-out** when no split exists.
+- [ ] 4.1 Implement `Verify(proposal, eval_set, split) → Verdict`: **auto-execute the transformed
+      working copy** (the built codemod output, per ADR-001 — the code that would ship, not a shimmed
+      run) through the **P4 eval harness**, multi-seed, on the **held-out split** (cases the proposal
+      was not generated from) when one exists; flag the result **not held-out** when no split exists.
 - [ ] 4.2 **Significance gate:** reuse the P4 `Stats.Compare(candidate, baseline, metric)` primitive —
       admit only a **statistically-significant** gain (mean + CI + significance test); a CI-overlap
       **tie** does **not** pass.
@@ -79,27 +95,32 @@
       `config_hash`, `eval_set_hash`, `split`, `seed`); store proposals / evidence / verdicts / rank
       entries, not a second copy of the traces. Make every verdict attributable to an exact
       proposal × exact eval split.
-- [ ] 5.5 Run candidate specs **only in the P3 sandbox** with no ambient credentials; keep optimizer
-      grounding bundles / candidate prompts as content-hashed blobs.
+- [ ] 5.5 Build and run candidate transformed working copies **only in the P3 sandbox** on isolated
+      worktrees with no ambient credentials; keep optimizer grounding bundles / candidate prompts /
+      candidate **source diffs** as content-hashed blobs.
 
 ## 6. Frontend + Product — Ranked recommendations, trend view, Advisory/Assisted UX
 - [ ] 6.1 Product: design the **Advisory / Assisted automation-level model** — Advisory is the default
-      (report a verified proposal, human applies); Assisted is an explicit **per-workflow opt-in**
-      (one-click apply a **verified** proposal). Define how authority is granted and how the verified
-      verdict earns trust. Design the unhappy path first: the all-failed **"no verified improvement
-      found"** empty state, the regression-caught state (cases fixed *and* broken side by side), and
-      the constraint-excluded state.
+      (open a **draft PR** / report a verified diff, human applies and merges); Assisted is an explicit
+      **per-workflow opt-in** (**one-click open the verified pull request**; the human reviews and
+      merges). In both levels the change reaches the repo only as a reviewable diff/PR; nothing merges
+      to the default branch without the gates + human approval. Define how authority is granted and how
+      the verified verdict earns trust. Design the unhappy path first: the all-failed **"no verified
+      improvement found"** empty state, the regression-caught state (cases fixed *and* broken side by
+      side), and the constraint-excluded state.
 - [ ] 6.2 Frontend: **ranked recommendation list** — each card = **diagnosis + failing-case evidence +
-      proposed diff (P5 diff component) + verified verdict** (delta ± CI, cost/latency impact, cases
-      fixed / cases broken). Withheld (gate-failed) proposals are not in the list; if shown at all,
-      they are a separate, clearly-labeled "did not pass verification" section.
+      reviewable source diff (source-diff view + P5 Variant-Spec diff component) + verified verdict**
+      (delta ± CI, cost/latency impact, cases fixed / cases broken). Withheld (gate-failed or
+      build-failed) proposals are not in the list; if shown at all, they are a separate,
+      clearly-labeled "did not pass verification" section.
 - [ ] 6.3 Frontend: **trend view** across variants over time — did quality actually rise, or did the
       failure mass move from cluster A to cluster B? Reads structured verdicts/eval history, not a
       hand-written narrative.
-- [ ] 6.4 Frontend: **Assisted one-click apply** — enabled **only** when `gate_result = pass`;
-      disabled-with-reason otherwise. Apply **materializes** the candidate as a saved named Variant
-      Spec (reversible; promotion to "active" is a separate step — see design Q7). An unverified
-      proposal never presents an apply control.
+- [ ] 6.4 Frontend: **Assisted one-click open-PR** — enabled **only** when `gate_result = pass`;
+      disabled-with-reason otherwise. The control **opens a pull request** carrying the codemod's
+      source diff against the user's repo (reversible via `git revert`; the human reviews and merges —
+      the system never merges to the default branch or mutates the working tree; see design Q7). An
+      unverified proposal never presents a PR-open control.
 - [ ] 6.5 First-class states: loading / **verifying** / **verified** / **gate-failed** / error —
       each visually distinct; **held-out** vs. **not-held-out** labelled; read terminal verdict status
       from persisted results (no derived state that drifts).
@@ -116,21 +137,25 @@
       (true-zero held-out delta), an **overfit** proposal (wins-on-generating, ties-held-out), a
       **cost-regression** proposal (fixed accuracy, tripled cost), and a **cluster-regression**
       proposal (fixed cluster A, broke cluster B).
-- [ ] 7.2 Operator tests: each diagnosis emits the catalog operator(s) + a contract-valid candidate;
-      prompt rewrite is grounded + traceable; `add rerank` gated to the RAG node; contract-violating
-      candidate not emitted.
+- [ ] 7.2 Operator tests: each diagnosis emits the catalog operator(s) + a contract-valid candidate +
+      a deterministic, building source diff; prompt rewrite is grounded + traceable; `add rerank` gated
+      to the RAG node; contract-violating candidate not emitted; **a candidate whose diff fails to
+      build is rejected before surfacing** (build gate); re-compiling a candidate yields a
+      byte-identical diff.
 - [ ] 7.3 Ranking test: order by expected gain / cost-of-change; constraint-violating candidate
       excluded, not #1.
 - [ ] 7.4 Verification tests (core): nothing-unverified (noise + overfit withheld); held-out delta
       surfaced (else flagged); significance (CI-overlap tie fails, real gain passes); regression-cost
       (tripled-cost fails); regression-cluster (broke-B fails, cases broken listed); verdict contents
       (diff + delta±CI + cost/latency + cases fixed + cases broken).
-- [ ] 7.5 Automation-level tests: Advisory reports without auto-apply; Assisted one-click apply
-      offered **only** for a gate-passing proposal and creates a Variant Spec; gate-failed proposal
-      offers no apply.
+- [ ] 7.5 Automation-level tests: Advisory reports/opens a draft PR without auto-merge; Assisted
+      one-click PR-open offered **only** for a gate-passing proposal and opens a pull request carrying
+      the source diff (system does not merge or mutate the working tree); gate-failed proposal offers
+      no PR-open control.
 - [ ] 7.6 Trend-view test: across three iterations where cluster-A falls but cluster-B rises, the
       trend view shows the workflow did **not** globally improve (problems moved).
-- [ ] 7.7 UI verification: drive ranked list + diff-with-evidence + trend + Advisory/Assisted screens
-      against a live (stubbed-provider) verification fan-out; confirm all states, held-out labelling,
-      cases-fixed/broken rendering, and that Assisted apply is gated on verification.
+- [ ] 7.7 UI verification: drive ranked list + source-diff-with-evidence + trend + Advisory/Assisted
+      screens against a live (stubbed-provider) verification fan-out; confirm all states, held-out
+      labelling, cases-fixed/broken rendering, source-diff rendering, and that Assisted PR-open is
+      gated on verification.
 - [ ] 7.8 Confirm the M8 exit checklist (PRD §13) is green.

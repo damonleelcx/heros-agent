@@ -48,7 +48,7 @@ forward:
   violate its JSON schema, or whose declared tool isn't actually available, must be rejected *before*
   the implementation is invoked. Validating after the call has already fired defeats the purpose.
 
-**Upstream state assumed:** P2's Configuration Layer (shim, Variant Spec, `config_hash`), the four
+**Upstream state assumed:** P2's Configuration Layer (source-transformation engine, Variant Spec, `config_hash`), the four
 registries with the P2 Skill Registry baseline (name → JSON-schema contract + impl handle) and the
 `context_policy` field + pluggable policy interface, the Runtime loader/executor, and the provider
 gateway with secrets sourced from a manager. P2.5's OTel substrate is available to instrument the
@@ -117,7 +117,8 @@ sandbox boundary but is not a hard dependency for P3's exit.
 **Platform engineer**
 - As a platform engineer, I want to set a node's context policy to `sliding-window` with a window
   size (or `summarization` with a summarizer model, or `rag-retrieval` with a top-k) purely in
-  config, so that I can compare context strategies without editing workflow code.
+  config, so that I can compare context strategies with no manual code changes — the change is
+  generated as a reviewable diff rather than hand-edited.
 - As a platform engineer, I want to register a skill with a JSON-schema contract and have the runtime
   reject a call whose args violate the schema *before* the tool runs, so that a bad binding fails
   loudly and safely.
@@ -344,7 +345,7 @@ disciplines and admits P5.5's change operators without a breaking change:
 
 ## 10. Dependencies
 
-- **Requires (upstream):** P2 Configuration Layer (shim, Variant Spec, `config_hash`), the four
+- **Requires (upstream):** P2 Configuration Layer (source-transformation engine, Variant Spec, `config_hash`), the four
   registries (esp. the P2 Skill Registry baseline and the `context_policy` field + pluggable policy
   interface), the Runtime loader/executor, and the provider gateway with secrets from a manager.
   P2.5 OTel substrate is used to emit sandbox/context telemetry (soft dependency).

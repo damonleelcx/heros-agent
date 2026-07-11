@@ -28,7 +28,7 @@ Four core subsystems plus three cross-cutting subsystems:
 | Subsystem | Responsibility |
 |-----------|----------------|
 | **Discovery Engine** | Static + dynamic analysis to extract LLM nodes and their DAG into a canonical **Workflow IR** |
-| **Configuration Layer** | Per-node overrides (model / prompt / skill / context) resolved from registries via a shim; a **Variant Spec** is a full config |
+| **Configuration Layer** | Per-node overrides (model / prompt / skill / context) resolved from registries and applied by a **source-transformation engine (codemod)** that rewrites the call sites via a deterministic AST transformation, delivered as a reviewable diff; a **Variant Spec** is a full config |
 | **Runtime** | Dynamic executor that runs a Variant Spec against live providers, sandboxed, fully traced |
 | **Evaluation Harness** | Runs variants over eval sets, collects traces/metrics, compares with statistical rigor |
 | **Metrics & Observability** *(cross-cutting)* | Shared OTel-based telemetry substrate every other subsystem reads from |
@@ -137,7 +137,7 @@ gantt
 |-----------|:----:|--------------------|
 | **M0 — Foundations frozen** | 3 | Workflow IR JSON schema + metric event schema versioned; config-hash scheme; repo scaffolded; CI green |
 | **M1 — Node extraction proven** | 7 | Discovery MVP extracts static LLM nodes from a Go repo via signature + user-declared entrypoints; IR emitted and diffable |
-| **M2 — First variant executes** | 11 | Runtime runs a hardcoded graph with per-node model/prompt overrides through the shim, sandboxed |
+| **M2 — First variant executes** | 11 | Runtime applies per-node model/prompt overrides to a hardcoded graph as a source transformation (reviewable diff) and runs the transformed working copy in a sandbox |
 | **M3 — Everything is measured** | 13 | Every provider-gateway call emits tagged OTel spans + operational metrics into trace/metric stores |
 | **M4 — Patterns dispatch metrics** | 17 | Structural classifier labels subgraphs; metric-set selection keys off pattern label |
 | **M5 — Variants are comparable** | 22 | Eval harness runs variants over generated + user eval sets, multi-seed, CI-bounded composite scores, leaderboard |

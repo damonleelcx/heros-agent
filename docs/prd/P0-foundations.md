@@ -65,7 +65,7 @@ not running services.
 
 ### Non-goals (deferred, with owning phase)
 - Actual node extraction / AST parsing — **P1 (Discovery MVP)**.
-- Registries, the shim, the Variant Spec type, and the loader/executor — **P2**.
+- Registries, the source-transformation engine (codemod), the Variant Spec type, and the loader/executor — **P2**.
 - Live OTel instrumentation and standing up the three stores as running services — **P2.5** (the
   *schema and storage decision* are P0; the *wiring* is P2.5).
 - Drag-to-reorder, contract-mismatch validation, adapter insertion — **P5** (P0 only defines the
@@ -127,7 +127,8 @@ These map 1:1 to OpenSpec requirements in `openspec/changes/p0-foundations/specs
 **Workflow IR (capability `workflow-ir`)**
 - **FR1** — The IR SHALL be a versioned JSON document (`ir_version`, semver) describing a workflow as
   a graph of nodes and edges.
-- **FR2** — Each node SHALL carry call-site metadata (file, symbol, line range), the current/observed
+- **FR2** — Each node SHALL carry precise call-site source-span metadata (file, symbol, line range,
+  AST path) sufficient for a later phase to rewrite the call site, the current/observed
   model (provider, model id, inference params), the prompt (template reference or inline + variable
   slots), the tools/skills bound, and the context-assembly description.
 - **FR3** — The IR SHALL distinguish **static node definitions** from **runtime invocations**: a node
@@ -248,7 +249,7 @@ The two schemas *are* the interface every subsystem satisfies.
 
 - `workflow-ir.schema.json` — root: `{ ir_version, workflow: {id, repo: {url, commit_sha}, language},
   nodes: [Node], edges: [Edge] }`.
-  - `Node = { node_id, kind:"static_definition", call_site:{file,symbol,line_start,line_end},
+  - `Node = { node_id, kind:"static_definition", call_site:{file,symbol,line_start,line_end,ast_path},
     model:{provider,model_id,params}, prompt:{template_ref|inline, variables[]}, tools_skills[],
     context_assembly:{policy, description}, io_contract:{input_schema, output_schema},
     invocation_semantics:{type: "single"|"loop"|"conditional", variable_at_runtime: bool},

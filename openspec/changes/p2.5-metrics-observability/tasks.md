@@ -1,8 +1,8 @@
 # Tasks — P2.5: Metrics & Observability substrate
 
-## 1. DevOps — Auto-instrumentation at the shim/gateway
+## 1. DevOps — Auto-instrumentation at the provider gateway
 - [ ] 1.1 Attach the OpenTelemetry SDK at the P2 provider gateway so every `Gateway.Complete` call
-      emits telemetry with **zero user code**; wrap the shim so every node execution emits a span.
+      emits telemetry with **zero user code**; wrap the executor so every node execution emits a span.
 - [ ] 1.2 Emit **latency** metrics per call: total, TTFT, tokens-per-sec (per node + end-to-end).
 - [ ] 1.3 Emit **cost** metrics: input/output/cache tokens × the model's price; attributable per
       node, per run, cumulative. Pin the price source (see design; likely the model-registry version).
