@@ -20,3 +20,6 @@
 
 # Go build cache (local; not for version control)
 /.gocache/
+
+# Local-only business strategy (do not commit)
+/docs/business/evaluation-and-monetization.md
