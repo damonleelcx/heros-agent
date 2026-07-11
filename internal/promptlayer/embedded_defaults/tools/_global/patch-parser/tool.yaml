@@ -1,8 +1,0 @@
-id: patch-parser
-risk_tier: medium
-description: Parse unified diff text and return file/hunk/add/remove counts.
-skills:
-  - systematic-debugging
-  - runtime-tools
-implementation_language: go
-implementation_entrypoint: internal/promptlayer/embedded_defaults/tools/_global/patch-parser/tool.go:Execute

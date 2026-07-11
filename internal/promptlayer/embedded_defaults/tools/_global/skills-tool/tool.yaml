@@ -1,9 +1,0 @@
-id: skills-tool
-risk_tier: medium
-description: List skills/tools catalog entries and read skill markdown bodies.
-skills:
-  - self-evolution-via-proposals
-  - long-running-work
-  - runtime-tools
-implementation_language: go
-implementation_entrypoint: internal/promptlayer/embedded_defaults/tools/_global/skills-tool/tool.go:Execute

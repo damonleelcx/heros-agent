@@ -1,8 +1,0 @@
-id: environments-local
-risk_tier: medium
-description: Execute commands and inspect local environment context.
-skills:
-  - runtime-tools
-  - long-running-work
-implementation_language: go
-implementation_entrypoint: internal/promptlayer/embedded_defaults/tools/_global/environments-local/tool.go:Execute

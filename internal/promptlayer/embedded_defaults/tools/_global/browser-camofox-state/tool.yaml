@@ -1,8 +1,0 @@
-id: browser-camofox-state
-risk_tier: medium
-description: Read/write persisted Camofox browser state snapshots.
-skills:
-  - native-mcp
-  - runtime-tools
-implementation_language: go
-implementation_entrypoint: internal/promptlayer/embedded_defaults/tools/_global/browser-camofox-state/tool.go:Execute

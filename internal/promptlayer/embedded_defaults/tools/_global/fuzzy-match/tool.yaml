@@ -1,8 +1,0 @@
-id: fuzzy-match
-risk_tier: medium
-description: Compute lightweight fuzzy similarity between two strings.
-skills:
-  - systematic-debugging
-  - runtime-tools
-implementation_language: go
-implementation_entrypoint: internal/promptlayer/embedded_defaults/tools/_global/fuzzy-match/tool.go:Execute

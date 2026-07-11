@@ -1,8 +1,0 @@
-id: homeassistant-tool
-risk_tier: medium
-description: Call Home Assistant HTTP endpoints via base_url/path.
-skills:
-  - runtime-tools
-  - systematic-debugging
-implementation_language: go
-implementation_entrypoint: internal/promptlayer/embedded_defaults/tools/_global/homeassistant-tool/tool.go:Execute

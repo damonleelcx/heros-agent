@@ -1,9 +1,0 @@
-id: cronjob-tools
-risk_tier: medium
-description: Add/list cron job intents in workspace-local schedule log.
-skills:
-  - self-evolution-via-proposals
-  - long-running-work
-  - runtime-tools
-implementation_language: go
-implementation_entrypoint: internal/promptlayer/embedded_defaults/tools/_global/cronjob-tools/tool.go:Execute

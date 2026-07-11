@@ -1,9 +1,0 @@
-id: mixture-of-agents-tool
-risk_tier: medium
-description: Run harness multi-agent decomposition for a goal/task.
-skills:
-  - self-evolution-via-proposals
-  - long-running-work
-  - runtime-tools
-implementation_language: go
-implementation_entrypoint: internal/promptlayer/embedded_defaults/tools/_global/mixture-of-agents-tool/tool.go:Execute

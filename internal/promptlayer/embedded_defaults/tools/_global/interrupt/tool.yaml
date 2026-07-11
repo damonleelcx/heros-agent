@@ -1,9 +1,0 @@
-id: interrupt
-risk_tier: medium
-description: Record interrupt acknowledgment payload with timestamp.
-skills:
-  - self-evolution-via-proposals
-  - long-running-work
-  - runtime-tools
-implementation_language: go
-implementation_entrypoint: internal/promptlayer/embedded_defaults/tools/_global/interrupt/tool.go:Execute

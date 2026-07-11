@@ -1,8 +1,0 @@
-id: browser-providers-browser-use
-risk_tier: medium
-description: Manage Browser-Use provider settings and runtime state.
-skills:
-  - native-mcp
-  - runtime-tools
-implementation_language: go
-implementation_entrypoint: internal/promptlayer/embedded_defaults/tools/_global/browser-providers-browser-use/tool.go:Execute

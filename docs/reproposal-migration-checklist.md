@@ -4,6 +4,11 @@ This is the keep/adapt/remove decision for every part of the existing repository
 the new purpose (see [`implementation-timeline/README.md`](implementation-timeline/README.md) and
 [`prd/`](prd/README.md)). Work top to bottom; the execution order is in §7.
 
+> **Execution status (branch `reproposal/cleanup`).** §7 steps 1–7 are DONE and verified —
+> `go build/vet/test ./...` all green, and `agentd` boots to serve `/healthz`+`/readyz`. See
+> [§8 Execution log](#8-execution-log) for exactly what happened, including three reclassifications
+> made during execution. Remaining: land P0 (net-new).
+
 ## Legend
 
 | Verdict | Meaning |
@@ -174,3 +179,59 @@ client, the tool/skill/prompt registry plumbing, tool contracts, and embeddings 
 areas). You remove roughly the entire agent runtime, desktop app, MCP sidecar, memory vault, org
 collective, and fleet worker (~12k+ LOC plus ~140 MB of binaries). Everything net-new is already
 specified in the PRDs and OpenSpec changes.
+
+---
+
+## 8. Execution log
+
+Executed on branch `reproposal/cleanup` in four commits (planning baseline → artifact purge →
+provider-gateway salvage → package/ancillary removal). The tree stayed buildable at each step.
+
+### What remains (the minimal, green foundation)
+
+```
+cmd/agentd                     # daemon entrypoint (boots launch → api)
+internal/
+  api          launch          # minimal authed HTTP server: /healthz, /readyz
+  auth  config  db  sqltime    # core: API-key auth, config, SQLite ledger, time util
+  providergateway              # SALVAGED OpenAI-compatible client (P2 gateway seed)
+  toolcontract agentlayout     # registry seeds (clean island) …
+  skillindex   toolindex       #   … Skill/Tool Registry foundations (P2/P3)
+  approval                     # human-in-the-loop gate seed (P6)
+  embeddings                   # failure-clustering / RAG seed (P3/P4.5)
+docs/{implementation-timeline,prd}  openspec/   # the new plan
+docs/TOOL-RESPONSE-CONTRACT.md      # kept as reference for the Skill Registry contract
+deploy/docker-compose.enterprise.yml # kept to ADAPT into the dev compose (P2.5)
+```
+
+**Verification:** `go build ./...`, `go vet ./...`, `go test ./...` all exit 0; `go.mod` reduced
+from ~40 dependencies to `yaml.v3` + `modernc.org/sqlite` (+ sqlite's transitive indirects). A
+live `agentd` run returned `{"status":"ok"}` on `/healthz` and `{"status":"ready"}` on `/readyz`.
+
+### Removed (628 files)
+
+All old commands (`heros`, `heros-cli`, `heros-desktop`, `heros-mcp`, `collectived`,
+`fleet-skill-worker`); the agent-runtime/desktop/collective/memory-vault packages
+(`cliagent`, `collective`, `syncsnapshot`, `indexsync`, `fleetworker`, `memorylayer`, `memoryfs`,
+`memorytree`, `vaultindex`, `inbox`, `installpath`, `evolve`); the old infra
+(`infra/natsbus`, `infra/neo4jstore`, `infra/qdrant`); desktop config; installers/packaging;
+old service units; install/tool-gen scripts; both release workflows; old docs; and ~140 MB of
+committed/on-disk binaries.
+
+### Three reclassifications made during execution (differ from §1–2)
+
+1. **`agentlayout` → KEEP** (was 🔴). It has zero internal deps and is a foundation of the
+   registry packages we keep (`skillindex`/`toolindex`/`promptlayer` all imported it). Removing it
+   would have broken the registry island.
+2. **`promptlayer` → REMOVE now, rebuild in P2** (was 🔵 salvage-in-place). Its `store.go` is
+   entangled with the embedded-seed (`SeedIfEmpty` → `seedEmbeddedDefaults`) and 295 old-product
+   skill markdown files. Cleaner to cut it whole and re-salvage `store.go` from git history when
+   building the Prompt Registry, than to carry the embedded content forward.
+3. **`harness`, `scheduler`, `platform`, `observability`, `tooling` → REMOVE now** (were 🟡 adapt).
+   Each was coupled to removed infra (nats/neo4j/qdrant) or the old topology and is not needed for
+   the P0-ready foundation. Their reusable *patterns* are recoverable from git history when the
+   Runtime executor (P2/P5), run queue (P4), and OTel substrate (P2.5) are built.
+
+**Salvage-from-git note:** `internal/harness`, `internal/scheduler`, and `internal/promptlayer`
+(store.go) are preserved in history at commit `6f381e8`'s parent and earlier — retrieve with
+`git show <rev>:internal/<pkg>/<file>.go` when their adaptation phase begins.

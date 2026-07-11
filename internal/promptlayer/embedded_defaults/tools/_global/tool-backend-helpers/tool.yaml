@@ -1,9 +1,0 @@
-id: tool-backend-helpers
-risk_tier: medium
-description: Return runtime debug metadata for tool backend context.
-skills:
-  - self-evolution-via-proposals
-  - long-running-work
-  - runtime-tools
-implementation_language: go
-implementation_entrypoint: internal/promptlayer/embedded_defaults/tools/_global/tool-backend-helpers/tool.go:Execute

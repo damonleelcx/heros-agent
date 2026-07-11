@@ -1,8 +1,0 @@
-id: transcription-tools
-risk_tier: medium
-description: Queue transcription payload metadata.
-skills:
-  - runtime-tools
-  - long-running-work
-implementation_language: go
-implementation_entrypoint: internal/promptlayer/embedded_defaults/tools/_global/transcription-tools/tool.go:Execute

@@ -1,8 +1,0 @@
-id: mcp-oauth
-risk_tier: medium
-description: Return MCP OAuth integration guidance and payload echo.
-skills:
-  - native-mcp
-  - runtime-tools
-implementation_language: go
-implementation_entrypoint: internal/promptlayer/embedded_defaults/tools/_global/mcp-oauth/tool.go:Execute
