@@ -51,9 +51,6 @@ type Config struct {
 	// KnowledgeVaults indexes Obsidian-style Markdown trees into semantic_chunks (+ optional Qdrant).
 	// Paths are usually absolute and may live outside data_dir; tenant_id scopes rows and retrieval.
 	KnowledgeVaults []KnowledgeVault `json:"knowledge_vaults"`
-
-	// HerosDesktop: optional Fyne heros-desktop UI (appearance/accent). Ignored by agentd; heros-desktop reads/writes. See heros_desktop.go.
-	HerosDesktop HerosDesktopPrefs `json:"heros_desktop,omitempty"`
 }
 
 // KnowledgeVault configures one vault root on disk (read-only indexing + optional note append).

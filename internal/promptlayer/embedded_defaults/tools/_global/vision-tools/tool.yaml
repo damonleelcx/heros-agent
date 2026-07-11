@@ -1,8 +1,0 @@
-id: vision-tools
-risk_tier: medium
-description: Inspect vision input file metadata for downstream analysis.
-skills:
-  - runtime-tools
-  - long-running-work
-implementation_language: go
-implementation_entrypoint: internal/promptlayer/embedded_defaults/tools/_global/vision-tools/tool.go:Execute

@@ -1,8 +1,0 @@
-id: url-safety
-risk_tier: medium
-description: Evaluate URL scheme/host validity and allow decision.
-skills:
-  - runtime-tools
-  - systematic-debugging
-implementation_language: go
-implementation_entrypoint: internal/promptlayer/embedded_defaults/tools/_global/url-safety/tool.go:Execute

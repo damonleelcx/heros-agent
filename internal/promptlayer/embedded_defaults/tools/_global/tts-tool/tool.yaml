@@ -1,8 +1,0 @@
-id: tts-tool
-risk_tier: medium
-description: Queue TTS payload metadata.
-skills:
-  - runtime-tools
-  - long-running-work
-implementation_language: go
-implementation_entrypoint: internal/promptlayer/embedded_defaults/tools/_global/tts-tool/tool.go:Execute

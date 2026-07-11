@@ -3,10 +3,17 @@
 
 /heros-data/
 /.heros-data/
+
+# Compiled binaries (build outputs — never version these)
 /agentd
 /collectived
 /heros-mcp
+/heros-cli
+/heros
 *.exe
+
+# Crash dumps and local scratch
+*.stackdump
 
 # Local runtime state (must never be versioned)
 /internal/cliagent/.heros/

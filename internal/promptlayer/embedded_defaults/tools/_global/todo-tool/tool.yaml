@@ -1,9 +1,0 @@
-id: todo-tool
-risk_tier: medium
-description: Append/list task records in workspace-local todo storage.
-skills:
-  - self-evolution-via-proposals
-  - long-running-work
-  - runtime-tools
-implementation_language: go
-implementation_entrypoint: internal/promptlayer/embedded_defaults/tools/_global/todo-tool/tool.go:Execute

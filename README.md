@@ -1,3 +1,12 @@
+> **⚠️ Project pivot in progress.** This repository is being repurposed into an
+> **LLM Agentic Workflow Evaluation & Configuration System**. The comprehensive
+> implementation timeline lives in
+> [`docs/implementation-timeline/`](docs/implementation-timeline/README.md). The
+> content below describes the prior *Heros OS-level agent* direction and is retained
+> for reference until the migration completes.
+
+---
+
 # Heros — OS-level agent
 
 This project targets an **operating-system-level agent** in the same **work posture** as **Claude Code**, **Codex**, and similar tools: it sits **next to real work**—IDE, terminal, pipelines—not as a separate “admin app.” **Admins and employees alike** are meant to **do their jobs through the agent** (planning, coding, asset workflows, ops, commerce tasks—whatever you wire in). The agent **accumulates** reusable **skills**, **memory**, and **tools** over time, then **evolves** that stack and **syncs** matured knowledge to an **organizational collective** so the whole company benefits.

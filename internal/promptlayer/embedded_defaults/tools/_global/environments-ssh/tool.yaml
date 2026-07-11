@@ -1,8 +1,0 @@
-id: environments-ssh
-risk_tier: medium
-description: Execute commands and track SSH environment metadata.
-skills:
-  - runtime-tools
-  - long-running-work
-implementation_language: go
-implementation_entrypoint: internal/promptlayer/embedded_defaults/tools/_global/environments-ssh/tool.go:Execute

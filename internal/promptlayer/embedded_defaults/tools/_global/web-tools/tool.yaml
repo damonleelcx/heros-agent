@@ -1,8 +1,0 @@
-id: web-tools
-risk_tier: medium
-description: Fetch HTTP(S) pages with timeout and response preview.
-skills:
-  - runtime-tools
-  - systematic-debugging
-implementation_language: go
-implementation_entrypoint: internal/promptlayer/embedded_defaults/tools/_global/web-tools/tool.go:Execute

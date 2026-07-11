@@ -1,9 +1,0 @@
-id: rl-training-tool
-risk_tier: medium
-description: Record RL training job intents into local job log.
-skills:
-  - self-evolution-via-proposals
-  - long-running-work
-  - runtime-tools
-implementation_language: go
-implementation_entrypoint: internal/promptlayer/embedded_defaults/tools/_global/rl-training-tool/tool.go:Execute

@@ -1,8 +1,0 @@
-id: code-execution-tool
-risk_tier: medium
-description: Execute local code/shell commands in the current workspace.
-skills:
-  - systematic-debugging
-  - runtime-tools
-implementation_language: go
-implementation_entrypoint: internal/promptlayer/embedded_defaults/tools/_global/code-execution-tool/tool.go:Execute

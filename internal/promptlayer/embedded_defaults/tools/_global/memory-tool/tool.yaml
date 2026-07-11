@@ -1,9 +1,0 @@
-id: memory-tool
-risk_tier: medium
-description: Search and save episodic memory via agentd memory APIs.
-skills:
-  - self-evolution-via-proposals
-  - long-running-work
-  - runtime-tools
-implementation_language: go
-implementation_entrypoint: internal/promptlayer/embedded_defaults/tools/_global/memory-tool/tool.go:Execute

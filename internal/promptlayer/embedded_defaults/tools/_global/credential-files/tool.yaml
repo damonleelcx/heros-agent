@@ -1,8 +1,0 @@
-id: credential-files
-risk_tier: medium
-description: Detect common credential file patterns in workspace root.
-skills:
-  - systematic-debugging
-  - runtime-tools
-implementation_language: go
-implementation_entrypoint: internal/promptlayer/embedded_defaults/tools/_global/credential-files/tool.go:Execute

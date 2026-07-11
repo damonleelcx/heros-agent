@@ -1,9 +1,0 @@
-id: tool-result-storage
-risk_tier: medium
-description: Save/list structured tool execution results in workspace storage.
-skills:
-  - self-evolution-via-proposals
-  - long-running-work
-  - runtime-tools
-implementation_language: go
-implementation_entrypoint: internal/promptlayer/embedded_defaults/tools/_global/tool-result-storage/tool.go:Execute

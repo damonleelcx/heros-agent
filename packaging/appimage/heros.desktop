@@ -1,9 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=Heros
-GenericName=OS agent
-Comment=Terminal REPL with embedded agentd
-Exec=heros
-Terminal=true
-Categories=Development;Utility;
-Keywords=agent;cli;heros;

@@ -1,8 +1,0 @@
-id: file-operations
-risk_tier: medium
-description: Structured file actions (list/read/write/delete/mkdir) over workspace paths.
-skills:
-  - systematic-debugging
-  - runtime-tools
-implementation_language: go
-implementation_entrypoint: internal/promptlayer/embedded_defaults/tools/_global/file-operations/tool.go:Execute

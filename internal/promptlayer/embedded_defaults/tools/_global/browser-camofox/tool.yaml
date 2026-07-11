@@ -1,8 +1,0 @@
-id: browser-camofox
-risk_tier: medium
-description: Manage Camofox browser session state (start/stop/status/configure).
-skills:
-  - native-mcp
-  - runtime-tools
-implementation_language: go
-implementation_entrypoint: internal/promptlayer/embedded_defaults/tools/_global/browser-camofox/tool.go:Execute

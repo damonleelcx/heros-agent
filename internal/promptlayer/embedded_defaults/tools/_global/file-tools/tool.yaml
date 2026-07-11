@@ -1,8 +1,0 @@
-id: file-tools
-risk_tier: medium
-description: List/read/write/delete/create files and folders in workspace paths.
-skills:
-  - systematic-debugging
-  - runtime-tools
-implementation_language: go
-implementation_entrypoint: internal/promptlayer/embedded_defaults/tools/_global/file-tools/tool.go:Execute

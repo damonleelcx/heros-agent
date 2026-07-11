@@ -1,9 +1,0 @@
-id: evolution-reminder
-risk_tier: low
-description: Nudge to use proposals for durable changes.
-skills:
-  - self-evolution-via-proposals
-  - long-running-work
-  - runtime-tools
-implementation_language: go
-implementation_entrypoint: internal/promptlayer/embedded_defaults/tools/_global/evolution-reminder/tool.go:Execute

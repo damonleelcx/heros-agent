@@ -1,8 +1,0 @@
-id: browser-tool
-risk_tier: medium
-description: Handle browser workflow payloads and URL-driven actions.
-skills:
-  - native-mcp
-  - runtime-tools
-implementation_language: go
-implementation_entrypoint: internal/promptlayer/embedded_defaults/tools/_global/browser-tool/tool.go:Execute

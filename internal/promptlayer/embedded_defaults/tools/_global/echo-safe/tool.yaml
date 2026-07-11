@@ -1,7 +1,0 @@
-id: echo-safe
-risk_tier: low
-description: Safe text utility for echoing, redacting secrets, and hashing input.
-skills:
-  - runtime-tools
-implementation_language: go
-implementation_entrypoint: internal/promptlayer/embedded_defaults/tools/_global/echo-safe/tool.go:Execute
