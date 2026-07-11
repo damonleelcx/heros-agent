@@ -35,6 +35,7 @@ Four core subsystems plus three cross-cutting subsystems:
 | **Analysis & Improvement Engine** *(cross-cutting)* | Attribution → diagnosis → verified proposals → closed-loop optimization |
 | **Pattern Classifier** *(cross-cutting)* | Labels each subgraph's agentic pattern; dispatches which metrics / failure modes / operators apply |
 | **Billing, Metering & Entitlements** *(cross-cutting)* | Meters LLM **spend under management** off the P2.5 telemetry substrate; enforces per-plan + per-automation-level entitlements; subscription and verified-savings billing |
+| **Admin & Operations Console** *(cross-cutting, internal)* | The **internal operator / back-office** surface the platform team runs the system from — manage tenants, plans/entitlements, billing operations, optimization jobs/fleet, model registries, cross-tenant observability, audit/compliance, and global safety controls (incl. the autonomous-optimizer kill switch). A privileged **read-model + command surface** over P2.5 (metrics/cost), P4/P6 (jobs/queue), P6 (autonomous audit + kill switch) and P7 (tenants/billing/entitlements) — **not** a new pipeline, and **not** the customer Web dashboard |
 
 ```mermaid
 graph LR
@@ -60,14 +61,26 @@ graph LR
 
 ### Delivery surfaces
 
-The platform reaches users through three surfaces, not a desktop app. Each maps to a plan tier
-and to the roles that own it:
+The platform reaches **customers** through three surfaces, not a desktop app. Each maps to a plan
+tier and to the roles that own it:
 
 | Surface | What it is | Tiers | Owners |
 |---------|-----------|:-----:|--------|
 | **CLI + CI integration** | Primary developer entry point. Runs discovery / codemod / eval **in the customer's own build environment** using the customer's own provider keys. | All tiers (incl. **Free**) | Backend, DevOps |
 | **Git App / bot** (GitHub / GitLab / Bitbucket) | Delivery surface that opens the optimization **PRs** (the ADR-001 reviewable-diff output). | **Team+** | Backend, DevOps |
 | **Web dashboard** (hosted SaaS) | Graph / leaderboard / diagnosis / trend views + budget & automation-level governance + **billing / usage**. Seats & retention scale by tier. | **Team+** | Frontend, Product |
+
+#### Internal operator surface (distinct from the customer Web dashboard)
+
+There is a **fourth surface, but it is internal/operator-facing**, not a customer tier — the
+platform team's own back-office. It has its **own admin identity + RBAC** (not a customer login,
+not a plan), so it is listed separately to keep it from ever being confused with surface #3, the
+customer Web dashboard. The customer dashboard governs *one tenant's* graphs, budgets, and
+billing; the operator console governs *the whole platform across all tenants*.
+
+| Surface | What it is | Audience | Owners |
+|---------|-----------|:--------:|--------|
+| **Admin & Operations Console** (P8) | Highest-blast-radius, **internal** operator console: tenants, plans/entitlements, billing operations, optimization jobs/fleet, model registries, cross-tenant observability, audit/compliance, and global safety controls (incl. the autonomous-optimizer kill switch). Security-first — SSO+MFA, RBAC, least privilege, append-only audit, impersonation-with-audit. | **Platform operators only** (own admin RBAC — **not** a customer plan) | Backend, Frontend, DevOps |
 
 **Commercial model (non-sensitive).** The value metric is **LLM spend under management (SUM)**,
 aggregated from the P2.5 cost metrics. Plans are referenced by **name** — **Free / Team / Business /
@@ -122,6 +135,7 @@ Which of the six senior roles leads (**L**) or supports (**S**) each phase. Full
 | **P5.5** Proposals + Verification | S | S | **L** | S | S | S |
 | **P6** Autonomous optimizer | S | S | **L** | **L** | S | **L** |
 | **P7** Billing, Metering & Entitlements | S | **L** | S | **L** | S | S |
+| **P8** Admin & Operations Console | S | **L** | S | **L** | **L** | S |
 
 ## 4. Timeline (Gantt)
 
@@ -151,6 +165,9 @@ gantt
   section Commercial
   P7a Metering + entitlements + billing   :p7a, 22, 12w
   P7b Verified-savings / gainshare billing:p7b, 34, 6w
+  section Operator
+  P8a Admin RBAC + tenant/billing admin + audit :p8a, 24, 10w
+  P8b Fleet ops + global autonomous controls + compliance :p8b, 34, 8w
 ```
 
 P7 is a cross-cutting commercialization phase that runs alongside the Intelligence track.
@@ -158,6 +175,16 @@ P7 is a cross-cutting commercialization phase that runs alongside the Intelligen
 and is sellable once **P4** exists — the first paying tier does not wait for the autonomous loop.
 **Wave 7b** (verified-savings / gainshare billing) depends on the **P5.5** verified-delta ledger;
 **unverified savings are never billed**.
+
+P8 is the **internal operator console** — the back-office the platform team runs the system from,
+distinct from the customer Web dashboard. It ships in two waves and adds **no new pipeline**: it is
+a privileged read-model + command surface over data P2.5/P4/P6/P7 already produce. **Wave 8a**
+(admin RBAC + tenant / billing / entitlement administration + append-only audit) runs alongside
+**P7** and is usable as soon as there are tenants and billing to administer. **Wave 8b** (fleet ops,
+global autonomous controls incl. the cross-tenant kill switch, cross-tenant observability, and
+compliance) follows once the **P6** autonomous loop and its audit trail exist to be governed
+fleet-wide. Because it is the highest-blast-radius surface, it is **security-first**: SSO+MFA,
+RBAC, least privilege, append-only audit, and impersonation-with-audit throughout.
 
 ## 5. Milestones & exit criteria
 
@@ -174,6 +201,7 @@ and is sellable once **P4** exists — the first paying tier does not wait for t
 | **M8 — Verified advice** | 34 | Change operators emit proposals; verification gate re-runs on held-out data with statistical significance before surfacing |
 | **M9 — Closed loop** | 40 | Autonomous analyze→propose→verify→apply under hard constraints (budget, allowlist, min-improvement, max-iterations), full audit trail + rollback |
 | **M10 — Self-serve billing live (first dollar)** | 34 | Metering aggregates SUM off the P2.5 substrate; plan entitlements gate features by plan + automation level; self-serve subscription checkout live for a named tier (7a). Verified-savings/gainshare billing (7b) follows once the P5.5 verified-delta ledger lands |
+| **M11 — Operator console live (platform manageable end-to-end)** | 42 | Internal Admin & Operations Console live behind SSO+MFA + admin RBAC: operators administer tenants, plans/entitlements, and billing ops with append-only audit + impersonation-with-audit (8a); fleet ops, cross-tenant observability, compliance, and global autonomous controls incl. the platform-wide kill switch operational (8b). The whole system is manageable from one privileged surface, distinct from the customer Web dashboard |
 
 ## 6. Cross-cutting risks (front-loaded on purpose)
 

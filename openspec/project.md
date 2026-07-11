@@ -43,4 +43,6 @@ for the source specification.
 
 This project uses OpenSpec for spec-driven development. See [`AGENTS.md`](AGENTS.md) for the
 format and rules. Capabilities live in `specs/`; proposed changes live in `changes/`. Each
-delivery phase (P0–P7) is tracked as one change under `changes/`.
+delivery phase (P0–P8) is tracked as one change under `changes/`. **P8 — Admin & Operations
+Console** is the platform team's **internal operator** surface (its own admin identity + RBAC),
+distinct from the customer-facing Web dashboard.

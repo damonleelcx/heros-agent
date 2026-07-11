@@ -38,6 +38,15 @@ both in P0. Both are cheap to design early and ruinously expensive to retrofit.
 P2.5 telemetry substrate (no parallel counter to drift out of sync), plus the entitlement/plan
 schema that gates features by plan and automation level.
 
+**On the operator console (P8):** designs the **privileged read-model** the internal Admin &
+Operations Console is built on — the cross-tenant projection over P2.5 (metrics/cost), P4/P6
+(jobs/fleet), P6 (autonomous audit + kill switch) and P7 (tenants/billing/entitlements) that
+adds **no new pipeline**, only a read + command layer. Owns the **admin RBAC + append-only audit
+data model** (who may do what to which tenant, and the immutable record of every operator action,
+including impersonation). The console is the platform's highest-blast-radius surface, so the
+command side is modeled explicitly around reversibility and least privilege — distinct from the
+per-tenant customer Web dashboard.
+
 ---
 
 ## 2. Senior Backend Dev — *explore → design → implement → test → harden → review*
@@ -67,6 +76,15 @@ automation level), and subscription/verified-savings billing integration. The sa
 and invariant discipline applies: a re-processed usage window must not double-bill, and metered
 SUM is a read over the P2.5 substrate — the platform never resells tokens, customers use their
 own provider keys.
+
+**On the operator console (P8):** **lead** (with Frontend + DevOps). Builds the admin API behind
+the console — the tenant / plan / entitlement administration services, billing-operations
+endpoints, and the privileged command handlers over the fleet (jobs/queue) and the global safety
+controls (incl. the autonomous-optimizer kill switch). Enforces **RBAC + least privilege** on
+every operator action and writes an **append-only audit** record for each, impersonation included.
+The same backend realities bite harder here: every command is cross-tenant, so authorization is
+checked server-side per action, invariants (which admin role may touch which tenant) are modeled
+into the schema, and destructive operations are reversible or explicitly flagged as not.
 
 ---
 
@@ -103,6 +121,13 @@ billing. Only savings proven through the P5.5 verified-delta ledger are billable
 "verification decides" rule that governs proposals also governs what the customer can be charged
 for; unverified savings are never billed.
 
+**On the operator console (P8, wave 8b):** **supports** — owns the **autonomous-fleet oversight**
+view. Defines what operators need to see and control across every tenant's autonomous loops: the
+cross-tenant audit trail, per-tenant and global constraint state, and the semantics of the
+**global kill switch** (what it halts, how in-flight applies are drained, how it degrades safely).
+The same non-negotiable carries over — the console lets an operator *stop* or *constrain* the
+autonomous loop fleet-wide, never silently *approve* an unverified change on a customer's behalf.
+
 ---
 
 ## 4. Senior DevOps Engineer — *blast radius, reversible, observable, least-privilege*
@@ -133,6 +158,14 @@ on them), the delivery surfaces' deploy/ops (CLI/CI, Git App/bot, hosted dashboa
 least-privilege posture for provider keys, which stay the customer's and never transit the
 platform as resellable tokens.
 
+**On the operator console (P8):** co-**lead** (with Backend + Frontend). Owns the console's
+security posture end to end — **SSO+MFA** on the admin identity, the RBAC enforcement points, and
+the deploy/ops of the highest-blast-radius surface in the platform. Its prime directives apply at
+full strength: *blast radius before implementation* (fleet-wide commands and the global kill
+switch get guardrails, confirmation, and rollback before they ship), *reversible or say it isn't*,
+and *if it isn't observable it isn't done* — the cross-tenant observability views are read off the
+same P2.5 substrate, and every operator action lands in the append-only audit log.
+
 ---
 
 ## 5. Senior Frontend Dev — *match the codebase, smallest correct change, a11y & perf are requirements*
@@ -157,6 +190,14 @@ Its phase discipline lands as:
 management meter, plan/entitlement state, seat & retention limits, and the paywall/upgrade
 surfaces. Loading/error/empty/success states apply to usage and invoice views as much as to
 runs; a stale or wrong usage number is a money bug, not a cosmetic one.
+
+**On the operator console (P8):** co-**lead** (with Backend + DevOps). Builds the **internal
+back-office UI** — tenant/plan/entitlement admin, billing operations, the fleet/jobs views,
+cross-tenant observability, and the global safety controls. It is a **separate app from the
+customer Web dashboard**, behind admin identity + RBAC, and its states matter more, not less: a
+dangerous cross-tenant action (impersonate, change entitlements, hit the kill switch) must render
+its blast radius, require deliberate confirmation, and never fire from an ambiguous or stale view.
+Accessibility and performance stay gates even though the audience is internal operators.
 
 ---
 
@@ -186,6 +227,14 @@ upgrade path, and the **gainshare-consent** flow (7b) where a customer explicitl
 **verified** savings are billable. Plans are referenced by name; prices are configuration, never
 hard-coded into a screen.
 
+**On the operator console (P8):** **supports** — owns the **back-office UX and the
+dangerous-action patterns**. The console's users are internal operators, but the same discipline
+applies: *design the unhappy path first*. Defines the consistent pattern for high-blast-radius
+actions (impersonate-with-audit, edit a tenant's entitlements, pull the global kill switch) —
+what confirmation, scoping, and after-the-fact audit visibility each requires — and *names the
+tradeoff* on every one, so an operator always sees the blast radius before acting. Keeps the
+operator console legibly distinct from the customer Web dashboard so the two are never conflated.
+
 ---
 
 ## Ownership at a glance
@@ -204,3 +253,4 @@ hard-coded into a screen.
 | Graph/config UI, leaderboard, dashboards | Frontend | Product Designer |
 | UX flows, automation levels, handoff | Product Designer | Frontend, AI |
 | Billing, Metering & Entitlements (P7) | Backend + DevOps | System Designer (metering data model), AI (verified savings), Frontend (billing UI), Product (packaging/paywall) |
+| Admin & Operations Console (P8, internal) | Backend + Frontend + DevOps | System Designer (read-model + RBAC + audit data model), Product (back-office UX / dangerous-action patterns), AI (autonomous-fleet oversight) |
