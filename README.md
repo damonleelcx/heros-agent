@@ -1,5 +1,7 @@
 # LLM Agentic Workflow Optimization Platform
 
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+
 Point it at a codebase; it discovers the LLM call graph, and **opens verified pull requests that
 optimize your prompts, models, context strategies, and node wiring** — with statistical proof the
 change is better or cheaper before you merge.
@@ -132,4 +134,12 @@ green.
 
 ## License
 
-No `LICENSE` file is present yet; licensing will be declared before any public release.
+Licensed under the **Apache License, Version 2.0** — see [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE).
+
+Apache-2.0 is a permissive license with an explicit patent grant, chosen so the discovery/CLI layer
+can be adopted freely and become the ecosystem's ingestion standard. You may use, modify, and
+distribute the code — including commercially — provided you retain the license and attribution
+notices and state any changes.
+
+Unless you explicitly note otherwise, contributions you submit are licensed under the same Apache-2.0
+terms.
