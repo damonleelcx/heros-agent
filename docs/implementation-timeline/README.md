@@ -34,6 +34,7 @@ Four core subsystems plus three cross-cutting subsystems:
 | **Metrics & Observability** *(cross-cutting)* | Shared OTel-based telemetry substrate every other subsystem reads from |
 | **Analysis & Improvement Engine** *(cross-cutting)* | Attribution → diagnosis → verified proposals → closed-loop optimization |
 | **Pattern Classifier** *(cross-cutting)* | Labels each subgraph's agentic pattern; dispatches which metrics / failure modes / operators apply |
+| **Billing, Metering & Entitlements** *(cross-cutting)* | Meters LLM **spend under management** off the P2.5 telemetry substrate; enforces per-plan + per-automation-level entitlements; subscription and verified-savings billing |
 
 ```mermaid
 graph LR
@@ -56,6 +57,23 @@ graph LR
   EH --> UI[UI: compare / optimize]
   AIE --> UI
 ```
+
+### Delivery surfaces
+
+The platform reaches users through three surfaces, not a desktop app. Each maps to a plan tier
+and to the roles that own it:
+
+| Surface | What it is | Tiers | Owners |
+|---------|-----------|:-----:|--------|
+| **CLI + CI integration** | Primary developer entry point. Runs discovery / codemod / eval **in the customer's own build environment** using the customer's own provider keys. | All tiers (incl. **Free**) | Backend, DevOps |
+| **Git App / bot** (GitHub / GitLab / Bitbucket) | Delivery surface that opens the optimization **PRs** (the ADR-001 reviewable-diff output). | **Team+** | Backend, DevOps |
+| **Web dashboard** (hosted SaaS) | Graph / leaderboard / diagnosis / trend views + budget & automation-level governance + **billing / usage**. Seats & retention scale by tier. | **Team+** | Frontend, Product |
+
+**Commercial model (non-sensitive).** The value metric is **LLM spend under management (SUM)**,
+aggregated from the P2.5 cost metrics. Plans are referenced by **name** — **Free / Team / Business /
+Enterprise** — as named entitlement bundles that gate features by plan **and** automation level
+(Autonomous auto-merge is Enterprise). Prices and plan definitions are **configuration, not in
+git**; customers always use their **own provider keys** (the platform never resells tokens).
 
 ## 2. Critical path
 
@@ -103,6 +121,7 @@ Which of the six senior roles leads (**L**) or supports (**S**) each phase. Full
 | **P5** Contracts + Re-arrange + Tracing | **L** | **L** | S | S | **L** | **L** |
 | **P5.5** Proposals + Verification | S | S | **L** | S | S | S |
 | **P6** Autonomous optimizer | S | S | **L** | **L** | S | **L** |
+| **P7** Billing, Metering & Entitlements | S | **L** | S | **L** | S | S |
 
 ## 4. Timeline (Gantt)
 
@@ -129,7 +148,16 @@ gantt
   P5 Contracts + Re-arrange + Tracing     :p5, 24, 6w
   P5.5 Proposals + Verification gate      :p55, 29, 5w
   P6 Autonomous optimizer                 :p6, 33, 7w
+  section Commercial
+  P7a Metering + entitlements + billing   :p7a, 22, 12w
+  P7b Verified-savings / gainshare billing:p7b, 34, 6w
 ```
+
+P7 is a cross-cutting commercialization phase that runs alongside the Intelligence track.
+**Wave 7a** (metering + entitlements + subscription billing) reuses the P2.5 telemetry substrate
+and is sellable once **P4** exists — the first paying tier does not wait for the autonomous loop.
+**Wave 7b** (verified-savings / gainshare billing) depends on the **P5.5** verified-delta ledger;
+**unverified savings are never billed**.
 
 ## 5. Milestones & exit criteria
 
@@ -145,6 +173,7 @@ gantt
 | **M7 — Safe re-arrangement** | 30 | Typed I/O contracts validate proposed orderings; dynamic tracing reconciles static graph; behavioral classification live |
 | **M8 — Verified advice** | 34 | Change operators emit proposals; verification gate re-runs on held-out data with statistical significance before surfacing |
 | **M9 — Closed loop** | 40 | Autonomous analyze→propose→verify→apply under hard constraints (budget, allowlist, min-improvement, max-iterations), full audit trail + rollback |
+| **M10 — Self-serve billing live (first dollar)** | 34 | Metering aggregates SUM off the P2.5 substrate; plan entitlements gate features by plan + automation level; self-serve subscription checkout live for a named tier (7a). Verified-savings/gainshare billing (7b) follows once the P5.5 verified-delta ledger lands |
 
 ## 6. Cross-cutting risks (front-loaded on purpose)
 

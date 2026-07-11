@@ -33,6 +33,11 @@ Its internal workflow maps directly onto the platform's design spine:
 **Highest-leverage decision it makes:** the event tagging contract and the typed I/O contract,
 both in P0. Both are cheap to design early and ruinously expensive to retrofit.
 
+**On billing (P7):** designs the **metering data model** — how per-call cost metrics roll up into
+**LLM spend under management (SUM)**, the billable value metric — as a derivation over the same
+P2.5 telemetry substrate (no parallel counter to drift out of sync), plus the entitlement/plan
+schema that gates features by plan and automation level.
+
 ---
 
 ## 2. Senior Backend Dev — *explore → design → implement → test → harden → review*
@@ -55,6 +60,13 @@ state, concurrency, partial failure, contracts outlive code* — are exactly thi
   older variants still resolve (all phases).
 - **Harden** → sandbox is not optional (P3); parameterize provider calls; never log prompts with
   secrets/PII; timeouts+backoff on every provider call.
+
+**On billing (P7):** co-leads the **Billing, Metering & Entitlements** subsystem with DevOps.
+Owns the metering aggregation service, the entitlement-enforcement layer (gating by plan +
+automation level), and subscription/verified-savings billing integration. The same idempotency
+and invariant discipline applies: a re-processed usage window must not double-bill, and metered
+SUM is a read over the P2.5 substrate — the platform never resells tokens, customers use their
+own provider keys.
 
 ---
 
@@ -86,6 +98,11 @@ failing node" is a *context-engineering* defect. Each maps to a change operator.
 single unverified LLM opinion drives an automated change; judges are calibrated against
 human-labeled subsets and their agreement is reported alongside the metric.
 
+**On billing (P7, wave 7b):** owns the **verified-savings computation** that feeds gainshare
+billing. Only savings proven through the P5.5 verified-delta ledger are billable — the same
+"verification decides" rule that governs proposals also governs what the customer can be charged
+for; unverified savings are never billed.
+
 ---
 
 ## 4. Senior DevOps Engineer — *blast radius, reversible, observable, least-privilege*
@@ -110,6 +127,12 @@ Its five-step task loop (Frame → Plan → Execute → Verify → Close the loo
 change, and its routing table (cicd / iac / containers / observability / incident / security)
 is the reference set for the platform's own deployment.
 
+**On billing (P7):** co-leads **Billing, Metering & Entitlements** with Backend. Owns the
+metering pipeline's operational reliability (accurate, auditable usage counters — money depends
+on them), the delivery surfaces' deploy/ops (CLI/CI, Git App/bot, hosted dashboard), and the
+least-privilege posture for provider keys, which stay the customer's and never transit the
+platform as resellable tokens.
+
 ---
 
 ## 5. Senior Frontend Dev — *match the codebase, smallest correct change, a11y & perf are requirements*
@@ -129,6 +152,11 @@ Its phase discipline lands as:
   virtualize lists, memoize deliberately, keep the node canvas responsive.
 - **Verify before done** — actually run the UI against a live variant before declaring a view
   complete.
+
+**On billing (P7):** owns the **billing / usage UI** in the hosted dashboard — the SUM-under-
+management meter, plan/entitlement state, seat & retention limits, and the paywall/upgrade
+surfaces. Loading/error/empty/success states apply to usage and invoice views as much as to
+runs; a stale or wrong usage number is a money bug, not a cosmetic one.
 
 ---
 
@@ -152,6 +180,12 @@ UX inflection points:
 Its quality bars — *design the unhappy path, content is the interface, name the tradeoff* — apply
 to every screen: diagnosis cards must show *why* (the failing cases as evidence), not just *what*.
 
+**On billing (P7):** owns the **packaging / paywall UX** — the surfaces→entitlements mapping made
+legible (what each named plan unlocks, how automation level gates Autonomous auto-merge), the
+upgrade path, and the **gainshare-consent** flow (7b) where a customer explicitly agrees that only
+**verified** savings are billable. Plans are referenced by name; prices are configuration, never
+hard-coded into a screen.
+
 ---
 
 ## Ownership at a glance
@@ -169,3 +203,4 @@ to every screen: diagnosis cards must show *why* (the failing cases as evidence)
 | Autonomous optimizer | AI Engineer + DevOps | Product, System Designer |
 | Graph/config UI, leaderboard, dashboards | Frontend | Product Designer |
 | UX flows, automation levels, handoff | Product Designer | Frontend, AI |
+| Billing, Metering & Entitlements (P7) | Backend + DevOps | System Designer (metering data model), AI (verified savings), Frontend (billing UI), Product (packaging/paywall) |

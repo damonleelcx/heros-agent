@@ -18,6 +18,7 @@ and pairs with an OpenSpec change of the same name under [`../../openspec/change
 | P5 — Contracts + Re-arrange + Tracing | [P5-contracts-rearrange-tracing.md](P5-contracts-rearrange-tracing.md) | `p5-contracts-rearrange-tracing` | System Designer + Backend + Frontend + Product |
 | P5.5 — Proposals + Verification | [P5.5-proposals-verification.md](P5.5-proposals-verification.md) | `p5.5-proposals-verification` | AI Engineer |
 | P6 — Autonomous optimizer | [P6-autonomous-optimizer.md](P6-autonomous-optimizer.md) | `p6-autonomous-optimizer` | AI Engineer + DevOps + Product |
+| P7 — Billing, Metering & Entitlements | [P7-billing-metering.md](P7-billing-metering.md) | `p7-billing-metering` | Backend + DevOps |
 
 ## PRD template
 
