@@ -1,5 +1,12 @@
 # **LLM Agentic Workflow Evaluation & Configuration System --- Implementation Plan**
 
+> **Historical record.** This is the verbatim source brief. One mechanism has since been revised:
+> the "adapter/shim resolves per-node config at runtime without editing source" approach (§3, §4)
+> is **superseded** — optimizations are now applied by **transforming the source code (AST codemods,
+> delivered as reviewable diffs/PRs)**. See [`../adr/ADR-001-source-transformation-apply-model.md`](../adr/ADR-001-source-transformation-apply-model.md).
+> The PRDs and OpenSpec changes reflect the revised mechanism; this file is left unchanged as the
+> original input.
+
 ## **1. System Overview**
 
 A platform that ingests a codebase, discovers the LLM call graph,

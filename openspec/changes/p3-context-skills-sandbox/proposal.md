@@ -20,7 +20,7 @@ subprocess/container isolate with **no ambient credentials**, default-deny netwo
 least-privilege read-only filesystem, and enforced resource bounds — with credentialed calls
 brokered by the trusted host so the isolate never receives a provider key.
 
-Depends on P2 (shim, Variant Spec, `config_hash`, the four registries incl. the Skill Registry
+Depends on P2 (source-transformation engine, Variant Spec, `config_hash`, the four registries incl. the Skill Registry
 baseline and the `context_policy` field + pluggable interface, the Runtime, and the gateway with
 secrets from a manager). Uses P2.5's OTel substrate to emit sandbox/context telemetry.
 Product rationale: [`../../../docs/prd/P3-context-skills-sandbox.md`](../../../docs/prd/P3-context-skills-sandbox.md).
@@ -67,7 +67,7 @@ Product rationale: [`../../../docs/prd/P3-context-skills-sandbox.md`](../../../d
   resource enforcement, and the tagged denial/audit event stream; Executor/Loader integration so
   repo tool code runs only in-sandbox and contract validation gates every skill call; P2.5 telemetry
   emitters for context-assembly, tool-error, and sandbox-denial events.
-- **Dependencies:** requires **P2** (shim, Variant Spec, `config_hash`, the four registries + policy
+- **Dependencies:** requires **P2** (source-transformation engine, Variant Spec, `config_hash`, the four registries + policy
   interface, Runtime, gateway w/ secrets manager) and **P2.5** (soft — telemetry substrate).
   Unblocks **P4** (variants differing only by context policy; safe execution of repo tools), **P4.5**
   (slices on tool-error / context-utilization / sandbox-denial), **P5.5** (context-policy swap +

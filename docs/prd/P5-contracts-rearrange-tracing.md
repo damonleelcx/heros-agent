@@ -19,7 +19,13 @@ tightly-coupled capabilities. First, a **typed per-node I/O contract validator +
 auto-inserter**: the `io_contract` reserved on every node since P0 is finally *enforced* — the
 system decides whether a proposed ordering is coherent, and where two nodes' schemas don't match it
 either **auto-inserts an explicit adapter** or **rejects the reorder**, but it **never silently
-produces a broken workflow**. Second, a **dynamic-tracing interceptor + reconciler**: static
+produces a broken workflow**. Per **ADR-001**, a coherent arrangement is *applied* by **transforming
+the user's source code** — a deterministic, AST-level codemod that rewrites the affected call sites /
+node wiring, delivered as a **reviewable diff/PR** on an isolated worktree — not by a runtime shim; the
+typed contract gates codemod generation (validation runs *before* a transform exists), adapter
+auto-insertion is itself a **generated code change**, and a transform that does not **build** is rejected
+before it is ever proposed. The thesis extends: **no silently-broken reorder** and **no silently-broken
+diff**. Second, a **dynamic-tracing interceptor + reconciler**: static
 analysis produced a *candidate* graph; P5 confirms it by instrumenting a run — an OTel-style
 interceptor logs every real LLM call, its inputs, and its stack, then reconciles the observed calls
 against the static candidates, resolving runtime-dynamic dispatch (loops, conditional routing) that
@@ -73,16 +79,24 @@ capped-confidence candidates awaiting P5. P4 eval-set generator that already shi
 - G1. **Enforce the typed per-node I/O contract** (P0's `io_contract`) as a coherence check on any
   proposed node ordering: for every producer→consumer edge, decide whether the producer's
   `output_schema` satisfies the consumer's `input_schema`.
-- G2. **Adapter auto-insertion.** Where a producer→consumer schema mismatch is bridgeable by a typed,
-  lossless transform, the system SHALL synthesize an **explicit adapter node**, insert it into the
-  Variant Spec, and surface it as an inspectable node — never a hidden coercion.
-- G3. **No silently-broken reorder.** A proposed ordering whose mismatch is **not** bridgeable SHALL
-  be **rejected** with a typed diagnostic naming the producer, the consumer, and the exact schema
-  fields that don't match; the incoherent Variant Spec is never persisted as runnable. This is the
-  phase's load-bearing correctness property.
+- G2. **Adapter auto-insertion as a generated code change.** Where a producer→consumer schema mismatch
+  is bridgeable by a typed, lossless transform, the system SHALL synthesize an **explicit adapter node**,
+  insert it into the Variant Spec, and **materialize it as a generated, reviewable source change** (a
+  codemod that inserts the adapter's code and rewires the call sites) — never a hidden runtime coercion.
+- G3. **No silently-broken reorder — and no silently-broken diff.** A proposed ordering whose mismatch is
+  **not** bridgeable SHALL be **rejected** *before any codemod is generated*, with a typed diagnostic
+  naming the producer, the consumer, and the exact schema fields that don't match; the incoherent Variant
+  Spec is never persisted as runnable and produces no source transformation. This is the phase's
+  load-bearing correctness property.
+- G3a. **Apply-by-source-transformation (ADR-001).** A coherent arrangement SHALL be applied by
+  generating a **deterministic, AST-level codemod** that rewrites the affected call sites / node wiring —
+  not a runtime shim. The transform SHALL be **deterministic** (same `config_hash` + source →
+  byte-identical diff), **build-preserving** (a codemod that fails to build the target is rejected before
+  it is proposed), **behavior-preserving except for the intended change**, applied to an **isolated
+  worktree/branch**, and delivered as a **reviewable diff/PR** revertible by `git revert`.
 - G4. **Interactive graph editor.** Users add/remove/reorder/swap nodes and produce a **new Variant
-  Spec** (new `config_hash`, lineage to the parent), every edit validated through the typed-contract
-  check before it can be committed.
+  Spec** (new `config_hash`, lineage to the parent) **plus a reviewable source diff**, every edit
+  validated through the typed-contract check before it can be committed.
 - G5. **The unhappy path is legible (designed first).** An invalid reordering surfaces the contract
   mismatch, previews the auto-inserted adapter when one exists, and explains *what would break* when
   none does — the user is never left with a silently-broken graph.
@@ -116,10 +130,13 @@ capped-confidence candidates awaiting P5. P4 eval-set generator that already shi
 - **Inference of a node's `io_contract` where static analysis cannot** — P5 consumes the contracts as
   discovered (permissive where P0/P1 left them permissive) and *refines* them from observed trace
   shapes additively; it does not add a new discovery language or synthesizer.
-- **LLM-authored adapter code that executes arbitrary transforms** — P5 draws adapters only from a
-  **typed adapter catalog** (rename, projection, wrap/unwrap, default-fill, declared format
-  coercion); free-form generated transform code is out of scope (and would itself need P3 sandboxing
-  + P5.5 verification).
+- **LLM-authored, free-form adapter transform code** — P5 draws adapters only from a **typed adapter
+  catalog** (rename, projection, wrap/unwrap, default-fill, declared format coercion), each emitting a
+  fixed, deterministic codemod; free-form generated transform code beyond the catalog is out of scope
+  (and would itself need P3 sandboxing + P5.5 verification).
+- **Autonomous merge of a generated PR** — P5 *opens* reviewable diffs/PRs that a human approves;
+  merging without human approval is **P6** (Autonomous). Below that level, nothing reaches the default
+  branch without human approval and the build + eval verification gate.
 - **New metric-set definitions** — P5 *wires* confirmed patterns to the metric-sets P3.5/P4 already
   defined; it does not author new metrics.
 
@@ -192,20 +209,33 @@ These map 1:1 to the OpenSpec requirements under
   mismatching edge as coherent without either an adapter or a rejection.
 - FR3. Where a mismatch is **adaptable**, the system SHALL synthesize an **adapter node** from the
   typed adapter catalog (field rename, projection, wrap/unwrap, default-fill, declared format
-  coercion), insert it on the edge in the resulting Variant Spec, and represent it as an **explicit,
-  inspectable node** carrying its own `io_contract` — not a hidden coercion.
+  coercion), insert it on the edge in the resulting Variant Spec, and **materialize it as a generated,
+  reviewable source change** (a deterministic codemod that inserts the adapter's code and rewires the
+  call sites) — represented as an **explicit, inspectable node** carrying its own `io_contract`, not a
+  hidden runtime coercion.
 - FR4. An adapter SHALL itself be validated: its `input_schema` SHALL be satisfied by the upstream
   producer and its `output_schema` SHALL satisfy the downstream consumer; the system SHALL NOT insert
   an adapter that would silently **drop a field the consumer requires** or lose data without flagging
-  the loss.
+  the loss, and the generated code change SHALL **build**.
 - FR5. **No silently-broken reorder.** When a proposed ordering contains an **incoherent** edge with
-  no admissible adapter, the system SHALL **reject** the ordering with a typed diagnostic that names
-  the producer node, the consumer node, and the specific schema field(s) that fail to match, and
-  SHALL NOT persist the incoherent ordering as a runnable Variant Spec.
+  no admissible adapter, the system SHALL **reject** the ordering — *before any codemod is generated* —
+  with a typed diagnostic that names the producer node, the consumer node, and the specific schema
+  field(s) that fail to match, and SHALL NOT persist the incoherent ordering as a runnable Variant Spec
+  or generate any source transformation for it.
 - FR6. A coherent ordering — including one made coherent by inserted adapters — SHALL produce a new
   Variant Spec with a new `config_hash` whose node I/O is guaranteed to pass the **same** typed
-  contract the P2 Executor enforces at runtime, so static validation and runtime enforcement never
-  disagree.
+  contract the P2 Executor enforces at runtime (on the **transformed** working copy), so static
+  validation and runtime enforcement never disagree.
+- FR6a. **Apply-by-source-transformation (ADR-001).** Applying a coherent Variant Spec SHALL mean
+  generating a **deterministic, AST-level source transformation (codemod)** that rewrites the affected
+  call sites / node wiring to match the spec — not resolving config through a runtime shim. The
+  transform SHALL be **deterministic** (same `config_hash` + same source → byte-identical, content-hashed
+  diff), **build-preserving** (a codemod that fails to compile/build the target SHALL be rejected before
+  it is proposed — no broken diff reaches the user), **behavior-preserving except for the intended
+  change** (only the reordered wiring + any inserted adapter move), applied to an **isolated
+  worktree/branch** (never the user's working tree in place), and delivered as a **reviewable diff/PR**
+  revertible by a single `git revert`. Below the P6 Autonomous level, no diff merges to the default
+  branch without human approval and the build + eval verification gate.
 - FR7. The validator SHALL be a **pure, deterministic** function of the two schemas and the adapter
   catalog: the same ordering over the same IR SHALL yield the same coherent/adaptable/incoherent
   verdict and the same inserted adapters every time.
@@ -213,13 +243,16 @@ These map 1:1 to the OpenSpec requirements under
 **Re-arrangement (`rearrangement`)**
 - FR8. The graph editor SHALL expose the Workflow IR and let a user **add, remove, reorder, and swap**
   nodes, producing a **candidate** new Variant Spec that is **not committed** until it passes
-  typed-contract validation.
-- FR9. Every edit SHALL be validated through the `typed-contracts` check **before commit**; an edit
-  that yields an incoherent, un-adaptable ordering SHALL NOT be silently committed.
+  typed-contract validation; commit generates the reviewable source diff, not a runtime shim update.
+- FR9. Every edit SHALL be validated through the `typed-contracts` check **before commit** (and
+  therefore before any codemod is generated); an edit that yields an incoherent, un-adaptable ordering
+  SHALL NOT be silently committed and SHALL NOT produce a source diff.
 - FR10. **The invalid state is legible (unhappy path, first-class).** When an edit yields a mismatch,
   the editor SHALL surface the contract mismatch (the two nodes and the specific fields), SHALL
-  **preview the auto-inserted adapter** when the mismatch is adaptable, and SHALL **explain what would
-  break** when it is not — in plain language attached to the offending edge, not a generic error.
+  **preview the auto-inserted adapter and the source change it would generate** when the mismatch is
+  adaptable, and SHALL **explain what would break** when it is not — in plain language attached to the
+  offending edge, not a generic error; an invalid reorder is legible as a **rejected or adapted diff
+  that is never applied**.
 - FR11. When an adapter can bridge a mismatch, the editor SHALL show the adapter it would insert and
   require the user to **accept or reject** it; the workflow SHALL never be committed in a broken state
   whether the user accepts or declines.
@@ -229,7 +262,9 @@ These map 1:1 to the OpenSpec requirements under
 - FR13. The editor SHALL remain **responsive on large IRs** (virtualized/canvas rendering, incremental
   re-validation of only the affected edges) so editing a large graph does not block the UI.
 - FR14. A committed edit SHALL produce a new Variant Spec with **lineage to the parent** and a diff,
-  so the arrangement can be compared against its parent on the P4 leaderboard.
+  so the arrangement can be compared against its parent on the P4 leaderboard, **and** a **reviewable
+  source diff (an AST-level codemod rewriting node wiring)** that must **build** before it is proposed
+  and is applied on an isolated worktree/branch, never the user's working tree in place (FR6a).
 
 **Dynamic tracing (`dynamic-tracing`)**
 - FR15. An **OTel-style interceptor** SHALL wrap the SDK entrypoints in the signature registry and log
@@ -273,7 +308,15 @@ These map 1:1 to the OpenSpec requirements under
 - **Static/runtime contract parity.** The schema-compatibility rule the validator uses is the **same**
   rule the P2 Executor enforces at runtime (FR6); a Variant Spec the validator accepts SHALL NOT halt
   on a typed-contract violation at runtime, and one it rejects SHALL NOT be runnable. Tested by
-  running a validator-accepted reorder end-to-end and asserting no contract halt.
+  applying a validator-accepted reorder as a source diff and running the transformed copy end-to-end and
+  asserting no contract halt.
+- **Source-transformation safety (first-class, ADR-001).** Applying an arrangement is a **deterministic,
+  AST-level codemod** (same `config_hash` + source → byte-identical, content-hashed diff), **build-
+  preserving** (a codemod that fails to build the target is rejected before it is proposed — no broken
+  diff reaches the user), **behavior-preserving except for the intended change**, applied to an
+  **isolated worktree/branch** (never the user's tree in place), delivered as a **reviewable diff/PR**,
+  and revertible by a single `git revert`. Tested with a build-breaking codemod (rejected, not applied)
+  and a re-generation determinism check.
 - **Interceptor overhead bounded.** The dynamic-tracing interceptor adds ≤ a configured overhead
   budget (target < 5% wall-clock and no added provider calls) to the traced run and never blocks it;
   logging is async and best-effort so a logging failure never fails the run.
@@ -305,11 +348,14 @@ graph TD
   CAT[Typed adapter catalog] --> VAL
   VAL -->|coherent| VS[(New Variant Spec<br/>+ config_hash + lineage)]
   VAL -->|adaptable| ADP[Insert explicit adapter node] --> VS
-  VAL -->|incoherent| REJ[Reject + typed diagnostic<br/>producer, consumer, fields]
+  VAL -->|incoherent| REJ[Reject + typed diagnostic<br/>producer, consumer, fields<br/>no codemod generated]
   REJ -.->|legible invalid-state UX| ED
-  ADP -.->|adapter preview: accept/reject| ED
+  ADP -.->|adapter + generated-diff preview: accept/reject| ED
 
-  VS --> RUN[P2 Runtime<br/>Executor enforces same contract]
+  VS --> XF[Source-transformation engine<br/>deterministic AST codemod<br/>build-preserving gate]
+  XF -->|build fails| REJT[Reject transform<br/>no broken diff]
+  REJT -.->|rejected-diff UX| ED
+  XF -->|reviewable diff/PR<br/>isolated worktree| RUN[P2 Runtime<br/>runs transformed copy<br/>Executor enforces same contract]
   RUN --> INT[OTel-style interceptor<br/>every LLM call + inputs + stack]
   INT --> TR[(Traces + P2.5 spans)]
   TR --> REC[Reconciler]
@@ -328,8 +374,11 @@ graph TD
   runtime-only edges); `behavioral_label` (subgraph_ref → pattern, `source = behavioral`, evidence
   ref, confidence); `anti_pattern` (subgraph_ref → kind, evidence ref). The `io_contract` schemas
   live in the IR (P0) — P5 reads them, and writes refined schemas back additively.
-- **Object store** — logged call inputs, call stacks, adapter definitions, and reconciliation reports,
-  content-hashed; DB holds hashes + tags only. No prompt/PII inline.
+- **Object store** — logged call inputs, call stacks, adapter definitions, generated diffs/codemods, and
+  reconciliation reports, content-hashed; DB holds hashes + tags only. No prompt/PII inline.
+- **Worktree pool / build cache (ADR-001)** — transforms apply to isolated git worktrees/branches; the
+  Runtime manages a working-copy + build cache per variant so the transformed copy (not a shimmed run) is
+  what is measured; the generated diff/PR is the audit trail and `git revert` the rollback.
 - **Span store / TSDB (P2.5)** — the spans the interceptor correlates to; the interceptor emits, it
   does not re-store.
 
@@ -338,9 +387,12 @@ graph TD
   same predicate the P2 Executor uses.
 - `ValidateOrdering(ir, ordering, catalog) → {coherent | adapted(adapters) | rejected(diagnostics)}`
   — pure, deterministic, total over all edges.
-- `Adapter{kind, in_schema, out_schema, apply}` from a fixed **catalog**; each carries its own
-  `io_contract`.
-- `Editor.Commit(edit) → VariantSpec | InvalidState(mismatch)` — never commits a broken spec.
+- `Adapter{kind, in_schema, out_schema, emit_codemod}` from a fixed **catalog**; each carries its own
+  `io_contract` and emits a deterministic codemod.
+- `GenerateTransform(ir, variant_spec, source) → Diff | RejectedTransform(build_error)` — deterministic
+  AST-level codemod; build-preserving; applied to an isolated worktree; reviewable diff/PR (ADR-001).
+- `Editor.Commit(edit) → {VariantSpec, ReviewableDiff} | InvalidState(mismatch) | RejectedTransform` —
+  never commits a broken spec; never applies a diff that won't build.
 - `Interceptor.wrap(entrypoint) → logs {call, inputs_hash, stack, tags}` — passive, async.
 - `Reconcile(ir, trace) → ReconciliationReport{confirmed[], unconfirmed[], runtime_only[], invocations}`.
 - `ConfirmBehavioral(ir, trace) → {labels[], anti_patterns[]}` — upgrades P3.5 candidates; wires
@@ -369,13 +421,22 @@ P0 decision (designed once, early), now enforced. The discipline lands as:
   attribute an invocation to its definition.
 
 **Backend (co-lead) — *contracts outlive code; partial failure; harden.***
-Owns the **validator + adapter inserter** and the **interceptor + reconciler** as services.
+Owns the **validator + adapter inserter**, the **source-transformation engine** (ADR-001), and the
+**interceptor + reconciler** as services.
 - *Contracts outlive code.* The adapter catalog is a versioned, additive contract; an inserted adapter
   carries its own `io_contract` and is validated like any node (FR4) — the system never trusts an
-  adapter it hasn't type-checked. No adapter silently drops a required field.
-- *Fail closed.* An incoherent ordering is **rejected**, not best-effort-run (FR5) — the same
-  fail-closed posture as the P2 Loader aborting on a dangling ref. The incoherent Variant Spec is
-  never persisted as runnable.
+  adapter it hasn't type-checked. No adapter silently drops a required field, and each adapter emits a
+  deterministic codemod rather than a runtime coercion.
+- *Apply is a source transformation, not a shim (ADR-001).* A coherent Variant Spec is applied by
+  generating a **deterministic, AST-level codemod** that rewrites the call sites / node wiring — the
+  same `config_hash` + source yields a byte-identical diff. The transform is **build-preserving** (a
+  codemod that won't build is rejected before it is proposed — no broken diff), behavior-preserving
+  except for the intended change, applied to an isolated worktree, and delivered as a reviewable PR
+  (`git revert` = rollback). This resolves the compiled-language feasibility hole and makes the eval
+  harness measure the code that actually ships (FR6a).
+- *Fail closed.* An incoherent ordering is **rejected** *before any codemod is generated*, not
+  best-effort-run (FR5) — the same fail-closed posture as the P2 Loader aborting on a dangling ref. The
+  incoherent Variant Spec is never persisted as runnable and no transform is produced for it.
 - *Partial failure in tracing.* The interceptor is **passive and async** (FR22): a logging failure
   never fails the traced run, and instrumentation never alters outputs — otherwise the evidence is
   worthless. Reconciliation tolerates a partial trace (marks unobserved candidates *unconfirmed*, not
@@ -388,10 +449,11 @@ Owns the **validator + adapter inserter** and the **interceptor + reconciler** a
 
 **Frontend (co-lead) — *match the codebase, smallest correct change, a11y & perf are requirements.***
 Owns the **interactive graph editor** and its states.
-- *The invalid state is a first-class state.* Loading / valid / **adapter-inserted** / **rejected**
-  are modeled explicitly per edit; the editor reads the validator's verdict as truth and never renders
-  a committed-but-broken graph. The rejected state is attached to the **specific offending edge** with
-  the mismatching fields named — not a global toast.
+- *The invalid state is a first-class state.* Loading / valid / **adapter-inserted** (with a preview of
+  the source diff it would generate) / **rejected** / **rejected-transform** (the codemod would not
+  build) are modeled explicitly per edit; the editor reads the validator's verdict as truth and never
+  renders a committed-but-broken graph or applies a broken diff. The rejected state is attached to the
+  **specific offending edge** with the mismatching fields named — not a global toast.
 - *Accessibility as a gate.* Every edit — add/remove/reorder/swap — is keyboard-operable; controls are
   labeled; focus is managed across a drag/reorder; the validation verdict is announced to a screen
   reader (FR12). The adapter-inserted and rejected states are distinct and **not color-only**.
@@ -399,8 +461,9 @@ Owns the **interactive graph editor** and its states.
   affected edges (< 200 ms), not the whole graph — the node canvas stays responsive on hundreds of
   nodes (FR13).
 - *Verify before done.* Drive the editor against a live IR: reorder into an incoherent state and
-  confirm it is blocked + legible; reorder into an adaptable state and confirm the adapter previews and
-  the committed spec runs without a runtime contract halt.
+  confirm it is blocked + legible with **no diff generated**; reorder into an adaptable state and confirm
+  the adapter + its **generated diff** preview, that the committed reorder emits a **reviewable diff that
+  builds**, and that the transformed working copy runs without a runtime contract halt.
 
 **Product (co-lead) — *design the unhappy path first; content is the interface; name the tradeoff.***
 Owns the **re-arrangement UX**, explicitly the riskiest interaction in the product.
@@ -408,14 +471,20 @@ Owns the **re-arrangement UX**, explicitly the riskiest interaction in the produ
   **invalid reorder**. The mismatch must be legible: *which* two nodes, *which* fields, and *what*
   breaks. When an adapter can bridge, the UX offers it and shows exactly what it inserts; when nothing
   can, the UX explains why and blocks the commit. "Drag to reorder" is never allowed to silently
-  produce a broken workflow — this is the phase's product thesis (FR5, FR10).
+  produce a broken workflow — nor a broken **diff**: a reorder whose codemod won't build is surfaced as
+  a rejected diff, never applied (ADR-001). This is the phase's product thesis (FR5, FR6a, FR10).
+- *PR-native mental model.* An applied arrangement is a **reviewable pull request** against the user's
+  repo — the model developers already trust from Dependabot/Renovate/coding agents — not zero-code-change
+  "magic." The UX previews the exact source change, and git history + `git revert` are the audit trail
+  and rollback the user already understands.
 - *Content is the interface.* An adapter must be named for what it does ("insert adapter: rename
   `answer`→`response`"), a rejection must state the concrete breakage ("node *Formatter* requires
   field `summary`, which *Router* does not produce"), and a confirmed **anti-pattern** must show its
   evidence (the iterations where quality didn't move), not just a label.
-- *Name the tradeoff.* An inserted adapter is a real change to data flow — the UX names it as such and
-  attributes it, so the user knows the arrangement they're comparing includes an adapter. A
-  refined-from-traces schema that tightens coherence is surfaced, not silent.
+- *Name the tradeoff.* An inserted adapter is a real change to data flow — and now a real change to
+  source — the UX names it as such, attributes it, and shows the diff it generates, so the user knows the
+  arrangement they're comparing includes an adapter. A refined-from-traces schema that tightens coherence
+  is surfaced, not silent.
 - *Journey.* Import → inspect graph → **re-arrange (with the safety rails above)** → run on the P4
   harness → compare. Designs the reconciliation-report moment ("here's what actually ran vs. what we
   discovered") as a legible screen.
@@ -476,6 +545,9 @@ Owns the **interceptor instrumentation** as an operational concern.
 | "Drag to reorder" silently ships a broken workflow | System Designer / Product | Ordering-coherence verdict is total over all edges; an incoherent, un-adaptable reorder is **rejected** with named producer/consumer/fields, never persisted as runnable (FR1, FR5); tested with a known-incoherent reorder |
 | Validator accepts an ordering the runtime then halts on | System Designer / Backend | `Satisfies` is the **same predicate** the P2 Executor enforces (FR6); test runs a validator-accepted reorder end-to-end and asserts no contract halt |
 | An adapter silently drops a required field / loses data | Backend | Adapters drawn from a typed catalog; each carries its own `io_contract` and is validated; no adapter that drops a consumer-required field without flagging the loss (FR3, FR4) |
+| A generated codemod produces a broken diff (won't build / incidental edits) | Backend | Build-preserving + behavior-preserving gate: a codemod that fails to build the target is **rejected before it is proposed**; the diff touches only reordered wiring + any adapter; applied on an isolated worktree, delivered as a reviewable PR, reverted with `git revert` (FR6a) |
+| Applied diff is non-deterministic / not reproducible | System Designer / Backend | Deterministic AST-level transform: same `config_hash` + same source → byte-identical, content-hashed diff (FR6a, FR7) |
+| A bad change reaches the user's default branch unreviewed | Product / DevOps | Every change is a reviewable diff/PR; below P6 Autonomous nothing merges without human approval + the build + eval verification gate (FR6a) |
 | Permissive P0 schemas admit incoherent orderings as "coherent" | System Designer | Refine schemas from observed trace shapes additively (dynamic tracing tightens the contract); surface which nodes still carry permissive schemas |
 | Interceptor alters the traced run's behavior/outputs → invalid evidence | Backend / DevOps | Interceptor is passive + async; a logging failure never fails the run; assert identical outputs traced vs. untraced (FR22) |
 | Static analysis missed a runtime-only edge → wrong graph | AI / Backend | Reconciler flags runtime-only edges/nodes and adds them additively; unobserved candidates marked *unconfirmed*, not deleted (FR16, FR17) |
@@ -494,13 +566,18 @@ Owns the **interceptor instrumentation** as an operational concern.
   inputs (a runtime-only edge static analysis misses); (e) a reflection loop with a variant that
   **never improves** across iterations (anti-pattern).
 - **Typed-contract tests.**
-  - A reorder that makes the consumer precede its data producer → **rejected**, diagnostic names both
-    nodes + the missing field; the spec is **not** persisted as runnable.
+  - A reorder that makes the consumer precede its data producer → **rejected** *before any codemod is
+    generated*, diagnostic names both nodes + the missing field; the spec is **not** persisted as
+    runnable and **no diff** is produced.
   - A reorder bridgeable by a rename → **adapter inserted** as an explicit node with its own
-    `io_contract`; the committed spec **runs end-to-end without a runtime contract halt** (static/
-    runtime parity).
+    `io_contract`, emitted as a **reviewable diff that builds**; the transformed working copy **runs
+    end-to-end without a runtime contract halt** (static/runtime parity).
   - An adapter that would drop a consumer-required field → **refused**, not inserted.
   - Determinism: the same reorder over the same IR yields the same verdict + same adapters twice.
+  - **Source-transformation (ADR-001):** a coherent reorder → **byte-identical diff** on re-generation; a
+    codemod that fails to build → **rejected before proposal**, not applied; the change is applied on an
+    isolated worktree (user tree untouched) and reverts cleanly with `git revert`; the diff touches only
+    reordered wiring + any inserted adapter.
 - **Re-arrangement UX tests.**
   - Drag into an incoherent state → the offending **edge** shows the mismatch (both nodes, the
     fields) and the commit is blocked; a screen reader announces "rejected".
@@ -536,11 +613,14 @@ Owns the **interceptor instrumentation** as an operational concern.
       broken), naming the producer, consumer, and mismatching field(s); the incoherent spec is not
       runnable.
 - [ ] An **adaptable** mismatch results in an **explicit auto-inserted adapter node** (from the typed
-      catalog, carrying its own `io_contract`); the committed spec **runs without a runtime contract
-      halt** (static/runtime parity).
+      catalog, carrying its own `io_contract`), materialized as a **reviewable diff that builds**; the
+      transformed working copy **runs without a runtime contract halt** (static/runtime parity).
 - [ ] No adapter is inserted that would **silently drop a consumer-required field**.
+- [ ] Applying a coherent arrangement generates a **deterministic, build-preserving, reviewable source
+      diff (codemod)** on an isolated worktree (ADR-001); a codemod that won't build is **rejected before
+      proposal**, and the diff is byte-identical on re-generation and revertible by `git revert`.
 - [ ] The graph editor supports **add/remove/reorder/swap**, produces a **new Variant Spec** with
-      lineage, and validates every edit before commit.
+      lineage **plus a reviewable source diff**, and validates every edit before commit.
 - [ ] The **invalid-reorder UX is legible** — the mismatch is attached to the offending edge, the
       adapter is previewed when available, and the breakage is explained when not — **first-class**,
       not a generic error.
@@ -586,3 +666,10 @@ Owns the **interceptor instrumentation** as an operational concern.
 - Q7. **Adapter and refinement lineage on the leaderboard.** When a re-arranged variant includes an
   inserted adapter or a trace-refined schema, how is that surfaced in the P4 config lineage so a
   comparison is apples-to-apples?
+- Q8. **Codemod delivery granularity (ADR-001).** Is each committed arrangement one PR, or are related
+  reorders/adapters batched into a single reviewable PR to bound review burden? And what is the branch /
+  worktree lifecycle (per-variant, per-session) and build-cache eviction policy for the worktree pool?
+- Q9. **Transform robustness across source shapes.** When the discovered call site is behind a wrapper,
+  a macro, or generated code the codemod can't rewrite deterministically, is that surfaced as a
+  **rejected transform** (like a build failure) rather than a best-effort edit — keeping "no
+  silently-broken diff" total?

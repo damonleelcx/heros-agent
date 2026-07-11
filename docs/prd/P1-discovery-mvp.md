@@ -64,7 +64,7 @@ hand-written IR sample against the schema.
 ### Non-goals (deferred, with owning phase)
 - Dynamic tracing / runtime confirmation of the candidate graph → **P5**.
 - Languages other than Go (tree-sitter language-agnostic path) → post-M1, tracked separately.
-- Making nodes configurable / the shim / registries → **P2**.
+- Making nodes configurable / the source-transformation engine / registries → **P2**.
 - Executing any discovered code or repo tools → sandbox is **P3**; discovery never executes.
 - Pattern classification (Routing/Reflection/RAG labels) → **P3.5** (structural), **P5** (behavioral).
 - Resolving runtime-dynamic dispatch (which loop branch actually ran) → **P5**.
@@ -90,8 +90,9 @@ hand-written IR sample against the schema.
   variable-at-runtime, so that I am not misled into thinking an agent loop is a single call.
 
 **Downstream subsystems**
-- As the Config Layer, I want each node to carry its call-site location and typed I/O contract
-  fields, so that I can wrap it and resolve its parameters from a config store.
+- As the Config Layer, I want each node to carry a precise call-site source span (file, line, AST
+  path) and typed I/O contract fields, so that I can rewrite its parameters at the call site via a
+  deterministic AST transformation, delivered as a reviewable diff.
 - As the Pattern Classifier, I want edges to encode data/control flow and framework DAGs read
   declaratively, so that topology-based detection is reliable rather than inferred from call order.
 
@@ -111,9 +112,10 @@ These map 1:1 to the OpenSpec `discovery-engine` requirements.
   every declared entrypoint (package-qualified function/method) as an LLM call site of equal
   standing to registry hits, and map declared argument positions/names to node metadata fields.
 - **FR3 — Per-call-site metadata extraction.** For each detected call site Discovery SHALL extract
-  model arg, messages/prompt construction, tools/skills passed, and the upstream data flow feeding
-  the prompt — resolving each statically where possible and marking it `unresolved` (not omitting
-  it) where not.
+  a precise source span (file, line, AST path) sufficient for a later phase to rewrite the call
+  site, the model arg, messages/prompt construction, tools/skills passed, and the upstream data
+  flow feeding the prompt — resolving each statically where possible and marking it `unresolved`
+  (not omitting it) where not.
 - **FR4 — Call-graph construction.** Discovery SHALL build a directed call graph whose nodes are
   LLM-invoking functions/agent steps and whose edges represent data or control flow (output of A
   feeding input of B), and emit it as the Workflow IR node/edge set.
@@ -257,7 +259,7 @@ and flagged (FR8). No symbolic execution; no running code.
 
 - **Upstream (required):** P0/M0 — frozen `workflow-ir.schema.json`, typed I/O contract fields,
   static-node vs. runtime-invocation distinction, content-hash conventions, green CI.
-- **Downstream (this unblocks):** P2 (Config Layer wraps discovered nodes), P2.5 (Metrics key on
+- **Downstream (this unblocks):** P2 (Config Layer rewrites discovered call sites via source transformation), P2.5 (Metrics key on
   `node_id`), P3.5 (Pattern Classifier reads IR topology), P4+ (Eval/Analysis attribute per node),
   P5 (dynamic tracing consumes the ambiguity flags and confirms the candidate graph).
 

@@ -7,33 +7,50 @@ Cross-reference: product rationale in [`../../../docs/prd/P5.5-proposals-verific
 P5.5 is where the AI Engineer playbook's sharpest law becomes the deliverable itself: **analysis
 without verification is confident guessing**, and LLM-generated analysis is especially prone to it.
 P4.5 produces read-only diagnoses (node + dimension + typed cause + failing cases); P5.5 turns each
-into a **concrete Variant-Spec change** and **proves it before it surfaces**. Three forces shape
-every decision. First, a recommendation must be **executed, not asserted** — so every proposal is a
-Variant Spec the P2 runtime runs and the P4 harness scores. Second, an LLM-driven fix (a prompt
-rewrite) will **overfit** to the cases that generated it — so it must be tested on **held-out** cases
+into a **concrete source-code change** — an AST-level codemod delivered as a **reviewable diff / pull
+request** (ADR-001) — and **proves it before it surfaces**. Applying a Variant Spec no longer means a
+runtime shim resolving parameters; it means **rewriting the discovered call sites in source** so the
+verified code is the code that ships. Four forces shape every decision. First, a recommendation must
+be **executed, not asserted** — so every proposal is a Variant Spec whose transformed working copy
+the P2 runtime runs and the P4 harness scores. A related, ADR-mandated force: because editing user
+code is high blast radius, a proposal's diff must be **AST-level + deterministic**, **build-
+preserving** (a diff that fails to compile is rejected before it is surfaced), **behavior-preserving
+except for the intended change**, **applied to an isolated worktree/branch**, and **always
+reviewable** (nothing reaches the repo except as a diff a human reads). Second, an LLM-driven fix (a
+prompt rewrite) will **overfit** to the cases that generated it — so it must be tested on **held-out**
+cases
 and its gain must clear the **same statistical bar** the leaderboard uses. Third, a fix that helps
 its target can **harm elsewhere** ("fixed accuracy, tripled cost"; "fixed cluster A, broke cluster
 B") — so a **regression check** with a hard cost/latency budget stands between the proposal and the
 user. The phase reuses machinery already built: the P4 harness + `Stats.Compare` primitive are the
 verification engine, the P5 typed I/O contract validates candidate diffs, the P3.5/P5 pattern label
-gates operators, and the P2 queue + idempotency drive verification fan-out. The
-**nothing-unverified-surfaces** guarantee is the property the whole phase exists to enforce.
+gates operators, the P2 queue + idempotency drive verification fan-out, and the **source
+transformation engine** (ADR-001) is the codemod that turns a Variant Spec into the reviewable source
+diff. The **nothing-unverified-surfaces** guarantee — now joined by **nothing reaches the repo except
+as a reviewable, building diff** — is the property the whole phase exists to enforce.
 
-## Decision 1 — A proposal is a Variant Spec; the engine closes the loop
+## Decision 1 — A proposal is a Variant Spec *and* the source diff its codemod emits; the engine closes the loop
 
 **Decision.** A proposal is not an opinion about a change — it **is** a candidate Variant Spec,
-content-hashed (`config_hash`) like any other, produced by a **change operator** and executed by the
-existing runtime. Verification is therefore "run the P4 harness on `config_hash` X on the held-out
-split"; a verdict is attributable to an exact proposal × exact eval split.
+content-hashed (`config_hash`) like any other, produced by a **change operator**, **compiled to a
+concrete source diff by a deterministic AST-level codemod** (ADR-001), applied to an isolated
+worktree/branch, and executed there by the existing runtime. Verification is therefore "build the
+transformed working copy for `config_hash` X and run the P4 harness on the held-out split"; a verdict
+is attributable to an exact proposal × exact source diff × exact eval split.
 
 **Why.** This is the architectural backbone of the improvement engine (source-plan §1: *the engine
 must close the loop — every proposed improvement is itself a Variant Spec the runtime can execute, so
-recommendations are verified, not asserted*). Making the proposal a first-class Variant Spec means
-P5.5 adds operators + a gate on top of P4/P5 rather than a parallel evaluation path — and it is
-exactly what lets P6 turn this loop autonomous by adding search + guardrails, not a rewrite.
+recommendations are verified, not asserted*), now made faithful by ADR-001: the runtime executes the
+**real, transformed source** rather than a shimmed run, so measured cost/latency/quality reflect the
+code that would ship. Making the proposal a first-class Variant Spec *with a reviewable diff* means
+P5.5 adds operators + a codemod + a gate on top of P4/P5 rather than a parallel evaluation path — and
+it is exactly what lets P6 turn this loop autonomous by adding search + guardrails + PR merge, not a
+rewrite.
 
 **Alternative rejected.** Emitting a free-text "suggestion" the user manually translates into a spec —
-un-executable, un-verifiable, and the definition of "confident guessing."
+un-executable, un-verifiable, and the definition of "confident guessing." Also rejected (ADR-001): a
+runtime shim resolving parameters without editing source — infeasible for compiled targets (Go) and
+it measures a code path that will never ship.
 
 ## Decision 2 — Operators are pattern- and contract-gated
 
@@ -177,29 +194,56 @@ Verdict = {
 
 ## Decision 9 — Two automation levels; Assisted is gated on verification
 
-**Decision.** P5.5 ships **Advisory** (report a verified proposal; the human applies) and **Assisted**
-(one-click apply a verified proposal). **Assisted apply is offered only when `gate_result = pass`.**
-Apply **materializes** the candidate as a saved named Variant Spec (reversible); promotion to the
-workflow's *active* variant is an explicit separate step (Q7). Advisory is the default; Assisted is an
-explicit per-workflow opt-in.
+**Decision.** P5.5 ships **Advisory** (open a **draft PR** / report the verified diff; the human
+applies and merges) and **Assisted** (**one-click open the verified pull request**; the human still
+reviews and merges). **Assisted PR-open is offered only when `gate_result = pass`.** Apply
+**opens a pull request** carrying the codemod's source diff against the user's repo — it never merges
+to the default branch and never mutates the working tree in place; merge (and thus activation) is the
+human's explicit step (Q7). Rollback is `git revert`; the audit trail is git history. Advisory is the
+default; Assisted is an explicit per-workflow opt-in.
 
 **Why.** Source-plan §7: Advisory = engine reports, human applies; Assisted = one-click apply a
-verified proposal. Each level is a distinct **trust contract** (Product). Gating one-click apply on
+verified proposal. Each level is a distinct **trust contract** (Product). Gating one-click PR-open on
 the verdict means the convenience of Assisted never becomes a channel for shipping an unverified
-change. Keeping apply to *materialize* (not auto-promote) keeps Assisted reversible and leaves
-unattended promotion + the loop to **P6-Autonomous** — which adds the kill switch, audit trail, and
-rollback that unattended apply requires.
+change. Keeping apply to *open a PR the human merges* (not auto-merge) keeps Assisted reversible and
+leaves unattended **merge** + the loop to **P6-Autonomous** — which adds the kill switch, audit trail
+(git history + change ledger), and rollback (`git revert`) that unattended merge requires.
 
-**Boundary with P6.** P5.5 deliberately stops at human-initiated apply. The full unattended
-analyze → propose → verify → apply loop, automated search, and the operational guardrails (kill
-switch / audit trail / rollback / min-improvement + max-iteration gates) are **P6**.
+**Boundary with P6.** P5.5 deliberately stops at human-initiated apply (open a PR; the human merges).
+The full unattended analyze → propose → verify → apply loop (open **and merge** a PR), automated
+search, and the operational guardrails (kill switch / audit trail = git history + change ledger /
+rollback = `git revert` / min-improvement + max-iteration gates) are **P6**.
+
+## Decision 10 — The codemod is deterministic, build-preserving, isolated, and reviewable (ADR-001)
+
+**Decision.** The transform that turns a candidate Variant Spec into a source change is a
+**deterministic, AST-level codemod**, not string substitution: the same `config_hash` against the
+same source produces a **byte-identical diff**, content-hashed for reproducibility. It changes only
+the configured dimension(s) at the targeted call site(s) (**behavior-preserving except for the
+intended change**; no incidental edits). It is applied to an **isolated worktree/branch**, never the
+user's working tree in place. Before a candidate is surfaced, its diff must **build/compile the
+target**; a non-building diff is **rejected pre-surface** (build-preserving), so it never reaches the
+ranker or the verification gate. Every surfaced change is a **reviewable diff** delivered as a
+patch/PR; rollback is `git revert` and the audit trail is git history.
+
+**Why.** ADR-001 replaces the runtime shim — infeasible for compiled languages (Go, the P1 target)
+and measuring a code path that never ships — with source transformation, and makes editing user code
+a first-class, testable risk surface. Transform correctness is now the top risk, so determinism,
+build-preservation, behavior-preservation, isolation, reviewability, and clean rollback are
+**requirements with scenarios**, not aspirations. Making the build gate a **pre-surface** filter
+means a broken codemod is caught before a user (or the verification gate) ever sees it, mirroring the
+P4 gates-not-penalties discipline.
+
+**Alternative rejected.** String/regex substitution — non-deterministic across formatting, fragile,
+and unable to guarantee behavior preservation. Mutating the user's tree in place — no isolation, no
+clean rollback.
 
 ## Data model sketch
 
 ```
 proposal(proposal_id PK, diagnosis_id FK->P4.5, operator, base_variant_id,
-         candidate_config_hash, diff_blob_hash,
-         status ENUM('candidate','verifying','verified','gate_failed','constraint_excluded'),
+         candidate_config_hash, source_diff_blob_hash, build_status ENUM('unbuilt','built','build_failed'),
+         status ENUM('candidate','build_failed','verifying','verified','gate_failed','constraint_excluded'),
          created_at)
 proposal_evidence(proposal_id FK, case_id, role ENUM('generating','held_out'),
                   PRIMARY KEY(proposal_id, case_id))
@@ -213,23 +257,33 @@ rank_entry(proposal_id FK, ranking_context, expected_gain, cost_of_change, score
 -- verification runs are ordinary P4 eval_result rows tagged with candidate_config_hash,
 -- eval_set_hash, split, seed; P5.5 does NOT re-store traces.
 ```
-Candidate diffs, rendered candidate prompts, and prompt-optimizer grounding bundles (failing-case
-traces) live in the object store keyed by content hash; DB rows hold only the hash.
+Candidate **source diffs** (the codemod output), rendered candidate prompts, and prompt-optimizer
+grounding bundles (failing-case traces) live in the object store keyed by content hash; DB rows hold
+only the hash. A `build_failed` proposal is retained for diagnostics but is never ranked or surfaced.
 
 ## Key interfaces
 
 ```
 Operator(diagnosis, ir, registries) -> []CandidateVariantSpec   // catalog row; pattern-gated
+Codemod(candidate, source) -> SourceDiff                         // deterministic AST transform (ADR-001)
+BuildCheck(source_diff, worktree) -> {builds BOOL}               // pre-surface build/compile gate
 PromptOptimize(node, failing_cases) -> PromptEdit                // DSPy/self-refine, grounded
 ContractValidate(candidate) -> {ok, adapters[]}                  // reuses P5 typed-contract validator
 Rank(candidates, constraints) -> []RankedProposal                // gain/cost-of-change; constraint filter
-Verify(proposal, eval_set, split) -> Verdict                     // held-out auto-exec -> Stats.Compare -> regression
+Verify(proposal, eval_set, split) -> Verdict                     // build transformed copy -> held-out auto-exec -> Stats.Compare -> regression
 Stats.Compare(candidate, baseline, metric) -> {delta±ci, sig, verdict}   // REUSED from P4, unchanged
-Apply(proposal, level) -> VariantSpec                            // assisted requires gate_result = pass
+Apply(proposal, level) -> PullRequest                            // advisory: draft PR; assisted: verified PR (gate_result = pass); human merges
 ```
 
 ## Risks
 
+- **A bad codemod breaks the build or silently changes behavior** (ADR-001's top new risk) —
+  mitigated by the deterministic AST transform, the **pre-surface build gate** (a non-building diff is
+  rejected before ranking/verification), behavior-preservation to the targeted call site, and
+  isolated worktree application (Decision 10); tested with a candidate whose diff fails to compile.
+- **A change mutates the user's tree or is unreviewable** — mitigated by applying every transform to
+  an isolated worktree/branch and delivering it only as a reviewable diff/PR; rollback is `git revert`
+  (Decision 10).
 - **Unverified suggestion reaches the user** — mitigated by making "surface" a predicate over
   `gate_result = pass` (Decision 8); tested with a good-looking-but-gate-failing proposal.
 - **Prompt rewrite overfits its generating cases** — mitigated by held-out auto-execution; surfaced

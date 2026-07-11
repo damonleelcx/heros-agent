@@ -46,7 +46,7 @@ embedding plumbing is worth keeping.
 | `internal/skillindex/` | 374 | 🟡 ADAPT | **Skill Registry** → **P2/P3** | Fold into the registry; keep the scan/index logic |
 | `internal/promptlayer/store.go` (+ seed) | ~2 files | 🔵 SALVAGE | **Prompt Registry** → **P2** | Keep the prompt store/versioning; **delete `embedded_defaults/` (295 markdown skill files — old product content)** |
 | `internal/embeddings/` | 153 | 🟢 KEEP | Failure clustering + RAG → **P3/P4.5** | Naive + OpenAI embedders reused for the RAG context strategy and failure-cluster embedding |
-| `internal/harness/` | 1898 | 🟡 ADAPT (heavy) | **Runtime executor** → **P2/P5** | Salvage the graph-execution + critic-loop patterns, but it is hard-wired to a leader/follower/critic topology — **rebuild** for arbitrary Variant-Spec DAG execution through the shim |
+| `internal/harness/` | 1898 | 🟡 ADAPT (heavy) | **Runtime executor** → **P2/P5** | Salvage the graph-execution + critic-loop patterns, but it is hard-wired to a leader/follower/critic topology — **rebuild** for arbitrary Variant-Spec DAG execution over the transformed working copy in a sandbox |
 | `internal/platform/` | 106 | 🔴 REMOVE* | — | It only wires the old enterprise deps (nats/neo4j/qdrant/memorylayer); rewrite as thin dependency wiring for the new stack |
 
 \* keep the ~10-line "hold shared deps in a struct" shape if convenient; the contents go.
@@ -148,7 +148,7 @@ to salvage — build fresh:
 |---|:---:|---|
 | Workflow IR + metric event schema + lineage | P0 | `openspec/changes/p0-foundations/` |
 | Discovery Engine (Go `go/ast`) | P1 | `openspec/changes/p1-discovery-mvp/` |
-| Config Layer + shim + Variant Spec + Runtime executor | P2 | `openspec/changes/p2-config-runtime/` |
+| Config Layer + source-transformation engine + Variant Spec + Runtime executor | P2 | `openspec/changes/p2-config-runtime/` |
 | Metrics/OTel substrate + 3 stores | P2.5 | `openspec/changes/p2.5-metrics-observability/` |
 | Context strategies + Skill Registry + **Sandbox** | P3 | `openspec/changes/p3-context-skills-sandbox/` |
 | Pattern Classifier | P3.5 | `openspec/changes/p3.5-pattern-classifier/` |

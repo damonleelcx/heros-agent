@@ -17,6 +17,16 @@ machinery already built: the P0 `io_contract` and static-def↔invocation distin
 metric-set mapping, and the P4 generator's seed interface. Four leads, one thesis: **no
 silently-broken reorder**.
 
+**Apply model (ADR-001).** A Variant Spec — including a re-arranged one — is applied by **transforming
+the user's source code**: a deterministic, AST-level codemod that rewrites the affected call sites / node
+wiring, delivered as a **reviewable diff/PR**, applied to an isolated worktree/branch, and reverted with
+`git revert`. There is **no runtime shim** resolving config. This reshapes P5's outputs: the typed
+contract gates codemod generation (validation runs *before* a transform exists), adapter auto-insertion
+is a **generated code change**, and a committed graph edit emits a **reviewable source diff** that must
+**build** before it is proposed. The thesis extends: no silently-broken reorder **and** no
+silently-broken diff. Dynamic tracing is unaffected in kind — it instruments a real run of the
+*transformed* working copy to reconcile the static graph.
+
 ## Decision 1 — One schema-satisfaction predicate, shared by validator and runtime
 
 **Decision.** Ordering coherence is decided by a single predicate `Satisfies(output_schema,
@@ -59,6 +69,10 @@ wrap/unwrap, default-fill, declared format coercion. An inserted adapter is an *
 node** carrying its own `io_contract`; it is validated (its input satisfied by the upstream producer,
 its output satisfying the downstream consumer) exactly like a discovered node. No adapter that would
 **silently drop a field the consumer requires**, or lose data, is inserted without flagging the loss.
+Per ADR-001, inserting an adapter is realized as a **generated code change** — the catalog entry emits a
+deterministic codemod that inserts the adapter node's source and rewires the call sites — and the
+generated diff is **build-preserving** (rejected before proposal if it fails to build), never a hidden
+runtime coercion.
 
 **Why.** An auto-inserted adapter is a real change to data flow — hiding it would reintroduce the
 silent-breakage problem one layer down. Making it an explicit node with its own contract means the
@@ -125,9 +139,12 @@ rather than a single observation.
 and validates it through `typed-contracts` **before commit**. The states — loading / valid /
 **adapter-inserted** / **rejected** — are modeled explicitly; the editor renders the validator's verdict
 and **never commits a broken graph**. The **rejected** state is attached to the specific offending edge
-(both nodes + the mismatching fields), the **adapter-inserted** state previews the adapter and requires
-accept/reject, and both are keyboard-operable and screen-reader-announced. Only affected edges are
-re-validated per edit, on a virtualized canvas, so large IRs stay responsive.
+(both nodes + the mismatching fields), the **adapter-inserted** state previews the adapter **and the
+source diff it would generate** and requires accept/reject, and both are keyboard-operable and
+screen-reader-announced. Only affected edges are re-validated per edit, on a virtualized canvas, so large
+IRs stay responsive. Committing a coherent edit generates a **reviewable source diff** (ADR-001) that must
+**build** before it is proposed; a build-failure is a distinct rejected state (a rejected *diff*), never a
+silently-applied change.
 
 **Why.** This is the Product thesis — *design the unhappy path first*. The primary artifact is the
 invalid reorder, made legible: which two nodes, which fields, what breaks. Modeling invalid as a
@@ -154,6 +171,35 @@ contract and coherence tightens over time. Additivity keeps this safe.
 **Trade-off.** Refinement could *retroactively* make a previously-"coherent" ordering incoherent as the
 schema tightens — surfaced (which nodes still carry permissive schemas; which orderings a refinement
 would affect), never silent (Q3).
+
+## Decision 8 — Applying an arrangement is a source transformation, delivered as a reviewable diff (ADR-001)
+
+**Decision.** A coherent Variant Spec (re-arranged or adapter-augmented) is applied by generating a
+**deterministic, AST-level codemod** that rewrites the affected call sites / node wiring to match the
+spec — not by a runtime shim resolving config. The transform is: **deterministic** (same `config_hash` +
+same source → byte-identical diff, content-hashed); **build-preserving** (a codemod that fails to
+compile/build the target is rejected *before* it is proposed — no broken diff ever reaches the user);
+**behavior-preserving except for the intended change** (only the reordered wiring + any inserted adapter
+move); **isolated** (applied to a worktree/branch, never the user's working tree in place); and **always
+reviewable** (delivered as a diff/PR, revertible by a single `git revert`). Validation precedes
+generation: a rejected ordering yields no codemod at all.
+
+**Why.** The runtime-shim apply model was infeasible for compiled targets (no monkey-patch seam in a Go
+binary) and measured the wrong artifact (a shimmed run doesn't exercise shipping code). Rewriting source
+resolves the feasibility hole (Go-first is coherent) and makes every measurement faithful because the P2
+Runtime executes the *transformed* copy. It also gives the correctness spine a second, cheaper gate: even
+a schema-coherent reorder is blocked if its codemod won't build, so "no silently-broken reorder" becomes
+"no silently-broken diff." PR-native delivery reuses the developer mental model (Dependabot/Renovate) and
+gets audit + rollback from git for free.
+
+**Alternative rejected.** A runtime adapter/shim that resolves per-node config without editing source —
+the original plan's mechanism, superseded by ADR-001: infeasible on compiled languages and unfaithful in
+measurement.
+
+**Trade-off.** The Runtime must manage working copies + builds per variant (worktree pool, build cache),
+heavier than a shim but far more accurate; transform correctness becomes the top risk (mitigated by the
+build + eval verification gate before any proposal, Decision 1's static/runtime parity, and the
+behavior-preserving constraint).
 
 ## Data model sketch
 
@@ -183,8 +229,11 @@ store keyed by content hash; DB rows hold only the hash and the P0 tag set.
 Satisfies(output_schema, input_schema) -> {ok | mismatch(fields)}   // shared with the P2 Executor
 ValidateOrdering(ir, ordering, catalog) -> {coherent | adapted(adapters) | rejected(diagnostics)}
                                                                     // pure, deterministic, TOTAL
-Adapter{kind, in_schema, out_schema, apply}                         // fixed catalog; own io_contract
-Editor.Commit(edit) -> VariantSpec | InvalidState(mismatch)         // never commits broken
+Adapter{kind, in_schema, out_schema, emit_codemod}                  // fixed catalog; own io_contract; emits source
+GenerateTransform(ir, variant_spec, source) -> Diff | RejectedTransform(build_error)
+                                                                    // deterministic AST codemod; build-preserving; isolated worktree
+Editor.Commit(edit) -> {VariantSpec, ReviewableDiff} | InvalidState(mismatch) | RejectedTransform
+                                                                    // never commits broken; never applies a diff that won't build
 Interceptor.wrap(entrypoint) -> logs {call, inputs_hash, stack, tags}   // passive, async, redacted
 Reconcile(ir, trace) -> ReconciliationReport{confirmed[], unconfirmed[], runtime_only[], invocations}
 ConfirmBehavioral(ir, trace) -> {labels[], anti_patterns[]}         // rules-first; wires metric-set
@@ -199,7 +248,13 @@ PerPathTargets(reconciled_ir) -> []PathTarget                      // incl. runt
 - **Validator accepts an ordering the runtime halts on** — mitigated by sharing `Satisfies` with the
   P2 Executor (Decision 1); tested end-to-end (validator-accepted reorder → no contract halt).
 - **Adapter silently drops a required field / loses data** — mitigated by typed-catalog adapters that
-  carry + validate their own `io_contract` (Decision 3).
+  carry + validate their own `io_contract`, emitted as a build-preserving code change (Decisions 3, 8).
+- **A codemod produces a broken diff (doesn't build / incidental edits)** — mitigated by the
+  build-preserving + behavior-preserving gate: a transform that fails to build the target is rejected
+  before it is ever proposed; the diff is applied on an isolated worktree, delivered as a reviewable
+  PR, and reverted with `git revert` (Decision 8).
+- **Diff is non-deterministic across runs** — mitigated by deterministic AST-level transforms: same
+  `config_hash` + same source → byte-identical, content-hashed diff (Decision 8).
 - **Interceptor alters the run → invalid evidence** — mitigated by a passive, async, best-effort
   interceptor; assert identical outputs traced vs. untraced (Decision 4).
 - **Runtime-only edge missed / loop mistaken for n nodes** — mitigated by additive reconciliation +

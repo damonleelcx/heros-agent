@@ -3,7 +3,7 @@
 Product rationale: [`../../../../docs/prd/P2.5-metrics-observability.md`](../../../../docs/prd/P2.5-metrics-observability.md)
 §6 (FR1–FR19) and §7 (NFR1–NFR10).
 
-Covers auto-instrumentation at the shim/gateway, the operational metric taxonomy, mandatory
+Covers auto-instrumentation at the provider gateway, the operational metric taxonomy, mandatory
 full-tag emission, drillable spans, three-store routing keyed by `config_hash`, cardinality/label
 discipline, secrets-never-in-traces, the evaluator-plugin interface stub, degrade-safe idempotent
 emission, and the live run-monitoring view. Builds on P0's `metric-event-schema` and
@@ -11,9 +11,9 @@ emission, and the live run-monitoring view. Builds on P0's `metric-event-schema`
 
 ## ADDED Requirements
 
-### Requirement: Operational metrics SHALL be auto-instrumented at the shim/gateway with no user code
+### Requirement: Operational metrics SHALL be auto-instrumented at the provider gateway with no user code
 
-Collection SHALL be auto-instrumented at the shim/provider-gateway layer so that every provider call
+Collection SHALL be auto-instrumented at the provider gateway so that every provider call
 and every node execution emits its operational metrics and spans **without any user code, per-node
 annotation, or metrics API call by a workflow author**. No operational metric SHALL require a
 workflow author to instrument a call site; a node cannot be executed through the Runtime without
@@ -28,7 +28,7 @@ being instrumented.
 - **AND** the workflow author added zero lines to obtain it.
 
 #### Scenario: An un-instrumented node is not possible
-- **WHEN** a node executes through the shim/gateway
+- **WHEN** a node executes through the provider gateway
 - **THEN** its operational metrics and span are emitted by the substrate itself
 - **AND** there is no execution path through the Runtime that produces an un-instrumented provider call.
 

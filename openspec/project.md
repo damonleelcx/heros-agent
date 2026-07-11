@@ -31,8 +31,18 @@ for the source specification.
 - Diagnosis proposes; **verification decides** — no unverified LLM opinion drives an automated change.
 - Statistical honesty — multi-seed runs, confidence intervals; ties when CIs overlap.
 
+### Commercial model & entitlements
+
+- The billable **value metric** is **LLM spend under management (SUM)**, aggregated from the P2.5 cost metrics — metering is a read over the telemetry substrate, not a parallel counter.
+- **Plans-as-config** — plans are referenced by **name** (Free / Team / Business / Enterprise); prices and plan definitions live in configuration, **never in git**.
+- **Entitlements gate by plan _and_ automation level** — a feature is unlocked only when both the plan and the automation level allow it (Autonomous auto-merge is Enterprise-only).
+- Customers use their **own provider keys** — the platform **never resells tokens**.
+- **Only verified savings are billable** — gainshare/verified-savings billing draws exclusively on the P5.5 verified-delta ledger; unverified savings are never billed.
+
 ## OpenSpec workflow
 
 This project uses OpenSpec for spec-driven development. See [`AGENTS.md`](AGENTS.md) for the
 format and rules. Capabilities live in `specs/`; proposed changes live in `changes/`. Each
-delivery phase (P0–P6) is tracked as one change under `changes/`.
+delivery phase (P0–P8) is tracked as one change under `changes/`. **P8 — Admin & Operations
+Console** is the platform team's **internal operator** surface (its own admin identity + RBAC),
+distinct from the customer-facing Web dashboard.
