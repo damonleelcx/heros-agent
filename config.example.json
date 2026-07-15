@@ -1,0 +1,22 @@
+{
+  "//": "Template for config.json (which is GITIGNORED). Copy to config.json for local dev, or leave secrets out entirely and inject them via environment / a secrets manager. NEVER commit real secrets. See docs/decisions/secrets-baseline.md.",
+
+  "listen_addr": "127.0.0.1:8787",
+  "data_dir": "",
+
+  "openai_base_url": "https://api.openai.com/v1",
+  "openai_model": "gpt-4o-mini",
+  "//openai_api_key": "PREFER env OPENAI_API_KEY (secrets manager). Do not paste a real key here.",
+
+  "qdrant_url": "",
+  "//qdrant_api_key": "PREFER env QDRANT_API_KEY.",
+
+  "neo4j_uri": "",
+  "neo4j_user": "neo4j",
+  "//neo4j_password": "PREFER env NEO4J_PASSWORD.",
+
+  "//inbox_signing_key": "PREFER env HEROS_INBOX_SIGNING_KEY.",
+
+  "auth_mode": "off",
+  "metrics_enabled": false
+}

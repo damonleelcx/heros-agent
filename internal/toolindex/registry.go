@@ -152,7 +152,7 @@ func PushAllRegistryToDisk(db *sql.DB, dataDir string, p SyncPolicy) error {
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	type pair struct{ tenant, name string }
 	var list []pair
 	for rows.Next() {

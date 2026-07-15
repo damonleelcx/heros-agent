@@ -1,0 +1,12 @@
+{
+  "schema_version": "1.0.0",
+  "variant_id": "v3",
+  "node_id": "classify_intent@app/triage.py:classify:41",
+  "case_id": "case_00042",
+  "seed": 2,
+  "timestamp": "2026-07-15T14:03:11.482Z",
+  "config_hash": "3a7b9c1d2e4f60718293a4b5c6d7e8f90112233445566778899aabbccddeeff0",
+  "metric_name": "llm.latency.total_ms",
+  "value": 812.4,
+  "unit": "ms"
+}

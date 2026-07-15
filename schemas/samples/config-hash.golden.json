@@ -1,0 +1,47 @@
+{
+  "$comment": "Golden vectors for config_hash (task 1.6 / Backend 2.4). A test SHALL assert: (a) determinism — canonicalizing `resolved_config` and SHA-256'ing yields `config_hash`; (b) seed-invariance — `run_id`/`seed`/`timestamp` are absent from resolved_config, so runs under different seeds share one hash; (c) version-sensitivity — repointing base.nodes[0].prompt_ref @3 -> @4 yields variant_b.config_hash; (d) canonicalization — a key-reordered copy of base hashes identically to base.",
+  "algorithm": {
+    "canonicalization": "RFC 8785 (JSON Canonicalization Scheme): recursively sort object keys by UTF-16 code unit, no insignificant whitespace, UTF-8, shortest round-tripping number form.",
+    "hash": "SHA-256 over the UTF-8 canonical bytes, lowercase hex, full 64 chars; UI MAY display the first 12."
+  },
+  "base": {
+    "resolved_config": {
+      "ir_version": "1.0.0",
+      "nodes": [
+        {
+          "node_id": "classify_intent@app/triage.py:classify:41",
+          "model_ref": "openai/gpt-4o-mini",
+          "prompt_ref": "prompt://triage/classify@3",
+          "skill_refs": [],
+          "context_policy": "single_message",
+          "context_params": {},
+          "provider_params": { "max_tokens": 256, "temperature": 0 }
+        },
+        {
+          "node_id": "resolve_agent@app/triage.py:resolve:77",
+          "model_ref": "anthropic/claude-sonnet-5",
+          "prompt_ref": "prompt://triage/resolve@7",
+          "skill_refs": ["search_kb@2", "issue_lookup@1"],
+          "context_policy": "tool_loop",
+          "context_params": { "max_iters": 6 },
+          "provider_params": { "max_tokens": 1024, "temperature": 0.2 }
+        }
+      ],
+      "edges": [
+        {
+          "from_node_id": "classify_intent@app/triage.py:classify:41",
+          "to_node_id": "resolve_agent@app/triage.py:resolve:77",
+          "kind": "data"
+        }
+      ]
+    },
+    "canonical_json": "{\"edges\":[{\"from_node_id\":\"classify_intent@app/triage.py:classify:41\",\"kind\":\"data\",\"to_node_id\":\"resolve_agent@app/triage.py:resolve:77\"}],\"ir_version\":\"1.0.0\",\"nodes\":[{\"context_params\":{},\"context_policy\":\"single_message\",\"model_ref\":\"openai/gpt-4o-mini\",\"node_id\":\"classify_intent@app/triage.py:classify:41\",\"prompt_ref\":\"prompt://triage/classify@3\",\"provider_params\":{\"max_tokens\":256,\"temperature\":0},\"skill_refs\":[]},{\"context_params\":{\"max_iters\":6},\"context_policy\":\"tool_loop\",\"model_ref\":\"anthropic/claude-sonnet-5\",\"node_id\":\"resolve_agent@app/triage.py:resolve:77\",\"prompt_ref\":\"prompt://triage/resolve@7\",\"provider_params\":{\"max_tokens\":1024,\"temperature\":0.2},\"skill_refs\":[\"search_kb@2\",\"issue_lookup@1\"]}]}",
+    "config_hash": "5427bc41fdb34b639274457365ff2e71e00dee7cb800306acdb8729b96c13345",
+    "config_hash_display12": "5427bc41fdb3"
+  },
+  "variant_b_prompt_v4": {
+    "change": "base.nodes[0].prompt_ref: prompt://triage/classify@3 -> prompt://triage/classify@4",
+    "config_hash": "c13b5afda2b2d99da267fd8fee703d49e5bf371aa5efb541e5fd86b956678944",
+    "note": "Differs from base.config_hash: a bound registry version change MUST change the hash."
+  }
+}

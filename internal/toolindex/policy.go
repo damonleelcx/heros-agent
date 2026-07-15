@@ -71,6 +71,6 @@ func (p SyncPolicy) Normalize() SyncPolicy {
 }
 
 func (p SyncPolicy) diskToDBApprovedOnly() bool { return p.DiskToDB == "approved_only" }
-func (p SyncPolicy) conflictDB() bool            { return p.Conflict == "db" }
+func (p SyncPolicy) conflictDB() bool           { return p.Conflict == "db" }
 func (p SyncPolicy) conflictYAMLNonBlank() bool { return p.Conflict == "yaml_nonblank" }
 func (p SyncPolicy) pushApprovedOnly() bool     { return p.PushToDisk == "approved_only" }

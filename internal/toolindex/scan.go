@@ -26,16 +26,16 @@ type ToolSpec struct {
 
 // Entry is one indexed tool directory.
 type Entry struct {
-	RelPath      string   `json:"rel_path"`
-	TenantScope  string   `json:"tenant_scope"`
-	ToolID       string   `json:"tool_id"`
-	RiskTier     string   `json:"risk_tier"`
-	Skills       []string `json:"skills"`
-	Description  string   `json:"description"`
-	ScriptPath   string   `json:"script_path,omitempty"`
-	SHA256       string   `json:"sha256"`
-	MtimeUnix    int64    `json:"mtime_unix"`
-	Size         int64    `json:"size"`
+	RelPath     string   `json:"rel_path"`
+	TenantScope string   `json:"tenant_scope"`
+	ToolID      string   `json:"tool_id"`
+	RiskTier    string   `json:"risk_tier"`
+	Skills      []string `json:"skills"`
+	Description string   `json:"description"`
+	ScriptPath  string   `json:"script_path,omitempty"`
+	SHA256      string   `json:"sha256"`
+	MtimeUnix   int64    `json:"mtime_unix"`
+	Size        int64    `json:"size"`
 }
 
 func Scan(dataDir string) ([]Entry, error) {
@@ -127,7 +127,7 @@ func List(db *sql.DB) ([]Entry, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return scanRows(rows)
 }
 
@@ -138,7 +138,7 @@ func ListByTenant(db *sql.DB, tenantScope string) ([]Entry, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return scanRows(rows)
 }
 
@@ -149,7 +149,7 @@ func ListForTenantAndGlobal(db *sql.DB, tenantID string) ([]Entry, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return scanRows(rows)
 }
 

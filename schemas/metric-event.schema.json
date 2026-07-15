@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://heros-agent.dev/schemas/metric-event.schema.json",
+  "title": "Metric Event",
+  "description": "The tagging contract on every telemetry event emitted by any subsystem. Seven required, non-null tags make every event sliceable by configuration, node, case, and seed, and reproducible. Aligned with OpenTelemetry GenAI semantic conventions. Frozen at M0. See docs/prd/P0-foundations.md and docs/decisions/otel-genai-conventions (P0 DevOps).",
+  "x-frozen": { "milestone": "M0", "policy": "additive-only", "record": "docs/decisions/m0-review-and-freeze.md" },
+  "type": "object",
+  "$comment": "schema_version is the semver of THIS event schema. The seven tags are declared here as non-null (required + typed, no null). Non-null is enforced twice more downstream: at the emission boundary (reject before write) and in Postgres (NOT NULL columns) — this schema is the first of the three layers (FR9, NFR3).",
+  "required": [
+    "schema_version",
+    "variant_id",
+    "run_id",
+    "node_id",
+    "case_id",
+    "seed",
+    "timestamp",
+    "config_hash",
+    "metric_name",
+    "value",
+    "unit"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "description": "Semver of the metric-event schema. Adding an optional dimension bumps MINOR; a breaking change bumps MAJOR (NFR1).",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+
+    "variant_id": {
+      "type": "string",
+      "description": "TAG 1/7. Stable logical label for the variant. Low-cardinality => usable as a TSDB series label. Answers: which variant.",
+      "minLength": 1
+    },
+    "run_id": {
+      "type": "string",
+      "description": "TAG 2/7. Groups one execution batch. HIGH-cardinality => NOT a TSDB series label; span attribute / Postgres column only (NFR4). Answers: which run.",
+      "minLength": 1
+    },
+    "node_id": {
+      "type": "string",
+      "description": "TAG 3/7. References the static definition in the Workflow IR. Low-cardinality => usable as a TSDB series label. Answers: per-node attribution.",
+      "minLength": 1
+    },
+    "case_id": {
+      "type": "string",
+      "description": "TAG 4/7. The eval case. HIGH-cardinality (~200/run) => NOT a TSDB series label; span attribute / Postgres column only (NFR4). Answers: per-case / per-failure-cluster slicing.",
+      "minLength": 1
+    },
+    "seed": {
+      "type": "integer",
+      "description": "TAG 5/7. The seed pinning OUR inputs (not the provider's sampling). Low-cardinality (~5) => usable as a TSDB series label. Answers: multi-seed confidence intervals.",
+      "minimum": 0
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "TAG 6/7. RFC 3339 / ISO 8601 UTC event time. Excluded from config_hash. Answers: trend over time."
+    },
+    "config_hash": {
+      "type": "string",
+      "description": "TAG 7/7. SHA-256 (hex) over the canonicalized resolved configuration (see docs/decisions/config-hash-spec.md). Low-cardinality per run => usable as a TSDB series label. Answers: which exact, replayable configuration.",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+
+    "metric_name": {
+      "type": "string",
+      "description": "PAYLOAD. The measured metric (e.g. llm.latency.total_ms, llm.cost.output_usd, llm.tokens.completion). Low-cardinality dimension usable as a TSDB series label.",
+      "minLength": 1
+    },
+    "value": {
+      "type": "number",
+      "description": "PAYLOAD. The numeric measurement."
+    },
+    "unit": {
+      "type": "string",
+      "description": "PAYLOAD. Unit of value (ms, usd, tokens, count, ...). Required: a value without a unit is an incomplete payload and is rejected (FR10).",
+      "minLength": 1
+    },
+
+    "node_kind": {
+      "type": "string",
+      "description": "OPTIONAL extensible dimension. Adding it is a MINOR bump and does not break existing consumers (FR10, NFR1)."
+    },
+    "invocation_id": {
+      "type": "string",
+      "description": "OPTIONAL extensible dimension. HIGH-cardinality => span attribute / exemplar only, NEVER a TSDB series label (NFR4)."
+    }
+  }
+}

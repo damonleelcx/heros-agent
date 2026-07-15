@@ -15,15 +15,15 @@ import (
 
 // Entry is one indexed skill on disk (authoritative content lives in the file).
 type Entry struct {
-	RelPath      string   `json:"rel_path"`
-	TenantScope  string   `json:"tenant_scope"`
-	Name         string   `json:"name"`
-	Title        string   `json:"title"`
-	DependsOn    []string `json:"depends_on"`
-	Tools        []string `json:"tools"`
-	SHA256       string   `json:"sha256"`
-	MtimeUnix    int64    `json:"mtime_unix"`
-	Size         int64    `json:"size"`
+	RelPath     string   `json:"rel_path"`
+	TenantScope string   `json:"tenant_scope"`
+	Name        string   `json:"name"`
+	Title       string   `json:"title"`
+	DependsOn   []string `json:"depends_on"`
+	Tools       []string `json:"tools"`
+	SHA256      string   `json:"sha256"`
+	MtimeUnix   int64    `json:"mtime_unix"`
+	Size        int64    `json:"size"`
 }
 
 // ParseTenantScopeFromRel extracts tenant from index rel_path (skills/.../SKILL.md).
@@ -156,7 +156,7 @@ func List(db *sql.DB) ([]Entry, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return scanRows(rows)
 }
 
@@ -167,7 +167,7 @@ func ListByTenant(db *sql.DB, tenantScope string) ([]Entry, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return scanRows(rows)
 }
 
@@ -178,7 +178,7 @@ func ListForTenantAndGlobal(db *sql.DB, tenantID string) ([]Entry, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return scanRows(rows)
 }
 
