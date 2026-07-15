@@ -1,0 +1,106 @@
+name: CI
+
+# Green-CI gate for P0 (DevOps tasks 4.1, 4.2). Jobs call the SAME `make` targets a developer runs
+# locally, so "green locally" == "green in CI" (no drift). No step silent-fails: gofmt, schema
+# negative-fixtures, and DB constraints all fail the build loudly when violated.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    name: build · vet · fmt · test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: make go (build, vet, gofmt-check, test)
+        run: make go
+      - name: go.mod tidy check
+        run: make tidy-check
+
+  lint:
+    name: golangci-lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: golangci/golangci-lint-action@v7
+        with:
+          version: v2.12.2
+
+  schema:
+    name: schema-validation + contract proofs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: install validators
+        run: pip install --quiet jsonschema
+      # Fails the build if a valid sample is rejected OR a negative fixture (missing tag /
+      # missing io_contract) is accepted (task 4.2).
+      - name: make schema
+        run: make schema
+
+  db-proof:
+    name: postgres constraints + slices
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        # Ephemeral throwaway DB for the duration of the job. Passwordless (trust) auth so there is no
+        # credential literal to leak — mirrors the local proof harness (initdb --auth=trust).
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_DB: postgres
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGDATABASE: postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: install driver
+        run: pip install --quiet "psycopg[binary]"
+      # Apply the migration and prove NOT NULL / PK / FK / CHECK / idempotency fire, then that every
+      # P4/P4.5 slice is answerable — against a real Postgres (tasks 2.1, 3.1).
+      - name: constraint proofs
+        run: python3 db/migrations/postgres/prove_constraints.py
+      - name: slice proofs
+        run: python3 db/migrations/postgres/prove_slices.py
+
+  secret-scan:
+    name: gitleaks (no secrets in repo)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

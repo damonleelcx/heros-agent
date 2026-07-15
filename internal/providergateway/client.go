@@ -52,7 +52,7 @@ func ChatCompletion(ctx context.Context, baseURL, apiKey, model string, messages
 	if err != nil {
 		return "", nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	rb, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return "", nil, fmt.Errorf("openai %s: %s", resp.Status, string(rb))

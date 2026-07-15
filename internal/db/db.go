@@ -72,7 +72,7 @@ func ensureToolRegistryV2(d *sql.DB) error {
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var hasTenant bool
 	pkCols := 0
 	for rows.Next() {

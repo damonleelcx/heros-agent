@@ -1,0 +1,19 @@
+# gitleaks config for the CI secret-scan job (P0 task 4.4). Extends the default rule set (provider API
+# keys, tokens, private keys) and adds allowlists for placeholder values that MUST NOT trip the scan.
+title = "heros-agent secret scan"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Non-secret placeholders and templates that must not be flagged."
+paths = [
+  '''config\.example\.json''',        # placeholders only (keys live in env / secrets manager)
+  '''docs/decisions/secrets-baseline\.md''',
+  '''docs/decisions/otel-genai-conventions\.md''',
+]
+regexes = [
+  '''PREFER env''',                   # the template's guidance strings
+  '''from-secrets-manager''',         # test fixtures in config secretenv_test.go
+  '''from-file''',
+]

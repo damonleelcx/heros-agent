@@ -118,7 +118,7 @@ func ListPending(db *sql.DB, tenantID string, admin bool) ([]Proposal, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return scanProposalRows(rows)
 }
 
@@ -140,7 +140,7 @@ func ListRecent(db *sql.DB, tenantID string, admin bool, limit int) ([]Proposal,
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return scanProposalRows(rows)
 }
 

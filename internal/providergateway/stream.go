@@ -50,7 +50,7 @@ func ChatCompletionStream(ctx context.Context, baseURL, apiKey, model string, me
 	if err != nil {
 		return "", nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		rb, _ := io.ReadAll(resp.Body)
 		return "", nil, fmt.Errorf("openai stream %s: %s", resp.Status, string(rb))
@@ -80,7 +80,7 @@ func ChatCompletionStream(ctx context.Context, baseURL, apiKey, model string, me
 				Delta struct {
 					Content   string `json:"content"`
 					ToolCalls []struct {
-						Index    int `json:"index"`
+						Index    int    `json:"index"`
 						ID       string `json:"id"`
 						Type     string `json:"type"`
 						Function struct {

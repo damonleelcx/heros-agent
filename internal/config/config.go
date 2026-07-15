@@ -11,21 +11,21 @@ import (
 type Config struct {
 	ListenAddr       string `json:"listen_addr"`
 	DataDir          string `json:"data_dir"`
-	OpenAIBaseURL    string `json:"openai_base_url"`    // e.g. https://api.openai.com/v1
-	OpenAIAPIKey     string `json:"openai_api_key"`     // optional; harness degrades without it
-	OpenAIModel      string `json:"openai_model"`       // default chat model
-	CollectiveURL    string `json:"collective_url"`     // optional peer for sync proposals
-	NodeID           string `json:"node_id"`            // stable device id
+	OpenAIBaseURL    string `json:"openai_base_url"`     // e.g. https://api.openai.com/v1
+	OpenAIAPIKey     string `json:"openai_api_key"`      // optional; harness degrades without it
+	OpenAIModel      string `json:"openai_model"`        // default chat model
+	CollectiveURL    string `json:"collective_url"`      // optional peer for sync proposals
+	NodeID           string `json:"node_id"`             // stable device id
 	AllowHighRiskCLI bool   `json:"allow_high_risk_cli"` // if false, high-risk never runs without pending approval
 
 	// Enterprise infra (leave empty to use SQLite-only semantic + local graph tables).
-	QdrantURL        string `json:"qdrant_url"`         // e.g. http://127.0.0.1:6333
+	QdrantURL        string `json:"qdrant_url"` // e.g. http://127.0.0.1:6333
 	QdrantAPIKey     string `json:"qdrant_api_key"`
 	QdrantCollection string `json:"qdrant_collection"` // default heros_memory
 	EmbeddingModel   string `json:"embedding_model"`   // e.g. text-embedding-3-small when using OpenAI embeddings
 	EmbeddingDims    int    `json:"embedding_dims"`    // 0=auto (1536 with OpenAI path, else 128 naive)
 
-	Neo4jURI      string `json:"neo4j_uri"`       // neo4j://127.0.0.1:7687
+	Neo4jURI      string `json:"neo4j_uri"` // neo4j://127.0.0.1:7687
 	Neo4jUser     string `json:"neo4j_user"`
 	Neo4jPassword string `json:"neo4j_password"`
 	Neo4jDatabase string `json:"neo4j_database"` // default neo4j
@@ -34,15 +34,15 @@ type Config struct {
 
 	// JetStream: durable stream over heros.> (server must start nats with -js).
 	JetStreamEnabled     bool   `json:"jetstream_enabled"`
-	JetStreamStreamName  string `json:"jetstream_stream_name"`  // default HEROS
+	JetStreamStreamName  string `json:"jetstream_stream_name"`   // default HEROS
 	JetStreamMaxAgeHours int    `json:"jetstream_max_age_hours"` // default 168 (7d)
 
 	// Auth: "off" | "required". When required, /api/* needs X-API-Key or Bearer + tenant credentials.
-	AuthMode           string              `json:"auth_mode"`
-	TenantCredentials  []TenantCredential  `json:"tenant_credentials"`
+	AuthMode          string             `json:"auth_mode"`
+	TenantCredentials []TenantCredential `json:"tenant_credentials"`
 
 	// Observability
-	MetricsEnabled bool `json:"metrics_enabled"` // GET /metrics Prometheus text
+	MetricsEnabled  bool   `json:"metrics_enabled"`   // GET /metrics Prometheus text
 	InboxSigningKey string `json:"inbox_signing_key"` // optional HMAC secret for inbox payload verification
 
 	// ToolRegistrySync rules for tools/*/tool.yaml ↔ SQLite tool_registry (see toolindex.SyncPolicy).
@@ -61,9 +61,9 @@ type KnowledgeVault struct {
 	ExcludeGlobs       []string `json:"exclude_globs"`
 	PollSeconds        int      `json:"poll_seconds"` // 0 = no periodic reindex (still startup + POST /api/memory/vault/reindex)
 	FollowSymlinks     bool     `json:"follow_symlinks"`
-	AgentNotesSubdir   string   `json:"agent_notes_subdir"`    // relative to vault root; default Agent/heros-notes
-	VaultAppendEnabled bool     `json:"vault_append_enabled"`  // mirror role=note episodic writes into the vault
-	AgentNotesMode     string   `json:"agent_notes_mode"`      // daily | session (default daily)
+	AgentNotesSubdir   string   `json:"agent_notes_subdir"`   // relative to vault root; default Agent/heros-notes
+	VaultAppendEnabled bool     `json:"vault_append_enabled"` // mirror role=note episodic writes into the vault
+	AgentNotesMode     string   `json:"agent_notes_mode"`     // daily | session (default daily)
 }
 
 // ToolRegistrySync configures disk/registry merge behavior.
@@ -72,9 +72,10 @@ type KnowledgeVault struct {
 // push_to_disk: "all" | "approved_only" — POST /api/catalog/tools/registry-to-disk scope.
 //
 // Env overrides (non-empty wins over JSON; applied in Load for every process using config.Load):
-//   HEROS_TOOL_REGISTRY_SYNC_DISK_TO_DB
-//   HEROS_TOOL_REGISTRY_SYNC_CONFLICT
-//   HEROS_TOOL_REGISTRY_SYNC_PUSH_TO_DISK
+//
+//	HEROS_TOOL_REGISTRY_SYNC_DISK_TO_DB
+//	HEROS_TOOL_REGISTRY_SYNC_CONFLICT
+//	HEROS_TOOL_REGISTRY_SYNC_PUSH_TO_DISK
 type ToolRegistrySync struct {
 	DiskToDB   string `json:"disk_to_db"`   // default all
 	Conflict   string `json:"conflict"`     // default yaml
@@ -85,7 +86,7 @@ type ToolRegistrySync struct {
 type TenantCredential struct {
 	TenantID string `json:"tenant_id"`
 	APIKey   string `json:"api_key"`
-	Role     string `json:"role"` // admin | member
+	Role     string `json:"role"`   // admin | member
 	KeyID    string `json:"key_id"` // optional label for audit
 }
 
@@ -109,6 +110,7 @@ func Load(path string) (Config, error) {
 		if err != nil {
 			if os.IsNotExist(err) {
 				applyToolRegistrySyncEnv(&c.ToolRegistrySync)
+				applySecretEnv(&c)
 				return c, nil
 			}
 			return c, err
@@ -139,7 +141,35 @@ func Load(path string) (Config, error) {
 		c.AuthMode = "off"
 	}
 	applyToolRegistrySyncEnv(&c.ToolRegistrySync)
+	applySecretEnv(&c)
 	return c, nil
+}
+
+// applySecretEnv sources secrets from the environment (non-empty wins over the JSON file). This is the
+// secrets-management baseline (P0 task 4.4): a secrets manager injects these env vars into the process,
+// so provider/backing-service keys never need to live in a committed file. See
+// docs/decisions/secrets-baseline.md. Env var -> field:
+//
+//	OPENAI_API_KEY            -> OpenAIAPIKey
+//	QDRANT_API_KEY            -> QdrantAPIKey
+//	NEO4J_PASSWORD            -> Neo4jPassword
+//	HEROS_INBOX_SIGNING_KEY   -> InboxSigningKey
+func applySecretEnv(c *Config) {
+	if c == nil {
+		return
+	}
+	if v := strings.TrimSpace(os.Getenv("OPENAI_API_KEY")); v != "" {
+		c.OpenAIAPIKey = v
+	}
+	if v := strings.TrimSpace(os.Getenv("QDRANT_API_KEY")); v != "" {
+		c.QdrantAPIKey = v
+	}
+	if v := strings.TrimSpace(os.Getenv("NEO4J_PASSWORD")); v != "" {
+		c.Neo4jPassword = v
+	}
+	if v := strings.TrimSpace(os.Getenv("HEROS_INBOX_SIGNING_KEY")); v != "" {
+		c.InboxSigningKey = v
+	}
 }
 
 func applyToolRegistrySyncEnv(s *ToolRegistrySync) {

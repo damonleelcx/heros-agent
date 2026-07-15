@@ -1,0 +1,13 @@
+{
+  "//": "NEGATIVE fixture: all seven tags present, but the payload omits `unit`. A value without a unit is an incomplete payload (FR10) and MUST be rejected. Proves the gate can go red for a payload defect, not only a missing tag.",
+  "schema_version": "1.0.0",
+  "variant_id": "v3",
+  "run_id": "run_01J8Z9QK2C7M",
+  "node_id": "classify_intent@app/triage.py:classify:41",
+  "case_id": "case_00042",
+  "seed": 2,
+  "timestamp": "2026-07-15T14:03:11.482Z",
+  "config_hash": "3a7b9c1d2e4f60718293a4b5c6d7e8f90112233445566778899aabbccddeeff0",
+  "metric_name": "llm.latency.total_ms",
+  "value": 812.4
+}
