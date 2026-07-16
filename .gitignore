@@ -10,6 +10,7 @@
 /heros-mcp
 /heros-cli
 /heros
+/bin/
 *.exe
 
 # Crash dumps and local scratch

@@ -60,7 +60,7 @@ green.
 
 ---
 
-## Phase 1 — Discovery MVP (Go, static) · ~Weeks 3–7 · **Milestone M1**
+## Phase 1 — Discovery MVP (multi-language, static) · ~Weeks 3–9 · **Milestone M1**
 
 > Prove node extraction on a single language before generalizing. Static IR only.
 

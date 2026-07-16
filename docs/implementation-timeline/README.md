@@ -151,7 +151,7 @@ gantt
   axisFormat %s
   section Platform
   P0 Foundations (IR + event schema)      :p0, 0, 3w
-  P1 Discovery MVP (Go static)            :p1, 3, 4w
+  P1 Discovery MVP (multi-language static) :p1, 3, 6w
   P2 Config + Runtime                     :p2, 6, 5w
   P2.5 Metrics / OTel                     :p25, 9, 4w
   P3 Context + Skills + Sandbox           :p3, 12, 4w

@@ -1,0 +1,234 @@
+# Signature registry — the seed rows (design doc 04 §3). DATA, not code: add an SDK by adding a row.
+# `selector` is the call-selector chain AS WRITTEN at the call site, after the receiver/package root:
+#   client.Messages.New          -> "Messages.New"
+#   client.Chat.Completions.New  -> "Chat.Completions.New"
+#   client.CreateChatCompletion  -> "CreateChatCompletion"
+#   llm.GenerateContent          -> "GenerateContent"     (interface method; matched by import + selector)
+#   llms.GenerateFromSinglePrompt-> "GenerateFromSinglePrompt" (package func; matched by import-qualified root)
+version: "1.0.0"
+# All seed rows are Go (frontend #1). Per-language registries add rows with their own `language:` tag
+# (10.2); `default_language` applies to any row that omits `language`.
+default_language: go
+rows:
+  # 1. Anthropic — anthropic-sdk-go (official). Options struct; v1 drops the F() wrapper.
+  - id: anthropic.messages.new
+    import_path: github.com/anthropics/anthropic-sdk-go
+    symbol_kind: nested_service_method
+    selector: Messages.New
+    provider_hint: anthropic
+    arg_map:
+      model: { field: "params.Model", unwrap: ["anthropic.F"] }
+      prompt: { field: "params.Messages", unwrap: ["anthropic.F"] }
+      tools: { field: "params.Tools", unwrap: ["anthropic.F"] }
+  - id: anthropic.messages.newstreaming
+    import_path: github.com/anthropics/anthropic-sdk-go
+    symbol_kind: nested_service_method
+    selector: Messages.NewStreaming
+    streaming: true
+    provider_hint: anthropic
+    arg_map:
+      model: { field: "params.Model" }
+      prompt: { field: "params.Messages" }
+      tools: { field: "params.Tools" }
+
+  # 2. OpenAI — openai-go (official). Doubly-nested service.
+  - id: openai.chat.completions.new
+    import_path: github.com/openai/openai-go
+    symbol_kind: nested_service_method
+    selector: Chat.Completions.New
+    provider_hint: openai
+    arg_map:
+      model: { field: "params.Model" }
+      prompt: { field: "params.Messages" }
+      tools: { field: "params.Tools" }
+  - id: openai.chat.completions.newstreaming
+    import_path: github.com/openai/openai-go
+    symbol_kind: nested_service_method
+    selector: Chat.Completions.NewStreaming
+    streaming: true
+    provider_hint: openai
+    arg_map:
+      model: { field: "params.Model" }
+      prompt: { field: "params.Messages" }
+      tools: { field: "params.Tools" }
+
+  # 3. OpenAI — sashabaranov/go-openai (community; most common). Same local package name "openai" as
+  #    row 2 — disambiguated purely by import_path (doc 04 §2.3).
+  - id: sashabaranov.createchatcompletion
+    import_path: github.com/sashabaranov/go-openai
+    symbol_kind: client_method
+    selector: CreateChatCompletion
+    provider_hint: openai
+    arg_map:
+      model: { field: "req.Model" }
+      prompt: { field: "req.Messages" }
+      tools: { field: "req.Tools" }
+  - id: sashabaranov.createchatcompletionstream
+    import_path: github.com/sashabaranov/go-openai
+    symbol_kind: client_method
+    selector: CreateChatCompletionStream
+    streaming: true
+    provider_hint: openai
+    arg_map:
+      model: { field: "req.Model" }
+      prompt: { field: "req.Messages" }
+      tools: { field: "req.Tools" }
+
+  # 4. LangChain(Go) — interface-typed. Provider UNKNOWN at the call site; model often at construction/env.
+  - id: langchaingo.model.generatecontent
+    import_path: github.com/tmc/langchaingo/llms
+    symbol_kind: interface_method
+    selector: GenerateContent
+    provider_hint: ""
+    arg_map:
+      model: { option: "WithModel" }
+      prompt: { index: 1 }
+      tools: { option: "WithTools" }
+  - id: langchaingo.generatefromsingleprompt
+    import_path: github.com/tmc/langchaingo/llms
+    symbol_kind: package_func
+    selector: GenerateFromSinglePrompt
+    provider_hint: ""
+    arg_map:
+      model: { option: "WithModel" }
+      prompt: { index: 2 }
+      tools: { option: "WithTools" }
+
+  # 5. AWS Bedrock — bedrockruntime. Converse is analyzable; InvokeModel Body is an opaque []byte blob.
+  - id: bedrock.converse
+    import_path: github.com/aws/aws-sdk-go-v2/service/bedrockruntime
+    symbol_kind: client_method
+    selector: Converse
+    provider_hint: bedrock
+    arg_map:
+      model: { field: "input.ModelId", unwrap: ["aws.String"] }
+      prompt: { field: "input.Messages" }
+      tools: { field: "input.ToolConfig" }
+  - id: bedrock.conversestream
+    import_path: github.com/aws/aws-sdk-go-v2/service/bedrockruntime
+    symbol_kind: client_method
+    selector: ConverseStream
+    streaming: true
+    provider_hint: bedrock
+    arg_map:
+      model: { field: "input.ModelId", unwrap: ["aws.String"] }
+      prompt: { field: "input.Messages" }
+      tools: { field: "input.ToolConfig" }
+  - id: bedrock.invokemodel
+    import_path: github.com/aws/aws-sdk-go-v2/service/bedrockruntime
+    symbol_kind: client_method
+    selector: InvokeModel
+    provider_hint: bedrock
+    opacity: ["prompt", "model.params"]
+    arg_map:
+      model: { field: "input.ModelId", unwrap: ["aws.String"] }
+      prompt: { form: opaque }
+
+  # ---- Python (frontend #2, tree-sitter). Resolution is syntactic: import-presence + selector +
+  #      keyword string literals. `model=` is commonly a string literal (resolvable); `messages=` is a
+  #      list (unresolved, honestly flagged). ----
+  - id: py.anthropic.messages.create
+    language: python
+    import_path: anthropic
+    symbol_kind: client_method
+    selector: messages.create
+    provider_hint: anthropic
+    arg_map:
+      model: { name: "model" }
+      prompt: { name: "messages" }
+  - id: py.openai.chat.completions.create
+    language: python
+    import_path: openai
+    symbol_kind: client_method
+    selector: chat.completions.create
+    provider_hint: openai
+    arg_map:
+      model: { name: "model" }
+      prompt: { name: "messages" }
+  - id: py.langchain.invoke
+    language: python
+    import_path: langchain_core
+    symbol_kind: client_method
+    selector: invoke
+    provider_hint: ""
+    arg_map:
+      prompt: { name: "input" }
+  - id: py.langchain.chatopenai.invoke
+    language: python
+    import_path: langchain_openai
+    symbol_kind: client_method
+    selector: invoke
+    provider_hint: openai
+    arg_map:
+      prompt: { name: "input" }
+  - id: py.langchain.chatanthropic.invoke
+    language: python
+    import_path: langchain_anthropic
+    symbol_kind: client_method
+    selector: invoke
+    provider_hint: anthropic
+    arg_map:
+      prompt: { name: "input" }
+  - id: py.langgraph.invoke
+    language: python
+    import_path: langgraph
+    symbol_kind: client_method
+    selector: invoke
+    provider_hint: ""
+    arg_map:
+      prompt: { name: "input" }
+  - id: py.crewai.kickoff
+    language: python
+    import_path: crewai
+    symbol_kind: client_method
+    selector: kickoff
+    provider_hint: ""
+  - id: py.bedrock.invoke_model
+    language: python
+    import_path: boto3
+    symbol_kind: client_method
+    selector: invoke_model
+    provider_hint: bedrock
+    opacity: ["prompt"]
+    arg_map:
+      model: { name: "modelId" }
+  - id: py.bedrock.converse
+    language: python
+    import_path: boto3
+    symbol_kind: client_method
+    selector: converse
+    provider_hint: bedrock
+    arg_map:
+      model: { name: "modelId" }
+
+  # ---- TypeScript / JavaScript (frontends #3/#4, tree-sitter). Args arrive as an options OBJECT
+  #      ({ model: "gpt-4o", messages: [...] }); `model` is often a string literal (resolvable). Rows are
+  #      duplicated per language tag since usage is identical across TS and JS. ----
+  - { id: ts.anthropic.messages.create, language: typescript, import_path: "@anthropic-ai/sdk", symbol_kind: client_method, selector: messages.create, provider_hint: anthropic, arg_map: { model: { name: model }, prompt: { name: messages } } }
+  - { id: js.anthropic.messages.create, language: javascript, import_path: "@anthropic-ai/sdk", symbol_kind: client_method, selector: messages.create, provider_hint: anthropic, arg_map: { model: { name: model }, prompt: { name: messages } } }
+  - { id: ts.openai.chat.completions.create, language: typescript, import_path: "openai", symbol_kind: client_method, selector: chat.completions.create, provider_hint: openai, arg_map: { model: { name: model }, prompt: { name: messages } } }
+  - { id: js.openai.chat.completions.create, language: javascript, import_path: "openai", symbol_kind: client_method, selector: chat.completions.create, provider_hint: openai, arg_map: { model: { name: model }, prompt: { name: messages } } }
+  - { id: ts.openai.responses.create, language: typescript, import_path: "openai", symbol_kind: client_method, selector: responses.create, provider_hint: openai, arg_map: { model: { name: model } } }
+  - { id: js.openai.responses.create, language: javascript, import_path: "openai", symbol_kind: client_method, selector: responses.create, provider_hint: openai, arg_map: { model: { name: model } } }
+  # Vercel AI SDK — bare imported functions: generateText({ model, prompt }) / streamText / generateObject.
+  - { id: ts.vercel.generatetext, language: typescript, import_path: "ai", symbol_kind: package_func, selector: generateText, provider_hint: "", arg_map: { prompt: { name: prompt } } }
+  - { id: js.vercel.generatetext, language: javascript, import_path: "ai", symbol_kind: package_func, selector: generateText, provider_hint: "", arg_map: { prompt: { name: prompt } } }
+  - { id: ts.vercel.streamtext, language: typescript, import_path: "ai", symbol_kind: package_func, selector: streamText, provider_hint: "", arg_map: { prompt: { name: prompt } } }
+  - { id: js.vercel.streamtext, language: javascript, import_path: "ai", symbol_kind: package_func, selector: streamText, provider_hint: "", arg_map: { prompt: { name: prompt } } }
+  # LangChain.js
+  - { id: ts.langchain.invoke, language: typescript, import_path: "@langchain/core", symbol_kind: client_method, selector: invoke, provider_hint: "", arg_map: { prompt: { name: input } } }
+  - { id: js.langchain.invoke, language: javascript, import_path: "@langchain/core", symbol_kind: client_method, selector: invoke, provider_hint: "", arg_map: { prompt: { name: input } } }
+
+  # ---- Rust (frontend #5, tree-sitter). Model is bound in a request struct/builder -> unresolved at
+  #      the floor; detection = crate import-presence + method selector. ----
+  - { id: rs.async_openai.create, language: rust, import_path: async_openai, symbol_kind: client_method, selector: chat.create, provider_hint: openai }
+  - { id: rs.async_openai.completions.create, language: rust, import_path: async_openai, symbol_kind: client_method, selector: completions.create, provider_hint: openai }
+  - { id: rs.anthropic.messages.create, language: rust, import_path: anthropic, symbol_kind: client_method, selector: messages.create, provider_hint: anthropic }
+  - { id: rs.anthropic.complete, language: rust, import_path: anthropic, symbol_kind: client_method, selector: complete, provider_hint: anthropic }
+
+  # ---- Java/Kotlin (frontend #6, tree-sitter). Builders bind the model at construction -> unresolved at
+  #      the floor; detection = SDK package import-presence + method selector. ----
+  - { id: java.langchain4j.generate, language: java, import_path: dev.langchain4j, symbol_kind: client_method, selector: generate, provider_hint: "" }
+  - { id: java.langchain4j.chat, language: java, import_path: dev.langchain4j, symbol_kind: client_method, selector: chat, provider_hint: "" }
+  - { id: java.springai.call, language: java, import_path: org.springframework.ai, symbol_kind: client_method, selector: call, provider_hint: "" }
+  - { id: java.bedrock.converse, language: java, import_path: software.amazon.awssdk.services.bedrockruntime, symbol_kind: client_method, selector: converse, provider_hint: bedrock }

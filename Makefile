@@ -14,10 +14,11 @@ PKG     ?= ./...
 
 .DEFAULT_GOAL := ci
 
-.PHONY: ci go build vet fmt test schema lint db-proof tidy-check clean help
+.PHONY: ci go build vet fmt test schema lint db-proof tidy-check clean help \
+        build-discover discovery-ci discovery-throughput
 
-## ci: the locally-provable gate (go + schema). Lint/db-proof run as their own CI jobs.
-ci: go schema
+## ci: the locally-provable gate (go + schema + discovery-ci). Lint/db-proof run as their own CI jobs.
+ci: go schema discovery-ci
 	@echo "== make ci: PASS =="
 
 ## go: build, vet, gofmt-check, test
@@ -46,6 +47,19 @@ schema:
 	$(PYTHON) schemas/test_config_hash.py
 	$(PYTHON) schemas/test_schema_evolution.py
 	$(PYTHON) schemas/spike_io_contract.py
+
+## build-discover: build the Discovery CLI to bin/discover
+build-discover:
+	$(GO) build -o bin/discover ./cmd/discover
+
+## discovery-ci: run the discover CLI on every fixture; validate emitted IR against the schema +
+##               node-count regression + golden-IR drift (tasks 8.1, 8.2). Needs: pip install jsonschema
+discovery-ci: build-discover
+	$(PYTHON) scripts/discovery_ci.py
+
+## discovery-throughput: soft throughput signal (≤60s / ~200k LOC) — informs, never blocks (task 8.3)
+discovery-throughput: build-discover
+	$(PYTHON) scripts/discovery_throughput.py
 
 ## lint: golangci-lint (installed by CI; locally install from https://golangci-lint.run)
 lint:

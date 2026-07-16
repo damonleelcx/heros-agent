@@ -1,24 +1,31 @@
-# PRD — P1: Discovery MVP (Go, static)
+# PRD — P1: Discovery MVP (multi-language, static)
 
 | Field | Value |
 |---|---|
 | Phase / Milestone | P1 / M1 |
-| Target window | ~Weeks 3–7 |
+| Target window | ~Weeks 3–9 (widened for multi-language scope) |
 | Lead role(s) | Backend |
 | Supporting role(s) | AI Engineer, DevOps, System Designer |
-| Status | Draft |
+| Status | Draft (rescoped to language-agnostic — see §15) |
 | OpenSpec change | `p1-discovery-mvp` |
 
 ## 1. Summary
 
-The Discovery Engine reads a Go repository as **untrusted text**, finds every static LLM call
-site in it, and emits a valid **Workflow IR** (the graph contract frozen in P0). Detection is
-driven by a **signature registry** of known SDK entrypoints *and* by **mandatory user-declared
-entrypoints** in an `llm-eval.yaml` file, because real codebases wrap the SDK behind in-house
-functions and signature matching alone misses those nodes. This phase proves node extraction on
-a single language, static-only; it is the gate that turns "a pile of source" into the
-configurable node graph every downstream subsystem (Config, Runtime, Metrics, Eval, Analysis)
-consumes. Dynamic tracing that would confirm the candidate graph at runtime is explicitly P5.
+The Discovery Engine reads a repository **in any language** as **untrusted text**, finds every
+static LLM call site in it, and emits a valid **Workflow IR** (the graph contract frozen in P0,
+which is language-neutral by design — its own P0 sample is Python). Discovery is built as a
+**language-agnostic core** (signature-registry model, node-ID scheme, metadata-extraction
+concepts, IR emission, run report, invariants) behind which sit pluggable **`LanguageFrontend`s** —
+the only language-specific layer. The first frontend parses **Go** via `go/ast`; **all other
+languages** (Python, TypeScript/JavaScript, Java/Kotlin, Rust, …) are parsed via a **tree-sitter**
+substrate, so adding a language is *adding a frontend + registry rows + fixtures*, never rewriting
+Discovery. Detection is driven by a **per-language signature registry** of known SDK entrypoints
+*and* by **mandatory user-declared entrypoints** in an `llm-eval.yaml` file, because real codebases
+in every language wrap the SDK behind in-house functions and signature matching alone misses those
+nodes. This phase proves node extraction is **language-agnostic**, static-only; it is the gate that
+turns "a pile of source" into the configurable node graph every downstream subsystem (Config,
+Runtime, Metrics, Eval, Analysis) consumes. Dynamic tracing that would confirm the candidate graph
+at runtime is explicitly P5.
 
 ## 2. Problem & context
 
@@ -29,11 +36,13 @@ any of it on.
 
 Two facts make naïve discovery wrong:
 
-1. **Wrappers defeat signature matching.** In production Go, `anthropic.Messages.New(...)` is
-   rarely called at the leaf; it sits behind `internal/llm.Complete(ctx, prompt)` or a
-   `GenerateSummary(...)` helper. A registry of SDK signatures alone under-counts nodes wherever
-   the SDK is wrapped — which is almost everywhere. User-declared entrypoints are therefore **not
-   optional**; they are a first-class detection source co-equal with the signature registry.
+1. **Wrappers defeat signature matching — in every language.** The SDK leaf call
+   (`anthropic.Messages.New(...)` in Go, `client.messages.create(...)` in Python,
+   `openai.chat.completions.create(...)` in TS) is rarely at the leaf; it sits behind an in-house
+   `complete(prompt)` / `Complete(ctx, prompt)` / `generateSummary(...)` helper. A registry of SDK
+   signatures alone under-counts nodes wherever the SDK is wrapped — which is almost everywhere, in
+   every language. User-declared entrypoints are therefore **not optional**; they are a first-class
+   detection source co-equal with the signature registry, and their design is language-neutral.
 2. **"How many nodes make LLM requests" is only well-defined for static definitions.** An agent
    loop or a router makes a *variable* number of calls at runtime. The IR must count nodes
    **per static definition** and flag loop/agent nodes as `variable-at-runtime`, deferring the
@@ -47,27 +56,44 @@ hand-written IR sample against the schema.
 ## 3. Goals & non-goals
 
 ### Goals
-- G1. Parse a Go repo with `go/ast` **without ever executing it**, treating source as untrusted text.
-- G2. Detect LLM call sites via a **signature registry** covering `anthropic.messages.create`,
-  `openai.chat.completions.create`, LangChain/LangGraph `invoke`, and Bedrock `converse`.
-- G3. Detect LLM call sites via **user-declared entrypoints** from `llm-eval.yaml` (wrapper case).
+- G0. **Language-agnostic architecture.** Separate a language-neutral core from a pluggable
+  **`LanguageFrontend`** (parse + call-site resolution). Adding a language SHALL be adding a frontend
+  + registry rows + fixtures, **not** modifying the core, the IR, the registry model, the node-ID
+  scheme, extraction, emission, the run report, or the invariants.
+- G1. Parse a repo in **any supported language without ever executing it**, treating source as
+  untrusted text: **Go** via `go/ast` (frontend #1), and **Python, TypeScript/JavaScript,
+  Java/Kotlin, Rust** (and further languages) via a **tree-sitter** substrate.
+- G2. Detect LLM call sites via a **per-language signature registry** covering, per language, the
+  major SDKs — e.g. Anthropic Messages, OpenAI Chat Completions, LangChain/LangGraph invoke, Bedrock
+  Converse in Go; the `anthropic`/`openai`/`langchain`/`langgraph`/`crewai`/`boto3` families in
+  Python; `@anthropic-ai/sdk`/`openai`/`langchain.js`/Vercel AI SDK in TS/JS; langchain4j/Spring
+  AI/Bedrock in Java; `async-openai`/`anthropic` crates in Rust. The registry is data, extensible
+  without code change.
+- G3. Detect LLM call sites via **user-declared entrypoints** from `llm-eval.yaml` (wrapper case),
+  with a **language-neutral** declaration format.
 - G4. For each call site extract per-node metadata: model arg, messages/prompt construction,
   tools/skills passed, and the upstream data flow feeding the prompt.
 - G5. Build a **call graph**: node = LLM-invoking function/agent step; edges = data/control flow.
-- G6. **Special-case framework DAGs** (LangGraph/CrewAI) by reading their declarative graph
-  definition instead of inferring topology from call order.
+- G6. **Special-case framework DAGs** (LangGraph/CrewAI in Python; LangGraphGo/langchaingo in Go;
+  equivalents elsewhere) by reading their declarative graph definition instead of inferring topology
+  from call order — via per-language framework readers behind one interface.
 - G7. Emit a **valid Workflow IR** that validates against the P0 schema and is stable/diffable
-  across runs.
+  across runs, **regardless of source language** (the IR records `workflow.language`).
 - G8. Report node count **per static definition** and flag loop/agent nodes as variable-at-runtime.
 - G9. Flag call sites whose static data flow is ambiguous as **P5 dynamic-tracing candidates**.
 
 ### Non-goals (deferred, with owning phase)
 - Dynamic tracing / runtime confirmation of the candidate graph → **P5**.
-- Languages other than Go (tree-sitter language-agnostic path) → post-M1, tracked separately.
-- Making nodes configurable / the source-transformation engine / registries → **P2**.
+- Making nodes configurable / the source-transformation engine / registries → **P2**. (Note: the P2
+  source-transformation codemod is itself per-language; P1 only guarantees the `call_site` anchor is
+  precise enough to support it.)
 - Executing any discovered code or repo tools → sandbox is **P3**; discovery never executes.
 - Pattern classification (Routing/Reflection/RAG labels) → **P3.5** (structural), **P5** (behavioral).
 - Resolving runtime-dynamic dispatch (which loop branch actually ran) → **P5**.
+- **Full type-inference fidelity for tree-sitter languages** — tree-sitter is syntactic (no type
+  resolution), so non-Go frontends lean harder on import-presence + selector + declared entrypoints,
+  and mark more fields `unresolved` (honestly) rather than guessing. Deep type resolution per language
+  (LSP/compiler-frontend integration) is a **post-M1 fidelity uplift**, not a P1 gate.
 
 ## 4. Users & personas
 
@@ -104,13 +130,22 @@ hand-written IR sample against the schema.
 
 These map 1:1 to the OpenSpec `discovery-engine` requirements.
 
-- **FR1 — Signature-registry detection.** Discovery SHALL detect a call site when a call
-  expression resolves (via `go/ast` + type/import info) to an entry in the signature registry.
-  The seed registry covers Anthropic Messages, OpenAI Chat Completions, LangChain/LangGraph
-  invoke, and Bedrock Converse. The registry is data, extensible without code change.
-- **FR2 — User-declared entrypoints (mandatory).** Discovery SHALL load `llm-eval.yaml`, treat
-  every declared entrypoint (package-qualified function/method) as an LLM call site of equal
-  standing to registry hits, and map declared argument positions/names to node metadata fields.
+- **FR0 — Language-frontend abstraction.** Discovery SHALL route parsing and call-site resolution
+  through a `LanguageFrontend` selected by source language, and the language-neutral core (registry
+  model, node-ID scheme, extraction, IR emission, run report, invariants) SHALL be identical across
+  languages. Adding a language SHALL require no change to the core. The IR SHALL record
+  `workflow.language`.
+- **FR1 — Signature-registry detection (per language).** Discovery SHALL detect a call site when a
+  call expression resolves (via the language frontend's import/module + selector resolution — Go
+  `go/ast` types; tree-sitter syntactic import + selector for other languages) to an entry in the
+  **per-language** signature registry. Seed registries cover the major SDKs **per language**
+  (see G2). The registry is data, extensible without code change; each row is language-tagged.
+- **FR2 — User-declared entrypoints (mandatory, language-neutral).** Discovery SHALL load
+  `llm-eval.yaml`, treat every declared entrypoint (a language-qualified function/method symbol) as
+  an LLM call site of equal standing to registry hits, and map declared argument positions/names/
+  field-paths/option-constructors to node metadata fields. The declaration format is language-neutral;
+  the symbol syntax is per-language (e.g. Go `pkg.(*T).M`, Python `module.Class.method`, TS
+  `module#export`).
 - **FR3 — Per-call-site metadata extraction.** For each detected call site Discovery SHALL extract
   a precise source span (file, line, AST path) sufficient for a later phase to rewrite the call
   site, the model arg, messages/prompt construction, tools/skills passed, and the upstream data
@@ -119,9 +154,11 @@ These map 1:1 to the OpenSpec `discovery-engine` requirements.
 - **FR4 — Call-graph construction.** Discovery SHALL build a directed call graph whose nodes are
   LLM-invoking functions/agent steps and whose edges represent data or control flow (output of A
   feeding input of B), and emit it as the Workflow IR node/edge set.
-- **FR5 — Framework DAG special-casing.** When a recognized framework (LangGraph/CrewAI) declares
-  its graph, Discovery SHALL derive nodes and edges from that declarative definition rather than
-  inferring topology from call order, and SHALL record the framework source on the subgraph.
+- **FR5 — Framework DAG special-casing (per language, behind one interface).** When a recognized
+  framework declares its graph — LangGraph/CrewAI (Python), LangGraphGo/langchaingo (Go), and
+  equivalents in other languages — Discovery SHALL derive nodes and edges from that declarative
+  definition rather than inferring topology from call order, and SHALL record the framework source on
+  the subgraph. Framework readers are per-language implementations of one `FrameworkReader` interface.
 - **FR6 — Static-vs-runtime node counting.** Discovery SHALL report node count **per static
   definition** and SHALL flag any node reachable through a loop or agent control structure as
   `variable-at-runtime`, never emitting a fixed runtime invocation count.
@@ -133,17 +170,20 @@ These map 1:1 to the OpenSpec `discovery-engine` requirements.
 
 ## 7. Non-functional requirements
 
-- **NFR1 — No-execution safety invariant (hard gate).** Discovery SHALL NOT execute, evaluate,
-  `go run`, `go build`-with-plugins, import as a plugin, or otherwise run any target-repo code, at
-  any point. Analysis is over the AST and text only. This is a security invariant, not a
-  preference: discovered source is untrusted.
+- **NFR1 — No-execution safety invariant (hard gate).** Discovery SHALL NOT execute, evaluate, run
+  an interpreter/compiler on, load as a plugin, `go run`, `python`, `node`, or otherwise run any
+  target-repo code, at any point, **in any language**. Analysis is over the AST/parse-tree and text
+  only. This is a security invariant, not a preference: discovered source is untrusted. (Tree-sitter
+  is a pure parser — it does not execute source — which is part of why it is the multi-language
+  substrate.)
 - **NFR2 — Determinism / reproducibility.** Identical repo state (same content hashes) yields
-  byte-identical IR. Node IDs are derived from stable, content-addressable inputs (e.g. package
-  path + function + call-site position + a content hash), never from wall-clock or map iteration order.
-- **NFR3 — Throughput / scale.** Target: a ~200k-LOC Go repo (~2–3k Go files) discovered in
-  **under 60 s** on a single worker; memory bounded by streaming/one-package-at-a-time parsing, not
-  by loading the whole repo AST into memory at once. (Back-of-envelope: nodes/repo in the tens to a
-  few hundred; this sizes the IR emitter and downstream stores, not a distributed system.)
+  byte-identical IR. Node IDs are derived from stable, content-addressable inputs (module/package
+  path + enclosing symbol + call-site structural position + a content hash), never from wall-clock or
+  map iteration order — a scheme that is language-neutral.
+- **NFR3 — Throughput / scale.** Target: a ~200k-LOC repo discovered in **under 60 s** on a single
+  worker, per language frontend; memory bounded by streaming/one-file-or-package-at-a-time parsing,
+  not by loading the whole repo parse-tree into memory at once. (Back-of-envelope: nodes/repo in the
+  tens to a few hundred; this sizes the IR emitter and downstream stores, not a distributed system.)
 - **NFR4 — Faithfulness.** Extracted prompt/context metadata must be faithful enough to later drive
   overrides (P2). Where fidelity cannot be guaranteed statically, the field is marked `unresolved`
   and flagged (NFR tie-in to FR8) rather than silently guessed — a wrong-but-confident value is worse
@@ -160,14 +200,17 @@ These map 1:1 to the OpenSpec `discovery-engine` requirements.
 
 ## 8. System design summary
 
-**Pipeline (single-language, static):**
+**Pipeline (language-agnostic core, per-language frontend, static):**
 
 ```mermaid
 flowchart LR
-  A[Go repo + llm-eval.yaml] --> B[Loader<br/>read-only, untrusted text]
-  B --> C[go/ast parse<br/>per package]
-  C --> D[Detector]
-  D -->|registry match| E[Call sites]
+  A[repo any language + llm-eval.yaml] --> B[Loader<br/>read-only, untrusted text]
+  B --> LF[LanguageFrontend<br/>select by language]
+  LF -->|Go| C1[go/ast parse]
+  LF -->|Python/TS/Java/Rust/…| C2[tree-sitter parse]
+  C1 --> D[Detector core]
+  C2 --> D
+  D -->|per-language registry match| E[Call sites]
   D -->|declared entrypoint| E
   D -->|framework DAG reader| E
   E --> F[Metadata extractor<br/>model/prompt/tools/dataflow]
@@ -177,27 +220,40 @@ flowchart LR
   H --> J[(Workflow IR + run report)]
 ```
 
+**The `LanguageFrontend` boundary is the whole point of the rescope.** It exposes: parse a
+file/unit to a normalized parse-tree; enumerate call sites with `{root, selector-chain, enclosing
+symbol, import map, structural position}`. Everything to the right of the frontend — detection,
+extraction, node-ID, graph, emission, report — is **language-neutral and shared**. Go's frontend is
+`go/ast`-backed (with real import resolution); every other language's frontend is tree-sitter-backed
+(syntactic: import-presence + selector, no type resolution). The detector consumes the frontend's
+normalized call-site shape, so it never knows which language produced it.
+
 **Detection sources are co-equal and merged** (a call site found by both registry and declaration
 is one node, deduplicated by call-site identity). Three sources feed one node set:
-1. **Signature registry** — data-driven table of package-qualified SDK entrypoints + argument maps.
-2. **User-declared entrypoints** — `llm-eval.yaml`, resolved the same way, mandatory.
-3. **Framework DAG readers** — per-framework plugins that read the declarative graph.
+1. **Per-language signature registry** — data-driven table of language-tagged, module/import-qualified
+   SDK entrypoints + argument maps.
+2. **User-declared entrypoints** — `llm-eval.yaml`, resolved the same way, mandatory, language-neutral.
+3. **Framework DAG readers** — per-language framework plugins behind one interface.
 
-**Node metadata (fields populated into the P0 IR node):** `id`, `call_site {file, line, func,
-package}`, `detected_by [registry|declared|framework]`, `model`, `prompt_construction`,
-`tools_skills[]`, `upstream_dataflow[]`, typed I/O contract stubs (`input_schema`/`output_schema`,
-best-effort static), `variable_at_runtime: bool`, `ambiguity_flags[]`, `framework_source?`.
-**Edges:** `{from_node, to_node, kind: data|control, evidence}`.
+**Node metadata (into the P0 IR node — language-neutral):** `node_id`, `call_site {file, symbol,
+line_start, line_end, ast_path}`, `model`, `prompt`, `tools_skills[]`, `context_assembly`, typed
+I/O-contract stubs, `invocation_semantics {type, variable_at_runtime}`. Discovery-internal provenance
+(`detected_by`, `ambiguity_flags`, `framework_source`, dataflow evidence) lives in the run report, not
+on the frozen node.
+**Edges:** `{from_node_id, to_node_id, kind: data|control}`.
 
 **Static resolution strategy.** Constant/literal args resolve directly; locally-constructed values
-resolve by intra-procedural data-flow (assignment chains, string builders, struct literals for
-messages). Anything requiring inter-procedural or runtime-value resolution is marked `unresolved`
-and flagged (FR8). No symbolic execution; no running code.
+resolve by intra-procedural data-flow up to a bounded budget. Anything requiring inter-procedural or
+runtime-value resolution is marked `unresolved` and flagged (FR8). For tree-sitter frontends, more
+falls to `unresolved` (no types) — honestly, never guessed. No symbolic execution; no running code.
 
 **Interfaces.**
-- CLI/service entry: `discover --repo <path> --config llm-eval.yaml --out ir.json`.
-- `SignatureRegistry` — pluggable table; add an SDK by adding a row, not code.
-- `FrameworkReader` — interface per framework (`Detect(pkg) bool`, `ReadDAG(pkg) (nodes, edges)`).
+- CLI/service entry: `discover --repo <path> --config llm-eval.yaml --out ir.json` (auto-detects
+  language(s); a repo may mix languages, producing one IR per workflow with per-node `call_site.file`).
+- `LanguageFrontend` — interface per language (`Parse`, `CallSites`); add a language by adding a
+  frontend, not by touching the core.
+- `SignatureRegistry` — pluggable, language-tagged table; add an SDK by adding a row, not code.
+- `FrameworkReader` — interface per framework/language (`Detect`, `ReadDAG`).
 - Output: Workflow IR JSON + a `discovery-report.json` (NFR6).
 
 ## 9. Design by role lens
@@ -274,13 +330,18 @@ and flagged (FR8). No symbolic execution; no running code.
 | Non-deterministic IR breaks diffing/reproducibility | Backend | Content-addressed stable node IDs, sorted output, golden-IR diff test in CI |
 | Framework DAG version drift breaks the reader | Backend | Per-framework reader is versioned and isolated; unknown version degrades to flagged subgraph, not a crash |
 | Malformed/hostile source crashes the parser | Backend | Skip-and-report per file, bounded recursion/resource use, continue on the rest |
+| **Multi-language scope explodes effort / delays M1** | Backend / Sys Designer | Language-neutral core reused across all frontends; per-language work bounded to *frontend + registry rows + fixtures*; languages shipped in priority order (Go done → Python → TS/JS → Java/Kotlin → Rust → the rest) so M1 lands incrementally, not big-bang |
+| **Tree-sitter has no type resolution → lower fidelity for non-Go** | AI Eng / Backend | Lean on import-presence + selector + mandatory declared entrypoints; mark more fields `unresolved` honestly (never guess); record match basis in the report; deep per-language type resolution is a post-M1 uplift, not a P1 gate |
+| **Per-language SDK registries drift as SDKs evolve** | Backend | Registry is data (rows), language-tagged; a drifted SDK is a row edit, surfaced by detections-by-source deltas; no core change |
+| **One frontend's bug corrupts a multi-language run** | Backend | Frontends isolated behind the interface; a per-package/per-frontend panic recovers to a diagnostic (I7), the rest of the run continues |
 
 ## 12. Rollout & test strategy
 
-- **Fixture-driven correctness.** A suite of small Go fixture repos, each with a documented
-  expected node count and expected IR; tests assert exact match. Mandatory fixtures: wrapper (SDK
-  behind in-house function), framework DAG (LangGraph/CrewAI declarative graph), loop/agent
-  (`variable_at_runtime`), malformed-file (skip-and-report), and a multi-source dedup case.
+- **Fixture-driven correctness, per language.** A suite of small fixture repos **per language**, each
+  with a documented expected node count and expected IR; tests assert exact match. Mandatory fixtures
+  **per frontend**: wrapper (SDK behind in-house function), framework DAG (declarative graph), loop/
+  agent (`variable_at_runtime`), malformed-file (skip-and-report), and a multi-source dedup case —
+  plus a **mixed-language repo** fixture proving one run handles multiple frontends.
 - **Schema-validation gate (DevOps).** CI runs Discovery on every fixture and validates emitted IR
   against `workflow-ir.schema.json`; build fails on any violation.
 - **Golden-IR diff.** Emitted IR is committed as golden output; CI fails on non-deterministic drift.
@@ -292,27 +353,65 @@ and flagged (FR8). No symbolic execution; no running code.
 
 ## 13. Success metrics & acceptance criteria (closes M1)
 
-- [ ] On a **real Go repo**, static LLM nodes are extracted and IR is emitted.
-- [ ] Emitted IR **validates against `workflow-ir.schema.json`** in CI.
+- [ ] The **`LanguageFrontend` abstraction** exists and the language-neutral core is unchanged across
+  frontends (adding a language touches no core file).
+- [ ] On a **real repo in each shipped language**, static LLM nodes are extracted and IR is emitted;
+  the IR records `workflow.language`.
+- [ ] **Go frontend** (via `go/ast`) is complete and green (delivered).
+- [ ] At least **Python and TypeScript/JavaScript frontends** (via tree-sitter) extract nodes on real
+  repos; remaining priority languages (Java/Kotlin, Rust, …) follow incrementally behind the same
+  interface.
+- [ ] A **mixed-language repo** produces one coherent IR spanning frontends.
+- [ ] Emitted IR **validates against `workflow-ir.schema.json`** in CI, for every language.
 - [ ] IR is **diffable / deterministic** — re-running on unchanged source produces byte-identical output.
 - [ ] **Wrapper nodes are found via user-declared entrypoints** — the wrapper fixture's hidden node
-  appears in the IR and is absent when the declaration is removed (proving the mechanism).
+  appears in the IR and is absent when the declaration is removed (proving the mechanism), per language.
 - [ ] **Framework-DAG fixture** yields nodes/edges read from the declarative graph, tagged with the
-  framework source.
+  framework source (Go and Python framework readers).
 - [ ] Node count is reported **per static definition**; loop/agent nodes are flagged
   `variable_at_runtime` with **no fixed runtime count** emitted.
 - [ ] Ambiguous-data-flow call sites are **flagged as P5 dynamic-tracing candidates** with a reason.
-- [ ] The **no-execution invariant** holds under test (no target code runs during discovery).
+- [ ] The **no-execution invariant** holds under test (no target code runs during discovery, any language).
 
 ## 14. Open questions
 
-- Q1. Exact `llm-eval.yaml` schema — how are argument positions/names mapped to IR metadata fields
-  for a declared wrapper (positional index, param name, or both)? (Backend + Sys Designer to freeze.)
-- Q2. Which LangGraph/CrewAI versions does the first framework reader target, and how is version
-  drift surfaced (degrade-to-flag vs. hard error)?
-- Q3. How deep does intra-procedural data-flow resolution go before a value is declared `unresolved`
-  — is there a bounded cost budget per call site? (AI Eng + Backend.)
-- Q4. Node-ID scheme: what exact tuple is content-addressed so IDs stay stable across benign
-  refactors (line shifts) yet unique per call site? (Sys Designer to specify with P0.)
-- Q5. Is `llm-eval.yaml` required to be present (hard fail if absent) or optional-but-recommended,
-  given wrappers are the common case?
+- Q1. **(Resolved — docs/discovery/05.)** `llm-eval.yaml` maps arguments by index / name / field-path /
+  option-constructor (all four), language-neutral.
+- Q2. **(Resolved — docs/discovery/07.)** Framework readers are versioned + isolated; unknown version
+  degrades-to-flag. Open sub-question: the per-language framework catalog (LangGraph/CrewAI for Python,
+  LangGraphGo/langchaingo for Go, …) and which versions each reader targets first.
+- Q3. **(Framed — docs/discovery/08.)** Bounded intra-procedural budget; concrete depth/node caps per
+  frontend still to tune.
+- Q4. **(Resolved — docs/discovery/06.)** Content-addressed tuple (module/pkg path · enclosing symbol ·
+  selector · occurrence index); language-neutral.
+- Q5. **(Resolved — docs/discovery/05.)** `llm-eval.yaml` is optional-but-recommended; absence surfaced
+  in the report.
+- **Q6 (new). Language auto-detection + mixed-repo semantics.** How does Discovery pick frontends per
+  file (extension? shebang? tree-sitter language guess?), and does a mixed-language repo emit one IR or
+  one-per-language? (Sys Designer + Backend to freeze.)
+- **Q7 (new). Tree-sitter symbol resolution without types.** For non-Go frontends, how are
+  module/import + selector resolved to a registry row without type info (Python dynamic imports, TS
+  re-exports, Java classpath)? What is the honest floor before `unresolved`? (AI Eng + Backend.)
+- **Q8 (new). Per-language node-ID stability.** The tuple is language-neutral, but "package path" and
+  "enclosing symbol" have per-language spellings; each frontend must define its stable spelling. (Sys
+  Designer per frontend.)
+
+## 15. Rescope note — Go-only → multi-language (this revision)
+
+This PRD was **rescoped from "Go, static" to "multi-language, static"** on the product owner's
+direction ("it must work with any repo of any language"). The decision, recorded per the R&D
+process's written-alignment rule (a product-form + tech-approach 双色点):
+
+- **What changed:** language-agnosticism moved from a *post-M1 non-goal* to a **first-class P1 goal**
+  (G0/G1/FR0). M1 now requires the `LanguageFrontend` abstraction plus multiple shipped frontends, not
+  a single Go pass. The target window widened accordingly.
+- **What did NOT change (and why the rescope is affordable):** the P0 IR is already language-neutral
+  (its sample is Python), and the P1 core built for Go — signature-registry *model*, node-ID scheme,
+  metadata-extraction concepts, IR emitter, run report, and all eight invariants — is language-neutral
+  already. The Go work is **frontend #1**, not throwaway.
+- **Delivery:** languages ship in priority order behind one interface (Go ✅ → Python → TS/JS →
+  Java/Kotlin → Rust → further), so M1 lands incrementally. This honors the cost law (evolvable,
+  no core rewrite per language) rather than a big-bang rewrite.
+- **Cost surfaced honestly:** tree-sitter frontends have no type resolution, so non-Go detection is
+  lower-fidelity (more honest `unresolved`), and per-language registries + fixtures are real ongoing
+  work. Deep per-language type resolution is a post-M1 uplift.

@@ -26,7 +26,11 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      # The Discovery tree-sitter frontends link the tree-sitter C runtime via cgo; ubuntu-latest ships
+      # gcc, so CGO builds out of the box. (CGO_ENABLED=0 builds of the discovery packages will not link.)
       - name: make go (build, vet, gofmt-check, test)
+        env:
+          CGO_ENABLED: "1"
         run: make go
       - name: go.mod tidy check
         run: make tidy-check
@@ -58,6 +62,31 @@ jobs:
       # missing io_contract) is accepted (task 4.2).
       - name: make schema
         run: make schema
+
+  discovery:
+    name: discovery IR schema-validation + golden drift
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: install validators
+        run: pip install --quiet jsonschema
+      # Runs the BUILT discover CLI on every fixture repo (Go + Python) and fails the build on any schema
+      # violation, node-count regression, or golden-IR drift (tasks 8.1, 8.2). cgo for tree-sitter.
+      - name: make discovery-ci
+        env:
+          CGO_ENABLED: "1"
+        run: make discovery-ci
+      # Soft throughput signal (task 8.3) — informs, never blocks (throughput is runner-sensitive).
+      - name: make discovery-throughput (soft)
+        run: make discovery-throughput
+        continue-on-error: true
 
   db-proof:
     name: postgres constraints + slices
