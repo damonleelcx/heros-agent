@@ -1,0 +1,125 @@
+{
+  "ir_version": "1.0.0",
+  "workflow": {
+    "id": "example.com/golden",
+    "repo": {
+      "url": "local://golden",
+      "commit_sha": "0000000"
+    },
+    "language": "go"
+  },
+  "nodes": [
+    {
+      "node_id": "n_7e1db093301473df",
+      "kind": "static_definition",
+      "call_site": {
+        "file": "pipeline.go",
+        "symbol": "classify",
+        "line_start": 7,
+        "line_end": 7,
+        "ast_path": "classify/Messages.New"
+      },
+      "model": {
+        "provider": "anthropic",
+        "model_id": "anthropic.ModelClaudeOpus4_6",
+        "params": {}
+      },
+      "prompt": {
+        "inline": "",
+        "variables": []
+      },
+      "tools_skills": [],
+      "context_assembly": {
+        "policy": "inline_messages",
+        "description": "static message list at the call site"
+      },
+      "io_contract": {
+        "input_schema": {
+          "type": "object"
+        },
+        "output_schema": {
+          "type": "object"
+        }
+      },
+      "invocation_semantics": {
+        "type": "single",
+        "variable_at_runtime": false
+      }
+    },
+    {
+      "node_id": "n_8258c19cd5c2c84b",
+      "kind": "static_definition",
+      "call_site": {
+        "file": "pipeline.go",
+        "symbol": "agent",
+        "line_start": 13,
+        "line_end": 13,
+        "ast_path": "agent/Messages.New"
+      },
+      "model": {
+        "provider": "anthropic",
+        "model_id": "unresolved",
+        "params": {}
+      },
+      "prompt": {
+        "inline": "",
+        "variables": []
+      },
+      "tools_skills": [],
+      "context_assembly": {
+        "policy": "inline_messages",
+        "description": "static message list at the call site"
+      },
+      "io_contract": {
+        "input_schema": {
+          "type": "object"
+        },
+        "output_schema": {
+          "type": "object"
+        }
+      },
+      "invocation_semantics": {
+        "type": "loop",
+        "variable_at_runtime": true
+      }
+    },
+    {
+      "node_id": "n_eed637b249df10fa",
+      "kind": "static_definition",
+      "call_site": {
+        "file": "caller.go",
+        "symbol": "run",
+        "line_start": 5,
+        "line_end": 5,
+        "ast_path": "run/Complete"
+      },
+      "model": {
+        "provider": "anthropic",
+        "model_id": "unresolved",
+        "params": {}
+      },
+      "prompt": {
+        "inline": "summarize the ticket",
+        "variables": []
+      },
+      "tools_skills": [],
+      "context_assembly": {
+        "policy": "inline_messages",
+        "description": "static message list at the call site"
+      },
+      "io_contract": {
+        "input_schema": {
+          "type": "object"
+        },
+        "output_schema": {
+          "type": "object"
+        }
+      },
+      "invocation_semantics": {
+        "type": "single",
+        "variable_at_runtime": false
+      }
+    }
+  ],
+  "edges": []
+}

@@ -1,0 +1,4 @@
+version: "1.0.0"
+entrypoints:
+  - symbol: "github.com/aws/aws-sdk-go-v2/service/bedrockruntime.(*Client).Converse"
+    provider: bedrock

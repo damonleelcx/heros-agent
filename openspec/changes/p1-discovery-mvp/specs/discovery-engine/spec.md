@@ -4,26 +4,58 @@ Cross-reference: [`../../../../docs/prd/P1-discovery-mvp.md`](../../../../docs/p
 
 ## ADDED Requirements
 
+### Requirement: The Discovery Engine SHALL be language-agnostic behind a `LanguageFrontend` abstraction
+
+Discovery SHALL separate a **language-neutral core** (signature-registry model, node-ID scheme,
+metadata extraction, call-graph builder, IR emission, run report, and the no-execution/determinism/
+faithfulness invariants) from a per-language **`LanguageFrontend`** that parses source and enumerates
+call sites in a normalized shape. The **Go** frontend SHALL use `go/ast`; **all other languages**
+(Python, TypeScript/JavaScript, Java/Kotlin, Rust, …) SHALL use a **tree-sitter** substrate. Adding a
+language SHALL require adding a frontend + signature-registry rows + fixtures, with **no change to the
+core**. The emitted IR SHALL record `workflow.language`.
+
+#### Scenario: The Go frontend and a tree-sitter frontend feed the same core
+- **WHEN** Discovery runs over a Go repo and over a Python repo
+- **THEN** both produce IR that validates against `workflow-ir.schema.json`
+- **AND** each IR records its `workflow.language`
+- **AND** the detection, node-ID, extraction, and emission logic exercised is the same language-neutral
+  core for both.
+
+#### Scenario: Adding a language does not change the core
+- **WHEN** a new `LanguageFrontend` and its signature-registry rows are added
+- **THEN** call sites in that language are detected and emitted as nodes
+- **AND** no change is required to the registry model, node-ID scheme, extractor, emitter, or run report.
+
+#### Scenario: A mixed-language repository yields one coherent IR
+- **WHEN** a repository contains source in more than one supported language
+- **THEN** Discovery selects the appropriate frontend per file
+- **AND** emits one Workflow IR whose nodes span the languages, each node's `call_site.file` naming its
+  source file.
+
 ### Requirement: The Discovery Engine SHALL detect LLM call sites that match a known-SDK signature registry
 
-The signature registry is a data-driven table of package-qualified SDK entrypoints with an argument
-map. The seed registry SHALL cover Anthropic Messages (`anthropic.messages.create`), OpenAI Chat
-Completions (`openai.chat.completions.create`), LangChain/LangGraph invoke, and Bedrock Converse, and
-SHALL be extensible by adding a table entry without changing detector code.
+The signature registry is a data-driven, **language-tagged** table of module/import-qualified SDK
+entrypoints with an argument map. The seed registry SHALL cover, **per language**, the major SDKs —
+Anthropic Messages, OpenAI Chat Completions, LangChain/LangGraph invoke, and Bedrock Converse in Go;
+the `anthropic`/`openai`/`langchain`/`langgraph`/`crewai`/`boto3` families in Python; `@anthropic-ai/sdk`/
+`openai`/`langchain.js`/Vercel AI SDK in TypeScript/JavaScript; langchain4j/Spring AI in Java; the
+`async-openai`/`anthropic` crates in Rust — and SHALL be extensible by adding a table entry without
+changing detector code.
 
 #### Scenario: Direct Anthropic SDK call is detected
-- **WHEN** a Go source file contains a call expression that resolves, via `go/ast` type and import
-  information, to the Anthropic Messages entrypoint in the signature registry
+- **WHEN** a source file (Go resolved via `go/ast`; other languages via the tree-sitter frontend's
+  import + selector resolution) contains a call expression that resolves to the Anthropic Messages
+  entrypoint in the signature registry for that language
 - **THEN** the engine emits exactly one IR node for that call site
-- **AND** the node's `detected_by` includes `registry`
-- **AND** the node's `call_site` records the file, line, function, and package of the call.
+- **AND** the run report's provenance for the node includes `registry`
+- **AND** the node's `call_site` records the file, symbol, and line span of the call.
 
 #### Scenario: Registry is extended by data, not code
 - **WHEN** a new SDK entrypoint row is added to the signature registry table and Discovery is re-run
 - **THEN** call sites resolving to that entrypoint are detected as nodes with no change to detector code.
 
-#### Scenario: A same-named function from an unrelated package is not a false positive
-- **WHEN** a call resolves to a function whose name matches a registry entry but whose package/import
+#### Scenario: A same-named function from an unrelated module is not a false positive
+- **WHEN** a call resolves to a function whose name matches a registry entry but whose module/import
   path does not match the registry entry
 - **THEN** the engine does NOT emit a node for that call site.
 
@@ -88,15 +120,17 @@ of one node feeds the input of another. The engine SHALL emit this node/edge set
 
 ### Requirement: The Discovery Engine SHALL special-case framework DAGs by reading their declarative graph definition
 
-When a recognized framework (LangGraph, CrewAI) declares its workflow graph, the engine SHALL derive
-nodes and edges from that declarative definition rather than inferring topology from call order, and
-SHALL record the framework as the source on the affected subgraph.
+When a recognized framework declares its workflow graph — LangGraph/CrewAI (Python),
+LangGraphGo/langchaingo (Go), and equivalents in other languages — the engine SHALL derive nodes and
+edges from that declarative definition rather than inferring topology from call order, and SHALL record
+the framework as the source on the affected subgraph. Framework readers are per-language implementations
+of one `FrameworkReader` interface.
 
-#### Scenario: LangGraph nodes and edges come from the declared graph
-- **WHEN** a repo builds a LangGraph/CrewAI graph declaratively (nodes and edges registered on a graph
-  object)
-- **THEN** the engine emits IR nodes and edges matching the declared graph structure
-- **AND** each such node's `framework_source` records the framework
+#### Scenario: A declarative graph's nodes and edges come from the declaration
+- **WHEN** a repo builds a framework graph declaratively (nodes and edges registered on a graph object —
+  e.g. a LangGraph graph in Python or a langgraphgo state graph in Go)
+- **THEN** the engine emits nodes and edges matching the declared graph structure
+- **AND** the affected subgraph's `framework_source` records the framework
 - **AND** the topology is taken from the declaration, not inferred from the order of calls in source.
 
 #### Scenario: Unrecognized framework version degrades to a flag, not a crash
@@ -154,13 +188,15 @@ candidate for P5 dynamic tracing.
 
 ### Requirement: The Discovery Engine SHALL never execute the target repository during analysis
 
-Discovery operates over the AST and text only. It SHALL NOT run, evaluate, `go run`, build with plugin
-mode, import as a plugin, or otherwise execute any target-repo code at any point. Discovered source is
-untrusted. This is a security invariant with its own test.
+Discovery operates over the AST/parse-tree and text only, **in any language**. It SHALL NOT run,
+evaluate, interpret, compile-and-run, `go run`/`python`/`node`, build with plugin mode, import as a
+plugin, or otherwise execute any target-repo code at any point. Discovered source is untrusted. This is
+a security invariant with its own test. (Tree-sitter is a pure parser and does not execute source,
+which is part of why it is the multi-language substrate.)
 
 #### Scenario: No target code runs during discovery
-- **WHEN** Discovery analyzes a fixture repo containing an `init()` function or package-level code with
-  an observable side effect (e.g. writing a file or opening a network connection)
+- **WHEN** Discovery analyzes a fixture repo (in any supported language) containing module-init /
+  top-level code with an observable side effect (e.g. writing a file or opening a network connection)
 - **THEN** that side effect never occurs during discovery.
 
 #### Scenario: The discovery path spawns no process

@@ -74,7 +74,7 @@ The full engineering plan is committed and specified:
 | Phase | Delivers |
 |---|---|
 | **P0** | Foundations — Workflow IR + metric-event schema + storage/lineage |
-| **P1** | Discovery MVP (Go static analysis) |
+| **P1** | Discovery MVP (multi-language static analysis — Go via `go/ast`, other languages via tree-sitter) |
 | **P2** | Config Layer (source-transformation engine) + Runtime |
 | **P2.5** | Metrics & Observability substrate (OpenTelemetry) |
 | **P3** | Context strategies + Skill Registry + Sandbox |

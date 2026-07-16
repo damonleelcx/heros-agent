@@ -25,11 +25,33 @@ declaration and a framework reader; treating declarations as a fallback invites 
 makes the wrapper case second-class. User-declared entrypoints are **mandatory and co-equal** — the
 wrapper reality is the norm, not the exception.
 
-### D2 — `go/ast` first, tree-sitter later
-Use Go's native `go/ast` + type/import resolution for the MVP (accurate symbol resolution for a
-single language). **Alternative rejected:** tree-sitter now for language-agnosticism — rejected as
-premature; it weakens Go symbol resolution and P1's mandate is to *prove extraction on one language*.
-Tree-sitter is the post-M1 generalization path.
+### D0 — Language-agnostic core behind a `LanguageFrontend` (rescope)
+Discovery is split into a **language-neutral core** (signature-registry *model*, node-ID scheme,
+metadata extraction, call-graph builder, IR emitter, run report, all eight invariants) and a
+**`LanguageFrontend`** — the only language-specific layer — which parses a file/unit and enumerates
+call sites in a normalized shape `{root, selector-chain, enclosing symbol, import map, structural
+position}`. The detector consumes that normalized shape and never knows the source language. **Adding
+a language = adding a frontend + registry rows + fixtures; the core is untouched.** **Alternative
+rejected:** a Go-specific pipeline generalized ad-hoc later — rejected because it would bake `go/ast`
+assumptions into the detector/emitter and make every new language a partial rewrite (an L5/L6
+evolvability/extensibility violation). This is the seam the multi-language rescope (PRD §15) turns on.
+
+### D2 — `go/ast` for the Go frontend; tree-sitter for every other language
+The **Go frontend** uses Go's native `go/ast` + import resolution (accurate symbol resolution). **All
+other language frontends** use **tree-sitter** — a pure, language-agnostic parser with a grammar per
+language (Python, TS/JS, Java/Kotlin, Rust, …). Tree-sitter is syntactic (no type resolution), so
+non-Go detection leans on import-presence + selector-chain + mandatory declared entrypoints, and marks
+more fields `unresolved` honestly (the Go frontend's method-call detection already works this way, so
+the approach generalizes cleanly). **Alternative rejected:** a single typed analyzer per language
+(compiler frontend / LSP) for full fidelity — rejected for P1 as far too costly across N languages;
+tree-sitter gives breadth now, and per-language type resolution is a **post-M1 fidelity uplift**, not a
+gate. **Alternative rejected:** tree-sitter for *Go too* (drop `go/ast`) — rejected because `go/ast`
+gives Go real import/type resolution for free and the Go frontend already ships; tree-sitter-go remains
+available if a uniform substrate is later preferred.
+
+> **Rescope note:** the previous revision listed tree-sitter as a *post-M1 non-goal*. On the product
+> owner's direction ("any repo of any language"), multi-language moved to a **first-class P1 goal**;
+> D0 + D2 are the architecture that makes it affordable — the Go work becomes frontend #1, not throwaway.
 
 ### D3 — Honest `unresolved`, never a guess
 Statically-unresolvable metadata (inter-procedural prompt assembly, runtime-selected model) is

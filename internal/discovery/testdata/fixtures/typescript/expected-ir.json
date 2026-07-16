@@ -1,0 +1,125 @@
+{
+  "ir_version": "1.0.0",
+  "workflow": {
+    "id": "workflow",
+    "repo": {
+      "url": "local://typescript",
+      "commit_sha": "0000000"
+    },
+    "language": "typescript"
+  },
+  "nodes": [
+    {
+      "node_id": "n_5539419decc4cc3a",
+      "kind": "static_definition",
+      "call_site": {
+        "file": "src/agent.ts",
+        "symbol": "loopAgent",
+        "line_start": 13,
+        "line_end": 13,
+        "ast_path": "loopAgent/chat.completions.create"
+      },
+      "model": {
+        "provider": "openai",
+        "model_id": "gpt-4o",
+        "params": {}
+      },
+      "prompt": {
+        "inline": "",
+        "variables": []
+      },
+      "tools_skills": [],
+      "context_assembly": {
+        "policy": "inline_messages",
+        "description": "static call site (syntactic frontend; no type resolution)"
+      },
+      "io_contract": {
+        "input_schema": {
+          "type": "object"
+        },
+        "output_schema": {
+          "type": "object"
+        }
+      },
+      "invocation_semantics": {
+        "type": "loop",
+        "variable_at_runtime": true
+      }
+    },
+    {
+      "node_id": "n_c9dfdfd12529ffcd",
+      "kind": "static_definition",
+      "call_site": {
+        "file": "src/agent.ts",
+        "symbol": "vercel",
+        "line_start": 17,
+        "line_end": 17,
+        "ast_path": "vercel/generateText"
+      },
+      "model": {
+        "provider": "unresolved",
+        "model_id": "unresolved",
+        "params": {}
+      },
+      "prompt": {
+        "inline": "summarize",
+        "variables": []
+      },
+      "tools_skills": [],
+      "context_assembly": {
+        "policy": "inline_messages",
+        "description": "static call site (syntactic frontend; no type resolution)"
+      },
+      "io_contract": {
+        "input_schema": {
+          "type": "object"
+        },
+        "output_schema": {
+          "type": "object"
+        }
+      },
+      "invocation_semantics": {
+        "type": "single",
+        "variable_at_runtime": false
+      }
+    },
+    {
+      "node_id": "n_d20d115088b6ebbc",
+      "kind": "static_definition",
+      "call_site": {
+        "file": "src/agent.ts",
+        "symbol": "classify",
+        "line_start": 9,
+        "line_end": 9,
+        "ast_path": "classify/messages.create"
+      },
+      "model": {
+        "provider": "anthropic",
+        "model_id": "claude-sonnet-4-5",
+        "params": {}
+      },
+      "prompt": {
+        "inline": "",
+        "variables": []
+      },
+      "tools_skills": [],
+      "context_assembly": {
+        "policy": "inline_messages",
+        "description": "static call site (syntactic frontend; no type resolution)"
+      },
+      "io_contract": {
+        "input_schema": {
+          "type": "object"
+        },
+        "output_schema": {
+          "type": "object"
+        }
+      },
+      "invocation_semantics": {
+        "type": "single",
+        "variable_at_runtime": false
+      }
+    }
+  ],
+  "edges": []
+}

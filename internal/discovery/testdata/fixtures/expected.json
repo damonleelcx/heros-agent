@@ -1,0 +1,18 @@
+{
+  "_comment": "Machine-readable expected node counts per fixture, consumed by scripts/discovery_ci.py (tasks 8.1/8.2/10.13). The prose rationale is each fixture's EXPECTED.md. 'config' => pass the fixture's llm-eval.yaml; 'golden' => byte-diff the emitted IR against expected-ir.json (golden-drift, per language).",
+  "fixtures": {
+    "golden":           { "nodes": 3, "config": true,  "golden": true },
+    "wrapper":          { "nodes": 1, "config": true },
+    "loop":             { "nodes": 1, "config": false },
+    "malformed":        { "nodes": 1, "config": false },
+    "dedup":            { "nodes": 1, "config": true },
+    "framework":        { "nodes": 0, "config": false },
+    "python":           { "nodes": 2, "config": false, "golden": true },
+    "python_framework": { "nodes": 0, "config": false },
+    "python_crewai":    { "nodes": 1, "config": false },
+    "typescript":       { "nodes": 3, "config": false, "golden": true },
+    "rust":             { "nodes": 2, "config": false, "golden": true },
+    "java":             { "nodes": 1, "config": false, "golden": true },
+    "mixed":            { "nodes": 3, "config": false, "golden": true }
+  }
+}
