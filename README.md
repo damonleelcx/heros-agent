@@ -11,7 +11,7 @@ touches production behavior without evidence.
 
 > **Status: foundation + full design.** This repository currently contains the **complete design**
 > (implementation timeline, per-phase PRDs, and OpenSpec change sets) plus a **minimal Go service
-> foundation**. The subsystems below are specified and being built phase by phase (P0 → P7). It is
+> foundation**. The subsystems below are specified and being built phase by phase (P0 → P8). It is
 > being repurposed from a prior *Heros OS-level agent* project; see
 > [`docs/reproposal-migration-checklist.md`](docs/reproposal-migration-checklist.md) for what was
 > kept, adapted, and removed.
@@ -64,7 +64,7 @@ The full engineering plan is committed and specified:
 
 - **[Implementation timeline](docs/implementation-timeline/README.md)** — system overview, critical
   path, role-ownership matrix, Gantt, and milestones (M0 → M10).
-- **[Product Requirements Documents](docs/prd/README.md)** — one PRD per phase (P0 → P7).
+- **[Product Requirements Documents](docs/prd/README.md)** — one PRD per phase (P0 → P8).
 - **[OpenSpec change sets](openspec/)** — behavioral, testable specs (`SHALL` requirements with
   scenarios); see [`openspec/AGENTS.md`](openspec/AGENTS.md) for the format and
   [`openspec/project.md`](openspec/project.md) for conventions.
@@ -85,6 +85,7 @@ The full engineering plan is committed and specified:
 | **P5.5** | Proposal operators + Verification gate |
 | **P6** | Autonomous optimizer |
 | **P7** | Billing, Metering & Entitlements |
+| **P8** | Admin & Operations Console (internal operator surface — RBAC, tenant/billing admin, fleet controls, audit log) |
 
 ## Repository layout (today)
 
@@ -99,7 +100,7 @@ internal/
   embeddings           # failure-clustering / RAG seed (P3/P4.5)
   approval  sqltime    # human-in-the-loop gate seed, helpers
 docs/                  # implementation-timeline, prd, adr, migration checklist
-openspec/              # spec-driven change sets (P0–P7)
+openspec/              # spec-driven change sets (P0–P8)
 ```
 
 The current `internal/` packages are the reusable foundation kept from the migration; the phase
