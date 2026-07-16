@@ -11,9 +11,15 @@ func TestNodeIDStability(t *testing.T) {
 		OccurrenceIndex:    0,
 	}
 
-	// Deterministic: same tuple -> same id.
-	if base.NodeID() != base.NodeID() {
-		t.Fatal("node_id not deterministic for identical tuple")
+	// Deterministic: same tuple -> same id (recompute from an equal identity, not the same call twice).
+	again := NodeIdentity{
+		ModulePkgPath:      "github.com/acme/app/internal/llm",
+		EnclosingSymbolFQN: "(*Service).Summarize",
+		Selector:           "Messages.New",
+		OccurrenceIndex:    0,
+	}
+	if base.NodeID() != again.NodeID() {
+		t.Fatal("node_id not deterministic for an identical tuple")
 	}
 
 	// A benign line shift is not part of the identity (no line field), so the id is unchanged. Two calls

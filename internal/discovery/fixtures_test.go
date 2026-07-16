@@ -32,17 +32,6 @@ func runFixture(t *testing.T, name string, useConfig bool) Result {
 
 func fileExists(p string) bool { _, err := os.Stat(p); return err == nil }
 
-func nodeBy(t *testing.T, ir IR, symbolSuffix string) IRNode {
-	t.Helper()
-	for _, n := range ir.Nodes {
-		if hasSuffix(n.CallSite.Symbol, symbolSuffix) {
-			return n
-		}
-	}
-	t.Fatalf("no node with enclosing symbol %q in %d nodes", symbolSuffix, len(ir.Nodes))
-	return IRNode{}
-}
-
 func hasSuffix(s, suf string) bool { return len(s) >= len(suf) && s[len(s)-len(suf):] == suf }
 
 // 6.1 — documented expected node COUNT is matched exactly across the fixtures.

@@ -3,7 +3,6 @@ package discovery
 import (
 	"fmt"
 	"os"
-	"sort"
 )
 
 // Options configures a discovery run.
@@ -129,14 +128,4 @@ func resolveWorkflowID(opts Options, frontendSuggestion string) string {
 		return frontendSuggestion
 	}
 	return "workflow"
-}
-
-// referencedNodeIDs is a helper for tests/consumers: the sorted set of node ids in an IR.
-func referencedNodeIDs(ir IR) []string {
-	out := make([]string, 0, len(ir.Nodes))
-	for _, n := range ir.Nodes {
-		out = append(out, n.NodeID)
-	}
-	sort.Strings(out)
-	return out
 }
