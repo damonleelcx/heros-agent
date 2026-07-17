@@ -23,8 +23,41 @@ red-able: an implementation that shelled out to run the repo would create the se
 - **Read-only (behavioral):** `TestReadOnlyNoRepoMutation` digests the repo tree before and after a
   run and asserts byte-identical — discovery creates/modifies/deletes nothing in the target.
 - **No ambient creds:** discovery takes no provider keys and reads none; there is no code path that
-  loads credentials. (The deployment-level read-only mount / no-egress / no-creds posture is the
-  DevOps §8 concern; these tests prove the code half.)
+  loads credentials.
+
+### The deployment half (added; previously deferred to "DevOps §8" and never delivered)
+
+The three tests above prove the *code* half — discovery does not *ask* for write access, sockets, or
+credentials. They do not prove the *runtime* denies them, and **the gap is not theoretical**:
+`discover` parses untrusted customer source with **tree-sitter's C runtime via cgo**
+(`CGO_ENABLED=0` does not link — the Python/Rust/Java/TS/JS frontends all bind it). A memory-safety
+bug in that C parser, reached by a hostile input file, is arbitrary code execution that the Go import
+guard cannot see: the guard constrains what *our* code asks for, not what someone else's bug does.
+Additionally, `noexec_test.go` scans only `internal/discovery/*.go`, so it says nothing about the
+`cmd/discover` main package or any dependency.
+
+| Claim | Runtime enforcement | Proof |
+|---|---|---|
+| Read-only repo mount | `/repo` mounted `:ro` (kernel-enforced), `read_only: true` rootfs | write + delete probes inside the shipped spec must fail; host tree unchanged |
+| No network egress | `network_mode: none` — no non-loopback interface exists | interface count == 0; outbound TCP cannot be established |
+| No ambient provider creds | `environment: {}`, no `env_file:` — compose forwards nothing | poison `OPENAI_API_KEY`/`ANTHROPIC_API_KEY`/`AWS_*` exported in the invoking shell must be absent inside the worker |
+
+- **Spec:** [`deploy/docker-compose.discovery.yml`](../../deploy/docker-compose.discovery.yml) (+ [`deploy/Dockerfile.discover`](../../deploy/Dockerfile.discover)) — also `cap_drop: [ALL]`, `no-new-privileges`, non-root uid 65532.
+- **Proof:** `make discovery-sandbox-proof` asserts each claim **twice** — statically (the field is
+  present in the resolved spec) and dynamically (the thing the field forbids actually fails). Static
+  alone would pass on a field Docker ignores; dynamic alone would pass if a probe measured nothing.
+  The probes run *through the shipped compose file*, so a proof that hand-rolled its own `docker run`
+  — which would only prove Docker works — is structurally impossible here.
+- **Red-check:** `make discovery-sandbox-proof-redcheck` weakens the spec one guarantee at a time
+  (drop `network_mode: none`; flip `/repo` to `:rw`; forward `OPENAI_API_KEY`) and requires the proof
+  to go red **and name the specific claim**. A fence that cannot go red is decoration.
+
+**Honest limits — what this does *not* guarantee.** It binds the container, not the binary. Running
+`bin/discover` directly on a host (which is what `make discovery-ci` does) gets **none** of these
+protections; the compose spec *encourages* the hardened path, and only CI's use of it is *enforced*.
+`network_mode: none` cuts egress, not a local kernel exploit; `cap_drop: ALL` is not a sandbox against
+a container escape. This bounds blast radius — it is not a claim to contain hostile code, which PRD §3
+defers to P3 (the same disclaimer `internal/executor`'s package doc makes about its own sandbox).
 
 ## §7.3 Robustness on hostile input (NFR5 / I7)
 
@@ -54,5 +87,11 @@ three failure shapes were already structurally prevented and now carry explicit 
 
 - Method-call detection is import-presence + selector heuristic (no `go/types`) — recorded as
   `BasisSelectorImport` in the report, not hidden.
-- Least-privilege at the *deployment* layer (read-only mount, network policy, secret-free env) is the
-  DevOps §8 job; §7 proves only that the code cannot violate it.
+- Least-privilege at the *deployment* layer is **no longer deferred** — see §7.2 "The deployment
+  half". Its limits are stated there: it binds the containerised worker, not a direct `bin/discover`
+  invocation on a host.
+- There is no least-privilege posture for `agentd`, and there cannot be one: `internal/api` links
+  `internal/executor` → `internal/providergateway`, which reads `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`
+  from the environment, and it must reach providers over the network. **`agentd` is not the
+  least-privilege worker** — `cmd/discover` is the only entrypoint where all three NFR7 claims can be
+  simultaneously true (its sole internal dependency is `internal/discovery`).

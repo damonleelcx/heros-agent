@@ -180,9 +180,15 @@ These map 1:1 to the OpenSpec requirements in `openspec/changes/p2-config-runtim
 **Runtime (`runtime`)**
 - FR11. The Loader SHALL resolve every `*_ref` in a Variant Spec against the registries and SHALL
   fail closed (abort, no transform generated, no run, no side effects) on any unresolved reference.
-- FR12. Models SHALL be invoked through a unified provider gateway such that swapping a node's
-  provider makes the transform rewrite only its `model_ref` at the call site; the gateway SHALL
-  normalize request/response shapes across providers.
+- FR12. Models invoked **by the platform** (the eval harness, the verifier, the optimizer — any model
+  call the system makes on its own behalf) SHALL be invoked through a unified provider gateway, which
+  SHALL normalize request/response shapes across providers. The **transformed program under
+  measurement calls its own provider SDKs directly** and SHALL NOT be rewritten to route through the
+  gateway: doing so would either ship our gateway into the customer's production call path or measure
+  code that is not the code that ships. Swapping a node's model **within a provider** SHALL be a
+  `model_ref` rewrite at the call site. Swapping a node's **provider** requires rewriting the SDK call
+  itself and is out of P2 scope. *(Amended by [ADR-002](../adr/ADR-002-provider-gateway-serves-platform-callers.md);
+  the original wording predates [ADR-001](../adr/ADR-001-source-transformation-apply-model.md).)*
 - FR13. The gateway SHALL apply a per-call timeout and bounded exponential backoff with retry on
   transient failures, and SHALL source provider credentials from a secrets manager, never from the
   Variant Spec, generated diffs, code, or logs.

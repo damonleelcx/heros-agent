@@ -1,6 +1,8 @@
 {
   "//": "Template for config.json (which is GITIGNORED). Copy to config.json for local dev, or leave secrets out entirely and inject them via environment / a secrets manager. NEVER commit real secrets. See docs/decisions/secrets-baseline.md.",
 
+  "//provider_credentials": "NOT configured here. Provider (LLM) credentials go through the gateway's Secrets seam, never config.json — see secrets-baseline.md §1.1. Select the source with env HEROS_SECRETS_SOURCE=env (default) | aws-secrets-manager; for AWS also set HEROS_SECRETS_AWS_REGION plus HEROS_SECRETS_AWS_PREFIX (e.g. heros/prod/) or HEROS_SECRETS_AWS_IDS (openai=arn:...). GET /readyz reports which source is live.",
+
   "listen_addr": "127.0.0.1:8787",
   "data_dir": "",
 

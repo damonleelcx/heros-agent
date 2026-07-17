@@ -35,6 +35,41 @@ jobs:
       - name: go.mod tidy check
         run: make tidy-check
 
+  # The seven language gates, proved against real compilers (ADR-003). Its own job because it is the
+  # only one that needs a JDK, Kotlin, Rust, Node, TypeScript and mypy — `make go` must stay cheap and
+  # must not start depending on them silently. With any of them missing these FAIL rather than skip.
+  verifiers:
+    name: language gates · live toolchains
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: install the type checkers and the Kotlin compiler
+        run: |
+          pip install --quiet mypy
+          npm install -g typescript
+          # ubuntu-latest ships Rust (cargo) and, via setup-java, a real JDK. Kotlin it does not.
+          curl -sSLo /tmp/kotlin.zip https://github.com/JetBrains/kotlin/releases/download/v2.0.21/kotlin-compiler-2.0.21.zip
+          unzip -q /tmp/kotlin.zip -d /opt
+          echo "/opt/kotlinc/bin" >> "$GITHUB_PATH"
+      - name: make verifier-proof
+        env:
+          CGO_ENABLED: "1"
+        run: make verifier-proof
+
   lint:
     name: golangci-lint
     runs-on: ubuntu-latest
@@ -77,8 +112,11 @@ jobs:
           python-version: "3.12"
       - name: install validators
         run: pip install --quiet jsonschema
-      # Runs the BUILT discover CLI on every fixture repo (Go + Python) and fails the build on any schema
-      # violation, node-count regression, or golden-IR drift (tasks 8.1, 8.2). cgo for tree-sitter.
+      # Runs the BUILT discover CLI on EVERY fixture repo — Go, Python, TypeScript, Rust, Java, Kotlin —
+      # and fails the build on any schema violation, node-count regression, or golden-IR drift
+      # (tasks 8.1, 8.2). The fixture list is discovered from testdata/fixtures/expected.json, so a new
+      # language's fixtures are covered here the moment they are registered; there is no per-language
+      # list in this file to forget to update. cgo for tree-sitter.
       - name: make discovery-ci
         env:
           CGO_ENABLED: "1"
@@ -89,7 +127,7 @@ jobs:
         continue-on-error: true
 
   db-proof:
-    name: postgres constraints + slices
+    name: postgres constraints + slices + P2 stores
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -122,6 +160,44 @@ jobs:
         run: python3 db/migrations/postgres/prove_constraints.py
       - name: slice proofs
         run: python3 db/migrations/postgres/prove_slices.py
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      # Apply 0002-0004 and prove the P2 store invariants on a live server: content-addressed
+      # registry versions and their immutability guards (1.1/1.6/1.7), the Variant Spec's lineage
+      # round-trip (2.1), and the transform record (3.9).
+      #
+      # The `pgproof` tag — not an env-var skip — is what gates these. `make go` does not compile
+      # them, and here they cannot silently opt out: with no reachable database the suite FAILS.
+      # Each package binds its own schema (internal/pgtest) so they do not race on this one server.
+      - name: P2 store proofs (live Postgres)
+        env:
+          HEROS_TEST_POSTGRES_URL: postgres://postgres@localhost:5432/postgres?sslmode=disable
+        run: go test -tags pgproof -count=1 ./internal/registry/ ./internal/variantspec/ ./internal/worktree/ ./internal/executor/ ./internal/runqueue/ ./internal/e2e/
+
+  discovery-sandbox:
+    name: discovery worker least-privilege runtime (task 7.2)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # Proves deploy/docker-compose.discovery.yml really enforces the three NFR7 claims: read-only
+      # repo mount, no network egress, no ambient provider creds. internal/discovery/noexec_test.go
+      # proves only the code half — `discover` parses untrusted source with tree-sitter C via cgo, and
+      # no Go import guard can constrain what that C does on a hostile input. This job is the runtime
+      # half. Weakening a line in the compose spec turns it red.
+      #
+      # Deliberately NOT part of `make ci`: it needs Docker, matching how db-proof/pg-proof are their
+      # own jobs rather than local-gate targets. ubuntu-latest ships Docker + compose v2.
+      - name: make discovery-sandbox-proof
+        run: make discovery-sandbox-proof
+      # Guards the guard: asserts the proof above can actually FAIL, by weakening the spec one
+      # guarantee at a time and requiring a red result attributed to that specific claim. Without
+      # this, a proof with an inverted assertion would print PASS forever.
+      - name: make discovery-sandbox-proof-redcheck
+        run: make discovery-sandbox-proof-redcheck
 
   secret-scan:
     name: gitleaks (no secrets in repo)

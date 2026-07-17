@@ -42,20 +42,39 @@ reject a transform whose build fails before any node executes.
 - **THEN** the Runtime reuses the cached build instead of regenerating and rebuilding
 - **AND** the reused artifact is byte-identical to the originally built one
 
-### Requirement: Models SHALL be invoked through a unified provider gateway so that provider swaps are transparent
+### Requirement: Platform model calls SHALL go through a unified provider gateway; the transformed program SHALL call its own SDKs
 
-All model calls made by the running transformed code SHALL pass through a single provider gateway
-that normalizes request and response shapes across providers. Swapping a node's provider SHALL
-require the transformation to rewrite only its `model_ref` at the call site, with no other change to
-workflow logic.
+Model calls made **by the platform** (the eval harness, the verifier, the optimizer) SHALL pass
+through a single provider gateway that normalizes request and response shapes across providers.
 
-#### Scenario: Provider swap rewrites only the model_ref
-- **WHEN** a node's `model_ref` is changed from an Anthropic model entry to an OpenAI model entry
+The **transformed program under measurement SHALL call its provider SDKs directly** and SHALL NOT be
+rewritten to route through the gateway — that is what keeps the measured artifact identical to the
+shipped one, and keeps the customer's runtime free of any dependency on us.
+
+Swapping a node's model **within a provider** SHALL require the transformation to rewrite only its
+`model_ref` at the call site, with no other change to workflow logic. Swapping a node's **provider**
+requires rewriting the SDK call itself (a different client, request shape, and response type); the
+transform SHALL refuse it with a typed error rather than emit a diff it cannot guarantee.
+
+*(Amended by [ADR-002](../../../../docs/adr/ADR-002-provider-gateway-serves-platform-callers.md). The
+original requirement predates ADR-001 and asked for the opposite of what ADR-001 requires.)*
+
+#### Scenario: Within-provider model swap rewrites only the model_ref
+- **WHEN** a node's `model_ref` is changed from one Anthropic model entry to another
   and nothing else in the Variant Spec changes
-- **THEN** the generated diff edits only that node's model argument, and the transformed run
-  executes successfully against OpenAI
-- **AND** the node receives a normalized response of the same shape it received from Anthropic
+- **THEN** the generated diff edits only that node's model argument
 - **AND** no other workflow source is modified
+
+#### Scenario: Cross-provider swap at a call site is refused, not guessed
+- **WHEN** a node's `model_ref` is changed from an Anthropic model entry to an OpenAI model entry
+- **THEN** the transform refuses with a typed error naming the node and the dimension, and no diff
+  is generated
+- **AND** no run is started
+
+#### Scenario: Platform calls are normalized across providers
+- **WHEN** the platform itself calls Anthropic, OpenAI, and Bedrock through the gateway
+- **THEN** each returns a normalized response of the same shape, with per-call timeout, bounded
+  backoff, and an idempotency key applied uniformly
 
 ### Requirement: The gateway SHALL apply per-call timeouts and bounded backoff and SHALL source secrets from a manager, never exposing them
 

@@ -10,11 +10,17 @@
 /heros-mcp
 /heros-cli
 /heros
+/p2uidemo
 /bin/
 *.exe
 
 # Crash dumps and local scratch
 *.stackdump
+
+# Deliberately-weakened compose spec written by scripts/discovery_sandbox_redcheck.py. It is removed
+# in a finally block, but if the red-check is killed mid-run the leftover must never be committable:
+# it is a copy of the discovery worker spec with a least-privilege guarantee removed.
+/deploy/.redcheck-compose.discovery.yml
 
 # Local runtime state (must never be versioned)
 /internal/cliagent/.heros/
@@ -25,3 +31,4 @@
 # Local-only business strategy (do not commit)
 /docs/business/evaluation-and-monetization.md
 /docs/business/pricing-plan.md
+.parity/

@@ -37,15 +37,7 @@ func Run(opts Options) (Result, error) {
 	}
 	frontends := opts.Frontends
 	if frontends == nil {
-		// Default frontend set — one per shipped language. Adding a language is appending a frontend here.
-		frontends = []LanguageFrontend{
-			NewGoFrontend(opts.Frameworks...),
-			NewPythonFrontend(),
-			NewTypeScriptFrontend(),
-			NewJavaScriptFrontend(),
-			NewRustFrontend(),
-			NewJavaFrontend(),
-		}
+		frontends = DefaultFrontends(opts.Frameworks...)
 	}
 
 	// Load llm-eval.yaml if provided. A missing file is valid (optional); a malformed one fails loud.
@@ -118,6 +110,26 @@ func Run(opts Options) (Result, error) {
 		return Result{}, fmt.Errorf("internal: report nodes (%d) != IR nodes (%d)", report.Summary.NodesEmitted, len(ir.Nodes))
 	}
 	return Result{IR: ir, Report: report}, nil
+}
+
+// DefaultFrontends is the shipped frontend set — one per supported language. Adding a language is
+// appending a frontend here.
+//
+// It is exported and is the ONE list, because two things now ask "which languages does this platform
+// support?": this pipeline, and the codemod's per-language call-site index (IndexSpanCallSites). A
+// second list would answer the question differently the moment a language is added to one of them — a
+// repo whose calls Discovery finds and the apply path claims not to know, with nothing to explain the
+// gap (禁止分裂 source-of-truth). worktree.VerifiableLanguages is checked against this list by test.
+func DefaultFrontends(frameworks ...FrameworkReader) []LanguageFrontend {
+	return []LanguageFrontend{
+		NewGoFrontend(frameworks...),
+		NewPythonFrontend(),
+		NewTypeScriptFrontend(),
+		NewJavaScriptFrontend(),
+		NewRustFrontend(),
+		NewJavaFrontend(),
+		NewKotlinFrontend(),
+	}
 }
 
 func resolveWorkflowID(opts Options, frontendSuggestion string) string {
