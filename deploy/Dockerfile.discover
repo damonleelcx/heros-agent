@@ -1,0 +1,44 @@
+# Discovery worker image (P1 task 7.2 / NFR7).
+#
+# WHY THIS IMAGE EXISTS AT ALL — the Go import guard is not enough:
+# internal/discovery/noexec_test.go fails the build if the analysis path imports os/exec, plugin, or
+# net. That is a strong guard over *Go* code, and it is why this repo can claim "discovery cannot open
+# a socket". But `discover` parses untrusted customer source with tree-sitter's **C** runtime via cgo
+# (CGO_ENABLED=0 does not link — the Python/Rust/Java/TS/JS frontends all bind it). A memory-safety
+# bug in that C parser, reached by a hostile input file, is arbitrary code execution that no Go-import
+# guard can see. The import guard constrains what our code *asks* for; this image constrains what the
+# process *can do* once someone else's bug is driving. They defend different things.
+#
+# Runtime posture is NOT set here — it is declared in deploy/docker-compose.discovery.yml (read-only
+# mount, no egress, no creds) and machine-checked by scripts/discovery_sandbox_proof.py. An image
+# cannot enforce its own network or mount policy; only the runtime spec can.
+
+# bookworm, not -alpine: this base already ships gcc, so the tree-sitter cgo build needs NO package
+# install step. That is not a preference — `apk add gcc` inside the (deprecated) legacy builder hangs
+# indefinitely on this toolchain at 0% CPU, and a build step that can hang forever is a step that will
+# eventually hang CI. Fewer moving parts beats a retry loop around a known-bad step.
+FROM golang:1.24-bookworm AS build
+WORKDIR /src
+# Cache deps before the source copy so edits do not re-download the module graph.
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+# CGO_ENABLED=1: mandatory here. The tree-sitter frontends do not build without it.
+# GOWORK=off: the checkout sits inside a parent go.work; the image must build from this module alone.
+RUN CGO_ENABLED=1 GOWORK=off go build -trimpath -o /out/discover ./cmd/discover
+
+# Same distro family as the builder so the glibc the binary linked against is the glibc it gets.
+FROM debian:bookworm-slim
+# Debian slim, not distroless/scratch, and the reason is the fence rather than convenience: the
+# sandbox proof overrides the entrypoint to probe THIS image under THE SHIPPED compose spec (try to
+# write /repo, try to open a socket, dump env). A shell-less image would force the proof to test a
+# look-alike image instead of the real one — a fence that tests a stand-in is decoration.
+#
+# The probes deliberately use only what this base already has — /proc/net/dev for interfaces,
+# bash's /dev/tcp for the egress attempt — so no iproute2/netcat is installed to run them. The shell
+# is a deliberate, bounded cost: under cap_drop=ALL + read_only + network_mode=none + non-root, it
+# grants an attacker no capability the posture does not already deny.
+COPY --from=build /out/discover /usr/local/bin/discover
+# Non-root by default; the compose spec pins the uid too (defense in depth, not decoration).
+USER 65532:65532
+ENTRYPOINT ["/usr/local/bin/discover"]

@@ -1,0 +1,58 @@
+package main
+
+import (
+	"fmt"
+
+	"github.com/anthropics/anthropic-sdk-go"
+)
+
+// The three nodes below are shaped to cover the transform engine's whole prompt boundary against a
+// REAL compiler — one call site it rewrites, two it must refuse, for two different reasons.
+
+// classify is node 1: a static call with a symbolic model constant, and a single-turn prompt built
+// from a literal and a runtime value.
+//
+// The literal "claude-opus-4-6" also appears in this comment, and in the string below, so a
+// text-matching transform would corrupt them and an AST-anchored one will not.
+//
+// Its prompt is the shape a real SDK call site has: a message CONSTRUCTION whose role lives in
+// NewUserMessage and whose text is the construction's only string expression. That is what a prompt
+// override rewrites — and because `ticket` is a runtime value the call site feeds in, it is also what
+// a SLOTLESS template must refuse rather than silently discard.
+func classify(client *anthropic.Client, ticket string) string {
+	_ = "claude-opus-4-6 appears here but must never be rewritten"
+	r, _ := client.Messages.New(nil, anthropic.MessageNewParams{
+		Model:     anthropic.ModelClaudeOpus4_6,
+		MaxTokens: 256,
+		Messages:  []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock("Triage this ticket: " + ticket))},
+	})
+	return r.Text
+}
+
+// resolve is node 2: a second call site, so a single-node override can be shown not to touch it.
+//
+// Its prompt is a TWO-TURN conversation: two text literals, so a prompt entry — which names one text
+// — cannot say which turn it replaces. The engine must refuse rather than pick one.
+func resolve(client *anthropic.Client) string {
+	r, _ := client.Messages.New(nil, anthropic.MessageNewParams{
+		Model:     anthropic.ModelClaudeSonnet4,
+		MaxTokens: 512,
+		Messages: []anthropic.MessageParam{
+			anthropic.NewUserMessage(anthropic.NewTextBlock("First question.")),
+			anthropic.NewUserMessage(anthropic.NewTextBlock("Second question.")),
+		},
+	})
+	return r.Text
+}
+
+// summarize is node 3: it never sets a model, so an override must INSERT the field. It also never
+// sets Messages, so a prompt override has no argument to rewrite and must say so.
+func summarize(client *anthropic.Client) string {
+	r, _ := client.Messages.New(nil, anthropic.MessageNewParams{MaxTokens: 128})
+	return r.Text
+}
+
+func main() {
+	c := anthropic.NewClient()
+	fmt.Println(classify(c, "ticket-42"), resolve(c), summarize(c))
+}

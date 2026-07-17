@@ -1,0 +1,4 @@
+version: "1.0.0"
+entrypoints:
+  - symbol: "async_openai.(*Client).create"
+    provider: openai

@@ -51,21 +51,37 @@ type Package struct {
 // DetectedCallSite is the output of §3 detection: a matched LLM call expression plus provenance and
 // the arg map telling §4 where model/prompt/tools live. It is NOT yet a full IR node (that is §4/§5).
 type DetectedCallSite struct {
-	Identity     NodeIdentity
-	NodeID       string
-	Sources      []DetectionSource // may be multiple after merge (§3.5)
-	RegistryRow  string            // signature row id, if matched by registry
-	DeclaredSym  string            // llm-eval symbol, if matched by declaration
-	Basis        []MatchBasis      // one per source, aligned with Sources
-	Call         *ast.CallExpr     // the matched call expression (Go frontend only; nil for tree-sitter)
-	File         *ParsedFile       // owning file (Go frontend only; nil for tree-sitter)
-	FileRel      string            // repo-relative source file (language-neutral; used by the emitter)
-	LineStart    int               // 1-based start line (language-neutral)
-	LineEnd      int               // 1-based end line (language-neutral)
-	ArgMap       ArgMap            // where model/prompt/tools live (from the matching source)
-	Keywords     map[string]string // keyword-arg name -> string-literal value (syntactic frontends; nil for Go)
-	ProviderHint string            // static provider hint, if any ("" => unresolved provider)
-	Opacity      []string          // IR fields inherently unresolvable for this entrypoint
-	DetectOnly   bool              // declared entrypoint that resolves nothing (all fields unresolved)
-	Invocation   string            // "single"|"loop"|"conditional" hint from a declaration ("" => single)
+	Identity    NodeIdentity
+	NodeID      string
+	Sources     []DetectionSource   // may be multiple after merge (§3.5)
+	RegistryRow string              // signature row id, if matched by registry
+	DeclaredSym string              // llm-eval symbol, if matched by declaration
+	Basis       []MatchBasis        // one per source, aligned with Sources
+	Call        *ast.CallExpr       // the matched call expression (Go frontend only; nil for tree-sitter)
+	File        *ParsedFile         // owning file (Go frontend only; nil for tree-sitter)
+	FileRel     string              // repo-relative source file (language-neutral; used by the emitter)
+	LineStart   int                 // 1-based start line (language-neutral)
+	LineEnd     int                 // 1-based end line (language-neutral)
+	ArgMap      ArgMap              // where model/prompt/tools live (from the matching source)
+	Keywords    map[string]ArgValue // keyword-arg name -> located value (syntactic frontends; nil for Go)
+	// KeywordInsert is where a keyword argument the call site does NOT write could be ADDED, from the
+	// analyzer that parsed it. nil means nowhere — see ArgInsert.
+	//
+	// It rides alongside Keywords because the two answer the two halves of one question ("can this
+	// dimension be rewritten?") and a rewriter needs both: Keywords covers `model=` written, this covers
+	// `model=` absent. Carried on the DetectedCallSite rather than re-derived later because the parse
+	// tree it comes from is gone by then — an offset invented after the fact would be a guess.
+	// Always nil for the Go frontend, which splices from real go/ast positions instead (see codemod.go).
+	KeywordInsert *ArgInsert
+	// KeywordUnpacking is the unpacking (`**kwargs`, `*args`) that made KeywordInsert nil, when one
+	// did. It carries no permission — KeywordInsert is already nil, so the insertion is already
+	// refused — only the REASON, so the refusal a human reads names the line to look at instead of
+	// saying "this call site has no argument list", which would be false and would send them nowhere.
+	// See ArgUnpacking. Always nil for the Go frontend (Go composite literals have no unpacking form,
+	// and `go build` would catch a duplicate field anyway).
+	KeywordUnpacking *ArgUnpacking
+	ProviderHint     string   // static provider hint, if any ("" => unresolved provider)
+	Opacity          []string // IR fields inherently unresolvable for this entrypoint
+	DetectOnly       bool     // declared entrypoint that resolves nothing (all fields unresolved)
+	Invocation       string   // "single"|"loop"|"conditional" hint from a declaration ("" => single)
 }

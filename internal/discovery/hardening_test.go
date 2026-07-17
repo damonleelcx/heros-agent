@@ -167,9 +167,8 @@ func main() { var c *anthropic.Client; c.Messages.New(nil, anthropic.MessageNewP
 // the non-framework nodes are still emitted (I7 / doc 08 F10). This is the guard the review added.
 type panickingReader struct{}
 
-func (panickingReader) Name() string                         { return "boom" }
-func (panickingReader) Detect(*Package) (string, bool, bool) { return "v0", true, true }
-func (panickingReader) ReadDAG(*Package) (FrameworkGraph, []Diagnostic) {
+func (panickingReader) Name() string { return "boom" }
+func (panickingReader) Read(SyntacticUnit) (FrameworkGraph, []Diagnostic, bool) {
 	panic("reader blew up on drifted input")
 }
 

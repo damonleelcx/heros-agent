@@ -1,0 +1,85 @@
+# Discovery worker — least-privilege runtime posture (P1 task 7.2, NFR7, invariant I8).
+#
+# Usage (one-shot job, not a daemon — unlike docker-compose.enterprise.yml which runs backing services):
+#   DISCOVER_REPO=/abs/path/to/target-repo DISCOVER_OUT=/abs/path/to/outdir \
+#     docker compose -f deploy/docker-compose.discovery.yml run --rm discover
+#
+# THIS FILE IS THE ENFORCEMENT POINT. docs/discovery/10-hardening-review.md §7.2 proves the *code*
+# half of least-privilege (the analysis path cannot import net/os-exec). It explicitly defers the
+# deployment half — read-only mount, no egress, no ambient creds — and this is that half.
+#
+# Why the code half is not sufficient on its own: `discover` parses untrusted customer source with
+# tree-sitter's C runtime through cgo. The Go import guard cannot constrain what that C code does on a
+# hostile input. These three settings bound the blast radius of a bug we do not control.
+#
+# Every field below is asserted by `make discovery-sandbox-proof`
+# (scripts/discovery_sandbox_proof.py). Weaken one and the proof goes RED — statically (the field is
+# checked in the resolved spec) and dynamically (the probe that the field blocks starts succeeding).
+# Do not "temporarily" relax a line here to make something work; that is the silent-downgrade this
+# whole file exists to prevent.
+
+services:
+  discover:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.discover
+      args:
+        # BUILD-TIME ONLY, and empty unless the operator's shell sets them. On a normal network (CI)
+        # these expand to "" and change nothing; on a proxied workstation the build would otherwise
+        # hang fetching the module graph. Passed through rather than hardcoded — a literal address
+        # here would be a fix for one machine, and wrong on every other.
+        #
+        # These do NOT weaken the runtime posture, and cannot: they are consumed by the builder stage,
+        # Docker excludes the predefined proxy args from the final image, and `network_mode: none`
+        # below means the worker has no route to a proxy even if one were somehow baked in.
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-}
+    image: heros-agent/discover:local
+
+    # ---- CLAIM 2 of task 7.2: no network egress -------------------------------------------------
+    # `none` = loopback only, no interface to the outside. Discovery has no legitimate reason to
+    # reach the network: it reads a local tree and writes a local file. This is what makes the
+    # no-egress claim a property of the RUNTIME rather than a property of our import list.
+    network_mode: none
+
+    # ---- CLAIM 3 of task 7.2: no ambient provider credentials -----------------------------------
+    # Deliberately empty, and deliberately NOT `env_file:`. Compose does not forward the operator's
+    # environment unless a variable is named here, so OPENAI_API_KEY / ANTHROPIC_API_KEY / AWS_* on
+    # the invoking shell do not reach this process. The proof enforces this the only way that means
+    # anything: it exports poison credentials and asserts they are absent inside the container.
+    # NOTE: the credential reader is internal/providergateway, which `discover` does not even link
+    # (only agentd does). This keeps it that way by construction rather than by hope.
+    environment: {}
+
+    volumes:
+      # ---- CLAIM 1 of task 7.2: read-only repo mount --------------------------------------------
+      # `:ro` is enforced by the kernel mount, not by discovery's good behaviour. The Go test
+      # TestReadOnlyNoRepoMutation proves our code does not *try* to write; this proves it *cannot*,
+      # including from tree-sitter C or any future code path that forgets the rule.
+      - ${DISCOVER_REPO:?set DISCOVER_REPO to the absolute path of the repo to analyse}:/repo:ro
+      # The single writable surface: the output directory. Narrow and explicit.
+      - ${DISCOVER_OUT:?set DISCOVER_OUT to the absolute path of the output directory}:/out
+
+    # Root filesystem immutable; /tmp is the only other writable path and it dies with the container.
+    read_only: true
+    tmpfs:
+      - /tmp
+
+    # Drop every Linux capability: parsing text needs none of them.
+    cap_drop:
+      - ALL
+    # Block setuid/setcap privilege escalation inside the container.
+    security_opt:
+      - no-new-privileges:true
+    # Non-root. Pinned here as well as in the Dockerfile so the posture is legible in one place and a
+    # future base-image change cannot silently restore root.
+    user: "65532:65532"
+
+    command:
+      - --repo
+      - /repo
+      - --out
+      - /out/ir.json
+      - --report
+      - /out/discovery-report.json

@@ -32,7 +32,7 @@ func (a *rustAnalyzer) Analyze(rel string, src []byte) (SyntacticUnit, []Diagnos
 	root := tree.RootNode()
 	collectRustUses(root, src, &unit)
 	walkRustCalls(root, src, "<module>", 0, 0, &unit)
-	return unit, nil
+	return unit, syntaxErrorDiagnostics("rust", rel, root)
 }
 
 func rustPkgPath(rel string) string {
@@ -45,13 +45,83 @@ func rustPkgPath(rel string) string {
 // segment of a scoped_identifier / use_list) is what import-presence checks against.
 func collectRustUses(n *sitter.Node, src []byte, unit *SyntacticUnit) {
 	if n.Type() == "use_declaration" {
-		for _, crate := range rustCratesOf(n, src) {
+		crates := rustCratesOf(n, src)
+		for _, crate := range crates {
 			unit.ImportPaths[crate] = true
+		}
+		// Bind each imported item's LOCAL name to the crate it came from. Without this, `unit.Imports` is
+		// empty for Rust and matchDeclaredEntries' free-function branch — which resolves a wrapper via
+		// `imports[root] == entry.ImportPath` — can never fire, so a declared Rust free function
+		// (`use myco_llm::complete; complete("…")`) is silently undetectable even though the declared
+		// mechanism documents itself as language-neutral. The rust_wrapper fixture is the guard.
+		//
+		// The value is the CRATE ROOT, matching the convention rustCratesOf already establishes for
+		// ImportPaths and that the registry's Rust rows key on (import_path: async_openai).
+		for local, crate := range rustUseBindings(n, src) {
+			unit.Imports[local] = crate
 		}
 	}
 	for i := 0; i < int(n.NamedChildCount()); i++ {
 		collectRustUses(n.NamedChild(i), src, unit)
 	}
+}
+
+// rustUseBindings maps each local name a `use` declaration binds to the CRATE it came from:
+//
+//	use myco_llm::complete;          -> {"complete": "myco_llm"}
+//	use myco_llm::{a, b};            -> {"a": "myco_llm", "b": "myco_llm"}
+//	use myco_llm::complete as done;  -> {"done": "myco_llm"}   (the alias shadows the item name)
+//	use myco_llm::*;                 -> {}                     (a glob binds no nameable local)
+//
+// The crate for each binding is read from that binding's own `path` field rather than from
+// rustCratesOf's flat list: rustCratesOf reports every identifier segment it sees (for
+// `use myco_llm::complete` it yields BOTH "myco_llm" and "complete"), which is fine for the
+// import-PRESENCE checks it feeds but cannot say which crate a given local name came from.
+func rustUseBindings(n *sitter.Node, src []byte) map[string]string {
+	out := map[string]string{}
+	var walk func(node *sitter.Node)
+	walk = func(node *sitter.Node) {
+		switch node.Type() {
+		case "use_as_clause":
+			// `a::b::Item as Alias` -> the alias is the binding; do not also bind Item.
+			if alias := node.ChildByFieldName("alias"); alias != nil {
+				if crate := firstIdentSegment(node.ChildByFieldName("path"), src); crate != "" {
+					out[alias.Content(src)] = crate
+				}
+			}
+			return
+		case "use_wildcard":
+			return // a glob binds no single local name
+		case "scoped_identifier":
+			// `a::b::Item` -> local is the RIGHTMOST segment, crate is the leftmost of the path.
+			name := node.ChildByFieldName("name")
+			if name == nil {
+				return
+			}
+			if crate := firstIdentSegment(node.ChildByFieldName("path"), src); crate != "" {
+				out[name.Content(src)] = crate
+			}
+			return
+		case "scoped_use_list":
+			// `a::{b, c}` -> every identifier in the use_list binds to the path's crate.
+			crate := firstIdentSegment(node.ChildByFieldName("path"), src)
+			list := node.ChildByFieldName("list")
+			if crate == "" || list == nil {
+				return
+			}
+			for i := 0; i < int(list.NamedChildCount()); i++ {
+				if item := list.NamedChild(i); item.Type() == "identifier" {
+					out[item.Content(src)] = crate
+				}
+			}
+			return
+		}
+		for i := 0; i < int(node.NamedChildCount()); i++ {
+			walk(node.NamedChild(i))
+		}
+	}
+	walk(n)
+	return out
 }
 
 func rustCratesOf(n *sitter.Node, src []byte) []string {
@@ -83,6 +153,9 @@ func rustCratesOf(n *sitter.Node, src []byte) []string {
 }
 
 func firstIdentSegment(n *sitter.Node, src []byte) string {
+	if n == nil {
+		return ""
+	}
 	cur := n
 	for cur != nil {
 		if cur.Type() == "identifier" {
@@ -119,11 +192,25 @@ func walkRustCalls(n *sitter.Node, src []byte, sym string, loop, cond int, unit 
 			root, ri, chain := rustCallTarget(fn, src)
 			unit.CallSites = append(unit.CallSites, RawCallSite{
 				Root: root, RootIdent: ri, Chain: chain,
-				EnclosingSymbol:   sym,
-				LineStart:         int(n.StartPoint().Row) + 1,
-				LineEnd:           int(n.EndPoint().Row) + 1,
-				Invocation:        invHint(loop, cond),
-				KeywordStrings:    map[string]string{},
+				EnclosingSymbol: sym,
+				LineStart:       int(n.StartPoint().Row) + 1,
+				LineEnd:         int(n.EndPoint().Row) + 1,
+				Invocation:      invHint(loop, cond),
+				// Rust has NO named arguments — the language offers no `f(model = x)` form at all — so
+				// there is nothing for a keyword span to point at and nowhere to insert one. Empty and
+				// nil here are facts about Rust, not unimplemented work, and a nil KeywordInsert is
+				// what makes a rewriter refuse a Rust call site loudly instead of splicing at offset 0.
+				//
+				// 🔴 This is NOT the same statement as "Rust call sites are un-rewritable in principle".
+				// async-openai binds the model on a request BUILDER
+				// (`CreateChatCompletionRequestArgs::default().model("gpt-4o")`) and the anthropic crate
+				// on a struct literal — both are locatable byte ranges. Neither is reachable today
+				// because no ArgLocator form addresses them (LocParamName is the only form the
+				// syntactic floor resolves) and the Rust registry rows declare no arg_map at all. That
+				// gap is in the registry + the floor, not here; closing it changes what the IR resolves
+				// and is a separate, deliberate decision.
+				Keywords:          map[string]ArgValue{},
+				KeywordInsert:     nil,
 				PositionalStrings: rustPositionalStrings(n, src),
 			})
 		}

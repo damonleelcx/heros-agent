@@ -13,10 +13,11 @@ type GoFrontend struct {
 	readers []FrameworkReader
 }
 
-// NewGoFrontend builds the Go frontend. With no readers it defaults to the Go declarative-graph reader.
+// NewGoFrontend builds the Go frontend. With no readers it defaults to the readers the language table
+// registers for Go — the single source of truth for per-language framework support (10.11).
 func NewGoFrontend(readers ...FrameworkReader) *GoFrontend {
 	if len(readers) == 0 {
-		readers = []FrameworkReader{NewGoGraphBuilderReader()}
+		readers = frameworkReadersByLanguage["go"]
 	}
 	return &GoFrontend{readers: readers}
 }
@@ -63,8 +64,11 @@ func (f *GoFrontend) Discover(repo string, reg *Registry, decl *declaredIndex) (
 		res.Nodes = append(res.Nodes, g.Nodes...)
 		res.Edges = append(res.Edges, g.Edges...)
 
+		// Framework reading consumes the language-neutral SyntacticUnit (10.11) — the same contract every
+		// other frontend uses. Node/edge extraction above keeps the richer go/ast path.
+		unit := goUnitFromPackage(pkg)
 		for _, reader := range f.readers {
-			fg, fdiags, present := safeFramework(reader, pkg)
+			fg, fdiags, present := safeFramework(reader, unit)
 			if present {
 				res.Frameworks = append(res.Frameworks, fg)
 				res.Diagnostics = append(res.Diagnostics, fdiags...)
@@ -77,24 +81,4 @@ func (f *GoFrontend) Discover(repo string, reg *Registry, decl *declaredIndex) (
 	}
 	res.Diagnostics = append(append([]Diagnostic{}, loaderDiags...), res.Diagnostics...)
 	return res, nil
-}
-
-// safeFramework runs one framework reader with a recover guard: a reader panic (a versioned reader bug on
-// drifted input) becomes a flagged diagnostic, never a crash (doc 07 §2.1 / doc 08 F10).
-func safeFramework(reader FrameworkReader, pkg *Package) (fg FrameworkGraph, diags []Diagnostic, present bool) {
-	defer func() {
-		if r := recover(); r != nil {
-			present = true
-			fg = FrameworkGraph{FrameworkSource: reader.Name(), Degraded: true, SubgraphID: "sg_" + sanitizeID(pkg.PkgPath)}
-			diags = []Diagnostic{{
-				Code: CodeFrameworkReaderErr, Severity: SeverityWarn, Symbol: fg.SubgraphID,
-				Message: fmt.Sprintf("framework reader %q panicked; subgraph degraded: %v", reader.Name(), r),
-			}}
-		}
-	}()
-	if _, p, _ := reader.Detect(pkg); !p {
-		return FrameworkGraph{}, nil, false
-	}
-	fg, diags = reader.ReadDAG(pkg)
-	return fg, diags, true
 }

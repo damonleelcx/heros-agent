@@ -48,7 +48,7 @@ func (a *jsAnalyzer) Analyze(rel string, src []byte) (SyntacticUnit, []Diagnosti
 	root := tree.RootNode()
 	collectJSImports(root, src, &unit)
 	walkJSCalls(root, src, "<module>", 0, 0, &unit)
-	return unit, nil
+	return unit, syntaxErrorDiagnostics(a.lang, rel, root)
 }
 
 func jsPkgPath(rel string) string {
@@ -160,15 +160,43 @@ func walkJSCalls(n *sitter.Node, src []byte, sym string, loop, cond int, unit *S
 				LineStart:         int(n.StartPoint().Row) + 1,
 				LineEnd:           int(n.EndPoint().Row) + 1,
 				Invocation:        invHint(loop, cond),
-				KeywordStrings:    jsObjectStrings(n, src),
+				Keywords:          jsObjectArgs(n, src),
 				PositionalStrings: jsPositionalStrings(n, src),
 			})
+			cs := &unit.CallSites[len(unit.CallSites)-1]
+			cs.KeywordInsert, cs.KeywordUnpacking = argInsertAtEnd(
+				jsOptionsObject(n), src, "}", ": ", jsArgUnpackings)
 		}
 	}
 	for i := 0; i < int(n.NamedChildCount()); i++ {
 		walkJSCalls(n.NamedChild(i), src, nsym, nloop, ncond, unit)
 	}
 }
+
+// jsArgUnpackings is nil, and the nil is a FINDING, not an omission — the same question Python
+// answers with `dictionary_splat` (see pyArgUnpackings), asked of JS/TS and answered "no".
+//
+// JS/TS has the obvious analogue of `**kwargs`: object spread, `create({...opts, model: "x"})`, a
+// `spread_element` sitting in the very object argInsertAtEnd appends to. The reason it is not a
+// hazard is not that it is rare — it is that the language's semantics make our insertion RIGHT:
+//
+//	{ ...opts, model: "gpt-4o" }   ->   model is "gpt-4o". Last key wins, always.
+//
+// Where Python's `create(**kwargs, model="x")` RAISES because two sources both bind `model`, JS
+// simply resolves the conflict, and it resolves it in our favour: a later key overwrites an earlier
+// spread. So an appended `model:` is exactly the override the spec asked for — the very thing
+// ArgInsert's premise claims, true here for a reason Python cannot offer. Blocking it would refuse
+// correct, common rewrites for a danger this language does not have.
+//
+// 🔴 That safety hangs entirely on appending at the END. `{ model: "x", ...opts }` is the opposite
+// program: opts wins, and the override becomes a silent no-op — a diff that looks applied and does
+// nothing, which is worse than a refusal because it is green. argInsertAtEnd appends at the end for
+// its own (syntactic) reasons; this file depends on it for a SEMANTIC one, so the property is pinned
+// by a test rather than left to the next person to rediscover.
+//
+// Verified against the real runtime, not from memory: `node -e 'console.log({...{model:"old"},
+// model:"new"}.model)'` prints `new`.
+var jsArgUnpackings map[string]bool
 
 // jsCallTarget unwinds a member_expression chain: `client.chat.completions.create` ->
 // ("client", true, ["chat","completions","create"]);  `generateText` -> ("generateText", true, []).
@@ -191,10 +219,15 @@ func jsCallTarget(fn *sitter.Node, src []byte) (root string, rootIdent bool, cha
 	return "", false, chain
 }
 
-// jsObjectStrings extracts string-valued pairs from the FIRST object-literal argument
-// (`create({ model: "gpt-4o", ... })`), mapping key -> string value for the model/prompt floor.
-func jsObjectStrings(call *sitter.Node, src []byte) map[string]string {
-	out := map[string]string{}
+// jsObjectArgs extracts the pairs of a call's object-literal arguments
+// (`create({ model: "gpt-4o", ... })`), mapping key -> located value for the model/prompt floor and
+// for the language-neutral apply path.
+//
+// Every pair is recorded, not only the string-valued ones: a pair the floor cannot read gets
+// Text == "", which keywordFor rejects exactly as it rejected a pair that was absent from this map,
+// so the IR is unchanged while `model: MODEL_ID` becomes rewritable.
+func jsObjectArgs(call *sitter.Node, src []byte) map[string]ArgValue {
+	out := map[string]ArgValue{}
 	args := call.ChildByFieldName("arguments")
 	if args == nil {
 		return out
@@ -211,12 +244,58 @@ func jsObjectStrings(call *sitter.Node, src []byte) map[string]string {
 			}
 			key := pair.ChildByFieldName("key")
 			val := pair.ChildByFieldName("value")
-			if key != nil && val != nil && val.Type() == "string" {
-				out[jsKeyName(key, src)] = jsStringValue(val, src)
+			if key == nil || val == nil {
+				continue
 			}
+			out[jsKeyName(key, src)] = jsArgValue(val, src)
 		}
 	}
 	return out
+}
+
+// jsOptionsObject returns the call's FIRST object-literal argument — the options object every JS/TS
+// SDK row in the registry targets (`create({model, messages})`). It is where a keyword argument the
+// call site does not write would be added.
+//
+// First, specifically: openai's client takes a SECOND options object for per-request settings
+// (`create({model}, {timeout})`), and `model` belongs in the first. Adding it to the second would
+// compile and then be ignored at runtime — silently not applying the override, which is worse than
+// refusing. jsObjectArgs reads pairs from every object argument (it always has); this names the one
+// an insertion may target, and they agree on the shape that matters: no registry row addresses a
+// call whose dimensions are split across two object arguments.
+func jsOptionsObject(call *sitter.Node) *sitter.Node {
+	args := call.ChildByFieldName("arguments")
+	if args == nil {
+		return nil
+	}
+	for i := 0; i < int(args.NamedChildCount()); i++ {
+		if obj := args.NamedChild(i); obj.Type() == "object" {
+			return obj
+		}
+	}
+	return nil
+}
+
+// jsArgValue normalizes one JS/TS value expression.
+//
+// The READ rule is unchanged: only a `string` node yields text. A template literal is deliberately
+// NOT read — it never has been, and making it start would change the emitted IR (a separate decision
+// that is not this one's to take). It is still CLASSIFIED, because a rewriter needs to know that
+// “ `${sys}\n${q}` “ is a string whose bytes must not be replaced wholesale, and that a
+// substitution-free “ `gpt-4o` “ is one whose bytes may be. That is why Kind is not derived from
+// Text: here the value is replaceable and yet the floor reads nothing from it.
+func jsArgValue(val *sitter.Node, src []byte) ArgValue {
+	v := ArgValue{Value: spanOf(val), Kind: ArgExpression}
+	switch val.Type() {
+	case "string":
+		v.Kind, v.Text = ArgLiteralString, jsStringValue(val, src)
+	case "template_string":
+		v.Kind = ArgLiteralString
+		if firstChildOfType(val, "template_substitution") != nil {
+			v.Kind = ArgInterpolatedString
+		}
+	}
+	return v
 }
 
 func jsPositionalStrings(call *sitter.Node, src []byte) []string {

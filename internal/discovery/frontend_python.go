@@ -34,7 +34,7 @@ func (a *pythonAnalyzer) Analyze(rel string, src []byte) (SyntacticUnit, []Diagn
 	root := tree.RootNode()
 	collectPyImports(root, src, &unit)
 	walkPyCalls(root, src, "<module>", 0, 0, &unit)
-	return unit, nil
+	return unit, syntaxErrorDiagnostics("python", rel, root)
 }
 
 // pyPkgPath derives a stable, language-neutral module path from the file path: "pkg/svc.py" -> "pkg.svc".
@@ -125,14 +125,44 @@ func walkPyCalls(n *sitter.Node, src []byte, sym string, loop, cond int, unit *S
 				LineStart:         int(n.StartPoint().Row) + 1,
 				LineEnd:           int(n.EndPoint().Row) + 1,
 				Invocation:        invHint(loop, cond),
-				KeywordStrings:    pyKeywordStrings(n, src),
+				Keywords:          pyKeywords(n, src),
 				PositionalStrings: pyPositionalStrings(n, src),
 			})
+			cs := &unit.CallSites[len(unit.CallSites)-1]
+			cs.KeywordInsert, cs.KeywordUnpacking = argInsertAtEnd(
+				n.ChildByFieldName("arguments"), src, ")", "=", pyArgUnpackings)
 		}
 	}
 	for i := 0; i < int(n.NamedChildCount()); i++ {
 		walkPyCalls(n.NamedChild(i), src, nsym, nloop, ncond, unit)
 	}
+}
+
+// pyArgUnpackings is Python's answer to argInsertAtEnd's `unpackings` question, and it is the only
+// non-empty set of the three. Python is the language where an unpacking can supply a keyword the
+// source never names AND the gate cannot see it — both halves are required, and Python is where they
+// meet.
+//
+//	dictionary_splat  `**kwargs`  -> `create(**kwargs, model="x")` raises
+//	                                 "got multiple values for keyword argument 'model'" when kwargs
+//	                                 carries "model". This is the reported case: hermes-agent's
+//	                                 agent/auxiliary_client.py sets kwargs["model"] two lines above
+//	                                 the call.
+//	list_splat        `*args`     -> `create(*args, model="x")` raises "got multiple values for
+//	                                 argument 'model'" when args is long enough to reach `model`
+//	                                 positionally. Weaker in practice (the OpenAI/Anthropic SDKs take
+//	                                 keyword-only arguments, so their own `create` could not be hit
+//	                                 this way) and included anyway: the premise ArgInsert rests on is
+//	                                 broken by BOTH, the syntactic floor cannot tell which callee it
+//	                                 is looking at, and the cost of refusing is a refusal while the
+//	                                 cost of guessing is a TypeError behind a green badge. Fail
+//	                                 closed on the premise, not on the odds (八级法则 L1/L2 > L8).
+//
+// Both are verified against the real grammar in span_test.go, and the runtime claims above are the
+// actual interpreter's, not this comment's recollection.
+var pyArgUnpackings = map[string]bool{
+	"dictionary_splat": true,
+	"list_splat":       true,
 }
 
 // pyCallTarget unwinds a call's function node into root + selector chain: `client.messages.create` ->
@@ -156,8 +186,15 @@ func pyCallTarget(fn *sitter.Node, src []byte) (root string, rootIdent bool, cha
 	return "", false, chain
 }
 
-func pyKeywordStrings(call *sitter.Node, src []byte) map[string]string {
-	out := map[string]string{}
+// pyKeywords normalizes a call's keyword arguments (`create(model="gpt-4o", messages=msgs)`).
+//
+// Every keyword argument is recorded, not only the string-literal ones the floor can read. That
+// widening is what the language-neutral apply path needs and it is safe for the floor: an argument
+// the floor cannot read gets Text == "", which keywordFor rejects exactly as it rejected an argument
+// that was absent from this map altogether. `model=MODEL_ID` stays unresolved in the IR and becomes
+// rewritable — those were always two different questions; only one map ever answered them.
+func pyKeywords(call *sitter.Node, src []byte) map[string]ArgValue {
+	out := map[string]ArgValue{}
 	args := call.ChildByFieldName("arguments")
 	if args == nil {
 		return out
@@ -169,11 +206,34 @@ func pyKeywordStrings(call *sitter.Node, src []byte) map[string]string {
 		}
 		name := c.ChildByFieldName("name")
 		val := c.ChildByFieldName("value")
-		if name != nil && val != nil && val.Type() == "string" {
-			out[name.Content(src)] = pyStringValue(val, src)
+		if name == nil || val == nil {
+			continue
 		}
+		out[name.Content(src)] = pyArgValue(val, src)
 	}
 	return out
+}
+
+// pyArgValue normalizes one Python value expression.
+//
+// The READ rule is byte-for-byte the one that came before: a `string` node yields pyStringValue, and
+// nothing else yields anything. The WRITE rule (Kind) is stricter and new — an f-string carrying an
+// `interpolation` is string-shaped but is NOT a value another literal may replace, because doing so
+// would silently drop the runtime values it splices in. The floor has always read an f-string's
+// first static segment and reported it as the model/prompt; that is a pre-existing floor inaccuracy,
+// left exactly as it is here (changing it would change the emitted IR), and Kind is what stops the
+// REWRITE path from inheriting it.
+func pyArgValue(val *sitter.Node, src []byte) ArgValue {
+	v := ArgValue{Value: spanOf(val), Kind: ArgExpression}
+	if val.Type() != "string" {
+		return v
+	}
+	v.Text = pyStringValue(val, src)
+	v.Kind = ArgLiteralString
+	if firstChildOfType(val, "interpolation") != nil {
+		v.Kind = ArgInterpolatedString
+	}
+	return v
 }
 
 // pyPositionalStrings returns the string-literal positional args of a call, in order (for framework

@@ -22,6 +22,7 @@ import (
 	"github.com/heros-foreal/agentd/internal/auth"
 	"github.com/heros-foreal/agentd/internal/config"
 	"github.com/heros-foreal/agentd/internal/db"
+	"github.com/heros-foreal/agentd/internal/providergateway"
 )
 
 // Server is a running agentd instance (HTTP API over the SQLite ledger).
@@ -49,7 +50,22 @@ func StartAgentd(ctx context.Context, cfg config.Config) (*Server, error) {
 		return nil, err
 	}
 
+	// Resolve the secrets source at BOOT, not at the first provider call.
+	//
+	// Two reasons, and neither is tidiness. First, failing closed here turns a misconfigured
+	// deployment into a process that does not start — the loudest signal there is — instead of one
+	// that starts, looks healthy, serves for an hour, and then fails the first real model call with a
+	// credential error that reads like an IAM problem. Second, /readyz can only report the live source
+	// if the live source is decided once, here, rather than re-derived by each caller.
+	secrets, err := providergateway.NewSecretsFromEnv(ctx)
+	if err != nil {
+		_ = database.Close()
+		return nil, fmt.Errorf("secrets source: %w", err)
+	}
+	log.Printf("secrets source: %s (%s)", secrets.Describe().Kind, secrets.Describe().Detail)
+
 	handler := api.New(database, cfg)
+	handler.SetSecretsSource(secrets)
 	httpServer := &http.Server{
 		Handler:           handler.Handler,
 		ReadHeaderTimeout: 10 * time.Second,

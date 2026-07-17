@@ -226,9 +226,23 @@ rows:
   - { id: rs.anthropic.messages.create, language: rust, import_path: anthropic, symbol_kind: client_method, selector: messages.create, provider_hint: anthropic }
   - { id: rs.anthropic.complete, language: rust, import_path: anthropic, symbol_kind: client_method, selector: complete, provider_hint: anthropic }
 
-  # ---- Java/Kotlin (frontend #6, tree-sitter). Builders bind the model at construction -> unresolved at
+  # ---- Java (frontend #6, tree-sitter). Builders bind the model at construction -> unresolved at
   #      the floor; detection = SDK package import-presence + method selector. ----
   - { id: java.langchain4j.generate, language: java, import_path: dev.langchain4j, symbol_kind: client_method, selector: generate, provider_hint: "" }
   - { id: java.langchain4j.chat, language: java, import_path: dev.langchain4j, symbol_kind: client_method, selector: chat, provider_hint: "" }
   - { id: java.springai.call, language: java, import_path: org.springframework.ai, symbol_kind: client_method, selector: call, provider_hint: "" }
   - { id: java.bedrock.converse, language: java, import_path: software.amazon.awssdk.services.bedrockruntime, symbol_kind: client_method, selector: converse, provider_hint: bedrock }
+
+  # ---- Kotlin (frontend #7, tree-sitter). Kotlin is a JVM language, so it consumes the SAME SDKs as
+  #      Java through the same dotted import paths — the rows below are NOT copy-paste filler: rows are
+  #      language-tagged and ForLanguage("kotlin") would match nothing without them, which is exactly why
+  #      a .kt file with a real langchain4j call used to yield 0 nodes while this section's header
+  #      claimed "Java/Kotlin". Same import paths, kotlin tag.
+  #
+  #      Kotlin adds ONE thing Java does not have: the AWS SDK for Kotlin (aws.sdk.kotlin.*), a separate
+  #      artifact from the AWS SDK for Java, whose Bedrock client exposes suspend fun converse(...).
+  - { id: kt.langchain4j.generate, language: kotlin, import_path: dev.langchain4j, symbol_kind: client_method, selector: generate, provider_hint: "" }
+  - { id: kt.langchain4j.chat, language: kotlin, import_path: dev.langchain4j, symbol_kind: client_method, selector: chat, provider_hint: "" }
+  - { id: kt.springai.call, language: kotlin, import_path: org.springframework.ai, symbol_kind: client_method, selector: call, provider_hint: "" }
+  - { id: kt.bedrock.converse, language: kotlin, import_path: software.amazon.awssdk.services.bedrockruntime, symbol_kind: client_method, selector: converse, provider_hint: bedrock }
+  - { id: kt.bedrock.kotlin.converse, language: kotlin, import_path: aws.sdk.kotlin.services.bedrockruntime, symbol_kind: client_method, selector: converse, provider_hint: bedrock }

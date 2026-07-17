@@ -32,7 +32,7 @@ func (a *javaAnalyzer) Analyze(rel string, src []byte) (SyntacticUnit, []Diagnos
 	root := tree.RootNode()
 	collectJavaImports(root, src, &unit)
 	walkJavaCalls(root, src, "<file>", 0, 0, &unit)
-	return unit, nil
+	return unit, syntaxErrorDiagnostics("java", rel, root)
 }
 
 func javaPkgPath(rel string) string {
@@ -87,11 +87,23 @@ func walkJavaCalls(n *sitter.Node, src []byte, sym string, loop, cond int, unit 
 		root, ri, chain := javaCallTarget(n, src)
 		unit.CallSites = append(unit.CallSites, RawCallSite{
 			Root: root, RootIdent: ri, Chain: chain,
-			EnclosingSymbol:   sym,
-			LineStart:         int(n.StartPoint().Row) + 1,
-			LineEnd:           int(n.EndPoint().Row) + 1,
-			Invocation:        invHint(loop, cond),
-			KeywordStrings:    map[string]string{},
+			EnclosingSymbol: sym,
+			LineStart:       int(n.StartPoint().Row) + 1,
+			LineEnd:         int(n.EndPoint().Row) + 1,
+			Invocation:      invHint(loop, cond),
+			// Java has NO named arguments — the language offers no `f(model = x)` form at all — so there
+			// is nothing for a keyword span to point at and nowhere to insert one. Empty and nil here are
+			// facts about Java, not unimplemented work, and a nil KeywordInsert is what makes a rewriter
+			// refuse a Java call site loudly instead of splicing at offset 0.
+			//
+			// 🔴 This is NOT the same statement as "Java call sites are un-rewritable in principle".
+			// langchain4j takes the prompt POSITIONALLY (`chatModel.generate("Hello")`) — a plain string
+			// literal with a perfectly good byte range. It is not reachable today because no ArgLocator
+			// form addresses it (LocParamName is the only form the syntactic floor resolves) and the Java
+			// registry rows declare no arg_map at all. That gap is in the registry + the floor, not here;
+			// closing it changes what the IR resolves and is a separate, deliberate decision.
+			Keywords:          map[string]ArgValue{},
+			KeywordInsert:     nil,
 			PositionalStrings: javaPositionalStrings(n, src),
 		})
 	}

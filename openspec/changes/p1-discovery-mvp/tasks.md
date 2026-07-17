@@ -90,6 +90,27 @@ Ordered, independently-verifiable tasks grouped by workstream/role. Backend lead
 - [x] 7.1 **No-execution assertion**: run discovery with process spawn / plugin load denied; a fixture
   with an `init()` side effect must never fire (NFR1).
 - [x] 7.2 Least-privilege worker: read-only repo mount, no network egress, no ambient provider creds (NFR7).
+  > **Both halves now exist.** *Code half:* `noexec_test.go:17` is a structural guard (fails the build
+  > if the analysis path imports `os/exec`/`plugin`/`net`) + `hardening_test.go:43`'s init-sentinel.
+  > *Deployment half (was missing — docs/discovery/10 §57 deferred it to "DevOps §8", which turned out
+  > to be GitHub Actions only, so nobody delivered it):* `deploy/docker-compose.discovery.yml`
+  > (`network_mode: none`, `/repo:ro`, `environment: {}`, `read_only`, `cap_drop: [ALL]`,
+  > `no-new-privileges`, non-root) + `deploy/Dockerfile.discover`, verified by
+  > `make discovery-sandbox-proof` (20/20 pass) and `make discovery-sandbox-proof-redcheck`, which
+  > proves the proof goes red when each claim is broken. CI job: `discovery-sandbox`.
+  > **Scope:** binds `cmd/discover` only. `agentd` can never satisfy claims 2–3 — it must reach
+  > providers by design. **Honest limit:** this bounds blast radius; it is *not* a claim to contain
+  > hostile code. The container defends what the import guard cannot — `discover` parses untrusted
+  > source through tree-sitter's C runtime via cgo. `make discovery-ci` still runs the binary on the
+  > host with none of this posture.
+  - Code half: `internal/discovery/noexec_test.go` (import guard: no `net`/`os/exec`/`plugin`) +
+    `hardening_test.go` (`TestReadOnlyNoRepoMutation`, init-sentinel).
+  - Runtime half: `deploy/docker-compose.discovery.yml` + `deploy/Dockerfile.discover` enforce all
+    three claims on `cmd/discover` (the only entrypoint where they can all hold — `agentd` links
+    `providergateway` and needs both creds and egress). Proven by `make discovery-sandbox-proof`
+    (static + dynamic per claim); the fence's own red-ability by `make discovery-sandbox-proof-redcheck`.
+    Limits stated in `docs/discovery/10-hardening-review.md` §7.2: this binds the containerised
+    worker, not a direct `bin/discover` run on a host.
 - [x] 7.3 Robustness: bound recursion/resource use on hostile input (deep nesting, huge literals,
   symlink cycles); degrade to per-file diagnostic (NFR5).
 - [x] 7.4 Adversarial self-review: hunt silently-dropped nodes, variable-node-given-fixed-count,
@@ -148,17 +169,70 @@ Ordered, independently-verifiable tasks grouped by workstream/role. Backend lead
 - [x] 10.6 **Python** frontend + registry rows (`anthropic`, `openai`, `langchain`, `langgraph`,
   `crewai`, `boto3`/Bedrock) + fixtures (wrapper, framework-DAG=LangGraph/CrewAI, loop, malformed,
   dedup, golden).
-- [x] 10.7 **TypeScript/JavaScript** frontend + registry rows (`@anthropic-ai/sdk`, `openai`,
+  > **Now true.** Previously the six-kind fixture list held for **Go only**: Python had no malformed
+  > and no dedup fixture, and its wrapper existed only as an in-test fixture
+  > (`frontend_python_test.go:97`) rather than a committed dir. All six now exist as committed
+  > fixtures. Fixture corpus overall: 13 → 30.
+  > The malformed fixtures exposed a real bug across **every** tree-sitter frontend: tree-sitter never
+  > fails a parse — it *recovers* — so no frontend surfaced `HasError`, and malformed source was
+  > silently half-analyzed under a clean report (失败要显眼 violation). `syntaxErrorDiagnostics` was
+  > added to the shared substrate for all frontends (a capability in only one frontend is a bug).
+  > Severity is deliberately `warn`, not `error`: the file was not skipped, so `error` would inflate
+  > `files_skipped` and claim a skip that never happened.
+- [ ] 10.7 **TypeScript/JavaScript** frontend + registry rows (`@anthropic-ai/sdk`, `openai`,
   `langchain`/`langgraph.js`, Vercel AI SDK) + fixtures.
+  > **TypeScript done; JavaScript un-ticked.** TS now has all six fixture kinds (golden, wrapper,
+  > framework-DAG, loop-in-golden, malformed, dedup). **!!! JavaScript has a registered frontend and
+  > 6 registry rows but ZERO fixtures** — so `.js` support is asserted, never demonstrated. Un-ticked
+  > rather than reworded: the frontend claims the language, so the fixture gap is a real gap.
 - [x] 10.8 **Java/Kotlin** frontend + registry rows (langchain4j, Spring AI, Bedrock) + fixtures.
+  > **Kotlin now genuinely ships** (it did not before: `frontend_java.go` returned only `.java`, there
+  > were zero kotlin-tagged registry rows, and `registry.yaml:229` carried a `# ---- Java/Kotlin ----`
+  > header over java-only rows — the false claim in data form). `frontend_kotlin.go` +
+  > 5 kotlin registry rows + 5 fixtures. Java's AST patterns did **not** transfer (Kotlin has no `name`
+  > field; `interface`→`class_declaration`; `if`/`when` are expressions), so the frontend was written
+  > against the real grammar, not copied.
+  > Fixtures: java = golden/wrapper/loop/malformed/dedup; kotlin = golden/wrapper/loop-in-golden/
+  > malformed/dedup. **framework-DAG is N/A for both** and documented as such in each `EXPECTED.md`:
+  > langchain4j/Spring AI are request/response SDKs and imperative builders, not statically-readable
+  > node/edge graphs. An N/A with a written reason is a real answer; a silently absent fixture is not.
 - [x] 10.9 **Rust** frontend + registry rows (`async-openai`, `anthropic` crates) + fixtures.
-- [x] 10.10 **Further languages** on demand behind the same interface (C#, Go already done, Ruby, …).
+  > Fixtures: golden, wrapper, loop-in-golden, malformed, dedup. **framework-DAG N/A** (same reason as
+  > 10.8, documented in `EXPECTED.md`). The `rust_wrapper` fixture caught a real bug on arrival: Rust
+  > `use` never populated `Imports`, so Rust free-function wrappers were undetectable despite
+  > `matchDeclaredEntries` documenting itself "LANGUAGE-NEUTRAL". Fixed at the source, not by editing
+  > the expected count to match.
+- [ ] 10.10 **Further languages** on demand behind the same interface (C#, Go already done, Ruby, …).
+  > **Un-ticked — nothing was demanded, so nothing shipped.** No C#/Ruby/PHP/Swift/Scala frontend
+  > exists; `frontend.go:44` lists those extensions only so they can be *reported as unsupported*
+  > (a `.cs` file with an Anthropic call yields 0 nodes and an honest `LANGUAGE_UNSUPPORTED`
+  > diagnostic). Building them speculatively is 八级法则 L8 cost for no demand, and 禁止清单 #15
+  > ("建了等未来用") forbids it. **The task is correctly worded ("on demand") — it was simply never
+  > true.** It becomes tickable the day a language is actually demanded.
 
 
 
 ### 10.D — Per-language framework readers, tests, CI
 
-- [x] 10.11 **Python framework readers**: LangGraph + CrewAI declarative-graph readers behind the
-  existing `FrameworkReader` interface (resolves the Go-vs-Python scope conflict, docs/discovery/07 §4).
+- [x] 10.11 **Python framework readers**: LangGraph + CrewAI declarative-graph readers behind **one**
+  framework-reader interface (resolves the Go-vs-Python scope conflict, docs/discovery/07 §4).
+  > **Reworded — the readers always worked; the claim of interface reuse was false.** They sat behind a
+  > *new, parallel* `syntacticFrameworkReader`, leaving the repo with **two** framework-reader
+  > interfaces. Per 「暴露冲突，不要折中平均」 the two were not blended into an average interface:
+  > the `SyntacticUnit`-keyed contract **won** and the `*Package`-keyed one was **deleted**. Rationale:
+  > `*Package` is `go/ast`, so it is structurally incapable of ever serving a tree-sitter frontend
+  > (八级法则 L6 不可扩展). The winner absorbed the loser's degrade-to-flag + diagnostics contract
+  > (a capability, not a competing design). Language scoping is now a config table
+  > (`frameworkReadersByLanguage`), not an if/else chain (禁止清单 #14).
+  > **Non-regression proved, not claimed** (import-parser-research-validation: 「没有纯重构例外 —
+  > '等价'是声称，不是证明」): all 13 pre-existing fixtures re-run before/after → **26/26 artifacts
+  > byte-identical (13 IR + 13 report)**. Diffing the IR alone would have been blind here — framework
+  > subgraphs travel in the *report*. The diff harness was itself red-checked.
+  > **!!! Known limitation, pinned not buried:** the shared floor drops positional fidelity —
+  > `AddNode(nodeName, "notaname")` now yields node `notaname` (a guess) where the deleted Go reader
+  > honestly skipped. Pre-existing in Python/TS, unreachable via valid LangGraph APIs, and outside the
+  > fixture corpus — so the byte-identical proof would **not** have caught it. Pinned in
+  > `TestBuilderFloorDropsPositionalFidelity_KnownLimitation`. The real fix (positional fidelity in
+  > `PositionalStrings` across all six analyzers) is a substrate change beyond this task.
 - [x] 10.12 **Mixed-language fixture** + golden IR proving one run spans multiple frontends.
 - [x] 10.13 CI: run Discovery + schema-validate + golden-drift + node-count regression **per language**.
