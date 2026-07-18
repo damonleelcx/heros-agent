@@ -45,6 +45,10 @@ type CallInfo struct {
 	Duration       time.Duration
 	Usage          Usage
 	StopReason     StopReason
+	// RateLimited reports whether ANY attempt in this logical call received a 429 (task 1.5's
+	// rate-limit-hit metric). A retried-then-succeeded call still saw the rate limit, so this is
+	// separate from Err: the outage signal must survive the recovery.
+	RateLimited bool
 	// Err is the terminal error, nil on success. It is already scrubbed — an observer that logs this
 	// cannot leak a credential, which matters because logging it is exactly what an observer is for.
 	Err error
@@ -54,17 +58,24 @@ type CallInfo struct {
 func WithObserver(o Observer) Option { return func(g *Gateway) { g.observer = o } }
 
 // observe fires the hook if one is attached.
-func (g *Gateway) observe(ctx context.Context, entry *registry.ModelEntry, req Request, seed *int64, started time.Time, resp *Response, err error) {
+//
+// attempts and rateLimited are passed explicitly rather than read from resp, because resp is nil on
+// every failure path — and a call that failed after 3 retries reporting Attempts=0 would understate
+// exactly the reliability signal (retry count, rate-limit exposure) task 1.5 needs most when things go
+// wrong. The gateway tracks both across the retry loop and hands them here so a failure carries the
+// same fidelity as a success.
+func (g *Gateway) observe(ctx context.Context, entry *registry.ModelEntry, req Request, seed *int64, started time.Time, resp *Response, err error, attempts int, rateLimited bool) {
 	if g.observer == nil {
 		return
 	}
 	info := CallInfo{
 		Provider: entry.Spec.Provider, ModelID: entry.Spec.ModelID, ModelVersionID: entry.VersionID,
 		IdempotencyKey: req.IdempotencyKey, Seed: seed,
+		Attempts: attempts, RateLimited: rateLimited,
 		Duration: time.Since(started), Err: err,
 	}
 	if resp != nil {
-		info.Attempts, info.Usage, info.StopReason = resp.Attempts, resp.Usage, resp.StopReason
+		info.Usage, info.StopReason = resp.Usage, resp.StopReason
 	}
 	g.observer.OnCall(ctx, info)
 }

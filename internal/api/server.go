@@ -29,6 +29,9 @@ type Server struct {
 	// p2 is the Postgres-backed P2 read surface, mounted by MountP2 when available.
 	p2 P2Stores
 
+	// monitor is the P2.5 live run-monitoring read model, mounted by MountMonitor when available.
+	monitor MonitorSource
+
 	// secrets is the live provider-credential source, reported by /readyz.
 	//
 	// The SOURCE, never a credential: this holds the thing that can produce secrets precisely so the

@@ -137,7 +137,7 @@ db-proof:
 ##           These tests are behind the `pgproof` build tag, so `make go` does not compile them; with
 ##           no database they FAIL rather than skip.
 pg-proof:
-	bash db/migrations/postgres/run_pg_docker.sh $(GO) test -tags pgproof -count=1 ./internal/registry/ ./internal/variantspec/ ./internal/worktree/ ./internal/executor/ ./internal/runqueue/ ./internal/submit/ ./internal/e2e/
+	bash db/migrations/postgres/run_pg_docker.sh $(GO) test -tags pgproof -count=1 ./internal/registry/ ./internal/variantspec/ ./internal/worktree/ ./internal/executor/ ./internal/runqueue/ ./internal/submit/ ./internal/e2e/ ./internal/telemetry/
 
 ## tidy-check: assert go.mod/go.sum are tidy (no drift)
 tidy-check:
