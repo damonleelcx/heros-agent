@@ -229,7 +229,12 @@ func (g *Gateway) Complete(ctx context.Context, entry *registry.ModelEntry, req 
 	// shape that survives the seven returns below — an instrument that only sees successes would
 	// report a provider outage as silence, which is precisely when someone is looking at it.
 	started := time.Now()
-	defer func() { g.observe(ctx, entry, req, seed, started, resp, err) }()
+	// Tracked across the retry loop so a FAILED call still reports how many attempts it took and whether
+	// it saw a rate limit — the observer reads these, and a failure that reported zero attempts would
+	// blind the reliability metrics precisely when they matter (task 1.5).
+	var attemptsMade int
+	var sawRateLimit bool
+	defer func() { g.observe(ctx, entry, req, seed, started, resp, err, attemptsMade, sawRateLimit) }()
 	spec := entry.Spec
 	ad, ok := g.adapters[spec.Provider]
 	if !ok {
@@ -260,7 +265,11 @@ func (g *Gateway) Complete(ctx context.Context, entry *registry.ModelEntry, req 
 				return nil, g.deadlineErr(ctx, lastErr, secretVals)
 			}
 		}
-		resp, retryable, err := g.attempt(ctx, ad, cred, spec, req, seed)
+		attemptsMade = attempt + 1
+		resp, status, retryable, err := g.attempt(ctx, ad, cred, spec, req, seed)
+		if status == http.StatusTooManyRequests {
+			sawRateLimit = true
+		}
 		switch {
 		case err == nil:
 			resp.Attempts = attempt + 1
@@ -279,36 +288,38 @@ func (g *Gateway) Complete(ctx context.Context, entry *registry.ModelEntry, req 
 	return nil, scrubErr(fmt.Errorf("after %d attempts: %v", g.maxRetries+1, lastErr), secretVals, ErrTransient)
 }
 
-// attempt performs one HTTP round trip. retryable reports whether the failure is worth another.
-func (g *Gateway) attempt(ctx context.Context, ad adapter, cred Credential, spec registry.ModelSpec, req Request, seed *int64) (resp *Response, retryable bool, err error) {
+// attempt performs one HTTP round trip. retryable reports whether the failure is worth another; status
+// is the HTTP status code (0 on a transport error) so Complete can distinguish a 429 rate limit from a
+// 5xx for the reliability metrics (task 1.5).
+func (g *Gateway) attempt(ctx context.Context, ad adapter, cred Credential, spec registry.ModelSpec, req Request, seed *int64) (resp *Response, status int, retryable bool, err error) {
 	httpReq, err := ad.build(ctx, g.endpoint(ad.name(), spec), cred, spec, req, seed)
 	if err != nil {
-		return nil, false, err // a request we cannot even build will not build next time either
+		return nil, 0, false, err // a request we cannot even build will not build next time either
 	}
 	httpResp, err := g.http.Do(httpReq)
 	if err != nil {
 		// A transport error (connection reset, DNS blip, TLS handshake) is the canonical transient.
-		return nil, true, err
+		return nil, 0, true, err
 	}
 	defer func() { _ = httpResp.Body.Close() }()
 
 	body, err := io.ReadAll(httpResp.Body)
 	if err != nil {
-		return nil, true, err
+		return nil, httpResp.StatusCode, true, err
 	}
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
-		return nil, isRetryableStatus(httpResp.StatusCode),
+		return nil, httpResp.StatusCode, isRetryableStatus(httpResp.StatusCode),
 			fmt.Errorf("%s returned %s: %s", ad.name(), httpResp.Status, truncate(string(body), 512))
 	}
 	out, err := ad.parse(body)
 	if err != nil {
 		// A 200 whose body will not parse is not a success. Returning content="" here is exactly the
 		// "HTTP 200 + parsed all zeros + no log" failure that hides a wire-format change for months.
-		return nil, false, fmt.Errorf("%s returned 200 but the body did not parse: %v (body: %s)",
+		return nil, httpResp.StatusCode, false, fmt.Errorf("%s returned 200 but the body did not parse: %v (body: %s)",
 			ad.name(), err, truncate(string(body), 512))
 	}
 	out.Provider, out.ModelID = spec.Provider, spec.ModelID
-	return out, false, nil
+	return out, httpResp.StatusCode, false, nil
 }
 
 // isRetryableStatus: 429 and 5xx are the provider saying "not now"; every other 4xx is it saying
