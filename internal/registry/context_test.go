@@ -26,7 +26,10 @@ func TestFullPolicy_ParamsSchemaIsItselfValid(t *testing.T) {
 // Variant Spec cannot reference one. The nil *sql.DB proves the rejection precedes any write.
 func TestRegisterContextPolicy_RejectsUnregisteredPolicyBeforeTouchingTheDatabase(t *testing.T) {
 	s := NewStore(nil, nil)
-	id, err := s.RegisterContextPolicy(context.Background(), "default", "sliding-window", nil)
+	// A name no build implements. (`sliding-window` is a real P3 policy now, so it can no longer stand
+	// in for "unregistered"; the point of the test — an unimplemented policy is rejected before any
+	// write — is unchanged.)
+	id, err := s.RegisterContextPolicy(context.Background(), "default", "no-such-policy", nil)
 	if err == nil {
 		t.Fatalf("registering an unimplemented policy succeeded and returned %s", id)
 	}
@@ -35,7 +38,7 @@ func TestRegisterContextPolicy_RejectsUnregisteredPolicyBeforeTouchingTheDatabas
 	}
 	// The unhappy path must say which policy, and what was available (PRD §9 Product Designer:
 	// design the unhappy path first — tell the user which dimension broke).
-	if !strings.Contains(err.Error(), "sliding-window") || !strings.Contains(err.Error(), "full") {
+	if !strings.Contains(err.Error(), "no-such-policy") || !strings.Contains(err.Error(), "full") {
 		t.Errorf("error should name the rejected policy and the available ones, got: %v", err)
 	}
 }
@@ -67,13 +70,13 @@ func TestRegisterContextPolicy_RejectsMalformedParamsJSON(t *testing.T) {
 // the interface has been designed too `full`-specifically (PRD §11 risk).
 func TestAddPolicy_IsEnoughToSupportANewPolicy(t *testing.T) {
 	s := NewStore(nil, nil)
-	s.AddPolicy(slidingWindow{})
+	s.AddPolicy(testWindow{})
 
-	if _, ok := s.policies["sliding-window"]; !ok {
+	if _, ok := s.policies["test-window"]; !ok {
 		t.Fatal("AddPolicy did not make the policy available")
 	}
 	// Its params are now validated against ITS schema, which this package knows nothing about.
-	_, err := s.RegisterContextPolicy(context.Background(), "default", "sliding-window", json.RawMessage(`{"turns":"lots"}`))
+	_, err := s.RegisterContextPolicy(context.Background(), "default", "test-window", json.RawMessage(`{"turns":"lots"}`))
 	if !errors.Is(err, ErrInvalidEntry) {
 		t.Fatalf("a new policy's params must be validated against its own schema, got %v", err)
 	}
@@ -86,15 +89,18 @@ func TestAddPolicy_IsEnoughToSupportANewPolicy(t *testing.T) {
 					"validation appears to have rejected them")
 			}
 		}()
-		_, _ = s.RegisterContextPolicy(context.Background(), "default", "sliding-window", json.RawMessage(`{"turns":10}`))
+		_, _ = s.RegisterContextPolicy(context.Background(), "default", "test-window", json.RawMessage(`{"turns":10}`))
 	}()
 }
 
-// slidingWindow stands in for a P3 policy. It exists only to prove the interface does not assume
-// `full`'s shape (no params).
-type slidingWindow struct{}
+// testWindow stands in for a caller-supplied policy. It exists only to prove AddPolicy + the interface
+// do not assume any builtin's shape.
+type testWindow struct{}
 
-func (slidingWindow) Name() string { return "sliding-window" }
-func (slidingWindow) ParamsSchema() json.RawMessage {
+func (testWindow) Name() string { return "test-window" }
+func (testWindow) ParamsSchema() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{"turns":{"type":"integer","minimum":1}},"required":["turns"],"additionalProperties":false}`)
+}
+func (testWindow) Assemble(_ context.Context, _ HostServices, conv Conversation, _ json.RawMessage, _ int64) (AssembledContext, error) {
+	return AssembledContext{Messages: conv.Messages, SourceMessageCount: len(conv.Messages)}, nil
 }
