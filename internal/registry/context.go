@@ -22,11 +22,14 @@ import (
 //     model_ref) without this package learning its shape (PRD OQ5).
 //
 // P3 adds the assembly method — the operation whose output the codemod rewrites into the call site's
-// context construction. It is deliberately absent here rather than stubbed: P2 has nothing to
-// implement behind it, and an unused method would freeze a signature designed with no caller.
+// context construction. Assemble is deterministic given policy + params + conversation + seed (FR-context
+// determinism): byte-identical for LLM-free policies, and — for policies with an LLM/retriever step —
+// an identical *resolved request* under the fixed seed. A policy that needs a model or retriever calls
+// it through `host` (the trusted-host gateway), never from inside a sandbox.
 type Policy interface {
 	Name() string
 	ParamsSchema() json.RawMessage
+	Assemble(ctx context.Context, host HostServices, conv Conversation, params json.RawMessage, seed int64) (AssembledContext, error)
 }
 
 // FullPolicy passes the complete context through with no truncation, summarization, or retrieval.
@@ -42,8 +45,34 @@ func (FullPolicy) ParamsSchema() json.RawMessage {
 	return json.RawMessage(`{"type":"object","additionalProperties":false}`)
 }
 
-// BuiltinPolicies returns the policies P2 ships. Task 1.5: register the `full` policy.
-func BuiltinPolicies() []Policy { return []Policy{FullPolicy{}} }
+// Assemble passes the whole conversation through unchanged. It is the lossless baseline: assembled ==
+// source, drop ratio 0, no host call. Byte-identical across runs because it copies the input verbatim.
+func (FullPolicy) Assemble(_ context.Context, _ HostServices, conv Conversation, params json.RawMessage, _ int64) (AssembledContext, error) {
+	if err := requireNoParams("full", params); err != nil {
+		return AssembledContext{}, err
+	}
+	msgs := copyMessages(conv.Messages)
+	return AssembledContext{
+		Messages:           msgs,
+		AssembledTokens:    estimateTokens(msgs),
+		SourceMessageCount: len(conv.Messages),
+		DropRatio:          0,
+	}, nil
+}
+
+// BuiltinPolicies returns every named context policy. P2 shipped only `full`; P3 adds the four
+// context-engineering strategies. Adding a policy is a new entry here (and its implementation), never
+// a schema change — the AddPolicy seam and content-addressed context entries are already policy-generic.
+func BuiltinPolicies() []Policy {
+	return []Policy{
+		FullPolicy{},        // P2 name, kept so pinned specs keep resolving
+		FullHistoryPolicy{}, // context-strategies spec name for the same identity behavior
+		SlidingWindowPolicy{},
+		SummarizationPolicy{},
+		RAGRetrievalPolicy{},
+		SemanticCompactionPolicy{},
+	}
+}
 
 // ContextSpec is a context entry's content: which policy, and the params it runs with.
 type ContextSpec struct {
