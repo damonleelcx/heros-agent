@@ -46,7 +46,10 @@ services:
     # isolate (task 3.7: no state persists between nodes).
     read_only: true
     tmpfs:
-      - /scratch
+      # mode=1777 (world-writable + sticky, like /tmp) so the non-root isolate user can write its
+      # scratch; a default tmpfs is root-owned 0755 and would deny uid 65532. The mount is ephemeral and
+      # dies with the isolate, so world-writable here is scoped to a single throwaway isolate.
+      - /scratch:mode=1777
 
     # ---- resource bounds (task 3.5) -----------------------------------------------------------
     # cgroup-enforced, so a fork bomb / mem bomb / runaway is contained by the OS, terminating only this
