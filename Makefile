@@ -22,7 +22,8 @@ PARITY_DIR ?= .parity
 .PHONY: ci go build vet fmt test schema lint db-proof pg-proof verifier-proof tidy-check clean help \
         build-discover discovery-ci discovery-throughput \
         discovery-parity-snapshot discovery-parity-verify \
-        discovery-sandbox-proof discovery-sandbox-proof-redcheck
+        discovery-sandbox-proof discovery-sandbox-proof-redcheck \
+        sandbox-proof sandbox-proof-redcheck
 
 ## ci: the locally-provable gate (go + schema + discovery-ci). Lint/db-proof run as their own CI jobs.
 ci: go schema discovery-ci
@@ -100,6 +101,23 @@ discovery-sandbox-proof:
 ##                          A fence that cannot go red is decoration. Needs only Docker.
 discovery-sandbox-proof-redcheck:
 	$(PYTHON) scripts/discovery_sandbox_redcheck.py
+
+## sandbox-proof: prove the P3 isolate's least-privilege RUNTIME (sandbox spec §3; tasks 3.2–3.5).
+##                          Asserts deploy/docker-compose.sandbox.yml — the concrete
+##                          sandbox.NewContainedEnforcer posture — actually enforces: default-deny
+##                          network egress (metadata endpoint unreachable), read-only working-set FS,
+##                          no ambient provider creds, and cgroup resource bounds — statically (the
+##                          field is in the shipped spec) and dynamically (the probe it forbids fails).
+##                          Complements internal/sandbox's hermetic Go proofs, which report OS-level
+##                          egress-deny + FS-scope as UNAVAILABLE on a bare host (fail-closed). Docker only.
+sandbox-proof:
+	$(PYTHON) scripts/sandbox_proof.py
+
+## sandbox-proof-redcheck: prove the sandbox proof can FAIL. Weakens the compose spec one guarantee at
+##                          a time (drop network_mode:none / /work to :rw / forward OPENAI_API_KEY /
+##                          drop pids_limit) and asserts the proof goes red for that specific claim.
+sandbox-proof-redcheck:
+	$(PYTHON) scripts/sandbox_redcheck.py
 
 ## verifier-proof: prove the seven language gates against REAL toolchains (ADR-003 decision 2).
 ##                 For each language: a genuine rewrite PASSES at the strength the ADR says that

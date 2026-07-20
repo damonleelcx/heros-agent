@@ -19,12 +19,21 @@ Each acceptance criterion from PRD §13, with the test(s) proving it. All green 
 | Every denial + contract rejection emits a **tagged audit event**, no secret values | `sandboxaudit.TestSandboxDenialEmittedWithP0Tags`, `TestFlowsThroughRealCollector`, `broker.TestAudit_SecretFree` | ✅ |
 | **Security-reviewer sign-off** against the threat model recorded | [`security-review.md`](security-review.md) — APPROVED | ✅ |
 
-## Deferred to deploy-time CI (tracked, not silently dropped)
+## Deploy-time container proof (now wired)
 
-- OS-level network/FS-namespace **denial proof** runs at the deployment layer (container proof, mirrors
-  `make discovery-sandbox-proof`). The Go layer proves the fail-closed gate that makes the bare-host
-  case safe; the container proof must run in CI before the sandbox handles real target repos. This is
-  the one condition on the security sign-off.
+- OS-level network/FS-namespace **denial proof** runs at the deployment layer via
+  `make sandbox-proof` + `make sandbox-proof-redcheck` (`deploy/docker-compose.sandbox.yml`,
+  `scripts/sandbox_proof.py`), wired as the `sandbox` job in `.github/workflows/ci.yml` — mirroring the
+  discovery-sandbox proof. Static + dynamic checks assert no egress (incl. the metadata endpoint), a
+  read-only working-set FS, no ambient creds, and cgroup resource bounds; the red-check proves the proof
+  can fail. The Go layer proves the fail-closed gate that keeps the bare-host case safe; this proves the
+  container actually delivers the OS-level controls.
 
-**P3 exit checklist: GREEN** (Go-provable criteria all pass; the single deploy-time container proof is
-tracked as the sign-off condition).
+## Node-execution wiring (now done)
+
+- `internal/nodeexec.Runner` is the repo-tool node path — `CheckInput` → isolate run → `CheckOutput`,
+  fail-closed at each stage — and `nodeexec.SandboxBinder` ties skill availability to
+  `Sandbox.CanIsolate()`, so a repo tool is unbindable (node fails closed) on a host that cannot isolate.
+
+**P3 exit checklist: GREEN** — Go-provable criteria pass in `make go`; the container posture proof runs
+as its own CI job (Docker), exactly like `discovery-sandbox`.

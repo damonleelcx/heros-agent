@@ -1,0 +1,32 @@
+# P3 sandbox isolate image (sandbox spec §3; the container half of internal/sandbox).
+#
+# WHY THIS IMAGE EXISTS — the Go enforcer is not enough on its own:
+# internal/sandbox proves, hermetically and cross-platform, the controls a process can enforce on
+# itself: a scrubbed environment (no ambient creds), hard resource bounds (CPU/mem/file/wall-clock/
+# output), an ephemeral working-set-scoped scratch, and the fail-closed gate. It reports OS-level
+# network-egress denial and filesystem-namespace scoping as UNAVAILABLE on a bare host, so a node that
+# requires them fails closed there (task 3.6). The remaining controls are delivered by THIS container +
+# deploy/docker-compose.sandbox.yml, which is exactly what sandbox.NewContainedEnforcer advertises.
+#
+# An image cannot enforce its own network or mount policy; only the runtime spec can. So the posture
+# (network_mode: none, read-only working-set mount, no creds, cap_drop, resource limits) lives in the
+# compose file and is machine-checked by scripts/sandbox_proof.py.
+#
+# Debian slim, not distroless/scratch, and the reason is the fence rather than convenience: the sandbox
+# proof overrides the entrypoint to probe THIS image under THE SHIPPED compose spec (try to egress, try
+# to read creds, try to write outside the working set, fork past the pid limit). A shell-less image
+# would force the proof to test a look-alike — a fence that tests a stand-in is decoration. The probes
+# use only what this base already has (/proc/net/dev, bash's /dev/tcp), so no iproute2/netcat is added.
+# Under cap_drop=ALL + read_only + network_mode=none + non-root, the shell grants an attacker no
+# capability the posture does not already deny.
+FROM debian:bookworm-slim
+
+# A non-root uid that does not exist on the host, pinned here and again in the compose spec (defense in
+# depth): a future base-image change cannot silently restore root.
+USER 65532:65532
+
+# The isolate's only writable surface at runtime is the tmpfs scratch declared in the compose spec;
+# the working set is mounted read-only. The default command is a shell so the proof can probe the
+# shipped posture; a real deployment overrides `command:` with the repo tool's argv.
+WORKDIR /scratch
+ENTRYPOINT ["/bin/sh"]

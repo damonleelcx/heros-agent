@@ -53,8 +53,11 @@ credential never enters the isolate.
 
 The Go layer proves the fail-closed gate, env-scrub, resource bounds, audit, and lifecycle hermetically
 and cross-platform. The OS-level **network deny** and **filesystem scope** are delivered by the
-deployment's container/namespace (advertised via `sandbox.NewContainedEnforcer`) and proven by a
-container proof, mirroring how the Discovery worker's least-privilege runtime is enforced by
-`deploy/docker-compose.discovery.yml` and proven by `make discovery-sandbox-proof`. On any host that
-cannot establish those restrictions, `NewOSEnforcer` reports them unavailable and every untrusted-repo
-node fails closed — never a silent downgrade.
+deployment's container/namespace (advertised via `sandbox.NewContainedEnforcer`,
+`deploy/docker-compose.sandbox.yml`) and **proven by `make sandbox-proof` + `make sandbox-proof-redcheck`**
+— the `sandbox` job in `.github/workflows/ci.yml`, mirroring how the Discovery worker's least-privilege
+runtime is enforced by `deploy/docker-compose.discovery.yml` and proven by `make discovery-sandbox-proof`.
+On any host that cannot establish those restrictions, `NewOSEnforcer` reports them unavailable and every
+untrusted-repo node fails closed — never a silent downgrade. The repo-tool node path itself is
+`internal/nodeexec.Runner` (CheckInput → isolate → CheckOutput), with availability tied to
+`Sandbox.CanIsolate()` via `nodeexec.SandboxBinder`.

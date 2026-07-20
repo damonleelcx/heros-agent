@@ -21,14 +21,21 @@ adversarial tests green.
 
 ## Findings
 
-1. **Info — OS network/FS denial is deployment-layer, not Go-layer.** The Go enforcer honestly reports
-   network/FS-namespace isolation as unavailable on a bare host and **fails closed** there; the real
-   denial is provided by the container/namespace (`NewContainedEnforcer`) and must be proven by a
-   container proof at deploy time (mirrors `make discovery-sandbox-proof`). Accepted: this is the
-   documented split, and the fail-closed gate makes the bare-host case safe.
-2. **Info — audit records are metadata-only by construction**, with `redactSecrets` as defense-in-depth
+1. **Resolved — OS network/FS denial now has a machine-checked container proof in CI.** The Go enforcer
+   honestly reports network/FS-namespace isolation as unavailable on a bare host and **fails closed**
+   there; the real denial is provided by the container (`NewContainedEnforcer` /
+   `deploy/docker-compose.sandbox.yml`) and is now proven by `make sandbox-proof` +
+   `make sandbox-proof-redcheck`, wired as the `sandbox` job in `.github/workflows/ci.yml` (mirrors the
+   discovery-sandbox proof). Static + dynamic checks assert no egress (incl. metadata endpoint), a
+   read-only working-set FS, no ambient creds, and cgroup resource bounds; the red-check proves the
+   proof can fail.
+2. **Resolved — skill availability is now sandbox-backed.** `nodeexec.SandboxBinder` ties a `repo:` impl
+   handle's bindability to `Sandbox.CanIsolate()`, so on a host that cannot isolate a repo tool is
+   unavailable and its node fails closed instead of running unsandboxed. `nodeexec.Runner` wires the
+   full node-execution path: `CheckInput` → isolate run → `CheckOutput`, fail-closed at each stage.
+3. **Info — audit records are metadata-only by construction**, with `redactSecrets` as defense-in-depth
    and the collector scrubber as the final backstop. No secret path into an event was found.
-3. **No blocking findings.** No control is missing a test; no test asserts a weaker property than its
+4. **No blocking findings.** No control is missing a test; no test asserts a weaker property than its
    control claims.
 
 ## Residual risk (accepted)
@@ -43,8 +50,9 @@ adversarial tests green.
 - **Fail-closed posture:** verified — no path downgrades untrusted execution to the host.
 - **Secrets:** verified never to enter the isolate or an audit event.
 
-**Security-reviewer sign-off: APPROVED for P3 close**, conditional on the deploy-time container proof
-running in CI before the sandbox handles real target repos (tracked as task 7.4's CI wiring).
+**Security-reviewer sign-off: APPROVED for P3 close.** The prior condition — a deploy-time container
+proof in CI — is now satisfied: `make sandbox-proof` + `sandbox-proof-redcheck` run as the `sandbox`
+job in CI, asserting the OS-level egress/FS/creds/resource posture the Go layer defers to the container.
 
 _Reviewed under the senior-devops-engineer + senior-qa-engineer security discipline; recorded before
 P3 close per PRD §13._

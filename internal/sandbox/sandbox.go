@@ -279,6 +279,15 @@ func (s *Sandbox) record(e Event) {
 	}
 }
 
+// CanIsolate reports whether this host can create an isolate with EVERY restriction untrusted repo tool
+// code requires: no ambient credentials, default-deny egress, a scoped read-only filesystem, and
+// resource bounds. It is the availability predicate the skill binder uses (nodeexec.SandboxBinder): if
+// this is false, a repo tool is unbindable and its node fails closed rather than running unsandboxed.
+func (s *Sandbox) CanIsolate() bool {
+	c := s.enforcer.Capabilities()
+	return c.ScrubEnv && c.ResourceLimits && c.NetworkDeny && c.FilesystemScope
+}
+
 // requiredButMissing returns the name of the first required-but-unenforceable restriction, or "".
 func requiredButMissing(spec Spec, caps Capabilities) string {
 	if spec.RequireNetworkIsolation && !caps.NetworkDeny {

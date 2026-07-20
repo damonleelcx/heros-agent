@@ -199,6 +199,29 @@ jobs:
       - name: make discovery-sandbox-proof-redcheck
         run: make discovery-sandbox-proof-redcheck
 
+  sandbox:
+    name: P3 isolate least-privilege runtime (sandbox spec §3)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # Proves deploy/docker-compose.sandbox.yml really enforces the OS-level controls internal/sandbox
+      # reports as UNAVAILABLE on a bare host: default-deny network egress (metadata endpoint
+      # unreachable), a read-only working-set-scoped filesystem, no ambient provider creds, and cgroup
+      # resource bounds. This is the deploy-time half that sandbox.NewContainedEnforcer relies on;
+      # untrusted repo tool code must not handle a real target repo until this job is green. Weakening a
+      # line in the compose spec turns it red.
+      #
+      # Deliberately NOT part of `make ci`: it needs Docker, matching how db-proof/pg-proof and the
+      # discovery-sandbox job are their own jobs rather than local-gate targets.
+      - name: make sandbox-proof
+        run: make sandbox-proof
+      # Guards the guard: asserts the proof above can actually FAIL, one weakened guarantee at a time.
+      - name: make sandbox-proof-redcheck
+        run: make sandbox-proof-redcheck
+
   secret-scan:
     name: gitleaks (no secrets in repo)
     runs-on: ubuntu-latest
