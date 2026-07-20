@@ -92,6 +92,31 @@ const (
 	// Throughput / concurrency for the run (task 1.6).
 	MetricCallsInFlight = "concurrency_calls_in_flight"
 	MetricCallsPerSec   = "throughput_calls_per_sec"
+
+	// Context-assembly (P3 task 1.9). One event per axis so P4 can slice a policy's assembled size,
+	// how much of the source it kept, and — for lossy policies — what it dropped. Emitted host-side by
+	// the context-policy layer, never from a sandbox.
+	MetricContextAssembledTokens = "context_assembled_tokens"
+	MetricContextSourceMessages  = "context_source_messages"
+	MetricContextDropRatio       = "context_drop_ratio"       // lossy policies only (summarization/compaction)
+	MetricContextRetrievedChunks = "context_retrieved_chunks" // rag-retrieval only
+
+	// Sandbox (P3 §5). Denial-rate and lifecycle are counters; each carries the P0 tag set for audit.
+	MetricSandboxDenial    = "sandbox_denial"    // 1 per denied action (egress/cred/fs/resource); dimension `denial_kind`
+	MetricSandboxLifecycle = "sandbox_lifecycle" // 1 per isolate lifecycle transition; dimension `phase`
+	MetricToolError        = "tool_error"        // 1 when a skill/tool call fails closed; dimension `reason`
+)
+
+// AttrContextPolicy tags a context-assembly event with the policy that produced it (high-cardinality
+// dimension, span/exemplar only). AttrDenialKind / AttrPhase / AttrToolReason likewise ride as
+// dimensions on the sandbox/tool events so a consumer can filter by what was denied without those
+// values ever becoming TSDB series labels.
+const (
+	AttrContextPolicy = "context_policy"
+	AttrDenialKind    = "denial_kind"
+	AttrPhase         = "phase"
+	AttrToolReason    = "reason"
+	AttrSkillName     = "skill_name"
 )
 
 // Units (P0 payload `unit`). Central, for the same reason the names are.
