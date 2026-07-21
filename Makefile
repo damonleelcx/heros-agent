@@ -23,7 +23,8 @@ PARITY_DIR ?= .parity
         build-discover discovery-ci discovery-throughput \
         discovery-parity-snapshot discovery-parity-verify \
         discovery-sandbox-proof discovery-sandbox-proof-redcheck \
-        sandbox-proof sandbox-proof-redcheck
+        sandbox-proof sandbox-proof-redcheck \
+        p35-calibration p35-graph-demo
 
 ## ci: the locally-provable gate (go + schema + discovery-ci). Lint/db-proof run as their own CI jobs.
 ci: go schema discovery-ci
@@ -55,6 +56,21 @@ schema:
 	$(PYTHON) schemas/test_config_hash.py
 	$(PYTHON) schemas/test_schema_evolution.py
 	$(PYTHON) schemas/spike_io_contract.py
+
+## p35-calibration: print the P3.5 pattern-classifier calibration table (per-detector TP/FP/FN,
+##                  recall/precision and confidence bands over the hand-labeled fixture set) and the
+##                  M4 exit checklist, verdict by verdict. Already covered by `make test`; this target
+##                  exists so the NUMBERS are readable rather than merely green — a detector's
+##                  confidence is a claim, and a claim wants evidence a human can look at.
+p35-calibration:
+	$(GO) test -count=1 -v -run 'TestCalibrationAgainstHandLabeledFixtures|TestM4ExitChecklist|TestDumpShowsEveryStage' ./internal/patternclassifier/
+
+## p35-graph-demo: serve the P3.5 pattern-classified graph view against REAL classifier output, so the
+##                 rule-vs-llm distinction and the "not yet classified" empty state can be checked in a
+##                 browser. Asserting on markup proves only that the string I wrote is the string I
+##                 wrote; three states have to be seen to be verified.
+p35-graph-demo:
+	$(GO) run ./cmd/p35graphdemo
 
 ## build-discover: build the Discovery CLI to bin/discover
 build-discover:

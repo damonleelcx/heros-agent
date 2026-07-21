@@ -7,7 +7,18 @@ import (
 )
 
 // IRVersion is the frozen Workflow IR schema version this emitter targets (P0, schemas/workflow-ir.schema.json).
+// Discovery emits an UNLABELLED IR, which is complete at 1.0.0.
 const IRVersion = "1.0.0"
+
+// IRVersionPatternLabels is the version a document declares once the P3.5 Pattern Classifier has
+// populated pattern_labels. The P3.5 expand step added OPTIONAL properties to the record P0 reserved
+// (source, subgraph_ref, detector_id, llm_run_ref, taxonomy_version, candidate), which by the
+// schema's own rule bumps MINOR and leaves MAJOR untouched — so a labelled and an unlabelled IR
+// validate at the same MAJOR, and a pre-P3.5 consumer pinned to MAJOR 1 still parses both.
+//
+// The bump is declared rather than skipped because a document that uses 1.1.0 fields while claiming
+// 1.0.0 is lying about which contract it was written against.
+const IRVersionPatternLabels = "1.1.0"
 
 // IR is the emitted Workflow IR document (frozen P0 contract). Field names and shapes MUST match
 // workflow-ir.schema.json exactly; the emitter populates only frozen fields (invariant I6, additive-only).
@@ -16,6 +27,34 @@ type IR struct {
 	Workflow  IRWorkflow `json:"workflow"`
 	Nodes     []IRNode   `json:"nodes"`
 	Edges     []IREdge   `json:"edges"`
+	// Subgraphs are the P3.5 pattern-labelling units. Reserved in P0, unset by Discovery, populated
+	// by the classifier. omitempty: an unlabelled IR must serialise exactly as it did before P3.5.
+	Subgraphs []IRSubgraph `json:"subgraphs,omitempty"`
+}
+
+// IRSubgraph is a named region of the graph carrying pattern labels (P0-reserved, P3.5-populated).
+type IRSubgraph struct {
+	SubgraphID    string           `json:"subgraph_id"`
+	NodeIDs       []string         `json:"node_ids"`
+	PatternLabels []IRPatternLabel `json:"pattern_labels,omitempty"`
+}
+
+// IRPatternLabel is the WIRE SHAPE of one pattern label, and nothing more. The vocabulary it draws
+// from, the validation rules, and the confidence calibration all live in internal/patternclassifier
+// — this package owns the IR contract, that package owns the classification semantics, and the
+// dependency runs one way (classifier → discovery) so the contract does not depend on its producer.
+//
+// A drift test in the classifier asserts these two representations serialise identically, so the
+// split cannot silently become two different formats.
+type IRPatternLabel struct {
+	Pattern         string  `json:"pattern"`
+	Confidence      float64 `json:"confidence"`
+	Source          string  `json:"source,omitempty"`
+	SubgraphRef     string  `json:"subgraph_ref,omitempty"`
+	DetectorID      string  `json:"detector_id,omitempty"`
+	LLMRunRef       string  `json:"llm_run_ref,omitempty"`
+	TaxonomyVersion string  `json:"taxonomy_version,omitempty"`
+	Candidate       bool    `json:"candidate,omitempty"`
 }
 
 type IRWorkflow struct {
@@ -39,6 +78,10 @@ type IRNode struct {
 	ContextAssembly     IRContextAssembly `json:"context_assembly"`
 	IOContract          IRIOContract      `json:"io_contract"`
 	InvocationSemantics IRInvocationSem   `json:"invocation_semantics"`
+	// PatternLabels are node-scoped labels (a capability like Tool Use co-existing on this node).
+	// Reserved in P0, unset by Discovery, populated by the P3.5 classifier. omitempty: an unlabelled
+	// node must serialise byte-identically to how it did before P3.5.
+	PatternLabels []IRPatternLabel `json:"pattern_labels,omitempty"`
 }
 
 type IRCallSite struct {

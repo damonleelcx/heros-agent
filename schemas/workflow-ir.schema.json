@@ -209,6 +209,7 @@
       "type": "array",
       "title": "Reserved pattern labels (P3.5)",
       "description": "Optional. Unset in P0/P1; populated by the P3.5 Pattern Classifier. Absence never invalidates an IR (FR7).",
+      "$comment": "EXPAND step (IR 1.1.0, P3.5): source/subgraph_ref/detector_id/llm_run_ref/taxonomy_version/candidate were added as OPTIONAL properties on the reserved P0 record. Adding optional fields bumps MINOR, never MAJOR — a P0/P1 document carrying only {pattern, confidence} still validates here, which is the whole point of reserving the slot. The `pattern` enum is deliberately NOT closed in the schema: closing it would be a RESTRICTING change to a frozen contract (additive-only policy) and would retroactively invalidate the P0 sample. Taxonomy membership is enforced at write time by the classifier (internal/patternclassifier: Label.Validate), which is the layer that owns the vocabulary.",
       "items": {
         "type": "object",
         "required": ["pattern", "confidence"],
@@ -223,6 +224,34 @@
             "type": "number",
             "minimum": 0,
             "maximum": 1
+          },
+          "source": {
+            "enum": ["rule", "llm"],
+            "description": "OPTIONAL (added in IR 1.1.0). Which layer produced the label: a deterministic structural rule detector, or the constrained LLM-as-classifier fallback."
+          },
+          "subgraph_ref": {
+            "type": "string",
+            "description": "OPTIONAL (added in IR 1.1.0). The region this label applies to — a subgraph_id, or a node_id when the label is a capability co-existing on a node. Classification is PER-SUBGRAPH: a label that does not name its region cannot dispatch a metric-set.",
+            "minLength": 1
+          },
+          "detector_id": {
+            "type": "string",
+            "description": "OPTIONAL (added in IR 1.1.0). Set when source = rule: identifies the versioned structural detector that fired.",
+            "minLength": 1
+          },
+          "llm_run_ref": {
+            "type": "string",
+            "description": "OPTIONAL (added in IR 1.1.0). Set when source = llm: keys the reproducibility record {model, seed, temperature, prompt_version, taxonomy_version} for that fallback run.",
+            "minLength": 1
+          },
+          "taxonomy_version": {
+            "type": "string",
+            "description": "OPTIONAL (added in IR 1.1.0). Pins the taxonomy the label was drawn from, so the label stays interpretable if the taxonomy is later extended.",
+            "minLength": 1
+          },
+          "candidate": {
+            "type": "boolean",
+            "description": "OPTIONAL (added in IR 1.1.0). true when structure could only show a CANDIDATE for a behavioral pattern (e.g. a loop-back edge suggests Reflection but cannot prove the loop iterates). Behavioral confirmation is P5; such a label carries a capped confidence and is never asserted as fact."
           }
         }
       }

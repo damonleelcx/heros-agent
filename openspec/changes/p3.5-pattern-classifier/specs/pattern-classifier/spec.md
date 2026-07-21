@@ -27,19 +27,36 @@ to. It SHALL NOT collapse a multi-pattern workflow to a single whole-workflow la
 
 ### Requirement: The Pattern Classifier SHALL draw every label only from the fixed 20-pattern taxonomy
 
-The taxonomy is a closed vocabulary of 20 patterns across four groups — control-flow (Prompt
-Chaining, Routing, Parallelization, Reflection, Planning, Prioritization, Exploration & Discovery),
-capability (Tool Use, Retrieval/RAG, Memory Management, Reasoning Techniques), coordination
-(Multi-Agent Collaboration, Inter-Agent Communication), and governance (Goal Setting & Monitoring,
-Exception Handling & Recovery, Human-in-the-Loop, Evaluation & Monitoring, Guardrails & Safety,
-Resource-Aware Optimization, Learning & Adaptation). No label — from the rule layer or the LLM
-fallback — SHALL name a pattern outside this set.
+The taxonomy is a closed vocabulary of exactly 20 patterns, each carrying a CANONICAL NUMBER 1–20
+that is part of the contract:
+
+1. Prompt Chaining (control-flow) · 2. Routing (control-flow) · 3. Parallelization (control-flow) ·
+4. Reflection (control-flow) · 5. Tool Use (capability) · 6. Planning (control-flow) ·
+7. Multi-Agent Collaboration (coordination) · 8. Memory Management (capability) ·
+9. Learning & Adaptation (governance) · 10. Goal Setting & Monitoring (governance) ·
+11. Exception Handling & Recovery (governance) · 12. Human-in-the-Loop (governance) ·
+13. Retrieval/RAG (capability) · 14. Inter-Agent Communication (coordination) ·
+15. Resource-Aware Optimization (governance) · 16. Reasoning Techniques (capability) ·
+17. Evaluation & Monitoring (governance) · 18. Guardrails & Safety (governance) ·
+19. Prioritization (control-flow) · 20. Exploration & Discovery (control-flow).
+
+The four groups are control-flow (7), capability (4), coordination (2) and governance (7). The
+canonical numbering interleaves the groups on purpose: it is the sequence patterns are referred to
+by, not a grouping. No label — from the rule layer or the LLM fallback — SHALL name a pattern outside
+this set, and no document or interface SHALL use a different numbering of it.
 
 #### Scenario: A pattern name outside the taxonomy is rejected
 
 - **WHEN** any layer attempts to emit a label whose `pattern` is not one of the 20 taxonomy patterns
 - **THEN** the label is rejected and not written to the IR
 - **AND** the rejection is recorded as a diagnostic.
+
+#### Scenario: The canonical pattern numbering is single-valued
+
+- **WHEN** any document, interface, or prompt enumerates the taxonomy
+- **THEN** it uses the canonical numbering 1–20 above
+- **AND** a pattern's number is the same everywhere it appears, so "Pattern 13" identifies exactly one
+  pattern (Retrieval/RAG) rather than depending on which document the reader consulted.
 
 #### Scenario: Each label pins the taxonomy version it was drawn from
 
