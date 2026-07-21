@@ -32,6 +32,9 @@ type Server struct {
 	// monitor is the P2.5 live run-monitoring read model, mounted by MountMonitor when available.
 	monitor MonitorSource
 
+	// p35 is the P3.5 pattern-classifier read model, mounted by MountP35 when available.
+	p35 PatternSource
+
 	// secrets is the live provider-credential source, reported by /readyz.
 	//
 	// The SOURCE, never a credential: this holds the thing that can produce secrets precisely so the

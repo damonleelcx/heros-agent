@@ -23,6 +23,11 @@ CASES = [
         [
             "samples/workflow-ir.valid.json",
             "samples/workflow-ir.with-subgraphs.valid.json",
+            # A REAL P3.5 classifier output (regenerate with P35_WRITE_SAMPLE=1 go test
+            # ./internal/patternclassifier -run TestGenerateLabelledSample). It proves the additive
+            # claim end to end: labels written into the P0-reserved field still validate against the
+            # frozen schema, at the same ir_version MAJOR as an unlabelled document.
+            "samples/workflow-ir.p35-labelled.valid.json",
         ],
         [
             "samples/workflow-ir.invalid-missing-io-contract.json",
