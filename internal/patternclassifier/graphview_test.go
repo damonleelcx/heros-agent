@@ -139,9 +139,15 @@ func TestGraphLayoutIsDeterministicAndLayered(t *testing.T) {
 	for _, n := range gv.Nodes {
 		layer[n.NodeID] = n.Layer
 	}
-	// The retrieval chain must lay out left to right in pipeline order.
-	if !(layer["n_embed"] < layer["n_retrieve"] && layer["n_retrieve"] < layer["n_rerank"] && layer["n_rerank"] < layer["n_answer"]) {
-		t.Errorf("the retrieval pipeline is not laid out in order: %+v", layer)
+	// The retrieval chain must lay out left to right in pipeline order. Written as the negation of
+	// each adjacent pair rather than !(a && b && c) so a failure names WHICH link is out of order.
+	for _, pair := range [][2]string{
+		{"n_embed", "n_retrieve"}, {"n_retrieve", "n_rerank"}, {"n_rerank", "n_answer"},
+	} {
+		if layer[pair[0]] >= layer[pair[1]] {
+			t.Errorf("the retrieval pipeline is not laid out in order: %s (layer %d) should precede %s (layer %d); all layers: %+v",
+				pair[0], layer[pair[0]], pair[1], layer[pair[1]], layer)
+		}
 	}
 	// Nodes on one layer get distinct rows, so they cannot draw on top of each other.
 	rows := map[[2]int]int{}

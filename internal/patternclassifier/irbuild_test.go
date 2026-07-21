@@ -22,19 +22,15 @@ func withModel(provider, modelID string) nodeOpt {
 	return func(n *discovery.IRNode) { n.Model.Provider, n.Model.ModelID = provider, modelID }
 }
 
-func withParams(p map[string]any) nodeOpt {
-	return func(n *discovery.IRNode) { n.Model.Params = p }
-}
-
 func withSemantics(kind string, variable bool) nodeOpt {
 	return func(n *discovery.IRNode) {
 		n.InvocationSemantics = discovery.IRInvocationSem{Type: kind, VariableAtRuntime: variable}
 	}
 }
 
-func withSymbol(sym string) nodeOpt {
-	return func(n *discovery.IRNode) { n.CallSite.Symbol = sym }
-}
+// No withParams / withSymbol option exists, deliberately: no detector reads `model.params` or
+// `call_site.symbol` as a signal, so a fixture that varied them would be testing nothing. The set of
+// builders here is meant to track the set of facts the detectors actually read.
 
 func withPrompt(text string) nodeOpt {
 	return func(n *discovery.IRNode) { n.Prompt.Inline = text }
