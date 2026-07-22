@@ -217,6 +217,16 @@ Applies the source-transformation apply model per
   > | **C.** Defer; seam only *(current)* | ~0 | 3.10 stays partial — honestly marked | User reviews diff + branch in the UI (works today) | Preserves optionality; a `Secrets`-shaped `PullRequests` seam drops in cleanly |
   >
   > **Recommendation: C now, then B or A behind a new ADR.** The seam is easy; the blockers are not.
+  >
+  > ✅ **Resolved by [ADR-005](../../../docs/adr/ADR-005-forge-delivery-and-credential-posture.md)**
+  > (2026-07-22), which chose **neither B nor A**. The framing above asks *"how do **we** get write
+  > access"*, and all three options follow from it. Re-asked as *"**who** should hold the
+  > credential"*, a fourth option appears: **the customer's CI already holds one** — repo-scoped,
+  > short-lived, forge-rotated. CI-mediated delivery is now the default and the platform holds **no**
+  > forge credential; the hosted Git App is opt-in, per-repo and revocable. Blocker #4 is resolved by
+  > a **separate append-only `delivery` record** rather than by relaxing `transform` immutability.
+  > Owned by **[P12](../p12-forge-delivery/)**; the CI hook it runs inside is
+  > **[P11](../p11-cli-ci-integration/)**.
 
 
 

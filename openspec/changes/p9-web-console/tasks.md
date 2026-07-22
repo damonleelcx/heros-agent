@@ -215,6 +215,24 @@ and browser-rendered acceptance.
       from the registry.
 - [ ] 11b.5 Extend the entitlement mapping (§10.1) to cover studio capabilities.
 
+## 11c. Frontend — Surfaces owned by the distribution phases (9b)
+
+Like §11b, these live in this shell but their **requirements** belong to their own phases and are
+not duplicated here.
+
+- [ ] 11c.1 **Link coverage** ([P11](../p11-cli-ci-integration/)) — display how much of a customer's
+      activity is linked, **wherever a spend figure derived from linked runs is shown**. It is not a
+      footnote: a figure reflecting a fraction of activity, shown without saying so, is what a billing
+      dispute is made of. Complete coverage and *unknown* coverage must render distinguishably.
+- [ ] 11c.2 **Delivery state** ([P12](../p12-forge-delivery/)) — show each delivery as **open /
+      merged / closed / superseded**, linked to the proposal that produced it, so the loop from
+      proposal to outcome is visible.
+- [ ] 11c.3 **No delivery route** and **degraded / revoked** render as **conditions with a next
+      action**, 🚫 never as empty lists — an empty list is the rendering that makes an invisible
+      failure look normal.
+- [ ] 11c.4 Resolve the CLI-emitted run reference to a canonical console route (§7.4), so a URL
+      pasted from a terminal into a pull request opens exactly that run.
+
 ## 12. Cutover — remove the legacy pages (9b, gated, owned, dated)
 
 - [ ] 12.1 For each of `p2.html`, `p25monitor.html`, `p35graph.html`, `p4board.html`: confirm its

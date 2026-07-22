@@ -1,8 +1,8 @@
 # Runtime — Spec Delta (P2)
 
-Product rationale: [`../../../../docs/prd/P2-config-runtime.md`](../../../../docs/prd/P2-config-runtime.md) §6 (FR11–FR18).
+Product rationale: [`../../../../../docs/prd/P2-config-runtime.md`](../../../../../docs/prd/P2-config-runtime.md) §6 (FR11–FR18).
 Applies the source-transformation apply model per
-[ADR-001](../../../../docs/adr/ADR-001-source-transformation-apply-model.md).
+[ADR-001](../../../../../docs/adr/ADR-001-source-transformation-apply-model.md).
 
 Covers the Loader, the transform application + build path, the provider gateway, the Executor, and
 the idempotency/reproducibility guarantees.
@@ -56,7 +56,7 @@ Swapping a node's model **within a provider** SHALL require the transformation t
 requires rewriting the SDK call itself (a different client, request shape, and response type); the
 transform SHALL refuse it with a typed error rather than emit a diff it cannot guarantee.
 
-*(Amended by [ADR-002](../../../../docs/adr/ADR-002-provider-gateway-serves-platform-callers.md). The
+*(Amended by [ADR-002](../../../../../docs/adr/ADR-002-provider-gateway-serves-platform-callers.md). The
 original requirement predates ADR-001 and asked for the opposite of what ADR-001 requires.)*
 
 #### Scenario: Within-provider model swap rewrites only the model_ref
