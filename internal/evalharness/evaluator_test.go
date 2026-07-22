@@ -190,3 +190,62 @@ func TestComputeStampsAttributionAndReferenceLabel(t *testing.T) {
 		t.Fatalf("reference label must ride on the value, got %q", mv.ReferenceLabel)
 	}
 }
+
+// A NODE-scoped target scores that node's own output, not the run's.
+//
+// This test exists because the linter found `traceBuilder.nodeOutput` unused and the honest reading
+// was not "dead helper" but "untested path": Trace.OutputFor branches on scope, and only the run
+// branch had ever been asserted. A node evaluator silently scoring the end-to-end output would
+// attribute a downstream node's answer to an upstream one, and nothing would have caught it.
+func TestNodeScopedTargetReadsThatNodesOutput(t *testing.T) {
+	tr := newTrace("run-1").
+		node("router", 0.01, 10, 1, 1, false).
+		node("answer", 0.02, 20, 1, 1, false).
+		nodeOutput("router", `{"a":"routed"}`).
+		nodeOutput("answer", `{"a":"world"}`).
+		output(`{"a":"end-to-end"}`).
+		build()
+
+	for _, tc := range []struct {
+		name   string
+		target Target
+		want   string
+	}{
+		{"run scope reads the end-to-end output", RunTarget(), `{"a":"end-to-end"}`},
+		{"node scope reads that node's output", NodeTarget("answer", ""), `{"a":"world"}`},
+		{"a different node reads its own", NodeTarget("router", ""), `{"a":"routed"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := tr.OutputFor(tc.target)
+			if !ok {
+				t.Fatal("want an output")
+			}
+			if string(got) != tc.want {
+				t.Fatalf("want %s, got %s", tc.want, got)
+			}
+		})
+	}
+
+	// A node that produced no output is absent, NOT the run's output under another name.
+	if _, ok := tr.OutputFor(NodeTarget("never-ran", "")); ok {
+		t.Fatal("a node with no output must report absent, never fall back to the run's")
+	}
+
+	// And an evaluator scoring a node scores that node: exact-match against the router's answer
+	// passes on the router and fails on the node that answered differently.
+	e := NewExactMatch()
+	c := baseCase()
+	c.Reference = json.RawMessage(`{"a":"routed"}`)
+	for _, tc := range []struct {
+		node string
+		want float64
+	}{{"router", 1}, {"answer", 0}} {
+		got, err := e.Evaluate(context.Background(), tr, c, NodeTarget(tc.node, ""))
+		if err != nil {
+			t.Fatalf("%s: %v", tc.node, err)
+		}
+		if got != tc.want {
+			t.Fatalf("node %s: want %v got %v", tc.node, tc.want, got)
+		}
+	}
+}

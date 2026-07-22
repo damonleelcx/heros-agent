@@ -32,9 +32,7 @@ func (c *Cache) Rank(profile Profile, gates GateSet) Leaderboard {
 	// Step 2 — gates. Refusals are computed once for the whole board: a gate driven by an
 	// uncalibrated judge is refused for EVERY variant, never for some.
 	refused := c.refusedGates(gates)
-	for _, r := range refused {
-		lb.Notes = append(lb.Notes, r)
-	}
+	lb.Notes = append(lb.Notes, refused...)
 
 	var passers, failures []Row
 	for _, id := range c.Order {

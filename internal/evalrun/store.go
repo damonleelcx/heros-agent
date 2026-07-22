@@ -117,11 +117,19 @@ func isHash64(s string) bool {
 		return false
 	}
 	for _, c := range s {
-		if !(c >= '0' && c <= '9') && !(c >= 'a' && c <= 'f') {
+		if !isLowerHexDigit(c) {
 			return false
 		}
 	}
 	return true
+}
+
+// isLowerHexDigit states the condition POSITIVELY. Written as a negated conjunction it reads as
+// "not a decimal digit and not a-f", which staticcheck flags for De Morgan in either arrangement —
+// and rightly: the concept being tested is "is a lowercase hex digit", so naming that is clearer
+// than any arrangement of the negation.
+func isLowerHexDigit(c rune) bool {
+	return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')
 }
 
 // AsMetricEvent projects the result onto the P0 metric-event contract, so the SAME validator P2.5
