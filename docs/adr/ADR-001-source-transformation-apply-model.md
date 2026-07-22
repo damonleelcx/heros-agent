@@ -1,8 +1,15 @@
 # ADR-001 — Apply optimizations by transforming source code, not by a runtime shim
 
-- **Status:** Accepted (2026-07-11)
+- **Status:** Accepted (2026-07-11) — **amended by [ADR-004](ADR-004-runtime-config-binding.md) (2026-07-22)**
 - **Deciders:** Product + System Design
 - **Supersedes:** the "adapter/shim resolves config at runtime without editing source" mechanism in the original source plan (§3 Configuration Layer, §4 Runtime) and its downstream PRDs/specs.
+- **Amended by:** [ADR-004](ADR-004-runtime-config-binding.md) — every requirement below still holds.
+  ADR-004 adds an **opt-in second shape** for what the transformation writes: a call-site indirection
+  plus a **generated binding artifact and resolved values shipped in the same diff**, after which the
+  model and prompt version are data that can change without a new codemod. It does **not** reintroduce
+  the shim rejected here: the binding is in the user's repository, their review, their build, and their
+  `git revert`, and measurement runs resolve it **pinned** to the embedded document. Read this ADR
+  first, then ADR-004.
 
 ## Context
 

@@ -5,9 +5,10 @@
 | Phase / Milestone | P8 / M11 |
 | Target window | ~Weeks 45–52 (two waves: 8a alongside P7, then 8b) |
 | Lead role(s) | Backend + Frontend + DevOps (co-leads) |
-| Supporting role(s) | System Designer, Product Designer, AI Engineer |
+| Supporting role(s) | System Designer, Product Designer, AI Engineer, QA Engineer |
 | Status | Draft |
 | OpenSpec change | `p8-admin-console` |
+| Console architecture | **Next.js (App Router) + TypeScript on its own origin, with its own BFF** — a separate application from the [P9](P9-web-console.md) customer console. See §8.4 and `admin-console-surface`. |
 
 > **Money-in-git rule.** This PRD contains **no dollar amounts, no percentages, and no price
 > bands**. Plans are referred to by **name only** — **Free / Team / Business / Enterprise**. The
@@ -157,10 +158,35 @@ the **cross-tenant read models**, and the **append-only, tamper-evident audit lo
   audit log) ships alongside **P7**; **8b** (fleet ops, global autonomous controls, cross-tenant
   observability, compliance) follows once **P6** fleet controls and **P2.5** aggregates it depends on
   are in place.
+- **G17. The operator console is a separate application on a separate origin.** The console SHALL be a
+  **distinct Next.js application** with its **own BFF** and its **own origin**, deployed independently
+  of the P9 customer console. Isolation SHALL be **enforced by the browser's origin boundary**, not by
+  routing correctness inside a shared application: separate origins mean separate cookie jars, so a
+  cross-site-scripting or routing defect in the customer console cannot reach an admin capability, and
+  an admin session is not reachable from customer-console script.
+- **G18. No admin credential reaches the browser.** The admin BFF SHALL hold the platform credential
+  server-side and issue the browser an `HttpOnly`, `SameSite` **admin session** bound to an admin
+  principal. No admin API key SHALL appear in the client bundle, a script-readable cookie, `localStorage`,
+  a URL, a log line, or a telemetry attribute — the P9 rule, applied to the higher-blast-radius surface.
+- **G19. The operator console is visually unmistakable.** The console SHALL share the platform's token
+  **system** (scale, spacing, type, accessibility primitives) but SHALL carry **distinct operator chrome**
+  — a distinct accent and a persistent, always-visible operator identification — so an operator with both
+  consoles open in tabs **cannot mistake one for the other at a glance**. Distinctness is a requirement
+  with a stated safety reason, not a style preference: the confusion it prevents is performing a
+  cross-tenant action while believing the view is single-tenant.
+- **G20. The screen and the gate never disagree.** The console SHALL render capability from the **same
+  permission map the backend enforces** (G3), so an operator is never shown a control the gate will
+  refuse, and never hidden one their role grants.
+- **G21. Accessibility and acceptance are not relaxed because the audience is internal.** Every control
+  SHALL be keyboard-reachable with a visible focus indicator, every data table SHALL use scoped headers,
+  every chart SHALL have a tabular fallback, contrast SHALL meet WCAG 2.1 AA, UI strings SHALL be English
+  with `en-US`-pinned formatting, and acceptance for any user-visible behavior SHALL require
+  **rendered-browser evidence**, never a successful build.
 
 ### Non-goals (explicitly deferred or owned elsewhere)
-- **The customer-facing web dashboard** — **P4/P7.** P8 is the **internal operator** console; it is a
-  distinct surface with a distinct identity and RBAC. The two are never the same app or the same login.
+- **The customer-facing web dashboard** — **[P9](P9-web-console.md).** P8 is the **internal operator**
+  console; it is a distinct surface with a distinct identity and RBAC. The two are **never the same app,
+  never the same origin, and never the same login** — see G17.
 - **Concrete prices, plan limits, SUM band boundaries, and gainshare rates** — **configuration, not
   this document, not git** (P7). P8 provides the **mechanism** to view and repoint the config; it holds
   no numbers.
@@ -322,6 +348,44 @@ These map 1:1 to the OpenSpec requirements under
   actions, kill-switch state, impersonation sessions, and cross-tenant views SHALL emit metrics/audit
   events on the **P2.5 substrate**.
 
+**Operator console surface — the application, its isolation, and its interface discipline** (`admin-console-surface`)
+- **FR19 (→ admin-console-surface).** The operator console SHALL be a **separate Next.js application**
+  with its **own BFF**, served from an **origin distinct from the customer console**, and deployed as an
+  independent unit. It SHALL NOT share an origin, a session cookie, or a client bundle with the P9
+  customer console.
+- **FR20 (→ admin-console-surface).** The admin BFF SHALL hold the platform credential **server-side
+  only** and issue an `HttpOnly`, `SameSite` admin session bound to an **admin principal**. No credential
+  SHALL appear in any client artifact, log, or telemetry attribute, and an unauthenticated request to any
+  console route SHALL **redirect to sign-in rather than render** a shell that then fails.
+- **FR21 (→ admin-console-surface).** A **customer (tenant) session SHALL NOT authorize any admin
+  capability**, and an admin session SHALL NOT be presentable to the customer console — the two session
+  domains are disjoint.
+- **FR22 (→ admin-console-surface).** The console SHALL render capability from the **same permission map
+  the backend enforces**; a control an operator's role does not grant SHALL NOT be rendered, and an
+  under-privileged action SHALL render **who holds the permission and how to escalate**, never a bare
+  refusal.
+- **FR23 (→ admin-console-surface).** The console SHALL carry **distinct operator chrome** — a distinct
+  accent and persistent operator identification naming the console and the acting admin principal —
+  visible on **every** view, so it cannot be confused with the customer console at a glance.
+- **FR24 (→ admin-console-surface).** Dangerous-action friction SHALL be **proportional to blast radius**
+  and rendered as such: a destructive action requires a **typed reason**; an **irreversible** action
+  additionally requires the operator to **type the target's identifier**; a **global** control (e.g. the
+  fleet kill switch) SHALL be visually distinct from and higher-friction than its per-tenant counterpart,
+  so "halt this tenant" can never be mistaken for "halt the fleet".
+- **FR25 (→ admin-console-surface).** While impersonation is active the console SHALL display a
+  **persistent banner** naming the tenant, the read-only scope, the expiry, and that every action is
+  logged, with an always-visible **End** control; entering write scope SHALL require a second
+  confirmation.
+- **FR26 (→ admin-console-surface).** **Loading, empty, denied, and degraded** SHALL be four distinct
+  renderings on every view; a permission denial SHALL NOT render as an empty result, and a transport
+  failure SHALL NOT render as absence of data.
+- **FR27 (→ admin-console-surface).** The console SHALL meet the same interface floor as P9: every control
+  keyboard-reachable with a visible focus indicator, scoped table headers, a tabular fallback for every
+  chart, WCAG 2.1 AA contrast, English UI strings with `Intl` formatting pinned to `en-US` through a
+  single swap point, and values escaped on render.
+- **FR28 (→ admin-console-surface).** **No number SHALL be hardcoded** in the console — plan names and
+  price references come from configuration, never from the client bundle (P7's money-in-git rule).
+
 ## 7. Non-functional requirements
 
 - **Security (load-bearing).** Admin identity is **separate from customer auth**; **SSO + MFA** is
@@ -368,12 +432,25 @@ These map 1:1 to the OpenSpec requirements under
   failures, privileged-action volume, active impersonation sessions, kill-switch state, cross-tenant
   view counts — with alerts on anomalies (e.g., a spike in privileged actions or a kill switch left
   armed). Operators watching operators.
-- **Accessibility & performance (UI).** The back-office renders **role-scoped** views (an operator sees
-  only capabilities their role grants), first-class **dangerous-action confirmation** (typed-target
-  confirmation + reason field for irreversible actions), a designed **impersonation-consent/active-
-  session banner**, and **loading / empty / denied / degraded** states; cross-tenant charts follow the
-  **dataviz** skill for contrast and light/dark; every control is keyboard-reachable; **no number is
-  hardcoded** — plan names and price references come from config.
+- **Console isolation (load-bearing).** The console is a **separate Next.js application on a separate
+  origin with its own BFF** (FR19). Isolation is enforced by the **browser's origin boundary** — separate
+  cookie jars, separate bundles — rather than by routing correctness inside a shared app, because on the
+  platform's highest-blast-radius surface a routing defect must not be the only thing standing between a
+  customer session and a cross-tenant capability. The admin credential is **server-side only** (FR20), and
+  the customer and admin session domains are **disjoint** (FR21).
+- **Accessibility & performance (UI).** The back-office renders **role-scoped** views from the same
+  permission map the backend enforces (FR22), first-class **dangerous-action confirmation** with friction
+  proportional to blast radius (FR24), a designed **impersonation-consent/active-session banner** (FR25),
+  and **loading / empty / denied / degraded** as four distinct states (FR26); cross-tenant charts follow
+  the **dataviz** skill for contrast and light/dark and carry a tabular fallback; every control is
+  keyboard-reachable at **WCAG 2.1 AA** (FR27); **no number is hardcoded** — plan names and price
+  references come from config (FR28). The audience being internal **does not** lower this floor: an
+  operator using a keyboard, or working at 200% zoom during an incident, is the normal case, not an edge
+  one.
+- **Visual distinctness as a safety property.** The console shares the platform token **system** but
+  carries **distinct operator chrome** (FR23). This is a safety requirement, not a style choice: the
+  failure it prevents is an operator with both consoles open performing a cross-tenant action while
+  believing the view is single-tenant.
 
 ## 8. System design summary
 
@@ -460,8 +537,45 @@ graph TB
 - **Config store (not git):** plan definitions + model **price references** the registry admin repoints
   (P7); the console reads/publishes versions, never a git-tracked number.
 
+**8.4 Console topology — two applications, two origins, two BFFs.**
+
+```mermaid
+graph TB
+  subgraph Admin["Operator console — its own origin"]
+    AB[Browser<br/>admin session cookie] -->|HttpOnly, SameSite| ABFF[Next.js admin BFF<br/>holds the platform credential]
+    ABFF -->|admin principal| API[agentd admin API<br/>Authorize per capability]
+  end
+  subgraph Cust["Customer console — a different origin"]
+    CB[Browser<br/>tenant session cookie] --> CBFF[Next.js customer BFF]
+    CBFF -->|tenant principal| API2[agentd /api/*<br/>tenant-scoped]
+  end
+  IDP[Admin IdP<br/>SSO + MFA] --> ABFF
+  TIDP[P7 tenant identity] --> CBFF
+  DS[(Shared token system<br/>scale · spacing · type · a11y)] -.-> ABFF
+  DS -.-> CBFF
+  API --> AUD[(Append-only audit)]
+```
+
+The two consoles are **separate Next.js applications on separate origins with separate BFFs** (FR19).
+That is the whole of the isolation argument: the browser enforces the boundary. Separate origins mean
+separate cookie jars and separate bundles, so a cross-site-scripting or routing defect in the customer
+console **cannot** reach an admin session or an admin capability. In a single application with
+role-gated routes the same isolation would be a property of routing correctness — and on the platform's
+highest-blast-radius surface, routing correctness is not a strong enough thing to rest it on.
+
+What the two consoles **do** share is the token **system** — scale, spacing, type, and the accessibility
+primitives — because the alternative is drift and doubled maintenance. What they must **not** share is
+appearance: the operator console carries **distinct chrome** (a distinct accent and persistent operator
+identification on every view, FR23) so an operator with both open in tabs cannot mistake one for the
+other. The failure that prevents is concrete and severe: performing a cross-tenant action while
+believing the view is single-tenant.
+
 **Key interfaces.**
 - `Authenticate(sso_assertion, mfa) → AdminSession` — via the admin IdP; short-TTL, revocable (FR1, FR2).
+- `AdminBFF.Forward(admin_session, request)` — resolves the admin principal server-side and attaches the
+  server-held credential; a **tenant** session presented here is refused (FR20, FR21).
+- `PermissionMap(admin_id) → capabilities[]` — the **same** map the backend gate enforces, read by the
+  console so screen and gate cannot disagree (FR22).
 - `Authorize(admin_id, capability, target) → {allowed, reason?}` — deny-by-default role gate; logs
   denials (FR3, FR4).
 - `SuspendTenant(admin_id, tenant, reason) / ReactivateTenant(...) / SetQuota(...)` — reason-required,
@@ -503,8 +617,22 @@ The backend **reuses** P7 for billing/entitlements, P4/P6 for jobs, and P6 for t
 issues *commands* to those services, it does not fork their logic, which keeps one source of truth per
 fact and keeps the console honest.
 
-**Frontend (co-lead) — *the interface makes power legible and dangerous actions deliberate; role-scoped
-by construction.***
+**Frontend (co-lead) — *a separate application, because isolation should not be a routing property.***
+The console is its **own Next.js (App Router, TypeScript) application on its own origin with its own
+BFF** (FR19) — not a role-gated section of the P9 customer console. The reasoning is the one the whole
+phase is organized around: this is the highest-blast-radius surface in the platform, and in a shared
+application the separation between a tenant session and a cross-tenant capability would be a property
+of routing correctness. As two origins it is a property the **browser** enforces — separate cookie
+jars, separate bundles — so a cross-site-scripting or routing defect on the customer side cannot reach
+an admin capability at all. The admin credential stays **server-side in the BFF** and the browser holds
+only an `HttpOnly` admin session (FR20); a tenant session presented to the admin BFF is refused (FR21).
+What the two consoles share is the token **system** — scale, spacing, type, accessibility primitives —
+because the alternative is the palette fork P9 spent a phase reconciling. What they deliberately do
+**not** share is appearance: distinct accent and **persistent operator identification on every view**
+(FR23), so an operator with both consoles open in tabs cannot confuse them. That is a safety
+requirement with a named failure, not a style preference.
+
+*The interface makes power legible and dangerous actions deliberate; role-scoped by construction.*
 The back-office IA is organized **by role and by blast radius**, not by database table. An operator
 sees **only** the capabilities their role grants (a Support view has no refund button to mis-click) —
 the UI reads the same permission map the backend enforces, so the screen and the gate never disagree.
@@ -521,9 +649,16 @@ The states that matter most are the dangerous ones, designed rather than default
   always-visible **End** control; entering write scope demands a **second confirmation** (FR13).
 - *Denied-with-escalation.* An under-privileged action renders **who holds it and how to escalate**, not
   a bare 403 (FR3) — least privilege as a guardrail, not a dead end.
-- *Loading / empty / denied / degraded* are all first-class; cross-tenant charts follow the **dataviz**
-  skill (contrast, light/dark, no chart-junk); everything is keyboard-reachable; **no number is
-  hardcoded** — plan names and price refs come from config.
+- *Loading / empty / denied / degraded* are all four first-class and distinct (FR26) — a permission
+  denial is not an empty result, and a transport failure is not absence of data; cross-tenant charts
+  follow the **dataviz** skill (contrast, light/dark, no chart-junk) and carry a tabular fallback;
+  everything is keyboard-reachable at WCAG 2.1 AA with scoped table headers (FR27); UI strings are
+  English with `Intl` pinned to `en-US`; **no number is hardcoded** — plan names and price refs come from
+  config (FR28).
+
+The interface floor is **not** relaxed because the audience is internal. An operator driving this
+console with a keyboard, or at 200% zoom, at 3am during an incident is the normal case — and the
+consequence of a mis-read control here is measured in tenants.
 
 **DevOps (co-lead) — *highest blast radius, so least privilege, tamper-evident audit, fail-closed, and
 operators-watching-operators.***
@@ -647,6 +782,11 @@ without a stop is theater; a stop without a record is unaccountable. P8 provides
 | Console outage leaves the fleet un-stoppable or actions unaudited | DevOps | Critical paths **fail closed** (audit-down ⇒ block; kill-state-unreachable ⇒ halt); P6 kill switch remains an independent brake |
 | Admin behavior is a black box | DevOps | Admin actions **observable** on P2.5 (FR18): logins, MFA failures, privileged-action volume, impersonations, kill-switch state, cross-tenant views — with anomaly alerts |
 | Operator enters card data / financial credentials into the console | DevOps / Backend | Console shows provider **handles + state** only; card data stays with the PCI-compliant provider; console never enters/stores financial credentials (safety rule) |
+| Customer-console defect reaches an admin capability | Frontend / DevOps | **Separate application, separate origin, separate BFF** (FR19) — isolation is enforced by the browser's origin boundary, not by routing correctness inside a shared app. Separate cookie jars, separate bundles; a tenant session presented to the admin BFF is refused (FR21). |
+| An admin credential leaks through the client | Frontend / DevOps | Credential is **server-side in the BFF only** (FR20); a build-time gate scans the shipped bundle; an unauthenticated route **redirects rather than renders**. |
+| An operator confuses the two consoles and acts cross-tenant believing it is one tenant | Product / Frontend | **Distinct operator chrome** — distinct accent + persistent operator identification on **every** view (FR23) — plus global controls visually distinct from per-tenant ones (FR24). |
+| The screen offers a control the gate refuses (or hides one it grants) | Frontend / Backend | The console renders from the **same permission map the backend enforces** (FR22); a denial renders **who holds it and how to escalate**, never a bare refusal. |
+| The interface floor is relaxed because the audience is internal | Frontend / QA | FR27 holds the console to the same a11y floor as P9, verified by automated audit **plus a keyboard-only pass**; acceptance requires **rendered-browser evidence**, not a green build (G21). |
 
 ## 12. Rollout & test strategy
 
@@ -747,6 +887,30 @@ without a stop is theater; a stop without a record is unaccountable. P8 provides
       removed/tombstoned with a non-PII audit reference retained.
 - [ ] Admin actions are **observable** on the P2.5 substrate (logins, MFA failures, privileged actions,
       impersonations, kill-switch state, cross-tenant views) with anomaly alerts.
+
+- [ ] The operator console is a **separate Next.js application on a separate origin with its own BFF**;
+      it shares no origin, session cookie, or client bundle with the P9 customer console (G17, FR19).
+- [ ] **No admin credential** appears in any client artifact — asserted by a build-time gate over the
+      shipped bundle; an unauthenticated console route **redirects to sign-in rather than rendering**
+      (G18, FR20).
+- [ ] A **tenant session authorizes no admin capability**, and an admin session is not presentable to the
+      customer console (FR21).
+- [ ] Every view carries **distinct operator chrome** — distinct accent plus persistent identification of
+      the console and the acting admin principal (G19, FR23).
+- [ ] The console renders capability from the **same permission map the backend enforces**; an
+      under-privileged action shows **who holds it and how to escalate** (G20, FR22).
+- [ ] A **global** control is visually distinct from and higher-friction than its per-tenant counterpart;
+      an irreversible action requires the operator to **type the target's identifier** (FR24).
+- [ ] An active impersonation shows a **persistent banner** (tenant, read-only scope, expiry, "every
+      action is logged") with an always-visible **End** control (FR25).
+- [ ] **Loading, empty, denied, and degraded** render as four distinct states on every view; a denial is
+      not an empty result and a transport failure is not absence of data (FR26).
+- [ ] Every page passes the automated accessibility audit **and a keyboard-only pass** at WCAG 2.1 AA;
+      UI strings are English with `Intl` pinned to `en-US` (G21, FR27).
+- [ ] **No number is hardcoded** in the console — plan names and price references resolve from
+      configuration (FR28).
+- [ ] Acceptance evidence for every user-visible console behavior is a **real browser rendering** against
+      a real API response, not a successful build (G21).
 
 ## 14. Open questions
 

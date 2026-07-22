@@ -194,6 +194,59 @@ resolves the tension: erasure of PII without erasure of the append-only record o
 **Open (PRD Q4).** The audit **chain** is retained per legal-hold policy; GDPR erasure **never** removes
 an entry, only tombstones PII in/around it.
 
+## Decision 11 — The operator console is a separate application on a separate origin, not a role-gated section of the customer console
+
+The back-office is its own **Next.js (App Router, TypeScript)** application with its own **BFF**, served
+from an origin distinct from the [P9](../p9-web-console/) customer console's, deployed independently.
+The admin credential lives server-side in that BFF; the browser holds only an `HttpOnly`, `SameSite`
+admin session bound to an admin principal. The admin and tenant session domains are **disjoint**.
+
+**Why.** In a single application with role-gated routes, the separation between a tenant session and a
+cross-tenant capability is a property of **routing correctness** — one mis-scoped route, one middleware
+ordering mistake, one XSS on the customer side, and the boundary is gone. As two origins it is a
+property the **browser** enforces: separate cookie jars, separate bundles, no script access across them.
+This is the platform's highest-blast-radius surface, where one action crosses tenant boundaries and can
+halt the autonomous fleet, so the boundary should not rest on our own routing being correct.
+
+**Alternative rejected — one application, admin routes gated by admin session + RBAC.** Cheapest by a
+wide margin: one BFF, one deployment, one design system with no packaging, and no second operational
+surface. Rejected on **L1 安全**: it converts a browser-enforced isolation into an application-enforced
+one on precisely the surface where the consequence of failure is measured in tenants. Under the priority
+ordering, a security degradation cannot be bought with L4 operational or L8 implementation convenience.
+The cost — a second deploy unit and a second BFF — is accepted and is small next to what it buys.
+
+**Alternative rejected — a non-web operator surface (CLI only).** Smallest attack surface of all, and
+some operations genuinely belong in a CLI. Rejected because the console's core value is making blast
+radius **legible before the action** — a confirmation that names the target, a banner that says you are
+impersonating, a global control that looks different from a per-tenant one. A CLI can require a typed
+reason but cannot make scope visually unmistakable, and "operator misread the scope" is the failure mode
+this phase exists to prevent.
+
+## Decision 12 — Shared token system, deliberately distinct operator chrome
+
+Both consoles draw scale, spacing, type and accessibility primitives from **one token system**. The
+operator console carries a **distinct accent and persistent operator identification on every view** —
+naming the console and the acting admin principal.
+
+**Why.** These are two different requirements pulling in opposite directions and both are real.
+Consistency argues for one look: P9 spent a phase reconciling three forked palettes, and a fourth fork
+would re-create exactly that debt while doubling the accessibility maintenance. Safety argues for
+difference: an operator with both consoles open in tabs must never perform a cross-tenant action while
+believing the view is single-tenant, and the P8 PRD already names keeping the two "legibly distinct" as
+a goal. Sharing the *system* while differing in *chrome* satisfies both — the underlying scale and a11y
+primitives are one source of truth, and the surface identity is unmistakable.
+
+**Alternative rejected — visually identical.** Maximum consistency, least design work. Rejected on the
+named failure above: identical appearance makes tab-confusion a live hazard on the one surface where
+its consequence is cross-tenant.
+
+**Alternative rejected — a fully independent visual language.** Strongest distinctness. Rejected on
+**L7 维护** and on accessibility: two independent systems means two contrast audits, two focus models,
+two sets of primitives to keep at WCAG 2.1 AA — and drift is then guaranteed rather than merely possible.
+
+**Corollary the specs carry:** the interface floor is **not** lowered because the audience is internal.
+An operator driving this console by keyboard, at 200% zoom, during an incident is the normal case.
+
 ## Data model sketch
 
 ```
@@ -282,3 +335,9 @@ GDPR.Execute(admin_id, subject_ref, reason) -> {completed, verification_ref}    
 - **Leaked SSO/MFA/session secrets or card data in scope** — mitigated by secrets-manager-sourced
   secrets (never in code/git/telemetry), provider handles only (no card data), no secret in telemetry
   (Decision 1; PRD §7).
+- **A customer-console defect reaches an admin capability** — mitigated by a separate application on a
+  separate origin with its own BFF, so isolation is browser-enforced rather than a routing property, and
+  the session domains are disjoint (Decision 11). *(Load-bearing.)*
+- **An operator confuses the two consoles and acts cross-tenant believing it is one tenant** — mitigated
+  by distinct operator chrome and persistent operator identification on every view, plus global controls
+  visually distinct from per-tenant ones (Decision 12; Decision 3).

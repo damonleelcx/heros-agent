@@ -1,7 +1,7 @@
 # Product Requirements Documents (PRDs)
 
 One PRD per delivery phase of the **LLM Agentic Workflow Evaluation & Configuration System**.
-Each PRD is written through the six senior-role lenses (see
+Each PRD is written through the eight senior-role lenses (see
 [`../implementation-timeline/roles-and-ownership.md`](../implementation-timeline/roles-and-ownership.md))
 and pairs with an OpenSpec change of the same name under [`../../openspec/changes/`](../../openspec/changes/).
 
@@ -20,6 +20,8 @@ and pairs with an OpenSpec change of the same name under [`../../openspec/change
 | P6 — Autonomous optimizer | [P6-autonomous-optimizer.md](P6-autonomous-optimizer.md) | `p6-autonomous-optimizer` | AI Engineer + DevOps + Product |
 | P7 — Billing, Metering & Entitlements | [P7-billing-metering.md](P7-billing-metering.md) | `p7-billing-metering` | Backend + DevOps |
 | P8 — Admin & Operations Console *(internal operator surface)* | [P8-admin-console.md](P8-admin-console.md) | `p8-admin-console` | Backend + Frontend + DevOps |
+| P9 — Web Console *(customer-facing dashboard)* | [P9-web-console.md](P9-web-console.md) | `p9-web-console` | Frontend + Product Designer |
+| P10 — Prompt & Model Studio *(authoring, bindings, runtime config)* | [P10-prompt-model-studio.md](P10-prompt-model-studio.md) | `p10-prompt-model-studio` | Backend + Product Designer |
 
 ## PRD template
 
@@ -80,8 +82,13 @@ Every phase PRD follows this structure:
 ## 14. Open questions
 ```
 
-The role-lens section (9) is where the six workflows do their work: the System Designer quantifies
+The role-lens section (9) is where the eight workflows do their work: the System Designer quantifies
 and picks storage, the Backend Dev designs contracts/failure behavior, the AI Engineer enforces
 evals-before-optimization and verification, DevOps enforces observability/least-privilege/blast-
-radius, Frontend owns the interface and its states, and Product anchors to the outcome and designs
-the unhappy path.
+radius, Frontend owns the interface and its states, Product anchors to the outcome and designs
+the unhappy path, QA defines the acceptance gate that can actually fail, and Sales Operations keeps
+what is sold aligned with what the system does.
+
+A PRD includes only the roles marked **L** or **S** for its phase in the
+[ownership matrix](../implementation-timeline/roles-and-ownership.md) — §9 is a working section, not a
+roll call.

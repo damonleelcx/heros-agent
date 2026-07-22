@@ -1,11 +1,11 @@
-# Roles & Ownership — Applying the Six Senior Workflows
+# Roles & Ownership — Applying the Eight Senior Workflows
 
-This timeline is not a generic project plan. Each phase is decomposed through the lens of six
+This timeline is not a generic project plan. Each phase is decomposed through the lens of eight
 senior-role operating playbooks (installed as Claude skills). Each playbook carries its own
 internal discipline; this document states what each role **owns** on this project and which of
 its internal phases apply where.
 
-The organizing principle across all six is the same one the AI Engineer playbook states most
+The organizing principle across all eight is the same one the AI Engineer playbook states most
 sharply: **you cannot improve what you cannot measure** — so the Metrics substrate and the eval
 harness are treated as load-bearing infrastructure, not reporting.
 
@@ -237,6 +237,87 @@ operator console legibly distinct from the customer Web dashboard so the two are
 
 ---
 
+## 7. Senior QA Engineer — *green tests are the goal only if green is credible*
+
+**Owns:** the acceptance gates. Not "writing tests" as a downstream chore — the definition of what
+counts as evidence that a phase actually works, and the honest statement of what was **not** covered.
+
+Its first principle is uncomfortable and exactly right for this system: **the happy path being green
+does not mean the invariant holds.** Nearly every expensive failure in a platform like this one is
+shaped identically — *the tests passed*. A schema column that exists in code and not in the deployed
+baseline. An evaluator that runs against a mock in production. A normalization mismatch that unit tests
+accept and that collapses recall. A tripwire test skipped because its environment variable was unset,
+so the half of the matrix that mattered was never exercised. QA's job is not to make the suite green;
+it is to make **green mean something**.
+
+| Playbook discipline | Where it applies here |
+|---|---|
+| **A 2xx is not proof of persistence** — assert existence, then value, then propagation, then cross-view consistency | **P0/P2/P2.5** — a run that returns `200` and writes no metric event is the exact failure this catches. The tag contract (`variant_id, run_id, node_id, case_id, seed, config_hash`) is asserted **by value**, not by presence |
+| **A guard must be able to go red** — revert the fix, watch it fail, restore it | Every invariant in this repo that is currently only a comment: the "browser derives nothing" rule (P9), the config-hash reproducibility rule (P0), the sandbox's no-ambient-credentials rule (P3) |
+| **Auto-discovery over allowlists** — a hand-maintained list of protected files protects only what someone remembered to add | Schema/fixture coherence, the P9 token-literal scan, and the read-model-field coverage check (P9 FR17) |
+| **Optional-skip means uncovered** — a test that silently skips when an environment is missing is false confidence, not partial coverage | Postgres-backed tests, container-backed sandbox proofs (P3), and the P9 browser gate |
+| **Aggregates hide single-sample bugs** | **P4** — a mean that looks fine while one seed diverges is the noise-as-signal failure the whole phase exists to prevent |
+| **Fault injection and degradation, not just success** | **P2.5/P3/P9** — subsystem unmounted, subject missing, upstream unreachable, SSE stripped by a proxy: four different renderings, four different remedies |
+
+**Highest-leverage decision it makes:** what constitutes acceptance for a phase — and specifically, in
+**P9**, the rule that **a successful build is not acceptance for a user-visible behavior**. A green
+build, a passing type-check and passing unit tests are all simultaneously compatible with a page that
+renders nothing, renders a credential, or renders the wrong subject. Only a rendered browser checked
+against the actual API response falsifies that. The same reasoning generalizes: for every phase, QA
+names the observation that could prove the phase wrong, and makes it routine.
+
+**On the eval harness (P4):** the harness is itself a measuring instrument, so QA tests the
+instrument — that a known-worse variant is actually ranked worse, that overlapping CIs really produce
+a tie rather than an ordering, that a disqualifying gate cannot be traded away by a weighted
+preference, and that an uncalibrated judge is barred from gating rather than merely annotated.
+
+**On the consoles (P8/P9):** browser-rendered acceptance at a fixed viewport, all four view states
+(loading / empty / error / populated) per view, the three error classes asserted to render distinctly,
+an automated accessibility audit **plus a keyboard-only pass** that no tool substitutes for, and
+security assertions as tests rather than review items — no credential in the shipped bundle, an
+unauthenticated route redirects rather than rendering, a revoked session denied at the next request.
+
+---
+
+## 8. Senior Sales Operations — *only promise what has shipped; state the boundary out loud*
+
+**Owns:** the capability map that customer-facing claims are drawn from, the mapping of surfaces to
+named plans, the trial/POC path, and the return flow from recurring customer questions into the
+backlog.
+
+Its governing rule is a commitment discipline with a four-rung maturity ladder — **✅ delivered /
+🟡 evolving / 🧪 reserved / ⛔ limitation** — and only the first rung is sayable to a customer. This
+repository already practices it: the root README opens with *"Status: foundation + full design"* and
+marks the subsystems as specified-and-being-built rather than done. That sentence is this role's work.
+
+| Playbook discipline | Where it applies here |
+|---|---|
+| **Only ✅ delivered is promisable**; 🟡/🧪 are internal planning states | Phase claims. "Autonomous optimization" is **P6** and is not sellable as present because P5.5 verification exists on paper |
+| **Silence about a ⛔ limitation is not neutrality, it is misdirection** | Discovery's static-analysis blind spot for dynamic dispatch (until **P5** dynamic tracing) is stated up front, not discovered during a POC |
+| **A lab number is not a production guarantee** — label the environment, give ranges, admit physical floors | Any published figure for discovery throughput, eval-run cost or optimization win rate. Multi-seed CIs are the honest form of this and come free from **P4** |
+| **A number must carry what it means for the customer** | SUM (**P7**) is a bill, not a metric — spend under management has to be expressible as "for a team your size, this is what you would be metering" |
+| **Recurring questions are the next requirement** | The support/FAQ loop feeds back into the PRDs; a question asked three times is a product gap, not a documentation gap |
+
+**Highest-leverage decision it makes:** the **surface-to-plan mapping** — which capability each named
+plan unlocks, and how the automation level (Advisory / Assisted / Autonomous) gates independently of
+the plan. Getting this wrong is not a pricing error; it is a product-behavior error that surfaces as a
+customer being shown something they cannot use.
+
+**On billing (P7):** plans are referenced **by name** (Free / Team / Business / Enterprise); prices are
+configuration and never enter git or a customer-facing document authored here. The gainshare story has
+a hard honesty constraint that this role must not soften: **only verified savings are billable**,
+drawn from the **P5.5** verified-delta ledger — an unverified saving is not a discountable claim, and
+the customer's own provider keys mean the platform never resells tokens.
+
+**On the customer console (P9):** supports. Every console capability maps to the plan name and
+automation level that unlocks it, and a gated capability is rendered **naming the plan that unlocks
+it** rather than hidden — a hidden feature produces a support ticket, a named one produces an upgrade
+conversation. Demo and trial paths run real read models against sample data, never a mocked screen: a
+demo that overstates is a churn cost that lands after the sale, and the same rule that says a UI verb
+must describe real system behavior applies to what the funnel shows.
+
+---
+
 ## Ownership at a glance
 
 | Subsystem | Lead role(s) | Supporting |
@@ -254,3 +335,7 @@ operator console legibly distinct from the customer Web dashboard so the two are
 | UX flows, automation levels, handoff | Product Designer | Frontend, AI |
 | Billing, Metering & Entitlements (P7) | Backend + DevOps | System Designer (metering data model), AI (verified savings), Frontend (billing UI), Product (packaging/paywall) |
 | Admin & Operations Console (P8, internal) | Backend + Frontend + DevOps | System Designer (read-model + RBAC + audit data model), Product (back-office UX / dangerous-action patterns), AI (autonomous-fleet oversight) |
+| Web Console (P9, customer-facing) | Frontend + Product Designer | Backend (session + credential boundary), System Designer (BFF boundary + typed read-model contract), DevOps (second-runtime operability, readiness aggregation), QA (browser-rendered acceptance gate), AI (rendering statistics without softening them), Sales Ops (surface-to-plan mapping) |
+| Prompt & Model Studio (P10) | Backend + Product Designer | System Designer (the data/structure line, config_hash + IR extensions), Frontend (studio surfaces in the P9 shell), AI (the studio-is-not-an-evaluator boundary), DevOps (fail-static resolution, customer-repo artifact), QA (reconciliation that can go red), Sales Ops (stating the runtime-config boundary) |
+| Acceptance gates & regression evidence | QA Engineer | every role — QA defines what counts as proof for the phase it is gating |
+| Capability claims, plan mapping, POC & delivery | Sales Operations | Product (packaging), Backend/DevOps (what is actually delivered) |
