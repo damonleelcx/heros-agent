@@ -67,6 +67,30 @@ interface but wires it in P5.
   (**P5**); automated search / autonomous optimizer (**P6**); trend view + regression detection +
   budget alerts (**P4.5+**).
 
+## What implementation changed about this proposal
+
+Three claims above were written before the code existed and needed correcting once it did. They are
+recorded here rather than silently edited, because the corrections are the useful part:
+
+- **"reporting the residual rather than a false 100%"** understated the failure mode. A false 100%
+  arrives two ways: by dropping unreachable obligations from the denominator (anticipated), and by
+  having no obligations at all (not anticipated). A real repository supplied the second — static
+  discovery finds call sites, not the flow between them, so an IR with zero edges has nothing to
+  cover and an empty-set fraction of 1.0 read as complete. A dimension with no obligations is now
+  **not measurable**, which is a third state alongside met and unmet.
+- **"references are labeled gold or weak"** treated an oracle as a *reference*. An oracle is a
+  reference, a decidable schema, or a regex — and, more importantly, only counts as evidence if it
+  can **fail**. An unconstrained contract that accepts every output is worse than no oracle: it looks
+  measured and decides nothing.
+- **"eval-set difficulty and diversity are tracked"** is necessary and not sufficient. Both describe
+  the *inputs*; neither says whether the set can answer the question it exists to answer. A third
+  floor — **oracle coverage** — was added.
+
+Two questions the same run raised are left open rather than answered unilaterally: whether a board
+should **refuse to rank** on an axis that was never measured, and whether **gate eligibility should
+generalize** from judges to any gate input whose evidence base is below floor. Both are product
+calls; see PRD §14 Q8–Q10.
+
 ## Impact
 
 - **Affected capabilities:** `eval-harness` (new), `eval-set-generation` (new), `scoring` (new).

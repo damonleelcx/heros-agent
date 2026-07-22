@@ -66,6 +66,49 @@ weighted sum, and the soft weighted preferences SHALL apply only to variants tha
 - **THEN** the variant is disqualified, not given a reduced-but-still-ranked score
 - **AND** it does not appear anywhere in the ranked list of gate-passing variants
 
+### Requirement: A metric that cannot separate the variant set SHALL NOT decide the ranking
+
+When every variant's confidence interval on a metric overlaps every other's, that metric SHALL be
+treated as **degenerate**: it normalizes to the same value for every variant and contributes nothing
+to the ordering. The reason SHALL be recorded alongside the normalization scale.
+
+#### Scenario: A metric whose spread is indistinguishable from noise does not order the board
+
+- **WHEN** three variants' latency intervals all overlap, while their quality intervals do not
+- **THEN** the latency metric is flagged degenerate and normalizes to the same value for all three
+- **AND** the ranking is decided by the metric that does separate them
+
+  *(Min-max normalization divides by the observed spread. When that spread is comparable to the
+  measurement noise, dividing by it amplifies noise across the whole [0,1] axis — the step meant to
+  make metrics comparable would otherwise promote noise to a ranking signal.)*
+
+### Requirement: A penalty derived from a measured quantity SHALL carry its uncertainty into the composite interval
+
+A penalty term computed from a measured metric SHALL enter the composite-score bootstrap per
+replicate, so its uncertainty widens the interval. A penalty computed from an exact count SHALL be
+subtracted as a constant. The composite score SHALL lie within its own confidence interval.
+
+#### Scenario: A noise-sized penalty difference does not produce a confident ordering
+
+- **WHEN** three variants are statistically indistinguishable on every metric, and differ only in
+  the measured quantity a penalty reads
+- **THEN** their composite intervals overlap and all three are shown tied
+- **AND** no variant is ranked strictly above another on that difference
+
+### Requirement: A variant whose runs did not complete SHALL be excluded from the ranking and named
+
+A variant with no usable measurement — a fan-out cut short by a spend cap, or fewer seeds than the
+configured floor — SHALL be excluded from the ranked order rather than scored from partial data, and
+SHALL be listed with the reason. The board SHALL report a partial state. A board on which no variant
+has a usable measurement SHALL be refused.
+
+#### Scenario: A budget-capped sweep produces a partial board, not a crash and not a silent short list
+
+- **WHEN** a spend cap stops a sweep after 26 of 84 variants have complete measurements
+- **THEN** the 26 measured variants are ranked
+- **AND** the 58 unmeasured variants are named with the reason, as one summary plus a list
+- **AND** the board reports a partial state rather than presenting 26 rows as the whole field
+
 ### Requirement: Each composite score SHALL carry a confidence interval and CI-overlapping variants SHALL be shown as tied
 
 Each composite score SHALL be reported with a confidence interval derived from the multi-seed runs.

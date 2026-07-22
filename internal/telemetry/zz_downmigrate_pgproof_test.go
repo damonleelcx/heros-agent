@@ -34,8 +34,14 @@ func TestPG_ZZ_DownMigrationIsExpandOnly(t *testing.T) {
 	// evaluator_name is gone; eval_result and its seven tag columns survive.
 	var hasEvaluator bool
 	if err := testDB.QueryRowContext(ctx,
+		// current_schema(): pgtest gives each proof its own schema, and more than one of them now has
+		// an `eval_result` — an unfiltered information_schema query answers about someone else's
+		// table. Without the filter this test went green only for as long as no other package
+		// created that table, and turned red the moment P4's proof did. (The same filter is on
+		// worktree's equivalent check, for the same reason.)
 		`SELECT EXISTS(SELECT 1 FROM information_schema.columns
-		 WHERE table_name='eval_result' AND column_name='evaluator_name')`).Scan(&hasEvaluator); err != nil {
+		 WHERE table_schema = current_schema()
+		   AND table_name='eval_result' AND column_name='evaluator_name')`).Scan(&hasEvaluator); err != nil {
 		t.Fatalf("column check: %v", err)
 	}
 	if hasEvaluator {

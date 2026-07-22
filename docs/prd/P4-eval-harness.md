@@ -192,6 +192,18 @@ These map 1:1 to the OpenSpec requirements under
 - FR12. The generator SHALL compute and report **eval-set difficulty and diversity** metrics, and
   SHALL dedupe near-identical cases; a score on an eval set below a difficulty/diversity floor SHALL
   be surfaced as low-confidence.
+- FR12a. The coverage report SHALL distinguish **"no obligations on this axis"** from **"every
+  obligation covered"**. A dimension with zero obligations SHALL be reported as *not measurable* and
+  SHALL NOT satisfy its threshold. *(Added after implementation: an empty-set covered-fraction is
+  1.0 by arithmetic, and reporting that alone claimed 100% path coverage for a workflow whose
+  control flow had never been observed — see Q8.)*
+- FR12b. An oracle SHALL be counted as evidence only when it is **decisive** — when it can return
+  "fail" for some plausible output of the workflow. The generator SHALL report the fraction of cases
+  carrying a decisive oracle (**oracle coverage**), SHALL count cases whose oracle can never fail
+  separately, and SHALL surface a set below the oracle-coverage floor as low-confidence.
+  *(Added after implementation: counting oracle PRESENCE rather than POWER credited an
+  unconstrained `{"type":"object"}` contract as evidence and let a variant that answers wrong 70% of
+  the time score task_success 1.000 — see Q9.)*
 
 **Scoring (`scoring`)**
 - FR13. Each metric SHALL be **normalized to [0,1]** (min-max or z-score across the variant set)
@@ -423,40 +435,57 @@ fails calibration, an all-tie board.
 
 ## 13. Success metrics & acceptance criteria (M5 exit checklist)
 
-- [ ] **Two variants** run over a **generated + user** eval set, **multi-seed**, and appear on a
+- [x] **Two variants** run over a **generated + user** eval set, **multi-seed**, and appear on a
       **leaderboard** with **CI-bounded composite scores** and **gate status**.
-- [ ] Evaluators are **pluggable**: a built-in (exact-match/schema/regex/LLM-judge) and a
+- [x] Evaluators are **pluggable**: a built-in (exact-match/schema/regex/LLM-judge) and a
       **user-registered custom metric** both compute over traces.
-- [ ] Metric-sets are **selected by the P3.5 pattern label** — a router is not scored as a RAG node.
-- [ ] **Per-node contribution** to end-to-end success/cost/latency is computed from traces.
-- [ ] A **true-zero-delta** pair is reported as a **tie** (overlapping CIs), not a false winner.
-- [ ] Every **LLM-judge** metric reports **agreement vs. a human-labeled subset**; an uncalibrated
+- [x] Metric-sets are **selected by the P3.5 pattern label** — a router is not scored as a RAG node.
+- [x] **Per-node contribution** to end-to-end success/cost/latency is computed from traces.
+- [x] A **true-zero-delta** pair is reported as a **tie** (overlapping CIs), not a false winner.
+- [x] Every **LLM-judge** metric reports **agreement vs. a human-labeled subset**; an uncalibrated
       judge is flagged and blocked from gating.
-- [ ] The generator **measures** path/node/edge coverage and **iterates a gap-filling loop until
+- [x] The generator **measures** path/node/edge coverage and **iterates a gap-filling loop until
       thresholds are met** (or reports the residual on an unreachable path).
-- [ ] Cases are flagged **gold vs. weak-labeled**; weak references do not silently drive scoring.
-- [ ] Eval-set **difficulty/diversity** is reported; a weak set is surfaced as low-confidence.
-- [ ] Metrics are **normalized to [0,1]** before weighting; the composite formula matches G9.
-- [ ] Weight profiles are **named**; switching profiles **re-ranks without re-executing** (cached).
-- [ ] Hard constraints are **disqualifying gates**, separate from weights; a gate-violating variant
+- [x] Cases are flagged **gold vs. weak-labeled**; weak references do not silently drive scoring.
+- [x] Eval-set **difficulty/diversity** is reported; a weak set is surfaced as low-confidence.
+- [x] Metrics are **normalized to [0,1]** before weighting; the composite formula matches G9.
+- [x] Weight profiles are **named**; switching profiles **re-ranks without re-executing** (cached).
+- [x] Hard constraints are **disqualifying gates**, separate from weights; a gate-violating variant
       is disqualified, not merely penalized.
-- [ ] Leaderboard rows show **score ± CI, component breakdown, gate pass/fail, `config_hash`
+- [x] Leaderboard rows show **score ± CI, component breakdown, gate pass/fail, `config_hash`
       lineage**; a **Pareto view** renders the quality/cost/latency frontier.
+
+> **Verified 2026-07-22** by `TestM5ExitChecklist` (`internal/p4e2e`), which runs one in-process
+> pipeline from IR to leaderboard and asserts every item above against what it actually produces,
+> plus the live-Postgres proofs (`make pg-proof`) and the browser verification recorded in
+> `openspec/changes/p4-eval-harness/ui-verification.md`.
 
 ## 14. Open questions
 
 - Q1. **CI method.** Bootstrap CIs over per-case scores vs. normal-approximation on the seed-mean —
   which is the default, and what N (seeds × cases) makes the tie test reliable? (Proposed: bootstrap
   over case-level scores, seeds as a variance component; default N ≥ 5 seeds.)
-- Q2. **Composite-score CI.** Propagate per-metric CIs analytically through the weighted sum, or
-  bootstrap the composite directly? (Proposed: bootstrap the composite so gate/normalization
-  interactions are captured.)
+- Q2. **Composite-score CI.** ~~Propagate per-metric CIs analytically through the weighted sum, or
+  bootstrap the composite directly?~~ **RESOLVED — bootstrap the composite**, by recombining cached
+  per-metric replicates under the active profile. Two implementation findings forced detail the
+  question did not anticipate: (a) the analytic route cannot hold the correlation between a
+  variant's metrics (a lucky-fast seed is also a cheap one); (b) a penalty derived from a *measured*
+  quantity must enter the bootstrap **per replicate** — subtracting its mean as an exact constant
+  shifts the interval without widening it, and on a board where every metric was statistically
+  degenerate that promoted a 1e-5 noise difference into a confident 1-2-3 ranking of three
+  indistinguishable variants. Count-derived penalties (what fraction of cases are weak-labeled) stay
+  exact constants.
 - Q3. **Coverage thresholds.** Are default path/node/edge thresholds fixed platform-wide, or
   per-pattern (a Reflection loop needs min/typical/max iterations; a linear chain doesn't)?
-- Q4. **Normalization set boundary.** Min-max/z-score is computed *across the variant set on the
-  board* — does adding a new variant re-normalize (and thus re-rank) existing ones, and is that
-  desirable or surprising? (Proposed: re-normalize on set change but pin a reference scale for
-  cross-board comparison.)
+- Q4. **Normalization set boundary.** Min-max is computed *across the variant set on the board* —
+  does adding a new variant re-normalize (and thus re-rank) existing ones? **Still open**, with the
+  reference scale now recorded per cached value (`score_cache.scale_min/scale_max`) so two boards can
+  be checked for comparability rather than assumed comparable. One sub-question CLOSED by
+  implementation: a metric whose variants' CIs all overlap must be treated as **degenerate** and
+  normalize to 1 for everyone. Min-max divides by the observed spread, so when that spread is
+  comparable to the measurement noise it amplifies noise across the whole [0,1] axis — the step meant
+  to make metrics comparable was promoting noise to a ranking signal. A metric that cannot separate
+  the field must not decide the ranking.
 - Q5. **Judge-agreement floor.** What κ / %-agreement is the default gate-eligibility floor, and
   does it vary by metric criticality?
 - Q6. **Difficulty/diversity definition.** How is "difficulty" operationalized before P5 real-trace
@@ -464,3 +493,41 @@ fails calibration, an all-tie board.
   uncertainty? (Proposed: baseline pass-rate + embedding-space spread for diversity.)
 - Q7. **Held-out split ownership.** P5.5 verification wants a held-out slice; does P4 mint the
   train/held-out split at generation time (tagged on the case) or does P5.5 carve it later?
+- Q8. **What may a board rank when an axis was never measured?** *(Raised by running P4 against a
+  real repository — see §14.1.)* A dimension with no obligations, or with obligations of which zero
+  were discharged, is now flagged and forces low-confidence — but the leaderboard still ranks.
+  Should it **refuse to rank** instead? "Nothing was exercised" is arguably not low confidence, it
+  is not a measurement. Open: refuse vs. flag.
+- Q9. **Should gate eligibility generalize past judges?** *(Raised by the same run.)* FR7 bars an
+  uncalibrated LLM judge from being a gate input. A min-quality gate reading a metric with **0%
+  oracle coverage** is exactly as unreliable and currently passes freely — that is how a variant
+  answering wrong 70% of the time earned a green `gate: pass`. Proposed: generalize the judge's
+  gate-eligibility predicate to any gate input whose *evidence base* is below floor, reusing the
+  existing refusal path (gate refused, disqualifies nobody, stated on the board). Not implemented —
+  it is a product call between refusing and flagging.
+- Q10. **Where does "this contract constrains nothing" get reported?** *(Same run.)* P1 discovery
+  emitted `{"type":"object"}` as the I/O contract for 40 of 40 nodes — its syntactic frontend does
+  not resolve types — and P4 had to discover downstream that its oracles were powerless. Discovery
+  already emits ambiguity flags; contract-emptiness arguably belongs there, as a P1 concern rather
+  than something each consumer re-derives.
+
+### 14.1 What running against a real repository changed
+
+The checklist in §13 was verified against a fixture. Pointing the same pipeline at a real repository
+(`nousresearch/hermes-agent`, commit `e57918a`) produced findings a fixture could not, because a
+fixture is built by the same person as the thing it tests:
+
+- **P1 discovery yields call sites, not flow.** 40 LLM call sites across 3,214 Python files, and
+  **zero edges** — inter-node flow is P5's dynamic tracing. Consequences: path coverage has no
+  obligations (FR12a), and P3.5 labels **nothing**, because its detectors work on graph topology.
+  Pattern-driven metric selection (FR3) therefore has nothing to dispatch on for such a workflow.
+- **Static I/O contracts may constrain nothing.** All 40 nodes carried `{"type":"object"}`, which
+  accepts every possible output (FR12b, Q10). Schema-driven generation (FR9) also has nothing to
+  fuzz from such a contract, and silently produced near-nothing rather than saying so.
+- **Model ids are unresolved.** All 40 call sites report `model_id: unresolved` — the model is
+  chosen at runtime — so a Variant Spec's per-node `model_ref` override has no static target on this
+  workflow.
+
+Taken together: a workflow can be **discovered** long before it can be **scored**. What P4 produces
+for such a repository is a *readiness verdict*, not a leaderboard, and it must say so — which is
+what FR12a, FR12b and the low-confidence surface now do.

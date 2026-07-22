@@ -19,7 +19,7 @@ PARITY_DIR ?= .parity
 
 .DEFAULT_GOAL := ci
 
-.PHONY: ci go build vet fmt test schema lint db-proof pg-proof verifier-proof tidy-check clean help \
+.PHONY: ci go build vet fmt test schema lint db-proof pg-proof verifier-proof tidy-check clean help p4-board-demo \
         build-discover discovery-ci discovery-throughput \
         discovery-parity-snapshot discovery-parity-verify \
         discovery-sandbox-proof discovery-sandbox-proof-redcheck \
@@ -171,7 +171,15 @@ db-proof:
 ##           These tests are behind the `pgproof` build tag, so `make go` does not compile them; with
 ##           no database they FAIL rather than skip.
 pg-proof:
-	bash db/migrations/postgres/run_pg_docker.sh $(GO) test -tags pgproof -count=1 ./internal/registry/ ./internal/variantspec/ ./internal/worktree/ ./internal/executor/ ./internal/runqueue/ ./internal/submit/ ./internal/e2e/ ./internal/telemetry/
+	bash db/migrations/postgres/run_pg_docker.sh $(GO) test -tags pgproof -count=1 ./internal/registry/ ./internal/variantspec/ ./internal/worktree/ ./internal/executor/ ./internal/runqueue/ ./internal/submit/ ./internal/e2e/ ./internal/telemetry/ ./internal/evalrun/
+
+## p4-board-demo: stand up the P4 eval board against a live fan-out with a stubbed provider.
+##                Everything between the queue and the pixel is the shipped path: the eval set comes
+##                from the gap-filling loop, the runs go through the bounded worker pool, the
+##                evaluators score real telemetry spans, and the board is the computed view over the
+##                score cache. Use -extra-variants to exercise the board's virtualization at scale.
+p4-board-demo:
+	$(GO) run ./cmd/p4boarddemo
 
 ## tidy-check: assert go.mod/go.sum are tidy (no drift)
 tidy-check:
