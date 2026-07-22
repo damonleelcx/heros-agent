@@ -1,6 +1,6 @@
 # Registries — Spec Delta (P2)
 
-Product rationale: [`../../../../docs/prd/P2-config-runtime.md`](../../../../docs/prd/P2-config-runtime.md) §6 (FR6–FR10).
+Product rationale: [`../../../../../docs/prd/P2-config-runtime.md`](../../../../../docs/prd/P2-config-runtime.md) §6 (FR6–FR10).
 
 Covers the four registries: **model**, **prompt**, **skill**, **context**.
 

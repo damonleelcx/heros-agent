@@ -76,6 +76,27 @@ for the source specification.
 - **The studio is not an evaluator** — no score, rank, winner or interval, and no promotion path from an
   exploratory result. Only P4 ranks; only a P5.5 verified delta is a claim.
 
+### Distribution surfaces (P11 CLI/CI, P12 forge delivery)
+
+- **The CLI is offline-first and free on every plan.** Discovery, apply and eval work with no account and
+  no network. Provider credentials are read from the customer's environment and **never** transmitted.
+- **Egress is an allowlist, constructed — never a denylist, filtered.** A denylist fails *silently* when
+  a field is added; an allowlist fails toward omission. Metrics and IR **structure** cross the boundary;
+  prompt text, source, diffs, environment values and credentials never do, on any path including
+  diagnostics.
+- **Metering counts only what it observed.** SUM derives from **linked** runs; the platform never infers
+  or extrapolates unlinked spend, and **link coverage** is displayed wherever a derived figure is shown.
+- **Our availability never fails a customer's build** — a CI step reports and continues when the platform
+  is unreachable, degraded, or slow. A **customer-configured gate** does fail it.
+- **The platform holds no forge credential by default.** The customer's CI opens the pull request with
+  the ephemeral, repo-scoped token it already holds; a hosted Git App is opt-in, per-repository,
+  least-privilege and customer-revocable
+  ([ADR-005](../docs/adr/ADR-005-forge-delivery-and-credential-posture.md)).
+- **Delivery is downstream of verification, never a path around it**, is idempotent per
+  `(config_hash, source_revision, target)`, and **never merges below Autonomous**.
+- **Delivery is recorded append-only; `transform` stays immutable.** A transform is produced once; a
+  delivery has a lifecycle. A merge is **observed**, never inferred from a pull request closing.
+
 ### Commercial model & entitlements
 
 - The billable **value metric** is **LLM spend under management (SUM)**, aggregated from the P2.5 cost metrics — metering is a read over the telemetry substrate, not a parallel counter.
@@ -88,7 +109,7 @@ for the source specification.
 
 This project uses OpenSpec for spec-driven development. See [`AGENTS.md`](AGENTS.md) for the
 format and rules. Capabilities live in `specs/`; proposed changes live in `changes/`. Each
-delivery phase (P0–P10) is tracked as one change under `changes/`. **P8 — Admin & Operations
+delivery phase (P0–P12) is tracked as one change under `changes/`. **P8 — Admin & Operations
 Console** is the platform team's **internal operator** surface (its own admin identity + RBAC);
 **P9 — Web Console** is the **customer-facing** dashboard, scoped to one tenant. The two are distinct
 surfaces and must never be conflated: nothing in P9 crosses a tenant boundary, and no P8 capability is

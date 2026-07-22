@@ -67,8 +67,8 @@ tier and to the roles that own it:
 
 | Surface | What it is | Tiers | Owners |
 |---------|-----------|:-----:|--------|
-| **CLI + CI integration** | Primary developer entry point. Runs discovery / codemod / eval **in the customer's own build environment** using the customer's own provider keys. | All tiers (incl. **Free**) | Backend, DevOps |
-| **Git App / bot** (GitHub / GitLab / Bitbucket) | Delivery surface that opens the optimization **PRs** (the ADR-001 reviewable-diff output). | **Team+** | Backend, DevOps |
+| **CLI + CI integration** — **P11**, see [PRD](../prd/P11-cli-ci-integration.md) | Primary developer entry point. Runs discovery / codemod / eval **in the customer's own build environment** using the customer's own provider keys. Offline-first with no account; **opt-in run linking** is what gives SUM metering its input and makes results legible in the dashboard. | All tiers (incl. **Free**) | Backend, DevOps |
+| **Git App / bot** (GitHub / GitLab / Bitbucket) — **P12**, see [PRD](../prd/P12-forge-delivery.md) | Delivery surface that opens the optimization **PRs** (the ADR-001 reviewable-diff output). **CI-mediated by default** — the customer's own CI opens the PR, so the platform holds no forge credential; a hosted Git App is opt-in ([ADR-005](../adr/ADR-005-forge-delivery-and-credential-posture.md)). Merged PRs are the **only** input to gainshare billing. | **Team+** | Backend, DevOps |
 | **Web dashboard** (hosted SaaS) — **P9**, see [PRD](../prd/P9-web-console.md) | Graph / leaderboard / diagnosis / trend views + budget & automation-level governance + **billing / usage**. Scoped to **one tenant**. Next.js + a BFF that holds the platform credential server-side, so no API key reaches the browser. Seats & retention scale by tier. | **Team+** | Frontend, Product |
 
 #### Internal operator surface (distinct from the customer Web dashboard)
@@ -139,6 +139,8 @@ Which of the eight senior roles leads (**L**) or supports (**S**) each phase. Fu
 | **P8** Admin & Operations Console | S | **L** | S | **L** | **L** | S | S | – |
 | **P9** Web Console *(customer-facing)* | S | S | S | S | **L** | **L** | S | S |
 | **P10** Prompt & Model Studio | S | **L** | S | S | S | **L** | S | S |
+| **P11** CLI & CI Integration | S | **L** | S | **L** | S | S | S | S |
+| **P12** Forge Delivery | S | **L** | S | **L** | S | S | S | S |
 
 **QA** supports every phase rather than leading one: it owns the *acceptance gate*, so its
 contribution is the definition of what would count as proof for that phase — and the honest statement
@@ -182,6 +184,11 @@ gantt
   P9b Entitlement gating + diagnosis + proposal review + cutover :p9b, 36, 8w
   P10a Prompt authoring + bindings + studio :p10a, 30, 10w
   P10b Runtime config binding + reconciliation :p10b, 40, 6w
+  section Distribution
+  P11a CLI core + egress boundary :p11a, 22, 10w
+  P11b CI integration :p11b, 32, 6w
+  P12a CI-mediated forge delivery :p12a, 36, 8w
+  P12b Hosted Git App :p12b, 44, 4w
 ```
 
 P7 is a cross-cutting commercialization phase that runs alongside the Intelligence track.
@@ -228,6 +235,18 @@ expressions stay **code**, because they name things in the program's lexical sco
 (authoring + bindings + studio) carries no runtime-path risk and stands alone; **wave 10b** (the
 runtime binding layer) is sequenced second so its stability surface is isolated and cuttable.
 
+P11 and P12 are the two surfaces the README always listed and no phase ever owned — and they are where
+the commercial model lives or dies. **Both revenue paths currently measure nothing.** SUM derives from
+P2.5 cost events, but the CLI runs eval in the customer's environment with the customer's keys, so
+those events reach no substrate; and billable savings are computed *only* from **merged-PR deltas**,
+but there is no code that opens a pull request. **P11** makes the CLI complete and offline-first — free
+on every plan, no account, provider keys never leaving the customer's machine — and adds an explicit,
+allowlist-constructed **linking** boundary that is the conversion moment and the meter's only input.
+**P12** delivers the pull request, and per [ADR-005](../adr/ADR-005-forge-delivery-and-credential-posture.md)
+it does so **without the platform acquiring write access to any customer repository**: the customer's
+own CI opens the PR with the ephemeral token it already holds, with a per-repo, revocable hosted Git App
+as the opt-in alternative. Each ships in two waves, with the credential-bearing half (**12b**) last.
+
 ## 5. Milestones & exit criteria
 
 | Milestone | ~Week | Definition of done |
@@ -247,6 +266,9 @@ runtime binding layer) is sequenced second so its stability surface is isolated 
 | **M12 — Customer console live (no key in the browser)** | 44 | A Team+ tenant signs in and drives graph → configure → run → compare → diagnose from a browser, with **no platform API key in any client artifact** and an unauthenticated route redirecting rather than rendering. One shell, one token set, WCAG 2.1 AA on every page, all four legacy surfaces at inventory parity, entitlement gating naming the plan that unlocks each capability, and readiness reporting not-ready when the console is unreachable. Every user-visible behavior accepted on **rendered-browser evidence**, not a green build |
 
 | **M13 — The configuration loop closes in the browser** | 46 | A user edits a prompt, publishes it **as a new version**, sees what changed (text **and** slot set), learns before publishing which nodes an added variable would block, binds slots to a literal / in-scope expression / env var / typed input with every failure caught at **spec-resolve** time, previews the byte-exact string, test-runs it against a model, and selects model + prompt per node — without writing Go. In `bound` mode (opt-in; `inline` stays default) model and prompt version become **data** changeable without a new PR, with the resolved values shipping in the same diff, per-invocation `config_hash` reconciled by the harness, measurement runs **pinned**, and unverified configurations **marked**. No studio result displays a score, rank, winner or interval |
+
+| **M14 — The free tier is adoptable and the meter can see** | 38 | The CLI does discovery, apply and eval **offline with no account**, on every plan including Free. Provider keys never leave the customer environment. `link` is explicit, authenticated, shows the exact payload before sending, and is **built from an allowlist** — metrics and IR structure cross; prompts, source, diffs and keys never do. Linked events enter the existing P2.5 substrate, so **SUM has an input at all**; metering counts only linked runs and **never extrapolates**, with link coverage shown wherever a derived figure is. A published CI action posts checks and uploads artifacts, fails the build on a **customer-configured gate** and **never** on our unavailability |
+| **M15 — The loop closes: verified optimizations reach repositories** | 48 | A Team+ customer receives verified optimizations as **pull requests on their own repository**, with the platform holding **no forge credential** in the default CI-mediated mode ([ADR-005](../adr/ADR-005-forge-delivery-and-credential-posture.md)); a hosted Git App is the opt-in alternative, per-repo, least-privilege and customer-revocable. Every PR carries its evidence and links back to the dashboard. Delivery is idempotent, bounded, superseding-aware, halt-respecting, and **never merges below Autonomous**. Merges are **observed and recorded** in an append-only delivery record — so **gainshare billing has its input** and `transform` immutability is untouched |
 
 ## 6. Cross-cutting risks (front-loaded on purpose)
 

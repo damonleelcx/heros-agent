@@ -1,8 +1,8 @@
 # Configuration Layer — Spec Delta (P2)
 
-Product rationale: [`../../../../docs/prd/P2-config-runtime.md`](../../../../docs/prd/P2-config-runtime.md) §6 (FR1–FR5).
+Product rationale: [`../../../../../docs/prd/P2-config-runtime.md`](../../../../../docs/prd/P2-config-runtime.md) §6 (FR1–FR5).
 Applies the source-transformation apply model per
-[ADR-001](../../../../docs/adr/ADR-001-source-transformation-apply-model.md).
+[ADR-001](../../../../../docs/adr/ADR-001-source-transformation-apply-model.md).
 
 ## ADDED Requirements
 

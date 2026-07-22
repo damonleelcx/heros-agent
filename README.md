@@ -11,7 +11,7 @@ touches production behavior without evidence.
 
 > **Status: foundation + full design.** This repository currently contains the **complete design**
 > (implementation timeline, per-phase PRDs, and OpenSpec change sets) plus a **minimal Go service
-> foundation**. The subsystems below are specified and being built phase by phase (P0 → P10). It is
+> foundation**. The subsystems below are specified and being built phase by phase (P0 → P12). It is
 > being repurposed from a prior *Heros OS-level agent* project; see
 > [`docs/reproposal-migration-checklist.md`](docs/reproposal-migration-checklist.md) for what was
 > kept, adapted, and removed.
@@ -54,8 +54,8 @@ Not a desktop app — a cloud service reached through three thin surfaces:
 
 | Surface | Role |
 |---|---|
-| **CLI + CI integration** | Primary developer entry point; runs discovery / codemod / eval **in your own build environment** with **your own provider keys** |
-| **Git App / bot** (GitHub / GitLab / Bitbucket) | Opens the optimization **PRs**, posts checks and comments |
+| **CLI + CI integration** — [P11](docs/prd/P11-cli-ci-integration.md) | Primary developer entry point; runs discovery / codemod / eval **in your own build environment** with **your own provider keys**. Free on every plan, works offline with no account; linking a run is explicit, opt-in, and sends metrics and structure — never source, prompts, or keys |
+| **Git App / bot** (GitHub / GitLab / Bitbucket) — [P12](docs/prd/P12-forge-delivery.md) | Opens the optimization **PRs**, posts checks and comments. By default your **own CI** opens the PR with the token it already holds, so the platform never gets write access to your repo; a hosted Git App is the opt-in alternative |
 | **Web dashboard** (hosted SaaS) — [P9](docs/prd/P9-web-console.md) | Graph view, leaderboard, diagnosis, trends, budgets, and automation-level governance. Scoped to one tenant; the platform credential stays server-side in a BFF, so no API key reaches the browser |
 
 ## The plan
@@ -63,8 +63,8 @@ Not a desktop app — a cloud service reached through three thin surfaces:
 The full engineering plan is committed and specified:
 
 - **[Implementation timeline](docs/implementation-timeline/README.md)** — system overview, critical
-  path, role-ownership matrix, Gantt, and milestones (M0 → M13).
-- **[Product Requirements Documents](docs/prd/README.md)** — one PRD per phase (P0 → P10).
+  path, role-ownership matrix, Gantt, and milestones (M0 → M15).
+- **[Product Requirements Documents](docs/prd/README.md)** — one PRD per phase (P0 → P12).
 - **[OpenSpec change sets](openspec/)** — behavioral, testable specs (`SHALL` requirements with
   scenarios); see [`openspec/AGENTS.md`](openspec/AGENTS.md) for the format and
   [`openspec/project.md`](openspec/project.md) for conventions.
@@ -88,6 +88,8 @@ The full engineering plan is committed and specified:
 | **P8** | Admin & Operations Console (internal operator surface — RBAC, tenant/billing admin, fleet controls, audit log; a separate Next.js app on its own origin) |
 | **P9** | Web Console (the customer-facing dashboard — Next.js + BFF, one design system, no API key in the browser) |
 | **P10** | Prompt & Model Studio (prompt authoring + versioning, variable bindings, per-node model/prompt selection, runtime config binding) |
+| **P11** | CLI & CI Integration (offline-first CLI on every plan; opt-in run linking that gives SUM metering its input) |
+| **P12** | Forge Delivery (the optimization PR — CI-mediated by default, hosted Git App opt-in; the gainshare input) |
 
 ## Repository layout (today)
 
@@ -102,7 +104,7 @@ internal/
   embeddings           # failure-clustering / RAG seed (P3/P4.5)
   approval  sqltime    # human-in-the-loop gate seed, helpers
 docs/                  # implementation-timeline, prd, adr, migration checklist
-openspec/              # spec-driven change sets (P0–P10)
+openspec/              # spec-driven change sets (P0–P12)
 ```
 
 The current `internal/` packages are the reusable foundation kept from the migration; the phase

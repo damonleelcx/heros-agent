@@ -5,6 +5,10 @@
 - **Amends:** `docs/prd/P2-config-runtime.md` FR12; `openspec/changes/p2-config-runtime/specs/runtime/spec.md`
   ("Models SHALL be invoked through a unified provider gateway so that provider swaps are transparent")
 - **Relates to:** [ADR-001](ADR-001-source-transformation-apply-model.md) (source-transformation apply model)
+- **Extended by:** [ADR-005](ADR-005-forge-delivery-and-credential-posture.md) — applies this ADR's
+  refusal of customer-side reach to a second dimension. Here the platform declines a place in the
+  customer's **runtime**; there it declines a standing write credential to their **repository**, by
+  having the customer's own CI open the pull request with the token it already holds.
 - **Closes:** the open question raised in [`docs/decisions/m2-exit-review.md`](../decisions/m2-exit-review.md) §4
 
 ## Context — what problem this solves
