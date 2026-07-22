@@ -87,6 +87,15 @@ of existing cases (robustness). Cheaper layers run first; the LLM is pointed onl
 edge case is hit; the leaderboard would confidently rank on an eval set that never exercises the
 failing path.
 
+**Correction from implementation — "nothing to measure" is not "everything measured".** The first
+implementation computed each dimension's achieved fraction as covered/total, which is 1.0 for an
+empty set. Running against a real repository whose IR carried **zero edges** (P1 static discovery
+finds call sites; inter-node flow is P5) therefore reported *path coverage 100%* for a workflow whose
+control flow had never been observed — the same false-100% this decision exists to prevent, reached
+from the opposite direction: not by dropping obligations from the denominator, but by never having
+any. A dimension with no obligations is now **not measurable**: achieved 0, never met, named in the
+report.
+
 ## Decision 5 — Gold vs. weak labels; difficulty/diversity as a metric
 
 **Decision.** Each case's reference is labeled **gold** (oracle-derived — exact-match/schema/
@@ -100,6 +109,31 @@ platform is built to avoid. Flagging gold-vs-weak lets the UI and the gates trea
 Tracking difficulty/diversity as a first-class metric prevents a passing score on a weak set from
 being mistaken for a real one. Difficulty operationalization (Q6) is proposed as baseline-model
 pass-rate + embedding-space spread for diversity, pending P5 real-trace calibration.
+
+**Correction from implementation — difficulty and diversity describe the INPUTS, and are not enough.**
+Both floors passed on a generated set where 12 of 17 cases carried no oracle at all: task success
+rested on five cases, and a genuinely broken variant topped the board. Neither metric says whether the
+set can answer the question it exists to answer, so a third floor — **oracle coverage** — was added.
+
+**Second correction — an oracle that cannot fail is not an oracle.** Oracle coverage initially counted
+oracle PRESENCE. A real repository supplied the counterexample: `{"type": "object"}`, emitted as the
+I/O contract for all 40 of its nodes by a frontend that does not resolve types, accepts every possible
+output. Schema validity returned 1 for every output of every variant, so a variant answering wrong 70%
+of the time scored task success 1.000 and passed the min-quality gate, while coverage reported a
+comfortable-looking 4%. The truthful figure was 0.
+
+Decisiveness is therefore **probed, not declared** — the same discipline the rest of the phase applies
+to everything else. Two refinements were needed to get the probe right, and both are worth recording
+because each looked correct until tested:
+
+- Probing across all of JSON scores `{"type":"object"}` decisive, because it rejects `null`. But a
+  workflow that emits objects never emits `null`; discriminating power must be measured **within the
+  type the contract declares**.
+- Probing the declared shape alone misses that `properties: {a: {type: string}}` IS decisive, because
+  it rejects `{"a": 42}`. Probes must also be derived from the **constraints** the contract declares.
+
+This is the same defect class as Decision 6's degenerate metric: an oracle that admits every output
+separates nothing, exactly as a metric whose variants all overlap separates nothing.
 
 ## Decision 6 — Normalize → gate → weight, with a per-variant score cache
 
@@ -123,6 +157,21 @@ profile recomputes only step 3 and **re-ranks without re-executing** any run.
 
 **Trade-off.** Named profiles are a fixed vocabulary (quality-first / cost-optimized / balanced) plus
 user-defined; the cache is keyed by `{variant, eval_set_hash}` and invalidated when either changes.
+
+**Correction from implementation — normalization must not amplify noise.** Min-max divides by the
+observed spread across the variant set. When that spread is comparable to the measurement noise —
+variants that are statistically indistinguishable on a metric — dividing by it spreads pure noise
+across the whole [0,1] axis and hands the composite an interval half the board wide. A metric on which
+every variant's interval overlaps every other's is now **degenerate**: it normalizes to 1 for everyone
+and decides nothing. The predicate is the same one `Stats.Compare` uses for its tie rule, so "these
+cannot be told apart" means the same thing in the normalizer as in the comparison primitive.
+
+**Correction — penalties must enter the interval, not just the point.** A penalty derived from a
+measured quantity was subtracted as that variant's exact mean, which shifts the composite without
+widening it. On a board where every metric was degenerate — hence every interval zero-width — three
+indistinguishable variants were ranked 1-2-3 on a difference of 1e-5 that came entirely from penalty
+noise, with no tie flag anywhere. Measurement-derived penalties now enter the bootstrap per replicate;
+count-derived ones (the weak-labeled fraction) remain exact constants.
 
 ## Decision 7 — Leaderboard is a view; Pareto shows the frontier
 
@@ -184,6 +233,13 @@ Score(variant, profile) -> {composite±ci, components, gate_status, config_hash}
 - **Cheap-but-broken variant tops a cost board** — mitigated by disqualifying gates evaluated before
   weighting (Decision 6).
 - **Re-ranking re-executes runs** — mitigated by the per-variant normalized-value cache (Decision 6).
+- **A vacuous coverage report reads as complete** — a dimension with no obligations is not-measurable,
+  never met (Decision 4 correction). Surfaced by a real repository whose IR carried zero edges.
+- **A powerless oracle is counted as evidence** — decisiveness is probed, not declared (Decision 5
+  correction). Surfaced by a real repository whose I/O contracts constrained nothing.
+- **A board ranks on an axis that was never measured** — currently flagged low-confidence but still
+  ranked; whether it should REFUSE to rank is PRD Q8, and whether gate eligibility should generalize
+  beyond judges to any low-evidence gate input is PRD Q9. Both are open product calls, not oversights.
 - **Normalization set-dependence** — adding a variant may re-normalize existing ones (Q4); flagged,
   with a proposed pinned reference scale for cross-board comparison.
 - **Fan-out blows provider budget** — mitigated by queue backpressure + a judge/generation spend cap

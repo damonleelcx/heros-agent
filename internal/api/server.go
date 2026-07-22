@@ -35,6 +35,9 @@ type Server struct {
 	// p35 is the P3.5 pattern-classifier read model, mounted by MountP35 when available.
 	p35 PatternSource
 
+	// p4 is the P4 eval-board read model, mounted by MountP4 when available.
+	p4 BoardSource
+
 	// secrets is the live provider-credential source, reported by /readyz.
 	//
 	// The SOURCE, never a credential: this holds the thing that can produce secrets precisely so the

@@ -61,6 +61,60 @@ which case it SHALL report the residual uncovered gap rather than claim full cov
 - **THEN** the generator terminates
 - **AND** it reports the residual uncovered path rather than a false 100% coverage
 
+### Requirement: A coverage dimension with no obligations SHALL be reported as not measurable, and SHALL NOT satisfy its threshold
+
+A coverage dimension carrying zero obligations SHALL be reported as **not measurable** — distinct
+from fully covered — and SHALL NOT be treated as having met its target. The report SHALL name which
+dimensions were not measurable.
+
+#### Scenario: A workflow with no IR edges reports path coverage as not measurable
+
+- **WHEN** coverage is measured against a Workflow IR that carries no edges (static discovery has
+  found call sites but not the flow between them)
+- **THEN** the path dimension is reported as **not measurable**, not as 100% covered
+- **AND** its target is not satisfied, so the overall report is not "met"
+- **AND** the report names path as a dimension that could not be measured
+
+#### Scenario: A dimension with obligations of which none are covered is distinguished from one with no obligations
+
+- **WHEN** one dimension has 40 obligations and none are discharged, and another has none at all
+- **THEN** the first is reported as 0% of 40 and the second as not measurable
+- **AND** both cause any score computed over that eval set to be surfaced as low-confidence
+
+### Requirement: An oracle SHALL count as evidence only when it can fail
+
+A case's oracle SHALL be counted toward the eval set's evidence only when it is **decisive** — when
+some plausible output of the workflow would make it return fail. The generator SHALL report the
+fraction of cases carrying a decisive oracle, SHALL count cases whose oracle can never fail
+separately from cases with no oracle, and SHALL surface a set below the configured oracle-coverage
+floor as low-confidence.
+
+Decisiveness SHALL be measured by probing the oracle, not inferred from its presence. Probing SHALL
+consider only outputs plausible for the contract — documents of the type the contract declares, plus
+documents violating the constraints it declares — because rejecting an output the workflow could
+never emit is not discriminating power.
+
+#### Scenario: An unconstrained output contract is not counted as an oracle
+
+- **WHEN** a case's only oracle is an output schema that accepts every document of its declared type
+  (for example `{"type": "object"}` emitted by a frontend that does not resolve types)
+- **THEN** the case is NOT counted toward oracle coverage
+- **AND** it is counted separately as carrying an oracle that can never fail
+- **AND** the reported reason states that the contract can never fail
+
+#### Scenario: A constrained contract is counted
+
+- **WHEN** a case's output schema declares a required property, or a type for a property, such that
+  some document of its declared type would be rejected
+- **THEN** the case IS counted toward oracle coverage
+
+#### Scenario: A set whose oracles cannot fail is low-confidence however many cases it has
+
+- **WHEN** an eval set of 53 cases carries no oracle able to fail
+- **THEN** oracle coverage is reported as 0%
+- **AND** the set is surfaced as low-confidence
+- **AND** any score computed over it is surfaced as low-confidence
+
 ### Requirement: Each case's reference SHALL be labeled gold or weak, and weak references SHALL NOT silently drive scoring
 
 The generator SHALL label each case's reference output **gold** where an oracle exists (exact-match,
@@ -73,6 +127,18 @@ surfaced as weak.
 - **WHEN** one case has a deterministic exact-match oracle and another has only an LLM-generated
   reference that no human has reviewed
 - **THEN** the first case is labeled `gold` and the second is labeled `weak`
+
+#### Scenario: An oracle is a reference OR a schema OR a pattern, for labeling purposes
+
+- **WHEN** a case carries a decidable output schema and no reference output
+- **THEN** it is labeled `gold` and is structurally valid
+- **AND** the schema is NOT stored as the case's reference output
+
+  *(The label rule keys off oracle PRESENCE, deliberately separate from the decisiveness test above:
+  a case carrying a weak schema is still carrying an oracle and must be labeled as such. Requiring a
+  REFERENCE specifically forced the schema-driven generator to store the schema in the reference
+  field, after which exact-match compared every output against a JSON Schema document and scored
+  zero for every variant.)*
 
 #### Scenario: Weak-labeled reference cannot silently gate
 
