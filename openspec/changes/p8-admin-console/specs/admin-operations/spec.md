@@ -1,6 +1,6 @@
 # Admin Operations — Spec Delta (P8)
 
-Product rationale: [`../../../../docs/prd/P8-admin-console.md`](../../../../docs/prd/P8-admin-console.md)
+Product rationale: [`../../../../../docs/prd/P8-admin-console.md`](../../../../../docs/prd/P8-admin-console.md)
 §6 (FR6–FR13) and §7.
 
 Covers the operator console's privileged **command** surface over the existing platform: the

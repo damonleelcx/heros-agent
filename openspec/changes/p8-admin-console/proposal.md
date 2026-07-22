@@ -77,13 +77,34 @@ manageable end-to-end)**.
   reference** keeps the chain intact). **Admin actions are observable** on the P2.5 substrate (logins,
   MFA failures, privileged actions, kill-switch state, impersonations, cross-tenant views) with anomaly
   alerts.
-- **UI.** A **back-office** surface with **role-scoped** views (an operator sees only what their role
-  grants), **dangerous-action confirmation** patterns (reason-required; type-the-target/second
-  confirmation for irreversible; global vs per-tenant kill switch visually distinct and higher-
-  friction), an **impersonation-consent flow + persistent active-session banner**, **denied-with-
-  escalation** states, and first-class loading/empty/denied/degraded states; cross-tenant charts via
-  the **dataviz** skill; **no number hardcoded** (plan names + price refs from config).
-- **Deferred / out of scope:** the customer-facing web dashboard (**P4/P7**); the metric/cost
+- **New capability `admin-console-surface`.** The back-office is a **separate Next.js (App Router,
+  TypeScript) application on its own origin with its own BFF** — not a role-gated section of the
+  [P9](../p9-web-console/) customer console. Isolation is enforced by the **browser's origin boundary**
+  (separate cookie jars, separate bundles), not by routing correctness inside a shared application: on
+  the platform's highest-blast-radius surface, a cross-site-scripting or routing defect in the customer
+  console must not be able to reach an admin capability. The admin credential is **server-side in the
+  BFF only** — never in the client bundle, a script-readable cookie, browser storage, a URL, a log, or a
+  telemetry attribute — and an unauthenticated route **redirects rather than rendering** a shell that
+  then fails. The admin and tenant **session domains are disjoint**: a tenant session authorizes no admin
+  capability, and an admin session is not presentable to the customer console. The console renders
+  capability from the **same permission map the backend enforces**, so screen and gate never disagree,
+  and a denial names **who holds the permission and how to escalate** rather than returning a bare
+  refusal. Every view carries **distinct operator chrome** — a distinct accent plus persistent
+  identification of the console and the acting admin principal — so an operator with both consoles open
+  cannot confuse them; this is a safety requirement whose named failure is performing a cross-tenant
+  action while believing the view is single-tenant. The two consoles share the token **system** (scale,
+  spacing, type, accessibility primitives) but **not** their appearance. Dangerous-action friction is
+  **proportional to blast radius** (reason-required confirm; type-the-target/second confirmation for
+  irreversible; the **global** kill switch visually distinct and higher-friction than per-tenant), an
+  **impersonation-consent flow + persistent active-session banner** with an always-visible End control,
+  and **loading / empty / denied / degraded** as four distinct renderings — a denial is not an empty
+  result and a transport failure is not absence of data. The interface floor is **not lowered because the
+  audience is internal**: keyboard reachability with visible focus, scoped table headers, a tabular
+  fallback for every chart, WCAG 2.1 AA contrast, English strings with `en-US`-pinned formatting, and
+  **rendered-browser evidence** — never a green build — as acceptance. **No number is hardcoded**: plan
+  names and price references resolve from configuration, and no price value is present in the client
+  bundle.
+- **Deferred / out of scope:** the customer-facing web dashboard (**[P9](../p9-web-console/)**); the metric/cost
   collection pipeline (**P2.5**); the job executor (**P4/P6**); the autonomous loop mechanics + per-run
   kill switch + change ledger (**P6**); the billing provider integration + idempotency + proration/
   dunning (**P7**); concrete prices/limits/rates (**config, not git**); entering financial credentials
@@ -93,7 +114,7 @@ manageable end-to-end)**.
 ## Impact
 
 - **Affected capabilities:** `admin-rbac` (new), `admin-operations` (new), `admin-observability-audit`
-  (new). Consumes the **P2.5** telemetry substrate (cross-tenant read models + admin-action
+  (new), `admin-console-surface` (new). Consumes the **P2.5** telemetry substrate (cross-tenant read models + admin-action
   observability), the **P4/P6** job queue + worker fleet (operated, not duplicated), the **P6** change
   ledger + kill switch (merge-audit + global/per-tenant halt), the **P7** account/entitlement/billing
   services (administered), and **ADR-001** (merge = the git-history event audited and kill-switch-
@@ -111,9 +132,11 @@ manageable end-to-end)**.
   merge, with `Audit.Verify()`; **cross-tenant read models** over P2.5 (permission-gated, every view
   logged); a **GDPR** deletion path (`gdpr_request`, tombstone + verifiable completion); admin-action
   metrics/audit on the P2.5 substrate; secrets-manager-sourced SSO/MFA + session-signing secrets (never
-  in code/git/telemetry); and a React **back-office** UI (role-scoped views, dangerous-action
-  confirmation, impersonation consent + banner, denied-with-escalation, cross-tenant read models, audit
-  viewer).
+  in code/git/telemetry); and a **Next.js back-office application on its own origin with its own BFF**
+  (role-scoped views driven by the backend's permission map, distinct operator chrome, dangerous-action
+  confirmation proportional to blast radius, impersonation consent + persistent banner,
+  denied-with-escalation, cross-tenant read models, audit viewer) — deployed independently of the P9
+  customer console and sharing no origin, session cookie, or client bundle with it.
 - **Dependencies:** requires **P7** (8a: administers tenants/billing/entitlements) and additionally
   **P6** + **P2.5** (8b: global fleet controls + cross-tenant read models); consults **P4/P6** (jobs)
   and **ADR-001** (merge = the audited/kill-switched event). Two waves — **8a** (admin RBAC +

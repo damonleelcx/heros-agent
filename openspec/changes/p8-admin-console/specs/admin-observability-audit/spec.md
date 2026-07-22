@@ -1,6 +1,6 @@
 # Admin Observability & Audit — Spec Delta (P8)
 
-Product rationale: [`../../../../docs/prd/P8-admin-console.md`](../../../../docs/prd/P8-admin-console.md)
+Product rationale: [`../../../../../docs/prd/P8-admin-console.md`](../../../../../docs/prd/P8-admin-console.md)
 §6 (FR14–FR18) and §7.
 
 Covers the operator console's cross-tenant read models and its record of truth: **permission-gated**

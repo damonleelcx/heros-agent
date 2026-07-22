@@ -6,7 +6,7 @@
 > re-order nodes, then **execute, score, diagnose, and optimize** variants.
 >
 > This document set is the comprehensive implementation timeline. It is written by
-> applying six senior-role operating playbooks (see [`roles-and-ownership.md`](roles-and-ownership.md))
+> applying eight senior-role operating playbooks (see [`roles-and-ownership.md`](roles-and-ownership.md))
 > to the [source plan](source-plan.md) so that every
 > phase ships with the right questions already answered — architecture quantified,
 > contracts designed, evals built before optimization, infra observable, UX validated.
@@ -16,14 +16,14 @@
 | File | What it covers |
 |------|----------------|
 | [`README.md`](README.md) | This file — system overview, critical path, role matrix, Gantt, milestones, cross-cutting risks |
-| [`roles-and-ownership.md`](roles-and-ownership.md) | The six senior workflows, what each owns, and how their internal phases apply here |
+| [`roles-and-ownership.md`](roles-and-ownership.md) | The eight senior workflows, what each owns, and how their internal phases apply here |
 | [`phases-platform.md`](phases-platform.md) | **Phases 0 → 3.5** — build the platform: IR/schema, Discovery, Config+Runtime, Metrics, Context/Skills, Pattern Classification |
 | [`phases-intelligence.md`](phases-intelligence.md) | **Phases 4 → 6** — measure & optimize: Eval harness, Attribution/Diagnosis, Re-arrangement/Tracing, Proposals/Verification, Autonomous loop |
 | [`source-plan.md`](source-plan.md) | The verbatim source specification this timeline implements |
 
 ## 1. System overview
 
-Four core subsystems plus three cross-cutting subsystems:
+Four core subsystems, three cross-cutting subsystems, and three surface/commercial subsystems:
 
 | Subsystem | Responsibility |
 |-----------|----------------|
@@ -36,6 +36,7 @@ Four core subsystems plus three cross-cutting subsystems:
 | **Pattern Classifier** *(cross-cutting)* | Labels each subgraph's agentic pattern; dispatches which metrics / failure modes / operators apply |
 | **Billing, Metering & Entitlements** *(cross-cutting)* | Meters LLM **spend under management** off the P2.5 telemetry substrate; enforces per-plan + per-automation-level entitlements; subscription and verified-savings billing |
 | **Admin & Operations Console** *(cross-cutting, internal)* | The **internal operator / back-office** surface the platform team runs the system from — manage tenants, plans/entitlements, billing operations, optimization jobs/fleet, model registries, cross-tenant observability, audit/compliance, and global safety controls (incl. the autonomous-optimizer kill switch). A privileged **read-model + command surface** over P2.5 (metrics/cost), P4/P6 (jobs/queue), P6 (autonomous audit + kill switch) and P7 (tenants/billing/entitlements) — **not** a new pipeline, and **not** the customer Web dashboard |
+| **Web Console** *(customer surface)* | The **customer-facing** dashboard, scoped to **one tenant** — graph, configure/diff, live run, eval board, diagnosis, proposal review, plus budget and automation-level governance. A Next.js application fronted by its own **BFF**, which holds the platform credential server-side so **no API key ever reaches the browser**. Like the operator console it adds **no new pipeline and no new statistics**: it renders read models P2/P2.5/P3.5/P4 already compute, and derives nothing client-side |
 
 ```mermaid
 graph LR
@@ -68,7 +69,7 @@ tier and to the roles that own it:
 |---------|-----------|:-----:|--------|
 | **CLI + CI integration** | Primary developer entry point. Runs discovery / codemod / eval **in the customer's own build environment** using the customer's own provider keys. | All tiers (incl. **Free**) | Backend, DevOps |
 | **Git App / bot** (GitHub / GitLab / Bitbucket) | Delivery surface that opens the optimization **PRs** (the ADR-001 reviewable-diff output). | **Team+** | Backend, DevOps |
-| **Web dashboard** (hosted SaaS) | Graph / leaderboard / diagnosis / trend views + budget & automation-level governance + **billing / usage**. Seats & retention scale by tier. | **Team+** | Frontend, Product |
+| **Web dashboard** (hosted SaaS) — **P9**, see [PRD](../prd/P9-web-console.md) | Graph / leaderboard / diagnosis / trend views + budget & automation-level governance + **billing / usage**. Scoped to **one tenant**. Next.js + a BFF that holds the platform credential server-side, so no API key reaches the browser. Seats & retention scale by tier. | **Team+** | Frontend, Product |
 
 #### Internal operator surface (distinct from the customer Web dashboard)
 
@@ -80,7 +81,7 @@ billing; the operator console governs *the whole platform across all tenants*.
 
 | Surface | What it is | Audience | Owners |
 |---------|-----------|:--------:|--------|
-| **Admin & Operations Console** (P8) | Highest-blast-radius, **internal** operator console: tenants, plans/entitlements, billing operations, optimization jobs/fleet, model registries, cross-tenant observability, audit/compliance, and global safety controls (incl. the autonomous-optimizer kill switch). Security-first — SSO+MFA, RBAC, least privilege, append-only audit, impersonation-with-audit. | **Platform operators only** (own admin RBAC — **not** a customer plan) | Backend, Frontend, DevOps |
+| **Admin & Operations Console** (P8) — [PRD](../prd/P8-admin-console.md) | Highest-blast-radius, **internal** operator console — a **separate Next.js app on its own origin with its own BFF**, sharing no origin, session, or bundle with the customer console: tenants, plans/entitlements, billing operations, optimization jobs/fleet, model registries, cross-tenant observability, audit/compliance, and global safety controls (incl. the autonomous-optimizer kill switch). Security-first — SSO+MFA, RBAC, least privilege, append-only audit, impersonation-with-audit. | **Platform operators only** (own admin RBAC — **not** a customer plan) | Backend, Frontend, DevOps |
 
 **Commercial model (non-sensitive).** The value metric is **LLM spend under management (SUM)**,
 aggregated from the P2.5 cost metrics. Plans are referenced by **name** — **Free / Team / Business /
@@ -119,27 +120,35 @@ graph LR
 
 ## 3. Role-ownership matrix
 
-Which of the six senior roles leads (**L**) or supports (**S**) each phase. Full mapping in [`roles-and-ownership.md`](roles-and-ownership.md).
+Which of the eight senior roles leads (**L**) or supports (**S**) each phase. Full mapping in [`roles-and-ownership.md`](roles-and-ownership.md).
 
-| Phase | System Designer | Backend Dev | AI Engineer | DevOps | Frontend Dev | Product Designer |
-|-------|:---:|:---:|:---:|:---:|:---:|:---:|
-| **P0** Foundations | **L** | S | S | S | – | S |
-| **P1** Discovery MVP | S | **L** | S | S | – | S |
-| **P2** Config + Runtime | S | **L** | S | S | S | S |
-| **P2.5** Metrics/OTel | S | S | S | **L** | S | – |
-| **P3** Context + Skills + Sandbox | S | **L** | S | **L** | – | – |
-| **P3.5** Pattern Classifier | S | S | **L** | – | S | – |
-| **P4** Eval Harness + gen + scoring | S | S | **L** | S | **L** | S |
-| **P4.5** Attribution + Diagnosis | S | S | **L** | S | S | S |
-| **P5** Contracts + Re-arrange + Tracing | **L** | **L** | S | S | **L** | **L** |
-| **P5.5** Proposals + Verification | S | S | **L** | S | S | S |
-| **P6** Autonomous optimizer | S | S | **L** | **L** | S | **L** |
-| **P7** Billing, Metering & Entitlements | S | **L** | S | **L** | S | S |
-| **P8** Admin & Operations Console | S | **L** | S | **L** | **L** | S |
+| Phase | System Designer | Backend Dev | AI Engineer | DevOps | Frontend Dev | Product Designer | QA Engineer | Sales Ops |
+|-------|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| **P0** Foundations | **L** | S | S | S | – | S | S | – |
+| **P1** Discovery MVP | S | **L** | S | S | – | S | S | – |
+| **P2** Config + Runtime | S | **L** | S | S | S | S | S | – |
+| **P2.5** Metrics/OTel | S | S | S | **L** | S | – | S | – |
+| **P3** Context + Skills + Sandbox | S | **L** | S | **L** | – | – | S | – |
+| **P3.5** Pattern Classifier | S | S | **L** | – | S | – | S | – |
+| **P4** Eval Harness + gen + scoring | S | S | **L** | S | **L** | S | S | – |
+| **P4.5** Attribution + Diagnosis | S | S | **L** | S | S | S | S | – |
+| **P5** Contracts + Re-arrange + Tracing | **L** | **L** | S | S | **L** | **L** | S | – |
+| **P5.5** Proposals + Verification | S | S | **L** | S | S | S | S | – |
+| **P6** Autonomous optimizer | S | S | **L** | **L** | S | **L** | S | S |
+| **P7** Billing, Metering & Entitlements | S | **L** | S | **L** | S | S | S | S |
+| **P8** Admin & Operations Console | S | **L** | S | **L** | **L** | S | S | – |
+| **P9** Web Console *(customer-facing)* | S | S | S | S | **L** | **L** | S | S |
+| **P10** Prompt & Model Studio | S | **L** | S | S | S | **L** | S | S |
+
+**QA** supports every phase rather than leading one: it owns the *acceptance gate*, so its
+contribution is the definition of what would count as proof for that phase — and the honest statement
+of what was not covered. **Sales Ops** appears only where a customer-facing claim is created (P6
+automation levels, P7 plans, P9 console surfaces), because that is where "only promise what has
+shipped" has something to govern.
 
 ## 4. Timeline (Gantt)
 
-Assumes a team of six seniors (one per role) plus shared review, working in two-week sprints.
+Assumes a team of six build-role seniors (System Designer, Backend, AI, DevOps, Frontend, Product) plus shared review, with QA and Sales Ops applied as gates rather than as additional parallel capacity, working in two-week sprints.
 Durations are estimates for a first production-quality build; adjacent phases overlap where the
 critical path allows. **~40 weeks (~10 months)** end to end; the read-only platform + eval harness
 (through P4) is usable at **~week 22**.
@@ -168,6 +177,11 @@ gantt
   section Operator
   P8a Admin RBAC + tenant/billing admin + audit :p8a, 24, 10w
   P8b Fleet ops + global autonomous controls + compliance :p8b, 34, 8w
+  section Customer surface
+  P9a Console BFF + shell + design system + page parity :p9a, 24, 12w
+  P9b Entitlement gating + diagnosis + proposal review + cutover :p9b, 36, 8w
+  P10a Prompt authoring + bindings + studio :p10a, 30, 10w
+  P10b Runtime config binding + reconciliation :p10b, 40, 6w
 ```
 
 P7 is a cross-cutting commercialization phase that runs alongside the Intelligence track.
@@ -184,7 +198,35 @@ a privileged read-model + command surface over data P2.5/P4/P6/P7 already produc
 global autonomous controls incl. the cross-tenant kill switch, cross-tenant observability, and
 compliance) follows once the **P6** autonomous loop and its audit trail exist to be governed
 fleet-wide. Because it is the highest-blast-radius surface, it is **security-first**: SSO+MFA,
-RBAC, least privilege, append-only audit, and impersonation-with-audit throughout.
+RBAC, least privilege, append-only audit, and impersonation-with-audit throughout. Its console is a
+**separate Next.js application on its own origin with its own BFF** — not a role-gated section of the
+customer console — so the boundary between a tenant session and a cross-tenant capability is enforced by
+the browser rather than by our own routing being correct.
+
+P9 is the **customer-facing Web dashboard** — delivery surface #3 — and is the one surface that
+shipped for years without a specification. Through P4 it exists as **demo pages**: five hand-written
+HTML files served from unlinked routes via `go:embed`. Those were the right call for proving P2–P4,
+but they cannot be the product, because the page routes are public while every `/api/*` call they make
+requires an API key — **a browser cannot authenticate to this platform at all**. P9 delivers the
+console as a Next.js application fronted by its own **BFF**, so the platform credential stays
+server-side and the browser only ever holds a session. **Wave 9a** is the boundary and the port
+(session + credential custody, one app shell, one reconciled token set, and parity ports of the four
+live surfaces against a written no-feature-loss inventory). **Wave 9b** is the product layer
+(entitlement gating wired to P7, diagnosis views, the proposal-review surface once P5.5's API exists,
+and the cutover that removes the legacy pages). P9 adds **no new pipeline and no new statistics** —
+scores, intervals, ties and ranks stay computed in Go, and the console renders them as received.
+
+P10 makes the platform's best-built primitive reachable. The prompt registry is already
+content-addressed and structurally immutable, `{{name}}` templating already renders deterministically
+and fails loudly, and per-node `model_ref`/`prompt_ref` already exist — but **nothing outside tests
+ever calls the write API**, a slot can only bind to a call-site expression *spelled identically*, and
+every configuration change costs a pull request. P10 adds the write path with version lineage, diff and
+pre-publish impact analysis; an explicit **bindings** map (`literal` / `expr` / `env` / `input`) with
+all validation at spec-resolve time; and — per [ADR-004](../adr/ADR-004-runtime-config-binding.md) — an
+opt-in `bound` apply mode that makes the model and prompt **data** while wiring and call-site
+expressions stay **code**, because they name things in the program's lexical scope. **Wave 10a**
+(authoring + bindings + studio) carries no runtime-path risk and stands alone; **wave 10b** (the
+runtime binding layer) is sequenced second so its stability surface is isolated and cuttable.
 
 ## 5. Milestones & exit criteria
 
@@ -202,6 +244,9 @@ RBAC, least privilege, append-only audit, and impersonation-with-audit throughou
 | **M9 — Closed loop** | 40 | Autonomous analyze→propose→verify→apply under hard constraints (budget, allowlist, min-improvement, max-iterations), full audit trail + rollback |
 | **M10 — Self-serve billing live (first dollar)** | 34 | Metering aggregates SUM off the P2.5 substrate; plan entitlements gate features by plan + automation level; self-serve subscription checkout live for a named tier (7a). Verified-savings/gainshare billing (7b) follows once the P5.5 verified-delta ledger lands |
 | **M11 — Operator console live (platform manageable end-to-end)** | 42 | Internal Admin & Operations Console live behind SSO+MFA + admin RBAC: operators administer tenants, plans/entitlements, and billing ops with append-only audit + impersonation-with-audit (8a); fleet ops, cross-tenant observability, compliance, and global autonomous controls incl. the platform-wide kill switch operational (8b). The whole system is manageable from one privileged surface, distinct from the customer Web dashboard |
+| **M12 — Customer console live (no key in the browser)** | 44 | A Team+ tenant signs in and drives graph → configure → run → compare → diagnose from a browser, with **no platform API key in any client artifact** and an unauthenticated route redirecting rather than rendering. One shell, one token set, WCAG 2.1 AA on every page, all four legacy surfaces at inventory parity, entitlement gating naming the plan that unlocks each capability, and readiness reporting not-ready when the console is unreachable. Every user-visible behavior accepted on **rendered-browser evidence**, not a green build |
+
+| **M13 — The configuration loop closes in the browser** | 46 | A user edits a prompt, publishes it **as a new version**, sees what changed (text **and** slot set), learns before publishing which nodes an added variable would block, binds slots to a literal / in-scope expression / env var / typed input with every failure caught at **spec-resolve** time, previews the byte-exact string, test-runs it against a model, and selects model + prompt per node — without writing Go. In `bound` mode (opt-in; `inline` stays default) model and prompt version become **data** changeable without a new PR, with the resolved values shipping in the same diff, per-invocation `config_hash` reconciled by the harness, measurement runs **pinned**, and unverified configurations **marked**. No studio result displays a score, rank, winner or interval |
 
 ## 6. Cross-cutting risks (front-loaded on purpose)
 
@@ -225,4 +270,10 @@ RBAC, least privilege, append-only audit, and impersonation-with-audit throughou
 - **Provider gateway** — LiteLLM-style unified abstraction — *AI Engineer / Backend*
 - **Tracing/metrics** — OpenTelemetry (GenAI semantic conventions) → span store (Tempo/Jaeger) + TSDB (Prometheus/ClickHouse) — *DevOps*
 - **Execution** — a queue for run fan-out; sandbox via subprocess/container — *DevOps / Backend*
-- **UI** — React + a graph library (node editor, leaderboard, dashboards, diff views) — *Frontend / Product Designer*
+- **Operator console (P8)** — a **second** Next.js + TypeScript application with its own BFF, on its
+  **own origin**, deployed independently of the customer console. Isolation is browser-enforced
+  (separate cookie jars, separate bundles) rather than a routing property, because one action on this
+  surface crosses tenant boundaries. Shares the token system; carries **distinct operator chrome** so the
+  two consoles are never confused. — *Frontend / Backend / DevOps*
+- **Web console (P9)** — Next.js (App Router) + TypeScript running as a **BFF** (node editor, leaderboard, dashboards, diff views). The Node server holds the platform credential and issues the browser an `HttpOnly` session, so **no API key reaches the browser**; the graph is a deterministic hand-rolled SVG layout rather than a graph library, because the current renderer's behaviors (back-edge routing, region rectangles, edge-kind styling) are deliberate and a library would have to re-earn each of them. TypeScript types are **generated from the Go view structs with a CI drift gate**. — *Frontend / Product Designer*
+  - *Until P9 lands, the shipped UI is five hand-written HTML files under `internal/api/static/` served via `go:embed` — no build step, no JS toolchain in the repo.*

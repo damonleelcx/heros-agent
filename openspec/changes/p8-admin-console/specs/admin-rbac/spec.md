@@ -1,6 +1,6 @@
 # Admin RBAC — Spec Delta (P8)
 
-Product rationale: [`../../../../docs/prd/P8-admin-console.md`](../../../../docs/prd/P8-admin-console.md)
+Product rationale: [`../../../../../docs/prd/P8-admin-console.md`](../../../../../docs/prd/P8-admin-console.md)
 §6 (FR1–FR5) and §7.
 
 Covers the operator-console identity and access model: admin identity **separate from customer auth**,

@@ -116,21 +116,64 @@ code, not in git.
       completion **verifiable**, action audited; the append-only chain stays intact via the non-PII
       tombstone ref (FR17).
 
-## 12. Frontend + Product — Back-office UI (8a → 8b)
-- [ ] 12.1 Product: design the **role-based IA** — each role (Support / Billing-Ops / Platform-SRE /
+## 12. Frontend + Product — Back-office application (8a → 8b)
+
+The console is a **separate Next.js (App Router, TypeScript) application on its own origin with its own
+BFF** — not a role-gated section of the [P9](../p9-web-console/) customer console (design.md Decision
+11). It shares P9's token **system** but not its appearance (Decision 12), and P9's interface rules
+apply here unchanged rather than being restated.
+
+**Isolation & credential custody (8a — do these first)**
+- [ ] 12.1 Stand up the console as an **independent Next.js application on its own origin** with its own
+      BFF, deployed as its own unit. It shares **no** origin, session cookie, or client bundle with the
+      customer console (FR19).
+- [ ] 12.2 Hold the platform credential **server-side in the admin BFF**; issue an `HttpOnly`,
+      `SameSite` session bound to an **admin principal**. Add a **build-time gate** scanning the shipped
+      bundle for credential material — machine-enforced, because a written rule alone has a demonstrated
+      failure rate (FR20).
+- [ ] 12.3 Make every console route **fail closed**: an unauthenticated request **redirects to sign-in**
+      rather than rendering a shell that then fails each request (FR20).
+- [ ] 12.4 Enforce **disjoint session domains**: a tenant session presented to the admin BFF is refused;
+      an admin session authorizes nothing on the customer console (FR21).
+- [ ] 12.5 Test — **security assertions, not review items**: no credential in the shipped bundle; an
+      unauthenticated route redirects; a revoked admin session is denied at the next request; a tenant
+      session reaches no admin capability.
+
+**Role-scoped interface**
+- [ ] 12.6 Product: design the **role-based IA** — each role (Support / Billing-Ops / Platform-SRE /
       Superadmin) sees a coherent, minimal surface; **denied-with-escalation** names who holds a
       capability, never a bare 403.
-- [ ] 12.2 Frontend: render **role-scoped views** by reading the **same permission map** the backend
-      enforces (screen and gate never disagree); no capability appears that the role doesn't grant.
-- [ ] 12.3 Frontend + Product: **dangerous-action confirmation** patterns — reason-required confirm;
-      **type-the-target / second confirmation** for irreversible; the **global** kill switch is visually
-      distinct + higher-friction than per-tenant (FR6, FR12).
-- [ ] 12.4 Frontend + Product: **impersonation-consent** flow (state tenant + reason + read-only scope +
+- [ ] 12.7 Frontend: render **role-scoped views** by reading the **same permission map** the backend
+      enforces (screen and gate never disagree); no capability appears that the role doesn't grant (FR22).
+
+**Operator chrome & dangerous-action friction**
+- [ ] 12.8 Build the **distinct operator chrome** — distinct accent plus **persistent identification of
+      the console and the acting admin principal on every view** — from the shared token system, not a
+      fourth palette. This is a safety requirement: its named failure is an operator with both consoles
+      open acting cross-tenant while believing the view is single-tenant (FR23).
+- [ ] 12.9 Frontend + Product: **dangerous-action confirmation** proportional to blast radius —
+      reason-required confirm; **type-the-target / second confirmation** for irreversible; the **global**
+      kill switch visually distinct + higher-friction than per-tenant, so "halt this tenant" can never be
+      mistaken for "halt the fleet" (FR6, FR12, FR24).
+- [ ] 12.10 Frontend + Product: **impersonation-consent** flow (tenant + reason + read-only scope +
       expiry) and a **persistent active-session banner** ("impersonating <tenant>, read-only, expires in
-      N min — every action logged") with an always-visible **End** control (FR13).
-- [ ] 12.5 Frontend: cross-tenant read models + an **audit-log viewer**; charts via the **dataviz** skill
-      (contrast, light/dark); first-class loading/empty/denied/degraded states; **no number hardcoded**
-      (plan names + price refs from config); keyboard-reachable.
+      N min — every action logged") with an always-visible **End** control; write elevation requires a
+      second confirmation (FR13, FR25).
+
+**Views, states & the interface floor**
+- [ ] 12.11 Frontend: cross-tenant read models + an **audit-log viewer**; charts via the **dataviz**
+      skill (contrast, light/dark) **with a tabular fallback**; **no number hardcoded** — plan names and
+      price refs resolve from config and no price value is in the client bundle (FR28).
+- [ ] 12.12 Render **loading / empty / denied / degraded** as **four distinct** states on every view: a
+      permission denial is not an empty result, and a transport failure is not absence of data (FR26).
+- [ ] 12.13 Hold the console to the **same interface floor as P9** — keyboard reachability with visible
+      focus, scoped table headers, WCAG 2.1 AA contrast, English strings with `Intl` pinned to `en-US`,
+      values escaped on render. 🚫 The audience being internal is **not** grounds to relax it (FR27).
+- [ ] 12.14 Test — automated accessibility audit **plus a keyboard-only pass** per page; the denied and
+      degraded paths walked, not only the populated one.
+- [ ] 12.15 🔴 Acceptance for every user-visible behavior is **rendered-browser evidence** against a real
+      API response — a green build, a passing type check, and passing unit tests are all compatible with
+      a page that renders nothing or the wrong tenant.
 
 ## 13. DevOps — Observability, secrets, rollout
 - [ ] 13.1 Emit admin activity on the **P2.5 substrate**: logins, **MFA failures**, privileged-action
