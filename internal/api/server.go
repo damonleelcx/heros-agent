@@ -44,6 +44,9 @@ type Server struct {
 	// p5 is the P5 interactive-graph-editor read+validate model, mounted by MountP5 when available.
 	p5 P5Source
 
+	// p55 is the P5.5 ranked-recommendation + verification read model, mounted by MountP55.
+	p55 P55Source
+
 	// secrets is the live provider-credential source, reported by /readyz.
 	//
 	// The SOURCE, never a credential: this holds the thing that can produce secrets precisely so the

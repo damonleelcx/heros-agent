@@ -24,7 +24,7 @@ PARITY_DIR ?= .parity
         discovery-parity-snapshot discovery-parity-verify \
         discovery-sandbox-proof discovery-sandbox-proof-redcheck \
         sandbox-proof sandbox-proof-redcheck \
-        p35-calibration p35-graph-demo
+        p35-calibration p35-graph-demo p55-demo
 
 ## ci: the locally-provable gate (go + schema + discovery-ci). Lint/db-proof run as their own CI jobs.
 ci: go schema discovery-ci
@@ -180,6 +180,14 @@ pg-proof:
 ##                score cache. Use -extra-variants to exercise the board's virtualization at scale.
 p4-board-demo:
 	$(GO) run ./cmd/p4boarddemo
+
+## p55-demo: serve the P5.5 ranked-recommendation + verification surface (task 7.7). Every verdict on
+##           screen comes out of internal/verification.Verify (significance + regression + nothing-
+##           unverified); the ONLY stub is the EvalRunner (provider), so the five outcomes (known-good,
+##           noise, overfit, cost-regression, cluster-regression), the held-out labelling, the trend
+##           view, and the Assisted PR-open gate can be SEEN. Pass -level advisory to check the default.
+p55-demo:
+	$(GO) run ./cmd/p55demo
 
 ## tidy-check: assert go.mod/go.sum are tidy (no drift)
 tidy-check:
