@@ -215,18 +215,6 @@ func objectList(v any) []map[string]any {
 	}
 }
 
-func sortedStrings(params map[string]any, key string) []string {
-	raw, _ := params[key].([]any)
-	out := make([]string, 0, len(raw))
-	for _, v := range raw {
-		if s, ok := v.(string); ok {
-			out = append(out, s)
-		}
-	}
-	sort.Strings(out)
-	return out
-}
-
 // goLiteral renders a JSON-decoded default value as a Go literal. Only the JSON scalar types can appear
 // in a schema `default`; anything else is rendered via a conservative %#v.
 func goLiteral(v any) string {

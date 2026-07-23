@@ -25,7 +25,7 @@ func TestApply_InsertedAdapterBuildsInIsolationAndReverts(t *testing.T) {
 		WorkflowID: "wf", SourceRevision: rev,
 		InsertedAdapters: []variantspec.InsertedAdapter{{
 			AdapterNodeID: "adapter:rename:A->B", FromNodeID: "A", ToNodeID: "B", CatalogKind: "rename",
-			Params: map[string]any{"renames": []map[string]any{{"from": "answer", "to": "response"}}},
+			Params:   map[string]any{"renames": []map[string]any{{"from": "answer", "to": "response"}}},
 			InSchema: map[string]any{"type": "object", "properties": map[string]any{"answer": map[string]any{"type": "string"}}},
 			OutSchema: map[string]any{"type": "object",
 				"properties": map[string]any{"response": map[string]any{"type": "string"}}, "required": []any{"response"}},
