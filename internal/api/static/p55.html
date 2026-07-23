@@ -1,0 +1,362 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>P5.5 — Verified recommendations</title>
+
+<!--
+  P5.5 ranked recommendation surface: diagnosis + failing-case evidence + reviewable source diff
+  (source diff + Variant-Spec diff) + the VERIFIED verdict (delta ± CI, cost/latency, cases
+  fixed/broken).
+
+  THE ONE RULE THAT SHAPES EVERYTHING: nothing unverified surfaces. The ranked list carries ONLY
+  gate-passing verdicts; everything else lives in a separate, clearly-labeled "did not pass
+  verification" section. The one-click Open-PR control is enabled ONLY when the verdict passed AND the
+  workflow is Assisted — the disabled control always says why. The server re-checks the gate on the
+  POST, so the guarantee is not a rendering choice.
+
+  Every status is a chip with TEXT (never colour alone): verified / gate-failed / build-failed, and
+  held-out / not-held-out. The synthesis under each verdict is NARRATION over the structured verdict —
+  the numbers are the verdict's, not the sentence's. Large lists are virtualized (a DOM cap). NO BUILD
+  STEP, no external resource — the surface is computed server-side and this page renders what it is
+  handed.
+-->
+
+<style>
+  :root {
+    --bg:#0f1419; --card:#1a2332; --text:#e7ecf3; --muted:#8fa3bd; --accent:#3d8bfd;
+    --line:#243247; --ctl:#2a3a52;
+    --good:#0ca30c; --warning:#fab219; --serious:#ec835a; --critical:#d03b3b;
+    --add:#3ec46d; --del:#e06c75; --held:#3987e5; --notheld:#fab219;
+  }
+  :root[data-theme="light"] {
+    --bg:#fcfcfb; --card:#ffffff; --text:#0b0b0b; --muted:#52514e; --accent:#2a78d6;
+    --line:#e3e2dc; --ctl:#f0efe9;
+    --good:#008300; --warning:#eda100; --serious:#eb6834; --critical:#e34948;
+    --add:#1a7f37; --del:#cf222e; --held:#2a78d6; --notheld:#bf8700;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --bg:#fcfcfb; --card:#ffffff; --text:#0b0b0b; --muted:#52514e; --accent:#2a78d6;
+      --line:#e3e2dc; --ctl:#f0efe9;
+      --good:#008300; --warning:#eda100; --serious:#eb6834; --critical:#e34948;
+      --add:#1a7f37; --del:#cf222e; --held:#2a78d6; --notheld:#bf8700;
+    }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text);
+         font:14px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif; }
+  header { padding:16px 20px; border-bottom:1px solid var(--line); display:flex; flex-wrap:wrap;
+           gap:12px 20px; align-items:center; }
+  h1 { font-size:16px; margin:0; font-weight:600; }
+  h2 { font-size:13px; margin:0 0 12px; font-weight:600; text-transform:uppercase; letter-spacing:.04em;
+       color:var(--muted); }
+  main { padding:20px; display:grid; gap:18px; max-width:1100px; margin:0 auto; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:16px; }
+  .muted { color:var(--muted); }
+  .mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .spacer { flex:1; }
+  button, select { font:inherit; color:var(--text); background:var(--ctl); border:1px solid var(--line);
+           border-radius:6px; padding:6px 12px; cursor:pointer; }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+
+  .chip { display:inline-flex; align-items:center; gap:4px; font-size:11px; padding:1px 8px;
+          border-radius:999px; border:1px solid var(--line); white-space:nowrap; font-weight:600; }
+  .chip.verified   { border-color:var(--good); color:var(--good); }
+  .chip.gatefailed { border-color:var(--critical); color:var(--critical); }
+  .chip.buildfailed{ border-color:var(--serious); color:var(--serious); }
+  .chip.verifying  { border-color:var(--warning); color:var(--warning); }
+  .chip.held       { border-color:var(--held); color:var(--held); }
+  .chip.notheld    { border-color:var(--notheld); color:var(--notheld); }
+  .chip.op         { border-color:var(--accent); color:var(--accent); }
+
+  .rec { border:1px solid var(--line); border-radius:8px; padding:14px; margin-bottom:12px;
+         background:var(--card); }
+  .rec:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  .rec h3 { margin:0 0 6px; font-size:14px; font-weight:600; }
+  .evidence { font-size:12px; color:var(--muted); margin:6px 0; }
+  .two { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  @media (max-width:720px){ .two { grid-template-columns:1fr; } }
+
+  pre.diff { background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:10px;
+             overflow:auto; max-height:240px; margin:6px 0 0; font-family:ui-monospace,Menlo,monospace;
+             font-size:12px; line-height:1.45; white-space:pre; }
+  pre.diff .add { color:var(--add); }
+  pre.diff .del { color:var(--del); }
+  table.spec { width:100%; border-collapse:collapse; font-size:12px; }
+  table.spec td, table.spec th { border-bottom:1px solid var(--line); padding:4px 6px; text-align:left; }
+
+  .verdict { margin-top:10px; padding-top:10px; border-top:1px solid var(--line); }
+  .narr { font-size:13px; margin:6px 0; }
+  .kv { display:flex; gap:22px; flex-wrap:wrap; font-variant-numeric:tabular-nums; }
+  .kv .k { font-size:10px; text-transform:uppercase; letter-spacing:.03em; color:var(--muted); }
+  .kv .v { font-size:15px; font-weight:600; }
+  .pos { color:var(--good); } .neg { color:var(--critical); }
+  .cases { font-size:12px; }
+  .cases .fixed { color:var(--good); } .cases .broken { color:var(--critical); }
+
+  .banner { padding:14px 16px; border-radius:8px; border:1px solid var(--line); }
+  .banner.empty { border-style:dashed; color:var(--muted); text-align:center; }
+  .withheld-sec .rec { opacity:.85; }
+  .trend-bar { display:flex; align-items:flex-end; gap:14px; height:120px; padding:8px 0; }
+  .trend-col { display:flex; flex-direction:column; align-items:center; gap:4px; font-size:11px; }
+</style>
+
+<header>
+  <h1>P5.5 · Verified recommendations</h1>
+  <span id="wf" class="chip mono"></span>
+  <div class="spacer"></div>
+  <label class="row" style="gap:6px">Automation
+    <select id="level" title="Advisory reports / opens a draft PR; Assisted offers one-click open-PR for verified proposals only">
+      <option value="advisory">Advisory (default)</option>
+      <option value="assisted">Assisted (opt-in)</option>
+    </select>
+  </label>
+  <button id="theme" title="Toggle light/dark">◐</button>
+</header>
+
+<main id="main">
+  <div id="status" class="banner">Loading…</div>
+  <section id="recs-sec" class="card" hidden>
+    <h2>Ranked recommendations · verified</h2>
+    <div id="recs"></div>
+  </section>
+  <section id="trend-sec" class="card" hidden>
+    <h2>Trend across variants</h2>
+    <div id="trend"></div>
+  </section>
+  <section id="withheld-sec" class="card withheld-sec" hidden>
+    <h2>Did not pass verification</h2>
+    <p class="muted" style="font-size:12px;margin-top:-6px">These proposals were verified (or failed to
+      build) and are shown for transparency. They are never recommendations and carry no apply control.</p>
+    <div id="withheld"></div>
+  </section>
+</main>
+
+<script>
+"use strict";
+const DOM_CAP = 50; // virtualization: never render more than this many cards per section.
+let SURFACE = null;
+
+function qs(id){ return document.getElementById(id); }
+function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+function fnum(n, d){ return (n>=0?"+":"") + Number(n).toFixed(d==null?3:d); }
+
+function workflowID(){
+  const u = new URL(location.href);
+  return u.searchParams.get("workflow") || "demo-workflow";
+}
+
+// theme toggle — stamps data-theme, which wins over the media query in both directions.
+qs("theme").onclick = () => {
+  const r = document.documentElement;
+  const cur = r.getAttribute("data-theme") ||
+    (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  r.setAttribute("data-theme", cur === "dark" ? "light" : "dark");
+};
+
+qs("level").onchange = () => { SURFACE = null; load(); };
+
+function colorizeDiff(d){
+  return esc(d).split("\n").map(line => {
+    if (line.startsWith("+")) return '<span class="add">'+line+'</span>';
+    if (line.startsWith("-")) return '<span class="del">'+line+'</span>';
+    return line;
+  }).join("\n");
+}
+
+function stateChip(c){
+  if (c.state === "verified") return '<span class="chip verified">✓ verified</span>';
+  if (c.gate_result === "build_failed") return '<span class="chip buildfailed">⚠ build-failed</span>';
+  if (c.state === "gate_failed") return '<span class="chip gatefailed">✗ gate-failed</span>';
+  return '<span class="chip verifying">… verifying</span>';
+}
+function heldChip(c){
+  if (c.gate_result === "build_failed") return "";
+  return c.held_out
+    ? '<span class="chip held">held-out</span>'
+    : '<span class="chip notheld">not held-out</span>';
+}
+
+// ciChart draws the quality delta point with its CI whiskers on a 0-centred axis (dataviz: legible in
+// both themes, never colour-alone — the sign and the number are printed too).
+function ciChart(c){
+  const w=220,h=34,mid=h/2, lo=Math.min(c.ci_low,-0.05), hi=Math.max(c.ci_high,0.05);
+  const span=hi-lo||1, x=v=>((v-lo)/span)*(w-20)+10;
+  const zero=x(0);
+  return '<svg width="'+w+'" height="'+h+'" role="img" aria-label="delta '+fnum(c.delta)+
+    ' CI '+fnum(c.ci_low)+' to '+fnum(c.ci_high)+'">'+
+    '<line x1="'+zero+'" y1="4" x2="'+zero+'" y2="'+(h-4)+'" stroke="var(--muted)" stroke-dasharray="2 2"/>'+
+    '<line x1="'+x(c.ci_low)+'" y1="'+mid+'" x2="'+x(c.ci_high)+'" y2="'+mid+
+      '" stroke="var(--accent)" stroke-width="2"/>'+
+    '<circle cx="'+x(c.delta)+'" cy="'+mid+'" r="4" fill="var(--accent)"/>'+
+    '</svg>';
+}
+
+function verdictBlock(c){
+  if (c.gate_result === "build_failed") {
+    return '<div class="verdict"><div class="narr">'+esc(c.narration)+'</div>'+
+      (c.source_diff? '<pre class="diff">'+colorizeDiff(c.source_diff)+'</pre>':'')+'</div>';
+  }
+  const costCls = c.cost_delta>0?"neg":"pos", latCls = c.latency_delta>0?"neg":"pos";
+  const fixed = (c.cases_fixed||[]), broken = (c.cases_broken||[]);
+  return '<div class="verdict">'+
+    '<div class="narr">'+esc(c.narration)+'</div>'+
+    '<div class="row">'+ciChart(c)+
+      '<div class="kv">'+
+        '<div><div class="k">Δ quality (95% CI)</div><div class="v">'+fnum(c.delta)+
+          ' <span class="muted" style="font-size:11px">['+fnum(c.ci_low)+', '+fnum(c.ci_high)+']</span></div></div>'+
+        '<div><div class="k">cost / run</div><div class="v '+costCls+'">'+fnum(c.cost_delta,4)+'</div></div>'+
+        '<div><div class="k">latency / run</div><div class="v '+latCls+'">'+fnum(c.latency_delta,0)+' ms</div></div>'+
+      '</div></div>'+
+    '<div class="cases">'+
+      '<span class="fixed">✓ fixed ('+fixed.length+'): '+esc(fixed.join(", ")||"—")+'</span> &nbsp; '+
+      '<span class="broken">✗ broken ('+broken.length+'): '+esc(broken.join(", ")||"—")+'</span>'+
+    '</div></div>';
+}
+
+function specDiffTable(rows){
+  if (!rows || !rows.length) return "";
+  let t = '<table class="spec"><tr><th>node</th><th>dimension</th><th>from</th><th>to</th></tr>';
+  for (const r of rows) t += '<tr><td class="mono">'+esc(r.node_id||"—")+'</td><td>'+esc(r.dimension)+
+    '</td><td class="mono">'+esc(r.from)+'</td><td class="mono">'+esc(r.to)+'</td></tr>';
+  return t + '</table>';
+}
+
+function prControl(c){
+  if (c.can_open_pr) {
+    return '<button class="primary" data-pr="'+esc(c.proposal_id)+'">Open PR</button>'+
+      '<span class="muted" style="font-size:11px">carries the source diff · human reviews & merges · revert with <code>git revert</code></span>';
+  }
+  return '<button disabled title="'+esc(c.pr_disabled_reason)+'">Open PR</button>'+
+    '<span class="muted" style="font-size:11px">'+esc(c.pr_disabled_reason)+'</span>';
+}
+
+function recCard(c, withApply){
+  const el = document.createElement("div");
+  el.className = "rec";
+  el.tabIndex = 0;
+  el.innerHTML =
+    '<div class="row"><span class="chip op">'+esc(c.operator)+'</span>'+stateChip(c)+heldChip(c)+
+      '<span class="mono muted">'+esc(c.node_id)+' · '+esc(c.pattern)+'</span></div>'+
+    '<h3>'+esc(c.rationale)+'</h3>'+
+    '<div class="evidence">diagnosis <span class="mono">'+esc(c.diag_id)+'</span> · failing cases: '+
+      esc((c.evidence_case_ids||[]).join(", ")||"—")+'</div>'+
+    '<div class="two">'+
+      '<div><div class="muted" style="font-size:11px">Source diff (codemod output)</div>'+
+        '<pre class="diff">'+colorizeDiff(c.source_diff||"(no source diff)")+'</pre></div>'+
+      '<div><div class="muted" style="font-size:11px">Variant-Spec diff</div>'+specDiffTable(c.spec_diff)+'</div>'+
+    '</div>'+
+    verdictBlock(c)+
+    (withApply ? '<div class="row" style="margin-top:10px">'+prControl(c)+'</div>' : '');
+  return el;
+}
+
+function renderTrend(t){
+  const sec = qs("trend-sec"), box = qs("trend");
+  if (!t || !t.points || t.points.length < 2) { sec.hidden = true; return; }
+  sec.hidden = false;
+  const max = Math.max(...t.points.map(p=>p.overall_success), 1);
+  let bars = '<div class="trend-bar">';
+  for (const p of t.points) {
+    const hgt = Math.round((p.overall_success/max)*90)+8;
+    bars += '<div class="trend-col"><div style="width:26px;height:'+hgt+'px;background:var(--accent);'+
+      'border-radius:3px 3px 0 0" title="overall success '+p.overall_success.toFixed(2)+'"></div>'+
+      '<span class="mono">'+p.overall_success.toFixed(2)+'</span>'+
+      '<span class="muted">'+esc(p.variant_id)+'</span></div>';
+  }
+  bars += '</div>';
+  const verdict = t.problems_moved
+      ? '<span class="chip gatefailed">problems moved</span>'
+      : (t.globally_improved ? '<span class="chip verified">improved</span>'
+                             : '<span class="chip verifying">flat</span>');
+  box.innerHTML = '<div class="row">'+verdict+'<span class="muted">bars = overall success per variant iteration</span></div>'+
+    bars + '<div class="narr">'+esc(t.narrative)+'</div>';
+}
+
+function render(s){
+  qs("wf").textContent = s.workflow_id;
+  qs("level").value = s.automation_level;
+  const st = qs("status");
+  if (s.state === "error") { st.className="banner"; st.textContent = "Error: "+(s.error||"unknown"); showSections(false); return; }
+  if (s.state === "verifying") { st.className="banner"; st.textContent = "Verifying candidates…"; }
+
+  const recs = s.recommendations||[], withheld = s.withheld||[];
+  const assisted = s.automation_level === "assisted";
+
+  // Recommendations (verified only).
+  const recsBox = qs("recs"); recsBox.textContent = "";
+  if (recs.length === 0) {
+    qs("recs-sec").hidden = false;
+    recsBox.innerHTML = '<div class="banner empty">No verified improvement found — every proposal was '+
+      'withheld by the verification gate. Nothing unverified is shown.</div>';
+  } else {
+    qs("recs-sec").hidden = false;
+    recs.slice(0, DOM_CAP).forEach(c => recsBox.appendChild(recCard(c, true)));
+    if (recs.length > DOM_CAP)
+      recsBox.insertAdjacentHTML("beforeend",
+        '<p class="muted">Showing '+DOM_CAP+' of '+recs.length+' (list virtualized).</p>');
+  }
+  if (s.state !== "verifying" && s.state !== "error") { st.className="banner"; st.hidden = recs.length>0 || withheld.length>0; if(!st.hidden){st.className="banner empty";st.textContent="Nothing to show yet.";} }
+
+  // Trend.
+  renderTrend(s.trend);
+
+  // Withheld (clearly separated).
+  const wBox = qs("withheld"); wBox.textContent = "";
+  qs("withheld-sec").hidden = withheld.length === 0;
+  withheld.slice(0, DOM_CAP).forEach(c => wBox.appendChild(recCard(c, false)));
+
+  // Assisted note.
+  if (assisted && recs.length) st.hidden = true;
+  wireApply(s);
+}
+
+function showSections(v){ for (const id of ["recs-sec","trend-sec","withheld-sec"]) qs(id).hidden = !v; }
+
+function wireApply(s){
+  qs("recs").querySelectorAll("button[data-pr]").forEach(btn => {
+    btn.onclick = async () => {
+      btn.disabled = true; btn.textContent = "Opening…";
+      try {
+        const r = await fetch("/api/p55/workflows/"+encodeURIComponent(s.workflow_id)+
+          "/proposals/"+encodeURIComponent(btn.dataset.pr)+"/open-pr", {method:"POST"});
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.error||("HTTP "+r.status));
+        btn.textContent = "PR opened";
+        btn.insertAdjacentHTML("afterend",
+          '<span class="chip verified" style="margin-left:8px">'+esc(j.branch)+' · '+esc(j.url)+'</span>');
+      } catch(e){ btn.disabled=false; btn.textContent="Open PR"; alert("Open PR failed: "+e.message); }
+    };
+  });
+}
+
+async function load(){
+  const st = qs("status"); st.hidden=false; st.className="banner"; st.textContent="Loading…";
+  try {
+    const level = qs("level").value;
+    const r = await fetch("/api/p55/workflows/"+encodeURIComponent(workflowID())+"/surface");
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error||("HTTP "+r.status));
+    // The chosen automation level is a client preference layered over the server surface; the server
+    // is the authority on can_open_pr, so we only re-request when the level changes the gate.
+    j.automation_level = level;
+    // Recompute the PR gate client-side to reflect the level toggle without a round-trip: enabled only
+    // for a verified card in Assisted mode (mirrors verification.PROpenAvailable).
+    for (const c of (j.recommendations||[])) {
+      const passed = c.state === "verified";
+      c.can_open_pr = passed && level === "assisted";
+      c.pr_disabled_reason = !passed ? "not verified — no gate-passing verdict"
+        : (level !== "assisted" ? "Advisory mode: apply by opening a draft PR for review" : "");
+    }
+    SURFACE = j;
+    render(j);
+  } catch(e){
+    const st2 = qs("status"); st2.hidden=false; st2.className="banner"; st2.textContent="Error: "+e.message;
+    showSections(false);
+  }
+}
+
+load();
+</script>

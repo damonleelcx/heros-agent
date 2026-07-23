@@ -1,0 +1,11 @@
+package main
+
+// classify is the call site a codemod would rewrite. The build-gate fixture is self-contained (no
+// external imports) so `go build ./...` can actually run on it in CI.
+func classify() string {
+	return "haiku"
+}
+
+func main() {
+	_ = classify()
+}
