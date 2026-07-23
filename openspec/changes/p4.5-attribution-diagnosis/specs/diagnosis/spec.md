@@ -79,6 +79,35 @@ diagnosis SHALL drive a change — the engine has no apply path, and the diagnos
 - **AND** its diagnoses are surfaced only as flagged, low-trust reports
 - **AND** no analyst diagnosis triggers any change to a Variant Spec, registry, or config
 
+### Requirement: Diagnosis SHALL degrade explicitly for an unclassified node, running only pattern-agnostic detectors
+
+When a node carries **no P3.5 pattern label** (an unclassified node — e.g. a hand-rolled agent's call
+site with no discovered graph), the engine SHALL check **only the pattern-agnostic** failure modes
+(context overflow / truncation, prompt-format drift, lost-in-the-middle, model-capability mismatch,
+and the tool-schema / retrieval detectors where their trace signal is present), SHALL **refuse** the
+pattern-scoped modes (misroute, infeasible/circular plan, non-convergence / degradation-on-revision),
+and SHALL surface the node as **"not classified"** — the reduced coverage stated, never hidden behind
+a silent default pattern. A silent fallback to a default pattern SHALL be logged (WARN), not applied.
+
+#### Scenario: An unclassified node runs pattern-agnostic detectors only
+
+- **WHEN** the engine diagnoses a node that has no P3.5 pattern label and whose trace shows a
+  context-overflow signal
+- **THEN** the context-overflow (pattern-agnostic) typed cause is emitted
+- **AND** no pattern-scoped cause (misroute, non-convergence, infeasible/circular plan) is emitted for
+  that node
+- **AND** the node is surfaced as **"not classified"** with its coverage limited to pattern-agnostic
+  checks
+
+#### Scenario: A pattern label sharpens diagnosis but is not required
+
+- **WHEN** the same failing case is diagnosed once with the node's P3.5 pattern label present and once
+  with it absent
+- **THEN** with the label, the pattern-scoped modes the pattern admits are additionally checked
+- **AND** with no label, only the pattern-agnostic modes are checked and the node reads "not
+  classified"
+- **AND** both runs produce a diagnosis with evidence rather than refusing outright
+
 ### Requirement: The engine SHALL diagnose only the failure modes admitted by a node's pattern label
 
 The engine SHALL read each node's P3.5 structural pattern label and check **only** the failure modes

@@ -9,6 +9,64 @@ ablation runs are ephemeral measurement variants that are never applied.
 
 ## ADDED Requirements
 
+### Requirement: Attribution SHALL derive locality from traces and work without a discovered workflow graph
+
+The engine SHALL derive per-node contribution, first-divergence order, failure clustering, and
+cost/latency bottleneck flags from the **traces** — span attributes plus **start-time execution
+order** — and SHALL NOT require statically-discovered IR edges to do so. Given a run's traces with no
+IR edges (a hand-rolled agent whose nodes are bare instrumented call sites), the engine SHALL still
+produce the per-node breakdown, name the first-divergence node from trace order, cluster the failing
+cases, and flag cost/latency bottlenecks. The Workflow IR, when present, SHALL be used only to supply
+a node's **output contract** (for contract-violation detection) and its **P3.5 pattern label** (for
+scoping); both are optional enrichment.
+
+#### Scenario: A hand-rolled agent with no workflow graph is still localized
+
+- **WHEN** a failing variant's traces are attributed and the IR carries **no edges, no per-node
+  output contracts, and no pattern labels** (the nodes are bare instrumented call sites)
+- **THEN** the engine produces the per-node contribution breakdown from the spans
+- **AND** names the first-divergence node from the span **start-time execution order**
+- **AND** clusters the failing cases and flags the cost/latency bottleneck node(s)
+- **AND** requires no discovered or authored workflow graph to do any of this
+
+#### Scenario: A declared output contract sharpens but is not required
+
+- **WHEN** the same traces are attributed once with per-node output contracts present in the IR and
+  once with none
+- **THEN** with contracts, first-divergence localizes a node whose output violates its contract
+  (contract-violation)
+- **AND** with no contracts, first-divergence falls back to reference-mismatch or a span failure and
+  reports **no** contract violation it could not check
+- **AND** both runs produce a usable per-node breakdown and scorecard
+
+### Requirement: The engine SHALL consume recovered node edges by provenance and never present an inferred edge as certain
+
+The agent's node edges MAY be recovered from linkage signals beyond framework detection — a **static**
+call-graph / data-flow / shared-conversation-state analysis (P1) and a **dynamic** span parent-child /
+shared-thread-id / temporal analysis (P2.5) — and carried in the IR each tagged with a **provenance**
+(`framework` | `inferred_static` | `inferred_dynamic`) and a confidence. When such edges are present,
+the engine SHALL order first-divergence and scope ablation's upstream-hold by the **highest-provenance
+edge set available**, and SHALL fall back to raw span **start-time order** only when no edge links the
+calls. The engine SHALL NOT render an `inferred_*` edge as a `framework` edge; a first-divergence along
+an inferred edge is a weaker claim that ablation upgrades. The engine **consumes** recovered edges; it
+does not invent them (recovery is owned by P1 static and P2.5 dynamic inference).
+
+#### Scenario: First-divergence orders by a recovered edge set, not wall-clock
+
+- **WHEN** a failing case's IR carries a linear recovered chain A→B→C tagged `inferred_static` (from
+  data-flow: A's response feeds B's prompt, B's feeds C's) whose edge order differs from the raw span
+  start-time order
+- **THEN** the engine orders first-divergence by the recovered A→B→C edge DAG
+- **AND** each consumed edge's provenance (`inferred_static`) is available on the scorecard, rendered
+  distinctly from a `framework` edge
+- **AND** removing the edges makes the engine fall back to span start-time order and still localize
+
+#### Scenario: An inferred edge is a hypothesis, upgraded by ablation
+
+- **WHEN** first-divergence names node B along an `inferred_static` edge
+- **THEN** the localization is surfaced as inferred (weaker) rather than framework-certain
+- **AND** an ablation of node B (Decision 2) is what upgrades it to a measured causal claim with a CI
+
 ### Requirement: The engine SHALL decompose end-to-end failure/cost/latency to individual nodes and identify the first-divergence node per failing case
 
 For a failing variant, the engine SHALL decompose end-to-end failure, cost, and latency to individual

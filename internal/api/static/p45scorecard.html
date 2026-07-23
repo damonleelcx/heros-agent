@@ -1,0 +1,367 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>P4.5 — Diagnose scorecard</title>
+
+<!--
+  P4.5 read-only per-run scorecard: overall metrics → localized node → failure clusters → typed cause
+  with evidence.
+
+  THE ONE RULE THAT SHAPES EVERYTHING: this screen EXPLAINS, it does not FIX. There is NO apply /
+  change control anywhere on the page — the deliberate absence is the read-only guarantee made
+  visible. A GET fetches it; a GET cannot change a workflow.
+
+  Four disciplines, each about not lying:
+    1. A diagnosis is never a bare label. Every diagnosis card carries the typed cause IN WORDS, its
+       source (rule vs analyst), its confidence/agreement, and the specific failing cases as evidence
+       reachable in one click.
+    2. An ablation delta is shown WITH its confidence interval and its verdict. A delta whose CI
+       overlaps zero renders `inconclusive`, never as a bottleneck.
+    3. An uncalibrated / below-floor analyst is flagged visibly; a low-confidence diagnosis is marked.
+       An analyst opinion never masquerades as a fact.
+    4. Every state — loading / error / empty / partial / inconclusive / uncalibrated — is a first-class
+       banner read from the persisted report, never inferred from a missing key.
+
+  Identity is never color-alone: every status chip carries text. Large node/cluster lists are
+  virtualized. NO BUILD STEP — the scorecard is computed server-side in internal/scorecard; this page
+  renders what it is handed and derives nothing.
+-->
+
+<style>
+  :root {
+    --bg:#0f1419; --card:#1a2332; --text:#e7ecf3; --muted:#8fa3bd; --accent:#3d8bfd;
+    --line:#243247; --ctl:#2a3a52;
+    /* dataviz palette, dark steps, checked against this page's card surface (#1a2332). */
+    --series-cost:#d95926;    /* orange — cost bottleneck */
+    --series-latency:#3987e5; /* blue   — latency bottleneck */
+    --bar:#3987e5;            /* sequential blue for share bars */
+    --good:#0ca30c; --warning:#fab219; --serious:#ec835a; --critical:#d03b3b;
+    --rule:#3987e5; --analyst:#9085e9;
+  }
+  :root[data-theme="light"] {
+    --bg:#fcfcfb; --card:#ffffff; --text:#0b0b0b; --muted:#52514e; --accent:#2a78d6;
+    --line:#e3e2dc; --ctl:#f0efe9;
+    --series-cost:#eb6834; --series-latency:#2a78d6; --bar:#2a78d6;
+    --good:#008300; --warning:#eda100; --serious:#eb6834; --critical:#e34948;
+    --rule:#2a78d6; --analyst:#4a3aa7;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text);
+         font:14px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif; }
+  header { padding:16px 20px; border-bottom:1px solid var(--line); display:flex; flex-wrap:wrap;
+           gap:12px 20px; align-items:baseline; }
+  h1 { font-size:16px; margin:0; font-weight:600; }
+  h2 { font-size:13px; margin:0 0 12px; font-weight:600; text-transform:uppercase; letter-spacing:.04em;
+       color:var(--muted); }
+  main { padding:20px; display:grid; gap:16px; max-width:1200px; margin:0 auto; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:16px; }
+  .muted { color:var(--muted); }
+  .mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .metrics { display:flex; gap:28px; flex-wrap:wrap; }
+  .metric .v { font-size:22px; font-weight:600; font-variant-numeric:tabular-nums; }
+  .metric .k { font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); }
+
+  .chip { display:inline-flex; align-items:center; gap:4px; font-size:11px; padding:1px 7px;
+          border-radius:999px; border:1px solid var(--line); white-space:nowrap; }
+  .chip-rule     { border-color:var(--rule); color:var(--rule); }
+  .chip-analyst  { border-color:var(--analyst); color:var(--analyst); }
+  .chip-cost     { border-color:var(--series-cost); color:var(--series-cost); }
+  .chip-latency  { border-color:var(--series-latency); color:var(--series-latency); }
+  .chip-bottleneck  { border-color:var(--critical); color:var(--critical); }
+  .chip-inconclusive{ border-color:var(--warning); color:var(--warning); }
+  .chip-lowconf  { border-color:var(--serious); color:var(--serious); }
+  .chip-flagged  { border-color:var(--critical); color:var(--critical); }
+  .chip-ok       { border-color:var(--good); color:var(--good); }
+  .chip-unclassified { border-color:var(--muted); color:var(--muted); border-style:dashed; }
+  /* Edge provenance — framework is solid/strong; inferred is dashed to read as "a hypothesis". */
+  .chip-framework       { border-color:var(--good); color:var(--good); }
+  .chip-inferred_static { border-color:var(--analyst); color:var(--analyst); border-style:dashed; }
+  .chip-inferred_dynamic{ border-color:var(--warning); color:var(--warning); border-style:dashed; }
+
+  .topo { display:grid; gap:6px; }
+  .edge { display:flex; align-items:center; gap:8px; padding:6px 10px; border:1px solid var(--line);
+          border-radius:6px; flex-wrap:wrap; }
+  .edge .arrow { color:var(--muted); }
+
+  .banner { border-radius:8px; padding:10px 14px; border:1px solid; }
+  .banner-note { border-color:var(--accent); background:rgba(61,139,253,0.08); }
+  .banner-partial { border-color:var(--warning); background:rgba(250,178,25,0.08); }
+  .banner-uncal { border-color:var(--critical); background:rgba(208,59,59,0.10); }
+  .banner-empty { border-color:var(--line); background:rgba(255,255,255,0.03); }
+  .banner-err  { border-color:var(--critical); background:rgba(208,59,59,0.10); }
+
+  table { width:100%; border-collapse:collapse; }
+  th { text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.04em;
+       color:var(--muted); font-weight:600; padding:6px 8px; border-bottom:1px solid var(--line); }
+  td { padding:8px; border-bottom:1px solid var(--line); vertical-align:middle; }
+  .bar { height:8px; border-radius:4px; background:var(--bar); min-width:2px; }
+  .barwrap { background:rgba(255,255,255,0.06); border-radius:4px; width:120px; height:8px; }
+  :root[data-theme="light"] .barwrap { background:rgba(0,0,0,0.06); }
+
+  .clusters { display:grid; gap:8px; }
+  .cluster { display:flex; justify-content:space-between; align-items:center; gap:12px;
+             padding:8px 10px; border:1px solid var(--line); border-radius:6px; }
+  .clsize { font-variant-numeric:tabular-nums; font-weight:600; }
+
+  .dcards { display:grid; gap:12px; grid-template-columns:repeat(auto-fill,minmax(320px,1fr)); }
+  .dcard { border:1px solid var(--line); border-radius:8px; padding:12px; display:grid; gap:8px; }
+  .dcard h3 { margin:0; font-size:14px; }
+  .evi { display:flex; gap:6px; flex-wrap:wrap; }
+  .evi button { background:var(--ctl); color:var(--text); border:1px solid var(--line);
+                border-radius:6px; padding:2px 8px; font:inherit; font-size:12px; cursor:pointer; }
+  .evi button:focus-visible, .vrow:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+
+  .abl { display:grid; gap:10px; }
+  .ablrow { display:grid; grid-template-columns:1fr auto; gap:8px; align-items:center;
+            border:1px solid var(--line); border-radius:6px; padding:8px 10px; }
+  .ci { position:relative; height:22px; background:rgba(255,255,255,0.05); border-radius:4px; }
+  :root[data-theme="light"] .ci { background:rgba(0,0,0,0.05); }
+  .ci .zero { position:absolute; top:0; bottom:0; width:1px; background:var(--muted); }
+  .ci .band { position:absolute; top:6px; height:10px; border-radius:5px; opacity:.85; }
+  .ci .mean { position:absolute; top:3px; width:2px; height:16px; background:var(--text); }
+
+  .vscroll { max-height:360px; overflow-y:auto; position:relative; }
+  a.repo { color:var(--accent); }
+  .noapply { font-size:12px; }
+  [hidden] { display:none !important; }
+</style>
+
+<header>
+  <h1>P4.5 · Diagnose scorecard</h1>
+  <span class="muted mono" id="hdr-variant"></span>
+  <span class="muted mono" id="hdr-config"></span>
+  <span class="chip chip-ok" title="This phase is read-only">read-only · explains, does not fix</span>
+</header>
+
+<main id="main" aria-live="polite">
+  <div id="loading" class="card">Loading scorecard…</div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const pct = (x) => (100 * (x || 0)).toFixed(0) + "%";
+const num = (x, d = 3) => (x == null ? "—" : Number(x).toFixed(d));
+const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+
+function variantID() {
+  const u = new URL(location.href);
+  return u.searchParams.get("variant") || "";
+}
+
+async function load() {
+  const id = variantID();
+  const main = $("main");
+  if (!id) { main.innerHTML = banner("err", "No variant selected. Append ?variant=…"); return; }
+  let res;
+  try {
+    res = await fetch(`/api/p45/variants/${encodeURIComponent(id)}/scorecard`);
+  } catch (e) {
+    main.innerHTML = banner("err", "Could not reach the scorecard service."); return;
+  }
+  if (res.status === 404) { main.innerHTML = banner("err", `No scorecard for variant ${esc(id)}.`); return; }
+  if (!res.ok) { main.innerHTML = banner("err", `Scorecard error (${res.status}).`); return; }
+  render(await res.json());
+}
+
+function banner(kind, text) {
+  const cls = { err:"banner-err", empty:"banner-empty", partial:"banner-partial",
+                uncal:"banner-uncal", note:"banner-note" }[kind] || "banner-note";
+  return `<div class="card ${cls} banner">${esc(text)}</div>`;
+}
+
+function render(v) {
+  const main = $("main");
+  $("hdr-variant").textContent = `${v.variant_id} · ${v.workflow_id}`;
+  $("hdr-config").textContent = `config ${String(v.config_hash).slice(0,12)}`;
+
+  if (v.state === "error") { main.innerHTML = banner("err", v.message || "Scorecard could not be computed."); return; }
+
+  const parts = [];
+
+  // Read-only note (the guarantee, stated).
+  parts.push(`<div class="card banner banner-note noapply">
+    This scorecard <strong>explains</strong> a failing run — which node, and why. It has
+    <strong>no apply or change control</strong>: turning a diagnosis into a fix is a separate,
+    verified step (P5.5).</div>`);
+
+  // First-class state banners.
+  if (v.state === "empty") parts.push(banner("empty", v.message || "No failing cases to diagnose."));
+  if (v.partial) parts.push(banner("partial", "Ablation fan-out in progress — some causal verdicts are not yet available."));
+  if (v.analyst_uncalibrated) parts.push(banner("uncal", "The LLM analyst is uncalibrated or below its agreement floor. Its diagnoses are shown as low-trust reports only."));
+
+  // Overall metrics.
+  parts.push(`<div class="card"><div class="metrics">
+    ${metric("task success", pct(v.overall.task_success))}
+    ${metric("failing cases", `${v.overall.n_failing} / ${v.overall.n_cases}`)}
+    ${metric("run cost", "$" + num(v.overall.cost_usd, 4))}
+    ${metric("run latency", Math.round(v.overall.latency_ms) + " ms")}
+  </div></div>`);
+
+  // Per-node breakdown (virtualized). The classified/unclassified count tells a user how much of the
+  // breakdown carries a P3.5 pattern label — a hand-rolled agent with no graph reports 0 classified.
+  const clsN = v.classified_node_count || 0, unclsN = v.unclassified_node_count || 0;
+  const coverage = unclsN > 0
+    ? `<span class="muted"> · ${clsN} classified, <span class="chip chip-unclassified">${unclsN} not classified</span></span>`
+    : (clsN > 0 ? `<span class="muted"> · ${clsN} classified</span>` : "");
+  parts.push(`<div class="card"><h2>Per-node breakdown${coverage}</h2>
+    ${unclsN > 0 ? `<div class="muted" style="margin:-6px 0 10px;font-size:12px">Unclassified nodes have no P3.5 pattern label (e.g. a hand-rolled agent with no graph); they are diagnosed by <strong>pattern-agnostic rules only</strong> — pattern-scoped causes are not checked for them.</div>` : ""}
+    <div id="nodescroll" class="vscroll" role="region" aria-label="per-node breakdown"></div></div>`);
+
+  // Recovered topology — how the agent's nodes are linked, with each edge's provenance. For a
+  // hand-rolled agent (no framework graph) these are inferred edges (dashed), shown as hypotheses.
+  const topo = v.topology || {};
+  if (topo.edges && topo.edges.length) {
+    const prov = topo.provenance
+      ? `<span class="chip chip-${topo.provenance}">${esc(topo.provenance)}</span>`
+      : `<span class="chip chip-unclassified">flat trace-order</span>`;
+    const orderNote = topo.ordered_by_topology
+      ? `first-divergence ordered by the recovered edges`
+      : `no edges linked the nodes — first-divergence used wall-clock order`;
+    parts.push(`<div class="card"><h2>Recovered topology <span class="muted" style="text-transform:none;font-weight:400">· ${esc(orderNote)} · ${prov}</span></h2>
+      <div class="muted" style="margin:-4px 0 10px;font-size:12px">Edges are recovered from linkage signals; an <strong>inferred</strong> edge (dashed) is a hypothesis, not a framework-certain fact — ablation is what upgrades it.</div>
+      <div class="topo">${topo.edges.map(edgeRow).join("")}</div></div>`);
+  }
+
+  // Failure clusters.
+  if (v.clusters && v.clusters.length) {
+    parts.push(`<div class="card"><h2>Top failure clusters</h2><div class="clusters">${
+      v.clusters.map(c => `<div class="cluster">
+        <div><div>${esc(c.label)}</div><div class="muted mono">rep: ${esc(c.representative_case_id)}</div></div>
+        <div class="clsize">${c.size}</div></div>`).join("")
+    }</div></div>`);
+  }
+
+  // Diagnosis cards.
+  parts.push(`<div class="card"><h2>Diagnoses — the why</h2>${
+    (v.diagnoses && v.diagnoses.length) ? `<div class="dcards">${v.diagnoses.map(diagnosisCard).join("")}</div>`
+      : `<div class="muted">No typed causes surfaced.</div>`
+  }</div>`);
+
+  // Ablation.
+  if (v.ablations && v.ablations.length) {
+    parts.push(`<div class="card"><h2>Ablation — measured causal deltas</h2>
+      <div class="abl">${v.ablations.map(ablationRow).join("")}</div></div>`);
+  }
+
+  main.innerHTML = parts.join("");
+  mountNodeList(v.nodes || []);
+}
+
+function metric(k, val) { return `<div class="metric"><div class="v">${esc(val)}</div><div class="k">${esc(k)}</div></div>`; }
+
+function edgeRow(e) {
+  const conf = e.confidence != null ? ` · conf ${Number(e.confidence).toFixed(2)}` : "";
+  return `<div class="edge">
+    <span class="mono">${esc(e.from)}</span><span class="arrow">→</span><span class="mono">${esc(e.to)}</span>
+    <span class="chip chip-${esc(e.provenance)}">${esc(e.provenance)}</span>
+    <span class="muted mono" style="font-size:11px">${esc(e.signal || "")}${conf}</span>
+  </div>`;
+}
+
+function diagnosisCard(d) {
+  const srcChip = d.source === "analyst"
+    ? `<span class="chip chip-analyst">analyst</span>`
+    : `<span class="chip chip-rule">rule</span>`;
+  const flags = [];
+  if (d.low_confidence) flags.push(`<span class="chip chip-lowconf">low confidence</span>`);
+  if (d.analyst_flagged) flags.push(`<span class="chip chip-flagged">analyst below floor</span>`);
+  if (!d.classified) flags.push(`<span class="chip chip-unclassified" title="node has no P3.5 pattern label; pattern-agnostic rule only">not classified</span>`);
+  let trust = "";
+  if (d.source === "analyst") {
+    trust = `<div class="muted mono">confidence ${num(d.confidence,2)} · agreement κ=${num(d.agreement,2)} (n=${d.n_human})</div>`;
+  } else {
+    trust = `<div class="muted mono">deterministic · confidence ${num(d.confidence,2)}</div>`;
+  }
+  const evidence = (d.evidence_case_ids || []).map(cid =>
+    `<button type="button" data-case="${esc(cid)}" title="open failing case">${esc(cid)}</button>`).join("");
+  return `<div class="dcard">
+    <div class="row">${srcChip}<span class="chip chip-latency">${esc(d.node_id)}</span>${flags.join("")}</div>
+    <h3>${esc(d.code)}</h3>
+    <div class="muted">${esc(d.description || "")}</div>
+    ${trust}
+    <div><div class="k muted" style="font-size:11px;text-transform:uppercase">evidence</div>
+      <div class="evi">${evidence || '<span class="muted">none</span>'}</div></div>
+  </div>`;
+}
+
+function ablationRow(a) {
+  const verdictChip = a.verdict === "bottleneck"
+    ? `<span class="chip chip-bottleneck">bottleneck</span>`
+    : `<span class="chip chip-inconclusive">inconclusive</span>`;
+  // CI band drawn on a shared scale spanning the delta interval and zero.
+  const lo = Math.min(a.ci_low, 0), hi = Math.max(a.ci_high, 0);
+  const span = (hi - lo) || 1;
+  const x = (val) => (100 * (val - lo) / span);
+  const bandColor = a.verdict === "bottleneck" ? "var(--critical)" : "var(--warning)";
+  return `<div class="ablrow">
+    <div>
+      <div class="row"><span class="chip chip-latency">${esc(a.node_id)}</span>
+        <span class="mono muted">${esc(a.metric)} · Δ ${num(a.delta_mean)} · CI [${num(a.ci_low)}, ${num(a.ci_high)}] · n=${a.n_seeds}</span></div>
+      <div class="ci" title="delta ± CI on a scale that includes zero">
+        <div class="zero" style="left:${x(0)}%"></div>
+        <div class="band" style="left:${x(a.ci_low)}%; width:${x(a.ci_high)-x(a.ci_low)}%; background:${bandColor}"></div>
+        <div class="mean" style="left:${x(a.delta_mean)}%"></div>
+      </div>
+    </div>
+    <div>${verdictChip}</div>
+  </div>`;
+}
+
+// Virtualized per-node list: only the rows in view are mounted.
+function mountNodeList(nodes) {
+  const scroll = $("nodescroll");
+  if (!scroll) return;
+  const rowH = 44, pad = 3;
+  const header = `<table><thead><tr>
+    <th>node</th><th>failure share</th><th>first-divergence</th><th>cost share</th><th>latency share</th><th>bottleneck</th>
+  </tr></thead></table>`;
+  scroll.innerHTML = `${header}<div id="vp" style="position:relative;height:${nodes.length*rowH}px"></div>`;
+  const vp = scroll.querySelector("#vp");
+  function paint() {
+    const top = scroll.scrollTop;
+    const start = Math.max(0, Math.floor(top / rowH) - pad);
+    const end = Math.min(nodes.length, Math.ceil((top + scroll.clientHeight) / rowH) + pad);
+    let html = "";
+    for (let i = start; i < end; i++) {
+      const n = nodes[i];
+      const dims = (n.bottleneck_dimensions || []).map(dm =>
+        `<span class="chip chip-${dm}">${esc(dm)}</span>`).join(" ") || '<span class="muted">—</span>';
+      const cls = n.classified
+        ? `<span class="chip chip-latency" title="P3.5 pattern">${esc(n.pattern || "")}</span>`
+        : `<span class="chip chip-unclassified" title="no P3.5 pattern label — pattern-agnostic checks only">not classified</span>`;
+      html += `<div class="vrow" tabindex="0" style="position:absolute;top:${i*rowH}px;left:0;right:0;height:${rowH}px;
+        display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr 1fr 1fr;align-items:center;gap:8px;
+        padding:0 8px;border-bottom:1px solid var(--line)">
+        <div class="mono">${esc(n.node_id)}<div style="margin-top:2px">${cls}</div></div>
+        <div>${bar(n.failure_share)}</div>
+        <div class="mono">${n.first_divergence_count}</div>
+        <div>${bar(n.mean_cost_share)}</div>
+        <div>${bar(n.mean_latency_share)}</div>
+        <div>${dims}</div>
+      </div>`;
+    }
+    vp.innerHTML = html;
+  }
+  scroll.addEventListener("scroll", paint);
+  paint();
+}
+
+function bar(share) {
+  const p = Math.round(100 * (share || 0));
+  return `<div class="row"><div class="barwrap"><div class="bar" style="width:${p}%"></div></div>
+    <span class="mono muted">${p}%</span></div>`;
+}
+
+// Evidence click → open the failing case (in a real deploy, the trace drill-down). One click, never a
+// dead label. Here it dispatches to the P2.5 monitor for that case id.
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-case]");
+  if (!b) return;
+  const cid = b.getAttribute("data-case");
+  // A read-only navigation — open the case's trace. No mutation.
+  window.open(`/p25/monitor?case=${encodeURIComponent(cid)}`, "_blank", "noopener");
+});
+
+load();
+</script>

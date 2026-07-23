@@ -48,6 +48,16 @@ Two facts make naïve discovery wrong:
    **per static definition** and flag loop/agent nodes as `variable-at-runtime`, deferring the
    actual invocation count to dynamic tracing (P5).
 
+3. **Most real agents are hand-rolled, not graphs.** A large fraction of production agents are bespoke
+   loops (a `run_agent.py`, a CLI, an SDK wrapper), not LangGraph/CrewAI graphs. For these, discovery
+   legitimately finds the LLM **call sites** (via the signature registry + declared entrypoints) but
+   **no connected workflow graph** — no framework subgraph, and often **zero edges** between nodes
+   (observed on a real repo: 40 call sites, 0 edges, no framework detections). This is an **honest,
+   expected** output, not a discovery failure: the graph simply isn't statically present. Downstream
+   phases must not require a graph — P3.5 marks such nodes "not yet classified", and **P4.5 localizes
+   from traces, treating edges/labels as optional enrichment** (see P4.5 FR13/FR14). P1's obligation
+   is only that each `call_site` anchor is precise enough for P2/P2.5 to instrument it as a node.
+
 **Upstream state assumed (from P0/M0):** `workflow-ir.schema.json` and the typed per-node I/O
 contract fields are frozen; `config_hash`/content-hash conventions exist; the static-node vs.
 runtime-invocation distinction is a first-class field in the IR; CI is green and can validate a
@@ -74,6 +84,18 @@ hand-written IR sample against the schema.
 - G4. For each call site extract per-node metadata: model arg, messages/prompt construction,
   tools/skills passed, and the upstream data flow feeding the prompt.
 - G5. Build a **call graph**: node = LLM-invoking function/agent step; edges = data/control flow.
+- G5a. **Recover the effective topology of hand-rolled agents** (no framework), by inferring edges
+  between discovered call sites from three static signals, each emitted with **provenance
+  `inferred_static` + a confidence** so a consumer (P4.5) never mistakes an inference for a framework
+  fact: **(i) call-graph** — the function holding call A transitively calls the function holding call
+  B, or a wrapper forwards to a primitive; **(ii) data-flow** — call A's response is threaded into
+  call B's prompt (e.g. appended to a `messages` list that B reads); **(iii) shared-state** — two call
+  sites read/write the same conversation/memory object. This is the load-bearing fix for the observed
+  gap: on a real hand-rolled repo, framework detection returned **0 edges** while the code plainly
+  links its 40 LLM calls (a `dispatch → chat.completions.create` call graph, a `messages.append`
+  data-flow chain, and a shared `_session_messages` object). Framework edges (G6) are provenance
+  `framework`; the minimum-viable subset (shared-state + call-graph) ships before full data-flow
+  analysis (staged, cost-escalation-path).
 - G6. **Special-case framework DAGs** (LangGraph/CrewAI in Python; LangGraphGo/langchaingo in Go;
   equivalents elsewhere) by reading their declarative graph definition instead of inferring topology
   from call order — via per-language framework readers behind one interface.
@@ -90,6 +112,11 @@ hand-written IR sample against the schema.
 - Executing any discovered code or repo tools → sandbox is **P3**; discovery never executes.
 - Pattern classification (Routing/Reflection/RAG labels) → **P3.5** (structural), **P5** (behavioral).
 - Resolving runtime-dynamic dispatch (which loop branch actually ran) → **P5**.
+- **Trace acquisition for hand-rolled agents** (turning discovered call sites into emitting run/node/
+  tool spans so P4.5 has something to attribute) → **P2.5**. P1 emits the precise `call_site` anchors;
+  P2.5 owns instrumenting them (auto-wrap at the provider-SDK boundary, or a user-declared
+  node-boundary adapter). Called out here so the framework-agnostic gap is owned, not discovered when
+  a hand-rolled repo yields an edge-less IR (resolves P4.5 Q8).
 - **Full type-inference fidelity for tree-sitter languages** — tree-sitter is syntactic (no type
   resolution), so non-Go frontends lean harder on import-presence + selector + declared entrypoints,
   and mark more fields `unresolved` (honestly) rather than guessing. Deep type resolution per language
@@ -154,6 +181,19 @@ These map 1:1 to the OpenSpec `discovery-engine` requirements.
 - **FR4 — Call-graph construction.** Discovery SHALL build a directed call graph whose nodes are
   LLM-invoking functions/agent steps and whose edges represent data or control flow (output of A
   feeding input of B), and emit it as the Workflow IR node/edge set.
+- **FR4a — Non-framework topology recovery (edge provenance).** For an agent with **no recognized
+  framework** (a hand-rolled loop), Discovery SHALL still recover node edges from three static
+  signals — **call-graph** (fn holding call A transitively calls fn holding call B, or a wrapper
+  forwards to a primitive), **data-flow** (call A's response threaded into call B's prompt, e.g. via
+  a shared `messages` list), and **shared-state** (two call sites read/write the same
+  conversation/memory object) — and SHALL emit each such edge tagged `provenance = inferred_static`
+  with a confidence, distinct from framework edges (`provenance = framework`, FR5). An inferred edge
+  is a **hypothesis**, never asserted as certain: it carries its confidence and its signal, so a
+  downstream consumer (P4.5 first-divergence / ablation scoping) can prefer higher-provenance edges
+  and surface the provenance. This closes the observed gap where framework detection returned **0
+  edges** on a repo whose LLM calls were plainly linked. The minimum-viable subset (shared-state +
+  call-graph) is required; full inter-procedural data-flow across very large files MAY be staged as a
+  later fidelity uplift, with the un-recovered links flagged rather than silently dropped.
 - **FR5 — Framework DAG special-casing (per language, behind one interface).** When a recognized
   framework declares its graph — LangGraph/CrewAI (Python), LangGraphGo/langchaingo (Go), and
   equivalents in other languages — Discovery SHALL derive nodes and edges from that declarative
