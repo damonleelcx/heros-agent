@@ -129,10 +129,37 @@ type Edge struct {
 	Kind       string `json:"kind"` // "data" | "control"
 }
 
+// InsertedAdapter is one catalog adapter the ordering-coherence validator inserted on a mismatching
+// edge to make a re-arrangement coherent (P5 Decision 3). It is an EXPLICIT, inspectable node carrying
+// its own io_contract — not a hidden runtime coercion — so it appears in the spec's node list and its
+// diff against the parent. The transform engine (§2) materialises it as generated source.
+type InsertedAdapter struct {
+	// AdapterNodeID is the synthetic node_id of the inserted adapter, on the edge from→to.
+	AdapterNodeID string `json:"adapter_node_id"`
+	FromNodeID    string `json:"from_node_id"`
+	ToNodeID      string `json:"to_node_id"`
+	// CatalogKind is one of the fixed typedcontract catalog kinds (rename, projection, …).
+	CatalogKind string `json:"catalog_kind"`
+	// Params are the kind-specific parameters (e.g. rename from→to). InSchema/OutSchema are the
+	// adapter's own io_contract, so a stored spec records exactly what was inserted and why.
+	Params    map[string]any `json:"params"`
+	InSchema  map[string]any `json:"in_schema"`
+	OutSchema map[string]any `json:"out_schema"`
+}
+
 // VariantSpec is the canonical desired-state config (FR3).
 type VariantSpec struct {
 	// WorkflowID ties the spec to the discovered workflow whose IR it overrides.
 	WorkflowID string `json:"workflow_id"`
+	// ParentVariantID is the config_hash of the spec this one was derived from by a re-arrangement
+	// edit (P5 lineage — Decision Data model). Empty for a root spec. It is NOT part of config_hash:
+	// lineage is a property of how a spec was authored, not of the configuration it denotes, so two
+	// specs reached by different edit paths that resolve to the same configuration still share a hash.
+	ParentVariantID string `json:"parent_variant_id,omitempty"`
+	// InsertedAdapters are the adapter nodes the validator inserted to make this arrangement coherent.
+	// Empty when the reorder was coherent as-is. Carried on the spec so the compare view and the
+	// transform engine both see exactly what was bridged.
+	InsertedAdapters []InsertedAdapter `json:"inserted_adapters,omitempty"`
 	// SourceRevision is the exact commit the transform targets. It is deliberately NOT part of
 	// config_hash — P0's include set does not have it, and PRD §7/FR16 treat reproducibility as
 	// {config_hash, source_revision, seed}, three separate axes. The generated diff is keyed by the

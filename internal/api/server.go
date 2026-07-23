@@ -41,6 +41,9 @@ type Server struct {
 	// p45 is the P4.5 read-only scorecard read model, mounted by MountP45 when available.
 	p45 ScorecardSource
 
+	// p5 is the P5 interactive-graph-editor read+validate model, mounted by MountP5 when available.
+	p5 P5Source
+
 	// secrets is the live provider-credential source, reported by /readyz.
 	//
 	// The SOURCE, never a credential: this holds the thing that can produce secrets precisely so the

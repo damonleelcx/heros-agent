@@ -101,7 +101,9 @@ capped-confidence candidates awaiting P5. P4 eval-set generator that already shi
   mismatch, previews the auto-inserted adapter when one exists, and explains *what would break* when
   none does — the user is never left with a silently-broken graph.
 - G6. **Keyboard-operable, accessible, responsive editor.** Full add/remove/reorder/swap by keyboard;
-  labeled controls; screen-reader announcement of validation state; responsive on large IRs.
+  labeled controls; screen-reader announcement of validation state; responsive on large IRs;
+  **both vertical and horizontal graph layouts**, user-toggleable, with orientation-aware keyboard
+  navigation and full a11y parity.
 - G7. **Dynamic-tracing interceptor.** An OTel-style interceptor wraps SDK entrypoints and logs
   **every real LLM call, its inputs, and its call stack**, tagged with the P0 tag set.
 - G8. **Reconcile against static candidates.** Match each observed call to a static candidate node;
@@ -261,6 +263,37 @@ These map 1:1 to the OpenSpec requirements under
   (coherent / adapter-inserted / rejected).
 - FR13. The editor SHALL remain **responsive on large IRs** (virtualized/canvas rendering, incremental
   re-validation of only the affected edges) so editing a large graph does not block the UI.
+- FR13a. The editor SHALL support **both a vertical and a horizontal node-graph layout**, user-toggleable
+  and persisted, so a workflow author can read the arrangement in whichever orientation matches its
+  shape (a deep pipeline vertically, a wide fan-out horizontally). Both layouts SHALL be **fully
+  keyboard-operable and screen-reader-accessible** (arrow-key semantics follow the active orientation;
+  the layout is announced on change; `aria-orientation` reflects it), SHALL carry the **same
+  first-class validation states**, and SHALL NOT rely on color alone (FR12 parity across orientations).
+- FR13c. The editor SHALL **adapt for non-graph agents**: when the discovered IR has nodes but **no
+  framework edges** (a ReAct loop, a fallback chain, a script of independent LLM calls), it SHALL
+  **recover topology** using the P4.5 machinery (edges inferred from shared conversation/memory state
+  and the run trace), write the edges back **additively** with **provenance + confidence**, and render
+  them as **inferred hypotheses, never framework-certain**. The re-arrangement validator SHALL check a
+  recovered edge exactly as a framework edge.
+- FR13d. The editor SHALL offer an **arrangement explorer** that enumerates the orderings of the
+  workflow's nodes, validates and **scores** each through the typed-contract check, and presents them as
+  a **ranked list**: **approved** arrangements (coherent / adapter-augmented) first, **rejected** ones
+  below, each group ordered by score (coherence quality — explicitly NOT a P4 eval-run score).
+  Enumeration SHALL be **bounded and the bound SURFACED** (never a silent truncation): the view reports
+  how many of the n! orderings were considered. Arrangements SHALL **stream as they are discovered** and
+  **animate into their ranked position** on arrival — a live discovery process — and each SHALL be
+  **keyboard-selectable** to apply it to the editor.
+- FR7b. The adapter catalog SHALL emit a **generated, reviewable source change in the target's
+  language** — **Go and Python** today (Python covering the large share of real agents). A language for
+  which no adapter emitter exists SHALL be **refused with a named reason**, never a silent skip.
+- FR13b. The editor SHALL support **drag-and-drop** re-arrangement of nodes in both orientations, as an
+  **addition to — never a replacement for** — full keyboard operation (WCAG 2.1 SC 2.5.7: any
+  drag-driven action has a single-pointer/keyboard alternative). A drag SHALL produce the same
+  **candidate** Variant Spec as a keyboard reorder and SHALL be **validated through `typed-contracts`
+  before commit**: a drop that yields an incoherent ordering SHALL surface the same rejected/adapter
+  state and SHALL NOT silently commit a broken graph. Drag affordances (drag handle, drop-target
+  indicator) SHALL be visible and not color-only, and the drop result SHALL be **announced to a screen
+  reader**.
 - FR14. A committed edit SHALL produce a new Variant Spec with **lineage to the parent** and a diff,
   so the arrangement can be compared against its parent on the P4 leaderboard, **and** a **reviewable
   source diff (an AST-level codemod rewriting node wiring)** that must **build** before it is proposed
@@ -609,34 +642,35 @@ Owns the **interceptor instrumentation** as an operational concern.
 
 ## 13. Success metrics & acceptance criteria (M7 exit checklist)
 
-- [ ] A user **re-orders a graph**; an **incoherent** ordering is **flagged/rejected** (not silently
+- [x] A user **re-orders a graph**; an **incoherent** ordering is **flagged/rejected** (not silently
       broken), naming the producer, consumer, and mismatching field(s); the incoherent spec is not
       runnable.
-- [ ] An **adaptable** mismatch results in an **explicit auto-inserted adapter node** (from the typed
+- [x] An **adaptable** mismatch results in an **explicit auto-inserted adapter node** (from the typed
       catalog, carrying its own `io_contract`), materialized as a **reviewable diff that builds**; the
       transformed working copy **runs without a runtime contract halt** (static/runtime parity).
-- [ ] No adapter is inserted that would **silently drop a consumer-required field**.
-- [ ] Applying a coherent arrangement generates a **deterministic, build-preserving, reviewable source
+- [x] No adapter is inserted that would **silently drop a consumer-required field**.
+- [x] Applying a coherent arrangement generates a **deterministic, build-preserving, reviewable source
       diff (codemod)** on an isolated worktree (ADR-001); a codemod that won't build is **rejected before
       proposal**, and the diff is byte-identical on re-generation and revertible by `git revert`.
-- [ ] The graph editor supports **add/remove/reorder/swap**, produces a **new Variant Spec** with
+- [x] The graph editor supports **add/remove/reorder/swap**, produces a **new Variant Spec** with
       lineage **plus a reviewable source diff**, and validates every edit before commit.
-- [ ] The **invalid-reorder UX is legible** — the mismatch is attached to the offending edge, the
+- [x] The **invalid-reorder UX is legible** — the mismatch is attached to the offending edge, the
       adapter is previewed when available, and the breakage is explained when not — **first-class**,
       not a generic error.
-- [ ] The editor is **fully keyboard-operable**, screen-reader announces the validation state, and it
-      stays **responsive on a large IR**.
-- [ ] **Dynamic tracing** instruments a run and logs **every real LLM call, its inputs, and its
+- [x] The editor is **fully keyboard-operable**, screen-reader announces the validation state, and it
+      stays **responsive on a large IR**; it offers **both vertical and horizontal layouts** and
+      **drag-and-drop** (as an addition to keyboard operation) — FR13a/FR13b.
+- [x] **Dynamic tracing** instruments a run and logs **every real LLM call, its inputs, and its
       stack**, tagged with the P0 tag set.
-- [ ] The reconciler **reconciles the trace against the static IR**: confirmed/unconfirmed static
+- [x] The reconciler **reconciles the trace against the static IR**: confirmed/unconfirmed static
       nodes, and a **runtime-only edge static analysis missed** is surfaced and added additively.
-- [ ] A **static node definition** is distinguished from its **runtime invocations** concretely (one
+- [x] A **static node definition** is distinguished from its **runtime invocations** concretely (one
       definition, n invocations).
-- [ ] **Behavioral tracing confirms Reflection** via iteration count > 1 on a self-edge (and does
+- [x] **Behavioral tracing confirms Reflection** via iteration count > 1 on a self-edge (and does
       *not* confirm it for a one-shot); the confirmed label selects the Reflection metric-set.
-- [ ] At least one **anti-pattern** (e.g. a never-improving reflection loop) is emitted as a typed
+- [x] At least one **anti-pattern** (e.g. a never-improving reflection loop) is emitted as a typed
       diagnosis with evidence for P5.5.
-- [ ] The P4 eval-set generator is **seeded from the dynamic traces** and does **per-path targeting**
+- [x] The P4 eval-set generator is **seeded from the dynamic traces** and does **per-path targeting**
       over the reconciled graph.
 
 ## 14. Open questions

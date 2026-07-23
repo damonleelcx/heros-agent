@@ -74,6 +74,97 @@ contrast and SHALL NOT rely on color alone.
 - **THEN** the state is conveyed by text/label and shape, not color alone
 - **AND** it meets WCAG AA contrast.
 
+### Requirement: The editor SHALL adapt for non-graph agents by recovering and surfacing inferred topology
+
+Many real agents (a ReAct loop, a fallback chain of LLM calls, a script of independent calls — e.g.
+hermes-agent's `call_llm`) declare **no framework graph**, so Discovery emits nodes with **zero edges**.
+For such a **non-graph agent** the editor SHALL **recover topology** — reusing the P4.5 recovered-topology
+machinery (inferring edges from the call sites' shared conversation/memory state and the run trace) — so
+re-arrangement has structure to validate against, rather than presenting a flat, edgeless list. A
+recovered edge SHALL be written back **additively** carrying its **provenance and confidence**, and the
+editor SHALL render it as an **inferred hypothesis, never as framework-certain** (a distinct,
+not-color-only encoding). The re-arrangement validator SHALL check recovered edges exactly as framework
+edges, so a reorder that breaks an inferred data dependency is still surfaced.
+
+#### Scenario: A non-graph agent's topology is recovered and shown as inferred
+- **WHEN** the editor opens an agent whose IR has nodes but no framework edges
+- **THEN** it recovers edges from shared conversation state (and/or trace) and renders them as inferred,
+  each carrying its provenance and confidence
+- **AND** a reorder that places a consumer ahead of its inferred producer is **rejected**, naming the
+  offending edge and field, exactly as for a framework edge
+- **AND** no inferred edge is rendered as framework-certain.
+
+### Requirement: The editor SHALL provide a streaming, ranked arrangement explorer
+
+The editor SHALL offer an **arrangement explorer** that enumerates orderings of the workflow's nodes,
+validates and **scores** each through the `typed-contracts` check, and presents them as a **ranked
+list**: **approved** arrangements (coherent / adapter-augmented) first, **rejected** ones below, each
+group ordered by score. The score SHALL be a **coherence-quality** score (coherent > adapter-augmented >
+rejected; within rejected, fewer broken edges rank higher) and SHALL be labelled as such — it is **not**
+a P4 eval-run score. Enumeration SHALL be **bounded and the bound SURFACED** (the view reports considered
+vs. total; a truncation is never silent). Arrangements SHALL be **streamed as they are discovered** and
+**animated into their ranked position** on arrival, and each SHALL be **keyboard-selectable** to apply it
+to the editor.
+
+#### Scenario: All orderings are ranked with approved first
+- **WHEN** the user opens the arrangement explorer
+- **THEN** every considered ordering is classified coherent / adapter-augmented / rejected and scored
+- **AND** approved arrangements are listed above rejected ones, each group ordered by score descending
+- **AND** the view reports how many of the total n! orderings were considered (bound surfaced, not silent).
+
+#### Scenario: Arrangements stream and animate as they are discovered
+- **WHEN** enumeration runs
+- **THEN** each arrangement appears in the list as it is validated (a live discovery process), animating
+  into its ranked position
+- **AND** an arrangement can be applied to the editor by keyboard (Enter/Space) or click.
+
+### Requirement: The editor SHALL support both a vertical and a horizontal node-graph layout
+
+The editor SHALL render the node graph in **either a vertical or a horizontal orientation**, toggleable
+by the user and persisted across sessions, so an author can read a deep pipeline vertically and a wide
+fan-out horizontally. Both orientations SHALL be **fully keyboard-operable** — the arrow-key semantics
+follow the active orientation (Up/Down move focus and reorder vertically; Left/Right do so horizontally),
+and the orientation-independent controls (Alt+move, swap, remove) work identically in both. The active
+orientation SHALL be exposed via `aria-orientation`, its change SHALL be **announced to a screen
+reader**, and both orientations SHALL carry the **same first-class validation states** (coherent /
+adapter-inserted / rejected), conveyed by text and shape, **not color alone**.
+
+#### Scenario: The author toggles between vertical and horizontal layouts
+- **WHEN** the author switches the editor from the vertical to the horizontal layout
+- **THEN** the nodes re-flow into the chosen orientation without losing the current order or validation
+  verdict
+- **AND** the choice is persisted and `aria-orientation` reflects it
+- **AND** the change is announced to a screen reader.
+
+#### Scenario: Reorder is keyboard-operable in both orientations
+- **WHEN** the author reorders a node by keyboard in the horizontal layout
+- **THEN** the orientation-appropriate arrow keys (Left/Right) move it, focus is managed to the moved
+  node, and the validation verdict is announced
+- **AND** the same reorder is possible in the vertical layout with Up/Down, with identical validation
+  behavior.
+
+### Requirement: The editor SHALL support drag-and-drop reordering as an addition to keyboard operation
+
+The editor SHALL let a user **drag and drop** a node to a new position, in both the vertical and
+horizontal layouts. Drag-and-drop SHALL be an **addition to, never a replacement for**, full keyboard
+operation (WCAG 2.1 SC 2.5.7 — every drag action has a keyboard equivalent). A drop SHALL produce the
+**same candidate Variant Spec** a keyboard reorder would and SHALL be **validated through
+`typed-contracts` before commit**: a drop yielding an incoherent ordering SHALL surface the same
+rejected/adapter-inserted first-class state and SHALL NOT silently commit a broken graph. Drag
+affordances and the drop-target position SHALL be conveyed by shape/text, **not color alone**, and the
+drop's validation verdict SHALL be **announced to a screen reader**.
+
+#### Scenario: A drag-and-drop reorder is validated before it commits
+- **WHEN** a user drags a consumer node ahead of the producer of a field it requires and drops it
+- **THEN** the editor produces the candidate ordering and validates it through the typed-contract check
+- **AND** the incoherent result is surfaced as the rejected state anchored to the offending edge
+- **AND** the drop does not silently commit a broken graph, exactly as a keyboard reorder would not.
+
+#### Scenario: Drag-and-drop does not remove the keyboard path
+- **WHEN** the editor offers drag-and-drop
+- **THEN** every reorder achievable by dragging is also achievable by keyboard alone
+- **AND** the drop result is announced to a screen reader.
+
 ### Requirement: The editor SHALL remain responsive on large IRs by re-validating incrementally
 
 The editor SHALL render large IRs (target: hundreds of nodes) with virtualized/canvas rendering and
