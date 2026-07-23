@@ -100,11 +100,6 @@ func main() {
 
 	if *scan {
 		// Try a provider-matched model rewrite on EVERY node; report which call sites are rewritable.
-		type row struct {
-			sym, file string
-			line      int
-			ok        bool
-		}
 		var rewritable, refused int
 		for _, n := range ir.Nodes {
 			mid := "gpt-4o"

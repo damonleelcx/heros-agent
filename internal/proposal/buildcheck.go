@@ -55,7 +55,7 @@ func (g GoBuildChecker) Check(ctx context.Context, patch *transform.Patch) (Buil
 	if err != nil {
 		return BuildResult{}, err
 	}
-	defer os.RemoveAll(work)
+	defer func() { _ = os.RemoveAll(work) }()
 
 	if err := copyTree(g.Root, work); err != nil {
 		return BuildResult{}, err
