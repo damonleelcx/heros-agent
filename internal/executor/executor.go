@@ -59,6 +59,7 @@ import (
 	"time"
 
 	"github.com/heros-foreal/agentd/internal/discovery"
+	"github.com/heros-foreal/agentd/internal/typedcontract"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
@@ -497,7 +498,11 @@ func (c *nodeContract) validateOutput(raw json.RawMessage) error {
 	if err != nil {
 		return fmt.Errorf("output is not valid JSON: %v", err)
 	}
-	if err := c.output.Validate(v); err != nil {
+	// The runtime half of static/runtime parity (task 1.2): the SAME value-validation the P5 typed
+	// contract uses. Static Satisfies(producer.output, consumer.input) plus this runtime guarantee —
+	// that every node's output conforms to its own output_schema — compose to "a coherent ordering runs
+	// with no contract halt".
+	if err := typedcontract.ValidateValue(c.output, v); err != nil {
 		return fmt.Errorf("output violates the node's io_contract: %v", err)
 	}
 	return nil
@@ -516,33 +521,16 @@ func compileContracts(ir *discovery.IR) (map[string]*nodeContract, error) {
 		if n.IOContract.OutputSchema == nil {
 			continue
 		}
-		raw, err := json.Marshal(n.IOContract.OutputSchema)
+		// Compile via the SHARED predicate's compiler (task 1.2): the P5 validator and this runtime
+		// check use one JSON Schema engine and one hermetic offline loader, so they can never disagree
+		// about what a schema means. A remote $ref is refused here exactly as it is statically.
+		sch, err := typedcontract.CompileSchema(n.IOContract.OutputSchema)
 		if err != nil {
-			return nil, fmt.Errorf("executor: node %q: marshal io_contract: %w", n.NodeID, err)
-		}
-		doc, err := jsonschema.UnmarshalJSON(strings.NewReader(string(raw)))
-		if err != nil {
-			return nil, fmt.Errorf("executor: node %q: io_contract is not valid JSON: %w", n.NodeID, err)
-		}
-		c := jsonschema.NewCompiler()
-		c.UseLoader(offlineLoader{}) // hermetic, as in the Skill Registry: a remote $ref would make the check depend on a third party
-		const loc = "heros:io-contract"
-		if err := c.AddResource(loc, doc); err != nil {
 			return nil, fmt.Errorf("executor: node %q: %w", n.NodeID, err)
-		}
-		sch, err := c.Compile(loc)
-		if err != nil {
-			return nil, fmt.Errorf("executor: node %q: io_contract is not a valid JSON Schema: %w", n.NodeID, err)
 		}
 		out[n.NodeID] = &nodeContract{nodeID: n.NodeID, output: sch}
 	}
 	return out, nil
-}
-
-type offlineLoader struct{}
-
-func (offlineLoader) Load(url string) (any, error) {
-	return nil, fmt.Errorf("remote $ref %q is not allowed in an io_contract", url)
 }
 
 var _ = io.Discard

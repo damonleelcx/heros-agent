@@ -13,6 +13,11 @@ type Source string
 const (
 	SourceRule Source = "rule"
 	SourceLLM  Source = "llm"
+	// SourceBehavioral is the P5 confirmation layer: a behavioral pattern (Reflection, Planning,
+	// Memory Management, HITL, Self-Consistency) CONFIRMED from runtime trace evidence, not guessed from
+	// structure. It is the only source permitted to carry a behavioral pattern above the structural
+	// candidate cap, because runtime evidence is exactly what structure could not supply (Decision 5).
+	SourceBehavioral Source = "behavioral"
 )
 
 // Confidence bands. These are the calibrated values the detectors draw from, not free numbers —
@@ -132,12 +137,29 @@ func (l Label) Validate() error {
 		if l.DetectorID != "" {
 			return fmt.Errorf("pattern %q: source=llm must not carry detector_id", l.Pattern)
 		}
+	case SourceBehavioral:
+		// A confirmed behavioral label is grounded in the trace, not a rule detector or an LLM run, so
+		// it carries neither ref. Its evidence lives in the reconciliation/behavioral report by content
+		// hash, referenced separately (task 8.4) — keeping the label's wire shape identical to P3.5's.
+		if l.DetectorID != "" || l.LLMRunRef != "" {
+			return fmt.Errorf("pattern %q: source=behavioral must not carry detector_id or llm_run_ref", l.Pattern)
+		}
+		if !IsBehavioral(l.Pattern) {
+			return fmt.Errorf("pattern %q: source=behavioral is only for behavioral patterns", l.Pattern)
+		}
 	default:
-		return fmt.Errorf("pattern %q: source %q is not one of rule|llm", l.Pattern, l.Source)
+		return fmt.Errorf("pattern %q: source %q is not one of rule|llm|behavioral", l.Pattern, l.Source)
 	}
-	// The honesty boundary, mechanised. A behavioral pattern cannot be CONFIRMED from structure, so
-	// no layer may assert one above the candidate cap, and it must be marked as a candidate.
-	if IsBehavioral(l.Pattern) {
+	// The honesty boundary, mechanised. A behavioral pattern cannot be CONFIRMED from STRUCTURE, so a
+	// structural (rule/llm) label must stay a capped candidate. A source=behavioral label is the P5
+	// CONFIRMATION from runtime evidence — exactly what lifts the cap — so it is exempt: it must NOT be
+	// a candidate and MAY exceed the cap.
+	switch {
+	case IsBehavioral(l.Pattern) && l.Source == SourceBehavioral:
+		if l.Candidate {
+			return fmt.Errorf("pattern %q: a confirmed behavioral label must not be marked candidate", l.Pattern)
+		}
+	case IsBehavioral(l.Pattern):
 		if l.Confidence > BehavioralCandidateCap {
 			return fmt.Errorf("pattern %q is behavioral: confidence %.2f exceeds the structural-candidate cap %.2f (confirmation is P5)",
 				l.Pattern, l.Confidence, BehavioralCandidateCap)
@@ -145,8 +167,10 @@ func (l Label) Validate() error {
 		if !l.Candidate {
 			return fmt.Errorf("pattern %q is behavioral: label must be marked candidate (structure cannot confirm it)", l.Pattern)
 		}
-	} else if l.Candidate {
-		return fmt.Errorf("pattern %q is structurally determined: it must not be marked candidate", l.Pattern)
+	default:
+		if l.Candidate {
+			return fmt.Errorf("pattern %q is structurally determined: it must not be marked candidate", l.Pattern)
+		}
 	}
 	return nil
 }
