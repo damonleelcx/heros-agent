@@ -128,6 +128,94 @@ judge whether to act (there being no automated apply).
 **Alternative rejected.** A single collapsed "health score" per node — hides whether the node fails on
 one category or many, and gives a human nothing to act on.
 
+## Decision 7 — Locality is trace-derived; the IR is optional enrichment (framework-agnostic)
+
+**Decision.** Attribution and diagnosis derive locality from the **traces** — per-node contribution,
+first-divergence order, clustering, and cost/latency bottleneck flags all read span attributes and
+**start-time execution order**, never statically-discovered IR edges. The Workflow IR is consulted
+for exactly two optional things: a node's **output contract** (to detect contract-violation) and its
+**P3.5 pattern label** (to scope diagnosis). Neither is required. When the IR carries **no edges**,
+locality still comes from trace order; when a node has **no contract**, contract-violation falls back
+to span-error/failed (and first-divergence to reference-mismatch or span failure); when a node has
+**no pattern label**, only the **pattern-agnostic** detectors run, the pattern-scoped modes are
+**refused**, and the node is surfaced as **"not classified"** — the degradation is explicit, not a
+silent default (`no-lazy-defaults`; a fallback to a default pattern is a WARN, not an application).
+
+**Why.** Most production agents are not LangGraph/CrewAI graphs — they are hand-rolled loops (a
+bespoke `run_agent.py`, a CLI, an SDK wrapper). P1 discovery finds their LLM **call sites** but not a
+connected graph (observed on a real repo: 40 call sites, **0 edges**, no pattern labels). If
+attribution depended on the discovered graph, the entire product would be gated on the user adopting
+a framework they have no reason to adopt — the exact agents that most need "which node, and why" would
+get nothing. Deriving locality from traces makes the engine framework-agnostic **by construction**:
+the same code path serves a graph framework and a hand-rolled loop, and the graph only ever *sharpens*
+a result it is not required to produce. This is the same honesty discipline as P4's coverage — reduced
+information reduces the claim **visibly** (an unclassified node says so) rather than silently.
+
+**The one hard dependency it exposes — trace acquisition.** Trace-derived locality needs traces. For
+a framework agent P1/P2 wire them; for a hand-rolled agent the spans come from either **(a)** auto-
+instrumenting the discovered provider-SDK call sites (zero user code; nodes = call sites; coarse
+identity, no edges) or **(b)** a thin user-declared node-boundary adapter (`llm-eval.yaml`-style;
+higher fidelity). The right path costs more than nothing, so it is a **user decision, surfaced**
+(`cost-escalation-path`), and it is **P1/P2.5** work — P4.5 consumes whatever spans exist. The minimum
+span shape P4.5 requires is `node_id + start_time + status` (+ cost/latency/token attributes for the
+bottleneck and detector signals); node identity defaults to the call-site symbol when nothing richer
+is declared.
+
+**Alternative rejected.** Require a discovered/authored workflow graph before a scorecard can be
+built — simpler to reason about, but it makes the product useless for the majority of real agents and
+turns a missing edge into a hard failure instead of a graceful degradation.
+
+## Decision 8 — Recover the effective topology from multiple linkage signals; consume it by provenance
+
+**Decision.** The agent's node edges are recovered from a **ranked set of linkage signals**, not from
+framework detection alone:
+
+| Provenance | Signal | Source | Owner | Discriminative power |
+|---|---|---|---|---|
+| `framework` | LangGraph/CrewAI graph edges | static | P1 | exact when present; absent for hand-rolled |
+| `inferred_static` | **call-graph** (fn with call A transitively calls fn with call B; wrapper→primitive) | static | P1 | strong for dispatch/fallback structure |
+| `inferred_static` | **data-flow** (return of call A → `messages.append` → prompt arg of call B) | static | P1 | strong; this is the actual chain |
+| `inferred_static` | **shared-state** (two calls read/write the same conversation/memory object) | static | P1 | strong for ReAct/loop agents where the message list *is* the graph |
+| `inferred_dynamic` | span **parent-child** nesting | runtime | P2.5 | direct caller→callee at run time |
+| `inferred_dynamic` | shared **conversation/thread id** on spans | runtime | P2.5 | groups one logical chain |
+| `inferred_dynamic` | **temporal + data** order within a run | runtime | P2.5 | weakest; the current default |
+
+P4.5 **consumes** these edges: first-divergence orders by, and ablation's "hold every *upstream* node
+fixed" scopes by, the **highest-provenance edge set available**, falling back to raw span start-time
+only when nothing links the calls. Every edge carries its provenance + confidence; P4.5 never renders
+an `inferred_*` edge as a `framework` one, and a first-divergence along an inferred edge is a weaker
+claim that **ablation** (Decision 2) upgrades to a measured cause.
+
+**Why.** The observed hand-rolled repo shows the point concretely: framework detection returned 0
+edges, yet the code links its 40 LLM calls unmistakably — `_dispatch_nonstreaming_api_request`
+forwards to `client.chat.completions.create`, fallback/retry wrappers forward to the same boundary,
+and every call reads/writes the same `_session_messages` conversation object (`messages =
+messages or self._session_messages`; `messages.append(...)`). The agent-architecture literature says
+the same in general: ReAct, Plan-and-Execute, and Reflexion agents all chain calls through
+**accumulated state / message history**, not a static framework graph. So the topology is present —
+it is just encoded in call-graph, data-flow, shared-state, and runtime-span signals rather than a
+framework's node list. Recovering it makes first-divergence a claim about the agent's *actual* order,
+not wall-clock coincidence, and lets ablation hold the true upstream fixed.
+
+**Honesty discipline.** An inferred edge is a **hypothesis**, exactly like a P3.5 behavioral
+*candidate* label — it is tagged, confidence-scored, and never allowed to masquerade as ground truth.
+Static and dynamic signals are **reconciled** (Q10): a dynamically-observed edge confirms/raises a
+statically-inferred one; a statically-inferred edge never observed at runtime is kept but flagged
+low-confidence. This is the same "diagnosis proposes; verification decides" law applied to *topology*.
+
+**Trade-off / staging (Q11).** Full data-flow analysis across a 300 KB `run_agent.py` is real work
+(P1). The **minimum viable** edge set — call-graph + shared-conversation-state (static) + span
+parent-child (dynamic) — is the cheapest, highest-signal subset and is **built**: a tree-sitter
+extractor (`internal/linkage/pyextract.go`) recovers the call-graph + shared-state signals from actual
+Python (proven on real hermes source — 6 real `inferred_static` call-graph edges recovered from
+`auxiliary_client.py` where framework detection found 0), and the IR schema was evolved additively
+(1.2.0) so recovered edges persist with provenance. The full static data-flow graph is the later
+fidelity uplift (cost-escalation-path: staged, cheap-high-signal subset before the expensive graph).
+
+**Alternative rejected.** Treat "no framework graph" as "no topology" and localize only by wall-clock
+span order — leaves the agent's real structure (sitting in the code and the traces) unused, and makes
+first-divergence a claim about timing rather than causation.
+
 ## Data model sketch
 
 ```
@@ -183,6 +271,21 @@ Scorecard(variant, eval_set) -> Report                     // overall + per-node
   every card (Decision 6).
 - **Ablation re-runs execute discovered code with credentials** — mitigated by running only in the P3
   sandbox with no ambient credentials.
+- **Engine assumes a graph; the agent is hand-rolled (no edges/contracts/labels)** — mitigated by
+  trace-derived locality (Decision 7): the IR is optional enrichment; the engine produces a scorecard
+  from traces alone and degrades explicitly (tested on an edge-less/contract-less/label-less IR).
+- **An unclassified node is silently treated as fully diagnosed** — mitigated by running only
+  pattern-agnostic detectors on it, refusing the pattern-scoped modes, and surfacing "not classified"
+  (Decision 7 / FR14); a silent default-pattern fallback is a WARN, never applied.
+- **No traces at all (agent never instrumented)** — trace acquisition is named the hard dependency
+  with two owned upstream paths; without spans P4.5 has nothing to attribute and says so, rather than
+  fabricating a scorecard.
+- **Topology left on the floor** — a hand-rolled agent's real links ignored, so first-divergence is
+  only wall-clock order — mitigated by recovering the effective topology from multiple linkage signals
+  and consuming the highest-provenance edge set (Decision 8).
+- **Inferred edge read as certain** — mitigated by per-edge provenance + confidence, static/dynamic
+  reconciliation, and ablation as the upgrade path (Decision 8); the scorecard renders an inferred
+  edge distinctly from a framework one.
 
 ## Open questions
 
@@ -201,3 +304,18 @@ Scorecard(variant, eval_set) -> Report                     // overall + per-node
 - **Q7. Scorecard-to-P5.5 handoff** — freeze the diagnosis record schema (taxonomy code + node +
   evidence + confidence + agreement) as the exact contract P5.5's operators consume; where it is
   versioned.
+- **Q8. Trace acquisition for hand-rolled agents (P1/P2.5, P4.5 depends on it)** — auto-instrument
+  discovered call sites vs. a declared node-boundary adapter vs. a mix; the minimum span shape P4.5
+  requires; whether node identity defaults to the call-site symbol. Surfaced as a user decision
+  (cost-escalation-path), owned upstream.
+- **Q9. "Not classified" node UX** — how prominently the scorecard marks an unclassified node and
+  whether it shows a classified-vs-unclassified count so a user sees how much the missing P3.5 labels
+  cost their diagnosis coverage.
+- **Q10. Linkage-signal precedence & reconciliation (P1/P2.5, P4.5 consumes)** — the trust order
+  (framework > inferred-static > inferred-dynamic > flat-trace-order), per-signal confidence, and how
+  static (source) and dynamic (trace) edges are reconciled when they disagree (proposed: dynamic
+  observation confirms/raises a static inference; unobserved static edge kept but low-confidence).
+- **Q11. Where linkage inference is owned & how much fidelity is worth it** — static call-graph /
+  data-flow / shared-state is P1 work (data-flow across a 300 KB file is non-trivial); dynamic
+  span/thread inference is P2.5. The minimum-viable edge set (proposed: shared-conversation-state +
+  span parent-child) ships before the full data-flow graph (staged, cost-escalation-path).

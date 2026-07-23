@@ -38,6 +38,9 @@ type Server struct {
 	// p4 is the P4 eval-board read model, mounted by MountP4 when available.
 	p4 BoardSource
 
+	// p45 is the P4.5 read-only scorecard read model, mounted by MountP45 when available.
+	p45 ScorecardSource
+
 	// secrets is the live provider-credential source, reported by /readyz.
 	//
 	// The SOURCE, never a credential: this holds the thing that can produce secrets precisely so the

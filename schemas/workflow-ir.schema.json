@@ -290,6 +290,20 @@
         "kind": {
           "enum": ["data", "control"],
           "description": "data: producer output feeds consumer input. control: a router/condition activates the target without passing data."
+        },
+        "provenance": {
+          "enum": ["framework", "inferred_static", "inferred_dynamic"],
+          "description": "OPTIONAL (added in IR 1.2.0). How this edge was recovered: read from a declarative framework graph (framework); inferred from the source call-graph / data-flow / shared-conversation-state (inferred_static); or inferred from run traces — span parent-child / shared-thread-id / temporal (inferred_dynamic). Absence means an edge whose provenance is unrecorded and MUST be treated as framework-strength by a pre-1.2.0 consumer. An inferred edge is a HYPOTHESIS; a consumer never renders it as framework-certain."
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "OPTIONAL (added in IR 1.2.0). Confidence in a recovered edge in [0,1]. Absent = unspecified (treat as 1.0). Meaningful for inferred_* edges; a framework edge is 1.0."
+        },
+        "signal": {
+          "type": "string",
+          "description": "OPTIONAL (added in IR 1.2.0). The specific evidence the edge was recovered from (e.g. call_graph, data_flow, shared_state, span_parent, shared_thread, temporal, framework), so a reader sees WHY the edge exists, not only its provenance tier."
         }
       }
     }

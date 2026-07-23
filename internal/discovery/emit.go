@@ -20,6 +20,12 @@ const IRVersion = "1.0.0"
 // 1.0.0 is lying about which contract it was written against.
 const IRVersionPatternLabels = "1.1.0"
 
+// IRVersionEdgeProvenance is the IR version that added the OPTIONAL edge provenance/confidence/signal
+// fields (recovered-topology, P4.5 Decision 8). Additive-only: a 1.1.0 document without these fields
+// still validates, and a consumer pinned below 1.2.0 parses them leniently. The emitter declares this
+// version only when it actually writes a provenance-tagged edge.
+const IRVersionEdgeProvenance = "1.2.0"
+
 // IR is the emitted Workflow IR document (frozen P0 contract). Field names and shapes MUST match
 // workflow-ir.schema.json exactly; the emitter populates only frozen fields (invariant I6, additive-only).
 type IR struct {
@@ -124,6 +130,12 @@ type IREdge struct {
 	FromNodeID string `json:"from_node_id"`
 	ToNodeID   string `json:"to_node_id"`
 	Kind       string `json:"kind"`
+	// Provenance / Confidence / Signal are OPTIONAL (IR 1.2.0, recovered-topology / P4.5 Decision 8).
+	// Absent Provenance means "unrecorded" — a consumer treats it as framework-strength. An inferred
+	// edge is a hypothesis carrying its confidence; a consumer never renders it as framework-certain.
+	Provenance string  `json:"provenance,omitempty"`
+	Confidence float64 `json:"confidence,omitempty"`
+	Signal     string  `json:"signal,omitempty"`
 }
 
 // BuildIR maps the extracted graph to the frozen IR. Nodes and edges are sorted for byte-stable,

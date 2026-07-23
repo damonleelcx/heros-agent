@@ -32,3 +32,6 @@
 /docs/business/evaluation-and-monetization.md
 /docs/business/pricing-plan.md
 .parity/
+
+# macOS
+.DS_Store

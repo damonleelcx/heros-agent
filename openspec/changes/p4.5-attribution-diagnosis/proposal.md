@@ -61,6 +61,31 @@ P4.5 consumes the P3.5 structural label as-is.
   virtualized; encodings via the **dataviz** skill; loading / error / empty / **partial** (ablation
   in progress) / **inconclusive** / **uncalibrated** states first-class. Deliberately **no apply /
   change affordance** — the phase is read-only.
+- **Effective-topology recovery (beyond framework detection).** "No framework graph" is not "no
+  topology": a hand-rolled agent's LLM calls are linked by the code (a **static call graph** — a
+  dispatch forwards to the create boundary, a fallback wraps the primary; **data flow** — a response
+  is appended to `messages` and becomes the next prompt; a **shared conversation/memory object** every
+  call reads and writes) and by the runtime traces (span **parent-child** nesting, a shared
+  **thread/conversation id**, **temporal + data** order). The system recovers the effective node graph
+  from **whichever linkage signals exist**, ranked by provenance — `framework` (strongest) >
+  `inferred_static` (P1: call-graph/data-flow/shared-state) > `inferred_dynamic` (P2.5:
+  span/thread/temporal) > flat trace-order (last resort). Each recovered edge is a **provenance-tagged
+  hypothesis**, never asserted as certain; ablation upgrades an inferred-edge localization to a
+  measured cause. Edge **recovery** is owned upstream (P1 static, P2.5 dynamic); **P4.5 consumes** the
+  recovered edges — ordering first-divergence and scoping ablation by the highest-provenance edge set —
+  and surfaces each edge's provenance on the scorecard.
+- **Framework-agnostic operation.** Attribution and diagnosis derive locality from the **traces**
+  (span attributes + execution order) and the recovered topology above, not from an assumed framework
+  graph — so the engine works for **any agent that emits run/node/tool spans**, graph-framework or
+  **hand-rolled loop**. The Workflow IR is **optional enrichment**: its edges sharpen ordering, its per-node output
+  contracts enable contract-violation detection, and its P3.5 pattern labels enable pattern-scoped
+  diagnosis — but none is required to produce a scorecard. When enrichment is absent the engine
+  **degrades explicitly**: first-divergence from trace order; contract-violation only where a node
+  declares a contract (else span-status); and for an **unclassified** node, only the pattern-agnostic
+  detectors, with the node surfaced as **"not classified"** and pattern-scoped modes refused, never
+  silently misapplied (`no-lazy-defaults`). The single hard prerequisite is **trace acquisition** —
+  for a hand-rolled agent the spans come from auto-instrumenting the discovered call sites or a thin
+  user-declared node-boundary adapter, a P1/P2.5 concern P4.5 consumes but does not own.
 - **Deferred:** change operators + proposal generation (**P5.5**); the verification gate — held-out
   re-run, statistical gate, regression check, verdict (**P5.5**); automation levels (Advisory /
   Assisted) + autonomous apply (**P5.5 / P6**); behavioral pattern re-classification + anti-pattern →
@@ -82,7 +107,12 @@ P4.5 consumes the P3.5 structural label as-is.
   diagnosis / analyst_cal — **no write path to Variant Spec / registry / config**), object store for
   trace excerpts / analyst prompts / embeddings (content-hashed), ablation fan-out on the P4 run
   queue (bounded concurrency, spend cap, P3 sandbox), and a React read-only per-run scorecard UI.
-- **Dependencies:** requires **P0**, **P2**, **P2.5**, **P3**, **P3.5**, **P4**. Unblocks **P5.5**
+- **Framework-agnostic note:** the hard input is P2.5 **traces**; the IR (edges / contracts) and P3.5
+  **pattern labels** are optional enrichment the engine degrades without (FR13/FR14). Trace
+  acquisition for hand-rolled (non-framework) agents — auto-instrumenting discovered call sites vs. a
+  declared node-boundary adapter — is a **P1/P2.5** concern this phase consumes, not a P4.5 deliverable.
+- **Dependencies:** requires **P0**, **P2**, **P2.5** (hard: traces), **P3**, **P4**; **P3.5** pattern
+  labels and IR edges/contracts are **optional enrichment**, not hard requirements. Unblocks **P5.5**
   (typed diagnoses → change operators; ablation machinery → verification gate; fixed taxonomy → the
   operator map's key), **P6** (node+dimension attribution points diagnosis-guided search), and the
   **P5** behavioral classifier's anti-pattern detections (plug into the same pattern-scoped
