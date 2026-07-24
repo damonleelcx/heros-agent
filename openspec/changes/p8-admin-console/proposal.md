@@ -104,6 +104,34 @@ manageable end-to-end)**.
   **rendered-browser evidence** — never a green build — as acceptance. **No number is hardcoded**: plan
   names and price references resolve from configuration, and no price value is present in the client
   bundle.
+
+  Those are the console's **floor**, and a floor is not a surface. The console is additionally specified
+  **above** it, for the reason this phase exists rather than for an aesthetic one: P8 is here to retire
+  the ad-hoc production shell, and an operator one page into an incident uses whatever answers fastest —
+  a console slower to read than a `psql` prompt does not retire it, it merely gets maintained beside it.
+  So craft is treated as a **security control**. The console is composed from **one documented design
+  language** (editorial type hierarchy, one spacing rhythm, one elevation model, a **closed** primitive
+  set, a motion budget, density as a remembered operator choice) **extending — never forking — the
+  shared token system**; numbers render **for comparison** (tabular figures, aligned columns, unit stated
+  once); the **hazard palette is reserved for hazard**, so danger stays salient by being rare; a
+  **command palette** one keystroke from anywhere offers **exactly** the capabilities the role's
+  permission map grants and reaches subjects by **type-ahead on their name**, so nothing must be recalled
+  from memory; every view is **URL-addressable and restorable**, so "look at this" in an incident channel
+  is a link; the **operating picture** — halted or not, wrong or not — is readable **without
+  interaction**, each figure carrying its **as-of time**, **announcing staleness** rather than presenting
+  as current, and updating **in place** without layout shift, without a row moving under the operator,
+  and without blanking data that is already correct. Motion is **meaningful and budgeted** and never sits
+  between an operator's intent and the command, with a full `prefers-reduced-motion` equivalent that
+  loses no information. Feedback is **truthful before it is smooth**: **no optimistic success** — a
+  change renders only once the backend and its write-ahead audit confirm it — every privileged command
+  ends in a **receipt naming the audit entry it wrote**, and **in flight / failed / outcome unknown** are
+  three distinct renderings, because a fail-closed platform genuinely produces the third. The invariant
+  that keeps all of this safe is stated as its own requirement: **delight on the read path, friction on
+  the write path** — the palette **navigates to** a destructive action and never **performs** one, reason
+  and typed-target fields are never pre-filled, and a restyle that leaves the danger path one step
+  shorter is a **regression** with a failing test. Craft is **evidenced, not asserted**: a rendering
+  matrix (light/dark, narrow/wide, 200% zoom, reduced motion, both densities, four states), a
+  **visual-regression baseline**, and a **recorded design review** with a name on it.
 - **Deferred / out of scope:** the customer-facing web dashboard (**[P9](../p9-web-console/)**); the metric/cost
   collection pipeline (**P2.5**); the job executor (**P4/P6**); the autonomous loop mechanics + per-run
   kill switch + change ledger (**P6**); the billing provider integration + idempotency + proration/
@@ -136,7 +164,13 @@ manageable end-to-end)**.
   (role-scoped views driven by the backend's permission map, distinct operator chrome, dangerous-action
   confirmation proportional to blast radius, impersonation consent + persistent banner,
   denied-with-escalation, cross-tenant read models, audit viewer) — deployed independently of the P9
-  customer console and sharing no origin, session cookie, or client bundle with it.
+  customer console and sharing no origin, session cookie, or client bundle with it; plus the console's
+  **experience layer above that floor**: a documented operator **design language + closed primitive set**
+  extending the shared tokens (type hierarchy, rhythm, elevation, motion budget, density), a
+  **command palette** driven by the permission map, **URL-addressable view state**, a **glanceable
+  live operating picture** with as-of times and in-place updates, **receipts carrying audit references**
+  with **no optimistic success**, and the craft-acceptance apparatus (rendering matrix, visual-regression
+  baseline, recorded design review) — with the dangerous-action friction re-verified against all of it.
 - **Dependencies:** requires **P7** (8a: administers tenants/billing/entitlements) and additionally
   **P6** + **P2.5** (8b: global fleet controls + cross-tenant read models); consults **P4/P6** (jobs)
   and **ADR-001** (merge = the audited/kill-switched event). Two waves — **8a** (admin RBAC +

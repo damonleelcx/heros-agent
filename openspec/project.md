@@ -25,6 +25,13 @@ for the source specification.
   console (P8, cross-tenant, own admin identity + RBAC). They share the token **system** but not their
   appearance — the operator console carries distinct chrome so the two are never confused. Isolation
   between them is enforced by the **browser's origin boundary**, not by routing inside a shared app.
+  The shared system lives in [`web/design-system/`](../web/design-system/README.md) — scale, spacing,
+  type, radius, elevation, motion budget, density, neutral ramp, status palette and focus — beside the
+  consoles rather than inside either one, so neither can fork it quietly. A surface's **identity** (its
+  accent and chrome) lives in that console's own token layer. Colour, spacing, type-size and radius
+  **literals are legal only in those two layers**; `npm run scan:tokens` fails the build on any other.
+  The hazard palette (`--warn`, `--danger`) is **reserved for hazard** — a destructive control, an armed
+  halt, an active impersonation, an alarming state — because danger is only legible while it is rare.
 - **Web console (P9)** — Next.js (App Router) + TypeScript, running as a **BFF**: the Node server holds
   the platform credential and issues the browser an `HttpOnly` session, so **no API key ever reaches the
   browser**. Graph rendering is a deterministic hand-rolled SVG layout (no graph library — see

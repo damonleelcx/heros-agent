@@ -247,6 +247,104 @@ two sets of primitives to keep at WCAG 2.1 AA — and drift is then guaranteed r
 **Corollary the specs carry:** the interface floor is **not** lowered because the audience is internal.
 An operator driving this console by keyboard, at 200% zoom, during an incident is the normal case.
 
+## Decision 13 — Craft is a security control, because an avoided console reopens the prod shell
+
+The console is specified **above** its interface floor: one documented design language extending the
+shared token system, a closed primitive set, comparison-ready numbers, a hazard palette reserved for
+hazard, a command palette, URL-addressable views, and an operating picture readable without
+interaction (FR29–FR34).
+
+**Why.** Decisions 11 and 12 and the interface floor (FR19–FR28) are all *lower bounds*: isolation,
+permission parity, four states, contrast, keyboard reach, no hardcoded number. Every one of them can be
+satisfied by a surface nobody wants to open — and on this phase that is a **security** outcome, not a
+taste one. P8's stated reason for existing is to retire the ad-hoc production shell: the unaudited,
+unscoped, over-privileged path an engineer takes when they need an answer. An operator one page into an
+incident uses whatever answers fastest. If the console makes them click through four views to learn
+whether the fleet is halted, while `psql` answers in one line, the shell wins — and the platform ends up
+with the anti-pattern **plus** a console it pays to maintain. The console is only the audited path if it
+is the **preferred** path, so the properties that make it preferred are specified with the same
+seriousness as the gates, and their absence is a defect rather than a backlog item.
+
+This is the same move Decision 12 already makes with visual distinctness: an interface property is
+promoted to a safety requirement because a named operational failure hangs off it. Here the named
+failure is *an operator answering an incident question outside the audited surface.*
+
+**Alternative rejected — ship the floor, polish later.** The usual sequencing. Rejected because "later"
+is not a real point on this timeline: 8b lands during a period when the fleet is already autonomous, and
+polish deferred past the moment operators form habits does not change the habit. Also, the floor is what
+gets built when the floor is what is written down — this change's own tasks are evidence: every §12 item
+is a compliance property, and the console that resulted satisfies all of them.
+
+**Alternative rejected — adopt a component library and inherit its look.** Fast, and free polish.
+Rejected on the same grounds as Decision 12's independent-language alternative, plus two specific to
+this surface: a library brings a **fourth** visual language and a second accessibility contract to
+audit, and it enlarges the client bundle that FR20's credential scan and FR28's price scan must keep
+clean. FR29 therefore **extends** the shared tokens and forbids raw literals rather than importing a
+system.
+
+**Alternative rejected — measure "preferred" and let craft follow the data.** Attractive, but the
+measurement (Q10: instrument production-shell sessions as a P2.5 signal) tells you operators are
+routing around the console *after* they have been doing it. Worth building; not a substitute for
+specifying the surface.
+
+## Decision 14 — Delight on the read path, friction on the write path
+
+Velocity and polish requirements apply to **reading** — finding a subject, seeing state, comparing
+numbers, linking a view. The **write** path keeps every step Decision 3 gives it. The command palette
+can *navigate to* a destructive action and can never *perform* one; reason and typed-target fields are
+never pre-filled; a restyle that shortens the path to a destructive effect is a regression with a test
+that fails (FR37).
+
+**Why.** "Make it fast and pleasant" and "make destruction deliberate" are genuinely opposed, and a
+design that does not state where the line falls will resolve it case by case — which, under deadline,
+resolves toward smoother. Drawing the line at **read vs. write** makes it decidable without judgment
+each time, and it is the same line the rest of P8 is organized around, so operators learn one rule
+rather than a list of exceptions.
+
+The distinction it forces is worth naming because it looks like a contradiction: FR32 says an operator
+must never have to recall an opaque identifier to **find** a subject, while FR24 says an irreversible
+action requires **typing the target's identifier**. Both hold, because they are different acts.
+Type-ahead is how you locate; typing the identifier is how you demonstrate you know what you are about
+to destroy. The second is not a lookup cost to be optimized away — it *is* the control.
+
+**Alternative rejected — uniform friction everywhere.** Safe-looking, and the reason the console is slow
+enough to be avoided (Decision 13). Confirming a *read* protects nothing and trains operators to click
+through confirmations, which is exactly how the write-path confirmation stops working.
+
+**Alternative rejected — let the palette execute safe writes, judged per command.** Rejected as a
+judgment that has to be re-made by every future contributor. Q9 leaves the *read* half open (may the
+palette run a read directly?) and settles the write half here: **never**.
+
+## Decision 15 — Truthful feedback over smooth feedback: no optimistic UI, receipts carry the audit reference
+
+A state change renders only after the backend confirms it, including its write-ahead audit. Every
+privileged command ends in a **receipt** naming action, target, reason, time and the **audit entry it
+wrote**, offering the reversing action or stating that none exists. **In flight**, **failed**, and
+**outcome unknown** are three distinct renderings (FR36).
+
+**Why.** Optimistic UI is the standard technique for making an interface feel fast, and it is
+**structurally incompatible** with this platform: Decision 3 commits the audit entry *before* the
+effect, and Decisions 4 and 6 fail closed when a store is unreachable. A surface that renders success on
+*intent* would therefore assert effects that never happened, most often precisely when something was
+already wrong — the worst possible moment to be told a tenant was suspended, a refund issued, or the
+fleet halted when it was not. Perceived speed is bought here on the **read** path (Decision 14), where
+being wrong costs nothing.
+
+The third outcome is the one usually missing. A fail-closed system genuinely produces "we could not
+determine whether that took effect," and collapsing it into either success or failure destroys
+information the operator needs: the remedy for *unknown* is to check the audit log, which is why the
+receipt carries the audit reference and why an unknown outcome states how to verify. This is the
+interface-level expression of the same principle Decision 4 applies to the kill switch — *can't tell*
+is its own answer, not a default to the convenient one.
+
+**Alternative rejected — optimistic with rollback on failure.** Rejected: the rollback path renders a
+state that was never true and then retracts it, which on a cross-tenant surface is indistinguishable to
+the operator from the platform having flapped. It also has no answer for the indeterminate case.
+
+**Alternative rejected — a toast that disappears.** Rejected as the receipt: an ephemeral confirmation
+cannot carry an audit reference anyone can act on, and the question "what did I actually just do, and
+where is the record?" is asked *after* the toast is gone.
+
 ## Data model sketch
 
 ```
@@ -341,3 +439,27 @@ GDPR.Execute(admin_id, subject_ref, reason) -> {completed, verification_ref}    
 - **An operator confuses the two consoles and acts cross-tenant believing it is one tenant** — mitigated
   by distinct operator chrome and persistent operator identification on every view, plus global controls
   visually distinct from per-tenant ones (Decision 12; Decision 3).
+- **The console is compliant but unloved, so the prod shell comes back** — the anti-pattern the phase
+  exists to remove, now running beside a console the team maintains. Mitigated by specifying the surface
+  above the floor: one design language + closed primitives, comparison-ready numbers, reserved hazard
+  palette, command palette, URL-addressable views, glanceable operating picture (Decision 13). Watched by
+  Q10 — emit production-shell/database sessions as a P2.5 signal and read a sustained rate as a **P8
+  defect**, not an operator habit.
+- **Craft work quietly shortens the destructive path** — a redesign that reads as "smoother" removes a
+  step, pre-fills a reason, or lets a shortcut fire an action. Mitigated by the read/write split being a
+  requirement rather than a convention (Decision 14): the palette navigates but never performs, nothing
+  on the danger path is pre-filled, and the FR24 dangerous-action tests plus a visual-regression baseline
+  are re-run after every restyle. *(Load-bearing.)*
+- **The interface asserts an effect the audit never recorded** — mitigated by prohibiting optimistic
+  success and requiring a receipt that names the audit entry, with *outcome unknown* as a first-class
+  third rendering (Decision 15). *(Load-bearing.)*
+- **A stale figure is read as current during an incident** — an operator concludes the fleet is halted
+  when it is not. Mitigated by every live figure carrying an as-of time and announcing staleness, and by
+  updates landing in place without reordering rows under the operator (FR34; Decision 13).
+- **Motion or density work erodes the accessibility floor it was built on** — mitigated by a documented
+  motion budget with a full `prefers-reduced-motion` equivalent, density modes that remove no
+  information, and an acceptance matrix that includes dark, 200% zoom, reduced motion and both densities
+  (FR35, FR29, FR37).
+- **The design language forks, or a component library imports its own** — mitigated by FR29 extending
+  the shared token system with no raw literals and a closed primitive set, keeping Decision 12's split
+  (shared system, distinct chrome) intact rather than becoming a fourth palette.

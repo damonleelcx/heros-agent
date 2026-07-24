@@ -106,6 +106,32 @@ type Controller struct {
 	// A deployment that HAS billing wires this in, and the P7 rollout keeps the Enterprise auto-merge
 	// entitlement off until the gate is verified.
 	Entitlement MergeEntitlement
+	// Admission is the P8 OPERATOR brake, consulted immediately before every merge (P8 FR7/FR12).
+	//
+	// It is separate from Kill, and the difference matters. `Kill` is the per-run switch a customer or
+	// this run's operator fires — in-process, scoped to this Controller. `Admission` is the PLATFORM's
+	// brake: the operator console's global and per-tenant kill switch and a tenant suspension, set
+	// from outside this process, effective immediately and with no deploy. A runaway fleet needs the
+	// second one, and wiring it to the same pre-merge check point means there is one enforcement
+	// point rather than two that can drift.
+	//
+	// Nil disables it, which is correct for a self-hosted deployment with no operator console. A
+	// deployment that HAS one wires it, and then an indeterminate answer halts (see the call site).
+	Admission MergeAdmission
+}
+
+// MergeAdmission is the P6 loop's view of the P8 operator brake.
+//
+// Declared here as the narrowest possible interface, for the same reason MergeEntitlement is: the
+// optimizer must remain buildable and testable with no operator console at all.
+type MergeAdmission interface {
+	// AllowMerge reports whether the platform currently permits this tenant's autonomous merge.
+	//
+	// The error return is the load-bearing part. It means the state is INDETERMINATE — the kill-switch
+	// store is unreachable — and its ONLY correct handling is to halt: "can't tell if we're stopped"
+	// means stopped (P8 design Decision 4). An implementation must never return (true, nil) when it
+	// could not read the state.
+	AllowMerge(customerID string) (allowed bool, reason string, err error)
 }
 
 // MergeEntitlement is the P6 loop's view of the P7 entitlement gate.
@@ -286,6 +312,29 @@ func (c *Controller) Run(ctx context.Context, in RunInput) (RunResult, error) {
 			res.Iterations = append(res.Iterations, iter)
 			c.stop(&res, StateStopped, "kill switch fired before merge — in-flight result discarded", auth.Actor)
 			break
+		}
+
+		// ── P8 operator brake (P8 FR7/FR12), read FAIL-CLOSED to halt ─────────────
+		//
+		// Checked here, in the same pre-merge window as the per-run kill switch, so an operator arming
+		// the global switch stops the next merge everywhere without a deploy and without this process
+		// restarting. An error is INDETERMINATE state and halts exactly as an armed switch does — the
+		// last-good Variant Spec stays live either way, which is the only outcome that is safe when we
+		// cannot tell whether we are supposed to be stopped.
+		if c.Admission != nil {
+			allowed, why, aerr := c.Admission.AllowMerge(auth.CustomerID)
+			switch {
+			case aerr != nil:
+				res.Iterations = append(res.Iterations, iter)
+				c.stop(&res, StateStopped, "operator kill-switch state indeterminate — fail closed, no merge: "+aerr.Error(), auth.Actor)
+				res.MergeEnabled = false
+				return res, nil
+			case !allowed:
+				res.Iterations = append(res.Iterations, iter)
+				c.stop(&res, StateStopped, "halted by the operator console: "+why, auth.Actor)
+				res.MergeEnabled = false
+				return res, nil
+			}
 		}
 
 		// A candidate that fails verification (contract/build/held-out) OR fails any P4 gate is never

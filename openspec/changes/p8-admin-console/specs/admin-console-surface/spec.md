@@ -1,7 +1,7 @@
 # Admin Console Surface — Spec Delta (P8)
 
 Product rationale: [`../../../../../docs/prd/P8-admin-console.md`](../../../../../docs/prd/P8-admin-console.md)
-§6 (FR19–FR28), §7 and §8.4. The customer-facing counterpart — and the source of the interface rules
+§6 (FR19–FR28 the floor, FR29–FR37 the surface above it), §7 and §8.4. The customer-facing counterpart — and the source of the interface rules
 this capability inherits rather than restates — is
 [`../../../p9-web-console/`](../../../p9-web-console/).
 
@@ -9,7 +9,8 @@ Covers the operator console **as an application**: a separate Next.js applicatio
 its own BFF, admin credential custody, the disjointness of admin and tenant session domains, rendering
 capability from the same permission map the backend enforces, distinct operator chrome, friction
 proportional to blast radius, and the interface floor — which is **not** lowered because the audience is
-internal.
+internal — **and the craft above that floor**: one design language, glanceable live state, operator
+velocity, truthful feedback, and evidence that the danger path's friction survived every one of them.
 
 > **Why a separate application.** This is the platform's highest-blast-radius surface: one action here
 > crosses tenant boundaries and can halt the autonomous fleet. In a single application with role-gated
@@ -259,3 +260,297 @@ build, type check, or unit-test run SHALL NOT by itself constitute acceptance.
 - **WHEN** acceptance evidence is produced for a console view
 - **THEN** it covers the denied and degraded states as well as the populated one
 - **AND** each is shown to render distinctly.
+
+> **Why craft requirements live in a security capability.** Everything above this line is the interface
+> **floor**: keyboard reach, four distinct states, contrast, escaped values, no hardcoded number. A floor
+> is what a surface must not fall below; it is not a description of the surface. The requirements below
+> are the surface itself, and they are here for the reason the whole phase exists rather than for an
+> aesthetic one. P8's stated purpose is to **retire the ad-hoc production shell** — the unaudited,
+> unscoped, over-privileged path (proposal.md §Why). A console that is slower to answer a question than a
+> `psql` prompt does not retire it: an operator under incident pressure routes around the surface that
+> slows them down, and the credentialled shell stays open next to it. Craft is the mechanism by which
+> this console is **preferred**, and being preferred is the only thing that makes it the **audited** path.
+> The split that keeps that safe is stated as a requirement below — **delight on the read path, friction
+> on the write path** — so "faster" never means "fewer deliberate steps to a destructive effect."
+
+### Requirement: Meeting the interface floor SHALL NOT by itself constitute an acceptable view
+
+A view that satisfies every accessibility, state, contrast and escaping requirement above SHALL still
+be rejected if it fails the composition, legibility, velocity, feedback or evidence requirements
+below. The floor SHALL be treated as the minimum below which a view cannot ship, never as the target
+a view is built to.
+
+#### Scenario: A floor-compliant view is still assessed against the craft requirements
+
+- **WHEN** a view passes the accessibility audit, renders four distinct states, and hardcodes no number
+- **THEN** it is assessed against the composition, legibility, velocity, feedback and evidence
+  requirements as well
+- **AND** passing the floor alone is not accepted as passing.
+
+### Requirement: Every view SHALL be composed from one documented design language and a closed set of primitives
+
+The console SHALL define one design language — an editorial type hierarchy, a single spacing rhythm, a
+single radius and elevation model, and a stated composition grid — as a documented extension of the
+shared token system, and SHALL compose every view from a **closed, documented set of primitives** (page
+frame, section, data table, stat, timeline, drawer, confirmation sheet, receipt, state block). A view
+SHALL NOT introduce a bespoke layout, a raw color value, or an off-scale spacing, type or radius value.
+
+#### Scenario: Visual values resolve to tokens rather than literals
+
+- **WHEN** the console's stylesheets and components are scanned for color, spacing, type-size and radius
+  literals outside the token definitions
+- **THEN** none is found
+- **AND** every visual value resolves to a token in the documented scale.
+
+#### Scenario: A new view adds no new primitive
+
+- **WHEN** a new operator view is built
+- **THEN** it composes from the existing primitive set
+- **AND** adding a primitive is a deliberate, documented extension of the language rather than a
+  side effect of building a page.
+
+#### Scenario: Density is an operator choice the console remembers
+
+- **WHEN** an operator selects a display density
+- **THEN** the console renders at that density and retains the choice across views and sessions
+- **AND** no information present at one density is absent at the other.
+
+### Requirement: Numeric data SHALL be rendered for comparison at a glance
+
+Numerals in tables and stats SHALL render in tabular (fixed-width) figures, aligned on their digits
+within a column, with the unit and scale stated once in the column header or stat label rather than
+repeated per value. A value's magnitude SHALL be distinguishable without counting digits.
+
+#### Scenario: A column of numbers aligns for scanning
+
+- **WHEN** a column of numeric values is rendered
+- **THEN** the digits align vertically in fixed-width figures
+- **AND** a larger value is visually distinguishable from a smaller one without reading it.
+
+#### Scenario: Unit and scale are stated once, not per cell
+
+- **WHEN** a numeric column or stat is rendered
+- **THEN** its unit and scale appear in the header or label
+- **AND** the same unit is not repeated on every value.
+
+#### Scenario: One quantity uses one scale within a view
+
+- **WHEN** the same quantity appears more than once in a view
+- **THEN** it is rendered at the same scale and precision throughout
+- **AND** two renderings of one quantity cannot be misread as different quantities.
+
+### Requirement: The hazard palette SHALL be reserved for hazard
+
+The console's danger and warning colors SHALL denote destructive scope, an armed halt, or an alarming
+state only. They SHALL NOT be used for emphasis, branding, decoration, or a non-hazardous status.
+
+#### Scenario: Danger color appears only on hazard
+
+- **WHEN** the console's rendered views are inspected for use of the danger and warning colors
+- **THEN** each occurrence denotes a destructive control, an armed kill switch, an active
+  impersonation, or an alarming state
+- **AND** none is decorative or emphatic.
+
+#### Scenario: Hazard remains salient because it is rare
+
+- **WHEN** an operator scans a view containing exactly one destructive control
+- **THEN** that control is the only element carrying the hazard palette
+- **AND** it is locatable without reading the view's text.
+
+### Requirement: Every capability the operator's role grants SHALL be reachable from a command palette on every view
+
+A command palette SHALL be reachable by a single keystroke from any view and SHALL address every
+capability the operator's role grants and every recently-viewed target by name. It SHALL be driven by
+the same permission map the backend enforces, so it SHALL NOT offer a capability the gate would refuse.
+
+#### Scenario: The palette is one keystroke from anywhere
+
+- **WHEN** an operator presses the palette keystroke on any authenticated view
+- **THEN** the palette opens with focus in its input
+- **AND** it is dismissible by keyboard without leaving the current view.
+
+#### Scenario: The palette offers only granted capabilities
+
+- **WHEN** an operator whose role does not grant a capability searches for it in the palette
+- **THEN** no entry for it is offered
+- **AND** the palette and the gate do not disagree.
+
+#### Scenario: A subject is found by name rather than recalled as an identifier
+
+- **WHEN** an operator needs to act on a tenant, job, or model
+- **THEN** the subject is selectable by type-ahead on its name
+- **AND** the operator is not required to recall an opaque identifier in order to reach it.
+
+### Requirement: Every view's state SHALL be addressable by URL and restorable
+
+A view's subject, filters, time window, and selected tab SHALL be represented in its URL. The URL SHALL
+reproduce the view for another authorized operator, and browser back and forward SHALL restore the
+previous view state exactly. No personal or sensitive value SHALL be placed in the URL.
+
+#### Scenario: A view pasted into an incident channel reproduces itself
+
+- **WHEN** an operator copies a view's URL and another authorized operator opens it
+- **THEN** the same subject, filters, time window and tab are restored
+- **AND** the second operator's own permissions still govern what is rendered.
+
+#### Scenario: Back and forward restore view state
+
+- **WHEN** an operator changes a filter and then navigates back
+- **THEN** the previous filter state is restored
+- **AND** the view does not reset to its default.
+
+#### Scenario: Sensitive values are not carried in the URL
+
+- **WHEN** view state is encoded into the URL
+- **THEN** it contains no session material, no impersonation credential, and no subject personal data.
+
+### Requirement: The live operating picture SHALL be readable without interaction
+
+The console's operating view SHALL show, without any interaction, whether anything is halted and
+whether anything is wrong — global and per-tenant kill-switch state, fleet and queue health, active
+impersonations, and unresolved anomalies. Each live figure SHALL carry the time it is current as of.
+
+#### Scenario: Halted and healthy are distinguishable at a glance
+
+- **WHEN** an operator opens the operating view with a kill switch armed
+- **THEN** the armed state is apparent without interaction and without reading prose
+- **AND** it is distinguishable from the unarmed state by more than color alone.
+
+#### Scenario: Stale data announces itself rather than presenting as current
+
+- **WHEN** a live figure cannot be refreshed within its expected interval
+- **THEN** the view states the time the figure is current as of and marks it stale
+- **AND** it is not presented as the current state.
+
+### Requirement: A live update SHALL NOT shift layout, reorder under the operator, or blank correct data
+
+Updating a live view SHALL preserve its layout and the position of the row the operator is pointing at
+or focused on. A refresh in flight SHALL be indicated without replacing already-correct data with a
+loading state.
+
+#### Scenario: An update does not move the target under the pointer
+
+- **WHEN** a live table updates while the operator's pointer or focus is on a row
+- **THEN** that row does not move
+- **AND** an action begun before the update lands on the subject it was begun on.
+
+#### Scenario: A refresh does not blank a correct view
+
+- **WHEN** a view holding current data refreshes
+- **THEN** the existing data remains rendered while the refresh is in flight
+- **AND** the refresh is indicated without a full-view loading state.
+
+### Requirement: Motion SHALL carry meaning, stay within budget, and never gate an action
+
+Motion SHALL be used only to preserve continuity or to mark a state change — where a surface came from,
+which value changed, what arrived. Transitions SHALL complete within a documented duration budget and
+SHALL NOT delay a navigation, confirmation, or command. Under `prefers-reduced-motion` every animation
+SHALL be replaced by an instant equivalent.
+
+#### Scenario: No action waits on an animation
+
+- **WHEN** an operator confirms an action or navigates while a transition is running
+- **THEN** the action is issued immediately
+- **AND** no animation is on the path between the operator's intent and the command.
+
+#### Scenario: Reduced motion loses no information
+
+- **WHEN** the console renders under `prefers-reduced-motion`
+- **THEN** every state change conveyed by motion is conveyed by a static means
+- **AND** no information exists only in an animation.
+
+#### Scenario: Motion is not decorative
+
+- **WHEN** an animation is present
+- **THEN** it corresponds to a state change, an arrival, or a spatial relationship
+- **AND** no element animates without such a referent.
+
+### Requirement: Every privileged command SHALL resolve to a receipt naming its audit entry
+
+On completion, a privileged command SHALL render a receipt stating what was done, to which target,
+under which recorded reason, at what time, and the reference of the audit entry it wrote. The receipt
+SHALL offer the reversing action or state explicitly that none exists.
+
+#### Scenario: A receipt names the audit entry
+
+- **WHEN** a privileged command completes
+- **THEN** the receipt states the action, the target, the recorded reason, the time, and the audit
+  reference
+- **AND** the operator can reach the audit entry from the receipt.
+
+#### Scenario: Irreversibility is stated rather than implied
+
+- **WHEN** a completed command has no reversing action
+- **THEN** the receipt says so explicitly
+- **AND** the absence of an undo control is not the only indication.
+
+### Requirement: The console SHALL NOT render an optimistic success, and SHALL distinguish in-flight, failed, and unknown outcomes
+
+A state change SHALL be rendered only after the backend confirms it, including its write-ahead audit. A
+command in flight, a command that failed, and a command whose outcome could not be determined SHALL be
+three distinct renderings.
+
+#### Scenario: Success is not shown before it is confirmed
+
+- **WHEN** an operator issues a privileged command
+- **THEN** the console renders it as in flight until the backend confirms the effect
+- **AND** it does not render the changed state in anticipation.
+
+#### Scenario: An indeterminate outcome is not rendered as either success or failure
+
+- **WHEN** a command's outcome cannot be determined — the response is lost or the audit write is
+  unconfirmed
+- **THEN** the console renders the outcome as unknown and states how to verify it
+- **AND** it renders neither success nor failure.
+
+### Requirement: No visual, motion, or velocity affordance SHALL reduce dangerous-action friction
+
+Every requirement above applies to the read path. On the write path, the friction defined for
+dangerous actions SHALL remain intact: no transition, shortcut, palette entry, default, or restyle
+SHALL make a destructive action reachable in fewer deliberate steps, and the command palette SHALL be
+able to navigate to a dangerous action but SHALL NOT execute one.
+
+#### Scenario: The palette navigates to a dangerous action but does not perform it
+
+- **WHEN** an operator selects a destructive capability from the command palette
+- **THEN** the console opens that action's confirmation, with the reason and any typed-target
+  requirement intact
+- **AND** the action is not performed by the palette selection.
+
+#### Scenario: A restyle leaves the friction unchanged
+
+- **WHEN** the console's visual language, motion, or navigation changes
+- **THEN** the dangerous-action path still requires a typed reason, still requires the target to be
+  typed where the action is irreversible, and still distinguishes global from per-tenant scope
+- **AND** the number of deliberate steps to a destructive effect has not decreased.
+
+#### Scenario: No smart default pre-fills a destructive intent
+
+- **WHEN** a destructive action's confirmation is opened
+- **THEN** the reason field is empty and any typed-target field is empty
+- **AND** neither is pre-filled from context, history, or a previous action.
+
+### Requirement: Craft acceptance SHALL be evidenced across a defined rendering matrix
+
+Acceptance evidence for a console view SHALL cover light and dark, a narrow and a wide viewport, 200%
+zoom, `prefers-reduced-motion`, both density modes, and the loading, empty, denied and degraded states.
+A visual-regression baseline SHALL gate unintended visual change, and a new view SHALL carry a recorded
+design review by the console's product designer.
+
+#### Scenario: The rendering matrix is covered by evidence
+
+- **WHEN** a console view is submitted for acceptance
+- **THEN** rendered evidence exists for each cell of the matrix
+- **AND** a cell without evidence blocks acceptance rather than being assumed to pass.
+
+#### Scenario: An unintended visual change is caught
+
+- **WHEN** a change alters a view's rendering in a way not described by the change
+- **THEN** the visual-regression baseline fails
+- **AND** the difference is reviewed rather than silently absorbed into the baseline.
+
+#### Scenario: A new view carries a named design review
+
+- **WHEN** a new operator view reaches acceptance
+- **THEN** a design review is recorded with its reviewer named
+- **AND** acceptance without one is not granted.
