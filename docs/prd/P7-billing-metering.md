@@ -615,32 +615,39 @@ boundaries** so they feel fair and legible rather than arbitrary. Three delivera
 
 ## 13. Success metrics & acceptance criteria (M10 exit checklist)
 
-- [ ] **SUM** for a customer/period is **derived from the P2.5 cost events** (tokens × price), not a
+- [x] **SUM** for a customer/period is **derived from the P2.5 cost events** (tokens × price), not a
       second pipeline, and re-derivation of a closed period is deterministic.
-- [ ] Every meter — **SUM, seats, retention, cloud eval compute** — is an **idempotent usage record
+- [x] Every meter — **SUM, seats, retention, cloud eval compute** — is an **idempotent usage record
       keyed `{customer, period, metric}`**; a **replayed period charges once** (never double-counted).
-- [ ] **Billable savings = baseline SUM − optimized SUM**, from **merged-PR deltas in the P5.5
+- [x] **Billable savings = baseline SUM − optimized SUM**, from **merged-PR deltas in the P5.5
       verified-delta ledger only**; an **estimated / un-merged saving bills nothing**; baseline +
       holdout methodology is **auditable**.
-- [ ] Usage is **reconcilable against the billing provider**; a seeded drift is **surfaced**, not
+- [x] Usage is **reconcilable against the billing provider**; a seeded drift is **surfaced**, not
       silently accepted.
-- [ ] Feature access is gated by **plan AND automation level**: CLI + discovery on **all incl. Free**;
+- [x] Feature access is gated by **plan AND automation level**: CLI + discovery on **all incl. Free**;
       Assisted PRs on **Team+**; dashboard (seats/retention/SUM band) on **Team+**; **Autonomous
       auto-merge on Enterprise only**.
-- [ ] Plan definitions + price references are **configuration**; a **plan/price change takes effect
+- [x] Plan definitions + price references are **configuration**; a **plan/price change takes effect
       with no code deploy** and nothing priced is in git.
-- [ ] An **over-limit action is denied with a named reason and an upgrade path**, never silently.
-- [ ] The billing provider integration bills **subscription + metered usage**; billing is
+- [x] An **over-limit action is denied with a named reason and an upgrade path**, never silently.
+- [x] The billing provider integration bills **subscription + metered usage**; billing is
       **idempotent — never double-charge** (idempotency key per charge-bearing op; webhook dedupe).
-- [ ] A **billing error is corrected via credit/refund** with a full audit log and **no data loss**
+- [x] A **billing error is corrected via credit/refund** with a full audit log and **no data loss**
       (additive correction; originals intact).
-- [ ] **Gainshare bills a share of VERIFIED savings only** — a charge for savings absent from the
+- [x] **Gainshare bills a share of VERIFIED savings only** — a charge for savings absent from the
       verified-delta ledger is **refused**.
-- [ ] Customers use their **own provider keys**; **no invoice line resells provider tokens**.
-- [ ] Provider **webhooks are handled idempotently** and **invoices reconcile** against platform
+- [x] Customers use their **own provider keys**; **no invoice line resells provider tokens**.
+- [x] Provider **webhooks are handled idempotently** and **invoices reconcile** against platform
       usage.
-- [ ] Revenue is **observable** on the P2.5 substrate (SUM, metered totals, failed charges, dunning,
+- [x] Revenue is **observable** on the P2.5 substrate (SUM, metered totals, failed charges, dunning,
       drift), with alerts on failed charges and drift.
+
+> **Confirmed 2026-07-23.** Every line above is asserted, item by item, by
+> `TestM10ExitChecklist` in [`internal/p7e2e/exit_test.go`](../../internal/p7e2e/exit_test.go) —
+> against ONE stack, so the claims have to be simultaneously true rather than each getting its own
+> favourable fixture. Wave **7a** items run first, then **7b**. The storage-layer half
+> (never-double-count, never-double-charge, append-only, no-card-data, gainshare-traces-to-evidence)
+> is proven against a live Postgres by `make pg-proof`.
 
 ## 14. Open questions
 

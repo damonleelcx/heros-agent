@@ -1,0 +1,115 @@
+# P7 revenue alerting — the two conditions that page, and the signals that only graph (task 8.1, G11).
+#
+# THIS FILE IS THE ROUTING, NOT THE DETECTION. The detection lives in the code
+# (internal/metering/observe.go raises metering.Alert for both conditions, and the same events are
+# emitted on the P2.5 substrate as ordinary metrics). This file is what a Prometheus/Alertmanager
+# deployment loads so the signal reaches a human — the "health signal must be externally readable, not
+# only in a log" half of the rule.
+#
+# WHY ONLY TWO ALERTS
+#
+# A failed charge is revenue that silently did not happen; a reconciliation drift is the meter and the
+# provider disagreeing about what a customer used. Both are invisible until month-end unless something
+# pages, and both are actionable the moment they occur. Everything else here is graphed, not paged — an
+# alert that fires because a number moved is an alert people mute, and a muted alert is worse than none
+# because it looks like coverage.
+#
+# WHY NO PER-CUSTOMER LABEL
+#
+# `customer_id` rides as a metric DIMENSION, never a TSDB series label (P2.5 Decision 4: one series per
+# customer is the cardinality explosion the label allowlist exists to prevent). So these rules fire on
+# the AGGREGATE and the responder pulls the affected customers from `usage_record` / `billing_event` —
+# the systems of record — rather than from the alert payload. An alert that names the customer would
+# cost a series per customer forever.
+
+groups:
+  - name: p7-revenue-pages
+    interval: 1m
+    rules:
+      # ── PAGE 1: a charge did not settle ────────────────────────────────────
+      #
+      # A charge that failed is buffered, not lost: the ledger row stays `pending` and FlushPending
+      # retries it under the same idempotency key, so the outage window is billed exactly once. This
+      # pages anyway, because "buffered forever" and "buffered briefly" look identical from inside.
+      - alert: P7BillingChargeFailed
+        expr: increase(revenue_charge_failed[15m]) > 0
+        for: 5m
+        labels:
+          severity: page
+          capability: billing
+        annotations:
+          summary: "A billing charge did not settle in the last 15 minutes"
+          description: >-
+            One or more charge-bearing operations failed against the billing provider. The usage is
+            safe in usage_record and the charges are buffered as `pending` billing_event rows under
+            their original idempotency keys; they will be billed exactly once on recovery. Check the
+            provider's status first, then drain the buffer.
+          runbook: >-
+            1. GET /readyz — confirm billing_rollout.provider_mode and that billing is enabled.
+            2. SELECT customer_id, period, kind, caused_by FROM billing_event WHERE status='pending'
+               ORDER BY created_at — this is the exact buffer, and it is the authoritative list.
+            3. Once the provider is healthy, run the FlushPending drain. It is idempotent: re-running
+               it cannot double-charge, because every retry carries the row's original key.
+            4. Do NOT hand-insert a charge to "catch up". A charge outside the write-ahead path has no
+               idempotency key and is the one shape that CAN double-charge.
+
+      # ── PAGE 2: the meter and the provider disagree ────────────────────────
+      #
+      # Drift is surfaced, never auto-resolved by overwrite (design Decision 7). The only permitted
+      # auto-correction is re-reporting usage the provider is MISSING; a provider-side excess or a
+      # quantity disagreement goes through the audited credit path, which is a human decision.
+      - alert: P7BillingReconciliationDrift
+        expr: increase(revenue_reconciliation_drift[1h]) > 0
+        for: 10m
+        labels:
+          severity: page
+          capability: billing
+        annotations:
+          summary: "Usage reconciliation found the platform and the provider disagreeing"
+          description: >-
+            A reconciliation surfaced drift between usage_record (what was used) and the provider's
+            recorded usage (what was charged). The reconciler is read-only and has changed nothing on
+            either side — that is deliberate, and it is why this needs a human.
+          runbook: >-
+            1. Identify the drift KIND from the `drift_kind` dimension:
+               - unreported / missing_at_provider → the provider is missing usage we hold. Repairable
+                 additively: re-report it idempotently (RepairUnreported). Safe, and a no-op if it was
+                 already there.
+               - missing_at_platform → the provider recorded usage we never reported. This is a charge
+                 with no platform-side justification. Do NOT delete the provider record; issue an
+                 audited CREDIT if the customer was over-charged.
+               - quantity_mismatch → the two disagree on how much. Re-derive the period (DeriveSUM is
+                 deterministic on a closed period) before touching anything; if the platform figure is
+                 right, correct the provider side via a credit, never by overwriting.
+            2. NEVER "fix" drift by editing usage_record or the provider's records to match. That is
+               reconcile-by-overwrite: it makes the alert stop and makes the disagreement unknowable.
+
+  # ── Graph these; do not page on them ─────────────────────────────────────
+  #
+  # Recorded here rather than left implicit so the distinction is a deliberate, reviewable decision
+  # instead of "whatever somebody added a rule for".
+  - name: p7-revenue-dashboards
+    interval: 5m
+    rules:
+      # Spend under management, aggregate. The per-customer figure lives in usage_record; this is the
+      # trend line.
+      - record: p7:sum_under_management:sum
+        expr: sum(revenue_sum_under_management)
+
+      # Metered quantities handed to the provider, by meter.
+      - record: p7:metered_reported:sum_by_meter
+        expr: sum by (meter) (revenue_metered_reported)
+
+      # The dunning funnel: how many customers are in each provider-owned billing state. Worth watching
+      # daily; not worth waking anyone for, because the provider is already dunning them.
+      - record: p7:invoice_state:count_by_state
+        expr: sum by (billing_state) (increase(revenue_invoice_state[1d]))
+
+      # Gainshare billed — verified, merged savings only, by construction (nothing else can produce
+      # this metric). A sudden jump is interesting, not alarming: it means optimizations shipped.
+      - record: p7:gainshare_billed:sum
+        expr: sum(revenue_gainshare_billed)
+
+      # Drift by kind, for the dashboard the responder opens after the page above.
+      - record: p7:reconciliation_drift:count_by_kind
+        expr: sum by (drift_kind, meter) (increase(revenue_reconciliation_drift[1d]))

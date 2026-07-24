@@ -94,6 +94,31 @@ type Controller struct {
 	// iteration (and once when the loop ends). It is the seam the live monitor reads P2.5 signals through
 	// so the UI shows current iteration / cumulative spend / PRs merged without deriving drifting state.
 	OnIteration func(res RunResult)
+	// Entitlement is the P7 commercial gate, consulted BEFORE every merge (P7 task 5.2 / FR8).
+	//
+	// It is deliberately separate from the three technical prerequisites: those answer "is merging SAFE
+	// here", this answers "did this customer contract for it". Absent the Autonomous auto-merge
+	// entitlement the loop FALLS BACK to opening a pull request for a human — the same verified change,
+	// one automation level down — rather than merging or silently dropping the candidate.
+	//
+	// Nil disables the commercial gate entirely, which is the correct behaviour for a self-hosted or
+	// pre-commercial deployment: there is no billing plan to consult, so there is nothing to enforce.
+	// A deployment that HAS billing wires this in, and the P7 rollout keeps the Enterprise auto-merge
+	// entitlement off until the gate is verified.
+	Entitlement MergeEntitlement
+}
+
+// MergeEntitlement is the P6 loop's view of the P7 entitlement gate.
+//
+// It is declared here, as the narrowest possible interface, rather than importing the entitlement
+// package: the optimizer must remain buildable and testable with no billing stack at all, and a
+// one-method interface is the seam that keeps the commercial concern from leaking into the loop's
+// dependency graph. `entitlement.MergeGate` satisfies it.
+type MergeEntitlement interface {
+	// AllowAutoMerge reports whether this customer's active plan entitles Autonomous auto-merge. On a
+	// denial it MUST return a named reason and, where one exists, the plan that lifts it — the loop
+	// writes both into the audit trail, so a fallback is never a silent one.
+	AllowAutoMerge(customerID string) (allowed bool, reason, upgradePlan string)
 }
 
 // RunInput is one Run's parameters: the recorded authority (constraints + arms), the attributed targets
@@ -301,6 +326,48 @@ func (c *Controller) Run(ctx context.Context, in RunInput) (RunResult, error) {
 			res.Iterations = append(res.Iterations, iter)
 			stall = 0 // a verified, gate-passing candidate is progress even when we may not merge it
 			continue
+		}
+
+		// ── P7 entitlement gate (task 5.2 / FR8) ─────────────────────────────────
+		//
+		// Consulted HERE — after the candidate has passed every technical gate, immediately before the
+		// merge — because that is the only point at which the question "may this customer merge" has a
+		// concrete answer to gate. Denied, the loop opens a NON-DRAFT pull request: the customer gets the
+		// verified change reviewable by a human (the Assisted contract they DO have), and the denial is
+		// audited with its named reason and upgrade path. It is never a silent drop and never a silent
+		// merge.
+		if c.Entitlement != nil {
+			allowed, reason, upgrade := c.Entitlement.AllowAutoMerge(auth.CustomerID)
+			if !allowed {
+				pr, derr := c.Repo.OpenPR(ctx, OpenPRRequest{ProposalID: cand.ConfigHash[:min(12, len(cand.ConfigHash))],
+					Branch: "optimizer/assisted-" + shortHash(cand.ConfigHash), SpecBytes: cand.SpecBytes, Draft: false,
+					Message: "verified optimization candidate " + cand.Operator + " (auto-merge not entitled)"})
+				if derr == nil {
+					iter.PRRef = pr.Branch
+				}
+				summary := "auto-merge not entitled: " + reason
+				if upgrade != "" {
+					summary += " (upgrade plan: " + upgrade + ")"
+				}
+				summary += " — opened a pull request for a human instead"
+				// Audited, not merely logged: a commercial decision that changed what the loop did to a
+				// customer's repository has to survive in the trail alongside the technical ones.
+				if _, lerr := c.append(auth.RunID, LedgerEvent{Type: EventEntitlementDenied, Actor: auth.Actor,
+					FromConfigHash: head, ToConfigHash: cand.ConfigHash, PRRef: iter.PRRef,
+					DiagnosisID: cand.DiagnosisID, Summary: summary}); lerr != nil {
+					// The ledger being down means the fallback itself is unauditable. Fail closed exactly as a
+					// merge would: stop, last-good spec live.
+					iter.Reason = "change-ledger unavailable — entitlement fallback unaudited"
+					res.Iterations = append(res.Iterations, iter)
+					c.stop(&res, StateStopped, "change-ledger unavailable — fail closed", auth.Actor)
+					res.MergeEnabled = false
+					break
+				}
+				iter.Reason = summary
+				res.Iterations = append(res.Iterations, iter)
+				stall = 0 // a verified, gate-passing candidate is progress even when we may not merge it
+				continue
+			}
 		}
 
 		applied, aerr := c.apply(ctx, auth, idx, cand, vr, head)
