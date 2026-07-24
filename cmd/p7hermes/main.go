@@ -401,8 +401,8 @@ func build(repoDir string) (*state, error) {
 
 	// ── 7. Billing service ────────────────────────────────────────────────────
 	secrets, err := billing.NewManagedSecrets(providergateway.StaticSecrets{
-		billing.SecretBillingAPIKey:         {APIKey: "sk_test_p7hermes_provider_key"},
-		billing.SecretBillingWebhookSigning: {APIKey: "whsec_p7hermes"},
+		billing.SecretBillingAPIKey:         {APIKey: "billing-api-key-DO-NOT-LEAK-hermes"},
+		billing.SecretBillingWebhookSigning: {APIKey: "webhook-signing-secret-DO-NOT-LEAK-hermes"},
 	})
 	if err != nil {
 		return nil, err
@@ -460,7 +460,7 @@ func build(repoDir string) (*state, error) {
 		})
 		stamp := now().UTC().Format(time.RFC3339)
 		if _, err := svc.HandleWebhook(ctx, billing.SignedWebhook{Body: body, Timestamp: stamp,
-			Signature: billing.SignWebhook("whsec_p7hermes", stamp, body)}); err != nil {
+			Signature: billing.SignWebhook("webhook-signing-secret-DO-NOT-LEAK-hermes", stamp, body)}); err != nil {
 			log.Printf("webhook: %v", err)
 		}
 	}

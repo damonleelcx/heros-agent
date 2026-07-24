@@ -99,8 +99,8 @@ func newHarness(t *testing.T, planID string) *harness {
 
 	ledger := NewMemLedger()
 	secrets, err := NewManagedSecrets(providergateway.StaticSecrets{
-		SecretBillingAPIKey:         {APIKey: "sk_test_billing_provider_key"},
-		SecretBillingWebhookSigning: {APIKey: "whsec_test_signing_secret"},
+		SecretBillingAPIKey:         {APIKey: "billing-api-key-DO-NOT-LEAK-test"},
+		SecretBillingWebhookSigning: {APIKey: "webhook-signing-secret-DO-NOT-LEAK-test"},
 	})
 	if err != nil {
 		t.Fatalf("secrets: %v", err)
@@ -411,8 +411,8 @@ func TestInvoiceValidateGoesRed(t *testing.T) {
 // the source is externally nameable for the health surface, and no secret VALUE appears in anything the
 // package produces — the ledger rows, the Describe output, or an error message.
 func TestBillingSecretsComeFromTheSecretsManagerAndNeverLeak(t *testing.T) {
-	const apiKey = "sk_test_billing_provider_key"
-	const webhookSecret = "whsec_test_signing_secret"
+	const apiKey = "billing-api-key-DO-NOT-LEAK-test"
+	const webhookSecret = "webhook-signing-secret-DO-NOT-LEAK-test"
 	h := newHarness(t, "team")
 	ctx := context.Background()
 
@@ -608,12 +608,12 @@ func TestBillingNeverTouchesCustomerProviderKeys(t *testing.T) {
 	ctx := context.Background()
 
 	rec := &recordingSecrets{inner: providergateway.StaticSecrets{
-		SecretBillingAPIKey:         {APIKey: "sk_test_billing_provider_key"},
-		SecretBillingWebhookSigning: {APIKey: "whsec_test_signing_secret"},
+		SecretBillingAPIKey:         {APIKey: "billing-api-key-DO-NOT-LEAK-test"},
+		SecretBillingWebhookSigning: {APIKey: "webhook-signing-secret-DO-NOT-LEAK-test"},
 		// Present but must never be asked for: if billing reached for these, it would be running
 		// inference on the platform's account — the token-resale business this design refuses.
-		"openai":    {APIKey: "sk-openai-customer-key"},
-		"anthropic": {APIKey: "sk-ant-customer-key"},
+		"openai":    {APIKey: "openai-customer-key-DO-NOT-LEAK-test"},
+		"anthropic": {APIKey: "anthropic-customer-key-DO-NOT-LEAK-test"},
 		"bedrock":   {AWS: &providergateway.AWSCredential{AccessKeyID: "AKIA", SecretAccessKey: "s"}},
 	}}
 	secrets, err := NewManagedSecrets(rec)

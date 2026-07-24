@@ -87,8 +87,8 @@ var (
 // The credentials the secrets manager holds. Their VALUES matter to exactly one test — the one that
 // asserts they appear nowhere.
 const (
-	billingAPIKey     = "sk_test_p7e2e_provider_key_1a2b3c"
-	webhookSigningKey = "whsec_p7e2e_signing_4d5e6f"
+	billingAPIKey     = "billing-api-key-DO-NOT-LEAK-fixture"
+	webhookSigningKey = "webhook-signing-secret-DO-NOT-LEAK-fixture"
 )
 
 // planIDs is every named plan, so the matrix iterates the real catalog.

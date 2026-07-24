@@ -10,7 +10,7 @@ import (
 	"github.com/heros-foreal/agentd/internal/metering"
 )
 
-const testWebhookSecret = "whsec_test_signing_secret"
+const testWebhookSecret = "webhook-signing-secret-DO-NOT-LEAK-test"
 
 // signed builds a correctly-signed delivery for a payload — the shape the provider actually sends.
 func signed(t *testing.T, p WebhookPayload, at time.Time) SignedWebhook {

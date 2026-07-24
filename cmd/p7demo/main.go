@@ -216,8 +216,8 @@ func build() (*state, error) {
 
 	// ── billing service ───────────────────────────────────────────────────────
 	secrets, err := billing.NewManagedSecrets(providergateway.StaticSecrets{
-		billing.SecretBillingAPIKey:         {APIKey: "sk_test_p7demo_provider_key"},
-		billing.SecretBillingWebhookSigning: {APIKey: "whsec_p7demo"},
+		billing.SecretBillingAPIKey:         {APIKey: "billing-api-key-DO-NOT-LEAK-demo"},
+		billing.SecretBillingWebhookSigning: {APIKey: "webhook-signing-secret-DO-NOT-LEAK-demo"},
 	})
 	if err != nil {
 		return nil, err
@@ -304,7 +304,7 @@ func build() (*state, error) {
 		})
 		stamp := now().UTC().Format(time.RFC3339)
 		if _, err := svc.HandleWebhook(ctx, billing.SignedWebhook{
-			Body: body, Timestamp: stamp, Signature: billing.SignWebhook("whsec_p7demo", stamp, body),
+			Body: body, Timestamp: stamp, Signature: billing.SignWebhook("webhook-signing-secret-DO-NOT-LEAK-demo", stamp, body),
 		}); err != nil {
 			log.Printf("webhook: %v", err)
 		}

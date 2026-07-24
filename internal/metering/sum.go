@@ -114,12 +114,24 @@ func DeriveSUM(src CostEventSource, customerID string, p Period) (SUMResult, err
 	}
 	sort.Strings(ids)
 
+	// Domain-separated, byte-oriented hashing — the same shape telemetry.deriveID and
+	// attribution.clusterID use. The separator matters: without it, ("a","bc") and ("ab","c") would
+	// digest identically, and two different event sets would look like the same re-derivation.
 	h := sha256.New()
-	fmt.Fprintf(h, "sum/v1\ncustomer=%s\nperiod=%s\n", customerID, p.ID)
+	h.Write([]byte("heros.p7.sum.v1"))
+	h.Write([]byte{0})
+	h.Write([]byte(customerID))
+	h.Write([]byte{0})
+	h.Write([]byte(p.ID))
 	total := 0.0
 	for _, id := range ids {
 		total += seen[id]
-		fmt.Fprintf(h, "%s=%s\n", id, strconv.FormatFloat(seen[id], 'x', -1, 64))
+		// 'x' is the exact hexadecimal float format: two values that differ in the last bit produce
+		// different digests, so a re-derivation cannot be mistaken for identical when it is not.
+		h.Write([]byte{0})
+		h.Write([]byte(id))
+		h.Write([]byte{'='})
+		h.Write([]byte(strconv.FormatFloat(seen[id], 'x', -1, 64)))
 	}
 
 	return SUMResult{
