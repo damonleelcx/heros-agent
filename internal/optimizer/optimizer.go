@@ -108,9 +108,14 @@ func (c Constraints) stallK() int {
 // actor, and the three prerequisite arms; the run's merge step is enabled iff all three are armed AND
 // the run is not halted. A grant is itself a change-ledger event.
 type Authority struct {
-	RunID       string      `json:"run_id"`
-	WorkflowID  string      `json:"workflow_id"`
-	Actor       string      `json:"actor"`
+	RunID      string `json:"run_id"`
+	WorkflowID string `json:"workflow_id"`
+	Actor      string `json:"actor"`
+	// CustomerID is the billing customer this run belongs to. It is what the P7 entitlement gate keys
+	// off before a merge (spec Requirement "the P6 loop SHALL consult the entitlement gate"). Empty
+	// means "no commercial gate configured for this run" — see Controller.Entitlement, which is the
+	// field that decides whether that is acceptable.
+	CustomerID  string      `json:"customer_id,omitempty"`
 	Constraints Constraints `json:"constraints"`
 	// WeightProfile is the active P4 weight profile whose composite score is the objective.
 	WeightProfile string `json:"weight_profile"`

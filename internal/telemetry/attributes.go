@@ -152,6 +152,78 @@ var OperationalMetricNames = []string{
 	MetricRateLimitHit,
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// P7 revenue metric taxonomy.
+//
+// These ride the SAME P2.5 substrate as every other metric — the same Sink, the same emission gate,
+// the same scrubber, the same three stores — because standing up a second telemetry path for revenue
+// would be the metering mistake (two collectors that disagree) repeated at the observability layer.
+//
+// They are BILLING-SCOPED rather than run-scoped: a customer's spend under management for a period is
+// not attributable to a run, a node, or a case. Rather than weaken the seven-tag contract, they carry
+// the reserved sentinels below — exactly the discipline NodeIDRun already established for a run-scoped
+// metric. The customer and period ride as DIMENSIONS, not tags, so they are queryable on a span or in
+// Postgres and are excluded from TSDB series labels by the allowlist (customer_id is unbounded, and a
+// label per customer is the cardinality explosion Decision 4 exists to prevent).
+// ─────────────────────────────────────────────────────────────────────────────
+const (
+	// MetricRevenueSUM is a customer's spend under management for a period.
+	MetricRevenueSUM = "revenue_sum_under_management"
+	// MetricRevenueMetered is a metered quantity reported to the billing provider.
+	MetricRevenueMetered = "revenue_metered_reported"
+	// MetricRevenueInvoiceState is 1 per observed invoice/subscription state transition; the state
+	// itself rides as the `billing_state` dimension.
+	MetricRevenueInvoiceState = "revenue_invoice_state"
+	// MetricRevenueChargeFailed is 1 per charge that did not settle. ALERTS (G11): a failed charge is
+	// revenue that silently did not happen.
+	MetricRevenueChargeFailed = "revenue_charge_failed"
+	// MetricRevenueGainshareBilled is a gainshare charge's billed quantity — verified savings only.
+	MetricRevenueGainshareBilled = "revenue_gainshare_billed"
+	// MetricRevenueReconcileDrift is 1 per drift finding. ALERTS (G11): drift is the meter and the
+	// provider disagreeing, which is how month-end becomes a reconstruction.
+	MetricRevenueReconcileDrift = "revenue_reconciliation_drift"
+)
+
+// RevenueMetricNames is the full P7 revenue taxonomy. A value, not a description, so a test can assert
+// the emitter covers exactly this set rather than whatever it happens to emit.
+var RevenueMetricNames = []string{
+	MetricRevenueSUM,
+	MetricRevenueMetered,
+	MetricRevenueInvoiceState,
+	MetricRevenueChargeFailed,
+	MetricRevenueGainshareBilled,
+	MetricRevenueReconcileDrift,
+}
+
+// Reserved tag values for a BILLING-SCOPED metric. Non-empty (the emission gate passes), greppable, and
+// distinct from any real identifier — so a consumer can filter revenue series in or out with
+// `variant_id = "__billing__"`, and no revenue metric can ever be mistaken for a run's.
+const (
+	VariantIDBilling = "__billing__"
+	RunIDBilling     = "__billing__"
+	NodeIDBilling    = "__billing__"
+	CaseIDBilling    = "__billing__"
+)
+
+// ConfigHashBilling is the reserved config_hash a billing-scoped metric carries. The tag contract
+// requires 64 lowercase hex characters, so this is a real, fixed hash rather than a sentinel word:
+// sha256("heros:p7:billing-scope/v1"). A billing figure is not produced by a configuration, and
+// pretending it was — by borrowing some run's hash — would make the number attributable to a config it
+// has nothing to do with.
+const ConfigHashBilling = "624525dc73350e657bd3fbf8e6b1dad99933aa683d9564d986f3eeaa437fb7c7"
+
+// Revenue dimensions. High-cardinality by nature (a label per customer is exactly the explosion
+// Decision 4 forbids), so they are dimensions — carried on spans and in Postgres, never TSDB labels.
+const (
+	AttrCustomerID    = "customer_id"
+	AttrBillingPeriod = "billing_period"
+	AttrChargeKind    = "charge_kind"
+	AttrBillingState  = "billing_state"
+	AttrDriftKind     = "drift_kind"
+	AttrPlanID        = "plan_id"
+	AttrMeterName     = "meter"
+)
+
 // RunScopedMetricNames are emitted once per run window rather than per call (throughput/concurrency).
 var RunScopedMetricNames = []string{
 	MetricCallsInFlight,

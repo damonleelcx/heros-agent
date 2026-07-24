@@ -226,6 +226,34 @@ type FakeRepo struct {
 	// FailMerge / FailRevert force the corresponding op to error, for recovery/failure tests.
 	FailMerge  bool
 	FailRevert bool
+
+	// opened / merged / lastDraft are observation counters. A test that asserts only on the loop's own
+	// RunResult cannot tell "did not merge" apart from "silently dropped the candidate" — both leave
+	// zero merges. These record what the repository was actually ASKED to do, which is the difference.
+	opened    int
+	merged    int
+	lastDraft bool
+}
+
+// Opened is how many pull requests were opened against this repo.
+func (r *FakeRepo) Opened() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.opened
+}
+
+// Merged is how many merges the repo actually performed.
+func (r *FakeRepo) Merged() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.merged
+}
+
+// LastPRWasDraft reports whether the most recently opened PR was a draft.
+func (r *FakeRepo) LastPRWasDraft() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.lastDraft
 }
 
 // NewFakeRepo builds a fake repo whose live spec is the given baseline bytes.
@@ -253,6 +281,8 @@ func (r *FakeRepo) OpenPR(_ context.Context, req OpenPRRequest) (PRRef, error) {
 	pr := PRRef{ProposalID: req.ProposalID, Branch: req.Branch, Draft: req.Draft,
 		URL: "(fake) " + req.Branch, ToConfigHash: h}
 	r.openBranches[req.Branch] = pr
+	r.opened++
+	r.lastDraft = req.Draft
 	return pr, nil
 }
 
@@ -267,6 +297,7 @@ func (r *FakeRepo) Merge(_ context.Context, pr PRRef) (string, error) {
 	}
 	prior := r.head
 	r.nextMerge++
+	r.merged++
 	commit := fmt.Sprintf("merge%03d", r.nextMerge)
 	r.merges[commit] = prior
 	r.head = pr.ToConfigHash

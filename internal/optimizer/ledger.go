@@ -25,6 +25,11 @@ const (
 	EventRevert   EventType = "revert"   // a merged change was reverted via git revert
 	EventRearm    EventType = "rearm"    // a human re-armed the merge step after a halt
 	EventIngest   EventType = "ingest"   // a production-failure trace became a new eval case
+	// EventEntitlementDenied records that the P7 entitlement gate refused a merge and the loop fell back
+	// to opening a pull request for a human. It is a first-class ledger event rather than a log line
+	// because it changed what the loop DID to the customer's repository, and "why was this verified
+	// candidate not merged" must be answerable from the trail years later.
+	EventEntitlementDenied EventType = "entitlement_denied"
 )
 
 // LedgerEvent is one append-only row. It is tagged with the P0 tag set (config_hash, variant_id,

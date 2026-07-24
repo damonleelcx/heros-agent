@@ -51,6 +51,18 @@ type Server struct {
 	// mounted by MountP6 when available.
 	p6 P6Source
 
+	// p7 is the P7 billing/usage read model (SUM, plan + entitlements, invoice breakdown, verified
+	// gainshare evidence), mounted by MountP7 when available.
+	p7 P7Source
+
+	// billing describes the live P7 rollout state (billing on/off, provider mode, gainshare,
+	// auto-merge entitlement), reported by /readyz.
+	//
+	// The rollout state is a HEALTH SIGNAL, not a startup log line: "is this box charging real money"
+	// is a question an operator asks about the box that is misbehaving, now — and a log line that
+	// scrolled past three restarts ago cannot answer it.
+	billing BillingRolloutDescriber
+
 	// secrets is the live provider-credential source, reported by /readyz.
 	//
 	// The SOURCE, never a credential: this holds the thing that can produce secrets precisely so the
@@ -58,6 +70,15 @@ type Server struct {
 	// answer than the gateway did.
 	secrets providergateway.Secrets
 }
+
+// BillingRolloutDescriber reports the P7 rollout gates. A one-method interface rather than an import
+// of the billing package: /readyz needs the words, not the type.
+type BillingRolloutDescriber interface {
+	Describe() map[string]string
+}
+
+// SetBillingRollout records the live P7 rollout so /readyz can report which gates are open.
+func (s *Server) SetBillingRollout(d BillingRolloutDescriber) { s.billing = d }
 
 // SetSecretsSource records which secrets source is live so /readyz can report it.
 //
@@ -108,6 +129,11 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 	body := map[string]any{"status": "ready"}
 	if s.secrets != nil {
 		body["secrets_source"] = s.secrets.Describe()
+	}
+	if s.billing != nil {
+		// Absent rather than "unknown" when unset: a deployment that wired no billing rollout has none,
+		// and saying so by omission beats inventing a status for it.
+		body["billing_rollout"] = s.billing.Describe()
 	}
 	writeJSON(w, http.StatusOK, body)
 }
