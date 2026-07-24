@@ -47,6 +47,10 @@ type Server struct {
 	// p55 is the P5.5 ranked-recommendation + verification read model, mounted by MountP55.
 	p55 P55Source
 
+	// p6 is the P6 autonomous-optimizer governance surface (live monitor + grant/stop/rollback),
+	// mounted by MountP6 when available.
+	p6 P6Source
+
 	// secrets is the live provider-credential source, reported by /readyz.
 	//
 	// The SOURCE, never a credential: this holds the thing that can produce secrets precisely so the
