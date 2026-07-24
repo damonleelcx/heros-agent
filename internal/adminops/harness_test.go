@@ -364,16 +364,6 @@ func (h *harness) entriesFor(action adminaudit.Action) []adminaudit.Entry {
 	return adminaudit.Select(h.audit, adminaudit.Filter{Action: action})
 }
 
-// lastEntry returns the newest audit entry, or fails.
-func (h *harness) lastEntry() adminaudit.Entry {
-	h.t.Helper()
-	es := h.audit.Entries()
-	if len(es) == 0 {
-		h.t.Fatal("audit chain is empty")
-	}
-	return es[len(es)-1]
-}
-
 // assertChainIntact fails unless the whole audit chain verifies.
 func (h *harness) assertChainIntact() {
 	h.t.Helper()

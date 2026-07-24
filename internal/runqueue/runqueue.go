@@ -317,8 +317,11 @@ type Job struct {
 	LeasedBy       string     `json:"leased_by,omitempty"`
 	LeaseExpiresAt *time.Time `json:"lease_expires_at,omitempty"`
 	EnqueuedAt     time.Time  `json:"enqueued_at"`
-	// DeadLetterReason is why a parked item was parked. A dead letter with no reason is one nobody
-	// will revive, which is why the table requires it.
+	// DeadLetterReason is why a parked item was parked, read from the queue's `last_error` column —
+	// the one the table's `run_queue_dead_has_a_reason` CHECK already guards. It is deliberately NOT a
+	// second column: exhaustion and operator cancellation are two ways to reach the same `dead` state,
+	// and giving each its own field would give "why is this run dead" two possible answers that a
+	// reader would have to join and choose between.
 	DeadLetterReason string `json:"dead_letter_reason,omitempty"`
 }
 
@@ -329,7 +332,7 @@ func (q *Queue) List(ctx context.Context, limit int) ([]Job, error) {
 	}
 	rows, err := q.db.QueryContext(ctx,
 		`SELECT run_id, config_hash, source_revision, state, attempts,
-		        COALESCE(leased_by,''), lease_expires_at, enqueued_at, COALESCE(dead_letter_reason,'')
+		        COALESCE(leased_by,''), lease_expires_at, enqueued_at, last_error
 		   FROM run_queue ORDER BY enqueued_at DESC LIMIT $1`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("runqueue: list: %w", err)
@@ -363,7 +366,7 @@ func (q *Queue) Requeue(ctx context.Context, runID string) error {
 	res, err := q.db.ExecContext(ctx,
 		`UPDATE run_queue
 		    SET state='ready', attempts=0, visible_at=now(),
-		        leased_by=NULL, lease_expires_at=NULL, dead_letter_reason=NULL
+		        leased_by=NULL, lease_expires_at=NULL, last_error=''
 		  WHERE run_id=$1 AND state='dead'`, runID)
 	if err != nil {
 		return fmt.Errorf("runqueue: requeue %s: %w", runID, err)
@@ -380,15 +383,17 @@ func (q *Queue) Requeue(ctx context.Context, runID string) error {
 
 // Cancel parks a ready or leased item with the operator's reason — the operator "cancel".
 //
-// It records the reason in the same dead_letter_reason column an exhausted item uses, so a cancelled
-// job and an exhausted one are both diagnosable from one field, and neither can be parked silently.
+// It records the reason in `last_error` — the SAME column an exhausted item writes, and the one the
+// table's `run_queue_dead_has_a_reason` CHECK enforces — so a cancelled job and an exhausted one are
+// both diagnosable from one field, and neither can be parked silently. The constraint is what makes
+// "a dead letter must say why" true of the database rather than of this function remembering.
 func (q *Queue) Cancel(ctx context.Context, runID, reason string) error {
 	if reason == "" {
 		return fmt.Errorf("runqueue: cancelling %s requires a reason", runID)
 	}
 	res, err := q.db.ExecContext(ctx,
 		`UPDATE run_queue
-		    SET state='dead', leased_by=NULL, lease_expires_at=NULL, dead_letter_reason=$2
+		    SET state='dead', leased_by=NULL, lease_expires_at=NULL, last_error=$2
 		  WHERE run_id=$1 AND state IN ('ready','leased')`, runID, reason)
 	if err != nil {
 		return fmt.Errorf("runqueue: cancel %s: %w", runID, err)

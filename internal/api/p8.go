@@ -856,14 +856,14 @@ const (
 
 func writeAdminError(w http.ResponseWriter, status int, code, detail string, heldBy []string) {
 	kind := errKindDegraded
-	switch {
-	case status == http.StatusUnauthorized:
+	switch status {
+	case http.StatusUnauthorized:
 		kind = errKindAuth
-	case status == http.StatusForbidden:
+	case http.StatusForbidden:
 		kind = errKindDenied
-	case status == http.StatusBadRequest:
+	case http.StatusBadRequest:
 		kind = errKindRequest
-	case status == http.StatusPreconditionRequired:
+	case http.StatusPreconditionRequired:
 		kind = errKindFriction
 	}
 	writeJSON(w, status, adminErrorBody{Error: code, Kind: kind, Detail: detail, HeldBy: heldBy})
