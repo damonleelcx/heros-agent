@@ -46,11 +46,45 @@ export function PageFrame({
 }) {
   return (
     <>
-      <p className="page__eyebrow">{eyebrow}</p>
-      <h1>{title}</h1>
-      {lede ? <p className="lede">{lede}</p> : null}
+      <div className="page__header">
+        <p className="page__eyebrow">{eyebrow}</p>
+        <h1>{title}</h1>
+        {lede ? <p className="lede">{lede}</p> : null}
+      </div>
       {children}
     </>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   AlarmBanner
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * AlarmBanner states a fleet-wide condition across the top of the view (FR34).
+ *
+ * It exists for one requirement: an armed kill switch must be apparent **without interaction**. A
+ * stat inside a panel is not that — it is legible only once the operator has decided which panel to
+ * read, and an operator one page into an incident has not.
+ *
+ * # Why four cues and not a red box
+ *
+ * The tint, the heavy rule, the word at display scale, and the slow breath on the indicator are
+ * independent. Take colour away entirely — a monochrome display, a colour-blind reader, a printed
+ * screenshot — and the sentence is still there at the top of the page saying what is halted. That is
+ * the difference between marking a state and merely colouring one.
+ *
+ * `role="alert"` with `aria-live="assertive"` is deliberate here and nowhere else in the console:
+ * this is the one condition worth interrupting a screen-reader user mid-sentence for.
+ */
+export function AlarmBanner({ word, children }: { word: string; children: ReactNode }) {
+  return (
+    <div className="alarm-banner" role="alert" aria-live="assertive">
+      <span className="alarm-banner__dot" aria-hidden="true" />
+      <span className="alarm-banner__word">
+        {word} — {children}
+      </span>
+    </div>
   );
 }
 

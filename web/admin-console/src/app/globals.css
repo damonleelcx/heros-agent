@@ -3,31 +3,52 @@
  *
  * # Where the values come from
  *
- *   web/design-system/tokens.css   the SHARED system: scale, spacing, type, radius, elevation,
- *                                  motion, density, neutral ramp, status palette, focus
- *   ./tokens.operator.css          the operator IDENTITY: accent and chrome, and nothing else
+ *   web/design-system/tokens.css   the SHARED system: the token vocabulary — scale, spacing, type
+ *                                  ramp, radius family, motion budget, density, and the contract each
+ *                                  status token carries
+ *   ./tokens.operator.css          the operator DESIGN LANGUAGE: this console's rendering of that
+ *                                  vocabulary — the instrument palettes, the three faces, the sharper
+ *                                  radii, the chrome
+ *   ./fonts.css                    the faces themselves, served from this origin
  *
  * Not one colour, spacing, type-size or radius literal appears below this comment. That is not a
  * stylistic preference — `scripts/scan-tokens.mjs` fails the build on a literal here, because a value
  * that bypasses the token layer cannot be themed, cannot be contrast-audited, and drifts silently
  * (design-system/README §9).
  *
+ * # The design this file renders
+ *
+ * An instrument panel, not a document. Three ideas do most of the work:
+ *
+ *   1. **The figure is the loudest thing.** Numbers are set in mono at display scale; the labels,
+ *      headings and frames around them are condensed micro-type that recedes (FR38). A section header
+ *      is a tracked-out eyebrow, not a title bar competing with its own contents.
+ *
+ *   2. **Separation by rule, not by shadow.** Panels are hairline-bordered rectangles on a near-black
+ *      ground. Nothing floats except the two things that genuinely sit above the page — the command
+ *      palette and the scrim behind it.
+ *
+ *   3. **One bright thing in the neutral state.** The teal accent marks what is interactive and
+ *      nothing else. Everything not interactive and not hazardous is neutral, which is what leaves the
+ *      hazard palette room to mean something.
+ *
  * # The closed primitive set (FR29)
  *
  * Every rule below belongs to one of nine primitives — page frame, section, data table, stat,
- * timeline, drawer, confirm sheet, receipt, state block — plus the chrome that wraps them and the
- * command palette that reaches them. A view composes from these; it does not add a tenth shape
- * without adding it to design-system/README §7 first.
+ * timeline, drawer, confirmation sheet, receipt, state block — plus the chrome that wraps them and the
+ * command palette that reaches them. A view composes from these; it does not add a tenth shape without
+ * adding it to design-system/README §7 first.
  *
  * # The hazard rule (FR31)
  *
- * `--warn` / `--danger` appear ONLY on: a destructive control, an armed halt, an active
- * impersonation, an alarming state. Every such use below is marked `HAZARD:`. Nothing else may
- * borrow them — see tokens.operator.css for why that is a safety property and not a taste one.
+ * `--warn` / `--danger` appear ONLY on: a destructive control, an armed halt, an active impersonation,
+ * an alarming state. Every such use below is marked `HAZARD:`. Nothing else may borrow them — see
+ * tokens.operator.css for why that is a safety property and not a taste one.
  */
 
 @import "../../../design-system/tokens.css";
 @import "./tokens.operator.css";
+@import "./fonts.css";
 
 /* ══════════════════════════════════════════════════════════════════════════
    Base
@@ -47,9 +68,31 @@ body {
   background: var(--canvas);
   color: var(--text);
   font-family: var(--font-sans);
-  font-size: var(--text-base);
+  font-size: var(--text-sm);
   line-height: var(--line-normal);
+  min-height: 100vh;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/*
+ * A very faint fixed grain over the ground.
+ *
+ * It is the one purely atmospheric thing in the console, and it earns its place by doing something
+ * measurable: on a near-black canvas, large flat fills band visibly on 8-bit panels, and a few
+ * hundredths of noise removes the banding. It is `pointer-events: none`, sits under every interactive
+ * layer, and carries no information — remove it and nothing is lost but the banding.
+ */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.4;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 256 256'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.028'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  background-size: 256px 256px;
 }
 
 /* Keyboard reachability with a VISIBLE focus indicator, on everything focusable.
@@ -72,12 +115,38 @@ a:hover {
   color: var(--accent-strong);
 }
 
+/* Identifiers and figures are ALWAYS mono and ALWAYS tabular: an operator compares tenant ids and
+ * hashes character by character, and reads a column of numbers for magnitude before reading any one
+ * of them. */
 code,
 .mono {
   font-family: var(--font-mono);
   font-size: var(--text-mono);
   font-variant-numeric: tabular-nums;
   overflow-wrap: anywhere;
+}
+
+/*
+ * The eyebrow treatment — condensed, tracked out, uppercase, small.
+ *
+ * It is declared once and reused by every label in the console (page eyebrow, section title, stat
+ * label, column header, pill, receipt term). That is what makes the framing layer recede uniformly:
+ * one treatment for "this names something", so the only things set in the running face are content.
+ */
+.page__eyebrow,
+.section__title,
+.stat__label,
+.role-chip,
+.pill,
+.palette__group,
+.receipt__grid dt,
+th {
+  font-family: var(--font-display);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
+  line-height: var(--line-snug);
 }
 
 .visually-hidden {
@@ -97,11 +166,11 @@ code,
   left: -9999px;
   top: 0;
   background: var(--surface);
-  color: var(--accent-strong);
+  color: var(--accent);
   padding: var(--space-3) var(--space-4);
   border: var(--rule) solid var(--accent-border);
   border-radius: var(--radius-md);
-  z-index: 100;
+  z-index: 300;
 }
 
 .skip-link:focus {
@@ -110,54 +179,66 @@ code,
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
-   Operator chrome (FR23) — the console's identity, on every view
-   ══════════════════════════════════════════════════════════════════════════ */
+   Operator chrome (FR23) — one band, on every view
+   ══════════════════════════════════════════════════════════════════════════
+
+   The console's identity, its navigation and the acting principal live in a single sticky band. One
+   band rather than two rows is a legibility decision: the operator's eye finds the horizon line once
+   and everything below it is content. It is darker than the page in BOTH themes, which is what makes
+   that horizon survive the light theme — and FR23 with it. */
 
 .chrome {
+  position: sticky;
+  top: 0;
+  z-index: 50;
   background: var(--chrome-bg);
   color: var(--chrome-text);
   border-bottom: var(--hairline) solid var(--chrome-border);
+}
+
+.chrome__bar {
+  max-width: var(--measure-content);
+  margin: 0 auto;
+  padding: var(--space-2) var(--gutter);
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-4);
+  gap: var(--space-3) var(--space-5);
   align-items: center;
-  justify-content: space-between;
-  padding: var(--space-3) var(--gutter);
 }
 
 .chrome__mark {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
-  font-size: var(--text-2xs);
+  gap: var(--space-2);
+  font-family: var(--font-display);
+  font-size: var(--text-base);
   font-weight: var(--weight-bold);
   letter-spacing: var(--tracking-eyebrow);
   text-transform: uppercase;
-  color: var(--chrome-text);
+  color: var(--chrome-accent);
+  white-space: nowrap;
 }
 
 /* The mark is a solid operator glyph, deliberately NOT a hazard stripe: chrome that borrows the
  * hazard motif spends the signal the kill switch needs (FR31). */
 .chrome__glyph {
-  width: var(--space-5);
-  height: var(--space-5);
+  border: var(--hairline) solid var(--chrome-accent);
   border-radius: var(--radius-sm);
-  background: var(--accent);
-  color: var(--accent-contrast);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: var(--text-xs);
-  font-weight: var(--weight-bold);
-  letter-spacing: var(--tracking-normal);
+  background: var(--chrome-border);
+  color: var(--chrome-text);
+  padding: 0 var(--space-2);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-eyebrow);
 }
 
 .chrome__right {
+  margin-left: auto;
   display: flex;
   align-items: center;
-  gap: var(--space-4);
+  gap: var(--space-3);
   flex-wrap: wrap;
-  font-size: var(--text-sm);
+  font-size: var(--text-xs);
 }
 
 .chrome__principal {
@@ -165,20 +246,41 @@ code,
   align-items: center;
   gap: var(--space-2);
   color: var(--chrome-muted);
+  font-size: var(--text-xs);
 }
 
 .chrome__principal strong {
   color: var(--chrome-text);
   font-family: var(--font-mono);
   font-size: var(--text-xs);
+  font-weight: var(--weight-regular);
+}
+
+/* The console's own clock. It is not decoration: every figure below states the time it is current as
+ * of, and those statements are only readable against a clock the operator can see (FR34). */
+.chrome__clock {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--chrome-muted);
+  white-space: nowrap;
+}
+
+.chrome__clock::before {
+  content: "";
+  width: var(--space-1);
+  height: var(--space-1);
+  border-radius: var(--radius-pill);
+  background: var(--chrome-accent);
 }
 
 .role-chip {
   border: var(--hairline) solid var(--chrome-border);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-sm);
   padding: 0 var(--space-2);
-  font-size: var(--text-2xs);
-  font-weight: var(--weight-semibold);
   color: var(--chrome-text);
   white-space: nowrap;
 }
@@ -186,20 +288,90 @@ code,
 /* HAZARD: an active impersonation is one of the four permitted uses. */
 .impersonation-banner {
   background: var(--danger-surface);
-  color: var(--text);
+  color: var(--danger);
   border-bottom: var(--rule) solid var(--danger-border);
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-4);
+  gap: var(--space-3) var(--space-4);
   align-items: center;
-  justify-content: space-between;
-  padding: var(--space-3) var(--gutter);
-  font-size: var(--text-sm);
+  justify-content: center;
+  padding: var(--space-2) var(--gutter);
+  font-family: var(--font-display);
+  font-size: var(--text-xs);
   font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
+}
+
+.impersonation-banner strong {
+  font-family: var(--font-mono);
+  font-weight: var(--weight-semibold);
+  text-transform: none;
+  letter-spacing: var(--tracking-normal);
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
-   Navigation
+   AlarmBanner — the fleet-wide halt, stated before anything else (FR34)
+   ══════════════════════════════════════════════════════════════════════════
+
+   HAZARD: an armed halt is one of the four permitted uses, and this is the loudest instance of it in
+   the console. The requirement is that an armed kill switch is unmissable *without interaction*, so
+   the banner sits above the page's own content, spans the full measure, states the fact in words at
+   display scale, and is announced assertively to a screen reader.
+
+   Four independent cues, so no single sense carries it: the hazard tint, the heavy rule, the WORD,
+   and a slow breath on the indicator. Remove any one — including all colour — and the state is still
+   stated. */
+
+.alarm-banner {
+  background: var(--danger-surface);
+  color: var(--danger);
+  border-top: var(--rule-strong) solid var(--danger);
+  border-bottom: var(--rule-strong) solid var(--danger);
+  /* Full-bleed to the content column's edges, so it reads as a band across the view rather than as
+   * one more panel among the panels it is trying to be louder than. */
+  margin: 0 calc(-1 * var(--gutter)) var(--stack);
+  padding: var(--space-3) var(--gutter);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  text-align: center;
+}
+
+.alarm-banner__word {
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
+  line-height: var(--line-tight);
+}
+
+/* The indicator is the only animated thing in the console. It marks a STATE, never a transition, so
+ * it uses the alarm step of the motion budget rather than an interaction duration — and it conveys
+ * nothing the word beside it does not already say (FR35). */
+.alarm-banner__dot {
+  flex: none;
+  width: var(--space-3);
+  height: var(--space-3);
+  border-radius: var(--radius-pill);
+  background: var(--danger);
+  animation: alarm-breath var(--motion-alarm) var(--ease-in-out) infinite;
+}
+
+@keyframes alarm-breath {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Navigation — inline in the chrome band
    ══════════════════════════════════════════════════════════════════════════ */
 
 .nav {
@@ -207,17 +379,20 @@ code,
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-1);
-  padding: 0 var(--gutter);
-  background: var(--surface);
-  border-bottom: var(--hairline) solid var(--border);
+  min-width: 0;
 }
 
 .nav a {
-  color: var(--text-muted);
+  color: var(--chrome-muted);
   text-decoration: none;
-  padding: var(--space-3);
-  font-size: var(--text-sm);
-  font-weight: var(--weight-medium);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-display);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
+  white-space: nowrap;
   border-bottom: var(--rule) solid transparent;
   transition:
     color var(--motion-fast) var(--ease-out),
@@ -225,22 +400,38 @@ code,
 }
 
 .nav a:hover {
-  color: var(--text);
-  border-bottom-color: var(--border-strong);
+  color: var(--chrome-text);
+  border-bottom-color: var(--chrome-border);
 }
 
 /* The current section is marked by colour AND a rule AND aria-current — never colour alone. */
 .nav a[aria-current="page"] {
-  color: var(--accent);
-  border-bottom-color: var(--accent);
-  font-weight: var(--weight-semibold);
+  color: var(--chrome-text);
+  border-bottom-color: var(--chrome-accent);
 }
 
 .nav__end {
-  margin-left: auto;
   display: flex;
   align-items: center;
   gap: var(--space-2);
+}
+
+/*
+ * A quiet control INSIDE the band takes the band's muted ink, not the page's.
+ *
+ * This was a real defect and a instructive one: `.quiet` uses `--text-muted`, which is a light grey
+ * in the dark theme and a dark slate in the light one. The band is dark in BOTH themes, so the light
+ * theme rendered "Sign out" as dark slate on deep teal — present in the accessibility tree, legible
+ * to nobody. Anything painted on the band resolves through the chrome tokens for exactly this
+ * reason; `--chrome-muted` is contrast-checked against the band, `--text-muted` against the page.
+ */
+.chrome button.quiet {
+  color: var(--chrome-muted);
+}
+
+.chrome button.quiet:hover {
+  background: var(--chrome-border);
+  color: var(--chrome-text);
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -248,35 +439,66 @@ code,
    ══════════════════════════════════════════════════════════════════════════ */
 
 main {
+  position: relative;
+  z-index: 1;
   padding: var(--space-6) var(--gutter) var(--space-10);
   max-width: var(--measure-content);
   margin: 0 auto;
 }
 
+/*
+ * The page header is closed by a rule across the whole measure.
+ *
+ * The rule used to hang off the lede, which meant it stopped where the prose stopped — a 62-character
+ * line under a 90-rem page, reading as an underline on a paragraph rather than as the boundary
+ * between "what this page is" and "what it says". The header owns the rule; the lede just wraps.
+ */
+.page__header {
+  padding-bottom: var(--stack-tight);
+  margin-bottom: var(--stack);
+  border-bottom: var(--hairline) solid var(--border);
+}
+
+/* The eyebrow names the surface and carries a live marker, so the page announces what it is before
+ * the title says what it is about. */
 .page__eyebrow {
-  font-size: var(--text-2xs);
-  font-weight: var(--weight-bold);
-  letter-spacing: var(--tracking-eyebrow);
-  text-transform: uppercase;
   color: var(--text-muted);
   margin: 0 0 var(--space-2);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.page__eyebrow::before {
+  content: "";
+  width: var(--space-1);
+  height: var(--space-1);
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  flex: none;
 }
 
 h1 {
-  font-size: var(--text-2xl);
+  font-family: var(--font-display);
+  font-size: var(--text-3xl);
+  font-weight: var(--weight-bold);
   line-height: var(--line-tight);
   letter-spacing: var(--tracking-tight);
   margin: 0 0 var(--space-2);
 }
 
 h2 {
+  font-family: var(--font-display);
   font-size: var(--text-xl);
+  font-weight: var(--weight-semibold);
   line-height: var(--line-snug);
   margin: var(--stack) 0 var(--stack-tight);
 }
 
 h3 {
+  font-family: var(--font-display);
   font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
   line-height: var(--line-snug);
   margin: var(--stack-tight) 0 var(--space-2);
 }
@@ -284,7 +506,7 @@ h3 {
 .lede {
   color: var(--text-muted);
   max-width: var(--measure-prose);
-  margin: 0 0 var(--stack);
+  margin: 0;
 }
 
 .hint {
@@ -315,17 +537,17 @@ h3 {
 .section__header {
   display: flex;
   gap: var(--space-3);
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
-  padding: var(--space-3) var(--pad-cell-x);
-  background: var(--surface-2);
+  padding: var(--space-2) var(--pad-cell-x);
   border-bottom: var(--hairline) solid var(--border);
 }
 
+/* The panel's title is an eyebrow, not a heading bar: it names the panel and then gets out of the way
+ * of the figures inside it (FR38). */
 .section__title {
-  font-size: var(--text-sm);
-  font-weight: var(--weight-semibold);
+  color: var(--text-muted);
   margin: 0;
 }
 
@@ -361,53 +583,65 @@ h3 {
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
-   Stat — one labelled figure, its unit, its as-of time (FR30, FR34)
+   Stat — one labelled figure, its unit, its as-of time (FR30, FR34, FR38)
    ══════════════════════════════════════════════════════════════════════════ */
 
 .stat-row {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(var(--measure-stat), 1fr));
   gap: var(--space-3);
 }
 
 .stat {
-  background: var(--surface);
+  background: var(--surface-2);
   border: var(--hairline) solid var(--border);
   border-radius: var(--radius-md);
   padding: var(--space-3) var(--pad-cell-x);
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
+  gap: var(--space-2);
   min-width: 0;
 }
 
 .stat__label {
-  font-size: var(--text-2xs);
-  font-weight: var(--weight-bold);
-  letter-spacing: var(--tracking-eyebrow);
-  text-transform: uppercase;
   color: var(--text-muted);
 }
 
+/* R16 / FR38: the shared stat scale, so "the figure outranks its frame" is a property of the token
+ * set rather than of each console's judgement. Set in mono because these are read as a COLUMN —
+ * tabular figures at a fixed width let an operator compare four stats without reading four numbers. */
 .stat__value {
-  font-size: var(--text-2xl);
+  font-family: var(--font-mono);
+  font-size: var(--text-stat);
+  font-weight: var(--weight-semibold);
   line-height: var(--line-tight);
   font-variant-numeric: tabular-nums;
   letter-spacing: var(--tracking-tight);
+  overflow-wrap: anywhere;
 }
 
+/* A stat whose value is a WORD rather than a figure — "Disarmed", "ARMED — every tenant halted".
+ * Display scale on a sentence is a headline, not a measurement, so the word steps down to a size the
+ * eye reads at once and the mono grid stops applying. */
 .stat__value--sm {
-  font-size: var(--text-lg);
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
 }
 
 .stat__unit {
+  font-family: var(--font-display);
   font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
   color: var(--text-muted);
   font-variant-numeric: normal;
 }
 
 .stat__meta {
-  font-size: var(--text-2xs);
+  font-size: var(--text-xs);
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
 }
@@ -433,10 +667,18 @@ h3 {
   background: var(--danger-surface);
 }
 
+.stat--alarm .stat__value {
+  color: var(--danger);
+}
+
 /* HAZARD: a figure that needs attention. */
 .stat--warn {
   border-color: var(--warn-border);
   background: var(--warn-surface);
+}
+
+.stat--warn .stat__value {
+  color: var(--warn);
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -457,27 +699,28 @@ caption {
   text-align: left;
   color: var(--text-muted);
   font-size: var(--text-xs);
-  padding: var(--space-3) var(--pad-cell-x);
+  padding: var(--space-2) var(--pad-cell-x);
+  border-bottom: var(--hairline) solid var(--border);
 }
 
 th {
   background: var(--surface-3);
   text-align: left;
-  font-weight: var(--weight-semibold);
-  font-size: var(--text-xs);
-  letter-spacing: var(--tracking-eyebrow);
-  text-transform: uppercase;
   color: var(--text-muted);
   padding: var(--space-2) var(--pad-cell-x);
   border-bottom: var(--hairline) solid var(--border-strong);
   white-space: nowrap;
 }
 
+/* A row's own header is the subject's NAME, so it drops the eyebrow treatment and reads as content —
+ * usually an identifier, which means mono. */
 tbody th {
   background: transparent;
+  font-family: var(--font-sans);
   text-transform: none;
   letter-spacing: var(--tracking-normal);
   font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
   color: var(--text);
   border-bottom: var(--hairline) solid var(--border);
   white-space: normal;
@@ -488,10 +731,15 @@ tbody th {
   padding: var(--pad-cell-y) var(--pad-cell-x);
 }
 
+tbody th.mono {
+  font-family: var(--font-mono);
+}
+
 td {
   padding: var(--pad-cell-y) var(--pad-cell-x);
   border-bottom: var(--hairline) solid var(--border);
   vertical-align: top;
+  color: var(--text-muted);
 }
 
 tbody tr:last-child td,
@@ -507,12 +755,17 @@ tbody tr:hover {
   background: var(--surface-2);
 }
 
-/* Numerals: tabular, right-aligned, unit stated once in the header (FR30). */
+/* Numerals: tabular, right-aligned, mono, unit stated once in the header (FR30). */
 .num,
 th.num {
   text-align: right;
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+td.num {
+  color: var(--text);
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -523,12 +776,8 @@ th.num {
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-sm);
   padding: 0 var(--space-2);
-  font-size: var(--text-2xs);
-  font-weight: var(--weight-bold);
-  letter-spacing: var(--tracking-eyebrow);
-  text-transform: uppercase;
   border: var(--hairline) solid;
   white-space: nowrap;
 }
@@ -554,28 +803,47 @@ th.num {
 }
 
 .pill--neutral {
-  background: var(--surface-2);
+  background: var(--surface-3);
   color: var(--text-muted);
-  border-color: var(--border-strong);
+  border-color: var(--border);
 }
 
 .pill--accent {
   background: var(--accent-surface);
-  color: var(--accent-strong);
+  color: var(--accent);
   border-color: var(--accent-border);
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
-   StateBlock — loading · empty · denied · degraded · unknown (FR26, FR36)
-   ══════════════════════════════════════════════════════════════════════════ */
+   StateBlock — nine answers, nine remedies (FR26, FR36)
+   ══════════════════════════════════════════════════════════════════════════
+
+   🔴 They must be distinguishable BEFORE the copy is read. That is the requirement, and tint alone
+   never met it: nine states cannot have nine legible tints, and an operator mid-incident does not read
+   two sentences to find out which of nine answers they are looking at.
+
+   So each state carries TWO signals that vary independently:
+
+     the FAMILY, carried by tint and by the weight of the leading rule
+       wait                 info tint, hairline rule            loading
+       nothing is wrong     quiet tint, hairline rule           empty · not-mounted · gated
+       you can act          accent tint, strong rule            not-found · denied
+       something is wrong   hazard tint, heavy rule             degraded · unusable · unknown
+
+     the MEMBER, carried by a mono glyph at display scale
+       ···  ∅  ⊘  ▲  ?  ⊗  ⚠  ≠  ⁇
+
+   The glyph is `aria-hidden` and carries no information of its own — every title states the answer in
+   words. It exists so the four families do not have to be nine colours, and so a state is recognised
+   at the distance a page is scanned from rather than the distance it is read from. */
 
 .state {
+  border: var(--hairline) solid var(--border);
   border-radius: var(--radius-md);
   padding: var(--space-4);
-  border-left: var(--rule-strong) solid;
+  border-left: var(--hairline) solid var(--border);
   margin-bottom: var(--space-4);
   background: var(--surface-2);
-  border-left-color: var(--border-strong);
 }
 
 .state:last-child {
@@ -583,17 +851,40 @@ th.num {
 }
 
 .state__title {
+  font-family: var(--font-display);
   font-weight: var(--weight-bold);
-  font-size: var(--text-sm);
+  font-size: var(--text-lg);
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
   margin: 0 0 var(--space-2);
   display: flex;
-  gap: var(--space-2);
+  gap: var(--space-3);
   align-items: center;
+}
+
+/* The member glyph. Mono, boxed, and a fixed square so nine different characters occupy exactly one
+ * shape — the eye finds the box first and reads the glyph inside it, rather than hunting a character
+ * whose width moves the title with it. */
+.state__mark {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--space-6);
+  height: var(--space-6);
+  border: var(--hairline) solid currentColor;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--text-base);
+  font-weight: var(--weight-regular);
+  line-height: 1;
+  opacity: 0.9;
 }
 
 .state__body {
   margin: 0 0 var(--space-2);
   font-size: var(--text-sm);
+  color: var(--text-muted);
   max-width: var(--measure-prose);
 }
 
@@ -601,34 +892,109 @@ th.num {
   margin-bottom: 0;
 }
 
+/* ── Family: wait ────────────────────────────────────────────────────────── */
+
 .state--loading {
   background: var(--info-surface);
-  border-left-color: var(--info-border);
+  border-color: var(--info-border);
 }
+
+.state--loading .state__title {
+  color: var(--info);
+}
+
+/* ── Family: nothing is wrong ────────────────────────────────────────────────
+ * Quiet on purpose. These three are ordinary answers, and an ordinary answer that shouts is an
+ * answer operators learn to dismiss — which costs the states that are real failures. */
 
 .state--empty {
   background: var(--surface-2);
-  border-left-color: var(--border-strong);
+}
+
+.state--empty .state__title {
+  color: var(--text-muted);
+}
+
+.state--not-mounted {
+  background: var(--surface-2);
+}
+
+.state--not-mounted .state__title {
+  color: var(--text-muted);
+}
+
+/* ✋ Gated is an ENTITLEMENT, not an error. It carries the accent — never the hazard palette (FR31) —
+ * because there is nothing wrong to report and nothing to fix. */
+.state--gated {
+  background: var(--surface-2);
+  border-color: var(--accent-border);
+}
+
+.state--gated .state__title {
+  color: var(--accent);
+}
+
+/* ── Family: you can act ──────────────────────────────────────────────────
+ * A denial and a bad identifier are both routing problems with a specific next move, so they carry
+ * the accent and a strong rule: worth stopping for, not worth alarming about. */
+
+.state--not-found {
+  background: var(--accent-surface);
+  border-color: var(--accent-border);
+  border-left: var(--rule-strong) solid var(--accent);
+}
+
+.state--not-found .state__title {
+  color: var(--accent);
 }
 
 /* A denial is NOT an alarm — it is a routing problem with an escalation path, so it carries the
  * accent rather than the hazard palette (FR31). */
 .state--denied {
   background: var(--accent-surface);
-  border-left-color: var(--accent-border);
+  border-color: var(--accent-border);
+  border-left: var(--rule-strong) solid var(--accent);
 }
+
+.state--denied .state__title {
+  color: var(--accent);
+}
+
+/* ── Family: something is wrong ───────────────────────────────────────────── */
 
 /* HAZARD: degraded means a subsystem could not be reached — an alarming state. */
 .state--degraded {
   background: var(--danger-surface);
-  border-left-color: var(--danger-border);
+  border-color: var(--danger-border);
+  border-left: var(--rule-heavy) solid var(--danger);
+}
+
+.state--degraded .state__title {
+  color: var(--danger);
+}
+
+/* HAZARD: an unreadable answer is alarming precisely because it does not look alarming — without this
+ * rendering it arrives as a page of blank fields and is read as data. */
+.state--unusable {
+  background: var(--danger-surface);
+  border-color: var(--danger-border);
+  border-left: var(--rule-heavy) solid var(--danger);
+}
+
+.state--unusable .state__title {
+  color: var(--danger);
 }
 
 /* HAZARD: an unknown outcome is alarming in a different way — something may have happened and the
  * console cannot say. Deliberately distinct from both success and failure (FR36). */
 .state--unknown {
   background: var(--warn-surface);
-  border-left-color: var(--warn-border);
+  border-color: var(--warn-border);
+  border-left: var(--rule-heavy) solid var(--warn);
+}
+
+.state--unknown .state__title {
+  color: var(--warn);
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -658,28 +1024,31 @@ th.num {
 }
 
 .receipt__title {
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
   font-weight: var(--weight-bold);
-  margin: 0 0 var(--space-2);
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
+  color: var(--ok);
+  margin: 0 0 var(--space-3);
 }
 
 .receipt__grid {
   display: grid;
   grid-template-columns: max-content 1fr;
-  gap: var(--space-1) var(--space-3);
+  gap: var(--space-1) var(--space-4);
   margin: 0 0 var(--space-3);
 }
 
 .receipt__grid dt {
-  font-size: var(--text-2xs);
-  font-weight: var(--weight-bold);
-  letter-spacing: var(--tracking-eyebrow);
-  text-transform: uppercase;
   color: var(--text-muted);
+  padding-top: var(--space-1);
 }
 
 .receipt__grid dd {
   margin: 0;
   font-size: var(--text-sm);
+  font-family: var(--font-mono);
   min-width: 0;
   overflow-wrap: anywhere;
 }
@@ -691,29 +1060,52 @@ th.num {
 
 /* ══════════════════════════════════════════════════════════════════════════
    ConfirmSheet — friction proportional to blast radius (FR24, FR37)
-   ══════════════════════════════════════════════════════════════════════════ */
+   ══════════════════════════════════════════════════════════════════════════
+
+   FOUR weights, and the differences are legible across a room without reading a word:
+
+     .action            ordinary — a hairline panel on the quiet surface, accent submit
+     .action--caution   reversible and single-subject — AMBER tint, amber rule, amber submit
+     .action--danger    irreversible — RED tint, red rule, red submit
+     .action--global    fleet-wide — red, heavy rule on every edge, raised
+
+   🔴 The amber tier is why this is four and not three. It was three, and the rendering proved the
+   requirement unmet: "halt this tenant" and "halt the fleet" both came out as red panels with red
+   submits differing only in the width of a left rule, which nobody reads as a difference. Two blast
+   radii sharing one colour is exactly the confusion FR24 names, so the reversible tier steps down to
+   the attention hue and leaves red to mean "this cannot be taken back".
+
+   That is still hazard reservation, not a dilution of it: amber has always meant "needs attention"
+   and red "alarming", and a reversible single-tenant halt is honestly the first of those. */
 
 form.action {
   border: var(--hairline) solid var(--border);
   border-radius: var(--radius-md);
   padding: var(--space-4);
   margin-bottom: var(--space-4);
-  background: var(--surface);
+  background: var(--surface-2);
 }
 
 form.action:last-child {
   margin-bottom: 0;
 }
 
-/* HAZARD: a destructive control. */
+/* HAZARD: a destructive control whose effect can be undone by a further recorded action. */
+form.action--caution {
+  border: var(--hairline) solid var(--warn-border);
+  border-left: var(--rule-strong) solid var(--warn);
+  background: var(--warn-surface);
+}
+
+/* HAZARD: an IRREVERSIBLE control. Red, because there is no correcting action afterwards. */
 form.action--danger {
   border: var(--hairline) solid var(--danger-border);
   border-left: var(--rule-strong) solid var(--danger);
   background: var(--danger-surface);
 }
 
-/* HAZARD: a FLEET-WIDE destructive control — visibly heavier than its per-tenant counterpart, so
- * "halt this tenant" can never be mistaken for "halt the fleet" (FR24). */
+/* HAZARD: a FLEET-WIDE destructive control — visibly heavier than every other control on this
+ * console, so "halt this tenant" can never be mistaken for "halt the fleet" (FR24). */
 form.action--global {
   border: var(--rule) solid var(--danger);
   border-left: var(--rule-heavy) solid var(--danger);
@@ -722,14 +1114,21 @@ form.action--global {
 }
 
 form.action legend {
+  font-family: var(--font-display);
   font-weight: var(--weight-bold);
-  font-size: var(--text-sm);
+  font-size: var(--text-lg);
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
   padding: 0;
 }
 
 form.action--global legend,
 form.action--danger legend {
   color: var(--danger);
+}
+
+form.action--caution legend {
+  color: var(--warn);
 }
 
 fieldset {
@@ -741,17 +1140,30 @@ fieldset {
 
 label {
   display: block;
+  font-family: var(--font-display);
   font-size: var(--text-xs);
   font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
+  color: var(--text-muted);
   margin: var(--space-3) 0 var(--space-1);
 }
 
+/*
+ * Fields size to their CONTENT's shape, not to the page's.
+ *
+ * The console runs a 90rem measure so a nine-column table does not wrap. A text field inherits that
+ * width unless told otherwise, and a 1400-pixel-wide box for a tenant id is not a generous field —
+ * it is a field whose left and right ends cannot be read in one fixation, above a label the eye has
+ * already left behind. The form measure is the width at which a field still reads as a field.
+ */
 input[type="text"],
 input[type="search"],
 input[type="number"],
 select,
 textarea {
   width: 100%;
+  max-width: var(--measure-form);
   font: inherit;
   font-size: var(--text-sm);
   padding: var(--pad-control-y) var(--space-3);
@@ -784,19 +1196,25 @@ textarea {
 
 .checkbox-row label {
   margin: 0;
+  font-family: var(--font-sans);
   font-size: var(--text-sm);
   font-weight: var(--weight-regular);
+  letter-spacing: var(--tracking-normal);
+  text-transform: none;
+  color: var(--text);
   display: inline;
 }
 
 button {
-  font: inherit;
-  font-size: var(--text-sm);
+  font-family: var(--font-display);
+  font-size: var(--text-xs);
   font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
   padding: var(--pad-control-y) var(--space-4);
   border-radius: var(--radius-sm);
   border: var(--hairline) solid var(--border-strong);
-  background: var(--surface-2);
+  background: var(--surface-3);
   color: var(--text);
   cursor: pointer;
   transition:
@@ -805,7 +1223,7 @@ button {
 }
 
 button:hover {
-  background: var(--surface-3);
+  border-color: var(--accent-border);
 }
 
 button:disabled {
@@ -824,7 +1242,7 @@ button.primary:hover {
   border-color: var(--accent);
 }
 
-/* HAZARD: the submit control of a destructive action. */
+/* HAZARD: the submit control of an irreversible or fleet-wide action. */
 button.danger {
   background: var(--danger);
   border-color: var(--danger);
@@ -834,6 +1252,19 @@ button.danger {
 button.danger:hover {
   background: var(--danger-border);
   border-color: var(--danger-border);
+}
+
+/* HAZARD: the submit control of a reversible destructive action — the amber tier, so the control
+ * that halts one tenant does not look like the control that halts the fleet. */
+button.caution {
+  background: var(--warn);
+  border-color: var(--warn);
+  color: var(--text-inverse);
+}
+
+button.caution:hover {
+  background: var(--warn-border);
+  border-color: var(--warn-border);
 }
 
 button.quiet {
@@ -874,7 +1305,7 @@ button.quiet:hover {
 details.drawer {
   border: var(--hairline) solid var(--border);
   border-radius: var(--radius-md);
-  background: var(--surface);
+  background: var(--surface-2);
   margin-bottom: var(--space-2);
 }
 
@@ -885,14 +1316,20 @@ details.drawer:last-child {
 details.drawer > summary {
   cursor: pointer;
   padding: var(--space-2) var(--space-3);
+  font-family: var(--font-display);
   font-size: var(--text-xs);
   font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
   color: var(--accent);
   border-radius: var(--radius-md);
+  /* The disclosure triangle and its label are one control. Inside a table cell they were wrapping
+   * apart — a stray ▶ on one line and the word on the next — which reads as two things. */
+  white-space: nowrap;
 }
 
 details.drawer > summary:hover {
-  background: var(--surface-2);
+  background: var(--surface-3);
 }
 
 details.drawer[open] > summary {
@@ -940,12 +1377,13 @@ figure {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: var(--text-muted);
 }
 
 .bar-chart__track {
   background: var(--chart-track);
   border-radius: var(--radius-sm);
-  height: var(--space-4);
+  height: var(--space-3);
   overflow: hidden;
 }
 
@@ -957,6 +1395,7 @@ figure {
 }
 
 .bar-chart__value {
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   font-size: var(--text-sm);
   text-align: right;
@@ -964,8 +1403,11 @@ figure {
 
 details.tabular-fallback > summary {
   cursor: pointer;
+  font-family: var(--font-display);
   font-size: var(--text-xs);
   font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
   color: var(--accent);
   padding: var(--space-2) 0;
 }
@@ -979,7 +1421,7 @@ details.tabular-fallback > summary {
   margin: 0;
   padding: 0;
   display: grid;
-  gap: var(--space-3);
+  gap: var(--space-2);
 }
 
 .timeline__item {
@@ -987,7 +1429,7 @@ details.tabular-fallback > summary {
   grid-template-columns: max-content 1fr;
   gap: var(--space-3);
   font-size: var(--text-sm);
-  padding-bottom: var(--space-3);
+  padding-bottom: var(--space-2);
   border-bottom: var(--hairline) solid var(--border);
 }
 
@@ -997,7 +1439,8 @@ details.tabular-fallback > summary {
 }
 
 .timeline__when {
-  font-size: var(--text-xs);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -1005,6 +1448,7 @@ details.tabular-fallback > summary {
 
 .timeline__what {
   min-width: 0;
+  color: var(--text-muted);
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -1015,7 +1459,10 @@ details.tabular-fallback > summary {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
-  font-size: var(--text-xs);
+  font-family: var(--font-display);
+  font-size: var(--text-2xs);
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
   color: var(--chrome-muted);
   background: transparent;
   border: var(--hairline) solid var(--chrome-border);
@@ -1024,7 +1471,7 @@ details.tabular-fallback > summary {
 }
 
 .palette-trigger:hover {
-  background: var(--chrome-border);
+  border-color: var(--chrome-accent);
   color: var(--chrome-text);
 }
 
@@ -1079,8 +1526,11 @@ kbd {
   }
 }
 
+/* The palette's own input is the exception to the form measure: it IS the overlay, and the overlay's
+ * width is already capped at 40rem. */
 .palette__input {
   width: 100%;
+  max-width: none;
   border: none;
   border-bottom: var(--hairline) solid var(--border);
   border-radius: 0;
@@ -1099,10 +1549,6 @@ kbd {
 }
 
 .palette__group {
-  font-size: var(--text-2xs);
-  font-weight: var(--weight-bold);
-  letter-spacing: var(--tracking-eyebrow);
-  text-transform: uppercase;
   color: var(--text-muted);
   padding: var(--space-3) var(--space-3) var(--space-1);
 }
@@ -1115,9 +1561,13 @@ kbd {
   text-align: left;
   background: transparent;
   border: var(--hairline) solid transparent;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   padding: var(--space-2) var(--space-3);
+  font-family: var(--font-sans);
   font-size: var(--text-sm);
+  font-weight: var(--weight-regular);
+  letter-spacing: var(--tracking-normal);
+  text-transform: none;
   color: var(--text);
   text-decoration: none;
 }
@@ -1125,7 +1575,7 @@ kbd {
 .palette__item[aria-selected="true"] {
   background: var(--accent-surface);
   border-color: var(--accent-border);
-  color: var(--accent-strong);
+  color: var(--accent);
 }
 
 .palette__item-main {
@@ -1134,7 +1584,7 @@ kbd {
 }
 
 .palette__item-sub {
-  font-size: var(--text-2xs);
+  font-size: var(--text-xs);
   color: var(--text-muted);
   display: block;
 }
@@ -1142,13 +1592,14 @@ kbd {
 /* HAZARD: a palette entry that leads to a destructive action is marked as such — and it NAVIGATES
  * to that action's confirmation, it never performs it (FR37). */
 .palette__danger {
+  font-family: var(--font-display);
   font-size: var(--text-2xs);
   font-weight: var(--weight-bold);
   letter-spacing: var(--tracking-eyebrow);
   text-transform: uppercase;
   color: var(--danger);
   border: var(--hairline) solid var(--danger-border);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-sm);
   padding: 0 var(--space-2);
   white-space: nowrap;
 }
@@ -1178,6 +1629,7 @@ kbd {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
+  font-family: var(--font-mono);
   font-size: var(--text-2xs);
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
@@ -1187,7 +1639,7 @@ kbd {
  * operator concludes the fleet is halted when it is not. */
 .freshness--stale {
   color: var(--warn);
-  font-weight: var(--weight-bold);
+  font-weight: var(--weight-semibold);
 }
 
 /* The freshness line sits above the picture, so the age of every figure below it is stated once. */

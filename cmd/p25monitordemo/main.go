@@ -20,6 +20,7 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -143,7 +144,8 @@ func main() {
 			_, _ = io.WriteString(w, "warming up — refresh in a moment")
 			return
 		}
-		http.Redirect(w, r, "/p25/monitor?run_id="+cur, http.StatusFound)
+		// The console owns the screen now; this redirect points at its canonical route.
+		http.Redirect(w, r, "/app/runs/"+url.PathEscape(cur)+"/live", http.StatusFound)
 	})
 
 	// Loop the run so a watcher always catches a live stream.

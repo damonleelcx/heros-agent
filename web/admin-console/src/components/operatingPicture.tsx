@@ -2,8 +2,26 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { OperatingPicture, OverviewPanel } from "@/lib/overview";
-import { DegradedState, DeniedState, EmptyState, Pill } from "./states";
-import { DataTable, Freshness, Num, Section, Stat, StatRow, Timeline, TimelineItem } from "./primitives";
+import {
+  DegradedState,
+  DeniedState,
+  EmptyState,
+  GatedState,
+  NotMountedState,
+  Pill,
+  UnusableState,
+} from "./states";
+import {
+  AlarmBanner,
+  DataTable,
+  Freshness,
+  Num,
+  Section,
+  Stat,
+  StatRow,
+  Timeline,
+  TimelineItem,
+} from "./primitives";
 import { timestamp } from "@/lib/format";
 import type { Role } from "@/lib/roles";
 
@@ -96,6 +114,16 @@ export function LiveOperatingPicture({
 
   return (
     <>
+      {/* The fleet-wide halt is stated before anything else on the page, because it is the one fact
+       * that changes what every figure below it means. A per-tenant halt is NOT banner-worthy: it is
+       * ordinary operations, and a banner that appears for ordinary operations is a banner operators
+       * learn to look past — which would cost exactly the salience the fleet-wide case needs. */}
+      {ks.data?.global_armed ? (
+        <AlarmBanner word="Global kill switch armed">
+          every tenant&rsquo;s autonomous merges are halted
+        </AlarmBanner>
+      ) : null}
+
       <p className="freshness-line">
         <Freshness asOf={asOf} stale={stale} />
         {refreshing && !stale ? <span className="caption"> · refreshing</span> : null}
@@ -311,15 +339,25 @@ function PanelBody<T>({
   padded?: boolean;
   children: React.ReactNode;
 }) {
-  if (panel.state === "denied") {
-    const body = (
-      <DeniedState capability={capability} description={panel.detail} heldBy={holders[capability] ?? []} />
-    );
-    return padded ? <div className="section__body">{body}</div> : body;
-  }
-  if (panel.state === "degraded") {
-    const body = <DegradedState what={what} detail={panel.detail} />;
-    return padded ? <div className="section__body">{body}</div> : body;
-  }
+  const verdict = ((): React.ReactNode => {
+    switch (panel.state) {
+      case "denied":
+        return (
+          <DeniedState capability={capability} description={panel.detail} heldBy={holders[capability] ?? []} />
+        );
+      case "not_mounted":
+        return <NotMountedState what={what} detail={panel.detail} />;
+      case "gated":
+        return <GatedState what={what} />;
+      case "unusable":
+        return <UnusableState what={what} detail={panel.detail} />;
+      case "degraded":
+        return <DegradedState what={what} detail={panel.detail} />;
+      default:
+        return null;
+    }
+  })();
+
+  if (verdict) return padded ? <div className="section__body">{verdict}</div> : verdict;
   return <>{children}</>;
 }

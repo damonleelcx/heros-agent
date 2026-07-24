@@ -310,3 +310,194 @@ item except 15.10, which exists to prove the **write** path survived them.
       **recorded design review** (reviewer named) for each new view (FR37). Then re-run 14.7 and 14.8.
       → `scripts/visual-baseline.mjs` + `tests/baselines/` (11 routes; proven red on a dropped column
       and green again on restore); review recorded in [`design-review.md`](design-review.md).
+
+## 16. Frontend + Product Designer — Hierarchy, theme, payload, agency (R16–R20)
+
+The 2026 trend review is recorded in
+[`../../../web/design-system/trend-ledger.md`](../../../web/design-system/trend-ledger.md) — sixteen
+trends, four adopted, four adapted-and-inverted, eight rejected, each with its reason. §15 built the
+surface that gets *preferred*; it did not say **which element on a view should be largest**, and the
+shipped console answers that wrongly: the section frame outranks the figure. Everything below is a
+**read**-path item except 16.7, which exists to prove the write path survived them — the same
+structure §15 used, for the same reason.
+
+🔴 Two of the ledger's rejections bind hardest here: an **agent that executes multi-step tasks** and a
+**form that pre-fills from history** are, on an admin console, machines for producing unattributable
+privileged actions.
+
+- [x] 16.1 Frontend: build the **stat primitive** — value at display scale, label and unit subordinate,
+      unit and scale stated once, tabular figures — and refactor every operator view onto it, so no
+      section heading, border or chip outranks the quantity it frames (FR38). 🚫 Adding a stat is a
+      use of the primitive, never a new bespoke layout (15.2).
+- [x] 16.2 🔴 Frontend: hold the stat primitive to the **hazard reservation** (FR31) and the
+      qualified-value rule — a figure rendered at display scale carries its qualifier **beside it at
+      that scale**, and display scale never confers confidence a qualified value has not earned (FR38).
+- [x] 16.3 Frontend: implement the **theme control** — follow system / dark / light, persisted per
+      operator, resolved **server-side** so the first paint is already correct with no flash and no
+      post-hydration reflow (FR39). Same mechanism as the density preference (15.4), not a second one.
+- [x] 16.4 🔴 Frontend + Product: keep the **operator chrome distinguishable from the customer console
+      in both themes** (FR23, FR39). A light-theme operator console that reads as the customer console
+      has defeated a safety requirement, not a style rule — this is the named failure of FR23 arriving
+      by a new route.
+- [x] 16.5 DevOps + Frontend: add the **payload ceiling** to the build — a stated byte budget on the
+      shipped client bundle, failing with the budget and the overage named, and no rendering runtime
+      shipped for decoration (FR40). Extends `scripts/scan-bundle.mjs`, which already walks the bundle
+      for credential material.
+- [x] 16.6 🔴 Frontend + Product: assert **no agentic affordance** over admin capabilities (FR41) —
+      nothing executes, queues, composes or one-click-recommends a privileged command; a suggested next
+      step **navigates to** its confirmation and performs no part of it.
+- [x] 16.7 🔴 **Friction survival, again.** Re-run the §12.9 dangerous-action tests and the §8.3
+      impersonation tests after all of §16; the deliberate step count to a destructive effect must not
+      have decreased, and no reason or typed-target field may have acquired a default (FR37, FR41).
+- [x] 16.8 Test — hierarchy (the rendered type scale of a value exceeds its label, its section heading
+      and its chrome on every view), theme (first paint correct, both themes AA, consoles distinct in
+      both), payload (an over-budget bundle fails the build), agency (no surface performs a privileged
+      command).
+- [x] 16.9 Re-run **14.7** (craft acceptance matrix) and **15.18** (visual-regression baseline) after
+      §16, and record the design review for the restyled views. A restyle that changes every baseline
+      without a described reason is exactly what 15.18 exists to catch.
+
+> **§16 record — 2026-07-24.** Build green (token scan · `next build` · bundle scan), **41 cases, 39
+> pass, 0 fail**, and walked in a browser against `cmd/p8hermes`.
+>
+> **16.1/16.2** — the operator `Stat` already existed and already outranked its frame; it now resolves
+> through the **shared** `--text-stat-sm` so the hierarchy is a property of the token set rather than a
+> coincidence between two consoles, and the relationship is asserted arithmetically.
+>
+> **16.3/16.4** — theme is a persisted, **server-resolved** choice on the same mechanism as density
+> (`readTheme` beside `readDensity`, one attribute on `<html>`, first paint already correct). Verified
+> live: the light theme renders and 🔴 **the dark teal chrome band survives it**, so the console is
+> still unmistakable beside the customer console — FR23 holds in both themes rather than only the one
+> that shipped.
+>
+> 🔎 **A defect found by making that checkable.** The new FR23 test compares the two consoles' accents
+> per theme, and the light **customer** accent added in this same change measured **23°** from the
+> operator teal — *tighter in light mode than the 26° the shipped dark pair manages*. The customer
+> accent was moved to indigo (37° away, 6.7:1 on white). The threshold is calibrated to the separation
+> the product already maintains, not to a number invented for the test.
+>
+> **16.5** — payload ceiling on the shipped bundle: **838,669 bytes**, 561,331 under. Measured from the
+> build manifests, and a dev-written tree is **refused** rather than misreported.
+>
+> **16.6/16.7** — no surface submits a privileged form from an effect; the palette still only
+> navigates. The friction tests pass **after** all of §16: *"the deliberate step count to a destructive
+> effect is unchanged"*, *"nothing on the dangerous path is pre-filled"*. Confirmed by looking — the
+> global kill switch in the **new light theme** is the only element on its page carrying the hazard
+> palette, its reason field opens empty and its confirmation unchecked.
+
+## 17. Frontend + Product Designer — The operator instrument restyle
+
+§15 and §16 produced a console that is correct, legible and preferred. It did not decide what the
+console should *look like*, and the answer it inherited was "a well-behaved web application". This
+section replaces that with a stated design: the console is read the way a control panel is read — at
+distance, under time pressure, by someone who needs "is anything halted" answered before they have
+finished sitting down.
+
+Everything below is a **read**-path item except 17.6, which exists to prove the write path survived
+them — the same structure §15 and §16 used, for the same reason.
+
+- [x] 17.1 Frontend: extend the operator token layer from *accent + chrome* to the console's full
+      **rendering of the shared vocabulary** — instrument palettes for both themes, three self-hosted
+      faces (sans / condensed display / mono), sharper radii, a wider content measure. No token NAME is
+      added that the shared system does not define, except `--chrome-*` and `--font-display`; the
+      shared file keeps owning the vocabulary, the scale and the contracts (Decision 12, 15.1).
+- [x] 17.2 Frontend: self-host every face from the console's own origin, latin-subset, under a stated
+      weight. `font-src 'self'` is not an obstacle to work around: a third-party subresource on an
+      operator surface hands that party a record of who is on the console and when.
+- [x] 17.3 Frontend: recompose every primitive in the instrument idiom — figures in mono at display
+      scale, one condensed tracked-out treatment shared by every label so the framing layer recedes
+      uniformly (FR38), separation by hairline rule rather than by shadow, and the chrome + navigation
+      + acting principal merged into a **single band** so the operator's eye finds one horizon line.
+- [x] 17.4 Frontend + Product: add the **`AlarmBanner`** primitive — a fleet-wide condition stated
+      across the top of the view in four independent cues (hazard tint, heavy rule, the condition in
+      words at display scale, a `--motion-alarm` indicator). FR34 asks that an armed kill switch be
+      apparent *without interaction*, and a stat inside a panel is legible only once the operator has
+      chosen which panel to read.
+- [x] 17.5 🔴 Frontend + Product: **render FR24, do not merely encode it.** The two-tier confirmation
+      satisfied every test and still put "halt this tenant" and "halt the fleet" on screen as red
+      panels with red submits differing by a rule width. Three tiers now key off the server's
+      blast-radius classification — amber reversible, red irreversible, red-and-heavy fleet-wide — and
+      the new test asserts the **hue** separation rather than the rule weight.
+- [x] 17.6 🔴 **Friction survival, again.** The §12.9 dangerous-action tests and the §8.3 impersonation
+      tests re-run green after the whole restyle: the deliberate step count is unchanged, no reason or
+      typed-target field acquired a default, and the palette still only navigates (FR37, FR41).
+- [x] 17.7 Test — the two guards this round added, each proven red before green: every rule painting on
+      the chrome band resolves through `--chrome-*` (a page ink there is contrast-checked against the
+      wrong background); and `--motion-alarm`, the one duration outside the interaction budget, may
+      only be used by a rule that also carries a hazard treatment.
+- [x] 17.8 Re-run **15.18** (visual-regression baseline) after the restyle and record the design
+      review. → all 11 routes re-baselined after looking at each rendering;
+      [`design-review.md`](design-review.md) "Review 2".
+- [x] 17.9 Re-walk the **14.7 acceptance matrix** cells the restyle did not cover — **200 % zoom**
+      (720 CSS px on a 1440 screen: no horizontal overflow, asserted programmatically as
+      `scrollWidth === clientWidth`, band reflows to four tiers), **reduced motion** (the shared
+      override applied live: every drawer body at `opacity: 1`, `animation-duration: 0s`, no transform,
+      and the armed-halt indicator fully visible with its word at display scale), and **compact
+      density** (rhythm tightens, no row/column/control/disclosure disappears).
+- [ ] 17.10 🔴 **Outstanding.** The **named** design review 15.18 requires. Review 2 in
+      [`design-review.md`](design-review.md) records the evidence with the reviewer explicitly unnamed;
+      a human still has to look and sign it.
+
+## 18. Frontend + Backend — The state family completed (FR26)
+
+The design brief names **seven** states every page must be able to render, and the admin console adds
+Denied and Degraded on top of them. The console shipped **five**. That was not a cosmetic shortfall:
+each missing state was being answered with another state's copy, and three of the four substitutions
+told the operator something false.
+
+- [x] 18.1 Backend: classify a missing subject as **404 / `not_found`** rather than 400 /
+      `request`. `account.ErrNotFound` already existed and the admin API's `writeCapabilityError`
+      simply never mapped it, so every mistyped identifier fell through the `default` arm and reached
+      the console as "the platform is broken".
+- [x] 18.2 Frontend: add `not_found` · `not_mounted` · `gated` · `unusable` to the API error kinds,
+      with a status map (404 → not_found, 402 → gated, 501 → not_mounted) so `degraded` is the
+      **fallback** rather than the default. `degraded` is the answer that sends an operator hunting an
+      outage; it should only be given when there might be one.
+- [x] 18.3 🔴 Frontend: **an unreadable response is never cast to data.** `safeParse` returned `null`,
+      `null` was cast to the expected type, and the page rendered every field as `undefined` — a
+      version mismatch presented to an operator as a tenant with no plan or a chain with no entries.
+      It does not look like a failure; it looks like data, and it is read as data. A `Symbol` sentinel
+      now separates "did not parse" from "parsed to null" (which is valid JSON), and the first raises
+      `unusable`.
+- [x] 18.4 Frontend: build the four missing state blocks and route every state through **one**
+      `StateBlock`, so a tenth cannot arrive with its own layout, spacing or idea of where the remedy
+      goes.
+- [x] 18.5 🔴 Frontend + Product: make the nine **distinguishable before the copy is read** — the
+      brief's actual complaint was that they "differ only by border and tint". Tint and rule weight now
+      carry the FAMILY (wait · nothing is wrong · you can act · something is wrong) and a mono glyph
+      carries the MEMBER. The glyph is `aria-hidden` and every title states the answer in words, so it
+      is a second signal and never the only one.
+- [x] 18.6 Frontend: hold the new states to the hazard reservation (FR31) — `empty`, `not_mounted`,
+      `gated`, `not_found` and `denied` may not touch `--warn` / `--danger`. **Gated especially**: the
+      brief marks it "✋ not an error", and an entitlement boundary rendered in red teaches operators
+      that the console cries wolf, which costs the states that are real failures.
+- [x] 18.7 Frontend: render a mistyped identifier **in place, inside the shell**, instead of leaving
+      through the framework's unstyled 404 — which carries no chrome, no acting principal, no palette,
+      and does not say which console the operator is on.
+- [x] 18.8 Test — all nine exist and are styled; no two share a mark; every state renders through the
+      one block; the "nothing is wrong" family never borrows the hazard palette and the three hazards
+      always do; an unreadable 2xx raises rather than casting; a panel reports its own verdict.
+
+> **§18 record — 2026-07-24.** `go test ./internal/api` green · token scan · `tsc` · **48 cases, 46
+> pass, 0 fail** · `next build` · bundle scan (**822 663 bytes**) · visual baseline green across 11
+> routes.
+>
+> 🔎 **The not-found path was verified end to end, and the browser is what found the last defect.**
+> With the console side complete, a bogus tenant id still rendered **DEGRADED** — because the platform
+> was answering `400 / kind: "request"` for "no such customer". The console was right and the
+> classification was wrong one layer down. Fixed in `internal/api/p8.go`, and the same URL now renders
+> **NO SUCH RECORD** with the identifier echoed in mono, in the accent rather than the hazard palette,
+> inside the operator shell. Three layers, one requirement, and only the rendering could show it.
+
+> **§17 record — 2026-07-24.** Token scan · `tsc` · **43 cases, 41 pass, 0 fail** · `next build` ·
+> bundle scan (**845 461 bytes**, 554 539 under the ceiling — the three faces are 160 kB of `woff2`
+> and are not JavaScript) · visual baseline green across 11 routes. Walked in a real browser against
+> `cmd/p8hermes` on the **production** build, in both themes and at 768 px.
+>
+> 🔎 **The two defects worth the restyle on their own.** Both were invisible to a green build, and
+> both are now machine-fenced. FR24 was *false on screen while true in the markup* — the requirement
+> that "halt this tenant" can never be mistaken for "halt the fleet", satisfied by a rule width nobody
+> perceives. And a light-theme "Sign out" rendered dark-slate-on-deep-teal: in the accessibility tree,
+> invisible on the screen, and unfindable while working in dark. The lesson both teach is the one
+> 12.15 already states — a green build, a passing type check and passing unit tests are all compatible
+> with a page that renders the wrong thing.

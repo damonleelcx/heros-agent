@@ -5,7 +5,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { ADMIN_SESSION_COOKIE, AdminApiError, adminFetch, exchangeAssertion, revokeSession } from "./adminApi";
 import { readSessionToken, SESSION_COOKIE_OPTIONS } from "./session";
-import { DENSITY_COOKIE, DENSITY_COOKIE_OPTIONS } from "./prefs";
+import { DENSITY_COOKIE, DENSITY_COOKIE_OPTIONS, THEME_COOKIE, THEME_COOKIE_OPTIONS, isTheme } from "./prefs";
 import type { Receipt } from "./types";
 
 /**
@@ -48,12 +48,27 @@ export type ActionResult =
   | {
       ok: false;
       /**
-       * denied/friction/request are FAILURES: nothing happened, and the operator can act on the
-       * message. `degraded` is a read that could not complete. `unknown` is the third outcome only a
-       * fail-closed platform produces — the command may or may not have taken effect, and the answer
+       * denied/friction/request/not_found/gated are FAILURES in which NOTHING HAPPENED and the
+       * operator can act on the message. `not_mounted` means the command does not exist in this
+       * deployment. `degraded` is a call that could not complete. `unusable` means the platform
+       * answered unreadably — retrying will not help. `unknown` is the third outcome only a
+       * fail-closed platform produces: the command may or may not have taken effect, and the answer
        * lives in the audit log, not in a retry (FR36).
+       *
+       * They stay distinct all the way to the confirmation sheet because the operator's NEXT MOVE
+       * differs for each, and a command surface that guesses wrong invites either a double-suspend or
+       * an abandoned incident.
        */
-      kind: "denied" | "friction" | "degraded" | "request" | "unknown";
+      kind:
+        | "denied"
+        | "friction"
+        | "request"
+        | "not_found"
+        | "not_mounted"
+        | "gated"
+        | "degraded"
+        | "unusable"
+        | "unknown";
       message: string;
       heldBy?: string[];
       command?: Command;
@@ -65,18 +80,31 @@ async function withSession<T>(fn: (token: string) => Promise<T>): Promise<T> {
   return fn(token);
 }
 
+/**
+ * COMMAND_KINDS are the API classifications a command outcome reports as itself.
+ *
+ * `auth` is deliberately absent: an expired session is not an outcome to render, it is a redirect,
+ * and it is handled before a command is ever issued.
+ */
+const COMMAND_KINDS = [
+  "denied",
+  "friction",
+  "request",
+  "not_found",
+  "not_mounted",
+  "gated",
+  "degraded",
+  "unusable",
+  "unknown",
+] as const;
+
 function toResult(error: unknown, command?: Command): ActionResult {
   if (error instanceof AdminApiError) {
-    const kind =
-      error.kind === "denied"
-        ? "denied"
-        : error.kind === "friction"
-          ? "friction"
-          : error.kind === "request"
-            ? "request"
-            : error.kind === "unknown"
-              ? "unknown"
-              : "degraded";
+    // `degraded` is the fallback rather than the default: it is the answer that sends an operator to
+    // look for an outage, and it should only be given when there might be one.
+    const kind = (COMMAND_KINDS as readonly string[]).includes(error.kind)
+      ? (error.kind as ActionResult extends { ok: false; kind: infer K } ? K : never)
+      : "degraded";
     return { ok: false, kind, message: error.message, heldBy: error.heldBy, command };
   }
   return { ok: false, kind: "degraded", message: String(error), command };
@@ -108,6 +136,20 @@ export async function signIn(assertion: unknown): Promise<ActionResult> {
 export async function setDensity(density: "comfortable" | "compact"): Promise<void> {
   const jar = await cookies();
   jar.set(DENSITY_COOKIE, density === "compact" ? "compact" : "comfortable", DENSITY_COOKIE_OPTIONS);
+  revalidatePath("/", "layout");
+}
+
+/**
+ * setTheme records the operator's colour theme (R17 / FR39).
+ *
+ * Deliberately the same shape as `setDensity`: both are display preferences read on the server so the
+ * first paint is correct, and a second mechanism for the second preference would be a second place to
+ * get the same thing wrong. `revalidatePath("/", "layout")` is what makes the root element's attribute
+ * re-render rather than only the page under it.
+ */
+export async function setTheme(theme: "system" | "dark" | "light"): Promise<void> {
+  const jar = await cookies();
+  jar.set(THEME_COOKIE, isTheme(theme) ? theme : "system", THEME_COOKIE_OPTIONS);
   revalidatePath("/", "layout");
 }
 

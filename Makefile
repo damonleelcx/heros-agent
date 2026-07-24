@@ -20,14 +20,15 @@ PARITY_DIR ?= .parity
 .DEFAULT_GOAL := ci
 
 .PHONY: ci go build vet fmt test schema lint db-proof pg-proof verifier-proof tidy-check clean help p4-board-demo \
+        console-types console-types-check console-test \
         build-discover discovery-ci discovery-throughput \
         discovery-parity-snapshot discovery-parity-verify \
         discovery-sandbox-proof discovery-sandbox-proof-redcheck \
         sandbox-proof sandbox-proof-redcheck \
         p35-calibration p35-graph-demo p55-demo p7-billing-demo p7-ui-states
 
-## ci: the locally-provable gate (go + schema + discovery-ci). Lint/db-proof run as their own CI jobs.
-ci: go schema discovery-ci
+## ci: the locally-provable gate (go + schema + console-types + discovery-ci). Lint/db-proof run as their own CI jobs.
+ci: go schema console-types-check discovery-ci
 	@echo "== make ci: PASS =="
 
 ## go: build, vet, gofmt-check, test
@@ -49,6 +50,23 @@ fmt:
 
 test:
 	$(GO) test -count=1 $(PKG)
+
+## console-types: regenerate the console's data contract from the Go view structs (P9 ADR-007)
+console-types:
+	$(GO) run ./cmd/consoletypes
+
+## console-types-check: fail if a Go view type changed and the checked-in contract did not.
+#
+# This is the drift gate, and it is the whole reason the artifacts are generated rather than written.
+# The failure mode it prevents is not a compile error — it is a BLANK CELL in production, because a
+# field renamed in Go becomes `undefined` in TypeScript and renders as an em-dash that looks exactly
+# like legitimately absent data.
+console-types-check:
+	$(GO) run ./cmd/consoletypes -check
+
+## console-test: the customer console's own suite (needs npm; see web/console/README.md)
+console-test:
+	cd web/console && npm run typecheck && npm test
 
 ## schema: JSON-schema validation gate + contract proofs (task 4.2)
 schema:

@@ -85,12 +85,18 @@ func main() {
 		Runs:       executor.NewStore(db),
 		Specs:      variantspec.NewStore(db),
 	})
-	fmt.Printf("p2 ui:  http://%s/p2\n", *addr)
-	fmt.Printf("  built + succeeded: ?cfg=%s&rev=rev1&run=run_ok\n", hashBuilt)
-	fmt.Printf("  build-rejected:    ?cfg=%s&rev=rev1\n", hashRejected)
-	fmt.Printf("  halted:            ?run=run_halted\n")
-	fmt.Printf("  baseline/empty:    ?cfg=%s&rev=rev1&run=run_empty\n", hashBaseline)
-	fmt.Printf("  built, syntax-checked (human review required): ?cfg=%s&rev=rev1\n", hashSyntaxOnly)
+	// The embedded UI page this demo used to open was removed in the P9 cutover: the console is now a
+	// separate component, so a demo can serve the read models but cannot serve the screen. It prints the
+	// API it is serving and how to point the console at it — the same shape `cmd/p9hermes` uses.
+	fmt.Printf("p2 API: http://%s\n\n", *addr)
+	fmt.Printf("  cd web/console && PLATFORM_API_BASE=http://%s \\\n", *addr)
+	fmt.Printf("    CONSOLE_PLATFORM_CREDENTIAL=demo CONSOLE_TENANT_IDENTITY=dev npm run dev\n\n")
+	fmt.Printf("  then, at http://127.0.0.1:4320\n")
+	fmt.Printf("    built + succeeded:  /app/transforms/%s/rev1  and  /app/runs/run_ok\n", hashBuilt)
+	fmt.Printf("    build-rejected:     /app/transforms/%s/rev1\n", hashRejected)
+	fmt.Printf("    halted:             /app/runs/run_halted\n")
+	fmt.Printf("    baseline/empty:     /app/transforms/%s/rev1  and  /app/runs/run_empty\n", hashBaseline)
+	fmt.Printf("    human review needed: /app/transforms/%s/rev1\n", hashSyntaxOnly)
 	log.Fatal(http.ListenAndServe(*addr, s.Handler))
 }
 

@@ -9,9 +9,12 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/heros-foreal/agentd/internal/auth"
 	"github.com/heros-foreal/agentd/internal/config"
@@ -69,6 +72,76 @@ type Server struct {
 	// endpoint can name it without anyone re-deriving it from configuration and getting a different
 	// answer than the gateway did.
 	secrets providergateway.Secrets
+
+	// console is the P9 customer console component, aggregated into /readyz when wired.
+	//
+	// The moment a second process sits in the request path, readiness has to cover it or it is
+	// measuring the wrong thing: a Go service that reports "ready" while the surface users actually
+	// reach is dead is a LYING HEALTH SIGNAL, and 🔴 health-signal-surface is explicit that a UI
+	// dashboard is never itself the health judgement. Nil-able like every other mount point, because a
+	// deployment that ships no console has no console component — and saying so by omission beats
+	// inventing a status for one that does not exist.
+	console ComponentProbe
+}
+
+// ComponentProbe reports whether a dependent component is reachable.
+//
+// A one-method interface rather than an import of the console's client: /readyz needs the ANSWER, not
+// the type. It also keeps the aggregation testable without a network — the failure case that matters
+// most here is the one where the component is unreachable, and that must be exercisable.
+type ComponentProbe interface {
+	// Name is the component's name as it appears on /readyz. Machine-readable, so a monitor can alert
+	// on the specific component rather than on "not ready".
+	Name() string
+	// Probe returns nil when the component is reachable, or the reason it is not.
+	Probe(ctx context.Context) error
+}
+
+// SetConsoleProbe wires the customer console into the readiness signal (P9 FR25).
+func (s *Server) SetConsoleProbe(p ComponentProbe) { s.console = p }
+
+// HTTPComponentProbe probes a component's health endpoint over HTTP.
+//
+// The timeout is explicit and short. A readiness probe that can hang is not a readiness probe: the
+// orchestrator's own probe deadline would fire first, and the answer an operator gets would be
+// "timeout" rather than "the console is unreachable" — the same outcome with none of the information.
+type HTTPComponentProbe struct {
+	ComponentName string
+	URL           string
+	Client        *http.Client
+}
+
+// NewHTTPComponentProbe builds a probe with a bounded client.
+func NewHTTPComponentProbe(name, url string) *HTTPComponentProbe {
+	return &HTTPComponentProbe{
+		ComponentName: name,
+		URL:           url,
+		Client:        &http.Client{Timeout: 2 * time.Second},
+	}
+}
+
+// Name reports the component's name.
+func (p *HTTPComponentProbe) Name() string { return p.ComponentName }
+
+// Probe performs one GET against the component's health endpoint.
+func (p *HTTPComponentProbe) Probe(ctx context.Context) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.URL, nil)
+	if err != nil {
+		return err
+	}
+	client := p.Client
+	if client == nil {
+		client = &http.Client{Timeout: 2 * time.Second}
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("unreachable: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("health endpoint returned %d", resp.StatusCode)
+	}
+	return nil
 }
 
 // BillingRolloutDescriber reports the P7 rollout gates. A one-method interface rather than an import
@@ -135,6 +208,34 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 		// and saying so by omission beats inventing a status for it.
 		body["billing_rollout"] = s.billing.Describe()
 	}
+
+	// Component aggregation (P9 FR25). The service's OWN health is not the deployment's health once a
+	// second process sits in the request path, so a degraded component makes the whole signal
+	// not-ready — and it is NAMED, because "not ready" without a subject sends an operator to read
+	// three dashboards to learn what this response already knew.
+	//
+	// The components map is present only when a component is wired. An empty map would assert that the
+	// deployment has components and they are all fine, which is a different claim from having none.
+	components := map[string]any{}
+	degraded := make([]string, 0, 1)
+	if s.console != nil {
+		if err := s.console.Probe(r.Context()); err != nil {
+			components[s.console.Name()] = map[string]any{"status": "degraded", "detail": err.Error()}
+			degraded = append(degraded, s.console.Name())
+		} else {
+			components[s.console.Name()] = map[string]any{"status": "ready"}
+		}
+	}
+	if len(components) > 0 {
+		body["components"] = components
+	}
+	if len(degraded) > 0 {
+		body["status"] = "degraded"
+		body["degraded_components"] = degraded
+		writeJSON(w, http.StatusServiceUnavailable, body)
+		return
+	}
+
 	writeJSON(w, http.StatusOK, body)
 }
 

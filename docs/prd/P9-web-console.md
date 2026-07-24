@@ -54,6 +54,18 @@ sentence) is enumerated and carried forward. Milestone **M12 — customer consol
 tenant can sign in and drive discovery → configure → run → compare → diagnose from a browser, with
 no API key in it and nothing on the screen that the server did not compute.
 
+Two things sit on top of that floor, because a floor is not a product. The first is a **craft layer**
+(G17, FR27–FR31): the console has to be the surface a customer *chooses* to open, and the properties
+that make it so — one subject per view present in the first paint, structure that does not reflow when
+data lands, depth and motion as hierarchy, a console that anticipates the next move — are specified
+and gated rather than left to taste. The rule that keeps that safe is **delight on the read path,
+honesty on the evidence path**: no visual emphasis may make a provisional, tied, disqualified,
+uncalibrated, unverified or gated value look more certain than the server said it was. The second is a
+**public home page** (G18, FR32–FR35) — the surface a prospect meets before there is a session at
+all. It renders with no session, no tenant data and no upstream call, and every capability it claims
+resolves through a checked-in **capability manifest** whose unshipped entries fail the build, so the
+page that sells the product cannot promise something the product does not do.
+
 ## 2. Problem & context
 
 The platform can already discover a call graph, apply a variant as a reviewable diff, run it
@@ -186,6 +198,25 @@ P9 adds the **session + credential boundary**, the **app shell**, the **design s
   accepted only on evidence from a **real browser rendering** the page against a real API response.
   `next build` succeeding, type-checking passing, and unit tests passing SHALL NOT constitute
   acceptance for any user-visible behavior.
+- **G17. The console SHALL be the surface a customer chooses to open — and the craft SHALL NOT
+  overstate the evidence.** A specification made only of lower bounds produces exactly what it asks
+  for: a compliant screen nobody opens. So the properties that make the console *preferred* — one
+  clear subject per view, the subject present in the first paint, depth and motion that carry
+  hierarchy rather than decoration, and a console that **anticipates the next move** (resume where
+  you left off, cross-surface continuity, a keyboard command path, live values that arrive without a
+  reload) — are specified with the same seriousness as the gates. The rule that keeps that safe is
+  **delight on the read path, honesty on the evidence path**: no elevation, gradient, accent,
+  animation or emphasis may make a **provisional, tied, disqualified, low-confidence, uncalibrated,
+  unverified or gated** value look more certain than the server said it was. On this product that is a
+  correctness property, not a taste one — P4's statistical honesty is the thing being rendered.
+- **G18. There SHALL be a public home page that sells the product without a session and without a
+  claim the platform cannot meet.** The console's public entry SHALL render with **no session, no
+  tenant data, and no upstream platform call**, so an anonymous visitor never touches the credential
+  boundary. Its capability claims SHALL be **derived from a checked-in capability manifest that names
+  each capability's owning phase and shipped state**, so the page cannot promise a capability that has
+  not shipped; and it SHALL name plans **by name only**, never a price value. It SHALL meet the same
+  accessibility floor, the same token discipline and the same `en-US` string rules as every other
+  page.
 
 ### Non-goals (explicitly deferred or owned elsewhere)
 
@@ -336,6 +367,90 @@ Numbered FRs; each maps 1:1 to an OpenSpec requirement in `openspec/changes/p9-w
 - **FR24.** All values interpolated into the DOM SHALL be escaped by default (the raw `node_id`
   interpolation in `p25monitor.html` SHALL NOT be reproduced).
 
+### The craft layer (capability `console-design-system`)
+
+These are the requirements that turn the floor into a surface a customer *prefers*. Each is written so
+it can go red; a rule about beauty that cannot fail a check is a preference, not a requirement.
+
+- **FR27.** Every view SHALL have **exactly one subject**, carried by exactly one display-level
+  heading, and that subject SHALL be present in the **first paint** — before its data resolves. A
+  view SHALL NOT open as an undifferentiated spinner, and SHALL NOT reflow its structure when data
+  arrives (skeletons occupy the shape the content will take).
+- **FR28.** Depth, motion and emphasis SHALL be **hierarchy signals drawn from the token set** and
+  SHALL NOT be decoration. Every duration SHALL come from the motion budget, no transition SHALL sit
+  on the action path, and `prefers-reduced-motion` SHALL lose **no information** — every state a
+  transition would have communicated SHALL also be communicated statically.
+- **FR29. 🔴 The confidence treatment SHALL be reserved for confident values.** A value the server
+  marked **provisional, tied, disqualified, low-confidence, uncalibrated, unverified, withheld,
+  candidate or gated** SHALL NOT be rendered with the emphasis reserved for a settled result —
+  no accent color, no elevation above its peers, no entrance animation, no display-weight type. This
+  is the P9 analogue of the hazard-palette reservation: emphasis is legible because it is *earned*,
+  and a UI that makes a tie look like a win has invented a ranking the server refused to make.
+- **FR30.** The console SHALL **anticipate the next move**: it SHALL offer the subjects this session
+  has already visited before asking for an identifier, SHALL provide a keyboard command path to every
+  subject and surface, and SHALL carry the current subject across surfaces so moving from graph to
+  run to diff to board never re-asks who the subject is.
+- **FR31.** Numbers SHALL be rendered for comparison — tabular figures, digit-aligned numeric
+  columns, unit and scale stated once, one precision per view — and a figure SHALL always be rendered
+  next to the qualifier the server attached to it (interval, seed count, coverage, calibration),
+  never alone.
+
+#### Visual hierarchy, theme and payload (R16–R20 — see [`trend-ledger.md`](../../web/design-system/trend-ledger.md))
+
+FR27–FR31 above specify that the craft layer is *expressed as tokens* and that emphasis is *reserved*.
+They do not say which element on a view should be largest, and the shipped console answers that
+wrongly: measured values render at the smallest type size on the page while the section frames that
+introduce them render larger. The four requirements below close that gap. They are derived from the
+2026 trend review, whose adopt/adapt/reject verdicts and reasoning are recorded in the ledger —
+including 🔴 the two trends (**AI-agent task execution**, **progressive pre-filled forms**) rejected
+because they would directly overturn this platform's audit-then-effect discipline.
+
+- **FR36. 🔴 The measured value SHALL outrank its frame.** In every **summary block** — a block whose
+  purpose is to present a small fixed set of headline quantities — the quantity SHALL be the visually
+  dominant element; its label, unit and provenance SHALL be subordinate to it, and no section heading,
+  card border or chrome SHALL carry more visual weight than the values that block exists to present.
+  A quantity SHALL state its **unit and scale once**, carry tabular figures, and — 🔴 without
+  exception — SHALL remain governed by FR29: emphasis applied to a qualified value is a defect, and it
+  is a *larger* defect at display scale than at body scale, because size reads as certainty.
+
+  *Scope, stated because the obvious reading is wrong.* This does **not** apply to a **table**. A table
+  is a comparison surface: its power is that many values are legible in one visual plane at one size,
+  and setting its cells at display scale would destroy the comparison the table exists to enable.
+  Tables remain governed by FR31 — tabular figures, digit-aligned columns, unit stated once in the
+  header. The distinction is between *the two numbers a reader came for* and *the forty numbers they
+  came to compare*, and a rule that could not tell them apart would be unimplementable and therefore
+  quietly ignored.
+- **FR37. Theme SHALL be chosen, not assumed.** The console SHALL offer an explicit theme control
+  (follow system / dark / light), persist the choice, and resolve it **server-side** so the first
+  paint is already correct and no theme flash or post-hydration reflow occurs. Every token pair SHALL
+  meet WCAG 2.1 AA in **both** resolved themes, and no information SHALL be carried by a hue that
+  exists in only one of them.
+- **FR38. The shipped client payload SHALL have a stated ceiling**, enforced at build time. Exceeding
+  it SHALL fail the build and name the budget and the overage. A page SHALL request **no third-party
+  origin** (already FR35) and SHALL NOT ship a rendering runtime — 3D, WebGL, animation library — for
+  decoration.
+- **FR39. Acceleration SHALL NOT become the only path, and the console SHALL NOT act on the user's
+  behalf.** Every capability reachable from the command path SHALL also be reachable by navigation
+  (FR9), and no surface SHALL pre-fill, infer, or auto-submit an input that carries a user's intent.
+
+### The public surface (capability `console-marketing-site`)
+
+- **FR32.** The console SHALL serve a **public home page** that requires no session, reads no tenant
+  data, and makes **no upstream platform call**. It SHALL NOT be reachable into any tenant-data route
+  without authentication, and it SHALL NOT cause the BFF to use the server-held credential.
+- **FR33.** Every capability claim on the public surface SHALL be **derived from a checked-in
+  capability manifest** that records each claim's owning phase and its shipped state. A claim whose
+  backing capability has not shipped SHALL fail the build rather than reaching the page — what is
+  sold SHALL match what the screen does.
+- **FR34.** The public surface SHALL name plans **by name** (Free / Team / Business / Enterprise) and
+  SHALL NOT contain a price value, a percentage, or any other business number in git. It SHALL state
+  the boundary of what the product does as plainly as it states the benefit.
+- **FR35.** The public surface SHALL meet the same floor as every other page: single token set,
+  English strings with pinned `en-US` formatting, keyboard reachability with visible focus, WCAG 2.1
+  AA contrast, text alternatives on graphical content, and **no third-party origin** — no external
+  font, script, tracker, or image host, so the page satisfies the console's own
+  `default-src 'self'` policy.
+
 ### Operability
 
 - **FR25.** The platform readiness signal SHALL account for the BFF: a healthy platform service with an
@@ -360,6 +475,10 @@ Numbered FRs; each maps 1:1 to an OpenSpec requirement in `openspec/changes/p9-w
 | **NFR10** | **Supply chain** | Dependencies SHALL be lockfile-pinned and scanned; a dependency SHALL NOT be added for a capability the design system already covers. |
 | **NFR11** | **Privacy in telemetry** | No prompt text, diff content, or credential SHALL appear in BFF logs, traces, or client-side analytics. |
 | **NFR12** | **Tenant isolation** | Every BFF request SHALL be scoped to the session's tenant server-side; a tenant identifier from the client SHALL NOT widen scope. |
+| **NFR13** | **Public-surface cost** | The public home page SHALL render without a session, without a platform call and without a third-party origin, so an anonymous visitor costs the platform nothing and can be served while the platform API is down. |
+| **NFR14** | **Claim integrity** | Zero unshipped capability claims on the public surface, and zero price values anywhere in the repository — both build-time gates over the rendered page and the shipped bundle, not review habits. |
+| **NFR15** | **Craft conformance** | Zero decorative motion, zero off-budget durations, zero confidence-treatment applications to a qualified value — machine-checked, because "it looked fine" is how a tie ends up styled as a win. |
+| **NFR16** | **Perceived responsiveness** | Every view's subject and structure SHALL be on screen before its data resolves, and the arrival of data SHALL NOT change the page's structure — measured as no layout shift between the skeleton and the populated state. |
 
 ## 8. System design summary
 
@@ -392,6 +511,8 @@ read. This is the entire justification for the Node process (D1 below).
 | **D5** | **TypeScript types generated from the Go view structs, with a drift gate in CI** | Hand-written types kept in sync by review | **L5/L6**: hand-written types rot silently and the failure mode is a blank cell, not a compile error. A generated artifact is checked in and a regeneration diff fails the build. |
 | **D6** | **One declared, supervised, health-checked console component; readiness aggregates it** | Deploy the console independently and let readiness keep reporting only the Go service | 🔴 `health-signal-surface`: a readiness endpoint that reports "ready" while the surface users reach is dead is a lying health signal. The moment a second process exists, readiness must cover it. |
 | **D7** | **Keep the hand-rolled SVG graph renderer** | Adopt a graph library for the P3.5 view | 🔴 no feature loss. The current renderer implements deliberate behaviors — back edges routed **under** the row so a Reflection loop is visible, region rectangles computed from member bounding boxes, data-vs-control edges distinguished by dash **and** arrow marker, node-scoped labels. A library would have to re-earn each of those, and the layout is already deterministic. Revisit only when an interaction (pan/zoom/select) that the hand-rolled renderer cannot serve is actually specified. |
+| **D8** | **The craft layer is expressed as tokens and primitives inside the single token set**, with the confidence treatment reserved for confident values (FR27–FR31) | Let "make it beautiful" be a per-page styling pass, or adopt a fashionable component kit for visual lift | 🔴 `ui-redesign-feature-and-visual-consistency` forbids improvised styling, and improvisation is exactly what a beauty brief invites. Expressing craft as tokens keeps it **auditable** — and the reservation rule (FR29) makes it a **correctness** property: on a product whose entire value is statistical honesty, a visual system that can make a tie look like a win is a defect, not a style. **L1/L2 over L8**: the extra work of specifying the craft is the cheapest item on the scale. |
+| **D9** | **The public home page ships inside the console application as a public, statically-rendered route with a machine-checked capability manifest** | A separate marketing site (different repo, different stack, marketing CMS), or a hand-written landing page with hand-written claims | Two surfaces means two design systems and two truths about what the product does; the second one drifts, and the drift is *sold*. Keeping it in the console makes the token set, the a11y floor and the string rules apply for free, and makes 🔴 "only promise delivered capability" a **build gate** (FR33) instead of a review. It costs one public route in an application that already exists — **L8**, the cheapest level — to buy claim integrity, which is a customer-trust property. |
 
 ### 8.3 What P9 does not build
 
@@ -513,6 +634,32 @@ sample data — never a mocked screen that promises behavior the product does no
 overstates is a support and churn cost that lands after the sale, and the same discipline that says a
 UI verb must describe real system behavior applies to what the funnel shows.
 
+The **public home page** is where that discipline is most easily lost and most expensive to lose, so
+it is built with a machine gate rather than a review habit. Every claim on the page resolves through a
+**capability manifest** naming the owning phase and its shipped state (FR33); a claim whose capability
+has not shipped fails the build, so the page physically cannot promise a roadmap item as a feature.
+Plans appear **by name only** and no price value exists in the repository (FR34) — the same rule P8
+already enforces on its bundle, for the same reason: a number in git is a number that ships to a
+customer after it stopped being true. And the page states the **boundary** beside the benefit — what
+the platform does not do, what still needs a human, what is measured rather than asserted — because
+the questions a prospect arrives with are the next round's requirements input, and an honest boundary
+produces a qualified lead where an overstated one produces a refund.
+
+**Product Designer (co-lead), second lens — *make it worth opening, without letting it lie.***
+The floor — four states, contrast, keyboard, escaping — says what the console must not do. It does not
+produce a surface anyone chooses to open, and a console nobody chooses is a console whose users stay
+in the CLI, which is the same outcome as not shipping it. So the craft properties are specified with
+the same seriousness as the gates (FR27–FR31): one subject per view, present in the **first paint**;
+structure that does not reflow when data lands; depth and motion as hierarchy rather than decoration;
+and a console that **anticipates the next move** instead of asking for an identifier it could have
+remembered. The constraint that makes this safe is the mirror of P8's *friction on the write path*:
+here it is **honesty on the evidence path** (FR29). This product exists to stop people believing a
+number that has not earned belief — so the visual system is not permitted to launder a qualified value
+into a confident one. A tie rendered with the winner's emphasis, a provisional interval animated in
+like a settled result, a gated capability styled identically to an available one: each is a
+*rendering* that contradicts the *data*, which is precisely the defect class the phase exists to
+prevent.
+
 ## 10. Dependencies
 
 **Requires**
@@ -623,6 +770,34 @@ produces this PRD.
       against a real API response, not a successful build (G16).
 - [ ] **A20.** Cutover is complete or explicitly scheduled with an owner: no legacy page is left served
       alongside its console replacement without a dated removal task.
+- [ ] **A21.** Every view carries exactly one display-level heading naming its subject, and that
+      subject renders **before** its data resolves; no view opens as an undifferentiated spinner
+      (G17, FR27).
+- [ ] **A22.** 🔴 No qualified value — `provisional`, `tie`, `disqualified`, `low-confidence`,
+      uncalibrated judge, `withheld`, `candidate`, unverified, or gated — is rendered with the
+      confidence treatment. Demonstrated by feeding the console a board where the top row is tied and
+      asserting it does not carry the settled-result emphasis (G17, FR29).
+- [ ] **A23.** Every duration in the console resolves to the motion budget, no transition sits on the
+      action path, and `prefers-reduced-motion` renders every state the motion would have carried
+      (FR28).
+- [ ] **A24.** The console offers the session's already-visited subjects and a keyboard command path
+      to every surface, and carries the current subject across surfaces without re-asking (FR30).
+- [ ] **A25.** The public home page renders with **no session, no tenant data and no upstream
+      platform call** — demonstrated by serving it with the platform API stopped (G18, FR32, NFR13).
+- [ ] **A26.** Every capability claim on the public surface resolves to a shipped entry in the
+      capability manifest, and no price value exists in the repository or the shipped bundle — both
+      build-time gates (G18, FR33, FR34, NFR14).
+- [ ] **A27.** 🔴 On every view that presents a quantity, the quantity is the visually dominant
+      element and no section frame outranks it. Demonstrated by rendering each data view and
+      asserting the computed type scale of the value exceeds that of its label, its section heading
+      and its chrome (FR36).
+- [ ] **A28.** The theme control offers follow-system / dark / light, the choice persists, and the
+      **first paint** is already in the chosen theme — no flash, no post-hydration reflow. Every
+      token pair meets WCAG 2.1 AA in both resolved themes (FR37).
+- [ ] **A29.** The shipped client payload is under its stated ceiling, the build fails above it and
+      names the overage, and no rendering runtime ships for decoration (FR38).
+- [ ] **A30.** Every capability reachable from the command path is also reachable by navigation, and
+      no input carrying user intent is pre-filled, inferred, or auto-submitted (FR39).
 
 ## 14. Open questions
 
@@ -650,3 +825,26 @@ produces this PRD.
 6. **Real-time scope beyond the run monitor.** Only the live run streams today. Whether the board and
    the graph should update live, or stay explicitly refreshed, is a product question with a real cost
    (fan-out) and a real hazard (a leaderboard that reorders under the reader's cursor).
+7. **🔴 Subject enumeration has no read model, and FR10 needs one.** FR10 requires the user to
+   **select** a workflow, run, variant, board or transform from platform-provided data — and the
+   platform exposes **no enumeration endpoint for any of them**. Every customer route is keyed by an
+   identifier the caller must already hold (`/api/p2/runs/{run_id}`,
+   `/api/p35/workflows/{workflow_id}/graph`, `/api/p4/workflows/{workflow_id}/board`,
+   `/api/p45/variants/{variant_id}/scorecard`, `/api/p55/workflows/{workflow_id}/surface`). P9's
+   standing constraint forbids adding a platform endpoint, and 🔴 `careful-api-creation` makes a new
+   endpoint a one-way door that belongs to the owning phase, so P9 **files this as a read-model
+   request** rather than growing one. Until it lands, the console's selection surface is built from
+   what it legitimately has — **subjects the session has already visited** (a console-local fact, not
+   a platform statistic), **subjects reachable from a read model already on screen** (board rows carry
+   variant and config hash; the P5.5 surface carries proposals; a run carries its config hash and
+   revision), and **direct identifier entry as an accelerator**. What it must never do, and does not,
+   is substitute a default subject (FR10). The gap is recorded in
+   [`surface-or-drop.md`](../../openspec/changes/p9-web-console/surface-or-drop.md) with its owning
+   phase; **the decision to add an enumeration read model is not P9's to take.**
+8. **The proposal-review surface's decision verbs.** FR16's queue → rationale → verified delta → diff
+   → **approve/reject** was written against the orphaned legacy page's shape. The P5.5 API that has
+   since landed exposes **open-PR** rather than approve/reject —
+   `POST /api/p55/workflows/{id}/proposals/{id}/open-pr`, gated on a passing verdict and Assisted
+   automation — because P5.5 decided that a human merges a reviewable PR and the platform never
+   merges for them. P9 renders the verb the platform actually implements; whether an in-console
+   approve/reject should also exist is a P5.5 product question, not a console styling choice.

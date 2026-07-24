@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/heros-foreal/agentd/internal/api"
@@ -66,6 +67,19 @@ func StartAgentd(ctx context.Context, cfg config.Config) (*Server, error) {
 
 	handler := api.New(database, cfg)
 	handler.SetSecretsSource(secrets)
+
+	// The P9 customer console, aggregated into /readyz when this deployment ships one (FR25).
+	//
+	// Wired from the environment rather than from config.json for the same reason the secrets source
+	// is: it is a property of the DEPLOYMENT — which containers are in this unit — not of the
+	// platform's configuration. A deployment with no console leaves it unset and /readyz reports on
+	// the Go service alone, which is true. A deployment that HAS one and leaves it unset gets a
+	// readiness signal that says "ready" while the surface its users reach is dead, which is the
+	// lying health signal `health-signal-surface` exists to forbid.
+	if consoleHealth := strings.TrimSpace(os.Getenv("CONSOLE_HEALTH_URL")); consoleHealth != "" {
+		handler.SetConsoleProbe(api.NewHTTPComponentProbe("console", consoleHealth))
+		log.Printf("readiness aggregates the console component at %s", consoleHealth)
+	}
 	httpServer := &http.Server{
 		Handler:           handler.Handler,
 		ReadHeaderTimeout: 10 * time.Second,

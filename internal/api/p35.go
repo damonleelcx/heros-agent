@@ -1,7 +1,6 @@
 package api
 
 import (
-	_ "embed"
 	"net/http"
 
 	"github.com/heros-foreal/agentd/internal/patternclassifier"
@@ -17,9 +16,6 @@ import (
 //
 // READ-ONLY. The classifier writes labels into the IR; this surface only shows what is there.
 
-//go:embed static/p35graph.html
-var p35GraphHTML []byte
-
 // PatternSource is the read model the routes serve: a classified workflow graph. An interface so the
 // API depends on no concrete store and a test can stub it.
 type PatternSource interface {
@@ -29,14 +25,7 @@ type PatternSource interface {
 // MountP35 registers the pattern-classifier routes. Call after New.
 func (s *Server) MountP35(src PatternSource) {
 	s.p35 = src
-	s.Mux.HandleFunc("GET /p35/graph", s.handleP35UI)
 	s.Mux.HandleFunc("GET /api/p35/workflows/{workflow_id}/graph", s.handleP35Graph)
-}
-
-func (s *Server) handleP35UI(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
-	_, _ = w.Write(p35GraphHTML)
 }
 
 func (s *Server) handleP35Graph(w http.ResponseWriter, r *http.Request) {

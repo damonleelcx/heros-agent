@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import { readDensity } from "@/lib/prefs";
+import { readDensity, readTheme } from "@/lib/prefs";
 
 /**
  * layout.tsx is the console's shell.
@@ -23,8 +23,9 @@ export const metadata: Metadata = {
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const density = await readDensity();
+  const theme = await readTheme();
   return (
-    <html lang="en-US" data-density={density}>
+    <html lang="en-US" data-density={density} data-theme={theme}>
       <body>
         <a className="skip-link" href="#main">
           Skip to main content

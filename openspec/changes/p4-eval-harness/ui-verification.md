@@ -10,8 +10,19 @@ Reproduce:
 ```
 make p4-board-demo                          # 4 variants
 go run ./cmd/p4boarddemo -extra-variants 80 # 84 variants, for the virtualization check
-open http://127.0.0.1:8085/p4/board?workflow=wf-router
+
+# The board moved to the console in the P9 cutover; the demo serves the read model, the console
+# serves the screen.
+cd web/console && PLATFORM_API_BASE=http://127.0.0.1:8085 \
+  CONSOLE_PLATFORM_CREDENTIAL=demo CONSOLE_TENANT_IDENTITY=dev npm run dev
+open http://127.0.0.1:4320/app/workflows/wf-router/board
 ```
+
+> **Note (2026-07-24).** This record was written against `static/p4board.html`, which the P9 cutover
+> removed together with its handler. The observations below stand as the record of what the live
+> fan-out produced; the *route* changed, and the commands above are the current way to reproduce it.
+> Every behaviour the record checked is now a case in
+> [`web/console/tests/inventory.test.mjs`](../../../web/console/tests/inventory.test.mjs) (**P4-1…44**).
 
 ## What the live fan-out produced
 

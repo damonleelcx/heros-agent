@@ -1,0 +1,76 @@
+# The customer console deployment unit (P9 §4.2, ADR-006).
+#
+# Two containers, ONE unit. Each is independently built, probed, restarted and versioned; neither runs
+# a supervisor. The reasoning is in docs/adr/ADR-006-console-deploy-packaging.md and it comes down to
+# one property: a dead process must be a DEAD CONTAINER, not a live container with a dead process
+# inside it, because only the first is visible to the restart policy, the rollout and the alert.
+#
+# Usage:
+#   docker compose -f deploy/docker-compose.console.yml --env-file deploy/.env.console up -d
+#
+# 🔴 SECRETS COME FROM THE ENVIRONMENT OR A SECRET STORE (§4.3). Never from this file, never from the
+# repository, never from a log line, never from a trace attribute, never from the client bundle. The
+# `${VAR:?...}` form below is deliberate: compose REFUSES TO START when the variable is unset, with the
+# message attached. A default would let the stack come up misconfigured and fail later, somewhere less
+# obvious than the moment somebody typed `up`.
+
+services:
+  agentd:
+    image: ${AGENTD_IMAGE:?set AGENTD_IMAGE to the platform image for this release}
+    environment:
+      # The console component the platform's /readyz aggregates. Set it and a dead console makes the
+      # deployment report not-ready, naming the console; leave it unset and readiness reports only on
+      # the Go service — which is a true statement about the wrong thing once a second process is in
+      # the request path.
+      CONSOLE_HEALTH_URL: http://console:4320/api/health
+    ports:
+      - "${AGENTD_PORT:-4321}:4321"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:4321/healthz"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+
+  console:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.console
+    image: ${CONSOLE_IMAGE:-heros-console:dev}
+    environment:
+      # The origin of the platform API. An origin, not a credential.
+      PLATFORM_API_BASE: http://agentd:4321
+      # The BFF's OWN credential for the platform API. It is the only credential in this unit, it lives
+      # in exactly one process's environment, and it crosses exactly one boundary: console -> agentd.
+      CONSOLE_PLATFORM_CREDENTIAL: ${CONSOLE_PLATFORM_CREDENTIAL:?set CONSOLE_PLATFORM_CREDENTIAL from your secret store}
+      # The tenant identity seam (ADR-008). `configured` reads the deployment's assertion -> tenant map;
+      # `dev` refuses to start in production, by design.
+      CONSOLE_TENANT_IDENTITY: ${CONSOLE_TENANT_IDENTITY:-configured}
+      CONSOLE_TENANT_ASSERTIONS: ${CONSOLE_TENANT_ASSERTIONS:?set CONSOLE_TENANT_ASSERTIONS from your secret store}
+      CONSOLE_SESSION_TTL_SECONDS: ${CONSOLE_SESSION_TTL_SECONDS:-28800}
+      CONSOLE_UPSTREAM_TIMEOUT_MS: ${CONSOLE_UPSTREAM_TIMEOUT_MS:-10000}
+      NODE_ENV: production
+    ports:
+      - "${CONSOLE_PORT:-4320}:4320"
+    depends_on:
+      agentd:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:4320/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+    # The console renders customer data and holds a credential. It needs no root, no extra capabilities,
+    # and nothing writable except the temp directory Next uses.
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true

@@ -132,7 +132,17 @@ manageable end-to-end)**.
   shorter is a **regression** with a failing test. Craft is **evidenced, not asserted**: a rendering
   matrix (light/dark, narrow/wide, 200% zoom, reduced motion, both densities, four states), a
   **visual-regression baseline**, and a **recorded design review** with a name on it.
-- **Deferred / out of scope:** the customer-facing web dashboard (**[P9](../p9-web-console/)**); the metric/cost
+- **Hierarchy, theme, payload, agency (R16–R20, FR38–FR41).** From a recorded review of the 2026
+  web-design trends
+  ([`../../../web/design-system/trend-ledger.md`](../../../web/design-system/trend-ledger.md)): the
+  measured value becomes the visually dominant element on every operator view; theme becomes an
+  explicit persisted choice **whose light variant must keep the operator chrome distinguishable from
+  the customer console** (FR23 arriving by a new route); the shipped payload gets an enforced ceiling.
+  🔴 And the two trends most dangerous on an admin surface — an **agent that executes multi-step tasks**
+  and a **form that pre-fills from history** — are rejected as requirements: on this console they are
+  machines for producing unattributable privileged actions.
+- **Deferred / out of scope:** an agentic or conversational affordance over admin capabilities
+  (**never** — FR41); the customer-facing web dashboard (**[P9](../p9-web-console/)**); the metric/cost
   collection pipeline (**P2.5**); the job executor (**P4/P6**); the autonomous loop mechanics + per-run
   kill switch + change ledger (**P6**); the billing provider integration + idempotency + proration/
   dunning (**P7**); concrete prices/limits/rates (**config, not git**); entering financial credentials

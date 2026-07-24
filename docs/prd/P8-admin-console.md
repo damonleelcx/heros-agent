@@ -491,6 +491,40 @@ These map 1:1 to the OpenSpec requirements under
   **visual-regression baseline** gating unintended change; and a **recorded design review** naming its
   reviewer for each new view.
 
+### Visual hierarchy, theme and payload (R16–R20 — see [`trend-ledger.md`](../../web/design-system/trend-ledger.md))
+
+FR29–FR37 specify that the operator language is tokenised, that emphasis is reserved and that the write
+path survives the read path's polish. They do not say **which element on a view should be largest**, and
+the shipped console answers that wrongly in the same way the customer console does: the frame outranks
+the figure. FR38–FR41 close that gap, derived from the 2026 trend review recorded in the ledger.
+
+🔴 The ledger's two **rejections** bind here more tightly than anywhere else in the product: an
+**AI agent that executes multi-step tasks** and a **form that pre-fills from history** are, on this
+surface, machines for producing unattributable privileged actions. FR37 already forbids the second by
+name; FR41 states the first.
+
+- **FR38 (→ admin-console-surface). 🔴 The measured value SHALL outrank its frame.** In every
+  **summary block** — a stat, a fleet figure, a cross-tenant aggregate headline — the quantity SHALL be
+  the visually dominant element, and no section heading, card border or chrome SHALL carry more weight
+  than the values it exists to present. This does **not** govern a **table**, whose cells share one
+  size precisely so a column can be compared at a glance; tables stay under FR30. This composes with FR30 (unit and scale once,
+  tabular figures) and 🔴 does **not** relax FR31: the hazard palette stays reserved, and a figure at
+  display scale is not thereby licensed to borrow it.
+- **FR39 (→ admin-console-surface). Theme SHALL be chosen, not assumed** — follow system / dark /
+  light, persisted per operator, resolved **server-side** so the first paint is correct with no flash
+  and no post-hydration reflow. Every token pair SHALL meet WCAG 2.1 AA in **both** resolved themes.
+  🔴 The operator console's distinct chrome (FR23) SHALL remain distinct in **both** themes: a
+  light-theme operator console that becomes indistinguishable from the customer console has defeated a
+  safety requirement, not a style rule.
+- **FR40 (→ admin-console-surface). The shipped client payload SHALL have a stated ceiling**, enforced
+  at build time, failing with the budget and the overage named. No rendering runtime SHALL ship for
+  decoration. This also protects FR20's premise: the credential scan's confidence is proportional to
+  how auditable the bundle is.
+- **FR41 (→ admin-console-surface). Nothing SHALL act on the operator's behalf.** No surface SHALL
+  execute, queue, compose, or recommend-with-one-click a privileged command; every privileged effect
+  SHALL originate in the operator's own confirmed, reasoned, un-pre-filled input (FR6, FR24, FR37).
+  A conversational or agentic affordance over admin capabilities is **prohibited on this console**.
+
 ## 7. Non-functional requirements
 
 - **Security (load-bearing).** Admin identity is **separate from customer auth**; **SSO + MFA** is
@@ -1059,6 +1093,17 @@ without a stop is theater; a stop without a record is unaccountable. P8 provides
     viewport, **200% zoom**, **reduced motion**, **both densities**, and the four states — a cell without
     evidence **blocks** acceptance; a **visual-regression baseline** fails on undescribed visual change;
     each new view carries a **recorded design review** with its reviewer named (FR37).
+  - **Hierarchy.** On every view presenting a quantity, the quantity is the **visually dominant**
+    element and no section frame outranks it — asserted from the rendered type scale, not from review
+    (FR38).
+  - **Theme.** The theme control offers follow-system / dark / light, the choice persists, and the
+    **first paint** is already correct — no flash, no reflow. Every token pair meets AA in both
+    resolved themes, and 🔴 the operator chrome remains **distinguishable from the customer console in
+    both** (FR39, FR23).
+  - **Payload.** The shipped bundle is under its stated ceiling; the build fails above it and names the
+    overage; no rendering runtime ships for decoration (FR40).
+  - **Agency.** No surface executes, queues, composes, or one-click-recommends a privileged command;
+    every privileged effect originates in the operator's own un-pre-filled input (FR41).
 - **Rollout.** **8a first** (RBAC + tenant/billing/entitlement admin + audit log) behind an **admin
   feature flag**, roles seeded **minimal**, admin IdP in test mode, dark until the M11-8a checklist is
   green. **8b** (fleet ops + global controls + cross-tenant read models + GDPR) enabled only after the

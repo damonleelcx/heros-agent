@@ -94,20 +94,40 @@
   /* ── Composition grid ────────────────────────────────────────────────────
    * One content measure for every page, one gutter, one prose measure. A view that needs
    * something wider says so by opting into --measure-wide, not by inventing a width.
+   *
+   * --measure-field and --measure-stat exist because their absence was a real defect: with no
+   * field measure a sign-in input for a 40-character token rendered 1440px wide, and with no stat
+   * measure a view of three figures rendered as one full-width card holding three chips. A width
+   * that is not a token is a width each page re-decides (R16, R1).
    */
   --measure-content: 78rem;
   --measure-wide: 96rem;
   --measure-prose: 62ch;
+  --measure-field: 26rem;
+  --measure-form: 32rem;
+  --measure-stat: 11rem;
   --gutter: var(--space-5);
+
+  /* ── Stat scale (R16 / FR36 · FR38) ──────────────────────────────────────
+   * The reader came for the number. These are the sizes that make that true: a value set at
+   * --text-stat outranks a --text-lg section title and a --text-xs label by construction, so the
+   * hierarchy is a property of the token set rather than of each page's judgement.
+   *
+   * --text-stat-sm is for a stat inside a dense grid of many; it still outranks its own label and
+   * its section frame, which is the whole of what R16 requires.
+   */
+  --text-stat: 2.25rem;
+  --text-stat-sm: 1.75rem;
 
   /* ── Elevation — three steps: flat, raised, overlay ──────────────────────
    * Depth is a hierarchy signal, not decoration: raised = a panel of content, overlay =
    * something that sits above the page and traps focus (the palette, a drawer).
+   *
+   * Only the flat step is theme-independent. `--elev-1..3` are theme-dependent — a shadow tuned for
+   * a white page is a smudge on a dark one — so they are defined in the palettes below and applied
+   * by the mapping blocks, like every other themed value.
    */
   --elev-0: none;
-  --elev-1: 0 1px 2px rgb(15 21 28 / 0.06), 0 1px 1px rgb(15 21 28 / 0.04);
-  --elev-2: 0 4px 12px rgb(15 21 28 / 0.10), 0 1px 3px rgb(15 21 28 / 0.06);
-  --elev-3: 0 18px 48px rgb(15 21 28 / 0.24), 0 2px 8px rgb(15 21 28 / 0.12);
 
   /* ── Motion budget (FR35) ────────────────────────────────────────────────
    * Named durations, and nothing longer. Motion explains continuity or marks a change; it
@@ -118,6 +138,23 @@
   --motion-fast: 120ms;
   --motion-base: 180ms;
   --motion-slow: 240ms;
+
+  /* The one duration outside the interaction budget, and the reason it is a NAMED step rather than a
+   * literal somebody reached for.
+   *
+   * Everything above times a transition: something the operator is waiting through, which is why
+   * nothing above is long enough to be waited on. `--motion-alarm` times a *state marker* — the slow
+   * breath on an armed halt or an active impersonation. It is on no interaction path, so its length
+   * costs nobody anything, and it is deliberately slow: a fast blink reads as a rendering fault and
+   * gets ignored, while a two-second breath reads as a thing that is on.
+   *
+   * 🔴 It is reserved for hazard, exactly as the hazard palette is (FR31), and `tests/craft.test.mjs`
+   * enforces that: a rule may only use this duration if it also carries a hazard treatment. A
+   * decorative pulse would spend the attention the armed kill switch needs, which is the same failure
+   * an amber chrome bar produced.
+   */
+  --motion-alarm: 2000ms;
+
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
 
@@ -132,82 +169,226 @@
   --stack: var(--space-5);
   --stack-tight: var(--space-3);
 
-  /* ── Neutral ramp + status palette (light) ───────────────────────────────
-   * Every pair below meets WCAG 2.1 AA at its intended size. The hazard hues (warn, danger)
-   * are RESERVED for hazard (FR31) — a surface identity may not borrow them.
+  /* ── Palette definitions ─────────────────────────────────────────────────
+   * Both palettes are DEFINED here and neither is applied here. The mapping blocks below choose,
+   * and they contain no colour values at all — which is what makes "the two themes carry the same
+   * token set" a checkable property rather than a habit. A token defined in one palette and absent
+   * from the other is exactly how a surface ends up with an unstyled control in light mode only.
+   *
+   * Every pair below meets WCAG 2.1 AA at its intended size in its own theme. The hazard hues
+   * (warn, danger) are RESERVED for hazard (FR31) — a surface identity may not borrow them.
    */
-  --canvas: #f7f8fa;
-  --surface: #ffffff;
-  --surface-2: #eef1f5;
-  --surface-3: #e2e6ec;
-  --border: #ccd2db;
-  --border-strong: #7d8794;
 
-  --text: #10151c;
-  --text-muted: #4b5563;
-  --text-inverse: #ffffff;
+  /* Light */
+  --light-canvas: #f7f8fa;
+  --light-surface: #ffffff;
+  --light-surface-2: #eef1f5;
+  --light-surface-3: #e2e6ec;
+  --light-border: #ccd2db;
+  --light-border-strong: #7d8794;
+  --light-text: #10151c;
+  --light-text-muted: #4b5563;
+  --light-text-inverse: #ffffff;
+  --light-ok: #0f6b3a;
+  --light-ok-surface: #e3f5ea;
+  --light-ok-border: #2f9e63;
+  --light-warn: #8a5300;
+  --light-warn-surface: #fdf1dc;
+  --light-warn-border: #c08a1e;
+  --light-danger: #a01110;
+  --light-danger-surface: #fdeaea;
+  --light-danger-border: #d13b37;
+  --light-info: #17497e;
+  --light-info-surface: #e7f0fa;
+  --light-info-border: #3f7fc4;
+  --light-focus-ring: #0b5fa5;
+  --light-chart-ink: #3a6ea8;
+  --light-chart-track: #e2e6ec;
+  --light-elev-1: 0 1px 2px rgb(15 21 28 / 0.06), 0 1px 1px rgb(15 21 28 / 0.04);
+  --light-elev-2: 0 4px 12px rgb(15 21 28 / 0.10), 0 1px 3px rgb(15 21 28 / 0.06);
+  --light-elev-3: 0 18px 48px rgb(15 21 28 / 0.24), 0 2px 8px rgb(15 21 28 / 0.12);
 
-  --ok: #0f6b3a;
-  --ok-surface: #e3f5ea;
-  --ok-border: #2f9e63;
-  --warn: #8a5300;
-  --warn-surface: #fdf1dc;
-  --warn-border: #c08a1e;
-  --danger: #a01110;
-  --danger-surface: #fdeaea;
-  --danger-border: #d13b37;
-  --info: #17497e;
-  --info-surface: #e7f0fa;
-  --info-border: #3f7fc4;
+  /* Dark */
+  --dark-canvas: #0d1117;
+  --dark-surface: #151b23;
+  --dark-surface-2: #1c232c;
+  --dark-surface-3: #252d38;
+  --dark-border: #303a47;
+  --dark-border-strong: #5b6674;
+  --dark-text: #e9eef5;
+  --dark-text-muted: #a3b2c4;
+  --dark-text-inverse: #0d1117;
+  --dark-ok: #62d29a;
+  --dark-ok-surface: #0c2f1e;
+  --dark-ok-border: #2c7f56;
+  --dark-warn: #f0b64a;
+  --dark-warn-surface: #33260a;
+  --dark-warn-border: #9a7420;
+  --dark-danger: #ff8f88;
+  --dark-danger-surface: #3a1311;
+  --dark-danger-border: #b8443e;
+  --dark-info: #8dbdf0;
+  --dark-info-surface: #10263d;
+  --dark-info-border: #3a6fa5;
+  --dark-focus-ring: #6cc6ff;
+  --dark-chart-ink: #7aa9dd;
+  --dark-chart-track: #252d38;
+  --dark-elev-1: 0 1px 2px rgb(0 0 0 / 0.5);
+  --dark-elev-2: 0 4px 14px rgb(0 0 0 / 0.55);
+  --dark-elev-3: 0 20px 52px rgb(0 0 0 / 0.68);
 
-  --focus-ring: #0b5fa5;
-
-  /* The scrim behind an overlay. Dark in both themes: it must dim the page beneath a
-   * focus-taking surface, not tint it. */
+  /* The scrim behind an overlay. Dark in BOTH themes: it must dim the page beneath a focus-taking
+   * surface, not tint it. It is therefore not part of either palette. */
   --scrim: rgb(8 12 18 / 0.45);
+}
 
-  /* Chart ink: one hue, varied by weight, because a bar's meaning is in its label and its
-   * number — never in its colour alone. */
-  --chart-ink: #3a6ea8;
-  --chart-track: #e2e6ec;
+/* ── Theme resolution (R17 / FR37 · FR39) ──────────────────────────────────
+ *
+ * Three settings, two renderings. `data-theme` is written on the root element SERVER-SIDE from the
+ * reader's persisted choice, so the first paint is already correct — a theme applied by a client
+ * effect is a theme the reader watches arrive.
+ *
+ *   data-theme="system"   follow the OS; the media query below decides
+ *   data-theme="dark"     dark regardless of the OS
+ *   data-theme="light"    light regardless of the OS
+ *
+ * `color-scheme` is set alongside so form controls, scrollbars and the canvas the browser paints
+ * before CSS loads all agree with the tokens. Getting that wrong produced the latent defect this
+ * block replaces: the customer console forced `color-scheme: dark` on the root while the tokens
+ * switched on `prefers-color-scheme`, so the two disagreed for a light-OS reader and only the
+ * identity layer's import order concealed it.
+ *
+ * 🔴 The three mapping blocks below must list the SAME token names. `tests/design-system.test.mjs`
+ * asserts it, because a token mapped in one block and forgotten in another is invisible until
+ * somebody switches theme.
+ */
+
+:root,
+:root[data-theme="system"] {
+  color-scheme: light dark;
+  --canvas: var(--light-canvas);
+  --surface: var(--light-surface);
+  --surface-2: var(--light-surface-2);
+  --surface-3: var(--light-surface-3);
+  --border: var(--light-border);
+  --border-strong: var(--light-border-strong);
+  --text: var(--light-text);
+  --text-muted: var(--light-text-muted);
+  --text-inverse: var(--light-text-inverse);
+  --ok: var(--light-ok);
+  --ok-surface: var(--light-ok-surface);
+  --ok-border: var(--light-ok-border);
+  --warn: var(--light-warn);
+  --warn-surface: var(--light-warn-surface);
+  --warn-border: var(--light-warn-border);
+  --danger: var(--light-danger);
+  --danger-surface: var(--light-danger-surface);
+  --danger-border: var(--light-danger-border);
+  --info: var(--light-info);
+  --info-surface: var(--light-info-surface);
+  --info-border: var(--light-info-border);
+  --focus-ring: var(--light-focus-ring);
+  --chart-ink: var(--light-chart-ink);
+  --chart-track: var(--light-chart-track);
+  --elev-1: var(--light-elev-1);
+  --elev-2: var(--light-elev-2);
+  --elev-3: var(--light-elev-3);
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
-    --canvas: #0d1117;
-    --surface: #151b23;
-    --surface-2: #1c232c;
-    --surface-3: #252d38;
-    --border: #303a47;
-    --border-strong: #5b6674;
-
-    --text: #e9eef5;
-    --text-muted: #a3b2c4;
-    --text-inverse: #0d1117;
-
-    --ok: #62d29a;
-    --ok-surface: #0c2f1e;
-    --ok-border: #2c7f56;
-    --warn: #f0b64a;
-    --warn-surface: #33260a;
-    --warn-border: #9a7420;
-    --danger: #ff8f88;
-    --danger-surface: #3a1311;
-    --danger-border: #b8443e;
-    --info: #8dbdf0;
-    --info-surface: #10263d;
-    --info-border: #3a6fa5;
-
-    --focus-ring: #6cc6ff;
-    --scrim: rgb(0 0 0 / 0.62);
-
-    --chart-ink: #7aa9dd;
-    --chart-track: #252d38;
-
-    --elev-1: 0 1px 2px rgb(0 0 0 / 0.5);
-    --elev-2: 0 4px 14px rgb(0 0 0 / 0.55);
-    --elev-3: 0 20px 52px rgb(0 0 0 / 0.68);
+  :root,
+  :root[data-theme="system"] {
+    color-scheme: dark;
+    --canvas: var(--dark-canvas);
+    --surface: var(--dark-surface);
+    --surface-2: var(--dark-surface-2);
+    --surface-3: var(--dark-surface-3);
+    --border: var(--dark-border);
+    --border-strong: var(--dark-border-strong);
+    --text: var(--dark-text);
+    --text-muted: var(--dark-text-muted);
+    --text-inverse: var(--dark-text-inverse);
+    --ok: var(--dark-ok);
+    --ok-surface: var(--dark-ok-surface);
+    --ok-border: var(--dark-ok-border);
+    --warn: var(--dark-warn);
+    --warn-surface: var(--dark-warn-surface);
+    --warn-border: var(--dark-warn-border);
+    --danger: var(--dark-danger);
+    --danger-surface: var(--dark-danger-surface);
+    --danger-border: var(--dark-danger-border);
+    --info: var(--dark-info);
+    --info-surface: var(--dark-info-surface);
+    --info-border: var(--dark-info-border);
+    --focus-ring: var(--dark-focus-ring);
+    --chart-ink: var(--dark-chart-ink);
+    --chart-track: var(--dark-chart-track);
+    --elev-1: var(--dark-elev-1);
+    --elev-2: var(--dark-elev-2);
+    --elev-3: var(--dark-elev-3);
   }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --canvas: var(--dark-canvas);
+  --surface: var(--dark-surface);
+  --surface-2: var(--dark-surface-2);
+  --surface-3: var(--dark-surface-3);
+  --border: var(--dark-border);
+  --border-strong: var(--dark-border-strong);
+  --text: var(--dark-text);
+  --text-muted: var(--dark-text-muted);
+  --text-inverse: var(--dark-text-inverse);
+  --ok: var(--dark-ok);
+  --ok-surface: var(--dark-ok-surface);
+  --ok-border: var(--dark-ok-border);
+  --warn: var(--dark-warn);
+  --warn-surface: var(--dark-warn-surface);
+  --warn-border: var(--dark-warn-border);
+  --danger: var(--dark-danger);
+  --danger-surface: var(--dark-danger-surface);
+  --danger-border: var(--dark-danger-border);
+  --info: var(--dark-info);
+  --info-surface: var(--dark-info-surface);
+  --info-border: var(--dark-info-border);
+  --focus-ring: var(--dark-focus-ring);
+  --chart-ink: var(--dark-chart-ink);
+  --chart-track: var(--dark-chart-track);
+  --elev-1: var(--dark-elev-1);
+  --elev-2: var(--dark-elev-2);
+  --elev-3: var(--dark-elev-3);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --canvas: var(--light-canvas);
+  --surface: var(--light-surface);
+  --surface-2: var(--light-surface-2);
+  --surface-3: var(--light-surface-3);
+  --border: var(--light-border);
+  --border-strong: var(--light-border-strong);
+  --text: var(--light-text);
+  --text-muted: var(--light-text-muted);
+  --text-inverse: var(--light-text-inverse);
+  --ok: var(--light-ok);
+  --ok-surface: var(--light-ok-surface);
+  --ok-border: var(--light-ok-border);
+  --warn: var(--light-warn);
+  --warn-surface: var(--light-warn-surface);
+  --warn-border: var(--light-warn-border);
+  --danger: var(--light-danger);
+  --danger-surface: var(--light-danger-surface);
+  --danger-border: var(--light-danger-border);
+  --info: var(--light-info);
+  --info-surface: var(--light-info-surface);
+  --info-border: var(--light-info-border);
+  --focus-ring: var(--light-focus-ring);
+  --chart-ink: var(--light-chart-ink);
+  --chart-track: var(--light-chart-track);
+  --elev-1: var(--light-elev-1);
+  --elev-2: var(--light-elev-2);
+  --elev-3: var(--light-elev-3);
 }
 
 /* ── Density switch ────────────────────────────────────────────────────────
@@ -232,6 +413,7 @@
     --motion-fast: 0ms;
     --motion-base: 0ms;
     --motion-slow: 0ms;
+    --motion-alarm: 0ms;
   }
 
   *,

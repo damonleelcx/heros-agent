@@ -1,0 +1,812 @@
+/*
+ * globals.css — the base layer, and the component classes a utility cannot express.
+ *
+ * Most of the design language lives in `tokens.customer.css` and in the components that compose it.
+ * What is here is the small set of things that must be identical EVERYWHERE and must therefore not be
+ * a per-call-site decision:
+ *
+ *   - the element defaults every page inherits, and one focus treatment;
+ *   - the two structural affordances (`skip-link`, `visually-hidden`) whose whole purpose is to exist
+ *     outside the visual composition;
+ *   - the four text roles, the status chips, the states, the table, the diff and the graph's own
+ *     vocabulary — each of which encodes a RULE (a status carries a word, an unknown status cannot
+ *     impersonate a known one, a state is distinguishable before its copy is read) that a string of
+ *     utilities at a call site would let the next person get wrong.
+ *
+ * The import order is load-bearing and asserted by a test: Tailwind first so its layers are declared,
+ * the token layer second so `@theme` resolves against them.
+ *
+ * `source(none)` plus an explicit `@source` is deliberate. Automatic detection walks up from this file
+ * and would happily scan `.next/`, `tests/` and any sibling application, which makes the generated
+ * stylesheet a function of what happens to be on disk. Naming the tree makes the build reproducible
+ * and keeps the payload ceiling meaningful.
+ */
+
+@import "tailwindcss" source(none);
+@source "../**/*.{ts,tsx}";
+
+@import "./tokens.customer.css";
+
+@layer base {
+  *,
+  *::before,
+  *::after {
+    border-color: var(--border);
+  }
+
+  html {
+    /*
+     * No `font-size` is set. The design bundle pins the root to 16px; this console does not, because a
+     * reader who has raised their browser's default font size has asked for larger text and a pinned
+     * root silently overrides them. Every size below is in `rem`, so the ramp scales with their choice.
+     */
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    margin: 0;
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /*
+   * The user agent's block margins are removed because every composition in this design sets its own
+   * rhythm with `gap`. Leaving them means two spacing systems fighting, and the visible symptom is the
+   * one nobody attributes correctly: inconsistent gaps between otherwise identical blocks.
+   *
+   * `.state__body` and the other flow containers put their own spacing back, deliberately and once.
+   */
+  p,
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6,
+  figure,
+  dl,
+  dd,
+  pre,
+  ul,
+  ol {
+    margin: 0;
+  }
+
+  /*
+   * One focus treatment, everywhere, and it is never removed.
+   *
+   * `:focus-visible` rather than `:focus`, so a mouse click does not leave a ring behind; an outline
+   * with an offset rather than a box-shadow, so it stays visible against every surface in both
+   * palettes — including inside the graph, whose backdrop is not a colour this rule can see.
+   */
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+    border-radius: var(--radius-md);
+  }
+
+  ::selection {
+    background-color: color-mix(in oklab, var(--primary) 28%, transparent);
+  }
+}
+
+@layer components {
+  /* ── Structural affordances ───────────────────────────────────────────── */
+
+  .skip-link {
+    /* Composed from utilities rather than written out, so the one place a spacing or type-size literal
+       may appear stays the token layer — the fence `scan-tokens.mjs` enforces. */
+    @apply absolute top-0 z-100 rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground;
+    left: -9999px;
+  }
+
+  .skip-link:focus {
+    @apply left-3 top-3;
+  }
+
+  .visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border-width: 0;
+  }
+
+  /* ── The four text roles ──────────────────────────────────────────────── */
+
+  .mono {
+    @apply font-mono;
+  }
+
+  .num {
+    @apply text-right tabular-nums;
+  }
+
+  .caption {
+    @apply text-xs leading-relaxed text-muted-foreground;
+  }
+
+  .hint {
+    @apply max-w-2xl text-xs leading-relaxed text-muted-foreground;
+  }
+
+  /* ── The type hierarchy · 🔴 R16 / FR36 ───────────────────────────────────
+   *
+   * These four sizes are the whole of R16, and they are declared together so the ordering is visible
+   * in one place rather than inferred from four utility strings in four files. The rule the ordering
+   * encodes: a measured value outranks the section that frames it, and its own label is the smallest
+   * thing in the group. A test compares the numbers.
+   */
+
+  .page__title {
+    font-size: var(--type-page);
+  }
+
+  .section__title {
+    font-size: var(--type-section);
+  }
+
+  .stat__label {
+    font-size: var(--type-label);
+    @apply font-mono uppercase tracking-[0.12em] text-muted-foreground;
+  }
+
+  .stat__value {
+    font-size: var(--type-stat);
+    @apply font-display font-light leading-none tracking-tight tabular-nums;
+  }
+
+  .stat--dense .stat__value {
+    font-size: var(--type-stat-sm);
+  }
+
+  .stat__unit {
+    @apply text-sm text-muted-foreground;
+  }
+
+  .stat__note {
+    @apply text-xs leading-relaxed text-muted-foreground/85;
+  }
+
+  /* ── The confidence reservation · 🔴 R14 / FR29 ───────────────────────────
+   *
+   * `confident` and `qualified` are written by `emphasis()` and by nothing else. The treatment lives
+   * here rather than at the call sites so it can be changed once — and so the difference is a property
+   * of WEIGHT and CONTRAST rather than of hue. A qualified number is not a different kind of number;
+   * it is the same measurement asserting less, and it must stay readable while it stops looking like
+   * one the server stood behind.
+   */
+
+  .confident {
+    font-weight: 500;
+    color: var(--foreground);
+  }
+
+  .qualified {
+    font-weight: 400;
+    color: color-mix(in oklab, var(--foreground) 62%, transparent);
+  }
+
+  .qualifier {
+    @apply flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5;
+  }
+
+  .qualifier__badge {
+    @apply rounded border border-warn/30 bg-warn/10 px-1.5 py-px font-mono text-[10px] font-medium uppercase tracking-wider text-warn;
+  }
+
+  .qualifier__copy {
+    @apply text-xs leading-relaxed text-muted-foreground;
+  }
+
+  /* ── Status chips · R3 ────────────────────────────────────────────────────
+   *
+   * Every chip carries a WORD; the tone is added on top of it. The modifier names come from
+   * `lib/status.ts`'s `TONE_CLASS`, so the mapping from a platform status to a treatment exists once.
+   */
+
+  .chip {
+    @apply inline-flex items-center gap-1.5 whitespace-nowrap rounded border border-transparent px-2 py-0.5 font-mono text-xs font-medium;
+    background-color: color-mix(in oklab, var(--muted) 90%, transparent);
+    color: var(--muted-foreground);
+  }
+
+  .chip--ok {
+    background-color: color-mix(in oklab, var(--ok) 12%, transparent);
+    color: var(--ok);
+  }
+
+  .chip--warn {
+    background-color: color-mix(in oklab, var(--warn) 14%, transparent);
+    color: var(--warn);
+  }
+
+  .chip--bad {
+    background-color: color-mix(in oklab, var(--bad) 12%, transparent);
+    color: var(--bad);
+  }
+
+  .chip--halt {
+    background-color: color-mix(in oklab, var(--halt) 16%, transparent);
+    color: var(--halt);
+  }
+
+  .chip--info {
+    background-color: color-mix(in oklab, var(--info) 12%, transparent);
+    color: var(--info);
+  }
+
+  /*
+   * 🔴 The unknown fallback is DASHED and borrows no status hue.
+   *
+   * This is the `p25monitor.html` defect stated as a rule: there, an unrecognised status fell through
+   * to the `running` style and actively asserted something false. A status this console does not model
+   * must be visibly outside the vocabulary, not the nearest thing in it.
+   */
+  .chip--unknown {
+    border-style: dashed;
+    border-color: color-mix(in oklab, var(--unknown) 55%, transparent);
+    background-color: transparent;
+    color: var(--unknown);
+  }
+
+  .chip__dot {
+    @apply size-1.5 shrink-0 rounded-full;
+    background-color: currentColor;
+  }
+
+  /*
+   * The loading state is a SKELETON shaped like the content it precedes, never a spinner.
+   *
+   * The bars occupy the shape the data will fill, so arrival changes values and not layout. A spinner
+   * communicates "wait" and nothing else, and the reflow when it is replaced is the jump that makes a
+   * page feel unfinished.
+   */
+  .skeleton {
+    @apply flex flex-col gap-3;
+  }
+
+  /* ── The three data states, and the four failure classes · R5 ─────────────
+   *
+   * They are five renderings rather than five strings in one box: a different border, a different
+   * surface and a different icon, so a reader can tell them apart BEFORE reading the copy. Collapsing
+   * them into one "something went wrong" turns four remedies — mount the subsystem, check the id,
+   * check the network, upgrade the plan — into none.
+   */
+
+  .state {
+    @apply rounded-xl border p-6;
+  }
+
+  .state__title {
+    @apply flex items-center gap-2.5 text-sm font-medium;
+  }
+
+  .state__body {
+    @apply mt-3 flex max-w-2xl flex-col text-sm leading-relaxed text-muted-foreground;
+    gap: --spacing(2);
+  }
+
+  .state--empty {
+    @apply items-center border-border bg-muted/10 text-center;
+    background-color: color-mix(in oklab, var(--muted) 35%, transparent);
+  }
+
+  .state--not-mounted {
+    border-color: var(--border);
+    background-color: color-mix(in oklab, var(--neutral) 6%, transparent);
+  }
+
+  .state--not-found {
+    border-color: var(--border);
+    background-color: color-mix(in oklab, var(--unknown) 6%, transparent);
+  }
+
+  .state--transport {
+    border-color: color-mix(in oklab, var(--bad) 30%, transparent);
+    background-color: color-mix(in oklab, var(--bad) 7%, transparent);
+  }
+
+  .state--upstream {
+    border-color: color-mix(in oklab, var(--warn) 30%, transparent);
+    background-color: color-mix(in oklab, var(--warn) 7%, transparent);
+  }
+
+  /*
+   * 🔴 FR15: a plan boundary is not a hazard.
+   *
+   * It gets its own hue, deliberately outside the status palette, because rendering an entitlement
+   * refusal in a warning colour tells the reader something has gone wrong. Nothing has: the capability
+   * is outside their plan, which is a commercial fact with a different next action.
+   */
+  .state--gated {
+    border-color: color-mix(in oklab, var(--gated) 30%, transparent);
+    background-color: color-mix(in oklab, var(--gated) 7%, transparent);
+  }
+
+  /* ── Banners ──────────────────────────────────────────────────────────── */
+
+  .banner {
+    @apply rounded-xl border px-4 py-3.5;
+  }
+
+  .banner__title {
+    @apply flex items-start gap-2.5 text-sm font-medium;
+  }
+
+  .banner--info {
+    border-color: color-mix(in oklab, var(--info) 28%, transparent);
+    background-color: color-mix(in oklab, var(--info) 8%, transparent);
+    color: var(--info);
+  }
+
+  .banner--warn {
+    border-color: color-mix(in oklab, var(--warn) 28%, transparent);
+    background-color: color-mix(in oklab, var(--warn) 8%, transparent);
+    color: var(--warn);
+  }
+
+  .banner--bad {
+    border-color: color-mix(in oklab, var(--bad) 28%, transparent);
+    background-color: color-mix(in oklab, var(--bad) 9%, transparent);
+    color: var(--bad);
+  }
+
+  /* ── The one table ────────────────────────────────────────────────────────
+   *
+   * Styled by element rather than by a class on every cell, so a view writes ordinary `<td>`s and
+   * cannot produce a table that looks like a different product. `.num` is the only opt-in, and it is
+   * the same opt-in the column definition uses for its header.
+   */
+
+  .data-table {
+    @apply w-full border-collapse text-sm;
+  }
+
+  .data-table caption {
+    @apply sr-only;
+  }
+
+  .data-table thead tr {
+    @apply border-b border-border bg-muted/40;
+  }
+
+  .data-table th {
+    @apply px-4 py-2.5 text-left align-bottom font-mono text-[10px] font-medium uppercase tracking-widest text-muted-foreground;
+  }
+
+  .data-table tbody tr {
+    @apply border-b border-border/40 transition-colors last:border-0;
+  }
+
+  .data-table tbody tr:hover {
+    @apply bg-muted/20;
+  }
+
+  .data-table td {
+    @apply px-4 py-3 align-top;
+  }
+
+  .data-table td.num,
+  .data-table th.num {
+    @apply text-right tabular-nums;
+  }
+
+  /*
+   * A qualified value in a numeric cell still aligns right.
+   *
+   * `Value` is a column flex box — the figure with its qualifiers stacked beneath — and a flex
+   * container ignores `text-align`, so a qualified number sat left while every unqualified number in
+   * the same column sat right. The effect was that the ONE row carrying a caveat was also the one row
+   * breaking the column's alignment, which reads as a rendering bug rather than as a caveat.
+   */
+  .data-table td.num > .inline-flex {
+    align-items: flex-end;
+  }
+
+  /*
+   * A node's error is its own full-width row (P2-22), not a cell.
+   *
+   * An error crammed into the last column of a six-column table is an error nobody reads: it wraps to
+   * six lines in a 90px column while the rest of the row is empty.
+   */
+  .row-error {
+    border-left: 2px solid var(--bad);
+    background-color: color-mix(in oklab, var(--bad) 7%, transparent);
+    color: var(--bad);
+    @apply font-mono text-xs;
+  }
+
+  /* The live monitor's per-row state marker: a chip AND an inset edge, never colour alone (P25-5). */
+  .node-row--ok {
+    box-shadow: inset 2px 0 0 var(--ok);
+  }
+
+  .node-row--warn {
+    box-shadow: inset 2px 0 0 var(--warn);
+  }
+
+  .node-row--bad {
+    box-shadow: inset 2px 0 0 var(--bad);
+  }
+
+  .node-row--unknown {
+    box-shadow: inset 2px 0 0 var(--unknown);
+  }
+
+  /* The leaderboard's expanded row is distinguished from a hover, which is transient (P4-19). */
+  .lb-row--expanded {
+    background-color: color-mix(in oklab, var(--muted) 70%, transparent);
+  }
+
+  /*
+   * The confidence-interval bar. The three custom properties are computed by the caller against the
+   * WHOLE board's range, so two rows' bars are comparable — scaling per row would make every interval
+   * look the same width, which is the one thing this graphic exists to show.
+   */
+  .ci {
+    @apply relative block h-1.5 w-full min-w-24 overflow-hidden rounded-full bg-muted;
+  }
+
+  .ci::before {
+    content: "";
+    position: absolute;
+    inset-block: 0;
+    left: var(--left);
+    width: var(--width);
+    border-radius: var(--radius-pill);
+    background-color: color-mix(in oklab, var(--primary) 35%, transparent);
+  }
+
+  .ci::after {
+    content: "";
+    position: absolute;
+    inset-block: 0;
+    left: var(--mean);
+    width: 2px;
+    border-radius: var(--radius-pill);
+    background-color: var(--primary);
+  }
+
+  /* ── Coverage meters (P4-34) ───────────────────────────────────────────── */
+
+  .meter__bar {
+    @apply relative block h-1.5 overflow-hidden rounded-full bg-muted;
+  }
+
+  .meter__bar::before {
+    content: "";
+    position: absolute;
+    inset-block: 0;
+    left: 0;
+    width: var(--achieved);
+    border-radius: var(--radius-pill);
+    background-color: var(--ok);
+  }
+
+  .meter__bar::after {
+    content: "";
+    position: absolute;
+    inset-block: 0;
+    left: var(--target);
+    width: 2px;
+    background-color: color-mix(in oklab, var(--foreground) 45%, transparent);
+  }
+
+  /* A dimension that did not meet its target is drawn in the caution hue AND falls short of the
+     target mark — two channels, so the shortfall is not carried by colour alone. */
+  .meter__bar--short::before {
+    background-color: var(--warn);
+  }
+
+  /* ── Diff ─────────────────────────────────────────────────────────────────
+   *
+   * Additions and deletions are distinguished by a colour, a border AND the leading `+`/`-` already in
+   * the text — so the patch still reads correctly in greyscale and in a screen reader's linear pass.
+   */
+
+  .diff {
+    @apply overflow-x-auto py-2 font-mono text-xs leading-5;
+    background-color: color-mix(in oklab, var(--muted) 30%, transparent);
+  }
+
+  .diff__line {
+    @apply block whitespace-pre px-4;
+  }
+
+  .diff__line--file {
+    color: color-mix(in oklab, var(--muted-foreground) 70%, transparent);
+  }
+
+  .diff__line--hunk {
+    border-left: 2px solid color-mix(in oklab, var(--info) 45%, transparent);
+    background-color: color-mix(in oklab, var(--info) 7%, transparent);
+    color: var(--info);
+  }
+
+  .diff__line--add {
+    border-left: 2px solid var(--ok);
+    background-color: color-mix(in oklab, var(--ok) 9%, transparent);
+    color: var(--ok);
+  }
+
+  .diff__line--del {
+    border-left: 2px solid var(--bad);
+    background-color: color-mix(in oklab, var(--bad) 10%, transparent);
+    color: var(--bad);
+  }
+
+  .diff__line--ctx {
+    @apply text-muted-foreground;
+  }
+
+  .buildlog {
+    @apply overflow-x-auto rounded-lg border border-border bg-muted/20 px-4 py-3 font-mono text-xs leading-6 text-muted-foreground;
+  }
+
+  .diagnostics {
+    @apply flex list-none flex-col rounded-xl border border-border p-0 text-xs leading-relaxed text-muted-foreground;
+  }
+
+  .diagnostics > li {
+    @apply border-b border-border/40 px-4 py-2.5 last:border-0;
+  }
+
+  /* ── The graph's vocabulary · P35 ─────────────────────────────────────────
+   *
+   * Five things are distinguished, and each is distinguished by more than one channel. Data and
+   * control edges differ by DASH and by ARROWHEAD as well as by weight; a region's label source
+   * differs by hue and by border style. A drawing that carried these differences in hue alone would be
+   * unreadable to a colour-blind reader — and the difference between a rule-matched pattern and a
+   * model-guessed one is the most consequential distinction on the page.
+   */
+
+  .graph-scroll {
+    /* 🔴 It SCROLLS rather than shrinking. A graph scaled to fit its container is a graph whose node
+       labels are unreadable at the size that matters, and the reader cannot get them back. */
+    @apply w-full overflow-x-auto p-3;
+  }
+
+  .graph .edge {
+    fill: none;
+    stroke-width: 1.5;
+  }
+
+  .graph .edge--data {
+    stroke: var(--graph-edge-muted);
+    stroke-dasharray: 5 4;
+  }
+
+  .graph .edge--control {
+    stroke: var(--ctl);
+  }
+
+  .graph .marker-data {
+    fill: var(--graph-edge-muted);
+  }
+
+  .graph .marker-control {
+    fill: var(--ctl);
+  }
+
+  .graph .region {
+    stroke-width: 1;
+    stroke-dasharray: 6 4;
+    fill: var(--graph-region);
+    stroke: var(--graph-region-border);
+  }
+
+  .graph .region--rule {
+    stroke: color-mix(in oklab, var(--primary) 55%, transparent);
+  }
+
+  .graph .region--llm {
+    fill: color-mix(in oklab, var(--llm) 7%, transparent);
+    stroke: color-mix(in oklab, var(--llm) 55%, transparent);
+  }
+
+  .graph .region--none {
+    fill: none;
+    stroke: var(--none);
+  }
+
+  .graph .nodebox {
+    fill: var(--graph-node);
+    stroke: var(--graph-node-border);
+    stroke-width: 1;
+  }
+
+  .graph .nodebox--llm {
+    stroke: color-mix(in oklab, var(--primary) 55%, transparent);
+  }
+
+  .graph .nodebox__id {
+    fill: var(--graph-text);
+    font-family: var(--font-mono);
+    font-size: var(--type-node);
+  }
+
+  .graph .nodebox__model {
+    fill: var(--graph-text-muted);
+    font-family: var(--font-mono);
+    font-size: var(--type-node-sub);
+  }
+
+  .graph .nodebox__labels {
+    fill: var(--primary);
+    font-family: var(--font-mono);
+    font-size: var(--type-label);
+  }
+
+  .legend {
+    @apply flex list-none flex-wrap gap-x-5 gap-y-2 p-0;
+  }
+
+  .legend__swatch {
+    @apply block h-3 w-6 shrink-0 rounded border;
+  }
+
+  .legend__swatch--data {
+    border-style: dashed;
+    border-color: var(--graph-edge-muted);
+  }
+
+  .legend__swatch--control {
+    border-color: var(--ctl);
+  }
+
+  .legend__swatch--rule {
+    border-color: color-mix(in oklab, var(--primary) 55%, transparent);
+    background-color: color-mix(in oklab, var(--primary) 10%, transparent);
+  }
+
+  .legend__swatch--llm {
+    border-color: color-mix(in oklab, var(--llm) 55%, transparent);
+    background-color: color-mix(in oklab, var(--llm) 10%, transparent);
+  }
+
+  .legend__swatch--none {
+    border-style: dashed;
+    border-color: var(--none);
+  }
+
+  .label-row {
+    @apply flex flex-col gap-2 border-l-2 pl-4;
+  }
+
+  .label-row--rule {
+    border-color: color-mix(in oklab, var(--primary) 55%, transparent);
+  }
+
+  .label-row--llm {
+    /* A model-guessed label is drawn DASHED as well as in its own hue: it is a candidate, and the
+       border style says so without the reader having to have learned the palette. */
+    border-style: dashed;
+    border-color: color-mix(in oklab, var(--llm) 55%, transparent);
+  }
+
+  .confidence {
+    @apply relative block h-1.5 w-24 overflow-hidden rounded-full bg-muted;
+  }
+
+  .confidence::before {
+    content: "";
+    position: absolute;
+    inset-block: 0;
+    left: 0;
+    width: var(--confidence);
+    border-radius: var(--radius-pill);
+    background-color: color-mix(in oklab, var(--primary) 75%, transparent);
+  }
+
+  /* ── The scatter's vocabulary · P4 ────────────────────────────────────── */
+
+  .axis {
+    stroke: var(--border);
+    stroke-width: 1;
+  }
+
+  .axis__label {
+    fill: var(--graph-text-muted);
+    font-size: var(--type-node);
+  }
+
+  .axis__tick {
+    fill: var(--graph-text-muted);
+    font-family: var(--font-mono);
+    font-size: var(--type-axis);
+  }
+
+  /* 🔴 Frontier membership is carried by SHAPE — a diamond against a circle — and only then by hue. */
+  .mark--frontier {
+    fill: color-mix(in oklab, var(--primary) 80%, transparent);
+    stroke: var(--primary);
+  }
+
+  .mark--dominated {
+    fill: color-mix(in oklab, var(--graph-text-muted) 40%, transparent);
+    stroke: color-mix(in oklab, var(--graph-text-muted) 70%, transparent);
+  }
+
+  .legend__mark {
+    @apply block size-2.5 shrink-0;
+  }
+
+  .legend__mark--frontier {
+    rotate: 45deg;
+    background-color: var(--primary);
+  }
+
+  .legend__mark--dominated {
+    border-radius: var(--radius-pill);
+    background-color: color-mix(in oklab, var(--graph-text-muted) 55%, transparent);
+  }
+
+  /* ── Controls ─────────────────────────────────────────────────────────────
+   *
+   * One button, one input, one select, one textarea. The console has exactly two button weights — the
+   * default and one primary — because a surface with five weights has no primary action.
+   */
+
+  .field {
+    @apply flex flex-col gap-1.5;
+    max-inline-size: var(--measure-field);
+  }
+
+  /* The opt-out, for the one field whose content genuinely is long: the Variant Spec editor. */
+  .field--wide {
+    max-inline-size: none;
+  }
+
+  .field > label {
+    @apply font-mono text-[10px] uppercase tracking-widest text-muted-foreground;
+  }
+
+  .input,
+  .select,
+  .textarea {
+    @apply w-full rounded-lg border border-border bg-input-background px-3 py-2 text-sm text-foreground transition-colors placeholder:text-muted-foreground/50;
+  }
+
+  .textarea {
+    @apply resize-y font-mono leading-6;
+  }
+
+  .button {
+    @apply inline-flex cursor-pointer items-center gap-2 whitespace-nowrap rounded-lg border border-border bg-muted/20 px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40;
+  }
+
+  .button--primary {
+    @apply border-transparent bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground hover:opacity-90;
+  }
+
+  .kbd {
+    @apply rounded border border-border bg-muted/50 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground;
+  }
+
+  /* ── Disclosure ───────────────────────────────────────────────────────── */
+
+  .figure__table {
+    @apply rounded-xl border border-border;
+  }
+}
+
+/*
+ * Reduced motion, and what it must NOT cost.
+ *
+ * The durations are collapsed in the token layer, which covers every transition. The skeleton's sweep
+ * is the one animation the console owns, and it is stopped here — with the bars left in place, because
+ * their SHAPE is the information ("something of this size is coming"), and the sweep was only ever
+ * saying "still working". Nothing is lost.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .skeleton__bar {
+    animation: none;
+  }
+}

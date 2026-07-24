@@ -1,0 +1,169 @@
+// routes.test.mjs holds §7.6 — the shell, selection, and canonical-route assertions.
+//
+// Two properties, both of which the four legacy pages get wrong:
+//
+//   🔴 **No route substitutes a default subject.** `p4board.html` does
+//      `params.get('workflow') || 'wf-demo'`, so opening the board bare shows a fully rendered,
+//      confident board for a workflow that is not the user's. That is strictly worse than an empty
+//      state: an empty state tells the truth, a wrong default asserts a falsehood with the full
+//      authority of a populated UI.
+//
+//   **Every legacy entry point still resolves.** R8 removes hand-typed parameters as an ENTRY
+//      MECHANISM; it must not remove shareability, which is a real and used capability.
+
+import { test, before, after } from "node:test";
+import assert from "node:assert/strict";
+import { startStubPlatform, startConsole, signIn } from "./support/harness.mjs";
+
+let platform;
+let console_;
+let cookie;
+
+before(async () => {
+  platform = await startStubPlatform();
+  console_ = await startConsole(platform.base);
+  cookie = await signIn(console_.base);
+}, { timeout: 60_000 });
+
+after(async () => {
+  await console_?.close();
+  await platform?.close();
+});
+
+async function page(path) {
+  const res = await fetch(`${console_.base}${path}`, { headers: { cookie } });
+  return { status: res.status, html: await res.text() };
+}
+
+/**
+ * text strips React's SSR markers and tags, so an assertion is about what a READER sees.
+ *
+ * React splits a JSX text node around an interpolation and marks the boundary with an HTML comment —
+ * `Open a <!-- -->workflow<!-- --> by identifier`. Asserting against the raw markup makes every copy
+ * assertion depend on where the interpolations happen to fall, which is a property of the source
+ * formatting rather than of the rendered page.
+ */
+function text(html) {
+  return html
+    .replace(/<!--.*?-->/g, "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ");
+}
+
+// ── No default subject ───────────────────────────────────────────────────────
+
+const SELECTION_ROUTES = [
+  ["/app/workflows", "workflow"],
+  ["/app/runs", "run"],
+  ["/app/transforms", "transform"],
+  ["/app/variants", "variant"],
+];
+
+for (const [route, subject] of SELECTION_ROUTES) {
+  test(`${route} with no parameters renders selection, never populated data`, async () => {
+    const before = platform.requests.length;
+    const { status, html } = await page(route);
+    assert.equal(status, 200);
+    // The decisive assertion: a selection surface makes NO upstream call, because there is no subject
+    // to fetch. If it fetched something, it chose a subject for the user.
+    assert.equal(platform.requests.length, before, `${route} fetched a subject it was not given`);
+    const rendered = text(html);
+    assert.match(rendered, new RegExp(`Open a ${subject} by identifier`, "i"), "no direct-entry accelerator");
+    assert.match(rendered, /Opened in this session/, "no already-visited list");
+    // And it must never contain the legacy default.
+    assert.doesNotMatch(html, /wf-demo/, `${route} mentions the hardcoded legacy default`);
+  });
+}
+
+test("the overview offers subjects and next actions, and fetches nothing", async () => {
+  const before = platform.requests.length;
+  const { status, html } = await page("/app");
+  assert.equal(status, 200);
+  assert.equal(platform.requests.length, before, "the overview made an upstream call");
+  assert.match(text(html), /Overview/);
+  assert.match(text(html), /Nothing opened yet|Opened in this session/);
+});
+
+// ── Every legacy entry point resolves to its canonical route ─────────────────
+
+const LEGACY = [
+  ["/p2?run=run-7", "/app/runs/run-7"],
+  ["/p2?cfg=abc123&rev=rev1", "/app/transforms/abc123/rev1"],
+  ["/p2", "/app/configure"],
+  ["/p25/monitor?run_id=run-7", "/app/runs/run-7/live"],
+  ["/p25/monitor", "/app/runs"],
+  ["/p35/graph?workflow_id=owner%2Frepo", "/app/workflows/owner%2Frepo/graph"],
+  ["/p35/graph", "/app/workflows"],
+  ["/p4/board?workflow=owner%2Frepo", "/app/workflows/owner%2Frepo/board"],
+  // 🔴 The one that matters most: bare, it goes to SELECTION — not to `wf-demo`.
+  ["/p4/board", "/app/workflows"],
+];
+
+for (const [legacy, canonical] of LEGACY) {
+  test(`${legacy} resolves to ${canonical}`, async () => {
+    const res = await fetch(`${console_.base}${legacy}`, { headers: { cookie }, redirect: "manual" });
+    assert.equal(res.status, 308, `${legacy} did not redirect permanently`);
+    const location = new URL(res.headers.get("location"), console_.base);
+    assert.equal(location.pathname, canonical);
+  });
+}
+
+test("a half-specified transform key goes to the picker, not to a not-found", async () => {
+  // A config hash without a source revision does not NAME a transform. That is a different fact from
+  // a transform that does not exist, and P2-12 already distinguishes them.
+  const res = await fetch(`${console_.base}/p2?cfg=abc123`, { headers: { cookie }, redirect: "manual" });
+  assert.equal(res.status, 308);
+  const location = new URL(res.headers.get("location"), console_.base);
+  assert.equal(location.pathname, "/app/transforms");
+  assert.equal(location.searchParams.get("config_hash"), "abc123");
+});
+
+test("a typed identifier resolves to the canonical route, so the subject ends up in the PATH", async () => {
+  // This is what keeps R9's shareable link and R8's no-hand-typed-entry compatible: the picker's form
+  // is a GET that redirects, so the address bar ends up carrying the subject rather than a query.
+  const res = await fetch(`${console_.base}/app/runs?run_id=run-9`, { headers: { cookie }, redirect: "manual" });
+  assert.equal(res.status, 307);
+  assert.equal(new URL(res.headers.get("location"), console_.base).pathname, "/app/runs/run-9");
+});
+
+// ── The shell reaches every surface ──────────────────────────────────────────
+
+test("the shell's navigation reaches every surface — none is reachable only by URL", async () => {
+  const { html } = await page("/app");
+  for (const href of ["/app", "/app/workflows", "/app/runs", "/app/transforms", "/app/variants", "/app/configure", "/app/account"]) {
+    assert.ok(html.includes(`href="${href}"`), `the shell does not link to ${href}`);
+  }
+});
+
+test("a subject carries across surfaces without being re-asked", async () => {
+  platform.set((req, res) => {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ workflow_id: "owner/repo", nodes: [], edges: [], regions: [], unclassified: [], llm_calls: 0, ir_version: "1", taxonomy_version: "1" }));
+  });
+  const { html } = await page("/app/workflows/owner%2Frepo/graph");
+  // The subject strip links the other two surfaces for the SAME workflow, so moving between them is a
+  // link rather than a URL edit — which is the defect the four legacy pages share most obviously.
+  assert.match(html, /href="\/app\/workflows\/owner%2Frepo\/board"/);
+  assert.match(html, /href="\/app\/workflows\/owner%2Frepo\/proposals"/);
+});
+
+test("an opened subject is offered back from the session, never re-typed", async () => {
+  // FR30. The console cannot enumerate a tenant's workflows — the platform exposes no such endpoint —
+  // but it must never ask for one it has already been given.
+  const { html } = await page("/app/workflows");
+  assert.match(text(html), /owner\/repo/, "a workflow opened moments ago is not offered back");
+});
+
+// ── Every view names its subject before its data resolves (R13) ─────────────
+
+test("a data view names its subject even when the upstream call fails", async () => {
+  platform.set((_req, res) => {
+    res.writeHead(503, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: "the pattern classifier is not mounted on this server" }));
+  });
+  const { html } = await page("/app/workflows/owner%2Frepo/graph");
+  // A failure that also erased the subject would leave the reader unable to tell WHICH workflow failed
+  // to load — which is the difference between an actionable error and a mystifying one.
+  assert.match(html, /<h1[^>]*>owner\/repo<\/h1>/);
+  assert.match(text(html), /not mounted on this deployment/);
+});

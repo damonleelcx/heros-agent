@@ -47,6 +47,25 @@ export function timestamp(iso: string | undefined | null): string {
   return dateTimeFormatter.format(parsed);
 }
 
+const clockFormatter = new Intl.DateTimeFormat(LOCALE, {
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hour12: false,
+  timeZone: "UTC",
+});
+
+/**
+ * clock renders the wall-clock time the chrome band shows, in UTC.
+ *
+ * It exists because every figure on this console states the instant it is current as of, and an
+ * as-of time is only readable against a NOW the operator can see. Both are UTC and both come from
+ * here, so "as of 14:09:31" and the clock beside it can be compared without a timezone in between.
+ */
+export function clock(at: Date): string {
+  return clockFormatter.format(at);
+}
+
 /** minutes renders a remaining-seconds value as whole minutes for the impersonation banner. */
 export function minutes(seconds: number): string {
   return integerFormatter.format(Math.max(0, Math.floor(seconds / 60)));

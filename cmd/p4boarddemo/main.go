@@ -10,7 +10,7 @@
 // That distinction matters. A demo that fabricated a board would prove the HTML parses; this one
 // proves the measurement path produces a board.
 //
-//	go run ./cmd/p4boarddemo        # then open http://127.0.0.1:8085/p4/board?workflow=wf-router
+//	go run ./cmd/p4boarddemo        # serves the p4 API; run web/console against it
 package main
 
 import (
@@ -21,6 +21,7 @@ import (
 	"log"
 	"math/rand"
 	"net/http"
+	"net/url"
 	"os"
 	"sync"
 	"time"
@@ -201,7 +202,13 @@ func main() {
 
 	srv := api.New(nil, config.Config{})
 	srv.MountP4(src)
-	fmt.Printf("\n  open http://%s/p4/board?workflow=%s\n\n", *addr, ir.Workflow.ID)
+	// The embedded UI page this demo used to open was removed in the P9 cutover: the console is now a
+	// separate component, so a demo can serve the read models but cannot serve the screen. It prints the
+	// API it is serving and how to point the console at it — the same shape `cmd/p9hermes` uses.
+	fmt.Printf("\n  p4 API: http://%s\n\n", *addr)
+	fmt.Printf("  cd web/console && PLATFORM_API_BASE=http://%s \\\n", *addr)
+	fmt.Printf("    CONSOLE_PLATFORM_CREDENTIAL=demo CONSOLE_TENANT_IDENTITY=dev npm run dev\n\n")
+	fmt.Printf("  then open http://127.0.0.1:4320/app/workflows/%s/board\n\n", url.PathEscape(ir.Workflow.ID))
 	if err := http.ListenAndServe(*addr, srv.Handler); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
