@@ -1,0 +1,61 @@
+/*
+ * tokens.operator.css — the OPERATOR console's identity layer (P8 tasks 15.1, 15.6).
+ *
+ * The shared system (`web/design-system/tokens.css`) supplies scale, spacing, type, radius,
+ * elevation, motion, density, the neutral ramp and the status palette. This file supplies exactly one
+ * thing the shared system deliberately does not: **who this surface is**.
+ *
+ * # Why the operator accent is cool, and why that is a safety fix
+ *
+ * The console's previous identity was amber — the same hue as `--warn`. That made the hazard palette
+ * ordinary: the chrome bar, the links, the primary buttons and the bar charts were all painted in the
+ * colour reserved for "something is wrong", so by the time an operator reached a control that really
+ * was dangerous, the signal had been spent. FR31 exists to prevent that, and FR24's friction depends
+ * on it — "halt this tenant" can only look different from "halt the fleet" if red and amber still mean
+ * something on this screen.
+ *
+ * So the operator identity is a **cool teal-cyan**, chosen because it is nowhere near the hazard hues,
+ * it reads as instrumentation rather than alarm, and it is unmistakable beside the customer console at
+ * a glance (FR23) without borrowing a colour that has a job.
+ *
+ * # Why literals are legal here
+ *
+ * This is a token layer — one of the two files `scripts/scan-tokens.mjs` allows literals in. Every
+ * other file in the console resolves through `var(--…)`.
+ */
+
+:root {
+  /* ── Operator identity ───────────────────────────────────────────────────
+   * accent           interactive ink: links, focusable affordances, the operator mark
+   * accent-strong    the same hue with more weight, for solid fills that carry text
+   * accent-surface   a tint for the chrome band and quiet emphasis
+   * accent-border    a hairline that survives on both tints
+   */
+  --accent: #0e6f83;
+  --accent-strong: #0a5462;
+  --accent-surface: #e2f4f8;
+  --accent-border: #2b93a8;
+  --accent-contrast: #ffffff;
+
+  /* The chrome band: darker than the page in both themes, so the console's identity is a
+   * horizon line the eye finds before it reads anything. */
+  --chrome-bg: #0b3b45;
+  --chrome-text: #e6f7fb;
+  --chrome-muted: #9dc6d1;
+  --chrome-border: #12707f;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --accent: #4fc9e0;
+    --accent-strong: #86e0f1;
+    --accent-surface: #06323c;
+    --accent-border: #2b8ea3;
+    --accent-contrast: #06212a;
+
+    --chrome-bg: #071f26;
+    --chrome-text: #d8f2f8;
+    --chrome-muted: #85aeb9;
+    --chrome-border: #10586a;
+  }
+}

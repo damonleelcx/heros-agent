@@ -1,0 +1,245 @@
+/*
+ * tokens.css — the SHARED token system (P8 design Decision 12; P8 tasks 15.1).
+ *
+ * This file is the single source of truth for scale, spacing, type, radius, elevation, motion and the
+ * accessibility primitives that BOTH consoles draw from — the customer console (P9) and the operator
+ * console (P8). It lives beside the consoles rather than inside either one, so neither can quietly
+ * fork it (PRD §14 Q8).
+ *
+ * # What belongs here, and what does not
+ *
+ * HERE: values that must not differ between the two surfaces — the spacing rhythm, the type ramp, the
+ * radius family, the elevation model, the motion budget, the density scale, the status palette, the
+ * neutral ramp, and the focus treatment.
+ *
+ * NOT HERE: a surface's IDENTITY. The operator console's accent and chrome live in the operator layer
+ * (`web/admin-console/src/app/tokens.operator.css`) precisely because the two consoles must be
+ * distinguishable at a glance, and that distinction is a safety requirement (FR23) rather than a style
+ * preference. Shared system, distinct chrome.
+ *
+ * # Why literals are legal only here
+ *
+ * A hex code or a pixel value anywhere else is a value that cannot be themed, cannot be audited for
+ * contrast, and drifts silently. `scripts/scan-tokens.mjs` enforces that mechanically: this file and
+ * the operator layer are the only places a literal may appear, and a stray `#hex` or `12px` elsewhere
+ * fails the build. A rule that is only written down has a demonstrated failure rate.
+ */
+
+:root {
+  /* ── Spacing rhythm — one 4px base, no off-scale values ──────────────────── */
+  --space-0: 0;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 2.5rem;
+  --space-8: 3rem;
+  --space-10: 4rem;
+
+  /* ── Radius family — four steps, and nothing between them ───────────────── */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-xl: 16px;
+  --radius-pill: 999px;
+
+  /* ── Rule weights ────────────────────────────────────────────────────────
+   * Borders carry hierarchy too: a hairline separates, a rule groups, a heavy rule marks a
+   * control whose blast radius is fleet-wide (FR24). Four weights, no fifth.
+   */
+  --hairline: 1px;
+  --rule: 2px;
+  --rule-strong: 4px;
+  --rule-heavy: 8px;
+  --focus-width: 3px;
+
+  /* ── Type ────────────────────────────────────────────────────────────────
+   * One sans for prose and one mono for identifiers. Identifiers (tenant ids, run
+   * ids, hashes, price refs) are ALWAYS mono: an operator compares them character by
+   * character, and a proportional font makes `l` and `1` the same shape.
+   */
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+
+  /* Mono set inside running text keeps the surrounding size but corrects for the mono face's
+   * larger x-height, so an identifier does not shout next to its label. */
+  --text-mono: 0.925em;
+
+  --text-2xs: 0.6875rem;
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.375rem;
+  --text-2xl: 1.75rem;
+  --text-3xl: 2.25rem;
+
+  --line-tight: 1.2;
+  --line-snug: 1.35;
+  --line-normal: 1.55;
+
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  /* Editorial hierarchy: an eyebrow is tracked out and small; a display line is tracked in.
+   * Both are tokens so a page cannot invent a third treatment. */
+  --tracking-eyebrow: 0.08em;
+  --tracking-tight: -0.01em;
+  --tracking-normal: 0;
+
+  /* ── Composition grid ────────────────────────────────────────────────────
+   * One content measure for every page, one gutter, one prose measure. A view that needs
+   * something wider says so by opting into --measure-wide, not by inventing a width.
+   */
+  --measure-content: 78rem;
+  --measure-wide: 96rem;
+  --measure-prose: 62ch;
+  --gutter: var(--space-5);
+
+  /* ── Elevation — three steps: flat, raised, overlay ──────────────────────
+   * Depth is a hierarchy signal, not decoration: raised = a panel of content, overlay =
+   * something that sits above the page and traps focus (the palette, a drawer).
+   */
+  --elev-0: none;
+  --elev-1: 0 1px 2px rgb(15 21 28 / 0.06), 0 1px 1px rgb(15 21 28 / 0.04);
+  --elev-2: 0 4px 12px rgb(15 21 28 / 0.10), 0 1px 3px rgb(15 21 28 / 0.06);
+  --elev-3: 0 18px 48px rgb(15 21 28 / 0.24), 0 2px 8px rgb(15 21 28 / 0.12);
+
+  /* ── Motion budget (FR35) ────────────────────────────────────────────────
+   * Named durations, and nothing longer. Motion explains continuity or marks a change; it
+   * never sits between an operator's intent and the command, so nothing here is long enough
+   * to be waited on.
+   */
+  --motion-instant: 0ms;
+  --motion-fast: 120ms;
+  --motion-base: 180ms;
+  --motion-slow: 240ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* ── Density (FR29) ──────────────────────────────────────────────────────
+   * Comfortable is the default. Compact tightens the RHYTHM only — never the information:
+   * no row, column, control or disclosure exists at one density and not the other.
+   */
+  --pad-card: var(--space-5);
+  --pad-cell-y: var(--space-3);
+  --pad-cell-x: var(--space-4);
+  --pad-control-y: var(--space-2);
+  --stack: var(--space-5);
+  --stack-tight: var(--space-3);
+
+  /* ── Neutral ramp + status palette (light) ───────────────────────────────
+   * Every pair below meets WCAG 2.1 AA at its intended size. The hazard hues (warn, danger)
+   * are RESERVED for hazard (FR31) — a surface identity may not borrow them.
+   */
+  --canvas: #f7f8fa;
+  --surface: #ffffff;
+  --surface-2: #eef1f5;
+  --surface-3: #e2e6ec;
+  --border: #ccd2db;
+  --border-strong: #7d8794;
+
+  --text: #10151c;
+  --text-muted: #4b5563;
+  --text-inverse: #ffffff;
+
+  --ok: #0f6b3a;
+  --ok-surface: #e3f5ea;
+  --ok-border: #2f9e63;
+  --warn: #8a5300;
+  --warn-surface: #fdf1dc;
+  --warn-border: #c08a1e;
+  --danger: #a01110;
+  --danger-surface: #fdeaea;
+  --danger-border: #d13b37;
+  --info: #17497e;
+  --info-surface: #e7f0fa;
+  --info-border: #3f7fc4;
+
+  --focus-ring: #0b5fa5;
+
+  /* The scrim behind an overlay. Dark in both themes: it must dim the page beneath a
+   * focus-taking surface, not tint it. */
+  --scrim: rgb(8 12 18 / 0.45);
+
+  /* Chart ink: one hue, varied by weight, because a bar's meaning is in its label and its
+   * number — never in its colour alone. */
+  --chart-ink: #3a6ea8;
+  --chart-track: #e2e6ec;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --canvas: #0d1117;
+    --surface: #151b23;
+    --surface-2: #1c232c;
+    --surface-3: #252d38;
+    --border: #303a47;
+    --border-strong: #5b6674;
+
+    --text: #e9eef5;
+    --text-muted: #a3b2c4;
+    --text-inverse: #0d1117;
+
+    --ok: #62d29a;
+    --ok-surface: #0c2f1e;
+    --ok-border: #2c7f56;
+    --warn: #f0b64a;
+    --warn-surface: #33260a;
+    --warn-border: #9a7420;
+    --danger: #ff8f88;
+    --danger-surface: #3a1311;
+    --danger-border: #b8443e;
+    --info: #8dbdf0;
+    --info-surface: #10263d;
+    --info-border: #3a6fa5;
+
+    --focus-ring: #6cc6ff;
+    --scrim: rgb(0 0 0 / 0.62);
+
+    --chart-ink: #7aa9dd;
+    --chart-track: #252d38;
+
+    --elev-1: 0 1px 2px rgb(0 0 0 / 0.5);
+    --elev-2: 0 4px 14px rgb(0 0 0 / 0.55);
+    --elev-3: 0 20px 52px rgb(0 0 0 / 0.68);
+  }
+}
+
+/* ── Density switch ────────────────────────────────────────────────────────
+ * Set on the root element from a server-read preference, so the first paint is already at the
+ * operator's density and nothing reflows after hydration.
+ */
+:root[data-density="compact"] {
+  --pad-card: var(--space-3);
+  --pad-cell-y: var(--space-1);
+  --pad-cell-x: var(--space-3);
+  --pad-control-y: var(--space-1);
+  --stack: var(--space-4);
+  --stack-tight: var(--space-2);
+}
+
+/* ── Reduced motion (FR35) ─────────────────────────────────────────────────
+ * Every animation collapses to its end state. Nothing here removes information, because no
+ * information is carried by motion alone.
+ */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-fast: 0ms;
+    --motion-base: 0ms;
+    --motion-slow: 0ms;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0ms !important;
+    scroll-behavior: auto !important;
+  }
+}

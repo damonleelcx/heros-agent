@@ -36,7 +36,12 @@ metrics/cost from **P2.5**, jobs/queue from **P4/P6**, the autonomous audit trai
 tenant/billing/entitlement administration + the audit log) alongside P7, and **8b** (fleet operations,
 global autonomous controls, cross-tenant observability, and compliance/GDPR handling). Milestone
 **M11 — operator console live** means the platform is **manageable end-to-end** by an authenticated,
-least-privileged operator, with every action observable and reversible.
+least-privileged operator, with every action observable and reversible. And because the console only
+retires the production shell if operators actually **prefer** it, the surface itself is a first-class
+requirement rather than polish deferred: one design language, a live operating picture readable at a
+glance, a command palette and URL-addressable views so nothing is recalled from memory, receipts that
+name the audit entry they wrote — and, holding it all honest, **delight on the read path and unchanged
+friction on the write path**.
 
 ## 2. Problem & context
 
@@ -182,6 +187,34 @@ the **cross-tenant read models**, and the **append-only, tamper-evident audit lo
   every chart SHALL have a tabular fallback, contrast SHALL meet WCAG 2.1 AA, UI strings SHALL be English
   with `en-US`-pinned formatting, and acceptance for any user-visible behavior SHALL require
   **rendered-browser evidence**, never a successful build.
+- **G22. The console is the fastest way to get the answer — because an avoided console reopens the prod
+  shell.** G1–G21 describe a **floor**; a floor is not a surface. P8's whole purpose is to retire the
+  ad-hoc production shell, and a console that is slower or harder to read than a `psql` prompt **does not
+  retire it** — an operator under incident pressure routes around the slow surface and the credentialled
+  shell stays open beside it. Craft is therefore a **security control**: the console SHALL be the
+  preferred path, because only the preferred path is the audited path.
+- **G23. One design language, one closed set of primitives, density as an operator's choice.** Every view
+  SHALL compose from a documented language (editorial type hierarchy, one spacing rhythm, one elevation
+  model, one composition grid) extending the shared token system, and from a **closed** primitive set —
+  no bespoke layout, no raw color, no off-scale value. Numbers SHALL be rendered for comparison (tabular
+  figures, aligned columns, unit stated once), and the **hazard palette SHALL be reserved for hazard**, so
+  danger stays salient by being rare.
+- **G24. The operating picture reads at a glance and never presents stale data as current.** Without any
+  interaction an operator SHALL be able to see **whether anything is halted and whether anything is
+  wrong** — kill-switch state, fleet/queue health, active impersonations, unresolved anomalies — each
+  carrying its as-of time. Live updates SHALL land **in place**: no layout shift, no row moving under the
+  pointer, no refresh blanking data that is already correct.
+- **G25. Feedback is truthful: receipts, and no optimistic success.** Every privileged command SHALL
+  resolve to a **receipt** naming what was done, to whom, under which reason, and **the audit entry it
+  wrote**, offering the reversing action or stating that none exists. The console SHALL NOT render an
+  optimistic success — **in flight**, **failed**, and **outcome unknown** are three distinct renderings,
+  because on a fail-closed surface "we could not confirm it" is a real and different answer.
+- **G26. Delight never buys down danger friction, and craft is evidenced rather than asserted.** Every
+  velocity and polish requirement applies to the **read** path; on the **write** path the friction of G4
+  and FR24 stands unchanged — the command palette can *navigate to* a destructive action but SHALL NOT
+  *perform* one, and nothing is pre-filled. Acceptance covers a defined rendering matrix (light/dark,
+  narrow/wide, 200% zoom, reduced motion, both densities, all four states) with a **visual-regression
+  baseline** and a named design review.
 
 ### Non-goals (explicitly deferred or owned elsewhere)
 - **The customer-facing web dashboard** — **[P9](P9-web-console.md).** P8 is the **internal operator**
@@ -206,6 +239,11 @@ the **cross-tenant read models**, and the **append-only, tamper-evident audit lo
 - **A general-purpose SQL/prod-shell replacement for arbitrary queries** — **explicitly not.** P8
   replaces the *ad-hoc prod shell* with **bounded, permission-gated, audited capabilities**; "run
   arbitrary SQL against any tenant" is the anti-pattern it exists to remove, not a feature.
+- **A second visual language, a component-library adoption, or decoration for its own sake** — **not
+  what G22–G26 ask for.** The craft requirements **extend** the shared token system (type hierarchy,
+  rhythm, elevation, primitives, motion budget); they do not fork it, do not import a third-party look,
+  and do not add ornament. Any animation without a state change behind it, any color outside the token
+  scale, and any hazard color used for emphasis are **defects** under FR29–FR31, not polish.
 
 ## 4. Users & personas
 
@@ -286,7 +324,7 @@ drives. Roles are the unit of least privilege (G3); a person may hold one role.
 ## 6. Functional requirements
 
 These map 1:1 to the OpenSpec requirements under
-`openspec/changes/p8-admin-console/specs/{admin-rbac,admin-operations,admin-observability-audit}/`.
+`openspec/changes/p8-admin-console/specs/{admin-rbac,admin-operations,admin-observability-audit,admin-console-surface}/`.
 
 **Admin RBAC — separate identity, SSO+MFA, short-lived sessions, least privilege** (`admin-rbac`)
 - **FR1 (→ admin-rbac).** Admin access SHALL be authenticated through a **dedicated admin identity
@@ -386,6 +424,73 @@ These map 1:1 to the OpenSpec requirements under
 - **FR28 (→ admin-console-surface).** **No number SHALL be hardcoded** in the console — plan names and
   price references come from configuration, never from the client bundle (P7's money-in-git rule).
 
+**Operator experience craft — the surface above the floor** (`admin-console-surface`)
+
+> FR19–FR28 are a **floor**: isolation, permission-parity, four states, contrast, keyboard reach, no
+> hardcoded number. A specification made entirely of floors produces exactly what it specifies — a
+> compliant surface no one wants to use. That is a **security** failure here, not a taste failure: P8
+> exists to retire the ad-hoc production shell, and an operator who finds the console slower than a
+> `psql` prompt at 3am uses the prompt. FR29–FR37 specify the surface that gets **preferred**, and
+> FR36 is the invariant that keeps "preferred" from meaning "easier to destroy something with."
+
+- **FR29 (→ admin-console-surface).** The console SHALL be composed from **one documented design
+  language** — an editorial type hierarchy, a single spacing rhythm, a single radius/elevation model, a
+  stated composition grid — expressed as an **extension of the shared token system** (never a fork), and
+  from a **closed, documented set of primitives** (page frame, section, data table, stat, timeline,
+  drawer, confirmation sheet, receipt, state block). No view SHALL introduce a bespoke layout, a raw
+  color, or an off-scale spacing/type/radius value. **Density** (comfortable / compact) SHALL be an
+  operator choice the console remembers, with no information present at one density and absent at the
+  other.
+- **FR30 (→ admin-console-surface).** Numeric data SHALL be rendered **for comparison at a glance**:
+  **tabular (fixed-width) figures**, digits aligned within a column, **unit and scale stated once** in
+  the header or label rather than repeated per cell, and one quantity rendered at one scale and precision
+  throughout a view. Magnitude SHALL be distinguishable without counting digits.
+- **FR31 (→ admin-console-surface).** The **hazard palette SHALL be reserved for hazard** — destructive
+  scope, an armed halt, an active impersonation, an alarming state — and SHALL NOT be used for emphasis,
+  branding, or decoration. Danger stays legible **because it is rare**: on a view with one destructive
+  control, that control SHALL be the only element carrying it.
+- **FR32 (→ admin-console-surface).** A **command palette** SHALL be reachable by a single keystroke from
+  every view, addressing **every capability the operator's role grants** and every recently-viewed target
+  by name, driven by the **same permission map** the backend enforces (FR22) so it never offers a
+  capability the gate would refuse. Subjects SHALL be reachable by **type-ahead on their name** — an
+  operator SHALL NOT be required to recall an opaque identifier to *find* a subject. (Typing the target's
+  identifier remains required as **confirmation friction** for irreversible actions, FR24 — finding a
+  subject and confirming a destruction are deliberately different acts.)
+- **FR33 (→ admin-console-surface).** Every view's **state SHALL live in its URL** — subject, filters,
+  time window, selected tab — so a view is **linkable, restorable, and pasteable into an incident
+  channel**, and browser back/forward restore it exactly (the opened view is still governed by the
+  *opener's* permissions). No session material, impersonation credential, or subject personal data SHALL
+  appear in a URL.
+- **FR34 (→ admin-console-surface).** The **live operating picture SHALL be readable without
+  interaction**: whether anything is **halted** (global and per-tenant kill-switch state) and whether
+  anything is **wrong** (fleet/queue health, active impersonations, unresolved anomalies), each figure
+  carrying its **as-of time**. A figure that cannot be refreshed within its expected interval SHALL
+  **announce staleness**, never present as current. Live updates SHALL land **in place**: no layout
+  shift, no row moving under the pointer or focus, and **no refresh blanking data that is already
+  correct** (a refresh in flight is indicated, not substituted for the view).
+- **FR35 (→ admin-console-surface).** **Motion SHALL carry meaning and never gate an action.** Animation
+  SHALL be used only for continuity or to mark a state change (where a surface came from, which value
+  changed, what arrived), SHALL complete within a documented duration budget, and SHALL NOT sit between
+  an operator's intent and the command — no confirmation, navigation, or command waits on a transition.
+  Under `prefers-reduced-motion` every animation SHALL have an instant equivalent, with **no information
+  conveyed only by motion**.
+- **FR36 (→ admin-console-surface).** Every privileged command SHALL resolve to a **receipt** stating the
+  action, target, recorded reason, time, and **the reference of the audit entry it wrote** (reachable
+  from the receipt), offering the reversing action or **explicitly stating that none exists**. The
+  console SHALL NOT render an **optimistic success**: a state change is shown only once the backend —
+  including its write-ahead audit — confirms it, and **in flight**, **failed**, and **outcome unknown**
+  SHALL be three distinct renderings, since on a fail-closed surface an unconfirmed outcome is a real
+  third answer with its own remedy.
+- **FR37 (→ admin-console-surface).** **No visual, motion, or velocity affordance SHALL reduce
+  dangerous-action friction.** FR29–FR36 apply to the **read** path; on the **write** path FR6/FR24 stand
+  unchanged — no transition, shortcut, palette entry, smart default, or restyle SHALL make a destructive
+  effect reachable in fewer deliberate steps; the palette **navigates to** a dangerous action and SHALL
+  NOT **perform** one; and reason and typed-target fields SHALL never be pre-filled from context or
+  history. Craft acceptance SHALL be **evidenced**, not asserted: rendered evidence across light/dark, a
+  narrow and a wide viewport, 200% zoom, reduced motion, both densities, and all four states (FR26); a
+  **visual-regression baseline** gating unintended change; and a **recorded design review** naming its
+  reviewer for each new view.
+
 ## 7. Non-functional requirements
 
 - **Security (load-bearing).** Admin identity is **separate from customer auth**; **SSO + MFA** is
@@ -451,6 +556,31 @@ These map 1:1 to the OpenSpec requirements under
   carries **distinct operator chrome** (FR23). This is a safety requirement, not a style choice: the
   failure it prevents is an operator with both consoles open performing a cross-tenant action while
   believing the view is single-tenant.
+- **Craft as a safety property, for the same reason distinctness is (load-bearing).** The floor above
+  (FR19–FR28) states what the console must not fall below; it does not describe a surface anyone would
+  choose. That distinction has a security consequence, because **P8's purpose is to retire the ad-hoc
+  production shell**: an unused console retires nothing. An operator at 3am, one page into an incident,
+  uses whatever answers fastest — and if that is a database prompt with a production credential, the
+  platform has the anti-pattern back **plus** a console it is paying to maintain. So the console is held
+  to being the **fastest and clearest** route to an operator's answer (FR29–FR36): one design language
+  and a closed primitive set (FR29), numbers rendered for comparison (FR30), hazard color reserved so
+  danger stays salient (FR31), a **command palette** and type-ahead subject selection so nothing must be
+  recalled from memory (FR32), **URL-addressable views** that paste into an incident channel (FR33), and
+  a **glanceable operating picture** that never presents stale data as current (FR34).
+- **Delight on the read path, friction on the write path.** The two pulls — "make it fast and pleasant"
+  and "make destruction deliberate" — are resolved by **which path** each applies to, and the split is
+  itself a requirement (FR37). Read: fast, dense, addressable, animated only where motion explains
+  something (FR35). Write: every step of FR6/FR24 intact, nothing pre-filled, and the palette able to
+  **navigate to** a dangerous action but never to **perform** one. A restyle that leaves the danger path
+  one step shorter is a **regression**, and it is tested for as one.
+- **Truthful feedback over smooth feedback.** The standard delight pattern — optimistic UI — is
+  **prohibited here** (FR36) and the reason is structural: this platform **write-ahead-audits before it
+  effects** and **fails closed** when it cannot, so a surface that renders success on intent would
+  routinely assert effects that never happened, on exactly the actions where being wrong is most
+  expensive. Instead, every command ends in a **receipt naming its audit entry**, and **in flight /
+  failed / outcome unknown** are three renderings — because "we could not confirm it" is a real outcome
+  of a fail-closed system and has its own remedy (verify in the audit log), not a spinner that eventually
+  lies in one direction or the other.
 
 ## 8. System design summary
 
@@ -660,6 +790,33 @@ The interface floor is **not** relaxed because the audience is internal. An oper
 console with a keyboard, or at 200% zoom, at 3am during an incident is the normal case — and the
 consequence of a mis-read control here is measured in tenants.
 
+*And the floor is not the surface: an avoided console reopens the prod shell.* Everything above is
+what the console must not fall below. None of it makes the console **worth opening**, and that gap is
+a security gap rather than a taste one — the phase exists to retire an unaudited database prompt, and
+the prompt is retired only if the console answers faster than it does. So the frontend deliverable
+includes the part usually left to "polish later," specified with the same seriousness as the gates:
+**one design language** extending the shared tokens — editorial type hierarchy, one spacing rhythm,
+one elevation model, a **closed** primitive set, density as a remembered operator choice (FR29); data
+rendered for **comparison** — tabular figures, aligned columns, unit stated once, one scale per
+quantity per view (FR30); the **hazard palette spent only on hazard**, so the one destructive control
+on a page is the only red thing on it (FR31); a **command palette** one keystroke from anywhere,
+listing exactly the capabilities the role grants because it reads the same permission map (FR32);
+**every view addressable by URL**, so "look at this" in an incident channel is a link and not a
+description (FR33); and an **operating picture that reads without interaction** — halted or not,
+wrong or not — updating **in place**, never blanking correct data, never letting a stale figure pass
+as current (FR34). Motion is budgeted and meaningful: it explains where a surface came from or what
+changed, it is never between the operator and the command, and under `prefers-reduced-motion` nothing
+is lost (FR35). Feedback is **truthful before it is smooth** — no optimistic success, a **receipt
+naming the audit entry** for every privileged command, and **in flight / failed / outcome unknown** as
+three renderings, because a fail-closed system genuinely produces the third (FR36).
+
+The resolution that makes all of this safe is stated as its own requirement: **delight on the read
+path, friction on the write path** (FR37). The palette *navigates to* a destructive action and never
+*performs* one; reason and typed-target fields are never pre-filled; a restyle that leaves the danger
+path one step shorter is a regression with a test that fails. Craft here is **evidenced** the same way
+behavior is — a rendering matrix (light/dark, narrow/wide, 200% zoom, reduced motion, both densities,
+four states), a visual-regression baseline, and a design review with a name on it.
+
 **DevOps (co-lead) — *highest blast radius, so least privilege, tamper-evident audit, fail-closed, and
 operators-watching-operators.***
 P8 is the surface a DevOps review would flag first, so its guardrails are the deliverable, not an
@@ -713,6 +870,18 @@ deliverables:
   **persistent, unmissable banner** that every action is logged as impersonation. This is the privacy-
   respecting alternative to the credential-copying anti-pattern; consent and audit are the design, not
   a policy note.
+- *The design language itself, and the read/write split that keeps it honest.* The fourth deliverable is
+  the one that decides whether any of the above is ever used: a **documented operator design language**
+  (type hierarchy, rhythm, elevation, the closed primitive set, the motion budget, density) extending —
+  never forking — the shared token system, plus the **rendering matrix** and **design-review record**
+  that make craft an acceptance artifact instead of an opinion (FR29, FR37). The governing rule the
+  design language encodes is **delight on the read path, friction on the write path**: finding, reading,
+  comparing and linking should feel effortless, while every destructive step keeps its reason, its typed
+  target, and its scope distinction. Concretely, the palette can take an operator *to* the global kill
+  switch in one keystroke and can never *arm* it; nothing about the danger path is ever pre-filled,
+  shortened, or animated into feeling routine. Designing the fast path well is what keeps operators
+  inside the audited surface — the slow, ugly console is the one that loses to a production shell, which
+  is the exact outcome the phase exists to prevent.
 
 **AI Engineer (support) — *the console is the operator brake on the most autonomous actor; halt is
 immediate, and every autonomous merge is on the record.***
@@ -787,6 +956,12 @@ without a stop is theater; a stop without a record is unaccountable. P8 provides
 | An operator confuses the two consoles and acts cross-tenant believing it is one tenant | Product / Frontend | **Distinct operator chrome** — distinct accent + persistent operator identification on **every** view (FR23) — plus global controls visually distinct from per-tenant ones (FR24). |
 | The screen offers a control the gate refuses (or hides one it grants) | Frontend / Backend | The console renders from the **same permission map the backend enforces** (FR22); a denial renders **who holds it and how to escalate**, never a bare refusal. |
 | The interface floor is relaxed because the audience is internal | Frontend / QA | FR27 holds the console to the same a11y floor as P9, verified by automated audit **plus a keyboard-only pass**; acceptance requires **rendered-browser evidence**, not a green build (G21). |
+| **The console is compliant but unloved, so operators go back to the prod shell** — the anti-pattern P8 exists to remove returns, now alongside a console the team is paying to maintain | Product / Frontend | Treat craft as a **security control** (G22): one design language + closed primitive set (FR29), comparison-ready numbers (FR30), **command palette** + type-ahead so nothing is recalled from memory (FR32), **URL-addressable views** (FR33), **glanceable operating picture** (FR34). Track it: if operators still reach for the shell, that is a P8 defect, not a habit. |
+| "Beautiful" is read as "smoother," and a redesign quietly shortens the destructive path | Product / Frontend / QA | **FR37 is the invariant**: read path fast, write path unchanged. The palette **navigates to** but never **performs** a dangerous action; reason/typed-target are never pre-filled; a **visual-regression baseline** plus a re-run of the dangerous-action tests gates every restyle. |
+| Optimistic UI asserts an effect that the write-ahead audit never committed | Frontend / Backend | **No optimistic success** (FR36): state changes render only on backend + audit confirmation; **in flight / failed / outcome unknown** are three renderings; every command ends in a **receipt naming its audit entry**, so "did it happen?" is answerable from the screen. |
+| A live dashboard shows a stale figure as current, or reorders a row under the operator mid-click | Frontend | Every live figure carries its **as-of time** and **announces staleness** (FR34); updates land **in place** — no layout shift, no reorder under pointer/focus, no refresh blanking correct data. |
+| Motion or density work degrades the a11y floor it was built on | Frontend / QA | Motion is budgeted, meaningful, never on the action path, with a full `prefers-reduced-motion` equivalent (FR35); density modes never remove information (FR29); the acceptance **rendering matrix** covers dark, 200% zoom, reduced motion and both densities (FR37). |
+| The design language forks into a third palette, or a component library imports its own look, a11y and bundle | Frontend | FR29 **extends** the shared token system rather than forking it (Decision 12); visual values must resolve to tokens with **no raw literals**, and the primitive set is closed and documented — adding one is a deliberate change, not a page side effect. |
 
 ## 12. Rollout & test strategy
 
@@ -846,6 +1021,44 @@ without a stop is theater; a stop without a record is unaccountable. P8 provides
   **per-tenant** kill switch (distinct friction) → impersonation consent + active banner → cross-tenant
   read model → GDPR delete (second confirmation) → audit-log view; confirm each state renders, denied-
   with-escalation shows for under-privileged roles, and **no number is hardcoded**.
+- **Experience-craft tests (the surface, not the floor).**
+  - **Language conformance.** A scan of stylesheets and components finds **no** color, spacing, type-size
+    or radius literal outside the token definitions; a new view adds **no new primitive**; toggling
+    **density** changes the rendering, persists across views and sessions, and removes **no** information
+    (FR29).
+  - **Numbers.** A numeric column renders in **tabular figures, digit-aligned**, with unit and scale in
+    the header and not in every cell; the same quantity appears at one scale and precision within a view
+    (FR30).
+  - **Hazard reservation.** Every occurrence of the danger/warning palette in a rendered view denotes a
+    destructive control, an armed halt, an active impersonation, or an alarming state — **none** is
+    decorative; on a view with one destructive control it is the only element carrying it (FR31).
+  - **Velocity.** The palette opens on one keystroke from every authenticated view with focus in its
+    input; it offers **exactly** the capabilities the role's permission map grants (a denied capability
+    is **absent**, not offered-then-refused); a subject is reachable by **type-ahead on its name**
+    without recalling an identifier (FR32).
+  - **Addressability.** A copied view URL reproduces subject + filters + time window + tab for another
+    authorized operator (governed by *their* permissions); back/forward restore state exactly; the URL
+    carries **no** session material, impersonation credential, or subject personal data (FR33).
+  - **Operating picture.** With a kill switch armed, the armed state is apparent **without interaction**
+    and distinguished by more than color; a figure past its refresh interval **marks itself stale** with
+    an as-of time; a live update **does not** shift layout, does not move the row under pointer/focus,
+    and does **not** blank already-correct data (FR34). *(Load-bearing: a stale figure read as current is
+    how an operator concludes the fleet is halted when it is not.)*
+  - **Motion.** A confirmation or navigation issued mid-transition is **not delayed**; under
+    `prefers-reduced-motion` every view renders the same information with no animation; no animated
+    element lacks a state-change referent (FR35).
+  - **Feedback.** A completed privileged command renders a **receipt** with action/target/reason/time and
+    a **reachable audit reference**; an irreversible one states that no undo exists. A command is **never**
+    rendered as succeeded before backend + audit confirmation, and a lost response renders **outcome
+    unknown** with a stated way to verify — neither success nor failure (FR36). *(Load-bearing.)*
+  - **Friction survival (load-bearing).** Selecting a destructive capability from the palette opens its
+    **confirmation** with reason and typed-target requirements intact and performs **nothing**; reason and
+    typed-target fields open **empty**; and the FR24 dangerous-action tests are **re-run after any restyle**
+    to prove the step count to a destructive effect has not decreased (FR37).
+  - **Craft acceptance matrix.** Rendered evidence exists for light **and** dark, a narrow **and** a wide
+    viewport, **200% zoom**, **reduced motion**, **both densities**, and the four states — a cell without
+    evidence **blocks** acceptance; a **visual-regression baseline** fails on undescribed visual change;
+    each new view carries a **recorded design review** with its reviewer named (FR37).
 - **Rollout.** **8a first** (RBAC + tenant/billing/entitlement admin + audit log) behind an **admin
   feature flag**, roles seeded **minimal**, admin IdP in test mode, dark until the M11-8a checklist is
   green. **8b** (fleet ops + global controls + cross-tenant read models + GDPR) enabled only after the
@@ -912,6 +1125,29 @@ without a stop is theater; a stop without a record is unaccountable. P8 provides
 - [ ] Acceptance evidence for every user-visible console behavior is a **real browser rendering** against
       a real API response, not a successful build (G21).
 
+- [ ] One **documented design language** exists (type hierarchy, spacing rhythm, elevation, composition
+      grid, motion budget, density) as an **extension** of the shared token system, with a **closed**
+      primitive set; a scan finds **no** color/spacing/type/radius literal outside the tokens (G23, FR29).
+- [ ] Numbers render in **tabular, digit-aligned figures** with unit and scale stated once; the **hazard
+      palette appears only on hazard** (G23, FR30, FR31).
+- [ ] A **command palette** opens on one keystroke from every view, offers **only** capabilities the
+      role's permission map grants, and reaches subjects by **type-ahead on name** (G22, FR32).
+- [ ] Every view is **URL-addressable and restorable** (subject, filters, window, tab) with **no**
+      sensitive value in the URL (G22, FR33).
+- [ ] The **operating picture** (halted / wrong) reads **without interaction**, every live figure carries
+      an **as-of time** and **announces staleness**, and updates land **in place** — no layout shift, no
+      reorder under the operator, no blanking of correct data (G24, FR34).
+- [ ] **Motion** is meaningful and budgeted, never sits between intent and command, and has a full
+      `prefers-reduced-motion` equivalent that loses **no** information (FR35).
+- [ ] Every privileged command ends in a **receipt naming its audit entry**; **no optimistic success** is
+      rendered; **in flight / failed / outcome unknown** are three distinct renderings (G25, FR36).
+- [ ] **Friction survived the craft work**: the palette navigates to but never performs a dangerous
+      action, reason and typed-target open empty, and the FR24 dangerous-action tests pass **after** the
+      restyle — the step count to a destructive effect has not decreased (G26, FR37). *(Load-bearing.)*
+- [ ] Craft acceptance is **evidenced**: the rendering matrix (light/dark, narrow/wide, 200% zoom,
+      reduced motion, both densities, four states) is covered, a **visual-regression baseline** gates
+      unintended change, and each new view has a **recorded design review** (G26, FR37).
+
 ## 14. Open questions
 
 - **Q1. Admin identity provider & break-glass.** Which SSO/MFA IdP backs admin identity, and what is the
@@ -945,4 +1181,22 @@ without a stop is theater; a stop without a record is unaccountable. P8 provides
   the fleet, are in-flight verifications abandoned per tenant (as in P6's single-loop stop), and is there
   a **resume** semantics or must each tenant be re-armed individually? (Proposed: mirror P6 —
   in-flight merges are abandoned leaving last-good specs live; **resume** requires an explicit disarm
-  (two-person per Q2), and the loop re-arms per its own P6 prerequisites.)
+  (two-person per Q2), and the loop re-arms per its own P6 prerequisites.
+- **Q8. Where does the operator design language live, and who owns it?** FR29 extends the shared token
+  system with a type hierarchy, rhythm, elevation model, primitive set and motion budget. Does that
+  extension live **inside the P8 console** (owned by whoever ships operator views) or **beside the shared
+  tokens** as a published operator layer that P9 can see but not consume? (Proposed: **beside the shared
+  tokens, owned jointly**, so the split stays exactly what Decision 12 says it is — shared system,
+  distinct chrome — and drift is visible in one place rather than discovered as a fork.)
+- **Q9. Does the command palette ever act, or only navigate?** FR37 answers this for **destructive**
+  capability (navigate only). The open part is the **safe** capability: may the palette run a read
+  directly ("show tenant X's invoices") rather than routing to the view? (Proposed: **yes for reads,
+  never for writes** — the line is the same one the whole console is organized around, and it stays
+  legible if it is drawn at *read vs. write* rather than at a per-command judgment.)
+- **Q10. Is there a defensible target for "the console is preferred"?** G22 makes craft a security
+  control on the claim that an unpleasant console reopens the prod shell — which is only meaningful if
+  the platform can tell. Do we instrument the counterfactual (production-shell sessions, and operator
+  time-to-answer per task), and is a shell session by a P8 role a **reportable event**? (Proposed: yes —
+  emit shell/database-session access as a P2.5 signal alongside admin activity (FR18), and treat a
+  sustained rate of it as a **P8 defect signal**, not an operator habit. Deferred to 8b since it needs
+  the P2.5 admin-activity feed.))
