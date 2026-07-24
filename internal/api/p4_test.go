@@ -107,30 +107,3 @@ func TestP4BoardHasNoWriteVerb(t *testing.T) {
 		t.Fatal("the board endpoint must not accept POST")
 	}
 }
-
-// The page is served from the binary, so deploying the UI is deploying agentd.
-func TestP4UIIsEmbeddedAndUncached(t *testing.T) {
-	s := New(nil, config.Config{})
-	s.MountP4(&stubBoard{ok: true})
-	rec := httptest.NewRecorder()
-	s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/p4/board", nil))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("want 200, got %d", rec.Code)
-	}
-	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
-		t.Fatalf("want HTML, got %q", ct)
-	}
-	if rec.Header().Get("Cache-Control") != "no-store" {
-		t.Fatal("the board page must not be cached; a stale board is a wrong board")
-	}
-	body := rec.Body.String()
-	for _, want := range []string{"Leaderboard", "Disqualified", "Pareto frontier", "Is this eval set good enough?"} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("the embedded page is missing the %q section", want)
-		}
-	}
-	// No build step, and no external fetches: the page must be self-contained.
-	if strings.Contains(body, "src=\"http") || strings.Contains(body, "href=\"http") {
-		t.Fatal("the board page must not load external assets")
-	}
-}

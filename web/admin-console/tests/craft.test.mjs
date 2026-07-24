@@ -116,7 +116,7 @@ test("the hazard palette is reserved for hazard", async () => {
   // Any rule that paints with --danger/--warn must either sit under a `HAZARD:` annotation or name a
   // hazard in its selector. Everything else is decoration, which is what FR31 forbids.
   const hazardSelectors =
-    /danger|warn|impersonation|alarm|degraded|unknown|stale|palette__danger|action--global/i;
+    /danger|warn|caution|impersonation|alarm|degraded|unknown|stale|palette__danger|action--global/i;
   const blocks = [...css.matchAll(/([^{}]+){([^}]*)}/g)];
   const offenders = [];
   for (const [, rawSelector, body] of blocks) {
@@ -130,24 +130,124 @@ test("the hazard palette is reserved for hazard", async () => {
   assert.deepEqual(offenders, [], `these rules use the hazard palette without being a hazard: ${offenders.join(", ")}`);
 });
 
-test("the operator identity does not reuse a hazard hue", async () => {
+test("the operator identity does not reuse a hazard hue, in EITHER theme", async () => {
   const operator = await read("src/app/tokens.operator.css");
   const shared = await readFile(join(ROOT, "..", "design-system", "tokens.css"), "utf8");
+  // The hazard hues are looked up in the OPERATOR layer first and the shared layer second, because
+  // the operator layer re-values the status palette for the near-black instrument ground. Checking
+  // the shared values while the console renders different ones would be a test asserting a property
+  // of a file nobody looks at.
   const hex = (source, name) => (source.match(new RegExp(`${name}:\\s*(#[0-9a-fA-F]{6})`)) ?? [])[1];
 
-  // The console's accent must not BE the warning colour. This is the concrete defect the operator
-  // identity was changed to fix: an amber console spends the signal its kill switch depends on.
-  const accent = hex(operator, "--accent");
-  const warn = hex(shared, "--warn");
-  const danger = hex(shared, "--danger");
-  assert.ok(accent && warn && danger, "could not read the accent and hazard hues");
-  assert.notEqual(accent, warn, "the operator accent is the warning colour");
-  assert.notEqual(accent, danger, "the operator accent is the danger colour");
+  // Both files now define their colours as per-theme palettes and MAP them, so the check follows the
+  // literals to where they live — and becomes stronger for it: the reservation is asserted in the light
+  // theme and the dark one rather than against whichever set happened to be unconditional.
+  //
+  // The defect being prevented is concrete: the operator console used to be amber, which is `--warn`.
+  // Painting the chrome, the links and the primary buttons in the hazard hue spends the signal the kill
+  // switch depends on — by the time an operator reaches a control that really is dangerous, red and
+  // amber have been ordinary for the whole session.
+  const THEMES = [
+    { name: "light", accent: "--ol-accent", warn: ["--ol-warn", "--light-warn"], danger: ["--ol-danger", "--light-danger"] },
+    { name: "dark", accent: "--od-accent", warn: ["--od-warn", "--dark-warn"], danger: ["--od-danger", "--dark-danger"] },
+  ];
 
-  // …and not merely a different shade of the same hue. A hue distance of at least 60° keeps them
-  // distinguishable for the readers who most need them to be.
-  assert.ok(hueDistance(accent, warn) > 60, "the operator accent is within 60° of the warning hue");
-  assert.ok(hueDistance(accent, danger) > 60, "the operator accent is within 60° of the danger hue");
+  /** effective resolves a token to whichever layer actually supplies the rendered value. */
+  const effective = ([operatorName, sharedName]) => hex(operator, operatorName) ?? hex(shared, sharedName);
+
+  for (const theme of THEMES) {
+    const accent = hex(operator, theme.accent);
+    const warn = effective(theme.warn);
+    const danger = effective(theme.danger);
+    assert.ok(accent && warn && danger, `could not read the ${theme.name} accent and hazard hues`);
+
+    assert.notEqual(accent, warn, `the ${theme.name} operator accent is the warning colour`);
+    assert.notEqual(accent, danger, `the ${theme.name} operator accent is the danger colour`);
+
+    // …and not merely a different shade of the same hue. A hue distance of at least 60° keeps them
+    // distinguishable for the readers who most need them to be.
+    assert.ok(
+      hueDistance(accent, warn) > 60,
+      `the ${theme.name} operator accent is within 60° of the warning hue`,
+    );
+    assert.ok(
+      hueDistance(accent, danger) > 60,
+      `the ${theme.name} operator accent is within 60° of the danger hue`,
+    );
+  }
+});
+
+test("🔴 the operator chrome stays distinguishable from the customer console in BOTH themes (FR23)", async () => {
+  // FR23 is a safety requirement, not a style rule: an operator with both consoles open, acting
+  // cross-tenant while believing the view is single-tenant, is its named failure. Adding a light theme
+  // is exactly the kind of change that could reintroduce it by a new route, so the property is asserted
+  // rather than assumed.
+  const operator = await read("src/app/tokens.operator.css");
+  const customer = await readFile(join(ROOT, "..", "console", "src", "app", "tokens.customer.css"), "utf8");
+  const hex = (source, name) => (source.match(new RegExp(`${name}:\\s*(#[0-9a-fA-F]{6})`)) ?? [])[1];
+
+  for (const [theme, operatorAccent, customerAccent] of [
+    ["light", "--ol-accent", "--cl-accent"],
+    ["dark", "--od-accent", "--cd-accent"],
+  ]) {
+    const op = hex(operator, operatorAccent);
+    const cu = hex(customer, customerAccent);
+    assert.ok(op && cu, `could not read both accents in the ${theme} theme`);
+    assert.notEqual(op, cu, `the two consoles share an accent in the ${theme} theme`);
+    // 25° is the separation the SHIPPED pair already maintains (the dark accents measure 26° apart),
+    // not a number invented for this test. Calibrating it to the existing design is what keeps it
+    // meaningful: a threshold above what ships would fail on day one and be lowered; one far below it
+    // would pass through a regression. This caught a real one — a light customer accent added in this
+    // change sat 23° away, tighter in light mode than the product manages in dark.
+    assert.ok(
+      hueDistance(op, cu) > 25,
+      `the ${theme} operator accent is ${hueDistance(op, cu).toFixed(0)}° from the customer accent — ` +
+        "the consoles are not distinguishable at a glance",
+    );
+  }
+
+  // The chrome band is DARKER than the page in both themes, which is what makes the console's identity
+  // a horizon line the eye finds before it reads anything. A light theme whose chrome went pale would
+  // have removed that cue precisely where it is easiest to lose.
+  for (const band of ["--ol-chrome-bg", "--od-chrome-bg"]) {
+    const value = hex(operator, band);
+    assert.ok(value, `${band} is not defined`);
+    const [r, g, b] = [1, 3, 5].map((i) => parseInt(value.slice(i, i + 2), 16));
+    assert.ok((r + g + b) / 3 < 90, `${band} is not a dark band — the operator horizon line is gone`);
+  }
+});
+
+test("🔴 everything painted on the chrome band resolves through the chrome tokens (FR23, FR39)", async () => {
+  // The band is dark in BOTH themes while the page inverts, so the page's inks are contrast-checked
+  // against the wrong background for anything sitting on it. That is not hypothetical: `.quiet` used
+  // `--text-muted`, and in the light theme "Sign out" rendered as dark slate on deep teal — present
+  // in the accessibility tree, invisible on screen, and impossible to notice while working in dark.
+  //
+  // The rule is therefore mechanical: inside the band, colour comes from `--chrome-*`.
+  const css = await read("src/app/globals.css");
+  const BAND = /^(\.chrome|\.nav\b|\.nav__|\.role-chip|\.palette-trigger)/;
+  const COLOURED = /(?:^|\s|;)(?:color|background|background-color|border(?:-\w+)?-color|border(?:-\w+)?)\s*:\s*([^;]+)/g;
+
+  const offenders = [];
+  for (const [, rawSelector, body] of css.matchAll(/([^{}]+){([^}]*)}/g)) {
+    const selector = rawSelector.trim().split("\n").pop().trim();
+    if (!BAND.test(selector)) continue;
+    for (const [, value] of body.matchAll(COLOURED)) {
+      const tokens = [...value.matchAll(/var\((--[\w-]+)\)/g)].map((m) => m[1]);
+      for (const token of tokens) {
+        // Non-colour tokens (rule weights, radii) legitimately appear in shorthand borders.
+        if (/^--(hairline|rule|rule-strong|rule-heavy|radius-|space-)/.test(token)) continue;
+        if (!token.startsWith("--chrome-")) {
+          offenders.push(`${selector}: ${token}`);
+        }
+      }
+    }
+  }
+  assert.deepEqual(
+    offenders,
+    [],
+    `these band rules take a PAGE colour, which is contrast-checked against the wrong background: ${offenders.join(", ")}`,
+  );
 });
 
 function hueDistance(a, b) {
@@ -199,6 +299,138 @@ test("every class a view uses is defined in the stylesheet", async () => {
         assert.ok(defined.has(cls), `${file} uses .${cls}, which the stylesheet does not define`);
       }
     }
+  }
+});
+
+// ── The state family: nine answers, nine remedies (FR26, FR36) ───────────────
+
+test("🔴 the console can render all NINE states, and no two mean the same thing", async () => {
+  // The design brief names seven states every page must be able to render, and the admin console adds
+  // Denied and Degraded on top. Four were missing entirely, and their absence was not neutral — each
+  // one was being answered with another state's copy:
+  //
+  //   not_found    a mistyped id rendered as "degraded", i.e. "the platform is broken"
+  //   unusable     an unparseable body was cast to the expected type and rendered as BLANK DATA
+  //   not_mounted  a capability absent from this deployment rendered as an outage
+  //   gated        an entitlement boundary rendered in the language of failure
+  const states = await read("src/components/states.tsx");
+  const css = await read("src/app/globals.css");
+
+  const EXPECTED = [
+    "LoadingState",
+    "EmptyState",
+    "NotMountedState",
+    "GatedState",
+    "NotFoundState",
+    "DeniedState",
+    "DegradedState",
+    "UnusableState",
+    "UnknownState",
+  ];
+  for (const component of EXPECTED) {
+    assert.match(states, new RegExp(`export function ${component}\\b`), `${component} does not exist`);
+  }
+
+  const variants = [...css.matchAll(/\.state--([a-z-]+)\s*\{/g)].map((m) => m[1]);
+  assert.equal(
+    new Set(variants).size,
+    EXPECTED.length,
+    `the stylesheet defines ${new Set(variants).size} state variants for ${EXPECTED.length} states`,
+  );
+});
+
+test("🔴 the states are distinguishable BEFORE the copy is read", async () => {
+  // This is the design brief's actual complaint: "they currently differ only by border and tint".
+  // Nine states cannot have nine legible tints, so each carries a MARK as well — and the marks must
+  // all differ, or the second signal is not a signal.
+  const states = await read("src/components/states.tsx");
+  const marks = [...states.matchAll(/mark="([^"]+)"/g)].map((m) => m[1]);
+  assert.ok(marks.length >= 9, `only ${marks.length} states carry a mark`);
+  assert.equal(new Set(marks).size, marks.length, `two states share a mark: ${marks.join(" ")}`);
+
+  // The mark is never the only carrier: it is aria-hidden, and the title states the answer in words.
+  assert.match(states, /className="state__mark" aria-hidden="true"/, "the mark is exposed as content");
+  for (const [, title] of states.matchAll(/title="([^"]+)"/g)) {
+    assert.ok(title.trim().length > 3, `a state's title is not a sentence: ${title}`);
+  }
+
+  // And every state resolves through the ONE block, so a tenth cannot arrive with its own layout.
+  // Exactly one container exists in the file — StateBlock's own — and it is parameterised.
+  const containers = [...states.matchAll(/<div className=[{"]`?state state--/g)];
+  assert.equal(
+    containers.length,
+    1,
+    `${containers.length} state containers in states.tsx — every state must render through StateBlock`,
+  );
+  assert.match(states, /<div className={`state state--\$\{variant\}`}/, "the one container is not parameterised");
+});
+
+test("🔴 'nothing is wrong' never borrows the hazard palette (FR31)", async () => {
+  // Empty, not-mounted and gated are ordinary answers. Gated in particular is an ENTITLEMENT — the
+  // brief marks it "✋ not an error" — and rendering an entitlement in red teaches operators that the
+  // console cries wolf, which costs the states that are real failures.
+  const css = await read("src/app/globals.css");
+  for (const variant of ["empty", "not-mounted", "gated", "not-found", "denied"]) {
+    const rules = [...css.matchAll(new RegExp(`\\.state--${variant}[^{]*\\{([^}]*)\\}`, "g"))];
+    assert.ok(rules.length > 0, `.state--${variant} is not styled`);
+    for (const [, body] of rules) {
+      assert.equal(
+        /var\(--(danger|warn)/.test(body),
+        false,
+        `.state--${variant} uses the hazard palette, and it is not a hazard`,
+      );
+    }
+  }
+
+  // …and the three that ARE hazards do carry it, or the family has no severity signal at all.
+  for (const variant of ["degraded", "unusable", "unknown"]) {
+    const joined = [...css.matchAll(new RegExp(`\\.state--${variant}[^{]*\\{([^}]*)\\}`, "g"))]
+      .map((m) => m[1])
+      .join(" ");
+    assert.match(joined, /var\(--(danger|warn)/, `.state--${variant} does not read as a hazard`);
+  }
+});
+
+test("🔴 an unreadable response is never cast to data", async () => {
+  // The most dangerous of the four gaps. `safeParse` returned null, null was cast to the expected
+  // type, and the page rendered every field as undefined — a version mismatch presented as a tenant
+  // with no plan. It does not look like a failure; it looks like data, and it is read as data.
+  const api = await read("src/lib/adminApi.ts");
+  assert.match(api, /UNPARSEABLE = Symbol/, "parse failure cannot be told from a body that parsed to null");
+  assert.match(api, /throw new AdminApiError\(\s*"unusable"/s, "an unreadable 2xx body is not raised");
+
+  // A 404 must not arrive as "the platform is broken", and the status map is what prevents it.
+  assert.match(api, /404:\s*"not_found"/, "a 404 is not classified as not_found");
+  assert.match(api, /402:\s*"gated"/, "a 402 is not classified as gated");
+  assert.match(api, /501:\s*"not_mounted"/, "a 501 is not classified as not_mounted");
+
+  // The tenant surface renders a bad identifier IN PLACE rather than leaving through the framework's
+  // unstyled 404 — which has no chrome, no acting principal, and does not say which console you are on.
+  // Checked on CODE, not on prose: the comment explaining why the framework's 404 was abandoned
+  // naturally names the call it replaced.
+  const detail = (await read("src/app/tenants/[id]/page.tsx"))
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
+  assert.equal(
+    /from "next\/navigation"[\s\S]{0,80}notFound|notFound\(\)/.test(detail),
+    false,
+    "a mistyped tenant id still leaves the console shell through the framework's unstyled 404",
+  );
+  assert.match(detail, /<NotFoundState/, "a mistyped tenant id does not render the not-found state");
+});
+
+test("the operating picture reports each panel's own verdict", async () => {
+  const overview = await read("src/lib/overview.ts");
+  for (const kind of ["not_mounted", "gated", "unusable"]) {
+    assert.match(overview, new RegExp(`"${kind}"`), `a panel cannot report ${kind}`);
+  }
+  // `degraded` must be the FALLBACK, not the default — it is the answer that sends someone hunting an
+  // outage, and it should only be given when there might be one.
+  assert.match(overview, /PANEL_KINDS\[error\.kind\] \?\? "degraded"/, "every failure still flattens to degraded");
+
+  const picture = await read("src/components/operatingPicture.tsx");
+  for (const component of ["NotMountedState", "GatedState", "UnusableState"]) {
+    assert.match(picture, new RegExp(`<${component}`), `the picture cannot render ${component}`);
   }
 });
 
@@ -416,6 +648,46 @@ test("the deliberate step count to a destructive effect is unchanged", async () 
   assert.equal(/--rule-heavy/.test(danger), false, "the per-tenant control is as heavy as the fleet-wide one");
 });
 
+test("🔴 the three blast radii are three different-LOOKING controls (FR24)", async () => {
+  // This test exists because the property it asserts was FALSE while the previous one passed. A
+  // fleet-wide halt and a reversible per-tenant halt both rendered as a red panel with a red submit,
+  // differing only in the width of a rule on the left edge — which is a difference in the stylesheet
+  // and not a difference an operator scanning a page perceives. FR24's whole content is that the two
+  // can never be confused, so the check is on the thing that separates them at a glance: the HUE.
+  const css = await read("src/app/globals.css");
+  const rule = (selector) => css.match(new RegExp(`${selector}\\s*{([^}]*)}`))?.[1];
+
+  const tiers = {
+    "--caution": rule("form\\.action--caution"),
+    "--danger": rule("form\\.action--danger"),
+    "--global": rule("form\\.action--global"),
+  };
+  for (const [name, body] of Object.entries(tiers)) {
+    assert.ok(body, `there is no ${name} confirmation tier`);
+  }
+
+  // The reversible tier carries the ATTENTION hue and the irreversible tiers carry the ALARM hue.
+  assert.match(tiers["--caution"], /var\(--warn/, "the reversible tier does not use the attention hue");
+  assert.equal(/var\(--danger/.test(tiers["--caution"]), false, "the reversible tier borrows the alarm hue");
+  assert.match(tiers["--danger"], /var\(--danger/, "the irreversible tier does not use the alarm hue");
+  assert.match(tiers["--global"], /var\(--danger/, "the fleet-wide tier does not use the alarm hue");
+
+  // …and the submit buttons differ too. The button is the thing under the pointer at the moment the
+  // action is committed, so a per-tenant submit that looks like a fleet-wide submit defeats the
+  // panel's distinction at exactly the wrong instant.
+  assert.match(css, /button\.caution\s*{[^}]*background:\s*var\(--warn\)/, "there is no reversible-tier submit");
+  assert.match(css, /button\.danger\s*{[^}]*background:\s*var\(--danger\)/, "there is no alarm-tier submit");
+
+  // The tier is chosen ONCE, from the server's classification, in the confirmation component — never
+  // per page. A page that picks its own weight is a page that can pick the wrong one.
+  const form = await read("src/components/actionForm.tsx");
+  assert.match(
+    form,
+    /const scope = global \? "global" : typedTarget \? "danger" : danger \? "caution" : null/,
+    "the confirmation tier is not derived from the server's blast-radius classification in one place",
+  );
+});
+
 // ── 15.11 · Motion ───────────────────────────────────────────────────────────
 
 test("motion is budgeted, meaningful, and never on the action path", async () => {
@@ -423,15 +695,29 @@ test("motion is budgeted, meaningful, and never on the action path", async () =>
   assert.match(shared, /--motion-fast:\s*120ms/);
   assert.match(shared, /--motion-base:\s*180ms/);
   assert.match(shared, /--motion-slow:\s*240ms/);
+  assert.match(shared, /--motion-alarm:\s*2000ms/);
 
   const css = await read("src/app/globals.css");
   // Every duration in the stylesheet comes from the budget: no bespoke timing.
   for (const match of css.matchAll(/(?:transition|animation)[^;]*?(\d+)ms/g)) {
     assert.fail(`a literal duration (${match[1]}ms) bypasses the motion budget`);
   }
-  // Nothing may animate longer than the slowest budgeted step.
-  for (const match of css.matchAll(/animation:\s*[\w-]+\s+var\(--([\w-]+)\)/g)) {
-    assert.match(match[1], /^motion-(fast|base|slow)$/, `animation uses ${match[1]}, which is not a motion token`);
+  // Every animation uses a NAMED step, and the one step longer than an interaction — `--motion-alarm`
+  // — is reserved for hazard exactly as the hazard palette is. A decorative two-second pulse would
+  // spend the attention an armed kill switch depends on, which is the FR31 failure arriving by a new
+  // route: this time through the motion budget rather than through the colour palette.
+  const hazardRule = /danger|warn|alarm|impersonation|degraded|unknown|stale/i;
+  for (const match of css.matchAll(/([^{}]*){[^}]*animation:\s*[\w-]+\s+var\(--([\w-]+)\)[^}]*}/g)) {
+    const [, rawSelector, token] = match;
+    assert.match(token, /^motion-(fast|base|slow|alarm)$/, `animation uses ${token}, which is not a motion token`);
+    if (token === "motion-alarm") {
+      const selector = rawSelector.trim().split("\n").pop().trim();
+      assert.match(
+        selector,
+        hazardRule,
+        `${selector} uses the alarm duration without being a hazard — the step is reserved`,
+      );
+    }
   }
   // Reduced motion collapses everything, and is declared in the shared layer so both consoles get it.
   assert.match(shared, /@media \(prefers-reduced-motion: reduce\)/);
@@ -446,7 +732,121 @@ test("no information is carried by motion alone", async () => {
   const changed = css.match(/@keyframes value-changed\s*{([^}]*}[^}]*)}/s)[1];
   assert.equal(/content:|opacity:\s*0/.test(changed), false, "the value-change mark hides content when not animating");
 
+  // The armed-halt indicator breathes; it must never go out. An indicator that reaches zero opacity
+  // is invisible for part of every cycle, so a reader who glances during the trough sees no alarm —
+  // and under reduced motion, where the animation collapses to its END state, it would be invisible
+  // permanently. The trough stays well clear of zero for both reasons.
+  const breath = css.match(/@keyframes alarm-breath\s*{([\s\S]*?)\n}/)[1];
+  const troughs = [...breath.matchAll(/opacity:\s*([\d.]+)/g)].map((m) => Number(m[1]));
+  assert.ok(troughs.length > 0, "the alarm indicator has no keyframed opacity");
+  assert.ok(
+    Math.min(...troughs) >= 0.3,
+    `the armed-halt indicator fades to ${Math.min(...troughs)} — it must stay visible throughout`,
+  );
+
+  // And the word is rendered by the banner regardless, so the animation adds emphasis and never
+  // information (FR35).
+  const primitives = await read("src/components/primitives.tsx");
+  assert.match(primitives, /alarm-banner__word/, "the armed-halt banner states nothing in words");
+
   const picture = await read("src/components/operatingPicture.tsx");
   // Staleness is text, not a pulse.
   assert.match(picture, /stale=\{stale\}/, "staleness is not passed to a text rendering");
+});
+
+// ── §16 · R16–R20: hierarchy, theme, payload, agency (FR38–FR41) ─────────────
+
+test("R16 / FR38 — the stat scale outranks every frame it can sit inside", async () => {
+  // The requirement stated as arithmetic. A stat's value must outrank its own label AND the section
+  // heading that introduces it — otherwise the frame is louder than the figure, which is the inverted
+  // hierarchy this rule exists to correct.
+  const shared = await readFile(join(ROOT, "..", "design-system", "tokens.css"), "utf8");
+  const css = await read("src/app/globals.css");
+  const rem = (source, token) => {
+    const m = source.match(new RegExp(`${token}\\s*:\\s*([0-9.]+)rem`));
+    return m ? Number(m[1]) : null;
+  };
+
+  // The console must resolve its stat size through the SHARED stat scale rather than through a local
+  // size that happens to look right — the whole point is that the hierarchy is a property of the
+  // token set. Which of the two steps it picks is a density judgement and is allowed to change; that
+  // it picks one of them, and that the one it picks wins the arithmetic, is not.
+  const used = css.match(/\.stat__value\s*\{[\s\S]*?font-size:\s*var\((--text-stat(?:-sm)?)\)/)?.[1];
+  assert.ok(used, "the stat value does not resolve through the shared stat scale");
+
+  const stat = rem(shared, used);
+  const sectionTitle = rem(shared, "--text-lg");
+  const label = rem(shared, "--text-xs");
+  assert.ok(stat && sectionTitle && label, "the stat scale tokens are missing");
+  assert.ok(stat > sectionTitle, `a stat (${stat}rem) must outrank a section title (${sectionTitle}rem)`);
+  assert.ok(stat > label, `a stat (${stat}rem) must outrank its own label (${label}rem)`);
+
+  // The frame must not out-shout the figure by another route either: the eyebrow treatment every
+  // label, section title and column header shares is capped at the smallest step in the ramp, so no
+  // amount of restyling the frame can overtake the number it frames.
+  assert.match(
+    css,
+    /\.section__title,[\s\S]{0,200}?\bth\s*\{[\s\S]*?font-size:\s*var\(--text-2xs\)/,
+    "the section title and column headers do not share the recessive eyebrow size",
+  );
+});
+
+test("R17 / FR39 — theme is resolved on the server and lands in the first paint", async () => {
+  const layout = await read("src/app/layout.tsx");
+  assert.match(layout, /data-theme=\{theme\}/, "the root element does not carry the resolved theme");
+  assert.match(layout, /await readTheme\(\)/, "the theme is not read on the server");
+
+  // Same mechanism as density, deliberately: a second way to read a display preference is a second
+  // place to get the same thing wrong.
+  assert.match(layout, /await readDensity\(\)/);
+  const prefs = await read("src/lib/prefs.ts");
+  assert.match(prefs, /export async function readTheme/);
+  assert.match(prefs, /THEME_COOKIE_OPTIONS = DENSITY_COOKIE_OPTIONS/, "the two preferences have diverged");
+});
+
+test("R17 / FR39 — the operator token layer maps both palettes by data-theme", async () => {
+  const operator = await read("src/app/tokens.operator.css");
+  for (const selector of [':root[data-theme="dark"]', ':root[data-theme="light"]', ':root[data-theme="system"]']) {
+    assert.ok(operator.includes(selector), `${selector} has no mapping — the theme control cannot reach it`);
+  }
+
+  // The mapping blocks must assign the same names, or a token defined in one theme and forgotten in
+  // the other renders unstyled in exactly one of them.
+  const names = (selector) => {
+    const start = operator.indexOf(selector);
+    const open = operator.indexOf("{", start);
+    const close = operator.indexOf("\n}", open);
+    return [...operator.slice(open, close).matchAll(/^\s*(--[a-z0-9-]+)\s*:/gim)].map((m) => m[1]).sort();
+  };
+  assert.deepEqual(names(':root[data-theme="light"]'), names(':root[data-theme="dark"]'));
+});
+
+test("R18 / FR40 — the bundle scan enforces a payload ceiling and refuses a dev-written tree", async () => {
+  const scan = await read("scripts/scan-bundle.mjs");
+  assert.match(scan, /PAYLOAD_CEILING_BYTES\s*=\s*[\d_]+/, "there is no stated ceiling");
+  assert.match(scan, /DECORATIVE_RUNTIMES/, "the rejected runtimes are not mechanically excluded");
+  assert.match(scan, /contaminated\(\)/, "a dev-written tree would be misreported rather than refused");
+  assert.match(scan, /shippedFiles\(\)/, "the measurement is not taken from what the build says ships");
+});
+
+test("🔴 R20 / FR41 — nothing acts on the operator's behalf", async () => {
+  // The trend ledger rejects agentic task execution on this surface without qualification: an agent
+  // that "handles multi-step tasks" over admin capabilities is a machine for producing unattributable
+  // privileged actions. Stated as a check so it cannot arrive as a "quick action" without somebody
+  // deleting this test, which is a conversation rather than a commit.
+  const offenders = [];
+  for await (const file of walk("src")) {
+    if (!file.endsWith(".tsx") && !file.endsWith(".ts")) continue;
+    const src = await read(file);
+    // A form submitted on mount, or a privileged action fired from an effect rather than a click.
+    if (/useEffect\([^)]*(?:requestSubmit|\.submit\(\))/s.test(src)) {
+      offenders.push(`${file}: submits a form from an effect`);
+    }
+  }
+  assert.deepEqual(offenders, [], `these surfaces act without the operator: ${offenders.join(", ")}`);
+
+  // And the palette still only navigates — asserted here as well as in the friction-survival test,
+  // because that one guards the step count while this one guards the principle.
+  const palette = await read("src/components/commandPalette.tsx");
+  assert.doesNotMatch(palette, /fetch\(|action=|onSubmit/, "the command palette performs rather than navigates");
 });

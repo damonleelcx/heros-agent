@@ -1,7 +1,10 @@
 # Admin Console Surface — Spec Delta (P8)
 
 Product rationale: [`../../../../../docs/prd/P8-admin-console.md`](../../../../../docs/prd/P8-admin-console.md)
-§6 (FR19–FR28 the floor, FR29–FR37 the surface above it), §7 and §8.4. The customer-facing counterpart — and the source of the interface rules
+§6 (FR19–FR28 the floor, FR29–FR37 the surface above it, FR38–FR41 the hierarchy/theme/payload/agency
+rules derived from the 2026 trend review in
+[`../../../../../web/design-system/trend-ledger.md`](../../../../../web/design-system/trend-ledger.md)),
+§7 and §8.4. The customer-facing counterpart — and the source of the interface rules
 this capability inherits rather than restates — is
 [`../../../p9-web-console/`](../../../p9-web-console/).
 
@@ -554,3 +557,84 @@ design review by the console's product designer.
 - **WHEN** a new operator view reaches acceptance
 - **THEN** a design review is recorded with its reviewer named
 - **AND** acceptance without one is not granted.
+
+### Requirement: The measured value SHALL outrank its frame
+
+In every **summary block** — a stat, a fleet figure, a cross-tenant aggregate headline — the quantity
+SHALL be the visually dominant element, and no section heading, card border or chrome SHALL carry more
+visual weight than the values it exists to present.
+
+This does **not** govern a table: a table is a comparison surface whose cells share one size so a
+column can be read at a glance, and it remains governed by the tabular-figure and unit-once rule.
+
+This composes with the unit-and-scale rule and does **not** relax the hazard reservation: a figure at
+display scale is not thereby licensed to borrow the hazard palette.
+
+#### Scenario: The figure dominates its block
+
+- **WHEN** an operator view renders a quantity
+- **THEN** that quantity's rendered type size exceeds that of its label, its section heading, and every
+  chrome element in the block
+- **AND** its unit and scale are stated once.
+
+#### Scenario: Display scale does not recruit the hazard palette
+
+- **WHEN** a quantity is rendered at display scale
+- **THEN** it carries a hazard hue only if it denotes a hazard
+- **AND** an ordinary figure rendered large remains outside the reserved palette.
+
+### Requirement: Theme SHALL be chosen rather than assumed, and the operator chrome SHALL stay distinct in both
+
+The console SHALL offer follow-system, dark and light themes, persist the choice per operator, and
+resolve it server-side so the first paint is already correct. The operator console's distinct
+identification SHALL remain distinguishable from the customer console in **both** resolved themes.
+
+#### Scenario: The first paint is already in the chosen theme
+
+- **WHEN** an operator with a persisted theme choice loads any console route
+- **THEN** the first paint renders in that theme with no flash and no post-hydration reflow.
+
+#### Scenario: The consoles stay distinguishable in both themes
+
+- **WHEN** the operator console and the customer console are rendered in the same resolved theme
+- **THEN** the operator console remains distinguishable at a glance by its accent and its persistent
+  identification of the console and acting admin principal
+- **AND** this holds in the light theme as well as the dark one.
+
+#### Scenario: Both themes meet the contrast floor
+
+- **WHEN** the token set is evaluated in each resolved theme
+- **THEN** every foreground/background pair meets WCAG 2.1 AA at its intended size in both.
+
+### Requirement: The shipped client payload SHALL have an enforced ceiling
+
+The build SHALL fail when the shipped client payload exceeds a stated byte budget, naming the budget and
+the overage, and no rendering runtime SHALL ship for decorative purposes.
+
+#### Scenario: An over-budget bundle fails the build
+
+- **WHEN** the shipped client payload exceeds the stated ceiling
+- **THEN** the build fails naming the budget and the measured overage.
+
+#### Scenario: The bundle stays auditable
+
+- **WHEN** the credential scan runs over the shipped bundle
+- **THEN** the bundle is within the stated ceiling
+- **AND** no decorative rendering runtime is present in it.
+
+### Requirement: Nothing SHALL act on the operator's behalf
+
+No console surface SHALL execute, queue, compose, or one-click-recommend a privileged command. Every
+privileged effect SHALL originate in the operator's own confirmed, reasoned, un-pre-filled input.
+
+#### Scenario: No agentic affordance over admin capabilities
+
+- **WHEN** the console is inspected for affordances that act on admin capabilities
+- **THEN** no conversational or agentic surface exists that can execute or queue a privileged command
+- **AND** every privileged effect traces to an operator's own confirmation and recorded reason.
+
+#### Scenario: A recommendation is not an action
+
+- **WHEN** the console surfaces a suggested next step on a privileged capability
+- **THEN** selecting it navigates to that capability's confirmation
+- **AND** performs no part of the command.

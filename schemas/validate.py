@@ -56,6 +56,21 @@ def load(rel: str):
 
 def main() -> int:
     failures = []
+
+    # Every schema in this directory must itself be a valid draft 2020-12 schema — including ones with
+    # no fixtures, which the CASES loop below never reaches.
+    #
+    # `console-view.schema.json` is the reason this exists. It is GENERATED from the Go view structs
+    # (cmd/consoletypes, ADR-007), and a generated schema is exactly the kind that goes subtly wrong
+    # without anyone noticing: nothing hand-writes it, so nothing hand-reads it either. Its drift gate
+    # proves it matches the Go types; this proves it is a schema at all.
+    for schema_path in sorted(HERE.glob("*.schema.json")):
+        try:
+            Draft202012Validator.check_schema(json.loads(schema_path.read_text()))
+            print(f"ok   {schema_path.name} is a valid draft 2020-12 schema")
+        except Exception as exc:  # noqa: BLE001 - the message is the finding
+            failures.append(f"{schema_path.name} is not a valid draft 2020-12 schema: {exc}")
+
     for schema_file, valids, invalids in CASES:
         schema = load(schema_file)
         # Meta-check: the schema itself must be a valid draft 2020-12 schema.

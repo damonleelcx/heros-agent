@@ -130,6 +130,36 @@ curl -s http://127.0.0.1:8787/readyz    # {"status":"ready"}
 Configuration is optional (sensible defaults are used). Pass `-config <path>` to point at a JSON
 config; the SQLite ledger and state live under the configured `data_dir`.
 
+### The web console
+
+The console is a **separate component** — a Next.js app with its own backend-for-frontend — rather
+than a page the Go service embeds. It requires **Node 22+**, and it runs beside `agentd`:
+
+```bash
+cd web/console
+npm ci
+
+PLATFORM_API_BASE=http://127.0.0.1:8787 CONSOLE_PLATFORM_CREDENTIAL=<the platform API key> CONSOLE_TENANT_IDENTITY=dev   npm run dev            # http://127.0.0.1:4320
+```
+
+🔴 **The browser never receives `CONSOLE_PLATFORM_CREDENTIAL`.** It is read by the BFF process and
+nothing else: the browser gets an `HttpOnly` session cookie it cannot read, every upstream call is made
+server-side, and the request's scope is derived from the session's tenant rather than from anything the
+client sends. `npm run build` fails if credential material reaches the shipped bundle — that is a
+build gate, not a review habit.
+
+`CONSOLE_TENANT_IDENTITY=dev` is a **development-only** identity provider and refuses to start under
+`NODE_ENV=production`, so it cannot be shipped by accident.
+
+To see it against a real repository with no provider account, point it at the hermes demo:
+
+```bash
+go run ./cmd/p9hermes -repo /path/to/hermes-agent      # serves the platform API on :4321
+```
+
+The console's own checks run with `npm test` (214 cases) and `npm run build`, which runs the token,
+string, markup, claim and bundle scans around `next build`.
+
 ## Contributing
 
 Work proceeds phase by phase against the OpenSpec change sets. Before implementing a phase, read its

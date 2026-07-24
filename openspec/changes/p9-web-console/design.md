@@ -3,7 +3,7 @@
 Product rationale: [`../../../docs/prd/P9-web-console.md`](../../../docs/prd/P9-web-console.md).
 Companion documents in this change: [`feature-inventory.md`](feature-inventory.md) (the
 no-feature-loss checklist that governs the port) and [`ui-ux-plan.md`](ui-ux-plan.md) (the UI/UX
-improvement rules R1–R12).
+improvement rules R1–R15).
 
 ## Context
 
@@ -196,6 +196,74 @@ current orphan was created in the first place.
 **Rationale:** deletion is a one-way door and reduces capability, so it requires explicit sign-off
 rather than being folded into a port.
 
+## Decision 9 — The craft layer is tokens and primitives, and the confidence treatment is reserved
+
+The console must be the surface a customer *chooses* to open. That is not a soft goal: a customer who
+does not open it stays in the CLI, and a console nobody opens is indistinguishable from one that was
+never built. P8 reached the same conclusion about operators and answered it in
+[`web/design-system/README.md`](../../../web/design-system/README.md) §0 — *delight on the read path,
+friction on the write path*. P9 inherits the structure and changes the second half, because the
+customer console has no fleet-wide destructive control. Its dangerous direction is different:
+
+> **Delight on the read path. Honesty on the evidence path.**
+
+**What is specified.** One subject per view, carried by exactly one display-level heading and present
+in the **first paint** before data resolves; skeletons that occupy the shape the content will take, so
+arrival changes no structure; depth, motion and emphasis drawn from the shared token set as hierarchy
+signals; every duration inside the motion budget with nothing on the action path and
+`prefers-reduced-motion` losing no information; and anticipation — already-visited subjects offered
+before an identifier is asked for, a keyboard command path to every subject, and the current subject
+carried across surfaces.
+
+**🔴 The reservation.** A value the server qualified — `provisional`, `tie`, `disqualified`,
+`low-confidence`, an uncalibrated judge, `withheld`, `candidate`, unverified, or entitlement-gated —
+**may not carry the confidence treatment**: no accent color, no elevation above its peers, no entrance
+animation, no display-weight type. This is the exact analogue of P8's hazard reservation (FR31 there),
+and the reasoning transfers intact: emphasis is legible because it is **rare and earned**. Its
+violation is not an aesthetic complaint. `p4board.html` already renders a tied rank de-emphasized and
+puts disqualified variants in their own section rather than ranking them last, because P4 decided that
+overlapping intervals are **not an ordering**. A craft pass that gives the top row a glow has re-made
+that decision in CSS.
+
+**Alternative rejected: treat visual quality as a per-page styling pass.** This is what a "make it
+beautiful" brief invites, and it is the exact mechanism 🔴 `ui-redesign-feature-and-visual-consistency`
+names — improvisation. It also produces the fourth palette fork this change exists to prevent.
+
+**Alternative rejected: adopt a fashionable component kit for visual lift.** Rejected for the same
+reason Decision 2 rejects a third-party design system, plus one more specific to craft: a kit's default
+emphasis model has no concept of a qualified value, so the reservation above would have to be
+re-implemented against the kit's assumptions — and the failure mode is silent.
+
+**Regression guards.** A duration outside the motion budget, a heading structure with more than one
+display level, and a confidence-treatment class applied to a qualified value each fail a test.
+
+## Decision 10 — The public home page ships inside the console, with a machine-checked claim manifest
+
+The public entry lives at the console's own root as a **public, statically-rendered route**: no
+session, no tenant data, and **no upstream platform call**, so an anonymous visitor never reaches the
+credential boundary and the page still serves while the platform API is down.
+
+**Claims are generated, not written.** Every capability the page asserts resolves through a checked-in
+**capability manifest** that records the claim, its **owning phase**, and its **shipped state**. A
+claim whose capability is not shipped **fails the build**. This turns the sales-operations rule —
+*only promise what has been delivered* — from a review habit into a gate, on the one surface where
+breaking it is most expensive and least visible: the roadmap item that reads like a feature is not
+caught by any test the engineering team runs, and it is discovered by a customer after the sale.
+
+**Plans by name; no price value in git.** The same rule P8 already enforces over its shipped bundle,
+for the same reason: a number committed to a repository outlives the moment it was true, and it ships.
+
+**Alternative rejected: a separate marketing site** (own repo, own stack, a CMS). It buys marketing
+autonomy and costs a second design system, a second accessibility posture, a second set of strings and
+— the expensive one — **a second truth about what the product does**, which drifts and is *sold*.
+Keeping it in the console makes the token set, the a11y floor, the string rules and the CSP apply for
+free, and makes FR33 enforceable at all. The cost is one public route in an application that already
+exists: **L8**, the cheapest level on the scale, buying a customer-trust property.
+
+**Alternative rejected: a hand-written landing page with hand-written claims.** Cheaper today. It is
+also precisely the artifact that goes stale silently, because no build step reads it and no test can
+tell an aspiration from a capability.
+
 ## Interfaces sketch
 
 ```
@@ -222,3 +290,7 @@ Health:   /readyz aggregates {platform, console}; degraded component named
 | The Node runtime becomes an unowned second deploy unit | Decision 6: declared, supervised, health-checked, readiness-aggregated, pinned, lockfile-reproducible. |
 | Two UIs stay live and diverge | Decision 8's cutover is a dated task with an owner, gated on inventory parity — not deferred indefinitely. |
 | Accessibility regresses to the current 1-of-5 level | Per-page gate: automated audit **plus** a keyboard-only pass; a page below the `p4board` level does not ship. |
+| A craft pass launders a qualified value into a confident one | Decision 9's reservation is a spec requirement with tests per qualifier (`tie`, `provisional`, `disqualified`, `low-confidence`, `withheld`, `candidate`, unverified, gated) — not a style note. |
+| "Make it beautiful" becomes the fourth palette fork | Craft is expressed as tokens and primitives in the shared set; the literal scan already fails a page-local color, and a duration outside the motion budget fails too. |
+| The public page claims a capability that has not shipped | Claims resolve through a checked-in capability manifest with owning phase and shipped state; an unshipped or unlisted claim fails the build (Decision 10). |
+| The public page becomes a second design system or a tracking surface | It ships inside the console under the same tokens, strings, a11y floor and `default-src 'self'` CSP; a third-party origin fails the CSP test. |

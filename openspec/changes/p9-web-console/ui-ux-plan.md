@@ -1,4 +1,4 @@
-# UI/UX Improvement Plan — P9 Web Console (R1–R12)
+# UI/UX Improvement Plan — P9 Web Console (R1–R15)
 
 > **Why these are rules, not suggestions.** A visual specification that cannot be checked is not a
 > specification, it is a preference. Every rule below is written as **must / must not**, with the
@@ -7,9 +7,37 @@
 > repeatedly; a rule wired to a failing check does not.
 >
 > **Scope.** These govern the P9 console. They are enforced through the requirements in
-> [`specs/console-design-system/spec.md`](specs/console-design-system/spec.md) and
-> [`specs/web-console/spec.md`](specs/web-console/spec.md); this file is where the *reasoning* lives.
+> [`specs/console-design-system/spec.md`](specs/console-design-system/spec.md),
+> [`specs/web-console/spec.md`](specs/web-console/spec.md) and
+> [`specs/console-marketing-site/spec.md`](specs/console-marketing-site/spec.md); this file is where
+> the *reasoning* lives.
 > Behaviors to preserve are in [`feature-inventory.md`](feature-inventory.md).
+
+---
+
+## Ratification (§1.2) — signed off, not assumed
+
+**R1–R15 are ratified by the product owner.** Removing capability is a product decision, so the four
+deliberate drops are recorded here with what is given up and what replaces it, rather than being
+folded silently into a port.
+
+| # | Dropped | What is given up | What replaces it | Where |
+|---|---|---|---|---|
+| 1 | `p4board.html`'s hardcoded `'wf-demo'` default | Opening `/p4/board` with no parameter currently renders **something**. | Selection, or an empty state. A confident, fully-populated board for a workflow that is not the user's is strictly worse than an empty state: an empty state tells the truth, a wrong default asserts a falsehood with the full authority of a populated UI. | R8 · P4-0 · FR10 |
+| 2 | `index.html`'s Chinese UI strings | Nothing — the page has no Go handler and its three endpoints do not exist. | The same surface in English, against the P5.5 API. | R4 · IDX · FR23 |
+| 3 | `index.html`'s unconditional 15 s polling that never stops | A queue that refreshes forever without being asked. | A bounded refresh strategy. An always-on timer against a queue with **no terminal state** is a cost with no owner, and it is the one polling loop in the tree that can never decide to stop. | IDX · R5 |
+| 4 | `index.html`'s `alert()` on action failure | A modal that blocks the page and carries no detail. | An in-page error state carrying the failure class, per R5's three-way taxonomy. | IDX · R5 |
+
+**Also ratified:** the **cutover** in [`tasks.md`](tasks.md) §12 — each of `p2.html`,
+`p25monitor.html`, `p35graph.html` and `p4board.html` is removed **together with its Go handler and
+`go:embed` directive** once its canonical route exists and every inventory item is checked or
+explicitly dropped; and `internal/api/static/index.html` is deleted, having no handler and three
+endpoints that do not exist. Recorded here because a deletion is a one-way door and 🔴
+`pattern-violation-minimal-fix` requires it to be explicit rather than a drive-by.
+
+**Not dropped, and not open for reinterpretation during delivery:** everything else in
+[`feature-inventory.md`](feature-inventory.md). A behavior absent from the drop table above and absent
+from the console is a **defect**, not a decision.
 
 ---
 
@@ -315,6 +343,106 @@ and fails on a field that appears in neither.
 
 ---
 
+## R13 — One subject per view, on screen before its data. Structure never reflows.
+
+**Mandatory.** Every view has **exactly one subject**, carried by exactly one display-level heading,
+and that subject is rendered in the **first paint** — before its data resolves. A skeleton occupies
+the shape the content will take, so the arrival of data changes values and never structure.
+
+**The defect this prevents.** All four current pages open the same way: a bare shell, then a generic
+`Loading…`, then a jump as content lands. `p4board.html` renders *Loading board…* into an empty page
+with no indication of which workflow is loading — so during the one second the reader most wants to
+know they are in the right place, the screen tells them nothing. And because the empty state and the
+populated state have different shapes, every load ends in a reflow.
+
+**Why it is a rule rather than a nicety.** A view that cannot name its subject before its data arrives
+is a view that cannot be shared, cannot be resumed, and cannot be told apart from the same view on a
+different subject in a screenshot. The subject is not decoration on the data — it is the one thing the
+route already knows for certain.
+
+**Counter-examples.**
+
+| Bad | Why |
+|---|---|
+| A full-page spinner with no subject | The reader cannot confirm they opened the right thing until it is already loaded. |
+| An empty state that is structurally different from the populated state | Every load ends in a layout jump; the eye re-finds everything. |
+| Two `<h1>`-level headings on one view | Two subjects means no subject; the page is really two pages. |
+
+**Regression guard.** A test asserts exactly one display-level heading per route, asserts the subject
+string is present in the pre-data render, and asserts the skeleton and populated renders produce the
+same structural signature.
+
+---
+
+## R14 — 🔴 The confidence treatment is reserved for confident values.
+
+**Mandatory.** Emphasis reserved for a settled result — accent color, elevation above peers, entrance
+animation, display-weight type — may **not** be applied to a value the server qualified:
+`provisional`, `tie`, `disqualified`, `low-confidence`, an uncalibrated judge, `withheld`,
+`candidate`, unverified, or entitlement-gated.
+
+**Why this is the load-bearing craft rule.** Everything else in this document protects information
+from being lost. This one protects it from being **overstated**, which on this product is worse. P4
+went to considerable trouble to make a tie a tie: overlapping confidence intervals are *not* an
+ordering, so `p4board.html` renders a tied rank muted and non-bold, puts disqualified variants in
+their own section titled *excluded from the ranked order, not ranked last*, and flags an uncalibrated
+judge wherever its metric appears. Every one of those is a **statistical** decision expressed
+visually. A styling pass that gives row 1 a glow, or animates the leader in, has silently overturned
+it — and no test in the eval harness can see that happen.
+
+This is the direct analogue of the operator console's reserved hazard palette
+([`web/design-system/README.md`](../../../web/design-system/README.md) §4): danger is legible because
+it is rare, and **confidence is credible because it is earned**. Spend it on a provisional number and
+the reader stops being able to tell which figures to trust — which is the entire value of the product.
+
+**Counter-examples.**
+
+| Bad | Why |
+|---|---|
+| Rank 1 accented while tied with rank 2 | Asserts an ordering the server explicitly declined to assert. |
+| A provisional interval animated in like a result | Motion reads as arrival-of-answer; there is no answer yet. |
+| A gated capability styled exactly like an available one, with the gate only in a tooltip | Reads as a broken feature rather than an unpurchased one (R-series: FR15). |
+| An unverified proposal card that looks like a verified one | The one rendering P5.5 exists to prevent. |
+
+**Regression guard.** A test renders a board whose top row carries `tie`, and asserts the row does not
+carry the confidence-treatment class; the same test runs for `provisional`, `disqualified`,
+`low-confidence`, `withheld`, `candidate` and gated.
+
+---
+
+## R15 — The public surface may not claim more than the product ships.
+
+**Mandatory.** The public home page renders with **no session, no tenant data and no upstream platform
+call**. Every capability claim on it resolves through a **checked-in capability manifest** naming the
+owning phase and shipped state; a claim whose capability has not shipped **fails the build**. Plans are
+named, never priced. No third-party origin — no external font, script, tracker or image host.
+
+**The defect this prevents.** A marketing surface is the one page in a repository that no test reads
+and no engineer re-checks after the first week. It is therefore the page most likely to describe the
+roadmap in the present tense, and the drift is not caught internally — it is caught by a customer,
+after the sale, as a support ticket or a refund. Making the claims resolve through a manifest turns
+"only promise what has shipped" from a habit into a gate.
+
+**Why no upstream call.** Two reasons, and the second is the one that matters. First, an anonymous
+visitor must never cause the BFF to use the server-held credential (R10). Second, the page a prospect
+first sees must not go down with the platform API — a marketing page that 500s during an incident is
+the worst possible sample of the product.
+
+**Counter-examples.**
+
+| Bad | Why |
+|---|---|
+| "Automatically optimizes your prompts" when auto-merge is gated and PRs are human-merged | Sells an automation level the platform deliberately does not offer by default. |
+| A price on the page | A number in git outlives the moment it was true, and it ships (P8 FR28). |
+| A hosted font or an analytics tag | Breaks `default-src 'self'`, and sends a prospect's IP to a third party before they consent to anything. |
+| A "customer logo" strip or benchmark figure with no source | Fabricated evidence on the surface whose entire job is credibility. |
+
+**Regression guard.** The claim scan fails the build on a page claim absent from the manifest or
+marked unshipped; the existing bundle scan already fails on a priced literal; a CSP test asserts no
+third-party origin is referenced.
+
+---
+
 ## Rollout order
 
 The rules are not equally urgent. Suggested order, by what unblocks the most:
@@ -327,4 +455,7 @@ The rules are not equally urgent. Suggested order, by what unblocks the most:
 | 4 | **R8**, **R9** | The largest experience win, and the one users will notice first. |
 | 5 | **R6**, **R7** | Accessibility floor and escaping — both are cheap in a React port and expensive to retrofit. |
 | 6 | **R12** | Needs cross-phase decisions, so it runs alongside rather than blocking. |
+| 2½ | **R14** | Sits with R1/R4 rather than after them: the reservation is a property of the token set and the primitives, and retrofitting it means revisiting every view that already shipped an emphasis. |
+| 4½ | **R13** | Follows R8/R9, because "one subject per view" is only expressible once the routes know what their subject is. |
+| 6 | **R15** | Independent of the credential boundary — the public page has no session — so it can run in parallel from the start. Its gate must exist before the page does, not after. |
 | — | **R11** | Not an item — it is the gate every one of the above passes through. |

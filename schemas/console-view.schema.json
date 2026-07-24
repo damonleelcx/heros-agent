@@ -1,0 +1,2711 @@
+{
+  "$defs": {
+    "AblationCard": {
+      "properties": {
+        "ci_high": {
+          "type": "number"
+        },
+        "ci_low": {
+          "type": "number"
+        },
+        "delta_mean": {
+          "type": "number"
+        },
+        "metric": {
+          "type": "string"
+        },
+        "n_seeds": {
+          "type": "integer"
+        },
+        "node_id": {
+          "type": "string"
+        },
+        "verdict": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ci_high",
+        "ci_low",
+        "delta_mean",
+        "metric",
+        "n_seeds",
+        "node_id",
+        "verdict"
+      ],
+      "type": "object"
+    },
+    "AnalystStatus": {
+      "properties": {
+        "agreement": {
+          "type": "number"
+        },
+        "calibrated": {
+          "type": "boolean"
+        },
+        "flagged": {
+          "type": "boolean"
+        },
+        "floor": {
+          "type": "number"
+        },
+        "n_human": {
+          "type": "integer"
+        },
+        "present": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "agreement",
+        "calibrated",
+        "flagged",
+        "floor",
+        "n_human",
+        "present"
+      ],
+      "type": "object"
+    },
+    "BillingStateView": {
+      "properties": {
+        "guidance": {
+          "type": "string"
+        },
+        "invoice_status": {
+          "type": "string"
+        },
+        "past_due": {
+          "type": "boolean"
+        },
+        "payment_failed": {
+          "type": "boolean"
+        },
+        "subscription_status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "past_due",
+        "payment_failed"
+      ],
+      "type": "object"
+    },
+    "BillingView": {
+      "description": "Response of GET /api/p7/customers/{customer_id}/billing",
+      "properties": {
+        "available_periods": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "customer_id": {
+          "type": "string"
+        },
+        "denial": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DenialView"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "drift": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/DriftView"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "empty": {
+          "type": "boolean"
+        },
+        "entitlements": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/EntitlementRow"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "invoice": {
+          "$ref": "#/$defs/InvoiceView"
+        },
+        "meters": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/MeterView"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "period": {
+          "type": "string"
+        },
+        "plan_config_version": {
+          "type": "string"
+        },
+        "plan_id": {
+          "type": "string"
+        },
+        "plan_name": {
+          "type": "string"
+        },
+        "savings": {
+          "$ref": "#/$defs/SavingsView"
+        },
+        "state": {
+          "$ref": "#/$defs/BillingStateView"
+        },
+        "sum": {
+          "type": "number"
+        },
+        "sum_trend": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/PeriodPoint"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sum_unit": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "customer_id",
+        "empty",
+        "entitlements",
+        "invoice",
+        "meters",
+        "period",
+        "plan_config_version",
+        "plan_id",
+        "plan_name",
+        "savings",
+        "state",
+        "sum",
+        "sum_unit"
+      ],
+      "type": "object"
+    },
+    "BoardView": {
+      "description": "Response of GET /api/p4/workflows/{workflow_id}/board",
+      "properties": {
+        "all_tie": {
+          "type": "boolean"
+        },
+        "coverage": {
+          "$ref": "#/$defs/CoverageView"
+        },
+        "disqualified": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/Row"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "error": {
+          "type": "string"
+        },
+        "eval_set_hash": {
+          "type": "string"
+        },
+        "gate_set": {
+          "type": "string"
+        },
+        "notes": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pareto": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/ParetoPoint"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "profile": {
+          "type": "string"
+        },
+        "profiles": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "progress": {
+          "$ref": "#/$defs/Progress"
+        },
+        "ranked": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/Row"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "runs_enqueued": {
+          "type": "integer"
+        },
+        "spend": {
+          "$ref": "#/$defs/SpendReport"
+        },
+        "state": {
+          "type": "string"
+        },
+        "unmeasured": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/UnmeasuredView"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "workflow_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "all_tie",
+        "coverage",
+        "disqualified",
+        "eval_set_hash",
+        "gate_set",
+        "pareto",
+        "profile",
+        "profiles",
+        "progress",
+        "ranked",
+        "runs_enqueued",
+        "spend",
+        "state",
+        "workflow_id"
+      ],
+      "type": "object"
+    },
+    "Budget": {
+      "properties": {
+        "generation_usd": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "judge_usd": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "max_generation_calls": {
+          "type": "integer"
+        },
+        "max_judge_calls": {
+          "type": "integer"
+        },
+        "total_usd": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "Card": {
+      "properties": {
+        "build_status": {
+          "type": "string"
+        },
+        "can_open_pr": {
+          "type": "boolean"
+        },
+        "cases_broken": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cases_fixed": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ci_high": {
+          "type": "number"
+        },
+        "ci_low": {
+          "type": "number"
+        },
+        "cost_delta": {
+          "type": "number"
+        },
+        "delta": {
+          "type": "number"
+        },
+        "diag_id": {
+          "type": "string"
+        },
+        "evidence_case_ids": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "gate_result": {
+          "type": "string"
+        },
+        "held_out": {
+          "type": "boolean"
+        },
+        "held_out_label": {
+          "type": "string"
+        },
+        "latency_delta": {
+          "type": "number"
+        },
+        "narration": {
+          "type": "string"
+        },
+        "node_id": {
+          "type": "string"
+        },
+        "operator": {
+          "type": "string"
+        },
+        "pattern": {
+          "type": "string"
+        },
+        "pr_disabled_reason": {
+          "type": "string"
+        },
+        "proposal_id": {
+          "type": "string"
+        },
+        "rationale": {
+          "type": "string"
+        },
+        "significant": {
+          "type": "boolean"
+        },
+        "source_diff": {
+          "type": "string"
+        },
+        "spec_diff": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/DimChange"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "state": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "build_status",
+        "can_open_pr",
+        "cases_broken",
+        "cases_fixed",
+        "ci_high",
+        "ci_low",
+        "cost_delta",
+        "delta",
+        "diag_id",
+        "evidence_case_ids",
+        "gate_result",
+        "held_out",
+        "held_out_label",
+        "latency_delta",
+        "narration",
+        "node_id",
+        "operator",
+        "pattern",
+        "proposal_id",
+        "rationale",
+        "significant",
+        "source_diff",
+        "spec_diff",
+        "state"
+      ],
+      "type": "object"
+    },
+    "ClusterRow": {
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "member_case_ids": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "representative_case_id": {
+          "type": "string"
+        },
+        "signature": {
+          "type": "string"
+        },
+        "size": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "label",
+        "member_case_ids",
+        "representative_case_id",
+        "signature",
+        "size"
+      ],
+      "type": "object"
+    },
+    "ComponentView": {
+      "properties": {
+        "contribution": {
+          "type": "number"
+        },
+        "judge": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/JudgeStanding"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "metric": {
+          "type": "string"
+        },
+        "normalized": {
+          "type": "number"
+        },
+        "raw": {
+          "type": "number"
+        },
+        "raw_ci_high": {
+          "type": "number"
+        },
+        "raw_ci_low": {
+          "type": "number"
+        },
+        "role": {
+          "type": "string"
+        },
+        "unit": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "contribution",
+        "metric",
+        "normalized",
+        "raw",
+        "raw_ci_high",
+        "raw_ci_low",
+        "role",
+        "unit"
+      ],
+      "type": "object"
+    },
+    "CoverageView": {
+      "properties": {
+        "difficulty": {
+          "type": "number"
+        },
+        "difficulty_measured": {
+          "type": "boolean"
+        },
+        "dimensions": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/DimensionView"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "diversity": {
+          "type": "number"
+        },
+        "iterations": {
+          "type": "integer"
+        },
+        "low_confidence": {
+          "type": "boolean"
+        },
+        "measured": {
+          "type": "boolean"
+        },
+        "met": {
+          "type": "boolean"
+        },
+        "n_cases": {
+          "type": "integer"
+        },
+        "n_gold": {
+          "type": "integer"
+        },
+        "n_indecisive": {
+          "type": "integer"
+        },
+        "n_none": {
+          "type": "integer"
+        },
+        "n_oracle": {
+          "type": "integer"
+        },
+        "n_weak": {
+          "type": "integer"
+        },
+        "oracle_coverage": {
+          "type": "number"
+        },
+        "reasons": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "residual": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/ResidualItem"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "stopped_because": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "difficulty",
+        "difficulty_measured",
+        "dimensions",
+        "diversity",
+        "iterations",
+        "low_confidence",
+        "measured",
+        "met",
+        "n_cases",
+        "n_gold",
+        "n_indecisive",
+        "n_none",
+        "n_oracle",
+        "n_weak",
+        "oracle_coverage",
+        "residual"
+      ],
+      "type": "object"
+    },
+    "DenialLimitView": {
+      "properties": {
+        "allowed": {
+          "type": "number"
+        },
+        "label": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "string"
+        },
+        "observed": {
+          "type": "number"
+        },
+        "period": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "allowed",
+        "label",
+        "limit",
+        "observed",
+        "period"
+      ],
+      "type": "object"
+    },
+    "DenialView": {
+      "properties": {
+        "feature": {
+          "type": "string"
+        },
+        "feature_label": {
+          "type": "string"
+        },
+        "limit": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DenialLimitView"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason": {
+          "type": "string"
+        },
+        "reason_code": {
+          "type": "string"
+        },
+        "upgrade_plan": {
+          "type": "string"
+        },
+        "upgrade_plan_name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "feature",
+        "feature_label",
+        "reason",
+        "reason_code"
+      ],
+      "type": "object"
+    },
+    "DiagnosisCard": {
+      "properties": {
+        "agreement": {
+          "type": "number"
+        },
+        "analyst_flagged": {
+          "type": "boolean"
+        },
+        "calibrated": {
+          "type": "boolean"
+        },
+        "classified": {
+          "type": "boolean"
+        },
+        "code": {
+          "type": "string"
+        },
+        "confidence": {
+          "type": "number"
+        },
+        "description": {
+          "type": "string"
+        },
+        "evidence_case_ids": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "low_confidence": {
+          "type": "boolean"
+        },
+        "n_human": {
+          "type": "integer"
+        },
+        "node_id": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "agreement",
+        "analyst_flagged",
+        "calibrated",
+        "classified",
+        "code",
+        "confidence",
+        "description",
+        "evidence_case_ids",
+        "low_confidence",
+        "n_human",
+        "node_id",
+        "source"
+      ],
+      "type": "object"
+    },
+    "Diagnostic": {
+      "properties": {
+        "raw_pattern": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "stage": {
+          "type": "string"
+        },
+        "subgraph_ref": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "reason",
+        "stage"
+      ],
+      "type": "object"
+    },
+    "DimChange": {
+      "properties": {
+        "dimension": {
+          "type": "string"
+        },
+        "from": {
+          "type": "string"
+        },
+        "node_id": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "dimension",
+        "from",
+        "node_id",
+        "to"
+      ],
+      "type": "object"
+    },
+    "DimensionView": {
+      "properties": {
+        "achieved": {
+          "type": "number"
+        },
+        "covered": {
+          "type": "integer"
+        },
+        "met": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "target": {
+          "type": "number"
+        },
+        "total": {
+          "type": "integer"
+        },
+        "uncovered": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "vacuous": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "achieved",
+        "covered",
+        "met",
+        "name",
+        "target",
+        "total"
+      ],
+      "type": "object"
+    },
+    "DriftView": {
+      "properties": {
+        "detail": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "metric": {
+          "type": "string"
+        },
+        "platform_quantity": {
+          "type": "number"
+        },
+        "provider_quantity": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "detail",
+        "kind",
+        "metric",
+        "platform_quantity",
+        "provider_quantity"
+      ],
+      "type": "object"
+    },
+    "EdgeView": {
+      "properties": {
+        "confidence": {
+          "type": "number"
+        },
+        "from": {
+          "type": "string"
+        },
+        "provenance": {
+          "type": "string"
+        },
+        "signal": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "confidence",
+        "from",
+        "provenance",
+        "signal",
+        "to"
+      ],
+      "type": "object"
+    },
+    "EntitlementRow": {
+      "properties": {
+        "feature": {
+          "type": "string"
+        },
+        "included": {
+          "type": "boolean"
+        },
+        "label": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "upgrade_plan": {
+          "type": "string"
+        },
+        "upgrade_plan_name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "feature",
+        "included",
+        "label"
+      ],
+      "type": "object"
+    },
+    "EvidenceView": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "link": {
+          "type": "string"
+        },
+        "method": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MethodView"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ref": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "label",
+        "ref"
+      ],
+      "type": "object"
+    },
+    "ExcludedRow": {
+      "properties": {
+        "reason": {
+          "type": "string"
+        },
+        "ref": {
+          "type": "string"
+        },
+        "would_have_been": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "reason",
+        "ref",
+        "would_have_been"
+      ],
+      "type": "object"
+    },
+    "GraphView": {
+      "description": "Response of GET /api/p35/workflows/{workflow_id}/graph",
+      "properties": {
+        "diagnostics": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/Diagnostic"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "edges": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/ViewEdge"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ir_version": {
+          "type": "string"
+        },
+        "llm_calls": {
+          "type": "integer"
+        },
+        "nodes": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/ViewNode"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "regions": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/ViewRegion"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "taxonomy_version": {
+          "type": "string"
+        },
+        "unclassified": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/ViewRegion"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "workflow_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "edges",
+        "ir_version",
+        "llm_calls",
+        "nodes",
+        "regions",
+        "taxonomy_version",
+        "unclassified",
+        "workflow_id"
+      ],
+      "type": "object"
+    },
+    "InvoiceView": {
+      "properties": {
+        "invoice_ref": {
+          "type": "string"
+        },
+        "lines": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/LineView"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "type": "string"
+        },
+        "totals": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/TotalView"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "lines"
+      ],
+      "type": "object"
+    },
+    "JudgeStanding": {
+      "properties": {
+        "agreement": {
+          "type": "number"
+        },
+        "calibrated": {
+          "type": "boolean"
+        },
+        "floor": {
+          "type": "number"
+        },
+        "metric": {
+          "type": "string"
+        },
+        "n_human": {
+          "type": "integer"
+        },
+        "percent_agreement": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "agreement",
+        "calibrated",
+        "floor",
+        "metric",
+        "n_human",
+        "percent_agreement"
+      ],
+      "type": "object"
+    },
+    "LineView": {
+      "properties": {
+        "amount_ref": {
+          "type": "string"
+        },
+        "basis": {
+          "type": "string"
+        },
+        "charge_ref": {
+          "type": "string"
+        },
+        "corrects": {
+          "type": "string"
+        },
+        "evidence": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/EvidenceView"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "kind": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "quantity": {
+          "type": "number"
+        },
+        "unit": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "basis",
+        "kind",
+        "label",
+        "quantity"
+      ],
+      "type": "object"
+    },
+    "MeterView": {
+      "properties": {
+        "allowed": {
+          "type": "number"
+        },
+        "label": {
+          "type": "string"
+        },
+        "metric": {
+          "type": "string"
+        },
+        "over": {
+          "type": "boolean"
+        },
+        "provider_usage_ref": {
+          "type": "string"
+        },
+        "reported_to_provider": {
+          "type": "boolean"
+        },
+        "unit": {
+          "type": "string"
+        },
+        "unlimited": {
+          "type": "boolean"
+        },
+        "value": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "allowed",
+        "label",
+        "metric",
+        "over",
+        "reported_to_provider",
+        "unit",
+        "unlimited",
+        "value"
+      ],
+      "type": "object"
+    },
+    "MethodView": {
+      "properties": {
+        "baseline_config_hash": {
+          "type": "string"
+        },
+        "candidate_config_hash": {
+          "type": "string"
+        },
+        "eval_set_hash": {
+          "type": "string"
+        },
+        "generating_cases": {
+          "type": "integer"
+        },
+        "holdout_cases": {
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "seeds": {
+          "type": "integer"
+        },
+        "significance_note": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "baseline_config_hash",
+        "candidate_config_hash",
+        "eval_set_hash",
+        "generating_cases",
+        "holdout_cases",
+        "id",
+        "seeds"
+      ],
+      "type": "object"
+    },
+    "NodeRow": {
+      "properties": {
+        "bottleneck_dimensions": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "classified": {
+          "type": "boolean"
+        },
+        "failure_share": {
+          "type": "number"
+        },
+        "first_divergence_count": {
+          "type": "integer"
+        },
+        "mean_cost_share": {
+          "type": "number"
+        },
+        "mean_latency_share": {
+          "type": "number"
+        },
+        "node_id": {
+          "type": "string"
+        },
+        "pattern": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "classified",
+        "failure_share",
+        "first_divergence_count",
+        "mean_cost_share",
+        "mean_latency_share",
+        "node_id"
+      ],
+      "type": "object"
+    },
+    "NodeView": {
+      "properties": {
+        "attempt_group": {
+          "type": "integer"
+        },
+        "error": {
+          "type": "string"
+        },
+        "idempotency_key": {
+          "type": "string"
+        },
+        "input_blob_hash": {
+          "type": "string"
+        },
+        "node_id": {
+          "type": "string"
+        },
+        "output_blob_hash": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "attempt_group",
+        "idempotency_key",
+        "node_id",
+        "status"
+      ],
+      "type": "object"
+    },
+    "OverallMetrics": {
+      "properties": {
+        "cost_usd": {
+          "type": "number"
+        },
+        "latency_ms": {
+          "type": "number"
+        },
+        "n_cases": {
+          "type": "integer"
+        },
+        "n_failing": {
+          "type": "integer"
+        },
+        "task_success": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "cost_usd",
+        "latency_ms",
+        "n_cases",
+        "n_failing",
+        "task_success"
+      ],
+      "type": "object"
+    },
+    "PRResult": {
+      "description": "Response of POST /api/p55/workflows/{workflow_id}/proposals/{proposal_id}/open-pr",
+      "properties": {
+        "branch": {
+          "type": "string"
+        },
+        "draft": {
+          "type": "boolean"
+        },
+        "proposal_id": {
+          "type": "string"
+        },
+        "rollback": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "branch",
+        "draft",
+        "proposal_id",
+        "rollback",
+        "url"
+      ],
+      "type": "object"
+    },
+    "ParetoPoint": {
+      "properties": {
+        "composite": {
+          "type": "number"
+        },
+        "cost_usd": {
+          "type": "number"
+        },
+        "label": {
+          "type": "string"
+        },
+        "latency_ms": {
+          "type": "number"
+        },
+        "non_dominated": {
+          "type": "boolean"
+        },
+        "quality": {
+          "type": "number"
+        },
+        "variant_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "composite",
+        "cost_usd",
+        "label",
+        "latency_ms",
+        "non_dominated",
+        "quality",
+        "variant_id"
+      ],
+      "type": "object"
+    },
+    "PenaltyView": {
+      "properties": {
+        "amount": {
+          "type": "number"
+        },
+        "term": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "amount",
+        "term"
+      ],
+      "type": "object"
+    },
+    "PeriodPoint": {
+      "properties": {
+        "baseline_sum": {
+          "type": "number"
+        },
+        "optimized_sum": {
+          "type": "number"
+        },
+        "period": {
+          "type": "string"
+        },
+        "sum": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "baseline_sum",
+        "optimized_sum",
+        "period",
+        "sum"
+      ],
+      "type": "object"
+    },
+    "Progress": {
+      "properties": {
+        "seed_floor": {
+          "type": "integer"
+        },
+        "units_completed": {
+          "type": "integer"
+        },
+        "units_planned": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "seed_floor",
+        "units_completed",
+        "units_planned"
+      ],
+      "type": "object"
+    },
+    "ProposalSurface": {
+      "description": "Response of GET /api/p55/workflows/{workflow_id}/surface",
+      "properties": {
+        "automation_level": {
+          "type": "string"
+        },
+        "error": {
+          "type": "string"
+        },
+        "recommendations": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/Card"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "state": {
+          "type": "string"
+        },
+        "trend": {
+          "$ref": "#/$defs/TrendView"
+        },
+        "withheld": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/Card"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "workflow_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "automation_level",
+        "recommendations",
+        "state",
+        "trend",
+        "withheld",
+        "workflow_id"
+      ],
+      "type": "object"
+    },
+    "ResidualItem": {
+      "properties": {
+        "dimension": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "unreachable": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "dimension",
+        "id",
+        "kind",
+        "reason",
+        "unreachable"
+      ],
+      "type": "object"
+    },
+    "Row": {
+      "properties": {
+        "ci_high": {
+          "type": "number"
+        },
+        "ci_low": {
+          "type": "number"
+        },
+        "components": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/ComponentView"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "config_hash": {
+          "type": "string"
+        },
+        "config_hash_short": {
+          "type": "string"
+        },
+        "failed_gates": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "flags": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "gate_pass": {
+          "type": "boolean"
+        },
+        "gate_reasons": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "label": {
+          "type": "string"
+        },
+        "method": {
+          "type": "string"
+        },
+        "n_cases": {
+          "type": "integer"
+        },
+        "n_seeds": {
+          "type": "integer"
+        },
+        "penalties": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/PenaltyView"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "provisional": {
+          "type": "boolean"
+        },
+        "rank": {
+          "type": "integer"
+        },
+        "score": {
+          "type": "number"
+        },
+        "tied_with": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "variant_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ci_high",
+        "ci_low",
+        "components",
+        "config_hash",
+        "config_hash_short",
+        "gate_pass",
+        "label",
+        "method",
+        "n_cases",
+        "n_seeds",
+        "provisional",
+        "rank",
+        "score",
+        "variant_id"
+      ],
+      "type": "object"
+    },
+    "RunMonitor": {
+      "description": "Response of GET /api/p25/runs/{run_id}/monitor",
+      "properties": {
+        "config_hash": {
+          "type": "string"
+        },
+        "halted": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunMonitorHalted"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "nodes": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/RunMonitorNode"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "terminal": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "config_hash",
+        "nodes",
+        "run_id",
+        "status",
+        "terminal"
+      ],
+      "type": "object"
+    },
+    "RunMonitorHalted": {
+      "properties": {
+        "node_id": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "node_id",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "RunMonitorNode": {
+      "properties": {
+        "cost_usd": {
+          "type": "number"
+        },
+        "latency_ms": {
+          "type": "number"
+        },
+        "node_id": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "tokens_completion": {
+          "type": "integer"
+        },
+        "tokens_prompt": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "cost_usd",
+        "latency_ms",
+        "node_id",
+        "state",
+        "tokens_completion",
+        "tokens_prompt"
+      ],
+      "type": "object"
+    },
+    "RunView": {
+      "description": "Response of GET /api/p2/runs/{run_id}",
+      "properties": {
+        "config_hash": {
+          "type": "string"
+        },
+        "config_hash_display": {
+          "type": "string"
+        },
+        "halted_node_id": {
+          "type": "string"
+        },
+        "halted_reason": {
+          "type": "string"
+        },
+        "nodes": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/NodeView"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "seed": {
+          "type": "integer"
+        },
+        "source_revision": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "config_hash",
+        "config_hash_display",
+        "nodes",
+        "run_id",
+        "seed",
+        "source_revision",
+        "status"
+      ],
+      "type": "object"
+    },
+    "SavingRow": {
+      "properties": {
+        "baseline_sum": {
+          "type": "number"
+        },
+        "merge_commit": {
+          "type": "string"
+        },
+        "method": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MethodView"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "optimized_sum": {
+          "type": "number"
+        },
+        "ref": {
+          "type": "string"
+        },
+        "savings": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "baseline_sum",
+        "merge_commit",
+        "optimized_sum",
+        "ref",
+        "savings"
+      ],
+      "type": "object"
+    },
+    "SavingsView": {
+      "properties": {
+        "baseline_sum": {
+          "type": "number"
+        },
+        "billed": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/SavingRow"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "consent_available": {
+          "type": "boolean"
+        },
+        "consented_at": {
+          "type": "string"
+        },
+        "excluded": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/ExcludedRow"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "gainshare_consent": {
+          "type": "boolean"
+        },
+        "none_verified": {
+          "type": "boolean"
+        },
+        "optimized_sum": {
+          "type": "number"
+        },
+        "unit": {
+          "type": "string"
+        },
+        "verified_savings": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "baseline_sum",
+        "consent_available",
+        "gainshare_consent",
+        "none_verified",
+        "optimized_sum",
+        "unit",
+        "verified_savings"
+      ],
+      "type": "object"
+    },
+    "ScorecardView": {
+      "description": "Response of GET /api/p45/variants/{variant_id}/scorecard",
+      "properties": {
+        "ablations": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/AblationCard"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "analyst": {
+          "$ref": "#/$defs/AnalystStatus"
+        },
+        "analyst_uncalibrated": {
+          "type": "boolean"
+        },
+        "classified_node_count": {
+          "type": "integer"
+        },
+        "clusters": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/ClusterRow"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "config_hash": {
+          "type": "string"
+        },
+        "diagnoses": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/DiagnosisCard"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "eval_set_hash": {
+          "type": "string"
+        },
+        "has_inconclusive": {
+          "type": "boolean"
+        },
+        "message": {
+          "type": "string"
+        },
+        "nodes": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/NodeRow"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "overall": {
+          "$ref": "#/$defs/OverallMetrics"
+        },
+        "partial": {
+          "type": "boolean"
+        },
+        "read_only": {
+          "type": "boolean"
+        },
+        "state": {
+          "type": "string"
+        },
+        "topology": {
+          "$ref": "#/$defs/TopologyView"
+        },
+        "unclassified_node_count": {
+          "type": "integer"
+        },
+        "variant_id": {
+          "type": "string"
+        },
+        "workflow_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ablations",
+        "analyst",
+        "analyst_uncalibrated",
+        "classified_node_count",
+        "clusters",
+        "config_hash",
+        "diagnoses",
+        "eval_set_hash",
+        "has_inconclusive",
+        "nodes",
+        "overall",
+        "partial",
+        "read_only",
+        "state",
+        "topology",
+        "unclassified_node_count",
+        "variant_id",
+        "workflow_id"
+      ],
+      "type": "object"
+    },
+    "SpecError": {
+      "description": "Response of POST /api/p2/specs/{resolve,submit} (rejection)",
+      "properties": {
+        "dimension": {
+          "type": "string"
+        },
+        "error": {
+          "type": "string"
+        },
+        "node_id": {
+          "type": "string"
+        },
+        "ref": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "error"
+      ],
+      "type": "object"
+    },
+    "SpendReport": {
+      "properties": {
+        "budget": {
+          "$ref": "#/$defs/Budget"
+        },
+        "by_kind": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "type": "object"
+        },
+        "calls_by_kind": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "type": "object"
+        },
+        "eval_run_id": {
+          "type": "string"
+        },
+        "exhausted": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "total_usd": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "budget",
+        "by_kind",
+        "calls_by_kind",
+        "eval_run_id",
+        "total_usd"
+      ],
+      "type": "object"
+    },
+    "SubmitResult": {
+      "description": "Response of POST /api/p2/specs/submit",
+      "properties": {
+        "config_hash": {
+          "type": "string"
+        },
+        "config_hash_display": {
+          "type": "string"
+        },
+        "diff_hash": {
+          "type": "string"
+        },
+        "rejected_dimension": {
+          "type": "string"
+        },
+        "rejected_node_id": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "source_revision": {
+          "type": "string"
+        },
+        "transform_status": {
+          "type": "string"
+        },
+        "variant_branch": {
+          "type": "string"
+        },
+        "variant_commit": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "config_hash",
+        "config_hash_display",
+        "source_revision",
+        "transform_status"
+      ],
+      "type": "object"
+    },
+    "TopologyView": {
+      "properties": {
+        "edges": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/EdgeView"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ordered_by_topology": {
+          "type": "boolean"
+        },
+        "provenance": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "edges",
+        "ordered_by_topology"
+      ],
+      "type": "object"
+    },
+    "TotalView": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "lines": {
+          "type": "integer"
+        },
+        "quantity": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "kind",
+        "label",
+        "lines",
+        "quantity"
+      ],
+      "type": "object"
+    },
+    "TransformView": {
+      "description": "Response of GET /api/p2/transforms/{config_hash}/{source_revision}",
+      "properties": {
+        "build_log": {
+          "type": "string"
+        },
+        "config_hash": {
+          "type": "string"
+        },
+        "config_hash_display": {
+          "type": "string"
+        },
+        "diff": {
+          "type": "string"
+        },
+        "diff_hash": {
+          "type": "string"
+        },
+        "rejected_dimension": {
+          "type": "string"
+        },
+        "rejected_node_id": {
+          "type": "string"
+        },
+        "requires_human_review": {
+          "type": "boolean"
+        },
+        "source_revision": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "variant_branch": {
+          "type": "string"
+        },
+        "variant_commit": {
+          "type": "string"
+        },
+        "verification_strength": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "config_hash",
+        "config_hash_display",
+        "diff",
+        "requires_human_review",
+        "source_revision",
+        "status",
+        "verification_strength"
+      ],
+      "type": "object"
+    },
+    "TrendPoint": {
+      "properties": {
+        "cluster_sizes": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "type": "object"
+        },
+        "iteration": {
+          "type": "integer"
+        },
+        "overall_success": {
+          "type": "number"
+        },
+        "variant_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "cluster_sizes",
+        "iteration",
+        "overall_success",
+        "variant_id"
+      ],
+      "type": "object"
+    },
+    "TrendView": {
+      "properties": {
+        "globally_improved": {
+          "type": "boolean"
+        },
+        "narrative": {
+          "type": "string"
+        },
+        "points": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/TrendPoint"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "problems_moved": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "globally_improved",
+        "narrative",
+        "points",
+        "problems_moved"
+      ],
+      "type": "object"
+    },
+    "UnmeasuredView": {
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "variant_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "label",
+        "reason",
+        "variant_id"
+      ],
+      "type": "object"
+    },
+    "ViewEdge": {
+      "properties": {
+        "from": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "from",
+        "kind",
+        "to"
+      ],
+      "type": "object"
+    },
+    "ViewLabel": {
+      "properties": {
+        "candidate": {
+          "type": "boolean"
+        },
+        "confidence": {
+          "type": "number"
+        },
+        "group": {
+          "type": "string"
+        },
+        "metrics": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ordinal": {
+          "type": "integer"
+        },
+        "pattern": {
+          "type": "string"
+        },
+        "primary_metric": {
+          "type": "string"
+        },
+        "provenance": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "candidate",
+        "confidence",
+        "group",
+        "metrics",
+        "ordinal",
+        "pattern",
+        "primary_metric",
+        "provenance",
+        "source",
+        "title"
+      ],
+      "type": "object"
+    },
+    "ViewNode": {
+      "properties": {
+        "labels": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/ViewLabel"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "layer": {
+          "type": "integer"
+        },
+        "model": {
+          "type": "string"
+        },
+        "node_id": {
+          "type": "string"
+        },
+        "order": {
+          "type": "integer"
+        },
+        "policy": {
+          "type": "string"
+        },
+        "region_ids": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "symbol": {
+          "type": "string"
+        },
+        "tools": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "labels",
+        "layer",
+        "model",
+        "node_id",
+        "order",
+        "policy",
+        "region_ids",
+        "symbol",
+        "tools"
+      ],
+      "type": "object"
+    },
+    "ViewRegion": {
+      "properties": {
+        "labels": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/ViewLabel"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "node_ids": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "subgraph_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "labels",
+        "node_ids",
+        "subgraph_id"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://heros.dev/schemas/console-view.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Generated by cmd/consoletypes from the Go view structs the P9 console renders. DO NOT EDIT.",
+  "properties": {
+    "BillingView": {
+      "$ref": "#/$defs/BillingView"
+    },
+    "BoardView": {
+      "$ref": "#/$defs/BoardView"
+    },
+    "GraphView": {
+      "$ref": "#/$defs/GraphView"
+    },
+    "PRResult": {
+      "$ref": "#/$defs/PRResult"
+    },
+    "ProposalSurface": {
+      "$ref": "#/$defs/ProposalSurface"
+    },
+    "RunMonitor": {
+      "$ref": "#/$defs/RunMonitor"
+    },
+    "RunView": {
+      "$ref": "#/$defs/RunView"
+    },
+    "ScorecardView": {
+      "$ref": "#/$defs/ScorecardView"
+    },
+    "SpecError": {
+      "$ref": "#/$defs/SpecError"
+    },
+    "SubmitResult": {
+      "$ref": "#/$defs/SubmitResult"
+    },
+    "TransformView": {
+      "$ref": "#/$defs/TransformView"
+    }
+  },
+  "title": "Console view models"
+}

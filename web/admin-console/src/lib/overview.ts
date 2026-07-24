@@ -34,7 +34,15 @@ import type {
  * (FR22). "Support cannot see the queue" and "the queue is empty" are different facts.
  */
 
-export type PanelState = "ok" | "denied" | "degraded";
+/**
+ * PanelState is the answer ONE panel of the picture gives.
+ *
+ * It carries the platform's classification through verbatim rather than flattening everything that is
+ * not `ok` into `degraded`. A panel that is not installed in this deployment, a panel whose aggregate
+ * is outside the tenant's plan, and a panel whose subsystem is unreachable are three different facts,
+ * and only the last one means somebody should go and look at an outage.
+ */
+export type PanelState = "ok" | "denied" | "not_mounted" | "gated" | "degraded" | "unusable";
 
 export type OverviewPanel<T> = {
   state: PanelState;
@@ -56,11 +64,23 @@ export type OperatingPicture = {
   recent: OverviewPanel<AuditEntry[]>;
 };
 
+/** PANEL_KINDS are the API classifications a panel renders as itself rather than as "degraded". */
+const PANEL_KINDS: Record<string, PanelState> = {
+  denied: "denied",
+  not_mounted: "not_mounted",
+  gated: "gated",
+  unusable: "unusable",
+  degraded: "degraded",
+};
+
 function panelFrom<T>(result: PromiseSettledResult<T>): OverviewPanel<T> {
   if (result.status === "fulfilled") return { state: "ok", data: result.value };
   const error = result.reason;
-  if (error instanceof AdminApiError && error.kind === "denied") {
-    return { state: "denied", detail: error.message };
+  if (error instanceof AdminApiError) {
+    // `degraded` is the fallback, not the default. Reporting a not-installed capability or an
+    // unreadable response as "the platform could not be reached" sends an operator to hunt an outage
+    // that is not happening, during the incident when they have least time to spare.
+    return { state: PANEL_KINDS[error.kind] ?? "degraded", detail: error.message };
   }
   return { state: "degraded", detail: error instanceof Error ? error.message : String(error) };
 }

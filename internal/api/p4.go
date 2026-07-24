@@ -1,14 +1,10 @@
 package api
 
 import (
-	_ "embed"
 	"net/http"
 
 	"github.com/heros-foreal/agentd/internal/evalboard"
 )
-
-//go:embed static/p4board.html
-var p4BoardHTML []byte
 
 // p4.go mounts the P4 eval board, following the p35.go pattern exactly: one Mount method, a
 // nil-able source interface, 503 when unmounted (deliberately distinct from 404), and the demo page
@@ -32,14 +28,7 @@ type BoardSource interface {
 // MountP4 registers the P4 board UI and its JSON endpoint.
 func (s *Server) MountP4(src BoardSource) {
 	s.p4 = src
-	s.Mux.HandleFunc("GET /p4/board", s.handleP4UI)
 	s.Mux.HandleFunc("GET /api/p4/workflows/{workflow_id}/board", s.handleP4Board)
-}
-
-func (s *Server) handleP4UI(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
-	_, _ = w.Write(p4BoardHTML)
 }
 
 func (s *Server) handleP4Board(w http.ResponseWriter, r *http.Request) {

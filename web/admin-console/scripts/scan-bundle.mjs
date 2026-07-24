@@ -11,12 +11,78 @@
 // point.
 //
 // It runs as the `postbuild` step of `npm run build`, so a bundle that would leak cannot ship.
+//
+// # The payload ceiling (R18 / FR40)
+//
+// The third check is a WEIGHT budget. On this console it also protects the first check's premise: the
+// confidence a credential scan gives is proportional to how auditable the bundle is, and a payload
+// that grows without limit is one nobody reads. It is equally how the trend review's REJECTED items
+// stay rejected — a 3D viewer, an animation library or a chatbot widget cannot arrive quietly on a
+// surface with a stated ceiling (see web/design-system/trend-ledger.md).
+//
+// The measurement comes from the build's own manifests rather than from the directory, because
+// `next dev` writes its unminified chunks into the same place; a tree a dev server has touched is
+// REFUSED rather than misreported, since a wrong number is worse than none — the wrong number gets
+// acted on.
 
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import process from "node:process";
 
 const CLIENT_DIR = join(process.cwd(), ".next", "static");
+
+// The ceiling, in bytes of shipped JavaScript. Raising it is a decision with an argument attached.
+const PAYLOAD_CEILING_BYTES = 1_400_000;
+
+// Runtimes that only ever arrive as decoration, named rather than inferred from size: a small 3D
+// library is still a 3D library on a console whose trend review rejected 3D.
+const DECORATIVE_RUNTIMES = [
+  { name: "three.js", needle: "THREE.WebGLRenderer" },
+  { name: "a WebGL context", needle: 'getContext("webgl' },
+  { name: "GSAP", needle: "gsap.registerPlugin" },
+  { name: "Lottie", needle: "lottie-web" },
+];
+
+/** shippedFiles returns the chunks the BUILD says the browser downloads. */
+async function shippedFiles() {
+  const files = new Set();
+  let found = false;
+  for (const name of ["build-manifest.json", "app-build-manifest.json"]) {
+    let manifest;
+    try {
+      manifest = JSON.parse(await readFile(join(process.cwd(), ".next", name), "utf8"));
+    } catch {
+      continue;
+    }
+    found = true;
+    collect(manifest, files);
+  }
+  return found ? files : null;
+}
+
+function collect(node, out) {
+  if (typeof node === "string") {
+    if (node.startsWith("static/")) out.add(node);
+    return;
+  }
+  if (Array.isArray(node)) {
+    for (const item of node) collect(item, out);
+    return;
+  }
+  if (node && typeof node === "object") {
+    for (const value of Object.values(node)) collect(value, out);
+  }
+}
+
+/** contaminated reports whether `next dev` has written into this `.next` tree. */
+async function contaminated() {
+  try {
+    await readFile(join(process.cwd(), ".next", "static", "development", "_buildManifest.js"), "utf8");
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 // Credential material the client bundle must never contain. The env var NAMES are here, not their
 // values — a value would itself be a leak, and if the build environment has the real credential we
@@ -70,10 +136,30 @@ async function main() {
   const needles = credentialNeedles();
   const findings = [];
   let scanned = 0;
+  let bytes = 0;
+
+  if (await contaminated()) {
+    console.error(
+      "bundle scan: `.next` has been written by a dev server, so the shipped payload cannot be measured.\n" +
+        "Stop `next dev` and run `npm run build`, which runs this scan against the build it just produced.",
+    );
+    process.exit(2);
+  }
+
+  const manifest = await shippedFiles();
 
   for await (const file of walk(CLIENT_DIR)) {
     scanned += 1;
     const content = await readFile(file, "utf8");
+    const relative = file.slice(file.indexOf(join(".next", "static")) + ".next/".length);
+    const shipped = manifest ? manifest.has(relative) : true;
+    if (shipped) bytes += Buffer.byteLength(content);
+
+    for (const { name, needle } of DECORATIVE_RUNTIMES) {
+      if (shipped && content.includes(needle)) {
+        findings.push(`PAYLOAD: ${name} is present in shipped bundle ${file}`);
+      }
+    }
 
     for (const { name, value } of needles) {
       if (content.includes(value)) {
@@ -86,6 +172,13 @@ async function main() {
         findings.push(`PRICE: literal ${JSON.stringify(match[0])} in shipped bundle ${file}`);
       }
     }
+  }
+
+  if (bytes > PAYLOAD_CEILING_BYTES) {
+    findings.push(
+      `PAYLOAD: shipped client bundle is ${bytes} bytes, over the ${PAYLOAD_CEILING_BYTES}-byte ceiling ` +
+        `by ${bytes - PAYLOAD_CEILING_BYTES}`,
+    );
   }
 
   if (scanned === 0) {
@@ -103,7 +196,11 @@ async function main() {
     process.exit(1);
   }
 
-  console.log(`bundle scan passed: ${scanned} client chunk(s), no credential material or priced literal.`);
+  console.log(
+    `bundle scan passed: ${scanned} client chunk(s) scanned, ${bytes} shipped bytes ` +
+      `(${PAYLOAD_CEILING_BYTES - bytes} under the ${PAYLOAD_CEILING_BYTES}-byte ceiling), ` +
+      `no credential material, priced literal, or decorative runtime.`,
+  );
 }
 
 main().catch((error) => {

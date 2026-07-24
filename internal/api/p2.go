@@ -2,7 +2,6 @@ package api
 
 import (
 	"database/sql"
-	_ "embed"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -45,9 +44,6 @@ import (
 // deploying agentd — no second artifact, no path to configure, and no way for the page and the API
 // that serves it to be different versions of each other.
 //
-//go:embed static/p2.html
-var p2HTML []byte
-
 // P2Stores are the read models the UI needs, plus the write path it submits through.
 type P2Stores struct {
 	Transforms *worktree.Store
@@ -67,17 +63,6 @@ func (s *Server) MountP2(st P2Stores) {
 	s.Mux.HandleFunc("GET /api/p2/transforms/{config_hash}/{source_revision}", s.handleGetTransform)
 	s.Mux.HandleFunc("POST /api/p2/specs/resolve", s.handleResolveSpec)
 	s.Mux.HandleFunc("POST /api/p2/specs/submit", s.handleSubmitSpec)
-	s.Mux.HandleFunc("GET /p2", s.handleP2UI)
-	s.Mux.HandleFunc("GET /p2/", s.handleP2UI)
-}
-
-// handleP2UI serves the bare view.
-func (s *Server) handleP2UI(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	// The page holds no secrets and no user content, but it reads run records that do carry prompt
-	// and completion references — so it is not something to leave in a shared cache.
-	w.Header().Set("Cache-Control", "no-store")
-	_, _ = w.Write(p2HTML)
 }
 
 // runView is a run plus its per-node I/O — everything the inspect view renders.
@@ -359,7 +344,7 @@ type submitResult struct {
 //     idempotency.
 //
 //  4. Is it serving a half-finished feature with no consumer?
-//     NO — the inverse. Its consumer is panel 1 of static/p2.html, shipped in this change, and it is
+//     NO — the inverse. Its consumer is the console's configure surface, and it is
 //     the thing task 7.2 has been claiming existed. The half-finished feature was submit's ABSENCE:
 //     a UI that says "submit a Variant Spec" and then asks the user to paste a config_hash that
 //     nothing produces.
@@ -376,7 +361,7 @@ type submitResult struct {
 //     state, so every caller would have to follow up with two more reads. It also invents a variant
 //     resource nothing else serves.
 //
-// Consumers, named as the rule requires: the write side is static/p2.html panel 1. The read side is
+// Consumers, named as the rule requires: the write side is the console's configure surface. The read side is
 // the two GET views already here, which the response's coordinates feed directly.
 //
 // ─────────────────────────────────────────────────────────────────────────────────────────────────

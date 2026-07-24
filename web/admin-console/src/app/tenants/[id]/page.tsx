@@ -1,8 +1,7 @@
-import { notFound } from "next/navigation";
 import { requireIdentity, hasCapability, holdersOf } from "@/lib/session";
 import { adminFetch, AdminApiError } from "@/lib/adminApi";
 import { OperatorShell } from "@/components/shell";
-import { DegradedState, DeniedState, Pill } from "@/components/states";
+import { DegradedState, DeniedState, NotFoundState, Pill, UnusableState } from "@/components/states";
 import { DataTable, Num, PageFrame, Section, Stat, StatRow } from "@/components/primitives";
 import { ActionForm } from "@/components/actionForm";
 import { RecordVisit } from "@/components/recordVisit";
@@ -34,14 +33,26 @@ export default async function TenantDetailPage({ params }: { params: Promise<{ i
   const { identity, sessionToken } = await requireIdentity();
 
   let tenant: TenantView | null = null;
-  let degraded: string | null = null;
+  /*
+   * The failure is kept AS ITS KIND rather than flattened to a message.
+   *
+   * A mistyped tenant id used to leave through `notFound()`, which renders the framework's own
+   * unstyled 404 — no chrome, no acting principal, no palette, and no statement of which console the
+   * operator is even on. Every other failure became "degraded", which told them the platform was
+   * broken when they had simply pasted the wrong thing. Both are now rendered in place, inside the
+   * shell, as the answer they actually are.
+   */
+  let failure: { kind: "not_found" | "unusable" | "degraded"; detail?: string } | null = null;
   try {
     tenant = await adminFetch<TenantView>(`/admin/api/tenants/${encodeURIComponent(id)}`, {
       sessionToken,
     });
   } catch (error) {
-    if (error instanceof AdminApiError && error.status === 404) notFound();
-    degraded = error instanceof AdminApiError ? error.message : String(error);
+    const kind = error instanceof AdminApiError ? error.kind : "degraded";
+    failure = {
+      kind: kind === "not_found" || kind === "unusable" ? kind : "degraded",
+      detail: error instanceof Error ? error.message : String(error),
+    };
   }
 
   let plans: PlanOption[] = [];
@@ -72,8 +83,14 @@ export default async function TenantDetailPage({ params }: { params: Promise<{ i
           />
         ) : null}
 
-        {degraded || !tenant ? (
-          <DegradedState what={`tenant ${id}`} detail={degraded ?? undefined} />
+        {failure || !tenant ? (
+          failure?.kind === "not_found" ? (
+            <NotFoundState what="tenant" identifier={id} />
+          ) : failure?.kind === "unusable" ? (
+            <UnusableState what={`tenant ${id}`} detail={failure.detail} />
+          ) : (
+            <DegradedState what={`tenant ${id}`} detail={failure?.detail} />
+          )
         ) : (
           <>
             <Section title="State">

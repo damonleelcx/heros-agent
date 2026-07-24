@@ -1,6 +1,7 @@
 package adminops_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/heros-foreal/agentd/internal/adminaudit"
 	"github.com/heros-foreal/agentd/internal/adminops"
@@ -345,23 +347,109 @@ var currencyOrBand = regexp.MustCompile(`(?i)(\$\s?\d[\d,]*\.\d|\$\s?\d{1,3}(,\d
 // CSS length function, or an inline style object. These are lengths in a stylesheet, not money.
 var cssLength = regexp.MustCompile(`(?i)(style=\{\{|\b(width|height|inset|top|right|bottom|left|flex|basis|translate|scale|size|zoom|opacity|stop-color|gradient)\b\s*[:(]|\b(calc|min|max|clamp|inset|rgb|rgba|hsl|hsla)\s*\()`)
 
-// pricedLine reports whether a source line carries a priced literal, discounting the two contexts
-// where a percent sign is not a rate: a CSS/inline-style length, and a comment.
+// pricedLine reports whether a source line carries a priced literal, discounting the contexts where a
+// percent sign is not a rate: a stylesheet, a CSS/inline-style length, and a comment.
 //
 // Comments are excluded because the fence's subject is what the PRODUCT says, not what an engineer
 // wrote about it — and because a comment explaining a money rule (like this one) must be able to
 // name the shape it is describing without failing the rule it describes.
-func pricedLine(line string) bool {
+//
+// # Why a whole stylesheet is exempt from the percentage reading
+//
+// `cssLength` recognises a percentage inside a declaration it knows the property of, or inside a CSS
+// function. That covers most of a stylesheet and missed two shapes the moment a real one was added to
+// the tree: a keyframe SELECTOR (`0%,` / `50% {` / `100% {`, which is not a declaration at all) and a
+// percentage inside a data URI (`height='100%25'` in an inline SVG, where it is URL-encoded and the
+// surrounding property is `background-image`).
+//
+// Extending the property list would have fixed those two and left the next two. The honest rule is
+// the structural one: **a `.css` file has no prices in it.** Money in this product is a reference
+// resolved from the config store, and a stylesheet cannot resolve one. So a stylesheet keeps the
+// context-independent half of the fence — a currency amount or a named band is still caught, because
+// `content: "$9.99"` would still be a business number in version history — and loses only the
+// percentage reading, which in that file can only ever be a length, a selector or an opacity.
+func pricedLine(path, line string) bool {
 	trimmed := strings.TrimSpace(line)
 	isComment := strings.HasPrefix(trimmed, "//") || strings.HasPrefix(trimmed, "*") ||
 		strings.HasPrefix(trimmed, "/*") || strings.HasPrefix(trimmed, "#") ||
 		strings.HasPrefix(trimmed, "<!--")
-	if isComment || cssLength.MatchString(line) {
+	if isComment || strings.HasSuffix(path, ".css") || cssLength.MatchString(line) {
 		// Still catch a currency amount or a named band even in these contexts — only the percentage
 		// reading is context-dependent.
 		return currencyOrBand.MatchString(line)
 	}
 	return pricedValue.MatchString(line)
+}
+
+// isText reports whether a tracked file is source the fence can meaningfully read.
+//
+// # Why this exists
+//
+// The fence walks everything `git ls-files` reports under the console tree, and that tree now carries
+// self-hosted font binaries. A `.woff2` has no lines and no literals: splitting its bytes on "\n"
+// produces spans of compressed data, and a span of compressed data contains every two-character
+// sequence eventually — including `6%`. The fence reported eleven priced literals in four fonts, none
+// of which was a number anybody wrote.
+//
+// That is worse than a missed leak. A gate whose failures are meaningless is a gate people learn to
+// skim past, and the one real finding arrives in the middle of a page of noise from a font file.
+//
+// The test is content-based rather than an extension allowlist, because the allowlist would need
+// amending for every binary the tree ever gains — and the amendment nobody makes is the day the fence
+// starts crying wolf again. A NUL byte, or bytes that are not valid UTF-8, means this is not text.
+func isText(b []byte) bool {
+	return utf8.Valid(b) && !bytes.ContainsRune(b, 0)
+}
+
+// TestPricedLineDiscriminates proves the fence still goes RED, and says exactly where it goes green.
+//
+// It exists because the two carve-outs above — a stylesheet, and a file that is not text — were added
+// to stop false positives, and a carve-out added to stop noise is one refactor away from stopping
+// everything. A fence nobody has watched fail is a fence nobody knows is connected, so this watches it
+// fail on the shapes that matter and pass on the shapes that were crying wolf.
+func TestPricedLineDiscriminates(t *testing.T) {
+	cases := []struct {
+		name   string
+		path   string
+		line   string
+		priced bool
+	}{
+		// The fence's actual subject: money written into version history.
+		{"currency in Go", "internal/adminops/plan.go", `price := "$12.50"`, true},
+		{"currency with separator", "internal/adminops/plan.go", `const enterprise = "$1,299"`, true},
+		{"named band", "internal/adminops/plan.go", `price_band = 3`, true},
+		{"rate in Go", "internal/adminops/plan.go", `overage := 15% of base`, true},
+		{"currency in a comment", "internal/adminops/plan.go", `// the Team plan is $49.00`, true},
+
+		// 🔴 A stylesheet loses the percentage reading and KEEPS the currency one. If this case ever
+		// goes green, the `.css` carve-out has stopped being a carve-out and become a hole.
+		{"currency in CSS", "web/admin-console/src/app/globals.css", `content: "$9.99";`, true},
+
+		// The shapes that were failing the build with no business number anywhere in them.
+		{"keyframe selector", "web/admin-console/src/app/globals.css", `  50% {`, false},
+		{"keyframe list", "web/admin-console/src/app/globals.css", `  0%,`, false},
+		{"percentage in a data URI", "web/admin-console/src/app/globals.css", `background-image: url("…height='100%25'…");`, false},
+		{"a plain CSS length", "web/admin-console/src/app/globals.css", `width: 100%;`, false},
+		{"a length outside CSS", "web/admin-console/src/components/bar.tsx", `style={{ width: "80%" }}`, false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := pricedLine(tc.path, tc.line); got != tc.priced {
+				t.Errorf("pricedLine(%q, %q) = %v, want %v", tc.path, tc.line, got, tc.priced)
+			}
+		})
+	}
+
+	// And a binary is never read as source. The four font files under the console tree reported
+	// eleven "priced literals" between them, every one of which was a byte pair inside compressed
+	// glyph data.
+	if isText([]byte{0x77, 0x4f, 0x46, 0x32, 0x00, 0x36, 0x25}) {
+		t.Error("a blob containing a NUL byte was treated as source")
+	}
+	if !isText([]byte("width: 100%;\n")) {
+		t.Error("ordinary UTF-8 source was treated as a binary")
+	}
 }
 
 // TestNoPricedValueInAdminSource is P8's half of the money-in-git rule (FR8, task 13.3).
@@ -396,8 +484,11 @@ func TestNoPricedValueInAdminSource(t *testing.T) {
 		if strings.Contains(rel, "billing_test.go") || strings.HasSuffix(rel, "scripts/scan-bundle.mjs") {
 			continue
 		}
+		if !isText(b) {
+			continue
+		}
 		for i, line := range strings.Split(string(b), "\n") {
-			if pricedLine(line) {
+			if pricedLine(rel, line) {
 				t.Errorf("%s:%d contains a priced literal — plans are named and prices are references: %q", rel, i+1, strings.TrimSpace(line))
 			}
 		}

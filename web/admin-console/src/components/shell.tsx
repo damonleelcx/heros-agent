@@ -2,12 +2,12 @@ import type { ReactNode } from "react";
 import type { AdminIdentity, TenantView } from "@/lib/types";
 import { ROLE_LABELS } from "@/lib/session";
 import { minutes } from "@/lib/format";
-import { readDensity } from "@/lib/prefs";
+import { readDensity, readTheme } from "@/lib/prefs";
 import { adminFetch } from "@/lib/adminApi";
 import { commandsFor, navFor } from "@/lib/surfaces";
 import { EndImpersonationButton } from "./impersonationBanner";
 import { CommandPalette, type PaletteSubject } from "./commandPalette";
-import { DensityToggle, PrimaryNav } from "./chromeControls";
+import { ConsoleClock, DensityToggle, PrimaryNav, ThemeToggle } from "./chromeControls";
 
 /**
  * shell.tsx is the operator chrome that wraps every authenticated view (FR23).
@@ -46,6 +46,7 @@ export async function OperatorShell({
   children: ReactNode;
 }) {
   const density = await readDensity();
+  const theme = await readTheme();
   const nav = navFor(identity.capabilities);
   const commands = commandsFor(identity.capabilities);
   const subjects = await paletteSubjects(identity, sessionToken);
@@ -53,28 +54,47 @@ export async function OperatorShell({
 
   return (
     <>
-      {/* ── Distinct operator chrome, on every view ── */}
+      {/* ── Distinct operator chrome, on every view ──
+       *
+       * One band, not two rows. The identity, the navigation and the acting principal share a single
+       * horizon line, so an operator's eye finds it once and everything below it is content. Its
+       * darkness survives the light theme, which is what keeps FR23 true in both.
+       */}
       <header className="chrome">
-        <span className="chrome__mark">
-          <span className="chrome__glyph" aria-hidden="true">
-            OP
+        <div className="chrome__bar">
+          <span className="chrome__mark">
+            {identity.console}
+            <span className="chrome__glyph">Internal</span>
           </span>
-          {identity.console} · Internal
-        </span>
-        <span className="chrome__right">
-          <CommandPalette commands={commands} subjects={subjects} />
-          <DensityToggle density={density} />
-          <span className="chrome__principal">
-            Acting as <strong>{identity.admin_id}</strong>
-            <span aria-label="Your roles">
-              {identity.roles.map((role) => (
-                <span key={role} className="role-chip">
-                  {ROLE_LABELS[role]}
-                </span>
-              ))}
+
+          <nav className="nav" aria-label="Console sections">
+            <PrimaryNav items={nav} />
+          </nav>
+
+          <span className="chrome__right">
+            <ConsoleClock />
+            <CommandPalette commands={commands} subjects={subjects} />
+            <DensityToggle density={density} />
+            <ThemeToggle theme={theme} />
+            <span className="chrome__principal">
+              Acting as <strong>{identity.admin_id}</strong>
+              <span aria-label="Your roles">
+                {identity.roles.map((role) => (
+                  <span key={role} className="role-chip">
+                    {ROLE_LABELS[role]}
+                  </span>
+                ))}
+              </span>
+            </span>
+            <span className="nav__end">
+              <form action="/api/session/logout" method="post">
+                <button type="submit" className="quiet">
+                  Sign out
+                </button>
+              </form>
             </span>
           </span>
-        </span>
+        </div>
       </header>
 
       {/* ── Impersonation banner (persistent, with End control) ── */}
@@ -88,17 +108,6 @@ export async function OperatorShell({
           <EndImpersonationButton impersonationId={imp.id} />
         </div>
       ) : null}
-
-      <nav className="nav" aria-label="Console sections">
-        <PrimaryNav items={nav} />
-        <span className="nav__end">
-          <form action="/api/session/logout" method="post">
-            <button type="submit" className="quiet">
-              Sign out
-            </button>
-          </form>
-        </span>
-      </nav>
 
       <main id="main">{children}</main>
     </>

@@ -1,0 +1,359 @@
+/*
+ * tokens.customer.css — the customer console's design language, and the ONLY place a literal lives.
+ *
+ * # What this file is
+ *
+ * It is the system from `Component library design` expressed as Tailwind v4 theme variables, plus the
+ * domain vocabulary that design system does not have (a status is not a colour; a graph edge is not a
+ * stroke). Every colour, radius, type size, measure and duration the console renders resolves through
+ * a name declared here, and `scripts/scan-tokens.mjs` fails the build on a literal anywhere else under
+ * `src/`. That fence is why the language could be replaced wholesale without leaving a residue of
+ * "just here" values behind in the views.
+ *
+ * # Why this file no longer imports the shared system
+ *
+ * It used to layer over `web/design-system/tokens.css`, with the customer palette overriding the
+ * shared one by source order. That arrangement was load-bearing when both consoles drew the same
+ * primitives from the same file. This surface no longer does: its type ramp, spacing rhythm, radius
+ * family and component set now come from the design system this rebuild adopted, and layering a
+ * partial override over a different system produces a third system nobody designed — which is the
+ * exact failure the shared file existed to prevent.
+ *
+ * So the split is now honest: the operator console keeps `web/design-system/tokens.css`, this console
+ * owns its language here, and the two are DELIBERATELY distinguishable — an operator who cannot tell a
+ * cross-tenant surface from a single-tenant one at a glance is one tab away from acting on the wrong
+ * screen.
+ *
+ * # The three themed blocks
+ *
+ * The design bundle switches with `classList.add("dark")` in an effect. This console cannot: the theme
+ * is a server-read cookie written into the first byte of HTML (R17 / FR37, `lib/theme.ts`), because a
+ * class added after hydration is a flash of the wrong theme, and the inline script that would avoid
+ * the flash is not available under a CSP with no `unsafe-inline`.
+ *
+ * So the same palette is keyed three ways, and the three blocks assign EXACTLY the same token names —
+ * a test asserts it, because a token present in one palette and missing from another is invisible
+ * until somebody opens the console on the other OS, and then a control renders unstyled in one theme
+ * only:
+ *
+ *   :root, :root[data-theme="light"]            the light palette, and the default
+ *   :root[data-theme="dark"]                    the reader chose dark
+ *   prefers-color-scheme + [data-theme=system]  the reader chose to follow the OS, and the OS is dark
+ *
+ * `color-scheme` is set beside each palette rather than forced on the root, so form controls,
+ * scrollbars and the browser's own surfaces agree with the tokens instead of contradicting them.
+ *
+ * # Why the status hues are tokens and not Tailwind's palette classes
+ *
+ * The design bundle writes `text-emerald-400` / `bg-rose-400/10` directly. Those are fixed hues chosen
+ * against a near-black surface and they fail on a white one, which would make the light theme a
+ * second-class rendering of the same information — and would put information in a hue that works in
+ * only one theme, which the craft rules forbid outright. Each status therefore has a token that flips
+ * with the palette, and the views name the STATUS, never the hue.
+ */
+
+/* ── Invariants · the same in every theme ────────────────────────────────── */
+
+:root {
+  --radius: 0.5rem;
+  /* The pill radius, for the bars and dots whose shape is a semicircle rather than a corner. */
+  --radius-pill: 9999px;
+
+  /*
+   * The type ramp, named by ROLE rather than by size.
+   *
+   * R16 is arithmetic, not taste: a measured value must outrank the frame that introduces it. The
+   * defect this replaces was measured in a browser — `40 nodes` set smaller than the words "This
+   * graph" above it. Naming the roles is what lets a test compare them, because `text-4xl` beside
+   * `text-lg` is only an ordering if you already know the scale.
+   */
+  --type-label: 0.625rem;
+  --type-section: 1.125rem;
+  --type-page: 1.875rem;
+  --type-stat-sm: 1.5rem;
+  --type-stat: 2.25rem;
+
+  /* The two drawings set their own type, because SVG text does not inherit the document's ramp and
+     because a node label and an axis tick have to hold their size against a fixed viewBox. */
+  --type-node: 0.75rem;
+  --type-node-sub: 0.65rem;
+  --type-axis: 0.6875rem;
+
+  /*
+   * Measures. A field is measured to its CONTENT, not to its container: the sign-in credential field
+   * rendered 1440px wide for a token of about forty characters, which reads as a text area and invites
+   * a paragraph.
+   */
+  --measure-field: 26rem;
+  --measure-form: 32rem;
+
+  /* Motion budget (FR28). Every duration in the console resolves through one of these three, so
+     `prefers-reduced-motion` can collapse all of them at once, below. */
+  --motion-fast: 120ms;
+  --motion-base: 180ms;
+  --motion-slow: 320ms;
+
+  /*
+   * The public surface is one composition and it is dark in BOTH themes — it is a poster rather than a
+   * reading surface, so its contrast is fixed rather than inherited. A half-inverted rendering of a
+   * composition built on glow, grid and glass is not a light theme, it is a broken one.
+   */
+  --marketing-canvas: #080d17;
+  --marketing-panel: #0a1020;
+  --marketing-ink: #ffffff;
+  --marketing-accent: #2ecfa8;
+  --marketing-accent-ink: #051a14;
+  --marketing-grid: linear-gradient(rgba(46, 207, 168, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(46, 207, 168, 0.04) 1px, transparent 1px);
+  --marketing-glow-primary: radial-gradient(circle, rgba(46, 207, 168, 0.5), transparent 70%);
+  --marketing-glow-secondary: radial-gradient(circle, rgba(91, 156, 246, 0.4), transparent 70%);
+  --marketing-fade: linear-gradient(to bottom, transparent, #080d17);
+}
+
+/* ── Light palette · the default, and what an explicit light choice selects ── */
+
+:root,
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --background: #f4f6fa;
+  --foreground: #0b0f1a;
+  --card: #ffffff;
+  --popover: #ffffff;
+  --primary: #0b7f6e;
+  --primary-foreground: #ffffff;
+  --secondary: #e8ebf2;
+  --muted: #eaecf2;
+  --muted-foreground: #575d78;
+  --accent: #0b6b59;
+  --border: rgba(11, 15, 26, 0.12);
+  --input-background: #eceef4;
+  --ring: #0b7f6e;
+
+  /* Status vocabulary. One token per tone in `lib/status.ts`; nothing else may carry a status. */
+  --ok: #047857;
+  --warn: #a16207;
+  --bad: #be123c;
+  --halt: #b91c1c;
+  --info: #0369a1;
+  --neutral: #52525b;
+  --unknown: #5b6270;
+
+  /*
+   * 🔴 Two concepts that happen to share a value are still two concepts.
+   *
+   * `--llm` is "a model was consulted"; `--halt` is "execution stopped". They are independently
+   * settable in every theme, so the day the graph's model-guessed colour needs to move it is a value
+   * change rather than a refactor. `--gated` is a third: a plan boundary is not a hazard (FR15), and
+   * giving it its own name is what stops the next person reaching for red because it was nearby.
+   */
+  --llm: #7c3aed;
+  --gated: #6d28d9;
+
+  /* The graph's own vocabulary: a control edge, a data edge, and a region nothing has labelled. */
+  --ctl: #0b7f6e;
+  --none: #8b90a3;
+
+  /* Chart series, in the order a legend assigns them. */
+  --series-1: #0b7f6e;
+  --series-2: #1d63c9;
+  --series-3: #7c3aed;
+  --series-4: #b45309;
+
+  /* The graph is an instrument panel. In the light theme it is a light one — a permanently dark
+     rectangle in a light page reads as a broken image rather than as an instrument. */
+  --graph-canvas: #f8fafc;
+  --graph-node: rgba(255, 255, 255, 0.95);
+  --graph-node-border: rgba(11, 15, 26, 0.16);
+  --graph-edge: rgba(11, 127, 110, 0.55);
+  --graph-edge-muted: rgba(11, 127, 110, 0.3);
+  --graph-region: rgba(11, 127, 110, 0.06);
+  --graph-region-border: rgba(11, 127, 110, 0.24);
+  --graph-text: #0b0f1a;
+  --graph-text-muted: #575d78;
+}
+
+/* ── Dark palette · chosen explicitly ────────────────────────────────────── */
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --background: #080d17;
+  --foreground: #dde2f0;
+  --card: #0e1422;
+  --popover: #0e1422;
+  --primary: #2ecfa8;
+  --primary-foreground: #051a14;
+  --secondary: #151d2e;
+  --muted: #141b2b;
+  --muted-foreground: #8b95b5;
+  --accent: #2ecfa8;
+  --border: rgba(255, 255, 255, 0.1);
+  --input-background: #151d2e;
+  --ring: #2ecfa8;
+
+  --ok: #34d399;
+  --warn: #fbbf24;
+  --bad: #fb7185;
+  --halt: #f87171;
+  --info: #38bdf8;
+  --neutral: #a1a1aa;
+  --unknown: #8b95b5;
+
+  --llm: #a78bfa;
+  --gated: #a78bfa;
+
+  --ctl: #2ecfa8;
+  --none: #7f8aa8;
+
+  --series-1: #2ecfa8;
+  --series-2: #5b9cf6;
+  --series-3: #a78bfa;
+  --series-4: #f59e4b;
+
+  --graph-canvas: #080d17;
+  --graph-node: rgba(8, 13, 23, 0.85);
+  --graph-node-border: rgba(255, 255, 255, 0.16);
+  --graph-edge: rgba(46, 207, 168, 0.5);
+  --graph-edge-muted: rgba(46, 207, 168, 0.26);
+  --graph-region: rgba(46, 207, 168, 0.05);
+  --graph-region-border: rgba(46, 207, 168, 0.2);
+  --graph-text: #dde2f0;
+  --graph-text-muted: #8b95b5;
+}
+
+/* ── Dark palette · inherited from the OS ────────────────────────────────── */
+
+@media (prefers-color-scheme: dark) {
+  :root[data-theme="system"] {
+    color-scheme: dark;
+
+    --background: #080d17;
+    --foreground: #dde2f0;
+    --card: #0e1422;
+    --popover: #0e1422;
+    --primary: #2ecfa8;
+    --primary-foreground: #051a14;
+    --secondary: #151d2e;
+    --muted: #141b2b;
+    --muted-foreground: #8b95b5;
+    --accent: #2ecfa8;
+    --border: rgba(255, 255, 255, 0.1);
+    --input-background: #151d2e;
+    --ring: #2ecfa8;
+
+    --ok: #34d399;
+    --warn: #fbbf24;
+    --bad: #fb7185;
+    --halt: #f87171;
+    --info: #38bdf8;
+    --neutral: #a1a1aa;
+    --unknown: #8b95b5;
+
+    --llm: #a78bfa;
+    --gated: #a78bfa;
+
+    --ctl: #2ecfa8;
+    --none: #7f8aa8;
+
+    --series-1: #2ecfa8;
+    --series-2: #5b9cf6;
+    --series-3: #a78bfa;
+    --series-4: #f59e4b;
+
+    --graph-canvas: #080d17;
+    --graph-node: rgba(8, 13, 23, 0.85);
+    --graph-node-border: rgba(255, 255, 255, 0.16);
+    --graph-edge: rgba(46, 207, 168, 0.5);
+    --graph-edge-muted: rgba(46, 207, 168, 0.26);
+    --graph-region: rgba(46, 207, 168, 0.05);
+    --graph-region-border: rgba(46, 207, 168, 0.2);
+    --graph-text: #dde2f0;
+    --graph-text-muted: #8b95b5;
+  }
+}
+
+/*
+ * `prefers-reduced-motion` collapses the whole budget in one place (FR28).
+ *
+ * Every transition in the console names one of these three durations, so this block is nearly the
+ * whole reduced-motion implementation — `globals.css` adds the one animation the console owns. Nothing
+ * is REMOVED: a state change still happens, it simply happens at once, which is the distinction
+ * between honouring the preference and losing the information the movement carried.
+ */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-fast: 1ms;
+    --motion-base: 1ms;
+    --motion-slow: 1ms;
+  }
+}
+
+/* ── The Tailwind theme ──────────────────────────────────────────────────── */
+
+@theme inline {
+  --font-sans: var(--font-jakarta), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: var(--font-jetbrains), ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-display: var(--font-newsreader), Georgia, "Times New Roman", serif;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-popover: var(--popover);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-border: var(--border);
+  --color-input-background: var(--input-background);
+  --color-ring: var(--ring);
+
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --color-bad: var(--bad);
+  --color-halt: var(--halt);
+  --color-info: var(--info);
+  --color-neutral: var(--neutral);
+  --color-unknown: var(--unknown);
+  --color-gated: var(--gated);
+  --color-llm: var(--llm);
+  --color-ctl: var(--ctl);
+  --color-none: var(--none);
+
+  --color-series-1: var(--series-1);
+  --color-series-2: var(--series-2);
+  --color-series-3: var(--series-3);
+  --color-series-4: var(--series-4);
+
+  --color-graph-canvas: var(--graph-canvas);
+  --color-graph-node: var(--graph-node);
+  --color-graph-node-border: var(--graph-node-border);
+  --color-graph-edge: var(--graph-edge);
+  --color-graph-edge-muted: var(--graph-edge-muted);
+  --color-graph-region: var(--graph-region);
+  --color-graph-region-border: var(--graph-region-border);
+  --color-graph-text: var(--graph-text);
+  --color-graph-text-muted: var(--graph-text-muted);
+
+  --color-marketing-canvas: var(--marketing-canvas);
+  --color-marketing-panel: var(--marketing-panel);
+  --color-marketing-ink: var(--marketing-ink);
+  --color-marketing-accent: var(--marketing-accent);
+  --color-marketing-accent-ink: var(--marketing-accent-ink);
+
+  /*
+   * Tailwind's own default is pointed at the motion budget rather than left at its 150ms literal, so
+   * `transition-colors` — which appears on nearly every interactive element in this design — is inside
+   * the budget and collapses with it. A utility that opted out would survive `prefers-reduced-motion`
+   * and animate for a reader who asked it not to.
+   */
+  --default-transition-duration: var(--motion-base);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 12px);
+}

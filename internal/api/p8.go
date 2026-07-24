@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/heros-foreal/agentd/internal/account"
 	"github.com/heros-foreal/agentd/internal/adminaudit"
 	"github.com/heros-foreal/agentd/internal/adminidentity"
 	"github.com/heros-foreal/agentd/internal/adminops"
@@ -852,6 +853,10 @@ const (
 	errKindDegraded = "degraded"
 	errKindAuth     = "auth"
 	errKindRequest  = "request"
+	// errKindNotFound is distinct from errKindRequest on purpose. "you sent something malformed" and
+	// "the thing you named does not exist" send an operator to two different places, and collapsing
+	// them into a 400 made a mistyped tenant id read on the console as a broken platform.
+	errKindNotFound = "not_found"
 )
 
 func writeAdminError(w http.ResponseWriter, status int, code, detail string, heldBy []string) {
@@ -863,6 +868,8 @@ func writeAdminError(w http.ResponseWriter, status int, code, detail string, hel
 		kind = errKindDenied
 	case http.StatusBadRequest:
 		kind = errKindRequest
+	case http.StatusNotFound:
+		kind = errKindNotFound
 	case http.StatusPreconditionRequired:
 		kind = errKindFriction
 	}
@@ -883,6 +890,11 @@ func writeCapabilityError(w http.ResponseWriter, err error) {
 		errors.Is(err, adminops.ErrImpersonationNoReason),
 		errors.Is(err, adminops.ErrImpersonatedWrite):
 		writeAdminError(w, http.StatusPreconditionRequired, "friction_required", err.Error(), nil)
+	case errors.Is(err, account.ErrNotFound):
+		// An identifier that does not resolve is a 404, never a 400. The console renders the two
+		// differently — "check what you pasted" versus "the platform could not be reached" — and only
+		// one of them is true here.
+		writeAdminError(w, http.StatusNotFound, "not_found", err.Error(), nil)
 	case errors.Is(err, adminaudit.ErrStoreUnavailable),
 		errors.Is(err, adminops.ErrKillStateIndeterminate):
 		// Fail-closed conditions are DEGRADED, not empty: the console says the subsystem is down.

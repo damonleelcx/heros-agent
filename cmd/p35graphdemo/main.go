@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 
 	"github.com/heros-foreal/agentd/internal/api"
 	"github.com/heros-foreal/agentd/internal/config"
@@ -46,9 +47,9 @@ func main() {
 	s.MountP35(src)
 	fmt.Printf("p3.5 graph:\n")
 	for _, w := range workflows() {
-		fmt.Printf("  %-22s http://%s/p35/graph?workflow_id=%s\n     %s\n", w.id, *addr, w.id, w.what)
+		fmt.Printf("  %-22s /app/workflows/%s/graph\n     %s\n", w.id, url.PathEscape(w.id), w.what)
 	}
-	fmt.Printf("  %-22s http://%s/p35/graph?workflow_id=nope\n     404: distinct from an unclassified workflow\n", "no-such-workflow", *addr)
+	fmt.Printf("  %-22s /app/workflows/nope/graph\n     404: distinct from an unclassified workflow\n", "no-such-workflow")
 	log.Fatal(http.ListenAndServe(*addr, s.Handler))
 }
 

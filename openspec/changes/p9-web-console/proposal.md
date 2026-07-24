@@ -87,6 +87,32 @@ guarantee against a written inventory of every current behavior.
   alternatives on graphical data, scoped table headers, tabular chart fallbacks. UI strings are
   **English**, `Intl` formatting is pinned to **`en-US`** through a single swap point, and all
   interpolated values are escaped by default.
+- **Craft, inside `console-design-system`.** A floor made only of lower bounds produces a compliant
+  screen nobody opens — and a customer who does not open the console stays in the CLI, which is the
+  same outcome as not shipping it. So the properties that make the console *preferred* are specified
+  as requirements: **one subject per view, present in the first paint** and not replaced by an
+  undifferentiated spinner; structure that **does not reflow** when data arrives; depth, motion and
+  emphasis drawn from the token set as **hierarchy signals rather than decoration**, with every
+  duration inside the motion budget and `prefers-reduced-motion` losing no information; and a console
+  that **anticipates the next move** — the session's already-visited subjects offered before an
+  identifier is asked for, a keyboard command path to every subject and surface, and the current
+  subject carried across surfaces. The rule that keeps craft from becoming dishonesty is
+  **🔴 the confidence treatment is reserved for confident values**: a value the server marked
+  `provisional`, `tie`, `disqualified`, `low-confidence`, uncalibrated, `withheld`, `candidate`,
+  unverified or gated is **never** rendered with the emphasis reserved for a settled result. That is
+  the P9 analogue of P8's hazard-palette reservation, and on this product it is a **correctness**
+  property: a UI that makes a tie look like a win has invented the ranking P4 deliberately refused to
+  make.
+- **New capability `console-marketing-site`.** A **public home page** — the surface a prospect meets
+  before a session exists. It renders with **no session, no tenant data and no upstream platform
+  call**, so an anonymous visitor never touches the credential boundary and the page still serves
+  while the platform API is down. Every capability it claims resolves through a **checked-in
+  capability manifest** recording the owning phase and shipped state, and a claim whose capability has
+  not shipped **fails the build** — what is sold cannot drift from what the screen does. Plans are
+  named (Free / Team / Business / Enterprise) and **no price value exists in git**. It states the
+  **boundary** beside the benefit, and it sits under the same single token set, the same `en-US`
+  string rules, the same accessibility floor, and the same `default-src 'self'` policy as every other
+  page — **no third-party font, script, tracker or image host**.
 - **Operability.** The platform readiness signal **aggregates the console**: a healthy Go service in
   front of an unreachable BFF does not report ready, and the degraded component is named on a readable
   endpoint. The console ships as one declared, supervised, health-checked component with a pinned
@@ -94,13 +120,23 @@ guarantee against a written inventory of every current behavior.
   platform's `trace_id` and carry no prompt text, diff content, or credential.
 - **Contract.** TypeScript types are **generated from the Go view structs** with a CI drift gate, so a
   read-model change cannot silently reach the browser as `undefined`.
+- **Hierarchy, theme, payload, agency (R16–R20).** Derived from a recorded review of the 2026 web-design
+  trends ([`../../../web/design-system/trend-ledger.md`](../../../web/design-system/trend-ledger.md)):
+  sixteen trends, four adopted, four adapted-and-inverted, eight rejected with reasons. The measured
+  value becomes the visually dominant element on any view that presents one; theme becomes an explicit,
+  persisted, server-resolved choice rather than a hardcoded default; the shipped payload gets an
+  enforced ceiling; and 🔴 the two trends that would overturn this platform's discipline — an agent that
+  acts on the user's behalf, and forms that pre-fill from history — are rejected as **requirements**,
+  not left to review judgement.
 - **Not changed here.** No new platform endpoint, table, queue or statistic. The existing `go:embed`
   pages keep working unchanged; their removal is a **separate, inventory-gated cutover step**, not a
-  side effect of the port. **Nothing is deleted in this change.**
+  side effect of the port. **Nothing is deleted in this change.** 🚫 And no feature is removed for
+  visual reasons: the R16–R20 work is a hierarchy change, never an information change.
 
 ## Impact
 
-- **Affected capabilities:** `web-console` (new), `console-bff` (new), `console-design-system` (new).
+- **Affected capabilities:** `web-console` (new), `console-bff` (new), `console-design-system` (new),
+  `console-marketing-site` (new).
   Read-model **consumers** of `config-layer`/`runtime` (P2), `metrics-observability` (P2.5),
   `pattern-classifier` (P3.5), `eval-harness`/`scoring` (P4), `entitlements` (P7) — consumed, not
   modified.

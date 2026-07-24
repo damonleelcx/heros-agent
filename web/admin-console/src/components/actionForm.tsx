@@ -4,6 +4,7 @@ import { useActionState } from "react";
 import type { ReactNode } from "react";
 import type { ActionResult } from "@/lib/actions";
 import { ROLE_LABELS, type Role } from "@/lib/roles";
+import { GatedState, NotFoundState, NotMountedState, UnusableState } from "./states";
 import { timestamp } from "@/lib/format";
 
 /**
@@ -14,9 +15,12 @@ import { timestamp } from "@/lib/format";
  * from the capability's friction metadata — the console never decides on its own which actions need a
  * typed target, because a second opinion about blast radius is a second opinion that can be wrong.
  *
- *   - reversible per-tenant  → a required reason + a confirm checkbox
- *   - irreversible / elevate → the above PLUS typing the target identifier
- *   - global scope           → the above, rendered visually distinct and higher-friction
+ *   - reversible per-tenant  → a required reason + a confirm checkbox, in the AMBER tier
+ *   - irreversible / elevate → the above PLUS typing the target identifier, in the RED tier
+ *   - global scope           → the above, red and heavier than anything else on the console
+ *
+ * Those three tiers are three different-LOOKING controls, not one control with three prop values.
+ * Friction that is only in the markup is friction an operator scanning a page does not experience.
  *
  * # What the craft work was NOT allowed to touch (FR37)
  *
@@ -61,7 +65,22 @@ export function ActionForm({
   children?: ReactNode;
 }) {
   const [state, formAction, pending] = useActionState(action, null);
-  const cls = global ? "action action--global" : danger ? "action action--danger" : "action";
+  /*
+   * The confirmation's WEIGHT is derived from its blast radius, in one place, from the server's own
+   * classification — never from a page's opinion:
+   *
+   *   global                     fleet-wide      → the heaviest treatment on the console
+   *   typedTarget (irreversible) one-way door    → the red tier
+   *   danger                     reversible      → the amber tier
+   *
+   * The amber tier exists because the rendering disproved the requirement without it: a per-tenant
+   * halt and a fleet-wide halt both came out as red panels with red submit buttons, differing only by
+   * the width of a left rule. FR24 asks that the two can never be confused, and two controls in the
+   * same colour with the same button are confusable no matter what the markup says.
+   */
+  const scope = global ? "global" : typedTarget ? "danger" : danger ? "caution" : null;
+  const cls = scope ? `action action--${scope}` : "action";
+  const submitClass = scope === "global" ? "danger" : scope === "danger" ? "danger" : scope === "caution" ? "caution" : "primary";
   const formId = title.replace(/[^a-zA-Z0-9]+/g, "-").toLowerCase();
 
   return (
@@ -105,7 +124,7 @@ export function ActionForm({
           <label htmlFor={`${formId}-confirm`}>I confirm this action</label>
         </div>
 
-        <button type="submit" className={global || danger ? "danger" : "primary"} disabled={pending}>
+        <button type="submit" className={submitClass} disabled={pending}>
           {pending ? "Working…" : submitLabel}
         </button>
       </fieldset>
@@ -113,7 +132,12 @@ export function ActionForm({
       {/* In flight is its own rendering: the command has left, and nothing is claimed about it yet. */}
       {pending ? (
         <div className="state state--loading" role="status" aria-live="polite">
-          <p className="state__title">In flight</p>
+          <p className="state__title">
+            <span className="state__mark" aria-hidden="true">
+              ···
+            </span>
+            In flight
+          </p>
           <p className="state__body">
             Issued to the platform. Nothing is shown as done until the platform — and its write-ahead
             audit — confirm it.
@@ -144,7 +168,12 @@ function ActionOutcome({
     const query = actionName ? `?action=${encodeURIComponent(actionName)}` : "";
     return (
       <div className="state state--unknown" role="alert">
-        <p className="state__title">Outcome unknown — do not retry yet</p>
+        <p className="state__title">
+          <span className="state__mark" aria-hidden="true">
+            ⁇
+          </span>
+          Outcome unknown — do not retry yet
+        </p>
         <p className="state__body">
           The console lost contact with the platform while issuing this command
           {targetLabel ? ` against ${targetLabel}` : ""}. The platform writes its audit entry{" "}
@@ -163,7 +192,12 @@ function ActionOutcome({
     const holders = (state.heldBy ?? []).map((r) => ROLE_LABELS[r as Role] ?? r);
     return (
       <div className="state state--denied" role="alert">
-        <p className="state__title">Denied — nothing happened</p>
+        <p className="state__title">
+          <span className="state__mark" aria-hidden="true">
+            ⊗
+          </span>
+          Denied — nothing happened
+        </p>
         <p className="state__body">
           {state.message}
           {holders.length > 0 ? ` This capability is held by ${holders.join(" or ")}.` : ""}
@@ -175,16 +209,40 @@ function ActionOutcome({
   if (state.kind === "friction") {
     return (
       <div className="state state--denied" role="alert">
-        <p className="state__title">One more step — nothing happened</p>
+        <p className="state__title">
+          <span className="state__mark" aria-hidden="true">
+            ⊗
+          </span>
+          One more step — nothing happened
+        </p>
         <p className="state__body">{state.message}</p>
       </div>
     );
   }
 
+  // The remaining kinds are rendered by the shared state family, so a command failure and a read
+  // failure of the same kind look the same and mean the same. Each says, in words, whether anything
+  // happened — because "nothing happened" is the fact the operator's next move turns on.
+  if (state.kind === "not_found") {
+    return <NotFoundState what="target" identifier={targetLabel} />;
+  }
+  if (state.kind === "not_mounted") {
+    return <NotMountedState what="this command" detail={state.message} />;
+  }
+  if (state.kind === "gated") {
+    return <GatedState what="This command" />;
+  }
+  if (state.kind === "unusable") {
+    return <UnusableState what="this command" detail={state.message} />;
+  }
+
   return (
     <div className="state state--degraded" role="alert">
       <p className="state__title">
-        {state.kind === "request" ? "Check the details — nothing happened" : "Platform unreachable"}
+        <span className="state__mark" aria-hidden="true">
+          ⚠
+        </span>
+        {state.kind === "request" ? "Check the details — nothing happened" : "Platform unreachable — nothing happened"}
       </p>
       <p className="state__body">{state.message}</p>
     </div>

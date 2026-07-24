@@ -1,7 +1,6 @@
 package api
 
 import (
-	_ "embed"
 	"encoding/json"
 	"net/http"
 	"time"
@@ -18,9 +17,6 @@ import (
 //   GET /api/p25/runs/{run_id}/monitor           one JSON snapshot (polling fallback, 404 for no run)
 //   GET /api/p25/runs/{run_id}/monitor/stream    Server-Sent Events: a snapshot every ~500 ms to close
 
-//go:embed static/p25monitor.html
-var p25MonitorHTML []byte
-
 // MonitorSource is the read model the routes serve — telemetry.Monitor implements it. An interface so
 // the API does not depend on a concrete monitor and a test can stub it.
 type MonitorSource interface {
@@ -30,16 +26,8 @@ type MonitorSource interface {
 // MountMonitor registers the live-monitor routes. Call after New.
 func (s *Server) MountMonitor(src MonitorSource) {
 	s.monitor = src
-	s.Mux.HandleFunc("GET /p25/monitor", s.handleMonitorUI)
 	s.Mux.HandleFunc("GET /api/p25/runs/{run_id}/monitor", s.handleMonitorSnapshot)
 	s.Mux.HandleFunc("GET /api/p25/runs/{run_id}/monitor/stream", s.handleMonitorStream)
-}
-
-func (s *Server) handleMonitorUI(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	// The page holds no secrets, but it reads run telemetry — not something to leave in a shared cache.
-	w.Header().Set("Cache-Control", "no-store")
-	_, _ = w.Write(p25MonitorHTML)
 }
 
 func (s *Server) handleMonitorSnapshot(w http.ResponseWriter, r *http.Request) {
