@@ -550,29 +550,29 @@ state precisely, which the substrate rollback and audit reconstruction depend on
 
 ## 13. Success metrics & acceptance criteria (M9 exit checklist)
 
-- [ ] The system autonomously runs **analyze → propose → verify → apply**, where apply **opens a
+- [x] The system autonomously runs **analyze → propose → verify → apply**, where apply **opens a
       pull request AND merges it** under hard constraints, with every applied change **auditable (git
       history + change ledger) and reversible (git revert)**.
-- [ ] The search is **diagnosis-guided** — candidates at the P4.5-attributed node+dimension are
+- [x] The search is **diagnosis-guided** — candidates at the P4.5-attributed node+dimension are
       evaluated before any blind grid/Bayesian expansion, and each candidate records its motivating
       diagnosis.
-- [ ] The **composite score is the objective** maximized and the **P4 gates are hard constraints** —
+- [x] The **composite score is the objective** maximized and the **P4 gates are hard constraints** —
       a higher-scoring gate-failing candidate is never merged.
-- [ ] The loop **merges nothing** unless kill switch + audit trail (git history + change ledger) +
+- [x] The loop **merges nothing** unless kill switch + audit trail (git history + change ledger) +
       rollback (git revert) are all armed; absent any one, it opens draft PRs in dry-run only.
-- [ ] The enumerated hard constraints — **budget ceiling, provider allowlist, min-improvement
+- [x] The enumerated hard constraints — **budget ceiling, provider allowlist, min-improvement
       threshold, max iterations** — bound the run.
-- [ ] A **budget breach halts the loop mid-run**, merges nothing further, and disarms merge.
-- [ ] A verified gain **below the min-improvement threshold stops** further iterations.
-- [ ] An applied change is **rolled back via git revert** of the merge commit to the byte-identical
+- [x] A **budget breach halts the loop mid-run**, merges nothing further, and disarms merge.
+- [x] A verified gain **below the min-improvement threshold stops** further iterations.
+- [x] An applied change is **rolled back via git revert** of the merge commit to the byte-identical
       prior spec.
-- [ ] **Regression detection halts** the loop and disarms merge; no candidate is merged on an
+- [x] **Regression detection halts** the loop and disarms merge; no candidate is merged on an
       unverified or regressing delta.
-- [ ] The **kill switch** stops the loop immediately; no PR merges after a stop; the stop is
+- [x] The **kill switch** stops the loop immediately; no PR merges after a stop; the stop is
       audited.
-- [ ] **Stall/no-progress detection** stops a search that isn't improving, rather than wandering.
-- [ ] A **production failure re-enters at P4** as a new eval case; coverage is re-measured.
-- [ ] The **Autonomous level** exposes an authority grant to open+merge PRs (constraints recorded), a
+- [x] **Stall/no-progress detection** stops a search that isn't improving, rather than wandering.
+- [x] A **production failure re-enters at P4** as a new eval case; coverage is re-measured.
+- [x] The **Autonomous level** exposes an authority grant to open+merge PRs (constraints recorded), a
       live monitor (iteration + spend/ceiling + PRs opened+merged + streaming audit + stop), and a
       visible rollback (git revert) per applied change.
 
