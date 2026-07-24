@@ -110,7 +110,6 @@ type field struct {
 	name     string
 	tsType   string
 	optional bool
-	doc      string
 	// jsonSchema is the field's schema fragment, built in the same pass.
 	jsonSchema map[string]any
 	required   bool
@@ -232,7 +231,7 @@ func (g *generator) inline(obj *object, t reflect.Type) error {
 // typeOf maps a Go type to a TypeScript type and a JSON Schema fragment, refusing what it cannot map.
 func (g *generator) typeOf(t reflect.Type, path string) (string, map[string]any, error) {
 	switch t.Kind() {
-	case reflect.Ptr:
+	case reflect.Pointer:
 		// A pointer field is nullable on the wire. `| null` rather than optional: the two mean
 		// different things to a consumer, and conflating them is how a UI renders "absent" for a value
 		// the server explicitly said was null.
@@ -417,7 +416,7 @@ func (g *generator) emitJSONSchema() ([]byte, error) {
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 func deref(t reflect.Type) reflect.Type {
-	for t.Kind() == reflect.Ptr {
+	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 	return t
