@@ -253,7 +253,7 @@ func (g *Gate) CheckEntitlement(customerID string, feature plancfg.Feature, leve
 	}
 
 	// ── Axis 3: is the customer inside the plan's metered allowances? ─────────
-	if hit, over := g.overLimit(customerID, plan, feature); over {
+	if hit, over := g.overLimit(acct, plan, feature); over {
 		d.Limit = &hit
 		return g.deny(d, ReasonOverLimit,
 			fmt.Sprintf("the %s plan allows %s up to %v for the period; this customer is at %v",
@@ -283,7 +283,7 @@ func (g *Gate) CheckLimit(customerID string, limit plancfg.Limit, metric meterin
 	}
 	d.PlanID, d.PlanName = plan.PlanID, plan.DisplayName
 
-	allowed, set := plan.Limit(limit)
+	allowed, set := g.effectiveLimit(acct, plan, limit)
 	if !set {
 		d.Allowed = true // unset limit == unlimited (see plancfg.PlanConfig.Limits)
 		return d, nil
@@ -319,11 +319,26 @@ func (g *Gate) observed(customerID string, metric metering.Metric) float64 {
 	return rec.Quantity
 }
 
+// effectiveLimit resolves one allowance for a customer: an operator-set per-tenant QUOTA OVERRIDE
+// (P8 FR7's SetQuota) if there is one, otherwise the plan's published allowance.
+//
+// The override is read here, at the single place limits are resolved, rather than at each call site.
+// That is what makes "an operator raised this tenant's seat allowance" true everywhere the allowance
+// is consulted — including the denial message, which then quotes the number actually enforced instead
+// of the plan's, which would be the wrong number in exactly the case an operator just intervened.
+func (g *Gate) effectiveLimit(acct account.Account, plan plancfg.PlanConfig, limit plancfg.Limit) (float64, bool) {
+	if v, ok := acct.QuotaOverride(string(limit)); ok {
+		return v, true
+	}
+	return plan.Limit(limit)
+}
+
 // overLimit checks every metered allowance that gates a surface, in table order, and returns the FIRST
 // one exceeded.
-func (g *Gate) overLimit(customerID string, plan plancfg.PlanConfig, feature plancfg.Feature) (LimitHit, bool) {
+func (g *Gate) overLimit(acct account.Account, plan plancfg.PlanConfig, feature plancfg.Feature) (LimitHit, bool) {
+	customerID := acct.CustomerID
 	for _, m := range meteredLimits[feature] {
-		allowed, set := plan.Limit(m.Limit)
+		allowed, set := g.effectiveLimit(acct, plan, m.Limit)
 		if !set {
 			continue // unset == unlimited
 		}

@@ -16,12 +16,33 @@ package account
 import (
 	"errors"
 	"fmt"
+	"math"
 	"regexp"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 )
+
+// Status is an account's lifecycle state, administered by the P8 operator console (P8 FR7).
+//
+// It lives on the account rather than in the operator console's own store because the account IS the
+// tenant's system of record — a second "is this tenant suspended" table would be a place for the two
+// answers to disagree, and the one that matters (may this tenant's loop merge) would be read from
+// whichever the caller happened to know about.
+type Status string
+
+const (
+	// StatusActive is the normal state. An account with no explicit status is treated as active, so
+	// existing rows and fixtures keep their behaviour.
+	StatusActive Status = "active"
+	// StatusSuspended halts the tenant: its autonomous optimizer merges no further while suspended
+	// (P8 FR7). Reversible by reactivation, which restores the prior state.
+	StatusSuspended Status = "suspended"
+)
+
+// Suspended reports whether s halts the tenant. Unset is active — the expand-only default.
+func (s Status) Suspended() bool { return s == StatusSuspended }
 
 // Account is one billable customer.
 type Account struct {
@@ -36,6 +57,32 @@ type Account struct {
 	GainshareConsent bool       `json:"gainshare_consent"`
 	ConsentedAt      *time.Time `json:"consented_at,omitempty"`
 	CreatedAt        time.Time  `json:"created_at"`
+
+	// Status is the lifecycle state the operator console administers. Empty means active.
+	Status Status `json:"status,omitempty"`
+	// SuspensionReason is the operator's recorded reason for the current suspension, and
+	// SuspendedAt is when it was applied. Both are cleared on reactivation. They are the account's own
+	// copy of what the audit chain records; the chain is the evidence, these are what the tenant view
+	// shows without a chain query.
+	SuspensionReason string     `json:"suspension_reason,omitempty"`
+	SuspendedAt      *time.Time `json:"suspended_at,omitempty"`
+	// QuotaOverrides are per-tenant allowance overrides an operator set (P8 FR7's SetQuota), keyed by
+	// the plan limit's name. An override REPLACES the plan's allowance for that one limit and leaves
+	// every other limit resolving from plan configuration.
+	//
+	// Keyed by string rather than by plancfg.Limit so the account model does not depend on the plan
+	// package; entitlement, which owns limit semantics, does the conversion. An absent key means "no
+	// override" — never zero, which would read as an allowance of nothing.
+	QuotaOverrides map[string]float64 `json:"quota_overrides,omitempty"`
+}
+
+// Active reports whether the account is not suspended.
+func (a Account) Active() bool { return !a.Status.Suspended() }
+
+// QuotaOverride returns the operator-set allowance for a limit, if one is set.
+func (a Account) QuotaOverride(limit string) (float64, bool) {
+	v, ok := a.QuotaOverrides[limit]
+	return v, ok
 }
 
 // Errors the store returns. They are distinguishable because callers act differently on each: a missing
@@ -100,6 +147,13 @@ type Store interface {
 	// SetGainshareConsent records consent or its REVOCATION. Revocation clears consented_at; consent
 	// stamps it. Both are ordinary updates — the audit of the change lives in the billing ledger.
 	SetGainshareConsent(customerID string, consented bool, at time.Time) (Account, error)
+	// SetStatus suspends or reactivates the account (P8 FR7). The reason is stored with the
+	// suspension and cleared on reactivation; the AUDIT of the change lives in the P8 audit chain,
+	// which this store neither owns nor can write.
+	SetStatus(customerID string, status Status, reason string, at time.Time) (Account, error)
+	// SetQuota sets or clears one per-tenant allowance override (P8 FR7). A NaN value clears the
+	// override, so "back to the plan's allowance" is expressible without a second method.
+	SetQuota(customerID, limit string, value float64) (Account, error)
 	List() []Account
 }
 
@@ -175,6 +229,63 @@ func (s *MemStore) SetGainshareConsent(customerID string, consented bool, at tim
 		a.ConsentedAt = &t
 	} else {
 		a.ConsentedAt = nil
+	}
+	s.by[customerID] = a
+	return a, nil
+}
+
+// SetStatus suspends or reactivates an account.
+//
+// A suspension REQUIRES a reason: "why is this tenant halted" is the first question asked when a
+// customer calls, and an unexplained suspension is indistinguishable from a mistake. Reactivation
+// clears the reason and the timestamp, restoring the prior state.
+func (s *MemStore) SetStatus(customerID string, status Status, reason string, at time.Time) (Account, error) {
+	switch status {
+	case StatusActive, StatusSuspended:
+	default:
+		return Account{}, fmt.Errorf("account: unknown status %q", status)
+	}
+	if status == StatusSuspended && strings.TrimSpace(reason) == "" {
+		return Account{}, errors.New("account: a suspension requires a recorded reason")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	a, ok := s.by[customerID]
+	if !ok {
+		return Account{}, fmt.Errorf("%w: %s", ErrNotFound, customerID)
+	}
+	a.Status = status
+	if status == StatusSuspended {
+		t := at.UTC()
+		a.SuspensionReason, a.SuspendedAt = reason, &t
+	} else {
+		a.SuspensionReason, a.SuspendedAt = "", nil
+	}
+	s.by[customerID] = a
+	return a, nil
+}
+
+// SetQuota sets or clears one per-tenant allowance override. A NaN value clears it.
+func (s *MemStore) SetQuota(customerID, limit string, value float64) (Account, error) {
+	if strings.TrimSpace(limit) == "" {
+		return Account{}, errors.New("account: a quota override must name the limit it overrides")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	a, ok := s.by[customerID]
+	if !ok {
+		return Account{}, fmt.Errorf("%w: %s", ErrNotFound, customerID)
+	}
+	if math.IsNaN(value) {
+		delete(a.QuotaOverrides, limit)
+	} else {
+		if value < 0 {
+			return Account{}, fmt.Errorf("account: quota override for %s is negative", limit)
+		}
+		if a.QuotaOverrides == nil {
+			a.QuotaOverrides = map[string]float64{}
+		}
+		a.QuotaOverrides[limit] = value
 	}
 	s.by[customerID] = a
 	return a, nil

@@ -425,6 +425,97 @@ func TestPG_NackBackoffDelaysRedelivery(t *testing.T) {
 	}
 }
 
+// The P8 operator surface, proved against the live table (P8 task 6.1/6.2): an operator can SEE the
+// queue, CANCEL a running item with a reason that survives on the row, and RETRY a parked one — and
+// the state machine refuses the two operations that would corrupt a run (retrying something a worker
+// still holds, cancelling something already finished).
+func TestPG_OperatorListCancelRetry(t *testing.T) {
+	ctx := context.Background()
+	seedLineage(t)
+	clean(t)
+	q := New(testDB)
+
+	for _, id := range []string{"op1", "op2"} {
+		if err := q.Enqueue(ctx, id, cfgHash, "rev1", 1); err != nil {
+			t.Fatalf("Enqueue %s: %v", id, err)
+		}
+	}
+	it, err := q.Dequeue(ctx, "w1")
+	if err != nil {
+		t.Fatalf("Dequeue: %v", err)
+	}
+
+	// ── List shows both, with the lease holder visible ──
+	jobs, err := q.List(ctx, 100)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(jobs) != 2 {
+		t.Fatalf("List returned %d jobs, want 2", len(jobs))
+	}
+	var leased *Job
+	for i := range jobs {
+		if jobs[i].RunID == it.RunID {
+			leased = &jobs[i]
+		}
+	}
+	if leased == nil || leased.State != "leased" || leased.LeasedBy != "w1" || leased.LeaseExpiresAt == nil {
+		t.Fatalf("the leased item does not report its holder: %+v", leased)
+	}
+
+	// ── Cancel the running item: the reason survives on the row ──
+	const why = "cancelled by operator: incident INC-77"
+	if err := q.Cancel(ctx, it.RunID, why); err != nil {
+		t.Fatalf("Cancel: %v", err)
+	}
+	jobs, _ = q.List(ctx, 100)
+	for _, j := range jobs {
+		if j.RunID == it.RunID {
+			if j.State != "dead" || j.DeadLetterReason != why {
+				t.Errorf("cancelled item = %+v, want dead with the operator's reason", j)
+			}
+			if j.LeasedBy != "" || j.LeaseExpiresAt != nil {
+				t.Errorf("a cancelled item still holds a lease: %+v", j)
+			}
+		}
+	}
+	// A cancelled item is not dispatchable.
+	next, err := q.Dequeue(ctx, "w2")
+	if err != nil {
+		t.Fatalf("Dequeue: %v", err)
+	}
+	if next.RunID == it.RunID {
+		t.Error("a cancelled item was dispatched again")
+	}
+
+	// ── Retry the parked item: clean ready, attempts reset ──
+	if err := q.Requeue(ctx, it.RunID); err != nil {
+		t.Fatalf("Requeue: %v", err)
+	}
+	jobs, _ = q.List(ctx, 100)
+	for _, j := range jobs {
+		if j.RunID == it.RunID {
+			if j.State != "ready" || j.Attempts != 0 || j.DeadLetterReason != "" {
+				t.Errorf("retried item = %+v, want a clean ready item", j)
+			}
+		}
+	}
+
+	// ── The two refusals ──
+	if err := q.Requeue(ctx, next.RunID); !errors.Is(err, ErrNotRetryable) {
+		t.Errorf("retrying a leased item: err = %v, want ErrNotRetryable", err)
+	}
+	if err := q.Ack(ctx, next.RunID, "w2"); err != nil {
+		t.Fatalf("Ack: %v", err)
+	}
+	if err := q.Cancel(ctx, next.RunID, "too late"); !errors.Is(err, ErrNotCancellable) {
+		t.Errorf("cancelling a finished item: err = %v, want ErrNotCancellable", err)
+	}
+	if err := q.Cancel(ctx, "op-unknown", ""); err == nil {
+		t.Error("a cancel with no reason was accepted")
+	}
+}
+
 func TestPG_ZZ_DownMigrationRemovesTheQueueOnly(t *testing.T) {
 	ctx := context.Background()
 	down, err := os.ReadFile(filepath.Join("..", "..", "db", "migrations", "postgres", "0006_p2_run_queue.down.sql"))
