@@ -43,6 +43,20 @@ honest `EXISTS / PARTIAL / ABSENT` status and, where a call-site codemod is not 
 | P17 — Memory Strategy Optimization *(greenfield axis: modeled + refused)* | [P17-memory-strategy-optimization.md](P17-memory-strategy-optimization.md) | `p17-memory-strategy-optimization` | System Designer + AI Engineer |
 | P18 — Harness Strategy Optimization *(greenfield axis: agent-loop scaffolds)* | [P18-harness-strategy-optimization.md](P18-harness-strategy-optimization.md) | `p18-harness-strategy-optimization` | System Designer + AI Engineer |
 
+### Delivery & Operations — P19 *(cross-cutting)*
+
+A cross-cutting phase that makes the specified system **deployable**. It adds no product feature and no
+statistic; it is downstream of P0–P18 and **composes** them into one deployment unit expressed on two
+substrates — **Docker Compose** (single-host / open-core) and **Kubernetes (Kustomize base + overlays)** — plus
+the operator console's missing deploy unit (on its own origin), the internal-LLM-access posture (secret store,
+egress-confined, never in a customer path), and the air-gapped / private-deploy delivery (self-contained
+package, declarative-idempotent apply, rollback by re-apply). Written through all eight role lenses; the DevOps
+first principle — *deliver "anyone who receives it can run it"* — is the through-line.
+
+| Phase | PRD | OpenSpec change | Lead role(s) |
+|-------|-----|-----------------|--------------|
+| P19 — Deployment & Delivery *(whole-platform Docker + K8s; consoles; internal LLM access; air-gapped)* | [P19-deployment-delivery.md](P19-deployment-delivery.md) | `p19-deployment` | DevOps + System Designer |
+
 ## PRD template
 
 Every phase PRD follows this structure:
