@@ -30,9 +30,9 @@ const (
 
 // BindingDocument is the resolved binding document (ADR-009). Its keys mirror the frozen JSON contract.
 type BindingDocument struct {
-	Schema     string                     `json:"schema"`
-	ConfigHash string                     `json:"config_hash"`
-	Nodes      map[string]BindingDocNode  `json:"nodes"`
+	Schema     string                    `json:"schema"`
+	ConfigHash string                    `json:"config_hash"`
+	Nodes      map[string]BindingDocNode `json:"nodes"`
 }
 
 // BindingDocNode holds one bound node's runtime-changeable data.

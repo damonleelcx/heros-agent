@@ -15,7 +15,7 @@ import (
 func TestReconciliation_GoesRedOnMismatch(t *testing.T) {
 	rec := NewReconciliation("requested-hash")
 	rec.Observe("requested-hash") // a matching invocation
-	rec.Observe("DIFFERENT-hash")  // one mismatched invocation
+	rec.Observe("DIFFERENT-hash") // one mismatched invocation
 	rec.Observe("requested-hash")
 
 	if rec.OK() {

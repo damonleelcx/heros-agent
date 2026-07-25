@@ -62,7 +62,7 @@ func TestMatrix_ModelCatalogListsRows(t *testing.T) {
 	var out struct {
 		Models []registry.ModelCatalogEntry `json:"models"`
 	}
-	json.Unmarshal(rec.Body.Bytes(), &out)
+	_ = json.Unmarshal(rec.Body.Bytes(), &out)
 	if len(out.Models) != 2 {
 		t.Fatalf("expected 2 model rows, got %d", len(out.Models))
 	}
@@ -76,7 +76,7 @@ func TestMatrix_WorkflowNodesAreColumns(t *testing.T) {
 	var out struct {
 		Nodes []studio.NodeSummary `json:"nodes"`
 	}
-	json.Unmarshal(rec.Body.Bytes(), &out)
+	_ = json.Unmarshal(rec.Body.Bytes(), &out)
 	if len(out.Nodes) != 1 || out.Nodes[0].NodeID != "n_triage" || out.Nodes[0].PromptName != "node/n_triage" {
 		t.Fatalf("unexpected columns: %+v", out.Nodes)
 	}
@@ -96,7 +96,7 @@ func TestMatrix_RunReturnsFigures(t *testing.T) {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
 	var res studio.Result
-	json.Unmarshal(rec.Body.Bytes(), &res)
+	_ = json.Unmarshal(rec.Body.Bytes(), &res)
 	if res.Output == "" || res.CostUSD <= 0 || res.Kind != "exploratory" {
 		t.Fatalf("run must return exploratory output+cost: %+v", res)
 	}
@@ -121,7 +121,7 @@ func TestMatrix_BindIsUnverifiedAndReplacesPrior(t *testing.T) {
 		Verified bool `json:"verified"`
 		InForce  bool `json:"in_force"`
 	}
-	json.Unmarshal(rec.Body.Bytes(), &out)
+	_ = json.Unmarshal(rec.Body.Bytes(), &out)
 	if out.Verified {
 		t.Fatal("a studio bind must be unverified")
 	}
@@ -135,7 +135,7 @@ func TestMatrix_BindIsUnverifiedAndReplacesPrior(t *testing.T) {
 	var bindings struct {
 		Bindings map[string]studio.Binding `json:"bindings"`
 	}
-	json.Unmarshal(rec.Body.Bytes(), &bindings)
+	_ = json.Unmarshal(rec.Body.Bytes(), &bindings)
 	if len(bindings.Bindings) != 1 {
 		t.Fatalf("one bound cell per column: expected 1 node bound, got %d", len(bindings.Bindings))
 	}

@@ -220,9 +220,9 @@ func (s *Server) handleStudioBind(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"binding": binding,
 		// The honest state: bound and in force, but unverified. Never "promoted" or "best".
-		"in_force":   true,
-		"verified":   false,
-		"note":       "in force — unverified. A studio selection is not a proof; run a multi-seed evaluation to establish a claim.",
+		"in_force": true,
+		"verified": false,
+		"note":     "in force — unverified. A studio selection is not a proof; run a multi-seed evaluation to establish a claim.",
 	})
 }
 

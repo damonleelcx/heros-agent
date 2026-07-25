@@ -182,7 +182,7 @@ func (s *Server) handlePromptDiff(w http.ResponseWriter, r *http.Request) {
 }
 
 type impactRequest struct {
-	ProposedBody string               `json:"proposed_body"`
+	ProposedBody string                `json:"proposed_body"`
 	Nodes        []registry.ImpactNode `json:"nodes"`
 }
 

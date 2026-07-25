@@ -73,8 +73,8 @@ func TestRunner_PerTenantCapBoundsSumOfUsers(t *testing.T) {
 	ctx := context.Background()
 
 	// Two different users in the same tenant; together they exceed the tenant cap.
-	r.Run(ctx, Caller{TenantID: "t", UserID: "u1"}, modelEntry(), providergateway.Request{}, nil)
-	r.Run(ctx, Caller{TenantID: "t", UserID: "u2"}, modelEntry(), providergateway.Request{}, nil)
+	_, _ = r.Run(ctx, Caller{TenantID: "t", UserID: "u1"}, modelEntry(), providergateway.Request{}, nil)
+	_, _ = r.Run(ctx, Caller{TenantID: "t", UserID: "u2"}, modelEntry(), providergateway.Request{}, nil)
 	res, _ := r.Run(ctx, Caller{TenantID: "t", UserID: "u3"}, modelEntry(), providergateway.Request{}, nil)
 	if !res.Capped || res.CapScope != "tenant" {
 		t.Fatalf("tenant cap should bound the sum of users; got capped=%v scope=%q", res.Capped, res.CapScope)

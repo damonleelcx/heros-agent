@@ -45,7 +45,7 @@ func NewRunner(gw Completer, meter *SpendMeter, price Pricer, now func() time.Ti
 // Result is a studio test-run's outcome: the output plus the cost, latency and tokens of THAT
 // execution (task 4.6). It carries no score, rank, or judgement — a studio result is exploratory.
 type Result struct {
-	Output       string `json:"output"`
+	Output       string  `json:"output"`
 	CostUSD      float64 `json:"cost_usd"`
 	LatencyMS    int64   `json:"latency_ms"`
 	InputTokens  int     `json:"input_tokens"`

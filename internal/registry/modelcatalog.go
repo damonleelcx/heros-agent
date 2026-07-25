@@ -14,10 +14,10 @@ import (
 
 // ModelCatalogEntry is one row of the matrix: a registered model at its latest version.
 type ModelCatalogEntry struct {
-	VersionID string     `json:"version_id"`
-	Name      string     `json:"name"`
-	Provider  string     `json:"provider"`
-	ModelID   string     `json:"model_id"`
+	VersionID string      `json:"version_id"`
+	Name      string      `json:"name"`
+	Provider  string      `json:"provider"`
+	ModelID   string      `json:"model_id"`
 	Params    ModelParams `json:"params"`
 }
 

@@ -120,10 +120,10 @@ func (m *SpendMeter) Report(c Caller) SpendReport {
 	sort.Strings(exhausted)
 	return SpendReport{
 		TenantID: c.TenantID, UserID: c.UserID,
-		ByKind:   map[SpendKind]float64{SpendStudio: total},
-		Calls:    m.callCount[c.userKey()],
-		TotalUSD: total,
-		Cap:      m.cap,
+		ByKind:    map[SpendKind]float64{SpendStudio: total},
+		Calls:     m.callCount[c.userKey()],
+		TotalUSD:  total,
+		Cap:       m.cap,
 		Exhausted: exhausted,
 	}
 }
