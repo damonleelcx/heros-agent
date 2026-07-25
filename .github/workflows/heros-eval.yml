@@ -1,0 +1,51 @@
+# heros-eval.yml is the reusable workflow wrapper (task 8.1) — the thing a customer references by
+# version from their own pipeline:
+#
+#   jobs:
+#     heros:
+#       uses: heros-foreal/agentd/.github/workflows/heros-eval.yml@v0
+#       with:
+#         eval-args: "--min-quality 0.7 --seeds 5"
+#       secrets:
+#         platform-token: ${{ secrets.HEROS_PLATFORM_TOKEN }}   # omit to run locally, publish nothing
+#
+# It grants only checks:write (to post the check) and contents:read. Platform unavailability never fails
+# it; a configured gate does. Linking is optional.
+name: heros eval
+on:
+  workflow_call:
+    inputs:
+      repo:
+        type: string
+        required: false
+        default: "."
+      eval-args:
+        type: string
+        required: false
+        default: ""
+      link-timeout:
+        type: string
+        required: false
+        default: "20"
+    secrets:
+      platform-token:
+        required: false
+permissions:
+  contents: read
+  checks: write
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+      - name: heros
+        uses: heros-foreal/agentd/.github/actions/heros@v0
+        with:
+          repo: ${{ inputs.repo }}
+          eval-args: ${{ inputs.eval-args }}
+          link-timeout: ${{ inputs.link-timeout }}
+          platform-token: ${{ secrets.platform-token }}
+          build-from-source: "true"

@@ -1,0 +1,104 @@
+# heros — the P11 CI integration (task 8.1): a PUBLISHED, VERSIONED composite action, not a README
+# snippet. A snippet copied into two hundred pipelines cannot be fixed; an action referenced by version
+# (`uses: heros-foreal/agentd/.github/actions/heros@v0`) can — a fix reaches every consumer by a tag.
+#
+# It runs the local heros workflow (discover + eval), posts a CHECK with the outcome, uploads the IR and
+# run report as ARTIFACTS, and enforces the build-safety / gate-bite rules via scripts/ci/heros-ci.sh.
+# It is usable with NO linking (publishes nothing). Credentials come from the CI secret mechanism and
+# are never echoed to logs, the check, or artifacts.
+name: "Heros — LLM workflow eval"
+description: "Run heros discover + eval on a PR, post a check, upload artifacts; never fail the build on platform unavailability."
+inputs:
+  repo:
+    description: "Path to the repository to analyze"
+    required: false
+    default: "."
+  eval-args:
+    description: "Extra args to `heros eval` — e.g. '--min-quality 0.7 --seeds 5'. A gate here fails the build when it fails."
+    required: false
+    default: ""
+  platform-token:
+    description: "Platform token to LINK runs. Omit to run entirely locally and publish nothing. Pass from ${{ secrets.* }}."
+    required: false
+    default: ""
+  link-timeout:
+    description: "Seconds to bound each platform call, so a slow platform cannot stall the pipeline."
+    required: false
+    default: "20"
+  build-from-source:
+    description: "Build the heros binary from this repo instead of downloading a release (used by this repo's own CI)."
+    required: false
+    default: "false"
+  delivery-hook:
+    description: "Optional command P12 CI-mediated delivery runs. This action invokes it but defines nothing about delivery."
+    required: false
+    default: ""
+outputs:
+  outcome:
+    description: "pass | gate-failed | error"
+    value: ${{ steps.run.outputs.outcome }}
+  run-url:
+    description: "Console URL of the linked run, when linking succeeded."
+    value: ${{ steps.run.outputs.run_url }}
+runs:
+  using: "composite"
+  steps:
+    - name: Build heros (from source)
+      if: inputs.build-from-source == 'true'
+      shell: bash
+      run: |
+        GOWORK=off go build -o "${RUNNER_TEMP}/heros" ./cmd/heros
+        echo "HEROS_BIN=${RUNNER_TEMP}/heros" >> "$GITHUB_ENV"
+    - name: Run heros (discover + eval + optional link)
+      id: run
+      shell: bash
+      env:
+        HEROS_REPO: ${{ inputs.repo }}
+        HEROS_EVAL_ARGS: ${{ inputs.eval-args }}
+        # 🔴 The token is passed via env from the secret and NEVER echoed. heros reads it; the script does
+        # not print it; the artifacts below exclude the log by construction.
+        HEROS_PLATFORM_TOKEN: ${{ inputs.platform-token }}
+        HEROS_LINK_TIMEOUT: ${{ inputs.link-timeout }}
+        HEROS_OUT: ${{ runner.temp }}/heros-out
+        HEROS_DELIVERY_HOOK: ${{ inputs.delivery-hook }}
+      run: |
+        set +e
+        bash "${GITHUB_ACTION_PATH}/../../../scripts/ci/heros-ci.sh"
+        code=$?
+        set -e
+        # Map the script's exit to a machine outcome for downstream jobs + the check.
+        if [ "$code" = "0" ]; then outcome="pass"; elif [ "$code" = "1" ]; then outcome="gate-failed"; else outcome="error"; fi
+        echo "outcome=${outcome}" >> "$GITHUB_OUTPUT"
+        url="$(grep -o '"run_url":"[^"]*"' "${HEROS_OUT}/link.json" 2>/dev/null | head -1 | cut -d'"' -f4)"
+        echo "run_url=${url}" >> "$GITHUB_OUTPUT"
+        exit $code
+    - name: Upload IR + run report (artifacts)
+      # Always upload, even on gate failure, so the evidence is retrievable. 🔴 The heros.log is NOT
+      # uploaded — it is the one surface a credential could theoretically reach, and artifacts persist.
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: heros-run
+        path: |
+          ${{ runner.temp }}/heros-out/ir.json
+          ${{ runner.temp }}/heros-out/discovery-report.json
+          ${{ runner.temp }}/heros-out/eval.json
+        if-no-files-found: warn
+    - name: Post check
+      if: always()
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const outcome = "${{ steps.run.outputs.outcome }}" || "error";
+          const conclusion = outcome === "pass" ? "success" : outcome === "gate-failed" ? "failure" : "neutral";
+          const title = outcome === "pass" ? "heros: passed"
+            : outcome === "gate-failed" ? "heros: a configured quality gate failed"
+            : "heros: tool/config error (not a platform outage)";
+          try {
+            await github.rest.checks.create({
+              owner: context.repo.owner, repo: context.repo.repo,
+              name: "heros/eval", head_sha: context.sha,
+              status: "completed", conclusion,
+              output: { title, summary: title },
+            });
+          } catch (e) { core.info("check not posted (permissions?): " + e.message); }

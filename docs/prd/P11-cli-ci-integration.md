@@ -33,7 +33,7 @@ The commercial consequence is sharper than the feature gap. P7 derives the billa
 the customer's environment with the customer's keys**, so those cost events are emitted *there*. They
 reach no substrate, so **SUM is zero and the subscription meter has nothing to bill**.
 
-P11 delivers three things. A **complete CLI** — `discover`, `apply`, `eval`, `link`, `login`, `status`
+P11 delivers three things. A **complete CLI** — `discover`, `apply`, `eval`, `link`, `login`, `status`, `version`
 — that works with no account and no network, because the free tier has to be genuinely free to be an
 ingestion standard. An **egress boundary** (`link`) that is opt-in, authenticated, shows exactly what
 it will send *before* sending it, and is built from an **allowlist** of permitted fields — cost,
@@ -214,6 +214,11 @@ Numbered FRs; each maps 1:1 to an OpenSpec requirement under
 - **FR7.** Configuration SHALL resolve in a documented order (flags → environment → project config
   file → defaults), and `status` SHALL report the effective configuration and its source per value.
 - **FR8.** Every command SHALL be non-interactive by default and SHALL NOT require a TTY.
+- **FR8a.** The CLI SHALL provide a `version` command that reports the tool version and the contract
+  versions it implements (the run-linking payload contract and the machine-output format), plus the
+  pinned link endpoint. It SHALL require no configuration and contact no network, so a pipeline can pin
+  or gate on the CLI version and a support conversation can start from an unambiguous "what am I
+  running".
 
 ### The egress boundary (capability `run-linking`)
 
@@ -472,7 +477,7 @@ written allowlist should be offered early and unprompted.
 
 ## 12. Rollout & test strategy
 
-**Wave 11a — the CLI and the boundary.** `discover` / `apply` / `eval` / `login` / `link` / `status`,
+**Wave 11a — the CLI and the boundary.** `discover` / `apply` / `eval` / `login` / `link` / `status` / `version`,
 offline-first, the allowlist payload, the dry-run, idempotent linking into P2.5, coverage as a read
 model, exit codes and the versioned output contract. Ends when a developer can do the whole local
 workflow with no account, and a customer who links gets a dashboard that reflects reality.
@@ -536,23 +541,28 @@ error semantics, build-safety on platform unavailability, and the hook P12's CI-
 
 ## 14. Open questions
 
-1. **Which forge gets the first-class CI action.** GitHub has the largest reach and the best-defined
-   ephemeral token; GitLab and Bitbucket would follow as documented invocations. Confirm the order, and
-   whether "documented invocation" is sufficient for the others at M14 or whether one more is required
-   for the commercial claim.
-2. **Where the local eval's cost events live before linking.** A local file the `link` command reads
-   later, or in-memory only so an unlinked run leaves no artifact? A file makes linking-after-the-fact
-   possible and CI retries cheap; it also means cost data sits on disk in the customer's environment,
-   which some customers will ask about.
-3. **Whether `apply` may write to the working tree at all.** ADR-001 requires transformations to be
-   worktree-isolated. The CLI could honour that strictly (always a branch/worktree) or offer an
-   explicit opt-in for in-place application. Strict is safer; developers will ask for the other.
-4. **Authentication mechanism for `login`.** Device-code flow versus a pasted API token. Device-code is
-   better UX and avoids a long-lived secret on disk; a token is simpler and works in headless CI. CI
-   likely needs the token path regardless, so the question is whether both ship at M14.
-5. **Link coverage denominator.** "Runs the platform knows about" is circular; the CLI would have to
-   report a run count separately from run data for the denominator to mean anything — which is itself a
-   (small) egress decision that needs the same allowlist scrutiny.
-6. **Whether unlinked runs may be linked retroactively**, and for how long. Useful (a user decides
-   after the fact that a result is worth keeping) but it interacts with billing periods: a run linked
-   after its period closed must not reopen a closed meter.
+> **Resolved for M14.** All seven questions below were ratified in
+> [`docs/decisions/p11-contracts.md`](../decisions/p11-contracts.md) (tasks 1.1–1.7) before any command
+> shipped. Each resolution is restated inline; the contract doc holds the reasoning and the single
+> machine source of truth. The **link endpoint is pinned to `https://heros-agent.space`** — run linking
+> transmits there and nowhere else.
+
+1. **Which forge gets the first-class CI action.** **Resolved — GitHub first**, on reach and its
+   well-defined ephemeral token; GitLab and Bitbucket ship as documented invocations of the same
+   (forge-agnostic) binary at M14.
+2. **Where the local eval's cost events live before linking.** **Resolved — on disk**, in an
+   already-allowlist-shaped run store at `.heros/runs/<run_id>.json` (git-ignored), so retroactive
+   linking and CI retries work and `link` is a pure reader. The data at rest is exactly the data on the
+   wire: no prompts, source, or keys.
+3. **Whether `apply` may write to the working tree at all.** **Resolved — no**, strict worktree
+   isolation always (ADR-001); `apply` emits a reviewable diff and never mutates the caller's tree.
+   In-place application is not shipped at M14.
+4. **Authentication mechanism for `login`.** **Resolved — token path ships at M14** (CI needs it
+   regardless), read from `--token`/`$HEROS_PLATFORM_TOKEN`/stdin, validated against
+   `https://heros-agent.space`, stored `0600`. Device-code deferred.
+5. **Link coverage denominator.** **Resolved — the CLI reports `runs_reported`**, a single allowlisted
+   non-negative integer (a count, never the runs). Coverage is `runs_linked / runs_reported`; a zero
+   denominator renders as *unknown*, distinct from *complete*.
+6. **Whether unlinked runs may be linked retroactively**, and for how long. **Resolved — within an open
+   billing period only**; the ingest endpoint rejects a linked event whose timestamp falls in a closed
+   period so a late link cannot reopen a closed meter. The full window policy is tracked in P7.

@@ -15,6 +15,7 @@ import {
 } from "@/components/primitives";
 import { usd2, score, integer } from "@/lib/format";
 import { CAPABILITIES } from "@/lib/entitlements";
+import { LinkCoverage } from "@/components/linkCoverage";
 
 export const dynamic = "force-dynamic";
 
@@ -147,14 +148,24 @@ function Body({ billing }: { billing: BillingView }) {
       </Section>
 
       <Section title="This period" aside={billing.sum_unit}>
-        <Stats>
-          <Stat
-            label="Spend this period"
-            value={usd2(billing.sum)}
-            unit={billing.sum_unit}
-            note="as the platform metered it — the console computes no total of its own"
-          />
-        </Stats>
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:gap-10">
+          <Stats>
+            <Stat
+              label="Spend this period"
+              value={usd2(billing.sum)}
+              unit={billing.sum_unit}
+              note="SUM reflects LINKED runs only — the console computes no total of its own, and unlinked runs are never estimated"
+            />
+          </Stats>
+          {/*
+            🔴 FR17: the completeness of the figure is part of the figure. Link coverage sits beside SUM,
+            not in a footnote, and distinguishes complete from unknown so a partial figure is never read
+            as the whole.
+          */}
+          <div className="w-full lg:max-w-md">
+            <LinkCoverage coverage={billing.link_coverage} />
+          </div>
+        </div>
         {meters.length === 0 ? (
           <Empty title="Nothing metered in this period yet." />
         ) : (

@@ -130,6 +130,39 @@ curl -s http://127.0.0.1:8787/readyz    # {"status":"ready"}
 Configuration is optional (sensible defaults are used). Pass `-config <path>` to point at a JSON
 config; the SQLite ledger and state live under the configured `data_dir`.
 
+### The CLI (`heros`) — free on every plan, offline, no account
+
+`cmd/heros` is the customer-installed CLI (P11). It runs discovery, the codemod, and eval **in your own
+environment with your own provider keys** — with **no account and no network**:
+
+```bash
+go build -o heros ./cmd/heros
+
+heros discover --repo /path/to/repo         # → Workflow IR + discovery report
+heros apply    --repo /path/to/repo --spec variant.json   # → reviewable diff (worktree-isolated)
+heros eval     --repo /path/to/repo --seeds 5 --min-quality 0.7   # → scored, multi-seed, gate-aware
+heros status                                # effective config + where each value came from
+heros version                               # tool + contract versions
+```
+
+Machine output goes to **stdout** in a stable, versioned JSON envelope; human narration goes to
+**stderr**. Exit codes are a contract: `0` ok · `1` a configured gate failed · `2` operational error ·
+`3` invalid config.
+
+**Linking is opt-in and explicit.** `heros link` transmits a run's **allowlisted** metrics + structure
+(never source, prompts, or provider keys) to **`https://heros-agent.space`** and nowhere else. See
+exactly what would be sent, without sending it:
+
+```bash
+heros login --token "$HEROS_PLATFORM_TOKEN"
+heros link --run <run-id> --dry-run    # prints the exact payload; transmits nothing
+heros link --run <run-id>              # transmits it; prints a dashboard URL
+```
+
+The egress allowlist, output format, and exit codes are referenceable contracts in
+[`docs/decisions/p11-contracts.md`](docs/decisions/p11-contracts.md); release verification is in
+[`docs/release/cli-verification.md`](docs/release/cli-verification.md).
+
 ### The web console
 
 The console is a **separate component** — a Next.js app with its own backend-for-frontend — rather

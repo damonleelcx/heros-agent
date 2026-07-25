@@ -151,6 +151,16 @@
         "invoice": {
           "$ref": "#/$defs/InvoiceView"
         },
+        "link_coverage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LinkCoverageView"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "meters": {
           "anyOf": [
             {
@@ -1299,6 +1309,29 @@
         "kind",
         "label",
         "quantity"
+      ],
+      "type": "object"
+    },
+    "LinkCoverageView": {
+      "properties": {
+        "complete": {
+          "type": "boolean"
+        },
+        "known": {
+          "type": "boolean"
+        },
+        "runs_linked": {
+          "type": "integer"
+        },
+        "runs_reported": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "complete",
+        "known",
+        "runs_linked",
+        "runs_reported"
       ],
       "type": "object"
     },

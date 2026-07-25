@@ -90,6 +90,11 @@ type Server struct {
 	// p10matrix is the P10 studio MATRIX surface (node × model grid: models/nodes/run/bind), mounted by
 	// MountP10Matrix when available.
 	p10matrix P10Matrix
+
+	// p11 is the P11 run-linking ingest surface (POST /api/p11/link + GET /api/p11/whoami), mounted by
+	// MountP11 when available. It attributes a linked run to the authenticated tenant server-side and
+	// lands its events in the existing P2.5 substrate. The platform API's authenticated ingest surface.
+	p11 LinkIngestSource
 }
 
 // ComponentProbe reports whether a dependent component is reachable.
