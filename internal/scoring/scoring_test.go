@@ -393,13 +393,6 @@ func TestProfileSwitchReRanksWithZeroNewRuns(t *testing.T) {
 }
 
 // Task 5.4 / 8.3 — a re-rank of 500 variants completes in under 200 ms.
-//
-// The budget is asserted against the BEST of several runs, not a single sample. A profile switch is
-// pure in-memory computation with no I/O, so its true cost IS the fastest run; a single sample can be
-// inflated by ambient scheduling load — this test shares a machine with the rest of `go test ./...`,
-// which runs packages in parallel — and asserting a wall-clock budget on one noisy sample is a flake,
-// not a regression detector. The minimum still catches a real regression (one that makes even the
-// fastest run exceed the budget) while ignoring load that has nothing to do with the algorithm.
 func TestReRankOf500VariantsIsUnder200ms(t *testing.T) {
 	b := Board{EvalSetHash: repeatHex("evalset"), Specs: DefaultSpecs()}
 	for i := 0; i < 500; i++ {
@@ -408,23 +401,27 @@ func TestReRankOf500VariantsIsUnder200ms(t *testing.T) {
 	}
 	c := buildCache(t, b)
 
-	// The cache build is the expensive step and happens once. The profile switch is what must be fast.
-	const runs = 5
-	gate := GateSet{Name: "prod", MinQuality: f(0.55)}
-	lb := c.Rank(CostOptimized(), gate) // warm-up + the result the correctness assertions read
-	best := time.Duration(0)
-	for i := 0; i < runs; i++ {
+	// The cache build is the expensive step and happens once; the profile switch is what must be fast.
+	// We measure the BEST of several re-ranks rather than a single wall-clock sample. The budget describes
+	// how fast the re-rank *is*, and a one-shot timing conflates that with whatever scheduler stall the
+	// machine happened to be under when the suite ran (this test sits near the end of a long run). Taking
+	// the minimum cancels transient contention while keeping the fence's teeth: the isolated re-rank runs
+	// in ~50 ms, so a genuine >4x regression still blows the 200 ms budget even at its best sample.
+	const iterations = 5
+	var best time.Duration
+	var lb Leaderboard
+	for i := 0; i < iterations; i++ {
 		start := time.Now()
-		lb = c.Rank(CostOptimized(), gate)
-		if e := time.Since(start); i == 0 || e < best {
-			best = e
+		lb = c.Rank(CostOptimized(), GateSet{Name: "prod", MinQuality: f(0.55)})
+		if elapsed := time.Since(start); i == 0 || elapsed < best {
+			best = elapsed
 		}
 	}
 
-	t.Logf("re-rank of %d variants: best of %d runs = %v (%d ranked, %d disqualified, %d runs enqueued)",
-		len(b.Variants), runs, best, len(lb.Ranked), len(lb.Disqualified), lb.RunsEnqueued)
+	t.Logf("re-rank of %d variants took %v (best of %d; %d ranked, %d disqualified, %d runs enqueued)",
+		len(b.Variants), best, iterations, len(lb.Ranked), len(lb.Disqualified), lb.RunsEnqueued)
 	if best > 200*time.Millisecond {
-		t.Fatalf("re-rank best-of-%d took %v, over the 200ms budget", runs, best)
+		t.Fatalf("re-rank took %v (best of %d), over the 200ms budget", best, iterations)
 	}
 	if lb.RunsEnqueued != 0 {
 		t.Fatalf("re-rank must enqueue zero runs, got %d", lb.RunsEnqueued)
