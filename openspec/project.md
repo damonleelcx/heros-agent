@@ -104,6 +104,25 @@ for the source specification.
 - **Delivery is recorded append-only; `transform` stays immutable.** A transform is produced once; a
   delivery has a lifecycle. A merge is **observed**, never inferred from a pull request closing.
 
+### Optimization axes (P13–P18 — Optimization Axis Expansion)
+
+- **An axis is a `Dimension`, not a feature.** Every optimization axis is a field that resolves into
+  `ResolvedNode` and therefore into `config_hash`; the eval harness scores it **without knowing the axis
+  exists**. A new axis that needs an eval, scorer or metric change is designed wrong — reduction shows up
+  in the existing `eval_tokens_total` / `eval_cost_usd` / `task_success` family, not a bespoke oracle.
+- **`config_hash` is append-only-compatible.** A new axis field is additive and `omitempty`; the
+  no-override (`none`) case SHALL hash byte-identically to before the field existed, so P0 golden vectors
+  keep reproducing (the P10 `bindings` expand-contract precedent).
+- **Modeled is not applied — and the gap is stated, never hidden.** Each axis declares its honest
+  `EXISTS / PARTIAL / ABSENT` status. Where a call-site codemod is not yet safe, a node carrying that
+  axis's override **SHALL be refused at transform with a typed `unsafeRewrite`, never silently dropped**
+  (the posture `refuseSkills`/`refuseContext` already ship). A silently-dropped override would let a
+  variant's `config_hash` be scored against unchanged source — a false result, so this is L1/L2.
+- **Diagnosis proposes; verification decides — on every axis.** An axis operator only *proposes* a Variant
+  Spec; a change is surfaced solely when it is verified better or cheaper on held-out data (P5.5). This
+  holds identically for a prompt rewrite, a tool prune, a reorder, a context-policy swap, a memory
+  strategy, or a heavier harness.
+
 ### Commercial model & entitlements
 
 - The billable **value metric** is **LLM spend under management (SUM)**, aggregated from the P2.5 cost metrics — metering is a read over the telemetry substrate, not a parallel counter.
@@ -116,7 +135,8 @@ for the source specification.
 
 This project uses OpenSpec for spec-driven development. See [`AGENTS.md`](AGENTS.md) for the
 format and rules. Capabilities live in `specs/`; proposed changes live in `changes/`. Each
-delivery phase (P0–P12) is tracked as one change under `changes/`. **P8 — Admin & Operations
+delivery phase (P0–P12, plus the P13–P18 Optimization Axis Expansion program) is tracked as one
+change under `changes/`. **P8 — Admin & Operations
 Console** is the platform team's **internal operator** surface (its own admin identity + RBAC);
 **P9 — Web Console** is the **customer-facing** dashboard, scoped to one tenant. The two are distinct
 surfaces and must never be conflated: nothing in P9 crosses a tenant boundary, and no P8 capability is
