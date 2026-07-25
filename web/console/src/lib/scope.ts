@@ -97,6 +97,11 @@ export function scoped(session: Session) {
     // whole point of this module. A customer id from the client would be a scope-widening attempt.
     billing: (period?: string) =>
       `/api/p7/customers/${encode(tenantId)}/billing` + (period ? `?period=${encode(period)}` : ""),
+
+    // ── P12 · forge delivery state ────────────────────────────────────────
+    // Tenant-scoped server-side from the session's credential + X-Console-Tenant header, like every
+    // other read. The console never sends a customer id in the path.
+    deliveries: () => `/api/p12/deliveries`,
   };
 }
 

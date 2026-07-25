@@ -73,6 +73,17 @@ const KNOWN: Record<string, StatusMeaning> = {
   // P5.5 surface state
   ready: { tone: "ok", word: "ready" },
   verifying: { tone: "info", word: "verifying" },
+
+  // P12 delivery lifecycle (`DeliveryView.state`). `merged` is the only shipped state and reads as
+  // success; `opened`/`updated` are candidates awaiting a human's merge; `closed` and `superseded` are
+  // benign endings (each has a distinct next action, so neither is `failed`); `reverted` is a warning
+  // because a merged change was rolled back.
+  opened: { tone: "info", word: "open" },
+  updated: { tone: "info", word: "open (updated)" },
+  merged: { tone: "ok", word: "merged" },
+  closed: { tone: "neutral", word: "closed" },
+  superseded: { tone: "neutral", word: "superseded" },
+  reverted: { tone: "warn", word: "reverted" },
 };
 
 /**
