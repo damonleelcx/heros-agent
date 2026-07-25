@@ -742,6 +742,77 @@
       ],
       "type": "object"
     },
+    "DeliveriesView": {
+      "description": "Response of GET /api/p12/deliveries",
+      "properties": {
+        "deliveries": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/DeliveryView"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "route": {
+          "$ref": "#/$defs/RouteConditionView"
+        }
+      },
+      "required": [
+        "deliveries",
+        "route"
+      ],
+      "type": "object"
+    },
+    "DeliveryView": {
+      "properties": {
+        "config_hash": {
+          "type": "string"
+        },
+        "delivery_id": {
+          "type": "string"
+        },
+        "forge_ref": {
+          "type": "string"
+        },
+        "merge_commit": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "proposal_ref": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "source_revision": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "config_hash",
+        "delivery_id",
+        "forge_ref",
+        "mode",
+        "proposal_ref",
+        "source_revision",
+        "state",
+        "target"
+      ],
+      "type": "object"
+    },
     "DenialLimitView": {
       "properties": {
         "allowed": {
@@ -1720,6 +1791,36 @@
         "kind",
         "reason",
         "unreachable"
+      ],
+      "type": "object"
+    },
+    "RouteConditionView": {
+      "properties": {
+        "detail": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "next_action": {
+          "type": "string"
+        },
+        "targets": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "kind"
       ],
       "type": "object"
     },
@@ -2711,6 +2812,9 @@
     },
     "BoardView": {
       "$ref": "#/$defs/BoardView"
+    },
+    "DeliveriesView": {
+      "$ref": "#/$defs/DeliveriesView"
     },
     "GraphView": {
       "$ref": "#/$defs/GraphView"

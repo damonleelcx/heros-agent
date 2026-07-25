@@ -640,3 +640,29 @@ export interface DriftView {
   provider_quantity: number;
 }
 
+/** Response of `GET /api/p12/deliveries`. */
+export interface DeliveriesView {
+  deliveries: DeliveryView[] | null;
+  route: RouteConditionView;
+}
+
+export interface DeliveryView {
+  delivery_id: string;
+  state: string;
+  config_hash: string;
+  source_revision: string;
+  target: string;
+  mode: string;
+  forge_ref: string;
+  reason?: string;
+  merge_commit?: string;
+  proposal_ref: string;
+}
+
+export interface RouteConditionView {
+  kind: string;
+  detail?: string;
+  next_action?: string;
+  targets?: string[] | null;
+}
+

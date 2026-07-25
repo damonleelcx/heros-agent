@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { FileCode, FlaskConical, GitBranch, Home, Layers, Play, Settings, User } from "lucide-react";
+import { FileCode, FlaskConical, GitBranch, GitPullRequest, Home, Layers, Play, Settings, User } from "lucide-react";
 import { requireSession } from "@/lib/session";
 import { visitedSubjects, routes, SUBJECT_LABELS } from "@/lib/subjects";
 import { NavLink } from "@/components/nav";
@@ -37,6 +37,7 @@ const SURFACES: Surface[] = [
   { href: "/app/runs", label: "Runs", icon: <Play /> },
   { href: "/app/variants", label: "Variants", icon: <Layers /> },
   { href: "/app/transforms", label: "Transforms", icon: <FileCode /> },
+  { href: "/app/delivery", label: "Delivery", icon: <GitPullRequest /> },
   { href: "/app/studio", label: "Studio", icon: <FlaskConical /> },
 ];
 
@@ -57,6 +58,7 @@ export default async function ConsoleLayout({ children }: { children: React.Reac
     { id: "s:workflows", group: "Surface", label: "Workflows", href: "/app/workflows" },
     { id: "s:runs", group: "Surface", label: "Runs", href: "/app/runs" },
     { id: "s:transforms", group: "Surface", label: "Transforms", href: "/app/transforms" },
+    { id: "s:delivery", group: "Surface", label: "Delivery", href: "/app/delivery" },
     { id: "s:variants", group: "Surface", label: "Variants", href: "/app/variants" },
     { id: "s:studio", group: "Surface", label: "Prompt & Model Studio", href: "/app/studio" },
     { id: "s:account", group: "Surface", label: "Plan and spend", href: routes.account() },

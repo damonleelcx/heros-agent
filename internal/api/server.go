@@ -95,6 +95,10 @@ type Server struct {
 	// MountP11 when available. It attributes a linked run to the authenticated tenant server-side and
 	// lands its events in the existing P2.5 substrate. The platform API's authenticated ingest surface.
 	p11 LinkIngestSource
+
+	// p12 is the P12 forge-delivery surface (console delivery read model + CI-mediated fetch/report),
+	// mounted by MountP12 when available. It holds no forge credential.
+	p12 P12Source
 }
 
 // ComponentProbe reports whether a dependent component is reachable.

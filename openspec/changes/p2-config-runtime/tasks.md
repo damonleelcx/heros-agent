@@ -216,7 +216,8 @@ Applies the source-transformation apply model per
   > | **B.** PR to a fork/mirror we own | Medium-high | Fork drift; a bot-fork PR is a weaker review artifact | Reviewable but second-class | Avoids customer write scope |
   > | **C.** Defer; seam only *(current)* | ~0 | 3.10 stays partial — honestly marked | User reviews diff + branch in the UI (works today) | Preserves optionality; a `Secrets`-shaped `PullRequests` seam drops in cleanly |
   >
-  > **Recommendation: C now, then B or A behind a new ADR.** The seam is easy; the blockers are not.
+  > ~~**Recommendation: C now, then B or A behind a new ADR.**~~ *(superseded — see below; the ADR
+  > chose neither B nor A.)* The seam is easy; the blockers are not.
   >
   > ✅ **Resolved by [ADR-005](../../../docs/adr/ADR-005-forge-delivery-and-credential-posture.md)**
   > (2026-07-22), which chose **neither B nor A**. The framing above asks *"how do **we** get write
