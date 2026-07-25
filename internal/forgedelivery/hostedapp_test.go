@@ -47,7 +47,7 @@ func TestApp_LeastPrivilege(t *testing.T) {
 	broader := []fd.PermissionSet{
 		{"pull_requests": "write", "contents": "write", "administration": "write"}, // extra scope
 		{"pull_requests": "write", "contents": "admin"},                            // higher level
-		{"actions": "write"},                                                       // unrelated scope
+		{"actions": "write"}, // unrelated scope
 	}
 	for _, p := range broader {
 		if err := p.WithinLeastPrivilege(); err == nil {

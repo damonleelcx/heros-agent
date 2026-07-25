@@ -222,7 +222,9 @@ type MemSecretsManager struct {
 }
 
 // NewMemSecretsManager builds an empty secrets manager.
-func NewMemSecretsManager() *MemSecretsManager { return &MemSecretsManager{tokens: map[string]string{}} }
+func NewMemSecretsManager() *MemSecretsManager {
+	return &MemSecretsManager{tokens: map[string]string{}}
+}
 
 // Put stores an installation's token. (In production the token is minted by the forge and refreshed;
 // this models custody, not the mint.)

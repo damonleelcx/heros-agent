@@ -148,7 +148,7 @@ func TestObserve_RevertKeepsMerged(t *testing.T) {
 	if !sawMerged || !sawReverted {
 		t.Fatalf("both merged and reverted must be in the record; got %+v", hist)
 	}
-	if !(mergedIdx < revertIdx) {
+	if mergedIdx >= revertIdx {
 		t.Errorf("merged must precede reverted in the sequence")
 	}
 }

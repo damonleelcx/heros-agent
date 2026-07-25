@@ -18,7 +18,9 @@ type fakeP12 struct {
 	cond  fd.RouteCondition
 }
 
-func (f *fakeP12) ListDeliveries(context.Context, string) ([]fd.DeliveryHead, error) { return f.heads, nil }
+func (f *fakeP12) ListDeliveries(context.Context, string) ([]fd.DeliveryHead, error) {
+	return f.heads, nil
+}
 func (f *fakeP12) RouteConditionFor(context.Context, string) (fd.RouteCondition, error) {
 	return f.cond, nil
 }
@@ -96,4 +98,3 @@ func TestP12CIReport_RejectsInconsistentIdentity(t *testing.T) {
 		t.Errorf("inconsistent identity report = %d, want 400; body=%s", rec.Code, rec.Body.String())
 	}
 }
-

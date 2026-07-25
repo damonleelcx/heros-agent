@@ -281,7 +281,9 @@ type stubRoutes struct {
 	capabilityDetail string
 }
 
-func (s *stubRoutes) RouteFor(context.Context, string, string) (*fd.Route, error) { return s.route, nil }
+func (s *stubRoutes) RouteFor(context.Context, string, string) (*fd.Route, error) {
+	return s.route, nil
+}
 func (s *stubRoutes) Capability(context.Context, string) (fd.RouteConditionKind, string, error) {
 	return s.capabilityKind, s.capabilityDetail, nil
 }

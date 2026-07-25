@@ -42,9 +42,9 @@ func TestRenderPRBody_CarriesEvidence(t *testing.T) {
 	}
 	body := fd.RenderPRBody(evidence(improvementVerdict(), ref))
 	for _, want := range []string{
-		fd.PRBodyContractVersion,       // the version marker (task 1.1)
-		"## Verified delta",            // verified delta section
-		"95% confidence interval",      // the CI is present
+		fd.PRBodyContractVersion,  // the version marker (task 1.1)
+		"## Verified delta",       // verified delta section
+		"95% confidence interval", // the CI is present
 		"## Held-out status", "held-out",
 		"## Eval evidence", "Cases fixed", "Cost impact", "Latency impact",
 		"## Lineage", "config_hash", "source_revision", "ch1", "rev1",
@@ -124,8 +124,11 @@ func TestConsoleEvidenceRef_Canonical(t *testing.T) {
 // 3.1 / 9.1 support: rendering is deterministic — identical evidence yields byte-identical bodies. This
 // is what lets the parity gate byte-compare the two modes.
 func TestRenderPRBody_Deterministic(t *testing.T) {
-	e := evidence(improvementVerdict(), "https://c.example/e")
-	if fd.RenderPRBody(e) != fd.RenderPRBody(e) {
+	// Two independent renders of the same evidence (kept in separate variables so the comparison is a
+	// real determinism check rather than a compile-time-identical expression).
+	first := fd.RenderPRBody(evidence(improvementVerdict(), "https://c.example/e"))
+	second := fd.RenderPRBody(evidence(improvementVerdict(), "https://c.example/e"))
+	if first != second {
 		t.Errorf("PR body rendering is not deterministic")
 	}
 }
