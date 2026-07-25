@@ -325,6 +325,39 @@ Numbered FRs; each maps 1:1 to an OpenSpec requirement under
 - **FR33.** The console SHALL present, for each node, **which facts are runtime-changeable and which
   require a new diff**, so the product never implies a flexibility it does not have.
 
+### Studio matrix surface — the primary studio view (M-series redesign, 2026-07-25)
+
+The studio's landing surface is a **node × model matrix**: **agent nodes on the horizontal axis
+(columns)**, **models on the vertical axis (rows)**. Each intersection is a cell where the user selects
+a prompt to **edit, preview, test, save, and inject into runtime**. This replaces the deep single-scroll
+studio page with a scannable grid, and matches the established prompt-playground pattern (LangSmith
+Playground side-by-side; promptfoo's prompt×model matrix; Opik's model-swapping playground) — with one
+deliberate divergence stated in §8.2 D9: **the matrix ranks nothing.** It is a *configuration surface*,
+not a leaderboard; ranking stays with P4 (multi-seed eval) and P5.5 (verified delta).
+
+- **FR34.** The studio SHALL present a **matrix** with agent nodes as columns and models as rows, sourced
+  from the workflow's discovered nodes and the model registry. It SHALL be reachable as a **primary
+  console surface** (a top-level destination), not a page nested several clicks deep.
+- **FR35.** A prompt is **node-scoped**: it belongs to a node (a column). Editing a prompt from any cell
+  in a column SHALL produce a **new immutable version** of that node's prompt; the model (the row) is
+  what the cell previews and tests against. This preserves content-addressed immutability (FR3–FR6).
+- **FR36.** Each cell SHALL support, over the node's prompt and the cell's model: **variable injection**
+  (supply sample bindings), **edit** (author a new version), **preview** (FR27, byte-identical),
+  **test-run** (FR28, output + cost + latency + tokens), and **save-and-bind** (FR37).
+- **FR37.** "Save and inject into runtime" SHALL bind the node to the cell's **(model, prompt version)**
+  via `bound` apply mode (FR15–FR21): it writes the node's binding-document entry and is **marked
+  unverified** (FR23) — a studio selection is "someone chose this," never "proven better" — and is
+  **refusable by automation level** (FR24). It offers **no promotion path** and asserts **no ranking**
+  (FR30).
+- **FR38.** At most **one cell per column** SHALL be the node's bound (runtime) configuration; the rest
+  are exploratory. The bound cell SHALL be visibly marked as *in force*, distinct from *verified*
+  (FR23) — "in force" is not "proven better."
+- **FR39.** A cell's variable bindings SHALL be authored per the four binding kinds (FR7): `literal`,
+  `expr`, `env`, `input`, validated at resolve (FR9) with the node/dimension/slot named on failure.
+- **FR40.** The matrix SHALL display **no aggregate score, no per-cell rank, no winner, and no
+  best-cell highlight**. Cost/latency/token figures on a tested cell are the raw figures of that
+  execution (FR28), never a comparative judgement.
+
 ## 7. Non-functional requirements
 
 | # | Requirement | Target |
@@ -395,6 +428,7 @@ configuration," and the console states it per node (FR33).
 | **D6** | **Fail-static resolution; remote opt-in; never a startup dependency** | Fetch at startup and fail if unavailable (simple, always fresh) | **L2 稳定 over L3/L4**: a platform outage must not become a customer outage, and a silent fallback to stale config would be worse than the outage. Degraded is a **reported state**, not a quiet substitution. |
 | **D7** | **Unverified resolution is visible and refusable, not forbidden** | Hard-forbid resolving to an unverified config | **L3 UX + honesty**: an operator sometimes must. Forbidding pushes people to work around the mechanism, which loses the telemetry that made the risk visible. Marked-at-every-invocation plus automation-level refusal keeps both the capability and the signal. |
 | **D8** | **The studio is explicitly not an evaluator** | Let a side-by-side show a winner | **L1-adjacent product honesty**: a two-sample comparison presented as a result is precisely the amateur loop (*change → eyeball → ship*) P4 exists to replace. The studio's value is discarding the obviously-bad cheaply; the moment it ranks, it competes with the instrument that is actually honest. |
+| **D9** | **The studio's primary surface is a node × model matrix that ranks nothing** (M-series) | A plain leaderboard grid that scores/ranks cells (the obvious "which model is best" table every eval tool ships) | **Extends D8 to the matrix's own layout.** Nodes-as-columns matches how a user configures a workflow — per node — and the grid is scannable where the deep single-scroll page was not (**L3 UX**). But a grid *invites* a best-cell highlight, and that highlight would be D8's forbidden ranking wearing a new shape (**L1 product honesty**). So the matrix is a **configuration surface**: each cell previews/tests and can be *bound* (selected into runtime, `bound` mode, marked **unverified**), but no cell is scored, ranked, or marked "best." "In force" ≠ "proven better." A prompt is **node-scoped** (a column), so an edit is a new immutable version of that node's prompt (preserves FR3–FR6) — rejected the cell-scoped-prompt alternative, which would fragment one node's prompt across models and multiply versions with no analytical gain (**L6 扩展性**). |
 
 ### 8.3 Data model additions (all additive)
 

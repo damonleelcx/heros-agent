@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { FileCode, GitBranch, Home, Layers, Play, Settings, User } from "lucide-react";
+import { FileCode, FlaskConical, GitBranch, Home, Layers, Play, Settings, User } from "lucide-react";
 import { requireSession } from "@/lib/session";
 import { visitedSubjects, routes, SUBJECT_LABELS } from "@/lib/subjects";
 import { NavLink } from "@/components/nav";
@@ -37,6 +37,7 @@ const SURFACES: Surface[] = [
   { href: "/app/runs", label: "Runs", icon: <Play /> },
   { href: "/app/variants", label: "Variants", icon: <Layers /> },
   { href: "/app/transforms", label: "Transforms", icon: <FileCode /> },
+  { href: "/app/studio", label: "Studio", icon: <FlaskConical /> },
 ];
 
 const SETTINGS: Surface[] = [
@@ -57,6 +58,7 @@ export default async function ConsoleLayout({ children }: { children: React.Reac
     { id: "s:runs", group: "Surface", label: "Runs", href: "/app/runs" },
     { id: "s:transforms", group: "Surface", label: "Transforms", href: "/app/transforms" },
     { id: "s:variants", group: "Surface", label: "Variants", href: "/app/variants" },
+    { id: "s:studio", group: "Surface", label: "Prompt & Model Studio", href: "/app/studio" },
     { id: "s:account", group: "Surface", label: "Plan and spend", href: routes.account() },
     ...visited.map((subject) => ({
       id: `v:${subject.kind}:${subject.id}`,
@@ -68,7 +70,10 @@ export default async function ConsoleLayout({ children }: { children: React.Reac
   ];
 
   return (
-    <div className="flex min-h-screen flex-col">
+    // Viewport-first (NFR17): on desktop the shell occupies exactly the viewport height and never
+    // page-scrolls — the header and rail stay fixed and each page lays out inside a bounded main region.
+    // Mobile keeps natural scroll (a phone legitimately scrolls).
+    <div className="flex min-h-screen flex-col md:h-dvh md:min-h-0 md:overflow-hidden">
       <a className="skip-link" href="#main">
         Skip to content
       </a>
@@ -151,7 +156,7 @@ export default async function ConsoleLayout({ children }: { children: React.Reac
           The bottom padding clears the compact navigation, which is fixed, and is removed once the
           rail takes over.
         */}
-        <main className="min-w-0 flex-1 pb-16 md:pb-0" id="main">
+        <main className="min-w-0 flex-1 pb-16 md:min-h-0 md:overflow-hidden md:pb-0" id="main">
           {children}
         </main>
       </div>

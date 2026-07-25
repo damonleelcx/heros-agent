@@ -5,6 +5,7 @@ import { DegradedState, DeniedState, NotFoundState, Pill, UnusableState } from "
 import { DataTable, Num, PageFrame, Section, Stat, StatRow } from "@/components/primitives";
 import { ActionForm } from "@/components/actionForm";
 import { RecordVisit } from "@/components/recordVisit";
+import { Tabs } from "@/components/tabs";
 import { timestamp } from "@/lib/format";
 import {
   suspendTenant,
@@ -92,7 +93,13 @@ export default async function TenantDetailPage({ params }: { params: Promise<{ i
             <DegradedState what={`tenant ${id}`} detail={failure?.detail} />
           )
         ) : (
-          <>
+          <Tabs
+            tabs={[
+              {
+                id: "state",
+                label: "State & quotas",
+                content: (
+                  <>
             <Section title="State">
               <StatRow>
                 <Stat
@@ -159,8 +166,14 @@ export default async function TenantDetailPage({ params }: { params: Promise<{ i
                 </DataTable>
               )}
             </Section>
-
-            <h2>Actions</h2>
+                  </>
+                ),
+              },
+              {
+                id: "actions",
+                label: "Actions",
+                content: (
+                  <>
             <div className="grid-2">
               {/* Suspend / reactivate */}
               <Section title="Lifecycle">
@@ -285,7 +298,11 @@ export default async function TenantDetailPage({ params }: { params: Promise<{ i
             <p className="hint">
               Target identifier for confirmations: <code>{target}</code>
             </p>
-          </>
+                  </>
+                ),
+              },
+            ]}
+          />
         )}
       </PageFrame>
     </OperatorShell>

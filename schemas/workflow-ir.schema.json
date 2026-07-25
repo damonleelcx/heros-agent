@@ -59,6 +59,11 @@
       "type": "array",
       "description": "Optional. Named subgraphs (a set of node_ids) for per-subgraph pattern labelling. Unset in P0/P1; populated by the P3.5 Pattern Classifier, which labels SUBGRAPHS (nodes and/or subgraphs — FR7). Absence never invalidates an IR; adding it is additive (no MAJOR bump).",
       "items": { "$ref": "#/$defs/Subgraph" }
+    },
+    "declared_env": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Optional (P10, additive). The environment variables the discovered workflow declares. A P10 `env` binding is validated against this set at spec-resolve; a variable not declared here is rejected, so an undeclared env read cannot reach a provider as an empty substitution. Adding it is additive (no MAJOR bump)."
     }
   },
   "$defs": {
@@ -105,6 +110,11 @@
             "ast_path": {
               "type": "string",
               "description": "Optional structured path to the call expression in the AST, for robust rewrites across formatting changes."
+            },
+            "in_scope": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Optional (P10, additive). The symbols recorded as in scope at this call site — conservatively only those already reaching the call, never the full lexical scope. A P10 `expr` binding is validated against this set at spec-resolve; absence means the IR does not record scope and the transform's own check applies. Adding it is additive (no MAJOR bump)."
             }
           }
         },

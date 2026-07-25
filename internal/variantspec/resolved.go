@@ -59,6 +59,23 @@ type ResolvedNode struct {
 	// out and why.
 	ContextParams  map[string]any `json:"context_params"`
 	ProviderParams map[string]any `json:"provider_params"`
+	// Bindings is the resolved per-slot binding source (P10 task 3.8, decisions.md D-1.4). ADDITIVE and
+	// omitempty with a nil-when-empty map: a node that binds no slot emits NO `bindings` key, so its
+	// canonical bytes are byte-identical to a pre-P10 node and the frozen golden vectors keep
+	// reproducing. When present, JCS sorts the keys, so `config_hash` depends on the binding SET, not
+	// its authoring order. The hash therefore changes iff a binding changes.
+	//
+	// Contrast the sibling maps above, which are always-present `{}`: their emptiness is part of the
+	// frozen bytes. This field is new, so its ABSENCE is what must stay byte-compatible — achieved by
+	// omission, not by an empty object.
+	Bindings map[string]ResolvedBinding `json:"bindings,omitempty"`
+}
+
+// ResolvedBinding is one slot's resolved binding: its kind and value, recorded explicitly (never
+// inferred from the value's shape). This is the hashed projection of a spec BindingSource.
+type ResolvedBinding struct {
+	Kind  string `json:"kind"`
+	Value string `json:"value"`
 }
 
 // ResolvedEdge is one graph edge. Edges are in the hash because re-arrangement (P5) changes the

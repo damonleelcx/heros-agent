@@ -82,6 +82,14 @@ type Server struct {
 	// deployment that ships no console has no console component — and saying so by omission beats
 	// inventing a status for one that does not exist.
 	console ComponentProbe
+
+	// p10 is the Postgres-backed prompt-authoring write surface (publish + timeline/diff/impact read
+	// models), mounted by MountP10 when available. The platform API's first WRITE surface.
+	p10 P10Store
+
+	// p10matrix is the P10 studio MATRIX surface (node × model grid: models/nodes/run/bind), mounted by
+	// MountP10Matrix when available.
+	p10matrix P10Matrix
 }
 
 // ComponentProbe reports whether a dependent component is reachable.

@@ -527,6 +527,16 @@ name; FR41 states the first.
 
 ## 7. Non-functional requirements
 
+- **Viewport-first — the console fits one screen (2026-07-25).** On desktop the operator shell (chrome
+  band + content) occupies exactly the viewport height and **SHALL NOT produce a page-level vertical
+  scrollbar**; the chrome, the impersonation banner and a page's header stay fixed while an operator
+  works. A view's primary content and its controls are visible **without scrolling**; a page with many
+  sections (the tenant detail carries **13**) presents them as **in-page tabs** rather than one long
+  stack, and genuinely long content (a table, an audit list) scrolls inside its **own bounded panel** —
+  exactly one region owns the scroll. Rationale: an operator mid-incident should not scroll past twelve
+  panels to reach the one they need; the kill-switch alarm and the acting-principal band must never
+  scroll out of view. Measured: `documentElement.scrollHeight ≤ innerHeight` for every authenticated
+  admin view at a standard desktop viewport. (Mirrors the customer console's P9 NFR17.)
 - **Security (load-bearing).** Admin identity is **separate from customer auth**; **SSO + MFA** is
   mandatory (FR1); sessions are **short-lived + revocable** (FR2); **every** capability is
   **deny-by-default permission-gated** (FR3); **least privilege** is enforced (Support cannot refund or

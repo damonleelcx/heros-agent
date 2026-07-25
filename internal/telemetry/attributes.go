@@ -60,6 +60,12 @@ const (
 	AttrLatencyMS  = "latency_ms"
 	AttrTimedOut   = "timed_out"
 	AttrNodeFailed = "failed"
+	// AttrResolvedConfigHash / AttrUnverified are the P10 bound-mode reconciliation tags (§9.1, §9.4).
+	// The resolver emits, on EVERY invocation, the config_hash of the document it actually resolved and
+	// whether that document carries a verified-delta record. They ride on the span (high-cardinality
+	// side, like the others here) so the eval harness can reconcile observed-vs-requested per invocation.
+	AttrResolvedConfigHash = "resolved_config_hash"
+	AttrUnverified         = "unverified"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -52,6 +52,24 @@ export function scoped(session: Session) {
     resolveSpec: () => `/api/p2/specs/resolve`,
     submitSpec: () => `/api/p2/specs/submit`,
 
+    // ── P10 · prompt & model studio ───────────────────────────────────────
+    // The prompt name is a SUBJECT (like a run_id), not an authority: the platform scopes it to this
+    // tenant server-side, and answers with only this tenant's prompts. `publish`, `impact` and
+    // `preview` are the studio's write/compute actions; `names`, `timeline` and `diff` are reads.
+    promptNames: () => `/api/p10/prompts`,
+    promptTimeline: (name: string) => `/api/p10/prompts/${encode(name)}/timeline`,
+    promptDiff: (a: string, b: string) => `/api/p10/prompts/diff?a=${encode(a)}&b=${encode(b)}`,
+    publishPrompt: () => `/api/p10/prompts/publish`,
+    promptImpact: () => `/api/p10/prompts/impact`,
+    studioPreview: () => `/api/p10/studio/preview`,
+    // Matrix surface: rows (models), columns (a workflow's nodes), test-run and bind a cell.
+    studioWorkflows: () => `/api/p10/workflows`,
+    studioModels: () => `/api/p10/models`,
+    studioNodes: (workflowId: string) => `/api/p10/workflows/${encode(workflowId)}/nodes`,
+    studioWorkflowBindings: (workflowId: string) => `/api/p10/workflows/${encode(workflowId)}/bindings`,
+    studioRun: () => `/api/p10/studio/run`,
+    studioBind: () => `/api/p10/studio/bind`,
+
     // ── P2.5 · live run monitor ───────────────────────────────────────────
     monitor: (runId: string) => `/api/p25/runs/${encode(runId)}/monitor`,
     monitorStream: (runId: string) => `/api/p25/runs/${encode(runId)}/monitor/stream`,

@@ -13,6 +13,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -21,8 +22,10 @@ import (
 
 	"github.com/heros-foreal/agentd/internal/api"
 	"github.com/heros-foreal/agentd/internal/config"
+	"github.com/heros-foreal/agentd/internal/discovery"
 	"github.com/heros-foreal/agentd/internal/executor"
 	"github.com/heros-foreal/agentd/internal/registry"
+	"github.com/heros-foreal/agentd/internal/studio"
 	"github.com/heros-foreal/agentd/internal/variantspec"
 	"github.com/heros-foreal/agentd/internal/worktree"
 	_ "github.com/lib/pq"
@@ -43,6 +46,8 @@ const (
 func main() {
 	addr := flag.String("addr", "127.0.0.1:8477", "listen address")
 	pgURL := flag.String("pg", os.Getenv("HEROS_TEST_POSTGRES_URL"), "postgres url")
+	irPath := flag.String("ir", "", "optional Workflow IR JSON to load as matrix columns")
+	workflowID := flag.String("workflow-id", "demo-workflow", "workflow id for the loaded IR")
 	flag.Parse()
 	if *pgURL == "" {
 		log.Fatal("set -pg or HEROS_TEST_POSTGRES_URL")
@@ -79,12 +84,38 @@ func main() {
 		log.Fatal(err)
 	}
 
-	s := api.New(nil, config.Config{})
+	// Auth so the P10 write surface has an authenticated tenant. A single static demo key → one tenant,
+	// which is all a local studio demo needs; the console forwards this key as its platform credential.
+	s := api.New(nil, config.Config{
+		AuthMode: "required",
+		TenantCredentials: []config.TenantCredential{
+			{TenantID: "demo", APIKey: "demo", Role: "member", KeyID: "demo"},
+		},
+	})
 	s.MountP2(api.P2Stores{
 		Transforms: worktree.NewStore(db, blobs),
 		Runs:       executor.NewStore(db),
 		Specs:      variantspec.NewStore(db),
 	})
+	// P10 prompt-authoring write surface (publish + timeline/diff/impact) over the same registry store.
+	reg := registry.NewStore(db, blobs)
+	s.MountP10(reg)
+
+	// P10 studio MATRIX: seed model rows, load a workflow IR as node columns, mount the grid routes.
+	seedModels(ctx, reg)
+	wfCatalog := studio.NewWorkflowCatalog()
+	if *irPath != "" {
+		ir, err := loadIR(*irPath)
+		if err != nil {
+			log.Printf("warning: could not load IR %s: %v", *irPath, err)
+		} else {
+			wfCatalog.Load(*workflowID, ir)
+			log.Printf("loaded workflow %q with %d node column(s) from %s", *workflowID, len(ir.Nodes), *irPath)
+		}
+	}
+	// Echo completer so test-run works without provider credentials; a real deployment injects the gateway.
+	runner := studio.NewRunner(studio.EchoCompleter{}, studio.NewSpendMeter(studio.Cap{}), studio.FlatPricer(0.5), nil)
+	s.MountP10Matrix(api.P10Matrix{Store: reg, Workflows: wfCatalog, Binds: studio.NewBindStore(), Runner: runner})
 	// The embedded UI page this demo used to open was removed in the P9 cutover: the console is now a
 	// separate component, so a demo can serve the read models but cannot serve the screen. It prints the
 	// API it is serving and how to point the console at it — the same shape `cmd/p9hermes` uses.
@@ -98,6 +129,41 @@ func main() {
 	fmt.Printf("    baseline/empty:     /app/transforms/%s/rev1  and  /app/runs/run_empty\n", hashBaseline)
 	fmt.Printf("    human review needed: /app/transforms/%s/rev1\n", hashSyntaxOnly)
 	log.Fatal(http.ListenAndServe(*addr, s.Handler))
+}
+
+// seedModels registers a few model rows for the studio matrix (M7.1). Idempotent — content-addressed.
+func seedModels(ctx context.Context, reg *registry.Store) {
+	temp := 0.2
+	max := 1024
+	models := []struct {
+		name, provider, id string
+	}{
+		{"sonnet", "anthropic", "claude-sonnet-5"},
+		{"opus", "anthropic", "claude-opus-4-8"},
+		{"gpt5", "openai", "gpt-5"},
+		{"haiku", "anthropic", "claude-haiku-4-5"},
+	}
+	for _, m := range models {
+		if _, err := reg.RegisterModel(ctx, m.name, registry.ModelSpec{
+			Provider: m.provider, ModelID: m.id,
+			Params: registry.ModelParams{Temperature: &temp, MaxTokens: &max},
+		}); err != nil {
+			log.Printf("warning: seed model %s: %v", m.name, err)
+		}
+	}
+}
+
+// loadIR reads a Workflow IR JSON file into the discovery.IR shape.
+func loadIR(path string) (*discovery.IR, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var ir discovery.IR
+	if err := json.Unmarshal(b, &ir); err != nil {
+		return nil, err
+	}
+	return &ir, nil
 }
 
 func seed(ctx context.Context, db *sql.DB, blobs *registry.CatalogingBlobStore) error {

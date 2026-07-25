@@ -51,7 +51,9 @@ export function PageFrame({
         <h1>{title}</h1>
         {lede ? <p className="lede">{lede}</p> : null}
       </div>
-      {children}
+      {/* The body owns the scroll on desktop (viewport-first): the header stays fixed, content scrolls
+          inside this bounded region, and a tabbed page's active panel scrolls within it. */}
+      <div className="page__body">{children}</div>
     </>
   );
 }

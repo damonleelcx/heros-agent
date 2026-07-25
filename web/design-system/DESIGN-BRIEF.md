@@ -73,6 +73,22 @@ and screenshots. Style it however you want; keep the word.
 **Also:** AA contrast in both themes, keyboard reachable with visible focus, charts need a text
 alternative and a data-table fallback. All normal, none of it limits the aesthetic.
 
+### 4. The console fits one screen (viewport-first)
+
+A dashboard is not a document. The shell — header, rail, page header, page actions — occupies exactly
+the viewport height and **never produces a page-level scrollbar** on desktop. A view's primary content
+and primary actions are visible **without scrolling**.
+
+- **Split stacked sections into in-page tabs.** When a page has several sections that would stack into
+  a tall scroll (the studio's matrix + prompt library + bound nodes; a workflow's overview + graph +
+  board), make them **tabs** — one section on screen at a time, each fitting the viewport. This is the
+  default mechanism, not bounded-scroll.
+- **Exactly one region owns the scroll**, and only when content genuinely exceeds the panel — a long
+  table or list scrolls *inside its own bounded box* (`overflow-y-auto`), never the page. The header,
+  rail, tab strip and page actions never move.
+- Measured: `documentElement.scrollHeight ≤ innerHeight` for every `/app/*` view at a standard desktop
+  viewport (NFR17). The studio was 4× over; the fix is tabs + a fixed shell, not smaller fonts.
+
 ---
 
 # Part 2 — Web console (customer)

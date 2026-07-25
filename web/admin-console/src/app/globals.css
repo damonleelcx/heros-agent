@@ -1650,3 +1650,125 @@ kbd {
   align-items: baseline;
   flex-wrap: wrap;
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Viewport-first shell (P8 viewport-first) — the console fits one screen
+   ══════════════════════════════════════════════════════════════════════════
+
+   On desktop the shell owns the viewport height and never page-scrolls: the chrome band, the
+   impersonation banner and the alarm stay fixed while `main` becomes the single bounded scroll region.
+   An operator mid-incident never scrolls the acting-principal band or the kill-switch alarm out of
+   view. Mobile keeps natural scroll (a small screen legitimately scrolls).
+   ────────────────────────────────────────────────────────────────────────── */
+@media (min-width: 768px) {
+  body {
+    height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  .chrome,
+  .impersonation-banner,
+  .alarm-banner {
+    flex: 0 0 auto;
+  }
+  /* main fills the shell and clips; the page BODY owns the scroll, so the page header stays fixed. */
+  main {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    padding-top: var(--space-5);
+    padding-bottom: 0;
+  }
+  .page__header {
+    flex: 0 0 auto;
+  }
+  .page__body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding-bottom: var(--space-6);
+  }
+}
+
+/* The page body wraps everything under the header. In normal flow (mobile) it is a plain block; on
+   desktop the rule above makes it the single bounded scroll region. */
+.page__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--stack);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Tabs — split a stacked page into in-page tabs, one section on screen at a time
+   ══════════════════════════════════════════════════════════════════════════ */
+.tabs {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+.tabs__list {
+  display: flex;
+  gap: var(--space-1);
+  border-bottom: var(--hairline) solid var(--border);
+  flex: 0 0 auto;
+  overflow-x: auto;
+}
+.tabs__tab {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  padding: var(--space-2) var(--space-3);
+  color: var(--text-muted);
+  font: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.tabs__tab:hover {
+  color: var(--text);
+}
+.tabs__tab[aria-selected="true"] {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+.tabs__tab:focus-visible {
+  outline: var(--focus-width) solid var(--focus-ring);
+  outline-offset: 2px;
+}
+.tabs__panel {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding-top: var(--space-4);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Operating picture — DENSIFIED to fit the viewport (P8 viewport-first)
+   ══════════════════════════════════════════════════════════════════════════
+
+   The overview is a glance surface (FR34): "is anything halted / is anything wrong" must be visible
+   without navigation, so it is NOT split into tabs (which would hide those very panels). Instead its
+   vertical rhythm is tightened so the whole picture fits one screen. Uses spacing tokens only.
+   ────────────────────────────────────────────────────────────────────────── */
+.operating .section {
+  margin-bottom: var(--space-4);
+}
+.operating .freshness-line {
+  margin-bottom: var(--space-2);
+}
+.operating .section__header {
+  padding-top: var(--space-1);
+  padding-bottom: var(--space-1);
+}
+.operating .section__body {
+  padding: var(--space-3);
+}
+.operating .stat-row {
+  gap: var(--space-2);
+}

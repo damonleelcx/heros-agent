@@ -77,18 +77,29 @@ export function PageFrame({
   wide?: boolean;
 }) {
   return (
-    <div className={cx("px-5 py-8 md:px-10", wide ? "max-w-7xl" : "max-w-5xl")}>
-      <div className="mb-8 border-b border-border/60 pb-7">
-        <p className="mb-2 font-mono text-[10px] uppercase tracking-[0.18em] text-primary">{eyebrow}</p>
-        <div className="flex flex-wrap items-start justify-between gap-4">
+    // Viewport-first (NFR17): the frame FILLS the main region (h-full) and clips (overflow-hidden), so
+    // the page never grows the document. A compact, shrink-0 header keeps the subject and actions fixed;
+    // the body is a bounded flex region (min-h-0 flex-1) that OWNS its own scroll — the page does not.
+    // A page whose sections would stack tall should split them into <Tabs> instead of relying on this
+    // body scroll (the studio does).
+    <div
+      className={cx(
+        "flex h-full min-h-0 w-full flex-col px-4 pt-5 md:px-8",
+        wide ? "max-w-[120rem]" : "max-w-6xl",
+      )}
+    >
+      <div className="mb-3 shrink-0 border-b border-border/60 pb-3">
+        <p className="mb-1 font-mono text-[10px] uppercase tracking-[0.18em] text-primary">{eyebrow}</p>
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <h1 className="page__title min-w-0 break-words font-display font-normal leading-tight text-foreground">
             {title}
           </h1>
           {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
         </div>
-        {lede ? <p className="mt-3 max-w-2xl text-sm leading-relaxed text-muted-foreground">{lede}</p> : null}
+        {lede ? <p className="mt-1.5 max-w-3xl text-sm leading-snug text-muted-foreground">{lede}</p> : null}
       </div>
-      <div className="flex flex-col gap-10">{children}</div>
+      {/* The body owns the scroll, not the page. pb-5 gives the last row breathing room inside the box. */}
+      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pb-5">{children}</div>
     </div>
   );
 }
