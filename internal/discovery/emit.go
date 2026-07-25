@@ -36,6 +36,21 @@ type IR struct {
 	// Subgraphs are the P3.5 pattern-labelling units. Reserved in P0, unset by Discovery, populated
 	// by the classifier. omitempty: an unlabelled IR must serialise exactly as it did before P3.5.
 	Subgraphs []IRSubgraph `json:"subgraphs,omitempty"`
+	// DeclaredEnv is the set of environment variables the discovered workflow declares (P10 task 3.4).
+	// ADDITIVE and omitempty: an IR that predates it serialises byte-identically. An `env` binding is
+	// validated against this set at spec-resolve; a variable not declared here is rejected (fail
+	// closed), so an undeclared env read cannot reach a provider as an empty substitution.
+	DeclaredEnv []string `json:"declared_env,omitempty"`
+}
+
+// DeclaresEnv reports whether name is a declared environment variable of this workflow.
+func (ir IR) DeclaresEnv(name string) bool {
+	for _, v := range ir.DeclaredEnv {
+		if v == name {
+			return true
+		}
+	}
+	return false
 }
 
 // IRSubgraph is a named region of the graph carrying pattern labels (P0-reserved, P3.5-populated).
@@ -96,6 +111,35 @@ type IRCallSite struct {
 	LineStart int    `json:"line_start"`
 	LineEnd   int    `json:"line_end"`
 	ASTPath   string `json:"ast_path,omitempty"`
+	// InScope is the set of symbols the IR records as in scope at this call site (P10 task 3.7,
+	// decisions.md D-1.2). ADDITIVE to the x-frozen: additive-only node object: omitempty, so an IR that
+	// predates this field serialises byte-identically and unmarshals InScope to nil.
+	//
+	// It is deliberately CONSERVATIVE — only the symbols already reaching the call, not the full lexical
+	// scope — so a binding naming an unrecorded expression is rejected (a false rejection), never a
+	// non-recorded one accepted (a false acceptance that would ship a non-building codemod). An `expr`
+	// binding is validated against this set at spec-resolve.
+	//
+	// nil (absent) vs a recorded set is meaningful: a nil InScope means "this IR does not record scope,"
+	// and resolve then defers the exactly-once satisfaction check to the transform's own promptExprFor,
+	// preserving pre-P10 behaviour exactly. A recorded set engages resolve-time enforcement. Real call
+	// sites always have symbols in scope, so an empty recorded set does not arise in practice.
+	InScope []string `json:"in_scope,omitempty"`
+}
+
+// InScopeRecorded reports whether this call site carries a recorded in-scope symbol set. Used by
+// resolve to decide whether to enforce binding satisfaction at resolve time (recorded) or defer to the
+// transform's own check (not recorded), which keeps pre-P10 IRs behaving exactly as before.
+func (cs IRCallSite) InScopeRecorded() bool { return cs.InScope != nil }
+
+// HasInScope reports whether name is a recorded in-scope symbol at this call site.
+func (cs IRCallSite) HasInScope(name string) bool {
+	for _, s := range cs.InScope {
+		if s == name {
+			return true
+		}
+	}
+	return false
 }
 
 type IRModel struct {

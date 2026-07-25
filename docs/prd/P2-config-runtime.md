@@ -13,6 +13,14 @@
 > applied by **transforming the user's source code** (deterministic AST codemods, delivered as
 > reviewable diffs/PRs), not by a runtime shim.
 
+> **Extended by P10 (by reference, not edited here).** [P10 Prompt & Model Studio](P10-prompt-model-studio.md)
+> extends P2's registries (an authenticated prompt **write** path plus timeline/diff/impact read models
+> over existing rows — no new table) and the codemod (an opt-in per-node `bound` apply mode, plus an
+> explicit `bindings` map with `literal`/`expr`/`env`/`input` sources). It amends ADR-001 via
+> [ADR-004](../adr/ADR-004-runtime-config-binding.md) without superseding it: transforms stay AST-level,
+> deterministic, build-preserving, reviewable and revertible. The `p2-config-runtime` change's merged
+> specs are **not** edited — P10 carries its own capability specs and additive deltas.
+
 ## 1. Summary
 
 P2 makes discovered LLM nodes **configurable and executable by transforming the user's source

@@ -63,7 +63,80 @@ var (
 	// dimension without risking behavior change. FR5 requires rejecting these BEFORE a transform is
 	// generated rather than emitting a diff nobody can trust.
 	ErrUnsafeRewrite = errors.New("variantspec: the transform cannot rewrite this call site safely")
+
+	// ── P10 variable-bindings failure classes (task 3.2) ────────────────────────────────────────────
+	// All reported through SpecError{NodeID, Dim, Ref} — no second error channel (task 3.2 / spec
+	// "Binding failures use the existing specification error shape"). Dim is DimPrompt (a binding
+	// satisfies a prompt slot); Ref is the offending slot, expression, variable, or kind.
+
+	// ErrUnknownBindingKind: a binding declares a source kind outside {literal, expr, env, input}.
+	ErrUnknownBindingKind = errors.New("variantspec: binding declares an unknown source kind")
+	// ErrUnsatisfiedSlot: a prompt slot is satisfied by neither an explicit binding nor an
+	// identically-spelled call-site expression.
+	ErrUnsatisfiedSlot = errors.New("variantspec: prompt slot is not satisfied by any binding or call-site expression")
+	// ErrAmbiguousSlot: a slot is satisfied by BOTH an explicit binding and an identically-spelled
+	// call-site expression — rejected rather than silently preferring one.
+	ErrAmbiguousSlot = errors.New("variantspec: prompt slot is satisfied twice (explicit binding and call-site expression)")
+	// ErrBindingOutOfScope: an expr binding names an expression the IR does not record as in scope at
+	// that call site, an env binding names an undeclared variable, or an input binding violates the
+	// node's typed contract.
+	ErrBindingOutOfScope = errors.New("variantspec: binding references something not available at the call site")
 )
+
+// BindingKind is the source of a prompt-slot binding (P10 task 3.1). The kind is recorded EXPLICITLY,
+// never inferred from the value's shape — "gold" could be a literal or an env var name, and guessing
+// is exactly the plausible-but-wrong behaviour this codebase declines.
+type BindingKind string
+
+const (
+	// BindLiteral is a constant value written directly into the prompt. Runtime-changeable in bound
+	// mode (it lives in the binding document).
+	BindLiteral BindingKind = "literal"
+	// BindExpr is an expression in scope at the call site (e.g. `ticket`). Structure, not data — it
+	// names a variable in the user's lexical scope, so it stays at the rewritten call site (ADR-004).
+	BindExpr BindingKind = "expr"
+	// BindEnv is a named environment variable read at run time. Runtime-changeable (the variable NAME
+	// lives in the binding document); an absent value at run time is a typed failure (task 3.5).
+	BindEnv BindingKind = "env"
+	// BindInput is a typed value from the node's P5 input contract.
+	BindInput BindingKind = "input"
+)
+
+func (k BindingKind) valid() bool {
+	switch k {
+	case BindLiteral, BindExpr, BindEnv, BindInput:
+		return true
+	default:
+		return false
+	}
+}
+
+// BindingSource is one slot's binding: its kind and the value that kind interprets (a constant, an
+// expression, a variable name, or an input reference).
+type BindingSource struct {
+	Kind  BindingKind `json:"kind"`
+	Value string      `json:"value"`
+}
+
+// ApplyMode selects how a node's configuration is written into the codemod (P10 task 7.1, ADR-004).
+// `inline` writes the value at the call site exactly as ADR-001 always did; `bound` writes an
+// indirection plus a generated binding artifact and a resolved binding document, all in one change.
+// It defaults to `inline` — nothing acquires an indirection unless asked.
+type ApplyMode string
+
+const (
+	ApplyInline ApplyMode = "inline"
+	ApplyBound  ApplyMode = "bound"
+)
+
+// Mode returns the node's apply mode, defaulting to inline. An empty or unset value is inline, so a
+// pre-P10 spec and a node that states no mode both apply exactly as before this capability existed.
+func (m ApplyMode) Mode() ApplyMode {
+	if m == ApplyBound {
+		return ApplyBound
+	}
+	return ApplyInline
+}
 
 // SpecError names the node and dimension a rejection is about, so an unhappy path can tell the user
 // where to look instead of just that something was wrong.
@@ -114,12 +187,20 @@ type NodeOverride struct {
 	// ContextPolicy is a context-registry version_id, despite the name FR3 froze for it — it names a
 	// registered (policy, params) entry, not a bare policy string.
 	ContextPolicy string `json:"context_policy,omitempty"`
+	// ApplyMode selects inline (default) or bound apply for this node (P10 task 7.1). Empty = inline.
+	ApplyMode ApplyMode `json:"apply_mode,omitempty"`
+	// Bindings maps a prompt slot name to its binding source (P10 task 3.1). Optional and additive:
+	// omitempty + nil-when-empty, so a spec that declares no bindings serialises exactly as it did
+	// before this field existed and hashes byte-identically (decisions.md D-1.4). The keys are slot
+	// names; a slot with no entry here must be satisfied by an identically-spelled call-site expression
+	// or the spec is rejected at resolve (task 3.3).
+	Bindings map[string]BindingSource `json:"bindings,omitempty"`
 }
 
 // isEmpty reports whether this override sets nothing. A node listed in the ordering with no
 // overrides is legitimate and common: it is a node that runs exactly as discovered.
 func (o NodeOverride) isEmpty() bool {
-	return o.ModelRef == "" && o.PromptRef == "" && len(o.SkillRefs) == 0 && o.ContextPolicy == ""
+	return o.ModelRef == "" && o.PromptRef == "" && len(o.SkillRefs) == 0 && o.ContextPolicy == "" && len(o.Bindings) == 0
 }
 
 // Edge is one graph edge in the spec's declared ordering.
@@ -218,6 +299,21 @@ func (s *VariantSpec) Validate() error {
 		}
 		if dup := firstDuplicate(o.SkillRefs); dup != "" {
 			return specErr(id, DimSkills, ErrInvalidSpec, "skill_refs binds %q twice", dup)
+		}
+		// Binding structure — everything checkable without the IR or registries (kind is in the set; a
+		// non-literal binding names something). The scope/declared/contract checks and the exactly-once
+		// satisfaction rule need the IR and the resolved prompt, so they live in Resolve (task 3.2/3.4).
+		for _, slot := range sortedKeys(o.Bindings) {
+			b := o.Bindings[slot]
+			if !b.Kind.valid() {
+				return &SpecError{NodeID: id, Dim: DimPrompt, Ref: slot, Err: ErrUnknownBindingKind,
+					Detail: fmt.Sprintf("slot %q declares kind %q, want one of literal, expr, env, input", slot, b.Kind)}
+			}
+			// A literal may legitimately be the empty string (a constant blank). expr/env/input must
+			// name something — an empty reference cannot be validated or materialised.
+			if b.Kind != BindLiteral && b.Value == "" {
+				return specErr(id, DimPrompt, ErrInvalidSpec, "slot %q binding of kind %q has an empty value", slot, b.Kind)
+			}
 		}
 	}
 

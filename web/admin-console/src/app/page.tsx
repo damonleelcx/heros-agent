@@ -47,7 +47,12 @@ export default async function OverviewPage() {
         title="Overview"
         lede="The live state of the platform: what is halted, what is wrong, who is acting as whom, and what was done last. Every figure carries the time it is current as of."
       >
-        <LiveOperatingPicture initial={picture} holders={holders} />
+        {/* The operating picture is a glance surface (FR34): tabs would be wrong here — hiding "is
+            anything halted / wrong" behind a click defeats the page. So it is DENSIFIED to fit the
+            viewport (tighter rhythm, panels packed) rather than split. */}
+        <div className="operating">
+          <LiveOperatingPicture initial={picture} holders={holders} />
+        </div>
       </PageFrame>
     </OperatorShell>
   );

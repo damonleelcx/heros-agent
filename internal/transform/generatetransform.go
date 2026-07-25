@@ -77,12 +77,44 @@ func GenerateTransform(resolved *variantspec.Resolved, spec *variantspec.Variant
 			NodeID: a.AdapterNodeID, Dim: "adapter:" + a.CatalogKind, File: gf.Path, Line: 1})
 	}
 
-	// 3. Combine diffs: existing-file edits first (already in Patch.Diff, path-sorted), then adapter
-	// new-file diffs (adapter-id-sorted above). Recompute the content hash over the whole.
+	// 3. Bound apply mode (P10 §7): for every node the spec marks `bound`, emit the binding document
+	// and the generated accessor into the SAME patch as the call-site rewrite, so one revert restores
+	// all three parts (task 7.5). A bound node with no resolved values is rejected here (task 7.3),
+	// before the transform is proposed or run — the same footing as a failed build.
+	var boundDiffs []byte
+	if resolved != nil {
+		boundFiles, err := GenerateBoundArtifacts(resolved)
+		if err != nil {
+			return nil, err
+		}
+		for _, path := range sortedFileKeys(boundFiles) {
+			if _, exists := base.Files[path]; exists {
+				return nil, fmt.Errorf("transform: bound artifact would overwrite an existing generated file %s", path)
+			}
+			base.Files[path] = boundFiles[path]
+			boundDiffs = append(boundDiffs, newFileDiff(path, boundFiles[path])...)
+			base.Touched = append(base.Touched, TouchedDimension{NodeID: "", Dim: "bound-artifact", File: path, Line: 1})
+		}
+	}
+
+	// 4. Combine diffs: existing-file edits first (already in Patch.Diff, path-sorted), then adapter
+	// new-file diffs (adapter-id-sorted), then bound artifacts (path-sorted). Recompute the content
+	// hash over the whole.
 	base.Diff = append(base.Diff, adapterDiffs...)
+	base.Diff = append(base.Diff, boundDiffs...)
 	sum := sha256.Sum256(base.Diff)
 	base.DiffHash = hex.EncodeToString(sum[:])
 	return base, nil
+}
+
+// sortedFileKeys returns a file map's paths sorted, so emission order (and the diff) is deterministic.
+func sortedFileKeys(m map[string][]byte) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // PreviewAdapterDiff renders the reviewable source diff a single inserted adapter would generate,
