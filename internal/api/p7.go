@@ -52,6 +52,12 @@ type BillingView struct {
 	SUMUnit string  `json:"sum_unit"`
 	// SUMTrend is the per-period history the chart renders. Empty is a real state (a new customer).
 	SUMTrend []PeriodPoint `json:"sum_trend,omitempty"`
+	// LinkCoverage, when present, is how much of the customer's activity the SUM figure reflects (P11
+	// FR17). SUM is derived from LINKED runs only — a run executed locally and never linked contributes
+	// nothing and is never estimated — so the completeness of the figure is part of the figure. The
+	// console displays this wherever SUM appears; absent means coverage is UNKNOWN (distinct from
+	// complete), which the console must not silently render as "all activity".
+	LinkCoverage *LinkCoverageView `json:"link_coverage,omitempty"`
 	// Meters is every metered quantity for the period, with the plan's allowance where one is set.
 	Meters []MeterView `json:"meters"`
 
@@ -82,6 +88,22 @@ type BillingView struct {
 	// Empty distinguishes "no usage recorded yet" from a measured zero. They look identical in a number
 	// and mean opposite things.
 	Empty bool `json:"empty"`
+}
+
+// LinkCoverageView is how much of a customer's activity a linked-derived spend figure reflects (P11
+// FR17, tasks 5.2/5.3). It distinguishes COMPLETE coverage from UNKNOWN coverage: a figure at 100% and
+// a figure whose denominator is unknown look identical as a number and mean opposite things, and
+// collapsing them is what a billing dispute is made of.
+type LinkCoverageView struct {
+	// RunsLinked is the numerator: runs whose events reached the platform.
+	RunsLinked int `json:"runs_linked"`
+	// RunsReported is the denominator: how many runs the CLI observed. A lower bound on total activity.
+	RunsReported int `json:"runs_reported"`
+	// Known is false when no denominator has been reported — coverage is UNKNOWN, neither complete nor a
+	// measured fraction. The console renders unknown distinctly, never as zero or as full.
+	Known bool `json:"known"`
+	// Complete is true only when every reported run is linked AND the denominator is known.
+	Complete bool `json:"complete"`
 }
 
 // PeriodPoint is one period's figure for the trend charts.
@@ -281,10 +303,16 @@ func (s *Server) handleP7Billing(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "the p7 billing surface is not mounted on this server"})
 		return
 	}
-	v, ok := s.p7.Billing(r.PathValue("customer_id"), r.URL.Query().Get("period"))
+	customerID := r.PathValue("customer_id")
+	v, ok := s.p7.Billing(customerID, r.URL.Query().Get("period"))
 	if !ok {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no billing account for " + r.PathValue("customer_id")})
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no billing account for " + customerID})
 		return
+	}
+	// Join the linking read model: SUM is derived from linked runs, so the figure carries its coverage
+	// (FR17). Absent when linking is not mounted → the console shows coverage as unknown, never complete.
+	if v.LinkCoverage == nil {
+		v.LinkCoverage = s.linkCoverageFor(customerID)
 	}
 	writeJSON(w, http.StatusOK, v)
 }

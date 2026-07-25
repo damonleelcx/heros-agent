@@ -44,3 +44,7 @@
 /p55hermes
 /p6demo
 /p6hermes
+
+# P11 CLI local run store (customer-side; never committed) + release output
+/.heros/
+/dist/

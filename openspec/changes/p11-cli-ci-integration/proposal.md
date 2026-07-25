@@ -43,8 +43,8 @@ which the project's priority ordering does not permit.
 ## What Changes
 
 - **New capability `cli`.** The command set the product advertises — **`discover`**, **`apply`**
-  (Variant Spec → reviewable diff), **`eval`** (multi-seed run + score), plus `login`, `link`, and
-  `status`. All of `discover` / `apply` / `eval` complete **with no platform account and no network
+  (Variant Spec → reviewable diff), **`eval`** (multi-seed run + score), plus `login`, `link`,
+  `status`, and `version`. All of `discover` / `apply` / `eval` complete **with no platform account and no network
   access**: the free tier has to be genuinely free to be an ingestion standard, and an offline
   guarantee is also the simplest possible answer in a security review. **Provider credentials are read
   from the customer's environment and used only for calls their own machine makes** — they are never

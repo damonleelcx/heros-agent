@@ -484,6 +484,7 @@ export interface BillingView {
   sum: number;
   sum_unit: string;
   sum_trend?: PeriodPoint[] | null;
+  link_coverage?: LinkCoverageView | null;
   meters: MeterView[] | null;
   plan_id: string;
   plan_name: string;
@@ -502,6 +503,13 @@ export interface PeriodPoint {
   sum: number;
   baseline_sum: number;
   optimized_sum: number;
+}
+
+export interface LinkCoverageView {
+  runs_linked: number;
+  runs_reported: number;
+  known: boolean;
+  complete: boolean;
 }
 
 export interface MeterView {

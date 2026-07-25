@@ -1,7 +1,7 @@
-# CLI — Spec Delta (P11)
+# CLI — Spec (folded from P11)
 
-Product rationale: [`../../../../../docs/prd/P11-cli-ci-integration.md`](../../../../../docs/prd/P11-cli-ci-integration.md)
-§6 (FR1–FR8) and §7. Design reasoning: [`../../design.md`](../../design.md) Decisions 1, 8, 9.
+Product rationale: [`../../../docs/prd/P11-cli-ci-integration.md`](../../../docs/prd/P11-cli-ci-integration.md)
+§6 (FR1–FR8) and §7. Design reasoning: [`../../changes/p11-cli-ci-integration/design.md`](../../changes/p11-cli-ci-integration/design.md) Decisions 1, 8, 9.
 
 Covers the customer-installed binary: the command set the product advertises, the guarantee that the
 local workflow needs **no account and no network**, provider-credential isolation, the machine/human
@@ -12,7 +12,7 @@ output split, exit codes as a discriminating contract, and explicit version comp
 > A tool that demands an account before it will read a repository does not become a default. The
 > guarantee is also the shortest answer in a security review: it works with the network off.
 
-## ADDED Requirements
+## Requirements
 
 ### Requirement: The CLI SHALL provide discovery, apply, and eval as commands
 
