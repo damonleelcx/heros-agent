@@ -174,7 +174,7 @@ func scoresFrom(ws []runlink.WireScore) []runlink.Score {
 	}
 	out := make([]runlink.Score, 0, len(ws))
 	for _, w := range ws {
-		out = append(out, runlink.Score{Metric: w.Metric, Value: w.Value, CILow: w.CILow, CIHigh: w.CIHigh})
+		out = append(out, runlink.Score(w)) // WireScore and Score are the same shape
 	}
 	return out
 }

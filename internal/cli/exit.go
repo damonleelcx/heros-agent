@@ -55,7 +55,3 @@ func invalidConfig(msg string) *ExitError { return &ExitError{Code: ExitInvalidC
 func operational(msg string, err error) *ExitError {
 	return &ExitError{Code: ExitOperational, Msg: msg, Err: err}
 }
-
-// gateFailed builds an ExitGateFailed error naming the gate that failed (FR23 / task 8.4). A gate
-// failure that does not name the gate is indistinguishable from a crash to the person reading the log.
-func gateFailed(msg string) *ExitError { return &ExitError{Code: ExitGateFailed, Msg: msg} }

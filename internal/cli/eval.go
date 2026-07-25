@@ -336,7 +336,7 @@ func evalConfigHash(workflowID, rev string, seeds []int64, cases []string) strin
 	h.Write([]byte{0})
 	h.Write([]byte(rev))
 	for _, s := range seeds {
-		fmt.Fprintf(h, "\x00s%d", s)
+		_, _ = fmt.Fprintf(h, "\x00s%d", s)
 	}
 	for _, c := range cases {
 		h.Write([]byte{0})

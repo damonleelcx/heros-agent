@@ -93,7 +93,7 @@ func (c *Client) Link(ctx context.Context, p runlink.Payload) (LinkResult, error
 	if err != nil {
 		return LinkResult{}, fmt.Errorf("link: transport: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 
 	switch resp.StatusCode {
@@ -132,7 +132,7 @@ func (c *Client) Validate(ctx context.Context) (identity string, err error) {
 	if err != nil {
 		return "", fmt.Errorf("login: transport: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode == http.StatusUnauthorized {
 		return "", fmt.Errorf("login: the platform rejected this token")

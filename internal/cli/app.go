@@ -213,7 +213,7 @@ func asExit(err error, target **ExitError) bool {
 }
 
 func usage(w io.Writer) {
-	fmt.Fprint(w, strings.TrimLeft(`
+	_, _ = fmt.Fprint(w, strings.TrimLeft(`
 heros — the LLM-workflow evaluation CLI (free on every plan; works offline with no account)
 
 Usage:

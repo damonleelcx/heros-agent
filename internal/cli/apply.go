@@ -143,10 +143,10 @@ func isolate(repo, rev string, s Streams) (dir, kind string, cleanup func(), err
 		return "", "", func() {}, e
 	}
 	if e := copyTree(repo, tmp); e != nil {
-		os.RemoveAll(tmp)
+		_ = os.RemoveAll(tmp)
 		return "", "", func() {}, e
 	}
-	return tmp, "temp-copy", func() { os.RemoveAll(tmp) }, nil
+	return tmp, "temp-copy", func() { _ = os.RemoveAll(tmp) }, nil
 }
 
 // acquireWorktree clones repo bare and checks rev out into an isolated worktree (ADR-001).
@@ -158,15 +158,15 @@ func acquireWorktree(repo, rev string) (dir string, cleanup func(), err error) {
 	ctx := context.Background()
 	pool, err := worktree.NewPool(ctx, repo, root)
 	if err != nil {
-		os.RemoveAll(root)
+		_ = os.RemoveAll(root)
 		return "", nil, err
 	}
 	wt, err := pool.Acquire(ctx, rev, "heros-apply")
 	if err != nil {
-		os.RemoveAll(root)
+		_ = os.RemoveAll(root)
 		return "", nil, err
 	}
-	return wt.Dir, func() { os.RemoveAll(root) }, nil
+	return wt.Dir, func() { _ = os.RemoveAll(root) }, nil
 }
 
 func isGitRepo(repo string) bool {
@@ -214,12 +214,12 @@ func copyFile(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	defer in.Close()
+	defer func() { _ = in.Close() }()
 	out, err := os.Create(dst)
 	if err != nil {
 		return err
 	}
-	defer out.Close()
+	defer func() { _ = out.Close() }()
 	_, err = io.Copy(out, in)
 	return err
 }

@@ -79,7 +79,7 @@ func main() {
 
 	// Credentials land in a temp config dir so this demo is self-contained.
 	tmp, _ := os.MkdirTemp("", "herosdemolink-")
-	os.Setenv("HEROS_CONFIG_DIR", tmp)
+	_ = os.Setenv("HEROS_CONFIG_DIR", tmp)
 
 	streams := cli.Streams{Out: os.Stdout, Err: os.Stderr}
 	cfg := func(kv map[string]string) cli.Config {

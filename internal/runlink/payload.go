@@ -88,7 +88,7 @@ func BuildPayload(r RunRecord) Payload {
 		RunsReported: r.RunsReported,
 	}
 	for _, s := range r.Scores {
-		p.Scores = append(p.Scores, WireScore{Metric: s.Metric, Value: s.Value, CILow: s.CILow, CIHigh: s.CIHigh})
+		p.Scores = append(p.Scores, WireScore(s)) // Score and WireScore are the same shape
 	}
 	// Deliberately NOT copied: per-node metrics carry no content, but they are aggregate-derivable and
 	// omitting them keeps the wire surface minimal. Everything sent is above; nothing below.

@@ -109,7 +109,7 @@ func TestUnknownVsCompleteCoverage(t *testing.T) {
 	// Complete: report 1, link 1.
 	_, _, links := newHarness()
 	links.ObserveRunsReported("t", 1)
-	links.Record(LinkedRun{RunID: "r1", TenantID: "t", LinkedAt: time.Now()})
+	_, _ = links.Record(LinkedRun{RunID: "r1", TenantID: "t", LinkedAt: time.Now()})
 	if c := links.Coverage("t"); !c.Complete || !c.Known {
 		t.Errorf("complete coverage misreported: %+v", c)
 	}

@@ -93,5 +93,5 @@ func (s Streams) EmitJSON(command string, exitCode int, data any, gate *GateResu
 // Narratef writes human narration to the error stream. Progress, warnings, and the human-readable
 // success line all go here — never to stdout.
 func (s Streams) Narratef(format string, args ...any) {
-	fmt.Fprintf(s.Err, format+"\n", args...)
+	_, _ = fmt.Fprintf(s.Err, format+"\n", args...)
 }
