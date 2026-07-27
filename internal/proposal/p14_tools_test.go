@@ -7,7 +7,6 @@ import (
 	"github.com/heros-foreal/agentd/internal/diagnosis"
 	"github.com/heros-foreal/agentd/internal/evalharness"
 	"github.com/heros-foreal/agentd/internal/patternclassifier"
-	"github.com/heros-foreal/agentd/internal/variantspec"
 )
 
 // P14 §6 — tool pruning and minimization as catalog operators.
@@ -200,11 +199,18 @@ func TestPrunedCandidateIsAnOrdinaryConfig(t *testing.T) {
 		Discovered: []string{"weatherTool", "sqlTool"}, Exercised: []string{"weatherTool"}})})
 	c := findCandidate(t, em.Candidates, OpToolPrune, "tool_a")
 
-	// It is a plain Variant Spec: the same type every other operator emits, valid on its own terms.
+	// It is a plain Variant Spec — the same type every other operator emits — and valid on its own
+	// terms. Validate() is the assertion that carries weight: it is what proves a prune produced a spec
+	// the ordinary resolve path will accept, so no dimension-specific scoring code is needed.
+	//
+	// 🚫 A `var _ *variantspec.VariantSpec = c.Spec` line used to sit here as a "type check". It asserted
+	// nothing: Candidate.Spec is DECLARED as that type, so the compiler already knew, and the line could
+	// not fail for any change to this operator. staticcheck (QF1011) was right to flag it — a test line
+	// that cannot go red is decoration, and decoration in a test is worse than absence because it reads
+	// as coverage.
 	if err := c.Spec.Validate(); err != nil {
 		t.Fatalf("a pruned candidate must be a structurally valid Variant Spec: %v", err)
 	}
-	var _ *variantspec.VariantSpec = c.Spec
 	if VerifyOrderHint(OpToolPrune) >= VerifyOrderHint(OpPromptRewrite) {
 		t.Error("a single tool deletion should verify before an expensive prompt sweep")
 	}
