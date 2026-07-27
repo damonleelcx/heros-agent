@@ -1,0 +1,9 @@
+[Operator console — TENANTS — /tenants]  "Acting as adm-superadmin · SUPERADMIN"
+Nav: Overview · Tenants · Billing · Model Registry · Jobs & Fleet · Kill Switch · Cross-Tenant · Audit Log · Compliance
+5 tenants; status resolved through the SAME gate the optimizer loop reads before every merge:
+  tenant-acme    Enterprise  ACTIVE  RUNNING  plan-cfg-p8hermes-2026-03
+  tenant-boreal  Business    ACTIVE  RUNNING  plan-cfg-p8hermes-2026-03
+  tenant-castle  Team        ACTIVE  RUNNING  plan-cfg-p8hermes-2026-03
+  tenant-dune    Team        ACTIVE  RUNNING  plan-cfg-p8hermes-2026-03
+  tenant-hermes  Enterprise  ACTIVE  RUNNING  plan-cfg-p8hermes-2026-03
+Plans are NAMED (opaque price references) — no price value on the surface.

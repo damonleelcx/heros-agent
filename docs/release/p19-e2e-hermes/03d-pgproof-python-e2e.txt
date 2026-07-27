@@ -1,0 +1,8 @@
+== start postgres:16-alpine (container heros-pgproof-9521) ==
+== wait for readiness on 127.0.0.1:32787 ==
+== run: go test -tags pgproof -count=1 ./internal/e2e/ -run TestE2E_Python_ModelOverrideIsGeneratedAppliedAndVerified -v ==
+=== RUN   TestE2E_Python_ModelOverrideIsGeneratedAppliedAndVerified
+2026/07/26 22:33:26 WARN worktree: verified with a weaker gate than type-checked; this transform will always require human review language=python dir=/var/folders/xl/4g22zs2s0qldcjw3d70my6080000gn/T/TestE2E_Python_ModelOverrideIsGeneratedAppliedAndVerified1895017508/002/pool/wt/variant-fff671d0055d strength=syntax-checked tool="python3 -m py_compile" unavailable="the repository configures no type checker (no pyright or mypy configuration found), so only parse validity could be proved"
+--- PASS: TestE2E_Python_ModelOverrideIsGeneratedAppliedAndVerified (0.31s)
+PASS
+ok  	github.com/heros-foreal/agentd/internal/e2e	1.336s

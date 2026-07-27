@@ -1,0 +1,13 @@
+heros 0.11.0-dev · contract p11.link.v1 · output p11.cli.v1 · link https://heros-agent.space
+{
+  "contract_version": "p11.cli.v1",
+  "command": "version",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "tool_version": "0.11.0-dev",
+    "contract_version": "p11.link.v1",
+    "output_contract_version": "p11.cli.v1",
+    "link_endpoint": "https://heros-agent.space"
+  }
+}

@@ -1,0 +1,5 @@
+[Operator console — security posture, verified live]
+- Admin API (:4311) refuses a direct (non-BFF) request:
+    {"detail":"this request did not come through the admin backend-for-frontend","error":"admin_bff_credential_required"}
+- Sign-in requires SSO subject + MFA factor (WebAuthn/TOTP); test fixture sso|superadmin.
+- Second origin: admin console on :4310, customer console on :4320 — disjoint cookie jars.

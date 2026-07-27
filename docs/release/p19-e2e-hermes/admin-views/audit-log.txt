@@ -1,0 +1,7 @@
+[Operator console — AUDIT LOG — /audit]
+"Append-only and hash-chained. Every admin action and every autonomous merge is here, and no role
+ — not even Superadmin — can alter or remove an entry without breaking the chain."
+CHAIN VERIFICATION: INTACT — 2 entries verified end to end (each entry's hash covers the one before it).
+Entries (newest first), columns SEQ/WHEN/ACTOR/ACTION/TARGET/RESULT/REASON/EVIDENCE:
+  2  system:p6-autonomous-loop  p6.autonomous.merge  tenant:tenant-acme  APPLIED    held-out +0.420, cost -0.0031
+  1  system:p6-autonomous-loop  p6.autonomous.merge  tenant:tenant-acme  ATTEMPTED  held-out +0.420, cost -0.0031

@@ -1,0 +1,18 @@
+=== apply/codemod against REAL nousresearch/hermes-agent checkout ===
+=== RUN   TestRealRepo_HermesAgent_SplatCallSitesAreRefusedNotMisRewritten
+    realrepo_test.go:75: hermes-agent: 40 discovered node(s) — 4 honestly rewritable, 33 refused (unpacking), 3 refused (other)
+    realrepo_test.go:78:   rewritable: n_008b903482b33087 (optional-skills/research/darwinian-evolver/scripts/parrot_openrouter.py:47)
+    realrepo_test.go:78:   rewritable: n_72be74d0cd763f6b (optional-skills/research/darwinian-evolver/templates/custom_problem_template.py:55)
+    realrepo_test.go:78:   rewritable: n_b8342c53b452ef71 (optional-skills/security/godmode/scripts/auto_jailbreak.py:355)
+    realrepo_test.go:78:   rewritable: n_e8a5bc82cc9eb543 (optional-skills/security/godmode/scripts/godmode_race.py:286)
+    realrepo_test.go:81:   refused (other): n_6c774a4ddb384bdc (agent/bedrock_adapter.py:1516)
+            transform: cannot rewrite this call site safely: node "n_6c774a4ddb384bdc", dimension "model": call site is an bedrock SDK call but the override selects provider "openai"; swapping providers means rewriting the SDK call itself (different client, params type, and response shape), which this engine does not do (ADR-002)
+    realrepo_test.go:81:   refused (other): n_6c7a049af87ce927 (agent/bedrock_adapter.py:1120)
+            transform: cannot rewrite this call site safely: node "n_6c7a049af87ce927", dimension "model": call site is an bedrock SDK call but the override selects provider "openai"; swapping providers means rewriting the SDK call itself (different client, params type, and response shape), which this engine does not do (ADR-002)
+    realrepo_test.go:81:   refused (other): n_f8980d38d822e490 (agent/bedrock_adapter.py:1173)
+            transform: cannot rewrite this call site safely: node "n_f8980d38d822e490", dimension "model": call site is an bedrock SDK call but the override selects provider "openai"; swapping providers means rewriting the SDK call itself (different client, params type, and response shape), which this engine does not do (ADR-002)
+    realrepo_test.go:111: n_3ac4435908c48539 (agent/auxiliary_client.py:7458) is now refused:
+        transform: cannot rewrite this call site safely: node "n_3ac4435908c48539", dimension "model": the model argument is not written at this call site and there is no place to add one: this call site passes **kwargs, so the arguments it actually sends are assembled at runtime and are not written here. `model` may ALREADY be among them — in Python it is a dict built somewhere else in the program, and a type-free parse cannot prove what is or is not in it. Adding `model=` would therefore not reliably override the model: if the unpacking already carries it, the call raises TypeError ("got multiple values for keyword argument 'model'") at runtime, and Python's gate cannot catch that — the file still PARSES, so the transform would be recorded `built` and shown to a reviewer with a green badge over a call that cannot execute. Set the model where **kwargs is assembled, or pass it as a written argument this engine can replace
+--- PASS: TestRealRepo_HermesAgent_SplatCallSitesAreRefusedNotMisRewritten (361.10s)
+PASS
+ok  	github.com/heros-foreal/agentd/internal/transform	361.505s

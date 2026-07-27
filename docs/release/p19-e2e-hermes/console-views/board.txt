@@ -1,0 +1,6 @@
+[Customer console — BOARD view — /app/workflows/nousresearch%2Fhermes-agent/board]
+"This subsystem is not mounted on this deployment" — graceful degradation:
+p9hermes mounts only P1 (discovery) + P3.5 (pattern graph); P2/P2.5/P4/P4.5/P5.5/P7 answer 503 not-mounted.
+The console renders that as a subsystem ABSENT on this deployment — distinct from a 404 and from a transport failure.
+Body: "p4 board is not mounted on this server". Everything else on the console is unaffected.
+VERIFIED via browser screenshot.

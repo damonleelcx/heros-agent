@@ -1,0 +1,7 @@
+[Customer console — GRAPH view — http://127.0.0.1:4320/app/workflows/nousresearch%2Fhermes-agent/graph]
+NODES 40 (call sites found) · EDGES 0 (dependencies mapped) · LLM FALLBACK CALLS 0 (fully rule-covered — no model was consulted)
+ir 1.0.0 · taxonomy 1.0.0
+All 40 nodes rendered with provider labels matching the IR: 37 openai/unresolved, 3 bedrock/unresolved
+(bedrock nodes: n_6c774a4ddb384bdc, n_6c7a049af87ce927, n_f8980d38d822e490).
+Patterns: 0 labelled · 40 not yet — each unlabelled region explains WHY (no structural signature matched; no model consulted or fallback returned nothing in taxonomy).
+VERIFIED: browser screenshot rendered the graph with the design system (left nav Overview/Workflows/Runs/Variants/Transforms/Delivery/Studio).

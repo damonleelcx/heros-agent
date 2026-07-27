@@ -1,0 +1,35 @@
+--- PASS: TestEmitAdapter_AllKindsParse (0.00s)
+=== RUN   TestGenerateTransform_PythonAdapterRunsNoHalt
+--- PASS: TestGenerateTransform_PythonAdapterRunsNoHalt (0.02s)
+=== RUN   TestGenerateTransform_AdapterAppearsInDiff
+--- PASS: TestGenerateTransform_AdapterAppearsInDiff (0.00s)
+=== RUN   TestGenerateTransform_AdapterBuildsAndRunsNoHalt
+--- PASS: TestGenerateTransform_AdapterBuildsAndRunsNoHalt (0.55s)
+=== RUN   TestGenerate_Python_ModelOverrideRewritesTheModelArgument
+--- PASS: TestGenerate_Python_ModelOverrideRewritesTheModelArgument (0.00s)
+=== RUN   TestGenerate_Python_ModelInsertedWhenTheCallSiteNeverSetOne
+--- PASS: TestGenerate_Python_ModelInsertedWhenTheCallSiteNeverSetOne (0.00s)
+=== RUN   TestGenerate_Python_ModelInsertIsRefusedUnderKwargsSplat
+--- PASS: TestGenerate_Python_ModelInsertIsRefusedUnderKwargsSplat (0.00s)
+=== RUN   TestGenerate_Python_ModelInsertIsRefusedUnderArgsSplat
+--- PASS: TestGenerate_Python_ModelInsertIsRefusedUnderArgsSplat (0.00s)
+=== RUN   TestGenerate_Python_ModelReplacementStillWorksAlongsideAKwargsSplat
+--- PASS: TestGenerate_Python_ModelReplacementStillWorksAlongsideAKwargsSplat (0.00s)
+=== RUN   TestGenerate_Python_IsDeterministic
+--- PASS: TestGenerate_Python_IsDeterministic (0.00s)
+=== RUN   TestGenerate_Python_PromptRefusesAMessageList
+--- PASS: TestGenerate_Python_PromptRefusesAMessageList (0.00s)
+=== RUN   TestGenerate_Python_PromptRefusesAnFString
+--- PASS: TestGenerate_Python_PromptRefusesAnFString (0.00s)
+=== RUN   TestGenerate_Python_PromptRewritesAStaticStringKeyword
+--- PASS: TestGenerate_Python_PromptRewritesAStaticStringKeyword (0.00s)
+=== RUN   TestGenerate_Python_ProviderSwapIsRefused
+--- PASS: TestGenerate_Python_ProviderSwapIsRefused (0.00s)
+=== RUN   TestGenerate_Java_RefusalNamesTheRealCause
+--- PASS: TestGenerate_Java_RefusalNamesTheRealCause (0.00s)
+=== RUN   TestGenerate_Rust_RefusalNamesTheRealCause
+--- PASS: TestGenerate_Rust_RefusalNamesTheRealCause (0.00s)
+=== RUN   TestGenerate_Python_SkillsAndContextStillRefuse
+--- PASS: TestGenerate_Python_SkillsAndContextStillRefuse (0.00s)
+PASS
+ok  	github.com/heros-foreal/agentd/internal/transform	1.001s

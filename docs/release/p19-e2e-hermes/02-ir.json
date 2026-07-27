@@ -1,0 +1,1494 @@
+{
+  "ir_version": "1.0.0",
+  "workflow": {
+    "id": "workflow",
+    "repo": {
+      "url": "https://github.com/nousresearch/hermes-agent.git",
+      "commit_sha": "528e3350374b4ecdd4d5721be9a29f4a93cfe79a"
+    },
+    "language": "python"
+  },
+  "nodes": [
+    {
+      "node_id": "n_0017914833d3d240",
+      "kind": "static_definition",
+      "call_site": {
+        "file": "trajectory_compressor.py",
+        "symbol": "TrajectoryCompressor._generate_summary_async",
+        "line_start": 728,
+        "line_end": 728,
+        "ast_path": "TrajectoryCompressor._generate_summary_async/chat.completions.create"
+      },
+      "model": {
+        "provider": "openai",
+        "model_id": "unresolved",
+        "params": {}
+      },
+      "prompt": {
+        "inline": "",
+        "variables": []
+      },
+      "tools_skills": [],
+      "context_assembly": {
+        "policy": "inline_messages",
+        "description": "static call site (syntactic frontend; no type resolution)"
+      },
+      "io_contract": {
+        "input_schema": {
+          "type": "object"
+        },
+        "output_schema": {
+          "type": "object"
+        }
+      },
+      "invocation_semantics": {
+        "type": "loop",
+        "variable_at_runtime": true
+      }
+    },
+    {
+      "node_id": "n_008b903482b33087",
+      "kind": "static_definition",
+      "call_site": {
+        "file": "optional-skills/research/darwinian-evolver/scripts/parrot_openrouter.py",
+        "symbol": "_prompt_llm",
+        "line_start": 47,
+        "line_end": 51,
+        "ast_path": "_prompt_llm/chat.completions.create"
+      },
+      "model": {
+        "provider": "openai",
+        "model_id": "unresolved",
+        "params": {}
+      },
+      "prompt": {
+        "inline": "",
+        "variables": []
+      },
+      "tools_skills": [],
+      "context_assembly": {
+        "policy": "inline_messages",
+        "description": "static call site (syntactic frontend; no type resolution)"
+      },
+      "io_contract": {
+        "input_schema": {
+          "type": "object"
+        },
+        "output_schema": {
+          "type": "object"
+        }
+      },
+      "invocation_semantics": {
+        "type": "single",
+        "variable_at_runtime": false
+      }
+    },
+    {
+      "node_id": "n_085e375f578473a6",
+      "kind": "static_definition",
+      "call_site": {
+        "file": "mini_swe_runner.py",
+        "symbol": "MiniSWERunner.run_task",
+        "line_start": 468,
+        "line_end": 468,
+        "ast_path": "MiniSWERunner.run_task/client.chat.completions.create"
+      },
+      "model": {
+        "provider": "openai",
+        "model_id": "unresolved",
+        "params": {}
+      },
+      "prompt": {
+        "inline": "",
+        "variables": []
+      },
+      "tools_skills": [],
+      "context_assembly": {
+        "policy": "inline_messages",
+        "description": "static call site (syntactic frontend; no type resolution)"
+      },
+      "io_contract": {
+        "input_schema": {
+          "type": "object"
+        },
+        "output_schema": {
+          "type": "object"
+        }
+      },
+      "invocation_semantics": {
+        "type": "loop",
+        "variable_at_runtime": true
+      }
+    },
+    {
+      "node_id": "n_2d26e4fd7432a5aa",
+      "kind": "static_definition",
+      "call_site": {
+        "file": "agent/chat_completion_helpers.py",
+        "symbol": "handle_max_iterations",
+        "line_start": 2101,
+        "line_end": 2101,
+        "ast_path": "handle_max_iterations/chat.completions.create"
+      },
+      "model": {
+        "provider": "openai",
+        "model_id": "unresolved",
+        "params": {}
+      },
+      "prompt": {
+        "inline": "",
+        "variables": []
+      },
+      "tools_skills": [],
+      "context_assembly": {
+        "policy": "inline_messages",
+        "description": "static call site (syntactic frontend; no type resolution)"
+      },
+      "io_contract": {
+        "input_schema": {
+          "type": "object"
+        },
+        "output_schema": {
+          "type": "object"
+        }
+      },
+      "invocation_semantics": {
+        "type": "conditional",
+        "variable_at_runtime": false
+      }
+    },
+    {
+      "node_id": "n_310ba64b6df50a1d",
+      "kind": "static_definition",
+      "call_site": {
+        "file": "agent/chat_completion_helpers.py",
+        "symbol": "_dispatch_nonstreaming_api_request",
+        "line_start": 430,
+        "line_end": 430,
+        "ast_path": "_dispatch_nonstreaming_api_request/client.chat.completions.create"
+      },
+      "model": {
+        "provider": "openai",
+        "model_id": "unresolved",
+        "params": {}
+      },
+      "prompt": {
+        "inline": "",
+        "variables": []
+      },
+      "tools_skills": [],
+      "context_assembly": {
+        "policy": "inline_messages",
+        "description": "static call site (syntactic frontend; no type resolution)"
+      },
+      "io_contract": {
+        "input_schema": {
+          "type": "object"
+        },
+        "output_schema": {
+          "type": "object"
+        }
+      },
+      "invocation_semantics": {
+        "type": "conditional",
+        "variable_at_runtime": false
+      }
+    },
+    {
+      "node_id": "n_38b7ac6b1eda80fa",
+      "kind": "static_definition",
+      "call_site": {
+        "file": "agent/auxiliary_client.py",
+        "symbol": "_call_fallback_candidate_async",
+        "line_start": 4033,
+        "line_end": 4033,
+        "ast_path": "_call_fallback_candidate_async/chat.completions.create"
+      },
+      "model": {
+        "provider": "openai",
+        "model_id": "unresolved",
+        "params": {}
+      },
+      "prompt": {
+        "inline": "",
+        "variables": []
+      },
+      "tools_skills": [],
+      "context_assembly": {
+        "policy": "inline_messages",
+        "description": "static call site (syntactic frontend; no type resolution)"
+      },
+      "io_contract": {
+        "input_schema": {
+          "type": "object"
+        },
+        "output_schema": {
+          "type": "object"
+        }
+      },
+      "invocation_semantics": {
+        "type": "single",
+        "variable_at_runtime": false
+      }
+    },
+    {
+      "node_id": "n_3ac4435908c48539",
+      "kind": "static_definition",
+      "call_site": {
+        "file": "agent/auxiliary_client.py",
+        "symbol": "call_llm",
+        "line_start": 7458,
+        "line_end": 7458,
+        "ast_path": "call_llm/chat.completions.create"
+      },
+      "model": {
+        "provider": "openai",
+        "model_id": "unresolved",
+        "params": {}
+      },
+      "prompt": {
+        "inline": "",
+        "variables": []
+      },
+      "tools_skills": [],
+      "context_assembly": {
+        "policy": "inline_messages",
+        "description": "static call site (syntactic frontend; no type resolution)"
+      },
+      "io_contract": {
+        "input_schema": {
+          "type": "object"
+        },
+        "output_schema": {
+          "type": "object"
+        }
+      },
+      "invocation_semantics": {
+        "type": "conditional",
+        "variable_at_runtime": false
+      }
+    },
+    {
+      "node_id": "n_3d007b41e7b0d6ea",
+      "kind": "static_definition",
+      "call_site": {
+        "file": "agent/auxiliary_client.py",
+        "symbol": "async_call_llm",
+        "line_start": 8093,
+        "line_end": 8093,
+        "ast_path": "async_call_llm/chat.completions.create"
+      },
+      "model": {
+        "provider": "openai",
+        "model_id": "unresolved",
+        "params": {}
+      },
+      "prompt": {
+        "inline": "",
+        "variables": []
+      },
+      "tools_skills": [],
+      "context_assembly": {
+        "policy": "inline_messages",
+        "description": "static call site (syntactic frontend; no type resolution)"
+      },
+      "io_contract": {
+        "input_schema": {
+          "type": "object"
+        },
+        "output_schema": {
+          "type": "object"
+        }
+      },
+      "invocation_semantics": {
+        "type": "conditional",
+        "variable_at_runtime": false
+      }
+    },
+    {
+      "node_id": "n_3f8a87a496e50139",
+      "kind": "static_definition",
+      "call_site": {
+        "file": "trajectory_compressor.py",
+        "symbol": "TrajectoryCompressor._generate_summary",
+        "line_start": 659,
+        "line_end": 659,
+        "ast_path": "TrajectoryCompressor._generate_summary/client.chat.completions.create"
+      },
+      "model": {
+        "provider": "openai",
+        "model_id": "unresolved",
+        "params": {}
+      },
+      "prompt": {
+        "inline": "",
+        "variables": []
+      },
+      "tools_skills": [],
+      "context_assembly": {
+        "policy": "inline_messages",
+        "description": "static call site (syntactic frontend; no type resolution)"
+      },
+      "io_contract": {
+        "input_schema": {
+          "type": "object"
+        },
+        "output_schema": {
+          "type": "object"
+        }
+      },
+      "invocation_semantics": {
+        "type": "loop",
+        "variable_at_runtime": true
+      }
+    },
+    {
+      "node_id": "n_46e018a6714ed035",
+      "kind": "static_definition",
+      "call_site": {
+        "file": "agent/auxiliary_client.py",
+        "symbol": "async_call_llm",
+        "line_start": 8049,
+        "line_end": 8049,
+        "ast_path": "async_call_llm/chat.completions.create"
+      },
+      "model": {
+        "provider": "openai",
+        "model_id": "unresolved",
+        "params": {}
+      },
+      "prompt": {
+        "inline": "",
+        "variables": []
+      },
+      "tools_skills": [],
+      "context_assembly": {
+        "policy": "inline_messages",
+        "description": "static call site (syntactic frontend; no type resolution)"
+      },
+      "io_contract": {
+        "input_schema": {
+          "type": "object"
+        },
+        "output_schema": {
+          "type": "object"
+        }
+      },
+      "invocation_semantics": {
+        "type": "conditional",
+        "variable_at_runtime": false
+      }
+    },
+    {
+      "node_id": "n_4887ec54ad5f73ab",
+      "kind": "static_definition",
+      "call_site": {
+        "file": "agent/auxiliary_client.py",
+        "symbol": "_call_fallback_candidate_sync",
+        "line_start": 3984,
+        "line_end": 3984,
+        "ast_path": "_call_fallback_candidate_sync/chat.completions.create"
+      },
+      "model": {
+        "provider": "openai",
+        "model_id": "unresolved",
+        "params": {}
+      },
+      "prompt": {
+        "inline": "",
+        "variables": []
+      },
+      "tools_skills": [],
+      "context_assembly": {
+        "policy": "inline_messages",
+        "description": "static call site (syntactic frontend; no type resolution)"
+      },
+      "io_contract": {
+        "input_schema": {
+          "type": "object"
+        },
+        "output_schema": {
+          "type": "object"
+        }
+      },
+      "invocation_semantics": {
+        "type": "conditional",
+        "variable_at_runtime": false
+      }
+    },
+    {
+      "node_id": "n_4e770b54018b09a0",
+      "kind": "static_definition",
+      "call_site": {
+        "file": "agent/auxiliary_client.py",
+        "symbol": "call_llm",
+        "line_start": 7340,
+        "line_end": 7340,
+        "ast_path": "call_llm/chat.completions.create"
+      },
+      "model": {
+        "provider": "openai",
+        "model_id": "unresolved",
+        "params": {}
+      },
+      "prompt": {
+        "inline": "",
+        "variables": []
+      },
+      "tools_skills": [],
+      "context_assembly": {
+        "policy": "inline_messages",
+        "description": "static call site (syntactic frontend; no type resolution)"
+      },
+      "io_contract": {
+        "input_schema": {
+          "type": "object"
+        },
+        "output_schema": {
+          "type": "object"
+        }
+      },
+      "invocation_semantics": {
+        "type": "loop",
+        "variable_at_runtime": true
+      }
+    },
+    {
+      "node_id": "n_52abb2a4e135a09b",
+      "kind": "static_definition",
+      "call_site": {
+        "file": "agent/auxiliary_client.py",
+        "symbol": "call_llm",
+        "line_start": 7307,
+        "line_end": 7307,
+        "ast_path": "call_llm/chat.completions.create"
+      },
+      "model": {
+        "provider": "openai",
+        "model_id": "unresolved",
+        "params": {}
+      },
+      "prompt": {
+        "inline": "",
+        "variables": []
+      },
+      "tools_skills": [],
+      "context_assembly": {
+        "policy": "inline_messages",
+        "description": "static call site (syntactic frontend; no type resolution)"
+      },
+      "io_contract": {
+        "input_schema": {
+          "type": "object"
+        },
+        "output_schema": {
+          "type": "object"
+        }
+      },
+      "invocation_semantics": {
+        "type": "single",
+        "variable_at_runtime": false
+      }
+    },
+    {
+      "node_id": "n_540fdd84d80030aa",
+      "kind": "static_definition",
+      "call_site": {
+        "file": "agent/auxiliary_client.py",
+        "symbol": "_call_fallback_candidate_async",
+        "line_start": 4051,
+        "line_end": 4051,
+        "ast_path": "_call_fallback_candidate_async/chat.completions.create"
+      },
+      "model": {
+        "provider": "openai",
+        "model_id": "unresolved",
+        "params": {}
+      },
+      "prompt": {
+        "inline": "",
+        "variables": []
+      },
+      "tools_skills": [],
+      "context_assembly": {
+        "policy": "inline_messages",
+        "description": "static call site (syntactic frontend; no type resolution)"
+      },
+      "io_contract": {
+        "input_schema": {
+          "type": "object"
+        },
+        "output_schema": {
+          "type": "object"
+        }
+      },
+      "invocation_semantics": {
+        "type": "conditional",
+        "variable_at_runtime": false
+      }
+    },
+    {
+      "node_id": "n_5c5d838bae45bfbb",
+      "kind": "static_definition",
+      "call_site": {
+        "file": "tests/run_agent/test_deepseek_v4_thinking_live.py",
+        "symbol": "test_deepseek_v4_thinking_tool_call_replay_round_trip",
+        "line_start": 151,
+        "line_end": 151,
+        "ast_path": "test_deepseek_v4_thinking_tool_call_replay_round_trip/chat.completions.create"
+      },
+      "model": {
+        "provider": "openai",
+        "model_id": "unresolved",
+        "params": {}
+      },
+      "prompt": {
+        "inline": "",
+        "variables": []
+      },
+      "tools_skills": [],
+      "context_assembly": {
+        "policy": "inline_messages",
+        "description": "static call site (syntactic frontend; no type resolution)"
+      },
+      "io_contract": {
+        "input_schema": {
+          "type": "object"
+        },
+        "output_schema": {
+          "type": "object"
+        }
+      },
+      "invocation_semantics": {
+        "type": "single",
+        "variable_at_runtime": false
+      }
+    },
+    {
+      "node_id": "n_66c7cbadf69e2d0e",
+      "kind": "static_definition",
+      "call_site": {
+        "file": "agent/auxiliary_client.py",
+        "symbol": "async_call_llm",
+        "line_start": 7927,
+        "line_end": 7927,
+        "ast_path": "async_call_llm/chat.completions.create"
+      },
+      "model": {
+        "provider": "openai",
+        "model_id": "unresolved",
+        "params": {}
+      },
+      "prompt": {
+        "inline": "",
+        "variables": []
+      },
+      "tools_skills": [],
+      "context_assembly": {
+        "policy": "inline_messages",
+        "description": "static call site (syntactic frontend; no type resolution)"
+      },
+      "io_contract": {
+        "input_schema": {
+          "type": "object"
+        },
+        "output_schema": {
+          "type": "object"
+        }
+      },
+      "invocation_semantics": {
+        "type": "conditional",
+        "variable_at_runtime": false
+      }
+    },
+    {
+      "node_id": "n_6c774a4ddb384bdc",
+      "kind": "static_definition",
+      "call_site": {
+        "file": "agent/bedrock_adapter.py",
+        "symbol": "probe_bedrock_context_length",
+        "line_start": 1516,
+        "line_end": 1520,
+        "ast_path": "probe_bedrock_context_length/converse"
+      },
+      "model": {
+        "provider": "bedrock",
+        "model_id": "unresolved",
+        "params": {}
+      },
+      "prompt": {
+        "inline": "",
+        "variables": []
+      },
+      "tools_skills": [],
+      "context_assembly": {
+        "policy": "inline_messages",
+        "description": "static call site (syntactic frontend; no type resolution)"
+      },
+      "io_contract": {
+        "input_schema": {
+          "type": "object"
+        },
+        "output_schema": {
+          "type": "object"
+        }
+      },
+      "invocation_semantics": {
+        "type": "loop",
+        "variable_at_runtime": true
+      }
+    },
+    {
+      "node_id": "n_6c7a049af87ce927",
+      "kind": "static_definition",
+      "call_site": {
+        "file": "agent/bedrock_adapter.py",
+        "symbol": "call_converse",
+        "line_start": 1120,
+        "line_end": 1120,
+        "ast_path": "call_converse/converse"
+      },
+      "model": {
+        "provider": "bedrock",
+        "model_id": "unresolved",
+        "params": {}
+      },
+      "prompt": {
+        "inline": "",
+        "variables": []
+      },
+      "tools_skills": [],
+      "context_assembly": {
+        "policy": "inline_messages",
+        "description": "static call site (syntactic frontend; no type resolution)"
+      },
+      "io_contract": {
+        "input_schema": {
+          "type": "object"
+        },
+        "output_schema": {
+          "type": "object"
+        }
+      },
+      "invocation_semantics": {
+        "type": "single",
+        "variable_at_runtime": false
+      }
+    },
+    {
+      "node_id": "n_72be74d0cd763f6b",
+      "kind": "static_definition",
+      "call_site": {
+        "file": "optional-skills/research/darwinian-evolver/templates/custom_problem_template.py",
+        "symbol": "_prompt_llm",
+        "line_start": 55,
+        "line_end": 59,
+        "ast_path": "_prompt_llm/chat.completions.create"
+      },
+      "model": {
+        "provider": "openai",
+        "model_id": "unresolved",
+        "params": {}
+      },
+      "prompt": {
+        "inline": "",
+        "variables": []
+      },
+      "tools_skills": [],
+      "context_assembly": {
+        "policy": "inline_messages",
+        "description": "static call site (syntactic frontend; no type resolution)"
+      },
+      "io_contract": {
+        "input_schema": {
+          "type": "object"
+        },
+        "output_schema": {
+          "type": "object"
+        }
+      },
+      "invocation_semantics": {
+        "type": "single",
+        "variable_at_runtime": false
+      }
+    },
+    {
+      "node_id": "n_7ee4c8dcc05a1ab5",
+      "kind": "static_definition",
+      "call_site": {
+        "file": "agent/auxiliary_client.py",
+        "symbol": "async_call_llm",
+        "line_start": 7961,
+        "line_end": 7961,
+        "ast_path": "async_call_llm/chat.completions.create"
+      },
+      "model": {
+        "provider": "openai",
+        "model_id": "unresolved",
+        "params": {}
+      },
+      "prompt": {
+        "inline": "",
+        "variables": []
+      },
+      "tools_skills": [],
+      "context_assembly": {
+        "policy": "inline_messages",
+        "description": "static call site (syntactic frontend; no type resolution)"
+      },
+      "io_contract": {
+        "input_schema": {
+          "type": "object"
+        },
+        "output_schema": {
+          "type": "object"
+        }
+      },
+      "invocation_semantics": {
+        "type": "conditional",
+        "variable_at_runtime": false
+      }
+    },
+    {
+      "node_id": "n_81a7fcf8329953d7",
+      "kind": "static_definition",
+      "call_site": {
+        "file": "agent/auxiliary_client.py",
+        "symbol": "call_llm",
+        "line_start": 7395,
+        "line_end": 7395,
+        "ast_path": "call_llm/chat.completions.create"
+      },
+      "model": {
+        "provider": "openai",
+        "model_id": "unresolved",
+        "params": {}
+      },
+      "prompt": {
+        "inline": "",
+        "variables": []
+      },
+      "tools_skills": [],
+      "context_assembly": {
+        "policy": "inline_messages",
+        "description": "static call site (syntactic frontend; no type resolution)"
+      },
+      "io_contract": {
+        "input_schema": {
+          "type": "object"
+        },
+        "output_schema": {
+          "type": "object"
+        }
+      },
+      "invocation_semantics": {
+        "type": "conditional",
+        "variable_at_runtime": false
+      }
+    },
+    {
+      "node_id": "n_8393edf5a7c4c846",
+      "kind": "static_definition",
+      "call_site": {
+        "file": "agent/auxiliary_client.py",
+        "symbol": "call_llm",
+        "line_start": 7536,
+        "line_end": 7536,
+        "ast_path": "call_llm/chat.completions.create"
+      },
+      "model": {
+        "provider": "openai",
+        "model_id": "unresolved",
+        "params": {}
+      },
+      "prompt": {
+        "inline": "",
+        "variables": []
+      },
+      "tools_skills": [],
+      "context_assembly": {
+        "policy": "inline_messages",
+        "description": "static call site (syntactic frontend; no type resolution)"
+      },
+      "io_contract": {
+        "input_schema": {
+          "type": "object"
+        },
+        "output_schema": {
+          "type": "object"
+        }
+      },
+      "invocation_semantics": {
+        "type": "conditional",
+        "variable_at_runtime": false
+      }
+    },
+    {
+      "node_id": "n_8469abc7e4483139",
+      "kind": "static_definition",
+      "call_site": {
+        "file": "agent/auxiliary_client.py",
+        "symbol": "async_call_llm",
+        "line_start": 7916,
+        "line_end": 7916,
+        "ast_path": "async_call_llm/chat.completions.create"
+      },
+      "model": {
+        "provider": "openai",
+        "model_id": "unresolved",
+        "params": {}
+      },
+      "prompt": {
+        "inline": "",
+        "variables": []
+      },
+      "tools_skills": [],
+      "context_assembly": {
+        "policy": "inline_messages",
+        "description": "static call site (syntactic frontend; no type resolution)"
+      },
+      "io_contract": {
+        "input_schema": {
+          "type": "object"
+        },
+        "output_schema": {
+          "type": "object"
+        }
+      },
+      "invocation_semantics": {
+        "type": "single",
+        "variable_at_runtime": false
+      }
+    },
+    {
+      "node_id": "n_8f4a2cccc9cae5a4",
+      "kind": "static_definition",
+      "call_site": {
+        "file": "agent/auxiliary_client.py",
+        "symbol": "async_call_llm",
+        "line_start": 8022,
+        "line_end": 8022,
+        "ast_path": "async_call_llm/chat.completions.create"
+      },
+      "model": {
+        "provider": "openai",
+        "model_id": "unresolved",
+        "params": {}
+      },
+      "prompt": {
+        "inline": "",
+        "variables": []
+      },
+      "tools_skills": [],
+      "context_assembly": {
+        "policy": "inline_messages",
+        "description": "static call site (syntactic frontend; no type resolution)"
+      },
+      "io_contract": {
+        "input_schema": {
+          "type": "object"
+        },
+        "output_schema": {
+          "type": "object"
+        }
+      },
+      "invocation_semantics": {
+        "type": "conditional",
+        "variable_at_runtime": false
+      }
+    },
+    {
+      "node_id": "n_993cdfd0da974576",
+      "kind": "static_definition",
+      "call_site": {
+        "file": "tests/run_agent/test_deepseek_v4_thinking_live.py",
+        "symbol": "test_deepseek_v4_thinking_tool_call_replay_round_trip",
+        "line_start": 229,
+        "line_end": 229,
+        "ast_path": "test_deepseek_v4_thinking_tool_call_replay_round_trip/chat.completions.create"
+      },
+      "model": {
+        "provider": "openai",
+        "model_id": "unresolved",
+        "params": {}
+      },
+      "prompt": {
+        "inline": "",
+        "variables": []
+      },
+      "tools_skills": [],
+      "context_assembly": {
+        "policy": "inline_messages",
+        "description": "static call site (syntactic frontend; no type resolution)"
+      },
+      "io_contract": {
+        "input_schema": {
+          "type": "object"
+        },
+        "output_schema": {
+          "type": "object"
+        }
+      },
+      "invocation_semantics": {
+        "type": "single",
+        "variable_at_runtime": false
+      }
+    },
+    {
+      "node_id": "n_a108dfe25d4cc260",
+      "kind": "static_definition",
+      "call_site": {
+        "file": "agent/auxiliary_client.py",
+        "symbol": "async_call_llm",
+        "line_start": 7990,
+        "line_end": 7990,
+        "ast_path": "async_call_llm/chat.completions.create"
+      },
+      "model": {
+        "provider": "openai",
+        "model_id": "unresolved",
+        "params": {}
+      },
+      "prompt": {
+        "inline": "",
+        "variables": []
+      },
+      "tools_skills": [],
+      "context_assembly": {
+        "policy": "inline_messages",
+        "description": "static call site (syntactic frontend; no type resolution)"
+      },
+      "io_contract": {
+        "input_schema": {
+          "type": "object"
+        },
+        "output_schema": {
+          "type": "object"
+        }
+      },
+      "invocation_semantics": {
+        "type": "conditional",
+        "variable_at_runtime": false
+      }
+    },
+    {
+      "node_id": "n_afb9cd7032eb5a04",
+      "kind": "static_definition",
+      "call_site": {
+        "file": "agent/chat_completion_helpers.py",
+        "symbol": "handle_max_iterations",
+        "line_start": 2144,
+        "line_end": 2144,
+        "ast_path": "handle_max_iterations/chat.completions.create"
+      },
+      "model": {
+        "provider": "openai",
+        "model_id": "unresolved",
+        "params": {}
+      },
+      "prompt": {
+        "inline": "",
+        "variables": []
+      },
+      "tools_skills": [],
+      "context_assembly": {
+        "policy": "inline_messages",
+        "description": "static call site (syntactic frontend; no type resolution)"
+      },
+      "io_contract": {
+        "input_schema": {
+          "type": "object"
+        },
+        "output_schema": {
+          "type": "object"
+        }
+      },
+      "invocation_semantics": {
+        "type": "conditional",
+        "variable_at_runtime": false
+      }
+    },
+    {
+      "node_id": "n_b2daa3ed32947414",
+      "kind": "static_definition",
+      "call_site": {
+        "file": "agent/auxiliary_client.py",
+        "symbol": "call_llm",
+        "line_start": 7486,
+        "line_end": 7486,
+        "ast_path": "call_llm/chat.completions.create"
+      },
+      "model": {
+        "provider": "openai",
+        "model_id": "unresolved",
+        "params": {}
+      },
+      "prompt": {
+        "inline": "",
+        "variables": []
+      },
+      "tools_skills": [],
+      "context_assembly": {
+        "policy": "inline_messages",
+        "description": "static call site (syntactic frontend; no type resolution)"
+      },
+      "io_contract": {
+        "input_schema": {
+          "type": "object"
+        },
+        "output_schema": {
+          "type": "object"
+        }
+      },
+      "invocation_semantics": {
+        "type": "conditional",
+        "variable_at_runtime": false
+      }
+    },
+    {
+      "node_id": "n_b8342c53b452ef71",
+      "kind": "static_definition",
+      "call_site": {
+        "file": "optional-skills/security/godmode/scripts/auto_jailbreak.py",
+        "symbol": "_test_query",
+        "line_start": 355,
+        "line_end": 361,
+        "ast_path": "_test_query/chat.completions.create"
+      },
+      "model": {
+        "provider": "openai",
+        "model_id": "unresolved",
+        "params": {}
+      },
+      "prompt": {
+        "inline": "",
+        "variables": []
+      },
+      "tools_skills": [],
+      "context_assembly": {
+        "policy": "inline_messages",
+        "description": "static call site (syntactic frontend; no type resolution)"
+      },
+      "io_contract": {
+        "input_schema": {
+          "type": "object"
+        },
+        "output_schema": {
+          "type": "object"
+        }
+      },
+      "invocation_semantics": {
+        "type": "single",
+        "variable_at_runtime": false
+      }
+    },
+    {
+      "node_id": "n_c1b8c1e302c0c48e",
+      "kind": "static_definition",
+      "call_site": {
+        "file": "agent/chat_completion_helpers.py",
+        "symbol": "_dispatch_nonstreaming_api_request",
+        "line_start": 432,
+        "line_end": 432,
+        "ast_path": "_dispatch_nonstreaming_api_request/chat.completions.create"
+      },
+      "model": {
+        "provider": "openai",
+        "model_id": "unresolved",
+        "params": {}
+      },
+      "prompt": {
+        "inline": "",
+        "variables": []
+      },
+      "tools_skills": [],
+      "context_assembly": {
+        "policy": "inline_messages",
+        "description": "static call site (syntactic frontend; no type resolution)"
+      },
+      "io_contract": {
+        "input_schema": {
+          "type": "object"
+        },
+        "output_schema": {
+          "type": "object"
+        }
+      },
+      "invocation_semantics": {
+        "type": "single",
+        "variable_at_runtime": false
+      }
+    },
+    {
+      "node_id": "n_dc32c1a4b50d85cf",
+      "kind": "static_definition",
+      "call_site": {
+        "file": "agent/auxiliary_client.py",
+        "symbol": "async_call_llm",
+        "line_start": 7895,
+        "line_end": 7895,
+        "ast_path": "async_call_llm/chat.completions.create"
+      },
+      "model": {
+        "provider": "openai",
+        "model_id": "unresolved",
+        "params": {}
+      },
+      "prompt": {
+        "inline": "",
+        "variables": []
+      },
+      "tools_skills": [],
+      "context_assembly": {
+        "policy": "inline_messages",
+        "description": "static call site (syntactic frontend; no type resolution)"
+      },
+      "io_contract": {
+        "input_schema": {
+          "type": "object"
+        },
+        "output_schema": {
+          "type": "object"
+        }
+      },
+      "invocation_semantics": {
+        "type": "single",
+        "variable_at_runtime": false
+      }
+    },
+    {
+      "node_id": "n_e4322e9fb3cde5ba",
+      "kind": "static_definition",
+      "call_site": {
+        "file": "agent/auxiliary_client.py",
+        "symbol": "_retry_same_provider_async",
+        "line_start": 3762,
+        "line_end": 3762,
+        "ast_path": "_retry_same_provider_async/chat.completions.create"
+      },
+      "model": {
+        "provider": "openai",
+        "model_id": "unresolved",
+        "params": {}
+      },
+      "prompt": {
+        "inline": "",
+        "variables": []
+      },
+      "tools_skills": [],
+      "context_assembly": {
+        "policy": "inline_messages",
+        "description": "static call site (syntactic frontend; no type resolution)"
+      },
+      "io_contract": {
+        "input_schema": {
+          "type": "object"
+        },
+        "output_schema": {
+          "type": "object"
+        }
+      },
+      "invocation_semantics": {
+        "type": "single",
+        "variable_at_runtime": false
+      }
+    },
+    {
+      "node_id": "n_e46c9402e42e7087",
+      "kind": "static_definition",
+      "call_site": {
+        "file": "agent/auxiliary_client.py",
+        "symbol": "_call_fallback_candidate_sync",
+        "line_start": 3967,
+        "line_end": 3967,
+        "ast_path": "_call_fallback_candidate_sync/chat.completions.create"
+      },
+      "model": {
+        "provider": "openai",
+        "model_id": "unresolved",
+        "params": {}
+      },
+      "prompt": {
+        "inline": "",
+        "variables": []
+      },
+      "tools_skills": [],
+      "context_assembly": {
+        "policy": "inline_messages",
+        "description": "static call site (syntactic frontend; no type resolution)"
+      },
+      "io_contract": {
+        "input_schema": {
+          "type": "object"
+        },
+        "output_schema": {
+          "type": "object"
+        }
+      },
+      "invocation_semantics": {
+        "type": "single",
+        "variable_at_runtime": false
+      }
+    },
+    {
+      "node_id": "n_e572b5e0afb47c31",
+      "kind": "static_definition",
+      "call_site": {
+        "file": "agent/auxiliary_client.py",
+        "symbol": "call_llm",
+        "line_start": 7357,
+        "line_end": 7357,
+        "ast_path": "call_llm/chat.completions.create"
+      },
+      "model": {
+        "provider": "openai",
+        "model_id": "unresolved",
+        "params": {}
+      },
+      "prompt": {
+        "inline": "",
+        "variables": []
+      },
+      "tools_skills": [],
+      "context_assembly": {
+        "policy": "inline_messages",
+        "description": "static call site (syntactic frontend; no type resolution)"
+      },
+      "io_contract": {
+        "input_schema": {
+          "type": "object"
+        },
+        "output_schema": {
+          "type": "object"
+        }
+      },
+      "invocation_semantics": {
+        "type": "conditional",
+        "variable_at_runtime": false
+      }
+    },
+    {
+      "node_id": "n_e8a5bc82cc9eb543",
+      "kind": "static_definition",
+      "call_site": {
+        "file": "optional-skills/security/godmode/scripts/godmode_race.py",
+        "symbol": "_query_model",
+        "line_start": 286,
+        "line_end": 292,
+        "ast_path": "_query_model/chat.completions.create"
+      },
+      "model": {
+        "provider": "openai",
+        "model_id": "unresolved",
+        "params": {}
+      },
+      "prompt": {
+        "inline": "",
+        "variables": []
+      },
+      "tools_skills": [],
+      "context_assembly": {
+        "policy": "inline_messages",
+        "description": "static call site (syntactic frontend; no type resolution)"
+      },
+      "io_contract": {
+        "input_schema": {
+          "type": "object"
+        },
+        "output_schema": {
+          "type": "object"
+        }
+      },
+      "invocation_semantics": {
+        "type": "single",
+        "variable_at_runtime": false
+      }
+    },
+    {
+      "node_id": "n_ee12f3841dc6769e",
+      "kind": "static_definition",
+      "call_site": {
+        "file": "agent/auxiliary_client.py",
+        "symbol": "call_llm",
+        "line_start": 7284,
+        "line_end": 7284,
+        "ast_path": "call_llm/chat.completions.create"
+      },
+      "model": {
+        "provider": "openai",
+        "model_id": "unresolved",
+        "params": {}
+      },
+      "prompt": {
+        "inline": "",
+        "variables": []
+      },
+      "tools_skills": [],
+      "context_assembly": {
+        "policy": "inline_messages",
+        "description": "static call site (syntactic frontend; no type resolution)"
+      },
+      "io_contract": {
+        "input_schema": {
+          "type": "object"
+        },
+        "output_schema": {
+          "type": "object"
+        }
+      },
+      "invocation_semantics": {
+        "type": "conditional",
+        "variable_at_runtime": false
+      }
+    },
+    {
+      "node_id": "n_f7d5f9f1cfdb7ae4",
+      "kind": "static_definition",
+      "call_site": {
+        "file": "agent/auxiliary_client.py",
+        "symbol": "_retry_same_provider_sync",
+        "line_start": 3697,
+        "line_end": 3697,
+        "ast_path": "_retry_same_provider_sync/chat.completions.create"
+      },
+      "model": {
+        "provider": "openai",
+        "model_id": "unresolved",
+        "params": {}
+      },
+      "prompt": {
+        "inline": "",
+        "variables": []
+      },
+      "tools_skills": [],
+      "context_assembly": {
+        "policy": "inline_messages",
+        "description": "static call site (syntactic frontend; no type resolution)"
+      },
+      "io_contract": {
+        "input_schema": {
+          "type": "object"
+        },
+        "output_schema": {
+          "type": "object"
+        }
+      },
+      "invocation_semantics": {
+        "type": "single",
+        "variable_at_runtime": false
+      }
+    },
+    {
+      "node_id": "n_f8980d38d822e490",
+      "kind": "static_definition",
+      "call_site": {
+        "file": "agent/bedrock_adapter.py",
+        "symbol": "call_converse_stream",
+        "line_start": 1173,
+        "line_end": 1173,
+        "ast_path": "call_converse_stream/converse"
+      },
+      "model": {
+        "provider": "bedrock",
+        "model_id": "unresolved",
+        "params": {}
+      },
+      "prompt": {
+        "inline": "",
+        "variables": []
+      },
+      "tools_skills": [],
+      "context_assembly": {
+        "policy": "inline_messages",
+        "description": "static call site (syntactic frontend; no type resolution)"
+      },
+      "io_contract": {
+        "input_schema": {
+          "type": "object"
+        },
+        "output_schema": {
+          "type": "object"
+        }
+      },
+      "invocation_semantics": {
+        "type": "conditional",
+        "variable_at_runtime": false
+      }
+    },
+    {
+      "node_id": "n_f9d38307bbd255b2",
+      "kind": "static_definition",
+      "call_site": {
+        "file": "agent/chat_completion_helpers.py",
+        "symbol": "interruptible_streaming_api_call._call_chat_completions",
+        "line_start": 2742,
+        "line_end": 2742,
+        "ast_path": "interruptible_streaming_api_call._call_chat_completions/chat.completions.create"
+      },
+      "model": {
+        "provider": "openai",
+        "model_id": "unresolved",
+        "params": {}
+      },
+      "prompt": {
+        "inline": "",
+        "variables": []
+      },
+      "tools_skills": [],
+      "context_assembly": {
+        "policy": "inline_messages",
+        "description": "static call site (syntactic frontend; no type resolution)"
+      },
+      "io_contract": {
+        "input_schema": {
+          "type": "object"
+        },
+        "output_schema": {
+          "type": "object"
+        }
+      },
+      "invocation_semantics": {
+        "type": "single",
+        "variable_at_runtime": false
+      }
+    },
+    {
+      "node_id": "n_fb197997604f67b4",
+      "kind": "static_definition",
+      "call_site": {
+        "file": "agent/auxiliary_client.py",
+        "symbol": "call_llm",
+        "line_start": 7425,
+        "line_end": 7425,
+        "ast_path": "call_llm/chat.completions.create"
+      },
+      "model": {
+        "provider": "openai",
+        "model_id": "unresolved",
+        "params": {}
+      },
+      "prompt": {
+        "inline": "",
+        "variables": []
+      },
+      "tools_skills": [],
+      "context_assembly": {
+        "policy": "inline_messages",
+        "description": "static call site (syntactic frontend; no type resolution)"
+      },
+      "io_contract": {
+        "input_schema": {
+          "type": "object"
+        },
+        "output_schema": {
+          "type": "object"
+        }
+      },
+      "invocation_semantics": {
+        "type": "conditional",
+        "variable_at_runtime": false
+      }
+    }
+  ],
+  "edges": []
+}

@@ -1,0 +1,292 @@
+{
+  "contract_version": "p11.cli.v1",
+  "command": "eval",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "run_id": "run-73191d9bdc2d",
+    "workflow_id": "workflow",
+    "config_hash": "701edfc16c8656303a9e2e5dd790a1a157ad98af18e984ccb762655353ec1638",
+    "runtime": "reference",
+    "seeds": [
+      1000,
+      1001,
+      1002
+    ],
+    "cases": 4,
+    "scores": [
+      {
+        "metric": "quality",
+        "value": 0.7875000000000001,
+        "ci_low": 0.7375,
+        "ci_high": 0.83125
+      },
+      {
+        "metric": "cost_usd",
+        "value": 0.43665359477124177,
+        "ci_low": 0.3985098039215686,
+        "ci_high": 0.4680401960784314
+      },
+      {
+        "metric": "latency_ms",
+        "value": 22524.780058651024,
+        "ci_low": 21471.730205278593,
+        "ci_high": 23371.187683284457
+      }
+    ],
+    "metrics": {
+      "cost_usd": 0.43665359477124177,
+      "latency_ms": 22524.780058651024,
+      "tokens_in": 9720,
+      "tokens_out": 3654,
+      "per_node": {
+        "n_0017914833d3d240": {
+          "cost_usd": 0.011496732026143791,
+          "latency_ms": 534.149560117302,
+          "tokens_in": 260,
+          "tokens_out": 86
+        },
+        "n_008b903482b33087": {
+          "cost_usd": 0.012960784313725491,
+          "latency_ms": 497.6392961876833,
+          "tokens_in": 237,
+          "tokens_out": 91
+        },
+        "n_085e375f578473a6": {
+          "cost_usd": 0.013169934640522877,
+          "latency_ms": 531.3636363636363,
+          "tokens_in": 240,
+          "tokens_out": 86
+        },
+        "n_2d26e4fd7432a5aa": {
+          "cost_usd": 0.008986928104575164,
+          "latency_ms": 607.9032258064517,
+          "tokens_in": 261,
+          "tokens_out": 86
+        },
+        "n_310ba64b6df50a1d": {
+          "cost_usd": 0.014006535947712421,
+          "latency_ms": 462.52199413489734,
+          "tokens_in": 252,
+          "tokens_out": 98
+        },
+        "n_38b7ac6b1eda80fa": {
+          "cost_usd": 0.014843137254901958,
+          "latency_ms": 550.3519061583578,
+          "tokens_in": 239,
+          "tokens_out": 93
+        },
+        "n_3ac4435908c48539": {
+          "cost_usd": 0.008986928104575164,
+          "latency_ms": 576.8181818181819,
+          "tokens_in": 240,
+          "tokens_out": 90
+        },
+        "n_3d007b41e7b0d6ea": {
+          "cost_usd": 0.008359477124183006,
+          "latency_ms": 603.4310850439882,
+          "tokens_in": 228,
+          "tokens_out": 92
+        },
+        "n_3f8a87a496e50139": {
+          "cost_usd": 0.00919607843137255,
+          "latency_ms": 560.4692082111438,
+          "tokens_in": 235,
+          "tokens_out": 97
+        },
+        "n_46e018a6714ed035": {
+          "cost_usd": 0.014006535947712416,
+          "latency_ms": 609.5894428152493,
+          "tokens_in": 233,
+          "tokens_out": 97
+        },
+        "n_4887ec54ad5f73ab": {
+          "cost_usd": 0.01107843137254902,
+          "latency_ms": 599.325513196481,
+          "tokens_in": 246,
+          "tokens_out": 95
+        },
+        "n_4e770b54018b09a0": {
+          "cost_usd": 0.01254248366013072,
+          "latency_ms": 600.9384164222874,
+          "tokens_in": 245,
+          "tokens_out": 94
+        },
+        "n_52abb2a4e135a09b": {
+          "cost_usd": 0.008986928104575163,
+          "latency_ms": 510.9824046920821,
+          "tokens_in": 242,
+          "tokens_out": 95
+        },
+        "n_540fdd84d80030aa": {
+          "cost_usd": 0.006477124183006535,
+          "latency_ms": 704.8240469208209,
+          "tokens_in": 257,
+          "tokens_out": 91
+        },
+        "n_5c5d838bae45bfbb": {
+          "cost_usd": 0.008568627450980392,
+          "latency_ms": 658.8563049853373,
+          "tokens_in": 231,
+          "tokens_out": 88
+        },
+        "n_66c7cbadf69e2d0e": {
+          "cost_usd": 0.006477124183006535,
+          "latency_ms": 486.3489736070381,
+          "tokens_in": 243,
+          "tokens_out": 90
+        },
+        "n_6c774a4ddb384bdc": {
+          "cost_usd": 0.00773202614379085,
+          "latency_ms": 660.2492668621701,
+          "tokens_in": 252,
+          "tokens_out": 94
+        },
+        "n_6c7a049af87ce927": {
+          "cost_usd": 0.014006535947712416,
+          "latency_ms": 542.7272727272729,
+          "tokens_in": 220,
+          "tokens_out": 90
+        },
+        "n_72be74d0cd763f6b": {
+          "cost_usd": 0.011496732026143791,
+          "latency_ms": 644.9999999999999,
+          "tokens_in": 248,
+          "tokens_out": 91
+        },
+        "n_7ee4c8dcc05a1ab5": {
+          "cost_usd": 0.007522875816993464,
+          "latency_ms": 521.6129032258065,
+          "tokens_in": 229,
+          "tokens_out": 81
+        },
+        "n_81a7fcf8329953d7": {
+          "cost_usd": 0.012333333333333333,
+          "latency_ms": 666.9208211143695,
+          "tokens_in": 242,
+          "tokens_out": 90
+        },
+        "n_8393edf5a7c4c846": {
+          "cost_usd": 0.012751633986928105,
+          "latency_ms": 509.882697947214,
+          "tokens_in": 235,
+          "tokens_out": 83
+        },
+        "n_8469abc7e4483139": {
+          "cost_usd": 0.011496732026143791,
+          "latency_ms": 515.674486803519,
+          "tokens_in": 221,
+          "tokens_out": 89
+        },
+        "n_8f4a2cccc9cae5a4": {
+          "cost_usd": 0.007522875816993464,
+          "latency_ms": 575.2785923753667,
+          "tokens_in": 249,
+          "tokens_out": 94
+        },
+        "n_993cdfd0da974576": {
+          "cost_usd": 0.011078431372549019,
+          "latency_ms": 635.9824046920821,
+          "tokens_in": 228,
+          "tokens_out": 89
+        },
+        "n_a108dfe25d4cc260": {
+          "cost_usd": 0.01254248366013072,
+          "latency_ms": 454.0175953079179,
+          "tokens_in": 239,
+          "tokens_out": 97
+        },
+        "n_afb9cd7032eb5a04": {
+          "cost_usd": 0.015261437908496734,
+          "latency_ms": 613.2551319648095,
+          "tokens_in": 236,
+          "tokens_out": 97
+        },
+        "n_b2daa3ed32947414": {
+          "cost_usd": 0.009405228758169935,
+          "latency_ms": 528.9442815249266,
+          "tokens_in": 244,
+          "tokens_out": 99
+        },
+        "n_b8342c53b452ef71": {
+          "cost_usd": 0.011078431372549019,
+          "latency_ms": 488.47507331378296,
+          "tokens_in": 245,
+          "tokens_out": 80
+        },
+        "n_c1b8c1e302c0c48e": {
+          "cost_usd": 0.011496732026143791,
+          "latency_ms": 565.5278592375366,
+          "tokens_in": 245,
+          "tokens_out": 92
+        },
+        "n_dc32c1a4b50d85cf": {
+          "cost_usd": 0.00856862745098039,
+          "latency_ms": 618.8269794721408,
+          "tokens_in": 261,
+          "tokens_out": 91
+        },
+        "n_e4322e9fb3cde5ba": {
+          "cost_usd": 0.014006535947712416,
+          "latency_ms": 616.6275659824047,
+          "tokens_in": 243,
+          "tokens_out": 89
+        },
+        "n_e46c9402e42e7087": {
+          "cost_usd": 0.007104575163398695,
+          "latency_ms": 454.82404692082105,
+          "tokens_in": 243,
+          "tokens_out": 90
+        },
+        "n_e572b5e0afb47c31": {
+          "cost_usd": 0.010450980392156863,
+          "latency_ms": 452.69794721407624,
+          "tokens_in": 237,
+          "tokens_out": 86
+        },
+        "n_e8a5bc82cc9eb543": {
+          "cost_usd": 0.007104575163398693,
+          "latency_ms": 443.0938416422287,
+          "tokens_in": 238,
+          "tokens_out": 94
+        },
+        "n_ee12f3841dc6769e": {
+          "cost_usd": 0.013169934640522877,
+          "latency_ms": 687.66862170088,
+          "tokens_in": 257,
+          "tokens_out": 93
+        },
+        "n_f7d5f9f1cfdb7ae4": {
+          "cost_usd": 0.014006535947712416,
+          "latency_ms": 582.9032258064517,
+          "tokens_in": 270,
+          "tokens_out": 93
+        },
+        "n_f8980d38d822e490": {
+          "cost_usd": 0.008986928104575163,
+          "latency_ms": 482.5366568914956,
+          "tokens_in": 257,
+          "tokens_out": 91
+        },
+        "n_f9d38307bbd255b2": {
+          "cost_usd": 0.012960784313725491,
+          "latency_ms": 553.0645161290322,
+          "tokens_in": 243,
+          "tokens_out": 92
+        },
+        "n_fb197997604f67b4": {
+          "cost_usd": 0.014424836601307193,
+          "latency_ms": 613.4750733137829,
+          "tokens_in": 232,
+          "tokens_out": 84
+        }
+      }
+    },
+    "stored_at": "/tmp/hermes-agent/.heros/runs",
+    "single_seed": true
+  },
+  "gate": {
+    "name": "configured-gates",
+    "passed": true
+  }
+}

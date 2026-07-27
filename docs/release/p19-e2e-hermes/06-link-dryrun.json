@@ -1,0 +1,143 @@
+{
+  "contract_version": "p11.cli.v1",
+  "command": "link",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "run_id": "run-73191d9bdc2d",
+    "dry_run": true,
+    "endpoint": "https://heros-agent.space",
+    "payload": {
+      "contract_version": "p11.link.v1",
+      "metrics": {
+        "cost": 0.43665359477124177,
+        "latency": 22524.780058651024,
+        "tokens": {
+          "in": 9720,
+          "out": 3654
+        }
+      },
+      "ir_structure": {
+        "node_ids": [
+          "n_0017914833d3d240",
+          "n_008b903482b33087",
+          "n_085e375f578473a6",
+          "n_2d26e4fd7432a5aa",
+          "n_310ba64b6df50a1d",
+          "n_38b7ac6b1eda80fa",
+          "n_3ac4435908c48539",
+          "n_3d007b41e7b0d6ea",
+          "n_3f8a87a496e50139",
+          "n_46e018a6714ed035",
+          "n_4887ec54ad5f73ab",
+          "n_4e770b54018b09a0",
+          "n_52abb2a4e135a09b",
+          "n_540fdd84d80030aa",
+          "n_5c5d838bae45bfbb",
+          "n_66c7cbadf69e2d0e",
+          "n_6c774a4ddb384bdc",
+          "n_6c7a049af87ce927",
+          "n_72be74d0cd763f6b",
+          "n_7ee4c8dcc05a1ab5",
+          "n_81a7fcf8329953d7",
+          "n_8393edf5a7c4c846",
+          "n_8469abc7e4483139",
+          "n_8f4a2cccc9cae5a4",
+          "n_993cdfd0da974576",
+          "n_a108dfe25d4cc260",
+          "n_afb9cd7032eb5a04",
+          "n_b2daa3ed32947414",
+          "n_b8342c53b452ef71",
+          "n_c1b8c1e302c0c48e",
+          "n_dc32c1a4b50d85cf",
+          "n_e4322e9fb3cde5ba",
+          "n_e46c9402e42e7087",
+          "n_e572b5e0afb47c31",
+          "n_e8a5bc82cc9eb543",
+          "n_ee12f3841dc6769e",
+          "n_f7d5f9f1cfdb7ae4",
+          "n_f8980d38d822e490",
+          "n_f9d38307bbd255b2",
+          "n_fb197997604f67b4"
+        ],
+        "edges": null,
+        "model_refs": {
+          "n_0017914833d3d240": "openai/unresolved",
+          "n_008b903482b33087": "openai/unresolved",
+          "n_085e375f578473a6": "openai/unresolved",
+          "n_2d26e4fd7432a5aa": "openai/unresolved",
+          "n_310ba64b6df50a1d": "openai/unresolved",
+          "n_38b7ac6b1eda80fa": "openai/unresolved",
+          "n_3ac4435908c48539": "openai/unresolved",
+          "n_3d007b41e7b0d6ea": "openai/unresolved",
+          "n_3f8a87a496e50139": "openai/unresolved",
+          "n_46e018a6714ed035": "openai/unresolved",
+          "n_4887ec54ad5f73ab": "openai/unresolved",
+          "n_4e770b54018b09a0": "openai/unresolved",
+          "n_52abb2a4e135a09b": "openai/unresolved",
+          "n_540fdd84d80030aa": "openai/unresolved",
+          "n_5c5d838bae45bfbb": "openai/unresolved",
+          "n_66c7cbadf69e2d0e": "openai/unresolved",
+          "n_6c774a4ddb384bdc": "bedrock/unresolved",
+          "n_6c7a049af87ce927": "bedrock/unresolved",
+          "n_72be74d0cd763f6b": "openai/unresolved",
+          "n_7ee4c8dcc05a1ab5": "openai/unresolved",
+          "n_81a7fcf8329953d7": "openai/unresolved",
+          "n_8393edf5a7c4c846": "openai/unresolved",
+          "n_8469abc7e4483139": "openai/unresolved",
+          "n_8f4a2cccc9cae5a4": "openai/unresolved",
+          "n_993cdfd0da974576": "openai/unresolved",
+          "n_a108dfe25d4cc260": "openai/unresolved",
+          "n_afb9cd7032eb5a04": "openai/unresolved",
+          "n_b2daa3ed32947414": "openai/unresolved",
+          "n_b8342c53b452ef71": "openai/unresolved",
+          "n_c1b8c1e302c0c48e": "openai/unresolved",
+          "n_dc32c1a4b50d85cf": "openai/unresolved",
+          "n_e4322e9fb3cde5ba": "openai/unresolved",
+          "n_e46c9402e42e7087": "openai/unresolved",
+          "n_e572b5e0afb47c31": "openai/unresolved",
+          "n_e8a5bc82cc9eb543": "openai/unresolved",
+          "n_ee12f3841dc6769e": "openai/unresolved",
+          "n_f7d5f9f1cfdb7ae4": "openai/unresolved",
+          "n_f8980d38d822e490": "bedrock/unresolved",
+          "n_f9d38307bbd255b2": "openai/unresolved",
+          "n_fb197997604f67b4": "openai/unresolved"
+        }
+      },
+      "config_hash": "701edfc16c8656303a9e2e5dd790a1a157ad98af18e984ccb762655353ec1638",
+      "source_revision": "528e3350374b4ecdd4d5721be9a29f4a93cfe79a",
+      "scores": [
+        {
+          "metric": "quality",
+          "value": 0.7875000000000001,
+          "ci_low": 0.7375,
+          "ci_high": 0.83125
+        },
+        {
+          "metric": "cost_usd",
+          "value": 0.43665359477124177,
+          "ci_low": 0.3985098039215686,
+          "ci_high": 0.4680401960784314
+        },
+        {
+          "metric": "latency_ms",
+          "value": 22524.780058651024,
+          "ci_low": 21471.730205278593,
+          "ci_high": 23371.187683284457
+        }
+      ],
+      "run_metadata": {
+        "run_id": "run-73191d9bdc2d",
+        "workflow_id": "workflow",
+        "timestamp": "2026-07-27T02:29:22Z",
+        "seed": [
+          1000,
+          1001,
+          1002
+        ],
+        "tool_version": "0.11.0-dev"
+      },
+      "runs_reported": 1
+    }
+  }
+}

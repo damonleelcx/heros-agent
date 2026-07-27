@@ -1,0 +1,5 @@
+[Customer console — workflow OVERVIEW — http://127.0.0.1:4320/app/workflows/nousresearch%2Fhermes-agent]
+Three questions about this workflow, and where each is answered:
+- GRAPH  — What shape is this workflow? (nodes, edges, patterns the classifier could/could not name)
+- BOARD  — Which variant is actually better? (scores with intervals, gate outcomes, cost/quality frontier)
+- PROPOSALS — What does the platform propose, and is it verified? (each proposal + rationale + verified delta + full diff)

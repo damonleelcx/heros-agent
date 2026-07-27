@@ -1,0 +1,14 @@
+{
+  "contract_version": "p11.cli.v1",
+  "command": "discover",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "workflow_id": "workflow",
+    "ir_path": "ir.json",
+    "report_path": "discovery-report.json",
+    "nodes": 40,
+    "edges": 0,
+    "source_revision": "528e3350374b4ecdd4d5721be9a29f4a93cfe79a"
+  }
+}

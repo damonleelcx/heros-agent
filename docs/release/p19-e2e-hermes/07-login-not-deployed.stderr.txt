@@ -1,0 +1,4 @@
+login: validating token against https://heros-agent.space…
+heros login: login: transport: Get "https://heros-agent.space/api/p11/whoami": net/http: TLS handshake timeout
+DNS: heros-agent.space -> 162.255.119.200
+TLS/HTTPS: FAILED as expected -> TimeoutError timed out
