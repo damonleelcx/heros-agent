@@ -112,15 +112,32 @@ func (s *Store) ResolveSkill(ctx context.Context, versionID string) (*SkillEntry
 	if err != nil {
 		return nil, err
 	}
-	in, err := compileSchema("input_schema", spec.InputSchema)
+	entry, err := NewSkillEntry(versionID, name, spec)
 	if err != nil {
 		return nil, fmt.Errorf("%w: skill %s: %v", ErrCorruptEntry, versionID, err)
+	}
+	entry.Envelope = env
+	return entry, nil
+}
+
+// NewSkillEntry builds a resolved skill entry from a spec, compiling both schemas through the same
+// hermetic compiler registration uses.
+//
+// It is the ONE construction path for a SkillEntry with live contracts, which is the point: P14's
+// call-site materializer derives a tool's SHAPE from `Spec.InputSchema`, so a SkillEntry that existed
+// with a contract the registry would have refused would be a shape nobody validated, materialized into
+// a customer's source. Callers outside the store (the transform engine's tests, a fixture builder) get
+// the same validation the resolve path gets, rather than a hand-built struct that skips it.
+func NewSkillEntry(versionID, name string, spec SkillSpec) (*SkillEntry, error) {
+	in, err := compileSchema("input_schema", spec.InputSchema)
+	if err != nil {
+		return nil, err
 	}
 	out, err := compileSchema("output_schema", spec.OutputSchema)
 	if err != nil {
-		return nil, fmt.Errorf("%w: skill %s: %v", ErrCorruptEntry, versionID, err)
+		return nil, err
 	}
-	return &SkillEntry{VersionID: versionID, Name: name, Spec: spec, Input: in, Output: out, Envelope: env}, nil
+	return &SkillEntry{VersionID: versionID, Name: name, Spec: spec, Input: in, Output: out}, nil
 }
 
 // ValidateInput checks an argument object against the skill's input contract. The runtime calls this

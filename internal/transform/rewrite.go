@@ -56,6 +56,7 @@ var rewriters = map[variantspec.Dimension]rewriter{
 	variantspec.DimPrompt:  rewritePrompt,
 	variantspec.DimSkills:  rewriteSkills,
 	variantspec.DimContext: rewriteContext,
+	variantspec.DimTools:   rewriteTools,
 }
 
 // rewriteModel rewrites the model argument to the override's model id.
@@ -368,31 +369,42 @@ func renderExpr(fset *token.FileSet, e ast.Expr) string {
 	return b.String()
 }
 
-// rewriteSkills refuses, with the reason.
+// rewriteSkills MATERIALIZES a bound skill at a Go call site (P14 task 2.1, decisions.md D-14.4).
 //
-// Binding skills means constructing SDK tool values — an `[]anthropic.ToolParam{{Name: …,
-// InputSchema: …}}` whose shape differs per SDK and per SDK version. The registry entry has the JSON
-// schema (FR8), but turning that into correct Go for an arbitrary SDK is code generation, not
-// argument substitution, and a subtly-wrong tool schema is the kind of change that compiles and then
-// degrades quality invisibly — the worst possible failure for an eval platform.
-func rewriteSkills(site discovery.GoCallSite, _ []byte, o variantspec.ResolvedOverride) ([]edit, error) {
-	return nil, refuseSkills(site.NodeID, o)
+// Go is the first — and, in 14a, the only — language whose skill refusal is replaced by construction.
+// The construction itself, the per-provider coverage table it is gated on, and the argument this whole
+// change rests on live in skillbind.go; this function is the dispatch table's entry for the skills
+// dimension and nothing more.
+//
+// 🔴 It still refuses, by name, for a Go call site whose PROVIDER has no declared tool-value form, and
+// for a tool set the call site assembles at runtime. "Go is supported" is not "every Go call site is
+// supported", and a refusal must say which half is missing.
+func rewriteSkills(site discovery.GoCallSite, src []byte, o variantspec.ResolvedOverride) ([]edit, error) {
+	return materializeSkills(site, src, o)
 }
 
-// refuseSkills is the skills refusal, shared by both engines.
+// refuseSkills is the INTERIM refusal, for every language whose materializer has not landed (P14 task
+// 2.2, decisions.md D-14.3). Today that is every tree-sitter language; Go no longer reaches it.
 //
-// One implementation because the reason is not a fact about Go: constructing an SDK's tool values from
-// a JSON schema is code generation in every language, and a subtly-wrong tool schema compiles and
-// degrades quality invisibly in every language. Two copies of this sentence would be two things to keep
-// true (禁止分裂 source-of-truth).
+// One implementation, shared by every span engine, because the reason is not a fact about any one of
+// them: constructing an SDK's tool values from a JSON schema is code generation, and at the syntactic
+// floor there is no typed evidence to check the construction against — the same blindness rewrite_span.go
+// documents for prompts, worse here because a construction has no original expression to compare to.
+// Two copies of this sentence would be two things to keep true (禁止分裂 source-of-truth).
+//
+// 🚫 This is never a silent drop and never a partial diff. A test asserting that a dropped SkillRef
+// still "succeeds" is itself a failing test (task 2.3): the node would run without the binding while
+// its config_hash still claimed it, and the eval would score a configuration that never existed.
 func refuseSkills(nodeID string, o variantspec.ResolvedOverride) error {
 	names := make([]string, 0, len(o.Skills))
 	for _, s := range o.Skills {
 		names = append(names, s.Name)
 	}
 	return unsafeRewrite(nodeID, string(variantspec.DimSkills),
-		"binding skills %v requires constructing SDK-specific tool values at the call site; this "+
-			"engine only replaces value expressions", names)
+		"binding skills %v requires constructing SDK-specific tool values at the call site, and no "+
+			"materializer for this language has landed yet (Go is the first — decisions.md D-14.4); this "+
+			"engine only replaces value expressions here, so the binding is REFUSED rather than dropped",
+		names)
 }
 
 // rewriteContext refuses, and P3 is the named owner of the rewrite that would not refuse.

@@ -142,3 +142,69 @@ func TestBuildCard_PRGateMatchesVerdict(t *testing.T) {
 		t.Error("advisory must not offer one-click PR-open and must give a reason")
 	}
 }
+
+// ── P14 task 8.2 — a refused candidate reaches the surface BY NAME ────────────────────────────────
+
+// TestCardForRoutesEveryBuildStatus is the gate that made api.CardFor worth having.
+//
+// The defect it prevents is not hypothetical — it is what the codebase actually had until P14 added a
+// third status: each producer wrote its own two-branch `if` over (built / build_failed), so a `refused`
+// candidate fell through the `built` branch and rendered a verified zero delta and an empty diff for a
+// change the transform had explicitly declined to make. The surface would then be asserting, in the
+// product's own voice, that a change nobody wrote made no difference.
+//
+// So the routing is exhaustive HERE, and the default is refused rather than built: "we could not tell
+// you what happened" is honest, and "verified, delta 0.00" is not.
+func TestCardForRoutesEveryBuildStatus(t *testing.T) {
+	refusal := proposal.ChangeRefusal{NodeID: "agent", Dimension: "skills",
+		Reason: "no materializer for this language has landed yet"}
+	pres := demoPres()
+	pres.Refusal = &refusal
+	pres.SourceDiff = "" // a refusal carries no diff
+
+	pass := verification.Verdict{ProposalID: "p1", GateResult: verification.GatePass, RegressionPass: true, Significant: true}
+
+	for _, tc := range []struct {
+		status     proposal.BuildStatus
+		wantStatus string
+		wantNamed  bool
+	}{
+		{proposal.BuildBuilt, "built", false},
+		{proposal.BuildFailed, string(proposal.BuildFailed), false},
+		{proposal.BuildRefused, string(proposal.BuildRefused), true},
+		// An unrecognised status must fail CLOSED, not render as verified.
+		{proposal.BuildStatus("something_a_later_phase_added"), string(proposal.BuildRefused), true},
+	} {
+		t.Run(string(tc.status), func(t *testing.T) {
+			card := CardFor(pres, tc.status, "log", pass, verification.Assisted)
+			if card.BuildStatus != tc.wantStatus {
+				t.Errorf("build_status = %q, want %q", card.BuildStatus, tc.wantStatus)
+			}
+			if !tc.wantNamed {
+				return
+			}
+			if card.RefusedNodeID != "agent" || card.RefusedDimension != "skills" || card.RefusedReason == "" {
+				t.Errorf("a refused card must name node, dimension and reason; got %+v",
+					[]string{card.RefusedNodeID, card.RefusedDimension, card.RefusedReason})
+			}
+			if card.SourceDiff != "" {
+				t.Error("a refused card must carry no source diff")
+			}
+			if card.CanOpenPR {
+				t.Error("a refused card must not be able to open a pull request")
+			}
+			if !strings.Contains(card.Narration, "refused") {
+				t.Errorf("the narration must say it was refused, got %q", card.Narration)
+			}
+		})
+	}
+
+	// 🔴 And the list decision: a refused candidate is never recommendable, even holding a PASSING
+	// verdict — which is the shape a producer that reused a previous verdict would hand it.
+	if Recommendable(proposal.BuildRefused, pass) {
+		t.Error("a refused candidate was recommendable")
+	}
+	if !Recommendable(proposal.BuildBuilt, pass) {
+		t.Error("a built, passing candidate must be recommendable, or nothing ever surfaces")
+	}
+}

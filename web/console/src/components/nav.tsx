@@ -82,6 +82,21 @@ export function SubjectLink({ href, children }: { href: string; children: ReactN
  * It is sticky beneath the header rather than scrolling away, because its whole job is to answer
  * "which one am I looking at, and where else can I take it?" — a question that arrives most often
  * halfway down a long table.
+ *
+ * # 🔴 Why the offset is top-0 and not top-12
+ *
+ * It used to be `top-12`, to sit below a 3rem shell header — correct while the DOCUMENT scrolled and
+ * this strip shared a scroll container with that header. The viewport-first shell (NFR17) moved the
+ * header OUT of the scrolling region: `<main>` is now `md:overflow-hidden` with a bounded height, so it
+ * is the containing block a sticky child resolves against, and the header is its sibling.
+ *
+ * Against that container `top-12` displaces the strip 48px DOWNWARD from its flow position, where it
+ * covers the first 48px of whatever the page renders next — which on every workflow surface is
+ * PageFrame's eyebrow and the top half of its <h1>. The page then looks like it has no eyebrow and a
+ * cropped title, and nothing in PageFrame is wrong, so that is where the search does not end.
+ *
+ * `top-0` pins it to the top of its own scroll container, which is what "sticky beneath the header"
+ * means now that the header is not in that container.
  */
 export function SubjectStrip({
   kind,
@@ -94,7 +109,7 @@ export function SubjectStrip({
 }) {
   return (
     <nav
-      className="sticky top-12 z-10 flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border bg-background/90 px-5 py-2 backdrop-blur md:px-10"
+      className="sticky top-0 z-10 flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border bg-background/90 px-5 py-2 backdrop-blur md:px-10"
       aria-label={`This ${kind.toLowerCase()}`}
     >
       <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">{kind}</span>

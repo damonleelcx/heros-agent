@@ -18,6 +18,16 @@ const (
 	BuildUnbuilt BuildStatus = "unbuilt"
 	BuildBuilt   BuildStatus = "built"
 	BuildFailed  BuildStatus = "build_failed"
+	// BuildRefused is a candidate the TRANSFORM refused before a diff existed — an un-applicable skill
+	// binding, a prune over a runtime-assembled tool set (P14 D-14.3). It is not a build failure and must
+	// not be reported as one: a build failure means "we wrote code and it did not compile", a refusal
+	// means "we declined to write code we could not stand behind", and a user acts on them differently.
+	//
+	// 🔴 It is a STATUS rather than an error for the reason task 8.2 exists: a refusal returned as an
+	// error aborts the whole batch and disappears into a log, so the one change the engine deliberately
+	// declined to make is the one the user never hears about. Carried as a status, it reaches the surface
+	// by name, next to the candidates that did compile.
+	BuildRefused BuildStatus = "refused"
 )
 
 // BuildResult is the outcome of applying a candidate's diff to an isolated worktree and building it.

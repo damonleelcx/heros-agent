@@ -29,11 +29,20 @@ import (
 	"github.com/heros-foreal/agentd/internal/evalstats"
 	"github.com/heros-foreal/agentd/internal/patternclassifier"
 	"github.com/heros-foreal/agentd/internal/proposal"
+	"github.com/heros-foreal/agentd/internal/sourcerev"
 	"github.com/heros-foreal/agentd/internal/transform"
 	"github.com/heros-foreal/agentd/internal/variantspec"
 )
 
-const commitSHA = "de5ece994415276d215976836161f871f1d6d8f5"
+// pinnedSHA is the commit this demo's documented output was produced from. It is VERIFIED against the
+// checkout rather than trusted: labelling the IR with a commit the tree is not at would put a false
+// source_revision on every number below, and source_revision is half the reproducibility key.
+const pinnedSHA = "de5ece994415276d215976836161f871f1d6d8f5"
+
+// commitSHA is the revision this run ACTUALLY parsed. It is a var, not a const, because the pin above is
+// verified against the checkout rather than assumed — main() sets it from sourcerev.Resolve, which fails
+// loudly instead of letting the output carry a provenance nothing can check.
+var commitSHA string
 
 // menu refs (64-hex, distinct). The param-tuned variant shares provider+model_id with the weak model.
 const (
@@ -54,7 +63,17 @@ func menu() proposal.Menu {
 
 func main() {
 	repo := flag.String("repo", "/tmp/hermes-agent", "path to the hermes-agent checkout (read-only)")
+	pin := flag.String("pin", pinnedSHA, "commit this run must be checked out at; empty means \"use HEAD and say so\"")
 	flag.Parse()
+
+	// Resolve the revision BEFORE discovery: the SHA labels the IR, and a label that does not match the
+	// tree makes every number below describe a run that never happened.
+	sha, note, err := sourcerev.Resolve(*repo, *pin)
+	if err != nil {
+		log.Fatalf("%v", err)
+	}
+	commitSHA = sha
+	fmt.Printf("source_revision %s (%s)\n", commitSHA[:12], note)
 
 	res, err := discovery.Run(discovery.Options{
 		Repo:      *repo,

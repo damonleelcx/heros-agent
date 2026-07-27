@@ -2,7 +2,9 @@ package api
 
 import (
 	_ "embed"
+	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/heros-foreal/agentd/internal/proposal"
 	"github.com/heros-foreal/agentd/internal/verification"
@@ -72,6 +74,17 @@ type Card struct {
 	Narration        string   `json:"narration"`
 	CanOpenPR        bool     `json:"can_open_pr"`
 	PRDisabledReason string   `json:"pr_disabled_reason,omitempty"`
+	// RefusedNodeID / RefusedDimension / RefusedReason name a change the TRANSFORM declined to make
+	// (P14 task 8.2). They are three flat fields rather than a nested object because the console's
+	// generated view contract is flat, and — more to the point — because a refusal must be impossible to
+	// miss: "node X, dimension skills: <reason>" is the whole of what a user needs, and it renders
+	// without the reader having to open anything.
+	//
+	// 🔴 Empty on every card that was not refused. A refusal that merely LOOKED like a missing field
+	// would read as a change that happened, which is precisely the outcome decisions.md D-14.3 forbids.
+	RefusedNodeID    string `json:"refused_node_id,omitempty"`
+	RefusedDimension string `json:"refused_dimension,omitempty"`
+	RefusedReason    string `json:"refused_reason,omitempty"`
 }
 
 // PRResult is what OpenPR returns: a reviewable PR the human merges (never auto-merged).
@@ -119,6 +132,40 @@ func BuildCard(pres proposal.Presentation, buildStatus string, v verification.Ve
 	}
 }
 
+// CardFor is the ONE place a compiled candidate's build status decides which card it becomes.
+//
+// # Why this exists rather than three call sites choosing for themselves
+//
+// Before P14 there were two statuses (built / build_failed) and each producer wrote its own two-branch
+// `if`. Adding a THIRD (refused, P14 task 8.2) is exactly the change that breaks that arrangement:
+// every producer that was not updated keeps its two branches, sends a refused candidate down the
+// `built` path, and renders a zero delta and an empty diff for a change that was never made. That is
+// the "looks complete" failure decisions.md D-14.3 is written against, arriving through the surface
+// rather than through the codemod.
+//
+// So the switch lives here, it is exhaustive, and an unrecognised status is treated as REFUSED rather
+// than as built — the fail-closed direction, because "we could not tell you what happened" is honest
+// and "verified, delta 0.00" is not.
+func CardFor(pres proposal.Presentation, status proposal.BuildStatus, buildLog string,
+	v verification.Verdict, level verification.AutomationLevel) Card {
+	switch status {
+	case proposal.BuildBuilt:
+		return BuildCard(pres, string(status), v, level)
+	case proposal.BuildFailed:
+		return BuildFailedCard(pres, buildLog)
+	default:
+		// BuildRefused, BuildUnbuilt, and anything a later phase adds.
+		return RefusedCard(pres)
+	}
+}
+
+// Recommendable reports whether a compiled candidate may appear in the RECOMMENDATIONS list rather
+// than the withheld one. Both halves are required: it must have built, and its verdict must have
+// passed. A refused candidate fails the first half without ever reaching the second.
+func Recommendable(status proposal.BuildStatus, v verification.Verdict) bool {
+	return status == proposal.BuildBuilt && v.Passed()
+}
+
 // BuildFailedCard renders a build-failed candidate for the withheld section — it has no verdict.
 func BuildFailedCard(pres proposal.Presentation, log string) Card {
 	return Card{
@@ -128,6 +175,41 @@ func BuildFailedCard(pres proposal.Presentation, log string) Card {
 		State: "gate_failed", GateResult: "build_failed",
 		Narration:        "Withheld: the candidate's diff failed to build and was rejected before verification.",
 		PRDisabledReason: "build failed",
+	}
+}
+
+// RefusedCard renders a change the TRANSFORM DECLINED, for the withheld section (P14 task 8.2).
+//
+// # Why a refusal gets its own card rather than being folded into build_failed
+//
+// They are different events with different owners. "Build failed" means the engine wrote code and the
+// compiler rejected it — a bug on our side, and the log is the next thing to read. "Refused" means the
+// engine declined to write code it could not stand behind — a limit, named, and the reason is the next
+// thing to read. Rendering the second as the first would send a user hunting a compiler error that does
+// not exist, and would quietly claim we tried.
+//
+// The card carries NO source diff, deliberately: a refusal that shipped a partial diff is exactly the
+// "looks complete" failure D-14.3 refuses, and the surface must not reconstruct it.
+func RefusedCard(pres proposal.Presentation) Card {
+	r := pres.Refusal
+	if r == nil {
+		r = &proposal.ChangeRefusal{NodeID: pres.NodeID, Reason: "the transform declined this change"}
+	}
+	where := r.NodeID
+	if r.Dimension != "" {
+		where = fmt.Sprintf("node %s, dimension %s", r.NodeID, r.Dimension)
+	}
+	return Card{
+		ProposalID: pres.ConfigHash, Operator: string(pres.Operator), NodeID: pres.NodeID, Pattern: pres.Pattern,
+		DiagID: pres.DiagID, EvidenceCaseIDs: pres.EvidenceCaseIDs, Rationale: pres.Rationale,
+		SpecDiff: pres.SpecDiff, BuildStatus: string(proposal.BuildRefused),
+		State: "gate_failed", GateResult: string(proposal.BuildRefused),
+		Narration: fmt.Sprintf("Withheld: the transform refused this change at %s. %s. Nothing was "+
+			"applied for that dimension — no partial diff was generated.", where, strings.TrimRight(r.Reason, ".")),
+		PRDisabledReason: "the transform refused this change",
+		RefusedNodeID:    r.NodeID,
+		RefusedDimension: r.Dimension,
+		RefusedReason:    r.Reason,
 	}
 }
 

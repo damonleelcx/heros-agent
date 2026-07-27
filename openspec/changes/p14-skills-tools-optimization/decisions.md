@@ -1,9 +1,10 @@
 # P14 — Recorded decisions (System Designer)
 
-Three contracts that must be fixed **before any transform or discovery code ships**, because each is a
+Four contracts that must be fixed **before any transform or discovery code ships**, because each is a
 one-way door. `design.md` argues the full decision set; this file records only the pre-code, one-way-door
 contracts: the tools≠skills IR split (D-14.1), the new `DimTools` dimension without a registry `Kind`
-(D-14.2), and the interim-refusal contract (D-14.3).
+(D-14.2), the interim-refusal contract (D-14.3), and which language gets the first skill materializer
+(D-14.4).
 
 ---
 
@@ -136,3 +137,50 @@ guarantee that a merged diff did what its `config_hash` says.
 its go-red test flips to a materialization test — a visible, testable progression. Until then, an
 un-applicable skill or a dynamic tool set is refused by name, and no diff ever ships a configuration it
 did not actually apply.
+
+---
+
+## D-14.4 — **Go** gets the first skill materializer; every other language keeps D-14.3's refusal
+
+**Problem.** D-14.3 fixes *that* an un-applicable skill refuses; it does not say *which* language stops
+refusing first. That ordering is a one-way door in a quieter way than the others: the first materializer
+sets the shape every later one is judged against — how the sealed schema becomes a tool value, where the
+per-language coverage is written down, and what a refusal for the *remaining* languages has to say now
+that "no language can do this" is no longer true. Choosing a language whose evidence is weakest would
+bake a guess into that shape.
+
+**Decision.** **Go is the first supported language.** Its materializer lives in `internal/transform`
+alongside `rewriteSkills`, and it is gated on a **declared per-provider tool-value form** — an anthropic
+form and an openai form, spelled once as data. Every other language (the tree-sitter engines) keeps
+`refuseSkills` unchanged, and a Go call site whose provider has **no declared form** keeps refusing too:
+support is per (language, provider), not per language. The per-language / per-provider coverage is
+recorded in **one** place — the form table's doc comment — for the same reason `argumentForm` is
+(NFR7, task 9.4): a refusal a user reads and a capability a doc claims must not drift.
+
+**Why this is the appropriate design.** Go is where the evidence is strongest and the blast radius
+smallest. `go/parser` + `go/ast` give the engine a *typed, non-recovering* parse: a file that yields a
+call site is a file that parsed (see `reparseGo`), so an insertion point is a real position rather than
+one invented inside source the parser was guessing at. The tree-sitter engines are explicitly the
+opposite (`reparseSyntactic`), and `rewrite_span.go`'s header already argues at length why a type-free
+parse cannot tell a role string from a prompt — the same blindness that makes a *prompt* rewrite unsafe
+there makes a *tool-value construction* unsafe there, and more so, because construction has no original
+expression to check the result against. `refuseSkills` is already a Go rewriter, so Go is also where the
+refusal is replaced rather than newly written. Finally, Go is where the build gate bites hardest: a
+wrong construction is a compile error the existing `BuildChecker` catches before a reviewer sees it,
+whereas in Python a wrong construction *parses* and reaches verification only as a quality regression.
+
+**Alternatives + decision point.** (a) **Python first** (the largest population of agent call sites) —
+rejected on **安全 (L1)**: the language with the most call sites is also the one with the least evidence
+per call site and no compile gate, so the first materializer would be the one whose mistakes are the
+hardest to see. (b) **All languages at once behind a shared JSON-schema→tool-value writer** — rejected
+on **single-source-of-truth and 实现 (L8)**: the SDK tool value's *shape* is per language AND per SDK, so
+a "shared" writer would be a switch pretending to be an abstraction, and it would land five untested
+spellings for the price of one tested one. (c) **Provider-agnostic Go materializer** (construct from the
+schema without knowing the SDK) — rejected for the reason `refuseSkills` gives today: there is no
+provider-agnostic spelling of a tool value, and inventing one produces code that compiles against
+nothing.
+
+**Effect.** 14a lands one materializer, for Go, for the providers whose tool-value form is declared. Every
+other (language, provider) pair keeps refusing **by name** — "no materializer for `<language>` yet" /
+"no declared tool-value form for provider `<p>`" — so the boundary is legible from the refusal itself,
+and each later materializer flips exactly one go-red refusal test into a materialization test.

@@ -102,6 +102,26 @@ a node that binds no skill SHALL hash byte-identically to a node that predates t
   existed
 - **AND** the P0 golden `config_hash` vectors continue to reproduce.
 
+### Requirement: Materializer coverage SHALL be stated in exactly one place
+
+The set of (language, provider) pairs whose skill binding can be materialized SHALL be derived from a
+single declared table, and every statement of coverage — a refusal a user reads, a capability a document
+claims, a badge a surface renders — SHALL resolve back to it. A second, independently-maintained
+statement of coverage SHALL NOT exist.
+
+#### Scenario: A refusal and the capability doc agree
+
+- **WHEN** a (language, provider) pair has no materializer
+- **THEN** the refusal names that pair and the pairs that would have worked
+- **AND** the capability documentation states the same set, checked against the declared table rather
+  than maintained alongside it.
+
+#### Scenario: Removing support removes the claim
+
+- **WHEN** a provider's materializer is removed from the declared table
+- **THEN** the documented coverage no longer claims it
+- **AND** the discrepancy is a build failure, not something a reader discovers by being refused.
+
 ### Requirement: A materialized skill SHALL surface failures only through the typed error envelope
 
 A materialized skill SHALL surface tool-call failures only through the `toolcontract` typed envelope's

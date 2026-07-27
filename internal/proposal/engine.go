@@ -22,6 +22,10 @@ type Target struct {
 	BasePromptBody string
 	Groundings     []FailingCaseGrounding
 	RequiredFields []string
+	// Usage is the P14 tool/skill selection evidence for this node (which capabilities the eval set
+	// exercised, which errored). Assembled by the caller from the run traces; absent means "no evidence
+	// recorded", and the selection operators then emit nothing.
+	Usage ToolUsage
 }
 
 // Refusal records a candidate the engine declined to surface, and why — either an inadmissible
@@ -136,6 +140,7 @@ func (e Engine) inputFor(op Operator, t Target) OperatorInput {
 		BasePromptBody:  t.BasePromptBody,
 		Groundings:      t.Groundings,
 		RequiredFields:  t.RequiredFields,
+		Usage:           t.Usage,
 	}
 }
 

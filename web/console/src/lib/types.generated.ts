@@ -444,6 +444,9 @@ export interface Card {
   narration: string;
   can_open_pr: boolean;
   pr_disabled_reason?: string;
+  refused_node_id?: string;
+  refused_dimension?: string;
+  refused_reason?: string;
 }
 
 export interface DimChange {
@@ -451,6 +454,8 @@ export interface DimChange {
   dimension: string;
   from: string;
   to: string;
+  kind?: string;
+  items?: string[] | null;
 }
 
 export interface TrendView {

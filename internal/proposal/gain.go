@@ -27,19 +27,30 @@ var operatorPrior = map[OperatorKind]float64{
 	OpRedundancyRemove:  0.15,
 	// P13 model-parameter tuning — a cheap, targeted knob, ordered near the other model changes.
 	OpParamTune: 0.20,
+	// P14 skills & tools. The removals sit BELOW their additive siblings on purpose: an add that does
+	// nothing wastes tokens, a remove that was wrong takes away a capability the eval set may not cover,
+	// so the cheaper-to-be-wrong direction is verified first when both are on the table.
+	OpRemoveSkill:  0.20,
+	OpToolPrune:    0.20,
+	OpToolMinimize: 0.25,
 }
 
 // verifyOrderHint ranks operators cheapest-first for verification ordering (design 5.1): a single
 // cheap change (downgrade / prune) is proven before an expensive multi-candidate prompt sweep. Lower
 // is cheaper. Unknown operators sort last.
 var verifyOrderHint = map[OperatorKind]int{
-	OpModelDowngrade:    0,
-	OpPrune:             0,
-	OpParamTune:         0, // a single param swap, as cheap as a model swap
-	OpMerge:             1,
-	OpReorder:           1,
-	OpFixSchemaBinding:  2,
-	OpAddSkill:          2,
+	OpModelDowngrade:   0,
+	OpPrune:            0,
+	OpParamTune:        0, // a single param swap, as cheap as a model swap
+	OpMerge:            1,
+	OpReorder:          1,
+	OpFixSchemaBinding: 2,
+	OpAddSkill:         2,
+	// P14: a single skill/tool delta costs about what a skill swap costs — one candidate, one eval pass.
+	// Minimization sits one step later: it is a whole-set change, so its diff is the widest of the three.
+	OpRemoveSkill:       2,
+	OpToolPrune:         2,
+	OpToolMinimize:      3,
 	OpContextPolicy:     3,
 	OpModelUpgrade:      3,
 	OpEnableThinking:    3,
