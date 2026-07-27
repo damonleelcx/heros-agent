@@ -95,3 +95,21 @@ test("studio nav entry is registered so the surface is reachable (task 4.1)", as
   const layout = await read("src/app/app/layout.tsx");
   assert.ok(layout.includes("/app/studio"), "the studio must be reachable from the nav");
 });
+
+test("studio is covered by the entitlement mapping, and honestly (P9 §11b.5)", async () => {
+  const src = await read("src/lib/entitlements.ts");
+  // §11b.5 — the studio capability must exist in the map so the account view lists it (FR15).
+  assert.match(src, /id:\s*"studio"/, "the studio capability is missing from the entitlement map");
+  // 🔴 It must map to a feature the platform actually enforces. P10 gates on authentication only, so
+  // the honest mapping is `feature: null` — claiming a plan boundary the gate will not honour is the
+  // screen-vs-gate disagreement entitlements.ts exists to prevent. Assert the studio row's feature is
+  // null, not a plan feature string.
+  const row = src.match(/id:\s*"studio"[\s\S]*?\},/);
+  assert.ok(row, "could not isolate the studio capability row");
+  assert.match(row[0], /feature:\s*null/, "studio must map to feature:null while P10 enforces no entitlement");
+  assert.doesNotMatch(
+    row[0],
+    /feature:\s*"(dashboard|assisted_pr|auto_merge)"/,
+    "studio must not claim a platform gate P10 does not enforce",
+  );
+});

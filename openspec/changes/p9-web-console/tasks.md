@@ -405,17 +405,14 @@ Each sub-task below ships only when its inventory section is fully checked.
 
 ## 11b. Frontend — Host the P10 Prompt & Model Studio (9b, owned by P10)
 
-> 🚧 **BLOCKED — re-verified 2026-07-24 (second check, this session).** P10 has a change directory
-> ([`../p10-prompt-model-studio/`](../p10-prompt-model-studio/)) and **no implementation**: there is no
-> `internal/api/p10.go`, no prompt-registry HTTP surface, and no read model for a prompt version, a
-> version timeline, a binding or a test run. Re-checked by grepping every mounted route for `/api/p10`
-> and for a prompt-registry handler — nothing. The block stands. Adding these routes now would ship a surface with no
-> backing endpoint — which is exactly how `internal/api/static/index.html` became an orphan, and the
-> mistake this change is organised to avoid repeating.
->
-> **Unblocking condition:** the P10 read models exist and are mounted. The rules below already bind:
-> the shell, the single token set, `en-US` strings, render-as-received, the accessibility floor, and
-> 🔴 11b.3's honesty rule are all in place and will apply to the studio the moment it has data.
+> ✅ **UNBLOCKED — verified 2026-07-27.** P10 is implemented and mounted: `internal/api/p10.go`
+> (`MountP10` — publish + timeline/diff/impact) and `internal/api/p10matrix.go` (`MountP10Matrix` —
+> `GET /api/p10/models`, `/api/p10/workflows/{id}/nodes`, `/api/p10/workflows/{id}/bindings`,
+> `POST /api/p10/studio/run`, `/api/p10/studio/bind`). The gate this block set is satisfied rather than
+> waived — the studio ships **because** it has backing endpoints, which is the whole point. The studio
+> surface itself landed under P10 (`web/console/src/app/app/studio/`), and this block is the record that
+> it satisfies **P9's** rules: single token set, `en-US` strings, render-as-received, three data states,
+> the accessibility floor, and 🔴 11b.3's honesty rule — each now an executable check.
 
 The studio is a console surface, so its routes live in this shell — but its **requirements** belong to
 [`../p10-prompt-model-studio/`](../p10-prompt-model-studio/) and are not duplicated here. P9's rules
@@ -423,48 +420,92 @@ govern it unchanged: single token set, English strings with pinned `en-US` forma
 render-as-received, no credential in the browser, three distinct data states, the accessibility floor,
 and browser-rendered acceptance.
 
-- [ ] 11b.1 Add the studio routes to the shell and navigation (§7.1): prompt browser, version timeline,
+- [x] 11b.1 Add the studio routes to the shell and navigation (§7.1): prompt browser, version timeline,
       version diff, editor, binding editor, preview + test-run, comparison, per-node selector.
-- [ ] 11b.2 Ensure the studio inherits the design system rather than introducing a fourth palette —
+      → `/app/studio` is in the shell rail and the command path (`app/layout.tsx`), and its one page
+      composes every listed sub-surface as in-page tabs: the **matrix** (per-node selector · models ·
+      test-run · bind), the **prompt library** (browser · version timeline · diff · editor/publish ·
+      preview · side-by-side comparison · binding editor), and **bound nodes**
+      (`studio/{studio,matrix,boundmode}.tsx`). `studio.test.mjs` asserts the nav entry (task 4.1).
+- [x] 11b.2 Ensure the studio inherits the design system rather than introducing a fourth palette —
       an editor and a diff view are exactly where a page-local style set tends to appear (R1).
-- [ ] 11b.3 🔴 Enforce P10's honesty rule in this shell: **no score, rank, winner, or confidence
+      → The studio renders through the shared primitives (`PageFrame`, `Section`, `Tabs`, `Card`,
+      `Chip`, `Banner`) and no page-local palette. The R1 build gate `scan-tokens.mjs` walks all of
+      `src/` — the studio's three component files included (90 files scanned, green) — so a colour /
+      radius / type-size / duration literal in the editor or diff view **fails the build**, not review.
+- [x] 11b.3 🔴 Enforce P10's honesty rule in this shell: **no score, rank, winner, or confidence
       interval** may render in a studio result, and no promotion path may exist from one. It is a
       failing test here as well as in P10.
-- [ ] 11b.4 Render prompt bodies as **text, never markup** (R7) — they are customer content and arrive
+      → `studio.test.mjs` sweeps `studio.tsx` and `matrix.tsx` line by line: any of
+      *score / winner / confidence interval / rank / best / promote* on a non-negating line is a
+      **failing test** (tasks 6.2, M6.1). The only cell distinction is *"in force — unverified"*, which
+      the test also pins as "not a proof". The page lede states *no score, no winner, no promotion path*.
+- [x] 11b.4 Render prompt bodies as **text, never markup** (R7) — they are customer content and arrive
       from the registry.
-- [ ] 11b.5 Extend the entitlement mapping (§10.1) to cover studio capabilities.
+      → No `dangerouslySetInnerHTML` on the studio surface — asserted by `studio.test.mjs` for both
+      `studio.tsx` and `matrix.tsx`, and by the repo-wide `scan-markup.mjs` build gate (89 files, green).
+      🔎 **Found while landing this under P9:** the studio's in-scope-symbol parse did
+      `catch { return [] }`, collapsing *"the nodes payload could not be read"* into *"there are no
+      symbols in scope"* — the unknown-vs-empty lie `security.test.mjs` forbids across `src/`. Fixed to
+      return `null` (scope **unknown**, still degrading to the free-text input), so the guard passes on
+      the truth rather than a contortion.
+- [x] 11b.5 Extend the entitlement mapping (§10.1) to cover studio capabilities.
+      → A `studio` capability row in `lib/entitlements.ts`, listed on the account view like every other.
+      🔴 It maps `feature: null` **deliberately**: P10 (`p10.go`, `p10matrix.go`, and the P10 spec)
+      enforces **no** entitlement on the studio, so claiming a plan boundary would make the screen and
+      the gate disagree — the one failure this file exists to prevent. The commercial boundary is not
+      lost, it moves downstream: studio exploration is ungated; *shipping* a verified change is the
+      already-gated `open-pr` path (Business, assisted). `studio.test.mjs` asserts the row exists **and**
+      that its feature is `null`, not a plan feature — so a future edit that invents an unenforced gate
+      turns red. If P10 ever gates the studio, this row maps to that feature, not before.
 
 ## 11c. Frontend — Surfaces owned by the distribution phases (9b)
 
-> 🚧 **BLOCKED — re-verified 2026-07-24 (second check, this session).** P11 (CLI & CI integration) and
-> P12 (forge delivery) have change directories and no implementation. `internal/linkage` exists as a
-> library — `linkage.go`, `infer.go` — and **nothing in `internal/api` imports it**, so there is no HTTP
-> read model for link coverage and none for delivery state. Re-checked by grepping the API package for
-> `linkage` and for `/api/p11` / `/api/p12`: no match. The block stands. 11c.1 in particular must not be approximated —
-> a spend figure derived from a fraction of a customer's activity, shown without saying so, is what a
-> billing dispute is made of, and the console cannot say what fraction it is until the platform
-> reports it.
->
-> **Unblocking condition:** P11's coverage read model and P12's delivery-state read model exist and are
-> mounted. 11c.3's rule — a missing delivery route and a revoked one render as **conditions with a next
-> action**, never as empty lists — is already the console's standing behaviour, so it costs nothing to
-> honour when the data arrives.
+> ✅ **UNBLOCKED — verified 2026-07-27.** Both read models exist and are mounted. P11 exposes a
+> **coverage** read model — `LinkIngestSource.Coverage` (`internal/api/p11.go`), joined into the P7
+> billing view as `link_coverage` so the SUM figure carries how complete it is (FR17), not a bare
+> number. P12 exposes the **delivery-state** read model — `GET /api/p12/deliveries` returning a
+> `DeliveriesView` of `DeliveryView` rows plus a `RouteConditionView` (`internal/api/p12.go`,
+> `MountP12`). The block set the right gate: 11c.1 was **not** approximated — the fraction is the
+> platform's own (`runs_linked` / `runs_reported`), and *unknown* is a distinct third state the console
+> never renders as full.
 
 Like §11b, these live in this shell but their **requirements** belong to their own phases and are
 not duplicated here.
 
-- [ ] 11c.1 **Link coverage** ([P11](../p11-cli-ci-integration/)) — display how much of a customer's
+- [x] 11c.1 **Link coverage** ([P11](../p11-cli-ci-integration/)) — display how much of a customer's
       activity is linked, **wherever a spend figure derived from linked runs is shown**. It is not a
       footnote: a figure reflecting a fraction of activity, shown without saying so, is what a billing
       dispute is made of. Complete coverage and *unknown* coverage must render distinguishably.
-- [ ] 11c.2 **Delivery state** ([P12](../p12-forge-delivery/)) — show each delivery as **open /
+      → `components/linkCoverage.tsx` sits **beside** SUM on the account view (`account/page.tsx`), not
+      in a footnote, and renders **three** distinct states — `complete` (all reported runs linked),
+      `partial` (`N of M`, "unlinked runs contribute nothing and are never estimated"), and `unknown`
+      (no run count reported — a dashed bar, never 100%). `link-coverage.test.mjs` renders all three
+      against a stub and asserts unknown is never collapsed into complete.
+- [x] 11c.2 **Delivery state** ([P12](../p12-forge-delivery/)) — show each delivery as **open /
       merged / closed / superseded**, linked to the proposal that produced it, so the loop from
       proposal to outcome is visible.
-- [ ] 11c.3 **No delivery route** and **degraded / revoked** render as **conditions with a next
+      → `app/delivery/page.tsx` renders each `DeliveryView` with the `Status` primitive
+      (opened→*open*, merged, superseded, closed, reverted — each a distinct word, not colour alone)
+      and a one-click **"Open evidence"** link to `proposal_ref`. `delivery.test.mjs` renders the four
+      states against a stub and asserts the proposal link and the merged row's merge commit.
+- [x] 11c.3 **No delivery route** and **degraded / revoked** render as **conditions with a next
       action**, 🚫 never as empty lists — an empty list is the rendering that makes an invisible
       failure look normal.
-- [ ] 11c.4 Resolve the CLI-emitted run reference to a canonical console route (§7.4), so a URL
+      → `RouteConditionBanner` renders `no_route` / `degraded` / `revoked` as a titled condition with
+      the platform's `next_action` and the line *"a reported condition, not an error and not an empty
+      result"*; with no configured route the deliveries area shows that condition, not the
+      configured-route empty copy. `delivery.test.mjs` asserts each condition is distinct, carries its
+      next action, and that a **503** surfaces as *not-mounted* rather than "no deliveries" (the R5
+      distinction, two hops).
+- [x] 11c.4 Resolve the CLI-emitted run reference to a canonical console route (§7.4), so a URL
       pasted from a terminal into a pull request opens exactly that run.
+      → The CLI/linkingest emits `https://heros-agent.space/app/runs/{run_id}`
+      (`internal/linkingest/linkingest.go`, pinned `runlink.PlatformBaseURL`), whose path is the
+      console's canonical `routes.run(id)`. Pinned from **both** sides so neither can drift silently:
+      Go `TestConsoleRoute_IsThePlatformCanonicalRunPath` asserts the default emitted URL; and
+      `routes.test.mjs` asserts `routes.run` is exactly `/app/runs/{id}` **and** renders the pasted
+      path to prove it opens that run's subject page, never the picker.
 
 ## 12. Cutover — remove the legacy pages (9b, gated, owned, dated)
 

@@ -34,6 +34,25 @@ func periodOf(ts string) metering.Period {
 	return metering.MonthPeriod(t)
 }
 
+// TestConsoleRoute_IsThePlatformCanonicalRunPath pins the run reference the CLI prints (FR18) to the
+// console's canonical run route (P9 §11c.4). A URL pasted from a terminal into a pull request must open
+// exactly that run in the console, so the emitted PATH must be `/app/runs/{run_id}` — the same segment
+// the console's `routes.run` defines and its routes.test.mjs pins from the other side. If this default
+// ever drifts, every already-pasted link silently stops resolving.
+func TestConsoleRoute_IsThePlatformCanonicalRunPath(t *testing.T) {
+	// No consoleURL override — this is the DEFAULT the platform uses when it has not been told otherwise.
+	ing := New(metering.NewMemCostEvents(), NewMemStore(), nil)
+
+	got := ing.route("tenant-A", "run-77")
+	want := "https://heros-agent.space/app/runs/run-77"
+	if got != want {
+		t.Fatalf("default console run route = %q, want %q (must match P9 routes.run)", got, want)
+	}
+	if !strings.HasPrefix(got, runlink.PlatformBaseURL+"/app/runs/") {
+		t.Fatalf("run route %q is not under the pinned platform /app/runs/ path", got)
+	}
+}
+
 // TestIdempotentLinking — re-linking the same run does not double-count SUM (FR14, task 3.4/7.7).
 func TestIdempotentLinking(t *testing.T) {
 	ing, sub, _ := newHarness()
