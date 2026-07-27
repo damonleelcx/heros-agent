@@ -26,7 +26,13 @@ export function Tabs({
   /** Optional controls rendered at the end of the tab strip (e.g. a workflow selector). */
   right?: ReactNode;
 }) {
-  const [active, setActive] = useState(initial ?? tabs[0]?.id ?? "");
+  // 🔴 `initial` is VALIDATED against the tab set, not trusted. It now comes from a URL query parameter
+  // (a linkable section), and an unrecognised value would otherwise select a panel that does not exist —
+  // rendering a tab strip above an empty region, which reads as a broken page rather than as a typo in a
+  // link. Falling back to the first tab is the honest failure: the reader sees the page.
+  const [active, setActive] = useState(
+    tabs.some((t) => t.id === initial) ? (initial as string) : (tabs[0]?.id ?? ""),
+  );
   const base = useId();
   const refs = useRef<Record<string, HTMLButtonElement | null>>({});
 

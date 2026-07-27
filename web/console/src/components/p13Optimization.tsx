@@ -1,6 +1,7 @@
 import { FileText, Layers, Scissors, Sparkles, SlidersHorizontal, TrendingDown, GitCommitVertical, ShieldCheck } from "lucide-react";
 import type { Card as ProposalCard } from "@/lib/types.generated";
 import { Section, Card, Chip, Row, Stat, Stats } from "@/components/primitives";
+import type { TabItem } from "@/components/tabs";
 import { Diff } from "@/components/diff";
 import { score, usd2, integer, plural } from "@/lib/format";
 
@@ -81,7 +82,40 @@ function metaFor(operator: string) {
   );
 }
 
-export function P13OptimizationReview({ card }: { card: ProposalCard }) {
+/**
+ * p13ReviewTabs splits this review into one tab per section (NFR17 / PageFrame's own rule: "a page whose
+ * sections would stack tall should split them into <Tabs>").
+ *
+ * The stacked version was five sections deep — the diff alone is a scrolling block — so a reader looking
+ * for the verified delta scrolled past the grounding to find it, and the Decision at the bottom was
+ * below the fold on every proposal. Tabs make each section a viewport rather than a stop on a long
+ * descent. Nothing is removed: every section that stacked is a tab.
+ */
+export function p13ReviewTabs(card: ProposalCard): TabItem[] {
+  const meta = metaFor(card.operator);
+  const tabs: TabItem[] = [
+    { id: "offered", label: "The offered change", content: <P13Offered card={card} /> },
+  ];
+  if (meta.family === "prompt") {
+    tabs.push(
+      { id: "grounding", label: "Grounding", content: <PromptGrounding card={card} /> },
+      { id: "delta", label: "Verified delta", content: <VerifiedDelta card={card} /> },
+      { id: "diff", label: "The change", content: <P13Diff card={card} aside="a reviewable diff of the new version" /> },
+    );
+  }
+  if (meta.family === "downgrade") {
+    tabs.push(
+      { id: "guardrail", label: "Held-out guardrail", content: <DowngradeGuardrail card={card} /> },
+      { id: "diff", label: "The change", content: <P13Diff card={card} aside="an intra-provider model swap" /> },
+    );
+  }
+  if (meta.family === "param") {
+    tabs.push({ id: "param", label: "Parameter tune", content: <ParamFacets card={card} /> });
+  }
+  return tabs;
+}
+
+function P13Offered({ card }: { card: ProposalCard }) {
   const meta = metaFor(card.operator);
   return (
     <>
@@ -105,16 +139,21 @@ export function P13OptimizationReview({ card }: { card: ProposalCard }) {
           <p className="max-w-3xl text-sm leading-relaxed text-foreground/90">{card.rationale}</p>
         </Card>
       </Section>
-
-      {meta.family === "prompt" ? <PromptFacets card={card} /> : null}
-      {meta.family === "downgrade" ? <DowngradeFacets card={card} /> : null}
-      {meta.family === "param" ? <ParamFacets card={card} /> : null}
     </>
   );
 }
 
+/** The diff, as its own tab: it is the tallest block on the page and the one a reviewer opens last. */
+function P13Diff({ card, aside }: { card: ProposalCard; aside: string }) {
+  return (
+    <Section title="The change" aside={aside}>
+      {card.source_diff ? <Diff patch={card.source_diff} /> : <p className="caption">No source diff.</p>}
+    </Section>
+  );
+}
+
 /** Grounding + the immutable-version framing for a prompt rewrite. */
-function PromptFacets({ card }: { card: ProposalCard }) {
+function PromptGrounding({ card }: { card: ProposalCard }) {
   const cases = card.evidence_case_ids ?? [];
   return (
     <>
@@ -143,18 +182,12 @@ function PromptFacets({ card }: { card: ProposalCard }) {
           </p>
         </Card>
       </Section>
-
-      <VerifiedDelta card={card} />
-
-      <Section title="The change" aside="a reviewable diff of the new version">
-        {card.source_diff ? <Diff patch={card.source_diff} /> : <p className="caption">No source diff.</p>}
-      </Section>
     </>
   );
 }
 
 /** The held-out guardrail tie for a model downgrade — a cost win and a quality tie, never a quality win. */
-function DowngradeFacets({ card }: { card: ProposalCard }) {
+function DowngradeGuardrail({ card }: { card: ProposalCard }) {
   const admitted = card.held_out; // the platform admits a downgrade only under the held-out guardrail
   return (
     <>
@@ -187,9 +220,6 @@ function DowngradeFacets({ card }: { card: ProposalCard }) {
             exists to refuse.
           </p>
         </Card>
-      </Section>
-      <Section title="The change" aside="an intra-provider model swap">
-        {card.source_diff ? <Diff patch={card.source_diff} /> : <p className="caption">No source diff.</p>}
       </Section>
     </>
   );

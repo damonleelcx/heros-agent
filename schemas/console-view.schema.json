@@ -498,6 +498,15 @@
         "rationale": {
           "type": "string"
         },
+        "refused_dimension": {
+          "type": "string"
+        },
+        "refused_node_id": {
+          "type": "string"
+        },
+        "refused_reason": {
+          "type": "string"
+        },
         "significant": {
           "type": "boolean"
         },
@@ -974,6 +983,22 @@
           "type": "string"
         },
         "from": {
+          "type": "string"
+        },
+        "items": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "kind": {
           "type": "string"
         },
         "node_id": {
