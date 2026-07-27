@@ -14,7 +14,10 @@
 P23 gives the customer console the two surfaces it has never had: a **legal surface** — a Terms of
 Service and a Privacy Notice, published as versioned artifacts with a recorded, auditable acceptance —
 and a **developer documentation surface** that takes a developer from *"what is this"* to a first real
-result and then answers reference questions without them reading Go source.
+result and then answers reference questions without them reading Go source — including the two pages every
+developer hits first: **how to install the CLI from a GitHub Release** (on macOS, Linux and Windows, with
+checksum-and-signature verification as a step of the install rather than an appendix) and **the complete CLI
+command reference**, exit-code contract included, generated from the registry rather than transcribed.
 
 Both are **published-word** surfaces: pages that are *read* rather than computed, whose characteristic
 failure is not a crash but **drift** — the written sentence and the running system quietly diverging,
@@ -78,9 +81,15 @@ must match.
 4. **Ship a three-tier developer documentation surface** — quickstart, guides, generated reference — that
    gets a developer to a first real result without reading source, and answers reference questions from
    artifacts the code already produces.
-5. **Make drift fail the build.** Extend the claim fence to documentation and add fences for CLI
-   commands, API paths, metric definitions, links/anchors and leaked credentials.
-6. **Serve both surfaces with zero platform calls and zero third-party requests**, so they work during a
+5. **Document the whole command surface and the way in.** A **CLI reference** covering every subcommand,
+   every flag and the **exit-code contract a customer's CI branches on**; and an **installation page** for
+   getting the CLI out of a **GitHub Release** onto macOS, Linux and Windows — where **verification is a
+   step of the install, not an appendix**.
+6. **Make drift fail the build.** Extend the claim fence to documentation and add fences for CLI
+   commands, API paths, metric definitions, links/anchors and leaked credentials — and make the CLI fence
+   run **both ways**, so a command that exists with no documentation fails as loudly as documentation for a
+   command that does not exist.
+7. **Serve both surfaces with zero platform calls and zero third-party requests**, so they work during a
    platform incident and inside an air-gapped P19 deployment.
 
 ### Non-goals (explicitly deferred, with the phase that owns them)
@@ -119,12 +128,30 @@ must match.
 **Evaluating developer**
 - As an evaluating developer, I want a quickstart that reaches a real result on my own repository in
   minutes, so that I can judge the product on its output instead of its copy.
+- As an evaluating developer, I want **one install command for my platform** that ends with a working
+  binary, so that I do not have to work out which release asset matches my machine.
+- As an evaluating developer, I want the install page to tell me **before** it happens that macOS or
+  Windows will warn me about the binary, so that an OS malware dialog is not my first impression of the
+  product.
 - As an evaluating developer, I want every page to say what the capability does **not** do, so that I
   discover the boundary before I build on it rather than after.
 
 **Integrating developer**
 - As an integrating developer, I want CLI and API reference generated from the shipped artifacts, so
   that what I read is what the binary and the service actually accept.
+- As an integrating developer, I want **every subcommand and flag** documented with its default and its
+  environment equivalent, so that I stop reading `internal/cli` to find out what a flag does.
+- As a CI author, I want the **exit codes documented as a contract with remedies**, so that my pipeline can
+  branch on "your gate failed" versus "the tool broke" without parsing prose.
+- As a CI author, I want to **pin a version** on every install channel, so that my build image is
+  reproducible.
+- As a security-conscious operator, I want the install path to **verify the checksum and the signature
+  before the binary lands on `PATH`**, so that the verification step is not something I have to know to go
+  looking for.
+- As an operator of an air-gapped estate, I want the install and its verification documented **without a
+  network**, so that a disconnected machine is a supported case rather than an improvisation.
+- As a developer who is done evaluating, I want **uninstall** documented in my channel's own idiom, so that
+  removing the tool is as clear as installing it.
 - As an integrating developer, I want an error message or an empty state to deep-link me to the exact
   section that explains it, so that I do not search for the sentence I need.
 - As an integrating developer, I want a glossary for the product's own nouns, so that "Variant Spec",
@@ -243,9 +270,47 @@ must match.
 - **FR33** — Legal and documentation render in a **third composition** — public (no session, no fetch),
   **theme-following**, typographic — distinct from the dark-fixed marketing poster and from the console
   shell.
-- **FR34** — The reading surface **scrolls as a document** (an explicit, stated exemption from the
-  console's viewport-first rule), holds a bounded measure, and offers a table of contents as a `nav`
-  landmark whose current section is marked by a **word**, not by colour alone.
+- **FR34** — The reading surface **scrolls as a document** (an explicit, stated exemption from the console's
+  viewport-first rule), holds a bounded measure, and offers a table of contents as a `nav` landmark whose
+  current section is marked by a **word**, not by colour alone.
+
+### CLI command reference
+
+- **FR35** — Every subcommand in the CLI registry appears in the reference. A subcommand that exists with no
+  reference entry **fails the build** — the CLI fence checks documentation against code *and* code against
+  documentation.
+- **FR36** — The **exit-code contract** is documented as a contract: every code, its meaning and the
+  **remedy** it implies, matching `internal/cli`. Three distinct remedies are never documented as sharing a
+  code.
+- **FR37** — Every command states whether it runs **offline with no account**; platform-facing commands
+  (`login`, `link`) document that they may be **absent from a build** and what that looks like.
+- **FR38** — Every flag is documented with its type, default and — where one exists — the environment
+  variable that supplies it, including **which wins** when both are set.
+- **FR39** — Every command entry carries at least one **complete, runnable invocation**, what success looks
+  like, and the exit code returned on success.
+- **FR40** — A deprecated command or flag is **marked before removal**, with the replacement and the expected
+  removal release. A removal is never the reader's first notice.
+
+### Installation & release-package documentation
+
+- **FR41** — Install documentation describes **only channels that exist**. Describing an unpublished channel
+  fails the build, under the same rule that gates capability claims.
+- **FR42** — The **release-asset table is generated** from the published release — filenames, targets,
+  versions and checksums. A hand-typed checksum, filename or version fails the build.
+- **FR43** — **Every documented install path verifies the download before the binary reaches `PATH`.**
+  Checksum *and* signature verification are steps of the install, never an optional appendix; a documented
+  path that installs first and verifies later is not published.
+- **FR44** — The **OS-trust posture** is stated honestly per platform: signed and notarized where true,
+  unsigned where true, with the exact quarantine-clear command and what accepting it means. No trust claim
+  outruns what the pipeline performs.
+- **FR45** — **Installing a pinned version** is documented for every channel, and a pinned install verifies
+  exactly as a latest install does.
+- **FR46** — **Upgrade and uninstall** are documented in each channel's own idiom, including deferring to the
+  package manager where the install was manager-mediated, and naming anything left behind.
+- **FR47** — An **offline / air-gapped install** is documented — from a transferred asset, with verification
+  performed on the disconnected machine and no step requiring the internet or an account.
+- **FR48** — The install page **ends by naming the next command**, which is the quickstart's first step, with
+  no configuration-file edit between installing and a first result.
 
 ## 7. Non-functional requirements
 
@@ -274,7 +339,7 @@ flowchart LR
   subgraph console["console container (ADR-006 — same deploy unit)"]
     C1["content/legal/en/*.md<br/>front matter + body"]
     C2["content/docs/en/**.md"]
-    G["generators (build time)<br/>CLI registry · schemas · API artifact"]
+    G["generators (build time)<br/>CLI registry · schemas · API artifact<br/>release assets → install page"]
     F["fences (build time)<br/>claims · cli · api · metric · link · secret · html"]
     R["(reading) route group<br/>/legal · /docs"]
     M["/legal/manifest.json<br/>(static)"]
@@ -344,6 +409,25 @@ the repository contains **no OpenAPI document** (verified: no `*openapi*` file e
 either emits that artifact from the existing route table or the API reference tier is **rendered as
 absent with the reason**. What it does *not* do is hand-write an endpoint list, which would be a copy of
 the truth that starts drifting the day it is written.
+
+**Decision 6b — Install documentation is generated from the release, and documents only channels that
+exist.** Asset filenames, target platforms, version strings and checksums come from the published release,
+never from a hand-typed line — the same generation rule as the rest of the reference, for a sharper reason:
+a stale checksum on an install page teaches readers that verification fails routinely, which is how a
+security step becomes a step people skip. And a channel is documented **only once it is published**, under
+the claims fence: an install command that 404s is the worst possible first sentence of a product. This
+matters concretely today, because `.github/workflows/` holds only `ci.yml` and `heros-eval.yml` — **there is
+no release pipeline and no published Release yet**. So the install page ships describing what *does* exist
+(build from source; the P11 reproducible build, `SHA256SUMS` and `herossign` verification runbook) and says
+plainly that packaged channels are not yet available. When [P20](P20-installable-packages.md) lands the
+pipeline, each channel's documentation becomes publishable **as that channel becomes real**, not before.
+
+**Decision 6c — Verification is a step of the install, never an appendix.** The CLI "runs inside your CI with
+access to your repository, so a compromised release is a compromise of every build it runs in." The install
+path most readers follow is the shortest one on the page — so the shortest path is the *verified* path, and
+a documented path that puts a binary on `PATH` before checking the checksum and signature is not published
+at all. This is **第1级 安全 over 第3级 UX over 第8级 实现**: a one-line install that silently drops
+verification is easier to write, easier to copy, and removes exactly the control the threat model rests on.
 
 **Decision 7 — A third composition: the reading surface.** The console follows the reader's theme
 because it is sat in front of for an hour; the public surface is dark-fixed because it is a poster seen
@@ -478,6 +562,15 @@ Two endpoints, both small, both hostile-input-shaped.
   that drops only what it created.
 - **Retention is a configured window, enforced by a job that can be run dry.** A deletion job whose first
   run in production is also its first run ever is a defect waiting for a quiet weekend.
+- **The exit-code contract is documentation of a contract, not a description of behavior (FR36).**
+  `internal/cli/exit.go` already states the case: the codes are public "the moment a customer's pipeline
+  branches on them", and the gap between *your gate failed* and *our tool broke* is load-bearing because the
+  remedies are opposite. So the reference documents each code with its **remedy**, the metric fence's
+  sibling check makes a drifted meaning fail the build, and three remedies never collapse onto one code.
+- **Command coverage is checked from the code side (FR35).** The CLI fence as first specified only catches
+  documentation naming a command that does not exist. The inverse — a command that exists and is
+  undocumented — is the failure that actually accumulates, because adding a subcommand is a normal Tuesday
+  and remembering the docs is not. So coverage is asserted against the registry.
 
 ### 9.4 Senior Frontend Dev — *match the codebase, smallest correct change, a11y & perf are requirements*
 
@@ -541,6 +634,19 @@ content — the fences do not care who typed it, which is the point of having th
 - **Reversibility of content.** Because every published version stays served (FR5), a rollback of a legal
   document is *publishing a new version*, never deleting one — the archived route is the thing consent
   records depend on.
+- **The install page is a DevOps artifact, not a marketing one (FR41–FR48).** It is generated from the
+  release the pipeline produced, so it cannot claim an asset, a version or a checksum the pipeline did not
+  emit. Three properties are load-bearing and each is a fence rather than a habit: **verify before `PATH`**
+  (the shortest documented path is the verified one); **honest OS trust** (never "notarized" for a channel
+  that is not — the customer meets the truth at the Gatekeeper dialog either way, and the only question is
+  whether we told them first); and **pinned installs on every channel**, because an unpinnable install is
+  an unreproducible build image.
+- **Offline install is documented because offline install is a delivery mode (FR47).** The same air-gapped
+  estate P19 targets has to get the CLI onto a disconnected machine, and verification has to work there —
+  a runbook that assumes the internet is a runbook for a different customer.
+- **Uninstall and upgrade in the channel's own idiom (FR46).** A tool that a package manager installed and
+  a downloader replaced underneath it is a support ticket with no clean answer; documenting the manager's
+  path is cheaper than fielding that.
 
 ### 9.7 Senior QA Engineer — *green tests are the goal only if green is credible*
 
@@ -556,6 +662,8 @@ forever while every sentence rots.
 | **Consent behavior** | FR11/FR12/FR13/FR14 | Double-submit → one row. Publish a **material** version → an existing user is asked again. Publish a **non-material** version → they are not. Make the write fail → the UI shows no acceptance and the commitment does not proceed. |
 | **A11y & print** | NFR5/NFR6 | Contrast and heading order in both themes via the existing design-system test; the print stylesheet asserted to emit the document identity. |
 | **Reachability** | FR21 | Extend the existing link-coverage test: every docs page reachable by navigation, every anchor referenced from CLI/console output resolves. |
+| **CLI coverage** | FR35/FR36 | Add a subcommand to the registry with no reference entry → build fails. Change an exit code's meaning without changing the reference → build fails. |
+| **Install honesty** | FR41–FR44 | Document a channel the pipeline does not publish → build fails. Hand-type a checksum → build fails. A documented install path that reaches `PATH` before verifying → rejected at review, and the reviewer has a named rule to point at rather than an opinion. |
 
 The negative assertions are the valuable ones, and they mirror what the console's test suite already
 does well: `routes.test.mjs` proves a selection surface makes **no** upstream call. The docs and legal
@@ -581,19 +689,39 @@ suites prove the same shape of nothing.
   defect with a ticket number.
 - **No SLA, no certification, no sub-processor list is claimed** until it exists. The compliance package
   is a non-goal (§3), and saying so early is cheaper than retracting it during a security review.
+- **The install page is the top of the funnel, and the rule bites hardest there (FR41, FR44).** It is the
+  first page a stranger reads, so it is the page most tempting to write ahead of the pipeline — a Homebrew
+  line before there is a tap, "notarized" before anyone has paid for a Developer ID. Both are the same
+  mistake the claims fence exists to stop, and both are found by a customer within minutes rather than by
+  us within months. A channel appears when it is published; a trust claim appears when the pipeline
+  performs it.
+- **"Verify before `PATH`" is a differentiator, so state it as one (FR43).** Most tools' install lines do
+  not verify anything. Ours does, by construction, and the reason — *this binary runs inside your CI with
+  access to your repository* — is exactly the argument a security reviewer needs to hear, on the page they
+  are already reading.
 
 ## 10. Dependencies
 
 **Upstream (must exist):**
 - **P9 — Web Console**: the shell, the `(public)` composition, the BFF credential boundary, the build
   scan idiom, `CAPABILITIES`, and the stub-platform test harness.
-- **P11 / P20 — CLI & install**: the subject of the quickstart, and the command registry the CLI fence
-  reads.
+- **P11 — CLI**: the subject of the quickstart; the **command registry** the CLI reference is generated
+  from and the CLI fence checks both ways; the **exit-code contract** in `internal/cli` and
+  `docs/decisions/p11-contracts.md`; and the supply-chain floor the install page documents today —
+  `scripts/release-cli.sh` (reproducible build + sorted `SHA256SUMS` + ed25519 signature via
+  `cmd/herossign`) and `docs/release/cli-verification.md`.
 - **P7 — Billing & entitlements**: the plan/metering facts the Terms must match.
 - **ADR-006 / ADR-007 / ADR-008**: deploy packaging, type generation, and the principal the consent
   record binds to.
 
 **Soft dependencies (integrate when they land; P23 does not block on them):**
+- **P20 — Installable Packages**: **per-channel gating.** P20 owns the tag-triggered release pipeline and
+  the channels themselves (curl\|sh, PowerShell, Homebrew, Scoop/winget, deb/rpm, container image), the
+  Gatekeeper/SmartScreen posture, and `heros upgrade`. P23 owns their **documentation**, generated from
+  what the pipeline publishes. Today `.github/workflows/` holds only `ci.yml` and `heros-eval.yml` — no
+  release pipeline exists — so the install page ships describing build-from-source plus the P11
+  verification runbook, and **each channel's page becomes publishable as that channel becomes real**
+  (FR41). P23 is therefore not blocked by P20; its install content grows with it.
 - **P21 — Stripe Payments**: checkout is one of the commitment moments the gate covers. Until P21 ships,
   the gate covers first sign-in and plan change.
 - **P22 — SSO & Identity**: makes the principal real. The record's shape is designed so P22 requires no
@@ -618,16 +746,28 @@ which needs a data inventory to exist first — and P23 produces one.
 | R8 | **An archived legal version is deleted during a repo cleanup**, orphaning consent records | Backend | A fence asserts that every version referenced by the manifest — and every hash format the records can hold — still resolves; deletion fails the build (NFR7). |
 | R9 | **Documentation scope expands into a full docs platform** and the phase never lands | Product | Three tiers, fixed (FR17). Versioned docs per release, localization, interactive API playgrounds and a changelog are out of scope by name (§3). |
 | R10 | **Consent records complicate erasure requests** | System Designer | NFR9 + FR16: the record holds no personal data beyond an opaque principal id, so erasure tombstones the subject and the evidentiary record survives — decided now rather than during the first request. |
+| R11 | **The install page describes channels P20 has not shipped**, and a stranger's first command 404s | DevOps + Sales Ops | FR41 puts channels under the claims fence: a channel is documented when it is published. Until then the page documents build-from-source plus the P11 verification runbook and says packaged channels are not yet available. |
+| R12 | **The one-line install becomes the unverified install** — the shortest path wins, and verification drifts into an appendix nobody reads | DevOps | FR43 makes the shortest documented path the verified one and refuses publication of any path that reaches `PATH` before verifying. The reviewer has a rule to cite, not a preference. |
+| R13 | **A trust claim outruns the pipeline** ("notarized" before a Developer ID is funded) | DevOps | FR44: every signing/notarization claim must resolve to a step the pipeline performs; where unsigned, the page says unsigned and documents the exact quarantine-clear command. |
+| R14 | **A new subcommand ships undocumented** — adding one is routine, remembering the docs is not | Backend + QA | FR35 runs the CLI fence from the code side: a registry entry with no reference entry fails the build. |
+| R15 | **Install docs go stale the moment a release is cut** (versions, filenames, checksums) | DevOps | FR42 generates the asset table from the release. A hand-typed checksum fails the build — and a routinely-wrong checksum is how readers learn to skip verification. |
 
 ## 12. Rollout & test strategy
 
 **Sequencing.** (1) The reading surface and the fences, with placeholder content — machinery before
-prose, so the content lands into something that checks it. (2) Documentation tiers 1–2 plus the generated
-CLI and schema reference. (3) Legal documents v1 and the manifest, published **read-only** — visible and
-linkable, with **no gate**. (4) The consent record backend, exercised by the API and by the account-page
-history view. (5) The gate, enabled last and at first only for **new** principals. Every step is
-independently shippable and independently revertible; a fault at step 5 never makes the documents
-unreadable.
+prose, so the content lands into something that checks it. (2) The **install page and the generated CLI
+reference** — first, because they are the pages a stranger reads before anything else, and because the
+CLI registry and the P11 verification runbook already exist to generate them from. (3) Documentation
+tiers 1–2 plus the generated schema reference. (4) Legal documents v1 and the manifest, published
+**read-only** — visible and linkable, with **no gate**. (5) The consent record backend, exercised by the
+API and by the account-page history view. (6) The gate, enabled last and at first only for **new**
+principals. Every step is independently shippable and independently revertible; a fault at step 6 never
+makes the documents unreadable.
+
+**Install channels ship on P20's clock, not this phase's.** Each channel's page becomes publishable the
+day the release pipeline publishes that channel, gated by the claims fence (FR41). Until then the install
+page documents build-from-source and the P11 verification runbook and says packaged channels are not yet
+available — so P23 lands complete without waiting for P20, and grows as P20 lands.
 
 **Enabling the gate** is deliberately the last, smallest, most reversible step, because it is the only
 one that can stop a customer doing something. It ships behind a flag, is enabled for new sign-ins first,
@@ -667,12 +807,24 @@ the exact failure this phase exists to prevent.
    verified by a reviewer on a clean machine.
 10. CLI and schema reference are generated; the HTTP API reference is either generated from a committed
     artifact or rendered as absent with the reason stated.
-11. All seven fences (claims, CLI, API, metric, link, secret, HTML) run in the build and each has a
-    fixture proving it fails.
-12. Docs and legal render with no external requests; asserted in an air-gapped-equivalent run.
-13. WCAG 2.2 AA in both themes; the reading surface ships no client JS beyond the TOC and search islands,
+11. All eight fences (claims, CLI **both ways**, API, metric, link, secret, HTML, install) run in the
+    build and each has a fixture proving it fails.
+12. **Every subcommand in the registry has a reference entry**, and adding one without documentation fails
+    the build. The **exit-code contract** is documented with each code's remedy and matches `internal/cli`.
+13. Every flag carries its default and environment equivalent, with precedence stated; each command entry
+    shows a runnable invocation, what success looks like, and the success exit code; platform-facing
+    commands document their "unavailable in this build" outcome.
+14. **The install page documents only published channels**, its asset table (filenames, versions,
+    checksums) is generated from the release, and **every documented path verifies checksum and signature
+    before the binary reaches `PATH`**. With no release pipeline yet published, it documents
+    build-from-source plus the P11 verification runbook and says so.
+15. The OS-trust posture is stated per platform and matches what the pipeline performs; pinned-version
+    install, upgrade and uninstall are documented per channel idiom; an **offline/air-gapped install with
+    verification** is documented; the page ends by naming the quickstart's first command.
+16. Docs and legal render with no external requests; asserted in an air-gapped-equivalent run.
+17. WCAG 2.2 AA in both themes; the reading surface ships no client JS beyond the TOC and search islands,
     with the bundle budget unchanged.
-14. Terms language reconciled line-by-line against P7 entitlements and (when present) P21 Stripe
+18. Terms language reconciled line-by-line against P7 entitlements and (when present) P21 Stripe
     configuration, with the reconciliation recorded in `docs/sales/`.
 
 **Success metrics (measured after release, feeding the ⑦ → ① loop):**

@@ -99,8 +99,10 @@ customers, auditors and regulators rather than by tests. So the phase delivers c
 keeps it honest: content-as-code inside the console's deploy unit (no CMS, no runtime fetch — [ADR-010](../adr/)),
 a document identity of `(kind, version, content_hash)` that a **consent record** points at instead of a URL, a
 commitment gate that never walls the console, generated reference (absent tiers marked absent, never hand-written),
-and seven build-time fences — each with a fixture proving it can fail — extending the `scan-claims` rule from the
-marketing page into the documentation tree.
+and eight build-time fences — each with a fixture proving it can fail — extending the `scan-claims` rule from the
+marketing page into the documentation tree. The developer tier includes the two pages every developer hits first:
+**installing the CLI from a GitHub Release** (verification is a step of the install, not an appendix; only published
+channels may be described) and the **complete CLI command reference**, exit-code contract included.
 
 | Phase | PRD | OpenSpec change | Lead role(s) |
 |-------|-----|-----------------|--------------|

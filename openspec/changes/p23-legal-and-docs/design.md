@@ -243,17 +243,18 @@ liability rather than a support ticket.
 
 ---
 
-## Decision 11 — Seven fences, each with a failing fixture, each stating what it does not check
+## Decision 11 — Eight fences, each with a failing fixture, each stating what it does not check
 
 | Fence | Fails the build when |
 |---|---|
-| `scan-docs-claims` | a docs page describes a capability not `shipped: true` with a named owning phase in `CAPABILITIES` |
-| `scan-cli` | a `heros …` invocation in content names a subcommand or flag the registry does not have |
+| `scan-docs-claims` | a docs page describes a capability not `shipped: true` with a named owning phase in `CAPABILITIES`, **or an install channel the release pipeline does not publish** |
+| `scan-cli` | **(docs → code)** a `heros …` invocation in content names a subcommand or flag the registry does not have; **(code → docs)** a subcommand in the registry has no reference entry; an exit code's documented meaning disagrees with `internal/cli` |
 | `scan-api` | a documented endpoint, method or field does not resolve against the machine-readable API artifact |
 | `scan-metric` | a metric definition disagrees with the harness on name, unit or computation, or cites no computation site |
 | `scan-links` | an internal link or anchor does not resolve, or an external link is not allow-listed and marked |
 | `scan-secrets` | content matches a credential pattern (provider key prefixes, PEM blocks, bearer tokens) |
 | `scan-content` | content contains raw HTML, an inline event handler, or an external script/font/stylesheet reference |
+| `scan-install` | an asset filename, version or **checksum is hand-typed rather than generated** from the release; a documented install path places the binary on `PATH` **before** verification; a signing/notarization claim names a step the pipeline does not perform |
 
 Two rules carried over from `scan-claims.mjs`, which already gets both right:
 
@@ -262,6 +263,62 @@ Two rules carried over from `scan-claims.mjs`, which already gets both right:
    Tone, emphasis and omission are **not** machine-checkable and stay a named review responsibility.
 2. **Each fence ships with a fixture proving it fails.** A fence with no failing fixture is not tested, and
    an untested fence is a green light with no bulb.
+
+---
+
+## Decision 12 — The install page is generated from the release, and documents only channels that exist
+
+Asset filenames, target platforms, version strings and checksums come from the published release, never from
+a hand-typed line. The generation rule is the same as Decision 6's, but the reason is sharper: **a stale
+checksum on an install page teaches readers that verification fails routinely**, which is precisely how a
+security step becomes a step people skip.
+
+A channel is documented **only once it is published**, under the claims fence. An install command that 404s
+is the worst possible first sentence of a product.
+
+**Honest status.** `.github/workflows/` holds only `ci.yml` and `heros-eval.yml` — **there is no release
+pipeline and therefore no published GitHub Release**. What exists is the P11 supply-chain floor:
+`scripts/release-cli.sh` (reproducible build, sorted `SHA256SUMS`, ed25519 signature via `cmd/herossign`)
+and `docs/release/cli-verification.md`. So the install page ships describing **what exists** — build from
+source, and the verification runbook — and states plainly that packaged channels are not yet available.
+Each P20 channel's documentation becomes publishable **as that channel becomes real**.
+
+This is the same EXISTS / PARTIAL / ABSENT posture as Decision 6, applied to distribution: P23 is therefore
+**not blocked by P20**, and its install content grows with P20 rather than waiting for it or preceding it.
+
+---
+
+## Decision 13 — Verification is a step of the install, never an appendix
+
+The CLI *"runs inside your CI with access to your repository, so a compromised release is a compromise of
+every build it runs in."* Two consequences, both structural rather than editorial:
+
+1. **The shortest documented path is the verified path.** Readers follow the line that fits on one line. If
+   the one-liner installs and a later section explains verification, the one-liner is what ships to
+   production — and it has silently removed the control the threat model rests on.
+2. **A documented path that reaches `PATH` before verifying is not published at all.** This is a
+   publication rule with a reviewer-citable name, not a preference to be argued per pull request.
+
+**Priority-law reading:** 第1级 安全 over 第3级 UX over 第8级 实现. An unverified one-liner is easier to
+write, easier to copy and shorter on the page. It is still refused.
+
+**Corollary — trust claims may not outrun the pipeline.** "Signed", "notarized" and "Authenticode" are
+claims about steps the pipeline performs; where an artifact is unsigned the page says unsigned and documents
+the exact quarantine-clear command and what accepting it means. The customer meets the truth at the
+Gatekeeper dialog either way; the only question is whether we told them first.
+
+---
+
+## Decision 14 — The CLI fence runs in both directions
+
+As first specified, the CLI fence catches documentation naming a command that does not exist. The failure
+that actually accumulates is the inverse: **a command that exists and is undocumented**, because adding a
+subcommand is a normal Tuesday and remembering the reference is not.
+
+So coverage is asserted **against the registry**: a subcommand present with no reference entry fails the
+build. The exit-code contract gets the same treatment — `internal/cli/exit.go` already says the codes are
+public "the moment a customer's pipeline branches on them", and a contract nobody can look up is a contract
+nobody can rely on.
 
 ---
 

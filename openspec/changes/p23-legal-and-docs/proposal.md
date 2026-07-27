@@ -62,13 +62,43 @@ a docs platform beyond three tiers.
   a **build-time static index served by the console** — no third-party service — degrading to a browsable
   table of contents with JavaScript off. Every page states the platform version it documents and the
   **boundary** of what the capability does not do. Everything renders in an **air-gapped** deploy.
-- **New capability `docs-accuracy-fence`.** Seven build-time gates in the idiom of the existing
+- **New capability `cli-reference`.** The documented command surface of the `heros` binary — the registry
+  today holds `help`, `version`, `discover`, `apply`, `eval`, `status`, `login`, `link`. **Every subcommand
+  in the registry must have a reference entry**, so the CLI fence runs **both ways**: documentation naming a
+  command that does not exist fails, *and* a command that exists with no documentation fails — which is the
+  failure that actually accumulates, because adding a subcommand is a normal Tuesday and remembering the docs
+  is not. The **exit-code contract** (`0` success / `1` your gate failed / `2` the tool broke / `3` invalid
+  invocation) is documented **as a contract, with each code's remedy**, matching `internal/cli` — the codes
+  are public "the moment a customer's pipeline branches on them", and a contract nobody can look up is a
+  contract nobody can rely on. Every command states whether it runs **offline with no account**; platform-
+  facing commands document their **"unavailable in this build"** outcome. Every flag carries its default, its
+  environment equivalent and **which wins**. Every entry carries a **runnable invocation**, what success looks
+  like and the success exit code. Deprecations are **marked before removal**.
+- **New capability `install-documentation`.** Getting the CLI out of a **GitHub Release** onto macOS, Linux
+  and Windows. **Verification is a step of the install, never an appendix**: the shortest documented path is
+  the *verified* path, and a path that places the binary on `PATH` before checking checksum **and** signature
+  is not published — the CLI "runs inside your CI with access to your repository", so the one-liner everyone
+  copies is exactly where the control must live. The **release-asset table is generated** from the published
+  release (filenames, targets, versions, checksums); a hand-typed checksum fails the build, because a
+  routinely-wrong checksum is how readers learn to skip verification. A channel is documented **only once it
+  is published**. The **OS-trust posture** is stated honestly per platform — never "notarized" for a channel
+  that is not, and where unsigned, the exact quarantine-clear command and what accepting it means. Plus
+  **pinned-version install** on every channel, **upgrade and uninstall in each channel's own idiom**, an
+  **offline/air-gapped install with verification on the disconnected machine**, and an ending that names the
+  quickstart's first command. **Honest status:** `.github/workflows/` holds only `ci.yml` and
+  `heros-eval.yml` — there is **no release pipeline and no published Release yet** — so the page ships
+  describing build-from-source plus the P11 verification runbook (`scripts/release-cli.sh`, `SHA256SUMS`,
+  `herossign`, `docs/release/cli-verification.md`) and says packaged channels are not yet available. Each
+  P20 channel becomes documentable **as it becomes real**.
+- **New capability `docs-accuracy-fence`.** Eight build-time gates in the idiom of the existing
   `scan-claims.mjs`: **claims** (a docs page may not describe a capability that is not `shipped: true` in
-  `CAPABILITIES`), **CLI** (every `heros …` invocation resolves to a real subcommand and flags), **API**
-  (every documented endpoint/field resolves against the machine-readable artifact), **metric** (every metric
-  definition matches the harness's name, unit and computation, and cites where it is computed), **link**
-  (internal links and anchors resolve; external links allow-listed and marked), **secret** (credential-shaped
-  content fails the build), **content** (Markdown with no raw HTML, no inline handlers, no external script).
+  `CAPABILITIES`, nor an install channel the pipeline does not publish), **CLI** (both directions, plus
+  exit-code parity), **API** (every documented endpoint/field resolves against the machine-readable
+  artifact), **metric** (every metric definition matches the harness's name, unit and computation, and cites
+  where it is computed), **link** (internal links and anchors resolve; external links allow-listed and
+  marked), **secret** (credential-shaped content fails the build), **content** (Markdown with no raw HTML, no
+  inline handlers, no external script), **install** (no hand-typed checksum/filename/version; no install path
+  that reaches `PATH` before verifying; no trust claim the pipeline does not perform).
   **Each fence ships with a fixture proving it can fail**, and each states in its own header what it does
   **not** check.
 - **New capability `reading-surface`.** A **third composition** beside the dark-fixed marketing poster and
@@ -85,21 +115,25 @@ fences that run inside the console's existing `npm run build`.
 
 ## Impact
 
-- **Affected capabilities:** new — `legal-documents`, `consent-records`, `developer-docs`,
-  `docs-accuracy-fence`, `reading-surface`. Consumes (does not modify) the P9 console shell + BFF boundary +
-  `CAPABILITIES` manifest, the P11/P20 CLI, the P7 entitlement facts, and ADR-006 / ADR-007 / ADR-008.
+- **Affected capabilities:** new — `legal-documents`, `consent-records`, `developer-docs`, `cli-reference`,
+  `install-documentation`, `docs-accuracy-fence`, `reading-surface`. Consumes (does not modify) the P9 console
+  shell + BFF boundary + `CAPABILITIES` manifest, the P11 CLI registry / exit-code contract / supply-chain
+  floor, the P20 release channels as they land, the P7 entitlement facts, and ADR-006 / ADR-007 / ADR-008.
 - **Affected code / systems:** `web/console/src/app/(reading)/` route group with `/legal/**` and `/docs/**`
   (new); `web/console/content/{legal,docs}/en/**` (new, locale-segmented from day one);
   `web/console/scripts/scan-{docs-claims,cli,api,metric,links,secrets,content}.mjs` (new, wired into
-  `npm run build`); `web/console/scripts/gen-{cli-reference,schema-reference,search-index,slug-manifest}.mjs`
-  (new); `web/console/tests/{legal,docs}.test.mjs` (new) and extensions to `link-coverage.test.mjs`;
+  `npm run build`); `web/console/scripts/gen-{cli-reference,schema-reference,search-index,slug-manifest,release-assets}.mjs`
+  (new); `web/console/tests/{legal,docs,install}.test.mjs` (new) and extensions to `link-coverage.test.mjs`;
   `internal/api` consent endpoints + `internal/legal` (new); `db/migrations/postgres/00NN_p23_legal_acceptance.{up,down}.sql`
   (next free number — `0016` at time of writing, P21/P22 being docs-only); `docs/adr/ADR-010-*` (new);
   `docs/sales/P23-terms-reconciliation.md` (new).
 - **Dependencies:** upstream — P9 (shell, `(public)` composition, BFF credential boundary, scan idiom, stub
-  platform harness), P11/P20 (the CLI the quickstart drives and the registry the CLI fence reads), P7 (the
-  plan/metering facts the Terms must match), ADR-006/007/008. Soft — P21 (checkout is one commitment moment;
-  until it ships the gate covers sign-in and plan change) and P22 (makes the principal real). Unblocks —
+  platform harness), P11 (the CLI the quickstart drives, the registry and exit-code contract the CLI
+  reference is generated from, and the `release-cli.sh` / `SHA256SUMS` / `herossign` verification floor the
+  install page documents today), P7 (the plan/metering facts the Terms must match), ADR-006/007/008. Soft —
+  P20 (**per-channel**: each install channel becomes documentable as the release pipeline publishes it; P23
+  is not blocked, its install content grows with P20), P21 (checkout is one commitment moment; until it ships
+  the gate covers sign-in and plan change) and P22 (makes the principal real). Unblocks —
   legally complete self-serve signup, enterprise security review without a bespoke questionnaire round-trip,
   deep-linkable CLI/console error messages, and the compliance package (which needs the data inventory this
   phase produces).
@@ -107,4 +141,6 @@ fences that run inside the console's existing `npm run build`.
   SOC 2 / ISO reports, trust center; self-serve data export/erasure (the notice names a request route and the
   P8 operator runbook); localization (content path is locale-segmented, English is authoritative);
   a blog / changelog / status page; hosted search, analytics or a headless CMS (ADR-010); cookie-consent UI
-  (the one session cookie is strictly necessary; a banner arrives with a change, not before it).
+  (the one session cookie is strictly necessary; a banner arrives with a change, not before it); **and the
+  install channels themselves** — the release pipeline, the installers, the signing/notarization and
+  `heros upgrade` are P20's to build. P23 documents them, and may not document them before they exist.

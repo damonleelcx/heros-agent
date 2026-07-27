@@ -17,12 +17,19 @@ guides, then reference generated from the artifacts the code already produces.
 ### Requirement: Documentation SHALL ship in three tiers — quickstart, guides and generated reference
 
 The surface SHALL provide a **Quickstart** (one path, install to first result), **Guides** (task-shaped, one
-job each) and **Reference** (CLI, HTTP API, schemas, metrics, glossary).
+job each — including **installing the CLI from a release package**) and **Reference** (**CLI commands**, HTTP
+API, schemas, metrics, glossary). The install content is specified by `install-documentation` and the command
+surface by `cli-reference`.
 
 #### Scenario: A reader can tell which tier answers their question
 - **WHEN** a reader opens the documentation index
 - **THEN** the three tiers are distinguished by name and purpose
 - **AND** the quickstart is the first thing offered to a reader with no prior state.
+
+#### Scenario: Installation and the command surface are both reachable from the index
+- **WHEN** a reader opens the documentation index
+- **THEN** the install page and the CLI command reference are both reachable from it by navigation
+- **AND** neither is discoverable only by search or by a link from another page.
 
 #### Scenario: The quickstart offers one path
 - **WHEN** a reader opens the quickstart

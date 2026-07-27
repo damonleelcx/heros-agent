@@ -105,6 +105,27 @@ stylesheet reference.
 - **WHEN** content contains a raw HTML block or an inline event handler
 - **THEN** the build fails.
 
+### Requirement: The build SHALL reject hand-written release data and an install path that skips verification
+
+Install content SHALL derive its asset filenames, versions and checksums from the published release. The
+build SHALL fail on a hand-typed checksum, filename or version; on a documented install path that places the
+binary on `PATH` before verifying checksum and signature; on a signing or notarization claim naming a step
+the release pipeline does not perform; and on an install channel the pipeline does not publish.
+
+#### Scenario: A hand-typed checksum fails the build
+- **WHEN** install content contains a literal checksum, asset filename or version that is not generated from
+  the release
+- **THEN** the build fails naming the value
+- **AND** a routinely-wrong checksum never gets the chance to teach readers that verification fails anyway.
+
+#### Scenario: An unverified install path fails
+- **WHEN** a documented install path places the binary on `PATH` before checksum and signature verification
+- **THEN** the fence fails and the path is not published.
+
+#### Scenario: A trust claim without a pipeline step fails
+- **WHEN** content claims an artifact is signed or notarized
+- **THEN** the build fails unless the release pipeline performs that step.
+
 ### Requirement: Each fence SHALL ship with a failing fixture and SHALL state what it does not check
 
 Every fence SHALL be accompanied by a fixture that proves it fails, and its header SHALL state the coverage
@@ -112,7 +133,7 @@ it does **not** provide.
 
 #### Scenario: Every fence is proven able to go red
 - **WHEN** the fence fixtures run
-- **THEN** each of the seven fences fails on its own fixture, individually
+- **THEN** each of the eight fences fails on its own fixture, individually
 - **AND** a fence with no failing fixture is not counted as delivered.
 
 #### Scenario: A fence does not imply coverage it lacks

@@ -62,27 +62,36 @@ phase:
       (**EXISTS**).
 - [ ] 4.4 `scripts/gen-search-index.mjs` — build-time static index over titles, headings and lead paragraphs;
       **state the ranking limit in the file header** (Decision 9).
-- [ ] 4.5 `scripts/scan-docs-claims.mjs` — extend the `scan-claims` rule to `/docs/**`: no page may describe a
+- [ ] 4.5 `scripts/gen-release-assets.mjs` — generate the install page's asset table (filenames, targets,
+      versions, checksums) **from the published release**. Until a release exists it emits nothing and the
+      install page renders the not-yet-available statement (Decision 12).
+- [ ] 4.6 `scripts/scan-docs-claims.mjs` — extend the `scan-claims` rule to `/docs/**`: no page may describe a
       capability that is not `shipped: true` with a named owning phase in `CAPABILITIES`.
-- [ ] 4.6 `scripts/scan-cli.mjs` — every `heros …` invocation in content resolves to a real subcommand **and
-      real flags**.
-- [ ] 4.7 `scripts/scan-api.mjs` — every documented endpoint, method and field resolves against the
+- [ ] 4.7 `scripts/scan-cli.mjs` — **both directions**: every `heros …` invocation in content resolves to a
+      real subcommand **and real flags**; **and** every subcommand in the registry has a reference entry. Plus
+      exit-code parity — a documented code whose meaning disagrees with `internal/cli` fails (Decision 14).
+- [ ] 4.8 `scripts/scan-api.mjs` — every documented endpoint, method and field resolves against the
       machine-readable API artifact; **refuse the page** when the artifact is absent rather than passing
       vacuously.
-- [ ] 4.8 `scripts/scan-metric.mjs` — every documented metric matches the harness on **name, unit and
+- [ ] 4.9 `scripts/scan-metric.mjs` — every documented metric matches the harness on **name, unit and
       computation** and **cites where it is computed**.
-- [ ] 4.9 `scripts/scan-links.mjs` — internal links and anchors resolve; a removed/renamed slug fails unless
+- [ ] 4.10 `scripts/scan-links.mjs` — internal links and anchors resolve; a removed/renamed slug fails unless
       the same change adds a redirect; external links allow-listed and visibly marked.
-- [ ] 4.10 `scripts/scan-secrets.mjs` — credential-shaped content (provider key prefixes, PEM blocks, bearer
+- [ ] 4.11 `scripts/scan-secrets.mjs` — credential-shaped content (provider key prefixes, PEM blocks, bearer
       tokens) fails the build.
-- [ ] 4.11 `scripts/scan-content.mjs` — Markdown only: **no raw HTML, no inline handlers, no external
+- [ ] 4.12 `scripts/scan-content.mjs` — Markdown only: **no raw HTML, no inline handlers, no external
       script/font/stylesheet reference** (this is what makes air-gapped parity a machine check rather than a
       policy).
-- [ ] 4.12 Wire all seven scans + four generators into `npm run build`, and add a **failing fixture per
-      fence** under `tests/support/` — a fake `heros frobnicate`, an unshipped claim, a dead anchor, a fake
-      API key, a raw `<script>`, a mismatched metric unit, an undocumented endpoint. Each must fail
-      **individually**.
-- [ ] 4.13 Give every fence a header that states **what it does not check** (NFR12), in the idiom
+- [ ] 4.13 `scripts/scan-install.mjs` — a hand-typed asset filename, version or **checksum** fails; a
+      documented install path that reaches `PATH` **before** verification fails; a signing/notarization claim
+      naming a step the pipeline does not perform fails; an install channel absent from the published release
+      fails (Decisions 12 + 13).
+- [ ] 4.14 Wire all eight scans + five generators into `npm run build`, and add a **failing fixture per
+      fence** under `tests/support/` — a fake `heros frobnicate`, a registry subcommand with no reference
+      entry, an unshipped claim, a dead anchor, a fake API key, a raw `<script>`, a mismatched metric unit, an
+      undocumented endpoint, a hand-typed checksum, and an install path that reaches `PATH` before verifying.
+      Each must fail **individually**.
+- [ ] 4.15 Give every fence a header that states **what it does not check** (NFR12), in the idiom
       `scan-claims.mjs` already uses.
 
 ## 5. Product Designer + Frontend — Documentation content (tiers 1–2)
@@ -104,94 +113,133 @@ phase:
 - [ ] 5.7 Design the unhappy paths as pages, not defaults: docs 404 offering the section index and search; a
       zero-result search that **says what it searched**.
 
-## 6. Sales Ops + Frontend — Legal content (published read-only, no gate yet)
-- [ ] 6.1 Author the **Terms of Service** with counsel; engineering supplies structure, front matter and the
+## 6. Backend + DevOps + Product — CLI reference and installation content
+- [ ] 6.1 Generate the **CLI reference** for every subcommand in the registry — today `help`, `version`,
+      `discover`, `apply`, `eval`, `status`, `login`, `link` — and make a registry entry with no reference
+      entry **fail the build** (§4.7). Adding a subcommand is a normal Tuesday; remembering the docs is not.
+- [ ] 6.2 Document the **exit-code contract as a contract**: `0` success, `1` a gate the customer configured
+      failed, `2` the tool broke, `3` invalid invocation — each with its **remedy**, sourced from
+      `internal/cli/exit.go` and `docs/decisions/p11-contracts.md`. The 1-vs-2 gap is load-bearing: opposite
+      remedies, and a CI step that fails for an unclear reason gets disabled.
+- [ ] 6.3 State per command whether it runs **offline with no account**; for `login` and `link`, document the
+      **"unavailable in this build"** outcome rather than leaving it to be met at the terminal.
+- [ ] 6.4 Document every flag with type, default, environment equivalent and **which wins** when both are
+      set; mark deprecations with their replacement and expected removal release, **before** removal.
+- [ ] 6.5 Give each command entry a **runnable invocation**, what success looks like, and the success exit
+      code.
+- [ ] 6.6 Author the **install page** for macOS, Linux and Windows. **The shortest path on the page is the
+      verified path**: checksum **and** signature checked before the binary reaches `PATH`. Do not publish
+      any path that installs first and verifies later (Decision 13) — that is the path everyone copies.
+- [ ] 6.7 Generate the **release-asset table** (§4.5) from the published release. **No hand-typed checksum,
+      filename or version** — a routinely-wrong checksum is how readers learn to skip verification.
+- [ ] 6.8 Gate channels on existence (§4.13): document a channel **only once the pipeline publishes it**.
+      Until then, document what does exist — build from source, `scripts/release-cli.sh`, `SHA256SUMS`,
+      `herossign`, `docs/release/cli-verification.md` — and **say packaged channels are not yet available**.
+- [ ] 6.9 State the **OS-trust posture per platform**: signed/notarized only where the pipeline does it;
+      otherwise "unsigned", with the exact quarantine-clear command and what accepting it means. Warn the
+      reader about the Gatekeeper/SmartScreen dialog **before** they meet it.
+- [ ] 6.10 Document **pinned-version install** on every channel (an unpinnable install is an unreproducible
+      build image), and **upgrade + uninstall in each channel's own idiom**, including deferring to the
+      package manager and naming any configuration or cache left behind.
+- [ ] 6.11 Document the **offline / air-gapped install**: transferred asset, checksum manifest, signature and
+      public key, with verification performed on the disconnected machine and **no step needing the internet
+      or an account**.
+- [ ] 6.12 End the install page by **naming the quickstart's first command**, with no config-file edit
+      between installing and a first discovery graph.
+
+## 7. Sales Ops + Frontend — Legal content (published read-only, no gate yet)
+- [ ] 7.1 Author the **Terms of Service** with counsel; engineering supplies structure, front matter and the
       commercial facts.
-- [ ] 6.2 Author the **Privacy Notice** from the §2 data inventory; assert **only rights with an implemented
+- [ ] 7.2 Author the **Privacy Notice** from the §2 data inventory; assert **only rights with an implemented
       route**, name the route, and state the response commitment operators have actually agreed to.
-- [ ] 6.3 Front matter on both: `kind`, `version`, `effective_date`, `authoritative_language`, `supersedes`,
+- [ ] 7.3 Front matter on both: `kind`, `version`, `effective_date`, `authoritative_language`, `supersedes`,
       `material` — and make the build fail when any is missing.
-- [ ] 6.4 Version-history page + permanent per-version routes `/legal/{kind}/v/{version}`; a superseded page
+- [ ] 7.4 Version-history page + permanent per-version routes `/legal/{kind}/v/{version}`; a superseded page
       **says so, names the current version and links to it — without redirecting**.
-- [ ] 6.5 Static `/legal/manifest.json` (kind → versions → `{effective_date, hash, route, material}`),
+- [ ] 7.5 Static `/legal/manifest.json` (kind → versions → `{effective_date, hash, route, material}`),
       resolvable with no session.
-- [ ] 6.6 Add a fence: a manifest entry whose document no longer resolves **fails the build** (the
+- [ ] 7.6 Add a fence: a manifest entry whose document no longer resolves **fails the build** (the
       orphaned-consent one-way door, Decision 2).
-- [ ] 6.7 Link legal from the **public footer, sign-in, console shell, account surface and checkout** — every
+- [ ] 7.7 Link legal from the **public footer, sign-in, console shell, account surface and checkout** — every
       place a commitment is made or reviewed.
-- [ ] 6.8 **Reconcile the Terms line-by-line against P7 entitlements and (when present) P21 Stripe
+- [ ] 7.8 **Reconcile the Terms line-by-line against P7 entitlements and (when present) P21 Stripe
       configuration** — plans, metering basis (SUM), gainshare/verified-savings basis, cancellation, refunds,
       any SLA language. Record it in `docs/sales/P23-terms-reconciliation.md`. A refund term Stripe cannot
       execute is a promise software will break.
-- [ ] 6.9 Assert **no** SLA, certification or sub-processor claim appears anywhere until it exists.
+- [ ] 7.9 Assert **no** SLA, certification or sub-processor claim appears anywhere until it exists.
 
-## 7. Backend — Consent records
-- [ ] 7.1 Migration `00NN_p23_legal_acceptance.{up,down}.sql` (next free number — `0016` at time of writing):
+## 8. Backend — Consent records
+- [ ] 8.1 Migration `00NN_p23_legal_acceptance.{up,down}.sql` (next free number — `0016` at time of writing):
       the table in `design.md` Decision 5, **expand-only**, with `unique (tenant_id, principal_id,
       document_kind, document_version)` — **idempotency in the schema, not in application code**.
-- [ ] 7.2 `internal/legal`: the manifest reader and **server-side `content_hash` validation**. A client that
+- [ ] 8.2 `internal/legal`: the manifest reader and **server-side `content_hash` validation**. A client that
       submits a hash for a version it was not shown is rejected; without this the record says whatever the
       browser said.
-- [ ] 7.3 `POST /v1/legal/acceptances` — **persist-then-acknowledge**; the 201 is written after commit, never
+- [ ] 8.3 `POST /v1/legal/acceptances` — **persist-then-acknowledge**; the 201 is written after commit, never
       before. A repeat of the same triple returns success and creates no second row.
-- [ ] 7.4 `GET /v1/legal/acceptances` — the caller's **own tenant only**, plus `pending[]` (the kinds needing
+- [ ] 8.4 `GET /v1/legal/acceptances` — the caller's **own tenant only**, plus `pending[]` (the kinds needing
       acceptance). No cross-tenant read exists on this path at all.
-- [ ] 7.5 Bind the record to the **ADR-008 principal**, not to an email or an IdP subject, so P22 requires no
+- [ ] 8.5 Bind the record to the **ADR-008 principal**, not to an email or an IdP subject, so P22 requires no
       migration here.
-- [ ] 7.6 Supersession: publishing a **material** version sets `superseded_by` on prior acceptances; a
+- [ ] 8.6 Supersession: publishing a **material** version sets `superseded_by` on prior acceptances; a
       **non-material** publication changes nothing.
-- [ ] 7.7 Retention job for the configured statutory window, **runnable dry**. A deletion job whose first
+- [ ] 8.7 Retention job for the configured statutory window, **runnable dry**. A deletion job whose first
       production run is also its first run ever is a defect waiting for a quiet weekend.
-- [ ] 7.8 Erasure path: tombstone the subject, **keep the evidentiary row** (document version, hash,
+- [ ] 8.8 Erasure path: tombstone the subject, **keep the evidentiary row** (document version, hash,
       timestamp). Assert the row holds no email, no name and no free text.
 
-## 8. Frontend + Product — The gate and the account surface (last, smallest, most reversible)
-- [ ] 8.1 Acceptance history on `/app/account`: document, version, date, principal — each entry linking to
+## 9. Frontend + Product — The gate and the account surface (last, smallest, most reversible)
+- [ ] 9.1 Acceptance history on `/app/account`: document, version, date, principal — each entry linking to
       **the exact archived text that was accepted**.
-- [ ] 8.2 The commitment gate at **first sign-in / checkout / plan change**, behind a flag, **new principals
+- [ ] 9.2 The commitment gate at **first sign-in / checkout / plan change**, behind a flag, **new principals
       first**.
-- [ ] 8.3 The non-blocking notice for existing sessions: names the document and the effective date, offers
+- [ ] 9.3 The non-blocking notice for existing sessions: names the document and the effective date, offers
       "Read it" and "Accept", and **the console keeps working**.
-- [ ] 8.4 Failed-write behavior: the button returns to rest with a plain sentence — *the acceptance was not
+- [ ] 9.4 Failed-write behavior: the button returns to rest with a plain sentence — *the acceptance was not
       recorded; nothing has been agreed* — and a retry. **No optimistic checkmark, ever.**
-- [ ] 8.5 Assert by test that consent **never** blocks reading the console, an in-flight run, or a legal
+- [ ] 9.5 Assert by test that consent **never** blocks reading the console, an in-flight run, or a legal
       document itself.
 
-## 9. DevOps — Deploy, observability, air-gapped parity
-- [ ] 9.1 Content ships in the **console container** (ADR-006); confirm a bad copy change is reverted by
+## 10. DevOps — Deploy, observability, air-gapped parity
+- [ ] 10.1 Content ships in the **console container** (ADR-006); confirm a bad copy change is reverted by
       redeploying the previous console image — no migration, no platform restart.
-- [ ] 9.2 Expose the live document versions and hashes from the running deployment (the static manifest plus
+- [ ] 10.2 Expose the live document versions and hashes from the running deployment (the static manifest plus
       the console's version surface) so "which text is live on this cluster" is a `curl`, not an
       investigation.
-- [ ] 9.3 Verify **air-gapped parity**: docs and legal byte-identical in the P19 air-gapped package and the
+- [ ] 10.3 Verify **air-gapped parity**: docs and legal byte-identical in the P19 air-gapped package and the
       hosted deploy; zero external requests, enforced by `scan-content` rather than by policy.
-- [ ] 9.4 Confirm the consent endpoints are the **only** new authenticated surface, accept exactly three
+- [ ] 10.4 Confirm the consent endpoints are the **only** new authenticated surface, accept exactly three
       fields, and read only the caller's own tenant; operator-side access to consent records stays in the P8
       console behind its existing RBAC + append-only audit.
 
-## 10. QA — The acceptance gate that can actually fail
-- [ ] 10.1 **Availability (NFR1):** stop the platform stub; every legal and docs route still returns 200 and
+## 11. QA — The acceptance gate that can actually fail
+- [ ] 11.1 **Availability (NFR1):** stop the platform stub; every legal and docs route still returns 200 and
       the harness's upstream-request counter **does not move** (the assertion `routes.test.mjs` already knows
       how to make).
-- [ ] 10.2 **Legal identity:** changing a document body without bumping the version **fails the build**;
+- [ ] 11.2 **Legal identity:** changing a document body without bumping the version **fails the build**;
       deleting an archived version **fails the build**.
-- [ ] 10.3 **Consent behavior:** double-submit → one row (proven against **real Postgres**, `pgproof`-style —
+- [ ] 11.3 **Consent behavior:** double-submit → one row (proven against **real Postgres**, `pgproof`-style —
       an idempotency guarantee asserted only against an in-memory fake is not asserted); **material**
       publication → an existing principal is asked again; **non-material** → they are not; a forced write
       failure → no acceptance rendered and the commitment does not proceed.
-- [ ] 10.4 **Fences:** each of the seven fixtures fails the build individually (§4.12).
-- [ ] 10.5 **Reachability (FR21/FR22):** extend `link-coverage.test.mjs` — every docs page reachable by
+- [ ] 11.4 **Fences:** each of the eight fixtures fails the build individually (§4.14).
+- [ ] 11.5 **CLI coverage:** add a subcommand to the registry with no reference entry → the build fails.
+      Change an exit code's meaning without changing the reference → the build fails.
+- [ ] 11.6 **Install honesty:** document a channel the pipeline does not publish → the build fails. Hand-type
+      a checksum → the build fails. A documented path that reaches `PATH` before verifying → refused at
+      review, with a named rule to cite rather than an opinion.
+- [ ] 11.7 **Reachability (FR21/FR22):** extend `link-coverage.test.mjs` — every docs page reachable by
       navigation, every anchor referenced from CLI or console output resolves.
-- [ ] 10.6 **A11y and print:** WCAG 2.2 AA in **both** themes via the existing design-system test; the print
+- [ ] 11.8 **A11y and print:** WCAG 2.2 AA in **both** themes via the existing design-system test; the print
       stylesheet asserted to emit the document identity.
-- [ ] 10.7 **The human end-to-end, recorded as evidence:** one reviewer on a clean machine follows the
-      published quickstart start to finish **without reading source or asking a question**; one reviewer reads
+- [ ] 11.9 **The human end-to-end, recorded as evidence:** one reviewer on a clean machine follows the
+      published **install page and quickstart** start to finish **without reading source or asking a question**, verification included; one reviewer reads
       and **prints** both legal documents as a buyer would. A green suite over documentation nobody has read
       end to end is the exact failure this phase exists to prevent.
 
-## 11. Close-out
-- [ ] 11.1 Add the P23 row to `docs/prd/README.md` and to the ownership matrix in
+## 12. Close-out
+- [ ] 12.1 Add the P23 row to `docs/prd/README.md` and to the ownership matrix in
       `docs/implementation-timeline/roles-and-ownership.md`.
-- [ ] 11.2 Record the §13 acceptance checklist outcomes; fold these delta specs into `openspec/specs/`.
-- [ ] 11.3 File the residue: anything a fence cannot check (tone, emphasis, omission) becomes a named review
+- [ ] 12.2 Record the §13 acceptance checklist outcomes; fold these delta specs into `openspec/specs/`.
+- [ ] 12.3 File the residue: anything a fence cannot check (tone, emphasis, omission) becomes a named review
       responsibility in the docs contributor guide — not an implied guarantee.
