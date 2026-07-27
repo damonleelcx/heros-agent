@@ -33,20 +33,20 @@ var operatorPrior = map[OperatorKind]float64{
 // cheap change (downgrade / prune) is proven before an expensive multi-candidate prompt sweep. Lower
 // is cheaper. Unknown operators sort last.
 var verifyOrderHint = map[OperatorKind]int{
-	OpModelDowngrade:   0,
-	OpPrune:            0,
-	OpMerge:            1,
-	OpReorder:          1,
-	OpFixSchemaBinding: 2,
-	OpAddSkill:         2,
-	OpContextPolicy:    3,
-	OpModelUpgrade:     3,
-	OpEnableThinking:   3,
-	OpRAGTune:          4,
-	OpAddRerank:        4,
-	OpParamTune:        0, // a single param swap, as cheap as a model swap
-	OpPromptRewrite:    5, // most expensive: a candidate sweep with generated prompts
-	OpInstructionHarden: 5,
+	OpModelDowngrade:    0,
+	OpPrune:             0,
+	OpParamTune:         0, // a single param swap, as cheap as a model swap
+	OpMerge:             1,
+	OpReorder:           1,
+	OpFixSchemaBinding:  2,
+	OpAddSkill:          2,
+	OpContextPolicy:     3,
+	OpModelUpgrade:      3,
+	OpEnableThinking:    3,
+	OpRAGTune:           4,
+	OpAddRerank:         4,
+	OpPromptRewrite:     5, // most expensive: a candidate sweep with generated prompts
+	OpInstructionHarden: 5, // the P13 prompt operators are sweeps too — same cost class
 	OpFewShotCurate:     5,
 	OpPromptCompress:    5,
 	OpRedundancyRemove:  5,
