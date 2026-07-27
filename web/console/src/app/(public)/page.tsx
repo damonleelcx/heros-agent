@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { Metadata } from "next";
-import { ArrowRight, ChevronRight, Minus } from "lucide-react";
+import { ArrowRight, Boxes, Check, ChevronRight, GitPullRequest, Minus, Server } from "lucide-react";
 import { Claim } from "@/components/marketing/claim";
 import { CAPABILITIES, PLAN_ORDER } from "@/lib/entitlements";
 import { cx } from "@/lib/cx";
@@ -11,10 +11,15 @@ import { cx } from "@/lib/cx";
  * # What is new here, and what is unchanged
  *
  * The composition is the design system's: a hero with a worked example beside it, four difference
- * cards, the loop as four steps, the claims, the plans, a close. What did NOT change is the thing the
- * page is for — every capability sentence still renders through `<Claim>`, so it resolves against the
- * manifest in `src/content/capabilities.ts` or the build fails (FR33, R15). A prettier page that could
- * describe the roadmap in the present tense would be a worse page.
+ * cards, the loop as four steps, the last-mile pair (how a change is delivered and where the platform
+ * runs), the claims, the plans, a close. What did NOT change is the thing the page is for — every
+ * capability sentence still renders through `<Claim>`, so it resolves against the manifest in
+ * `src/content/capabilities.ts` or the build fails (FR33, R15). A prettier page that could describe the
+ * roadmap in the present tense would be a worse page.
+ *
+ * The last-mile section (delivery, P12; deployment, P19) follows the same rule: its two panels are
+ * labelled illustrations, exactly like the hero's DemoBoard, and the hard claims underneath them —
+ * `ci-mediated`, `deploy` — go through `<Claim>` in the claims grid where the build fence can see them.
  *
  * Two design-bundle details were deliberately dropped:
  *
@@ -300,6 +305,130 @@ function HeroGraph() {
   );
 }
 
+// ── The last mile · delivery (P12) and deployment (P19) ──────────────────────
+
+/**
+ * Both panels below are ILLUSTRATIONS and are labelled as such, on the same terms as DemoBoard: the
+ * SHAPE of the thing with invented specifics. The checkable claims they dramatise — a PR opened by
+ * your own CI, one image set on two substrates — render through `<Claim id="ci-mediated">` and
+ * `<Claim id="deploy">` in the claims section, where the build fence can see them.
+ */
+
+const DELIVERY_CHECKS = [
+  { label: "eval gate", value: "passed", tone: "accent" },
+  { label: "verified", value: "−38% cost · quality held", tone: "accent" },
+  { label: "diff", value: "1 file · 1 call site", tone: "ink" },
+];
+
+/** DeliveryCard — a delivered pull request, opened by the customer's CI (P12). */
+function DeliveryCard() {
+  return (
+    <figure className="relative m-0">
+      <div className="overflow-hidden rounded-2xl border border-marketing-ink/10 bg-marketing-ink/5 shadow-2xl backdrop-blur-xl">
+        <div className="flex items-center gap-2 border-b border-marketing-ink/8 px-4 py-3">
+          <GitPullRequest className="size-3.5 shrink-0 text-marketing-accent" aria-hidden="true" />
+          <p className="min-w-0 truncate font-mono text-xs text-marketing-ink/70">
+            heros/optimize <span className="text-marketing-ink/40">·</span>{" "}
+            <span className="text-marketing-ink/45">generate_reply → gpt-4o-mini</span>
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2 border-b border-marketing-ink/5 bg-marketing-accent/6 px-4 py-2">
+          <span className="size-1.5 shrink-0 rounded-full bg-marketing-accent" aria-hidden="true" />
+          <span className="text-xs text-marketing-ink/60">
+            Opened by <span className="font-mono text-marketing-ink/85">your CI</span> — the platform holds no
+            repo token
+          </span>
+        </div>
+
+        <ul className="m-0 list-none divide-y divide-marketing-ink/5 p-0">
+          {DELIVERY_CHECKS.map((row) => (
+            <li key={row.label} className="flex items-center justify-between px-4 py-3">
+              <span className="flex items-center gap-2">
+                <Check className="size-3.5 shrink-0 text-marketing-accent" aria-hidden="true" />
+                <span className="font-mono text-[10px] uppercase tracking-widest text-marketing-ink/30">
+                  {row.label}
+                </span>
+              </span>
+              <span
+                className={cx(
+                  "font-mono text-xs tabular-nums",
+                  row.tone === "accent" ? "text-marketing-accent" : "text-marketing-ink/60",
+                )}
+              >
+                {row.value}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      <div className="absolute -right-3 -top-3 rounded-lg border border-marketing-ink/15 bg-marketing-panel/90 px-2.5 py-1.5 backdrop-blur">
+        <p className="font-mono text-[9px] uppercase tracking-wider text-marketing-ink/40">CI-mediated</p>
+        <p className="font-mono text-[10px] font-medium text-marketing-ink/70">no repo write access</p>
+      </div>
+
+      <figcaption className="mt-3 text-center font-mono text-[10px] text-marketing-ink/25">
+        Illustration — a delivered pull request, opened by your CI
+      </figcaption>
+    </figure>
+  );
+}
+
+const SUBSTRATES = [
+  { icon: Server, name: "Docker Compose", detail: "single host · open-core" },
+  { icon: Boxes, name: "Kubernetes", detail: "a cluster · dev / staging / prod / air-gapped" },
+];
+
+/** DeploymentDiagram — one digest-pinned image set fanning to two substrates (P19). */
+function DeploymentDiagram() {
+  return (
+    <figure className="relative m-0">
+      <div className="rounded-2xl border border-marketing-ink/10 bg-marketing-ink/5 p-6 shadow-2xl backdrop-blur-xl">
+        <div className="mx-auto w-full max-w-[16rem] rounded-xl border border-marketing-accent/25 bg-marketing-accent/8 px-4 py-3 text-center">
+          <p className="font-mono text-[10px] uppercase tracking-widest text-marketing-accent/60">images.env</p>
+          <p className="mt-1 font-mono text-xs text-marketing-ink/75">one digest-pinned image set</p>
+        </div>
+
+        <svg viewBox="0 0 240 34" className="mx-auto h-8 w-full max-w-[16rem]" aria-hidden="true">
+          <path
+            d="M120 0 L120 12 M120 12 L58 12 L58 32 M120 12 L182 12 L182 32"
+            className="fill-none stroke-marketing-accent/30"
+            strokeWidth="1.25"
+          />
+        </svg>
+
+        <div className="grid grid-cols-2 gap-3">
+          {SUBSTRATES.map((substrate) => {
+            const Icon = substrate.icon;
+            return (
+              <div
+                key={substrate.name}
+                className="rounded-xl border border-marketing-ink/10 bg-marketing-panel/60 p-4"
+              >
+                <Icon className="mb-2 size-4 text-marketing-accent/80" aria-hidden="true" />
+                <p className="font-mono text-xs text-marketing-ink/80">{substrate.name}</p>
+                <p className="mt-1 text-[11px] leading-relaxed text-marketing-ink/35">{substrate.detail}</p>
+              </div>
+            );
+          })}
+        </div>
+
+        <p className="mt-5 flex items-center justify-center gap-2 rounded-lg border border-marketing-ink/8 bg-marketing-ink/3 px-3 py-2">
+          <span className="size-1.5 rounded-full bg-marketing-accent/70" aria-hidden="true" />
+          <span className="font-mono text-[10px] uppercase tracking-wider text-marketing-ink/45">
+            one deployment = one tenant boundary
+          </span>
+        </p>
+      </div>
+
+      <figcaption className="mt-3 text-center font-mono text-[10px] text-marketing-ink/25">
+        Illustration — the same image set, either substrate
+      </figcaption>
+    </figure>
+  );
+}
+
 // ── Plans ───────────────────────────────────────────────────────────────────
 
 /** unlocksAt lists the console capabilities this repository's entitlement table attributes to a plan. */
@@ -476,6 +605,64 @@ export default function HomePage() {
         </div>
       </section>
 
+      {/* ── The last mile · delivery (P12) + deployment (P19) ─────────────── */}
+      <section className="relative overflow-hidden border-t border-marketing-ink/5 px-6 py-24 md:px-12">
+        <div
+          className="absolute right-0 top-1/3 size-[30rem] rounded-full opacity-[0.05]"
+          style={{ backgroundImage: "var(--marketing-glow-secondary)" }}
+          aria-hidden="true"
+        />
+        <div className="relative mx-auto max-w-7xl">
+          <p className="mb-3 font-mono text-[10px] uppercase tracking-[0.2em] text-marketing-accent">
+            The last mile
+          </p>
+          <h2 className="mb-4 max-w-2xl font-display text-4xl font-light text-marketing-ink">
+            It ends as a pull request — and it runs where you run.
+          </h2>
+          <p className="mb-14 max-w-xl text-sm leading-relaxed text-marketing-ink/40">
+            A verified change is delivered the way your team already merges code, and the platform behind
+            it stands up from one image set on a substrate you already operate. Two ends of the same
+            promise: nothing lands, and nothing runs, outside your control.
+          </p>
+
+          <div className="grid gap-8 lg:grid-cols-2 lg:gap-12">
+            <article className="flex flex-col">
+              <span className="mb-4 inline-flex w-fit items-center rounded border border-marketing-accent/15 bg-marketing-accent/8 px-2 py-0.5">
+                <span className="font-mono text-[10px] text-marketing-accent/70">P12 · Forge delivery</span>
+              </span>
+              <h3 className="mb-2 font-display text-2xl font-normal text-marketing-ink">
+                Delivered by your own CI
+              </h3>
+              <p className="mb-8 max-w-md text-sm leading-relaxed text-marketing-ink/45">
+                The optimization arrives as a pull request, opened from the CI you already run with the
+                token it already holds — so the platform never needs write access to your repository. A
+                hosted Git App is there if you want it, and off until you do.
+              </p>
+              <div className="mt-auto">
+                <DeliveryCard />
+              </div>
+            </article>
+
+            <article className="flex flex-col">
+              <span className="mb-4 inline-flex w-fit items-center rounded border border-marketing-accent/15 bg-marketing-accent/8 px-2 py-0.5">
+                <span className="font-mono text-[10px] text-marketing-accent/70">P19 · Deployment</span>
+              </span>
+              <h3 className="mb-2 font-display text-2xl font-normal text-marketing-ink">
+                One image set, either substrate
+              </h3>
+              <p className="mb-8 max-w-md text-sm leading-relaxed text-marketing-ink/45">
+                The whole platform stands up from one digest-pinned image set — a single host on Docker
+                Compose, or a cluster on Kubernetes — from the same digests and the same environment
+                contract, so a difference between them is a topology question, never an image one.
+              </p>
+              <div className="mt-auto">
+                <DeploymentDiagram />
+              </div>
+            </article>
+          </div>
+        </div>
+      </section>
+
       {/* ── Claims, each with its boundary ────────────────────────────────── */}
       <section className="border-t border-marketing-ink/5 bg-marketing-panel/40 px-6 py-24 md:px-12">
         <div className="mx-auto max-w-7xl">
@@ -502,7 +689,9 @@ export default function HomePage() {
             <Claim id="attribution" />
             <Claim id="proposals" />
             <Claim id="pull-request" />
+            <Claim id="ci-mediated" />
             <Claim id="console" />
+            <Claim id="deploy" />
             <Claim id="billing-evidence" />
           </ul>
         </div>

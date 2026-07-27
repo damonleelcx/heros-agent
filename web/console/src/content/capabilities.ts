@@ -139,11 +139,22 @@ export const CAPABILITIES: Capability[] = [
   {
     id: "pull-request",
     claim: "Delivers a change as a pull request a person reviews and merges",
-    phase: "P5.5 / ADR-005 — Forge delivery",
+    phase: "P12 — Forge delivery",
     shipped: true,
-    evidence: "handleP55OpenPR refuses unless the verdict passed and the workflow is at Assisted automation",
+    evidence:
+      "internal/forgedelivery, internal/deliveryrecord, internal/api/p12.go; handleP55OpenPR refuses unless the verdict passed and the workflow is at Assisted automation",
     boundary:
       "The platform opens the pull request. It does not merge it. Autonomous merging exists as a governed, budgeted, audited option — it is not what happens by default.",
+  },
+  {
+    id: "ci-mediated",
+    claim: "Opens that pull request from your own CI, so the platform never needs write access to your repository",
+    phase: "P12 — Forge delivery",
+    shipped: true,
+    evidence:
+      "internal/forgedelivery: CI-mediated delivery is the default path; the delivery record is reconciled from the forge, not from a token the platform holds",
+    boundary:
+      "A hosted Git App is the opt-in alternative for teams that would rather the platform open the PR. It is off by default, and nothing here holds a repository token until you turn it on.",
   },
   {
     id: "console",
@@ -153,6 +164,16 @@ export const CAPABILITIES: Capability[] = [
     evidence: "web/console; the credential is held server-side and scripts/scan-bundle.mjs fails the build if it reaches a shipped chunk",
     boundary:
       "The console renders what the platform computed. It derives no score, no ranking and no confidence of its own, so it cannot disagree with the system of record.",
+  },
+  {
+    id: "deploy",
+    claim: "Stands the whole platform up from one digest-pinned image set, on a single host or a Kubernetes cluster",
+    phase: "P19 — Deployment and delivery",
+    shipped: true,
+    evidence:
+      "deploy/ (Docker Compose + Kustomize overlays), deploy/images.env, internal/deploy; make deploy-lint fails the build if the two substrates diverge or an image is unpinned",
+    boundary:
+      "One deployment serves one tenant boundary. Isolation between customers is deployment-level, not shared multi-tenancy — the operator console's cross-tenant views govern one operator's own deployments, not a shared install.",
   },
   {
     id: "billing-evidence",
