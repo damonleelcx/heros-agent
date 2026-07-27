@@ -33,6 +33,10 @@ type ModelChoice struct {
 	LatencyMS float64
 	// Thinking marks a model whose registry entry enables an extended-thinking budget.
 	Thinking bool
+	// Params is the entry's provider parameters (temperature, max_tokens, …). Metadata only — the
+	// operator references the entry by Ref; these let paramTuneOp tell a parameter-tuned variant of the
+	// current model apart from the model itself. Never hashed here.
+	Params map[string]any
 }
 
 // SkillChoice is one skill registry entry (a tool, retriever, embedding, or rerank stage).
@@ -124,6 +128,49 @@ func (m Menu) contextPoliciesOfKind(policy string) []ContextChoice {
 	return out
 }
 
+// paramTunedVariants returns menu models that are the SAME provider+model_id as cur but carry different
+// provider parameters — the candidates for a parameter tune (P13 §3.5). Deterministic order. Returns
+// nothing when cur is empty or no tuned variant exists, so paramTuneOp declines cleanly.
+func (m Menu) paramTunedVariants(cur ModelChoice) []ModelChoice {
+	if cur.Ref == "" {
+		return nil
+	}
+	var out []ModelChoice
+	for _, c := range m.Models {
+		if c.Ref == cur.Ref {
+			continue
+		}
+		if c.Provider == cur.Provider && c.ModelID == cur.ModelID && !paramsEqual(c.Params, cur.Params) {
+			out = append(out, c)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Ref < out[j].Ref })
+	return out
+}
+
+// modelByRef returns the menu choice with the given ref, or a zero value when absent.
+func (m Menu) modelByRef(ref string) ModelChoice {
+	for _, c := range m.Models {
+		if c.Ref == ref {
+			return c
+		}
+	}
+	return ModelChoice{}
+}
+
+// paramsEqual reports whether two provider-param maps hold the same keys and values.
+func paramsEqual(a, b map[string]any) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, av := range a {
+		if bv, ok := b[k]; !ok || av != bv {
+			return false
+		}
+	}
+	return true
+}
+
 func sortModels(cs []ModelChoice) {
 	sort.SliceStable(cs, func(i, j int) bool {
 		if cs[i].Tier != cs[j].Tier {
@@ -166,9 +213,16 @@ func cloneOverride(o variantspec.NodeOverride) variantspec.NodeOverride {
 		ModelRef:      o.ModelRef,
 		PromptRef:     o.PromptRef,
 		ContextPolicy: o.ContextPolicy,
+		ApplyMode:     o.ApplyMode,
 	}
 	if o.SkillRefs != nil {
 		out.SkillRefs = append([]string(nil), o.SkillRefs...)
+	}
+	if o.Bindings != nil {
+		out.Bindings = make(map[string]variantspec.BindingSource, len(o.Bindings))
+		for k, v := range o.Bindings {
+			out.Bindings[k] = v
+		}
 	}
 	return out
 }

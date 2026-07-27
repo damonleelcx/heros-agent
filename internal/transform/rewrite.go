@@ -452,6 +452,19 @@ func insertStructField(fset *token.FileSet, cl *ast.CompositeLit, src []byte, na
 	return edit{Start: at, End: at, New: text}, nil
 }
 
+// refuseInlineParamTune is P13 task 3.6 / Decision 7: a parameter tune (temperature/max-tokens) on an
+// INLINE node has no call-site rewriter. This engine replaces value EXPRESSIONS the call site already
+// wrote; a params struct field the author may never have written is not one of them, so synthesizing it
+// would be SDK-shaped code generation (the ADR-001 top risk), and dropping it would hash one thing and
+// run another (P10 reconciliation fails such a run). Both are refused; only BOUND mode carries a param
+// tune, where it lives in the binding document as data.
+func refuseInlineParamTune(nodeID string) error {
+	return unsafeRewrite(nodeID, string(variantspec.DimModel),
+		"this override is a parameter tune (temperature/max-tokens) on an inline node, but there is no "+
+			"call-site parameter rewriter; a param tune can only be materialized in bound apply mode "+
+			"(ADR-004), so it is refused here rather than silently dropped")
+}
+
 // providerHintFor returns the provider the matched registry row declares for this call site, if any.
 func providerHintFor(site discovery.GoCallSite) string { return site.ProviderHint }
 

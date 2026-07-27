@@ -44,6 +44,17 @@ const (
 	OpFixSchemaBinding OperatorKind = "fix_schema_binding"       // erroring tool → correct the schema binding
 	OpPrune            OperatorKind = "prune"                    // redundant node → remove it
 	OpMerge            OperatorKind = "merge"                    // redundant node → merge it into a neighbour
+
+	// ── P13 deeper prompt operators (13a) — each a distinct grounded catalog row, all publishing a new
+	// immutable prompt version through the P10 registry. They are OPERATORS, not new taxonomy codes or
+	// dimensions: they handle the existing CausePromptFormatDrift code and land only in PromptRef.
+	OpInstructionHarden OperatorKind = "instruction_harden" // under-specified prompt → explicit constraints
+	OpFewShotCurate     OperatorKind = "few_shot_curate"    // dead/duplicate exemplars → curated few-shot
+	OpPromptCompress    OperatorKind = "prompt_compress"    // token bloat → compressed prompt (quality-gated)
+	OpRedundancyRemove  OperatorKind = "redundancy_remove"  // redundant instructions → de-duplicated prompt
+
+	// ── P13 model-parameter tuning (13b) — temperature/max-tokens via ProviderParams, bound-mode only.
+	OpParamTune OperatorKind = "param_tune" // tune provider params (bound apply mode)
 )
 
 // Signal is a structural driver that is NOT expressible as a P4.5 taxonomy code but still maps to a
@@ -130,6 +141,11 @@ type Candidate struct {
 	// ExpectedGain is a cheap pre-verification estimate (operator-prior × severity), used only to order
 	// verification (design Q2). The measured verdict replaces it post-verification.
 	ExpectedGain float64
+	// GuardrailRequired marks a candidate whose admissibility depends on the held-out downgrade guardrail
+	// (P13 task 3.4): a cheaper model is admissible ONLY when its task-success CI overlaps the incumbent's
+	// on held-out cases. Verification consults RequiresHeldOutGuardrail / EvaluateDowngradeGuardrail for
+	// such a candidate before admitting it. In-memory only — never hashed (design Decision 8).
+	GuardrailRequired bool
 }
 
 // Operator is one catalog change-operator. It declares the diagnosis taxonomy codes and structural

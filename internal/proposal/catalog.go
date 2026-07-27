@@ -20,6 +20,11 @@ func DefaultCatalog() []Operator {
 		enableThinkingOp{},
 		modelDowngradeOp{},
 		promptRewriteOp{},
+		instructionHardenOp{},
+		fewShotCurateOp{},
+		promptCompressOp{},
+		redundancyRemoveOp{},
+		paramTuneOp{},
 		contextPolicyOp{},
 		reorderOp{},
 		ragTuneOp{},
@@ -97,8 +102,46 @@ func (op modelDowngradeOp) Propose(in OperatorInput) ([]Candidate, error) {
 	for _, m := range in.Menu.cheaperModels(tier) {
 		spec := cloneSpec(in.Base)
 		setModel(spec, in.NodeID(), m.Ref)
+		c := newCandidate(op.Kind(), in, in.NodeID(), []string{"model"}, spec,
+			fmt.Sprintf("cost bottleneck → downgrade to cheaper model %s (tier %d, ~$%.4f/run); admissible only "+
+				"under the held-out quality guardrail (equal-quality-cheaper tie)", m.ModelID, m.Tier, m.CostPerRun))
+		// A downgrade is admissible ONLY under the held-out CI-overlap guardrail (design Decision 4). Mark
+		// the candidate so verification evaluates the guardrail before admitting it (task 3.4).
+		c.GuardrailRequired = true
+		out = append(out, c)
+	}
+	return out, nil
+}
+
+// ── P13 model-parameter tuning (13b): paramTuneOp ─────────────────────────────────────────────────
+//
+// A parameter tune changes temperature/max-tokens (NOT the model), modeled and hashed through the SAME
+// provider_params field a model swap already populates (no new hashed field — task 4.2). It is emitted
+// in BOUND apply mode, because that is the only mode that can carry a param change as data (ADR-004,
+// design Decision 7): an inline param override has no call-site rewriter and is refused at transform.
+
+type paramTuneOp struct{}
+
+func (paramTuneOp) Kind() OperatorKind { return OpParamTune }
+func (paramTuneOp) Handles() []diagnosis.TaxonomyCode {
+	// A determinism problem (format drift) is the diagnosis a temperature tune answers; it adds no new
+	// taxonomy code.
+	return []diagnosis.TaxonomyCode{diagnosis.CausePromptFormatDrift}
+}
+func (paramTuneOp) HandlesSignal() Signal                           { return SignalNone }
+func (paramTuneOp) AdmissiblePatterns() []patternclassifier.Pattern { return nil }
+
+func (op paramTuneOp) Propose(in OperatorInput) ([]Candidate, error) {
+	cur := in.Menu.modelByRef(baseOverride(in.Base, in.NodeID()).ModelRef)
+	var out []Candidate
+	for _, m := range in.Menu.paramTunedVariants(cur) {
+		spec := cloneSpec(in.Base)
+		setModel(spec, in.NodeID(), m.Ref)
+		// Bound apply mode: a param tune materializes as data in the binding document; the same change
+		// inline has no call-site rewriter and would be refused at transform (Decision 7).
+		setApplyMode(spec, in.NodeID(), variantspec.ApplyBound)
 		out = append(out, newCandidate(op.Kind(), in, in.NodeID(), []string{"model"}, spec,
-			fmt.Sprintf("cost bottleneck → downgrade to cheaper model %s (tier %d, ~$%.4f/run)", m.ModelID, m.Tier, m.CostPerRun)))
+			fmt.Sprintf("format drift → tune provider params %v (bound apply mode)", m.Params)))
 	}
 	return out, nil
 }
@@ -146,6 +189,114 @@ func (op promptRewriteOp) Propose(in OperatorInput) ([]Candidate, error) {
 	c.Grounding = &g
 	c.NewPromptBody = edit.NewPromptBody
 	return []Candidate{c}, nil
+}
+
+// ── P13 deeper prompt operators (13a): instruction_harden / few_shot_curate / prompt_compress /
+// redundancy_remove ───────────────────────────────────────────────────────────────────────────────
+//
+// Each is a DISTINCT catalog row (design Decision 1 — not a strategy enum inside one operator), so its
+// admissibility is its own. They share only proposePromptStrategy's emission mechanics: grounded-or-
+// silent, publish a new immutable version, attach grounding, never apply. All four handle the existing
+// CausePromptFormatDrift code — P13 adds NO taxonomy code (task 4.2).
+
+// proposePromptStrategy is the shared emission path for the deeper prompt operators (§2). It builds a
+// grounded optimize request for the given strategy, declines SILENTLY when ungrounded or when the
+// strategy has nothing to change, publishes the rewritten body as a NEW content-addressed prompt
+// version (task 2.5), and attaches the grounding bundle (task 2.7). It applies nothing — the candidate
+// is returned for verification exactly like every other operator's output (task 2.9).
+func proposePromptStrategy(kind OperatorKind, in OperatorInput, strategy PromptStrategy, rationale string) ([]Candidate, error) {
+	if in.PromptOptimizer == nil {
+		return nil, nil // no optimizer wired: emit nothing rather than a generic rewrite
+	}
+	req := PromptOptimizeRequest{
+		NodeID:         in.Diagnosis.NodeID,
+		BasePromptRef:  baseOverride(in.Base, in.Diagnosis.NodeID).PromptRef,
+		BasePromptBody: in.BasePromptBody,
+		FailingCases:   in.Groundings,
+		RequiredFields: in.RequiredFields,
+		Strategy:       strategy,
+	}
+	edit, err := in.PromptOptimizer.Optimize(req)
+	if err != nil {
+		// grounded-or-silent: neither "no cases to ground on" (ErrUngrounded) nor "grounded but nothing
+		// to change" (ErrNoChange) is a batch error — the operator emits no candidate (Decision 2).
+		if err == ErrUngrounded || err == ErrNoChange {
+			return nil, nil
+		}
+		return nil, err
+	}
+	// A rewrite that changed nothing is not a candidate — it would tie itself and spend a verification
+	// slot on a no-op.
+	if edit.NewPromptBody == in.BasePromptBody {
+		return nil, nil
+	}
+	newRef := syntheticPromptRef(edit.NewPromptBody)
+	spec := cloneSpec(in.Base)
+	setPrompt(spec, in.Diagnosis.NodeID, newRef)
+	c := newCandidate(kind, in, in.Diagnosis.NodeID, []string{"prompt"}, spec, rationale)
+	g := edit.Grounding
+	c.Grounding = &g
+	c.NewPromptBody = edit.NewPromptBody
+	return []Candidate{c}, nil
+}
+
+type instructionHardenOp struct{}
+
+func (instructionHardenOp) Kind() OperatorKind { return OpInstructionHarden }
+func (instructionHardenOp) Handles() []diagnosis.TaxonomyCode {
+	return []diagnosis.TaxonomyCode{diagnosis.CausePromptFormatDrift}
+}
+func (instructionHardenOp) HandlesSignal() Signal                           { return SignalNone }
+func (instructionHardenOp) AdmissiblePatterns() []patternclassifier.Pattern { return nil }
+
+func (op instructionHardenOp) Propose(in OperatorInput) ([]Candidate, error) {
+	return proposePromptStrategy(op.Kind(), in, StrategyInstructionHarden,
+		fmt.Sprintf("under-specification on %d case(s) → harden instructions (grounded)", len(in.Diagnosis.EvidenceCaseIDs)))
+}
+
+type fewShotCurateOp struct{}
+
+func (fewShotCurateOp) Kind() OperatorKind { return OpFewShotCurate }
+func (fewShotCurateOp) Handles() []diagnosis.TaxonomyCode {
+	return []diagnosis.TaxonomyCode{diagnosis.CausePromptFormatDrift}
+}
+func (fewShotCurateOp) HandlesSignal() Signal                           { return SignalNone }
+func (fewShotCurateOp) AdmissiblePatterns() []patternclassifier.Pattern { return nil }
+
+func (op fewShotCurateOp) Propose(in OperatorInput) ([]Candidate, error) {
+	return proposePromptStrategy(op.Kind(), in, StrategyFewShotCurate,
+		fmt.Sprintf("dead/duplicate exemplars on %d case(s) → curate few-shot set (grounded)", len(in.Diagnosis.EvidenceCaseIDs)))
+}
+
+type promptCompressOp struct{}
+
+func (promptCompressOp) Kind() OperatorKind { return OpPromptCompress }
+func (promptCompressOp) Handles() []diagnosis.TaxonomyCode {
+	return []diagnosis.TaxonomyCode{diagnosis.CausePromptFormatDrift}
+}
+func (promptCompressOp) HandlesSignal() Signal                           { return SignalNone }
+func (promptCompressOp) AdmissiblePatterns() []patternclassifier.Pattern { return nil }
+
+// Propose emits a token-reduced candidate. Note the rationale carries NO token target: a compression
+// competes on the full standard metric family (task_success, cost, …) exactly like any other candidate
+// (task 2.3), and a shorter-but-worse prompt loses (FR8). Token reduction is a means, never a goal.
+func (op promptCompressOp) Propose(in OperatorInput) ([]Candidate, error) {
+	return proposePromptStrategy(op.Kind(), in, StrategyCompress,
+		fmt.Sprintf("prompt bloat on %d case(s) → compress; competes on verified quality, not token count", len(in.Diagnosis.EvidenceCaseIDs)))
+}
+
+type redundancyRemoveOp struct{}
+
+func (redundancyRemoveOp) Kind() OperatorKind { return OpRedundancyRemove }
+func (redundancyRemoveOp) Handles() []diagnosis.TaxonomyCode {
+	return []diagnosis.TaxonomyCode{diagnosis.CausePromptFormatDrift}
+}
+func (redundancyRemoveOp) HandlesSignal() Signal                           { return SignalNone }
+func (redundancyRemoveOp) AdmissiblePatterns() []patternclassifier.Pattern { return nil }
+
+func (op redundancyRemoveOp) Propose(in OperatorInput) ([]Candidate, error) {
+	return proposePromptStrategy(op.Kind(), in, StrategyRedundancyRemove,
+		fmt.Sprintf("redundant instructions on %d case(s) → de-duplicate (grounded)", len(in.Diagnosis.EvidenceCaseIDs)))
 }
 
 // ── context-policy switch / reorder (context overflow / lost-in-middle) ───────────────────────────
@@ -368,6 +519,12 @@ func setModel(s *variantspec.VariantSpec, node, ref string) {
 func setPrompt(s *variantspec.VariantSpec, node, ref string) {
 	o := s.Nodes[node]
 	o.PromptRef = ref
+	s.Nodes[node] = o
+}
+
+func setApplyMode(s *variantspec.VariantSpec, node string, mode variantspec.ApplyMode) {
+	o := s.Nodes[node]
+	o.ApplyMode = mode
 	s.Nodes[node] = o
 }
 

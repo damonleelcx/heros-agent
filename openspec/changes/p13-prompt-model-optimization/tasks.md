@@ -26,85 +26,85 @@ held-out CI-overlap guardrail. Effects land **only** in existing `ResolvedNode` 
       NFRs as first-class requirements). → `specs/prompt-rewrite/spec.md`, `specs/model-selection/spec.md`.
 - [x] 1.3 Confirm **no one-way-door contract** is opened (no new `Dimension`/`Kind`/table), so this
       change ships **no** `decisions.md`. Record the reasoning in `design.md` Decision 8. → `design.md`.
-- [ ] 1.4 Ratify the **held-out split derivation** (deterministic from `config_hash` + case ids) and the
+- [x] 1.4 Ratify the **held-out split derivation** (deterministic from `config_hash` + case ids) and the
       **minimum-held-out** floor below which the guardrail returns `inadmissible-insufficient-data`
       rather than a false tie. → `internal/proposal/guardrail.go` `HeldOutSplit`
       (Test: `TestHeldOutSplitIsDeterministic`, `TestGuardrailInsufficientDataIsThirdVerdict`).
 
 ## 2. AI Engineer + Backend — Deeper prompt operators (13a)
 
-- [ ] 2.1 Add `instruction_harden` as a catalog row handling under-specification, declining when
+- [x] 2.1 Add `instruction_harden` as a catalog row handling under-specification, declining when
       ungrounded. → `internal/proposal/catalog.go` `instructionHardenOp` in `DefaultCatalog()`
       (Test: `TestInstructionHardenOnlyOnGroundedUnderspec`).
-- [ ] 2.2 Add `few_shot_curate` as a catalog row (remove/reorder dead exemplars), grounded-or-silent. →
+- [x] 2.2 Add `few_shot_curate` as a catalog row (remove/reorder dead exemplars), grounded-or-silent. →
       `internal/proposal/catalog.go` `fewShotCurateOp` (Test: `TestFewShotCurateGroundedOrSilent`).
-- [ ] 2.3 Add `prompt_compress` (token-reduction) as a catalog row, competing on the full metric family
+- [x] 2.3 Add `prompt_compress` (token-reduction) as a catalog row, competing on the full metric family
       with no token target as a goal. → `internal/proposal/catalog.go` `promptCompressOp`
       (Test: `TestCompressCompetesOnMetricsNotTokenTarget`).
-- [ ] 2.4 Add `redundancy_remove` as a catalog row. → `internal/proposal/catalog.go` `redundancyRemoveOp`
+- [x] 2.4 Add `redundancy_remove` as a catalog row. → `internal/proposal/catalog.go` `redundancyRemoveOp`
       (Test: `TestRedundancyRemoveGrounded`).
-- [ ] 2.5 Route every new operator's rewrite through P10's **content-addressed publish** so each emits a
+- [x] 2.5 Route every new operator's rewrite through P10's **content-addressed publish** so each emits a
       new `PromptRef` and never mutates a version. → `internal/proposal/catalog.go` reuses
       `syntheticPromptRef` / registry publish (Test: `TestRewritePublishesNewImmutableVersion`).
-- [ ] 2.6 🔴 **Refuse a rewrite that un-applies a node.** A slot-set change that leaves a call-site value
+- [x] 2.6 🔴 **Refuse a rewrite that un-applies a node.** A slot-set change that leaves a call-site value
       unbound is refused at resolve with the slot **named**, via P10 impact analysis — never a silent
       drop. → `internal/variantspec/resolve.go` binding check (Test: `TestCompressionUnApplyIsRefusedNamingSlot`).
-- [ ] 2.7 Attach each candidate's **grounding** (the cases addressed) so verification and review see the
+- [x] 2.7 Attach each candidate's **grounding** (the cases addressed) so verification and review see the
       change's purpose. → `internal/proposal/catalog.go` `Candidate.Grounding`
       (Test: `TestPromptCandidateCarriesGrounding`).
-- [ ] 2.8 Add a `gain.go` **prior** for each new prompt operator (ordering only, never a result). →
+- [x] 2.8 Add a `gain.go` **prior** for each new prompt operator (ordering only, never a result). →
       `internal/proposal/gain.go` `operatorPrior` (Test: `TestNewPromptOperatorsHavePriors`).
-- [ ] 2.9 🚫 **Never apply a candidate directly.** Assert every new prompt operator's output reaches a
+- [x] 2.9 🚫 **Never apply a candidate directly.** Assert every new prompt operator's output reaches a
       diff only through the P5.5 gate. → `internal/proposal/*` (Test: `TestPromptCandidateNeverAppliedWithoutVerification`).
 
 ## 3. AI Engineer — Model selection under guardrail (13b)
 
-- [ ] 3.1 Implement the **downgrade guardrail**: a cheaper model is admissible only when its
+- [x] 3.1 Implement the **downgrade guardrail**: a cheaper model is admissible only when its
       `task_success` CI overlaps the incumbent's on **held-out** cases (reuse `evalstats.Compare`
       overlap). → `internal/proposal/guardrail.go` (Test: `TestDowngradeInadmissibleWhenCINoOverlap`).
-- [ ] 3.2 🔴 **Held-out isolation.** The guardrail's cases are **disjoint** from the operator's
+- [x] 3.2 🔴 **Held-out isolation.** The guardrail's cases are **disjoint** from the operator's
       motivating cases. → `internal/proposal/guardrail.go` (Test: `TestGuardrailCasesDisjointFromMotivating`).
-- [ ] 3.3 Make an admitted downgrade an **equal-quality-cheaper tie**: reported as a cost win and a
+- [x] 3.3 Make an admitted downgrade an **equal-quality-cheaper tie**: reported as a cost win and a
       quality tie, never a quality win. → `internal/proposal/catalog.go` `modelDowngradeOp` + verdict
       (Test: `TestDowngradeTieIsCostWinNotQualityWin`).
-- [ ] 3.4 Wire the guardrail as an **admissibility** predicate on `modelDowngradeOp`, leaving
+- [x] 3.4 Wire the guardrail as an **admissibility** predicate on `modelDowngradeOp`, leaving
       `modelUpgradeOp`/`enableThinkingOp` admissibility unchanged. → `internal/proposal/catalog.go`
       (Test: `TestUpgradeAdmissibilityUnchanged`).
-- [ ] 3.5 Implement **parameter tuning** (temperature/max-tokens) via `ProviderParams`, materialized in
+- [x] 3.5 Implement **parameter tuning** (temperature/max-tokens) via `ProviderParams`, materialized in
       **bound** mode (ADR-004). → `internal/proposal/catalog.go` `paramTuneOp`, `internal/transform/boundmode.go`
       (Test: `TestParamTuneMaterializesInBoundMode`).
-- [ ] 3.6 🔴 **Refuse an un-materializable inline param override** with a named cause — never dropped. →
+- [x] 3.6 🔴 **Refuse an un-materializable inline param override** with a named cause — never dropped. →
       `internal/transform/rewrite.go` (Test: `TestInlineParamOverrideRefusedNotDropped`).
-- [ ] 3.7 🔴 **Refuse a cross-provider swap at a user call site** (ADR-002), producing no diff; keep
+- [x] 3.7 🔴 **Refuse a cross-provider swap at a user call site** (ADR-002), producing no diff; keep
       intra-provider swaps applying. → `internal/transform/rewrite.go:81` `rewriteModel`
       (Test: `TestCrossProviderSwapRefusedNoDiff`, `TestIntraProviderSwapApplies`).
-- [ ] 3.8 Add a `gain.go` prior for `paramTuneOp`; downgrade/upgrade priors already exist. →
+- [x] 3.8 Add a `gain.go` prior for `paramTuneOp`; downgrade/upgrade priors already exist. →
       `internal/proposal/gain.go` (Test: `TestParamTuneHasPrior`).
 
 ## 4. Backend + System Designer — Contract preservation (both waves)
 
-- [ ] 4.1 Assert a P13 candidate's only hashed effect is `PromptRef`/`ModelRef`/`ProviderParams`; P0
+- [x] 4.1 Assert a P13 candidate's only hashed effect is `PromptRef`/`ModelRef`/`ProviderParams`; P0
       golden vectors reproduce bit-for-bit. → `internal/confighash/*_golden_test.go` unchanged
       (Test: `TestGoldenVectorsStillReproduce`).
-- [ ] 4.2 🚫 **No new hashed field, `Dimension`, `Kind`, table, oracle, or metric.** Assert the
+- [x] 4.2 🚫 **No new hashed field, `Dimension`, `Kind`, table, oracle, or metric.** Assert the
       `Dimension` enum and registry `Kind` set are unchanged. → structural test
       (Test: `TestNoNewDimensionOrKind`).
-- [ ] 4.3 Assert the eval harness still consumes only `config_hash` + `Trace` — no operator label
+- [x] 4.3 Assert the eval harness still consumes only `config_hash` + `Trace` — no operator label
       reaches it. → `internal/evalharness/*` unchanged (Test: `TestEvalRemainsAxisAgnostic`).
 
 ## 5. QA — Acceptance gate (both waves)
 
-- [ ] 5.1 Ungrounded-or-silent: each new prompt operator yields **zero** candidates on an ungrounded
+- [x] 5.1 Ungrounded-or-silent: each new prompt operator yields **zero** candidates on an ungrounded
       request. → (Test: `TestUngroundedYieldsZeroCandidates`).
-- [ ] 5.2 Immutability: a rewrite creates a new `version_id`; the parent stays resolvable. →
+- [x] 5.2 Immutability: a rewrite creates a new `version_id`; the parent stays resolvable. →
       (Test: `TestRewriteCreatesNewVersionParentIntact`).
-- [ ] 5.3 Un-apply refusal goes **red**: a compression dropping a live `{{slot}}` is refused naming the
+- [x] 5.3 Un-apply refusal goes **red**: a compression dropping a live `{{slot}}` is refused naming the
       slot. → (Test: `TestUnApplyRefusalGoesRed`).
-- [ ] 5.4 Guardrail goes **red**: a non-overlapping downgrade is inadmissible even with lower
+- [x] 5.4 Guardrail goes **red**: a non-overlapping downgrade is inadmissible even with lower
       `eval_cost_usd`. → (Test: `TestNonOverlappingDowngradeInadmissible`).
-- [ ] 5.5 Statistical honesty: every verdict carries a CI; CI-overlapping candidates report tied; no
+- [x] 5.5 Statistical honesty: every verdict carries a CI; CI-overlapping candidates report tied; no
       single-seed decision. → (Test: `TestP13VerdictsAreMultiSeedWithTies`).
-- [ ] 5.6 A shorter-but-worse prompt **fails** (FR8 can go red). → (Test: `TestShorterWorsePromptIsNotAWin`).
+- [x] 5.6 A shorter-but-worse prompt **fails** (FR8 can go red). → (Test: `TestShorterWorsePromptIsNotAWin`).
 
 ## 6. Product Designer — The offered change (both waves)
 

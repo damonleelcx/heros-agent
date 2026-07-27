@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { AlertTriangle, GitPullRequest } from "lucide-react";
-import type { ProposalSurface } from "@/lib/types.generated";
+import type { Card as ProposalCard, ProposalSurface } from "@/lib/types.generated";
 import { load } from "@/lib/view";
 import { requireSession } from "@/lib/session";
 import { recordVisit, routes } from "@/lib/subjects";
@@ -20,7 +20,21 @@ import {
 } from "@/components/primitives";
 import { Disclosure } from "@/components/figure";
 import { Diff } from "@/components/diff";
+import { P13OptimizationReview } from "@/components/p13Optimization";
 import { score, usd2, ms, integer, plural } from "@/lib/format";
+
+// P13 prompt & model optimization operators get the dedicated optimization-review presentation
+// (grounding for a rewrite; the held-out equal-quality-cheaper tie for a downgrade). Every other
+// operator keeps the generic proposal layout.
+const P13_OPERATORS = new Set([
+  "instruction_harden",
+  "few_shot_curate",
+  "prompt_compress",
+  "redundancy_remove",
+  "prompt_rewrite",
+  "model_downgrade",
+  "param_tune",
+]);
 
 export const dynamic = "force-dynamic";
 
@@ -76,6 +90,12 @@ function Body({
 
   const verified = Boolean(recommended);
   const flags = [...(verified ? [] : ["withheld"]), ...(card.significant ? [] : ["low-confidence"])];
+  // A P13 prompt-or-model optimization gets the dedicated review presentation — a rewrite as a diff of
+  // a new immutable version with its grounding, a downgrade as an equal-quality-cheaper held-out tie.
+  // It REPLACES the generic rationale/delta/diff sections (it renders its own), and leaves the withheld
+  // banner and the Decision block below untouched: those are about whether a change may ship at all,
+  // which is the same question for every operator.
+  const isP13 = P13_OPERATORS.has(card.operator);
 
   return (
     <>
@@ -88,6 +108,49 @@ function Body({
         </Banner>
       ) : null}
 
+      {isP13 ? <P13OptimizationReview card={card} /> : <GenericReview card={card} flags={flags} />}
+
+      <Section title="Decision">
+        <Card className="flex flex-col gap-4">
+          {/*
+            The caveat renders ABOVE the button and always, including when the button is disabled. It
+            is the one sentence that stops "open a pull request" being read as "apply this change",
+            and a reader who has already clicked has not read it.
+          */}
+          <p className="flex items-start gap-3 rounded-lg border border-border/60 bg-muted/20 px-4 py-3 text-xs leading-relaxed text-muted-foreground">
+            <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-warn" aria-hidden="true" />
+            Opening a pull request puts this change in front of a reviewer in the repository. It does not
+            run the change and it does not merge it — at any automation level this deployment offers, a
+            person does.
+          </p>
+          {card.can_open_pr ? (
+            <form
+              method="post"
+              action={`/api/console/proposals/${encodeURIComponent(workflowId)}/${encodeURIComponent(proposalId)}/open-pr`}
+            >
+              <button className="button button--primary" type="submit">
+                <GitPullRequest className="size-4" aria-hidden="true" />
+                Open a pull request
+              </button>
+            </form>
+          ) : (
+            <span className="qualifier">
+              <span className="qualifier__badge">no pull request</span>
+              <span className="qualifier__copy">
+                {card.pr_disabled_reason || "this proposal cannot open a pull request"}
+              </span>
+            </span>
+          )}
+        </Card>
+      </Section>
+    </>
+  );
+}
+
+/** The presentation every non-P13 operator keeps, unchanged. */
+function GenericReview({ card, flags }: { card: ProposalCard; flags: string[] }) {
+  return (
+    <>
       <Section title="Why this was proposed">
         <Row>
           <Chip>{card.operator}</Chip>
@@ -149,40 +212,6 @@ function Body({
             </ul>
           </Disclosure>
         ) : null}
-      </Section>
-
-      <Section title="Decision">
-        <Card className="flex flex-col gap-4">
-          {/*
-            The caveat renders ABOVE the button and always, including when the button is disabled. It
-            is the one sentence that stops "open a pull request" being read as "apply this change",
-            and a reader who has already clicked has not read it.
-          */}
-          <p className="flex items-start gap-3 rounded-lg border border-border/60 bg-muted/20 px-4 py-3 text-xs leading-relaxed text-muted-foreground">
-            <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-warn" aria-hidden="true" />
-            Opening a pull request puts this change in front of a reviewer in the repository. It does not
-            run the change and it does not merge it — at any automation level this deployment offers, a
-            person does.
-          </p>
-          {card.can_open_pr ? (
-            <form
-              method="post"
-              action={`/api/console/proposals/${encodeURIComponent(workflowId)}/${encodeURIComponent(proposalId)}/open-pr`}
-            >
-              <button className="button button--primary" type="submit">
-                <GitPullRequest className="size-4" aria-hidden="true" />
-                Open a pull request
-              </button>
-            </form>
-          ) : (
-            <span className="qualifier">
-              <span className="qualifier__badge">no pull request</span>
-              <span className="qualifier__copy">
-                {card.pr_disabled_reason || "this proposal cannot open a pull request"}
-              </span>
-            </span>
-          )}
-        </Card>
       </Section>
     </>
   );
