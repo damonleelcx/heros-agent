@@ -69,6 +69,19 @@ func targets() []target {
 			"skills", "retriever", "retriever + rerank", "cohere-rerank", "regress"},
 		{"_dispatch_nonstreaming_api_request", proposal.OpPrune, "redundant_node", "routing",
 			"prune", "in graph", "removed + rewired", "", "noise"},
+
+		// P13 — the deeper prompt operators and model selection under the held-out guardrail. Added
+		// here because the P13 operators are catalog rows like any other, so the surface this demo
+		// serves should span them too. The downgrade uses the "notheld" outcome deliberately: its
+		// admissibility is decided by the held-out quality guardrail, not by a headline delta.
+		{"_generate_summary", proposal.OpPromptCompress, "prompt_format_drift", "prompt_chaining",
+			"prompt", "prompt://summary@v2", "prompt://summary@v3 (compressed)",
+			"Summarize the trajectory. Return JSON {summary, key_steps}.", "good"},
+		{"call_llm", proposal.OpInstructionHarden, "prompt_format_drift", "tool_use",
+			"prompt", "prompt://tool@v1", "prompt://tool@v2 (hardened)",
+			"Call the tool. Follow every instruction exactly and completely.", "good"},
+		{"_query_model", proposal.OpModelDowngrade, "cost_bottleneck", "routing",
+			"model", "(discovered)", "gpt-4o-mini", "gpt-4o-mini", "notheld"},
 	}
 }
 
@@ -155,7 +168,18 @@ func main() {
 		Recommendations: recs, Withheld: withheld, Trend: trend,
 	}}
 
-	s := api.New(nil, config.Config{})
+	// Register the console's credential → tenant, so the P9 console's BFF can read this surface over a
+	// real network hop (the same convention cmd/p9hermes documents). AuthMode "required" is what wires
+	// the auth middleware and puts a tenant PRINCIPAL in the request context; without it a tenant-scoped
+	// read answers 401 even for a valid key.
+	cfg := config.Config{
+		AuthMode: "required",
+		TenantCredentials: []config.TenantCredential{{
+			TenantID: "nousresearch/hermes-agent", APIKey: "p55hermes-demo-credential-do-not-ship",
+			Role: "member", KeyID: "p55hermes",
+		}},
+	}
+	s := api.New(nil, cfg)
 	s.MountP55(src)
 	fmt.Printf("P5.5 on hermes-agent:  http://%s/p55/recommendations?workflow=hermes\n", *addr)
 	fmt.Printf("surface JSON:          http://%s/api/p55/workflows/hermes/surface\n", *addr)
@@ -274,7 +298,7 @@ func gateVerdict(t target, configHash string) verification.Verdict {
 	evalSet := []string{"g1", "g2", "g3", "h1", "h2", "h3", "h4", "h5", "h6"}
 	base := configHash + "-base"
 	gen := []string{"g1", "g2", "g3"}
-	p := verification.Proposal{ProposalID: "p-" + t.symbolContains, CandidateConfigHash: configHash,
+	p := verification.Proposal{ProposalID: proposalID(t), CandidateConfigHash: configHash,
 		BaselineConfigHash: base, SourceRevision: commitSHA, DiffHash: configHash[:16], GeneratingCaseIDs: gen}
 
 	var baseSucc, candSucc map[string]float64
@@ -402,6 +426,15 @@ func rationale(t target, s discovery.IRCallSite) string {
 	default:
 		return string(t.operator) + " at " + at
 	}
+}
+
+// proposalID derives a UNIQUE id for a target. The operator is part of it because two operators can
+// legitimately target the SAME call site — P13's prompt_compress and the original prompt_rewrite both
+// act on _generate_summary — and keying only on the symbol collides: the surface would carry two cards
+// with one id, the console would render duplicate React keys, and the detail route would resolve every
+// such id to whichever card sorted first, making the others unreachable by URL.
+func proposalID(t target) string {
+	return "p-" + t.symbolContains + "-" + string(t.operator)
 }
 
 func shortNode(id string) string {
