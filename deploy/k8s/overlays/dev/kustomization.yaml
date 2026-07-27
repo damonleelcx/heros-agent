@@ -1,0 +1,38 @@
+# dev overlay — a single-node kind/k3d cluster. Expresses ONLY its differences from base: one replica
+# of each stateless workload (a dev cluster has one node; a PDB with minAvailable 1 on replicas 1 would
+# block the only node's drain, so dev drops to the base's replicas via a patch and the PDB tolerates it),
+# smaller resources, and an in-cluster fake SecretStore so no cloud account is needed for local work.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+  - secretstore.yaml
+
+# One replica of each stateless workload — a dev cluster is single-node. The base PDBs are
+# minAvailable:1; on a single node a drain of a 1-replica workload is expected to be disruptive in dev.
+patches:
+  - target: { kind: Deployment, name: agentd }
+    patch: |
+      - { op: replace, path: /spec/replicas, value: 1 }
+  - target: { kind: Deployment, name: console }
+    patch: |
+      - { op: replace, path: /spec/replicas, value: 1 }
+  - target: { kind: Deployment, name: admin-console }
+    patch: |
+      - { op: replace, path: /spec/replicas, value: 1 }
+  # dev resolves the platform's own model calls from the process env (a developer's own key), not a
+  # cloud secret store. Strategic-merge by env NAME (not index), so a reordering of base env cannot
+  # silently retarget this patch.
+  - target: { kind: Deployment, name: agentd }
+    patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata: { name: agentd }
+      spec:
+        template:
+          spec:
+            containers:
+              - name: agentd
+                env:
+                  - { name: HEROS_SECRETS_SOURCE, value: "env" }

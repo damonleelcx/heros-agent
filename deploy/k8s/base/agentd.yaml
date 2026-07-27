@@ -1,0 +1,105 @@
+# agentd — the Go platform service: the control-plane + data-plane API and the aggregator of /readyz.
+#
+# Stateless hot-path component: its DURABLE state is Postgres (eval + lineage) and the object store, so
+# a second replica serves correctly with no code change and no local state that would diverge — which
+# is why it carries a replica count as a VALUE and a PodDisruptionBudget, not a StatefulSet identity.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentd
+  labels:
+    app.kubernetes.io/name: agentd
+    heros.dev/plane: control-and-data     # the NetworkPolicy selects on this
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agentd
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # Bounded surge/unavailability: a bad revision that fails its readiness probe halts the rollout
+      # with at most one pod down, instead of replacing healthy pods with broken ones.
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: agentd
+        heros.dev/plane: control-and-data
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: agentd
+          image: ghcr.io/heros-foreal/agentd
+          args: []
+          ports:
+            - { name: http, containerPort: 4321 }
+          env:
+            - { name: HEROS_LISTEN_ADDR, value: "0.0.0.0:4321" }
+            - { name: HEROS_DATA_DIR, value: "/var/lib/heros" }
+            - { name: HEROS_DATASTORE_NAME, value: "postgres" }
+            # The secret seam for the platform's OWN model calls. Selected here; the credentials come
+            # from the external store the overlay's ExternalSecret materialises, resolved at call time.
+            - { name: HEROS_SECRETS_SOURCE, value: "aws-secrets-manager" }
+            # Every component the deployment ships, aggregated into /readyz by health URL. Postgres is
+            # aggregated by the agentd datastore ping (HEROS_DATASTORE_NAME).
+            - { name: CONSOLE_HEALTH_URL, value: "http://console:4320/api/health" }
+            - { name: ADMIN_CONSOLE_HEALTH_URL, value: "http://admin-console:4310/api/health" }
+            - { name: OBJECT_STORE_HEALTH_URL, value: "http://objectstore:9000/minio/health/ready" }
+            - { name: QUEUE_HEALTH_URL, value: "http://queue:8222/healthz" }
+            - { name: VECTOR_STORE_HEALTH_URL, value: "http://vectorstore:6333/readyz" }
+            - { name: GRAPH_STORE_HEALTH_URL, value: "http://graphstore:7474/" }
+          # Liveness reads /healthz (the process serves); readiness reads /readyz (dependencies
+          # reachable + the aggregated component verdict). Both read a HEALTH ENDPOINT, never a UI.
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests: { cpu: "250m", memory: "256Mi" }
+            limits: { cpu: "1", memory: "512Mi" }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: workdir, mountPath: /var/lib/heros }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - { name: workdir, emptyDir: {} }
+        - { name: tmp, emptyDir: {} }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agentd
+  labels:
+    app.kubernetes.io/name: agentd
+spec:
+  selector:
+    app.kubernetes.io/name: agentd
+  ports:
+    - { name: http, port: 4321, targetPort: http }
+---
+# A node drain (voluntary disruption) cannot remove the last available replica of the control/data
+# plane API — kubernetes-delivery requires a PDB for every workload with replicas > 1.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: agentd
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agentd

@@ -1,0 +1,18 @@
+# Build override for the single-VM deploy (P19 open-core form) — build the platform's own images ON
+# THE BOX so a first deploy needs NO registry and NO published digests. Layer it after the platform
+# file; `docker compose ... up -d --build` then builds agentd + the customer console locally.
+#
+# The store images (Postgres/MinIO/NATS/Qdrant/Neo4j) still come from their public tags via the env
+# file — only the three images this repo produces are built here. For a repeatable / cluster deploy,
+# publish these to a registry and pin digests instead (see deploy/images.env + the Kustomize base).
+services:
+  agentd:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.agentd
+    image: ${AGENTD_IMAGE:-heros-agentd:local}
+  console:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.console
+    image: ${CONSOLE_IMAGE:-heros-console:local}

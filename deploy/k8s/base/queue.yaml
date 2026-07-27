@@ -1,0 +1,64 @@
+# Queue — NATS/JetStream, the transport for the P2.5 event substrate. Stateful (JetStream file store)
+# with a named claim; replicas:1 => no PDB required. The monitoring endpoint on :8222 is what /readyz
+# aggregates as `queue`.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: queue
+  labels:
+    app.kubernetes.io/name: queue
+    heros.dev/plane: data
+spec:
+  serviceName: queue
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: queue
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: queue
+        heros.dev/plane: data
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: nats
+          image: nats
+          args: ["-js", "-sd", "/data", "-m", "8222"]
+          ports:
+            - { name: client, containerPort: 4222 }
+            - { name: monitor, containerPort: 8222 }
+          readinessProbe:
+            httpGet: { path: /healthz, port: monitor }
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          livenessProbe:
+            httpGet: { path: /healthz, port: monitor }
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          resources:
+            requests: { cpu: "100m", memory: "128Mi" }
+            limits: { cpu: "500m", memory: "256Mi" }
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: data, mountPath: /data }
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources: { requests: { storage: 10Gi } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: queue
+  labels: { app.kubernetes.io/name: queue }
+spec:
+  selector: { app.kubernetes.io/name: queue }
+  ports:
+    - { name: client, port: 4222, targetPort: client }
+    - { name: monitor, port: 8222, targetPort: monitor }

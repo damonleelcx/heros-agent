@@ -1,0 +1,62 @@
+# Vector store — Qdrant. Stateful with a named claim; replicas:1 => no PDB required. /readyz on :6333
+# is aggregated as `vector_store`.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: vectorstore
+  labels:
+    app.kubernetes.io/name: vectorstore
+    heros.dev/plane: data
+spec:
+  serviceName: vectorstore
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vectorstore
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: vectorstore
+        heros.dev/plane: data
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: qdrant
+          image: qdrant/qdrant
+          ports:
+            - { name: http, containerPort: 6333 }
+            - { name: grpc, containerPort: 6334 }
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          livenessProbe:
+            httpGet: { path: /livez, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          resources:
+            requests: { cpu: "100m", memory: "256Mi" }
+            limits: { cpu: "1", memory: "1Gi" }
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: data, mountPath: /qdrant/storage }
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources: { requests: { storage: 10Gi } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vectorstore
+  labels: { app.kubernetes.io/name: vectorstore }
+spec:
+  selector: { app.kubernetes.io/name: vectorstore }
+  ports:
+    - { name: http, port: 6333, targetPort: http }
+    - { name: grpc, port: 6334, targetPort: grpc }

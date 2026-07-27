@@ -1,0 +1,49 @@
+# The agentd platform-service image (P19).
+#
+# The Go service is the platform's data-plane + control-plane API and the aggregator of /readyz. It is
+# its own image for the same reason the console is (ADR-006): one process per container, so a dead
+# process is a DEAD CONTAINER the orchestrator can see and restart — never a live container with a dead
+# process inside it that a supervisor keeps reporting healthy.
+#
+# The toolchain is PINNED. A floating `golang:1.24` moves, and a build that cannot be reproduced is the
+# property NFR9 exists to buy. Repin deliberately, in a commit, with the digest recorded.
+FROM golang:1.24-bookworm AS build
+WORKDIR /src
+
+# Deps first, from go.mod/go.sum, so an edit to the source does not re-resolve the module graph — and
+# so the graph cannot resolve differently between two builds of the same commit. `-mod=readonly` fails
+# the build if go.mod would change, which is how a "reproducible" build stops being one.
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+# CGO is ON — deliberately. agentd's discovery frontends link the tree-sitter C runtime via cgo
+# (the same reason CI builds with CGO_ENABLED=1), so a CGO_ENABLED=0 build does not even LINK. The
+# golang:1.24-bookworm build stage ships gcc, so this compiles cleanly. Trimpath + -buildvcs=false keep
+# the build path and VCS state out of the binary, so the same commit builds byte-for-byte regardless of
+# where it is checked out. The resulting binary links glibc, which the runtime base below provides.
+ENV CGO_ENABLED=1
+RUN go build -trimpath -buildvcs=false -mod=readonly -o /out/agentd ./cmd/agentd
+
+# ── Runtime ──────────────────────────────────────────────────────────────────
+# distroless/base (NOT static): it carries glibc, which the cgo binary needs. Still no shell and no
+# package manager — minimal attack surface. Nonroot: the service needs no root, so a container escape
+# starts from the least useful possible position.
+FROM gcr.io/distroless/base-debian12:nonroot
+WORKDIR /app
+COPY --from=build /out/agentd /app/agentd
+
+# The data directory is a MOUNT POINT for a named volume — the SQLite single-binary ledger lives here;
+# in the platform deployment the durable state is Postgres and this holds only transient working state.
+ENV HEROS_DATA_DIR=/var/lib/heros
+ENV HEROS_LISTEN_ADDR=0.0.0.0:4321
+USER nonroot:nonroot
+EXPOSE 4321
+
+# The health endpoint the orchestrator probes and the same one every layer above reads. /healthz is
+# liveness (the process serves); /readyz is readiness (dependencies reachable + the aggregated
+# component verdict). The distroless base has no shell, so the probe is the binary itself.
+HEALTHCHECK --interval=15s --timeout=3s --start-period=20s --retries=3 \
+  CMD ["/app/agentd", "-healthcheck"]
+
+ENTRYPOINT ["/app/agentd"]

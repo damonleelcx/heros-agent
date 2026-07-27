@@ -1,0 +1,25 @@
+# Keep the Docker build context small and reproducible (P19 single-VM build). Without this, the ~1.2 GB
+# repo — .git history, the committed demo binaries, node_modules, proof artifacts — ships to the daemon
+# on every build and slows a VM deploy to a crawl. The Go build needs only the source; the console
+# builds copy web/console explicitly and do their own npm ci.
+.git
+.github
+# Committed demo binaries (tens of MB each) — never needed in an image.
+p2uidemo
+p5editordemo
+bin
+# Node modules and build output rebuilt inside the image.
+**/node_modules
+**/.next
+web/**/tsconfig.tsbuildinfo
+# Deploy-time generated + local state, proof artifacts, scratch.
+deploy/.env.platform
+deploy/.env.admin-console
+deploy/.env.deploy-images
+deploy/caddy/Caddyfile
+dist
+tmp
+docs/release/p19-e2e-hermes
+# Local editor / OS cruft.
+.DS_Store
+**/.DS_Store

@@ -77,8 +77,45 @@ func StartAgentd(ctx context.Context, cfg config.Config) (*Server, error) {
 	// readiness signal that says "ready" while the surface its users reach is dead, which is the
 	// lying health signal `health-signal-surface` exists to forbid.
 	if consoleHealth := strings.TrimSpace(os.Getenv("CONSOLE_HEALTH_URL")); consoleHealth != "" {
-		handler.SetConsoleProbe(api.NewHTTPComponentProbe("console", consoleHealth))
-		log.Printf("readiness aggregates the console component at %s", consoleHealth)
+		handler.SetConsoleProbe(api.NewHTTPComponentProbe("customer_console", consoleHealth))
+		log.Printf("readiness aggregates the customer_console component at %s", consoleHealth)
+	}
+
+	// The rest of the platform deployment (P19). Each component is aggregated into /readyz when — and
+	// only when — this deployment ships it, wired by a health URL in the environment. Same posture as
+	// the console: a component with no URL is honestly absent, not "unknown"; a component WITH a URL
+	// that is unreachable turns /readyz not-ready and NAMES itself. The name is the one /readyz
+	// reports, so a monitor alerts on "admin_console" or "object_store", not on "not ready".
+	//
+	//   ADMIN_CONSOLE_HEALTH_URL  the P8 operator console (its own origin/unit) — admin-console-deploy FR
+	//   OBJECT_STORE_HEALTH_URL   the object store (MinIO / content store)
+	//   QUEUE_HEALTH_URL          the queue (NATS/JetStream)
+	//   VECTOR_STORE_HEALTH_URL   the vector store (Qdrant)
+	//   GRAPH_STORE_HEALTH_URL    the graph store (Neo4j)
+	for _, c := range []struct{ env, name string }{
+		{"ADMIN_CONSOLE_HEALTH_URL", "admin_console"},
+		{"OBJECT_STORE_HEALTH_URL", "object_store"},
+		{"QUEUE_HEALTH_URL", "queue"},
+		{"VECTOR_STORE_HEALTH_URL", "vector_store"},
+		{"GRAPH_STORE_HEALTH_URL", "graph_store"},
+	} {
+		if url := strings.TrimSpace(os.Getenv(c.env)); url != "" {
+			handler.AddComponentProbe(api.NewHTTPComponentProbe(c.name, url))
+			log.Printf("readiness aggregates the %s component at %s", c.name, url)
+		}
+	}
+
+	// The secret source's REACHABILITY, aggregated fail-closed (platform-llm-access FR, air-gapped
+	// FR). Describe() already names the live source on /readyz; this adds the degraded verdict. It is
+	// wired only for an out-of-process store that can actually be unreachable — the air-gapped on-prem
+	// gateway (HEROS_SECRETS_HEALTH_URL). For AWS Secrets Manager the store is reached with an ambient
+	// identity and there is no health URL to sh/probe; for the env source there is nothing off-box to
+	// be unreachable. When the configured gateway is down, /readyz reports secrets_source degraded and
+	// the model-dependent stages read that as degraded-not-available — fail static, never fail open,
+	// and never a startup dependency (the probe runs at readiness time, not at boot).
+	if secretsHealth := strings.TrimSpace(os.Getenv("HEROS_SECRETS_HEALTH_URL")); secretsHealth != "" {
+		handler.AddComponentProbe(api.NewHTTPComponentProbe("secrets_source", secretsHealth))
+		log.Printf("readiness aggregates the secrets_source reachability at %s", secretsHealth)
 	}
 	httpServer := &http.Server{
 		Handler:           handler.Handler,

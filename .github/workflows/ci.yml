@@ -35,6 +35,23 @@ jobs:
       - name: go.mod tidy check
         run: make tidy-check
 
+  # P19 deploy gates. Its own job — cheap, no toolchain — so a manifest change that breaks digest
+  # pinning, image-set parity, or leaks a plaintext Secret fails the build the same way a Go break does.
+  # kustomize renders the overlays so the digest check reads what actually APPLIES, not the raw base.
+  deploy-lint:
+    name: deploy · digest pins · image parity · no plaintext secrets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: install kustomize
+        run: go install sigs.k8s.io/kustomize/kustomize/v5@v5.4.3
+      - name: make deploy-lint
+        run: PATH="$(go env GOPATH)/bin:$PATH" make deploy-lint
+
   # The seven language gates, proved against real compilers (ADR-003). Its own job because it is the
   # only one that needs a JDK, Kotlin, Rust, Node, TypeScript and mypy — `make go` must stay cheap and
   # must not start depending on them silently. With any of them missing these FAIL rather than skip.

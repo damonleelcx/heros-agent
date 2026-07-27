@@ -1,0 +1,69 @@
+# airgapped overlay — a private-deploy cluster with NO public egress. Differences from base:
+#   • the platform's model calls go to an operator-provided ON-PREM gateway, never the public internet;
+#   • agentd's egress allowlist REPLACES the public 0.0.0.0/0:443 rule with the on-prem gateway only —
+#     so no stage can attempt a public-internet egress, and the allowlist fails toward omission;
+#   • /readyz aggregates the on-prem gateway's reachability (HEROS_SECRETS_HEALTH_URL) and reports
+#     secrets_source degraded (fail STATIC, last-known-good retained) when it is unreachable — never
+#     fail-open, never a startup dependency;
+#   • the SecretStore is the operator's on-prem store (Vault), not a cloud service.
+#
+# 🔴 Replace ONPREM_GATEWAY_CIDR and the gateway host below with the operator's real values before
+# apply. They are the only environment-specific inputs, and they are addresses, not secrets.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+  - secretstore.yaml
+
+patches:
+  # 1) Point the model seam at the on-prem gateway and aggregate its reachability into /readyz.
+  - target: { kind: Deployment, name: agentd }
+    patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata: { name: agentd }
+      spec:
+        replicas: 2
+        template:
+          spec:
+            containers:
+              - name: agentd
+                env:
+                  # The seam still resolves credentials from the on-prem store; the model CALLS route to
+                  # the on-prem gateway. Kept "env" here because the on-prem store injects provider creds
+                  # into the process via the ExternalSecret; the confinement is the egress policy below.
+                  - { name: HEROS_SECRETS_SOURCE, value: "env" }
+                  # When this is unreachable, /readyz reports secrets_source degraded and the model-
+                  # dependent stages read that as degraded-not-available — fail static, not a crash.
+                  - { name: HEROS_SECRETS_HEALTH_URL, value: "http://onprem-llm-gateway.heros.svc:8080/healthz" }
+
+  # 2) Replace agentd's egress: the stores stay; the PUBLIC 0.0.0.0/0 rule is gone, replaced by the
+  #    on-prem gateway CIDR only. A NetworkPolicy egress list has no merge key, so this strategic-merge
+  #    REPLACES the whole list — there is no public-internet rule left to leak through.
+  - target: { kind: NetworkPolicy, name: agentd }
+    patch: |
+      apiVersion: networking.k8s.io/v1
+      kind: NetworkPolicy
+      metadata: { name: agentd }
+      spec:
+        egress:
+          - to:
+              - podSelector: { matchLabels: { app.kubernetes.io/name: postgres } }
+            ports: [{ protocol: TCP, port: 5432 }]
+          - to:
+              - podSelector: { matchLabels: { app.kubernetes.io/name: objectstore } }
+            ports: [{ protocol: TCP, port: 9000 }]
+          - to:
+              - podSelector: { matchLabels: { app.kubernetes.io/name: queue } }
+            ports: [{ protocol: TCP, port: 4222 }, { protocol: TCP, port: 8222 }]
+          - to:
+              - podSelector: { matchLabels: { app.kubernetes.io/name: vectorstore } }
+            ports: [{ protocol: TCP, port: 6333 }, { protocol: TCP, port: 6334 }]
+          - to:
+              - podSelector: { matchLabels: { app.kubernetes.io/name: graphstore } }
+            ports: [{ protocol: TCP, port: 7474 }, { protocol: TCP, port: 7687 }]
+          # The ONLY off-cluster egress: the operator's on-prem LLM gateway. No public internet.
+          - to:
+              - ipBlock: { cidr: 10.100.0.0/24 }   # 🔴 replace with ONPREM_GATEWAY_CIDR
+            ports: [{ protocol: TCP, port: 8080 }]

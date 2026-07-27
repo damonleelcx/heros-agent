@@ -1,0 +1,26 @@
+# staging overlay — a real multi-node cluster mirroring prod's shape at smaller size. Differences from
+# base: 2 replicas of stateless workloads (base already 2; kept explicit for readability), staging-sized
+# resources, and a cloud SecretStore reached by an AMBIENT workload identity (no bootstrap secret).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+  - secretstore.yaml
+
+patches:
+  # Staging runs the same 2 replicas as base for the stateless plane, with modest limits.
+  - target: { kind: Deployment, name: agentd }
+    patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata: { name: agentd }
+      spec:
+        replicas: 2
+        template:
+          spec:
+            containers:
+              - name: agentd
+                resources:
+                  requests: { cpu: "250m", memory: "256Mi" }
+                  limits: { cpu: "1", memory: "512Mi" }

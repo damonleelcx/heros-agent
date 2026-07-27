@@ -1,0 +1,51 @@
+# The operator/admin console deployment unit — SECOND ORIGIN (P19 admin-console-deploy, Decision 5).
+#
+# Two containers, ONE unit, on its OWN origin, separate from the customer console. The operator console
+# is NOT folded into the P9 unit and is NOT a route inside it: a role-gated `/admin` tree would put
+# cross-tenant operator capability one authorization bug away from a customer session, so the isolation
+# is the browser ORIGIN boundary (P8 Decision 11) — a different origin, a disjoint cookie jar, its own
+# BFF, and its OWN credential distinct from the customer BFF's.
+#
+# The admin BFF (:4310) is the second origin; the admin API (:4311) is the platform's admin surface,
+# reached only through the BFF's credential. In the single-host layout the admin API is the same agentd
+# stood up by docker-compose.platform.yml with its admin routes mounted; here the BFF is pointed at it.
+#
+# Usage (stood up ALONGSIDE the platform unit, sharing its network so the BFF can reach the admin API):
+#
+#   docker compose --env-file deploy/.env.images --env-file deploy/.env.admin-console \
+#     -f deploy/docker-compose.platform.yml -f deploy/docker-compose.admin-console.yml up -d
+#
+# 🔴 SECRETS COME FROM THE ENVIRONMENT OR A SECRET STORE. The admin credential is the highest-value one
+# in the system; it lives in exactly one process's environment and crosses exactly one boundary:
+# admin-console -> admin API. `${VAR:?...}` refuses to start when it is unset.
+
+services:
+  admin-console:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.admin-console
+    image: ${ADMIN_CONSOLE_IMAGE:-heros-admin-console:dev}
+    environment:
+      # The origin of the admin API. An origin, not a credential. In the single-host layout this is the
+      # platform agentd's admin surface.
+      ADMIN_API_BASE: http://agentd:4321
+      # The operator BFF's OWN credential for the admin API — DISTINCT from CONSOLE_PLATFORM_CREDENTIAL.
+      # Neither BFF can act with the other's credential.
+      ADMIN_PLATFORM_CREDENTIAL: ${ADMIN_PLATFORM_CREDENTIAL:?set ADMIN_PLATFORM_CREDENTIAL from your secret store}
+      # The identity mode (ADR-008). `configured` accepts only the deployment's real IdP; `dev` accepts
+      # fixture SSO subjects and REFUSES to start under NODE_ENV=production, by design.
+      ADMIN_IDENTITY_MODE: ${ADMIN_IDENTITY_MODE:-configured}
+      NODE_ENV: production
+    ports:
+      # 4310, the operator origin — DISTINCT from the customer console's 4320.
+      - "${ADMIN_CONSOLE_PORT:-4310}:4310"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4310/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]

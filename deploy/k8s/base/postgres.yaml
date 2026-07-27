@@ -1,0 +1,141 @@
+# Postgres — the stateful store for eval + lineage. A single-writer instance: a documented SINGLE
+# POINT OF FAILURE (Decision 6) whose acceptance is VOID without the backup CronJob below. The
+# stateless data plane scales horizontally; this stays a documented single point whose availability
+# rests on restart + backup. See deploy/README.md §Backups for the SPOF blast radius and restore.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  labels:
+    app.kubernetes.io/name: postgres
+    heros.dev/plane: data
+spec:
+  serviceName: postgres
+  replicas: 1                         # single-writer, no split-brain; replicas:1 => no PDB required
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: postgres
+        heros.dev/plane: data
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        fsGroup: 999
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: postgres
+          image: postgres
+          ports:
+            - { name: pg, containerPort: 5432 }
+          env:
+            - { name: POSTGRES_DB, value: heros }
+            - { name: POSTGRES_USER, value: heros }
+            # The password comes from the operator's external store via the ExternalSecret, NEVER a
+            # committed plaintext Secret (see externalsecrets.yaml).
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: heros-postgres, key: password } }
+            - { name: PGDATA, value: /var/lib/postgresql/data/pgdata }
+          livenessProbe:
+            exec: { command: ["pg_isready", "-U", "heros", "-d", "heros"] }
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          readinessProbe:
+            exec: { command: ["pg_isready", "-U", "heros", "-d", "heros"] }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests: { cpu: "250m", memory: "512Mi" }
+            limits: { cpu: "1", memory: "1Gi" }
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data }
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests: { storage: 20Gi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  labels:
+    app.kubernetes.io/name: postgres
+spec:
+  selector:
+    app.kubernetes.io/name: postgres
+  ports:
+    - { name: pg, port: 5432, targetPort: pg }
+---
+# The backup that makes accepting the single-Postgres SPOF a sound call (Decision 6). It ships WITH the
+# deploy — not as a follow-up — and the dump FAILS LOUD on empty: every failure path deletes the
+# partial file so a zero-byte backup cannot form a poisoned rollback chain.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgres-backup
+  labels:
+    app.kubernetes.io/name: postgres-backup
+spec:
+  schedule: "17 3 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            # The NetworkPolicy selects backup pods on this label to permit their egress to postgres.
+            app.kubernetes.io/name: postgres-backup
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            seccompProfile: { type: RuntimeDefault }
+          containers:
+            - name: pg-backup
+              image: postgres
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -eu
+                  ts="$(date -u +%Y%m%dT%H%M%SZ)"
+                  out="/backups/heros-${ts}.dump"; tmp="${out}.partial"
+                  if ! pg_dump --format=custom --file="$tmp"; then
+                    echo "backup: pg_dump FAILED at ${ts}" >&2; rm -f "$tmp"; exit 1
+                  fi
+                  size="$(wc -c < "$tmp" 2>/dev/null || echo 0)"
+                  if [ "$size" -lt 512 ]; then
+                    echo "backup: dump ${size}B < 512B; treating as FAILED" >&2; rm -f "$tmp"; exit 1
+                  fi
+                  mv "$tmp" "$out"; echo "backup: OK ${out} (${size}B)"
+                  find /backups -name 'heros-*.dump' -type f -mtime +14 -delete 2>/dev/null || true
+              env:
+                - { name: PGHOST, value: postgres }
+                - { name: PGUSER, value: heros }
+                - { name: PGDATABASE, value: heros }
+                - name: PGPASSWORD
+                  valueFrom: { secretKeyRef: { name: heros-postgres, key: password } }
+              volumeMounts:
+                - { name: backups, mountPath: /backups }
+          volumes:
+            - name: backups
+              persistentVolumeClaim: { claimName: heros-postgres-backups }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: heros-postgres-backups
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests: { storage: 20Gi }
