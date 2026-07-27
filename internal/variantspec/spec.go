@@ -81,6 +81,13 @@ var (
 	// that call site, an env binding names an undeclared variable, or an input binding violates the
 	// node's typed contract.
 	ErrBindingOutOfScope = errors.New("variantspec: binding references something not available at the call site")
+
+	// ErrRewriteUnappliesNode (P13 task 2.6, design Decision 3): a prompt rewrite whose slot-set change
+	// drops a slot the discovered call site still supplies a value for would leave that runtime value
+	// unbound — un-applying the node. It is REFUSED at resolve with the slot named (via P10 impact
+	// analysis), never silently dropped or emitted as an un-bindable diff. Reported through
+	// SpecError{NodeID, Dim: DimPrompt, Ref: slot} like every other binding failure (task 3.2).
+	ErrRewriteUnappliesNode = errors.New("variantspec: a prompt rewrite drops a slot the call site still supplies, un-applying the node")
 )
 
 // BindingKind is the source of a prompt-slot binding (P10 task 3.1). The kind is recorded EXPLICITLY,

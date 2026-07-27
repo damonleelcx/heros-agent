@@ -60,6 +60,13 @@ type ResolvedOverride struct {
 	Prompt  *registry.PromptEntry
 	Skills  []*registry.SkillEntry
 	Context *registry.ContextEntry
+	// ParamTune marks a model override that changes ONLY the provider parameters (temperature,
+	// max-tokens) and not the provider or model id — a P13 parameter tune, not a model swap (design
+	// Decision 7). It is transform-facing and NOT part of config_hash (the HASHED effect is
+	// ResolvedNode.ProviderParams): its only job is to tell the transform that this override's effect is
+	// a parameter change, which materializes in BOUND mode and is REFUSED in inline mode (there is no
+	// call-site parameter rewriter — an inline param change would hash one thing and run another).
+	ParamTune bool
 }
 
 // Dimensions returns the dimensions this override actually sets, in a stable order. The Transform
@@ -168,6 +175,14 @@ func resolveNode(ctx context.Context, nodeID string, o NodeOverride, irNode *dis
 			MaxTokens:      entry.Spec.Params.MaxTokens,
 			ThinkingBudget: entry.Spec.Params.ThinkingBudget,
 		})
+		// A model override that keeps the SAME provider+model_id but changes the params is a parameter
+		// tune (P13 Decision 7), not a model swap. Flag it so the transform materializes it in bound mode
+		// and refuses it inline — never a silent same-model, changed-params inline edit that hashes one
+		// thing and runs another.
+		if entry.Spec.Provider == irNode.Model.Provider && entry.Spec.ModelID == irNode.Model.ModelID &&
+			!paramsEqual(node.ProviderParams, copyParams(irNode.Model.Params)) {
+			ro.ParamTune = true
+		}
 	} else {
 		// The discovered binding. A model the discovery engine could not resolve statically is
 		// "unresolved" in the IR; that is a faithful record of the call site, and it is pinned by
@@ -305,6 +320,30 @@ func validateBindings(nodeID string, o NodeOverride, irNode *discovery.IRNode, i
 		}
 	}
 
+	// 1b. Un-apply refusal (P13 task 2.6, design Decision 3). A rewrite publishes a NEW pinned prompt;
+	//     if that prompt's slot set drops a variable the DISCOVERED call site still supplies a value for,
+	//     the runtime value would no longer bind — the node is un-applied. Refuse here, at resolve,
+	//     naming the slot (P10 impact analysis), rather than emitting a diff that silently discards it.
+	//
+	//     Engages only when the prompt was actually overridden (a rewrite) AND the discovered prompt
+	//     declared variables: the discovered prompt's own variables are the baseline the call site feeds,
+	//     so a pinned prompt that no longer declares one of them is the un-apply case Decision 3 refuses.
+	//     A slot the rewrite ADDS but the call site does not supply is the mirror case, caught by the
+	//     satisfaction loop below (ErrUnsatisfiedSlot).
+	if o.PromptRef != "" {
+		for _, v := range irNode.Prompt.Variables {
+			if slotSet[v] {
+				continue // the rewrite kept this slot; the runtime value still binds
+			}
+			if _, rebound := o.Bindings[v]; rebound {
+				continue // an explicit binding re-supplies it; not un-applied
+			}
+			return nil, &SpecError{NodeID: nodeID, Dim: DimPrompt, Ref: v, Err: ErrRewriteUnappliesNode,
+				Detail: fmt.Sprintf("the rewritten prompt no longer declares slot %q, but the call site "+
+					"still supplies a value for it; the rewrite would un-apply this node", v)}
+		}
+	}
+
 	// 2. Exactly-once satisfaction (task 3.3), gated as documented above.
 	if irNode.CallSite.InScopeRecorded() || len(o.Bindings) > 0 {
 		for _, slot := range slots {
@@ -360,6 +399,21 @@ func refError(nodeID string, dim Dimension, ref string, err error) error {
 			Detail: fmt.Sprintf("the registry entry is corrupt: %v", err)}
 	}
 	return fmt.Errorf("variantspec: node %q, dimension %q, ref %q: %w", nodeID, dim, ref, err)
+}
+
+// paramsEqual reports whether two provider-param maps hold the same keys and values. Used only to tell
+// a parameter tune from a no-op model override; never a hash input.
+func paramsEqual(a, b map[string]any) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, av := range a {
+		bv, ok := b[k]
+		if !ok || av != bv {
+			return false
+		}
+	}
+	return true
 }
 
 func copyParams(in map[string]any) map[string]any {

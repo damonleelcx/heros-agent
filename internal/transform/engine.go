@@ -93,6 +93,17 @@ func Generate(r *variantspec.Resolved, root string) (*Patch, error) {
 					languageDisplay(r.Language), root)}
 		}
 
+		// P13 Decision 7 — a parameter tune (same model, changed params) has no call-site rewriter. In
+		// BOUND mode it is materialized by GenerateBoundArtifacts (as data in the binding document), so
+		// there is nothing to rewrite inline here — skip it. In INLINE mode it is REFUSED with a named
+		// cause, never silently dropped (task 3.6).
+		if override.ParamTune {
+			if r.ApplyModes[nodeID].Mode() == variantspec.ApplyBound {
+				continue
+			}
+			return nil, refuseInlineParamTune(nodeID)
+		}
+
 		for _, dim := range override.Dimensions() {
 			src, err := readFile(root, site.fileRel)
 			if err != nil {

@@ -18,6 +18,15 @@ var operatorPrior = map[OperatorKind]float64{
 	OpFixSchemaBinding: 0.30,
 	OpPrune:            0.15,
 	OpMerge:            0.15,
+	// P13 deeper prompt operators — priors ORDER verification only, never a result (they are replaced
+	// by the measured verdict). Hardening sits with the base rewrite; curation/compression/redundancy
+	// are lower-yield tidy-ups, so they verify after the higher-yield changes.
+	OpInstructionHarden: 0.30,
+	OpFewShotCurate:     0.20,
+	OpPromptCompress:    0.15,
+	OpRedundancyRemove:  0.15,
+	// P13 model-parameter tuning — a cheap, targeted knob, ordered near the other model changes.
+	OpParamTune: 0.20,
 }
 
 // verifyOrderHint ranks operators cheapest-first for verification ordering (design 5.1): a single
@@ -35,7 +44,12 @@ var verifyOrderHint = map[OperatorKind]int{
 	OpEnableThinking:   3,
 	OpRAGTune:          4,
 	OpAddRerank:        4,
+	OpParamTune:        0, // a single param swap, as cheap as a model swap
 	OpPromptRewrite:    5, // most expensive: a candidate sweep with generated prompts
+	OpInstructionHarden: 5,
+	OpFewShotCurate:     5,
+	OpPromptCompress:    5,
+	OpRedundancyRemove:  5,
 }
 
 // VerifyOrderHint returns the cheapest-operator-first verification order hint for an operator, for the
