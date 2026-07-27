@@ -473,15 +473,16 @@ export default function HomePage() {
               </p>
 
               <h1 className="mb-6 font-display text-5xl font-light leading-[1.08] tracking-tight text-marketing-ink md:text-6xl xl:text-7xl">
-                Most prompt changes ship on a hunch.
+                Most LLM workflows are tuned on a hunch.
                 <br />
                 <span className="text-marketing-accent">This one ships on evidence.</span>
               </h1>
 
               <p className="mb-4 max-w-lg text-lg leading-relaxed text-marketing-ink/55">
-                Heros discovers every LLM call site in your repository, changes one at a time as a
-                reviewable diff, runs it sandboxed, and scores it over multiple seeds — then tells you
-                plainly when the difference is too small to call.
+                Heros maps every LLM call site in your repository into a graph you can tune — the model,
+                the prompt, the context, the tools, the wiring — one reviewable change at a time. It runs
+                each sandboxed, scores it over multiple seeds, and tells you plainly when the difference
+                is too small to call.
               </p>
 
               <p className="mb-10 max-w-md text-sm text-marketing-ink/35">
