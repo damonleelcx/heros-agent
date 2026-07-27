@@ -56,6 +56,8 @@ import (
 	"github.com/heros-foreal/agentd/internal/config"
 	"github.com/heros-foreal/agentd/internal/discovery"
 	"github.com/heros-foreal/agentd/internal/patternclassifier"
+	"github.com/heros-foreal/agentd/internal/registry"
+	"github.com/heros-foreal/agentd/internal/studio"
 )
 
 // workflowID is the identifier the console addresses this workflow by. It is the repository, because
@@ -96,8 +98,38 @@ func main() {
 	}
 	view := patternclassifier.BuildGraphView(labelled, result)
 
-	srv := api.New(nil, config.Config{})
+	// Register the console's credential → tenant, so a tenant-scoped read model (the studio matrix's
+	// bindings) resolves a principal. The subject-keyed graph never needed one; the matrix does, because
+	// a binding belongs to a tenant. The platform derives the tenant from the API key alone (there is no
+	// X-Console-Tenant trust here), so this one line is what makes /api/p10 answer with a tenant.
+	cfg := config.Config{
+		// AuthMode "required" wires the auth middleware, which is what puts a tenant PRINCIPAL in the
+		// request context. Without it the middleware never runs, so a tenant-scoped read model (the
+		// studio bindings) sees no principal and answers 401 even for a valid key.
+		AuthMode: "required",
+		TenantCredentials: []config.TenantCredential{{
+			TenantID: workflowID, APIKey: "p9hermes-demo-credential-do-not-ship", Role: "member", KeyID: "p9hermes",
+		}},
+	}
+	srv := api.New(nil, cfg)
 	srv.MountP35(&graphSource{views: map[string]patternclassifier.GraphView{workflowID: view}})
+
+	// P10 Prompt & Model Studio MATRIX (P9 §11b) — mounted with the REAL discovered nodes as the
+	// matrix COLUMNS, so the studio shows a model-per-node grid over the actual hermes call sites, not
+	// a fixture. The ROWS are the model catalog, which is a provider list rather than customer data, so
+	// a static set is honest. Test-run is deliberately NOT mounted (nil Runner): it needs a provider
+	// fan-out, so the run action answers 503 — the same honest degradation the unmounted subsystems
+	// below use, never an invented completion. Binding is real (an in-memory selection, "in force —
+	// unverified", carrying no score). The Postgres-backed prompt registry (publish/timeline/diff) is
+	// not mounted here; the matrix — the surface 11b is about — is.
+	studioCat := studio.NewWorkflowCatalog()
+	studioCat.Load(workflowID, labelled)
+	srv.MountP10Matrix(api.P10Matrix{
+		Store:     demoModels{},
+		Workflows: studioCat,
+		Binds:     studio.NewBindStore(),
+		Runner:    nil,
+	})
 
 	// The other subsystems are mounted with NO SOURCE, deliberately — and this line is the whole
 	// difference between an honest degradation and a misleading one.
@@ -120,6 +152,7 @@ func main() {
 	fmt.Print(account)
 	fmt.Printf("\nplatform API on http://%s\n", *addr)
 	fmt.Printf("  MOUNTED     P3.5 pattern graph   GET /api/p35/workflows/%s/graph\n", workflowID)
+	fmt.Printf("  MOUNTED     P10 studio matrix    GET /api/p10/workflows/%s/nodes  (real nodes; test-run 503)\n", workflowID)
 	fmt.Printf("  NOT MOUNTED P2, P2.5, P4, P4.5, P5.5, P7 — each answers 503 with a not-mounted body,\n")
 	fmt.Printf("              which the console renders as a subsystem that is absent on this deployment,\n")
 	fmt.Printf("              distinct from a 404 and from a transport failure.\n\n")
@@ -218,4 +251,28 @@ type graphSource struct {
 func (g *graphSource) GraphView(id string) (patternclassifier.GraphView, bool) {
 	view, ok := g.views[id]
 	return view, ok
+}
+
+// demoModels is a minimal MatrixStore for the studio MATRIX (P9 §11b): it serves the model CATALOG —
+// the matrix rows — which is a provider list, not customer data, so a static set is honest here. The
+// figures a run would produce are never fabricated: `ResolveModel`/`StudioRender` are reached only by
+// the test-run path, which this demo gates off (nil Runner answers 503 first), so they return the
+// not-available error rather than a made-up completion.
+type demoModels struct{}
+
+func (demoModels) ModelCatalog(ctx context.Context) ([]registry.ModelCatalogEntry, error) {
+	return []registry.ModelCatalogEntry{
+		{VersionID: "m_sonnet5", Name: "Claude Sonnet 5", Provider: "anthropic", ModelID: "claude-sonnet-5"},
+		{VersionID: "m_opus5", Name: "Claude Opus 5", Provider: "anthropic", ModelID: "claude-opus-5"},
+		{VersionID: "m_haiku45", Name: "Claude Haiku 4.5", Provider: "anthropic", ModelID: "claude-haiku-4-5"},
+		{VersionID: "m_gpt5", Name: "GPT-5", Provider: "openai", ModelID: "gpt-5"},
+	}, nil
+}
+
+func (demoModels) ResolveModel(ctx context.Context, versionID string) (*registry.ModelEntry, error) {
+	return nil, registry.ErrNotFound
+}
+
+func (demoModels) StudioRender(ctx context.Context, versionID string, bindings map[string]string) (string, error) {
+	return "", registry.ErrNotFound
 }

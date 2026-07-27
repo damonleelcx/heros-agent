@@ -13,7 +13,12 @@
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 import { startStubPlatform, startConsole, signIn } from "./support/harness.mjs";
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 let platform;
 let console_;
@@ -107,6 +112,41 @@ for (const [legacy, canonical] of LEGACY) {
     assert.equal(location.pathname, canonical);
   });
 }
+
+// ── §11c.4 — the CLI-emitted run reference opens exactly that run ─────────────
+//
+// The `link` CLI prints, and the platform stores, a run URL built as
+// `https://heros-agent.space/app/runs/{run_id}` (internal/linkingest linkingest.go, and the pinned
+// PlatformBaseURL in internal/runlink). When that URL is pasted from a terminal into a pull request,
+// its PATH — `/app/runs/{run_id}` — must open that run in this console, not a picker and not a 404.
+// So the console's canonical run route MUST be that exact segment. This guards the console half; the
+// Go half is pinned by internal/linkingest's TestConsoleRoute_IsThePlatformCanonicalRunPath.
+
+test("11c.4 — the canonical run route is the exact segment the CLI emits (/app/runs/{id})", async () => {
+  const routesSrc = await readFile(join(ROOT, "src/lib/routes.ts"), "utf8");
+  // A refactor that changed this segment (say to /app/run/ or /app/runs/{id}/view) would silently
+  // break every run URL already pasted into a pull request. Pin it against the CLI's literal.
+  assert.match(
+    routesSrc,
+    /run:\s*\(id:[^)]*\)\s*=>\s*`\/app\/runs\/\$\{encodeURIComponent\(id\)\}`/,
+    "routes.run must resolve to /app/runs/{id} — the literal the CLI/linkingest emits",
+  );
+});
+
+test("11c.4 — pasting the CLI's exact run path opens that run, not a picker or a redirect", async () => {
+  // The stub answers with a body the run view cannot render (an empty object); the point is not the
+  // data but the RESOLUTION — the pasted path must land on the run SUBJECT page (which names the run
+  // in first paint per R13), never bounce to the runs picker.
+  platform.set((_req, res) => {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end("{}");
+  });
+  const res = await fetch(`${console_.base}/app/runs/run_from_cli`, { headers: { cookie }, redirect: "manual" });
+  assert.equal(res.status, 200, "the CLI's run path redirected or 404'd instead of opening the run");
+  const html = await res.text();
+  assert.match(html, /run_from_cli/, "the run subject was not named on its own page");
+  assert.doesNotMatch(text(html), /Open a run by identifier/i, "the CLI's run path fell through to the picker");
+});
 
 test("a half-specified transform key goes to the picker, not to a not-found", async () => {
   // A config hash without a source revision does not NAME a transform. That is a different fact from

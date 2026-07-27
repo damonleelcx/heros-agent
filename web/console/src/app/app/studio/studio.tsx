@@ -646,14 +646,19 @@ function Editor({ names, onPublished }: { names: string[]; onPublished: () => vo
  *  are known (from the nodes list) it offers them as a pick list for `expr` — a validated choice
  *  cannot be made wrong, a free-text box can (task 4.5). */
 function BindingEditor({ slots, nodesJSON }: { slots: string[]; nodesJSON: string }) {
-  const inScope = useMemo(() => {
+  // `null` means the in-scope symbols could not be read — which is NOT the same fact as "there are no
+  // symbols in scope" (`[]`). Representing an unreadable nodes payload as an empty set is the exact
+  // unknown-vs-empty collapse P9's fail-closed rule (and security.test.mjs) forbids: it would assert
+  // there is nothing to bind to when the truth is we do not know. Both cases fall through to the
+  // free-text input below, but they are kept as different facts.
+  const inScope = useMemo<string[] | null>(() => {
     try {
       const nodes = JSON.parse(nodesJSON) as { CallSiteExprs?: string[] }[];
       const set = new Set<string>();
       for (const n of nodes) (n.CallSiteExprs ?? []).forEach((e) => set.add(e));
       return [...set].sort();
     } catch {
-      return [];
+      return null;
     }
   }, [nodesJSON]);
   const [kinds, setKinds] = useState<Record<string, string>>({});
@@ -683,7 +688,7 @@ function BindingEditor({ slots, nodesJSON }: { slots: string[]; nodesJSON: strin
                 <option value="env">env</option>
                 <option value="input">input</option>
               </select>
-              {kind === "expr" && inScope.length > 0 ? (
+              {kind === "expr" && inScope && inScope.length > 0 ? (
                 <select
                   value={values[s] ?? ""}
                   onChange={(e) => setValues((v) => ({ ...v, [s]: e.target.value }))}
