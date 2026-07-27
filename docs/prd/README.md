@@ -89,6 +89,23 @@ the operator console (its own `admin.*` origin) stand on.
 | P21 — Stripe Payments *(real Stripe behind the P7 Provider interface; checkout; idempotent webhooks; entitlement sync)* | [P21-stripe-payments.md](P21-stripe-payments.md) | `p21-payments` | Sales Operations + Backend |
 | P22 — SSO & Identity *(customer OIDC/SAML behind the ADR-008 seam; operator SSO+MFA made real)* | [P22-sso-identity.md](P22-sso-identity.md) | `p22-sso` | System Designer + Backend |
 
+### Published-Word Surfaces — P23
+
+The console's two **read, not computed** surfaces: a **legal surface** (Terms of Service + Privacy Notice) and a
+**developer documentation** surface. They ship together because they are one engineering problem — long-form text
+served from the console to readers with **no session**, which must stay true as the system changes and must keep
+serving when the platform does not. Their characteristic failure is **drift**, not a crash, and drift is found by
+customers, auditors and regulators rather than by tests. So the phase delivers content *and* the machinery that
+keeps it honest: content-as-code inside the console's deploy unit (no CMS, no runtime fetch — [ADR-010](../adr/)),
+a document identity of `(kind, version, content_hash)` that a **consent record** points at instead of a URL, a
+commitment gate that never walls the console, generated reference (absent tiers marked absent, never hand-written),
+and seven build-time fences — each with a fixture proving it can fail — extending the `scan-claims` rule from the
+marketing page into the documentation tree.
+
+| Phase | PRD | OpenSpec change | Lead role(s) |
+|-------|-----|-----------------|--------------|
+| P23 — Legal Surface & Developer Documentation *(Terms + Privacy Notice as versioned artifacts; append-only consent records; three-tier generated docs; accuracy fences)* | [P23-legal-and-developer-docs.md](P23-legal-and-developer-docs.md) | `p23-legal-and-docs` | Product Designer + Frontend + Sales Operations |
+
 ## PRD template
 
 Every phase PRD follows this structure:
