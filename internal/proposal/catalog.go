@@ -30,7 +30,10 @@ func DefaultCatalog() []Operator {
 		ragTuneOp{},
 		addRerankOp{},
 		addSkillOp{},
+		removeSkillOp{},
 		fixSchemaBindingOp{},
+		toolPruneOp{},
+		toolMinimizeOp{},
 		pruneOp{},
 	}
 }
@@ -472,6 +475,178 @@ func (op fixSchemaBindingOp) Propose(in OperatorInput) ([]Candidate, error) {
 	return out, nil
 }
 
+// ── P14 remove-skill (an erroring or never-exercised skill) ───────────────────────────────────────
+//
+// The mirror of addSkillOp, and the operator that makes the skill axis a full one: P14 promises
+// add / remove / rerank, each verification-gated, and without a removal the axis can only ever grow.
+//
+// # Grounded or silent
+//
+// It emits ONLY for a skill the recorded usage says errored or was never exercised. Unbinding a
+// capability because a diagnosis fired somewhere on the node would be a change on no evidence — the
+// same failure the prompt operators decline with ErrUngrounded — and the cost of being wrong is not
+// symmetric: an unnecessary ADD wastes tokens, an unnecessary REMOVE takes away something the workflow
+// needed and the eval set may not cover.
+//
+// 🔴 It is a PROPOSAL, like every other row. A removal that regresses the verified score does not ship
+// (task 3.2); the operator's prior only orders it for verification.
+
+type removeSkillOp struct{}
+
+func (removeSkillOp) Kind() OperatorKind { return OpRemoveSkill }
+func (removeSkillOp) Handles() []diagnosis.TaxonomyCode {
+	return []diagnosis.TaxonomyCode{diagnosis.CauseToolSchemaMismatch}
+}
+func (removeSkillOp) HandlesSignal() Signal { return SignalNone }
+func (removeSkillOp) AdmissiblePatterns() []patternclassifier.Pattern {
+	return []patternclassifier.Pattern{patternclassifier.ToolUse}
+}
+
+func (op removeSkillOp) Propose(in OperatorInput) ([]Candidate, error) {
+	if !in.Usage.Recorded() {
+		return nil, nil // no evidence: decline silently rather than unbind on a hunch
+	}
+	current := baseOverride(in.Base, in.NodeID())
+	var out []Candidate
+	for _, ref := range current.SkillRefs {
+		name := in.Menu.skillNameByRef(ref)
+		if name == "" {
+			// A ref the menu cannot name is a ref this operator cannot ground a decision about. Skipping
+			// it is the fail-closed direction: the alternative is removing a skill whose usage we never
+			// actually looked up.
+			continue
+		}
+		why := ""
+		switch {
+		case in.Usage.erroring(name):
+			why = "errored during the eval"
+		case !in.Usage.exercised(name):
+			why = "was never exercised by the eval set"
+		default:
+			continue // exercised and clean — leave it alone
+		}
+		spec := cloneSpec(in.Base)
+		removeSkill(spec, in.NodeID(), ref)
+		out = append(out, newCandidate(op.Kind(), in, in.NodeID(), []string{"skills"}, spec,
+			fmt.Sprintf("skill %s %s → unbind it (verified before it ships)", name, why)))
+	}
+	return out, nil
+}
+
+// ── P14 tool pruning / minimization (14b) ─────────────────────────────────────────────────────────
+//
+// Both land in `NodeOverride.ToolSelection` — the KEPT set — and both are validated at resolve against
+// the node's DISCOVERED tool set (D-14.2), so an operator can never propose keeping a tool the node does
+// not offer: the spec would be rejected before a diff exists.
+//
+// 🚫 Neither introduces a metric. The win is fewer `eval_tokens_total` (a declared tool costs tokens on
+// every call) and, where a pruned tool was erroring, a lower `tool_error_rate` — both already in the
+// harness's standard family. A bespoke "tools_pruned" number would measure the change rather than its
+// effect, and a change that measures itself always looks like a win.
+//
+// Neither declares AdmissiblePatterns. That is deliberate and is not laziness: the grounding is the
+// recorded USAGE, not the pattern label, and a RAG or Planning node that happens to offer tools has
+// exactly the same unused-tool cost as one the classifier labelled Tool Use. Gating on the label would
+// make the saving depend on a classification that has nothing to do with it.
+
+type toolPruneOp struct{}
+
+func (toolPruneOp) Kind() OperatorKind                { return OpToolPrune }
+func (toolPruneOp) Handles() []diagnosis.TaxonomyCode { return nil }
+func (toolPruneOp) HandlesSignal() Signal             { return SignalUnusedTools }
+func (toolPruneOp) AdmissiblePatterns() []patternclassifier.Pattern {
+	return nil
+}
+
+// Propose emits ONE candidate PER unused tool, rather than one candidate dropping them all.
+//
+// One-per-tool is the smaller blast radius (design Q4's "a minimal change beats a maximal one when both
+// clear the bar") and it is what makes the verdict attributable: if three tools are dropped together
+// and the score moves, nothing says which drop moved it. The all-at-once variant is a separate operator
+// (tool-minimize below) precisely so the two are scored as the different bets they are.
+func (op toolPruneOp) Propose(in OperatorInput) ([]Candidate, error) {
+	if !in.Usage.Recorded() || len(in.Usage.Discovered) == 0 {
+		return nil, nil // no evidence: never prune a tool set nobody looked at
+	}
+	var out []Candidate
+	for _, tool := range in.Usage.Discovered {
+		if in.Usage.exercised(tool) {
+			continue
+		}
+		kept := keepAllBut(in.Usage.Discovered, tool)
+		if len(kept) == len(in.Usage.Discovered) {
+			continue
+		}
+		spec := cloneSpec(in.Base)
+		setToolSelection(spec, in.NodeID(), kept)
+		out = append(out, newCandidate(op.Kind(), in, in.NodeID(), []string{"tools"}, spec,
+			fmt.Sprintf("tool %s is declared but the eval set never calls it → prune it (fewer declared-tool "+
+				"tokens; scored on the standard metric family, not on the saving)", tool)))
+	}
+	return out, nil
+}
+
+type toolMinimizeOp struct{}
+
+func (toolMinimizeOp) Kind() OperatorKind                { return OpToolMinimize }
+func (toolMinimizeOp) Handles() []diagnosis.TaxonomyCode { return nil }
+func (toolMinimizeOp) HandlesSignal() Signal             { return SignalUnusedTools }
+func (toolMinimizeOp) AdmissiblePatterns() []patternclassifier.Pattern {
+	return nil
+}
+
+// Propose emits the MINIMAL set: exactly the tools the eval set exercised.
+//
+// It is emitted alongside the individual prunes, not instead of them, and the harness scores all of
+// them against the full-tool-set baseline. That is the honest way to ask "how far can this go": the
+// minimal set is a hypothesis about the whole set, the single prunes are hypotheses about one tool each,
+// and measurement — not the operator — decides which survives.
+func (op toolMinimizeOp) Propose(in OperatorInput) ([]Candidate, error) {
+	if !in.Usage.Recorded() || len(in.Usage.Discovered) == 0 {
+		return nil, nil
+	}
+	var kept []string
+	for _, tool := range in.Usage.Discovered {
+		if in.Usage.exercised(tool) {
+			kept = append(kept, tool)
+		}
+	}
+	// Nothing to minimize when every declared tool is already used.
+	if len(kept) == len(in.Usage.Discovered) {
+		return nil, nil
+	}
+	// 🔴 An empty minimal set is NOT emitted. "The eval set exercised no tool" is at least as likely to
+	// mean the eval set does not cover this node's tool use as it is to mean the node needs no tools, and
+	// the two are indistinguishable from here. Unbinding every tool on that evidence is the asymmetric
+	// mistake; the per-tool prunes above still offer the incremental version.
+	if len(kept) == 0 {
+		return nil, nil
+	}
+	spec := cloneSpec(in.Base)
+	setToolSelection(spec, in.NodeID(), kept)
+	return []Candidate{newCandidate(op.Kind(), in, in.NodeID(), []string{"tools"}, spec,
+		fmt.Sprintf("%d of %d declared tools are exercised → propose the minimal set %v, scored against the "+
+			"full set", len(kept), len(in.Usage.Discovered), kept))}, nil
+}
+
+// keepAllBut returns the discovered set minus one tool, preserving IR order (the selection is
+// canonicalized at resolve, so the order here is only for a legible rationale).
+func keepAllBut(all []string, drop string) []string {
+	out := make([]string, 0, len(all))
+	for _, t := range all {
+		if t != drop {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+func setToolSelection(s *variantspec.VariantSpec, node string, kept []string) {
+	o := s.Nodes[node]
+	o.ToolSelection = append([]string(nil), kept...)
+	s.Nodes[node] = o
+}
+
 // ── prune (redundant node) ────────────────────────────────────────────────────────────────────────
 
 type pruneOp struct{}
@@ -537,6 +712,22 @@ func setContext(s *variantspec.VariantSpec, node, ref string) {
 func addSkill(s *variantspec.VariantSpec, node, ref string) {
 	o := s.Nodes[node]
 	o.SkillRefs = append(append([]string(nil), o.SkillRefs...), ref)
+	s.Nodes[node] = o
+}
+
+// removeSkill unbinds one skill ref at a node, PRESERVING the order of the rest. Order is
+// identity-bearing (ResolvedNode.SkillRefs is never sorted), so a removal that also reordered the
+// survivors would be two changes wearing one rationale, and verification could not tell which of them
+// moved the score.
+func removeSkill(s *variantspec.VariantSpec, node, ref string) {
+	o := s.Nodes[node]
+	refs := make([]string, 0, len(o.SkillRefs))
+	for _, r := range o.SkillRefs {
+		if r != ref {
+			refs = append(refs, r)
+		}
+	}
+	o.SkillRefs = refs
 	s.Nodes[node] = o
 }
 

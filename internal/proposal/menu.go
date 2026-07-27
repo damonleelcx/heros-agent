@@ -148,6 +148,18 @@ func (m Menu) paramTunedVariants(cur ModelChoice) []ModelChoice {
 	return out
 }
 
+// skillNameByRef maps a spec's skill_ref back to the registered NAME the trace records when that skill
+// is called. It is how the selection operators join "what the spec pinned" to "what the eval exercised"
+// without either side inventing an identity for the other. Empty when the menu does not carry the ref.
+func (m Menu) skillNameByRef(ref string) string {
+	for _, s := range m.Skills {
+		if s.Ref == ref {
+			return s.Name
+		}
+	}
+	return ""
+}
+
 // modelByRef returns the menu choice with the given ref, or a zero value when absent.
 func (m Menu) modelByRef(ref string) ModelChoice {
 	for _, c := range m.Models {
@@ -217,6 +229,9 @@ func cloneOverride(o variantspec.NodeOverride) variantspec.NodeOverride {
 	}
 	if o.SkillRefs != nil {
 		out.SkillRefs = append([]string(nil), o.SkillRefs...)
+	}
+	if o.ToolSelection != nil {
+		out.ToolSelection = append([]string(nil), o.ToolSelection...)
 	}
 	if o.Bindings != nil {
 		out.Bindings = make(map[string]variantspec.BindingSource, len(o.Bindings))

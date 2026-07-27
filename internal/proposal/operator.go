@@ -55,6 +55,25 @@ const (
 
 	// ── P13 model-parameter tuning (13b) — temperature/max-tokens via ProviderParams, bound-mode only.
 	OpParamTune OperatorKind = "param_tune" // tune provider params (bound apply mode)
+
+	// ── P14 skills & tools (14a/14b) ────────────────────────────────────────────────────────────────
+	//
+	// OpRemoveSkill is its OWN kind rather than a generalization of OpPrune (PRD §14 Q2, settled here).
+	// The two look alike only from far away: OpPrune removes a NODE and rewires its neighbours — a graph
+	// edit whose admissibility question is "does the wiring still type-check" — while a skill removal is
+	// a per-dimension delta on one node whose admissibility question is "was this skill ever exercised".
+	// They fire on different drivers (a redundant-node signal vs a tool diagnosis), carry different
+	// rationales, and want different verification order. Folding them together would put an `if` inside
+	// pruneOp deciding which of two contracts it is honouring, which is the enum-switch this catalog is
+	// built to avoid (core rule 6).
+	OpRemoveSkill OperatorKind = "remove_skill" // erroring / unexercised skill → unbind it
+	// OpToolPrune drops provider-native tools the eval set never exercises — a call-site DELETION of an
+	// already-present tool, not a construction. Distinct from OpRemoveSkill for the reason D-14.1 splits
+	// tools from skills in the IR: a tool is selected, a skill is bound, and one sentence cannot mean both.
+	OpToolPrune OperatorKind = "tool_prune"
+	// OpToolMinimize proposes the MINIMAL tool set that preserves task success — the whole-set analogue
+	// of a single prune, emitted as one candidate so the harness scores the set rather than each drop.
+	OpToolMinimize OperatorKind = "tool_minimize"
 )
 
 // Signal is a structural driver that is NOT expressible as a P4.5 taxonomy code but still maps to a
@@ -68,6 +87,11 @@ const (
 	SignalNone           Signal = ""
 	SignalCostBottleneck Signal = "cost_bottleneck" // → model-downgrade
 	SignalRedundantNode  Signal = "redundant_node"  // → prune / merge
+	// SignalUnusedTools is P14's structural driver: the node offers the model tools the eval set never
+	// calls. It is a Signal rather than a taxonomy code for the reason the other two are — an unused
+	// tool is not a FAILURE, so the frozen P4.5 failure taxonomy has no honest code for it, and inventing
+	// one would put "nothing went wrong, but this costs tokens" in a vocabulary about what went wrong.
+	SignalUnusedTools Signal = "unused_tools" // → tool-prune / tool-minimize
 )
 
 // OperatorInput is what every operator reads. It is assembled by the engine from a diagnosis (or a
@@ -105,6 +129,46 @@ type OperatorInput struct {
 	// RequiredFields is the output contract the prompt failures violated, pinned by the rewrite's
 	// format constraint. Empty when no schema was violated.
 	RequiredFields []string
+	// Usage is the P14 selection evidence: which of the node's tools/skills the eval set actually
+	// exercised, and which of them errored. The skill-removal and tool-pruning operators are GROUNDED on
+	// it and emit nothing without it — unbinding a capability on no evidence is exactly the plausible-
+	// but-unfounded change the catalog declines elsewhere (the prompt operators' grounded-or-silent rule).
+	Usage ToolUsage
+}
+
+// ToolUsage is the evidence the P14 selection operators are grounded on.
+//
+// It is deliberately about NAMES the call site declares, not registry refs: a discovered tool has no
+// registry identity at all (decisions.md D-14.2 — "a tool is selected against the discovered set, not
+// resolved from a ref"), and a bound skill's name is what the trace records when it is called. The
+// operators map a spec's skill_ref back to a name through the Menu, which is the one place refs and
+// names are already joined.
+type ToolUsage struct {
+	// Discovered is the node's discovered tool set, in IR order. Empty means "not recorded", which is
+	// not the same as "the node offers no tools" — an operator treats it as no evidence and declines.
+	Discovered []string
+	// Exercised is the subset the eval set actually called.
+	Exercised []string
+	// Erroring names the tools/skills whose calls failed during the eval.
+	Erroring []string
+}
+
+// Recorded reports whether any usage evidence exists. A pass with no recorded usage grounds nothing,
+// and the selection operators emit nothing rather than guess which capability is dead.
+func (u ToolUsage) Recorded() bool {
+	return len(u.Discovered) > 0 || len(u.Exercised) > 0 || len(u.Erroring) > 0
+}
+
+func (u ToolUsage) exercised(name string) bool { return containsString(u.Exercised, name) }
+func (u ToolUsage) erroring(name string) bool  { return containsString(u.Erroring, name) }
+
+func containsString(xs []string, x string) bool {
+	for _, v := range xs {
+		if v == x {
+			return true
+		}
+	}
+	return false
 }
 
 // NodeID returns the node the input targets. For a Signal-driven operator the diagnosis may be a thin
