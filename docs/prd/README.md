@@ -57,6 +57,21 @@ first principle — *deliver "anyone who receives it can run it"* — is the thr
 |-------|-----|-----------------|--------------|
 | P19 — Deployment & Delivery *(whole-platform Docker + K8s; consoles; internal LLM access; air-gapped)* | [P19-deployment-delivery.md](P19-deployment-delivery.md) | `p19-deployment` | DevOps + System Designer |
 
+### Self-Serve Distribution — P20 *(cross-cutting)*
+
+The complement to P19: where P19 delivers the platform to a **server/cluster** (the *fleet* delivery), P20
+delivers the free `heros` **CLI to an individual machine** (the *self-serve* delivery) as **installable
+packages released on GitHub**. It adds no product feature and no statistic; it wraps the P11 binary + supply-
+chain floor in a distribution — a tag-triggered GitHub-Release pipeline (no human in the upload path),
+native install channels (curl\|sh / PowerShell / Homebrew / Scoop-winget / deb-rpm / container image) that
+**verify the signature before the binary is on `PATH`**, an OS-trust posture (Gatekeeper / SmartScreen),
+zero-config first-run onboarding, and a safe self-update. The consoles are server-deployed (P19), not
+end-user-installed; the product is explicitly *"not a desktop app."*
+
+| Phase | PRD | OpenSpec change | Lead role(s) |
+|-------|-----|-----------------|--------------|
+| P20 — Installable Packages & Self-Serve Distribution *(GitHub-Release pipeline; native installers; Gatekeeper/SmartScreen; onboarding; self-update)* | [P20-installable-packages.md](P20-installable-packages.md) | `p20-installable-packages` | DevOps + Product Designer |
+
 ### Identity & Payments — P21–P22
 
 The commercial front door. **P21 — Stripe Payments** makes the P7 billing abstraction real: it implements the
