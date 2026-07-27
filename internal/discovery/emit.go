@@ -103,7 +103,85 @@ type IRNode struct {
 	// Reserved in P0, unset by Discovery, populated by the P3.5 classifier. omitempty: an unlabelled
 	// node must serialise byte-identically to how it did before P3.5.
 	PatternLabels []IRPatternLabel `json:"pattern_labels,omitempty"`
+
+	// ── P14 tools≠skills split (decisions.md D-14.1) ────────────────────────────────────────────────
+	//
+	// ToolsSkills above conflates two things with OPPOSITE apply mechanics: a *tool* is a provider-native
+	// function the model may call, SELECTED (kept or pruned) from what the model is offered; a *skill* is
+	// a registered platform capability with a sealed contract, BOUND by constructing a value. One flat
+	// slice cannot express "prune this unused tool" without the same sentence also reading as "unbind
+	// this platform skill".
+	//
+	// 🔴 The split is ADDITIVE and ToolsSkills is FROZEN. Both fields are `omitempty` and nil-when-empty
+	// (the DeclaredEnv pattern, :39-43), so an IR that predates them serialises byte-identically, the P0
+	// golden vectors keep reproducing, and every `config_hash`-keyed row stays addressable. ToolsSkills
+	// is never repurposed: it remains the conflated view a pre-P14 consumer reads.
+	//
+	// The FRONTEND populates these at extraction, because it is the only component that can see which
+	// discovered entry is which. A consumer never re-derives the split — a re-derivation would be a
+	// second classifier, and two classifiers are two answers.
+	Tools  []IRTool `json:"tools,omitempty"`
+	Skills []string `json:"skills,omitempty"`
 }
+
+// IRTool is one provider-native tool the node offers the model, as the call site declares it.
+//
+// A tool is identified by the text the CALL SITE wrote, not by a registry version_id, and that is a
+// decision rather than an omission: a tool is already identified by its call site, so sealing it into
+// the registry would invent a second identity for something that already has one (decisions.md D-14.2).
+// A tool selection names tools by these identifiers and is validated against this set, fail-closed.
+type IRTool struct {
+	Name string `json:"name"`
+	// DeclaredAt locates the tool as a STATIC, deletable element of a written list.
+	//
+	// 🔴 nil is load-bearing and is not "unknown": it means the node's tool set is ASSEMBLED AT RUNTIME,
+	// so there is no declaration a prune could delete. That is exactly the case FR14 / D-14.3 require the
+	// transform to REFUSE rather than guess at, and recording it here is what lets the refusal name the
+	// reason instead of reporting a tool it could not find.
+	DeclaredAt *IRToolLocation `json:"declared_at,omitempty"`
+}
+
+// Locatable reports whether this tool is a static declaration a prune could delete. A tool that is not
+// locatable drives the FR14 refusal.
+func (t IRTool) Locatable() bool { return t.DeclaredAt != nil }
+
+// IRToolLocation is where a statically-declared tool sits in its list. The file is the node's own
+// call_site.file — repeating it here would be a second copy of one fact — so only the position within
+// the file and within the list is recorded.
+type IRToolLocation struct {
+	Line int `json:"line"`
+	// Index is the tool's position in the written list, so a deletion addresses the element rather than
+	// searching for text that may appear more than once.
+	Index int `json:"index"`
+}
+
+// DeclaresTool reports whether name is one of the tools the IR records for this node. This is the
+// fail-closed check a tool selection is validated against — the same shape as IR.DeclaresEnv and
+// IRCallSite.HasInScope, and for the same reason: a selection over a tool the node does not offer must
+// be rejected, never applied to nothing.
+func (n IRNode) DeclaresTool(name string) bool {
+	for _, t := range n.Tools {
+		if t.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// ToolByName returns the recorded tool and whether it was found.
+func (n IRNode) ToolByName(name string) (IRTool, bool) {
+	for _, t := range n.Tools {
+		if t.Name == name {
+			return t, true
+		}
+	}
+	return IRTool{}, false
+}
+
+// ToolsRecorded reports whether this node carries a P14 tool split at all. nil (absent) means "this IR
+// predates the split", which is NOT the same as "this node offers no tools" — a consumer that conflated
+// them would treat every pre-P14 node as tool-free and silently accept a selection over nothing.
+func (n IRNode) ToolsRecorded() bool { return n.Tools != nil || n.Skills != nil }
 
 type IRCallSite struct {
 	File      string `json:"file"`
@@ -242,6 +320,11 @@ func buildNode(n ExtractedNode) IRNode {
 		Prompt:          IRPrompt{Inline: n.Prompt.Inline, Variables: vars},
 		ToolsSkills:     tools,
 		ContextAssembly: IRContextAssembly{Policy: n.Context.Policy, Description: n.Context.Description},
+		// P14 split — passed through NIL-WHEN-EMPTY, deliberately unlike ToolsSkills above, which is
+		// normalised to `[]`. ToolsSkills' emptiness is part of the frozen bytes; these fields' ABSENCE
+		// is what has to stay byte-compatible, and absence is achieved by omission, not by an empty array.
+		Tools:  n.Tools,
+		Skills: n.Skills,
 		// Permissive typed I/O-contract stubs (P1 allowance — doc 01 §2.1). Refinable additively.
 		IOContract: IRIOContract{
 			InputSchema:  map[string]any{"type": "object"},

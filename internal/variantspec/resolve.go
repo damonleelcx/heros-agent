@@ -60,6 +60,11 @@ type ResolvedOverride struct {
 	Prompt  *registry.PromptEntry
 	Skills  []*registry.SkillEntry
 	Context *registry.ContextEntry
+	// ToolSelection is the KEPT tool set, canonical (sorted, validated against the node's discovered
+	// tools). The transform derives the DELETIONS from it — everything the call site declares that this
+	// set does not keep. Carrying the kept set rather than the dropped one is deliberate: the kept set is
+	// what the author wrote and what config_hash records, so the two cannot disagree.
+	ToolSelection []string
 	// ParamTune marks a model override that changes ONLY the provider parameters (temperature,
 	// max-tokens) and not the provider or model id — a P13 parameter tune, not a model swap (design
 	// Decision 7). It is transform-facing and NOT part of config_hash (the HASHED effect is
@@ -84,6 +89,19 @@ func (o ResolvedOverride) Dimensions() []Dimension {
 	}
 	if o.Context != nil {
 		out = append(out, DimContext)
+	}
+	if len(o.ToolSelection) > 0 {
+		out = append(out, DimTools)
+	}
+	return out
+}
+
+// discoveredToolNames lists the tools the IR records for a node, for a rejection a human has to act on:
+// "you asked to keep X" is only actionable next to "the node offers Y and Z".
+func discoveredToolNames(irNode *discovery.IRNode) []string {
+	out := make([]string, 0, len(irNode.Tools))
+	for _, t := range irNode.Tools {
+		out = append(out, t.Name)
 	}
 	return out
 }
@@ -244,6 +262,35 @@ func resolveNode(ctx context.Context, nodeID string, o NodeOverride, irNode *dis
 	} else {
 		node.ContextPolicy = irNode.ContextAssembly.Policy
 		node.ContextParams = map[string]any{}
+	}
+
+	// ── tools (P14 task 5.3, decisions.md D-14.2) ──────────────────────────────────────────────────
+	//
+	// A tool selection is VALIDATED AGAINST THE NODE'S DISCOVERED TOOL SET and fails closed. This is the
+	// third application of a pattern the codebase has already proved twice — an `env` binding validated
+	// against DeclaredEnv, an `expr` binding validated against in_scope — and it fails in the same safe
+	// direction: a selection naming a tool the IR does not record for this node is REJECTED here, before
+	// any diff exists, rather than applied to nothing and shipped as a prune that pruned nothing.
+	//
+	// 🔴 An IR that predates the split is also a rejection, not a pass. `Tools == nil` means "this IR
+	// does not record tools", which is NOT "this node offers none" — treating the two alike would accept
+	// every selection against every pre-P14 IR, which is precisely the false acceptance fail-closed
+	// exists to prevent.
+	if len(o.ToolSelection) > 0 {
+		if !irNode.ToolsRecorded() {
+			return ro, node, &SpecError{NodeID: nodeID, Dim: DimTools, Err: ErrToolNotDiscovered,
+				Detail: "the IR at this source_revision records no tool set for this node (it predates the " +
+					"tools/skills split), so a selection over it cannot be validated and is refused rather " +
+					"than applied to an unknown set"}
+		}
+		for _, name := range o.ToolSelection {
+			if !irNode.DeclaresTool(name) {
+				return ro, node, &SpecError{NodeID: nodeID, Dim: DimTools, Ref: name, Err: ErrToolNotDiscovered,
+					Detail: fmt.Sprintf("the node's discovered tool set is %v", discoveredToolNames(irNode))}
+			}
+		}
+		ro.ToolSelection = o.SelectedTools()
+		node.ToolSelection = ro.ToolSelection
 	}
 
 	// ── bindings (P10 tasks 3.2–3.5, 3.8) ──────────────────────────────────────────────────────────

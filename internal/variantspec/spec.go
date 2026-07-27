@@ -35,8 +35,8 @@ import (
 	"strings"
 )
 
-// Dimension is one of a node's four independently-overridable dimensions (FR2). Typed rather than
-// stringly so that every error can name one and the set stays closed.
+// Dimension is one of a node's independently-overridable dimensions (FR2). Typed rather than stringly
+// so that every error can name one and the set stays CLOSED.
 type Dimension string
 
 const (
@@ -44,7 +44,24 @@ const (
 	DimPrompt  Dimension = "prompt"
 	DimSkills  Dimension = "skills"
 	DimContext Dimension = "context"
+	// DimTools is tool SELECTION — which of the tools a node already offers the model it keeps
+	// (P14, decisions.md D-14.2). It is a fifth member of the closed enum, and it is deliberately NOT
+	// folded into DimSkills: a tool is selected (a call-site DELETION of an already-present element)
+	// while a skill is bound (a CONSTRUCTION from a sealed contract), and conflating them in the
+	// dimension layer would re-introduce, one level up, exactly the confusion D-14.1 splits in the IR.
+	//
+	// 🚫 There is no new registry `Kind` behind it. A tool is already identified by its call site, so
+	// sealing it into the registry would invent a second identity for something that has one; a selection
+	// is validated against the node's DISCOVERED tool set instead, fail-closed — the same pattern as an
+	// `env` binding against DeclaredEnv and an `expr` binding against in_scope.
+	DimTools Dimension = "tools"
 )
+
+// Dimensions is the closed enum, in a stable order. Exported so a consumer iterating dimensions cannot
+// silently miss one that was added — the alternative is a hand-written list somewhere else that drifts.
+func Dimensions() []Dimension {
+	return []Dimension{DimModel, DimPrompt, DimSkills, DimContext, DimTools}
+}
 
 // Sentinel errors. Typed so the Loader, the UI, and P4 can tell "you asked for something that does
 // not exist" from "we cannot safely do what you asked" — the first is the author's mistake, the
@@ -88,6 +105,15 @@ var (
 	// analysis), never silently dropped or emitted as an un-bindable diff. Reported through
 	// SpecError{NodeID, Dim: DimPrompt, Ref: slot} like every other binding failure (task 3.2).
 	ErrRewriteUnappliesNode = errors.New("variantspec: a prompt rewrite drops a slot the call site still supplies, un-applying the node")
+
+	// ErrToolNotDiscovered (P14, decisions.md D-14.2): a tool selection names a tool the IR does not
+	// record for that node. FAIL CLOSED — the selection is rejected at resolve rather than applied to
+	// nothing, because "keep only these three tools" applied to a set that does not contain one of them
+	// silently means something different from what the author wrote.
+	//
+	// It is its OWN sentinel and not ErrUnresolvedRef: a tool is not a registry entry, so "this ref does
+	// not resolve" would send the reader to look up a version_id that was never supposed to exist.
+	ErrToolNotDiscovered = errors.New("variantspec: tool selection names a tool this node does not offer")
 )
 
 // BindingKind is the source of a prompt-slot binding (P10 task 3.1). The kind is recorded EXPLICITLY,
@@ -202,12 +228,50 @@ type NodeOverride struct {
 	// names; a slot with no entry here must be satisfied by an identically-spelled call-site expression
 	// or the spec is rejected at resolve (task 3.3).
 	Bindings map[string]BindingSource `json:"bindings,omitempty"`
+	// ToolSelection is the KEPT subset of the node's discovered tools (P14, DimTools). Optional and
+	// additive: omitempty + nil-when-empty, so a spec that prunes nothing serialises exactly as it did
+	// before this field existed (decisions.md D-1.4, applied a second time).
+	//
+	// 🔴 The entries are DISCOVERED CALL-SITE IDENTIFIERS, not registry version_ids — a tool has no
+	// registry identity (D-14.2). That is why this field does not feed Refs(): there is nothing here for
+	// a registry to resolve, and listing it among the refs would send the loader looking for entries that
+	// were never registered.
+	//
+	// It is a SET, not a sequence. Two specs that keep the same tools in different authoring order
+	// denote one configuration and must share a config_hash, so the resolved projection sorts it —
+	// unlike SkillRefs, whose order is identity-bearing because the call site binds them in that order.
+	ToolSelection []string `json:"tool_selection,omitempty"`
 }
 
 // isEmpty reports whether this override sets nothing. A node listed in the ordering with no
 // overrides is legitimate and common: it is a node that runs exactly as discovered.
 func (o NodeOverride) isEmpty() bool {
-	return o.ModelRef == "" && o.PromptRef == "" && len(o.SkillRefs) == 0 && o.ContextPolicy == "" && len(o.Bindings) == 0
+	return o.ModelRef == "" && o.PromptRef == "" && len(o.SkillRefs) == 0 && o.ContextPolicy == "" &&
+		len(o.Bindings) == 0 && len(o.ToolSelection) == 0
+}
+
+// SelectedTools returns the kept tool set in canonical (sorted, de-duplicated) order — the same order
+// the resolved projection hashes, so a caller comparing two selections compares the SET rather than the
+// order they happened to be written in. Nil when nothing is selected.
+//
+// 🚫 Deliberately NOT named Refs and deliberately not folded into VariantSpec.Refs(): these are
+// call-site identifiers, and a registry lookup for one of them would fail on something that was never
+// meant to be registered.
+func (o NodeOverride) SelectedTools() []string {
+	if len(o.ToolSelection) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	out := make([]string, 0, len(o.ToolSelection))
+	for _, t := range o.ToolSelection {
+		if seen[t] {
+			continue
+		}
+		seen[t] = true
+		out = append(out, t)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // Edge is one graph edge in the spec's declared ordering.
@@ -306,6 +370,19 @@ func (s *VariantSpec) Validate() error {
 		}
 		if dup := firstDuplicate(o.SkillRefs); dup != "" {
 			return specErr(id, DimSkills, ErrInvalidSpec, "skill_refs binds %q twice", dup)
+		}
+		// Tool selection — the structure checkable without the IR. Whether the named tools EXIST at the
+		// node is the IR's question and lives in Resolve, exactly as a skill_ref's existence does.
+		for i, t := range o.ToolSelection {
+			if t == "" {
+				return specErr(id, DimTools, ErrInvalidSpec, "tool_selection[%d] is empty", i)
+			}
+		}
+		if dup := firstDuplicate(o.ToolSelection); dup != "" {
+			// A duplicate is rejected rather than de-duplicated: a selection is a SET, so writing a tool
+			// twice means the author believes something about it that is not true, and silently collapsing
+			// it would hide the misunderstanding rather than surface it.
+			return specErr(id, DimTools, ErrInvalidSpec, "tool_selection keeps %q twice", dup)
 		}
 		// Binding structure — everything checkable without the IR or registries (kind is in the set; a
 		// non-literal binding names something). The scope/declared/contract checks and the exactly-once

@@ -69,6 +69,16 @@ type ResolvedNode struct {
 	// frozen bytes. This field is new, so its ABSENCE is what must stay byte-compatible — achieved by
 	// omission, not by an empty object.
 	Bindings map[string]ResolvedBinding `json:"bindings,omitempty"`
+	// ToolSelection is the kept subset of the node's discovered tools (P14, DimTools; decisions.md
+	// D-14.2). ADDITIVE and omitempty with a nil-when-empty slice: a node that prunes nothing emits NO
+	// `tool_selection` key, so its canonical bytes are byte-identical to a pre-P14 node and the frozen
+	// golden vectors keep reproducing — the same discipline Bindings above follows.
+	//
+	// It is SORTED, unlike SkillRefs. That asymmetry is the contract, not an inconsistency: skill order
+	// is identity-bearing because the call site binds them in that order, while a tool selection denotes
+	// a SET — two specs keeping the same tools in different authoring order describe one configuration
+	// and must share a config_hash, or every eval comparison fragments on a formatting difference.
+	ToolSelection []string `json:"tool_selection,omitempty"`
 }
 
 // ResolvedBinding is one slot's resolved binding: its kind and value, recorded explicitly (never
