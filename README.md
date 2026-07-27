@@ -9,8 +9,9 @@ change is better or cheaper before you merge.
 Think **"Dependabot for LLM cost & quality."** You review a diff and merge; the platform never
 touches production behavior without evidence.
 
-> **Status: platform implemented and deployable (P0 → P12, P19); optimization-axis expansion in
-> design (P13 → P18).** The four core subsystems and all three delivery surfaces are built:
+> **Status: platform implemented and deployable (P0 → P12, P19); optimization-axis expansion
+> (P13 → P18) and the commercial/distribution phases (P20 → P22) in design.** The four core
+> subsystems and all three delivery surfaces are built:
 > Discovery, the source-transformation Config Layer, the sandboxed Runtime, the Eval Harness, the
 > attribution/diagnosis/verification engine, the autonomous optimizer, billing & metering, the
 > admin and customer consoles, the offline `heros` CLI, and CI-mediated forge delivery all live under
@@ -73,7 +74,7 @@ The full engineering plan is committed and specified:
 
 - **[Implementation timeline](docs/implementation-timeline/README.md)** — system overview, critical
   path, role-ownership matrix, Gantt, and milestones (M0 → M15).
-- **[Product Requirements Documents](docs/prd/README.md)** — one PRD per phase (P0 → P19).
+- **[Product Requirements Documents](docs/prd/README.md)** — one PRD per phase (P0 → P22).
 - **[OpenSpec change sets](openspec/)** — behavioral, testable specs (`SHALL` requirements with
   scenarios); see [`openspec/AGENTS.md`](openspec/AGENTS.md) for the format and
   [`openspec/project.md`](openspec/project.md) for conventions.
@@ -106,6 +107,9 @@ The full engineering plan is committed and specified:
 | **P17** | Memory Strategy Optimization (what an agent remembers becomes a tunable dimension) |
 | **P18** | Harness Strategy Optimization (the scaffold around a node becomes a tunable dimension) |
 | **P19** | Deployment & Delivery (the platform as a thing you can stand up) |
+| **P20** | Installable Packages & Self-Serve Distribution (GitHub-Release pipeline; native installers; signature-verified before `PATH`; onboarding + self-update) |
+| **P21** | Stripe Payments (real Stripe behind the P7 `billing.Provider` interface — checkout, metered usage, idempotent signature-verified webhooks, entitlement sync) |
+| **P22** | SSO & Identity (customer OIDC/SAML behind the ADR-008 seam; operator SSO + MFA made real) |
 
 Phases **P13 → P18** form the **Optimization Axis Expansion**: each takes a dimension the IR already
 models and makes it a *verified, applicable* optimization axis under the same "diagnosis proposes,
@@ -134,8 +138,8 @@ internal/
   linkage  linkingest  runlink  clilink  cli # CLI + opt-in run linking (P11)
   forgedelivery  deliveryrecord  submit  reconcile   # CI-mediated forge delivery (P12)
   studio  broker  approval  auth  db  launch  api    # studio, HITL gate, service core
-docs/                  # implementation-timeline, prd (P0–P19), adr, decisions, migration checklist
-openspec/              # spec-driven change sets (P0–P19)
+docs/                  # implementation-timeline, prd (P0–P22), adr, decisions, migration checklist
+openspec/              # spec-driven change sets (P0–P22)
 web/console            # the customer-facing Next.js dashboard + BFF (P9)
 ```
 
