@@ -9,12 +9,21 @@ change is better or cheaper before you merge.
 Think **"Dependabot for LLM cost & quality."** You review a diff and merge; the platform never
 touches production behavior without evidence.
 
-> **Status: foundation + full design.** This repository currently contains the **complete design**
-> (implementation timeline, per-phase PRDs, and OpenSpec change sets) plus a **minimal Go service
-> foundation**. The subsystems below are specified and being built phase by phase (P0 → P12). It is
-> being repurposed from a prior *Heros OS-level agent* project; see
-> [`docs/reproposal-migration-checklist.md`](docs/reproposal-migration-checklist.md) for what was
-> kept, adapted, and removed.
+> **Status: platform implemented and deployable (P0 → P12, P19); optimization-axis expansion in
+> design (P13 → P18).** The four core subsystems and all three delivery surfaces are built:
+> Discovery, the source-transformation Config Layer, the sandboxed Runtime, the Eval Harness, the
+> attribution/diagnosis/verification engine, the autonomous optimizer, billing & metering, the
+> admin and customer consoles, the offline `heros` CLI, and CI-mediated forge delivery all live under
+> [`internal/`](internal/) and are demoable end-to-end through the `cmd/pNhermes` walkthroughs. The
+> whole platform now **stands up from one digest-pinned image set** on Docker Compose or Kubernetes
+> ([`deploy/`](deploy/), see [P19](docs/prd/P19-deployment-delivery.md)), and the pipeline has been
+> run **live against a real 3,333-file repo** (a full end-to-end proof lands with the E2E-proof PR).
+> The **complete design**
+> (implementation timeline, per-phase PRDs, and OpenSpec change sets) is committed alongside. The
+> current frontier is the **Optimization Axis Expansion** (P13 → P18) — turning each modeled dimension
+> into an applicable optimization axis. The repo was repurposed from a prior *Heros OS-level agent*
+> project; see [`docs/reproposal-migration-checklist.md`](docs/reproposal-migration-checklist.md) for
+> what was kept, adapted, and removed.
 
 ## How it works
 
@@ -64,7 +73,7 @@ The full engineering plan is committed and specified:
 
 - **[Implementation timeline](docs/implementation-timeline/README.md)** — system overview, critical
   path, role-ownership matrix, Gantt, and milestones (M0 → M15).
-- **[Product Requirements Documents](docs/prd/README.md)** — one PRD per phase (P0 → P12).
+- **[Product Requirements Documents](docs/prd/README.md)** — one PRD per phase (P0 → P19).
 - **[OpenSpec change sets](openspec/)** — behavioral, testable specs (`SHALL` requirements with
   scenarios); see [`openspec/AGENTS.md`](openspec/AGENTS.md) for the format and
   [`openspec/project.md`](openspec/project.md) for conventions.
@@ -90,32 +99,57 @@ The full engineering plan is committed and specified:
 | **P10** | Prompt & Model Studio (prompt authoring + versioning, variable bindings, per-node model/prompt selection, runtime config binding) |
 | **P11** | CLI & CI Integration (offline-first CLI on every plan; opt-in run linking that gives SUM metering its input) |
 | **P12** | Forge Delivery (the optimization PR — CI-mediated by default, hosted Git App opt-in; the gainshare input) |
+| **P13** | Prompt & Model Optimization (deepening the one axis that already ships) |
+| **P14** | Skills & Tools Optimization (making the skill axis apply, and splitting tools from skills) |
+| **P15** | Workflow / Node-Wiring Optimization (turning the graph's shape into an optimization axis) |
+| **P16** | Context Strategy Optimization (making the richest modeled axis actually applicable) |
+| **P17** | Memory Strategy Optimization (what an agent remembers becomes a tunable dimension) |
+| **P18** | Harness Strategy Optimization (the scaffold around a node becomes a tunable dimension) |
+| **P19** | Deployment & Delivery (the platform as a thing you can stand up) |
+
+Phases **P13 → P18** form the **Optimization Axis Expansion**: each takes a dimension the IR already
+models and makes it a *verified, applicable* optimization axis under the same "diagnosis proposes,
+verification decides" gate.
 
 ## Repository layout (today)
 
 ```
-cmd/agentd/            # service entrypoint — boots the HTTP server
+cmd/
+  agentd               # service entrypoint — boots the HTTP server
+  heros                # the offline-first customer CLI (P11)
+  pNhermes / pNdemo    # per-phase end-to-end walkthroughs against the hermes demo repo
 internal/
-  api  launch          # minimal HTTP server: /healthz, /readyz (auth-gated /api/*)
-  auth  config  db     # API-key auth, config, SQLite ledger
-  providergateway      # OpenAI-compatible provider client (seed of the LiteLLM-style gateway, P2)
-  toolcontract         # tool JSON-schema + error taxonomy (Skill Registry contract seed, P2/P3)
-  agentlayout  skillindex  toolindex   # registry foundations
-  embeddings           # failure-clustering / RAG seed (P3/P4.5)
-  approval  sqltime    # human-in-the-loop gate seed, helpers
-docs/                  # implementation-timeline, prd, adr, migration checklist
-openspec/              # spec-driven change sets (P0–P12)
+  discovery  irwriteback                 # LLM call-graph extraction → Workflow IR (P1)
+  transform  variantspec  config*        # source-transformation codemod + Variant Spec (P2)
+  executor  nodeexec  sandbox  runqueue  # sandboxed, traced Runtime (P2/P3)
+  providergateway  toolcontract  skillindex  toolindex  registry   # gateway + Skill Registry
+  telemetry  metricevent                 # OpenTelemetry substrate (P2.5)
+  patternclassifier                      # agentic-pattern labelling (P3.5)
+  evalgen  evalharness  evalrun  evalstats  scoring  scorecard  evalboard   # Eval Harness (P4)
+  attribution  attrengine  diagnosis  proposal  verification   # analysis & improvement (P4.5/P5.5)
+  arrangements  typedcontract  dynamictracing   # re-arrangement + typed I/O + dynamic tracing (P5)
+  optimizer                              # autonomous closed-loop optimizer (P6)
+  billing  metering  entitlement  account   # billing, metering & entitlements (P7)
+  admin*  adminaudit  adminrbac  adminops    # admin & operations console backend (P8)
+  linkage  linkingest  runlink  clilink  cli # CLI + opt-in run linking (P11)
+  forgedelivery  deliveryrecord  submit  reconcile   # CI-mediated forge delivery (P12)
+  studio  broker  approval  auth  db  launch  api    # studio, HITL gate, service core
+docs/                  # implementation-timeline, prd (P0–P19), adr, decisions, migration checklist
+openspec/              # spec-driven change sets (P0–P19)
+web/console            # the customer-facing Next.js dashboard + BFF (P9)
 ```
 
-The current `internal/` packages are the reusable foundation kept from the migration; the phase
-subsystems (Discovery, Config Layer, Runtime, Eval, …) are built on top of them per the plan.
+The four core subsystems (Discovery, Config Layer, Runtime, Eval Harness), the cross-cutting
+engines (metrics, analysis/improvement, pattern classifier, billing), and all three surfaces are
+implemented; `GOWORK=off go test ./...` runs green across the tree.
 
 ## Getting started
 
-Requires **[Go](https://go.dev/dl/) 1.22+**.
+Requires **[Go](https://go.dev/dl/) 1.24+**.
 
 ```bash
 # build and test everything
+# (prefix GOWORK=off if a parent go.work workspace is present)
 go build ./...
 go test ./...
 
@@ -192,6 +226,34 @@ go run ./cmd/p9hermes -repo /path/to/hermes-agent      # serves the platform API
 
 The console's own checks run with `npm test` (214 cases) and `npm run build`, which runs the token,
 string, markup, claim and bundle scans around `next build`.
+
+## Deploying (P19)
+
+The whole platform stands up as **one deployment unit** from **one digest-pinned image set**
+([`deploy/images.env`](deploy/images.env)), on either of two substrates that reference the *same*
+digests and the *same* environment contract:
+
+- **Docker Compose** — a single host; the open-core / evaluation path.
+- **Kubernetes (Kustomize)** — a cluster; the managed and enterprise path, with `dev` / `staging` /
+  `prod` / `airgapped` overlays and external-secret references (values never live in the repo).
+
+```bash
+cp deploy/images.env            deploy/.env.images     # the digest-pinned image set
+cp deploy/.env.platform.example deploy/.env.platform   # then fill from YOUR secret store
+docker compose --env-file deploy/.env.images --env-file deploy/.env.platform \
+  -f deploy/docker-compose.platform.yml up -d
+```
+
+> **One deployment = one tenant boundary.** Isolation between customers is deployment-level, not
+> software multi-tenancy — a hosted concern, not a knob inside a shared install.
+
+`make deploy-lint` fails the build if the Compose and Kubernetes topologies ever diverge or if a
+plaintext secret or unpinned image slips in. The full runbook — capacity ranges, the control-plane /
+data-plane split, and the single point of failure named beside its backup precondition — is
+[`deploy/README.md`](deploy/README.md). A **live end-to-end proof** of the pipeline run against the
+real `nousresearch/hermes-agent` repo — 40 discovered nodes, honest codemod refusals, gate-enforced
+eval, both consoles — is captured under `docs/release/p19-e2e-hermes/`, which lands with the
+E2E-proof PR.
 
 ## Contributing
 
