@@ -61,6 +61,29 @@ export const CAPABILITIES: ConsoleCapability[] = [
     unlockedBy: "Free",
   },
   {
+    // 🔴 §11b.5 — the studio is mapped `feature: null` on purpose, and the purpose is honesty.
+    //
+    // The platform (P10) enforces NO entitlement on the studio: `internal/api/p10.go` and
+    // `internal/api/p10matrix.go` gate on authentication alone, and the P10 spec records no plan
+    // boundary. Mapping it to `dashboard` or any other plan would make this table CLAIM a gate the
+    // platform will not honour — and the day a Free tenant is told "Studio needs Team" and then served
+    // the studio anyway is the day the screen and the gate disagree, which is the one failure this
+    // whole file exists to prevent (see the header). So the mapping tells the truth: exploration in the
+    // studio is ungated.
+    //
+    // The commercial line is not lost by this — it moves one step downstream and is already priced.
+    // Everything here is EXPLORATORY: a bound cell is "in force, unverified", never "proven best". The
+    // gated act is SHIPPING a verified change, which is the `open-pr` / `proposals` path below
+    // (Business, at assisted automation). If P10 ever introduces its own entitlement, this row maps to
+    // that feature — not before, because a gate that isn't enforced isn't a gate.
+    id: "studio",
+    label: "Explore prompts and models in the Studio",
+    description:
+      "Browse and diff prompt versions, publish a new immutable version, and try a model per node on the matrix. Every result is exploratory — a bound cell is in force, not proven; shipping a verified change is the gated open-PR path below.",
+    feature: null,
+    unlockedBy: "Free",
+  },
+  {
     id: "dashboard",
     label: "The console itself",
     description: "A browser surface over the platform, with a session instead of an API key.",
