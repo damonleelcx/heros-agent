@@ -57,6 +57,23 @@ first principle — *deliver "anyone who receives it can run it"* — is the thr
 |-------|-----|-----------------|--------------|
 | P19 — Deployment & Delivery *(whole-platform Docker + K8s; consoles; internal LLM access; air-gapped)* | [P19-deployment-delivery.md](P19-deployment-delivery.md) | `p19-deployment` | DevOps + System Designer |
 
+### Identity & Payments — P21–P22
+
+The commercial front door. **P21 — Stripe Payments** makes the P7 billing abstraction real: it implements the
+existing `billing.Provider` interface against Stripe (subscriptions, metered usage, invoices, credits/refunds),
+adds the customer payment-method collection P7 left abstract (Stripe Checkout / Payment Element — card data
+never touches the platform), and syncs subscription lifecycle to entitlements through **idempotent,
+signature-verified, persist-then-ack** webhooks. **P22 — SSO & Identity** supplies the single-sign-on mechanism
+[ADR-008](../adr/ADR-008-console-tenant-identity-seam.md) reserved — OIDC (Auth Code + PKCE) primary and SAML 2.0
+for the enterprise, plus the operator console's real SSO+MFA — **changing the `verify(assertion) → { tenantId }`
+seam and nothing above it** (ADR-008 Rule 3). P22 is the identity floor that both P21's self-serve checkout and
+the operator console (its own `admin.*` origin) stand on.
+
+| Phase | PRD | OpenSpec change | Lead role(s) |
+|-------|-----|-----------------|--------------|
+| P21 — Stripe Payments *(real Stripe behind the P7 Provider interface; checkout; idempotent webhooks; entitlement sync)* | [P21-stripe-payments.md](P21-stripe-payments.md) | `p21-payments` | Sales Operations + Backend |
+| P22 — SSO & Identity *(customer OIDC/SAML behind the ADR-008 seam; operator SSO+MFA made real)* | [P22-sso-identity.md](P22-sso-identity.md) | `p22-sso` | System Designer + Backend |
+
 ## PRD template
 
 Every phase PRD follows this structure:
