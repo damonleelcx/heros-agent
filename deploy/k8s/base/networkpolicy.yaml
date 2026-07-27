@@ -1,0 +1,206 @@
+# NetworkPolicy — the control/data-plane separation as a RUNTIME boundary, not a diagram (Decision 3),
+# and egress as a constructed ALLOWLIST (Decision 4).
+#
+# The compile-time no-cross-import discipline (control-plane code does not import data-plane code) gets
+# its runtime twin here: default-deny, then only the seam flows are permitted. The test — "pull the
+# control plane, does the data plane still serve?" — has a YES answer BY CONSTRUCTION, because the
+# stores' availability does not depend on the consoles, and the consoles reaching the API is the only
+# control→data flow.
+#
+# 🔴 EGRESS IS A CONSTRUCTED ALLOWLIST, NEVER A FILTERED DENYLIST. Only agentd (the gateway's client)
+# may reach an external provider; every other pod has NO external-egress rule, so adding a new client
+# fails TOWARD OMISSION (it simply cannot egress) rather than silently leaking. A denylist fails the
+# other way — silently open — when a field is added.
+
+# 1) DEFAULT-DENY everything (ingress + egress) for every pod in the namespace. Everything below is an
+#    explicit re-permit. A pod with no matching allow rule can talk to nothing — verifiable by a
+#    blocked probe, not assumed.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+# 2) DNS for every pod (egress UDP/TCP 53 to kube-dns). Without this, default-deny egress would break
+#    name resolution for even the permitted flows. DNS is not "the internet" — it is a cluster service.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-egress
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels: { k8s-app: kube-dns }
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+---
+# 3) agentd (control+data API): ingress ONLY from the two consoles (the seam: BFF → API); egress to the
+#    stores (data plane) and to external providers (the gateway's model-call client). This is the ONLY
+#    workload with an external-egress rule.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: agentd
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: agentd }
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector: { matchLabels: { app.kubernetes.io/name: console } }
+        - podSelector: { matchLabels: { app.kubernetes.io/name: admin-console } }
+      ports:
+        - { protocol: TCP, port: 4321 }
+  egress:
+    # To the data-plane stores — the permitted control/data seam.
+    - to:
+        - podSelector: { matchLabels: { app.kubernetes.io/name: postgres } }
+      ports: [{ protocol: TCP, port: 5432 }]
+    - to:
+        - podSelector: { matchLabels: { app.kubernetes.io/name: objectstore } }
+      ports: [{ protocol: TCP, port: 9000 }]
+    - to:
+        - podSelector: { matchLabels: { app.kubernetes.io/name: queue } }
+      ports: [{ protocol: TCP, port: 4222 }, { protocol: TCP, port: 8222 }]
+    - to:
+        - podSelector: { matchLabels: { app.kubernetes.io/name: vectorstore } }
+      ports: [{ protocol: TCP, port: 6333 }, { protocol: TCP, port: 6334 }]
+    - to:
+        - podSelector: { matchLabels: { app.kubernetes.io/name: graphstore } }
+      ports: [{ protocol: TCP, port: 7474 }, { protocol: TCP, port: 7687 }]
+    # To EXTERNAL provider endpoints — HTTPS only, and to public IPs only (cluster/private ranges
+    # excluded so this rule cannot be a backdoor to another in-cluster service). This is the ONE place
+    # the platform's model-call egress lives. The airgapped overlay REPLACES this with the on-prem
+    # gateway's address and removes public egress entirely.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports: [{ protocol: TCP, port: 443 }]
+---
+# 4) console (customer BFF): ingress from the ingress controller / anywhere on 4320; egress ONLY to
+#    agentd. No external egress — the browser talks to the BFF, the BFF talks to the API, and that is all.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: console
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: console }
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - ports: [{ protocol: TCP, port: 4320 }]
+  egress:
+    - to:
+        - podSelector: { matchLabels: { app.kubernetes.io/name: agentd } }
+      ports: [{ protocol: TCP, port: 4321 }]
+---
+# 5) admin-console (operator BFF): ingress on 4310; egress ONLY to agentd. A DIFFERENT origin than the
+#    customer console, and it has no path to any customer-console pod — the isolation is structural.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: admin-console
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: admin-console }
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - ports: [{ protocol: TCP, port: 4310 }]
+  egress:
+    - to:
+        - podSelector: { matchLabels: { app.kubernetes.io/name: agentd } }
+      ports: [{ protocol: TCP, port: 4321 }]
+---
+# 6) Stores: ingress ONLY from agentd (and, for postgres, from the backup job). No egress rule beyond
+#    the shared DNS — a store has no business reaching out. The data plane thus keeps serving
+#    established work with the control plane (consoles) gone: nothing here depends on a console.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: postgres }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: { matchLabels: { app.kubernetes.io/name: agentd } }
+        - podSelector: { matchLabels: { app.kubernetes.io/name: postgres-backup } }
+      ports: [{ protocol: TCP, port: 5432 }]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: objectstore
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: objectstore }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: { matchLabels: { app.kubernetes.io/name: agentd } }
+      ports: [{ protocol: TCP, port: 9000 }, { protocol: TCP, port: 9001 }]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: queue
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: queue }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: { matchLabels: { app.kubernetes.io/name: agentd } }
+      ports: [{ protocol: TCP, port: 4222 }, { protocol: TCP, port: 8222 }]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: vectorstore
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: vectorstore }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: { matchLabels: { app.kubernetes.io/name: agentd } }
+      ports: [{ protocol: TCP, port: 6333 }, { protocol: TCP, port: 6334 }]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: graphstore
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: graphstore }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: { matchLabels: { app.kubernetes.io/name: agentd } }
+      ports: [{ protocol: TCP, port: 7474 }, { protocol: TCP, port: 7687 }]
+---
+# 7) postgres-backup: egress ONLY to postgres. It is a data-plane job with no external reach.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres-backup
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: postgres-backup }
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector: { matchLabels: { app.kubernetes.io/name: postgres } }
+      ports: [{ protocol: TCP, port: 5432 }]

@@ -1,0 +1,47 @@
+# prod overlay — the production cluster. Differences from base: 3 replicas of the stateless plane (so a
+# node loss plus a rolling update still leaves a quorum), production-sized resources, and the cloud
+# SecretStore reached by an ambient identity. The stateful stores stay single-instance (Decision 6); the
+# Patroni-HA evolution is a future overlay, the door left open, not walked through here.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+  - secretstore.yaml
+
+patches:
+  - target: { kind: Deployment, name: agentd }
+    patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata: { name: agentd }
+      spec:
+        replicas: 3
+        template:
+          spec:
+            containers:
+              - name: agentd
+                resources:
+                  requests: { cpu: "500m", memory: "512Mi" }
+                  limits: { cpu: "2", memory: "1Gi" }
+  - target: { kind: Deployment, name: console }
+    patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata: { name: console }
+      spec:
+        replicas: 3
+  - target: { kind: Deployment, name: admin-console }
+    patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata: { name: admin-console }
+      spec:
+        replicas: 3
+  # A node drain must leave a quorum, not just one pod: raise the PDB floor with the replica count.
+  - target: { kind: PodDisruptionBudget, name: agentd }
+    patch: |
+      apiVersion: policy/v1
+      kind: PodDisruptionBudget
+      metadata: { name: agentd }
+      spec: { minAvailable: 2 }

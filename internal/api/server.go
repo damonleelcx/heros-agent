@@ -14,6 +14,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/heros-foreal/agentd/internal/auth"
@@ -73,15 +75,18 @@ type Server struct {
 	// answer than the gateway did.
 	secrets providergateway.Secrets
 
-	// console is the P9 customer console component, aggregated into /readyz when wired.
+	// probes are the dependent components aggregated into /readyz (P9 FR25, P19 topology FR).
 	//
 	// The moment a second process sits in the request path, readiness has to cover it or it is
 	// measuring the wrong thing: a Go service that reports "ready" while the surface users actually
 	// reach is dead is a LYING HEALTH SIGNAL, and 🔴 health-signal-surface is explicit that a UI
-	// dashboard is never itself the health judgement. Nil-able like every other mount point, because a
-	// deployment that ships no console has no console component — and saying so by omission beats
-	// inventing a status for one that does not exist.
-	console ComponentProbe
+	// dashboard is never itself the health judgement. A slice, because P19 deploys more than one
+	// dependent component (customer console, operator console, object store, queue, vector/graph
+	// stores, the air-gapped secret gateway) and the deployment must aggregate EVERY component it
+	// ships — a partial aggregation is the lying signal again, one degraded store below the fold.
+	// Empty when a deployment ships no dependent components — saying so by omission beats inventing a
+	// status for one that does not exist.
+	probes []ComponentProbe
 
 	// p10 is the Postgres-backed prompt-authoring write surface (publish + timeline/diff/impact read
 	// models), mounted by MountP10 when available. The platform API's first WRITE surface.
@@ -114,8 +119,19 @@ type ComponentProbe interface {
 	Probe(ctx context.Context) error
 }
 
-// SetConsoleProbe wires the customer console into the readiness signal (P9 FR25).
-func (s *Server) SetConsoleProbe(p ComponentProbe) { s.console = p }
+// SetConsoleProbe wires the customer console into the readiness signal (P9 FR25). It is a thin alias
+// for AddComponentProbe kept because P9's launch path and tests already call it by this name.
+func (s *Server) SetConsoleProbe(p ComponentProbe) { s.AddComponentProbe(p) }
+
+// AddComponentProbe registers one dependent component in the readiness aggregation (P19). Order of
+// registration is the order components are reported; a nil probe is ignored so a launch path can wire
+// a component conditionally without a guard at every call site.
+func (s *Server) AddComponentProbe(p ComponentProbe) {
+	if p == nil {
+		return
+	}
+	s.probes = append(s.probes, p)
+}
 
 // HTTPComponentProbe probes a component's health endpoint over HTTP.
 //
@@ -210,13 +226,26 @@ func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 // It is absent rather than "unknown" when unset — a deployment that never wired a source has no
 // secrets source, and saying so by omission beats inventing a status for it.
 func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
+	body := map[string]any{"status": "ready"}
+	components := map[string]any{}
+	degraded := make([]string, 0, 1)
+
+	// The primary datastore is the first aggregated component, NAMED, not a bare "db_unavailable"
+	// status on the whole document. In the platform deployment this is Postgres (eval + lineage); the
+	// name comes from HEROS_DATASTORE_NAME so /readyz names the store the operator actually runs
+	// ("postgres") rather than a generic word, and defaults to "datastore" for the SQLite single-binary.
 	if s.DB != nil {
+		name := strings.TrimSpace(os.Getenv("HEROS_DATASTORE_NAME"))
+		if name == "" {
+			name = "datastore"
+		}
 		if err := s.DB.PingContext(r.Context()); err != nil {
-			writeJSON(w, http.StatusServiceUnavailable, map[string]any{"status": "db_unavailable"})
-			return
+			components[name] = map[string]any{"status": "degraded", "detail": "ping failed: " + err.Error()}
+			degraded = append(degraded, name)
+		} else {
+			components[name] = map[string]any{"status": "ready"}
 		}
 	}
-	body := map[string]any{"status": "ready"}
 	if s.secrets != nil {
 		body["secrets_source"] = s.secrets.Describe()
 	}
@@ -226,21 +255,21 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 		body["billing_rollout"] = s.billing.Describe()
 	}
 
-	// Component aggregation (P9 FR25). The service's OWN health is not the deployment's health once a
-	// second process sits in the request path, so a degraded component makes the whole signal
-	// not-ready — and it is NAMED, because "not ready" without a subject sends an operator to read
-	// three dashboards to learn what this response already knew.
+	// Component aggregation (P9 FR25, P19 topology). The service's OWN health is not the deployment's
+	// health once a second process sits in the request path, so a degraded component makes the whole
+	// signal not-ready — and it is NAMED, because "not ready" without a subject sends an operator to
+	// read three dashboards to learn what this response already knew. Every wired component is probed;
+	// a partial aggregation is the same lying signal, just one store below the fold.
 	//
-	// The components map is present only when a component is wired. An empty map would assert that the
-	// deployment has components and they are all fine, which is a different claim from having none.
-	components := map[string]any{}
-	degraded := make([]string, 0, 1)
-	if s.console != nil {
-		if err := s.console.Probe(r.Context()); err != nil {
-			components[s.console.Name()] = map[string]any{"status": "degraded", "detail": err.Error()}
-			degraded = append(degraded, s.console.Name())
+	// Probes read REACHABILITY, not traffic freshness, and none of them depends on the traffic /readyz
+	// gates — an HTTP GET against a health endpoint, a datastore ping — so readiness can never deadlock
+	// on the very traffic it is meant to admit (task 3.3).
+	for _, p := range s.probes {
+		if err := p.Probe(r.Context()); err != nil {
+			components[p.Name()] = map[string]any{"status": "degraded", "detail": err.Error()}
+			degraded = append(degraded, p.Name())
 		} else {
-			components[s.console.Name()] = map[string]any{"status": "ready"}
+			components[p.Name()] = map[string]any{"status": "ready"}
 		}
 	}
 	if len(components) > 0 {

@@ -25,6 +25,38 @@ and pairs with an OpenSpec change of the same name under [`../../openspec/change
 | P11 — CLI & CI Integration *(the free surface + the metering path)* | [P11-cli-ci-integration.md](P11-cli-ci-integration.md) | `p11-cli-ci-integration` | Backend + DevOps |
 | P12 — Forge Delivery *(the pull request + the gainshare input)* | [P12-forge-delivery.md](P12-forge-delivery.md) | `p12-forge-delivery` | Backend + DevOps |
 
+### Optimization Axis Expansion (OAX) — P13–P18
+
+A follow-on program that widens the set of **optimization axes** the platform can evaluate and improve.
+Every axis is a `Dimension` on the Variant Spec that resolves into `config_hash` and is scored by the
+**axis-agnostic** eval harness (so none of these phases changes eval/scoring). P13–P16 deepen or make
+*applicable* axes that are already modeled; P17–P18 add two **greenfield** axes. Each phase specifies its
+honest `EXISTS / PARTIAL / ABSENT` status and, where a call-site codemod is not yet safe, a first-class
+**interim refusal** (the same posture skills/context ship with today).
+
+| Phase | PRD | OpenSpec change | Lead role(s) |
+|-------|-----|-----------------|--------------|
+| P13 — Prompt & Model Optimization *(deepen operators; downgrade guardrail)* | [P13-prompt-model-optimization.md](P13-prompt-model-optimization.md) | `p13-prompt-model-optimization` | AI Engineer + System Designer |
+| P14 — Skills & Tools Optimization *(unblock skill binding; split tools≠skills)* | [P14-skills-tools-optimization.md](P14-skills-tools-optimization.md) | `p14-skills-tools-optimization` | Backend + System Designer |
+| P15 — Workflow / Node-Wiring Optimization *(merge/reorder under typed-contract gate)* | [P15-workflow-wiring-optimization.md](P15-workflow-wiring-optimization.md) | `p15-workflow-wiring-optimization` | System Designer + Backend |
+| P16 — Context Strategy Optimization *(unblock context codemod; retrieval tuning)* | [P16-context-strategy-optimization.md](P16-context-strategy-optimization.md) | `p16-context-strategy-optimization` | AI Engineer + Backend |
+| P17 — Memory Strategy Optimization *(greenfield axis: modeled + refused)* | [P17-memory-strategy-optimization.md](P17-memory-strategy-optimization.md) | `p17-memory-strategy-optimization` | System Designer + AI Engineer |
+| P18 — Harness Strategy Optimization *(greenfield axis: agent-loop scaffolds)* | [P18-harness-strategy-optimization.md](P18-harness-strategy-optimization.md) | `p18-harness-strategy-optimization` | System Designer + AI Engineer |
+
+### Delivery & Operations — P19 *(cross-cutting)*
+
+A cross-cutting phase that makes the specified system **deployable**. It adds no product feature and no
+statistic; it is downstream of P0–P18 and **composes** them into one deployment unit expressed on two
+substrates — **Docker Compose** (single-host / open-core) and **Kubernetes (Kustomize base + overlays)** — plus
+the operator console's missing deploy unit (on its own origin), the internal-LLM-access posture (secret store,
+egress-confined, never in a customer path), and the air-gapped / private-deploy delivery (self-contained
+package, declarative-idempotent apply, rollback by re-apply). Written through all eight role lenses; the DevOps
+first principle — *deliver "anyone who receives it can run it"* — is the through-line.
+
+| Phase | PRD | OpenSpec change | Lead role(s) |
+|-------|-----|-----------------|--------------|
+| P19 — Deployment & Delivery *(whole-platform Docker + K8s; consoles; internal LLM access; air-gapped)* | [P19-deployment-delivery.md](P19-deployment-delivery.md) | `p19-deployment` | DevOps + System Designer |
+
 ## PRD template
 
 Every phase PRD follows this structure:

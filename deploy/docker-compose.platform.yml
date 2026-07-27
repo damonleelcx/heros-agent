@@ -1,0 +1,182 @@
+# The whole-platform deployment unit — single host / open-core (P19 deployment-topology).
+#
+# ONE unit, MANY containers, ONE readiness truth. This composes the P0–P18 components — the Go service
+# (agentd), Postgres (eval + lineage), the object store, the queue, the vector and graph stores, and
+# the customer console — under one aggregated /readyz and one secret contract. The operator console is
+# a SEPARATE unit on its own origin (docker-compose.admin-console.yml, P19 Decision 5); it is not
+# folded in here, by construction.
+#
+# Usage (the image set and the secret env are two separate --env-file inputs, on purpose: one is the
+# digest-pinned artifact set, the other is deployment secrets):
+#
+#   cp deploy/images.env deploy/.env.images
+#   cp deploy/.env.platform.example deploy/.env.platform     # then fill from your secret store
+#   docker compose --env-file deploy/.env.images --env-file deploy/.env.platform \
+#     -f deploy/docker-compose.platform.yml up -d
+#
+# 🔴 SECRETS COME FROM THE ENVIRONMENT OR A SECRET STORE. Never from this file, never from the
+# repository, never from a log line, never from a trace attribute, never from a client bundle. The
+# `${VAR:?...}` form REFUSES TO START when the variable is unset, with the message attached — a default
+# would let the stack come up misconfigured and fail later, somewhere less obvious than `up`.
+
+services:
+  # ── Data plane + control plane: the Go service, the aggregator of /readyz ─────────────────────────
+  agentd:
+    image: ${AGENTD_IMAGE:?set AGENTD_IMAGE from deploy/images.env}
+    environment:
+      HEROS_LISTEN_ADDR: 0.0.0.0:4321
+      HEROS_DATA_DIR: /var/lib/heros
+      HEROS_DATASTORE_NAME: postgres
+      # The secret seam for the platform's OWN model calls (platform-llm-access). No provider key is in
+      # this file; the seam resolves them at call time from the source named here.
+      HEROS_SECRETS_SOURCE: ${HEROS_SECRETS_SOURCE:-env}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # Every component the deployment ships, aggregated into /readyz by health URL. A component with no
+      # URL is honestly absent; a component WITH a URL that is unreachable turns /readyz not-ready and
+      # NAMES itself. Postgres is aggregated by the agentd datastore ping (HEROS_DATASTORE_NAME).
+      CONSOLE_HEALTH_URL: http://console:4320/api/health
+      OBJECT_STORE_HEALTH_URL: http://objectstore:9000/minio/health/ready
+      QUEUE_HEALTH_URL: http://queue:8222/healthz
+      VECTOR_STORE_HEALTH_URL: http://vectorstore:6333/readyz
+      GRAPH_STORE_HEALTH_URL: http://graphstore:7474/
+    ports:
+      - "${AGENTD_PORT:-4321}:4321"
+    depends_on:
+      postgres: { condition: service_healthy }
+      objectstore: { condition: service_healthy }
+      queue: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "/app/agentd", "-healthcheck"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp]
+    volumes:
+      - agentd-data:/var/lib/heros
+    security_opt: [no-new-privileges:true]
+
+  # ── Stateful store: Postgres (single-writer SPOF — see deploy/README.md; backup ships below) ──────
+  postgres:
+    image: ${POSTGRES_IMAGE:?set POSTGRES_IMAGE from deploy/images.env}
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-heros}
+      POSTGRES_USER: ${POSTGRES_USER:-heros}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-heros} -d $${POSTGRES_DB:-heros}"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  # ── Postgres backup: ships WITH the deploy (Decision 6). Accepting the SPOF is void without this. ──
+  # The dump FAILS LOUD on empty — every failure path deletes the file so a zero-byte backup cannot
+  # form a poisoned rollback chain. It is a long-running container that sleeps between cron-shaped runs.
+  postgres-backup:
+    image: ${POSTGRES_IMAGE:?set POSTGRES_IMAGE from deploy/images.env}
+    entrypoint: ["/bin/sh", "/opt/heros/pg-backup.sh"]
+    environment:
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER:-heros}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?}
+      PGDATABASE: ${POSTGRES_DB:-heros}
+      BACKUP_CRON: ${POSTGRES_BACKUP_CRON:-17 3 * * *}
+      BACKUP_RETENTION_DAYS: ${POSTGRES_BACKUP_RETENTION_DAYS:-14}
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: unless-stopped
+    volumes:
+      - ./scripts/pg-backup.sh:/opt/heros/pg-backup.sh:ro
+      - postgres-backups:/var/backups/heros
+    security_opt: [no-new-privileges:true]
+
+  # ── Object store: MinIO (content store for artifacts/diffs) ───────────────────────────────────────
+  objectstore:
+    image: ${OBJECT_STORE_IMAGE:?set OBJECT_STORE_IMAGE from deploy/images.env}
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${OBJECT_STORE_ROOT_USER:-heros}
+      MINIO_ROOT_PASSWORD: ${OBJECT_STORE_ROOT_PASSWORD:?}
+    healthcheck:
+      test: ["CMD-SHELL", "mc ready local || curl -fsS http://127.0.0.1:9000/minio/health/ready"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+    volumes:
+      - objectstore-data:/data
+
+  # ── Queue: NATS/JetStream (the P2.5 event substrate transport) ────────────────────────────────────
+  queue:
+    image: ${QUEUE_IMAGE:?set QUEUE_IMAGE from deploy/images.env}
+    command: ["-js", "-m", "8222"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8222/healthz || exit 1"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+    volumes:
+      - queue-data:/data
+
+  # ── Vector store: Qdrant ──────────────────────────────────────────────────────────────────────────
+  vectorstore:
+    image: ${VECTOR_STORE_IMAGE:?set VECTOR_STORE_IMAGE from deploy/images.env}
+    restart: unless-stopped
+    volumes:
+      - vectorstore-data:/qdrant/storage
+
+  # ── Graph store: Neo4j ────────────────────────────────────────────────────────────────────────────
+  graphstore:
+    image: ${GRAPH_STORE_IMAGE:?set GRAPH_STORE_IMAGE from deploy/images.env}
+    environment:
+      NEO4J_AUTH: ${NEO4J_AUTH:?}
+    restart: unless-stopped
+    volumes:
+      - graphstore-data:/data
+
+  # ── Customer console (P9): its own container, one process, own credential ─────────────────────────
+  console:
+    image: ${CONSOLE_IMAGE:?set CONSOLE_IMAGE from deploy/images.env}
+    environment:
+      PLATFORM_API_BASE: http://agentd:4321
+      CONSOLE_PLATFORM_CREDENTIAL: ${CONSOLE_PLATFORM_CREDENTIAL:?set CONSOLE_PLATFORM_CREDENTIAL from your secret store}
+      CONSOLE_TENANT_IDENTITY: ${CONSOLE_TENANT_IDENTITY:-configured}
+      CONSOLE_TENANT_ASSERTIONS: ${CONSOLE_TENANT_ASSERTIONS:?set CONSOLE_TENANT_ASSERTIONS from your secret store}
+      CONSOLE_SESSION_TTL_SECONDS: ${CONSOLE_SESSION_TTL_SECONDS:-28800}
+      CONSOLE_UPSTREAM_TIMEOUT_MS: ${CONSOLE_UPSTREAM_TIMEOUT_MS:-10000}
+      NODE_ENV: production
+    ports:
+      - "${CONSOLE_PORT:-4320}:4320"
+    depends_on:
+      agentd: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4320/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+
+# Each stateful store is a NAMED volume (deployment-topology: "each stateful store is a stateful
+# component with a named volume"). A named volume survives `down` and is what backup/restore acts on.
+volumes:
+  agentd-data:
+  postgres-data:
+  postgres-backups:
+  objectstore-data:
+  queue-data:
+  vectorstore-data:
+  graphstore-data:

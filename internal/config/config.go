@@ -142,7 +142,30 @@ func Load(path string) (Config, error) {
 	}
 	applyToolRegistrySyncEnv(&c.ToolRegistrySync)
 	applySecretEnv(&c)
+	applyDeployEnv(&c)
 	return c, nil
+}
+
+// applyDeployEnv lets the deployment substrate set the listen address and data directory from the
+// environment (P19). A container cannot bind 127.0.0.1 and be reachable from a sibling container, and
+// baking listen_addr into a committed config.json would make "which interface do I bind" a code fact
+// rather than a deployment fact. Non-empty wins over the JSON file, matching applySecretEnv's posture:
+// the manifest is the single source for deployment-shaped values, and there is no default that would
+// let a mis-set address come up bound to the wrong interface silently — an unset var keeps the
+// in-process default (127.0.0.1:8787), which is the safe local one.
+//
+//	HEROS_LISTEN_ADDR  -> ListenAddr   (e.g. 0.0.0.0:4321 in a container)
+//	HEROS_DATA_DIR     -> DataDir      (e.g. a mounted named volume)
+func applyDeployEnv(c *Config) {
+	if c == nil {
+		return
+	}
+	if v := strings.TrimSpace(os.Getenv("HEROS_LISTEN_ADDR")); v != "" {
+		c.ListenAddr = v
+	}
+	if v := strings.TrimSpace(os.Getenv("HEROS_DATA_DIR")); v != "" {
+		c.DataDir = v
+	}
 }
 
 // applySecretEnv sources secrets from the environment (non-empty wins over the JSON file). This is the

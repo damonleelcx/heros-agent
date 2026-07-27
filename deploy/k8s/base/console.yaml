@@ -1,0 +1,85 @@
+# Customer console (P9) — stateless BFF, replicas 2 + PDB. Its own origin (Service `console`), distinct
+# from the operator console's. The platform credential is server-side only; the browser gets an
+# HttpOnly session cookie and never the key.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: console
+  labels:
+    app.kubernetes.io/name: console
+    heros.dev/plane: control
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: console
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: console
+        heros.dev/plane: control
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: console
+          image: ghcr.io/heros-foreal/heros-console
+          ports:
+            - { name: http, containerPort: 4320 }
+          env:
+            - { name: PLATFORM_API_BASE, value: "http://agentd:4321" }
+            - { name: CONSOLE_TENANT_IDENTITY, value: "configured" }
+            - { name: NODE_ENV, value: "production" }
+            # The BFF's OWN credential + the assertion->tenant map, from the operator's external store.
+            - name: CONSOLE_PLATFORM_CREDENTIAL
+              valueFrom: { secretKeyRef: { name: heros-console, key: platform-credential } }
+            - name: CONSOLE_TENANT_ASSERTIONS
+              valueFrom: { secretKeyRef: { name: heros-console, key: tenant-assertions } }
+          # Probes read the console's OWN health endpoint (never a rendered page).
+          livenessProbe:
+            httpGet: { path: /api/health, port: http }
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /api/health, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests: { cpu: "100m", memory: "192Mi" }
+            limits: { cpu: "500m", memory: "384Mi" }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - { name: tmp, emptyDir: {} }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: console
+  labels: { app.kubernetes.io/name: console }
+spec:
+  selector: { app.kubernetes.io/name: console }
+  ports:
+    - { name: http, port: 4320, targetPort: http }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: console
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: console

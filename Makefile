@@ -20,6 +20,7 @@ PARITY_DIR ?= .parity
 .DEFAULT_GOAL := ci
 
 .PHONY: ci go build vet fmt test schema lint db-proof pg-proof verifier-proof tidy-check clean help p4-board-demo \
+        deploy-lint \
         console-types console-types-check console-test \
         build-discover discovery-ci discovery-throughput \
         discovery-parity-snapshot discovery-parity-verify \
@@ -63,6 +64,14 @@ console-types:
 # like legitimately absent data.
 console-types-check:
 	$(GO) run ./cmd/consoletypes -check
+
+## deploy-lint: P19 deploy gates — digest-pinned images, image-set parity across substrates, no
+## committed plaintext Secret. Each fails LOUD and names the offender; run before every deploy PR.
+deploy-lint:
+	bash scripts/deploy/check-digest-pins.sh
+	bash scripts/deploy/check-image-parity.sh
+	bash scripts/deploy/check-no-plaintext-secrets.sh
+	@echo "== make deploy-lint: PASS =="
 
 ## console-test: the customer console's own suite (needs npm; see web/console/README.md)
 console-test:
