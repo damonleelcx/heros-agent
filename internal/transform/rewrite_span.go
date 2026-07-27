@@ -65,6 +65,9 @@ var spanRewriters = map[variantspec.Dimension]spanRewriter{
 	variantspec.DimContext: func(s discovery.SpanCallSite, _ []byte, o variantspec.ResolvedOverride) ([]edit, error) {
 		return nil, refuseContext(s.NodeID, o)
 	},
+	// P14 tool selection. It refuses here too, and for a reason of the same kind as the skills refusal
+	// but not identical to it, so it gets its own sentence rather than sharing one (see spanRewriteTools).
+	variantspec.DimTools: spanRewriteTools,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────────
