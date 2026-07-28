@@ -346,3 +346,35 @@ func (b bigSource) IR(id string) (*discovery.IR, bool) {
 	}
 	return b.ir, true
 }
+
+// P15 task 4.3 — a genuine REORDER commit is refused at transform, observably, with no diff.
+//
+// This is the user-visible face of the interim refusal. Before P15 this path returned "committed" with
+// a diff that contained only the inserted adapters (or nothing at all) while the new spec's Order
+// claimed a rearranged graph — a change the source never received, whose config_hash a later eval
+// would nonetheless score. The honest outcome is a rejected transform that says which axis it refused.
+func TestP5Commit_ReorderRefusedAtTransform(t *testing.T) {
+	s := newP5Server(t)
+	// A, B and C are all data-independent of each other in this ordering (no edges submitted), so the
+	// coherence gate ADMITS it — which is the point: the refusal below is the transform's, not the
+	// gate's, and it is the only thing standing between a reorder and a false measurement.
+	req := httptest.NewRequest(http.MethodPost, "/api/p5/workflows/wf/commit",
+		strings.NewReader(`{"parent_variant_id":"wf:root","order":["C","B","A"],"edges":[]}`))
+	rec := httptest.NewRecorder()
+	s.Mux.ServeHTTP(rec, req)
+
+	var c commitResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &c); err != nil {
+		t.Fatalf("decode: %v (%s)", err, rec.Body.String())
+	}
+	if c.Status != "rejected_transform" {
+		t.Fatalf("a reorder has no source materialization and must be refused, got %q (%s)",
+			c.Status, rec.Body.String())
+	}
+	if !strings.Contains(c.BuildError, "wiring") {
+		t.Fatalf("the refusal must name the wiring axis, got %q", c.BuildError)
+	}
+	if c.Diff != "" || c.DiffHash != "" {
+		t.Fatalf("a refused reorder must produce no diff, got %q", c.Diff)
+	}
+}

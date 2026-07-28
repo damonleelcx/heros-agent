@@ -435,6 +435,189 @@ func refuseContext(nodeID string, o variantspec.ResolvedOverride) error {
 			"not an argument swap", o.Context.Spec.Policy)
 }
 
+// ── P15: the interim refusal for un-materializable wiring ────────────────────────────────────────
+//
+// The wiring axis (`Order`/`Edges`) is fully MODELED and fully HASHED: a reorder, a merge, or a prune
+// produces a Variant Spec that resolves to a different `config_hash`. What does not exist is a
+// rewriter that turns that graph into source — moving a call, fusing two calls, deleting a call are
+// AST surgery on the user's control flow, not the value replacement this engine performs.
+//
+// 🔴 So the honest outcome is a REFUSAL, and the alternative is the worst failure this system has.
+// Silently no-op'ing the wiring would let the engine "succeed": the diff would rewrite the node
+// CONTENTS, the build would pass, the eval would run — and the score would be attributed to a
+// `config_hash` claiming a graph the source never had. That is a FALSE MEASUREMENT, not a missing
+// feature, and it would poison the verified-delta ledger that every later decision reads. A platform
+// whose principle is "verification decides" cannot afford one measurement that means nothing.
+//
+// This is the same refuse-until-safe shape as refuseSkills (P14) and refuseContext (P3-owned):
+// modeled, resolvable, hashable, materialization deferred and STATED. When a wiring rewriter lands it
+// replaces this function and nothing upstream changes.
+//
+// An inserted ADAPTER is not refused: it IS materializable — EmitAdapter generates its source into the
+// same diff (decisions.md D-2) — so the comparison below collapses adapter hops before deciding, and a
+// coherent-but-adapted spec passes.
+
+// wiringRefusalDim is the axis name carried on the refusal. It is a plain string and deliberately NOT
+// a variantspec.Dimension: the wiring axis is Order/Edges, and minting a Dimension const for it would
+// be the second representation task 1.4 forbids. The error still names the axis, which is what a
+// reader needs.
+const wiringRefusalDim = "wiring"
+
+// refuseWiring is the typed refusal: an ErrUnsafeRewrite naming the wiring axis and the specific
+// difference, so the reader learns WHICH rewire was asked for, not just that something was refused.
+func refuseWiring(nodeID, difference string) error {
+	return unsafeRewrite(nodeID, wiringRefusalDim,
+		"this spec asks for a wiring change (%s), but no call-site rewriter materializes a node "+
+			"rearrangement as source — moving, fusing, or deleting a call is control-flow surgery, not the "+
+			"value replacement this engine performs. It is REFUSED rather than applied as a no-op: a no-op "+
+			"would let this spec's config_hash, which already records the new graph, be scored against "+
+			"source that was never rewired — a false measurement, not a missing feature", difference)
+}
+
+// checkWiring compares the wiring a spec ASKS for against the wiring the source HAS, and returns the
+// refusal when they differ. spec may be nil (the plain Generate path, where the resolved config is the
+// only statement of the desired wiring).
+//
+// It concludes nothing when no discovered wiring was recorded: a Resolved assembled by hand has no IR
+// behind it, and refusing on absent evidence would block every caller that never had a graph to
+// compare against. The production path (variantspec.Resolve) always records it.
+// checkWiring is now MATERIALIZE-OR-REFUSE (P15 15c task 15.1). It returns:
+//
+//	(nil, nil)    the spec's wiring is the source's wiring — nothing to do;
+//	(plan, nil)   the difference is the ONE shape this engine materializes (an adjacent transposition);
+//	(nil, err)    every other difference — the 15b refusal, unchanged, naming the axis.
+//
+// The narrowing is deliberate and literal. `planWiringSwap` admits exactly one adjacent pair exchanged
+// with the edge set untouched; a merge, a prune, an edge change, a non-adjacent move, or two
+// transpositions at once all fall through to the same refusal they got before 15c. Widening this test
+// is how a rewriter acquires reach it cannot justify, so the test is written to be read, not extended.
+func checkWiring(r *variantspec.Resolved, spec *variantspec.VariantSpec) (*swapPlan, error) {
+	if r == nil || !r.DiscoveredWiring.Recorded() {
+		return nil, nil
+	}
+	order, edges := desiredWiring(r, spec)
+	if len(order) == 0 {
+		return nil, nil // nothing was asked for
+	}
+	diff := wiringDifference(r.DiscoveredWiring, order, edges)
+	if diff == "" {
+		return nil, nil
+	}
+	if plan, ok := planWiringSwap(r.DiscoveredWiring, order, edges); ok {
+		return plan, nil
+	}
+	return nil, refuseWiring(firstDifferingNode(r.DiscoveredWiring.Order, order), diff)
+}
+
+// desiredWiring is the wiring the spec asks for, with inserted-adapter hops collapsed back to the edge
+// they bridge — an adapter is generated source in the same diff, so it is not an un-materializable
+// rewire and must not read as one.
+func desiredWiring(r *variantspec.Resolved, spec *variantspec.VariantSpec) ([]string, []variantspec.ResolvedEdge) {
+	var order []string
+	var edges []variantspec.ResolvedEdge
+	if spec != nil && len(spec.Order) > 0 {
+		order = append(order, spec.Order...)
+		for _, e := range spec.Edges {
+			edges = append(edges, variantspec.ResolvedEdge{FromNodeID: e.FromNodeID, ToNodeID: e.ToNodeID, Kind: e.Kind})
+		}
+	} else {
+		for _, n := range r.Config.Nodes {
+			order = append(order, n.NodeID)
+		}
+		edges = append(edges, r.Config.Edges...)
+	}
+
+	adapters := map[string]variantspec.InsertedAdapter{}
+	if spec != nil {
+		for _, a := range spec.InsertedAdapters {
+			adapters[a.AdapterNodeID] = a
+		}
+	}
+	if len(adapters) == 0 {
+		return order, edges
+	}
+
+	kept := order[:0:0]
+	for _, id := range order {
+		if _, isAdapter := adapters[id]; !isAdapter {
+			kept = append(kept, id)
+		}
+	}
+	// Collapse producer→adapter→consumer back to producer→consumer; drop the two hops.
+	collapsed := make([]variantspec.ResolvedEdge, 0, len(edges))
+	for _, e := range edges {
+		if a, ok := adapters[e.ToNodeID]; ok && e.FromNodeID == a.FromNodeID {
+			collapsed = append(collapsed, variantspec.ResolvedEdge{
+				FromNodeID: a.FromNodeID, ToNodeID: a.ToNodeID, Kind: e.Kind})
+			continue
+		}
+		if _, ok := adapters[e.FromNodeID]; ok {
+			continue // the adapter→consumer half of a hop already accounted for
+		}
+		collapsed = append(collapsed, e)
+	}
+	return kept, collapsed
+}
+
+// wiringDifference reports the first difference between the discovered wiring and the desired one, in
+// a sentence a user can act on, or "" when they denote the same graph. Node ORDER is compared as a
+// sequence (it is identity-bearing) and edges as a SET (two specs listing the same edges in another
+// order are one graph).
+func wiringDifference(discovered variantspec.Wiring, order []string, edges []variantspec.ResolvedEdge) string {
+	if len(discovered.Order) != len(order) {
+		return fmt.Sprintf("the source wires %d node(s) %v but the spec orders %d %v",
+			len(discovered.Order), discovered.Order, len(order), order)
+	}
+	for i := range order {
+		if discovered.Order[i] != order[i] {
+			return fmt.Sprintf("node order differs at position %d: the source runs %q there, the spec asks for %q "+
+				"(source %v, spec %v)", i, discovered.Order[i], order[i], discovered.Order, order)
+		}
+	}
+	have := edgeSet(discovered.Edges)
+	want := edgeSet(edges)
+	for k := range want {
+		if !have[k] {
+			return fmt.Sprintf("the spec adds the edge %s, which the source does not wire", k)
+		}
+	}
+	for k := range have {
+		if !want[k] {
+			return fmt.Sprintf("the spec drops the edge %s, which the source wires", k)
+		}
+	}
+	return ""
+}
+
+func edgeSet(edges []variantspec.ResolvedEdge) map[string]bool {
+	out := make(map[string]bool, len(edges))
+	for _, e := range edges {
+		out[e.FromNodeID+" -"+e.Kind+"-> "+e.ToNodeID] = true
+	}
+	return out
+}
+
+// firstDifferingNode names the node the refusal is anchored to: the first position where the two
+// orders disagree, or the first node either side declares. A refusal with no node reads as "something
+// about the graph"; naming one gives the reader somewhere to look.
+func firstDifferingNode(discovered, desired []string) string {
+	for i := range desired {
+		if i >= len(discovered) {
+			return desired[i]
+		}
+		if discovered[i] != desired[i] {
+			return desired[i]
+		}
+	}
+	if len(discovered) > len(desired) {
+		return discovered[len(desired)]
+	}
+	if len(desired) > 0 {
+		return desired[0]
+	}
+	return ""
+}
+
 // byteRange converts an AST node's positions to byte offsets in the original file.
 func byteRange(fset *token.FileSet, n ast.Node, srcLen int) (int, int, error) {
 	start := fset.Position(n.Pos()).Offset
