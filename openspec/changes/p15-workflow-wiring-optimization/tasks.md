@@ -108,6 +108,31 @@ never silently dropped or no-op'd. A candidate is **surfaced only after P5.5 ver
       `rejected_transform` naming the wiring axis, where before P15 it returned `committed` with a diff
       that never rewired anything).
 
+### ⚠️ Correction, earned by CI (2026-07-28)
+
+The first version of §4's gate compared the spec's `Order` against the IR's **node-emission order** —
+the order Discovery happened to walk files in — and treated any difference as a rearrangement. That
+refused **twelve pre-existing e2e specs** that override only a model or a prompt, because their author
+listed the nodes in the workflow's logical sequence rather than in emission order. The Python e2e was
+the same mistake on edges: the spec declares the data edges the coherence gate needs, and the IR had
+recorded none.
+
+The rule now matches what the source actually states:
+
+| Case | Outcome |
+|---|---|
+| the spec's **node set** differs (merge / prune) | **REFUSED** — the dropped call is still in the tree |
+| a **source-stated pair** is inverted (two calls the source runs as consecutive sibling statements) | **MATERIALIZED** if it is one adjacent transposition, else **REFUSED** |
+| an ordering between calls the source does **not** order, or a declared edge | **nothing to do** — a declaration with no source counterpart, refusing it would break every spec ever authored while preventing no false measurement |
+
+`sourceOrderedPairs` reuses the SAME admissibility the materializer requires, so "which pairs does the
+source order" and "which pairs can be exchanged" can never drift apart. The honest boundary is recorded
+in PRD §8.2 as a **NOT MODELLED** row rather than left to be discovered.
+
+🔴 The local suite was green when this shipped because the failing tests are behind the `pgproof` build
+tag and were never compiled by `go test ./...`. `make pgproof` (Docker) is the command that would have
+caught it, and it is what verified the fix.
+
 ## 5. Backend + System Designer — Wiring-safety: the coherence gate as a requirement (15b)
 
 - [x] 5.1 Specify that a candidate ordering is validated by `GateReorder` → `ValidateOrdering` **before**

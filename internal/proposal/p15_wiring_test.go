@@ -69,8 +69,7 @@ func wiringHash(t *testing.T, s *variantspec.VariantSpec) string {
 		cfg.Nodes = append(cfg.Nodes, variantspec.ResolvedNode{NodeID: id})
 	}
 	for _, e := range s.Edges {
-		cfg.Edges = append(cfg.Edges, variantspec.ResolvedEdge{
-			FromNodeID: e.FromNodeID, ToNodeID: e.ToNodeID, Kind: e.Kind})
+		cfg.Edges = append(cfg.Edges, variantspec.ResolvedEdge(e))
 	}
 	h, err := cfg.Hash()
 	if err != nil {

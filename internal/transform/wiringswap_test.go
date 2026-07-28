@@ -743,12 +743,13 @@ func TestMergeAndPruneStillRefused(t *testing.T) {
 		t.Errorf("the refusal must still name the wiring axis, got %v", err)
 	}
 
-	// An added edge with an unchanged order: still not a transposition.
-	rewired := reorderedResolved(disc, first, second)
-	rewired.Config.Nodes = []variantspec.ResolvedNode{{NodeID: first}, {NodeID: second}}
-	rewired.Config.Edges = []variantspec.ResolvedEdge{{FromNodeID: first, ToNodeID: second, Kind: "data"}}
-	if _, err := Generate(rewired, root); err == nil {
-		t.Fatal("an added edge must still be refused after 15c")
+	// A declared EDGE, by contrast, is NOT a rewire and must pass: an IR that records no edge means
+	// "not recorded", and the coherence gate is exactly what a spec declares edges for.
+	declared := reorderedResolved(disc, first, second)
+	declared.Config.Nodes = []variantspec.ResolvedNode{{NodeID: first}, {NodeID: second}}
+	declared.Config.Edges = []variantspec.ResolvedEdge{{FromNodeID: first, ToNodeID: second, Kind: "data"}}
+	if _, err := Generate(declared, root); err != nil {
+		t.Fatalf("a declared edge is not a request to rewrite source: %v", err)
 	}
 }
 
@@ -785,4 +786,14 @@ def run(ctx):
 	if !strings.Contains(string(out), "Return a client (see the note below.") {
 		t.Error("the docstring must be carried through unchanged")
 	}
+}
+
+// keysOf lists a file map's paths, for a failure message that says which files a patch touched.
+func keysOf(m map[string][]byte) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }

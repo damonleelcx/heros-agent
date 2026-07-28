@@ -253,7 +253,7 @@ func adapterBoundary(ir *discovery.IR) {
 // ── §4 — 🔴 the headline refusal, at the real transform ──────────────────────────────────────────
 
 func refuseAtTransform(ir *discovery.IR, base *variantspec.VariantSpec, cands []proposal.Candidate, repo string) {
-	fmt.Printf("-- §4 - 🔴 a wiring-differing spec is REFUSED at transform, with no diff (task 4.2/4.3) --\n")
+	fmt.Printf("-- §4 - 🔴 what the transform REFUSES, and what it has nothing to refuse (task 4.2/4.3) --\n")
 
 	resolved := &variantspec.Resolved{
 		ConfigHash: "cfg-hermes-wiring", SourceRevision: ir.Workflow.Repo.CommitSHA,
@@ -262,6 +262,7 @@ func refuseAtTransform(ir *discovery.IR, base *variantspec.VariantSpec, cands []
 		DiscoveredWiring: variantspec.WiringOf(ir),
 	}
 
+	refused, inert := 0, 0
 	for _, c := range cands {
 		if c.Operator != proposal.OpMerge && c.Operator != proposal.OpPrune && c.Operator != proposal.OpReorder {
 			continue
@@ -269,13 +270,16 @@ func refuseAtTransform(ir *discovery.IR, base *variantspec.VariantSpec, cands []
 		patch, err := transform.GenerateTransform(resolved, c.Spec, repo)
 		var re *transform.RewriteError
 		switch {
-		case err == nil:
-			fmt.Printf("  !! %-8s produced a patch where a refusal was required (%d file(s))\n", c.Operator, len(patch.Files))
 		case errors.As(err, &re) && errors.Is(err, transform.ErrUnsafeRewrite) && re.Dim == "wiring":
-			fmt.Printf("  %-8s REFUSED  node=%s dim=%s  patch emitted: %v\n",
-				c.Operator, short(re.NodeID), re.Dim, patch != nil)
-		default:
+			refused++
+			fmt.Printf("  %-8s REFUSED  node=%s  patch emitted: %v\n", c.Operator, short(re.NodeID), patch != nil)
+		case err != nil:
 			fmt.Printf("  %-8s unexpected error: %v\n", c.Operator, err)
+		case patch != nil && len(patch.Files) == 0:
+			inert++
+			fmt.Printf("  %-8s no refusal, EMPTY patch — the source states no order between these calls\n", c.Operator)
+		default:
+			fmt.Printf("  %-8s MATERIALIZED %d file(s)\n", c.Operator, len(patch.Files))
 		}
 	}
 
@@ -284,13 +288,17 @@ func refuseAtTransform(ir *discovery.IR, base *variantspec.VariantSpec, cands []
 	if _, err := transform.GenerateTransform(resolved, base, repo); err != nil {
 		fmt.Printf("  !! the UNCHANGED baseline was refused too: %v\n", err)
 	} else {
-		fmt.Printf("  baseline   accepted (its wiring is the source's wiring) - the refusal fires on a\n")
-		fmt.Printf("             DIFFERENCE, not on the presence of an Order.\n")
+		fmt.Printf("  baseline   accepted (its wiring is the source's wiring)\n")
 	}
-	fmt.Printf("  -> a silent no-op would have \"succeeded\" here: the diff would rewrite node CONTENTS, the\n")
-	fmt.Printf("     build would pass, the eval would run, and the score would be attributed to a config_hash\n")
-	fmt.Printf("     claiming a graph this repository never had. That is a false measurement, and it is the\n")
-	fmt.Printf("     one outcome a platform whose principle is \"verification decides\" cannot afford.\n\n")
+
+	fmt.Printf("  %d refused (a merge or a prune: the source still CONTAINS the call the spec dropped, so\n", refused)
+	fmt.Printf("     scoring that config_hash would be a false measurement), %d inert.\n", inert)
+	fmt.Printf("  -> the inert ones are the honest boundary, recorded in the PRD ledger as NOT MODELLED:\n")
+	fmt.Printf("     these calls sit in different functions, so the SOURCE states no order between them.\n")
+	fmt.Printf("     Their config_hash differs and their behaviour does not, so the harness scores a tie —\n")
+	fmt.Printf("     wasteful, but not a false win. Refusing them instead would break every spec ever\n")
+	fmt.Printf("     authored (twelve pre-existing e2e specs did break, which is how this was found) while\n")
+	fmt.Printf("     preventing no false measurement at all.\n\n")
 }
 
 // ── §3.4 — determinism, on the real graph ────────────────────────────────────────────────────────

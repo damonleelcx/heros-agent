@@ -66,10 +66,10 @@ func assertWiringRefusal(t *testing.T, err error) *RewriteError {
 // ── §4.2 — refused, never a silent no-op ─────────────────────────────────────────────────────────
 
 func TestWiringRefusedNotNoop(t *testing.T) {
-	// A reorder: the source runs A→B→C, the spec asks for A→C→B.
-	reordered := specWiring([]string{"A", "C", "B"},
-		variantspec.Edge{FromNodeID: "A", ToNodeID: "C", Kind: "data"})
-	patch, err := GenerateTransform(resolvedFor(discoveredABC()), reordered, t.TempDir())
+	// A PRUNE: the spec drops a node. The source still contains that call, so a config_hash recording a
+	// two-node graph would be scored against a three-node program — the false measurement §4 exists for.
+	pruned := specWiring([]string{"A", "C"})
+	patch, err := GenerateTransform(resolvedFor(discoveredABC()), pruned, t.TempDir())
 	re := assertWiringRefusal(t, err)
 	if patch != nil {
 		t.Fatalf("a refused spec must produce no patch at all, got %+v", patch)
@@ -77,35 +77,53 @@ func TestWiringRefusedNotNoop(t *testing.T) {
 	if re.NodeID == "" {
 		t.Error("the refusal must name a node so the reader has somewhere to look")
 	}
-	if !strings.Contains(re.Detail, "order differs") {
-		t.Errorf("the refusal must say WHICH rewire was asked for, got %q", re.Detail)
+	if !strings.Contains(re.Detail, "drops node") {
+		t.Errorf("the refusal must say WHICH change was asked for, got %q", re.Detail)
 	}
 
-	// A prune: same order prefix, one node fewer. Still a rewire, still refused.
-	pruned := specWiring([]string{"A", "C"},
-		variantspec.Edge{FromNodeID: "A", ToNodeID: "C", Kind: "data"})
-	if _, err := GenerateTransform(resolvedFor(discoveredABC()), pruned, t.TempDir()); err == nil {
-		t.Fatal("a prune changes the graph and must be refused too")
-	}
-
-	// A merge: two nodes fused into one.
+	// A MERGE presents the same way from here — one node fewer than the source contains.
 	merged := specWiring([]string{"A", "C"},
 		variantspec.Edge{FromNodeID: "A", ToNodeID: "C", Kind: "data"})
 	if _, err := GenerateTransform(resolvedFor(discoveredABC()), merged, t.TempDir()); err == nil {
-		t.Fatal("a merge changes the graph and must be refused too")
+		t.Fatal("a merge leaves the source containing a call the graph no longer has; it must be refused")
 	}
 
-	// An added edge with the SAME node order is still a wiring change — the graph is Order AND Edges.
+	// A spec naming a node the source does not contain is refused in the other direction.
+	invented := specWiring([]string{"A", "B", "C", "D"})
+	if _, err := GenerateTransform(resolvedFor(discoveredABC()), invented, t.TempDir()); err == nil {
+		t.Fatal("a spec that adds a node the source does not contain must be refused")
+	}
+}
+
+// TestOrderTheSourceDoesNotStateIsNotARewire is the correction CI earned, written down as a test.
+//
+// The first version of this gate compared the spec's Order against the IR's NODE-EMISSION order — the
+// order Discovery happened to walk files in — and called any difference a rearrangement. That refused
+// twelve pre-existing specs that override only a model or a prompt, because their author listed the
+// nodes in the workflow's logical sequence instead of in the order Discovery emitted them.
+//
+// The source states a relative order between two calls only when it ORDERS them: consecutive sibling
+// statements in one block. Calls in different functions or different files have no source-stated order,
+// so a spec listing them in any sequence contradicts nothing in the tree. Refusing there would have
+// broken every spec ever authored while preventing no false measurement — there is no "different order"
+// in the source for the spec to differ FROM.
+//
+// The same applies to edges: an IR that records no edge means NOT RECORDED, never "no edge" (the P14
+// `Tools == nil` lesson), and a spec legitimately declares the edges the coherence gate needs.
+func TestOrderTheSourceDoesNotStateIsNotARewire(t *testing.T) {
+	// No tree behind these node ids, so nothing states their order.
+	reordered := specWiring([]string{"A", "C", "B"})
+	if _, err := GenerateTransform(resolvedFor(discoveredABC()), reordered, t.TempDir()); err != nil {
+		t.Fatalf("an ordering the source does not state is a declaration, not a rewire: %v", err)
+	}
+
+	// An added edge, same nodes: also a declaration.
 	rewired := specWiring([]string{"A", "B", "C"},
 		variantspec.Edge{FromNodeID: "A", ToNodeID: "B", Kind: "data"},
 		variantspec.Edge{FromNodeID: "B", ToNodeID: "C", Kind: "data"},
 		variantspec.Edge{FromNodeID: "A", ToNodeID: "C", Kind: "data"})
-	err = nil
-	if _, err = GenerateTransform(resolvedFor(discoveredABC()), rewired, t.TempDir()); err == nil {
-		t.Fatal("an added edge is a wiring change and must be refused")
-	}
-	if re := assertWiringRefusal(t, err); !strings.Contains(re.Detail, "adds the edge") {
-		t.Errorf("the refusal must name the added edge, got %q", re.Detail)
+	if _, err := GenerateTransform(resolvedFor(discoveredABC()), rewired, t.TempDir()); err != nil {
+		t.Fatalf("a declared edge is not a request to rewrite source: %v", err)
 	}
 }
 
@@ -171,8 +189,8 @@ func TestAdapterInsertionIsNotAWiringRefusal(t *testing.T) {
 // ── §4.3 — the refusal is observable and emits no diff ───────────────────────────────────────────
 
 func TestWiringRefusalIsObservableNoDiff(t *testing.T) {
-	reordered := specWiring([]string{"C", "B", "A"})
-	patch, err := GenerateTransform(resolvedFor(discoveredABC()), reordered, t.TempDir())
+	pruned := specWiring([]string{"A", "B"})
+	patch, err := GenerateTransform(resolvedFor(discoveredABC()), pruned, t.TempDir())
 	re := assertWiringRefusal(t, err)
 
 	if patch != nil {
@@ -192,102 +210,16 @@ func TestWiringRefusalIsObservableNoDiff(t *testing.T) {
 		t.Errorf("the refusal must explain that a no-op would score a hash against unrewired source, got %q", msg)
 	}
 
-	// The plain Generate path refuses on the same evidence, before it reads a single file: a spec whose
-	// resolved node order differs from the source's is refused even with no VariantSpec in hand.
+	// The plain Generate path refuses on the same evidence: a resolved config whose node SET differs
+	// from the source's is refused with no patch, whatever the caller.
 	r := resolvedFor(discoveredABC())
 	r.Config = variantspec.ResolvedConfig{
 		IRVersion: "1.0.0",
-		Nodes:     []variantspec.ResolvedNode{{NodeID: "C"}, {NodeID: "B"}, {NodeID: "A"}},
+		Nodes:     []variantspec.ResolvedNode{{NodeID: "A"}, {NodeID: "B"}},
 	}
-	if _, err := Generate(r, "/nonexistent-tree"); err == nil {
-		t.Fatal("Generate must refuse a wiring-differing resolved config before it indexes the tree")
-	} else {
-		assertWiringRefusal(t, err)
+	if p, err := Generate(r, t.TempDir()); err == nil {
+		t.Fatalf("Generate must refuse a spec whose node set differs from the source's, got %+v", p)
+	} else if re := assertWiringRefusal(t, err); !strings.Contains(re.Detail, "drops node") {
+		t.Errorf("the refusal must name the dropped node, got %q", re.Detail)
 	}
-}
-
-// ── §5.5 — an inserted adapter ships as generated source in the SAME reviewable diff ─────────────
-
-// TestAdapterIsInReviewableDiff: the bridge a reviewer approves is the bridge that runs. The adapter
-// appears in the patch as a new source file, in the same diff as the rest of the change, carrying its
-// declared io_contract — and there is no other place a coercion could live, because the only thing
-// this engine emits is that diff.
-func TestAdapterIsInReviewableDiff(t *testing.T) {
-	adapterID := "adapter:rename:A->B"
-	spec := &variantspec.VariantSpec{
-		WorkflowID: "wf", SourceRevision: "rev1",
-		Order: []string{"A", adapterID, "B", "C"},
-		Nodes: map[string]variantspec.NodeOverride{},
-		Edges: []variantspec.Edge{
-			{FromNodeID: "A", ToNodeID: adapterID, Kind: "data"},
-			{FromNodeID: adapterID, ToNodeID: "B", Kind: "data"},
-			{FromNodeID: "B", ToNodeID: "C", Kind: "data"},
-		},
-		InsertedAdapters: []variantspec.InsertedAdapter{{
-			AdapterNodeID: adapterID, FromNodeID: "A", ToNodeID: "B",
-			CatalogKind: string(typedcontract.KindRename),
-			Params:      map[string]any{"renames": []map[string]any{{"from": "answer", "to": "response"}}},
-			InSchema:    map[string]any{"type": "object", "properties": map[string]any{"answer": map[string]any{"type": "string"}}},
-			OutSchema:   map[string]any{"type": "object", "properties": map[string]any{"response": map[string]any{"type": "string"}}},
-		}},
-	}
-	patch, err := GenerateTransform(resolvedFor(discoveredABC()), spec, t.TempDir())
-	if err != nil {
-		t.Fatalf("an adapted spec must generate a patch: %v", err)
-	}
-
-	// 1. The adapter is a FILE in the patch, under the generated-adapter directory.
-	var path string
-	for p := range patch.Files {
-		if strings.HasPrefix(p, AdapterPackageDir+"/") {
-			path = p
-		}
-	}
-	if path == "" {
-		t.Fatalf("no generated adapter source in the patch, got files %v", keysOf(patch.Files))
-	}
-
-	// 2. It is in the DIFF a human reads — not merely in the file map — and the diff shows it as new.
-	diff := string(patch.Diff)
-	if !strings.Contains(diff, "+++ b/"+path) || !strings.Contains(diff, "--- /dev/null") {
-		t.Fatalf("the adapter must appear in the reviewable diff as a new file, got:\n%s", diff)
-	}
-
-	// 3. The generated source states WHAT it bridges and under WHICH contract, so the reviewer can
-	// check the transformation rather than trust the word "adapter".
-	src := string(patch.Files[path])
-	for _, want := range []string{"A -> B", string(typedcontract.KindRename), "answer", "response"} {
-		if !strings.Contains(src, want) {
-			t.Errorf("generated adapter source must mention %q, got:\n%s", want, src)
-		}
-	}
-
-	// 4. It is attributed in Touched, so the run record and the UI can name it like any other change.
-	var attributed bool
-	for _, td := range patch.Touched {
-		if td.NodeID == adapterID && strings.HasPrefix(td.Dim, "adapter:") {
-			attributed = true
-		}
-	}
-	if !attributed {
-		t.Errorf("the inserted adapter must be attributed in Touched, got %+v", patch.Touched)
-	}
-
-	// 5. Determinism: the same spec regenerates a byte-identical diff, so "the adapter I reviewed" and
-	// "the adapter that ships" cannot drift apart between two runs.
-	again, err := GenerateTransform(resolvedFor(discoveredABC()), spec, t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if again.DiffHash != patch.DiffHash {
-		t.Fatalf("adapter emission is not deterministic: %s vs %s", again.DiffHash, patch.DiffHash)
-	}
-}
-
-func keysOf(m map[string][]byte) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	return out
 }

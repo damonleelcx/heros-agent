@@ -20,21 +20,21 @@ change, two or more transpositions, a language with no materializer — keeps th
 
 ### Requirement: Only an exact adjacent transposition SHALL be materialized
 
-The transform engine SHALL materialize a wiring change as source only when the difference between the
-spec's wiring and the discovered wiring is exactly one transposition of two adjacent nodes in the order,
-with the edge set unchanged. Every other wiring difference SHALL keep the interim refusal.
+The transform engine SHALL materialize a wiring change as source only when exactly one SOURCE-STATED
+pair is inverted and the spec places those two nodes next to each other. A source-stated pair is two
+call sites the source runs as consecutive sibling statements; an ordering the source does not state is
+not a wiring change at all. Every other difference SHALL keep the interim refusal.
 
 #### Scenario: A single adjacent swap is attempted
 
-- **WHEN** a resolved spec's order differs from the discovered order by exactly one adjacent
-  transposition and its edges are unchanged
+- **WHEN** a resolved spec inverts exactly one source-stated pair and places the two nodes adjacently
 - **THEN** the engine attempts to materialize the swap
 - **AND** a successful materialization produces a reviewable diff rather than a refusal.
 
 #### Scenario: Any other wiring difference is still refused
 
-- **WHEN** the wiring difference is a merge, a prune, an added or dropped edge, or more than one
-  transposition
+- **WHEN** the difference is a merge, a prune, more than one inverted pair, or an inversion across
+  other nodes
 - **THEN** the change is refused with the typed error naming the wiring axis
 - **AND** no diff is produced.
 

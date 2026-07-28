@@ -63,6 +63,15 @@ func (p *Patch) IsEmpty() bool { return len(p.Diff) == 0 }
 // revision is the caller that must guarantee the tree matches it.
 // It dispatches on the workflow's LANGUAGE (ADR-003 decision 1). See engines.
 func Generate(r *variantspec.Resolved, root string) (*Patch, error) {
+	return generate(r, nil, root)
+}
+
+// generate is the one implementation both entrypoints share. `spec` is optional: the P2 submit path
+// (Generate) has only the resolved projection, while the P5 commit path (GenerateTransform) also has
+// the authored spec — and the spec is where a pure re-arrangement lives, since it changes no override
+// and therefore leaves no trace in `Overrides`. Passing it through rather than duplicating the wiring
+// decision in two callers is what keeps ONE gate: a second copy is a second thing to keep true.
+func generate(r *variantspec.Resolved, spec *variantspec.VariantSpec, root string) (*Patch, error) {
 	if r == nil {
 		return nil, fmt.Errorf("transform: Generate requires a resolved spec")
 	}
@@ -70,15 +79,20 @@ func Generate(r *variantspec.Resolved, root string) (*Patch, error) {
 	// source's own, or the ONE shape this engine can materialize (an adjacent transposition), or it is
 	// refused. Deciding here rather than after the per-node loop is what makes it impossible to emit a
 	// partial diff that rewrites the contents of a graph nobody rewired.
-	plan, err := checkWiring(r, nil)
+	eng, err := engineFor(r.Language)
 	if err != nil {
 		return nil, err
 	}
-	eng, engErr := engineFor(r.Language)
-	if engErr != nil {
-		return nil, engErr
-	}
 	sites, err := eng.index(root)
+	if err != nil {
+		return nil, err
+	}
+	// 🔴 P15 task 4.2 / 15.1 — the wiring decision, before any file is read or rewritten: the spec
+	// either wires what the source wires, or asks for the ONE shape this engine can materialize (an
+	// adjacent transposition of two sibling statements), or is refused. It runs after indexing because
+	// the only evidence of a source-stated ORDER is where the call sites actually are (see checkWiring);
+	// it still runs before any edit, so a refused wiring cannot leave a partial diff behind.
+	plan, err := checkWiring(r, spec, sites, root)
 	if err != nil {
 		return nil, err
 	}

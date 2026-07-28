@@ -6,6 +6,7 @@ import (
 	"go/ast"
 	"go/printer"
 	"go/token"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -481,32 +482,215 @@ func refuseWiring(nodeID, difference string) error {
 // It concludes nothing when no discovered wiring was recorded: a Resolved assembled by hand has no IR
 // behind it, and refusing on absent evidence would block every caller that never had a graph to
 // compare against. The production path (variantspec.Resolve) always records it.
-// checkWiring is now MATERIALIZE-OR-REFUSE (P15 15c task 15.1). It returns:
+// checkWiring is MATERIALIZE-OR-REFUSE, over the wiring the SOURCE ACTUALLY STATES (P15 15c, corrected).
 //
-//	(nil, nil)    the spec's wiring is the source's wiring — nothing to do;
-//	(plan, nil)   the difference is the ONE shape this engine materializes (an adjacent transposition);
-//	(nil, err)    every other difference — the 15b refusal, unchanged, naming the axis.
+// # What the source states, and what it does not
 //
-// The narrowing is deliberate and literal. `planWiringSwap` admits exactly one adjacent pair exchanged
-// with the edge set untouched; a merge, a prune, an edge change, a non-adjacent move, or two
-// transpositions at once all fall through to the same refusal they got before 15c. Widening this test
-// is how a rewriter acquires reach it cannot justify, so the test is written to be read, not extended.
-func checkWiring(r *variantspec.Resolved, spec *variantspec.VariantSpec) (*swapPlan, error) {
+// This is the whole of the correctness argument, and the first version of it was wrong in a way CI
+// caught: it compared the spec's `Order` against the IR's NODE-EMISSION order and treated any
+// difference as "the spec asks to rearrange the graph". Emission order is a discovery walk artifact —
+// which file was read first — not a claim about execution. Twelve pre-existing specs that override only
+// a model or a prompt were refused for wiring because their author listed the nodes in the workflow's
+// logical sequence rather than in the order Discovery happened to emit them.
+//
+// The source states a relative order between two calls only when it actually orders them: when their
+// call sites are CONSECUTIVE SIBLING STATEMENTS in one block. Two calls in different functions, or
+// different files, have no source-stated order at all — `Order` there is the author's declaration of
+// the workflow's shape, which is what a Variant Spec's ordering has always been for, and it contradicts
+// nothing in the tree.
+//
+// Edges are out of the comparison entirely, for the reason P14 learned with `Tools == nil`: an IR that
+// records no edge means NOT RECORDED, never "no edge". A syntactic frontend infers few edges and a spec
+// legitimately declares the ones the coherence gate needs; treating a declared edge as a request to
+// rewire source refuses a change nobody asked for.
+//
+// So exactly three outcomes remain:
+//
+//	the node SET differs (a merge or a prune)   → REFUSE. The source demonstrably still contains the
+//	                                              call, so scoring this config_hash would be false.
+//	a source-ordered PAIR is inverted           → materialize it if it is the one shape we can
+//	                                              (an adjacent transposition), else REFUSE.
+//	anything else                               → nothing to do: the source states no order to contradict.
+func checkWiring(r *variantspec.Resolved, spec *variantspec.VariantSpec, sites map[string]boundSite, root string) (*swapPlan, error) {
 	if r == nil || !r.DiscoveredWiring.Recorded() {
 		return nil, nil
 	}
-	order, edges := desiredWiring(r, spec)
+	order, _ := desiredWiring(r, spec)
 	if len(order) == 0 {
 		return nil, nil // nothing was asked for
 	}
-	diff := wiringDifference(r.DiscoveredWiring, order, edges)
-	if diff == "" {
+
+	// 1. The node SET. A node the spec drops is still in the tree, and a node it adds is not — either
+	// way the running code is not the graph the hash records.
+	if missing, extra, ok := nodeSetDiff(r.DiscoveredWiring.Order, order); !ok {
+		return nil, refuseWiring(firstNonEmpty(missing, extra), describeNodeSetDiff(missing, extra))
+	}
+
+	// 2. The pairs the SOURCE orders. Nothing else is evidence of a rearrangement.
+	pairs, err := sourceOrderedPairs(r.Language, sites, root)
+	if err != nil {
+		return nil, err
+	}
+	pos := map[string]int{}
+	for i, id := range order {
+		pos[id] = i
+	}
+	var inverted []sourcePair
+	for _, p := range pairs {
+		if pos[p.first] > pos[p.second] {
+			inverted = append(inverted, p)
+		}
+	}
+	if len(inverted) == 0 {
 		return nil, nil
 	}
-	if plan, ok := planWiringSwap(r.DiscoveredWiring, order, edges); ok {
-		return plan, nil
+	if len(inverted) == 1 {
+		if plan, ok := planAdjacentSwap(order, inverted[0]); ok {
+			return plan, nil
+		}
 	}
-	return nil, refuseWiring(firstDifferingNode(r.DiscoveredWiring.Order, order), diff)
+	p := inverted[0]
+	return nil, refuseWiring(p.first, fmt.Sprintf(
+		"the source runs %s then %s as consecutive statements in %s, and this spec asks for the opposite "+
+			"order (%d source-ordered pair(s) inverted)", p.first, p.second, p.file, len(inverted)))
+}
+
+// sourcePair is two nodes the SOURCE puts in a definite order: consecutive sibling statements.
+type sourcePair struct {
+	first, second string
+	file          string
+	firstLine     int
+	secondLine    int
+}
+
+// sourceOrderedPairs finds every pair of call sites the source itself orders — same file, consecutive
+// sibling statements with nothing but blank lines between them.
+//
+// It deliberately reuses the SAME admissibility the materializer requires (`admitSwap`'s structural
+// half). That is not a coincidence to be refactored away: the set of pairs whose order the source
+// states IS the set of pairs a transposition could exchange, so one predicate answers both questions
+// and they can never drift apart.
+func sourceOrderedPairs(language string, sites map[string]boundSite, root string) ([]sourcePair, error) {
+	resolve, ok := statementResolvers[strings.ToLower(strings.TrimSpace(language))]
+	if !ok {
+		// A language with no statement resolver states no order this engine can read. That is not a
+		// refusal: it means the spec's ordering contradicts nothing we can see, which is the honest
+		// position for a frontend that never parsed statements.
+		return nil, nil
+	}
+
+	byFile := map[string][]string{}
+	for id, s := range sites {
+		byFile[s.fileRel] = append(byFile[s.fileRel], id)
+	}
+	var out []sourcePair
+	for _, rel := range sortedStringKeys(byFile) {
+		ids := byFile[rel]
+		if len(ids) < 2 {
+			continue
+		}
+		src, err := readFile(root, rel)
+		if err != nil {
+			return nil, err
+		}
+		sort.Slice(ids, func(i, j int) bool { return sites[ids[i]].lineStart < sites[ids[j]].lineStart })
+		for i := 0; i+1 < len(ids); i++ {
+			a, errA := resolve(src, ids[i], sites[ids[i]].lineStart)
+			b, errB := resolve(src, ids[i+1], sites[ids[i+1]].lineStart)
+			if errA != nil || errB != nil {
+				continue // a statement this engine cannot read states no order it can act on
+			}
+			if admitSwap(src, a, b) != nil {
+				continue // not consecutive siblings: the source does not order these two
+			}
+			out = append(out, sourcePair{first: ids[i], second: ids[i+1], file: rel,
+				firstLine: a.startLine, secondLine: b.startLine})
+		}
+	}
+	return out, nil
+}
+
+// planAdjacentSwap admits the inverted pair only when the spec places the two nodes NEXT TO each other:
+// an exchange of neighbours. A pair inverted across other nodes is a move, which this engine does not do.
+func planAdjacentSwap(order []string, p sourcePair) (*swapPlan, bool) {
+	i, j := -1, -1
+	for k, id := range order {
+		if id == p.first {
+			i = k
+		}
+		if id == p.second {
+			j = k
+		}
+	}
+	if i < 0 || j < 0 || i != j+1 {
+		return nil, false
+	}
+	return &swapPlan{First: p.first, Second: p.second}, true
+}
+
+// nodeSetDiff reports whether two orderings name the same nodes, and if not, one concrete node from
+// each side. Sorted, so the same defect always produces the same message.
+func nodeSetDiff(discovered, desired []string) (missing, extra string, ok bool) {
+	have := map[string]bool{}
+	for _, id := range discovered {
+		have[id] = true
+	}
+	want := map[string]bool{}
+	for _, id := range desired {
+		want[id] = true
+	}
+	var miss, ext []string
+	for id := range have {
+		if !want[id] {
+			miss = append(miss, id)
+		}
+	}
+	for id := range want {
+		if !have[id] {
+			ext = append(ext, id)
+		}
+	}
+	if len(miss) == 0 && len(ext) == 0 {
+		return "", "", true
+	}
+	sort.Strings(miss)
+	sort.Strings(ext)
+	if len(miss) > 0 {
+		missing = miss[0]
+	}
+	if len(ext) > 0 {
+		extra = ext[0]
+	}
+	return missing, extra, false
+}
+
+func describeNodeSetDiff(missing, extra string) string {
+	switch {
+	case missing != "" && extra != "":
+		return fmt.Sprintf("this spec drops node %s and adds node %s; the source still contains the call "+
+			"the spec dropped", missing, extra)
+	case missing != "":
+		return fmt.Sprintf("this spec drops node %s — a merge or a prune — but the source still contains "+
+			"that call, so the graph this config_hash records is not the graph that would run", missing)
+	default:
+		return fmt.Sprintf("this spec adds node %s, which the source does not contain", extra)
+	}
+}
+
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
+}
+
+func sortedStringKeys(m map[string][]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // desiredWiring is the wiring the spec asks for, with inserted-adapter hops collapsed back to the edge
@@ -518,7 +702,7 @@ func desiredWiring(r *variantspec.Resolved, spec *variantspec.VariantSpec) ([]st
 	if spec != nil && len(spec.Order) > 0 {
 		order = append(order, spec.Order...)
 		for _, e := range spec.Edges {
-			edges = append(edges, variantspec.ResolvedEdge{FromNodeID: e.FromNodeID, ToNodeID: e.ToNodeID, Kind: e.Kind})
+			edges = append(edges, variantspec.ResolvedEdge(e))
 		}
 	} else {
 		for _, n := range r.Config.Nodes {
@@ -557,65 +741,6 @@ func desiredWiring(r *variantspec.Resolved, spec *variantspec.VariantSpec) ([]st
 		collapsed = append(collapsed, e)
 	}
 	return kept, collapsed
-}
-
-// wiringDifference reports the first difference between the discovered wiring and the desired one, in
-// a sentence a user can act on, or "" when they denote the same graph. Node ORDER is compared as a
-// sequence (it is identity-bearing) and edges as a SET (two specs listing the same edges in another
-// order are one graph).
-func wiringDifference(discovered variantspec.Wiring, order []string, edges []variantspec.ResolvedEdge) string {
-	if len(discovered.Order) != len(order) {
-		return fmt.Sprintf("the source wires %d node(s) %v but the spec orders %d %v",
-			len(discovered.Order), discovered.Order, len(order), order)
-	}
-	for i := range order {
-		if discovered.Order[i] != order[i] {
-			return fmt.Sprintf("node order differs at position %d: the source runs %q there, the spec asks for %q "+
-				"(source %v, spec %v)", i, discovered.Order[i], order[i], discovered.Order, order)
-		}
-	}
-	have := edgeSet(discovered.Edges)
-	want := edgeSet(edges)
-	for k := range want {
-		if !have[k] {
-			return fmt.Sprintf("the spec adds the edge %s, which the source does not wire", k)
-		}
-	}
-	for k := range have {
-		if !want[k] {
-			return fmt.Sprintf("the spec drops the edge %s, which the source wires", k)
-		}
-	}
-	return ""
-}
-
-func edgeSet(edges []variantspec.ResolvedEdge) map[string]bool {
-	out := make(map[string]bool, len(edges))
-	for _, e := range edges {
-		out[e.FromNodeID+" -"+e.Kind+"-> "+e.ToNodeID] = true
-	}
-	return out
-}
-
-// firstDifferingNode names the node the refusal is anchored to: the first position where the two
-// orders disagree, or the first node either side declares. A refusal with no node reads as "something
-// about the graph"; naming one gives the reader somewhere to look.
-func firstDifferingNode(discovered, desired []string) string {
-	for i := range desired {
-		if i >= len(discovered) {
-			return desired[i]
-		}
-		if discovered[i] != desired[i] {
-			return desired[i]
-		}
-	}
-	if len(discovered) > len(desired) {
-		return discovered[len(desired)]
-	}
-	if len(desired) > 0 {
-		return desired[0]
-	}
-	return ""
 }
 
 // byteRange converts an AST node's positions to byte offsets in the original file.

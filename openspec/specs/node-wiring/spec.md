@@ -145,13 +145,18 @@ recommended change.
 
 ### Requirement: An un-materializable wiring change SHALL be refused at transform, never silently applied
 
-Until the transform engine can materialize a wiring change as source, a resolved spec whose `Order` or
-`Edges` differ from the discovered wiring SHALL be refused at transform with a typed error that names the
-wiring axis. It SHALL NOT be silently dropped, and SHALL NOT be applied as a no-op.
+A wiring change the transform engine cannot materialize SHALL be refused at transform with a typed error
+that names the wiring axis. It SHALL NOT be silently dropped, and SHALL NOT be applied as a no-op.
+
+The refusal is scoped to what the SOURCE STATES: a spec whose node SET differs from the discovered one
+(the dropped call is still in the tree), or one that inverts an order the source states by running two
+calls as consecutive sibling statements. An ordering between calls the source does not order, or an edge
+the IR never recorded, is a declaration with no source counterpart and is not refused.
 
 #### Scenario: A wiring-differing spec is refused, not no-op'd
 
-- **WHEN** a resolved spec whose wiring differs from the discovered graph reaches the transform engine
+- **WHEN** a resolved spec drops a node the source still contains, or inverts a source-stated order it
+  cannot materialize
 - **THEN** the transform refuses it with a typed error naming the wiring axis
 - **AND** no diff is generated
 - **AND** the wiring change is not applied as a no-op that would let its `config_hash` be scored against

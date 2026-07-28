@@ -221,10 +221,15 @@ Numbered FRs; each maps 1:1 to an OpenSpec requirement under
 - **FR7.** A produced wiring candidate SHALL be **surfaced to the user only after P5.5 verification**
   shows it better or cheaper on held-out data. A candidate that verification does not confirm SHALL NOT
   be presented as a recommended change.
-- **FR8.** Until source-level materialization of wiring exists, a **resolved spec whose `Order`/`Edges`
-  differ from the discovered wiring SHALL be refused at transform** with an `unsafeRewrite`-class error
-  that names the wiring axis. It SHALL NOT be silently dropped, and SHALL NOT be applied as a no-op that
-  would let a wiring `config_hash` be scored against unchanged source.
+- **FR8.** A wiring change the transform engine cannot materialize SHALL be **refused at transform**
+  with an `unsafeRewrite`-class error naming the wiring axis, never silently dropped and never applied
+  as a no-op that would let a wiring `config_hash` be scored against unchanged source. The refusal
+  SHALL be scoped to what the SOURCE STATES: (a) a spec whose **node set** differs from the discovered
+  one — the dropped call is demonstrably still in the tree — and (b) a spec that **inverts a
+  source-stated order**, i.e. two call sites the source runs as consecutive sibling statements.
+  🚫 An ordering between calls the source does NOT order (different functions, different files) is an
+  authoring declaration with no counterpart in the tree and SHALL NOT be refused; nor SHALL a declared
+  edge, because an IR that records no edge means *not recorded*, never *no edge*.
 
 ### The coherence gate as a requirement (capability `wiring-safety`)
 
@@ -256,10 +261,10 @@ Numbered FRs; each maps 1:1 to an OpenSpec requirement under
 slice whose behaviour a machine can bound, and leaves every other wiring change refused exactly as FR8
 requires. The slice is a **transposition of two adjacent, independent sibling statements**.
 
-- **FR15.** The transform engine SHALL materialize a wiring change as source **only** when the difference
-  between the spec's wiring and the discovered wiring is exactly **one transposition of two adjacent
-  nodes** in the order, with the edge set unchanged. Any other difference — a merge, a prune, an added or
-  dropped edge, two or more transpositions — SHALL keep FR8's refusal.
+- **FR15.** The transform engine SHALL materialize a wiring change as source **only** when exactly **one
+  source-stated pair is inverted** and the spec places those two nodes next to each other — a
+  transposition of neighbours. A merge, a prune, two or more inverted pairs, or an inversion across
+  other nodes SHALL keep FR8's refusal.
 - **FR16.** A transposition SHALL be materialized **only** when both nodes' call sites are, in the target
   source: in the **same file**, at the **same block nesting**, **consecutive** (nothing between them but
   blank lines), each occupying **whole lines**, and neither a control-flow statement (`return`, `raise`,
@@ -339,6 +344,7 @@ land its effect in `ResolvedConfig` → `config_hash`."
 | Source-level materialization of a **reorder** (adjacent transposition, Go + Python) | **PARTIAL (15c)** | `internal/transform/wiringswap.go` — swap-only, sibling-statement, independence-checked, permutation-gated |
 | Source-level materialization of a **merge** or a **prune** | **ABSENT** | deleting or fusing a call is not a permutation of the file's lines; both keep FR8's refusal |
 | Source-level materialization of a wiring change in Java/Kotlin/Rust/TypeScript/JavaScript | **ABSENT** | no statement materializer for those frontends; the refusal names the language (FR19) |
+| An ordering between calls the source does **not** order (different functions/files) | **NOT MODELLED** | it is identity-bearing in `config_hash` but has no source counterpart and no runtime effect; it is neither materialized nor refused, and this row exists so that is on the record rather than discovered |
 
 ### 8.3 Decisions, with what was rejected
 

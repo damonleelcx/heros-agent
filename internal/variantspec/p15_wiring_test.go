@@ -257,7 +257,7 @@ func TestAdaptedVerdictRecordsAdapter(t *testing.T) {
 	// Order: the adapter runs after its producer and before its consumer, or the graph it describes
 	// could not execute.
 	ai, pi, ci := indexIn(got.Order, a.AdapterNodeID), indexIn(got.Order, "A"), indexIn(got.Order, "B")
-	if ai < 0 || !(pi < ai && ai < ci) {
+	if ai < 0 || pi >= ai || ai >= ci {
 		t.Fatalf("the adapter must be ordered between its producer and consumer, got %v", got.Order)
 	}
 	// The parent is untouched: gating derives, it does not edit in place.
