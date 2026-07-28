@@ -102,7 +102,10 @@ commitment gate that never walls the console, generated reference (absent tiers 
 and eight build-time fences — each with a fixture proving it can fail — extending the `scan-claims` rule from the
 marketing page into the documentation tree. The developer tier includes the two pages every developer hits first:
 **installing the CLI from a GitHub Release** (verification is a step of the install, not an appendix; only published
-channels may be described) and the **complete CLI command reference**, exit-code contract included.
+channels may be described) and the **complete CLI command reference**, exit-code contract included. The home page
+gains a **GitHub repository link**, with any star count taken as a **build-time measurement stamped with its date** —
+never a third-party badge, because the console's `default-src 'self'` CSP refuses one and the page's no-third-party
+posture is worth more than a number.
 
 | Phase | PRD | OpenSpec change | Lead role(s) |
 |-------|-----|-----------------|--------------|

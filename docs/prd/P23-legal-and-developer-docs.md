@@ -91,6 +91,9 @@ must match.
    command that does not exist.
 7. **Serve both surfaces with zero platform calls and zero third-party requests**, so they work during a
    platform incident and inside an air-gapped P19 deployment.
+8. **Point the home page at the open repository** with a GitHub link — and, if a star count is shown, make
+   it a **build-time measurement stamped with its date**, never a third-party badge, so social proof costs
+   the reader no privacy and the page no CSP exception.
 
 ### Non-goals (explicitly deferred, with the phase that owns them)
 
@@ -133,6 +136,13 @@ must match.
 - As an evaluating developer, I want the install page to tell me **before** it happens that macOS or
   Windows will warn me about the binary, so that an OS malware dialog is not my first impression of the
   product.
+- As an evaluating developer, I want a **link to the GitHub repository from the home page**, so that I can
+  read the code before I decide whether to trust the product — which for a tool that runs inside my CI is
+  the order I actually evaluate in.
+- As an evaluating developer, I want any star count to say **when it was measured**, so that I can tell a
+  measurement from a decoration.
+- As a privacy-conscious reader, I want the home page to contact **no third party**, so that reading a
+  marketing page does not announce me to anyone.
 - As an evaluating developer, I want every page to say what the capability does **not** do, so that I
   discover the boundary before I build on it rather than after.
 
@@ -312,6 +322,22 @@ must match.
 - **FR48** — The install page **ends by naming the next command**, which is the quickstart's first step, with
   no configuration-file edit between installing and a first result.
 
+### Social proof on the public home page
+
+- **FR49** — The home page carries a **link to the project's public GitHub repository**, reachable with no
+  session, marked as external, and issuing **no network request until the reader clicks it**. A link to a
+  private or non-existent repository fails the build — the same rule that forbids an install command that
+  404s.
+- **FR50** — Any **star count is measured at build time** and rendered **with its measurement date**. It is
+  never fetched by the reader's browser.
+- **FR51** — Social proof introduces **no third-party origin and no CSP relaxation**: no badge image, no
+  iframe, no widget script, no cross-origin fetch. `default-src 'self'` stays as it is; a change relaxing it
+  for social proof is refused.
+- **FR52** — A count is **never hand-typed** (a literal in source fails the build), and when the measurement
+  is unavailable the element **degrades to the plain link** — never a zero, a placeholder, an error or a
+  broken badge.
+- **FR53** — Displaying the count is **opt-in configuration, default off**; the **link is unconditional**.
+
 ## 7. Non-functional requirements
 
 | # | Requirement | Target / how it is checked |
@@ -428,6 +454,27 @@ path most readers follow is the shortest one on the page — so the shortest pat
 a documented path that puts a binary on `PATH` before checking the checksum and signature is not published
 at all. This is **第1级 安全 over 第3级 UX over 第8级 实现**: a one-line install that silently drops
 verification is easier to write, easier to copy, and removes exactly the control the threat model rests on.
+
+**Decision 6d — The GitHub link is unconditional; a star count is a build-time measurement or it is
+nothing.** The console sets a per-request CSP in `middleware.ts` — `default-src 'self'`,
+`connect-src 'self'`, `img-src 'self' data:` — and that file's own comment names the public page's
+no-third-party-origin rule as the reason. So the three usual ways to put a star count on a page are already
+**refused at runtime**: a shields.io `<img>`, a GitHub buttons widget, and a browser-side call to
+`api.github.com`. Rather than carve an exception, this phase takes the constraint as the design: **the link
+costs nothing** (an anchor makes no request until clicked), and **the count, if shown, is captured during
+the build and stamped with when it was measured**. That keeps the page's privacy posture (no third party
+observes a visit), its air-gapped parity, and its CSP exactly as they are — 第1级 安全 and 第2级 稳定 over
+第8级 实现, for a number.
+
+Two consequences worth stating plainly. A count is **never hand-typed** — the same rule as a release
+checksum, for the same reason. And when the measurement is unavailable (offline build, rate limit, API
+failure) the element **degrades to the plain link**, never to a zero or a broken badge: an unavailable
+measurement rendered as `0` is a false statement, and it is the one a reader will believe.
+
+**The count is opt-in, default off, and that is a product decision rather than a technical one.** The
+repository is public and currently has **0 stars**. Rendering "★ 0" on a marketing home page is worse than
+rendering nothing, and the honest way to handle that is a configured choice someone makes — not a threshold
+that hides the number when it is inconvenient, which is the same dishonesty with extra machinery.
 
 **Decision 7 — A third composition: the reading surface.** The console follows the reader's theme
 because it is sat in front of for an hour; the public surface is dark-fixed because it is a poster seen
@@ -595,6 +642,11 @@ applies again here, so the codebase's existing decision is followed rather than 
   document identity in the running footer (FR7).
 - The existing scans (`scan-tokens`, `scan-strings`, `scan-markup`, `scan-bundle`) apply unchanged to the
   new routes; the new fences are additions in the same idiom, run from the same `npm run build`.
+- **The GitHub link is an anchor, and that is the whole implementation (FR49).** It goes in the public
+  header beside "Sign in" and in the footer; it makes no request until clicked. The count, when enabled, is
+  a **server-rendered string from a build-time measurement** — no client component, no effect, no loading
+  state, and therefore nothing that can spin forever on a page with no data. The smallest correct change
+  here is genuinely small, and the reason it stays small is that the CSP forbids the large version.
 
 ### 9.5 Senior AI Engineer — *evals before optimization; diagnosis proposes, verification decides*
 
@@ -644,6 +696,12 @@ content — the fences do not care who typed it, which is the point of having th
 - **Offline install is documented because offline install is a delivery mode (FR47).** The same air-gapped
   estate P19 targets has to get the CLI onto a disconnected machine, and verification has to work there —
   a runbook that assumes the internet is a runbook for a different customer.
+- **Social proof does not get a CSP exception (FR51).** `middleware.ts` sets `default-src 'self'`,
+  `connect-src 'self'`, `img-src 'self' data:` per request, and its own comment names the public page's
+  no-third-party-origin rule as the reason. A badge or a browser-side `api.github.com` call is refused
+  there; the build-time check simply makes the refusal visible at review instead of at deploy. The
+  measurement, if taken, is taken **by the build** — one machine we control, once per deploy, rather than
+  once per visitor.
 - **Uninstall and upgrade in the channel's own idiom (FR46).** A tool that a package manager installed and
   a downloader replaced underneath it is a support ticket with no clean answer; documenting the manager's
   path is cheaper than fielding that.
@@ -664,6 +722,7 @@ forever while every sentence rots.
 | **Reachability** | FR21 | Extend the existing link-coverage test: every docs page reachable by navigation, every anchor referenced from CLI/console output resolves. |
 | **CLI coverage** | FR35/FR36 | Add a subcommand to the registry with no reference entry → build fails. Change an exit code's meaning without changing the reference → build fails. |
 | **Install honesty** | FR41–FR44 | Document a channel the pipeline does not publish → build fails. Hand-type a checksum → build fails. A documented install path that reaches `PATH` before verifying → rejected at review, and the reviewer has a named rule to point at rather than an opinion. |
+| **Home-page social proof** | FR49–FR53 | Add a shields.io image or an `api.github.com` fetch → build fails on the external-origin check, and the runtime CSP refuses it independently. Hand-type a count → build fails. Force the measurement to fail → the page renders the plain link, never `0`. Point the link at a private repo → build fails. |
 
 The negative assertions are the valuable ones, and they mirror what the console's test suite already
 does well: `routes.test.mjs` proves a selection surface makes **no** upstream call. The docs and legal
@@ -695,6 +754,16 @@ suites prove the same shape of nothing.
   mistake the claims fence exists to stop, and both are found by a customer within minutes rather than by
   us within months. A channel appears when it is published; a trust claim appears when the pipeline
   performs it.
+- **The repository link is a sales asset, and the honest one (FR49).** A technical buyer evaluating a tool
+  that will run inside their CI reads the code before they read the pitch. Linking to it from the home page
+  says *look for yourself* — which is the same argument as "your code stays yours" and "you bring your own
+  keys", made by gesture rather than by sentence. What it must not become is a **badge**: a number rendered
+  by a third party on the page where we tell people we contact no third parties would undercut the exact
+  claim it sits beside.
+- **A star count is a claim about the world, and gets the same treatment as a claim about the product
+  (FR50, FR52).** Stamped with when it was measured, never hand-typed, and absent rather than wrong when the
+  measurement fails. `capabilities.ts` exists because a page nobody re-reads drifts; a vanity number is that
+  page's most driftable line.
 - **"Verify before `PATH`" is a differentiator, so state it as one (FR43).** Most tools' install lines do
   not verify anything. Ours does, by construction, and the reason — *this binary runs inside your CI with
   access to your repository* — is exactly the argument a security reviewer needs to hear, on the page they
@@ -751,6 +820,9 @@ which needs a data inventory to exist first — and P23 produces one.
 | R13 | **A trust claim outruns the pipeline** ("notarized" before a Developer ID is funded) | DevOps | FR44: every signing/notarization claim must resolve to a step the pipeline performs; where unsigned, the page says unsigned and documents the exact quarantine-clear command. |
 | R14 | **A new subcommand ships undocumented** — adding one is routine, remembering the docs is not | Backend + QA | FR35 runs the CLI fence from the code side: a registry entry with no reference entry fails the build. |
 | R15 | **Install docs go stale the moment a release is cut** (versions, filenames, checksums) | DevOps | FR42 generates the asset table from the release. A hand-typed checksum fails the build — and a routinely-wrong checksum is how readers learn to skip verification. |
+| R16 | **Social proof arrives as a badge**, quietly adding a third-party origin, a CSP exception and a privacy leak to the page that sets no cookies | Frontend + DevOps | FR51: no badge, iframe, widget or cross-origin fetch; `default-src 'self'` unchanged. The CSP already refuses these at runtime, and the build-time check makes the refusal visible before review rather than after deploy. |
+| R17 | **"★ 0" ships to the marketing home page** — the repository is public with 0 stars today, and a rendered zero is a worse claim than silence | Product + Sales Ops | FR53: the count is opt-in, default **off**; the link is unconditional. The decision is configured by a person rather than triggered by a number becoming available. |
+| R18 | **A stale count is read as live**, or an unavailable measurement renders as `0` | Frontend | FR50 stamps the measurement date; FR52 degrades to the plain link when the measurement is unavailable — never a zero, placeholder or broken badge. |
 
 ## 12. Rollout & test strategy
 
@@ -826,6 +898,10 @@ the exact failure this phase exists to prevent.
     with the bundle budget unchanged.
 18. Terms language reconciled line-by-line against P7 entitlements and (when present) P21 Stripe
     configuration, with the reconciliation recorded in `docs/sales/`.
+19. The home page links to the **public** GitHub repository, marked external, with **no third-party request
+    at render**; the CSP is unchanged; a private or missing repository target fails the build.
+20. Any star count is a **build-time measurement rendered with its date**; a hand-typed count fails the
+    build; an unavailable measurement degrades to the plain link; display is opt-in and defaults to off.
 
 **Success metrics (measured after release, feeding the ⑦ → ① loop):**
 

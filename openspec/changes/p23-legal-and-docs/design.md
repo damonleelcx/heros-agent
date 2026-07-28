@@ -253,7 +253,7 @@ liability rather than a support ticket.
 | `scan-metric` | a metric definition disagrees with the harness on name, unit or computation, or cites no computation site |
 | `scan-links` | an internal link or anchor does not resolve, or an external link is not allow-listed and marked |
 | `scan-secrets` | content matches a credential pattern (provider key prefixes, PEM blocks, bearer tokens) |
-| `scan-content` | content contains raw HTML, an inline event handler, or an external script/font/stylesheet reference |
+| `scan-content` | content contains raw HTML, an inline event handler, or an external script/font/stylesheet reference — **or public-surface markup names a third-party origin** (badge, widget, hosted font, cross-origin fetch), which the runtime CSP would refuse anyway |
 | `scan-install` | an asset filename, version or **checksum is hand-typed rather than generated** from the release; a documented install path places the binary on `PATH` **before** verification; a signing/notarization claim names a step the pipeline does not perform |
 
 Two rules carried over from `scan-claims.mjs`, which already gets both right:
@@ -322,6 +322,45 @@ nobody can rely on.
 
 ---
 
+## Decision 15 — The GitHub link is unconditional; a star count is a build-time measurement or it is nothing
+
+The console sets a per-request CSP in [`middleware.ts`](../../../web/console/src/middleware.ts):
+`default-src 'self'`, `connect-src 'self'`, `img-src 'self' data:`. That file's own comment names the public
+page's no-third-party-origin rule as the reason. So the three usual ways to render a star count are
+**already refused at runtime**:
+
+| Approach | Outcome |
+|---|---|
+| shields.io / badge `<img>` | refused by `img-src 'self' data:` |
+| GitHub buttons widget / iframe | refused by `default-src 'self'` |
+| browser-side `fetch('https://api.github.com/…')` | refused by `connect-src 'self'` |
+
+**Decision.** Take the constraint as the design rather than carving an exception:
+
+- **The link is an anchor.** It makes no request until clicked, so it costs nothing — no privacy leak, no
+  CSP change, no air-gapped degradation, no loading state that can spin forever.
+- **The count, if shown, is captured during the build** and rendered as a server-side string **stamped with
+  its measurement date**. One machine we control, once per deploy — not once per visitor.
+- **Never hand-typed.** Same rule as a release checksum (Decision 12), same reason.
+- **Degrades to the plain link** when the measurement is unavailable (offline build, rate limit, API
+  failure). Never `0`, never a placeholder, never a broken badge: *an unavailable measurement rendered as
+  zero is a false statement, and it is the one a reader will believe.*
+- **Opt-in, default off** for the count; the link is unconditional. The repository is public and has **0
+  stars** today, and "★ 0" on a marketing home page is worse than nothing. The honest handling is a
+  configured choice a person makes — **not** a threshold that hides the number when it is inconvenient,
+  which is the same dishonesty with extra machinery.
+
+**Priority-law reading:** 第1级 安全/隐私 (no third party observes a visit to a page that sets no cookies)
+and 第2级 稳定 (no render-path dependency on an external API and its rate limit) over 第8级 实现 — for a
+number. And a sales note that is not incidental: a badge rendered by a third party, sitting on the page
+where we tell readers we contact no third parties, would undercut the exact claim beside it.
+
+**Generalizes past this feature.** The rule is written for *any* number the marketing surface states about
+the world rather than about the product — downloads, members, "used by" — because this will not be the last
+one asked for.
+
+---
+
 ## Risks carried by this design
 
 | Risk | Why we accept it | What limits the damage |
@@ -332,3 +371,5 @@ nobody can rely on.
 | API reference ships absent | An absent tier is honest | Decision 6 forbids the hand-written alternative outright |
 | Archived version deleted in a cleanup | Human error is certain over years | A fence fails the build on an unresolvable manifest entry |
 | Consent records complicate erasure | Evidence must outlive the identity | NFR9: the row holds no personal data beyond an opaque id |
+| A star count is stale between deploys | The alternative costs 第1级 privacy and 第2级 stability | The measurement date is rendered beside it; absent beats wrong |
+| "★ 0" reaches the home page | The repo is public with 0 stars today | Opt-in, default off; the link is unconditional (Decision 15) |

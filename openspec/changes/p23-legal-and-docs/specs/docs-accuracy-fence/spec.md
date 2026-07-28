@@ -105,6 +105,12 @@ stylesheet reference.
 - **WHEN** content contains a raw HTML block or an inline event handler
 - **THEN** the build fails.
 
+#### Scenario: A third-party origin in public-surface markup fails
+- **WHEN** the public surface's markup names a third-party origin — a badge image, a widget script, a hosted
+  font, or a cross-origin fetch
+- **THEN** the build fails naming the origin
+- **AND** the runtime CSP would refuse it independently, so the build-time and runtime enforcements agree.
+
 ### Requirement: The build SHALL reject hand-written release data and an install path that skips verification
 
 Install content SHALL derive its asset filenames, versions and checksums from the published release. The

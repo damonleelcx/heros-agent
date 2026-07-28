@@ -90,6 +90,21 @@ a docs platform beyond three tiers.
   describing build-from-source plus the P11 verification runbook (`scripts/release-cli.sh`, `SHA256SUMS`,
   `herossign`, `docs/release/cli-verification.md`) and says packaged channels are not yet available. Each
   P20 channel becomes documentable **as it becomes real**.
+- **New capability `social-proof-claims`.** A **link to the project's public GitHub repository on the home
+  page** — in the header and footer, marked external, making **no request until the reader clicks it**; a
+  link to a private or missing repository fails the build, under the same rule that forbids an install
+  command that 404s. If a **star count** is shown it is **measured during the build and stamped with its
+  measurement date**, never fetched by the reader's browser. **No third-party origin and no CSP
+  relaxation**: the console sets `default-src 'self'` / `connect-src 'self'` / `img-src 'self' data:` per
+  request in `middleware.ts` — whose own comment names the public page's no-third-party-origin rule — so a
+  shields.io badge, a GitHub buttons widget and a browser-side `api.github.com` call are **already refused
+  at runtime**, and this capability declines to be the exception. A count is **never hand-typed** (same rule
+  as a release checksum) and **degrades to the plain link** when the measurement is unavailable — never a
+  zero, a placeholder or a broken badge, because an unavailable measurement rendered as `0` is a false
+  statement and the one a reader will believe. Display of the count is **opt-in, default off**; the link is
+  unconditional. (The repository is public and currently has **0 stars** — rendering "★ 0" on a marketing
+  page is worse than rendering nothing, and that is a decision a person makes rather than a behavior that
+  appears when a number becomes available.)
 - **New capability `docs-accuracy-fence`.** Eight build-time gates in the idiom of the existing
   `scan-claims.mjs`: **claims** (a docs page may not describe a capability that is not `shipped: true` in
   `CAPABILITIES`, nor an install channel the pipeline does not publish), **CLI** (both directions, plus
@@ -97,7 +112,7 @@ a docs platform beyond three tiers.
   artifact), **metric** (every metric definition matches the harness's name, unit and computation, and cites
   where it is computed), **link** (internal links and anchors resolve; external links allow-listed and
   marked), **secret** (credential-shaped content fails the build), **content** (Markdown with no raw HTML, no
-  inline handlers, no external script), **install** (no hand-typed checksum/filename/version; no install path
+  inline handlers, no external script; and **no third-party origin in public-surface markup**), **install** (no hand-typed checksum/filename/version; no install path
   that reaches `PATH` before verifying; no trust claim the pipeline does not perform).
   **Each fence ships with a fixture proving it can fail**, and each states in its own header what it does
   **not** check.
@@ -116,14 +131,15 @@ fences that run inside the console's existing `npm run build`.
 ## Impact
 
 - **Affected capabilities:** new — `legal-documents`, `consent-records`, `developer-docs`, `cli-reference`,
-  `install-documentation`, `docs-accuracy-fence`, `reading-surface`. Consumes (does not modify) the P9 console
+  `install-documentation`, `social-proof-claims`, `docs-accuracy-fence`, `reading-surface`. Consumes (does not modify) the P9 console
   shell + BFF boundary + `CAPABILITIES` manifest, the P11 CLI registry / exit-code contract / supply-chain
   floor, the P20 release channels as they land, the P7 entitlement facts, and ADR-006 / ADR-007 / ADR-008.
 - **Affected code / systems:** `web/console/src/app/(reading)/` route group with `/legal/**` and `/docs/**`
   (new); `web/console/content/{legal,docs}/en/**` (new, locale-segmented from day one);
   `web/console/scripts/scan-{docs-claims,cli,api,metric,links,secrets,content}.mjs` (new, wired into
   `npm run build`); `web/console/scripts/gen-{cli-reference,schema-reference,search-index,slug-manifest,release-assets}.mjs`
-  (new); `web/console/tests/{legal,docs,install}.test.mjs` (new) and extensions to `link-coverage.test.mjs`;
+  (new); `web/console/tests/{legal,docs,install}.test.mjs` (new) and extensions to `link-coverage.test.mjs` and
+  `public-surface.test.mjs`; `web/console/src/app/(public)/` header + footer (GitHub link);
   `internal/api` consent endpoints + `internal/legal` (new); `db/migrations/postgres/00NN_p23_legal_acceptance.{up,down}.sql`
   (next free number — `0016` at time of writing, P21/P22 being docs-only); `docs/adr/ADR-010-*` (new);
   `docs/sales/P23-terms-reconciliation.md` (new).
