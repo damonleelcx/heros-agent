@@ -2,7 +2,6 @@ package transform
 
 import (
 	"go/ast"
-	"strings"
 
 	"github.com/heros-foreal/agentd/internal/discovery"
 	"github.com/heros-foreal/agentd/internal/variantspec"
@@ -161,15 +160,92 @@ func containsStr(xs []string, x string) bool {
 	return false
 }
 
-// spanRewriteTools is the tree-sitter engines' entry for the tools dimension: a refusal, for the same
-// reason skills refuse there. A deletion needs to know which element of a list is which, and at the
-// syntactic floor a list element is an unnamed span — the frontend records no tool split for these
-// languages at all (syntactic.go sets an empty ToolsSkills), so there is nothing to prune AGAINST.
-// Refusing here is what stops a selection that resolve accepted from silently deleting nothing.
-func spanRewriteTools(site discovery.SpanCallSite, _ []byte, o variantspec.ResolvedOverride) ([]edit, error) {
-	return nil, unsafeRewrite(site.NodeID, string(variantspec.DimTools),
-		"pruning to tool set %s needs the node's tool list located as static, deletable elements, and the "+
-			"%s frontend records no tool split for a call site; no pruner for this language has landed yet "+
-			"(Go is the first — decisions.md D-14.4), so the selection is REFUSED rather than applied to nothing",
-		strings.Join(o.ToolSelection, ", "), languageDisplay(site.Language))
+// spanRewriteTools is the tree-sitter engines' entry for the tools dimension.
+//
+// 🔴 It used to be a flat refusal whose sentence named the wrong owner — "no pruner for this language has
+// landed yet (Go is the first)". That read like a rewriter gap and never was one: deleting a written
+// element from a written list needs no per-SDK knowledge and constructs nothing. What was missing was
+// the frontend RECORDING which written element is which tool, and wave 14d landed that
+// (discovery/toolsplit_span.go). So this is now the same deletion the Go pruner performs, over spans
+// instead of AST positions, and the refusals below are about the SOURCE rather than about the language.
+//
+// 🚫 It never infers which element is which. The elements come back from the same splitter the frontend
+// recorded the split with, so "the tool the selection names" and "the element at the call site" are one
+// spelling — not two that have to be kept in step by whoever edits next.
+func spanRewriteTools(site discovery.SpanCallSite, src []byte, o variantspec.ResolvedOverride) ([]edit, error) {
+	const dim = string(variantspec.DimTools)
+
+	loc := site.ArgMap.Tools
+	if loc == nil {
+		return nil, refuseShape(site.NodeID, dim,
+			"the registry row matched for this call site declares no tools locator, so there is no tool list "+
+				"to prune; the SDK this row covers does not take tools at the call site")
+	}
+	v, written := site.Keywords[loc.Name]
+	if !written {
+		if u := site.KeywordUnpacking; u != nil {
+			return nil, refuseShape(site.NodeID, dim,
+				"this call site passes %s, so the tools it offers are assembled somewhere else in the program "+
+					"and are not written here; there is no declaration to delete. 🔴 A property of the call "+
+					"site, NOT of %s support — a pruner for this language refuses it for the same reason",
+				u.Text, languageDisplay(site.Language))
+		}
+		return nil, refuseShape(site.NodeID, dim,
+			"this call site writes no %s argument, so the selection %v has nothing to prune; the tools reach "+
+				"the SDK some other way and a deletion here would delete nothing while claiming to",
+			loc.Name, o.ToolSelection)
+	}
+	if err := checkSpan(site.NodeID, dim, v.Value, len(src)); err != nil {
+		return nil, err
+	}
+	text := string(src[v.Value.Start:v.Value.End])
+	if !discovery.IsWrittenList(site.Language, text) {
+		return nil, refuseShape(site.NodeID, dim,
+			"this call site's tool set is %s, not a list written here, so there is no declaration to delete; "+
+				"pruning it would mean guessing which of the tools it builds to drop, and a guess that parses "+
+				"is the failure mode with no downstream net", describeSpanValue(v, text))
+	}
+	elems, err := discovery.SplitWrittenList(site.Language, text)
+	if err != nil {
+		return nil, refuseShape(site.NodeID, dim,
+			"this call site's tool list cannot be split into the elements the author wrote: %v", err)
+	}
+
+	kept := map[string]bool{}
+	for _, name := range o.ToolSelection {
+		kept[name] = true
+	}
+
+	base := v.Value.Start
+	var edits []edit
+	present := make([]string, 0, len(elems))
+	for _, e := range elems {
+		present = append(present, e.Text)
+		if kept[e.Text] {
+			continue
+		}
+		start, end := absorbSeparator(src, base+e.Start, base+e.End)
+		if lineOf(src, start) != lineOf(src, end) {
+			return nil, refuseShape(site.NodeID, dim,
+				"tool %s spans %s:%d-%d; deleting a multi-line element would remove line(s) and shift every "+
+					"line below it, which this engine does not do", e.Text, site.FileRel,
+				lineOf(src, start), lineOf(src, end))
+		}
+		edits = append(edits, edit{Start: start, End: end, New: "", NodeID: site.NodeID, Dim: dim})
+	}
+
+	// 🔴 Fail closed on a selection the call site does not carry — same rule as the Go pruner, and for
+	// the same reason: reaching here means the TREE and the IR the selection was validated against
+	// disagree, and emitting anyway would prune against a call site nobody validated.
+	for _, name := range o.ToolSelection {
+		if !containsStr(present, name) {
+			return nil, refuseShape(site.NodeID, dim,
+				"the selection keeps tool %q, but this call site declares %v; the tree and the IR the "+
+					"selection was validated against disagree, so no deletion is emitted", name, present)
+		}
+	}
+	if len(edits) == 0 {
+		return nil, nil // the selection keeps everything: recorded in config_hash, no bytes change
+	}
+	return edits, nil
 }

@@ -104,7 +104,7 @@ func main() {
 
 	wave13aPromptOperators(eng, promptNode)
 	wave13bModelSelection(eng, modelNode)
-	paramTuneBoundMode(modelNode)
+	paramTuneBoundMode(modelNode, *repo)
 
 	fmt.Printf("\n✔ P13 run complete on the real hermes-agent IR. Diagnosis inputs and held-out deltas are\n")
 	fmt.Printf("  illustrative; the operator emission, immutable version ids, guardrail verdicts, and the\n")
@@ -204,7 +204,7 @@ func wave13bModelSelection(eng proposal.Engine, node string) {
 }
 
 // ── param tuning materializes in bound apply mode; inline is refused ───────────────────────────────
-func paramTuneBoundMode(node string) {
+func paramTuneBoundMode(node, repo string) {
 	fmt.Printf("── Wave 13b · parameter tuning (bound apply mode) ──\n")
 
 	// Bound: the tuned params materialize as data in the binding document.
@@ -231,7 +231,10 @@ func paramTuneBoundMode(node string) {
 		SourceRevision: commitSHA, ConfigHash: "cfg-hermes-param-inline", Language: "python",
 		Overrides: map[string]variantspec.ResolvedOverride{node: {ParamTune: true}},
 	}
-	if _, err := transform.Generate(inline, "/tmp/hermes-agent"); err != nil {
+	// The repo under test, NOT a hard-coded path: a refusal produced against some other directory
+	// would be a refusal about a tree this run never discovered, and on a machine where that path does
+	// not exist it would "pass" for the wrong reason entirely — a vacuous demonstration of the gate.
+	if _, err := transform.Generate(inline, repo); err != nil {
 		fmt.Printf("  inline: refused with a named cause (expected) — %s\n", firstClause(err.Error()))
 	} else {
 		fmt.Printf("  inline: WARNING — expected a refusal for an inline param tune, got none\n")

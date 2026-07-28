@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/heros-foreal/agentd/internal/diagnosis"
@@ -504,14 +505,30 @@ func (ragTuneOp) AdmissiblePatterns() []patternclassifier.Pattern {
 	return []patternclassifier.Pattern{patternclassifier.RetrievalRAG}
 }
 
+// Propose emits one candidate per retrieval-parameter entry the menu offers for this node.
+//
+// P16 task 6.2 widens the knobs from top-k alone to top-k, CHUNK SIZE, and EMBEDDING MODEL — the three
+// parameters that actually decide what a retriever returns. They are proposed as registry entries, not
+// as inline params, exactly like every other dimension: the operator references a pinned entry by
+// version_id, so what was tried is re-derivable from `config_hash` months later.
+//
+// 🔴 Each candidate's rationale names WHICH knob moved and from what. That is not cosmetic: verification
+// attributes a measured delta to a candidate, and a rationale that said only "retrieval miss → tune"
+// would leave the ledger recording that *something* about retrieval helped, which is not a finding
+// anyone can act on. An entry identical to what the node already pins is skipped — it would spend a
+// verification slot proving a no-op.
 func (op ragTuneOp) Propose(in OperatorInput) ([]Candidate, error) {
 	var out []Candidate
-	// tune top-k: swap in a larger-window context policy.
+	cur, _ := in.Menu.contextByRef(baseOverride(in.Base, in.Diagnosis.NodeID).ContextPolicy)
 	for _, c := range in.Menu.contextPoliciesOfKind("topk") {
+		delta := retrievalDelta(cur, c)
+		if delta == "" {
+			continue // identical to the node's current retrieval configuration: nothing to verify
+		}
 		spec := cloneSpec(in.Base)
 		setContext(spec, in.Diagnosis.NodeID, c.Ref)
 		out = append(out, newCandidate(op.Kind(), in, in.Diagnosis.NodeID, []string{"context"}, spec,
-			fmt.Sprintf("retrieval miss → increase top-k (%d)", c.TopK)))
+			fmt.Sprintf("retrieval miss → %s", delta)))
 	}
 	// swap retriever / embedding.
 	for _, kind := range []string{skillKindRetriever, skillKindEmbedding} {
@@ -523,6 +540,36 @@ func (op ragTuneOp) Propose(in OperatorInput) ([]Candidate, error) {
 		}
 	}
 	return out, nil
+}
+
+// retrievalDelta describes, in words a reviewer and the verified-delta ledger both read, what a
+// candidate retrieval entry changes relative to the one the node pins now. Empty when nothing changes.
+//
+// The knobs are listed in a fixed order so two runs of the same proposal produce the same sentence —
+// a rationale that varied by map ordering would make identical candidates look different in the UI.
+func retrievalDelta(cur, next ContextChoice) string {
+	var parts []string
+	if next.TopK != 0 && next.TopK != cur.TopK {
+		parts = append(parts, fmt.Sprintf("top-k %s→%d", zeroAsUnset(cur.TopK), next.TopK))
+	}
+	if next.ChunkSize != 0 && next.ChunkSize != cur.ChunkSize {
+		parts = append(parts, fmt.Sprintf("chunk size %s→%d", zeroAsUnset(cur.ChunkSize), next.ChunkSize))
+	}
+	if next.EmbeddingModel != "" && next.EmbeddingModel != cur.EmbeddingModel {
+		from := cur.EmbeddingModel
+		if from == "" {
+			from = "(unset)"
+		}
+		parts = append(parts, fmt.Sprintf("embedding %s→%s", from, next.EmbeddingModel))
+	}
+	return strings.Join(parts, ", ")
+}
+
+func zeroAsUnset(v int) string {
+	if v == 0 {
+		return "(unset)"
+	}
+	return strconv.Itoa(v)
 }
 
 type addRerankOp struct{}

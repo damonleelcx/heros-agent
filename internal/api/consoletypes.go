@@ -79,5 +79,8 @@ func ConsoleViewTypes() []ConsoleViewType {
 
 		// ── P12 · forge delivery state + route condition ─────────────────────
 		{Name: "DeliveriesView", Sample: DeliveriesView{}, Endpoint: "GET /api/p12/deliveries"},
+
+		// ── P13 13d · total per-axis, per-language coverage ───────────────────
+		{Name: "AxisCoverageView", Sample: coverageView{}, Endpoint: "GET /api/p13/coverage"},
 	}
 }

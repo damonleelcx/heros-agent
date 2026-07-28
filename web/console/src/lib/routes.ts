@@ -35,7 +35,9 @@ export const routes = {
     `/app/transforms/${encodeURIComponent(configHash)}/${encodeURIComponent(sourceRevision)}`,
   scorecard: (variantId: string) => `/app/variants/${encodeURIComponent(variantId)}/scorecard`,
   studio: () => "/app/studio",
+  authoring: () => "/app/authoring",
   wiring: () => "/app/wiring",
+  coverage: () => "/app/coverage",
   account: () => "/app/account",
   delivery: () => "/app/delivery",
 };

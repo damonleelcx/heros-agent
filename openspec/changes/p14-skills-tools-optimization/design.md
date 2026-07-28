@@ -128,6 +128,82 @@ ill-defined — the very metric that proves a prune helped — and a raw provide
 a trace the platform renders. The typed envelope *is* the runtime error taxonomy the axis is measured
 against; a change to what tools are offered must not change what an error can be.
 
+## Decision 8 — Authoring on this axis is fail-closed selection, and its refusal moves to preflight
+
+A user may bind / unbind / reorder a node's skills and prune / restore its tools, through the shared
+[`authored-change`](../p13-prompt-model-optimization/specs/authored-change/spec.md) contract (one spine,
+two origins; origin-blind refusals; `unverified` labeling; conflicts, reversal, audit, offline parity).
+Two axis-specific rules are added. **Selection is fail-closed**: a skill must be a registry-sealed entry
+with a *pinned* version, and a tool must be a member of the node's **discovered** tool set — neither is
+free text. **The language boundary is stated at preflight**: on a node whose language has no landed
+materializer, skills are not offered at all, and a binding submitted anyway is refused with the same typed
+cause the transform raises.
+
+**Alternative rejected — let the user type a skill or tool identifier and resolve it later.** It is the
+obvious editor affordance and it removes a dependency on discovery being complete. Rejected on **L1 safety +
+L2 stability**, and it is the same argument that makes `env` validate against `DeclaredEnv` and `expr`
+validate against `in_scope`. A tool the frontend did not locate at that call site is not a tool the codemod
+can delete — the emitted diff would either remove nothing or remove the wrong span, and both are silent.
+A skill bound without a pinned version is worse: the SDK tool value is constructed from the version's
+sealed schema, so an unpinned binding means *the shape of the constructed value is whatever the registry
+happens to hold at apply time*, which is precisely the "compiles and then degrades quality invisibly"
+failure `refuseSkills` was written to prevent. Fail-closed selection costs an authoring surface that can
+only offer what discovery found; free text costs a class of wrong diffs that no test can enumerate.
+
+**Alternative rejected — surface the language refusal at submit, reusing the transform's refusal.** No new
+code path, and the cause text is already correct. Rejected on **L3 user-facing complexity**: a node's language is
+known before the user opens the picker. Offering a full skill catalog on a node that provably cannot carry
+one, then refusing after the user has chosen and ordered several, is the interaction-simplicity failure in
+its purest form — the system withheld a fact it already had. The materializer-coverage table
+([`docs/decisions/p14-materializer-coverage.md`](../../../docs/decisions/p14-materializer-coverage.md),
+derived from the form table rather than copied) is the single source that answers it, so preflight and the
+transform cannot disagree about which languages are supported.
+
+## Decision 9 — Two total coverage tables, and the tool split is a frontend obligation
+
+D-14.4 chose Go as the *first* materializer and left every other language on D-14.3's refusal. That was
+right as an interim posture and is wrong as a terminal one, for a reason the refusal text itself makes
+visible: discovery finds these call sites in all seven registered languages and the IR records them, so a
+missing row describes **our backlog**, not the customer's code. D-14.5 closes it. Three sub-decisions do the
+work, and each rejects a shortcut that would have been faster.
+
+**Coverage is two tables, not one, and both are total.** Binding and pruning are blocked by different
+things in different packages: binding needs a **spelling** for a (language, provider, SDK generation) cell;
+pruning needs the **frontend** to record a tool split. So a language that can prune and cannot bind is the
+*normal* case here, not an anomaly — and a single "P14 coverage" answer would have to pick one of the two,
+which in practice means the pessimistic one, telling a customer whose real need is a prune that the axis
+does not apply to them. Both tables are total over the registered language set (**absence is not a value**,
+P13 Decision 13), so every language reads as either a materialization or a named missing artifact.
+
+**The spelling is the only per-language part of binding, and it is evidence, not intent.** The *shape* of a
+bound skill already comes from the pinned version's sealed schema, which is language-independent; what
+differs per cell is how that provider's SDK **in that language, at that generation** spells a tool list.
+That is why adding TypeScript is a set of rows rather than a second source of truth. It is also why a row
+is admitted only with a **build gate** proving those bytes compile against the named generation —
+*rejected: shipping a spelling that merely reparses.* This axis exists because a wrong tool schema
+**compiles**; a row backed by anything less than a build is the failure the whole capability was written
+to prevent, wearing a coverage badge.
+
+**The pruner does not infer; the frontend records.** `spanRewriteTools` refuses today not because deletion
+is hard at the syntactic floor — it is the easiest edit in the engine — but because a syntactic list
+element is an unnamed span and the frontend records no tool split, so there is nothing to prune *against*.
+*Rejected: let the span pruner infer which element is which tool* (by position, by text similarity, by
+matching the selection's names against element text). Every version of that inference trades **L1
+correctness for L8 convenience**, and its failure mode is a prune that deletes the wrong element in a diff
+that parses — the failure class with no downstream net. The frontend recording each tool's identifier and
+declaration location is more work, in the right package, and it makes the unlocatable case explicit rather
+than indistinguishable from the absent one.
+
+**What stays refused after every row lands.** An SDK that carries its tools inside an opaque serialized
+body has no tool value to construct or delete in **any** language, and a call site that assembles its tool
+set at run time has no declaration to point at. Both are `call-site-cannot-carry-it` under P13's cause
+classes, both refuse identically before and after 14d, and neither may be counted as a platform gap — the
+distinction that keeps a coverage table from turning into a promise nobody can keep.
+
+**Corollary — a reorder is a real change.** Skill order is identity-bearing, so an authored reorder yields
+a new `config_hash` and is a scoreable configuration, not a cosmetic edit. The authoring surface must not
+present it as one.
+
 ## Interfaces sketch
 
 ```
@@ -150,6 +226,17 @@ NodeOverride.ToolSelection *ToolSelection `json:",omitempty"`   // { keep []stri
 ResolvedNode.ToolSelection *ResolvedToolSelection `json:",omitempty"`   // nil-when-empty → byte-identical pre-P14 (D5)
 rewriters[DimTools]   = deletePrunedTool | refuseDynamic  // deletion of a static tool element, else ErrUnsafeRewrite (FR14)
 OpToolPrune           // catalog row; scored by existing metrics (D6) → eval_tokens_total ↓ · tool_error_rate ↓
+
+// P14 skill-tool-authoring  (14c — a second ORIGIN on the same spine; see p13 authored-change)
+authoring.Draft{ Edits: node → { SkillRefs?, ToolSelection? } }        // parent immutable; token-guarded
+preflight(draft) → admissible
+                 | refused{ cause, node, field }                       // SAME typed causes as the operator path:
+                 //   no-materializer(language) · unknown-or-unpinned-skill · invalid-skill-args(field)
+                 //   tool-outside-discovered-set(tool) · dynamic-tool-set(node)
+                 | not-yet-measurable{ missing }
+offer(node) = { skills: registry-sealed ∧ pinned ∧ materializerCoverage(node.language),
+                tools : node.Tools (discovered) }                      // fail closed; NEVER free text
+// reorder is identity-bearing ⇒ new config_hash ⇒ a real, scoreable change, not a cosmetic one
 ```
 
 ## Risks
@@ -163,4 +250,13 @@ OpToolPrune           // catalog row; scored by existing metrics (D6) → eval_t
 | Pruning over a dynamically-built tool list produces a bad edit | Refuse a dynamic tool set with `ErrUnsafeRewrite` rather than guess (FR14). |
 | A new tool metric forks the definition of a saving | Decision 6 — no new metric; scored by the axis-agnostic harness. |
 | A tool/skill change leaks a raw provider error and breaks `tool_error_rate` | Decision 7 — failures only through the `toolcontract` allowlisted codes. |
+| A user types a tool or skill name and the codemod deletes the wrong span, or nothing | Decision 8 — fail-closed selection: skills from the sealed registry with a **pinned** version, tools from the node's **discovered** set; free text is not a selection. |
+| A user picks skills on a node whose language cannot carry one, and finds out after submitting | Decision 8 — the language boundary is stated at preflight from the **same** materializer-coverage table the transform reads, so the two cannot disagree. |
+| An authored reorder is treated as cosmetic | Decision 8 corollary — skill order is identity-bearing; a reorder yields a new `config_hash` and is presented as a real change. |
+| An unverified authored prune is quoted as a token saving | The shared `unverified` rule — no token, cost, or error-rate saving is attributed until the harness runs. |
 | The capability doc and actual per-language coverage drift | Coverage written down once (NFR7), the `argumentForm` single-source-of-truth discipline. |
+| A language is absent from coverage and reads as "not applicable" | Decision 9 — **two total tables** over the registered language set; a generated test fails on a missing cell. |
+| A new spelling compiles against the wrong SDK generation | Decision 9 — a row names its generation and is admitted only with a build gate proving those bytes compile against it. |
+| A span pruner deletes the wrong element | Decision 9 — the **frontend** records each tool's declaration location; an unlocatable tool is recorded as such and refused, never inferred. |
+| Pruning is written off because binding is unavailable | Decision 9 — two tables, neither read as implying the other; a language routinely prunes before it binds. |
+| A call site that assembles tools at run time is told to wait for a rewriter | Decision 9 — it is `call-site-cannot-carry-it`, reported ahead of the language question and unchanged by any later row. |

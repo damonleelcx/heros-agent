@@ -192,8 +192,16 @@ item("P15-9", "the wiring surface shows an APPLIED reorder, not only declined on
   "AxisApplied", /id: "applied"/, /An applied reorder/);
 item("P15-10", "the applied state carries the engine's REAL diff, not a description of one", "wiring",
   "APPLIED_DIFF", "--- a/wiring.go", "+++ b/wiring.go");
-item("P15-11", "the applied card states the permutation invariant that makes the change safe", "axisRefusal",
+// P16 moved this sentence from the COMPONENT to the CALLER, and the move is the point. The invariant
+// was hard-coded to the wiring axis, so the first applied change from another axis (a context window,
+// which DELETES list elements) rendered "the file's lines were reordered" over a diff where that is
+// simply false. A safety claim asserted on behalf of a change the component knows nothing about is the
+// sentence a reviewer stops reading the diff because of. The wiring page still states it — that is what
+// this item guards — and `AxisApplied` now REQUIRES each caller to supply its own.
+item("P15-11", "the applied card states the permutation invariant that makes the change safe", "wiring",
   "reordered and nothing else changed", /same lines/i);
+item("P16-1", "the applied card takes its invariant from the caller rather than asserting one", "axisRefusal",
+  "invariant: ReactNode");
 
 item("P2-12", "a transform loads by config_hash + source_revision", "transform",
   "config_hash", "source_revision");

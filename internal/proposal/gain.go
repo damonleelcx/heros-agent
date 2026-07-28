@@ -83,3 +83,71 @@ func expectedGain(kind OperatorKind, in OperatorInput) float64 {
 	}
 	return prior * sev
 }
+
+// ── Operator credit (P13 13c task 10.4, FR29) ───────────────────────────────────────────────────
+//
+// An operator's record must measure the OPERATOR. The moment a human corrects a nearly-right proposal
+// and the corrected version wins, crediting that win to the originating operator turns its win rate
+// into a measure of how often people fix it — and every downstream use of that number (the gain prior
+// above, cheapest-first ordering, "which operators earn their keep") is then reading the wrong thing.
+//
+// So there are exactly two rules, and they are stated here rather than at each reporting call site:
+//
+//	a USER-originated candidate credits no operator at all;
+//	a candidate FORKED from a proposal credits no operator either — its outcome belongs to the person
+//	who changed it, and the original proposal's own outcome (accepted or rejected as proposed) is what
+//	the operator is measured on.
+
+// CreditedOperator reports which operator, if any, may be credited with this candidate's outcome.
+//
+// The boolean is not a nicety: `("", false)` and `("authored", true)` are different facts, and a caller
+// that ignored the flag would create an "authored" row in a table of operator performance — which reads
+// as a catalog operator that nobody can find in the catalog.
+func CreditedOperator(c Candidate) (OperatorKind, bool) {
+	if c.Origin.IsUser() {
+		return "", false
+	}
+	if c.ForkedFromProposal != "" {
+		// Defensive, and deliberately not merely defensive: a candidate carrying a fork pointer was
+		// touched by a person even if something upstream forgot to set Origin. The pointer is the
+		// evidence; trusting only Origin would let one missed assignment restore the inflation.
+		return "", false
+	}
+	return c.Operator, true
+}
+
+// OperatorCredits tallies outcomes per operator, excluding everything CreditedOperator withholds.
+//
+// `won` is supplied by the caller because "won" is a verification verdict and this package does not
+// decide verdicts — passing it in keeps the tally arithmetic here and the judgment where it belongs.
+func OperatorCredits(cands []Candidate, won func(Candidate) bool) map[OperatorKind]OperatorCredit {
+	out := map[OperatorKind]OperatorCredit{}
+	for _, c := range cands {
+		op, ok := CreditedOperator(c)
+		if !ok {
+			continue
+		}
+		cr := out[op]
+		cr.Proposed++
+		if won != nil && won(c) {
+			cr.Won++
+		}
+		out[op] = cr
+	}
+	return out
+}
+
+// OperatorCredit is one operator's tally.
+type OperatorCredit struct {
+	Proposed int
+	Won      int
+}
+
+// WinRate is Won/Proposed, or 0 when nothing was proposed. Stated as a method so no caller divides by
+// zero in its own way.
+func (c OperatorCredit) WinRate() float64 {
+	if c.Proposed == 0 {
+		return 0
+	}
+	return float64(c.Won) / float64(c.Proposed)
+}

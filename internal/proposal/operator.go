@@ -220,6 +220,19 @@ type Candidate struct {
 	// on held-out cases. Verification consults RequiresHeldOutGuardrail / EvaluateDowngradeGuardrail for
 	// such a candidate before admitting it. In-memory only — never hashed (design Decision 8).
 	GuardrailRequired bool
+
+	// ── P13 13c: the second ORIGIN ────────────────────────────────────────────────────────────────
+	//
+	// Origin is who initiated this change. The zero value reads as OriginOperator, so every catalog
+	// operator keeps constructing candidates exactly as it did. 🚫 Never hashed (origin.go).
+	Origin Origin
+	// Actor is the acting identity for a user-originated candidate. Zero for an operator's.
+	Actor Actor
+	// ForkedFromProposal is set when a person edited an operator's proposal and submitted the result.
+	// Both lineages stay visible — but the outcome belongs to the person, and the originating operator
+	// is NOT credited with it, or an operator's win rate degrades into a measure of how often humans
+	// fix it. In-memory only, never hashed.
+	ForkedFromProposal string
 }
 
 // Operator is one catalog change-operator. It declares the diagnosis taxonomy codes and structural

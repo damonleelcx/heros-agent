@@ -53,6 +53,7 @@ const PATH_TEMPLATES: Array<[RegExp, string]> = [
   [/^\/api\/p55\/workflows\/[^/]+\/surface$/, "/api/p55/workflows/{workflow_id}/surface"],
   [/^\/api\/p55\/workflows\/[^/]+\/proposals\/[^/]+\/open-pr$/, "/api/p55/workflows/{workflow_id}/proposals/{proposal_id}/open-pr"],
   [/^\/api\/p7\/customers\/[^/]+\/billing/, "/api/p7/customers/{customer_id}/billing"],
+  [/^\/api\/p13\/coverage$/, "/api/p13/coverage"],
   [/^\/healthz$/, "/healthz"],
   [/^\/readyz$/, "/readyz"],
 ];

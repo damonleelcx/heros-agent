@@ -381,6 +381,7 @@ func swapSurvey(ir *discovery.IR, base *variantspec.VariantSpec, repo string) {
 
 	reasons := map[string]int{}
 	applied := 0
+	inert := 0
 	var firstDiff string
 	for i := 0; i+1 < len(base.Order); i++ {
 		first, second := base.Order[i], base.Order[i+1]
@@ -401,14 +402,34 @@ func swapSurvey(ir *discovery.IR, base *variantspec.VariantSpec, repo string) {
 			reasons[refusalShape(err)]++
 			continue
 		}
+		// 🔴 A patch with NO diff is not a materialization. Both branches return nil error, and
+		// counting them together printed "39 materialized" directly above the sentence "no pair in
+		// this repository is a transposition of two adjacent sibling statements" — the survey
+		// contradicting itself in the same block.
+		//
+		// The distinction is the one §4's correction turned on. These node pairs sit in different
+		// functions, so the source ORDERS nothing between them: swapping them is a DECLARATION, not a
+		// rewire, and emitting no diff is correct (it is why the gate does not refuse them). But it is
+		// also the exact shape of the failure this axis exists to prevent — a config_hash recording a
+		// rearranged graph, scored against source that was never rewired. Reporting it as "materialized"
+		// is how that failure would be read as a success.
+		if patch == nil || patch.IsEmpty() {
+			inert++
+			continue
+		}
 		applied++
 		if firstDiff == "" {
 			firstDiff = string(patch.Diff)
 			fmt.Printf("  MATERIALIZED %s <-> %s\n", short(first), short(second))
 		}
 	}
-	fmt.Printf("  %d adjacent pair(s) surveyed: %d materialized, %d refused\n",
-		len(base.Order)-1, applied, len(base.Order)-1-applied)
+	fmt.Printf("  %d adjacent pair(s) surveyed: %d materialized, %d inert (no diff), %d refused\n",
+		len(base.Order)-1, applied, inert, len(base.Order)-1-applied-inert)
+	if inert > 0 {
+		fmt.Printf("    the inert ones are pairs the SOURCE states no order between (different functions),\n")
+		fmt.Printf("    so the swap is a declaration rather than a rewire: correct to accept, and correct\n")
+		fmt.Printf("    NOT to call materialized — nothing was written to the source.\n")
+	}
 	for _, k := range sortedReasons(reasons) {
 		fmt.Printf("    %3d refused: %s\n", reasons[k], k)
 	}

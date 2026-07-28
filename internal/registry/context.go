@@ -60,9 +60,10 @@ func (FullPolicy) Assemble(_ context.Context, _ HostServices, conv Conversation,
 	}, nil
 }
 
-// BuiltinPolicies returns every named context policy. P2 shipped only `full`; P3 adds the four
-// context-engineering strategies. Adding a policy is a new entry here (and its implementation), never
-// a schema change — the AddPolicy seam and content-addressed context entries are already policy-generic.
+// BuiltinPolicies returns every named context policy. P2 shipped only `full`; P3 added the four
+// context-engineering strategies; P16 adds two more. Adding a policy is a new entry here (and its
+// implementation), never a schema change — the AddPolicy seam and content-addressed context entries are
+// already policy-generic, which is the whole reason this list can grow without anything else moving.
 func BuiltinPolicies() []Policy {
 	return []Policy{
 		FullPolicy{},        // P2 name, kept so pinned specs keep resolving
@@ -71,6 +72,10 @@ func BuiltinPolicies() []Policy {
 		SummarizationPolicy{},
 		RAGRetrievalPolicy{},
 		SemanticCompactionPolicy{},
+		// P16 (tasks 4.2, 4.3): two additions behind this interface. Neither changes the registry schema,
+		// the ContextSpec shape, or the Dimension enum — each is a Name/ParamsSchema/Assemble and a row.
+		HierarchicalSummaryPolicy{},
+		StructuredExtractionPolicy{},
 	}
 }
 

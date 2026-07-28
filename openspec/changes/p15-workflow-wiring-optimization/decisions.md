@@ -1,6 +1,7 @@
 # P15 — Recorded decisions (System Designer, §1)
 
-Two contracts that must be fixed **before any `mergeOp` ships or any adapter reaches a customer diff**,
+Contracts that must be fixed **before any `mergeOp` ships, any adapter reaches a customer diff, or any
+further language's statement resolver lands**,
 because each is a one-way door. `OpMerge` is a wire value stored on a proposal row
 ([`operator.go:30-32`](../../../internal/proposal/operator.go): *"the wire value stored on a proposal
 row, so it is a stable string"*), so its **semantics** become a contract the moment the first row names
@@ -167,4 +168,51 @@ class of bug it was written for.
 
 **Effect.** The permutation assertion is the thing a reviewer can trust without reading the codemod: if
 it holds, the change cannot have altered a single character of the file's content.
+
+---
+
+## D-5 — A statement resolver is the **only** per-language part of a wiring move, and the invariant never varies
+
+**Problem.** `statementResolvers` carries two rows, and wave 15e adds the remaining five. That is
+ordinary work with one extraordinary hazard, and it is a one-way door: the *shape* of the first
+non-line-oriented resolver decides what the permutation invariant is asserted over for every language
+afterwards. Go and Python both happen to place a statement on whole lines, so the invariant is currently
+stated as "the same lines, permuted". TypeScript chains, Kotlin `apply` blocks and Rust
+expression-statements can put two nodes on one line, where an adjacent transposition is perfectly
+well-defined and the *line* invariant is not. If the first such resolver is allowed to relax the invariant
+"just for this language", the gate that makes a textual move trustworthy has been weakened silently — and
+nothing fails, because a weakened gate's whole symptom is that it stops catching things.
+
+**Decision.** Two parts, both pre-code.
+
+1. **The per-language surface is exactly one function: resolve the statement enclosing a line, returning
+   its byte span.** The plan (`planWiringSwap`'s literal one-adjacent-pair check), the edge-set
+   comparison, the coherence gate, the emitted edit, and the invariant are produced by the same neutral
+   path in every language. A language may not supply its own gate, its own invariant, or a fast path
+   around either.
+2. **The invariant is asserted over the resolved statement multiset, with the line-count rule retained as
+   the stricter special case where statements are line-aligned.** A language whose statements are line
+   aligned keeps today's assertion unchanged; a language whose statements are not is asserted over spans,
+   and in **both** cases the assertion is one implementation, not a per-language pair.
+
+**Why this is the appropriate design.** Part 1 is **L6 + L2**. Five languages arriving as five resolvers
+is a table growing rows; five languages arriving as five gates is one safety property becoming five
+dialects, of which the weakest will be the least reviewed. Part 2 is **L1**, and it is the one place 15e
+could quietly weaken a gate: a per-language relaxation is indistinguishable, in every passing test run,
+from a per-language correctness. Choosing the multiset formulation *before* the first non-line-oriented
+resolver lands means the generalization is a deliberate design act rather than a concession made under
+schedule pressure by whoever happens to write the TypeScript row.
+
+**Alternatives.** (a) **Let each resolver assert what it can** — rejected under part 2. (b) **Restrict
+coverage to line-oriented languages** — rejected as a false boundary: it would leave TypeScript, the
+second-largest population of agent call sites, permanently uncovered for a formatting convention rather
+than a safety property. (c) **Emit a formatting normalization pass first, so every language becomes line
+oriented** — rejected on **L2 + L5**: rewriting a customer's formatting to make our invariant cheaper is a
+far larger change than the one requested, and the minimality gate exists to forbid exactly that.
+
+**Effect.** Each remaining language is one resolver plus one coverage row, landing as one go-red refusal
+test flipped into a materialization test. What does **not** change: the admitted operation stays a single
+adjacent transposition; a merge, prune, edge change, non-adjacent move or multi-swap stays refused **by
+shape** in every language; a workflow with no transposable pair stays refused as a fact about the source;
+and an unmaterializable draft stays unscoreable everywhere.
 

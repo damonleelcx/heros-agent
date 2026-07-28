@@ -2,7 +2,7 @@
   "name": "heros-console",
   "version": "0.1.0",
   "private": true,
-  "description": "P9 customer console — the tenant-facing dashboard and its BFF, plus the public home page.",
+  "description": "P9 customer console \u2014 the tenant-facing dashboard and its BFF, plus the public home page.",
   "scripts": {
     "dev": "next dev --port 4320",
     "build": "npm run scan:tokens && npm run scan:strings && npm run scan:markup && npm run scan:claims && next build && npm run scan:bundle",
@@ -15,7 +15,8 @@
     "typecheck": "tsc --noEmit",
     "test": "node --test tests/*.test.mjs",
     "accept": "node scripts/accept.mjs",
-    "scan:markup": "node scripts/scan-markup.mjs"
+    "scan:markup": "node scripts/scan-markup.mjs",
+    "dev:browser": "CONSOLE_TENANT_IDENTITY=configured CONSOLE_TENANT_ASSERTIONS='{\"local-dev-assertion\":\"tenant-hermes\"}' CONSOLE_PLATFORM_CREDENTIAL=local-dev-credential-not-a-secret PLATFORM_API_BASE=http://127.0.0.1:4399 next dev --port 4320"
   },
   "dependencies": {
     "@tailwindcss/postcss": "4.1.12",

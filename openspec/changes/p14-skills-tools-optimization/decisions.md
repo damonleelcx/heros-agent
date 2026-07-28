@@ -1,10 +1,10 @@
 # P14 — Recorded decisions (System Designer)
 
-Four contracts that must be fixed **before any transform or discovery code ships**, because each is a
+Five contracts that must be fixed **before any transform or discovery code ships**, because each is a
 one-way door. `design.md` argues the full decision set; this file records only the pre-code, one-way-door
 contracts: the tools≠skills IR split (D-14.1), the new `DimTools` dimension without a registry `Kind`
-(D-14.2), the interim-refusal contract (D-14.3), and which language gets the first skill materializer
-(D-14.4).
+(D-14.2), the interim-refusal contract (D-14.3), which language gets the first skill materializer
+(D-14.4), and the shape of the coverage claim that carries the rest of the languages (D-14.5).
 
 ---
 
@@ -184,3 +184,69 @@ nothing.
 other (language, provider) pair keeps refusing **by name** — "no materializer for `<language>` yet" /
 "no declared tool-value form for provider `<p>`" — so the boundary is legible from the refusal itself,
 and each later materializer flips exactly one go-red refusal test into a materialization test.
+
+> **Scope note (D-14.5).** "Go is first" is an **ordering** decision, not a terminal state. D-14.5 defines
+> the shape of the claim that carries the remaining languages and the obligations that make each of them a
+> row rather than an invention. D-14.4's refusal text, its per-(language, provider) granularity, and its
+> go-red tests are unchanged by it.
+
+---
+
+## D-14.5 — Coverage is **two total tables**; the tool split is a **frontend** obligation, never an inference
+
+**Problem.** D-14.4 leaves the axis in a state that is honest per refusal and dishonest in aggregate.
+`MaterializerCoverage()` reports only the cells that work, so a language with no materializer has **no row
+at all** — and an absent row renders on every surface as *not applicable*, which is a statement about the
+customer's code. It is not: discovery finds these call sites in all seven registered languages and the IR
+records them. Worse, the axis has *two* mechanics with *two different* blockers, and the single word
+"Go-only" hides which one a given customer has hit. Both of those are one-way doors in the same quiet way
+D-14.4 was: the first shape published is the shape every later cell is judged against, and a consumer that
+learns to read "absent means unsupported" cannot be un-taught cheaply.
+
+**Decision.** Three parts, all pre-code.
+
+1. **Two coverage tables, both total.** Skill **binding** coverage is keyed by
+   **(language, provider, SDK generation)**; tool **pruning** coverage is keyed by
+   **(language, frontend tool split)**. Each carries an entry for **every** registered language, and an
+   entry is either a materialization or a **named missing artifact**. Neither table may be read as implying
+   the other, and neither may express a gap by omission. This is P13's `language-coverage` contract applied
+   to this axis; the totality check is generated from `discovery.DefaultFrontends`, so adding a frontend
+   with no entry fails.
+2. **A spelling row is admitted only on a build.** A `(language, provider, SDK generation)` row is a claim
+   that *these bytes compile against that SDK generation*, and the only thing that can prove it is a build
+   gate. A row that merely reparses is not a row.
+3. **The frontend records the tool split; the pruner never infers it.** Every language frontend records,
+   per tool, the call-site identifier and the **location of its declaration**, and records *unlocatable*
+   explicitly where it cannot. A span pruner may not derive which unnamed element is which tool by
+   position, text similarity, or name matching against the selection.
+
+**Why this is the appropriate design.** Part 1 is an **L3 / L6** argument. A single answer for two mechanics
+would have to be resolved toward the pessimistic one, so a customer whose real need is a *prune* — which is
+the cheap, byte-safe, no-construction half — would be told the axis does not apply. And absence-as-a-value
+is the specific failure that makes a backlog item read as a product boundary; making the tables total costs
+rows and buys the platform the ability to say *which of three things* is missing (P13 FR43), two of which
+are not ours to fix. Part 2 is **L1**, and it is this axis's founding argument restated: `refuseSkills`
+exists because a subtly-wrong tool schema *compiles and then degrades quality invisibly*. A coverage row
+backed by a reparse rather than a build reintroduces exactly that, with a badge on it. Part 3 is **L1 over
+L8**: inference is cheaper than teaching six frontends to record a location, and its failure mode is a
+prune that deletes the wrong element in a diff that parses — the failure class ADR-001 names as having no
+downstream net. Recording the location is more work in the *right* package; inferring it is less work in
+the *wrong* one.
+
+**Alternatives.** (a) **One coverage table for the axis** — rejected under part 1's argument; the mechanics'
+blockers live in different packages and move independently. (b) **Reach the other languages by having the
+span pruner match selection names against element text** — rejected under part 3; it is an inference
+presented as a lookup. (c) **Admit spelling rows on reparse alone, and let verification catch the bad
+ones** — rejected under part 2: verification catches *quality* regressions, and a wrong tool schema's first
+symptom is a model that stops calling the tool, which is a slow, expensive way to learn what a build would
+have said in a second. (d) **Declare the remaining languages structurally unsupported and stop** — rejected
+as false: the only structural cases are an SDK whose tools live in an opaque body and a call site that
+assembles its tools at run time, and those refuse under `call-site-cannot-carry-it` in **every** language,
+including Go.
+
+**Effect.** 14d turns each remaining language into a bounded set of artifacts — a spelling row per
+(provider, SDK generation), a frontend tool split, and where the SDK binds before the call, a binding site
+(P13 FR52) — each landing as one go-red refusal test flipped into a materialization test, exactly as
+D-14.4 intended. What does **not** change: the sealed schema stays the sole source of a bound skill's
+shape in every language; a materialized binding is still a proposal the harness decides; and the two
+structural refusals above stay refused after every row has landed.

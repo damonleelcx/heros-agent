@@ -4,11 +4,21 @@
 //
 // # What this run proves, and the one thing it deliberately does NOT
 //
-// hermes-agent is PYTHON. Go is the first — and in 14a the only — language whose skill materializer has
-// landed (decisions.md D-14.4). So the honest headline result of running P14 against this repository is
-// a REFUSAL, and that is not a disappointing outcome to be worked around: it is the contract D-14.3
-// specifies, exercised on real node ids, at real call sites, with the reason named. The failure P14 is
-// written against is a diff that LOOKS complete; a run that quietly produced one here would be the bug.
+// hermes-agent is PYTHON. When 14a shipped, Go was the only language whose skill materializer had
+// landed (decisions.md D-14.4) and the headline here was a LANGUAGE refusal. 14d changed that: Python
+// is now a covered row, and the headline is still a REFUSAL — but a refusal about the CALL SITES.
+//
+// 🔴 That distinction is the whole point, not a footnote. Every working node in this repository passes
+// `**_create_kwargs`, so what it offers the model is assembled elsewhere in the program and is not
+// written at the call site. There is no argument to append to and no declaration to delete, and a
+// materializer for Python refuses it for exactly that reason. Reporting this as "Python is not
+// supported yet" would tell this repository's author to wait for a rewriter that would refuse them on
+// the day it shipped. The reason named must be the most specific TRUE one: the change, then the
+// registry row, then the call site's source, and the language LAST.
+//
+// A refusal is not a disappointing outcome to be worked around: it is the contract D-14.3 specifies,
+// exercised on real node ids, at real call sites, with the reason named. The failure P14 is written
+// against is a diff that LOOKS complete; a run that quietly produced one here would be the bug.
 //
 // Concretely, all of the following are the shipped code paths running on the real IR:
 //
@@ -119,8 +129,9 @@ func main() {
 
 	fmt.Printf("\n=== P14 run complete on the real hermes-agent IR ===\n")
 	fmt.Printf("The headline result for THIS repository is a refusal, by name, at a real call site - which\n")
-	fmt.Printf("is the contract, not a gap. hermes-agent is Python; Go is the first language whose skill\n")
-	fmt.Printf("materializer has landed (D-14.4). Nothing above shipped a diff it could not stand behind.\n")
+	fmt.Printf("is the contract, not a gap. hermes-agent is Python, and Python IS a covered materializer\n")
+	fmt.Printf("row — so what refuses here is the call site (**_create_kwargs assembles its arguments\n")
+	fmt.Printf("elsewhere), not the language. Nothing above shipped a diff it could not stand behind.\n")
 }
 
 // ── 14b task 4.1/4.4 — the split is additive, proven on a real 40-node IR ─────────────────────────
@@ -391,7 +402,28 @@ func coverage() {
 	for _, c := range transform.MaterializerCoverage() {
 		fmt.Printf("  %-6s %-10s %s\n", c.Language, c.Provider, c.SDK)
 	}
-	fmt.Printf("  hermes-agent is python -> not covered, which is why every binding above refused.\n")
+	// 🔴 The cause is read off the coverage table rather than asserted. This line used to read
+	// "hermes-agent is python -> not covered, which is why every binding above refused", which was true
+	// when Go was the only materializer and became false the moment the Python row landed — while the
+	// refusals above already said, correctly, that they were properties of the CALL SITE. A closing
+	// summary that blames the language for a call-site refusal is the exact conflation the refusal
+	// ordering exists to prevent (the change, then the row, then the source, and the language LAST): it
+	// tells this repository's author to wait for a rewriter that would refuse their `**kwargs` call site
+	// for the same reason on the day it ships.
+	covered := false
+	for _, c := range transform.MaterializerCoverage() {
+		if c.Language == "python" {
+			covered = true
+			break
+		}
+	}
+	if covered {
+		fmt.Printf("  hermes-agent is python -> COVERED above. The refusals are therefore about the CALL\n")
+		fmt.Printf("  SITES (**_create_kwargs), not about Python: a materializer for this language refuses\n")
+		fmt.Printf("  them for the same reason. Nothing here is waiting on a language.\n")
+	} else {
+		fmt.Printf("  hermes-agent is python -> no row above, so a binding refuses on the language.\n")
+	}
 	fmt.Printf("  the prune is scored, when it applies, by the UNCHANGED harness: %s / %s (no new metric).\n\n",
 		evalharness.MetricRunTokens, evalharness.MetricToolErrorRate)
 }
