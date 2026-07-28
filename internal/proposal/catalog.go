@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/heros-foreal/agentd/internal/diagnosis"
 	"github.com/heros-foreal/agentd/internal/patternclassifier"
@@ -35,6 +36,10 @@ func DefaultCatalog() []Operator {
 		toolPruneOp{},
 		toolMinimizeOp{},
 		pruneOp{},
+		// P15 (15a): the wiring axis's third operator. One ROW, exactly like the other eighteen — the
+		// merge is not a mode of pruneOp, because "drop a dead node" and "fuse two nodes into one" answer
+		// different admissibility questions and produce different edges (decisions.md D-1).
+		mergeOp{},
 	}
 }
 
@@ -337,23 +342,153 @@ func (reorderOp) AdmissiblePatterns() []patternclassifier.Pattern {
 	return nil
 }
 
+// freeReorderBudget bounds how many data-independent adjacent pairs one pass proposes.
+//
+// The reorder space is factorial and the verification budget is not: every candidate costs a held-out
+// eval run, so proposing every permutation would spend the budget on the axis with the LOWEST operator
+// prior. Four is a working bound, not a law — and when it truncates, the rationale says so (no silent
+// cap), because a user reading "3 reorders proposed" on a nine-node graph would otherwise believe the
+// space was exhausted.
+const freeReorderBudget = 4
+
+// Propose emits the lost-in-middle swap AND bounded free rewiring of data-independent neighbours
+// (P15 task 3.2).
+//
+// The three shapes it emits, all in the Order/Edges space and nothing else:
+//
+//	SWAP (diagnosed)      move the diagnosed node one step earlier — the minimal answer to lost-in-middle.
+//	SWAP (independent)    exchange an adjacent pair with NO data edge between them. Their relative order
+//	                      is arbitrary today; which one runs first is a real, measurable choice.
+//	PARALLELIZE           drop the CONTROL edge that sequences a data-independent pair. Two nodes with no
+//	                      data dependency and no control edge between them are, by the executor's reading
+//	                      of the graph, free to run concurrently — so "mark it parallelizable" needs no
+//	                      new field and no new dimension: it is the ABSENCE of a sequencing edge, which
+//	                      Edges already expresses and config_hash already covers.
+//
+// 🔴 Every one of them is a PROPOSAL and every one goes through the same coherence gate. A reorder the
+// gate rejects yields no runnable spec, so no diff and no PR (design Decision 3) — this operator is
+// deliberately free to propose an ordering that turns out to be incoherent, because the gate, not the
+// operator, is where that is decided.
 func (op reorderOp) Propose(in OperatorInput) ([]Candidate, error) {
 	if in.Base == nil || len(in.Base.Order) < 2 {
 		return nil, nil
 	}
-	// Move the diagnosed node earlier (a lost-in-middle node is one buried in a long context; pulling
-	// it toward the front of its neighbours is the minimal reorder). The contract gate rejects any
-	// reorder that breaks a downstream typed input.
-	order := append([]string(nil), in.Base.Order...)
-	idx := indexOf(order, in.Diagnosis.NodeID)
-	if idx <= 0 {
-		return nil, nil
+	parentID := parentVariantID(in)
+	var out []Candidate
+	seen := map[string]bool{} // dedupe by resulting wiring: two operators may reach the same graph
+
+	emit := func(node string, order []string, edges []variantspec.Edge, rationale string) {
+		key := wiringKey(order, edges)
+		if seen[key] || key == wiringKey(in.Base.Order, in.Base.Edges) {
+			return // a candidate identical to the baseline is a no-op that would tie itself
+		}
+		seen[key] = true
+		out = append(out, newCandidate(op.Kind(), in, node, []string{"order"},
+			variantspec.Reorder(in.Base, parentID, order, edges), rationale))
 	}
-	order[idx-1], order[idx] = order[idx], order[idx-1]
-	cand := variantspec.Reorder(in.Base, in.Base.ParentVariantID, order, in.Base.Edges)
-	c := newCandidate(op.Kind(), in, in.Diagnosis.NodeID, []string{"order"}, cand,
-		"lost-in-middle → move node earlier in the ordering")
-	return []Candidate{c}, nil
+
+	// 1. The diagnosed node moves one step earlier (unchanged behaviour).
+	if idx := indexOf(in.Base.Order, in.Diagnosis.NodeID); idx > 0 {
+		order := append([]string(nil), in.Base.Order...)
+		order[idx-1], order[idx] = order[idx], order[idx-1]
+		emit(in.Diagnosis.NodeID, order, in.Base.Edges, "lost-in-middle → move node earlier in the ordering")
+	}
+
+	// 2/3. Free rewiring over data-independent adjacent pairs, bounded and with the bound stated.
+	pairs := independentAdjacentPairs(in.Base)
+	budgeted := pairs
+	if len(budgeted) > freeReorderBudget {
+		budgeted = budgeted[:freeReorderBudget]
+	}
+	bound := ""
+	if len(pairs) > len(budgeted) {
+		bound = fmt.Sprintf(" (bounded: %d of %d independent adjacent pairs proposed this pass)",
+			len(budgeted), len(pairs))
+	}
+	for _, p := range budgeted {
+		order := append([]string(nil), in.Base.Order...)
+		order[p.i], order[p.i+1] = order[p.i+1], order[p.i]
+		emit(p.first, order, in.Base.Edges, fmt.Sprintf(
+			"%s and %s have no data dependency → exchange their order; which of two independent nodes runs "+
+				"first is a measurable choice, not a fact about the code%s", p.first, p.second, bound))
+
+		if p.control {
+			// The pair is sequenced only by a control edge. Dropping it leaves both nodes in the graph with
+			// no path between them — the wiring-level statement of "these may run in parallel".
+			emit(p.first, in.Base.Order, withoutControlEdge(in.Base.Edges, p.first, p.second), fmt.Sprintf(
+				"%s and %s are sequenced by a control edge but exchange no data → drop the sequencing edge so "+
+					"they may run in parallel%s", p.first, p.second, bound))
+		}
+	}
+	return out, nil
+}
+
+// independentPair is one adjacent (order[i], order[i+1]) pair with no DATA edge between them, and
+// whether a control edge is what sequences them.
+type independentPair struct {
+	i             int
+	first, second string
+	control       bool
+}
+
+// independentAdjacentPairs walks the order once and returns every adjacent pair the graph does not
+// make data-dependent, in order — so the result, and therefore the emitted candidates, are a pure
+// function of the base spec (task 3.4).
+func independentAdjacentPairs(base *variantspec.VariantSpec) []independentPair {
+	var out []independentPair
+	for i := 0; i+1 < len(base.Order); i++ {
+		a, b := base.Order[i], base.Order[i+1]
+		var data, control bool
+		for _, e := range base.Edges {
+			touches := (e.FromNodeID == a && e.ToNodeID == b) || (e.FromNodeID == b && e.ToNodeID == a)
+			if !touches {
+				continue
+			}
+			if e.Kind == "data" {
+				data = true
+			} else {
+				control = true
+			}
+		}
+		if data {
+			continue // a data dependency is a fact about the code, not an ordering choice
+		}
+		out = append(out, independentPair{i: i, first: a, second: b, control: control})
+	}
+	return out
+}
+
+func withoutControlEdge(edges []variantspec.Edge, a, b string) []variantspec.Edge {
+	out := make([]variantspec.Edge, 0, len(edges))
+	for _, e := range edges {
+		if e.Kind != "data" && ((e.FromNodeID == a && e.ToNodeID == b) || (e.FromNodeID == b && e.ToNodeID == a)) {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
+// wiringKey renders an ordering + edge set as a comparable string, so two candidates that denote the
+// same graph are recognised as one. It is a de-duplication key, NOT an identity: config_hash is the
+// identity, and it is computed at resolve from the same two fields.
+func wiringKey(order []string, edges []variantspec.Edge) string {
+	var b strings.Builder
+	for _, n := range order {
+		b.WriteString(n)
+		b.WriteByte('>')
+	}
+	b.WriteByte('|')
+	rendered := make([]string, 0, len(edges))
+	for _, e := range edges {
+		rendered = append(rendered, e.FromNodeID+"-"+e.Kind+"->"+e.ToNodeID)
+	}
+	sort.Strings(rendered) // an edge SET: two specs listing the same edges in another order are one graph
+	for _, r := range rendered {
+		b.WriteString(r)
+		b.WriteByte(';')
+	}
+	return b.String()
 }
 
 // ── RAG-tune / add-rerank (RAG relevance low) ─────────────────────────────────────────────────────
@@ -663,10 +798,149 @@ func (op pruneOp) Propose(in OperatorInput) ([]Candidate, error) {
 	if in.Base == nil || indexOf(in.Base.Order, node) < 0 {
 		return nil, nil
 	}
-	spec := pruneNode(in.Base, node)
+	spec := pruneNode(in.Base, node, parentVariantID(in))
 	c := newCandidate(op.Kind(), in, node, []string{"order"}, spec,
 		"redundant node → prune it and rewire its neighbours")
 	return []Candidate{c}, nil
+}
+
+// ── P15 merge (a redundant node fused into its adjacent neighbour) ───────────────────────────────
+//
+// `OpMerge` has existed as a reserved constant with a gain prior since P5.5 and had no implementation;
+// this is it. Its semantics are a ONE-WAY DOOR (decisions.md D-1): the moment a stored proposal row
+// names `merge`, every future reader — the compare view, the verified-delta ledger, a re-run months
+// later — depends on what that word meant. So the scope is fixed narrow and stays narrow:
+//
+//	ADJACENT PAIR ONLY. One survivor, one absorbed. The absorbed node leaves `Order`; its inbound edges
+//	retarget the survivor and its outbound edges re-source from it — a MECHANICAL rewire, not a re-plan.
+//
+// 🚫 It does not fuse a non-adjacent set, and it does not fuse three nodes at once. The coherence gate
+// would happily admit such a merge (it only checks I/O contracts), so the gate alone does not bound
+// reviewability — the operator's scope must. A chain of three redundant calls merges pairwise across
+// proposal iterations, where each intermediate step is separately gated, separately scored, and
+// separately reviewable, instead of one unfalsifiable n-ary claim.
+//
+// 🔴 It is a PROPOSAL. A merge that reads redundant but scores worse on held-out data does not ship
+// (task 6.3) — "the second call was correcting the first" is a real and common shape, and only
+// verification can tell it apart from genuine redundancy.
+
+type mergeOp struct{}
+
+func (mergeOp) Kind() OperatorKind                { return OpMerge }
+func (mergeOp) Handles() []diagnosis.TaxonomyCode { return nil }
+func (mergeOp) HandlesSignal() Signal             { return SignalRedundantNode }
+func (mergeOp) AdmissiblePatterns() []patternclassifier.Pattern {
+	// Pattern-agnostic for the same reason prune is: redundancy is a property of what the node
+	// CONTRIBUTED, which the signal carries, not of the label the classifier gave it.
+	return nil
+}
+
+// Propose emits at most ONE candidate: the flagged node fused into the neighbour it already runs
+// beside. The survivor is the node's PREDECESSOR in the order when it has one, and its successor
+// otherwise — deterministic in both directions, so the same base + signal always names the same pair
+// (task 3.4). A node that is alone in the order has no adjacent pair and yields nothing.
+func (op mergeOp) Propose(in OperatorInput) ([]Candidate, error) {
+	if in.Base == nil {
+		return nil, nil
+	}
+	absorbed := in.NodeID()
+	idx := indexOf(in.Base.Order, absorbed)
+	if idx < 0 {
+		return nil, nil // the signal names a node this spec does not order; nothing to fuse
+	}
+	survivor := adjacentSurvivor(in.Base.Order, idx)
+	if survivor == "" {
+		return nil, nil // a single-node order: a merge needs two adjacent nodes
+	}
+	spec := mergeNodes(in.Base, survivor, absorbed, parentVariantID(in))
+	// NodeID is the SURVIVOR, not the absorbed node: the candidate's graph no longer contains the
+	// absorbed node, so pointing the UI (and the ranking sort) at a node the spec does not order would
+	// name something a reviewer cannot open. The rationale names both halves of the pair.
+	c := newCandidate(op.Kind(), in, survivor, []string{"order"}, spec,
+		fmt.Sprintf("node %s is redundant beside adjacent node %s → fuse the pair: %s survives and absorbs it, "+
+			"%s's edges are rewired through the survivor (verified on held-out data before it is recommended)",
+			absorbed, survivor, survivor, absorbed))
+	return []Candidate{c}, nil
+}
+
+// adjacentSurvivor names the neighbour that absorbs the node at idx: the predecessor when there is
+// one, else the successor. Preferring the predecessor is not arbitrary — the survivor keeps its own
+// inbound edges, so fusing FORWARD (into the node that already runs first) leaves the graph's entry
+// points untouched and makes the resulting order a prefix-preserving edit a reviewer can follow.
+func adjacentSurvivor(order []string, idx int) string {
+	switch {
+	case idx > 0:
+		return order[idx-1]
+	case idx+1 < len(order):
+		return order[idx+1]
+	default:
+		return ""
+	}
+}
+
+// mergeNodes derives the fused candidate: absorbed leaves the order, its edges move to the survivor,
+// every other per-node override is inherited unchanged, and the parent is never touched (D-1, D-2).
+//
+// It derives through variantspec.Reorder — the same helper the P5 editor's re-arrangement uses — so
+// there is ONE way a wiring candidate comes into existence and it is the one that records lineage.
+func mergeNodes(base *variantspec.VariantSpec, survivor, absorbed, parentID string) *variantspec.VariantSpec {
+	order := make([]string, 0, len(base.Order))
+	for _, n := range base.Order {
+		if n != absorbed {
+			order = append(order, n)
+		}
+	}
+	spec := variantspec.Reorder(base, parentID, order, rewireThroughSurvivor(base.Edges, survivor, absorbed))
+	// The absorbed node's override goes with it. A spec that kept it would be rejected by Validate
+	// ("node has overrides but is not in order") — dead config the author believes is live.
+	delete(spec.Nodes, absorbed)
+	return spec
+}
+
+// rewireThroughSurvivor is the mechanical half of D-1: every edge touching the absorbed node is
+// retargeted or re-sourced onto the survivor, in input order, with the pair's own edge dropped (it was
+// internal to the fusion) and duplicates collapsed. Deterministic by construction — no map iteration
+// decides the result, only the input order does.
+func rewireThroughSurvivor(edges []variantspec.Edge, survivor, absorbed string) []variantspec.Edge {
+	out := make([]variantspec.Edge, 0, len(edges))
+	seen := map[variantspec.Edge]bool{}
+	for _, e := range edges {
+		if e.FromNodeID == absorbed {
+			e.FromNodeID = survivor
+		}
+		if e.ToNodeID == absorbed {
+			e.ToNodeID = survivor
+		}
+		if e.FromNodeID == e.ToNodeID {
+			// The survivor→absorbed (or absorbed→survivor) edge became a self-edge: it described data flow
+			// BETWEEN the two fused calls, which after the fusion happens inside one call. Keeping it would
+			// claim the merged node feeds itself.
+			continue
+		}
+		if seen[e] {
+			continue // two edges that collapsed onto the same pair are one edge
+		}
+		seen[e] = true
+		out = append(out, e)
+	}
+	return out
+}
+
+// parentVariantID is the identity a derived wiring candidate records as its parent.
+//
+// It prefers the baseline's OWN config_hash when the caller supplied one (Engine.BaseVariantID), which
+// is what "derived from" means; it falls back to whatever lineage the baseline itself carries so a
+// caller that never resolved the baseline still produces a spec with a lineage pointer rather than an
+// empty one. The value is never hashed — lineage is a property of how a spec was authored, not of the
+// configuration it denotes (spec.go:306-310).
+func parentVariantID(in OperatorInput) string {
+	if in.BaseVariantID != "" {
+		return in.BaseVariantID
+	}
+	if in.Base != nil {
+		return in.Base.ParentVariantID
+	}
+	return ""
 }
 
 // ── shared derivation helpers ────────────────────────────────────────────────────────────────────
@@ -791,9 +1065,9 @@ func baseOverride(s *variantspec.VariantSpec, node string) variantspec.NodeOverr
 
 // pruneNode removes node from the spec's ordering and rewires each predecessor directly to each
 // successor, dropping every edge touching the node. The contract gate validates the result.
-func pruneNode(base *variantspec.VariantSpec, node string) *variantspec.VariantSpec {
+func pruneNode(base *variantspec.VariantSpec, node, parentID string) *variantspec.VariantSpec {
 	spec := cloneSpec(base)
-	spec.ParentVariantID = base.ParentVariantID
+	spec.ParentVariantID = parentID
 	// drop from order
 	order := make([]string, 0, len(spec.Order))
 	for _, n := range spec.Order {
