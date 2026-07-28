@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { Loader2, Play, RotateCcw, ShieldCheck } from "lucide-react";
 import { Chip, Banner, Row, Section } from "@/components/primitives";
+import { AxisRefusal } from "@/components/axisRefusal";
 import { routes } from "@/lib/routes";
 import { cx } from "@/lib/cx";
 
@@ -54,6 +55,7 @@ type Outcome =
       rejectedNodeId?: string;
       rejectedDimension?: string;
     }
+  | { kind: "refused"; axis: string; nodeId?: string; message: string }
   | { kind: "failed"; status: number; message: string };
 
 export function Configurator() {
@@ -141,6 +143,18 @@ export function Configurator() {
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
+        // A 400 that names a DIMENSION is a refusal, not a breakage: the platform read the spec, knew
+        // exactly what was asked for, and declined that one axis by name. It gets its own outcome so it
+        // can be said in those words — see AXIS_NOTE.
+        if (res.status === 400 && typeof body.dimension === "string" && body.dimension !== "") {
+          setOutcome({
+            kind: "refused",
+            axis: body.dimension,
+            nodeId: body.node_id,
+            message: body.error ?? "The platform declined this change without saying why, which is itself a defect.",
+          });
+          return;
+        }
         setOutcome({ kind: "failed", status: res.status, message: body.error ?? `The platform returned ${res.status}.` });
         return;
       }
@@ -306,6 +320,12 @@ function Outcome({ outcome }: { outcome: Outcome }) {
         </Row>
       </Banner>
     );
+  }
+
+  if (outcome.kind === "refused") {
+    // The refusal card is a shared component: the submit path and the /preview/p15 state page render
+    // the SAME element, so what is checked in a browser is what a customer sees.
+    return <AxisRefusal axis={outcome.axis} nodeId={outcome.nodeId} message={outcome.message} />;
   }
 
   if (outcome.kind === "failed") {

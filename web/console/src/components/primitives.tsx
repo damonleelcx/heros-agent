@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
-import { AlertTriangle, FolderOpen, Hash, Lock, Package, Search, WifiOff } from "lucide-react";
+import { AlertTriangle, FolderOpen, Hash, Info, Lock, Package, Search, WifiOff } from "lucide-react";
 import { statusOf, TONE_CLASS, type Tone } from "@/lib/status";
 import { emphasis, qualifiersOf, QUALIFIER_COPY, QUALIFIER_LABEL } from "@/lib/emphasis";
 import { cx } from "@/lib/cx";
@@ -542,10 +542,14 @@ export function Banner({
   title: string;
   children?: ReactNode;
 }) {
+  // The icon follows the TONE. A warning triangle over "this change was applied" is a small lie told
+  // in an eyeblink — the reader takes the caution before they read the sentence, and then has to undo
+  // it. Warn and bad keep the triangle; info states a fact and gets the neutral mark.
+  const Icon = tone === "info" ? Info : AlertTriangle;
   return (
     <div className={`banner banner--${tone}`} role="note">
       <p className="banner__title">
-        <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+        <Icon className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
         <span>{title}</span>
       </p>
       {children ? (
