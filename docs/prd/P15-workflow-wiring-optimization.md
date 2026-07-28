@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | Phase / Milestone | P15 / M18 |
-| Target window | Two waves: 15a node-wiring operators (merge/reorder/prune), then 15b wiring-safety as a first-class gate |
+| Target window | Three waves: 15a node-wiring operators (merge/reorder/prune), 15b wiring-safety as a first-class gate, then **15c call-site materialization** — the reorder-only slice of a wiring rewriter |
 | Lead role(s) | System Designer + Backend (co-leads) |
 | Supporting role(s) | AI Engineer, QA Engineer |
 | Status | Draft |
@@ -250,6 +250,37 @@ Numbered FRs; each maps 1:1 to an OpenSpec requirement under
   fixed ([`adapter.go:61-71`](../../internal/typedcontract/adapter.go)), so the same reorder yields the
   same inserted adapters and the same `config_hash` on every evaluation.
 
+### Call-site materialization of a reorder (capability `wiring-materialization`)
+
+15c closes the gap FR8 names honestly. It does **not** build a general wiring rewriter: it builds the one
+slice whose behaviour a machine can bound, and leaves every other wiring change refused exactly as FR8
+requires. The slice is a **transposition of two adjacent, independent sibling statements**.
+
+- **FR15.** The transform engine SHALL materialize a wiring change as source **only** when the difference
+  between the spec's wiring and the discovered wiring is exactly **one transposition of two adjacent
+  nodes** in the order, with the edge set unchanged. Any other difference — a merge, a prune, an added or
+  dropped edge, two or more transpositions — SHALL keep FR8's refusal.
+- **FR16.** A transposition SHALL be materialized **only** when both nodes' call sites are, in the target
+  source: in the **same file**, at the **same block nesting**, **consecutive** (nothing between them but
+  blank lines), each occupying **whole lines**, and neither a control-flow statement (`return`, `raise`,
+  `break`, `continue`, `yield`, `defer`, `go`). A pair failing any of these SHALL be refused with the
+  specific reason named.
+- **FR17.** 🔴 A transposition SHALL be materialized **only when the two statements are independent**: no
+  name bound by one is read by the other, in either direction. The analysis SHALL be **conservative** —
+  where the frontend cannot prove independence, the pair is refused, never assumed independent.
+- **FR18.** 🔴 The emitted change SHALL be a **permutation of the file's lines**: same line count, and the
+  same multiset of lines as the original. No line may be added, deleted, or altered by a wiring
+  materialization — only moved. The minimality gate SHALL enforce this and SHALL confine every changed
+  line to the two swapped blocks.
+- **FR19.** Materialization SHALL be **per-language and named**: a language with no statement materializer
+  SHALL refuse with a message that says so, in the same shape as the skills refusal (P14 D-14.3), rather
+  than attempting a generic textual move.
+- **FR20.** A materialized reorder SHALL pass the **same build gate** every other transform passes; a
+  swap whose result does not build or no longer parses SHALL be rejected before it is proposed.
+- **FR21.** Materialization SHALL be **deterministic**: the same {spec, source_revision, tree} SHALL
+  produce a byte-identical diff, and the swap SHALL be its own inverse — applying the same transposition
+  twice returns the original bytes.
+
 ## 7. Non-functional requirements
 
 | # | Requirement | Target |
@@ -305,7 +336,9 @@ land its effect in `ResolvedConfig` → `config_hash`."
 | `OpPrune` operator (neighbour rewire) | **EXISTS** | [`catalog.go:326-344`](../../internal/proposal/catalog.go) |
 | `OpMerge` operator | **RESERVED / UNIMPLEMENTED** | const [`operator.go:46`](../../internal/proposal/operator.go); prior [`gain.go:20,29`](../../internal/proposal/gain.go); **not** in `DefaultCatalog()` |
 | Free reorder / parallelize independent nodes | **PARTIAL** | reorder is one swap; no parallelization operator |
-| Source-level materialization of any wiring change | **ABSENT** | transform emits model/prompt only; refuses skills/context ([`rewrite.go:388,417`](../../internal/transform/rewrite.go)); nothing reads `Order`/`Edges` |
+| Source-level materialization of a **reorder** (adjacent transposition, Go + Python) | **PARTIAL (15c)** | `internal/transform/wiringswap.go` — swap-only, sibling-statement, independence-checked, permutation-gated |
+| Source-level materialization of a **merge** or a **prune** | **ABSENT** | deleting or fusing a call is not a permutation of the file's lines; both keep FR8's refusal |
+| Source-level materialization of a wiring change in Java/Kotlin/Rust/TypeScript/JavaScript | **ABSENT** | no statement materializer for those frontends; the refusal names the language (FR19) |
 
 ### 8.3 Decisions, with what was rejected
 
@@ -317,6 +350,9 @@ land its effect in `ResolvedConfig` → `config_hash`."
 | **D4** | **A bridging adapter is explicit generated source in the same diff** | Insert a runtime coercion shim that reconciles the mismatch invisibly | **L1 安全 + L3 UX.** The platform's core rule is a codemod, never a runtime shim; an adapter that is not in the diff is a value change hidden from review. Recording it as an `InsertedAdapter` node with its own `io_contract` keeps "an indirection never hides a value from review." |
 | **D5** | **Un-materializable wiring is refused at transform, naming the axis** | Let the transform silently no-op the wiring and rewrite only the node content | **L1 安全 + L2 稳定.** A silent no-op would let a spec whose `config_hash` claims a reordered graph be scored against source that was never reordered — a false measurement, the worst outcome for a system whose principle is *verification decides*. Refusal is the honest `refuse-until-safe` pattern the engine already uses for skills/context. |
 | **D6** | **No new eval metric; wiring is scored by the axis-agnostic harness** | Add a wiring-specific quality metric | **L6 不可扩展 + single source of truth.** The harness consumes `config_hash` + `Trace`; a bespoke metric would be a second definition of "better" for one axis. Landing the effect in `config_hash` is sufficient and keeps one scoring truth. |
+| **D7** | **The rewriter's admitted operation is a *transposition of two adjacent sibling statements* — nothing else** | A general "move this call anywhere" rewriter, or one that also fuses and deletes calls | **L1 安全 + L2 稳定.** A transposition of two whole-line blocks is a *permutation of the file's lines*, which is machine-checkable in one line of code and impossible to get subtly wrong; an arbitrary move rewrites bindings, scope and control flow, which is the ADR-001 top risk ("a bad codemod can break a build or subtly change behavior") with no cheap invariant behind it. Reach (L8) does not buy down a safety guarantee (L1). |
+| **D8** | **The permutation invariant is a NEW edit class with its own gate, not a loosening of the existing one** | Relax `gateMinimal`'s "no rewrite may change the file's line count" so a block move fits through | **L2 稳定 + L5 不可演进.** That rule is what makes "only the targeted lines changed" checkable at all; relaxing it for one rewriter removes the check for *every* rewriter, forever. A separate class keeps the old invariant intact for value rewrites and gives the swap a stronger one (same lines, reordered). |
+| **D9** | **Go and Python first; every other language refuses by name** | A generic line-based move for all seven frontends | **L1 安全.** Independence needs a parse. Go has `go/ast`; Python is whitespace-explicit and tree-sitter gives the spans. For the rest, a textual move would be a guess that compiles — the failure mode with no downstream net (P14 D-14.3, applied again). |
 
 ### 8.4 Data model additions
 

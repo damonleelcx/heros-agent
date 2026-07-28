@@ -119,6 +119,38 @@ a bespoke metric would be a second definition of "better" for one axis. "Fewer n
 better score at equal or lower cost is, and the existing `task_success`/`eval_cost_usd`/`eval_latency_ms`
 metrics already express it. Landing the effect in `config_hash` is sufficient.
 
+## Decision 7 — Materialization is a transposition of two adjacent SIBLING STATEMENTS, or a refusal
+
+Wave 15c replaces Decision 5's blanket refusal for exactly one shape and leaves it in force for every
+other. The engine materializes a wiring change iff:
+
+1. the spec's `Order` differs from the discovered order by **one adjacent transposition**, `Edges` equal;
+2. both call sites are in the **same file**, at the **same indentation**, **consecutive** (nothing but
+   blank lines between), each spanning **whole lines**;
+3. neither statement is control flow (`return` / `raise` / `break` / `continue` / `yield` / `defer` / `go`);
+4. the two statements are **independent**: no name bound by one is read by the other;
+5. the workflow's language has a **statement materializer** (Go, Python).
+
+**Alternative rejected — a general move-a-call-anywhere rewriter.** It would materialize merge and prune
+too. Rejected on **L1 安全 + L2 稳定 over L8 reach** (decisions.md D-3): an arbitrary move has no
+checkable invariant, while a transposition of whole-line blocks is a *permutation of the file's lines* —
+provable in one comparison. The wrong-but-compiling version of a control-flow edit is the failure mode
+with no downstream net.
+
+## Decision 8 — The swap is a NEW edit class with a stronger gate, not a relaxed old one
+
+`gateMinimal`'s "no rewrite changes the line count" stays exactly as it is for value rewrites. The swap
+class asserts: same line count **and** same multiset of lines **and** every changed line inside one of
+the two swapped blocks. See decisions.md D-4 — relaxing the shared rule would remove the check from every
+rewriter forever to serve one caller.
+
+## Decision 9 — Go and Python first; every other language refuses BY NAME
+
+Independence needs a parse. Go has `go/ast`; Python's statements are whitespace-delimited and the
+syntactic frontend already supplies spans and a parse check. Java/Kotlin/Rust/TypeScript/JavaScript
+refuse with the language named — the same shape P14 D-14.3 uses for skills, and for the same reason: a
+textual move for a language whose structure we did not parse is a guess that compiles.
+
 ## Interfaces sketch
 
 ```
@@ -141,6 +173,14 @@ typedcontract.FindAdapter(producerOut, consumerIn) (*AdapterMatch, bool)  // adm
 // transform interim refusal (new — analogue of refuseSkills/refuseContext):
 if resolved.Order/Edges differ from discovered wiring:
     return nil, unsafeRewrite(nodeID, "wiring", "wiring materialization is deferred; refusing rather than scoring a hash against unchanged source")
+
+
+// P15 15c — materialization of ONE wiring shape (new: internal/transform/wiringswap.go):
+planWiringSwap(discovered, desired) (*swapPlan, bool)   // exactly one adjacent transposition, edges equal
+materializeSwap(plan, site, src, language) ([]edit, error)
+    same file · same indent · consecutive · whole lines · not control flow · independent → two block edits
+    otherwise → refuseWiringMaterialize(node, reason)     // names WHICH condition failed
+gateMinimal(swap edits) asserts: line count equal ∧ line multiset equal ∧ changed lines ⊆ the two blocks
 
 // identity (all already true):
 config_hash includes Order + Edges (+ InsertedAdapter)   → wiring change ⇒ new hash
