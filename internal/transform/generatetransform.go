@@ -31,9 +31,25 @@ func GenerateTransform(resolved *variantspec.Resolved, spec *variantspec.Variant
 		return nil, fmt.Errorf("transform: GenerateTransform requires a variant spec")
 	}
 
+	// 🔴 P15 task 4.2 — the wiring gate, before any file is read or any adapter is emitted. The spec's
+	// own Order/Edges are the statement of the desired graph here (Generate sees only the resolved
+	// projection), and an inserted adapter is collapsed out first: an adapter IS materialized, in this
+	// very function, so it is not the un-materializable rewire this refusal is about.
+	//
+	// No diff is produced on this path — the refusal returns before base is built — which is task 4.3's
+	// "no diff is emitted for a refused spec", structurally rather than by convention.
+	plan, err := checkWiring(resolved, spec)
+	if err != nil {
+		return nil, err
+	}
+
 	// 1. Dimension overrides (reuses the whole existing, tested value-rewrite path).
+	//
+	// Generate is also where a materializable wiring transposition is emitted (15c task 15.2), so it is
+	// called when there is a PLAN even if there is no override — a pure reorder is a real change with a
+	// real diff, and routing it through the same function keeps one emission path rather than two.
 	var base *Patch
-	if resolved != nil && len(resolved.Overrides) > 0 {
+	if resolved != nil && (len(resolved.Overrides) > 0 || plan != nil) {
 		p, err := Generate(resolved, root)
 		if err != nil {
 			return nil, err

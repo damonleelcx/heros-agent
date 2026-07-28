@@ -27,6 +27,7 @@ func newTarget(t *testing.T) string {
 	for src, dst := range map[string]string{
 		"testdata/target/go.mod.txt":      "go.mod",
 		"testdata/target/pipeline.go.txt": "pipeline.go",
+		"testdata/target/wiring.go.txt":   "wiring.go",
 	} {
 		b, err := os.ReadFile(src)
 		if err != nil {
