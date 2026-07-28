@@ -51,6 +51,53 @@ type Resolved struct {
 	// ApplyModes records each overridden node's apply mode (P10 task 7.1), defaulting to inline. NOT
 	// part of config_hash — how a value is written is not part of the configuration it denotes.
 	ApplyModes map[string]ApplyMode
+	// DiscoveredWiring is the wiring the IR recorded at source_revision — the order and edges the
+	// checked-out SOURCE actually has, as opposed to the ones this spec ASKS for (P15 task 4.2).
+	//
+	// The two can differ, and the difference is the whole of the wiring axis: `Order`/`Edges` are
+	// identity-bearing, so a reorder/merge/prune is a new config_hash — but no rewriter materializes it
+	// as source yet. Carrying the discovered wiring here is what lets the transform engine TELL that a
+	// spec is asking for a rewire it cannot perform, and refuse instead of emitting a diff that changes
+	// only the node contents while the config_hash claims a different graph.
+	//
+	// 🚫 NOT part of config_hash, exactly as SourceRevision and Language are not: it is a property of
+	// the tree, not of the configuration. It rides here for the reason Language does — this struct is
+	// the one place a spec and the IR it was resolved against are already joined, so a caller cannot
+	// supply a wiring from a different IR than the hash was computed over.
+	DiscoveredWiring Wiring
+}
+
+// Wiring is a graph's shape: the node order and the edges between them. It is the same pair
+// `config_hash` covers, in the same resolved spelling, so a comparison between what a spec asks for
+// and what the source has is a comparison of like with like.
+//
+// Empty means NOT RECORDED, which is different from "an empty graph": a caller that assembled a
+// Resolved by hand (the P5 editor, a codemod test) may have no IR to read, and the transform's wiring
+// check declines to conclude anything from an absent record rather than refusing everything.
+type Wiring struct {
+	Order []string       `json:"order"`
+	Edges []ResolvedEdge `json:"edges"`
+}
+
+// Recorded reports whether any discovered wiring was captured.
+func (w Wiring) Recorded() bool { return len(w.Order) > 0 }
+
+// WiringOf projects a discovered IR into the wiring shape. The node order is the IR's own order —
+// what Discovery found, in the order it found it — and the edges are copied verbatim; the optional
+// provenance/confidence fields are deliberately dropped, because whether an edge was recovered or
+// framework-certain does not change what the source WIRES.
+func WiringOf(ir *discovery.IR) Wiring {
+	if ir == nil {
+		return Wiring{}
+	}
+	w := Wiring{Order: make([]string, 0, len(ir.Nodes)), Edges: make([]ResolvedEdge, 0, len(ir.Edges))}
+	for _, n := range ir.Nodes {
+		w.Order = append(w.Order, n.NodeID)
+	}
+	for _, e := range ir.Edges {
+		w.Edges = append(w.Edges, ResolvedEdge{FromNodeID: e.FromNodeID, ToNodeID: e.ToNodeID, Kind: e.Kind})
+	}
+	return w
 }
 
 // ResolvedOverride carries the resolved registry entries for one node's overridden dimensions. A nil
@@ -132,6 +179,9 @@ func Resolve(ctx context.Context, spec *VariantSpec, ir *discovery.IR, regs Regi
 		Overrides:      map[string]ResolvedOverride{},
 		ApplyModes:     map[string]ApplyMode{},
 		Config:         ResolvedConfig{IRVersion: ir.IRVersion, Nodes: []ResolvedNode{}, Edges: []ResolvedEdge{}},
+		// What the SOURCE wires, carried beside what the spec asks for, so the transform engine can tell
+		// a wiring change from a content change (P15 task 4.2). Read-only, never hashed.
+		DiscoveredWiring: WiringOf(ir),
 	}
 
 	for _, nodeID := range spec.Order {

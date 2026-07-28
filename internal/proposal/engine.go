@@ -53,6 +53,10 @@ type Engine struct {
 	Menu Menu
 	// Base is the baseline Variant Spec candidates are derived from.
 	Base *variantspec.VariantSpec
+	// BaseVariantID is the baseline's config_hash, when the caller has resolved it. Wiring candidates
+	// record it as their ParentVariantID (P15 design Decision 2). Empty is legitimate: a caller that
+	// has not resolved the baseline supplies nothing rather than a made-up id.
+	BaseVariantID string
 	// Optimizer produces grounded prompt rewrites. Nil disables the prompt-rewrite operator.
 	Optimizer PromptOptimizer
 	// IR is the discovered IR, used by the contract gate and the wiring operators.
@@ -93,12 +97,16 @@ func (e Engine) Propose(targets []Target) Emission {
 			}
 			for _, c := range cands {
 				if e.Gate != nil {
-					ok, reason, _ := e.Gate.Admit(c)
+					gated, ok, reason := e.Gate.Admit(c)
 					if !ok {
 						em.Refusals = append(em.Refusals, Refusal{Operator: c.Operator, NodeID: c.NodeID,
 							Reason: reason})
 						continue
 					}
+					// The spec that leaves the gate is the one that gets compiled: on an `adapted` verdict it
+					// carries the inserted adapters, so the diff a reviewer reads contains the bridge the
+					// gate admitted (P15 task 3.2 / decisions.md D-2).
+					c = gated
 				}
 				em.Candidates = append(em.Candidates, c)
 			}
@@ -133,6 +141,7 @@ func (e Engine) inputFor(op Operator, t Target) OperatorInput {
 		Signal:          t.Signal,
 		Pattern:         t.Pattern,
 		Base:            e.Base,
+		BaseVariantID:   e.BaseVariantID,
 		Menu:            e.Menu,
 		Bottleneck:      t.Bottleneck,
 		PromptOptimizer: e.Optimizer,

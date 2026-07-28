@@ -53,7 +53,19 @@ export function Tabs({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div role="tablist" aria-label="Sections" onKeyDown={onKeyDown} className="flex shrink-0 gap-1 border-b border-border">
+      {/*
+        The strip scrolls SIDEWAYS in its own container rather than clipping. At 375px a five-tab strip
+        with real labels is wider than the viewport, and the app shell clips its overflow — so without
+        this the last tab is invisible AND unreachable by pointer, while the page looks fine on a
+        desktop. Wide content scrolling inside its own box is the same rule the tables and diffs follow;
+        the tab that scrolled out of view is still one swipe (or one arrow key) away.
+      */}
+      <div
+        role="tablist"
+        aria-label="Sections"
+        onKeyDown={onKeyDown}
+        className="flex shrink-0 gap-1 overflow-x-auto border-b border-border [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      >
         {tabs.map((t) => {
           const selected = t.id === active;
           return (
@@ -70,7 +82,7 @@ export function Tabs({
               type="button"
               onClick={() => setActive(t.id)}
               className={cx(
-                "-mb-px cursor-pointer border-b-2 px-3 py-2 text-sm transition-colors",
+                "-mb-px shrink-0 cursor-pointer whitespace-nowrap border-b-2 px-3 py-2 text-sm transition-colors",
                 selected
                   ? "border-primary text-foreground"
                   : "border-transparent text-muted-foreground hover:text-foreground",

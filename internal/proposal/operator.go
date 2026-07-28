@@ -112,6 +112,16 @@ type OperatorInput struct {
 	Pattern patternclassifier.Pattern
 	// Base is the current Variant Spec the candidate is derived from (the baseline). Never mutated.
 	Base *variantspec.VariantSpec
+	// BaseVariantID is the baseline's own config_hash, when the caller resolved it. The wiring
+	// operators (reorder / prune / merge) record it as the candidate's ParentVariantID, which is what
+	// "this candidate was derived from that configuration" means — the compare view and rollback both
+	// walk that pointer (P15 design Decision 2).
+	//
+	// It is OPTIONAL and in-memory only: an operator test that never resolves a baseline has no hash to
+	// supply, and a candidate then falls back to the baseline's own recorded lineage rather than
+	// claiming a parent that does not exist. 🚫 Never hashed — lineage is a property of how a spec was
+	// authored, not of the configuration it denotes.
+	BaseVariantID string
 	// Menu is the set of registry refs the operator may select from (models, skills, context policies).
 	Menu Menu
 	// Bottleneck is the optional cost/latency attribution flag backing a Signal-driven operator.

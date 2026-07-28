@@ -44,6 +44,31 @@ type edit struct {
 	// whose rewrite failed to build"), and so the minimality gate can attribute every changed line.
 	NodeID string
 	Dim    string
+	// Swap marks this edit as one half of a WIRING TRANSPOSITION (P15 15c, decisions.md D-4) rather
+	// than a value replacement.
+	//
+	// The two classes are gated differently and deliberately so. A value rewrite may never change the
+	// file's line count — that rule is what makes "only the targeted lines changed" checkable, and it
+	// stays exactly as strict as it was. A swap moves whole lines by construction, so it could not pass
+	// that rule; instead it must satisfy a STRONGER one: the output is the input's lines REORDERED —
+	// same count, same multiset, every changed line inside one of the two swapped blocks.
+	//
+	// 🚫 Marking a value rewrite as a swap to get it past the line-count rule would defeat both gates.
+	// The flag is set in exactly one place (the wiring materializer) and read in exactly one place (the
+	// minimality gate), so there is no third caller to get it wrong.
+	Swap bool
+}
+
+// isSwap reports whether an edit set is a wiring transposition. A set is either all swap or none: a
+// file cannot be simultaneously line-permuted and value-rewritten under one gate, and mixing the two
+// would leave each edit checked by the other's rule.
+func isSwap(edits []edit) bool {
+	for _, e := range edits {
+		if e.Swap {
+			return true
+		}
+	}
+	return false
 }
 
 // insertion reports whether this edit adds text rather than replacing an expression (Start == End),

@@ -240,7 +240,16 @@ func (s *Server) handleP5Commit(w http.ResponseWriter, r *http.Request) {
 
 	// Coherent/adapted → generate the reviewable source diff. A build failure would surface here as a
 	// rejected_transform (the build gate itself runs in the worktree layer at apply time — §2).
-	resolved := &variantspec.Resolved{Language: ir.Workflow.Language, SourceRevision: parent.SourceRevision}
+	// DiscoveredWiring is what the SOURCE wires, carried so the transform engine can tell an edit that
+	// only inserts an adapter (materializable — it emits generated source) from one that rearranges the
+	// graph (P15 task 4.2: refused, because no rewriter moves a call). Without it the engine would have
+	// no evidence to compare against and would emit an adapter-only diff for a reorder, letting the new
+	// config_hash be scored against source that was never rewired.
+	resolved := &variantspec.Resolved{
+		Language:         ir.Workflow.Language,
+		SourceRevision:   parent.SourceRevision,
+		DiscoveredWiring: variantspec.WiringOf(ir),
+	}
 	patch, err := transform.GenerateTransform(resolved, spec, "")
 	if err != nil {
 		writeJSON(w, http.StatusOK, commitResponse{Status: "rejected_transform", BuildError: err.Error(),

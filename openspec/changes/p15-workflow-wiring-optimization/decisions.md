@@ -97,3 +97,74 @@ derived from `(from, to, kind)` and the catalog match order is fixed
 ([`rearrange.go:91-93`](../../../internal/variantspec/rearrange.go),
 [`adapter.go:61-71`](../../../internal/typedcontract/adapter.go)), so the same reorder yields the same
 adapter and the same `config_hash` on every evaluation.
+
+---
+
+## D-3 — The wiring rewriter's admitted operation is a **transposition of two adjacent sibling statements**
+
+**Problem.** 15a/15b left source materialization ABSENT and every wiring change refused. Closing that
+gap means writing a rewriter that changes CONTROL FLOW rather than a value — the one thing this engine
+has never done, and the thing ADR-001 names as its top risk. The scope of that rewriter is a one-way
+door: a stored transform row that says a reorder was applied constrains what every future reader — a
+reviewer, a rollback, a re-run — believes happened to the file. We must choose: (A) a general "move a
+call to a new position" rewriter, which also enables merge and prune materialization, or (B) a
+**transposition of two ADJACENT statements** and nothing else.
+
+**Decision.** **(B): adjacent transposition only.** The engine materializes a wiring change if and only
+if the spec's order differs from the discovered order by exactly one adjacent swap, the edge set is
+unchanged, and the two call sites are consecutive sibling statements that bind nothing the other reads.
+Merge and prune remain refused. Non-adjacent moves remain refused. Two swaps at once remain refused.
+
+**Why this is the appropriate design.** A transposition of two whole-line blocks has an invariant no
+other source edit in this repository has: **the output is the input's lines, reordered**. Same count,
+same multiset. That is checkable in one comparison, it cannot be subtly wrong, and it means the review
+question collapses from "did the codemod rewrite this correctly" to "should these two statements run in
+the other order" — which is exactly the question the typed-contract gate and verification already
+answer. A general move has no such invariant: it must reconstruct indentation, re-anchor comments,
+decide what travels with the statement, and prove the destination scope binds the same names. Each of
+those is a place to be wrong in a way that still compiles.
+
+**Alternatives + decision point.** (A) has real reach — it would materialize merge and prune too, making
+the whole axis applicable rather than one slice of it. Rejected on **safety (L1) + stability (L2) over
+operator reach (L8)**: an arbitrary move is the ADR-001 top risk with no cheap invariant behind it, and
+the wrong-but-compiling version of a control-flow edit degrades behaviour invisibly — the failure mode
+with no downstream net. Under the eight-level law, reach never buys down a safety guarantee. The narrow
+slice also fails HONESTLY: a pair that is not a clean transposition is refused by name, so a user learns
+which condition blocked it instead of receiving a diff nobody can vouch for.
+
+**Effect.** A stored transform that materialized wiring always means "these two adjacent statements
+changed places, nothing else in the file moved". If a general mover is ever wanted, it is a NEW
+capability decided with its own risk in hand, never a silent widening of this one.
+
+---
+
+## D-4 — The permutation invariant is a **new edit class**, never a loosening of the minimality gate
+
+**Problem.** `gateMinimal` enforces that no rewrite changes a file's line count
+([`engine.go`](../../../internal/transform/engine.go)): a rewriter may not emit a newline, and may not
+replace a multi-line expression with a single-line one. That rule is what makes "only the targeted lines
+changed" checkable at all, and it is what keeps `TouchedDimension.Line` valid in both the original and
+the transformed file. A statement swap moves lines by construction, so it does not fit through the gate
+as written. Two ways out: (A) relax the rule so a block move is allowed, or (B) introduce a **separate
+edit class** with its own, stricter invariant.
+
+**Decision.** **(B): a separate class.** A wiring swap is a distinct edit kind. Value rewrites keep the
+old invariant unchanged. The swap class asserts something STRONGER: the file's line count is unchanged
+**and** the multiset of its lines is unchanged (a permutation) **and** every changed line lies inside
+one of the two swapped blocks.
+
+**Why this is appropriate.** Relaxing the shared rule would remove the check from every rewriter that
+exists today and every one added later, to serve one new caller — the definition of an越级 trade (an L2
+guarantee spent for an L8 convenience). Keeping the classes separate means a future value rewriter that
+tries to emit a newline is still caught by the original rule, and a future wiring rewriter that tries to
+edit a line while moving it is caught by the new one. Two rules, each exactly as strict as its class
+allows, is also what makes the failure messages honest: a violation names which invariant broke.
+
+**Alternatives + decision point.** (A) is fewer lines of code and one rule instead of two. Rejected on
+**stability (L2) over implementation cost (L8)**: a safety check that is weakened for one case protects
+nothing afterwards, and the weakening is invisible — nothing fails, the gate simply stops catching the
+class of bug it was written for.
+
+**Effect.** The permutation assertion is the thing a reviewer can trust without reading the codemod: if
+it holds, the change cannot have altered a single character of the file's content.
+

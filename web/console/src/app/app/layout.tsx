@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { FileCode, FlaskConical, GitBranch, GitPullRequest, Home, Layers, Play, Settings, User } from "lucide-react";
+import { FileCode, FlaskConical, GitBranch, GitPullRequest, Home, Layers, Play, Settings, Share2, User } from "lucide-react";
 import { requireSession } from "@/lib/session";
 import { visitedSubjects, routes, SUBJECT_LABELS } from "@/lib/subjects";
 import { NavLink } from "@/components/nav";
@@ -39,6 +39,7 @@ const SURFACES: Surface[] = [
   { href: "/app/transforms", label: "Transforms", icon: <FileCode /> },
   { href: "/app/delivery", label: "Delivery", icon: <GitPullRequest /> },
   { href: "/app/studio", label: "Studio", icon: <FlaskConical /> },
+  { href: "/app/wiring", label: "Wiring", icon: <Share2 /> },
 ];
 
 const SETTINGS: Surface[] = [
@@ -61,6 +62,7 @@ export default async function ConsoleLayout({ children }: { children: React.Reac
     { id: "s:delivery", group: "Surface", label: "Delivery", href: "/app/delivery" },
     { id: "s:variants", group: "Surface", label: "Variants", href: "/app/variants" },
     { id: "s:studio", group: "Surface", label: "Prompt & Model Studio", href: "/app/studio" },
+    { id: "s:wiring", group: "Surface", label: "Node wiring", href: "/app/wiring" },
     { id: "s:account", group: "Surface", label: "Plan and spend", href: routes.account() },
     ...visited.map((subject) => ({
       id: `v:${subject.kind}:${subject.id}`,

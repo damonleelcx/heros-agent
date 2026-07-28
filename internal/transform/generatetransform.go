@@ -31,10 +31,18 @@ func GenerateTransform(resolved *variantspec.Resolved, spec *variantspec.Variant
 		return nil, fmt.Errorf("transform: GenerateTransform requires a variant spec")
 	}
 
-	// 1. Dimension overrides (reuses the whole existing, tested value-rewrite path).
+	// 1. Dimension overrides AND the wiring decision (reuses the whole existing, tested path).
+	//
+	// 🔴 The wiring gate lives in Generate, not here: deciding it needs the call-site index, because the
+	// only evidence of a source-stated ORDER is where the statements actually are. Calling Generate
+	// whenever a resolved spec exists — even with no override — is what makes a pure reorder reach it;
+	// a wiring change is a real change with a real diff, and one emission path is better than two.
+	//
+	// No diff escapes a refusal: Generate returns the error before it assembles a patch, which is task
+	// 4.3's "no diff is emitted for a refused spec", structurally rather than by convention.
 	var base *Patch
-	if resolved != nil && len(resolved.Overrides) > 0 {
-		p, err := Generate(resolved, root)
+	if resolved != nil {
+		p, err := generate(resolved, spec, root)
 		if err != nil {
 			return nil, err
 		}

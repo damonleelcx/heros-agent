@@ -62,8 +62,16 @@ is axis-agnostic — it consumes `config_hash` + `Trace`, never a Dimension labe
   nothing the consumer requires** ([`adapter.go:73-82`](../../../internal/typedcontract/adapter.go)), and
   adapter identity is **deterministic** so the same reorder yields the same inserted adapters and the same
   `config_hash` on every evaluation.
-- **Not changed here.** **No source-level wiring codemod** — the rewriter that physically re-orders,
-  fuses, or deletes call sites in the target is deferred; until it lands, the interim refusal holds. **No
+- **New capability `wiring-materialization` (wave 15c).** The interim refusal is replaced for exactly ONE
+  shape: a **transposition of two adjacent, independent sibling statements**, materialized as a
+  **permutation of the file's lines** — same count, same multiset, every changed line inside one of the
+  two swapped blocks. It is admitted only when both call sites are in the same file at the same nesting,
+  consecutive, whole-line, neither control flow, and neither binds a name the other reads; the analysis
+  is conservative, so unprovable independence is a refusal. Go and Python have statement materializers;
+  every other language refuses **by name**. 🚫 A merge, a prune, an edge change, a non-adjacent move, or
+  two transpositions at once keep the 15b refusal unchanged.
+- **Not changed here.** **No general wiring codemod** — the rewriter that physically MOVES a call to an
+  arbitrary position, or fuses or deletes one, is still deferred; the interim refusal holds for all of it. **No
   new eval metric and no wiring-specific scorer** — the harness stays axis-agnostic and scores a
   wiring-changed `config_hash` with the existing `RunMetrics`. **No `config_hash` contract change** —
   `Order`/`Edges`/`InsertedAdapter` already participate; P0's golden vectors are unchanged. **No new
@@ -72,7 +80,7 @@ is axis-agnostic — it consumes `config_hash` + `Trace`, never a Dimension labe
 
 ## Impact
 
-- **Affected capabilities:** `node-wiring` (new), `wiring-safety` (new). Consumed, not modified:
+- **Affected capabilities:** `node-wiring` (new), `wiring-safety` (new), `wiring-materialization` (new, 15c). Consumed, not modified:
   `workflow-ir` (P1), `config-layer`/`runtime` (P2), `typed-contract` (P3), `eval-harness`/`scoring`
   (P4), `diagnosis`/`proposal` (P5.5).
 - **Affected code/systems:** `internal/proposal` gains one operator (`mergeOp`) and one `DefaultCatalog()`
@@ -90,4 +98,6 @@ is axis-agnostic — it consumes `config_hash` + `Trace`, never a Dimension labe
   existing `config_hash` changes; a spec with no wiring change hashes byte-identically to today.
 - **Sequencing:** **15a** (the node-wiring operators) is a complete step on its own — candidates are
   produced, gated, and hashed. **15b** (wiring-safety as a named requirement set) formalizes the gate,
-  adapter posture, determinism, and interim refusal that 15a already routes through.
+  adapter posture, determinism, and interim refusal that 15a already routes through. **15c** narrows that
+refusal by exactly one shape — the adjacent transposition — and is independently revertible: removing it
+returns the axis to 15b's behaviour with no upstream change.

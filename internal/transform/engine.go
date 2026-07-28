@@ -63,14 +63,36 @@ func (p *Patch) IsEmpty() bool { return len(p.Diff) == 0 }
 // revision is the caller that must guarantee the tree matches it.
 // It dispatches on the workflow's LANGUAGE (ADR-003 decision 1). See engines.
 func Generate(r *variantspec.Resolved, root string) (*Patch, error) {
+	return generate(r, nil, root)
+}
+
+// generate is the one implementation both entrypoints share. `spec` is optional: the P2 submit path
+// (Generate) has only the resolved projection, while the P5 commit path (GenerateTransform) also has
+// the authored spec — and the spec is where a pure re-arrangement lives, since it changes no override
+// and therefore leaves no trace in `Overrides`. Passing it through rather than duplicating the wiring
+// decision in two callers is what keeps ONE gate: a second copy is a second thing to keep true.
+func generate(r *variantspec.Resolved, spec *variantspec.VariantSpec, root string) (*Patch, error) {
 	if r == nil {
 		return nil, fmt.Errorf("transform: Generate requires a resolved spec")
 	}
+	// 🔴 P15 task 4.2 / 15.1 — before anything is indexed, read, or rewritten: the wiring is either the
+	// source's own, or the ONE shape this engine can materialize (an adjacent transposition), or it is
+	// refused. Deciding here rather than after the per-node loop is what makes it impossible to emit a
+	// partial diff that rewrites the contents of a graph nobody rewired.
 	eng, err := engineFor(r.Language)
 	if err != nil {
 		return nil, err
 	}
 	sites, err := eng.index(root)
+	if err != nil {
+		return nil, err
+	}
+	// 🔴 P15 task 4.2 / 15.1 — the wiring decision, before any file is read or rewritten: the spec
+	// either wires what the source wires, or asks for the ONE shape this engine can materialize (an
+	// adjacent transposition of two sibling statements), or is refused. It runs after indexing because
+	// the only evidence of a source-stated ORDER is where the call sites actually are (see checkWiring);
+	// it still runs before any edit, so a refused wiring cannot leave a partial diff behind.
+	plan, err := checkWiring(r, spec, sites, root)
 	if err != nil {
 		return nil, err
 	}
@@ -128,6 +150,18 @@ func Generate(r *variantspec.Resolved, root string) (*Patch, error) {
 		}
 	}
 
+	// P15 15c task 15.2 — the wiring transposition, emitted into the SAME patch as the content edits so
+	// one revert takes both. It is added after the per-node loop because its admissibility depends on the
+	// file's statements, not on any override, and because a wiring change that cannot be materialized
+	// must refuse before a partial patch exists.
+	if plan != nil {
+		swapTouched, err := planSwapEdits(plan, sites, root, r.Language, editsByFile)
+		if err != nil {
+			return nil, err
+		}
+		touched = append(touched, swapTouched)
+	}
+
 	patch := &Patch{
 		ConfigHash: r.ConfigHash, SourceRevision: r.SourceRevision,
 		Files: map[string][]byte{}, Touched: touched,
@@ -174,6 +208,17 @@ func Generate(r *variantspec.Resolved, root string) (*Patch, error) {
 // answer it — but it is NOT optional, and a language whose engine omitted it would be caught by
 // engineFor rather than quietly skipping the check (see langEngine).
 func gateMinimal(rel string, src, out []byte, edits []edit, allowed map[int]bool, reparse reparser) error {
+	// A WIRING TRANSPOSITION is a different class of edit and gets a different — stronger — check
+	// (P15 15c, decisions.md D-4). It is not routed through the rules below because it would fail the
+	// first of them by construction: a swap moves whole lines, and every rule below exists to forbid
+	// exactly that for a VALUE rewrite. Relaxing them instead would have removed the check from every
+	// rewriter in the package, forever, to serve one caller.
+	if isSwap(edits) {
+		if err := gateSwapPermutation(rel, src, out, edits); err != nil {
+			return err
+		}
+		return reparseOrReject(rel, src, out, edits, reparse)
+	}
 	for line := range changedLines(src, edits) {
 		if !allowed[line] {
 			e := edits[0]
@@ -207,11 +252,104 @@ func gateMinimal(rel string, src, out []byte, edits []edit, allowed map[int]bool
 					rel, from, to, to-from)}
 		}
 	}
+	return reparseOrReject(rel, src, out, edits, reparse)
+}
+
+// reparseOrReject is the "the result still parses" half of the gate, shared by both edit classes. A
+// splice that produced invalid source is rejected here rather than at the build gate, because this one
+// can name the node and the dimension.
+func reparseOrReject(rel string, src, out []byte, edits []edit, reparse reparser) error {
 	if err := reparse(rel, src, out); err != nil {
 		e := edits[0]
 		return &RewriteError{NodeID: e.NodeID, Dim: e.Dim, Err: ErrUnsafeRewrite, Detail: err.Error()}
 	}
 	return nil
+}
+
+// gateSwapPermutation is the wiring transposition's gate (P15 15c task 12.2, FR18).
+//
+// 🔴 It asserts the one property that makes a statement swap reviewable without reading the codemod:
+// THE OUTPUT IS THE INPUT'S LINES, REORDERED. Three checks, and each catches a different way of being
+// wrong:
+//
+//	line COUNT unchanged      a move that dropped or duplicated a line
+//	line MULTISET unchanged   a move that also EDITED a line while carrying it — re-indentation, a
+//	                          trailing-comma fix, a "harmless" whitespace normalisation. This is the
+//	                          check that makes the class safe: if it holds, not one character of the
+//	                          file's content changed, only the order of its lines.
+//	changed lines ⊆ blocks    a move that disturbed code outside the two statements it claimed to swap
+//
+// A rewriter cannot satisfy these by accident, and a reviewer who trusts only this assertion still
+// knows the change cannot have altered what any line SAYS.
+func gateSwapPermutation(rel string, src, out []byte, edits []edit) error {
+	blame := edits[0]
+	fail := func(format string, args ...any) error {
+		return &RewriteError{NodeID: blame.NodeID, Dim: blame.Dim, Err: ErrUnsafeRewrite,
+			Detail: fmt.Sprintf(format, args...)}
+	}
+
+	before, after := splitLines(src), splitLines(out)
+	if len(before) != len(after) {
+		return fail("the wiring swap changed %s from %d line(s) to %d: a transposition moves lines, it "+
+			"never adds or removes one", rel, len(before), len(after))
+	}
+	if missing, extra, ok := lineMultisetDiff(before, after); !ok {
+		return fail("the wiring swap did not preserve %s's lines: it would drop %q and introduce %q. A "+
+			"transposition may REORDER lines and may not edit one while moving it", rel, missing, extra)
+	}
+
+	// Every changed line must lie inside one of the swapped blocks. The blocks are the edits' own byte
+	// ranges, in ORIGINAL coordinates, which is the same space changedLines reports in.
+	inBlock := map[int]bool{}
+	for _, e := range edits {
+		for l := lineOf(src, e.Start); l <= lineOf(src, maxInt(e.Start, e.End-1)); l++ {
+			inBlock[l] = true
+		}
+	}
+	for i := range before {
+		if before[i] == after[i] {
+			continue
+		}
+		if !inBlock[i+1] { // changedLines and lineOf are 1-based
+			return fail("the wiring swap changed %s:%d, which is outside both swapped statements; a "+
+				"transposition may only disturb the two blocks it exchanges", rel, i+1)
+		}
+	}
+	return nil
+}
+
+// lineMultisetDiff reports whether two line slices are permutations of each other, and if not, one
+// concrete line from each side of the difference — a message that names the offending line is what
+// turns a failed invariant into something a person can act on.
+func lineMultisetDiff(before, after []string) (missing, extra string, ok bool) {
+	count := make(map[string]int, len(before))
+	for _, l := range before {
+		count[l]++
+	}
+	for _, l := range after {
+		count[l]--
+	}
+	// Sorted iteration: the reported line must not depend on map ordering, or the same defect produces
+	// a different message on every run and nobody can tell two failures apart.
+	keys := make([]string, 0, len(count))
+	for k, v := range count {
+		if v != 0 {
+			keys = append(keys, k)
+		}
+	}
+	if len(keys) == 0 {
+		return "", "", true
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		if count[k] > 0 && missing == "" {
+			missing = k
+		}
+		if count[k] < 0 && extra == "" {
+			extra = k
+		}
+	}
+	return missing, extra, false
 }
 
 // reparser is gateMinimal's "the result still parses" assertion for one language.
