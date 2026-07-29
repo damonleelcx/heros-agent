@@ -81,6 +81,15 @@ var spanRewriters = map[variantspec.Dimension]spanRewriter{
 	// P14 tool selection. It refuses here too, and for a reason of the same kind as the skills refusal
 	// but not identical to it, so it gets its own sentence rather than sharing one (see spanRewriteTools).
 	variantspec.DimTools: spanRewriteTools,
+	// P17 memory. It refuses here with the SAME implementation the Go engine uses (memoryrefuse.go), and
+	// the entry is present rather than absent on purpose: an absent entry falls through to engines.go's
+	// generic "no rewriter for this dimension", which is CauseCallSiteShape — it would tell the user their
+	// call site cannot carry the change, when in fact the platform has not built the artifact.
+	//
+	// 🔴 Unlike skills and context, memory is NOT asymmetric across languages and must not be described as
+	// if it were: no language has a materializer, because what is missing is a memory runtime, not a
+	// per-language rewriter. Naming a language as "pending" here would imply another one is not.
+	variantspec.DimMemory: spanRewriteMemory,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────────

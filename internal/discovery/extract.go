@@ -25,6 +25,11 @@ type ExtractedNode struct {
 	Tools       []IRTool
 	Skills      []string
 	Context     ContextAssembly
+	// Memory is the memory strategy this call site already implements — what the node carries ACROSS
+	// invocations (P17 task 6.2). Derived by the frontend, which is the only component that sees the
+	// call site, so no consumer has to re-derive it (a re-derivation would be a second classifier, and
+	// two classifiers are two answers).
+	Memory      string
 	Invocation  InvocationSemantics
 	Ambiguities []AmbiguityFlag
 }
@@ -136,6 +141,12 @@ func extractOne(s DetectedCallSite, m callMeta) ExtractedNode {
 		n.Model = ResolvedModel{Provider: UnresolvedSentinel, ModelID: UnresolvedSentinel, Unresolved: true}
 		n.Prompt = ResolvedPrompt{Unresolved: true}
 		n.Context = ContextAssembly{Policy: "unresolved", Description: "detect-only declaration: metadata not resolved"}
+		// Memory is `none` here for the same reason it is `none` everywhere else, NOT "unresolved":
+		// a cross-invocation store was never statically visible at any call site, so a detect-only
+		// declaration is not missing an answer this engine could otherwise have given. Marking it
+		// unresolved would imply a resolvable fact was skipped and would leave the resolver without a
+		// concrete base (see deriveMemory).
+		n.Memory = deriveMemory(n)
 		n.Ambiguities = []AmbiguityFlag{
 			flag(s.NodeID, "model", CodeModelUnresolved, "detect_only declaration resolves no model"),
 			flag(s.NodeID, "prompt", CodePromptUnresolved, "detect_only declaration resolves no prompt"),
@@ -148,6 +159,7 @@ func extractOne(s DetectedCallSite, m callMeta) ExtractedNode {
 	n.ToolsSkills = extractTools(s, fset)
 	n.Tools, n.Skills = classifyToolsSkills(s, fset)
 	n.Context = deriveContext(n)
+	n.Memory = deriveMemory(n)
 	return n
 }
 
@@ -353,6 +365,22 @@ func firstQuoted(s string) string {
 	}
 	return s[start+1 : start+1+end]
 }
+
+// deriveMemory records the memory strategy the call site already implements (P17 task 6.2).
+//
+// It returns `none` for every node, and that is a claim about the EVIDENCE rather than a placeholder or
+// unfinished work. A memory strategy is a store read and written BETWEEN turns — which is precisely why
+// `MemoryManagement` is a BEHAVIORAL pattern in the classifier, confirmed by "memory read/write against a
+// store between turns" (internal/patternclassifier/taxonomy.go), not a structural one. P1 extracts a
+// single call site; a cross-invocation store is not visible there, by definition.
+//
+// 🚫 The tempting alternative is to guess from context — an imported vector-store package, a variable
+// named `history`, a `.save()` call nearby. That would be a plausible-but-wrong default of exactly the
+// kind this engine declines everywhere else (the UnresolvedSentinel exists for the same reason): a node
+// mislabelled `vector-recall` would resolve, hash, and be compared as a configuration the source never
+// had. `none` is the honest floor, and what raises it is a trace-backed detector that can see the
+// between-turns behaviour — a future memory-runtime phase's job, not a heuristic here.
+func deriveMemory(ExtractedNode) string { return "none" }
 
 func deriveContext(n ExtractedNode) ContextAssembly {
 	// P1 has no context-strategy analysis (P3); record an honest, non-empty policy for the schema.

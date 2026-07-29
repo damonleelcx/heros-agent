@@ -68,6 +68,16 @@ type Edit struct {
 	// because "clear the tolerance" and "leave the tolerance alone" are different edits and the outer
 	// nil is the only way to say the second.
 	DropTolerance **float64 `json:"drop_tolerance,omitempty"`
+	// MemoryRef sets or clears the node's memory strategy — what it carries ACROSS invocations (P17
+	// FR17/FR18). A pointer to "" CLEARS it, and clearing must reproduce the pre-selection `config_hash`
+	// byte-identically: the field is additive and omit-when-absent, so an empty ref removes the key
+	// entirely rather than writing an empty one.
+	//
+	// 🔴 Its own field, never folded into ContextPolicy. Memory persists across invocations; context
+	// assembly is within one call (P17 decisions.md D2). One field meaning both would let a user edit a
+	// cross-session concern through a within-call control and could never be cleanly separated once
+	// drafts and hashes depended on it.
+	MemoryRef *string `json:"memory_ref,omitempty"`
 }
 
 // Dimensions names which dimensions this edit touches, in the closed enum's stable order. It is what
@@ -88,6 +98,9 @@ func (e Edit) Dimensions() []variantspec.Dimension {
 	}
 	if e.ToolSelection != nil {
 		dims = append(dims, variantspec.DimTools)
+	}
+	if e.MemoryRef != nil {
+		dims = append(dims, variantspec.DimMemory)
 	}
 	return dims
 }
@@ -227,6 +240,13 @@ func applyEdit(o variantspec.NodeOverride, e Edit) variantspec.NodeOverride {
 			v := **e.DropTolerance
 			o.ContextDropTolerance = &v
 		}
+	}
+	if e.MemoryRef != nil {
+		// Setting "" CLEARS the strategy. Because MemoryRef is `omitempty`, the empty string emits no key
+		// at all, so a select-then-clear returns to the pre-selection bytes and the pre-selection
+		// config_hash — the byte-exact back-out P17 FR18 requires. No branch is needed for it, and that is
+		// the point: the clear path and the set path are one assignment, so they cannot drift.
+		o.MemoryRef = *e.MemoryRef
 	}
 	return o
 }

@@ -58,6 +58,10 @@ var rewriters = map[variantspec.Dimension]rewriter{
 	variantspec.DimSkills:  rewriteSkills,
 	variantspec.DimContext: rewriteContext,
 	variantspec.DimTools:   rewriteTools,
+	// P17: memory REFUSES here, and in the span engine, through one shared implementation. The reason is
+	// not a fact about Go — a store read and written between invocations has no call-site expression in
+	// any language — so it lives in memoryrefuse.go rather than being stated twice.
+	variantspec.DimMemory: rewriteMemory,
 }
 
 // rewriteModel rewrites the model argument to the override's model id.

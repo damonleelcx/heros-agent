@@ -14,6 +14,11 @@ type Menu struct {
 	Models          []ModelChoice
 	Skills          []SkillChoice
 	ContextPolicies []ContextChoice
+	// MemoryStrategies are the sealed memory-registry entries OpMemoryPolicy may select from (P17).
+	// Its own slice, not folded into ContextPolicies, because a memory ref and a context ref resolve in
+	// different registries — one pasted into the other's dimension fails closed, which is exactly the
+	// guarantee a shared slice would invite a caller to break.
+	MemoryStrategies []MemoryChoice
 }
 
 // ModelChoice is one model registry entry available for a model up/down-grade, with the cheap signals
@@ -70,6 +75,46 @@ type ContextChoice struct {
 	// always beats it (DropGate.Observed). Meaningless unless Lossy.
 	ExpectedDrop float64
 }
+
+// MemoryChoice is one memory registry entry available for a strategy swap (P17).
+//
+// Strategy is metadata, exactly as ModelChoice.Provider is: the operator references the entry by Ref and
+// never inlines a strategy name, so a candidate is always resolvable back from its config_hash. It exists
+// so a rationale can say WHAT would change and so two entries of the same strategy — a 2 000-token
+// summary buffer and a 6 000-token one — are distinguishable to a human reading the proposal.
+type MemoryChoice struct {
+	Ref      string // memory registry version_id (64-hex content address)
+	Strategy string // "none" | "scratchpad" | "summary-buffer" | "vector-recall" | "entity-memory"
+	// Title is the strategy's human label, carried so a proposal rationale reads as a sentence rather
+	// than a wire name (registry.MemoryStrategy keeps the two layers separate for the same reason).
+	Title string
+}
+
+// memoryStrategiesExcept returns the menu's memory entries other than the one the node already binds,
+// in a deterministic order — the candidates for a swap.
+//
+// 🔴 `none` is excluded as a TARGET. Proposing "remove this node's memory" against a stale-read signal
+// would be answering "your recall is stale" with "then recall nothing", which is not a fix; it is the
+// removal of the capability being diagnosed. A user may of course author `none` themselves — that is
+// their call to make about their own agent (memory-authoring), and it is a different act from the
+// platform recommending it.
+func (m Menu) memoryStrategiesExcept(currentRef string) []MemoryChoice {
+	var out []MemoryChoice
+	for _, c := range m.MemoryStrategies {
+		if c.Ref == currentRef || c.Strategy == memoryStrategyNone {
+			continue
+		}
+		out = append(out, c)
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Ref < out[j].Ref })
+	return out
+}
+
+// memoryStrategyNone mirrors registry.StrategyNone. It is spelled here rather than imported so this
+// package's operator layer keeps depending only on refs and metadata — the registry is the resolver's
+// dependency, not the catalog's — and it is pinned to the registry constant by a test, so the two cannot
+// drift silently.
+const memoryStrategyNone = "none"
 
 const (
 	skillKindRerank    = "rerank"

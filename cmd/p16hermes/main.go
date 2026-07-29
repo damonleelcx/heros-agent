@@ -679,6 +679,12 @@ func (emptyRegistries) ResolveContextPolicy(context.Context, string) (*registry.
 	return nil, registry.ErrNotFound
 }
 
+// ResolveMemory completes variantspec.Registries (P17). It fails closed like its siblings: this
+// harness pins no memory strategy, so a memory_ref here names nothing and must not resolve to something.
+func (emptyRegistries) ResolveMemory(context.Context, string) (*registry.MemoryEntry, error) {
+	return nil, registry.ErrNotFound
+}
+
 func siteOf(ir *discovery.IR, id string) string {
 	for _, n := range ir.Nodes {
 		if n.NodeID == id {

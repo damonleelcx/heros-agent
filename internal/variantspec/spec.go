@@ -55,12 +55,27 @@ const (
 	// is validated against the node's DISCOVERED tool set instead, fail-closed — the same pattern as an
 	// `env` binding against DeclaredEnv and an `expr` binding against in_scope.
 	DimTools Dimension = "tools"
+	// DimMemory is what the agent CARRIES ACROSS invocations — a store read and written between turns
+	// (P17, decisions.md D2). It is a sixth member of the closed enum, and it is deliberately NOT a mode
+	// of DimContext: memory persists across invocations and sessions, while context assembly is how a
+	// SINGLE call builds its message list. The codebase already draws that line — MemoryManagement's
+	// confirmation signal is "memory read/write against a store between turns"
+	// (internal/patternclassifier/taxonomy.go) — and the *between-turns* clause is the boundary.
+	//
+	// Collapsing the two would let a cross-session concern masquerade as a within-call one, and a merged
+	// Dimension can never be cleanly un-merged once specs and hashes depend on it.
+	//
+	// 🔴 Unlike DimTools, this one DOES have a registry Kind behind it (registry.KindMemory): a memory
+	// strategy is a (strategy, params) pair authored independently of any call site, so it has no
+	// call-site identity to reuse. The Kind is hashed into the version_id, which is what makes a memory
+	// ref pasted into another dimension fail closed instead of silently resolving.
+	DimMemory Dimension = "memory"
 )
 
 // Dimensions is the closed enum, in a stable order. Exported so a consumer iterating dimensions cannot
 // silently miss one that was added — the alternative is a hand-written list somewhere else that drifts.
 func Dimensions() []Dimension {
-	return []Dimension{DimModel, DimPrompt, DimSkills, DimContext, DimTools}
+	return []Dimension{DimModel, DimPrompt, DimSkills, DimContext, DimTools, DimMemory}
 }
 
 // Sentinel errors. Typed so the Loader, the UI, and P4 can tell "you asked for something that does
@@ -257,13 +272,28 @@ type NodeOverride struct {
 	// acceptable is a property of the node's job (a Retrieval node tolerates augmentation a
 	// Summarization node does not), and a policy is shared across nodes with different tolerances.
 	ContextDropTolerance *float64 `json:"context_drop_tolerance,omitempty"`
+	// MemoryRef is a memory-registry version_id naming a sealed (strategy, params) entry — what this node
+	// CARRIES ACROSS invocations (P17 task 3.2, decisions.md D3).
+	//
+	// 🔴 Additive and `omitempty`: a node that binds no memory emits NO `memory_ref` key, so it
+	// serialises byte-identically to a pre-P17 override and every frozen config_hash golden vector keeps
+	// reproducing. This is the fourth application of the discipline Bindings, ToolSelection and
+	// ContextDropTolerance above follow, and it is the whole of D3 — an always-present field would move
+	// the canonical bytes of EVERY existing node and orphan every keyed row.
+	//
+	// 🚫 It is a version_id and nothing else. A spec that inlined a strategy's params would be a
+	// configuration whose content lives outside any registry, so it could never be resolved back from a
+	// config_hash months later — rejected at resolve with ErrInlineDefinition, exactly like every other
+	// ref (FR3).
+	MemoryRef string `json:"memory_ref,omitempty"`
 }
 
 // isEmpty reports whether this override sets nothing. A node listed in the ordering with no
 // overrides is legitimate and common: it is a node that runs exactly as discovered.
 func (o NodeOverride) isEmpty() bool {
 	return o.ModelRef == "" && o.PromptRef == "" && len(o.SkillRefs) == 0 && o.ContextPolicy == "" &&
-		len(o.Bindings) == 0 && len(o.ToolSelection) == 0 && o.ContextDropTolerance == nil
+		len(o.Bindings) == 0 && len(o.ToolSelection) == 0 && o.ContextDropTolerance == nil &&
+		o.MemoryRef == ""
 }
 
 // SelectedTools returns the kept tool set in canonical (sorted, de-duplicated) order — the same order
@@ -409,6 +439,15 @@ func (s *VariantSpec) Validate() error {
 			return specErr(id, DimContext, ErrInvalidSpec,
 				"context_drop_tolerance is %v, want a ratio in [0,1]", *t)
 		}
+		// Memory ref — the one thing checkable without the registry: that it is a REFERENCE at all
+		// (P17 task 3.2 / 5.6). An inlined strategy definition is a structural error, not a dangling ref,
+		// so it gets ErrInlineDefinition rather than ErrUnresolvedRef: the author did not point at a
+		// missing entry, they declined to point at one. See inlinesDefinition for what counts and why.
+		if inlinesDefinition(o.MemoryRef) {
+			return &SpecError{NodeID: id, Dim: DimMemory, Ref: o.MemoryRef, Err: ErrInlineDefinition,
+				Detail: "memory_ref carries an inline strategy definition; it must be a memory-registry " +
+					"version_id, so the configuration is resolvable back from a config_hash"}
+		}
 		// Binding structure — everything checkable without the IR or registries (kind is in the set; a
 		// non-literal binding names something). The scope/declared/contract checks and the exactly-once
 		// satisfaction rule need the IR and the resolved prompt, so they live in Resolve (task 3.2/3.4).
@@ -453,7 +492,7 @@ func (s *VariantSpec) Validate() error {
 func (s *VariantSpec) Refs() []string {
 	set := map[string]bool{}
 	for _, o := range s.Nodes {
-		for _, r := range []string{o.ModelRef, o.PromptRef, o.ContextPolicy} {
+		for _, r := range []string{o.ModelRef, o.PromptRef, o.ContextPolicy, o.MemoryRef} {
 			if r != "" {
 				set[r] = true
 			}
@@ -468,6 +507,25 @@ func (s *VariantSpec) Refs() []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// inlinesDefinition reports whether a ref field carries a DEFINITION rather than a reference to one
+// (FR3, P17 task 5.6). It is the one inline-vs-reference test in the package, read by Validate (the
+// structural gate) and again by resolveNode (defense in depth, for a caller that assembled a Resolve
+// by hand) — 禁止分裂 source-of-truth: two copies would be two rules to keep true.
+//
+// A version_id is an opaque token. A JSON object or array is the shape params take, so a ref whose
+// first non-space byte is `{` or `[` is an author writing the strategy out instead of registering it.
+// That is the mistake FR3 exists to catch, and catching it here means it is caught BEFORE any diff,
+// worktree, or provider call exists.
+//
+// 🚫 Deliberately NOT a 64-hex format check. Refs are opaque to this package — a test registry, a
+// future addressing scheme, or a shortened alias are all legitimate references, and rejecting them
+// would be this layer inventing a registry rule it does not own. What it CAN say is "this is not a
+// reference at all", and it says only that.
+func inlinesDefinition(ref string) bool {
+	t := strings.TrimSpace(ref)
+	return strings.HasPrefix(t, "{") || strings.HasPrefix(t, "[")
 }
 
 func firstDuplicate(xs []string) string {

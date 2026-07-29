@@ -62,6 +62,22 @@ So P17 ships the modeling and a **first-class refusal**, not a codemod, and clai
   `operatorPrior` + `verifyOrderHint` at [`gain.go:8,26`](../../../internal/proposal/gain.go)) proposes a
   strategy swap against a memory bottleneck; **verification decides**, and while the transform refuses, a
   memory proposal is surfaced as **refused-not-scored** — no win is claimed.
+- **New capability `memory-authoring`.** The memory axis gains a **second origin**: a workflow owner can
+  select a node's strategy and parameters themselves, not only wait for `OpMemoryPolicy` to nominate one.
+  It binds — and never restates — P13's shared
+  [`authored-change`](../p13-prompt-model-optimization/specs/authored-change/spec.md) contract: one spine,
+  two origins, `Origin` recorded and never hashed, *a user may author the change, a user may not author the
+  evidence.* What P17 adds is the consequence of D4: **at M20 the transform refuses**, so unlike
+  [P13](../p13-prompt-model-optimization/)–[P16](../p16-context-strategy-optimization/), an authored memory
+  change **does not reach the user's source at all**. The honest split is *modeling is not refused,
+  materialization is* — selecting a strategy resolves, hashes, versions, records a `user` origin and a
+  parent pointer, and diffs in lineage, and it re-materializes unchanged the day the rewriter lands. Three
+  rules keep that from becoming a lie: the boundary is **stated before the user chooses**, from the same
+  coverage fact the engine refuses from (never a second sentence that can drift); the refusal is raised at
+  **preflight** with the **transform's own typed cause**, so nobody learns it from an empty diff; and a
+  refused change is **never** rendered as applied, delivered, or improved — `refused` is its own state,
+  distinct from `failed` and `pending`. Clearing a strategy reproduces the prior `config_hash`
+  byte-identically, and `none` is indistinguishable from cleared.
 - **Not changed here.** No memory codemod / call-site rewrite (**deferred** to a future memory-runtime
   owner). No live memory runtime or store (the platform wiring was removed at the pivot and is reintroduced
   per phase; `vector-recall`'s embedding store and `entity-memory`'s structured store are strategy
@@ -73,14 +89,18 @@ So P17 ships the modeling and a **first-class refusal**, not a codemod, and clai
 
 ## Impact
 
-- **Affected capabilities:** `memory-store` (new), `memory-policy` (new). Consumed, not modified:
+- **Affected capabilities:** `memory-store` (new), `memory-policy` (new), `memory-authoring` (new).
+  Consumed, not modified: **`authored-change` (P13 — referenced, never restated)**,
   `variant-spec`/`config-hash` (P2), `registry` (P0/P2), `discovery-engine`/`workflow-ir` (P1),
   `transform-engine` (P2), `pattern-classifier` (P4.5), `proposal-catalog` (P4.5), `eval-harness`/`scoring`
   (P4). Kept disjoint: `context-assembly` (P16).
 - **Affected code/systems:** `internal/variantspec` (Dimension, NodeOverride, resolve, ResolvedNode),
   `internal/registry` (new `KindMemory` + `memory.go` + `memory_entry` table), `internal/discovery`
   (IR field + frontend), `internal/transform` (a `refuseMemory` in both engines), `internal/proposal`
-  (operator kind, catalog, priors). One new table; everything else is an additive field.
+  (operator kind, catalog, priors), `internal/authoring` (the memory edit plus the boundary read — **no**
+  new package; a second one would be the second apply path the contract forbids), `internal/api`
+  (`GET /api/p17/memory`), `web/console` (the `/app/memory` authoring surface). One new table; everything
+  else is an additive field.
 - **Dependencies:** requires **P1** (IR), **P2** (resolution, `config_hash`, transform dispatch),
   **P4** (axis-agnostic harness — ready but not exercised for memory at M20), **P4.5** (taxonomy, catalog,
   priors), **P16** (the context axis memory is kept disjoint from).
@@ -89,5 +109,7 @@ So P17 ships the modeling and a **first-class refusal**, not a codemod, and clai
 - **Breaking:** none. Every change is additive; a node with no memory strategy serializes and hashes
   byte-identically to a pre-P17 node, and the P0 golden `config_hash` vectors reproduce unchanged.
 - **Sequencing:** **20a** (the store + the modeled, refused Dimension) is a complete phase on its own.
-  **20b** (the operator + the metric wiring) follows. A **future** phase owns the rewrite that lifts the
-  refusal — explicitly out of scope here.
+  **20b** (the operator + the metric wiring) follows. **20c** (`memory-authoring`) follows 20b and depends
+  on 20a's refusal being typed and on P13's shared `authored-change` contract: the authoring surface's
+  central job is to render a refusal faithfully, so it cannot precede the refusal it renders. A **future**
+  phase owns the rewrite that lifts the refusal — explicitly out of scope here.

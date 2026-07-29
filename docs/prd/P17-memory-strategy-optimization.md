@@ -272,6 +272,67 @@ Numbered FRs; each maps 1:1 to an OpenSpec requirement under
   ([`metricset.go:98`](../../internal/patternclassifier/metricset.go)) — plus eval token totals; P17 SHALL
   add no new metric and SHALL NOT alter the taxonomy.
 
+### User-initiated change on this axis (capability `memory-authoring`)
+
+The cross-axis rules are **FR21–FR33 of [P13](P13-prompt-model-optimization.md)** (capability
+[`authored-change`](../../openspec/changes/p13-prompt-model-optimization/specs/authored-change/spec.md))
+and apply here in full without restatement: one spine, two origins; origin recorded and never hashed; *a
+user may author the change, a user may not author the evidence.*
+
+What P17 adds is governed by the one fact that separates this axis from
+[P13](P13-prompt-model-optimization.md)/[P14](P14-skills-tools-optimization.md)/[P15](P15-workflow-wiring-optimization.md)/[P16](P16-context-strategy-optimization.md):
+**at M20 the transform refuses every memory change.** On the other four axes an authored change reaches
+the user's source as a diff and is merely *unscored*. Here it does not reach the source at all. That makes
+the authoring surface's job the opposite of the usual one — it must sell the user *less* than they will
+expect, up front and in specifics, and it must still be worth using.
+
+It is worth using because the refusal is narrow. Selecting a strategy **resolves**, **hashes**,
+**versions**, **records**, and **compares** — everything except the codemod. A workflow owner can pin
+`summary-buffer(max_tokens=2000)` on a node, see the exact `config_hash` it produces, diff it against the
+parent variant, hand the id to a colleague, and have it survive to the day the rewriter lands, at which
+point that same id materializes. What they cannot do is get a diff today, or a number ever, until
+verification runs.
+
+> **The sentence this capability adds to the shared contract: the platform may refuse to apply an
+> authored change, but it may never refuse *silently*, discover the refusal *late*, or dress the refusal
+> up as the change having *worked*.**
+
+- **FR17.** A user SHALL be able to **select a node's memory strategy and set its parameters** from the
+  closed builtin set, expressed solely through the existing `MemoryRef` override so it resolves, freezes,
+  and participates in `config_hash` through the existing field. Only **registered** strategies SHALL be
+  offered; free text SHALL NOT be a selection path, and a params value violating the strategy's
+  `ParamsSchema` SHALL be rejected before the entry is sealed.
+- **FR18.** A user SHALL be able to **clear** a node's memory strategy. Clearing SHALL reproduce the
+  pre-selection `config_hash` **byte-identically**, and selecting `none` SHALL be indistinguishable from
+  clearing — the same `config_hash`, the same canonical bytes (FR4 applied to authoring). A surface SHALL
+  NOT present `none` and *cleared* as two states that differ in effect.
+- **FR19.** 🔴 An authored memory change SHALL be refused at **preflight** — before any transform, worktree,
+  build, or eval spend — with the **same typed cause the transform raises**, naming the node, the `memory`
+  dimension, and the deferred call-site materialization. The user SHALL learn this from the refusal path,
+  never from an empty diff.
+- **FR20.** 🔴 **Before** a user selects a strategy, the authoring surface SHALL state — from the same
+  coverage source the transform refuses from — that a memory change **cannot be applied to source at
+  M20**, and it SHALL state this as a **fact about the platform's missing artifact**, not as a fact about
+  the user's call site, their language, or their strategy choice. The control SHALL be **live and the
+  boundary stated**, never silently disabled: a disabled control tells the user nothing about *why*, and
+  invites the belief that some other strategy, language, or plan would enable it.
+- **FR21.** 🚫 An authored memory change SHALL NOT be **applied**, delivered, or merged at M20, and the
+  refusal SHALL NOT be presentable as success. No surface, report, or record SHALL show an applied,
+  delivered, or partially-applied state for a memory change while the transform refuses it.
+- **FR22.** An authored memory change SHALL nonetheless be **derivable, resolvable, hashable, storable and
+  comparable**: it SHALL produce a candidate variant with a real `config_hash`, a recorded `user` origin
+  and actor, and a parent-variant pointer, so it is diffable in lineage and re-materializable unchanged
+  once the rewriter lands. Refusing to apply SHALL NOT mean refusing to model.
+- **FR23.** An authored memory change SHALL be stamped `unverified` and SHALL claim **nothing** — no
+  memory-hit-rate gain, no staleness reduction, no token or cost saving, no quality effect — until the
+  harness has run. While the transform refuses, it SHALL be surfaced as **refused-not-scored** (FR15
+  applied to the user-originated path), and `refused` SHALL be rendered as its own state, distinct from
+  both `failed` and `pending`.
+- **FR24.** The two origins SHALL be **indistinguishable downstream**: a memory configuration a user
+  authors and one `OpMemoryPolicy` proposes SHALL resolve to the same `config_hash`, be refused by the
+  same rewriter with the same typed cause, and pass the same gates. There SHALL be no authoring-only
+  resolve path, transform path, or gate.
+
 ## 7. Non-functional requirements
 
 | # | Requirement | Target |
@@ -284,6 +345,10 @@ Numbered FRs; each maps 1:1 to an OpenSpec requirement under
 | **NFR6** | **Determinism** | The same target at the same revision emits the same IR memory defaults; the same spec resolves to the same memory field bytes and the same `config_hash` every time. |
 | **NFR7** | **Strategy closure** | The builtin strategy set is closed for the shipped strategy-set version; a sixth strategy without a version bump fails a cardinality assertion rather than silently changing what a stored strategy name means (mirroring `TaxonomySize`). |
 | **NFR8** | **Boundary containment** | No memory field, ref, or operator is expressible as a context construct or vice versa; a static check keeps `DimMemory` and `DimContext` disjoint in override, resolution, and transform dispatch. |
+| **NFR9** | **One spine, two origins** | Exactly one resolve path, one transform entry point, and one gate serve both the authored and the proposed memory change; asserted by enumerating the apply path, not by review. A second path would be a second place for the refusal to be wrong. |
+| **NFR10** | **The refusal is stated before the choice, not after it** | The authoring surface renders the M20 no-materializer boundary *before* a strategy is selected, sourced from the same coverage fact the transform refuses from — never a second hand-written sentence that can drift from the engine's behaviour. Asserted in the console tests. |
+| **NFR11** | **A refusal is never rendered as success** | No surface presents a refused memory change as applied, delivered, partially applied, or improved, and `refused` renders as its own state, distinct from `failed` and `pending`. This is the one presentation the axis exists to keep honest: at M20 the refusal *is* the outcome, so a UI that softens it is the whole lie. |
+| **NFR12** | **Clearing is byte-exact** | Selecting a strategy and then clearing it reproduces the prior `config_hash` byte-identically, and `none` hashes identically to cleared — so a user can back out of an authored memory change with no residue in the hash. |
 
 ## 8. System design summary
 

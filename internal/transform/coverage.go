@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/heros-foreal/agentd/internal/discovery"
+	"github.com/heros-foreal/agentd/internal/registry"
 	"github.com/heros-foreal/agentd/internal/variantspec"
 )
 
@@ -108,6 +109,7 @@ func CoverageAxes() []string {
 		string(variantspec.DimSkills),
 		string(variantspec.DimTools),
 		string(variantspec.DimContext),
+		string(variantspec.DimMemory),
 		wiringRefusalDim,
 	}
 }
@@ -136,6 +138,7 @@ func AxisCoverage() []CoverageCell {
 		out = append(out, skillCoverage(lang)...)
 		out = append(out, toolPruneCoverage(lang)...)
 		out = append(out, contextCoverage(lang)...)
+		out = append(out, memoryCoverage(lang)...)
 		out = append(out, wiringCoverage(lang)...)
 	}
 	sortCoverage(out)
@@ -373,6 +376,42 @@ func contextCoverage(lang string) []CoverageCell {
 				cell.Note = "retention is decided by the shared policy code; what is missing is splitting this language's written list into its elements"
 			}
 		}
+		out = append(out, cell)
+	}
+	return out
+}
+
+// memoryCoverage reads the builtin strategy set — the same closed vocabulary RegisterMemory validates
+// against — and answers for every (language, strategy) cell (P17).
+//
+// 🔴 It is UNIFORM across languages, and that uniformity is the claim, not a shortcut. Skills and context
+// are asymmetric because what is missing there is a per-language artifact (a tool-value spelling, a list
+// splitter), so one language's cell can flip to materializes while another's does not. Memory is missing
+// something else entirely: a memory RUNTIME plus a codemod that introduces a store, a lifetime, a key
+// scheme, and read/write points. No language has one. Rendering a language in this axis's refusal — "the
+// Rust rewriter is pending" — would imply some other language's is not, which is false, and would send a
+// user to wait for the wrong thing.
+//
+// `none` materializes, because the identity strategy is genuinely equivalent to the un-rewritten call
+// site — exactly as `full`/identity does in the context axis. That is not a courtesy row: it is what
+// makes "none ≡ absent" true at the coverage layer too, so a user who selects `none` is not told their
+// no-op was refused.
+func memoryCoverage(lang string) []CoverageCell {
+	const axis = string(variantspec.DimMemory)
+	var out []CoverageCell
+	for _, st := range registry.BuiltinMemoryStrategies() {
+		cell := CoverageCell{Axis: axis, Language: lang, Form: st.Name()}
+		if st.Name() == registry.StrategyNone {
+			cell.Status = CoverageMaterializes
+			cell.Note = "the identity strategy; equivalent to the un-rewritten call site, so nothing is emitted"
+			out = append(out, cell)
+			continue
+		}
+		cell.Status = CoverageRefuses
+		cell.Cause = CauseNoMaterializer
+		cell.MissingArtifact = "a memory runtime (a store, a lifetime, and a key scheme) plus the call-site rewriter that reads and writes it"
+		cell.Note = "a memory strategy is read and written BETWEEN invocations, so no expression — and no " +
+			"region — at the call site holds it; this is missing in every language, not this one"
 		out = append(out, cell)
 	}
 	return out

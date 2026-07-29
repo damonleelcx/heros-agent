@@ -17,6 +17,11 @@ type Registries interface {
 	ResolvePrompt(ctx context.Context, versionID string) (*registry.PromptEntry, error)
 	ResolveSkill(ctx context.Context, versionID string) (*registry.SkillEntry, error)
 	ResolveContextPolicy(ctx context.Context, versionID string) (*registry.ContextEntry, error)
+	// ResolveMemory resolves a memory-registry version_id (P17 task 4.1). It is its OWN method, and not a
+	// mode of ResolveContextPolicy, for the reason decisions.md D2 keeps the dimensions apart: memory
+	// persists ACROSS invocations, context is within one call, and one method returning either would let
+	// a cross-session concern resolve through a within-call path.
+	ResolveMemory(ctx context.Context, versionID string) (*registry.MemoryEntry, error)
 }
 
 // Resolved is a spec resolved against the IR and the registries: the hashed configuration plus the
@@ -124,6 +129,17 @@ type ResolvedOverride struct {
 	// the node declares none — the gate then falls back to its pattern-derived default, which is a
 	// gate-time decision and deliberately not frozen into the hash.
 	ContextDropTolerance *float64
+	// Memory is the resolved memory strategy — what this node carries ACROSS invocations (P17 task 4.1).
+	// Nil means the node did not override memory; non-nil means it did, INCLUDING when the strategy it
+	// selected is `none`.
+	//
+	// 🔴 That distinction is load-bearing and is why this is a pointer rather than a string. "No override"
+	// and "an override that selects the identity strategy" produce the same HASHED bytes (D3: none ≡
+	// absent) but are different facts about what the author asked for, and the transform has to be able to
+	// tell them apart: an explicit `none` is a no-op it applies silently, while a real strategy is a
+	// refusal it must raise. Collapsing them would either refuse `none` (wrong — the identity strategy
+	// changes nothing, so there is nothing to refuse) or skip the refusal entirely.
+	Memory *registry.MemoryEntry
 }
 
 // Dimensions returns the dimensions this override actually sets, in a stable order. The Transform
@@ -144,6 +160,13 @@ func (o ResolvedOverride) Dimensions() []Dimension {
 	}
 	if len(o.ToolSelection) > 0 {
 		out = append(out, DimTools)
+	}
+	// Memory is reported iff the node OVERRODE it — including an override that selects `none`. See the
+	// Memory field's comment: the transform needs to tell "no override" from "the identity strategy",
+	// because one is skipped and the other is a no-op it applies. A node that never mentioned memory is
+	// never dispatched here, which is how FR2's per-dimension independence stays mechanical.
+	if o.Memory != nil {
+		out = append(out, DimMemory)
 	}
 	return out
 }
@@ -326,6 +349,51 @@ func resolveNode(ctx context.Context, nodeID string, o NodeOverride, irNode *dis
 		t := *o.ContextDropTolerance
 		node.ContextDropTolerance = &t
 		ro.ContextDropTolerance = &t
+	}
+
+	// ── memory (P17 task 4.1, decisions.md D3/D4) ──────────────────────────────────────────────────
+	//
+	// The merge rule is the same as every other dimension's: an override resolves to a registry entry
+	// pinned by its immutable version_id; no override falls back to the DISCOVERED default, pinned by
+	// source_revision. Discovery emits `none` for every node today (there is no static evidence of a
+	// cross-invocation store at a call site), so the fallback is inert — but it is WIRED, not assumed,
+	// because the resolver's job is to leave nothing to defaulting and an assumption here would be a
+	// silent default the day discovery learns to detect one.
+	//
+	// 🔴 What does NOT happen here is the refusal. A spec carrying a MemoryRef resolves cleanly and
+	// produces a stable config_hash; only the TRANSFORM refuses (decisions.md D4). Blocking at resolve
+	// would throw away the modeling, hashing, and proposal that are entirely safe and correct, and would
+	// make the axis useless for the large fraction of its value that needs no codemod.
+	if o.MemoryRef != "" {
+		// Defense in depth against a caller that assembled a Resolve by hand and skipped Validate. Same
+		// helper, so there is one inline-vs-reference rule rather than two that can disagree.
+		if inlinesDefinition(o.MemoryRef) {
+			return ro, node, &SpecError{NodeID: nodeID, Dim: DimMemory, Ref: o.MemoryRef, Err: ErrInlineDefinition,
+				Detail: "memory_ref carries an inline strategy definition; it must be a memory-registry " +
+					"version_id, so the configuration is resolvable back from a config_hash"}
+		}
+		entry, err := regs.ResolveMemory(ctx, o.MemoryRef)
+		if err != nil {
+			return ro, node, refError(nodeID, DimMemory, o.MemoryRef, err)
+		}
+		ro.Memory = entry
+		// `none` ≡ absent (D3): the identity strategy emits NO memory key, so an explicitly-`none` node
+		// canonicalizes byte-identically to a node that never mentioned memory and the P0 golden vectors
+		// keep reproducing. The override is still recorded on `ro` — the transform must be able to see
+		// that the author asked for something, even when what they asked for changes nothing.
+		if !entry.IsNone() {
+			params, err := decodeParams(entry.Spec.Params)
+			if err != nil {
+				return ro, node, specErr(nodeID, DimMemory, ErrUnresolvedRef,
+					"memory entry %s has params that are not a JSON object: %v", entry.VersionID, err)
+			}
+			node.Memory = &ResolvedMemory{Strategy: entry.Spec.Strategy, Params: params}
+		}
+	} else if base := irNode.MemoryDefault(); base != registry.StrategyNone {
+		// The discovered default, pinned by source_revision like any other un-overridden dimension. No
+		// params: the IR records WHICH strategy a call site already implements, not how it is tuned —
+		// inventing params here would be this layer guessing at a configuration nobody wrote.
+		node.Memory = &ResolvedMemory{Strategy: base, Params: map[string]any{}}
 	}
 
 	// ── tools (P14 task 5.3, decisions.md D-14.2) ──────────────────────────────────────────────────

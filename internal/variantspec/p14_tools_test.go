@@ -39,15 +39,20 @@ func TestDimToolsInClosedEnum(t *testing.T) {
 	if DimTools != "tools" {
 		t.Fatalf("DimTools is %q; the wire value is stored on rows and cannot drift", DimTools)
 	}
+	// The five P14 froze, IN ORDER, as the PREFIX of the enum. A prefix and not the whole list: the
+	// enum is closed against accidents, not against later phases — P17 appends DimMemory deliberately,
+	// through the same eight-step checklist, and a length equality here would have failed for that
+	// addition while saying nothing about the claim this test actually makes, which is "P14 grew the
+	// enum by exactly one, at the end, and did not disturb the four before it".
 	want := []Dimension{DimModel, DimPrompt, DimSkills, DimContext, DimTools}
 	got := Dimensions()
-	if len(got) != len(want) {
-		t.Fatalf("the closed enum has %d member(s), want %d: %v", len(got), len(want), got)
+	if len(got) < len(want) {
+		t.Fatalf("the closed enum has %d member(s), want at least the %d P14 froze: %v", len(got), len(want), got)
 	}
 	seen := map[Dimension]bool{}
 	for i, d := range got {
-		if d != want[i] {
-			t.Errorf("Dimensions()[%d] = %q, want %q", i, d, want[i])
+		if i < len(want) && d != want[i] {
+			t.Errorf("Dimensions()[%d] = %q, want %q — P14's five are the enum's stable prefix", i, d, want[i])
 		}
 		if seen[d] {
 			t.Errorf("%q appears twice in the closed enum", d)

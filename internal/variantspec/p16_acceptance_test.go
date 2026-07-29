@@ -21,12 +21,19 @@ import (
 // ── task 7.7 — no new Dimension ──────────────────────────────────────────────────────────────────
 
 func TestP16AddsNoDimension(t *testing.T) {
+	// P16's claim is that RETRIEVAL did not become a dimension — it is a policy with params. That claim
+	// is tested by the retrieval-name check below; the prefix check pins that P16 disturbed none of the
+	// five that existed when it landed.
+	//
+	// 🔴 Not a length equality. P17 appends DimMemory through the same eight-step checklist, on an axis
+	// P16 has no opinion about — memory persists ACROSS invocations, context is within one call
+	// (P17 decisions.md D2) — and a count assertion would have reported that as a P16 violation.
 	want := []Dimension{DimModel, DimPrompt, DimSkills, DimContext, DimTools}
 	got := Dimensions()
-	if len(got) != len(want) {
-		t.Fatalf("the dimension enum has %d members (%v), want the frozen %d (%v); P16 models retrieval as "+
-			"a rag-retrieval POLICY with params precisely so this enum does not have to open (decisions.md D-1)",
-			len(got), got, len(want), want)
+	if len(got) < len(want) {
+		t.Fatalf("the dimension enum has %d members (%v), want at least the %d P16 froze (%v); P16 models "+
+			"retrieval as a rag-retrieval POLICY with params precisely so this enum does not have to open "+
+			"for retrieval (decisions.md D-1)", len(got), got, len(want), want)
 	}
 	for i := range want {
 		if got[i] != want[i] {
