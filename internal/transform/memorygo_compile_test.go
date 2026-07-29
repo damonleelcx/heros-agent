@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -54,8 +55,8 @@ func Ask(client *anthropic.Client, question string) (*anthropic.Message, error) 
 
 // goMemoryTarget writes a self-contained module that builds against the real SDK.
 //
-// It carries its own go.mod requiring the SDK at the version this repo resolved, and reuses THIS repo's
-// go.sum so the build runs from the module cache with no network. A test that needed the network would be
+// It reuses THIS repo's go.mod (renamed) and go.sum, so the build resolves to exactly the versions this
+// repo already has in the module cache and runs with no network. A test that needed the network would be
 // a test that fails for reasons unrelated to what it asserts.
 func goMemoryTarget(t *testing.T) string {
 	t.Helper()
@@ -69,9 +70,26 @@ func goMemoryTarget(t *testing.T) string {
 		t.Fatal(err)
 	}
 
-	version := sdkVersion(t)
-	gomod := "module heros.test/target\n\ngo 1.24\n\nrequire github.com/anthropics/anthropic-sdk-go " + version + "\n"
-	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte(gomod), 0o600); err != nil {
+	// 🔴 The fixture module inherits THIS repo's entire require graph, renamed — not a minimal
+	// `require anthropic-sdk-go` line.
+	//
+	// A minimal go.mod is a different module, and MVS resolves it differently: with only the SDK's own
+	// requirements to satisfy, it selects the LOWEST admissible version of each transitive dependency
+	// (gjson pulls tidwall/pretty v1.2.0), while this repo's graph raises some of them (v1.2.1). The
+	// go.sum copied above is this repo's, so the lower selections are neither in it nor in the module
+	// cache — and the build runs with GOPROXY=off, on purpose, so nothing can be fetched to cover the
+	// difference. That failed only on a clean machine: a developer whose cache happened to hold the
+	// lower version saw it pass, and CI did not. Copying the graph makes the selection identical to the
+	// one go.sum already covers, so the check stays offline and stays honest.
+	repoMod, err := os.ReadFile(filepath.Join("..", "..", "go.mod"))
+	if err != nil {
+		t.Fatalf("read go.mod: %v", err)
+	}
+	gomod := regexp.MustCompile(`(?m)^module .*$`).ReplaceAll(repoMod, []byte("module heros.test/target"))
+	if !strings.Contains(string(gomod), "module heros.test/target") {
+		t.Fatal("the repo go.mod has no module line to rename; the fixture module would be unbuildable")
+	}
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), gomod, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "target.go"), []byte(goMemoryTargetSrc), 0o600); err != nil {
