@@ -36,20 +36,21 @@ import (
 // shape skillbind.go's `toolValueForms` uses for tool values, and for the same reason: the SHAPE is
 // language-neutral, only the SPELLING is per SDK.
 //
-// # Why this table ships EMPTY rather than with a plausible row
+// # What a row costs, and why there is exactly one
 //
-// 🚫 This module cannot compile against any real SDK. The Go fixture is committed as `.txt` precisely
-// because "a directory of real .go files importing an SDK this module does not depend on would break
-// `go build ./...` for the whole repo" (engine_test.go). So a row written here could not be verified to
-// compile, let alone to behave — and ADR-001 names exactly that as the top risk: *a bad codemod can
-// break a build or subtly change behavior*, with the wrong-but-compiling version the worse half.
+// 🚫 A row may not be written from memory. ADR-001 names the top risk as *a bad codemod can break a
+// build or subtly change behavior*, with the wrong-but-compiling version the worse half — and a
+// response conversion is precisely where that happens, because the wrong spelling of a per-SDK method
+// is indistinguishable from the right one until something compiles it.
 //
-// An unverified row is not a partial capability. It is a guess that would be emitted into a customer's
-// repository, and this table treats an absent provider the same way `toolValueForms` treats Bedrock: a
-// provider whose spelling this engine has no evidence for, refused by name rather than guessed at.
+// So the anthropic row below exists only because TestGoMemoryMaterializedOutputCompiles builds the
+// emitted source against the real anthropic-sdk-go, offline, in a module of its own (see
+// memorygo_compile_test.go, and the blank test import that keeps the SDK in go.mod). That test is the
+// bar: a provider this engine has no compiled evidence for is refused BY NAME, the same way
+// `toolValueForms` treats Bedrock, rather than guessed at.
 //
-// What a row costs, so the next person does not have to rediscover it: one entry below, one fixture that
-// compiles against that SDK, and the conformance assertion that Go's materialized behaviour matches
+// What the next row costs, so nobody has to rediscover it: one entry below, one fixture that compiles
+// against that SDK, and the conformance assertion that Go's materialized behaviour matches
 // internal/memoryruntime — the same bar the Python module already clears by execution.
 
 // memoryResponseForm is how ONE provider's response value is converted, in ONE language, into the
@@ -77,10 +78,11 @@ func memoryResponseKey(language, provider string) memoryResponseCell {
 
 // memoryResponseForms is the coverage table: (language, provider) → how to convert a response there.
 //
-// 🔴 It is deliberately EMPTY, and the emptiness is evidence rather than a TODO. See the file comment:
-// nothing here can be compiled against a real SDK, so every row would be an unverified guess emitted
-// into a customer's repository. Python needs no row because its message and response shapes are the
-// same duck-typed dict; Go needs one per provider because they are different static types.
+// 🔴 It is deliberately SHORT, and what is absent is evidence rather than a TODO: a provider is here
+// only once its conversion has been compiled against that SDK (see the file comment), because an
+// unverified row is not a partial capability — it is a guess emitted into a customer's repository.
+// Python needs no row because its message and response shapes are the same duck-typed dict; Go needs
+// one per provider because they are different static types.
 var memoryResponseForms = map[memoryResponseCell]memoryResponseForm{
 	{"go", "anthropic"}: {
 		// VERIFIED against the SDK in the module cache, not written from memory: `func (r Message)
@@ -295,11 +297,19 @@ func goAssignTarget(line string) (string, bool) {
 		return "", false
 	}
 	for _, r := range first {
-		if r != '_' && !(r >= 'a' && r <= 'z') && !(r >= 'A' && r <= 'Z') && !(r >= '0' && r <= '9') {
+		if !isNameRune(r) {
 			return "", false
 		}
 	}
 	return first, true
+}
+
+// isNameRune reports whether r may appear in a name this package is willing to write into generated
+// source: ASCII letters, digits and underscore, and nothing else. Deliberately narrower than
+// unicode.IsLetter — a name outside this set is one whose bytes we would be re-emitting on faith, and
+// the safe answer for a call site we cannot name is to refuse it, not to quote it.
+func isNameRune(r rune) bool {
+	return r == '_' || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')
 }
 
 func memoryContentBlindDisplay() string {

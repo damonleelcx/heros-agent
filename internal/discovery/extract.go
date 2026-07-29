@@ -22,9 +22,9 @@ type ExtractedNode struct {
 	// Tools and Skills are the P14 split of ToolsSkills (decisions.md D-14.1), classified HERE because
 	// the frontend is the only component that can see which discovered entry is which. Nil when the node
 	// declares none, so the emitted IR omits them and a pre-P14 document round-trips byte-identically.
-	Tools       []IRTool
-	Skills      []string
-	Context     ContextAssembly
+	Tools   []IRTool
+	Skills  []string
+	Context ContextAssembly
 	// Memory is the memory strategy this call site already implements — what the node carries ACROSS
 	// invocations (P17 task 6.2). Derived by the frontend, which is the only component that sees the
 	// call site, so no consumer has to re-derive it (a re-derivation would be a second classifier, and

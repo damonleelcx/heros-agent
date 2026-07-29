@@ -72,14 +72,15 @@ func memoryOverride(t *testing.T, strategy string) variantspec.ResolvedOverride 
 
 // materializeAt runs the memory materializer against a REAL discovered call site.
 //
-// 🔴 It calls spanMaterializeMemory directly rather than going through Generate, and that is a statement
-// about where this phase stopped rather than a testing convenience. The materializer is NOT yet in the
-// span dispatch: emitting `agentmem.recall(...)` requires an `import agentmem` at the top of the file,
-// which is an UNTARGETED line, and engine.go's minimality gate correctly rejects it. Wiring it needs a
-// new edit class with its own admission rule — the isSwap precedent — and weakening the gate instead
-// would remove the untargeted-line check from every rewriter in the package to serve one.
+// It calls spanMaterializeMemory directly rather than going through Generate, which narrows what these
+// tests see to the rewriter itself: real discovery, real spans, real edits, and the both-halves gate,
+// with no artifact generation or diff assembly in the frame.
 //
-// What these tests DO establish is real: real discovery, real spans, real edits, and the both-halves gate.
+// 🔴 That is now a focus, not a boundary. This comment used to say the materializer was NOT in the span
+// dispatch — true when the import of the generated module was an untargeted line that engine.go's
+// minimality gate correctly rejected. The import edit class landed with its own admission rule, the
+// dispatch entry is live (rewrite_span.go), and TestMemoryMaterializesEndToEnd drives the whole path
+// through Generate. Read that one for what ships; read these for why each edit is the edit it is.
 func materializeAt(t *testing.T, src, strategy string) ([]edit, error) {
 	t.Helper()
 	root := spanTarget(t, "pipeline.py", src)
@@ -172,6 +173,48 @@ func TestKwargsCallSiteRefusesAboutTheCall(t *testing.T) {
 	}
 	if strings.Contains(strings.ToLower(err.Error()), "no python module has been generated") {
 		t.Errorf("the refusal blames the platform for a call-site fact: %v", err)
+	}
+}
+
+// TestUnassignedResultRefusesWholeRatherThanHalf — the decision the phase turns on, on the shape that
+// admits exactly one half.
+//
+// 🔴 This is the case pySimpleAssignTarget's unit test cannot see. That test asserts one LINE is
+// rejected; this one asserts what the materializer does with a whole site whose recall half would land
+// perfectly — the message list is written right there — and whose record half cannot, because no name
+// holds the response. The tempting outcome is the wrong one: emit the recall edit, skip the record edit,
+// report success. The result reads from a store nothing fills, which behaves exactly like `none` while
+// the config_hash claims a strategy, and unlike P17's silent drop it ships a real diff that builds and
+// looks reviewed.
+//
+// It is also not hypothetical: agent/bedrock_adapter.py:1516 in hermes-agent is this shape, and it is
+// the only one of that repository's 31 nodes that is NOT refused for **kwargs.
+func TestUnassignedResultRefusesWholeRatherThanHalf(t *testing.T) {
+	edits, err := materializeAt(t, pyMemoryNoAssignSrc, "scratchpad")
+	if err == nil {
+		t.Fatalf("a call site whose result is never assigned produced %d edit(s) and no error; half a "+
+			"memory is not a weaker memory — recall alone reads from a store nothing fills", len(edits))
+	}
+	if len(edits) != 0 {
+		t.Errorf("the refusal still returned %d edit(s); a refused site must leave the source untouched, "+
+			"or the caller can apply half of what it was refused", len(edits))
+	}
+	var re *RewriteError
+	if !errors.As(err, &re) {
+		t.Fatalf("refusal = %v, want a RewriteError", err)
+	}
+	if re.Cause != CauseCallSiteShape {
+		t.Errorf("cause = %q, want %q: the platform has the python materializer, and this site's own "+
+			"shape is what stops it", re.Cause, CauseCallSiteShape)
+	}
+	// The sentence must name the half that is missing and the edit that would fix it. "Refused" alone
+	// sends the reader to the wrong half — recall is written and fine.
+	msg := err.Error()
+	for _, want := range []string{"record", "assign"} {
+		if !strings.Contains(strings.ToLower(msg), want) {
+			t.Errorf("the refusal does not mention %q, so it does not say which half failed or what to "+
+				"change: %v", want, msg)
+		}
 	}
 }
 

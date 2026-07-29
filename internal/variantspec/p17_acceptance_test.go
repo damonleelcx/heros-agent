@@ -30,9 +30,6 @@ import (
 // un-audited. Reading the plan directly means the plan cannot outgrow its own audit.
 
 var (
-	// A completed task line: `- [x] 4.2 ... (Test: `TestFoo`)`. Only completed tasks are audited —
-	// an open task naming a test that does not exist yet is a plan, not a false claim.
-	taskLineRe = regexp.MustCompile(`(?m)^- \[x\] (\d+\.\d+)`)
 	// The evidence pointer. Go test names only: the console's are `.mjs` test titles, audited separately
 	// below because they live in a different runner and cannot be found by this pattern.
 	goTestRefRe = regexp.MustCompile("\\(Test: `(Test\\w+)`")

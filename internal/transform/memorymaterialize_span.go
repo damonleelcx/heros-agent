@@ -421,7 +421,9 @@ func pySimpleAssignTarget(line string) (string, bool) {
 		return "", false
 	}
 	for _, r := range target {
-		if r != '_' && r != '.' && !(r >= 'a' && r <= 'z') && !(r >= 'A' && r <= 'Z') && !(r >= '0' && r <= '9') {
+		// '.' is admitted here and nowhere else: `self.resp = client.chat(...)` is a name this engine can
+		// write back into a generated statement, where Go's `a, b := …` tuple form is not.
+		if r != '.' && !isNameRune(r) {
 			return "", false
 		}
 	}

@@ -159,7 +159,7 @@ func TestMemoryDefaultDeterministic(t *testing.T) {
 		t.Fatalf("marshal: %v", err)
 	}
 	if string(other) != string(first) {
-		t.Fatalf("a different extraction order produced different IR bytes; node order is normalized, so "+
+		t.Fatalf("a different extraction order produced different IR bytes; node order is normalized, so " +
 			"the memory defaults must not reintroduce order-dependence")
 	}
 }

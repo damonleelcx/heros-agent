@@ -36,8 +36,15 @@ import (
 //
 // That is a real precondition on the customer's code, and it is stated rather than smoothed over: a
 // process-lifetime default would be the exact merge D1 rejects, and returning empty memory instead would
-// run `none` under another strategy's hash. Loud-and-fixable beats quiet-and-wrong, and the materializer
-// surfaces it before apply rather than at run time (see memorySessionPrecondition).
+// run `none` under another strategy's hash. Loud-and-fixable beats quiet-and-wrong.
+//
+// 🔴 Where it is stated, precisely: in the GENERATED MODULE, at run time — Python raises
+// `MemorySessionRequired` from `get_session`, Go returns `ErrNoSession`. Each spells the fix in its own
+// idiom (`agentmem.set_session(<id>)` / `agentmem.SetSession`), so there is no shared sentence to hold
+// them together, and a shared constant that no surface read would only look like one. Nothing surfaces
+// this BEFORE apply: `Patch` carries a diff and its touched dimensions, not advisories. A pre-apply
+// warning is worth building, but it is a surface, not a string, and claiming it here while the reader's
+// first encounter is a traceback would be the same kind of quiet-and-wrong this paragraph rejects.
 
 // Artifact paths are fixed and deterministic so regeneration overwrites byte-identically.
 const (
@@ -45,14 +52,6 @@ const (
 	memoryDocPath      = "agentmem.json"
 	memoryDocSchema    = "heros.agentmem/v1"
 )
-
-// memorySessionPrecondition is the sentence every surface uses for the session requirement. One
-// spelling, because the refusal a user reads before apply and the exception they would hit at run time
-// must not be two different explanations of one fact.
-const memorySessionPrecondition = "materialized memory needs a session id to scope it: set HEROS_MEMORY_SESSION, " +
-	"or call agentmem.set_session(<id>) at the point your program knows which conversation it is serving. " +
-	"The generated module raises rather than defaulting one, because a defaulted session merges " +
-	"conversations that must stay separate"
 
 // MemoryDocument is the emitted params document. Its shape mirrors the binding document's: a schema, the
 // config hash it was generated for, and per-node data.
