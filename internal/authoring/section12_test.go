@@ -191,6 +191,10 @@ func TestPreflightPayloadCarriesNoContent(t *testing.T) {
 		// `{"max_tokens":2000}` inline would be a payload and would belong nowhere near a draft — which is
 		// also why variantspec rejects an inlined memory definition at resolve.
 		"MemoryRef": true,
+		// P18: a harness-registry version_id, on identical terms. The strategy's params — including
+		// `max_turns`, which is the COST — live in the sealed entry the ref addresses. A field that held
+		// `{"max_turns":9}` inline would let a draft carry a bill nobody registered.
+		"HarnessRef": true,
 	}
 	for i := 0; i < rt.NumField(); i++ {
 		name := rt.Field(i).Name

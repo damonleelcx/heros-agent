@@ -89,8 +89,12 @@ type DetectedCallSite struct {
 	// See ArgUnpacking. Always nil for the Go frontend (Go composite literals have no unpacking form,
 	// and `go build` would catch a duplicate field anyway).
 	KeywordUnpacking *ArgUnpacking
-	ProviderHint     string   // static provider hint, if any ("" => unresolved provider)
-	Opacity          []string // IR fields inherently unresolvable for this entrypoint
-	DetectOnly       bool     // declared entrypoint that resolves nothing (all fields unresolved)
-	Invocation       string   // "single"|"loop"|"conditional" hint from a declaration ("" => single)
+	// CallSpan is the byte span of the call expression itself, for a rewrite that wraps the CALL rather
+	// than replacing one of its arguments (P18 §11). Zero when the analyzer recorded none — which a
+	// rewriter must treat as "no span" and refuse, never as offset 0.
+	CallSpan     ArgSpan
+	ProviderHint string   // static provider hint, if any ("" => unresolved provider)
+	Opacity      []string // IR fields inherently unresolvable for this entrypoint
+	DetectOnly   bool     // declared entrypoint that resolves nothing (all fields unresolved)
+	Invocation   string   // "single"|"loop"|"conditional" hint from a declaration ("" => single)
 }

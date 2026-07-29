@@ -256,3 +256,7 @@ func (noopRegistries) ResolveContextPolicy(context.Context, string) (*registry.C
 func (noopRegistries) ResolveMemory(context.Context, string) (*registry.MemoryEntry, error) {
 	return nil, registry.ErrNotFound
 }
+
+func (noopRegistries) ResolveHarness(context.Context, string) (*registry.HarnessEntry, error) {
+	return nil, registry.ErrNotFound
+}

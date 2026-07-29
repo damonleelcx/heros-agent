@@ -517,3 +517,170 @@ surface guarantee for autonomous turns.
 4. **When does the control-loop codemod stop refusing?** The refusal is the seam a later phase lands in
    (as P3 landed in `refuseContext`). Which phase proves the bounded-loop rewrite safe, and for which
    languages first, is out of scope for M21 and tracked against the transform engine's roadmap.
+
+---
+
+# Addendum — the harness runtime, the call-site rewriter, and the authored change
+
+| Field | Value |
+|---|---|
+| Adds to | §3 (goals G12–G17), §6 (FR22–FR45), §7 (NFR10–NFR15), §13 (A15–A26) |
+| Capabilities | `harness-runtime` (new) · `harness-materialization` (new) · `harness-authoring` (new) · `agent-loop` (refusal **narrowed per cell**, not removed) |
+| Contracts of record | [`decisions.md`](../../openspec/changes/p18-harness-strategy-optimization/decisions.md) D-8 … D-13 |
+
+## 15. What this addendum adds, and why the phase was not complete without it
+
+Sections 1–14 describe an axis that is **modelled, hashed, proposed, and refused**. Two things were
+missing, and each is load-bearing rather than cosmetic.
+
+**A user could not make an active change to their harness strategy.** As written, a scaffold changes only
+when `OpHarnessStrategy` proposes one. That makes harness the one operator-only axis: model, prompt,
+skills, context, wiring and memory all bind the cross-axis `authored-change` contract — *a user MAY author
+the change, a user MAY NOT author the evidence* — and harness must too, through the **same** override,
+the **same** resolver, the **same** transform, and the **same** admissibility gate. A second apply path
+would be a second definition of what "shipped" means.
+
+**The refusal named two missing artifacts, and nothing was building them.** G6 refuses a `HarnessRef` at
+transform because *"materializing a control loop is code generation."* That sentence names precisely what
+is absent: **a harness runtime** — a bounded loop, a stop condition, and a continuation rule — and **the
+call-site rewriter** that drives it. Without both, the axis can be authored, hashed and compared but can
+never reach a customer's source, and an *interim* refusal is indefinite by another name.
+
+### 15.1 Additional goals
+
+- **G12. There is a harness runtime.** The platform SHALL define each builtin strategy's loop — the
+  continue/stop decision and the continuation rule — **once**, bounded by construction, deterministic, and
+  callable by the generated artifact rather than re-derived per language.
+- **G13. There is a call-site rewriter.** A resolved harness SHALL be materializable as source at a call
+  site wherever it can be materialized **honestly**, and refused by name wherever it cannot.
+- **G14. DRIVE AND DECIDE, or refuse.** A cell SHALL materialize only when the runtime can both re-invoke
+  the call **and** evaluate the strategy's stop condition against the response. A call site that can carry
+  one half but not the other SHALL be refused **whole**, naming the missing half.
+- **G15. The generated module reaches nothing new.** The emitted artifact SHALL make no provider call,
+  dispatch no tool, read no credential, and import nothing outside the standard library. A planner, a tool
+  executor and a critic are **injected host services**; a strategy whose service is absent SHALL refuse
+  rather than substitute a lighter loop.
+- **G16. The refusal narrows per cell; it is never removed.** Coverage SHALL become a read of the
+  materializer table per `(language, strategy, call-shape)`. `single-shot` is the identity and
+  materializes everywhere; every uncovered cell SHALL still return a typed `unsafeRewrite` with its own
+  cause class.
+- **G17. A user can change their scaffold, and is told the truth before they choose.** A user SHALL be
+  able to select, parameterize and clear a node's harness strategy; the **per-cell** boundary and the
+  **added per-run cost** of a heavier scaffold SHALL be stated **before** the choice, from the engine's own
+  coverage source; and the change SHALL claim nothing until verification has run.
+
+### 15.2 Additional functional requirements
+
+#### The harness runtime (capability `harness-runtime`)
+
+- **FR22.** A harness runtime SHALL define, for every strategy in the closed builtin set, a
+  `Plan(strategy, params, turn, answer) → continue | stop(reason)` decision and the continuation rule that
+  produces the next turn's input. A strategy in the sealed vocabulary without a loop definition SHALL fail
+  loudly rather than degrading to a single shot.
+- **FR23.** The loop SHALL be **bounded by construction**: no strategy and no combination of params SHALL
+  express an unbounded loop, and the executed turn count SHALL never exceed the sealed `max_turns`.
+- **FR24.** A run that terminates because it reached the ceiling SHALL record that reason, distinguishably
+  from a run that terminated because its stop condition was satisfied.
+- **FR25.** The loop SHALL be **deterministic**: identical strategy, params and answers SHALL produce an
+  identical turn count, stop reason and per-turn record. The runtime SHALL read no clock and no random
+  source.
+- **FR26.** The runtime SHALL make **no provider call**, dispatch **no tool**, open **no network
+  connection**, and read **no credential**.
+- **FR27.** A planner, a tool executor and a critic SHALL be **injected host services**. A strategy
+  requiring one that was not supplied SHALL refuse with a typed error **naming the service**, and SHALL NOT
+  fall back to a lighter strategy's loop.
+- **FR28.** A run SHALL expose the number of turns executed, the stop reason, and a per-turn record. None
+  of these SHALL participate in `config_hash`.
+- **FR29.** The added turns SHALL execute the caller-supplied turn function and nothing else; the runtime
+  SHALL NOT widen the egress destinations, tool grants, or filesystem scope available at the call site.
+
+#### The call-site rewriter (capability `harness-materialization`)
+
+- **FR30.** A cell SHALL materialize only when **both** halves are available — the call is re-invocable and
+  the stop condition is evaluable against the response — and both SHALL be resolved **before** the first
+  edit is emitted.
+- **FR31.** A call site that can carry one half but not the other SHALL be refused **whole**, naming which
+  half is missing.
+- **FR32.** `single-shot` SHALL be the identity: it emits nothing, materializes in every language, and is
+  never reported as refused.
+- **FR33.** A strategy requiring a host service SHALL be refused at a call site — which offers no injection
+  point — **naming the service**, and SHALL NOT be degraded to a strategy that does not need one. This
+  covers `react-loop` (tool execution), `plan-execute` (planning and step execution) and `critic-loop` (a
+  separate critic call).
+- **FR34.** The emitted artifact SHALL import nothing outside its language's standard library.
+- **FR35.** The emitted artifact SHALL regenerate **byte-identically** from the same resolved
+  configuration.
+- **FR36.** The emitted artifact SHALL ship in the **same patch** as the call-site edit, so one revert
+  restores both.
+- **FR37.** The emitted artifact SHALL read the strategy and its params **as data** from the binding
+  document, so retuning a bound parameter is a document change and not a code change.
+- **FR38.** Coverage SHALL be a **read of the materializer table** per `(language, strategy, call-shape)`,
+  never a second table, so a coverage claim cannot drift from the engine's behaviour in either direction.
+- **FR39.** Every cell without a materializer SHALL still return a typed `unsafeRewrite` carrying its own
+  cause class, and the resolved configuration SHALL still carry the override — **refuse, never drop**
+  remains true wherever it still applies.
+- **FR40.** A cause class SHALL be assigned honestly: a permanent language fact (a response whose text is
+  not readable without importing the customer's SDK) SHALL be `not-expressible-at-a-call-site` and SHALL
+  carry **no** missing artifact; only a genuinely absent platform artifact SHALL be
+  `no-materializer-for-this-language`.
+- **FR41.** Materialization SHALL change only what the transform **emits**. Every `config_hash` minted
+  before the rewriter landed SHALL reproduce bit-for-bit after it, and a stored harness configuration SHALL
+  materialize without being re-authored.
+
+#### The authored change (capability `harness-authoring`)
+
+- **FR42.** A user SHALL be able to select a node's harness strategy from the closed builtin set and supply
+  its params, expressed **solely** through the existing `HarnessRef` override. Free text SHALL NOT be a
+  selection path; params violating the strategy's schema — including a param the strategy does not declare
+  — SHALL be rejected **before** the entry is sealed, naming the parameter.
+- **FR43.** A user SHALL be able to **clear** a node's harness strategy, and clearing SHALL reproduce the
+  pre-selection `config_hash` byte-identically. `single-shot` with no params SHALL be indistinguishable
+  from cleared.
+- **FR44.** The authoring surface SHALL state the **per-cell** boundary and the **added per-run cost** of a
+  heavier scaffold **before** the user chooses, read from the engine's own coverage source. A control SHALL
+  NOT be silently disabled; where a selection cannot be applied, the reason SHALL be readable and SHALL
+  distinguish a missing platform artifact from a fact about the user's call site or language.
+- **FR45.** An authored harness change SHALL be stamped `unverified`, SHALL claim no `task_success`, cost
+  or latency effect until verification has run, and — where its cell refuses — SHALL be surfaced as
+  **refused-not-scored**, never as a win, a regression, or a tie. Exactly **one** transform entry point and
+  **one** admissibility gate SHALL serve both origins; there SHALL be no authoring-only apply path.
+
+### 15.3 Additional non-functional requirements
+
+| # | Requirement | Target |
+|---|---|---|
+| **NFR10** | **Both halves or refuse** | A half-materializable call site is refused whole; a test asserts the refusal names the missing half and would fail if a partial loop were emitted. |
+| **NFR11** | **No new reachability** | The emitted artifact's import set is asserted to be standard-library-only, and no provider client, credential, or network destination is reachable from the runtime. |
+| **NFR12** | **Byte-identical regeneration** | The same resolved configuration regenerates the artifact byte-for-byte; asserted, not assumed. |
+| **NFR13** | **Coverage is derived** | The coverage read and the transform's answer for the same cell are asserted equal; a hand-maintained copy is a test failure. |
+| **NFR14** | **Identity untouched** | Every `config_hash` minted under 18a reproduces bit-for-bit after the rewriter lands. |
+| **NFR15** | **Cost stated before the choice** | For any strategy whose ceiling exceeds one turn, the surface states that per-run cost and latency may multiply up to that ceiling, and that whether it is worth it is verification's answer, not the selection's. |
+
+## 16. Additional acceptance criteria (M21 exit checklist, addendum)
+
+- [ ] **A15.** A harness runtime defines every builtin strategy's loop once; a strategy in the sealed
+      vocabulary without a definition fails loudly (G12, FR22).
+- [ ] **A16.** The turn count never exceeds the sealed `max_turns`, for every strategy and every params
+      combination (G12, FR23, NFR5).
+- [ ] **A17.** Reaching the ceiling is recorded and is distinguishable from a satisfied stop condition
+      (FR24).
+- [ ] **A18.** The loop is deterministic over repeated execution (FR25, NFR4).
+- [ ] **A19.** The runtime makes no provider call and dispatches no tool; a missing host service refuses by
+      name rather than substituting (G15, FR26, FR27, NFR11).
+- [ ] **A20.** A half-materializable call site is refused **whole**, naming the missing half; both halves
+      are computed before any edit is emitted (G14, FR30, FR31, NFR10).
+- [ ] **A21.** `single-shot` emits nothing, materializes in every language, and is never reported as
+      refused (G16, FR32).
+- [ ] **A22.** `react-loop`, `plan-execute` and `critic-loop` are refused at every call site, each naming
+      the host service a generated module may not supply (FR33).
+- [ ] **A23.** The emitted artifact imports only the standard library, regenerates byte-identically, ships
+      in the same patch as the call-site edit, and reads its params as data (FR34–FR37, NFR12).
+- [ ] **A24.** Coverage is a read of the materializer table; the coverage answer and the transform's answer
+      agree for every cell, and every uncovered cell still returns a typed `unsafeRewrite` (G16, FR38–FR40,
+      NFR13).
+- [ ] **A25.** Every `config_hash` minted under 18a reproduces bit-for-bit after the rewriter lands, and a
+      stored authored configuration materializes without being re-authored (FR41, NFR14).
+- [ ] **A26.** A user can select, parameterize and clear a node's harness strategy; clearing reproduces the
+      prior hash byte-identically; the per-cell boundary and the added per-run cost are stated before the
+      choice; the change claims nothing until verification runs; and exactly one transform entry point and
+      one admissibility gate serve both origins (G17, FR42–FR45, NFR15).

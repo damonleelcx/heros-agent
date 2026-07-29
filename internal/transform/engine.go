@@ -97,6 +97,13 @@ func generate(r *variantspec.Resolved, spec *variantspec.VariantSpec, root strin
 	if err != nil {
 		return nil, err
 	}
+	// 🔴 P18 task 5.3 — a GROUP harness, decided here for the same reason the wiring is: its scope is a
+	// set of edges rather than a node, so dispatching it from whichever node came first in the loop below
+	// would make its refusal depend on iteration order. Deciding before anything is read or rewritten is
+	// what makes it impossible to leave a partial diff behind for a group that was going to be refused.
+	if err := checkGroupHarness(r); err != nil {
+		return nil, err
+	}
 
 	// Per-file edits, and the call-site line ranges the minimality gate will allow them in.
 	editsByFile := map[string][]edit{}
@@ -170,27 +177,25 @@ func generate(r *variantspec.Resolved, spec *variantspec.VariantSpec, root strin
 	// transformed tree). Adjusting here keeps a compiler diagnostic attributable to the node that caused
 	// it, which is one of the two things the line-count invariant existed to protect.
 	for _, rel := range sortedKeys(editsByFile) {
-		if !hasMemoryEdit(editsByFile[rel]) {
-			continue
-		}
-		src, err := readFile(root, rel)
-		if err != nil {
-			return nil, err
-		}
-		blame := firstMemoryEdit(editsByFile[rel])
-		imp, err := memoryImportEdit(src, blame.NodeID, blame.Dim, r.Language, root)
-		if err != nil {
-			return nil, err
-		}
-		editsByFile[rel] = append(editsByFile[rel], imp)
-		impLine := lineOf(src, imp.Start)
-		if allowedLines[rel] == nil {
-			allowedLines[rel] = map[int]bool{}
-		}
-		allowedLines[rel][impLine] = true
-		for i := range touched {
-			if touched[i].File == rel && touched[i].Line >= impLine {
-				touched[i].Line++
+		for _, need := range generatedImportsFor(editsByFile[rel]) {
+			src, err := readFile(root, rel)
+			if err != nil {
+				return nil, err
+			}
+			imp, err := need.build(src, r.Language, root)
+			if err != nil {
+				return nil, err
+			}
+			editsByFile[rel] = append(editsByFile[rel], imp)
+			impLine := lineOf(src, imp.Start)
+			if allowedLines[rel] == nil {
+				allowedLines[rel] = map[int]bool{}
+			}
+			allowedLines[rel][impLine] = true
+			for i := range touched {
+				if touched[i].File == rel && touched[i].Line >= impLine {
+					touched[i].Line++
+				}
 			}
 		}
 	}
@@ -249,6 +254,26 @@ func generate(r *variantspec.Resolved, spec *variantspec.VariantSpec, root strin
 		}
 	}
 
+	// P18 §11 — the generated harness module and its params document, on exactly the same terms as the
+	// memory artifact above: same patch as the call-site edits so one revert restores all of it, and
+	// emitted only when a call site was actually rewritten.
+	if harnessWasMaterialized(editsByFile) {
+		harnessFiles, err := GenerateHarnessArtifacts(r, r.Language)
+		if err != nil {
+			return nil, err
+		}
+		for _, path := range sortedFileKeys(harnessFiles) {
+			if _, exists := patch.Files[path]; exists {
+				return nil, fmt.Errorf("transform: the harness artifact would overwrite %s, which this patch "+
+					"already changes; a generated file must never clobber the customer's own source", path)
+			}
+			patch.Files[path] = harnessFiles[path]
+			diffs = append(diffs, newFileDiff(path, harnessFiles[path])...)
+			patch.Touched = append(patch.Touched, TouchedDimension{
+				Dim: string(variantspec.DimHarness), File: path, Line: 1})
+		}
+	}
+
 	patch.Diff = diffs
 	sum := sha256.Sum256(diffs)
 	patch.DiffHash = hex.EncodeToString(sum[:])
@@ -287,8 +312,8 @@ func gateMinimal(rel string, src, out []byte, edits []edit, allowed map[int]bool
 	// A MEMORY MATERIALIZATION is the third edit class (P18 §9.1). It is routed here for the same reason
 	// a swap is: it would fail the line-count rule below by construction, because it adds an import line.
 	// Its own rule is stricter, not laxer — see gateMemoryImport.
-	if isMemoryImport(edits) {
-		if err := gateMemoryImport(rel, src, out, edits, allowed); err != nil {
+	if isGeneratedImport(edits) {
+		if err := gateGeneratedImports(rel, src, out, edits, allowed); err != nil {
 			return err
 		}
 		return reparseOrReject(rel, src, out, edits, reparse)
@@ -340,7 +365,9 @@ func reparseOrReject(rel string, src, out []byte, edits []edit, reparse reparser
 	return nil
 }
 
-// gateMemoryImport is the memory materialization's gate (P18 §9.1).
+// gateGeneratedImports is the generated-module materializations' gate (P18 §9.1, widened by §11
+// to admit one import line per generated module rather than exactly one overall — so a node carrying
+// BOTH a memory and a harness materialization passes without either rule being loosened).
 //
 // 🔴 It asserts the one property that makes an import insertion reviewable without reading the codemod:
 // THE OUTPUT IS THE INPUT'S LINES WITH EXACTLY ONE IMPORT LINE INSERTED, and every other difference
@@ -362,7 +389,7 @@ func reparseOrReject(rel string, src, out []byte, edits []edit, reparse reparser
 //
 // A rewriter cannot satisfy these by accident. A reviewer who trusts only this assertion still knows the
 // change added one import and altered nothing else outside the call site it named.
-func gateMemoryImport(rel string, src, out []byte, edits []edit, allowed map[int]bool) error {
+func gateGeneratedImports(rel string, src, out []byte, edits []edit, allowed map[int]bool) error {
 	blame := edits[0]
 	fail := func(format string, args ...any) error {
 		return &RewriteError{NodeID: blame.NodeID, Dim: blame.Dim, Err: ErrUnsafeRewrite,
@@ -370,55 +397,99 @@ func gateMemoryImport(rel string, src, out []byte, edits []edit, allowed map[int
 	}
 
 	var imports []edit
+	seen := map[string]bool{}
 	for _, e := range edits {
-		if e.Import {
-			imports = append(imports, e)
+		if !e.Import {
+			continue
 		}
+		// 🔴 DISTINCT modules only. Two edits inserting the same import would leave a duplicate; the
+		// count below admits one line per generated module, which is what lets a node carrying BOTH a
+		// memory and a harness materialization pass without either gate being loosened.
+		if seen[e.New] {
+			return fail("%s would gain the import %q twice; each generated module is imported once", rel, e.New)
+		}
+		seen[e.New] = true
+		imports = append(imports, e)
 	}
-	if len(imports) != 1 {
-		return fail("the memory materialization of %s carries %d import edits; exactly one is admitted, "+
-			"or the file gains a duplicate import", rel, len(imports))
+	if len(imports) == 0 {
+		return fail("%s was routed through the generated-import gate with no import edit", rel)
 	}
-	imp := imports[0]
-	if imp.Start != imp.End {
-		return fail("the memory import edit for %s replaces bytes [%d,%d) instead of inserting; this class "+
-			"may add a line and may not remove one", rel, imp.Start, imp.End)
-	}
-	if !memoryImportLine.MatchString(imp.New) {
-		return fail("the memory import edit for %s would insert %q, which is not a single import line. "+
-			"This class exists to add ONE import; admitting arbitrary text would make it the "+
-			"insert-anything escape hatch the untargeted-line rule exists to prevent", rel, imp.New)
+	insertedAt := map[int]bool{}
+	for _, imp := range imports {
+		if imp.Start != imp.End {
+			return fail("the generated import edit for %s replaces bytes [%d,%d) instead of inserting; this "+
+				"class may add a line and may not remove one", rel, imp.Start, imp.End)
+		}
+		if !memoryImportLine.MatchString(imp.New) {
+			return fail("the generated import edit for %s would insert %q, which is not a single import "+
+				"line. This class exists to add ONE import per generated module; admitting arbitrary text "+
+				"would make it the insert-anything escape hatch the untargeted-line rule exists to prevent",
+				rel, imp.New)
+		}
+		insertedAt[lineOf(src, imp.Start)-1] = true
 	}
 
 	before, after := splitLines(src), splitLines(out)
-	if len(after) != len(before)+1 {
-		return fail("the memory materialization changed %s from %d line(s) to %d; this class adds exactly "+
-			"one import line, and attribution below the insertion is shifted by exactly that", rel,
-			len(before), len(after))
+	if len(after) != len(before)+len(imports) {
+		return fail("the materialization changed %s from %d line(s) to %d; this class adds exactly one "+
+			"import line per generated module (%d here), and attribution below the insertion is shifted by "+
+			"exactly that", rel, len(before), len(after), len(imports))
 	}
 
-	// Where the line landed, in the OUTPUT's coordinates. The edit inserted at a line boundary, so the
-	// inserted line is the one at the input line index the offset falls on.
-	k := lineOf(src, imp.Start) - 1 // 0-based index in `after`
-	if k < 0 || k >= len(after) {
-		return fail("the memory import for %s landed outside the file", rel)
+	// Where the lines landed, in the OUTPUT's coordinates. Every edit inserted at a line boundary, and
+	// several may share one — applyEdits emits them in order at the same offset, so the inserted block
+	// starts at that boundary and is as long as the number of edits that chose it.
+	var insertedIdx []int
+	for k := range insertedAt {
+		insertedIdx = append(insertedIdx, k)
 	}
-	if !memoryImportLine.MatchString(after[k] + "\n") {
-		return fail("the memory materialization of %s did not put the import where it claimed (line %d is "+
-			"%q); the shift attribution relies on knowing which line moved", rel, k+1, after[k])
+	sort.Ints(insertedIdx)
+	var removed []int
+	shift := 0
+	for _, k := range insertedIdx {
+		n := 0
+		for _, imp := range imports {
+			if lineOf(src, imp.Start)-1 == k {
+				n++
+			}
+		}
+		for i := 0; i < n; i++ {
+			idx := k + shift + i
+			if idx < 0 || idx >= len(after) {
+				return fail("a generated import for %s landed outside the file", rel)
+			}
+			if !memoryImportLine.MatchString(after[idx] + "\n") {
+				return fail("the materialization of %s did not put its import where it claimed (line %d is "+
+					"%q); the shift attribution relies on knowing which line moved", rel, idx+1, after[idx])
+			}
+			removed = append(removed, idx)
+		}
+		shift += n
 	}
 
-	// Remove the inserted line and compare what is left against the input, line for line.
+	// Remove the inserted lines and compare what is left against the input, line for line.
+	drop := map[int]bool{}
+	for _, i := range removed {
+		drop[i] = true
+	}
 	reduced := make([]string, 0, len(before))
-	reduced = append(reduced, after[:k]...)
-	reduced = append(reduced, after[k+1:]...)
+	for i, line := range after {
+		if drop[i] {
+			continue
+		}
+		reduced = append(reduced, line)
+	}
+	if len(reduced) != len(before) {
+		return fail("removing %s's inserted import line(s) leaves %d line(s) against %d in the input",
+			rel, len(reduced), len(before))
+	}
 	for i := range before {
 		if reduced[i] == before[i] {
 			continue
 		}
 		if !allowed[i+1] {
-			return fail("the memory materialization would change %s:%d, which is outside the targeted "+
-				"call site; adding an import does not license editing anything else", rel, i+1)
+			return fail("the materialization would change %s:%d, which is outside the targeted call site; "+
+				"adding an import does not license editing anything else", rel, i+1)
 		}
 	}
 	return nil

@@ -158,6 +158,19 @@ type RawCallSite struct {
 	KeywordInsert     *ArgInsert          // where a keyword arg could be ADDED; nil => nowhere (see ArgInsert)
 	KeywordUnpacking  *ArgUnpacking       // the unpacking that made KeywordInsert nil; nil otherwise
 	PositionalStrings []string            // string-literal positional args in order (for framework builder calls)
+	// CallSpan is the byte span of the CALL EXPRESSION itself — `client.messages.create(...)`, opening
+	// name through closing paren (P18 §11).
+	//
+	// 🔴 It exists because a HARNESS is a loop AROUND the call, not a replacement of one of its arguments,
+	// so it is the first rewrite in this engine that needs the call's own extent. The memory rewriter
+	// named exactly this as its clean follow-up: it worked around the absence by appending its second
+	// statement with a `;`, and recorded that "deriving one by scanning for balanced parens is precisely
+	// the guess rewrite_span.go declines". This is the non-guess — the analyzer already has the node, so
+	// the span costs one field rather than a heuristic.
+	//
+	// Zero when the analyzer did not record one, which a rewriter must treat as "no span" and refuse
+	// rather than as offset 0.
+	CallSpan ArgSpan
 }
 
 // argInsertAtEnd builds an ArgInsert that splices at the END of a delimited container (an argument
@@ -447,6 +460,7 @@ func detectSyntacticUnit(unit SyntacticUnit, reg *Registry, decl *declaredIndex)
 			FileRel: unit.RelPath, LineStart: cs.LineStart, LineEnd: cs.LineEnd,
 			Keywords: cs.Keywords, KeywordInsert: cs.KeywordInsert,
 			KeywordUnpacking: cs.KeywordUnpacking, Invocation: cs.Invocation,
+			CallSpan: cs.CallSpan,
 		}
 		if row, basis, ok := matchRegistryRows(reg, unit.Imports, importsPath, cs.Root, cs.RootIdent, cs.Chain); ok {
 			s := base

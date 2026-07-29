@@ -60,7 +60,8 @@ type edit struct {
 	// Binding marks an edit that replaces a value the program bound BEFORE the call — a builder-chain
 	// call or a request-value field (P13 FR52). See bindingSite().
 	Binding bool
-	// Import marks the single import line a MEMORY MATERIALIZATION adds to a file (P18 §9.1).
+	// Import marks an import line a GENERATED-MODULE MATERIALIZATION adds to a file (P18 §9.1; widened
+	// by §11 to the harness module as well as the memory one).
 	//
 	// It is a THIRD edit class, alongside Swap and Binding, and it exists for the same reason they do:
 	// memory materialization needs something no value rewrite needs — a line at the top of the file, so
@@ -83,12 +84,12 @@ type edit struct {
 	Import bool
 }
 
-// isMemoryImport reports whether an edit set carries the memory materialization's import line.
+// isGeneratedImport reports whether an edit set carries a generated module's import line.
 //
-// Unlike isSwap, this is a MIXED set by construction: the import travels with the recall/record value
-// edits it exists to serve, and gating them separately would let one pass while the other failed —
-// leaving a file with an import nothing uses, or a call nothing imported.
-func isMemoryImport(edits []edit) bool {
+// Unlike isSwap, this is a MIXED set by construction: the import travels with the value edits it exists
+// to serve, and gating them separately would let one pass while the other failed — leaving a file with an
+// import nothing uses, or a call nothing imported.
+func isGeneratedImport(edits []edit) bool {
 	for _, e := range edits {
 		if e.Import {
 			return true

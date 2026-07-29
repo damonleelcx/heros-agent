@@ -22,6 +22,11 @@ type Registries interface {
 	// persists ACROSS invocations, context is within one call, and one method returning either would let
 	// a cross-session concern resolve through a within-call path.
 	ResolveMemory(ctx context.Context, versionID string) (*registry.MemoryEntry, error)
+	// ResolveHarness resolves a harness-registry version_id (P18 task 3.3). Its OWN method for the reason
+	// ResolveMemory is: a harness is a different Kind with a different id space, and one method returning
+	// either would let a scaffold resolve through a memory path — the exact cross-dimension confusion the
+	// Kind is hashed into the version_id to prevent.
+	ResolveHarness(ctx context.Context, versionID string) (*registry.HarnessEntry, error)
 }
 
 // Resolved is a spec resolved against the IR and the registries: the hashed configuration plus the
@@ -70,6 +75,18 @@ type Resolved struct {
 	// the one place a spec and the IR it was resolved against are already joined, so a caller cannot
 	// supply a wiring from a different IR than the hash was computed over.
 	DiscoveredWiring Wiring
+	// HarnessGroups are the resolved group harnesses, carried beside the hashed projection so the
+	// transform can name the exact edge set it is refusing (P18 task 5.3). Nil when the spec declares
+	// none, which is the common case.
+	HarnessGroups []ResolvedGroupOverride
+}
+
+// ResolvedGroupOverride is one group harness as the transform sees it: the registry entry the author
+// pinned, and the ordered edge set it wraps. The entry rather than the projection, for the same reason
+// ResolvedOverride carries entries — a refusal has to name what the author wrote.
+type ResolvedGroupOverride struct {
+	Entry *registry.HarnessEntry
+	Edges []ResolvedEdge
 }
 
 // Wiring is a graph's shape: the node order and the edges between them. It is the same pair
@@ -140,6 +157,17 @@ type ResolvedOverride struct {
 	// refusal it must raise. Collapsing them would either refuse `none` (wrong — the identity strategy
 	// changes nothing, so there is nothing to refuse) or skip the refusal entirely.
 	Memory *registry.MemoryEntry
+	// Harness is the resolved harness strategy — the control loop this node's call runs inside (P18 task
+	// 3.3). Nil means the node did not override the harness; non-nil means it did, INCLUDING when the
+	// strategy it selected is `single-shot`.
+	//
+	// 🔴 That distinction is load-bearing and is why this is a pointer rather than a string. "No override"
+	// and "an override that selects the identity strategy" produce the same HASHED bytes (D-8:
+	// single-shot ≡ absent) but are different facts about what the author asked for, and the transform has
+	// to tell them apart: an explicit `single-shot` is a no-op it applies silently, while a multi-turn
+	// strategy is either materialized or refused. Collapsing them would either refuse `single-shot` (wrong
+	// — one turn is exactly the un-rewritten call site) or skip the decision entirely.
+	Harness *registry.HarnessEntry
 }
 
 // Dimensions returns the dimensions this override actually sets, in a stable order. The Transform
@@ -167,6 +195,12 @@ func (o ResolvedOverride) Dimensions() []Dimension {
 	// never dispatched here, which is how FR2's per-dimension independence stays mechanical.
 	if o.Memory != nil {
 		out = append(out, DimMemory)
+	}
+	// Harness is reported iff the node OVERRODE it — including an override that selects `single-shot`, for
+	// the reason the Harness field's comment gives: the transform must be able to tell "no override" from
+	// "the identity strategy", because one is never dispatched and the other is a no-op it applies.
+	if o.Harness != nil {
+		out = append(out, DimHarness)
 	}
 	return out
 }
@@ -237,6 +271,27 @@ func Resolve(ctx context.Context, spec *VariantSpec, ir *discovery.IR, regs Regi
 	// manual literal would keep compiling and silently leave the new field zero in the hashed output.
 	for _, e := range spec.Edges {
 		out.Config.Edges = append(out.Config.Edges, ResolvedEdge(e))
+	}
+
+	// Group harnesses (P18 FR15, decisions.md D-5). Resolved after the nodes so a group naming an edge
+	// between nodes that failed to resolve never gets here — and projected in the spec's declared order,
+	// because a loop over a→b→c is not a loop over c→b→a.
+	for i, g := range spec.HarnessGroups {
+		entry, err := regs.ResolveHarness(ctx, g.HarnessRef)
+		if err != nil {
+			return nil, refError("", DimHarness, g.HarnessRef, err)
+		}
+		params, err := decodeParams(entry.Spec.Params)
+		if err != nil {
+			return nil, specErr("", DimHarness, ErrUnresolvedRef,
+				"harness_groups[%d]: entry %s has params that are not a JSON object: %v", i, entry.VersionID, err)
+		}
+		rg := ResolvedHarnessGroup{Harness: ResolvedHarness{Strategy: entry.Spec.Strategy, Params: params}}
+		for _, e := range g.Edges {
+			rg.Edges = append(rg.Edges, ResolvedEdge(e))
+		}
+		out.Config.HarnessGroups = append(out.Config.HarnessGroups, rg)
+		out.HarnessGroups = append(out.HarnessGroups, ResolvedGroupOverride{Entry: entry, Edges: rg.Edges})
 	}
 
 	hash, err := out.Config.Hash()
@@ -394,6 +449,50 @@ func resolveNode(ctx context.Context, nodeID string, o NodeOverride, irNode *dis
 		// params: the IR records WHICH strategy a call site already implements, not how it is tuned —
 		// inventing params here would be this layer guessing at a configuration nobody wrote.
 		node.Memory = &ResolvedMemory{Strategy: base, Params: map[string]any{}}
+	}
+
+	// ── harness (P18 task 3.3, decisions.md D-2/D-8) ───────────────────────────────────────────────
+	//
+	// The merge rule is every other dimension's: an override resolves to a registry entry pinned by its
+	// immutable version_id; no override falls back to the DISCOVERED default, pinned by source_revision.
+	// Discovery emits `single-shot` for every node it cannot PROVE runs a loop, so the fallback is usually
+	// inert — but it is WIRED rather than assumed, because a node whose source already implements a ReAct
+	// loop has a different default, and an assumption here would silently claim it was a single shot.
+	//
+	// 🔴 What does NOT happen here is the refusal or the materialization. A spec carrying a HarnessRef
+	// resolves cleanly and produces a stable config_hash; only the TRANSFORM decides whether this cell can
+	// carry it (decisions.md D-4, narrowed per cell by D-11). Blocking at resolve would throw away the
+	// modeling, hashing and proposal that are entirely safe and correct.
+	if o.HarnessRef != "" {
+		// Defense in depth against a caller that assembled a Resolve by hand and skipped Validate.
+		if inlinesDefinition(o.HarnessRef) {
+			return ro, node, &SpecError{NodeID: nodeID, Dim: DimHarness, Ref: o.HarnessRef, Err: ErrInlineDefinition,
+				Detail: "harness_ref carries an inline strategy definition; it must be a harness-registry " +
+					"version_id, so the configuration is resolvable back from a config_hash"}
+		}
+		entry, err := regs.ResolveHarness(ctx, o.HarnessRef)
+		if err != nil {
+			return ro, node, refError(nodeID, DimHarness, o.HarnessRef, err)
+		}
+		ro.Harness = entry
+		// `single-shot` with no params ≡ absent (D-8): the identity strategy emits NO harness key, so an
+		// explicitly-single-shot node canonicalizes byte-identically to a node that never mentioned a
+		// harness and the P0 golden vectors keep reproducing. The override is still recorded on `ro` — the
+		// transform must be able to see that the author asked for something, even when what they asked for
+		// changes nothing.
+		params, err := decodeParams(entry.Spec.Params)
+		if err != nil {
+			return ro, node, specErr(nodeID, DimHarness, ErrUnresolvedRef,
+				"harness entry %s has params that are not a JSON object: %v", entry.VersionID, err)
+		}
+		if !entry.IsSingleShot() || len(params) > 0 {
+			node.Harness = &ResolvedHarness{Strategy: entry.Spec.Strategy, Params: params}
+		}
+	} else if base := irNode.HarnessDefault(); base != registry.StrategySingleShot {
+		// The discovered default, pinned by source_revision like any other un-overridden dimension. No
+		// params: the IR records WHICH scaffold a call site already implements, not how it is tuned —
+		// inventing params here would be this layer guessing at a configuration nobody wrote.
+		node.Harness = &ResolvedHarness{Strategy: base, Params: map[string]any{}}
 	}
 
 	// ── tools (P14 task 5.3, decisions.md D-14.2) ──────────────────────────────────────────────────

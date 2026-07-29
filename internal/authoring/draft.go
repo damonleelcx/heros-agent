@@ -78,6 +78,13 @@ type Edit struct {
 	// cross-session concern through a within-call control and could never be cleanly separated once
 	// drafts and hashes depended on it.
 	MemoryRef *string `json:"memory_ref,omitempty"`
+	// HarnessRef sets or clears the node's harness strategy — the control loop its call runs inside
+	// (P18 §12). Nil leaves the dimension alone; `""` clears the override; a ref sets it.
+	//
+	// 🔴 Its own field, never folded into MemoryRef or ContextPolicy. A harness decides how many calls
+	// happen at all, while those two describe what one call carries and what survives between calls; one
+	// field meaning two of them would let a scaffold change resolve through another dimension's path.
+	HarnessRef *string `json:"harness_ref,omitempty"`
 }
 
 // Dimensions names which dimensions this edit touches, in the closed enum's stable order. It is what
@@ -98,6 +105,9 @@ func (e Edit) Dimensions() []variantspec.Dimension {
 	}
 	if e.ToolSelection != nil {
 		dims = append(dims, variantspec.DimTools)
+	}
+	if e.HarnessRef != nil {
+		dims = append(dims, variantspec.DimHarness)
 	}
 	if e.MemoryRef != nil {
 		dims = append(dims, variantspec.DimMemory)
@@ -247,6 +257,12 @@ func applyEdit(o variantspec.NodeOverride, e Edit) variantspec.NodeOverride {
 		// config_hash — the byte-exact back-out P17 FR18 requires. No branch is needed for it, and that is
 		// the point: the clear path and the set path are one assignment, so they cannot drift.
 		o.MemoryRef = *e.MemoryRef
+	}
+	if e.HarnessRef != nil {
+		// Setting "" CLEARS the strategy, on exactly the same terms as MemoryRef above: `omitempty` means
+		// the empty string emits no key, so a select-then-clear returns to the pre-selection bytes and the
+		// pre-selection config_hash (FR43). One assignment for both paths, so they cannot drift.
+		o.HarnessRef = *e.HarnessRef
 	}
 	return o
 }

@@ -129,6 +129,10 @@ func walkPyCalls(n *sitter.Node, src []byte, sym string, loop, cond int, unit *S
 				PositionalStrings: pyPositionalStrings(n, src),
 			})
 			cs := &unit.CallSites[len(unit.CallSites)-1]
+			// The call expression's own extent (P18 §11). `n` IS the call node, so this is a read rather
+			// than a derivation — which is the whole reason the harness rewriter can wrap a call without
+			// scanning for balanced parens.
+			cs.CallSpan = spanOf(n)
 			cs.KeywordInsert, cs.KeywordUnpacking = argInsertAtEnd(
 				n.ChildByFieldName("arguments"), src, ")", "=", pyArgUnpackings)
 		}

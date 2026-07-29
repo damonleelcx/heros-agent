@@ -650,6 +650,10 @@ func (emptyRegistries) ResolveMemory(context.Context, string) (*registry.MemoryE
 	return nil, registry.ErrNotFound
 }
 
+func (emptyRegistries) ResolveHarness(context.Context, string) (*registry.HarnessEntry, error) {
+	return nil, registry.ErrNotFound
+}
+
 func siteOf(ir *discovery.IR, id string) string {
 	for _, n := range ir.Nodes {
 		if n.NodeID == id {

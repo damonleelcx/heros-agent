@@ -70,12 +70,25 @@ const (
 	// call-site identity to reuse. The Kind is hashed into the version_id, which is what makes a memory
 	// ref pasted into another dimension fail closed instead of silently resolving.
 	DimMemory Dimension = "memory"
+	// DimHarness is the SCAFFOLD around a node's call — how many turns it runs and in what control loop
+	// (P18, decisions.md D-2). It is a seventh member of the closed enum, and it is deliberately NOT a
+	// mode of DimContext or DimMemory: those describe what ONE call carries and what it remembers between
+	// calls, while this one decides how many calls happen at all. Two variants identical in model, prompt,
+	// skills, context and memory but one running a single shot and the other a bounded ReAct loop are
+	// different computations, and collapsing them into an existing dimension would make a scaffold change
+	// masquerade as a param change in the hash.
+	//
+	// 🔴 Like DimMemory and unlike DimTools, it has a registry Kind behind it (registry.KindHarness): a
+	// strategy is a (strategy, params) pair authored independently of any call site, so it has no
+	// call-site identity to reuse. The Kind is hashed into the version_id, which is what makes a harness
+	// ref pasted into another dimension fail closed instead of silently resolving.
+	DimHarness Dimension = "harness"
 )
 
 // Dimensions is the closed enum, in a stable order. Exported so a consumer iterating dimensions cannot
 // silently miss one that was added — the alternative is a hand-written list somewhere else that drifts.
 func Dimensions() []Dimension {
-	return []Dimension{DimModel, DimPrompt, DimSkills, DimContext, DimTools, DimMemory}
+	return []Dimension{DimModel, DimPrompt, DimSkills, DimContext, DimTools, DimMemory, DimHarness}
 }
 
 // Sentinel errors. Typed so the Loader, the UI, and P4 can tell "you asked for something that does
@@ -286,6 +299,23 @@ type NodeOverride struct {
 	// config_hash months later — rejected at resolve with ErrInlineDefinition, exactly like every other
 	// ref (FR3).
 	MemoryRef string `json:"memory_ref,omitempty"`
+	// HarnessRef is a harness-registry version_id naming a sealed (strategy, params) entry — the control
+	// loop this node's call runs inside (P18 task 3.2, decisions.md D-2, D-8).
+	//
+	// 🔴 Additive and `omitempty`: a node that binds no harness emits NO `harness_ref` key, so it
+	// serialises byte-identically to a pre-P18 override and every frozen config_hash golden vector keeps
+	// reproducing. This is the fifth application of the discipline Bindings, ToolSelection,
+	// ContextDropTolerance and MemoryRef above follow — an always-present field would move the canonical
+	// bytes of EVERY existing node and orphan every keyed row.
+	//
+	// 🚫 It is a version_id and nothing else. A spec that inlined a strategy's params would be a
+	// configuration whose content lives outside any registry, so it could never be resolved back from a
+	// config_hash months later — rejected at resolve with ErrInlineDefinition, exactly like every other
+	// ref (FR4).
+	//
+	// 🚫 It never reorders anything. A harness wraps a node or consumes an ordered edge set P15 defined;
+	// the wiring says what the edges ARE, the harness says what loop runs over them (decisions.md D-5).
+	HarnessRef string `json:"harness_ref,omitempty"`
 }
 
 // isEmpty reports whether this override sets nothing. A node listed in the ordering with no
@@ -293,7 +323,7 @@ type NodeOverride struct {
 func (o NodeOverride) isEmpty() bool {
 	return o.ModelRef == "" && o.PromptRef == "" && len(o.SkillRefs) == 0 && o.ContextPolicy == "" &&
 		len(o.Bindings) == 0 && len(o.ToolSelection) == 0 && o.ContextDropTolerance == nil &&
-		o.MemoryRef == ""
+		o.MemoryRef == "" && o.HarnessRef == ""
 }
 
 // SelectedTools returns the kept tool set in canonical (sorted, de-duplicated) order — the same order
@@ -345,6 +375,28 @@ type InsertedAdapter struct {
 	OutSchema map[string]any `json:"out_schema"`
 }
 
+// HarnessGroup is a harness that wraps an ORDERED EDGE SET rather than a single node — the group form of
+// the scaffold axis (P18 FR15, decisions.md D-5).
+//
+// 🔴 The edge set is EXPLICIT, and that is the whole of D-5. A group harness could have inferred its own
+// subgraph, which would be more convenient and would be a SECOND definition of the edges — one that can
+// drift from the wiring the executor actually walks. So the group CONSUMES P15's wiring: every edge here
+// must be an edge the spec already declares. The wiring says what the edges ARE; the harness says what
+// loop runs over them.
+//
+// 🚫 A group harness never reorders. Validate rejects an edge the spec does not declare, which makes
+// "compose with wiring, never re-derive it" mechanical rather than a rule to remember — a group that
+// invented an edge would be expressing a rearrangement through the wrong axis.
+type HarnessGroup struct {
+	// HarnessRef is a harness-registry version_id, on exactly the same terms as NodeOverride.HarnessRef:
+	// a reference and nothing else, inline definitions rejected.
+	HarnessRef string `json:"harness_ref"`
+	// Edges is the ordered edge set the loop runs over. Order is identity-bearing: a loop over a→b→c is
+	// not the same computation as one over c→b→a, so the resolved projection preserves it rather than
+	// sorting.
+	Edges []Edge `json:"edges"`
+}
+
 // VariantSpec is the canonical desired-state config (FR3).
 type VariantSpec struct {
 	// WorkflowID ties the spec to the discovered workflow whose IR it overrides.
@@ -373,6 +425,9 @@ type VariantSpec struct {
 	// Nodes maps node_id -> its override. A node in Order with no entry here runs as discovered.
 	Nodes map[string]NodeOverride `json:"nodes"`
 	Edges []Edge                  `json:"edges"`
+	// HarnessGroups are harnesses that wrap an ordered edge set rather than a single node (P18 FR15).
+	// Additive and omitempty: a spec that declares none serialises byte-identically to a pre-P18 spec.
+	HarnessGroups []HarnessGroup `json:"harness_groups,omitempty"`
 }
 
 // Validate checks the spec's internal structure — everything checkable without touching the IR or
@@ -448,6 +503,14 @@ func (s *VariantSpec) Validate() error {
 				Detail: "memory_ref carries an inline strategy definition; it must be a memory-registry " +
 					"version_id, so the configuration is resolvable back from a config_hash"}
 		}
+		// Harness ref — the same one thing checkable without the registry: that it is a REFERENCE at all
+		// (P18 task 3.2). Same helper, so there is one inline-vs-reference rule in the package rather than
+		// a second that can disagree with it.
+		if inlinesDefinition(o.HarnessRef) {
+			return &SpecError{NodeID: id, Dim: DimHarness, Ref: o.HarnessRef, Err: ErrInlineDefinition,
+				Detail: "harness_ref carries an inline strategy definition; it must be a harness-registry " +
+					"version_id, so the configuration is resolvable back from a config_hash"}
+		}
 		// Binding structure — everything checkable without the IR or registries (kind is in the set; a
 		// non-literal binding names something). The scope/declared/contract checks and the exactly-once
 		// satisfaction rule need the IR and the resolved prompt, so they live in Resolve (task 3.2/3.4).
@@ -461,6 +524,40 @@ func (s *VariantSpec) Validate() error {
 			// name something — an empty reference cannot be validated or materialised.
 			if b.Kind != BindLiteral && b.Value == "" {
 				return specErr(id, DimPrompt, ErrInvalidSpec, "slot %q binding of kind %q has an empty value", slot, b.Kind)
+			}
+		}
+	}
+
+	// Harness groups: the ref is a reference, the edge set is non-empty, and — the load-bearing check —
+	// every edge is one the spec ALREADY DECLARES (P18 FR15, decisions.md D-5). That last rule is what
+	// makes "a group harness composes with wiring and never re-derives it" mechanical: a group naming an
+	// edge the graph does not have would be expressing a rearrangement through the harness axis, which
+	// is P15's job and not this one's.
+	declared := map[Edge]bool{}
+	for _, e := range s.Edges {
+		declared[e] = true
+	}
+	for i, g := range s.HarnessGroups {
+		if inlinesDefinition(g.HarnessRef) {
+			return &SpecError{Dim: DimHarness, Ref: g.HarnessRef, Err: ErrInlineDefinition,
+				Detail: fmt.Sprintf("harness_groups[%d].harness_ref carries an inline strategy definition; "+
+					"it must be a harness-registry version_id", i)}
+		}
+		if g.HarnessRef == "" {
+			return specErr("", DimHarness, ErrInvalidSpec, "harness_groups[%d] declares no harness_ref", i)
+		}
+		if len(g.Edges) == 0 {
+			return specErr("", DimHarness, ErrInvalidSpec,
+				"harness_groups[%d] wraps no edges; a group harness with an empty scope is a node harness "+
+					"written the hard way, and it would hash as a change that loops over nothing", i)
+		}
+		for j, e := range g.Edges {
+			if !declared[e] {
+				return specErr("", DimHarness, ErrInvalidSpec,
+					"harness_groups[%d].edges[%d] (%s -> %s, %s) is not an edge this spec declares; a group "+
+						"harness CONSUMES the wiring rather than defining it, so an edge the graph does not "+
+						"have would be a second, divergent definition of what the executor walks",
+					i, j, e.FromNodeID, e.ToNodeID, e.Kind)
 			}
 		}
 	}
@@ -492,13 +589,18 @@ func (s *VariantSpec) Validate() error {
 func (s *VariantSpec) Refs() []string {
 	set := map[string]bool{}
 	for _, o := range s.Nodes {
-		for _, r := range []string{o.ModelRef, o.PromptRef, o.ContextPolicy, o.MemoryRef} {
+		for _, r := range []string{o.ModelRef, o.PromptRef, o.ContextPolicy, o.MemoryRef, o.HarnessRef} {
 			if r != "" {
 				set[r] = true
 			}
 		}
 		for _, r := range o.SkillRefs {
 			set[r] = true
+		}
+	}
+	for _, g := range s.HarnessGroups {
+		if g.HarnessRef != "" {
+			set[g.HarnessRef] = true
 		}
 	}
 	out := make([]string, 0, len(set))

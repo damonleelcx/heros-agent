@@ -142,18 +142,23 @@ func TestP17AddsExactlyOneDimension(t *testing.T) {
 	before := []Dimension{DimModel, DimPrompt, DimSkills, DimContext, DimTools}
 	got := Dimensions()
 
-	if len(got) != len(before)+1 {
-		t.Fatalf("the dimension enum has %d members (%v); P17 adds exactly one (memory) to the %d that "+
-			"existed. A different count means either the addition was missed or something else was added "+
-			"without a decision record.", len(got), got, len(before))
+	// 🔴 P18 appended a seventh (harness), deliberately and through the same checklist, so this assertion
+	// is written against the PREFIX and the POSITION of memory rather than against the total count. That
+	// is the change the door was guarding for: it went red when harness landed, which is exactly what it
+	// exists to do, and it is being widened by a deliberate act with a decision record (P18 decisions.md
+	// D-2) rather than deleted.
+	if len(got) < len(before)+1 {
+		t.Fatalf("the dimension enum has %d members (%v); P17 adds at least one (memory) to the %d that "+
+			"existed. A smaller count means the addition was missed.", len(got), got, len(before))
 	}
 	for i, want := range before {
 		if got[i] != want {
 			t.Errorf("dimension %d is %q, want %q — P17 appends, it does not reorder", i, got[i], want)
 		}
 	}
-	if got[len(got)-1] != DimMemory {
-		t.Errorf("the last dimension is %q, want memory", got[len(got)-1])
+	if got[len(before)] != DimMemory {
+		t.Errorf("dimension %d is %q, want memory — P17's addition sits directly after the five that "+
+			"preceded it, and a later phase appends AFTER it rather than in front of it", len(before), got[len(before)])
 	}
 }
 

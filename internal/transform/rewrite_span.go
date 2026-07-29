@@ -89,6 +89,10 @@ var spanRewriters = map[variantspec.Dimension]spanRewriter{
 	// That statement was true when nothing had a materializer and is false now; the coverage table and
 	// the console read the materializer set rather than repeating either claim.
 	variantspec.DimMemory: spanMaterializeMemory,
+	// P18: harness. Same contract as the Go engine's entry — `single-shot` is the identity and emits
+	// nothing, every other strategy materializes only where both halves of the loop are available, and
+	// refuses by name otherwise. See harnessmaterialize_span.go.
+	variantspec.DimHarness: spanMaterializeHarness,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────────
