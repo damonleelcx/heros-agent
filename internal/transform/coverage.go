@@ -420,6 +420,21 @@ func memoryCoverage(lang string) []CoverageCell {
 				"a store nothing fills behaves as `none`. Needs a written message list and a statement-level " +
 				"assignment; a call site with neither is refused by shape. The generated module requires a " +
 				"session id and raises rather than defaulting one"
+		case strings.EqualFold(lang, "go"):
+			// 🔴 Go's gap is NOT the same as the other uncovered languages', and saying so is the whole
+			// value of naming it. Its READ half would work — a generic recall over any SDK's message slice
+			// is type-safe without importing it. Its WRITE half needs one thing: converting the SDK's
+			// response VALUE into its message VALUE, which are different static types in Go and the same
+			// duck-typed dict in Python. Reporting "no Go module" would send a reader looking for general
+			// Go work when the missing piece is one per-provider conversion.
+			cell.Status = CoverageRefuses
+			cell.Cause = CauseNoMaterializer
+			cell.MissingArtifact = "a per-provider response conversion for Go (memoryResponseForms), turning " +
+				"the SDK's response value into its message value"
+			cell.Note = "the read half is ready; the record half cannot store what the call returned until " +
+				"that conversion is declared, and the read half alone is never emitted because it behaves " +
+				"as `none` under this strategy's hash (covered today: " +
+				strings.Join(MemoryMaterializerLanguages(), ", ") + ")"
 		default:
 			cell.Status = CoverageRefuses
 			cell.Cause = CauseNoMaterializer

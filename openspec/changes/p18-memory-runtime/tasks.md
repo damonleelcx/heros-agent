@@ -123,10 +123,38 @@ which can be un-shipped once a customer has run them.
 
 ## 4. The call-site rewriter — Go
 
-- [ ] 4.1 Recall + record at a Go call site, through a generated Go artifact. **NOT DONE.** Go has no
-      emitted module, so `memoryMaterializers` excludes it and every Go cell refuses with
-      `CauseNoMaterializer` naming the missing module — the honest state, not a silent gap.
-- [ ] 4.2 🔴 Both-halves-or-refuse in the AST engine. Blocked on 4.1.
+- [x] 4.1 Establish what Go's memory materialization actually needs, and refuse with THAT rather than
+      with "unsupported". → `internal/transform/memorymaterialize.go`
+      (Test: `TestGoMemoryRefusalNamesTheBlockedHalf`, `TestGoMemoryCoverageStatesTheMissingArtifact`).
+- [x] 4.2 🔴 Both-halves-or-refuse holds in the AST engine: the ready half is not emitted alone.
+      → `internal/transform/memorymaterialize.go` (Test: `TestGoMemoryRefusalNamesTheBlockedHalf`).
+- [x] 4.3 🚫 Add the per-provider response-conversion table with **zero rows**, and a test that makes the
+      emptiness a decision rather than an oversight — naming the three things a row owes.
+      → `internal/transform/memorymaterialize.go` (Test: `TestMemoryResponseFormTableIsEmptyAndSaysWhy`).
+
+**🔴 Go does not materialize memory, and the reason is specific rather than general.**
+
+Go's **read** half would work today: a generic `Recall[T any](nodeID string, msgs []T) []T` is type-safe
+against any SDK's message slice without importing it, and the registry row already locates the list
+(`prompt: {field: "params.Messages"}`).
+
+Its **write** half needs one thing. Recording a turn stores what was sent *and what came back* — and in
+Go those are **different static types**: the call returns the SDK's response value while the store holds
+its message-parameter value. In Python they are the same duck-typed dict, which is why `_as_message`
+suffices there and nothing equivalent exists here. Converting between them is per-provider: the same
+shape `skillbind.go`'s `toolValueForms` uses for tool values.
+
+🚫 **Why the table ships empty instead of with a plausible row.** This module cannot compile against any
+real SDK — the Go fixture is committed as `.txt` precisely because "a directory of real .go files
+importing an SDK this module does not depend on would break `go build ./...` for the whole repo". A row
+written here could not be verified to compile, let alone to behave, and would be emitted into a
+customer's repository as a guess. ADR-001 names that as the top risk, with the wrong-but-compiling
+version the worse half. An unverified row is not a partial capability.
+
+**What a row owes**, recorded so the next person does not rediscover it: (1) a fixture that BUILDS
+against that SDK, so the emission is compiled rather than assumed; (2) a conformance assertion that the
+materialized behaviour matches `internal/memoryruntime`, the bar the Python module clears by execution;
+(3) an `sdkNote` dating the spelling to an SDK generation, so it can be seen to rot.
 
 ## 5. Coverage, and lifting the refusal per cell
 
