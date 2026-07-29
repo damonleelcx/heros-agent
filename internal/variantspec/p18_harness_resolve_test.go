@@ -293,10 +293,11 @@ func TestHarnessChangeChangesHashOnly(t *testing.T) {
 		t.Fatal("changing max_turns did not change the hash; a loop that may run five turns is not the " +
 			"same configuration as one that may run three, and it does not cost the same")
 	}
-	// And nothing else moved: same spec, same registry, same hash.
-	if hash("loop3") != hash("loop3") {
-		t.Fatal("resolution is not deterministic")
-	}
+	// 🔴 A determinism check used to sit here as `hash("loop3") != hash("loop3")`, and staticcheck was
+	// right to reject it (SA4000): written that way it reads as a tautology, and a reader cannot tell
+	// whether it is asserting anything. Determinism IS asserted — over five repetitions, in
+	// TestHarnessIdentityUntouchedSuite — so this line was a duplicate of a real check written in a form
+	// that could not carry the claim. Dropped rather than reworded past the linter.
 }
 
 // TestHarnessRefFailStaticNamesRef — task 3.7. 🔴 Fail-static. An unresolvable ref fails the resolve

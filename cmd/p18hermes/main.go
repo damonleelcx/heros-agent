@@ -248,8 +248,7 @@ func transformOutcome(ir *discovery.IR, base *variantspec.VariantSpec, regs *har
 				log.Fatalf("resolve %s/%s: %v", short(node), entry.Spec.Strategy, err)
 			}
 			patch, err := transform.Generate(resolved, repo)
-			switch {
-			case err == nil:
+			if err == nil {
 				// 🔴 Two very different outcomes both arrive here, and collapsing them would be the false
 				// claim this run exists to avoid. The identity emits NOTHING (no diff is the correct diff
 				// for it); a covered multi-turn cell emits a REAL loop. Counting them together would let
@@ -266,7 +265,7 @@ func transformOutcome(ir *discovery.IR, base *variantspec.VariantSpec, regs *har
 				} else {
 					identityNoOp++
 				}
-			default:
+			} else {
 				var re *transform.RewriteError
 				if asRewrite(err, &re) && re.Dim == string(variantspec.DimHarness) {
 					refused++
