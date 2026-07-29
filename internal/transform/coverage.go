@@ -110,6 +110,7 @@ func CoverageAxes() []string {
 		string(variantspec.DimTools),
 		string(variantspec.DimContext),
 		string(variantspec.DimMemory),
+		string(variantspec.DimHarness),
 		wiringRefusalDim,
 	}
 }
@@ -139,6 +140,7 @@ func AxisCoverage() []CoverageCell {
 		out = append(out, toolPruneCoverage(lang)...)
 		out = append(out, contextCoverage(lang)...)
 		out = append(out, memoryCoverage(lang)...)
+		out = append(out, harnessCoverage(lang)...)
 		out = append(out, wiringCoverage(lang)...)
 	}
 	sortCoverage(out)
@@ -456,6 +458,75 @@ func goProviderCaveat(lang string) string {
 	return ". In Go it additionally needs a verified response conversion for the call site's provider " +
 		"(declared today: " + memoryResponseProvidersDisplay() + "), because the response and the stored " +
 		"message are different static types"
+}
+
+// harnessCoverage reads the builtin strategy set and the MATERIALIZER TABLE, and answers for every
+// (language, strategy) cell (P18 §5, narrowed per-cell by §11).
+//
+// It derives from HasHarnessMaterializer and harnessHostService — the same two functions the rewriters
+// dispatch on — so the claim and the behaviour cannot disagree. A hand-written copy would be the drift
+// this file exists to end.
+//
+// Three distinct answers, and telling them apart is the whole value of the read:
+//
+//	single-shot                             MATERIALIZES everywhere. One turn is the un-rewritten call
+//	                                        site, so there is nothing to emit and nothing to refuse.
+//	react-loop/plan-execute/critic-loop      REFUSE everywhere, permanently, with CauseNotAtCallSite and
+//	                                        NO missing artifact: each needs a host service a call site
+//	                                        cannot inject, and that is true in every language before and
+//	                                        after every rewriter lands.
+//	reflexion                               the only cell whose answer depends on the LANGUAGE, because
+//	                                        it is the only multi-turn strategy needing no second actor.
+//
+// 🚫 A `materializes` cell is a claim about the (language, strategy) PAIR, not a promise about every call
+// site in it: the loop needs a re-invocable call whose answer is readable, and a call site without one is
+// refused by shape. That is the same granularity memoryCoverage uses, and the Note says so rather than
+// leaving a reader to discover it at apply time.
+func harnessCoverage(lang string) []CoverageCell {
+	const axis = string(variantspec.DimHarness)
+	var out []CoverageCell
+	for _, st := range registry.BuiltinHarnessStrategies() {
+		cell := CoverageCell{Axis: axis, Language: lang, Form: st.Name()}
+		switch {
+		case st.Name() == registry.StrategySingleShot:
+			cell.Status = CoverageMaterializes
+			cell.Note = "the identity strategy; one turn is exactly the un-rewritten call site, so nothing " +
+				"is emitted and nothing is refused"
+		case harnessHostService(st.Name()) != "":
+			// 🔴 Not our backlog, and permanently so. CauseNotAtCallSite carries NO missing artifact: there
+			// is nothing to build, because a call site has nowhere to inject a tool executor, a planner or
+			// a critic, and the generated module may not reach a provider (decisions.md D-10).
+			cell.Status = CoverageRefuses
+			cell.Cause = CauseNotAtCallSite
+			cell.Note = "this strategy needs " + harnessHostService(st.Name()) +
+				", which no call site can supply in any language"
+		case HarnessStrategyMaterializesIn(lang, st.Name()):
+			cell.Status = CoverageMaterializes
+			cell.Note = "materialized by wrapping the written call in a bounded loop that re-invokes it and " +
+				"reads each answer against the stop condition — BOTH halves or the call site is refused, " +
+				"because a loop that cannot decide when to stop is the same call priced N times. Needs a " +
+				"re-invocable call whose result is assigned at statement level; a call site without one is " +
+				"refused by shape"
+		case HasHarnessMaterializer(lang):
+			// The language HAS a materializer and this strategy still cannot run on it. Today that is Go's
+			// answer-reading strategies, and the cause is permanent rather than owed.
+			cell.Status = CoverageRefuses
+			cell.Cause = CauseNotAtCallSite
+			cell.Note = "this strategy decides whether to take another turn by reading the ANSWER's text, " +
+				"and in " + languageDisplay(lang) + " a response is your SDK's own type — the generated " +
+				"module would have to import your SDK to read a field off it. Python materializes this one, " +
+				"because there a response is a dict"
+		default:
+			cell.Status = CoverageRefuses
+			cell.Cause = CauseNoMaterializer
+			cell.MissingArtifact = "a " + lang + " harness module and its call-site rewriter (harnessMaterializers)"
+			cell.Note = "the harness runtime is shared and has landed; what is missing for this language is " +
+				"the emitted module a rewritten call site would drive, and the rewriter that emits it " +
+				"(covered today: " + harnessMaterializerDisplay() + ")"
+		}
+		out = append(out, cell)
+	}
+	return out
 }
 
 func sortedPolicyNames() []string {

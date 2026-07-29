@@ -153,7 +153,7 @@ func TestMemoryImportClassAdmitsOnlyItsOwnImport(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := gateMemoryImport("f.py", src, out, []edit{e}, allowed); err != nil {
+		if err := gateGeneratedImports("f.py", src, out, []edit{e}, allowed); err != nil {
 			t.Fatalf("a single import line was rejected: %v", err)
 		}
 	})
@@ -169,7 +169,7 @@ func TestMemoryImportClassAdmitsOnlyItsOwnImport(t *testing.T) {
 		} {
 			e := edit{Start: 0, End: 0, New: bad, NodeID: "n", Dim: "memory", Import: true}
 			out, _ := applyEdits(src, []edit{e})
-			if err := gateMemoryImport("f.py", src, out, []edit{e}, allowed); err == nil {
+			if err := gateGeneratedImports("f.py", src, out, []edit{e}, allowed); err == nil {
 				t.Errorf("the gate admitted %q; this class exists to add ONE import, and anything looser "+
 					"makes it the insert-anything hatch the untargeted-line rule exists to prevent", bad)
 			}
@@ -179,7 +179,7 @@ func TestMemoryImportClassAdmitsOnlyItsOwnImport(t *testing.T) {
 	t.Run("a replacement disguised as an import is refused", func(t *testing.T) {
 		e := edit{Start: 0, End: 5, New: "import agentmem\n", NodeID: "n", Dim: "memory", Import: true}
 		out, _ := applyEdits(src, []edit{e})
-		if err := gateMemoryImport("f.py", src, out, []edit{e}, allowed); err == nil {
+		if err := gateGeneratedImports("f.py", src, out, []edit{e}, allowed); err == nil {
 			t.Error("the gate admitted an edit that REPLACES bytes while claiming to insert an import; " +
 				"this class may add a line and may not remove one")
 		}
@@ -188,7 +188,7 @@ func TestMemoryImportClassAdmitsOnlyItsOwnImport(t *testing.T) {
 	t.Run("two imports are refused", func(t *testing.T) {
 		e := edit{Start: 0, End: 0, New: "import agentmem\n", NodeID: "n", Dim: "memory", Import: true}
 		out, _ := applyEdits(src, []edit{e, e})
-		if err := gateMemoryImport("f.py", src, out, []edit{e, e}, allowed); err == nil {
+		if err := gateGeneratedImports("f.py", src, out, []edit{e, e}, allowed); err == nil {
 			t.Error("the gate admitted two import edits; the file would gain a duplicate import")
 		}
 	})
@@ -202,7 +202,7 @@ func TestMemoryImportClassAdmitsOnlyItsOwnImport(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := gateMemoryImport("f.py", src, out, []edit{imp, sneak}, allowed); err == nil {
+		if err := gateGeneratedImports("f.py", src, out, []edit{imp, sneak}, allowed); err == nil {
 			t.Errorf("the gate admitted an untargeted edit alongside the import:\n%s", out)
 		}
 	})

@@ -15,7 +15,11 @@ import (
 // updating this test is a change to a closed vocabulary, and it should have to be deliberate.
 func TestDimensionEnumClosedIncludesMemory(t *testing.T) {
 	dims := Dimensions()
-	const want = 6
+	// 🔴 Widened from 6 to 7 by P18, which appended `harness` through the same eight-step checklist and
+	// with its own decision record (P18 decisions.md D-2). The assertion stays a CARDINALITY assertion —
+	// its whole job is to go red when a closed vocabulary grows — and it went red on exactly the change
+	// it was written to catch. Bumping it is the deliberate act; deleting it would not be.
+	const want = 7
 	if len(dims) != want {
 		t.Fatalf("Dimensions() has %d members, want %d — the enum is CLOSED; adding a dimension is a "+
 			"deliberate act, not a silent one (got %v)", len(dims), want, dims)
@@ -28,7 +32,7 @@ func TestDimensionEnumClosedIncludesMemory(t *testing.T) {
 		}
 		seen[d] = true
 	}
-	for _, d := range []Dimension{DimModel, DimPrompt, DimSkills, DimContext, DimTools, DimMemory} {
+	for _, d := range []Dimension{DimModel, DimPrompt, DimSkills, DimContext, DimTools, DimMemory, DimHarness} {
 		if !seen[d] {
 			t.Errorf("Dimensions() omits %q — a consumer iterating dimensions would silently miss it", d)
 		}

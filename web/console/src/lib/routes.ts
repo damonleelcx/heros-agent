@@ -37,6 +37,7 @@ export const routes = {
   studio: () => "/app/studio",
   authoring: () => "/app/authoring",
   wiring: () => "/app/wiring",
+  harness: () => "/app/harness",
   coverage: () => "/app/coverage",
   account: () => "/app/account",
   delivery: () => "/app/delivery",

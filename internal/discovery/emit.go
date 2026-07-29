@@ -139,6 +139,50 @@ type IRNode struct {
 	// default of exactly the kind this codebase declines; `none` is the honest floor, and a future
 	// trace-backed detector is what will raise it.
 	Memory string `json:"memory,omitempty"`
+
+	// Harness is the control loop this node's call ALREADY runs inside at source_revision — its scaffold
+	// (P18 task 4.1). The per-node DEFAULT the resolver merges an override onto, so resolution never has
+	// to invent a base.
+	//
+	// 🔴 ADDITIVE and omitempty, and the empty string means `single-shot` (see HarnessDefault). An IR that
+	// predates this field serialises byte-identically, the P0 golden vectors keep reproducing, and every
+	// config_hash-keyed row stays addressable — the same discipline Tools/Skills/Memory above follow.
+	//
+	// 🚫 Discovery emits `single-shot` for every node today, and — as with Memory — that is a statement
+	// about the EVIDENCE rather than a placeholder. The tempting signal is right there: InvocationSemantics
+	// already records `loop` when the call sits inside one (invocationFor). It is the WRONG signal. A `for`
+	// loop over a list of tickets fires the node many times with no scaffold at all, while an agent loop is
+	// the MODEL deciding to take another turn; the two are indistinguishable from loop depth. Emitting
+	// `react-loop` because a call sat in a `for` would be a plausible-but-wrong default that then hashes
+	// into a configuration nobody authored. `single-shot` is the honest floor, and a detector that can tell
+	// the two apart is what will raise it.
+	Harness string `json:"harness,omitempty"`
+}
+
+// HarnessDefault returns the node's discovered harness strategy, defaulting to `single-shot`.
+//
+// The empty string and `single-shot` are ONE state, resolved here so no caller has to remember which
+// spelling it received — the same accessor/inverse pair MemoryDefault and omitDefaultMemory form, for the
+// same reason: the two spellings arrive from different places (an omitted key from a pre-P18 IR, an
+// explicit value from this emitter) and a caller comparing against either literal would misread the other.
+func (n IRNode) HarnessDefault() string {
+	if n.Harness == "" {
+		return "single-shot"
+	}
+	return n.Harness
+}
+
+// omitDefaultHarness is HarnessDefault's inverse, used by the emitter: the default strategy is written as
+// ABSENCE so it costs no bytes, and everything else is written verbatim.
+//
+// The two are inverses on purpose and are declared adjacent for the same reason: if one learned a new
+// default and the other did not, a node would round-trip into a different scaffold than it was emitted
+// with, silently — and a silently-changed scaffold is a silently-changed bill.
+func omitDefaultHarness(s string) string {
+	if s == "single-shot" {
+		return ""
+	}
+	return s
 }
 
 // MemoryDefault returns the node's discovered memory strategy, defaulting to `none`.
@@ -382,6 +426,12 @@ func buildNode(n ExtractedNode) IRNode {
 		// false-acceptance hiding in the collapse, so paying for the distinction in churned bytes across
 		// every stored IR would buy nothing.
 		Memory: omitDefaultMemory(n.Memory),
+		// P18 — the per-node harness default, passed through OMITTED-AT-DEFAULT for exactly the reasons
+		// Memory above is: `single-shot` emits no key, so a pre-P18 document and a current one that proved
+		// no loop serialise byte-identically and the golden IR fixture keeps reproducing. Discovery's floor
+		// is `single-shot` at EVERY node (deriveHarness), so an absent key and a recorded `single-shot`
+		// mean the same thing and HarnessDefault() maps both to it.
+		Harness: omitDefaultHarness(n.Harness),
 		// Permissive typed I/O-contract stubs (P1 allowance — doc 01 §2.1). Refinable additively.
 		IOContract: IRIOContract{
 			InputSchema:  map[string]any{"type": "object"},

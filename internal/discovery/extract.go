@@ -29,7 +29,11 @@ type ExtractedNode struct {
 	// invocations (P17 task 6.2). Derived by the frontend, which is the only component that sees the
 	// call site, so no consumer has to re-derive it (a re-derivation would be a second classifier, and
 	// two classifiers are two answers).
-	Memory      string
+	Memory string
+	// Harness is the control loop this call site already runs inside — the node's scaffold (P18 task 4.1).
+	// Derived by the frontend for the same reason Memory is: it is the only component that sees the call
+	// site, so no consumer has to re-derive it.
+	Harness     string
 	Invocation  InvocationSemantics
 	Ambiguities []AmbiguityFlag
 }
@@ -147,6 +151,7 @@ func extractOne(s DetectedCallSite, m callMeta) ExtractedNode {
 		// unresolved would imply a resolvable fact was skipped and would leave the resolver without a
 		// concrete base (see deriveMemory).
 		n.Memory = deriveMemory(n)
+		n.Harness = deriveHarness(n)
 		n.Ambiguities = []AmbiguityFlag{
 			flag(s.NodeID, "model", CodeModelUnresolved, "detect_only declaration resolves no model"),
 			flag(s.NodeID, "prompt", CodePromptUnresolved, "detect_only declaration resolves no prompt"),
@@ -160,6 +165,7 @@ func extractOne(s DetectedCallSite, m callMeta) ExtractedNode {
 	n.Tools, n.Skills = classifyToolsSkills(s, fset)
 	n.Context = deriveContext(n)
 	n.Memory = deriveMemory(n)
+	n.Harness = deriveHarness(n)
 	return n
 }
 
@@ -381,6 +387,22 @@ func firstQuoted(s string) string {
 // had. `none` is the honest floor, and what raises it is a trace-backed detector that can see the
 // between-turns behaviour — a future memory-runtime phase's job, not a heuristic here.
 func deriveMemory(ExtractedNode) string { return "none" }
+
+// deriveHarness returns the scaffold this call site PROVES it runs inside, which today is always
+// `single-shot` (P18 task 4.1).
+//
+// 🔴 The floor is `single-shot` because P1's evidence cannot distinguish the two things that look alike.
+// `invocationFor` already records `loop` when the call sits inside one, and reaching for that here is the
+// obvious move — but a `for` loop over a list of tickets fires one node many times with NO scaffold, while
+// an agent loop is the MODEL choosing to take another turn. Loop depth cannot tell them apart, and the
+// difference is the whole of the axis: one is a fan-out, the other is a bounded control loop whose turns
+// are model-decided.
+//
+// 🚫 So this does not guess. Emitting `react-loop` because a call sat inside a `for` would hash a
+// configuration nobody authored, and the resolver would then merge overrides onto a base that was never
+// true. A detector that can prove a model-decided turn — a trace-backed one, not a syntactic one — is what
+// raises this floor; until then the honest answer is the identity.
+func deriveHarness(ExtractedNode) string { return "single-shot" }
 
 func deriveContext(n ExtractedNode) ContextAssembly {
 	// P1 has no context-strategy analysis (P3); record an honest, non-empty policy for the schema.

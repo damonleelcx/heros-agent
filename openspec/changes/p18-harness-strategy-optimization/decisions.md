@@ -208,3 +208,176 @@ not hidden. Two contracts contain it (Decision 7 in `design.md`, tasks 7.1–7.2
 The sales-honest framing (per the sales-ops discipline) is that the risk is **风险可观测 (observable)**,
 never **风险可控 (controlled)** — the added surface is real, and the guarantee is that you can *see* it in
 the trace and that it is *bounded*, not that it is gone.
+
+---
+
+# Addendum — the runtime, the rewriter, and the authored change
+
+Six further one-way doors, opened by two requirements that arrived after the axis was modelled:
+
+1. **A user must be able to make an active change to their harness strategy** — not only receive one from
+   the operator.
+2. **There must be a harness runtime and a call-site rewriter** — the axis must be able to reach a
+   customer's source, not only their `config_hash`.
+
+The first is a binding of the cross-axis `authored-change` contract; the second narrows D-4 without
+removing it. Neither weakens what is above: D-1, D-2, D-3, D-5, D-6 and the L1 safety note stand
+unchanged, and D-4's refusal is **narrowed per cell, never lifted wholesale**.
+
+---
+
+## D-8 — 🔴 CORRECTION to D-2/D-3: the resolved field is a **projection**, not the `version_id`
+
+**Problem.** Tasks 3.4 and the D-3 sketch both spell the resolved field `ResolvedNode.HarnessRef string`
+— the registry `version_id`. That contradicts the frozen doctrine of `resolved.go`: `config_hash` denotes
+a **configuration**, not a set of registry rows, so *"two specs that pin different entries with an
+identical strategy and params describe the same computation and must share a hash."* Hashing the
+`version_id` would fork one configuration into as many hashes as there are entries that spell it, and every
+eval comparison would fragment on a registry id nobody chose deliberately.
+
+**Decision.** The **spec** field stays `NodeOverride.HarnessRef string` (a ref, as tasks 3.2 says). The
+**resolved** field is `ResolvedNode.Harness *ResolvedHarness{Strategy string, Params map[string]any}` —
+additive, `omitempty`, nil-when-absent — exactly as `ResolvedMemory` is. The identity `single-shot` with
+no params resolves to a **nil** pointer, so it hashes as absent.
+
+**Why appropriate.** It is the same shape the four sibling axes already have (`ModelRef` is
+`provider/model_id`, not a model entry's id; `Memory` is `{strategy, params}`). Following it costs
+nothing and keeps one rule; deviating would make harness the only axis whose hash is registry-shaped.
+
+**Alternatives + decision point.** Hash the `version_id` as written. Rejected on **L5 evolvability** and
+single-source-of-truth: two identical configurations would compare as different, permanently, and a
+`config_hash` is not revisable once rows key on it.
+
+**Effect.** Two harness entries with the same strategy and params are one configuration. `single-shot`
+with no params ≡ absent, byte-for-byte, which is what makes tasks 3.5 and 3.6 both true at once.
+
+---
+
+## D-9 — 🔴 **DRIVE AND DECIDE, or refuse** — the decision the materialization turns on
+
+**Problem.** A harness is a **loop**, and a loop is two separable capabilities: *driving* the call again
+(re-invoking it) and *deciding* whether to run again (reading the answer against a stop condition).
+Materializing only the drive half yields a fixed-turn loop that burns N calls and discards N−1 answers;
+materializing only the decide half yields a strategy that can tell it should continue and cannot. Either
+way the node runs a behaviour its `config_hash` does not name — which is exactly the *"scored a
+configuration that never ran"* failure D-4 exists to prevent, re-introduced one layer down.
+
+**Decision.** A cell materializes only when the generated runtime can emit **both** halves: it can
+re-invoke the call, **and** it can evaluate the strategy's stop condition against the response. Otherwise
+the call site is refused **whole**, by name, saying which half is missing.
+
+**Why appropriate.** It is the same contract the memory runtime turns on (recall AND record, P18
+`p18-memory-runtime` D2), for the same reason, and it has already been proved to hold under shipping
+pressure once. A fixed-turn loop is the harness analogue of *"a memory that recalls from a store nothing
+fills"*: it compiles, it runs, it costs money, and it is not the strategy the hash names.
+
+**Alternatives + decision point.** Emit the drive half alone and let `max_turns` be the stop condition
+for every strategy. Rejected on **L1 safety** and **L2 stability**: `reflexion` degraded to "call it three
+times" is `single-shot` wearing another strategy's hash, priced three times over. Convenience at L8 cannot
+buy a false eval result.
+
+**Effect.** Every emitted harness is the strategy it claims to be. A cell that cannot be is refused with
+the missing half named, and the refusal can go red in a test.
+
+---
+
+## D-10 — 🚫 The generated runtime makes **no provider call and dispatches no tool**
+
+**Problem.** Three of the five strategies want a second actor: `react-loop` needs the customer's **tool
+executor**, `plan-execute` needs a planner turn plus a step executor, and `critic-loop` needs a call to a
+**separate critic model**. The straightforward materialization has the generated module perform those
+itself.
+
+**Decision.** The generated artifact performs **no provider call and no tool dispatch**. Anything needing
+one is a **host service** the caller injects; a strategy whose host service is absent **refuses** rather
+than substituting a weaker loop. At a call site there is no injection point, so `react-loop`,
+`plan-execute` and `critic-loop` are refused there, each naming the service it needs.
+
+**Why appropriate.** A generated file that reached a provider would put a **credential in the customer's
+process** — a new egress surface created by a codemod, which is the one thing the L1 note above forbids
+compounding. And substituting (running `reflexion` when `critic-loop` was asked for) is the D-9 failure
+by another route. This is the memory runtime's D3 applied unchanged, which is why it needs no new
+machinery.
+
+**Alternatives + decision point.** Let the artifact call the provider for the critic turn, reusing the
+client already at the call site. Rejected on **L1 safety**: the client at the call site is the customer's,
+its credential is the customer's, and generated code spending it on turns the author did not write is a
+cost and an egress the author never authorized. Rejected again on **L2 stability**: the critic model is a
+different entry, so a failure there fails a call the author cannot see.
+
+**Effect.** The blast radius of a materialized harness is exactly the call the author already wrote,
+re-invoked a bounded number of times. Nothing new is reachable, which is what makes task 7.2 provable
+rather than asserted.
+
+---
+
+## D-11 — The refusal is **narrowed per cell**, never removed; `single-shot` is the identity
+
+**Problem.** D-4 says every `HarnessRef` is refused. Shipping a rewriter makes that false for some cells
+and still true for most. A flag flipped to "harness is supported" would be the bait-and-switch this repo
+has already refused once.
+
+**Decision.** `harnessCoverage` becomes a **read of the materializer table**, per `(language, strategy,
+call-shape)` cell. A covered cell materializes; every other cell still returns a typed `unsafeRewrite`
+with its own cause, and the D-4 totality canary still passes for those cells. `single-shot` is the
+**identity**: it emits nothing and materializes everywhere, exactly as `none` does for memory and
+`full` for context.
+
+**Why appropriate.** The claim and the behaviour are then one table, so a coverage sentence cannot drift
+from the engine. It is also the only shape in which the phase can be honest in **both** directions — a
+table that kept saying "refused everywhere" after a rewriter landed would over-refuse, which is the same
+defect as over-claiming.
+
+**Alternatives + decision point.** Keep one flat verdict per axis (simplest surface). Rejected on **L3
+user complexity** and L1 honesty: a user in a covered cell would be told to wait for work that has landed,
+and a user in an uncovered cell would be told it works.
+
+**Effect.** A user is told the truth about *their* language, *their* strategy and *their* call site.
+`single-shot` never reports a refusal, because there is nothing to refuse.
+
+---
+
+## D-12 — A user MAY author a harness change; a user MAY NOT author the evidence
+
+**Problem.** The axis must be user-drivable, not operator-only. But an authored change arrives with no
+verdict, and the surface that accepts it is also the surface most tempted to congratulate the user.
+
+**Decision.** Harness binds the cross-axis [`authored-change`](../../specs/authored-change/spec.md)
+contract — one spine, two origins, origin recorded and never hashed — through the **existing**
+`HarnessRef` override and **no second apply path**. A user selects from the closed builtin set, supplies
+schema-valid params, and may clear the selection; clearing reproduces the prior `config_hash`
+byte-identically. The change is stamped `unverified`, claims **no** quality, cost or latency effect, and
+where the cell refuses it is surfaced as **refused-not-scored** — never as a win, a regression, or a tie.
+
+**Why appropriate.** The two origins must be indistinguishable downstream or the platform has two
+truths about what a configuration is. Making the user's path the *same* override, resolver, transform and
+gate is what makes that structural rather than a policy.
+
+**Alternatives + decision point.** Give authoring its own fast path that skips the admissibility gate
+(it is the user's own choice, after all). Rejected on **L1 honesty** and **L5 evolvability**: a second
+apply path is a second definition of what shipping means, and the gate exists precisely because a user
+cannot see the cost of a heavier scaffold before it runs.
+
+**Effect.** A user can change their scaffold, see exactly what will and will not happen to their source
+before they choose, and never be told their unverified change worked.
+
+---
+
+## D-13 — `config_hash` is untouched by the runtime and the rewriter
+
+**Problem.** The runtime introduces a turn trace, a stop reason, and a per-turn record. Any of those
+reaching the hashed projection would fragment one configuration across every run that executed it.
+
+**Decision.** This addendum changes what the transform **emits** and what a surface **offers**; it never
+changes what a configuration **is**. `ResolvedHarness` carries the strategy and its sealed params and
+nothing else. Every hash minted under 18a reproduces bit-for-bit.
+
+**Why appropriate.** Identity is the frozen contract (D-3); emission is not. Keeping the two apart is
+what lets the rewriter land later without re-authoring a single stored spec.
+
+**Alternatives + decision point.** Hash the turn ceiling actually reached, so a run is comparable to
+its configuration. Rejected on **L2 stability**: that is a property of a *run*, and hashing it would give
+one configuration as many hashes as it had outcomes.
+
+**Effect.** A harness configuration authored before the rewriter lands materializes unchanged after it,
+with the same `config_hash` and no re-authoring.

@@ -63,6 +63,11 @@ var rewriters = map[variantspec.Dimension]rewriter{
 	// type, which does not arise in Python where both are the same duck-typed shape. See
 	// memorymaterialize.go — the refusal names which half is blocked, which "Go is unsupported" would not.
 	variantspec.DimMemory: materializeMemory,
+	// P18: harness. `single-shot` is the IDENTITY and emits nothing — one turn is exactly the
+	// un-rewritten call site, so there is nothing to refuse. Every other strategy is decided by
+	// harnessmaterialize.go, which materializes a cell only when the generated runtime can both DRIVE the
+	// call and DECIDE whether to run again, and refuses by name otherwise (decisions.md D-9).
+	variantspec.DimHarness: materializeHarness,
 }
 
 // rewriteModel rewrites the model argument to the override's model id.

@@ -41,6 +41,15 @@ var operatorPrior = map[OperatorKind]float64{
 	// has a cheap tell in advance. It is not lower to "reflect" the refusal — a prior encodes expected
 	// lift if applied, and bending it to encode applicability would put two different facts in one number.
 	OpMemoryPolicy: 0.25,
+	// Harness. The highest prior in the table, and the number states a belief rather than a hope: when a
+	// node's failing cases genuinely need a second turn, no in-call change recovers them — a stronger
+	// model still answers once. That is why the axis exists.
+	//
+	// 🔴 A prior encodes expected LIFT IF APPLIED, and nothing else. It is deliberately not lowered to
+	// "reflect" that most harness cells refuse at transform, nor to reflect that a heavier scaffold costs
+	// more: applicability is the transform's answer and cost is the admissibility gate's, and bending one
+	// number to carry three facts is how a ranking silently stops meaning what it says.
+	OpHarnessStrategy: 0.35,
 }
 
 // verifyOrderHint ranks operators cheapest-first for verification ordering (design 5.1): a single
@@ -76,6 +85,12 @@ var verifyOrderHint = map[OperatorKind]int{
 	// been the same category error as bending the prior: this table answers "how expensive is it to
 	// verify", the refusal answers "can it be verified at all", and one number cannot carry both.
 	OpMemoryPolicy: 3,
+	// Harness. The MOST expensive thing to verify in the table, and honestly so: every other operator
+	// runs the eval set once per candidate, while a heavier scaffold runs it once per candidate and then
+	// pays max_turns model calls for each case inside that run. Ordering it last is not a judgement about
+	// its value (the prior says the opposite) — it is the cheapest-first rule applied to the operator
+	// that is genuinely the least cheap.
+	OpHarnessStrategy: 6,
 }
 
 // VerifyOrderHint returns the cheapest-operator-first verification order hint for an operator, for the

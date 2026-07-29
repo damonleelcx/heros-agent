@@ -604,6 +604,9 @@ func (m *memRegs) ResolveMemory(_ context.Context, id string) (*registry.MemoryE
 	}
 	return nil, registry.ErrNotFound
 }
+func (m *memRegs) ResolveHarness(context.Context, string) (*registry.HarnessEntry, error) {
+	return nil, registry.ErrNotFound
+}
 
 // coverageReader adapts the transform engine's table for the authoring boundary — the same adapter the
 // BFF uses, so this run reads the boundary from where the console reads it.

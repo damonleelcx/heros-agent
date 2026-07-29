@@ -19,7 +19,68 @@ type Menu struct {
 	// different registries — one pasted into the other's dimension fails closed, which is exactly the
 	// guarantee a shared slice would invite a caller to break.
 	MemoryStrategies []MemoryChoice
+	// HarnessStrategies are the sealed harness-registry entries OpHarnessStrategy may select from (P18).
+	// Its own slice for the same reason MemoryStrategies is: a harness ref and a memory ref resolve in
+	// different registries, and one pasted into the other's dimension fails closed.
+	HarnessStrategies []HarnessChoice
 }
+
+// HarnessChoice is one harness registry entry available for a scaffold swap (P18).
+//
+// 🔴 MaxTurns is carried, and it is the one piece of metadata this menu could not do without: the
+// admissibility gate needs to know whether a candidate is HEAVIER than the baseline, and "heavier" is
+// the turn ceiling. Deriving it downstream would mean re-parsing sealed params in the gate, which is a
+// second reader of a schema and therefore a second thing that can be wrong.
+//
+// Strategy and Title are metadata exactly as ModelChoice.Provider is: the operator references the entry
+// by Ref and never inlines a strategy name, so a candidate is always resolvable back from its
+// config_hash.
+type HarnessChoice struct {
+	Ref      string // harness registry version_id (64-hex content address)
+	Strategy string // "single-shot" | "react-loop" | "plan-execute" | "reflexion" | "critic-loop"
+	Title    string
+	// MaxTurns is the entry's sealed turn ceiling; 1 for the identity. Platform metadata, never hashed.
+	MaxTurns int
+}
+
+// harnessStrategiesExcept returns the menu's harness entries other than the one the node already binds,
+// in a deterministic order — the candidates for a swap.
+//
+// 🚫 Unlike memoryStrategiesExcept, the identity is not excluded WHOLESALE, and the asymmetry is
+// deliberate. Proposing `none` against a stale-read signal answers "your recall is stale" with "then
+// recall nothing" — the removal of the capability being diagnosed. Proposing `single-shot` against a
+// scaffold mismatch is a real and often correct answer: a node running a five-turn loop its cases never
+// needed is burning money, and "run one turn" is the cheapest fix on the table. The admissibility gate
+// only bites on candidates that are HEAVIER, so a lighter candidate is judged on quality alone.
+//
+// 🔴 It IS excluded when it is already in force, and that exclusion is the second half of the same rule.
+// A node with NO harness ref is implicitly `single-shot`, so proposing the identity there is proposing
+// NOTHING: the candidate resolves to the baseline's own config_hash, and it would occupy a verification
+// slot measuring a configuration against itself. Found by running the operator against a real repository,
+// where every node is implicitly single-shot and the first candidate emitted was the baseline.
+func (m Menu) harnessStrategiesExcept(currentRef string) []HarnessChoice {
+	// An absent ref means the node runs the identity already — the discovered default everywhere.
+	currentIsIdentity := currentRef == ""
+
+	var out []HarnessChoice
+	for _, c := range m.HarnessStrategies {
+		if c.Ref == currentRef {
+			continue
+		}
+		if currentIsIdentity && c.Strategy == harnessStrategySingleShot {
+			continue
+		}
+		out = append(out, c)
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Ref < out[j].Ref })
+	return out
+}
+
+// harnessStrategySingleShot mirrors registry.StrategySingleShot. Spelled here rather than imported so
+// this package's operator layer keeps depending only on refs and metadata — the registry is the
+// resolver's dependency, not the catalog's — and it is pinned to the registry constant by a test, so the
+// two cannot drift silently.
+const harnessStrategySingleShot = "single-shot"
 
 // ModelChoice is one model registry entry available for a model up/down-grade, with the cheap signals
 // an operator ranks by. Tier and CostPerRun are platform metadata (from the registry / a pricing
@@ -277,6 +338,17 @@ func cloneSpec(s *variantspec.VariantSpec) *variantspec.VariantSpec {
 	if s.InsertedAdapters != nil {
 		out.InsertedAdapters = append([]variantspec.InsertedAdapter(nil), s.InsertedAdapters...)
 	}
+	// Group harnesses ride along unchanged (P18). A node-scoped operator must not drop a group the
+	// baseline declared — that would be the cloneOverride defect one level up, and with a larger blast
+	// radius, since a group spans several nodes.
+	if s.HarnessGroups != nil {
+		out.HarnessGroups = make([]variantspec.HarnessGroup, 0, len(s.HarnessGroups))
+		for _, g := range s.HarnessGroups {
+			cp := variantspec.HarnessGroup{HarnessRef: g.HarnessRef}
+			cp.Edges = append([]variantspec.Edge(nil), g.Edges...)
+			out.HarnessGroups = append(out.HarnessGroups, cp)
+		}
+	}
 	return out
 }
 
@@ -286,6 +358,15 @@ func cloneOverride(o variantspec.NodeOverride) variantspec.NodeOverride {
 		PromptRef:     o.PromptRef,
 		ContextPolicy: o.ContextPolicy,
 		ApplyMode:     o.ApplyMode,
+		// 🔴 MemoryRef was MISSING here until P18, and its absence was a real defect rather than an
+		// omission of a decorative field: a proposal derived from a baseline that binds a memory strategy
+		// silently UNBOUND it, so the candidate's config_hash differed from the baseline in TWO dimensions
+		// while the candidate's Dimensions() claimed one. The eval would then attribute the whole delta to
+		// the dimension the operator named. Caught by TestCloneOverrideCarriesEveryDimension, which
+		// enumerates the fields rather than listing the ones someone remembered.
+		MemoryRef: o.MemoryRef,
+		// HarnessRef, for the same reason and from the start (P18).
+		HarnessRef: o.HarnessRef,
 	}
 	// 🔴 The drop tolerance is COPIED BY VALUE, not aliased (P16 task 5.3). A candidate that shared the
 	// baseline's pointer would let a later mutation of one reach the other; a candidate that dropped it

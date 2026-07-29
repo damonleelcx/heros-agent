@@ -48,6 +48,10 @@ func DefaultCatalog() []Operator {
 		// which signal it was serving is the enum-switch this catalog exists to avoid.
 		memoryPolicyOp{signal: SignalStaleMemory},
 		memoryPolicyOp{signal: SignalContradictoryMemory},
+		// P18 (18b): the harness axis. ONE row, because one Signal drives it — the node's cases needed
+		// more than one turn and the node runs one. It also handles Reflection's own non-convergence code,
+		// which is the diagnosis-driven half of the same question.
+		harnessStrategyOp{},
 	}
 }
 
@@ -1067,6 +1071,93 @@ func (op memoryPolicyOp) Propose(in OperatorInput) ([]Candidate, error) {
 	return out, nil
 }
 
+// ── harness-strategy switch (a scaffold mismatch: the cases need more turns than the node takes) ──
+//
+// 🔴 The operator that must NOT claim an outcome, for a second reason on top of the one memoryPolicyOp
+// gives. Like memory, whether a call site materializes is the compile step's answer and not the
+// operator's. Unlike memory, a harness candidate can be MEASURABLY BETTER AND STILL INADMISSIBLE: a
+// heavier scaffold that raises task_success while multiplying cost and latency is a bill the customer
+// never agreed to buy quality with (decisions.md D-6). So the rationale states the change and the
+// trade-off, and leaves both verdicts — does it apply, is it worth it — to the two gates that can answer
+// them.
+
+type harnessStrategyOp struct{}
+
+func (harnessStrategyOp) Kind() OperatorKind { return OpHarnessStrategy }
+
+// Handles is Reflection's own non-convergence code: "revisions never converge" is a statement about the
+// LOOP, so a scaffold change is a first-class answer to it.
+func (harnessStrategyOp) Handles() []diagnosis.TaxonomyCode {
+	return []diagnosis.TaxonomyCode{diagnosis.CauseNonConvergence}
+}
+
+func (harnessStrategyOp) HandlesSignal() Signal { return SignalScaffoldMismatch }
+
+// AdmissiblePatterns restricts the operator to the patterns whose WORK is a control loop.
+//
+// 🔴 Not nil (any pattern). Changing the scaffold of a node that does one thing once is a change with a
+// mechanism but no hypothesis — it would resolve, hash, occupy a verification slot, and pay for turns
+// nobody had a reason to expect would help. And the label is an INPUT: no authoring path, parameter, or
+// plan sets a node's pattern, so this restriction cannot be unlocked by asking for it.
+func (harnessStrategyOp) AdmissiblePatterns() []patternclassifier.Pattern {
+	return []patternclassifier.Pattern{
+		patternclassifier.Reflection,
+		patternclassifier.Planning,
+		patternclassifier.ToolUse,
+	}
+}
+
+func (op harnessStrategyOp) Propose(in OperatorInput) ([]Candidate, error) {
+	nodeID := in.NodeID()
+	current := in.Base.Nodes[nodeID].HarnessRef
+
+	var out []Candidate
+	for _, h := range in.Menu.harnessStrategiesExcept(current) {
+		spec := cloneSpec(in.Base)
+		setHarness(spec, nodeID, h.Ref)
+		label := h.Title
+		if label == "" {
+			label = h.Strategy
+		}
+		driver := string(op.HandlesSignal())
+		if in.Signal != SignalNone {
+			driver = string(in.Signal)
+		} else if in.Diagnosis.TaxonomyCode != "" {
+			driver = string(in.Diagnosis.TaxonomyCode)
+		}
+		out = append(out, newCandidate(op.Kind(), in, nodeID, []string{string(variantspec.DimHarness)}, spec,
+			fmt.Sprintf("%s on %d case(s) → switch the scaffold to %s (%s). %s",
+				driver, len(in.Diagnosis.EvidenceCaseIDs), label, turnsPhrase(h.MaxTurns),
+				harnessTradeoffPhrase(h.MaxTurns))))
+	}
+	return out, nil
+}
+
+// turnsPhrase states the turn ceiling in the rationale, because the ceiling IS the cost.
+func turnsPhrase(maxTurns int) string {
+	if maxTurns <= 1 {
+		return "one turn"
+	}
+	return fmt.Sprintf("up to %d turns", maxTurns)
+}
+
+// harnessTradeoffPhrase states the trade-off a reader is about to be asked to accept, WITHOUT claiming
+// an outcome in either direction.
+//
+// 🔴 A heavier scaffold's cost is arithmetic and can be stated before anything runs; its benefit is a
+// measurement and cannot. Saying the first and withholding the second is the honest shape — and it is
+// what stops a proposal reading as a recommendation, which the ranking layer, not the operator, is
+// allowed to make.
+func harnessTradeoffPhrase(maxTurns int) string {
+	if maxTurns <= 1 {
+		return "One turn costs what the un-rewritten call costs; whether it answers the failing cases is " +
+			"verification's answer, not this proposal's"
+	}
+	return fmt.Sprintf("This may multiply the node's per-run cost and latency by up to %d. Whether that "+
+		"buys enough task_success to be worth it is decided on held-out cases by the admissibility gate, "+
+		"never by this proposal", maxTurns)
+}
+
 func newCandidate(kind OperatorKind, in OperatorInput, nodeID string, dims []string, spec *variantspec.VariantSpec, rationale string) Candidate {
 	return Candidate{
 		Operator:        kind,
@@ -1102,6 +1193,19 @@ func setApplyMode(s *variantspec.VariantSpec, node string, mode variantspec.Appl
 func setContext(s *variantspec.VariantSpec, node, ref string) {
 	o := s.Nodes[node]
 	o.ContextPolicy = ref
+	s.Nodes[node] = o
+}
+
+// setHarness binds a harness-registry version_id at a node (P18). It sets ONLY HarnessRef, for the
+// reason setMemory sets only MemoryRef: the harness axis is per-dimension independent like every other,
+// so proposing a scaffold swap must not disturb the node's model, prompt, context or memory.
+//
+// 🚫 It never touches Order or Edges. A harness change is not a rearrangement (decisions.md D-5); an
+// operator that reordered while claiming to change the scaffold would produce a candidate whose
+// config_hash records two changes and whose rationale describes one.
+func setHarness(s *variantspec.VariantSpec, node, ref string) {
+	o := s.Nodes[node]
+	o.HarnessRef = ref
 	s.Nodes[node] = o
 }
 

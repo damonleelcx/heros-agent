@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Brain, FileCode, FlaskConical, GitBranch, GitPullRequest, Home, Layers, PenLine, Play, Settings, Share2, SlidersHorizontal,
-  Grid3x3, User } from "lucide-react";
+  Grid3x3, Repeat, User } from "lucide-react";
 import { requireSession } from "@/lib/session";
 import { visitedSubjects, routes, SUBJECT_LABELS } from "@/lib/subjects";
 import { NavLink } from "@/components/nav";
@@ -46,6 +46,11 @@ const SURFACES: Surface[] = [
   // Memory sits beside Context because a reader confuses the two more often than any other pair, and
   // adjacency is where the distinction is cheapest to make: within one call vs across invocations.
   { href: "/app/memory", label: "Memory", icon: <Brain /> },
+  // Harness sits after Memory because the three are the axes a reader most often conflates, and the
+  // order teaches the distinction: within one call (context), across calls (memory), around the call
+  // (harness). It is also the only one that can multiply what a node costs, so it is the last one a
+  // reader reaches rather than the first.
+  { href: "/app/harness", label: "Harness", icon: <Repeat /> },
   // Coverage sits last in the primary group because it is the surface a reader reaches WHEN an axis
   // declines — it explains the boundary the other surfaces enforce, rather than being a place to work.
   { href: "/app/coverage", label: "Coverage", icon: <Grid3x3 /> },
@@ -75,6 +80,7 @@ export default async function ConsoleLayout({ children }: { children: React.Reac
     { id: "s:wiring", group: "Surface", label: "Node wiring", href: "/app/wiring" },
     { id: "s:context", group: "Surface", label: "Context strategy", href: "/app/context" },
     { id: "s:memory", group: "Surface", label: "Memory strategy", href: "/app/memory" },
+    { id: "s:harness", group: "Surface", label: "Harness strategy", href: "/app/harness" },
     { id: "s:coverage", group: "Surface", label: "Coverage — what applies where", href: "/app/coverage" },
     { id: "s:account", group: "Surface", label: "Plan and spend", href: routes.account() },
     ...visited.map((subject) => ({

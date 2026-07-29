@@ -453,6 +453,10 @@ func (emptyRegistries) ResolveMemory(context.Context, string) (*registry.MemoryE
 	return nil, registry.ErrNotFound
 }
 
+func (emptyRegistries) ResolveHarness(context.Context, string) (*registry.HarnessEntry, error) {
+	return nil, registry.ErrNotFound
+}
+
 type skillRegistries struct {
 	entries map[string]*registry.SkillEntry
 }
@@ -474,6 +478,10 @@ func (s skillRegistries) ResolveContextPolicy(context.Context, string) (*registr
 }
 
 func (s skillRegistries) ResolveMemory(context.Context, string) (*registry.MemoryEntry, error) {
+	return nil, registry.ErrNotFound
+}
+
+func (s skillRegistries) ResolveHarness(context.Context, string) (*registry.HarnessEntry, error) {
 	return nil, registry.ErrNotFound
 }
 

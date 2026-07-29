@@ -92,3 +92,68 @@ modelled, resolved, and hashed, but **refused at transform** with a typed `unsaf
   byte-identically to its pre-P18 form and every existing golden vector reproduces.
 - **Sequencing:** **18a** (the catalog + the dimension: modelled, resolved, hashed, refused, scored) is a
   complete phase on its own. **18b** (the operator + the cost/quality admissibility gate) follows.
+
+---
+
+## Addendum — the runtime, the rewriter, and the authored change
+
+### Why (addendum)
+
+Two requirements arrived after the axis was modelled, and both are load-bearing rather than cosmetic.
+
+**A user must be able to make an active change to their harness strategy.** As written above, the only way
+a scaffold ever changes is `OpHarnessStrategy` proposing one. That makes the axis operator-only, which is
+not what the other axes are: model, prompt, skills, context, wiring and memory all bind the cross-axis
+[`authored-change`](../../specs/authored-change/spec.md) contract, and harness must too, through the same
+override and with **no second apply path**.
+
+**The refusal named two missing artifacts, and this change builds them.** Decision 4 refuses a `HarnessRef`
+at transform because *"materializing a control loop is code generation."* That sentence names exactly what
+is missing: **a harness runtime** — a bounded loop, a stop condition and a continuation rule — and **the
+call-site rewriter** that drives it. Without them the axis can be authored, hashed and compared, but can
+never reach a customer's source, and the interim refusal is indefinite rather than interim.
+
+### What Changes (addendum)
+
+- **New capability `harness-runtime`.** `internal/harnessruntime`: one definition of each builtin
+  strategy's loop — `Plan(strategy, params, turn, answer) → continue|stop(reason)` — plus a `Run` that is
+  **bounded by construction** (no strategy and no param combination expresses an unbounded loop), reaching
+  the ceiling terminates and is **recorded**, and the result exposes a per-turn trace that is
+  **observable and never hashed**. 🚫 The runtime performs **no provider call and dispatches no tool**: a
+  planner, a tool executor and a critic are **injected host services**, and a strategy whose service is
+  absent **refuses** rather than substituting a lighter loop.
+
+- **New capability `harness-materialization`.** A dependency-free generated module per language that
+  regenerates byte-identically and ships in the **same patch** as the call-site edit, plus the rewriters
+  that drive it. The one decision it turns on is **DRIVE AND DECIDE, or refuse**: a cell materializes only
+  when the runtime can both re-invoke the call **and** evaluate the stop condition against the response;
+  otherwise the call site is refused **whole**, naming the missing half. Consequences, stated rather than
+  hidden: `single-shot` is the identity and materializes everywhere; `reflexion` materializes where a
+  response's text is readable (Python — a message is a `dict`) and refuses where it is the customer's SDK
+  type (Go — `CauseNotAtCallSite`, **no missing artifact**, because there is nothing to build); and
+  `react-loop`, `plan-execute` and `critic-loop` refuse at **every** call site, each naming the host
+  service a generated module may not supply. Decision 4's refusal is therefore **narrowed per cell, never
+  removed** — `harnessCoverage` becomes a read of the materializer table, and the totality canary still
+  passes for every uncovered cell.
+
+- **New capability `harness-authoring`.** P18's binding of the `authored-change` spine: select a strategy
+  from the closed builtin set, supply schema-valid params, clear it (clearing reproduces the prior
+  `config_hash` byte-identically; `single-shot` with no params ≡ cleared). The **per-cell** boundary is
+  stated **before** the choice, read from the engine's own coverage source rather than a second sentence,
+  and the added cost of a heavier scaffold is stated rather than implied. An authored change is stamped
+  `unverified`, claims nothing, and where the cell refuses is surfaced as **refused-not-scored**. A new
+  `/app/harness` console surface renders it.
+
+- **Still not changed.** `config_hash` is untouched — this addendum changes what the transform **emits**
+  and what a surface **offers**, never what a configuration **is**, so every hash minted under 18a
+  reproduces bit-for-bit. No runtime topology engine is resurrected. No eval metric and no scoring change.
+  No harness override reorders nodes.
+
+### Impact (addendum)
+
+- **Affected capabilities:** `harness-runtime` (new), `harness-materialization` (new), `harness-authoring`
+  (new). `agent-loop`'s refusal requirement is **modified** — narrowed per cell, not removed.
+- **Affected code/systems:** `internal/harnessruntime` (new), `internal/transform`
+  (`harnessartifact*.go`, `harnessmaterialize*.go`, `coverage.go`), `internal/registry/authoring.go`
+  (the validate-without-register path the surface calls), `web/console` (`/app/harness`).
+- **Breaking:** none. Additive throughout; the refusal narrows, so nothing that worked stops working.

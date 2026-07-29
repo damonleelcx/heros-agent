@@ -90,6 +90,19 @@ const (
 	// more than silence, and because the day the rewriter lands the operator wakes with no change to its
 	// contract: its worth was always going to be decided by the harness.
 	OpMemoryPolicy OperatorKind = "memory_policy_switch"
+
+	// ── P18 harness (18b) ───────────────────────────────────────────────────────────────────────────
+	//
+	// OpHarnessStrategy proposes swapping the SCAFFOLD around a node's call — how many turns it runs and
+	// in what control loop. Its own kind, and not a mode of any existing operator, for the reason
+	// decisions.md D-2 keeps the dimension apart: model/prompt/skills/context/memory all describe what
+	// happens inside or around ONE call, and this one decides how many calls happen at all.
+	//
+	// 🔴 It is the only operator whose admissibility is a COST question rather than only a quality one. A
+	// heavier scaffold almost always raises task_success SOMEWHERE while multiplying eval_cost_usd and
+	// eval_latency_ms, so "it scored higher" is not sufficient to ship it — see harness_op.go, which is
+	// the gate, and decisions.md D-6, which is why the gate exists.
+	OpHarnessStrategy OperatorKind = "harness_strategy_switch"
 )
 
 // Signal is a structural driver that is NOT expressible as a P4.5 taxonomy code but still maps to a
@@ -123,6 +136,18 @@ const (
 	// would put a cross-turn observation into a per-case vocabulary.
 	SignalStaleMemory         Signal = "stale_read"           // → memory-policy switch
 	SignalContradictoryMemory Signal = "contradictory_memory" // → memory-policy switch
+
+	// ── P18 scaffold mismatch ───────────────────────────────────────────────────────────────────────
+	//
+	// SignalScaffoldMismatch is the structural driver for a harness swap: the node's failing cases need
+	// more than one turn to answer, and the node runs one.
+	//
+	// A Signal rather than a taxonomy code, for the reason the four above are: the frozen P4.5 taxonomy
+	// is about what WENT WRONG in a case, and "this task needed a second look and the node never took
+	// one" is a property of the SCAFFOLD across the case set rather than of any single failing case.
+	// Inventing a code for it would put a cross-case structural observation into a per-case vocabulary,
+	// and the taxonomy is frozen precisely so that cannot happen quietly.
+	SignalScaffoldMismatch Signal = "scaffold_mismatch" // → harness-strategy switch
 )
 
 // OperatorInput is what every operator reads. It is assembled by the engine from a diagnosis (or a
