@@ -8,6 +8,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -159,6 +160,41 @@ func generate(r *variantspec.Resolved, spec *variantspec.VariantSpec, root strin
 		}
 	}
 
+	// P18 §9.1 — the memory import. It is added after the per-node loop, and per FILE rather than per
+	// node, because that is what it is: two memory nodes in one file need ONE import, and emitting it
+	// from the per-site materializer would produce a duplicate the gate then rejects — a refusal caused
+	// by our own emission rather than by anything the user wrote.
+	//
+	// 🔴 It also SHIFTS attribution. Every recorded line below the insertion point moves down by one in
+	// the transformed file, and the build gate reads transformed-file coordinates (it compiles the
+	// transformed tree). Adjusting here keeps a compiler diagnostic attributable to the node that caused
+	// it, which is one of the two things the line-count invariant existed to protect.
+	for _, rel := range sortedKeys(editsByFile) {
+		if !hasMemoryEdit(editsByFile[rel]) {
+			continue
+		}
+		src, err := readFile(root, rel)
+		if err != nil {
+			return nil, err
+		}
+		blame := firstMemoryEdit(editsByFile[rel])
+		imp, err := memoryImportEdit(src, blame.NodeID, blame.Dim, r.Language, root)
+		if err != nil {
+			return nil, err
+		}
+		editsByFile[rel] = append(editsByFile[rel], imp)
+		impLine := lineOf(src, imp.Start)
+		if allowedLines[rel] == nil {
+			allowedLines[rel] = map[int]bool{}
+		}
+		allowedLines[rel][impLine] = true
+		for i := range touched {
+			if touched[i].File == rel && touched[i].Line >= impLine {
+				touched[i].Line++
+			}
+		}
+	}
+
 	// P15 15c task 15.2 — the wiring transposition, emitted into the SAME patch as the content edits so
 	// one revert takes both. It is added after the per-node loop because its admissibility depends on the
 	// file's statements, not on any override, and because a wiring change that cannot be materialized
@@ -193,6 +229,26 @@ func generate(r *variantspec.Resolved, spec *variantspec.VariantSpec, root strin
 		diffs = append(diffs, unifiedDiff(rel, src, out, editsByFile[rel])...)
 	}
 
+	// P18 §2 — the generated memory module and its params document, emitted into the SAME patch as the
+	// call-site edits so one revert restores all of it. Emitted only when a call site was actually
+	// rewritten for memory: a module in a customer's tree that nothing calls is dead code we put there.
+	if memoryWasMaterialized(editsByFile) {
+		memFiles, err := GenerateMemoryArtifacts(r, r.Language)
+		if err != nil {
+			return nil, err
+		}
+		for _, path := range sortedFileKeys(memFiles) {
+			if _, exists := patch.Files[path]; exists {
+				return nil, fmt.Errorf("transform: the memory artifact would overwrite %s, which this patch "+
+					"already changes; a generated file must never clobber the customer's own source", path)
+			}
+			patch.Files[path] = memFiles[path]
+			diffs = append(diffs, newFileDiff(path, memFiles[path])...)
+			patch.Touched = append(patch.Touched, TouchedDimension{
+				Dim: string(variantspec.DimMemory), File: path, Line: 1})
+		}
+	}
+
 	patch.Diff = diffs
 	sum := sha256.Sum256(diffs)
 	patch.DiffHash = hex.EncodeToString(sum[:])
@@ -224,6 +280,15 @@ func gateMinimal(rel string, src, out []byte, edits []edit, allowed map[int]bool
 	// rewriter in the package, forever, to serve one caller.
 	if isSwap(edits) {
 		if err := gateSwapPermutation(rel, src, out, edits); err != nil {
+			return err
+		}
+		return reparseOrReject(rel, src, out, edits, reparse)
+	}
+	// A MEMORY MATERIALIZATION is the third edit class (P18 §9.1). It is routed here for the same reason
+	// a swap is: it would fail the line-count rule below by construction, because it adds an import line.
+	// Its own rule is stricter, not laxer — see gateMemoryImport.
+	if isMemoryImport(edits) {
+		if err := gateMemoryImport(rel, src, out, edits, allowed); err != nil {
 			return err
 		}
 		return reparseOrReject(rel, src, out, edits, reparse)
@@ -274,6 +339,95 @@ func reparseOrReject(rel string, src, out []byte, edits []edit, reparse reparser
 	}
 	return nil
 }
+
+// gateMemoryImport is the memory materialization's gate (P18 §9.1).
+//
+// 🔴 It asserts the one property that makes an import insertion reviewable without reading the codemod:
+// THE OUTPUT IS THE INPUT'S LINES WITH EXACTLY ONE IMPORT LINE INSERTED, and every other difference
+// confined to a targeted call-site line. Five checks, each catching a different way of being wrong:
+//
+//	exactly one import edit    two would leave a duplicate import, or an import for a module the file
+//	                           does not call
+//	it is an INSERTION         Start == End: it replaces nothing, so it cannot delete code by claiming
+//	                           to add some
+//	its text is ONE import     a single `import <name>` line, matched against a pattern. This is what
+//	                           stops the class being a general "insert arbitrary lines" escape hatch —
+//	                           the thing a future contributor would most naturally reach for it as.
+//	line count +1 exactly      not +2, not 0; the shift attribution accounts for is the shift that
+//	                           happened
+//	lines match, minus one     removing the inserted line from the output must reproduce the input
+//	                           EXCEPT on allowed lines. This is the check that makes the class safe: if
+//	                           it holds, nothing outside the targeted call site changed, and the one
+//	                           thing that moved is a line whose content the previous check pinned.
+//
+// A rewriter cannot satisfy these by accident. A reviewer who trusts only this assertion still knows the
+// change added one import and altered nothing else outside the call site it named.
+func gateMemoryImport(rel string, src, out []byte, edits []edit, allowed map[int]bool) error {
+	blame := edits[0]
+	fail := func(format string, args ...any) error {
+		return &RewriteError{NodeID: blame.NodeID, Dim: blame.Dim, Err: ErrUnsafeRewrite,
+			Detail: fmt.Sprintf(format, args...)}
+	}
+
+	var imports []edit
+	for _, e := range edits {
+		if e.Import {
+			imports = append(imports, e)
+		}
+	}
+	if len(imports) != 1 {
+		return fail("the memory materialization of %s carries %d import edits; exactly one is admitted, "+
+			"or the file gains a duplicate import", rel, len(imports))
+	}
+	imp := imports[0]
+	if imp.Start != imp.End {
+		return fail("the memory import edit for %s replaces bytes [%d,%d) instead of inserting; this class "+
+			"may add a line and may not remove one", rel, imp.Start, imp.End)
+	}
+	if !memoryImportLine.MatchString(imp.New) {
+		return fail("the memory import edit for %s would insert %q, which is not a single import line. "+
+			"This class exists to add ONE import; admitting arbitrary text would make it the "+
+			"insert-anything escape hatch the untargeted-line rule exists to prevent", rel, imp.New)
+	}
+
+	before, after := splitLines(src), splitLines(out)
+	if len(after) != len(before)+1 {
+		return fail("the memory materialization changed %s from %d line(s) to %d; this class adds exactly "+
+			"one import line, and attribution below the insertion is shifted by exactly that", rel,
+			len(before), len(after))
+	}
+
+	// Where the line landed, in the OUTPUT's coordinates. The edit inserted at a line boundary, so the
+	// inserted line is the one at the input line index the offset falls on.
+	k := lineOf(src, imp.Start) - 1 // 0-based index in `after`
+	if k < 0 || k >= len(after) {
+		return fail("the memory import for %s landed outside the file", rel)
+	}
+	if !memoryImportLine.MatchString(after[k] + "\n") {
+		return fail("the memory materialization of %s did not put the import where it claimed (line %d is "+
+			"%q); the shift attribution relies on knowing which line moved", rel, k+1, after[k])
+	}
+
+	// Remove the inserted line and compare what is left against the input, line for line.
+	reduced := make([]string, 0, len(before))
+	reduced = append(reduced, after[:k]...)
+	reduced = append(reduced, after[k+1:]...)
+	for i := range before {
+		if reduced[i] == before[i] {
+			continue
+		}
+		if !allowed[i+1] {
+			return fail("the memory materialization would change %s:%d, which is outside the targeted "+
+				"call site; adding an import does not license editing anything else", rel, i+1)
+		}
+	}
+	return nil
+}
+
+// memoryImportLine is the ONLY text this edit class may insert. Anchored at both ends and permitting a
+// single module name, because a looser pattern is how a class meant for one import becomes a way to
+// insert arbitrary source past the minimality gate.
+var memoryImportLine = regexp.MustCompile(`^import (?:[a-zA-Z_][a-zA-Z0-9_]*|"[^"\n]+")\n$`)
 
 // gateSwapPermutation is the wiring transposition's gate (P15 15c task 12.2, FR18).
 //

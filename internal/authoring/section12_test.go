@@ -185,6 +185,12 @@ func TestPreflightPayloadCarriesNoContent(t *testing.T) {
 	refFields := map[string]bool{
 		"ModelRef": true, "PromptRef": true, "SkillRefs": true, "ToolSelection": true,
 		"ContextPolicy": true, "ApplyMode": true, "DropTolerance": true,
+		// P17: a memory-registry version_id. It is a REFERENCE, and the distinction is the one this
+		// allowlist exists to force: the strategy's params live in the sealed registry entry the ref
+		// addresses, so a draft carries the address and never the configuration. A field that held
+		// `{"max_tokens":2000}` inline would be a payload and would belong nowhere near a draft — which is
+		// also why variantspec rejects an inlined memory definition at resolve.
+		"MemoryRef": true,
 	}
 	for i := 0; i < rt.NumField(); i++ {
 		name := rt.Field(i).Name

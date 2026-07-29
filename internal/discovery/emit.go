@@ -122,6 +122,52 @@ type IRNode struct {
 	// second classifier, and two classifiers are two answers.
 	Tools  []IRTool `json:"tools,omitempty"`
 	Skills []string `json:"skills,omitempty"`
+
+	// Memory is the memory strategy this node ALREADY implements at source_revision — what it carries
+	// ACROSS invocations (P17 task 6.1). It is the per-node DEFAULT the resolver merges an override onto,
+	// so resolution never has to invent a base.
+	//
+	// 🔴 ADDITIVE and omitempty, and the empty string means `none` (see MemoryDefault). An IR that
+	// predates this field serialises byte-identically, the P0 golden vectors keep reproducing, and every
+	// config_hash-keyed row stays addressable — the same discipline Tools/Skills above follow.
+	//
+	// 🚫 Discovery emits `none` for every node today, and that is a statement about the EVIDENCE, not a
+	// placeholder. A memory strategy is a store read and written BETWEEN turns (patternclassifier
+	// taxonomy.go: "memory read/write against a store between turns"), so it is not visible in the single
+	// call site P1 extracts — the same reason `MemoryManagement` is a BEHAVIORAL pattern and not a
+	// structural one. Guessing a strategy from an imported library name would be a plausible-but-wrong
+	// default of exactly the kind this codebase declines; `none` is the honest floor, and a future
+	// trace-backed detector is what will raise it.
+	Memory string `json:"memory,omitempty"`
+}
+
+// MemoryDefault returns the node's discovered memory strategy, defaulting to `none`.
+//
+// The empty string and `none` are ONE state, resolved here so no caller has to remember which spelling it
+// received. That matters because the two spellings arrive from different places — an omitted key from a
+// pre-P17 IR, an explicit "none" from this emitter — and a caller comparing against "" would treat a
+// current IR as unrecorded while a caller comparing against "none" would treat an old one as unrecorded.
+// One accessor, one answer.
+func (n IRNode) MemoryDefault() string {
+	if n.Memory == "" {
+		return "none"
+	}
+	return n.Memory
+}
+
+// omitDefaultMemory is MemoryDefault's inverse, used by the emitter: the default strategy is written as
+// ABSENCE so it costs no bytes, and everything else is written verbatim. The pair is what makes
+// "the resolver always resolves against a concrete base" true without every node carrying a key that
+// says nothing — the concreteness lives in the accessor, which is the only way anyone reads the field.
+//
+// The two are inverses on purpose and are declared adjacent for the same reason: if one learned a new
+// default and the other did not, a node would round-trip into a different strategy than it was emitted
+// with, silently.
+func omitDefaultMemory(s string) string {
+	if s == "none" {
+		return ""
+	}
+	return s
 }
 
 // IRTool is one provider-native tool the node offers the model, as the call site declares it.
@@ -325,6 +371,17 @@ func buildNode(n ExtractedNode) IRNode {
 		// is what has to stay byte-compatible, and absence is achieved by omission, not by an empty array.
 		Tools:  n.Tools,
 		Skills: n.Skills,
+		// P17 — the per-node memory default, passed through OMITTED-AT-DEFAULT, exactly as Tools/Skills
+		// above are: `none` emits no key, so a pre-P17 document and a current one that found no memory
+		// strategy serialise byte-identically and the golden IR fixture keeps reproducing.
+		//
+		// 🔴 The distinction Tools needs — "not recorded" is NOT "offers none", which is why ToolsRecorded()
+		// exists — deliberately does not arise here, and that is an argument rather than an oversight.
+		// Discovery's floor for memory is `none` at EVERY node (deriveMemory), so an absent key and a
+		// recorded `none` mean the same thing and MemoryDefault() maps both to `none`. There is no
+		// false-acceptance hiding in the collapse, so paying for the distinction in churned bytes across
+		// every stored IR would buy nothing.
+		Memory: omitDefaultMemory(n.Memory),
 		// Permissive typed I/O-contract stubs (P1 allowance — doc 01 §2.1). Refinable additively.
 		IOContract: IRIOContract{
 			InputSchema:  map[string]any{"type": "object"},

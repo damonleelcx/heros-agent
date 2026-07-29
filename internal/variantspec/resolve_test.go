@@ -18,6 +18,7 @@ type fakeRegistries struct {
 	prompts  map[string]*registry.PromptEntry
 	skills   map[string]*registry.SkillEntry
 	contexts map[string]*registry.ContextEntry
+	memories map[string]*registry.MemoryEntry
 	// calls counts lookups, so a test can prove resolution ABORTED rather than carried on.
 	calls int
 }
@@ -28,6 +29,7 @@ func newFakeRegistries() *fakeRegistries {
 		prompts:  map[string]*registry.PromptEntry{},
 		skills:   map[string]*registry.SkillEntry{},
 		contexts: map[string]*registry.ContextEntry{},
+		memories: map[string]*registry.MemoryEntry{},
 	}
 }
 
@@ -58,6 +60,35 @@ func (f *fakeRegistries) ResolveContextPolicy(_ context.Context, id string) (*re
 		return e, nil
 	}
 	return nil, registry.ErrNotFound
+}
+
+// ResolveMemory looks up ONLY the memory map (P17). Its own map, and not a shared one keyed by id, is
+// what makes the cross-dimension fail-closed check meaningful in these tests: a context ref handed here
+// must miss, exactly as it would against the real store, where the Kind is part of the content address.
+func (f *fakeRegistries) ResolveMemory(_ context.Context, id string) (*registry.MemoryEntry, error) {
+	f.calls++
+	if e, ok := f.memories[id]; ok {
+		return e, nil
+	}
+	return nil, registry.ErrNotFound
+}
+
+// addMemory seals a real memory entry into the fake registry — sealed, not hand-built, so the version_id
+// the tests resolve is the one the production seal path would produce for the same content.
+func (f *fakeRegistries) addMemory(t *testing.T, ref, name, strategy, params string) *registry.MemoryEntry {
+	t.Helper()
+	st := registry.MemoryStrategyNamed(strategy)
+	if st == nil {
+		t.Fatalf("addMemory: %q is not a builtin strategy", strategy)
+	}
+	e := &registry.MemoryEntry{
+		VersionID: ref,
+		Name:      name,
+		Spec:      registry.MemorySpec{Strategy: strategy, Params: json.RawMessage(params)},
+		Strategy:  st,
+	}
+	f.memories[ref] = e
+	return e
 }
 
 func ptrF(f float64) *float64 { return &f }

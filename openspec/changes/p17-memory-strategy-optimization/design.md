@@ -164,6 +164,45 @@ flatter the axis.
 
 (Full record: [decisions.md D6](./decisions.md).)
 
+## Decision 7 — A user may **author** a memory change; the platform refuses to **apply** it, out loud and up front
+
+The memory axis gets a **second origin**. A workflow owner can select a node's strategy and params from the
+closed builtin set, and clear it, on P13's shared
+[`authored-change`](../p13-prompt-model-optimization/specs/authored-change/spec.md) spine — one pipeline,
+two origins, `Origin` recorded and never hashed. What P17 adds is forced by Decision 4: **the transform
+refuses**, so unlike P13–P16, an authored change here **never reaches the user's source**.
+
+The split that makes this coherent is **modeling is not refused; materialization is.** Selecting a strategy
+resolves, hashes, seals a registry entry, records `user` origin + actor + parent pointer, and diffs in
+lineage — a real `config_hash` that re-materializes unchanged the day the rewriter lands. What is withheld
+is the codemod and the number.
+
+**Alternative rejected (a) — no authoring until the rewriter lands.** Rejected on **L5/L6**: it discards the
+large fraction of the axis's value that needs no codemod (pin, compare, hand to a colleague, survive to the
+rewrite) and confuses "we cannot write this into your source" with "you may not express this."
+**Alternative rejected (b) — a second apply path that "applies" the record.** Rejected on **L1**: a second
+apply path is a second place for every gate to be wrong, and a lineage record claiming an applied
+configuration the source never had is Decision 4's silent-drop failure re-introduced one layer up.
+**Alternative rejected (c) — let the user compose the change and refuse at apply.** Rejected on **L1/L8**:
+technically honest, practically a bait-and-switch — the user spends effort against a boundary the platform
+knew about before they started.
+
+So three rules, and they are the whole of the capability:
+
+| Rule | Where it bites | Why not the obvious alternative |
+|---|---|---|
+| The boundary is **stated before the choice**, from the coverage fact the engine refuses from | the surface, pre-selection | a hand-written sentence beside the control is a second source of truth, and the UI copy is the one that drifts |
+| Refused at **preflight**, with the **transform's own typed cause** | before worktree/build/eval spend | a refusal discovered from an empty diff is discovered late, by someone puzzling over a non-effect |
+| **Never** rendered as applied, delivered, or improved; `refused` is its own state | every surface and record | at M20 the refusal *is* the outcome, so a UI that softens it is the entire lie |
+
+🔴 The control stays **live with the boundary stated**, never silently disabled. A greyed-out control says
+nothing about *why*, and invites the belief that some other strategy, language, or plan would unlock it.
+
+Clearing reproduces the prior `config_hash` byte-identically, and `none` is indistinguishable from cleared
+(Decision 3 applied to authoring) — so a user can back out with no residue in the hash.
+
+(Full record: [decisions.md D7](./decisions.md). Spec: [`specs/memory-authoring/spec.md`](./specs/memory-authoring/spec.md).)
+
 ## Interfaces sketch
 
 ```
@@ -190,6 +229,16 @@ operator (operator.go:34)            OpMemoryPolicy = "memory_policy_switch"
 
 eval path                            axis-agnostic (config_hash + Trace) — READY, not exercised at M20
   improvement signal                  memory_hit_rate ↑ · staleness ↓ · eval_tokens_total ↓ (metricset.go:98)
+
+authoring (Decision 7)               internal/authoring — the EXISTING spine, one new Edit field
+  Edit.MemoryRef *string              set / CLEAR ("" removes the key → prior config_hash, byte-exact)
+  Preflighter.Materializer.Probe      the transform's OWN cause, raised before any spend
+  MemoryBoundaryFor(coverage, lang)   READ from transform.CoverageFor("memory") — never restated prose
+  GET /api/p17/memory                 vocabulary + boundary; no tenant, no plan, no role
+  POST /api/p13/authoring/{preflight,submit}   ← the SAME routes an operator candidate uses
+  origin                              Origin=user + actor + ParentVariantID — recorded, never hashed
+  🚫 no second apply path             a memory edit rides the shared routes or it does not ship
+  🚫 no apply, no delivery, no score  `refused` renders as its own state (≠ failed, ≠ pending)
 ```
 
 ## Risks
@@ -203,3 +252,5 @@ eval path                            axis-agnostic (config_hash + Trace) — REA
 | A sixth strategy is added without a version bump and reinterprets a stored name | Decision 5 — a cardinality assertion (like `TaxonomySize`) fails loudly; the builtin set is closed per strategy-set version. |
 | A memory ref resolves in the wrong registry | Decision 1 — the Kind is hashed into the version_id, so a cross-dimension paste fails closed. |
 | The phase is read as delivering scored memory optimization | The PRD, proposal, and decisions all state M20 is "modeled + refused," not "optimized"; no scored memory win is claimed anywhere. |
+| A user authors a memory change and believes it reached their source | Decision 7 — the boundary is stated **before** the selection from the same coverage fact the engine refuses from, the apply refuses at preflight with the transform's own typed cause, and no surface or record can show applied/delivered/partially-applied. Asserted in the console tests, because a UI that softens the refusal is the whole lie. |
+| The authoring surface's stated limit drifts from what the engine actually does | Decision 7 — one preflight verdict, two readers (the surface and the apply path). A second hand-written sentence in the UI is exactly the copy that goes stale. |

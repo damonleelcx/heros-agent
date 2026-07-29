@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -66,11 +67,17 @@ func mentionsWiring(s string) string {
 }
 
 func TestNoNewDimensionForWiring(t *testing.T) {
-	// 1. The Dimension enum stays CLOSED over content dimensions.
+	// 1. The Dimension enum carries NO WIRING member. P15's claim is about what the axis is NOT, so the
+	//    check below (no dimension names the wiring axis) is the load-bearing half; the prefix check
+	//    just pins that P15 disturbed none of the members that existed when it landed.
+	//
+	//    🔴 A length equality here would be the wrong assertion, and it was one: it fired when P17 added
+	//    DimMemory — a deliberate, checklist-driven addition on a different axis — reporting it as a P15
+	//    violation. A test that goes red for a change it has no opinion about teaches readers to edit
+	//    tests to make builds green, which is the habit that lets a real regression through.
 	got := Dimensions()
-	if len(got) != len(contentDimensions) {
-		t.Fatalf("Dimensions() returned %v; P15 adds no dimension — the wiring axis is Order/Edges, "+
-			"already hashed. Want exactly the content dimensions %v", got, contentDimensions)
+	if len(got) < len(contentDimensions) {
+		t.Fatalf("Dimensions() returned %v; want at least the content dimensions %v", got, contentDimensions)
 	}
 	for i, want := range contentDimensions {
 		if got[i] != want {
@@ -100,11 +107,23 @@ func TestNoNewDimensionForWiring(t *testing.T) {
 
 	// 3. The registry grows no wiring Kind. A wiring change references no registry entry at all: it
 	// selects nothing to resolve, it rearranges nodes that already exist.
+	//
+	// 🔴 The assertion is "no kind NAMES the wiring axis", not "the kind set is exactly these four". P15
+	// has no opinion about kinds other phases add on other axes — P17's `memory` is one — and a set
+	// equality here went red for it, reporting a checklist-driven addition on an unrelated axis as a P15
+	// violation. What P15 owns is the absence of a wiring kind, so that is what is checked, plus that the
+	// four it was built against are all still present.
 	kinds := registryKinds(t)
-	wantKinds := []string{"context", "model", "prompt", "skill"}
-	if !reflect.DeepEqual(kinds, wantKinds) {
-		t.Fatalf("registry Kind consts = %v, want %v — P15 registers no wiring kind (a rearrangement "+
-			"resolves no ref)", kinds, wantKinds)
+	for _, k := range kinds {
+		if w := mentionsWiring(k); w != "" {
+			t.Fatalf("registry Kind %q names the wiring axis (%q); a rearrangement resolves no ref — it "+
+				"selects nothing to look up, it rearranges nodes that already exist", k, w)
+		}
+	}
+	for _, want := range []string{"context", "model", "prompt", "skill"} {
+		if !slices.Contains(kinds, want) {
+			t.Fatalf("registry Kind %q is missing; kinds = %v", want, kinds)
+		}
 	}
 
 	// 4. No wiring table. `Order`/`Edges` are columns of the variant spec document that already

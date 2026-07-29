@@ -89,6 +89,35 @@ type ResolvedNode struct {
 	// correct identity: two variants that differ only in the drop a node tolerates are different
 	// configurations, because the second admits proposals the first rejects.
 	ContextDropTolerance *float64 `json:"context_drop_tolerance,omitempty"`
+	// Memory is the node's resolved memory strategy — what it carries ACROSS invocations (P17 task 4.2,
+	// decisions.md D3). ADDITIVE and omitempty with a NIL-when-absent pointer: a node with no memory
+	// strategy emits NO `memory` key, so its canonical bytes are byte-identical to a pre-P17 node and the
+	// frozen golden vectors keep reproducing — the fourth application of the discipline Bindings,
+	// ToolSelection and ContextDropTolerance above follow.
+	//
+	// 🔴 `none` ≡ ABSENT. The identity strategy resolves to a NIL pointer here, not to
+	// `{"strategy":"none"}`, so a node that explicitly selects `none` and a node that never mentioned
+	// memory produce the same bytes and the same config_hash. That equality is what lets a user back out
+	// of an authored memory change with no residue in the hash, and it is asserted rather than assumed
+	// (TestNoneMemoryHashesAsAbsent).
+	//
+	// When present it participates in config_hash structurally — JCS sorts the params keys, so the hash
+	// depends on the params SET rather than their authoring order, and it changes iff the strategy or a
+	// param changes. That is the correct identity: two variants differing in what a node remembers between
+	// turns are different configurations, whatever else they share.
+	//
+	// 🚫 It is NOT the memory registry's version_id. Like every other field here this is a PROJECTION —
+	// config_hash denotes a CONFIGURATION, not a set of registry rows, so two specs pinning different
+	// entries with the same strategy and params describe one computation and must share a hash.
+	Memory *ResolvedMemory `json:"memory,omitempty"`
+}
+
+// ResolvedMemory is a node's resolved memory strategy: which strategy, and the params it runs with. This
+// is the hashed projection of a memory registry entry — the strategy NAME and the params, never the
+// version_id, for the reason ResolvedNode's doc comment gives.
+type ResolvedMemory struct {
+	Strategy string         `json:"strategy"`
+	Params   map[string]any `json:"params"`
 }
 
 // ResolvedBinding is one slot's resolved binding: its kind and value, recorded explicitly (never

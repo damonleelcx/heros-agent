@@ -41,6 +41,13 @@ func DefaultCatalog() []Operator {
 		// merge is not a mode of pruneOp, because "drop a dead node" and "fuse two nodes into one" answer
 		// different admissibility questions and produce different edges (decisions.md D-1).
 		mergeOp{},
+		// P17 (20b): the memory axis. TWO rows of ONE operator, because `fires` matches a single Signal
+		// per row while both of the classifier's memory failure modes drive the same change. Two rows of
+		// the same struct is the honest spelling of "one operator, two drivers"; two DIFFERENT operator
+		// kinds would claim they were different changes, and an `if` inside one row's Propose deciding
+		// which signal it was serving is the enum-switch this catalog exists to avoid.
+		memoryPolicyOp{signal: SignalStaleMemory},
+		memoryPolicyOp{signal: SignalContradictoryMemory},
 	}
 }
 
@@ -992,6 +999,74 @@ func parentVariantID(in OperatorInput) string {
 
 // ── shared derivation helpers ────────────────────────────────────────────────────────────────────
 
+// ── memory-policy switch (a memory bottleneck: stale reads / contradictory recall) ───────────────
+//
+// 🔴 THIS OPERATOR WOKE UP. P17 catalogued it DORMANT, because the transform refused every memory
+// rewrite: a candidate could resolve and hash and then never reach an eval, so it could never be scored,
+// so it could never be a win. P18 shipped the runtime and the call-site rewriters, and a memory candidate
+// on a covered cell now compiles to a real diff and is verifiable like any other.
+//
+// # What changed here, and what deliberately did not
+//
+// What changed is one sentence: the rationale used to assert "REFUSED at transform". That was true of
+// every memory candidate when it was written and is false of some of them now, and a rationale that
+// asserts a stale outcome is worse than one that asserts none — it is read as current.
+//
+// 🚫 So the rationale no longer claims an OUTCOME at all, in either direction. It describes the CHANGE
+// and names the precondition, and whether this particular call site materializes is decided by the
+// compile step and carried on `Compiled.BuildStatus` / `Compiled.Refusal`. That is where it belongs: the
+// operator is pure and pattern-gated, it does not see the call site, and a claim it cannot check is a
+// claim it should not make.
+//
+// The honesty contract is unchanged and is enforced structurally rather than by wording: a refused
+// candidate has `BuildStatus == BuildRefused`, `Surfaceable()` is false, and it never reaches
+// verification — so it cannot be counted as a win, a regression, or a tie. Nothing about that depended on
+// the rationale's sentence.
+
+type memoryPolicyOp struct {
+	// signal is which memory failure mode this row answers. Two rows share this struct because `fires`
+	// matches one Signal per row; see DefaultCatalog.
+	signal Signal
+}
+
+func (memoryPolicyOp) Kind() OperatorKind                { return OpMemoryPolicy }
+func (memoryPolicyOp) Handles() []diagnosis.TaxonomyCode { return nil }
+func (op memoryPolicyOp) HandlesSignal() Signal          { return op.signal }
+
+// AdmissiblePatterns restricts the operator to nodes the classifier labelled MemoryManagement.
+//
+// 🔴 Not nil (any pattern), unlike the model operators. A memory strategy swap on a node that keeps no
+// memory is a change with no mechanism — it would resolve, hash, occupy a verification slot and measure
+// nothing. And the label is an INPUT here, never an output: no authoring path, parameter, or plan sets a
+// node's pattern, so this restriction cannot be unlocked by asking for it.
+func (memoryPolicyOp) AdmissiblePatterns() []patternclassifier.Pattern {
+	return []patternclassifier.Pattern{patternclassifier.MemoryManagement}
+}
+
+func (op memoryPolicyOp) Propose(in OperatorInput) ([]Candidate, error) {
+	nodeID := in.NodeID()
+	current := in.Base.Nodes[nodeID].MemoryRef
+
+	var out []Candidate
+	for _, m := range in.Menu.memoryStrategiesExcept(current) {
+		spec := cloneSpec(in.Base)
+		setMemory(spec, nodeID, m.Ref)
+		label := m.Title
+		if label == "" {
+			label = m.Strategy
+		}
+		// 🔴 The rationale describes the CHANGE and names the precondition, and claims no outcome in either
+		// direction. Whether this call site materializes is the compile step's answer, carried on
+		// Compiled.BuildStatus — an operator that asserted it would be asserting something it cannot see.
+		out = append(out, newCandidate(op.Kind(), in, nodeID, []string{string(variantspec.DimMemory)}, spec,
+			fmt.Sprintf("%s on %d case(s) → switch memory strategy to %s. Materializing it needs a call "+
+				"site that writes its message list and assigns the call's result, because memory is a read "+
+				"AND a write and a site that can carry only one half materializes neither",
+				op.signal, len(in.Diagnosis.EvidenceCaseIDs), label)))
+	}
+	return out, nil
+}
+
 func newCandidate(kind OperatorKind, in OperatorInput, nodeID string, dims []string, spec *variantspec.VariantSpec, rationale string) Candidate {
 	return Candidate{
 		Operator:        kind,
@@ -1027,6 +1102,15 @@ func setApplyMode(s *variantspec.VariantSpec, node string, mode variantspec.Appl
 func setContext(s *variantspec.VariantSpec, node, ref string) {
 	o := s.Nodes[node]
 	o.ContextPolicy = ref
+	s.Nodes[node] = o
+}
+
+// setMemory binds a memory-registry version_id at a node (P17). It sets ONLY MemoryRef: the memory axis
+// is per-dimension independent like every other, so proposing a strategy swap must not disturb the
+// node's context policy, its model, or anything else the baseline pinned.
+func setMemory(s *variantspec.VariantSpec, node, ref string) {
+	o := s.Nodes[node]
+	o.MemoryRef = ref
 	s.Nodes[node] = o
 }
 

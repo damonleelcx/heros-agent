@@ -99,6 +99,21 @@ jobs:
       - uses: golangci/golangci-lint-action@v7
         with:
           version: v2.12.2
+          # 🔴 The analysis cache is skipped deliberately, and the reason is that it changes the ANSWER.
+          #
+          # staticcheck's SA5011 (nil dereference) needs a cross-package fact — that `t.Fatal` does not
+          # return — and that fact is not part of what the restored cache carries. When a package's
+          # diagnostics come back from cache without it, every `if x == nil { t.Fatal(…) }` in the repo
+          # reports as a possible nil dereference. On 2026-07-29 that produced 34 such issues in test
+          # files nobody had touched, in packages the branch never went near, while the same commit had
+          # linted clean 20 minutes earlier and a cold local run of the identical v2.12.2 binary reported
+          # 0 issues — and re-running the untouched earlier commit reproduced the failure, which is what
+          # ruled the source out.
+          #
+          # A lint that answers differently depending on what a cache happened to hold is not a gate: it
+          # fails clean branches and would pass dirty ones just as easily. ~1 minute per run buys an
+          # answer that matches what `golangci-lint run ./...` gives a developer on their own machine.
+          skip-cache: true
 
   schema:
     name: schema-validation + contract proofs

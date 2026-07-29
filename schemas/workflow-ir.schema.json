@@ -199,6 +199,11 @@
           "description": "Optional (P14, additive — no MAJOR bump). The registered platform capabilities this node binds, split out of the frozen `tools_skills` list. A skill is BOUND by constructing a value from its sealed contract — the opposite mechanic to a tool's selection — which is why the two cannot share one slice.",
           "items": { "type": "string", "minLength": 1 }
         },
+        "memory": {
+          "type": "string",
+          "description": "Optional (P17, additive — no MAJOR bump). The memory strategy this node already implements: what it carries ACROSS invocations and sessions, as opposed to `context_assembly`, which is how a SINGLE call builds its message list. Absent means the document predates the field and is read as `none`. Discovery emits `none` for every node, which is a claim about the evidence rather than a placeholder: a store read and written between turns is not visible at the single call site P1 extracts, which is why `MemoryManagement` is a behavioral pattern and not a structural one.",
+          "minLength": 1
+        },
         "context_assembly": {
           "type": "object",
           "description": "How context is built for this call (RAG policy, message-window strategy, etc.).",

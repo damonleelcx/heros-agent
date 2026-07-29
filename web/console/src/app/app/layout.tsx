@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { FileCode, FlaskConical, GitBranch, GitPullRequest, Home, Layers, PenLine, Play, Settings, Share2, SlidersHorizontal,
+import { Brain, FileCode, FlaskConical, GitBranch, GitPullRequest, Home, Layers, PenLine, Play, Settings, Share2, SlidersHorizontal,
   Grid3x3, User } from "lucide-react";
 import { requireSession } from "@/lib/session";
 import { visitedSubjects, routes, SUBJECT_LABELS } from "@/lib/subjects";
@@ -43,6 +43,9 @@ const SURFACES: Surface[] = [
   { href: "/app/authoring", label: "Author", icon: <PenLine /> },
   { href: "/app/wiring", label: "Wiring", icon: <Share2 /> },
   { href: "/app/context", label: "Context", icon: <SlidersHorizontal /> },
+  // Memory sits beside Context because a reader confuses the two more often than any other pair, and
+  // adjacency is where the distinction is cheapest to make: within one call vs across invocations.
+  { href: "/app/memory", label: "Memory", icon: <Brain /> },
   // Coverage sits last in the primary group because it is the surface a reader reaches WHEN an axis
   // declines — it explains the boundary the other surfaces enforce, rather than being a place to work.
   { href: "/app/coverage", label: "Coverage", icon: <Grid3x3 /> },
@@ -71,6 +74,7 @@ export default async function ConsoleLayout({ children }: { children: React.Reac
     { id: "s:authoring", group: "Surface", label: "Author a change", href: "/app/authoring" },
     { id: "s:wiring", group: "Surface", label: "Node wiring", href: "/app/wiring" },
     { id: "s:context", group: "Surface", label: "Context strategy", href: "/app/context" },
+    { id: "s:memory", group: "Surface", label: "Memory strategy", href: "/app/memory" },
     { id: "s:coverage", group: "Surface", label: "Coverage — what applies where", href: "/app/coverage" },
     { id: "s:account", group: "Surface", label: "Plan and spend", href: routes.account() },
     ...visited.map((subject) => ({

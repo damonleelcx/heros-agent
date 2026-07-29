@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/heros-foreal/agentd/internal/discovery"
+	"github.com/heros-foreal/agentd/internal/registry"
 	"github.com/heros-foreal/agentd/internal/variantspec"
 )
 
@@ -108,6 +109,7 @@ func CoverageAxes() []string {
 		string(variantspec.DimSkills),
 		string(variantspec.DimTools),
 		string(variantspec.DimContext),
+		string(variantspec.DimMemory),
 		wiringRefusalDim,
 	}
 }
@@ -136,6 +138,7 @@ func AxisCoverage() []CoverageCell {
 		out = append(out, skillCoverage(lang)...)
 		out = append(out, toolPruneCoverage(lang)...)
 		out = append(out, contextCoverage(lang)...)
+		out = append(out, memoryCoverage(lang)...)
 		out = append(out, wiringCoverage(lang)...)
 	}
 	sortCoverage(out)
@@ -376,6 +379,83 @@ func contextCoverage(lang string) []CoverageCell {
 		out = append(out, cell)
 	}
 	return out
+}
+
+// memoryCoverage reads the builtin strategy set and the MATERIALIZER TABLE, and answers for every
+// (language, strategy) cell (P17, narrowed per-cell by P18 §5.1).
+//
+// 🔴 This read was UNIFORM under P17 and is not any more, and the change is the honest one rather than a
+// loosening. P17's uniformity was a true claim about a true state: nothing was missing per-language,
+// because a memory RUNTIME was missing everywhere. P18 shipped that runtime and a Python materializer,
+// so the axis became asymmetric exactly like skills and context — and a table that kept saying "this is
+// missing in every language" would now be lying in the OPPOSITE direction, over-refusing rather than
+// over-claiming. Both are the same defect: a coverage claim that does not match the engine.
+//
+// It derives from HasMemoryMaterializer — the same table spanMaterializeMemory dispatches on — so the
+// claim and the behaviour cannot disagree.
+//
+// `none` materializes everywhere, because the identity strategy is genuinely equivalent to the
+// un-rewritten call site — exactly as `full`/identity does in the context axis. That is what makes
+// "none ≡ absent" true at the coverage layer too, so a user selecting `none` is never told their no-op
+// was refused.
+//
+// 🚫 A `materializes` cell is a claim about the (language, strategy) PAIR, not a promise about every call
+// site in it: the record half needs a statement-level assignment, and a call site without one is refused
+// by shape. That is the same granularity contextCoverage uses, and the Note says so rather than leaving a
+// reader to discover it at apply time.
+func memoryCoverage(lang string) []CoverageCell {
+	const axis = string(variantspec.DimMemory)
+	hasMaterializer := HasMemoryMaterializer(lang)
+	var out []CoverageCell
+	for _, st := range registry.BuiltinMemoryStrategies() {
+		cell := CoverageCell{Axis: axis, Language: lang, Form: st.Name()}
+		switch {
+		case st.Name() == registry.StrategyNone:
+			cell.Status = CoverageMaterializes
+			cell.Note = "the identity strategy; equivalent to the un-rewritten call site, so nothing is emitted"
+		case MemoryStrategyMaterializesIn(lang, st.Name()):
+			cell.Status = CoverageMaterializes
+			cell.Note = "materialized by wrapping the written message list with a recall and recording the " +
+				"turn after the call — BOTH halves or the call site is refused, because a memory that reads " +
+				"a store nothing fills behaves as `none`. Needs a written message list and a statement-level " +
+				"assignment; a call site with neither is refused by shape. The generated module requires a " +
+				"session id and raises rather than defaulting one" + goProviderCaveat(lang)
+		case hasMaterializer:
+			// The language HAS a materializer and this strategy still cannot run on it. Today that is Go's
+			// content-reading strategies, and the cause is permanent rather than owed: a Go message is the
+			// customer's SDK type, so reading its text would mean importing their SDK into generated code.
+			//
+			// 🔴 CauseNotAtCallSite carries NO missing artifact, and the asymmetry is the point (P13 FR45):
+			// naming one would promise work that would not help, because there is nothing to build.
+			cell.Status = CoverageRefuses
+			cell.Cause = CauseNotAtCallSite
+			cell.Note = "this strategy decides what to keep by reading message TEXT, and in " +
+				languageDisplay(lang) + " a message is your SDK's own type — the generated module would have " +
+				"to import your SDK to read a field off it. " + languageDisplay(lang) + " materializes the " +
+				"strategies whose retention is a function of count; Python materializes this one, because " +
+				"there a message is a dict"
+		default:
+			cell.Status = CoverageRefuses
+			cell.Cause = CauseNoMaterializer
+			cell.MissingArtifact = "a " + lang + " memory module and its call-site rewriter (memoryMaterializers)"
+			cell.Note = "the memory runtime is shared and has landed; what is missing for this language is " +
+				"the emitted module a rewritten call site would call, and the rewriter that emits it " +
+				"(covered today: " + strings.Join(MemoryMaterializerLanguages(), ", ") + ")"
+		}
+		out = append(out, cell)
+	}
+	return out
+}
+
+// goProviderCaveat states the one extra precondition a Go cell carries: the record half needs a verified
+// response conversion for the call site's provider, which is a per-provider fact the cell cannot know.
+func goProviderCaveat(lang string) string {
+	if !strings.EqualFold(lang, "go") {
+		return ""
+	}
+	return ". In Go it additionally needs a verified response conversion for the call site's provider " +
+		"(declared today: " + memoryResponseProvidersDisplay() + "), because the response and the stored " +
+		"message are different static types"
 }
 
 func sortedPolicyNames() []string {

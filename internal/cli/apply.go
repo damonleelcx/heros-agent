@@ -250,3 +250,9 @@ func (noopRegistries) ResolveSkill(context.Context, string) (*registry.SkillEntr
 func (noopRegistries) ResolveContextPolicy(context.Context, string) (*registry.ContextEntry, error) {
 	return nil, registry.ErrNotFound
 }
+
+// ResolveMemory completes variantspec.Registries (P17). It fails closed like its siblings: this
+// harness pins no memory strategy, so a memory_ref here names nothing and must not resolve to something.
+func (noopRegistries) ResolveMemory(context.Context, string) (*registry.MemoryEntry, error) {
+	return nil, registry.ErrNotFound
+}

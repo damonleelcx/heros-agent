@@ -33,6 +33,14 @@ var operatorPrior = map[OperatorKind]float64{
 	OpRemoveSkill:  0.20,
 	OpToolPrune:    0.20,
 	OpToolMinimize: 0.25,
+	// Memory. A coarse ordering hint and nothing else, like every other row here — and since P18 gave the
+	// axis real materializers, this number now IS replaced by a measured verdict on a covered cell, which
+	// is the ordinary case rather than the exception P17 described.
+	//
+	// The value sits with the context policy's: both change what the model effectively sees, and neither
+	// has a cheap tell in advance. It is not lower to "reflect" the refusal — a prior encodes expected
+	// lift if applied, and bending it to encode applicability would put two different facts in one number.
+	OpMemoryPolicy: 0.25,
 }
 
 // verifyOrderHint ranks operators cheapest-first for verification ordering (design 5.1): a single
@@ -61,6 +69,13 @@ var verifyOrderHint = map[OperatorKind]int{
 	OpFewShotCurate:     5,
 	OpPromptCompress:    5,
 	OpRedundancyRemove:  5,
+	// Memory. It sits with the context policy at 3 — one candidate, one eval pass, same cost class.
+	//
+	// 🔴 It was never sorted last "because it will be refused anyway", and that restraint is why nothing
+	// here had to change when P18 made memory verifiable. Encoding applicability in a COST hint would have
+	// been the same category error as bending the prior: this table answers "how expensive is it to
+	// verify", the refusal answers "can it be verified at all", and one number cannot carry both.
+	OpMemoryPolicy: 3,
 }
 
 // VerifyOrderHint returns the cheapest-operator-first verification order hint for an operator, for the

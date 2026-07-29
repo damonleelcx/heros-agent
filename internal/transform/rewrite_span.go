@@ -81,6 +81,14 @@ var spanRewriters = map[variantspec.Dimension]spanRewriter{
 	// P14 tool selection. It refuses here too, and for a reason of the same kind as the skills refusal
 	// but not identical to it, so it gets its own sentence rather than sharing one (see spanRewriteTools).
 	variantspec.DimTools: spanRewriteTools,
+	// P18: memory MATERIALIZES here for the languages with an emitted module (Python today) and refuses
+	// by cell for the rest. Both halves — recall and record — or neither: a memory that reads a store
+	// nothing fills behaves as `none` under another strategy's hash. See memorymaterialize_span.go.
+	//
+	// 🔴 The axis is no longer uniform across languages, which is exactly what P17's copy said it was.
+	// That statement was true when nothing had a materializer and is false now; the coverage table and
+	// the console read the materializer set rather than repeating either claim.
+	variantspec.DimMemory: spanMaterializeMemory,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────────

@@ -447,6 +447,12 @@ func (emptyRegistries) ResolveContextPolicy(context.Context, string) (*registry.
 	return nil, registry.ErrNotFound
 }
 
+// ResolveMemory completes variantspec.Registries (P17). It fails closed like its siblings: this
+// harness pins no memory strategy, so a memory_ref here names nothing and must not resolve to something.
+func (emptyRegistries) ResolveMemory(context.Context, string) (*registry.MemoryEntry, error) {
+	return nil, registry.ErrNotFound
+}
+
 type skillRegistries struct {
 	entries map[string]*registry.SkillEntry
 }
@@ -464,6 +470,10 @@ func (s skillRegistries) ResolveSkill(_ context.Context, id string) (*registry.S
 	return nil, registry.ErrNotFound
 }
 func (s skillRegistries) ResolveContextPolicy(context.Context, string) (*registry.ContextEntry, error) {
+	return nil, registry.ErrNotFound
+}
+
+func (s skillRegistries) ResolveMemory(context.Context, string) (*registry.MemoryEntry, error) {
 	return nil, registry.ErrNotFound
 }
 

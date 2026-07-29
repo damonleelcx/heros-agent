@@ -58,6 +58,11 @@ var rewriters = map[variantspec.Dimension]rewriter{
 	variantspec.DimSkills:  rewriteSkills,
 	variantspec.DimContext: rewriteContext,
 	variantspec.DimTools:   rewriteTools,
+	// P18: memory refuses here with a reason SPECIFIC to Go, not the shared one. The read half would
+	// work; the write half needs a per-provider conversion from the SDK response type to its message
+	// type, which does not arise in Python where both are the same duck-typed shape. See
+	// memorymaterialize.go — the refusal names which half is blocked, which "Go is unsupported" would not.
+	variantspec.DimMemory: materializeMemory,
 }
 
 // rewriteModel rewrites the model argument to the override's model id.

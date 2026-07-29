@@ -74,6 +74,22 @@ const (
 	// OpToolMinimize proposes the MINIMAL tool set that preserves task success — the whole-set analogue
 	// of a single prune, emitted as one candidate so the harness scores the set rather than each drop.
 	OpToolMinimize OperatorKind = "tool_minimize"
+
+	// ── P17 memory (20b) ────────────────────────────────────────────────────────────────────────────
+	//
+	// OpMemoryPolicy proposes swapping what a node carries ACROSS invocations — a different memory
+	// strategy, or the same strategy retuned. It is its own kind and not a mode of OpContextPolicy for
+	// the reason decisions.md D2 keeps the two dimensions apart: context assembly is how a SINGLE call
+	// builds its message list, memory is what survives between calls, and one operator meaning both would
+	// put an `if` inside contextPolicyOp deciding which contract it was honouring.
+	//
+	// 🚫 It is DORMANT at M20, and that is a contract rather than a stage of implementation. The
+	// transform refuses every memory rewrite (decisions.md D4), so a memory proposal resolves and hashes
+	// but can never be verified — and what cannot be verified cannot be a win. It is catalogued anyway,
+	// exactly as the reserved OpMerge was, because a proposal a user can SEE and reason about is worth
+	// more than silence, and because the day the rewriter lands the operator wakes with no change to its
+	// contract: its worth was always going to be decided by the harness.
+	OpMemoryPolicy OperatorKind = "memory_policy_switch"
 )
 
 // Signal is a structural driver that is NOT expressible as a P4.5 taxonomy code but still maps to a
@@ -92,6 +108,21 @@ const (
 	// tool is not a FAILURE, so the frozen P4.5 failure taxonomy has no honest code for it, and inventing
 	// one would put "nothing went wrong, but this costs tokens" in a vocabulary about what went wrong.
 	SignalUnusedTools Signal = "unused_tools" // → tool-prune / tool-minimize
+
+	// ── P17 memory bottlenecks ──────────────────────────────────────────────────────────────────────
+	//
+	// These two are the classifier's OWN failure modes for the MemoryManagement pattern
+	// (internal/patternclassifier/metricset.go: FailureModes {"contradictory_memory", "stale_read"}),
+	// lifted verbatim rather than renamed. Reusing the exact spellings is the point: the vocabulary that
+	// DETECTS a memory problem and the vocabulary that DRIVES a memory proposal are then the same
+	// vocabulary, so nothing has to translate between them and no translation can drift.
+	//
+	// They are Signals rather than taxonomy codes for the reason the three above are: the frozen P4.5
+	// taxonomy is about what WENT WRONG in a case, and "the agent recalled something stale" is a property
+	// of the memory strategy across turns rather than of any one failing case. Inventing a code for it
+	// would put a cross-turn observation into a per-case vocabulary.
+	SignalStaleMemory         Signal = "stale_read"           // → memory-policy switch
+	SignalContradictoryMemory Signal = "contradictory_memory" // → memory-policy switch
 )
 
 // OperatorInput is what every operator reads. It is assembled by the engine from a diagnosis (or a

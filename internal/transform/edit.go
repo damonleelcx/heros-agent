@@ -60,6 +60,41 @@ type edit struct {
 	// Binding marks an edit that replaces a value the program bound BEFORE the call — a builder-chain
 	// call or a request-value field (P13 FR52). See bindingSite().
 	Binding bool
+	// Import marks the single import line a MEMORY MATERIALIZATION adds to a file (P18 §9.1).
+	//
+	// It is a THIRD edit class, alongside Swap and Binding, and it exists for the same reason they do:
+	// memory materialization needs something no value rewrite needs — a line at the top of the file, so
+	// the rewritten call site can reach the generated module — and the two ways of getting there without
+	// a new class are both worse.
+	//
+	// 🚫 Loosening the untargeted-line rule would remove that check from EVERY rewriter in the package,
+	// forever, to serve one caller — the trade P15's decisions.md D-4 refuses by name. And emitting the
+	// call without the import ships source that references a module nothing imported, which is broken
+	// code in a customer's repository.
+	//
+	// So the class carries its own rule (gateMemoryImport), and that rule is STRONGER than the one it
+	// replaces rather than weaker: the output must be the input's lines with EXACTLY ONE import line
+	// inserted, every other difference confined to an allowed line. A reviewer who trusts only that
+	// assertion knows one import was added and nothing outside the targeted call site moved.
+	//
+	// 🔴 It is the one edit in the package permitted to change the file's line count, and it changes it
+	// by exactly +1. Attribution survives because generate() shifts the recorded TouchedDimension lines
+	// below the insertion point to match — see memoryImportShift.
+	Import bool
+}
+
+// isMemoryImport reports whether an edit set carries the memory materialization's import line.
+//
+// Unlike isSwap, this is a MIXED set by construction: the import travels with the recall/record value
+// edits it exists to serve, and gating them separately would let one pass while the other failed —
+// leaving a file with an import nothing uses, or a call nothing imported.
+func isMemoryImport(edits []edit) bool {
+	for _, e := range edits {
+		if e.Import {
+			return true
+		}
+	}
+	return false
 }
 
 // isSwap reports whether an edit set is a wiring transposition. A set is either all swap or none: a
