@@ -33,10 +33,9 @@ var operatorPrior = map[OperatorKind]float64{
 	OpRemoveSkill:  0.20,
 	OpToolPrune:    0.20,
 	OpToolMinimize: 0.25,
-	// P17 memory. A coarse ordering hint and NOTHING else — which matters more here than anywhere else in
-	// this table, because at M20 the transform refuses a memory rewrite, so this number will never be
-	// replaced by a measured verdict. A reader (or a dashboard) that mistook a prior for a result would
-	// therefore be mistaking it PERMANENTLY, not just until the eval ran.
+	// Memory. A coarse ordering hint and nothing else, like every other row here — and since P18 gave the
+	// axis real materializers, this number now IS replaced by a measured verdict on a covered cell, which
+	// is the ordinary case rather than the exception P17 described.
 	//
 	// The value sits with the context policy's: both change what the model effectively sees, and neither
 	// has a cheap tell in advance. It is not lower to "reflect" the refusal — a prior encodes expected
@@ -70,14 +69,12 @@ var verifyOrderHint = map[OperatorKind]int{
 	OpFewShotCurate:     5,
 	OpPromptCompress:    5,
 	OpRedundancyRemove:  5,
-	// P17 memory. It sits with the context policy at 3 — one candidate, one eval pass, same cost class —
-	// and NOT at the end of the queue.
+	// Memory. It sits with the context policy at 3 — one candidate, one eval pass, same cost class.
 	//
-	// 🔴 Sorting it last "because it will be refused anyway" would be encoding applicability in a COST
-	// hint, which is the same category error as bending its prior: this table answers "how expensive is
-	// it to verify", the refusal answers "can it be verified at all", and one number cannot carry both.
-	// The refusal is expressed where it belongs — at the transform, typed — and a candidate that never
-	// reaches verification costs nothing wherever it sits in this order.
+	// 🔴 It was never sorted last "because it will be refused anyway", and that restraint is why nothing
+	// here had to change when P18 made memory verifiable. Encoding applicability in a COST hint would have
+	// been the same category error as bending the prior: this table answers "how expensive is it to
+	// verify", the refusal answers "can it be verified at all", and one number cannot carry both.
 	OpMemoryPolicy: 3,
 }
 

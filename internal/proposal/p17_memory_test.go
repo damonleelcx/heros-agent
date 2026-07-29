@@ -1,12 +1,18 @@
 package proposal
 
 import (
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/heros-foreal/agentd/internal/diagnosis"
+	"github.com/heros-foreal/agentd/internal/discovery"
 	"github.com/heros-foreal/agentd/internal/patternclassifier"
 	"github.com/heros-foreal/agentd/internal/registry"
+	"github.com/heros-foreal/agentd/internal/transform"
 	"github.com/heros-foreal/agentd/internal/variantspec"
 )
 
@@ -178,68 +184,201 @@ func TestMemoryPolicyPriorAndOrderHint(t *testing.T) {
 	}
 }
 
-// TestMemoryProposalRefusedNotScored — task 8.4 🚫 and task 11.6. The dormancy contract.
-func TestMemoryProposalRefusedNotScored(t *testing.T) {
+// TestMemoryProposalClaimsNoOutcome — P18 §6.1, replacing P17's wording assertion.
+//
+// 🔴 P17 asserted the rationale SAYS "refused ... not applied ... no measured result". That was true of
+// every memory candidate then, and is false of some of them now that P18 gave the axis materializers. A
+// rationale asserting a stale outcome is worse than one asserting none — it is read as current.
+//
+// So the assertion inverts: the rationale must claim NO outcome, in either direction. Whether a given
+// call site materializes is the compile step's answer, and the refused-not-scored guarantee is enforced
+// by BuildStatus/Surfaceable rather than by wording (TestMemoryProposalRefusedNotScored below).
+func TestMemoryProposalClaimsNoOutcome(t *testing.T) {
 	op := memoryPolicyOp{signal: SignalStaleMemory}
 	cands, err := op.Propose(memoryInput(SignalStaleMemory))
 	if err != nil {
 		t.Fatalf("Propose: %v", err)
 	}
 	if len(cands) == 0 {
-		t.Fatal("the memory operator emitted nothing against a memory bottleneck with a populated menu; a " +
-			"dormant operator still PROPOSES — dormancy is about what may be claimed, not about staying silent")
+		t.Fatal("the memory operator emitted nothing against a memory bottleneck with a populated menu")
 	}
 
 	for _, c := range cands {
 		if c.Operator != OpMemoryPolicy {
 			t.Errorf("candidate carries operator %q, want %q", c.Operator, OpMemoryPolicy)
 		}
-		// It changes ONLY the memory dimension. A proposal that also moved the model would make the
-		// eventual measurement un-attributable.
 		if len(c.Dimensions) != 1 || c.Dimensions[0] != string(variantspec.DimMemory) {
 			t.Errorf("candidate changes dimensions %v, want exactly [memory]", c.Dimensions)
 		}
 		ov := c.Spec.Nodes["recall"]
 		if ov.MemoryRef == "" || ov.MemoryRef == refMemScratch {
-			t.Errorf("candidate did not change the node's memory ref (got %q, baseline was %q)",
-				ov.MemoryRef, refMemScratch)
+			t.Errorf("candidate did not change the node's memory ref (got %q)", ov.MemoryRef)
 		}
-		// 🚫 `none` is never a proposed TARGET. Answering "your recall is stale" with "then recall
-		// nothing" removes the capability being diagnosed rather than fixing it.
+		// 🚫 `none` is never a proposed TARGET: answering "your recall is stale" with "recall nothing"
+		// removes the capability being diagnosed.
 		if ov.MemoryRef == refMemNone {
-			t.Error("the operator proposed `none` as a fix for a memory bottleneck; that is the removal of " +
-				"the capability being diagnosed, not a repair. A USER may author it — that is their call " +
-				"about their own agent — but the platform must not recommend it")
+			t.Error("the operator proposed `none` as a fix for a memory bottleneck")
 		}
-		// The baseline is untouched — a candidate never shares backing storage with Base.
 		if memoryBase().Nodes["recall"].MemoryRef != refMemScratch {
 			t.Error("Propose mutated the baseline spec")
 		}
 
-		// 🔴 The rationale states the refusal IN THE PROPOSAL. A user reading a candidate list must not
-		// discover one click later that this one cannot be applied — that is the "refusal discovered late"
-		// failure the authoring contract (D7) rejects, and a rationale is the cheapest place to prevent it.
 		low := strings.ToLower(c.Rationale)
-		if !strings.Contains(low, "refused") {
-			t.Errorf("the rationale does not say the change is refused: %q", c.Rationale)
-		}
-		if !strings.Contains(low, "not applied") && !strings.Contains(low, "no measured") &&
-			!strings.Contains(low, "carries no measured result") {
-			t.Errorf("the rationale does not say the change is unapplied and unmeasured: %q", c.Rationale)
-		}
-
-		// 🚫 And it claims NO result. ExpectedGain is a pre-verification ordering estimate; nothing on the
-		// candidate may read as a measured outcome.
+		// 🚫 No outcome claimed in EITHER direction. Not a win …
 		for _, word := range []string{"improve", "gain of", "reduces staleness", "win", "faster", "cheaper"} {
 			if strings.Contains(low, word) {
-				t.Errorf("the rationale claims an outcome (%q) for a change that cannot be verified at M20: %q",
+				t.Errorf("the rationale claims a positive outcome (%q) that only verification can decide: %q",
 					word, c.Rationale)
 			}
 		}
-		if c.GuardrailRequired {
-			t.Error("a memory candidate requires the held-out downgrade guardrail; that guardrail is about " +
-				"model cost/quality ties and has no meaning here")
+		// … and not a refusal either, because on a covered cell it is not refused.
+		for _, word := range []string{"refused", "not applied", "no measured result"} {
+			if strings.Contains(low, word) {
+				t.Errorf("the rationale asserts a refusal (%q), which is stale on a cell that materializes. "+
+					"The outcome belongs to Compiled.BuildStatus, which the operator cannot see: %q",
+					word, c.Rationale)
+			}
 		}
+		// It DOES name the precondition, which is a property of the change rather than of the outcome.
+		if !strings.Contains(low, "read and a write") && !strings.Contains(low, "read AND a write") {
+			t.Errorf("the rationale does not name the both-halves precondition: %q", c.Rationale)
+		}
+		if c.GuardrailRequired {
+			t.Error("a memory candidate requires the held-out downgrade guardrail, which is about model " +
+				"cost/quality ties and has no meaning here")
+		}
+	}
+}
+
+// TestMemoryProposalRefusedNotScored — task 6.2 🚫. The honesty contract SURVIVES the capability.
+//
+// 🔴 This is the test that matters most in §6. Waking the operator must not make a refused memory change
+// scorable: on a cell with no materializer the candidate must come back BuildRefused, must not be
+// Surfaceable, and must therefore never reach verification — so it cannot be a win, a regression, or a
+// tie. That is enforced by the compile path's own machinery, not by anything the operator says.
+func TestMemoryProposalRefusedNotScored(t *testing.T) {
+	cands, err := memoryPolicyOp{signal: SignalStaleMemory}.Propose(memoryInput(SignalStaleMemory))
+	if err != nil || len(cands) == 0 {
+		t.Fatalf("Propose: %v (%d candidates)", err, len(cands))
+	}
+
+	// A language with no memory materializer at all.
+	root := t.TempDir()
+	c := Compiler{
+		Resolver: memoryResolverFor(t, "rust"),
+		Root:     root,
+		Build:    alwaysBuilds{},
+	}
+	got, err := c.Compile(context.Background(), cands[0])
+	if err != nil {
+		t.Fatalf("Compile returned an error rather than a verdict: %v. A refusal is a verdict about the "+
+			"candidate, not a failure of the compiler — returning an error would abort the whole batch "+
+			"over one declined change", err)
+	}
+	if got.BuildStatus != BuildRefused {
+		t.Fatalf("BuildStatus = %q, want %q on a cell with no materializer", got.BuildStatus, BuildRefused)
+	}
+	if got.Surfaceable() {
+		t.Fatal("a refused memory candidate is Surfaceable, so it would be recommended and could be scored")
+	}
+	if !got.Refusal.Refused() {
+		t.Error("the compiled candidate carries no refusal, so nobody can tell why it was declined")
+	}
+	if got.Refusal.Dimension != string(variantspec.DimMemory) {
+		t.Errorf("the refusal names dimension %q, want memory", got.Refusal.Dimension)
+	}
+	if got.Refusal.Reason == "" {
+		t.Error("the refusal carries no reason")
+	}
+	// 🚫 And it is not credited to the operator as an outcome, because it produced none.
+	credits := OperatorCredits([]Candidate{got.Candidate}, func(Candidate) bool { return false })
+	if credits[OpMemoryPolicy].Won != 0 {
+		t.Error("a refused memory candidate was credited as a win")
+	}
+}
+
+// TestMemoryProposalCompilesWhereMaterializable — task 6.1 🔴. The operator is awake.
+//
+// P17 catalogued OpMemoryPolicy DORMANT: every candidate it emitted was refused at transform, so none
+// could reach an eval and none could be scored. P18 shipped the materializers, and this asserts the
+// consequence end-to-end — a memory candidate on a COVERED cell compiles to a real diff carrying BOTH
+// halves, builds, and is Surfaceable, which is what makes it eligible for verification.
+//
+// 🔴 It goes through the real Compiler and the real transform. A test that stubbed the codemod would
+// prove the plumbing and not the capability, and the capability is the whole of §6.
+func TestMemoryProposalCompilesWhereMaterializable(t *testing.T) {
+	// A Python call site that writes its message list and assigns the call's result — both halves land.
+	const src = `import openai
+
+client = openai.OpenAI()
+
+
+def chat(question):
+    resp = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[{"role": "user", "content": question}],
+    )
+    return resp
+`
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "pipeline.py"), []byte(src), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sites, err := discovery.IndexSpanCallSites(root, "python", nil)
+	if err != nil {
+		t.Fatalf("index: %v", err)
+	}
+	var nodeID string
+	for id := range sites {
+		nodeID = id
+	}
+	if nodeID == "" {
+		t.Fatal("discovery found no python call site; the assertion below would pass for the wrong reason")
+	}
+
+	// The operator proposes against that node.
+	in := memoryInput(SignalStaleMemory)
+	in.Diagnosis.NodeID = nodeID
+	in.Base = &variantspec.VariantSpec{
+		WorkflowID: "wf-mem", SourceRevision: "rev1",
+		Order: []string{nodeID},
+		Nodes: map[string]variantspec.NodeOverride{nodeID: {MemoryRef: refMemScratch}},
+	}
+	cands, err := memoryPolicyOp{signal: SignalStaleMemory}.Propose(in)
+	if err != nil || len(cands) == 0 {
+		t.Fatalf("Propose: %v (%d candidates)", err, len(cands))
+	}
+
+	c := Compiler{Resolver: memoryResolverFor(t, "python"), Root: root, Build: alwaysBuilds{}}
+	got, err := c.Compile(context.Background(), cands[0])
+	if err != nil {
+		t.Fatalf("Compile: %v", err)
+	}
+
+	if got.BuildStatus != BuildBuilt {
+		t.Fatalf("BuildStatus = %q, want %q. The operator is supposed to be AWAKE on a covered cell: a "+
+			"candidate that still cannot compile could never be verified, and the axis would remain "+
+			"unscorable.\nrefusal: %+v", got.BuildStatus, BuildBuilt, got.Refusal)
+	}
+	if !got.Surfaceable() {
+		t.Fatal("a materialized memory candidate is not Surfaceable, so it would never reach verification")
+	}
+	if got.Patch == nil || len(got.Patch.Diff) == 0 {
+		t.Fatal("the compiled candidate carries no diff")
+	}
+
+	after := string(got.Patch.Files["pipeline.py"])
+	// 🔴 BOTH halves in the emitted diff. A recall without a record reads a store nothing fills, which
+	// behaves as `none` under this candidate's config_hash — and would then be SCORED as the strategy.
+	if !strings.Contains(after, "agentmem.recall(") || !strings.Contains(after, "agentmem.record(") {
+		t.Fatalf("the compiled diff does not carry both halves:\n%s", after)
+	}
+	if got.ConfigHash == "" {
+		t.Error("the compiled candidate carries no config_hash to be scored under")
+	}
+	// And it IS creditable to the operator now — which is exactly what dormancy denied.
+	if op, ok := CreditedOperator(got.Candidate); !ok || op != OpMemoryPolicy {
+		t.Errorf("a materialized memory candidate is not credited to the memory operator (%q, %v)", op, ok)
 	}
 }
 
@@ -302,4 +441,52 @@ func TestMemoryOperatorDeclinesWithoutAMenu(t *testing.T) {
 	if len(cands) != 0 {
 		t.Fatalf("the operator proposed the strategy the node already binds (%d candidates)", len(cands))
 	}
+}
+
+// ── compile-path doubles ─────────────────────────────────────────────────────────────────────────
+
+// memoryResolverFor resolves a candidate to a config whose LANGUAGE decides which memory cell it lands
+// in. That is the only fact the compile path needs from resolution here — the refusal it exercises is
+// the transform's, not the registry's.
+func memoryResolverFor(t *testing.T, language string) Resolver {
+	t.Helper()
+	return memResolver{t: t, language: language}
+}
+
+type memResolver struct {
+	t        *testing.T
+	language string
+}
+
+func (r memResolver) Resolve(spec *variantspec.VariantSpec) (*variantspec.Resolved, error) {
+	st := registry.MemoryStrategyNamed("summary-buffer")
+	if st == nil {
+		r.t.Fatal("summary-buffer is not a builtin strategy")
+	}
+	out := &variantspec.Resolved{
+		ConfigHash: strings.Repeat("c", 64), SourceRevision: "rev1", Language: r.language,
+		Overrides: map[string]variantspec.ResolvedOverride{},
+	}
+	for nodeID, ov := range spec.Nodes {
+		if ov.MemoryRef == "" {
+			continue
+		}
+		out.Overrides[nodeID] = variantspec.ResolvedOverride{
+			Memory: &registry.MemoryEntry{
+				VersionID: ov.MemoryRef, Name: "m",
+				Spec:     registry.MemorySpec{Strategy: "summary-buffer", Params: json.RawMessage(`{"max_tokens":2000}`)},
+				Strategy: st,
+			},
+		}
+	}
+	return out, nil
+}
+
+// alwaysBuilds stands in for the build gate. The refusal under test happens BEFORE the build, so a
+// checker that always passes proves the refusal is the transform's rather than a build failure wearing
+// its name.
+type alwaysBuilds struct{}
+
+func (alwaysBuilds) Check(context.Context, *transform.Patch) (BuildResult, error) {
+	return BuildResult{Builds: true}, nil
 }

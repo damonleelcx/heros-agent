@@ -171,11 +171,40 @@ A blank test-only import now holds it, with the reason recorded at the import si
 
 ## 6. The operator wakes
 
-- [ ] 6.1 `OpMemoryPolicy` is no longer dormant where the cell materializes: the proposal compiles to a
-      real diff and becomes verifiable. → `internal/proposal/p17_memory_test.go`
+- [x] 6.1 🔴 `OpMemoryPolicy` is awake where the cell materializes: through the REAL `Compiler` and the
+      REAL transform, a candidate compiles to a diff carrying **both halves**, builds, is `Surfaceable`,
+      and is creditable to the operator. → `internal/proposal/p17_memory_test.go`
       (Test: `TestMemoryProposalCompilesWhereMaterializable`).
-- [ ] 6.2 🚫 It is STILL not scored where the cell refuses — the honesty contract survives the capability.
+- [x] 6.2 🚫 STILL not scored where the cell refuses: `BuildRefused`, not `Surfaceable`, never credited.
       → `internal/proposal/p17_memory_test.go` (Test: `TestMemoryProposalRefusedNotScored`).
+- [x] 6.3 The rationale claims **no outcome in either direction**, replacing P17's hard-coded refusal.
+      → `internal/proposal/catalog.go` (Test: `TestMemoryProposalClaimsNoOutcome`).
+
+**What actually had to change, and what did not.**
+
+Almost nothing in the compile path. `Compiled.BuildStatus` / `Surfaceable()` already distinguished
+refused from built generically, so the moment `transform.Generate` stopped refusing on a covered cell,
+the operator became verifiable **without a line of plumbing**. Dormancy was never a mode the code was in;
+it was a consequence of the transform's answer, which is why lifting it cost nothing here.
+
+What did have to change was a **claim**. The rationale hard-coded *"REFUSED at transform … not applied …
+carries no measured result"* — true of every memory candidate when P17 wrote it, false of some of them
+now. A rationale asserting a stale outcome is worse than one asserting none, because it is read as
+current.
+
+🚫 So the rationale now asserts **no outcome in either direction** — not a win, and not a refusal. It
+describes the change and names the both-halves precondition; whether *this* call site materializes is
+`Compiled.BuildStatus`'s answer, and the operator is pure and never sees the call site. A claim it cannot
+check is a claim it should not make.
+
+🔴 The honesty contract is enforced **structurally, not by wording**: a refused candidate is
+`BuildRefused`, `Surfaceable()` is false, it never reaches verification, and `CreditedOperator` gives it
+no win. None of that ever depended on the sentence — which is why it survived the capability landing
+intact.
+
+Two stale comments in `gain.go` also went: the prior no longer claims it "will never be replaced by a
+measured verdict" (on a covered cell it now is), and the order hint records that it was *never* sorted
+last "because it will be refused anyway" — that restraint is why nothing there had to move.
 
 ## 7. The surfaces stop saying "no language has one"
 
@@ -253,7 +282,7 @@ refused**. Nothing half-built ships.
       (Test: `TestMemoryImportClassAdmitsOnlyItsOwnImport`).
 - [x] 9.2 Wire `spanMaterializeMemory` into the span dispatch once 9.1 lands, and assert the artifact
       ships in the SAME patch as the call-site edit.
-- [ ] 9.3 Then: §4 (Go), §5 (per-cell coverage), §6 (the operator wakes), §7 (the surfaces), §8 (hermes).
+- [x] 9.3 Then: §4 (Go), §5 (per-cell coverage), §6 (the operator wakes), §7 (the surfaces), §8 (hermes) — all landed.
 
 ### What this does NOT change
 

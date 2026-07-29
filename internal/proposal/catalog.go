@@ -999,22 +999,30 @@ func parentVariantID(in OperatorInput) string {
 
 // ── shared derivation helpers ────────────────────────────────────────────────────────────────────
 
-// ── P17 memory-policy switch (a memory bottleneck: stale reads / contradictory recall) ───────────
+// ── memory-policy switch (a memory bottleneck: stale reads / contradictory recall) ───────────────
 //
-// 🚫 DORMANT AT M20, and the dormancy is the design rather than an unfinished edge. The transform
-// refuses every memory rewrite (P17 decisions.md D4), so a candidate this operator emits will resolve
-// and hash and then be REFUSED — it can never reach an eval, so it can never be scored, so it can never
-// be a win. It is catalogued anyway, for two reasons that are worth stating because "then why ship it"
-// is the obvious question:
+// 🔴 THIS OPERATOR WOKE UP. P17 catalogued it DORMANT, because the transform refused every memory
+// rewrite: a candidate could resolve and hash and then never reach an eval, so it could never be scored,
+// so it could never be a win. P18 shipped the runtime and the call-site rewriters, and a memory candidate
+// on a covered cell now compiles to a real diff and is verifiable like any other.
 //
-//  1. A proposal a user can SEE is worth more than silence. The diagnosis is real — the classifier
-//     measured stale reads — and naming the change that would address it, with a real config_hash the
-//     user can inspect and compare, is useful even while the platform cannot apply it.
-//  2. The day the call-site rewriter lands, this operator wakes with NO change to its contract. Its
-//     worth was always going to be decided by verification; nothing here has to be rewritten to make
-//     that true, which is the test of whether the dormancy was modelled honestly.
+// # What changed here, and what deliberately did not
 //
-// The same posture the reserved OpMerge held before P15 gave it edges to emit.
+// What changed is one sentence: the rationale used to assert "REFUSED at transform". That was true of
+// every memory candidate when it was written and is false of some of them now, and a rationale that
+// asserts a stale outcome is worse than one that asserts none — it is read as current.
+//
+// 🚫 So the rationale no longer claims an OUTCOME at all, in either direction. It describes the CHANGE
+// and names the precondition, and whether this particular call site materializes is decided by the
+// compile step and carried on `Compiled.BuildStatus` / `Compiled.Refusal`. That is where it belongs: the
+// operator is pure and pattern-gated, it does not see the call site, and a claim it cannot check is a
+// claim it should not make.
+//
+// The honesty contract is unchanged and is enforced structurally rather than by wording: a refused
+// candidate has `BuildStatus == BuildRefused`, `Surfaceable()` is false, and it never reaches
+// verification — so it cannot be counted as a win, a regression, or a tie. Nothing about that depended on
+// the rationale's sentence.
+
 type memoryPolicyOp struct {
 	// signal is which memory failure mode this row answers. Two rows share this struct because `fires`
 	// matches one Signal per row; see DefaultCatalog.
@@ -1047,14 +1055,13 @@ func (op memoryPolicyOp) Propose(in OperatorInput) ([]Candidate, error) {
 		if label == "" {
 			label = m.Strategy
 		}
-		// 🔴 The rationale states the refusal in the same breath as the proposal. A user reading a list of
-		// candidates must not have to discover, one click later, that this one cannot be applied — that is
-		// the "refusal discovered late" failure D7 rejects, and a rationale is where it is cheapest to
-		// prevent.
+		// 🔴 The rationale describes the CHANGE and names the precondition, and claims no outcome in either
+		// direction. Whether this call site materializes is the compile step's answer, carried on
+		// Compiled.BuildStatus — an operator that asserted it would be asserting something it cannot see.
 		out = append(out, newCandidate(op.Kind(), in, nodeID, []string{string(variantspec.DimMemory)}, spec,
-			fmt.Sprintf("%s on %d case(s) → switch memory strategy to %s. REFUSED at transform until a "+
-				"memory runtime and its call-site rewriter land, so this resolves and hashes but is not "+
-				"applied and carries no measured result",
+			fmt.Sprintf("%s on %d case(s) → switch memory strategy to %s. Materializing it needs a call "+
+				"site that writes its message list and assigns the call's result, because memory is a read "+
+				"AND a write and a site that can carry only one half materializes neither",
 				op.signal, len(in.Diagnosis.EvidenceCaseIDs), label)))
 	}
 	return out, nil
