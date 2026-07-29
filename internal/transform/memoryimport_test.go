@@ -212,7 +212,7 @@ func TestMemoryImportClassAdmitsOnlyItsOwnImport(t *testing.T) {
 func TestMemoryImportPlacement(t *testing.T) {
 	t.Run("it goes below a module docstring", func(t *testing.T) {
 		src := []byte("\"\"\"The module doc.\"\"\"\n\nimport openai\n")
-		e, err := memoryImportEdit(src, "n", "memory")
+		e, err := memoryImportEdit(src, "n", "memory", "python", "")
 		if err != nil {
 			t.Fatalf("memoryImportEdit: %v", err)
 		}
@@ -230,7 +230,7 @@ func TestMemoryImportPlacement(t *testing.T) {
 
 	t.Run("it goes below a __future__ import", func(t *testing.T) {
 		src := []byte("from __future__ import annotations\n\nimport openai\n")
-		e, err := memoryImportEdit(src, "n", "memory")
+		e, err := memoryImportEdit(src, "n", "memory", "python", "")
 		if err != nil {
 			t.Fatalf("memoryImportEdit: %v", err)
 		}
@@ -247,7 +247,7 @@ func TestMemoryImportPlacement(t *testing.T) {
 
 	t.Run("a file with no import is refused rather than guessed at", func(t *testing.T) {
 		src := []byte("x = 1\ny = 2\n")
-		if _, err := memoryImportEdit(src, "n", "memory"); err == nil {
+		if _, err := memoryImportEdit(src, "n", "memory", "python", ""); err == nil {
 			t.Error("a file with no top-level import got an import inserted at a guessed position")
 		} else if !errors.Is(err, ErrUnsafeRewrite) {
 			t.Errorf("err = %v, want ErrUnsafeRewrite", err)

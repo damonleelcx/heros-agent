@@ -119,6 +119,13 @@ func GenerateMemoryArtifacts(resolved *variantspec.Resolved, language string) (m
 			pyMemoryModulePath: []byte(pythonMemoryModule),
 			memoryDocPath:      docBytes,
 		}, nil
+	case "go":
+		// Go's module lands in its own package directory, because Go requires a package per directory —
+		// unlike Python, where a flat module beside the caller is importable as-is.
+		return map[string][]byte{
+			goMemoryModulePath: []byte(goMemoryModule),
+			goMemoryDocPath:    docBytes,
+		}, nil
 	default:
 		// 🚫 No default module. A language with no artifact must never receive another language's — the
 		// materializer refuses that cell before this is reached, and this is the second line of that

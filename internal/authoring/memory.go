@@ -140,6 +140,13 @@ type MemoryBoundary struct {
 
 // MemoryBoundaryFor derives the pre-selection boundary statement from the coverage table.
 //
+// 🔴 It considers EVERY non-identity cell, not the first one. Coverage is per (language, strategy) now,
+// and a language can materialize some strategies and refuse others — Go materializes the content-blind
+// ones and permanently refuses the ones that read message text. Reading only the first cell made the
+// answer depend on alphabetical order: `entity-memory` sorts before `scratchpad`, so Go reported the
+// whole axis inapplicable while one of its strategies worked. That is over-refusing, which is the same
+// defect as over-claiming and the one nobody reports.
+//
 // A language with no cells at all yields Applicable=false with an explicit reason, never a silent
 // "true": absence of evidence about a language must not render as permission.
 func MemoryBoundaryFor(cov CoverageReader, language string) MemoryBoundary {
@@ -152,24 +159,46 @@ func MemoryBoundaryFor(cov CoverageReader, language string) MemoryBoundary {
 				"memory change could be applied here is unknown; an unknown is not a yes", language),
 		}
 	}
-	for _, c := range cells {
+
+	var anyApplies bool
+	var firstRefusal *MemoryCoverageCell
+	for i := range cells {
+		c := cells[i]
 		if c.Strategy == registry.StrategyNone {
-			continue // the identity strategy always "materializes" by changing nothing; it says nothing about the axis
+			continue // the identity strategy always "applies" by changing nothing; it says nothing about the axis
 		}
 		if c.Materializes {
-			return MemoryBoundary{Applicable: true}
+			anyApplies = true
+			continue
 		}
-		return MemoryBoundary{
-			Applicable:           false,
-			MissingArtifact:      c.MissingArtifact,
-			Reason:               c.Note,
-			LanguageIsTheBlocker: false,
+		if firstRefusal == nil {
+			firstRefusal = &cells[i]
 		}
 	}
-	return MemoryBoundary{
-		Applicable:      false,
-		MissingArtifact: "a non-identity strategy in the coverage table",
-		Reason:          "only the identity strategy is covered, so no memory change is applicable",
+
+	switch {
+	case anyApplies:
+		// Applicable, but the refusing cells are still real. The surface renders per-strategy
+		// applicability beside this; what the boundary carries is the headline.
+		b := MemoryBoundary{Applicable: true}
+		if firstRefusal != nil {
+			b.MissingArtifact = firstRefusal.MissingArtifact
+			b.Reason = firstRefusal.Note
+		}
+		return b
+	case firstRefusal != nil:
+		return MemoryBoundary{
+			Applicable:           false,
+			MissingArtifact:      firstRefusal.MissingArtifact,
+			Reason:               firstRefusal.Note,
+			LanguageIsTheBlocker: false,
+		}
+	default:
+		return MemoryBoundary{
+			Applicable:      false,
+			MissingArtifact: "a non-identity strategy in the coverage table",
+			Reason:          "only the identity strategy is covered, so no memory change is applicable",
+		}
 	}
 }
 

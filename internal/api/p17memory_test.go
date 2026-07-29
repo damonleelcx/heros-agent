@@ -18,20 +18,18 @@ import (
 func TestMemoryReadModelStatesTheBoundaryBeforeAnyChoice(t *testing.T) {
 	v := memoryReadModel("go")
 
-	// 🔴 Go has no memory materializer, so the answer for Go is no — and the payload says so up front.
-	// (P17 asserted this of EVERY language; P18 made it per-language, which the Python case below pins.)
-	if v.Boundary.Applicable {
-		t.Fatal("the read model reports memory as applicable for Go; Go has no emitted memory module, and " +
-			"a surface built on this payload would promise a change that is then refused")
-	}
-	if v.Boundary.MissingArtifact == "" {
-		t.Error("the boundary names no missing artifact; a client would render \"unavailable\" with no reason, " +
-			"which is the inert-control failure FR20 forbids")
+	// 🔴 Go materializes SOME strategies and permanently refuses others, so the headline is "applicable"
+	// and the refusing cells are still stated. P17 asserted a flat no for every language; P18 §4 made it
+	// per (language, strategy), and a test still demanding the flat no would demand a lie.
+	if !v.Boundary.Applicable {
+		t.Fatal("the read model reports memory as inapplicable for Go, though Go materializes the " +
+			"content-blind strategies; over-refusing is the same defect as over-claiming")
 	}
 	if v.Boundary.Reason == "" {
-		t.Error("the boundary carries no reason sentence")
+		t.Error("the boundary carries no reason sentence for the cells that still refuse")
 	}
-	// 🔴 The language is never the blocker. Saying otherwise implies another language works.
+	// 🔴 The language is never the blocker on its own — the refusing Go cells refuse because of what the
+	// STRATEGY needs, not because Go is unsupported.
 	if v.Boundary.LanguageIsTheBlocker {
 		t.Error("the payload blames the language for the refusal")
 	}
@@ -84,8 +82,14 @@ func TestMemoryReadModelOffersTheClosedVocabulary(t *testing.T) {
 	if identity != 1 {
 		t.Errorf("the payload marks %d identity strategies, want exactly 1", identity)
 	}
-	if applying != 0 {
-		t.Errorf("%d non-identity strategies claim to apply for Go, which has no materializer", applying)
+	// Go applies the content-blind strategies and refuses the content-reading ones, so SOME apply and some
+	// do not. Asserting either extreme would be wrong.
+	if applying == 0 {
+		t.Error("no non-identity strategy applies for Go, though it materializes the content-blind ones")
+	}
+	if applying == len(v.Strategies)-1 {
+		t.Error("every non-identity strategy claims to apply for Go; the ones that read message text " +
+			"cannot run on a content-blind runtime")
 	}
 }
 

@@ -413,28 +413,27 @@ func memoryCoverage(lang string) []CoverageCell {
 		case st.Name() == registry.StrategyNone:
 			cell.Status = CoverageMaterializes
 			cell.Note = "the identity strategy; equivalent to the un-rewritten call site, so nothing is emitted"
-		case hasMaterializer:
+		case MemoryStrategyMaterializesIn(lang, st.Name()):
 			cell.Status = CoverageMaterializes
 			cell.Note = "materialized by wrapping the written message list with a recall and recording the " +
 				"turn after the call — BOTH halves or the call site is refused, because a memory that reads " +
 				"a store nothing fills behaves as `none`. Needs a written message list and a statement-level " +
 				"assignment; a call site with neither is refused by shape. The generated module requires a " +
-				"session id and raises rather than defaulting one"
-		case strings.EqualFold(lang, "go"):
-			// 🔴 Go's gap is NOT the same as the other uncovered languages', and saying so is the whole
-			// value of naming it. Its READ half would work — a generic recall over any SDK's message slice
-			// is type-safe without importing it. Its WRITE half needs one thing: converting the SDK's
-			// response VALUE into its message VALUE, which are different static types in Go and the same
-			// duck-typed dict in Python. Reporting "no Go module" would send a reader looking for general
-			// Go work when the missing piece is one per-provider conversion.
+				"session id and raises rather than defaulting one" + goProviderCaveat(lang)
+		case hasMaterializer:
+			// The language HAS a materializer and this strategy still cannot run on it. Today that is Go's
+			// content-reading strategies, and the cause is permanent rather than owed: a Go message is the
+			// customer's SDK type, so reading its text would mean importing their SDK into generated code.
+			//
+			// 🔴 CauseNotAtCallSite carries NO missing artifact, and the asymmetry is the point (P13 FR45):
+			// naming one would promise work that would not help, because there is nothing to build.
 			cell.Status = CoverageRefuses
-			cell.Cause = CauseNoMaterializer
-			cell.MissingArtifact = "a per-provider response conversion for Go (memoryResponseForms), turning " +
-				"the SDK's response value into its message value"
-			cell.Note = "the read half is ready; the record half cannot store what the call returned until " +
-				"that conversion is declared, and the read half alone is never emitted because it behaves " +
-				"as `none` under this strategy's hash (covered today: " +
-				strings.Join(MemoryMaterializerLanguages(), ", ") + ")"
+			cell.Cause = CauseNotAtCallSite
+			cell.Note = "this strategy decides what to keep by reading message TEXT, and in " +
+				languageDisplay(lang) + " a message is your SDK's own type — the generated module would have " +
+				"to import your SDK to read a field off it. " + languageDisplay(lang) + " materializes the " +
+				"strategies whose retention is a function of count; Python materializes this one, because " +
+				"there a message is a dict"
 		default:
 			cell.Status = CoverageRefuses
 			cell.Cause = CauseNoMaterializer
@@ -446,6 +445,17 @@ func memoryCoverage(lang string) []CoverageCell {
 		out = append(out, cell)
 	}
 	return out
+}
+
+// goProviderCaveat states the one extra precondition a Go cell carries: the record half needs a verified
+// response conversion for the call site's provider, which is a per-provider fact the cell cannot know.
+func goProviderCaveat(lang string) string {
+	if !strings.EqualFold(lang, "go") {
+		return ""
+	}
+	return ". In Go it additionally needs a verified response conversion for the call site's provider " +
+		"(declared today: " + memoryResponseProvidersDisplay() + "), because the response and the stored " +
+		"message are different static types"
 }
 
 func sortedPolicyNames() []string {

@@ -94,7 +94,7 @@ export const STRATEGIES: Strategy[] = [
  * Both are the same defect — a claim that does not match the engine — and over-refusing is the one a
  * team never notices, because nobody files a bug about being told "no".
  */
-export const MATERIALIZED_LANGUAGES = ["python"] as const;
+export const MATERIALIZED_LANGUAGES = ["python", "go"] as const;
 
 /** What a language without a materializer is still waiting for. Per-language now, not per-axis. */
 export const BOUNDARY = {
@@ -102,7 +102,14 @@ export const BOUNDARY = {
   applicableIn: MATERIALIZED_LANGUAGES,
   missingArtifact: "that language's memory module and its call-site rewriter",
   reason:
-    "The memory runtime has landed and Python call sites materialize it. What a remaining language is waiting for is the emitted module a rewritten call site would call, and the rewriter that emits it.",
+    "The memory runtime has landed. Python and Go call sites materialize it; a remaining language is waiting for the emitted module a rewritten call site would call, and the rewriter that emits it.",
+  /**
+   * 🔴 Go materializes a strict SUBSET, and the reason is permanent rather than owed. A Go message is
+   * your SDK's own type, so generated code cannot read its text without importing your SDK — which means
+   * the strategies that decide what to keep by reading content cannot run there. Python's messages are
+   * dicts, so all five work.
+   */
+  contentBlindOnly: { language: "go", strategies: ["none", "scratchpad"] },
   /** Modeling is never refused; only materialization is. This is what keeps the control live. */
   authorableAnyway: true,
   /**
@@ -112,5 +119,6 @@ export const BOUNDARY = {
   preconditions: [
     "The call site must write its message list, and assign the call's result to a name — memory is a read AND a write, and a call site that can carry only one is refused whole.",
     "Your program must supply a session id (HEROS_MEMORY_SESSION, or agentmem.set_session). The generated module raises rather than defaulting one, because a defaulted session merges conversations that must stay separate.",
+    "In Go, only the strategies that retain by count apply — a Go message is your SDK's own type, so generated code cannot read its text to summarise or search it. The others are refused by name, never quietly downgraded.",
   ],
 } as const;

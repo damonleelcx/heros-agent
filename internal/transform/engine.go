@@ -178,7 +178,7 @@ func generate(r *variantspec.Resolved, spec *variantspec.VariantSpec, root strin
 			return nil, err
 		}
 		blame := firstMemoryEdit(editsByFile[rel])
-		imp, err := memoryImportEdit(src, blame.NodeID, blame.Dim)
+		imp, err := memoryImportEdit(src, blame.NodeID, blame.Dim, r.Language, root)
 		if err != nil {
 			return nil, err
 		}
@@ -427,7 +427,7 @@ func gateMemoryImport(rel string, src, out []byte, edits []edit, allowed map[int
 // memoryImportLine is the ONLY text this edit class may insert. Anchored at both ends and permitting a
 // single module name, because a looser pattern is how a class meant for one import becomes a way to
 // insert arbitrary source past the minimality gate.
-var memoryImportLine = regexp.MustCompile(`^import [a-zA-Z_][a-zA-Z0-9_]*\n$`)
+var memoryImportLine = regexp.MustCompile(`^import (?:[a-zA-Z_][a-zA-Z0-9_]*|"[^"\n]+")\n$`)
 
 // gateSwapPermutation is the wiring transposition's gate (P15 15c task 12.2, FR18).
 //

@@ -59,6 +59,7 @@ import (
 // about which cells work.
 var memoryMaterializers = map[string]bool{
 	"python": true,
+	"go":     true,
 }
 
 // MemoryMaterializerLanguages lists the languages with a memory materializer, sorted. Read by the
@@ -205,7 +206,46 @@ const memoryImportName = "agentmem"
 //
 // A file with no such import is REFUSED rather than guessed at. It is also a file that is not calling an
 // SDK, so the refusal costs nothing real.
-func memoryImportEdit(src []byte, nodeID, dim string) (edit, error) {
+func memoryImportEdit(src []byte, nodeID, dim, language, root string) (edit, error) {
+	if strings.EqualFold(language, "go") {
+		return goMemoryImportEdit(src, nodeID, dim, root)
+	}
+	return pyMemoryImportEdit(src, nodeID, dim)
+}
+
+// goMemoryImportEdit adds `import "<module>/agentmem"` as its own single-import line.
+//
+// 🔴 The module path is READ from the target's go.mod, never assumed: a guessed import produces a diff
+// that does not compile, and fails for a reason the reader cannot act on.
+//
+// Two consecutive single-import lines are valid Go. gofmt would merge them into a block; this engine does
+// not run gofmt, because reformatting is exactly the incidental edit FR5c forbids.
+func goMemoryImportEdit(src []byte, nodeID, dim, root string) (edit, error) {
+	mod, err := goModulePath(root)
+	if err != nil {
+		return edit{}, refuseShape(nodeID, dim, "%v", err)
+	}
+	lines := strings.Split(string(src), "\n")
+	offset := 0
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		topLevel := len(line) == len(strings.TrimLeft(line, " \t"))
+		if topLevel && (strings.HasPrefix(trimmed, "import ")) {
+			return edit{
+				Start: offset, End: offset,
+				New:    "import \"" + mod + "/" + goMemoryModuleDir + "\"\n",
+				NodeID: nodeID, Dim: dim, Import: true,
+			}, nil
+		}
+		offset += len(line) + 1
+	}
+	return edit{}, refuseShape(nodeID, dim,
+		"this file declares no top-level import, so there is no position where the generated memory "+
+			"module's import is certainly legal — it must follow the package clause, and this engine will "+
+			"not guess where that ends")
+}
+
+func pyMemoryImportEdit(src []byte, nodeID, dim string) (edit, error) {
 	lines := strings.Split(string(src), "\n")
 	offset := 0
 	for _, line := range lines {

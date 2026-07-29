@@ -45,7 +45,18 @@ func realStrategies(t *testing.T) []string {
 	return out
 }
 
-// TestMemoryOverrideRefusedInASTEngine — task 7.1 🔴.
+// TestMemoryOverrideRefusedInASTEngine — task 7.1 🔴, as P18 §4 leaves it.
+//
+// 🔴 P17 asserted one cause for every Go cell, because Go had no materializer and the gap was uniform.
+// P18 gave Go a content-blind runtime and a verified anthropic response conversion, so its causes are now
+// per-strategy — and collapsing them back to one would tell three different readers the same wrong thing:
+//
+//	a content-reading strategy → CauseNotAtCallSite. Permanent: a Go message is the customer's SDK type,
+//	                             so its text is not readable without importing their SDK.
+//	a content-blind strategy   → CauseCallSiteShape on this fixture, whose call is a bare statement with
+//	                             no variable to record the response from. The author can change that.
+//
+// What did NOT change: no memory override is silently dropped, and a refusal never produces a diff.
 func TestMemoryOverrideRefusedInASTEngine(t *testing.T) {
 	root := newTarget(t)
 	ids := nodeIDs(t, root)
@@ -53,36 +64,35 @@ func TestMemoryOverrideRefusedInASTEngine(t *testing.T) {
 	for _, strategy := range realStrategies(t) {
 		t.Run(strategy, func(t *testing.T) {
 			p, err := Generate(resolvedWith(map[string]variantspec.ResolvedOverride{
-				ids["classify"]: {Memory: memoryEntry(t, strategy)},
+				ids["summarize"]: memoryOverride(t, strategy),
 			}), root)
 			if err == nil {
-				t.Fatalf("the Go engine APPLIED a %s memory override. This is the worst outcome the system "+
-					"can produce: the diff would be filed under a config_hash claiming a memory strategy the "+
-					"source never had, and the eval would score a configuration that never ran", strategy)
-			}
-			if !errors.Is(err, ErrUnsafeRewrite) {
-				t.Fatalf("err = %v, want ErrUnsafeRewrite", err)
+				t.Fatalf("the Go engine APPLIED a %s memory override at a call site with no variable to "+
+					"record the response from", strategy)
 			}
 			if p != nil {
 				t.Error("a refused memory override produced a patch; a refusal must produce NO diff")
 			}
-
+			if !errors.Is(err, ErrUnsafeRewrite) {
+				t.Fatalf("err = %v, want ErrUnsafeRewrite", err)
+			}
 			var re *RewriteError
 			if !errors.As(err, &re) {
 				t.Fatalf("the refusal is not a *RewriteError: %v", err)
 			}
-			if re.NodeID != ids["classify"] {
-				t.Errorf("the refusal names node %q, want %q", re.NodeID, ids["classify"])
+			if re.NodeID != ids["summarize"] {
+				t.Errorf("the refusal names node %q, want %q", re.NodeID, ids["summarize"])
 			}
 			if re.Dim != string(variantspec.DimMemory) {
 				t.Errorf("the refusal names dimension %q, want memory", re.Dim)
 			}
-			// 🔴 CauseNoMaterializer, not CauseCallSiteShape. The user's call site is fine; the PLATFORM has
-			// not built the artifact. Getting this backwards tells them to change code that is not the
-			// problem.
-			if re.Cause != CauseNoMaterializer {
-				t.Errorf("the refusal's cause is %q, want %q: the call site is not at fault, the missing "+
-					"memory runtime is", re.Cause, CauseNoMaterializer)
+
+			want := CauseCallSiteShape
+			if !memoryContentBlindStrategies[strategy] {
+				want = CauseNotAtCallSite
+			}
+			if re.Cause != want {
+				t.Errorf("cause = %q, want %q for strategy %q", re.Cause, want, strategy)
 			}
 			if !strings.Contains(err.Error(), strategy) {
 				t.Errorf("the refusal does not name the strategy that was refused: %v", err)
@@ -368,28 +378,37 @@ func TestMemoryCoverageReflectsMaterializers(t *testing.T) {
 
 	for _, c := range cells {
 		identity := c.Form == registry.StrategyNone
-		covered := HasMemoryMaterializer(c.Language)
-
-		wantMaterializes := identity || covered
+		wantMaterializes := identity || MemoryStrategyMaterializesIn(c.Language, c.Form)
 		if got := c.Status == CoverageMaterializes; got != wantMaterializes {
 			t.Errorf("[%s/%s] coverage says materializes=%v, the engine's materializer table says %v; the "+
 				"claim and the behaviour must not be able to disagree", c.Language, c.Form, got, wantMaterializes)
 		}
-		if c.Status == CoverageRefuses {
-			if c.Cause != CauseNoMaterializer {
-				t.Errorf("[%s/%s] cause = %q, want %q — the runtime has landed, so what is missing for this "+
-					"language is ours to build", c.Language, c.Form, c.Cause, CauseNoMaterializer)
-			}
+		if c.Status != CoverageRefuses {
+			continue
+		}
+		// Two refusal shapes, and the difference is who (if anyone) can close it. A CauseNoMaterializer
+		// cell owes an artifact and must name where the axis DOES work; a CauseNotAtCallSite cell owes
+		// nothing, because there is nothing to build — and naming an artifact there would promise work
+		// that would not help (P13 FR45).
+		switch c.Cause {
+		case CauseNoMaterializer:
 			if c.MissingArtifact == "" {
 				t.Errorf("[%s/%s] a no-materializer refusal names no missing artifact", c.Language, c.Form)
 			}
-			// 🔴 And it must point at what DOES work, or a reader cannot tell whether the axis works anywhere.
 			for _, lang := range MemoryMaterializerLanguages() {
 				if !strings.Contains(c.Note, lang) {
 					t.Errorf("[%s/%s] the refusal note does not name %q among the covered languages: %q",
 						c.Language, c.Form, lang, c.Note)
 				}
 			}
+		case CauseNotAtCallSite:
+			if c.MissingArtifact != "" {
+				t.Errorf("[%s/%s] a permanent refusal names a missing artifact (%q); the asymmetry between "+
+					"the cause classes is the point", c.Language, c.Form, c.MissingArtifact)
+			}
+		default:
+			t.Errorf("[%s/%s] refuses with cause %q, which is neither of the two shapes this axis produces",
+				c.Language, c.Form, c.Cause)
 		}
 	}
 

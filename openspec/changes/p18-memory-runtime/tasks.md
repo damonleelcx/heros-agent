@@ -123,38 +123,39 @@ which can be un-shipped once a customer has run them.
 
 ## 4. The call-site rewriter — Go
 
-- [x] 4.1 Establish what Go's memory materialization actually needs, and refuse with THAT rather than
-      with "unsupported". → `internal/transform/memorymaterialize.go`
-      (Test: `TestGoMemoryRefusalNamesTheBlockedHalf`, `TestGoMemoryCoverageStatesTheMissingArtifact`).
-- [x] 4.2 🔴 Both-halves-or-refuse holds in the AST engine: the ready half is not emitted alone.
-      → `internal/transform/memorymaterialize.go` (Test: `TestGoMemoryRefusalNamesTheBlockedHalf`).
-- [x] 4.3 🚫 Add the per-provider response-conversion table with **zero rows**, and a test that makes the
-      emptiness a decision rather than an oversight — naming the three things a row owes.
-      → `internal/transform/memorymaterialize.go` (Test: `TestMemoryResponseFormTableIsEmptyAndSaysWhy`).
+- [x] 4.1 Recall + record at a Go call site, through a generated Go artifact.
+      → `internal/transform/memorymaterialize.go`, `internal/transform/memoryartifact_go.go`
+      (Test: `TestGoMemoryMaterializedOutputCompiles`).
+- [x] 4.2 🔴 Both-halves-or-refuse holds identically in the AST engine: a call site that DISCARDS its
+      response (`_, _ = client…`) is refused whole, because the record would have to name `_`.
+      → `internal/transform/memorymaterialize.go` (Test: `TestGoHalfMaterializableRefusedWhole`).
+- [x] 4.3 Add the per-provider response-conversion table with a VERIFIED `(go, anthropic)` row.
+      → `internal/transform/memorymaterialize.go` (Test: `TestMemoryResponseFormRowsAreVerified`).
+- [x] 4.4 🔴 **Compile the emission.** The materialized source is written out and built against the real
+      anthropic-sdk-go in its own module, offline from the module cache.
+      → `internal/transform/memorygo_compile_test.go` (Test: `TestGoMemoryMaterializedOutputCompiles`).
 
-**🔴 Go does not materialize memory, and the reason is specific rather than general.**
+**The SDK is now a real test dependency**, added on request, and it changed the answer: `Message.ToParam()`
+does exist — in `messageutil.go`, not `message.go`, and on no other response type in the package. That was
+read out of the module cache rather than recalled, and the compile test re-checks it every run. Sabotaging
+the row to `ToMessageParam()` fails with the real type error.
 
-Go's **read** half would work today: a generic `Recall[T any](nodeID string, msgs []T) []T` is type-safe
-against any SDK's message slice without importing it, and the registry row already locates the list
-(`prompt: {field: "params.Messages"}`).
+🔴 **Go materializes a strict SUBSET of what Python does, permanently.** A Go message is the customer's
+SDK type, so generated code cannot read its text without importing their SDK. So:
 
-Its **write** half needs one thing. Recording a turn stores what was sent *and what came back* — and in
-Go those are **different static types**: the call returns the SDK's response value while the store holds
-its message-parameter value. In Python they are the same duck-typed dict, which is why `_as_message`
-suffices there and nothing equivalent exists here. Converting between them is per-provider: the same
-shape `skillbind.go`'s `toolValueForms` uses for tool values.
+| | Python | Go |
+|---|---|---|
+| `none`, `scratchpad` (retain by **count**) | materializes | **materializes** |
+| `summary-buffer`, `vector-recall`, `entity-memory` (retain by **content**) | materializes | **refuses — `CauseNotAtCallSite`** |
 
-🚫 **Why the table ships empty instead of with a plausible row.** This module cannot compile against any
-real SDK — the Go fixture is committed as `.txt` precisely because "a directory of real .go files
-importing an SDK this module does not depend on would break `go build ./...` for the whole repo". A row
-written here could not be verified to compile, let alone to behave, and would be emitted into a
-customer's repository as a guess. ADR-001 names that as the top risk, with the wrong-but-compiling
-version the worse half. An unverified row is not a partial capability.
+That refusal carries **no missing artifact**, and the asymmetry is the point: there is nothing to build, so
+naming an artifact would promise work that would not help. A Go user selecting `summary-buffer` is told
+why and told that Python does it — never handed a `scratchpad` wearing its name, which would run one
+strategy under another's `config_hash`.
 
-**What a row owes**, recorded so the next person does not rediscover it: (1) a fixture that BUILDS
-against that SDK, so the emission is compiled rather than assumed; (2) a conformance assertion that the
-materialized behaviour matches `internal/memoryruntime`, the bar the Python module clears by execution;
-(3) an `sdkNote` dating the spelling to an SDK generation, so it can be seen to rot.
+⚠️ **`go mod tidy` deleted the dependency on the first pass**, because nothing in the repo *imports* the
+SDK — the emission is a string until the test writes it out. The compile test caught it by failing loudly.
+A blank test-only import now holds it, with the reason recorded at the import site.
 
 ## 5. Coverage, and lifting the refusal per cell
 
