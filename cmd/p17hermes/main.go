@@ -21,8 +21,11 @@
 //	    byte-identical canonical bytes and the same config_hash, so no stored hash moved;
 //	§3  the hash MOVES iff the strategy or its params move — the other half of the same contract;
 //	§4  🔴 the headline: every non-identity strategy is REFUSED at transform on every discovered node,
-//	    with a typed cause, producing no diff — and a spec carrying a refused memory override alongside
-//	    an applicable model override is refused WHOLE rather than half-applied;
+//	    with a typed cause, producing no diff — counted by cause class AND by refusal shape, because
+//	    30 of these nodes fail memory's READ half (the request is unpacked from a mapping) and one
+//	    fails its WRITE half (the call's result is never named), and a run that reported only the
+//	    first would be stating something false about the last — and a spec carrying a refused memory
+//	    override alongside an applicable model override is refused WHOLE rather than half-applied;
 //	§5  the operator is catalogued and DORMANT: it proposes against a real memory bottleneck, the
 //	    proposal resolves and hashes, and it yields no scored result;
 //	§6  the authored path: a user selects a strategy, it resolves and hashes, preflight refuses it with
@@ -30,8 +33,12 @@
 //
 // The boundaries, stated rather than worked around:
 //
-//	the MATERIALIZATION does not run here, and does not run anywhere — no language has a memory
-//	rewriter, because what is missing is a memory runtime. §4 reports that as a count, not a claim.
+//	the MATERIALIZATION runs here and produces nothing, which is a different fact from the one this
+//	file used to state. P18 landed the memory runtime and the python and go rewriters, so §4 is no
+//	longer measuring an absent platform: python's rewriter is invoked on all 186 combinations and
+//	refuses each on the SHAPE OF THIS REPOSITORY'S CALL SITES. §4 counts the cause classes rather
+//	than sampling one sentence, so the difference between "we have not built it" and "your source
+//	cannot carry it" is read off the run instead of asserted by this comment.
 //
 //	the diagnosis signal in §5 is illustrative (in production it comes from P4.5). Everything it drives
 //	— the candidate spec, the config_hash, the refusal — is real.
@@ -47,6 +54,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -210,7 +218,21 @@ func refuseAtTransform(ir *discovery.IR, base *variantspec.VariantSpec, regs *me
 	fmt.Println("--- 4. 🔴 what the transform does with a memory override, on every node ---")
 
 	var refused, applied, otherErr int
-	var sample string
+	// 🔴 The cause CLASS is counted per node, not just per attempt. Now that python materializes,
+	// "186 refused" no longer says who owns the gap: CauseNoMaterializer would be ours and would mean
+	// the run below is measuring the platform, CauseCallSiteShape is the repository's own source. One
+	// sampled sentence cannot tell those apart across 186 attempts, so count them.
+	byCause := map[transform.CauseClass]int{}
+	nodesByCause := map[transform.CauseClass]map[string]bool{}
+	// One cause class can still hide two different facts about the source, so the refusals are ALSO
+	// grouped by the clause the engine opened with. Memory is a read and a write; a site can fail the
+	// read half (its arguments are unpacked) or the write half (its result is never named), and those
+	// are different things for the reader to go fix.
+	byShape := map[string]int{}
+	nodesByShape := map[string]map[string]bool{}
+	namesByShape := map[string]map[string]bool{}
+	shapeSite := map[string]string{}
+	shapeSample := map[string]string{}
 	for _, node := range base.Order {
 		for _, ref := range regs.order {
 			entry := regs.byRef[ref]
@@ -233,8 +255,27 @@ func refuseAtTransform(ir *discovery.IR, base *variantspec.VariantSpec, regs *me
 				var re *transform.RewriteError
 				if asRewrite(err, &re) && re.Dim == string(variantspec.DimMemory) {
 					refused++
-					if sample == "" {
-						sample = re.Detail
+					byCause[re.Cause]++
+					if nodesByCause[re.Cause] == nil {
+						nodesByCause[re.Cause] = map[string]bool{}
+					}
+					nodesByCause[re.Cause][node] = true
+
+					shape := openingClause(re.Detail, entry.Spec.Strategy)
+					byShape[shape]++
+					if nodesByShape[shape] == nil {
+						nodesByShape[shape] = map[string]bool{}
+					}
+					nodesByShape[shape][node] = true
+					if namesByShape[shape] == nil {
+						namesByShape[shape] = map[string]bool{}
+					}
+					for _, n := range kwargsName.FindAllString(re.Detail, -1) {
+						namesByShape[shape][n] = true
+					}
+					if shapeSample[shape] == "" {
+						shapeSample[shape] = re.Detail
+						shapeSite[shape] = siteOf(ir, node)
 					}
 				} else {
 					otherErr++
@@ -257,13 +298,49 @@ func refuseAtTransform(ir *discovery.IR, base *variantspec.VariantSpec, regs *me
 	fmt.Println("  ✅ nothing was dropped: every override came back either materialized or as a typed")
 	fmt.Println("     refusal naming the memory dimension. On THIS repository the answer is refusal")
 	fmt.Println("     everywhere — and the REASON is what moved. It is no longer \"the platform has not")
-	fmt.Println("     built it\" (ours, temporary); it is \"your call site unpacks its arguments\" (theirs,")
-	fmt.Println("     permanent, and actionable). Python materializes memory; hermes-agent's call sites")
-	fmt.Println("     assemble their requests elsewhere, so there is no written message list to wrap.")
+	fmt.Println("     built it\" (ours, temporary); it is \"this call site cannot carry it\" (the source's,")
+	fmt.Println("     and actionable). Python materializes memory, and its rewriter ran on all of these.")
 	fmt.Println()
-	fmt.Println("  the engine's sentence, verbatim:")
-	for _, line := range wrap(sample, 92) {
-		fmt.Printf("    %s\n", line)
+	fmt.Println("  and that is COUNTED rather than sampled — the refusals, by cause class:")
+	for _, cause := range transform.CauseClasses() {
+		n := byCause[cause]
+		if n == 0 {
+			continue
+		}
+		fmt.Printf("    %-34s %3d attempt(s) over %d of %d node(s)\n",
+			cause, n, len(nodesByCause[cause]), len(base.Order))
+	}
+	if byCause[transform.CauseNoMaterializer] == 0 {
+		fmt.Printf("  ✅ ZERO of the %d refusals is blamed on a missing materializer. Not one of them is\n", refused)
+		fmt.Println("     waiting on us: python HAS the rewriter, it ran on every one, and it refused each on")
+		fmt.Println("     the shape of the call site it was pointed at.")
+	} else {
+		fmt.Printf("  ⚠️  %d refusal(s) still name a missing materializer — that share is OURS, not theirs.\n",
+			byCause[transform.CauseNoMaterializer])
+	}
+	fmt.Println()
+
+	// 🔴 The shape table, which is where the finding actually is. The cause class says WHOSE the gap
+	// is; the shape says WHAT to change, and memory can fail either of its two halves independently.
+	shapes := sortedKeys(byShape)
+	sort.SliceStable(shapes, func(i, j int) bool { return byShape[shapes[i]] > byShape[shapes[j]] })
+	fmt.Printf("  the same refusals grouped by what the engine actually said — %d distinct shapes:\n", len(shapes))
+	for _, s := range shapes {
+		fmt.Printf("    %3d× over %2d node(s)  %s\n", byShape[s], len(nodesByShape[s]), s)
+		fmt.Printf("                          e.g. %s\n", shapeSite[s])
+		if names := sortedKeys(namesByShape[s]); len(names) > 0 {
+			fmt.Printf("                          as: %s\n", strings.Join(names, " "))
+		}
+	}
+	fmt.Println()
+	// 🔴 Every shape verbatim, not a sample of them. A tail of one node is exactly where "the reason
+	// this repository refuses" turns into a sentence that is true of most nodes and false of one.
+	fmt.Println("  the engine's sentence, verbatim, once per shape:")
+	for _, s := range shapes {
+		fmt.Printf("    [%d× %s]\n", byShape[s], s)
+		for _, line := range wrap(shapeSample[s], 90) {
+			fmt.Printf("      %s\n", line)
+		}
 	}
 	fmt.Println()
 
@@ -655,6 +732,24 @@ func sortedKeys[V any](m map[string]V) []string {
 
 // wrap breaks a long engine sentence for a terminal, WITHOUT abbreviating it. A refusal a reader has to
 // act on is printed whole; only a survey line may be trimmed.
+// openingClause reduces a refusal sentence to the clause that identifies the SHAPE it refused on, so
+// one structural finding does not appear once per strategy and once per local variable name. Both the
+// strategy and the unpacked mapping's name are stripped: "**kwargs" and "**stream_kwargs" are the same
+// thing to fix, as are scratchpad's and vector-recall's demand for a result to record. The concrete
+// names are kept alongside and printed. Presentation only — nothing downstream reads the key.
+func openingClause(detail, strategy string) string {
+	s := strings.ReplaceAll(detail, `"`+strategy+`"`, `"<strategy>"`)
+	s = kwargsName.ReplaceAllString(s, "**<mapping>")
+	for _, sep := range []string{", so ", ", and that means ", ". "} {
+		if i := strings.Index(s, sep); i > 0 {
+			s = s[:i]
+		}
+	}
+	return strings.TrimSpace(s)
+}
+
+var kwargsName = regexp.MustCompile(`\*\*[A-Za-z_][A-Za-z0-9_]*`)
+
 func wrap(s string, width int) []string {
 	words := strings.Fields(s)
 	if len(words) == 0 {
