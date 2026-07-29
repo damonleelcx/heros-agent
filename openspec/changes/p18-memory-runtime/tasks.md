@@ -66,55 +66,58 @@ which can be un-shipped once a customer has run them.
 
 ## 1. The memory runtime (the first missing artifact)
 
-- [ ] 1.1 Add `internal/memoryruntime`: a `Store` interface, the **key scheme** (what scopes one
+- [x] 1.1 Add `internal/memoryruntime`: a `Store` interface, the **key scheme** (what scopes one
       conversation), and the **lifetime** (when an entry expires). → `internal/memoryruntime/store.go`
       (Test: `TestStoreKeySchemeScopesByNodeAndSession`).
-- [ ] 1.2 Implement `Recall` / `Record` for all five strategies as ONE dispatch over the closed set, so a
+- [x] 1.2 Implement `Recall` / `Record` for all five strategies as ONE dispatch over the closed set, so a
       sixth strategy cannot silently no-op. → `internal/memoryruntime/strategy.go`
       (Test: `TestEveryBuiltinStrategyImplementsRecallAndRecord`).
-- [ ] 1.3 🔴 **Determinism.** The same store state + the same params produce byte-identical recall output.
+- [x] 1.3 🔴 **Determinism.** The same store state + the same params produce byte-identical recall output.
       → `internal/memoryruntime/strategy_test.go` (Test: `TestRecallDeterministic`).
-- [ ] 1.4 🔴 **Bounded by construction.** `scratchpad` never exceeds `max_entries`, `summary-buffer` never
+- [x] 1.4 🔴 **Bounded by construction.** `scratchpad` never exceeds `max_entries`, `summary-buffer` never
       exceeds `max_tokens`, `vector-recall` never returns more than `top_k`. A strategy that could grow
       without bound is a memory leak in the customer's process.
       → `internal/memoryruntime/strategy_test.go` (Test: `TestStrategiesAreBounded`).
-- [ ] 1.5 🚫 **No provider call from the runtime.** `summary-buffer`'s summarization is a HOST service, not
+- [x] 1.5 🚫 **No provider call from the runtime.** `summary-buffer`'s summarization is a HOST service, not
       something the generated artifact calls — a generated file that reached a provider would put a
       credential in the customer's process. → `internal/memoryruntime/strategy.go`
       (Test: `TestRuntimeMakesNoProviderCall`).
-- [ ] 1.6 Wire `Recall`/`Record` onto the `registry.MemoryStrategy` interface the P17 registry already
-      ships, so there is ONE definition of what a strategy does — read by the runtime and by the
-      materializer alike. → `internal/registry/memory_builtins.go`
-      (Test: `TestStrategyBehaviourHasOneDefinition`).
+- [x] 1.6 One definition of a strategy's behaviour, bound to the sealed vocabulary.
+      → `internal/memoryruntime/strategy.go` (Test: `TestEveryBuiltinStrategyImplementsRecallAndRecord`).
+      🔴 NOT as methods on `registry.MemoryStrategy`, as this task first said. Putting them there would
+      drag a `Store` dependency into every consumer of a sealed definition, and would need ten delegating
+      methods that can drift. The dispatch is keyed by strategy NAME, and a conformance test asserts the
+      sealed vocabulary and the runtime name exactly the same set — which binds them without the import.
 
 ## 2. The generated artifact
 
-- [ ] 2.1 Emit a **dependency-free** memory module per language, alongside the call-site edit in the SAME
+- [x] 2.1 Emit a **dependency-free** memory module per language, alongside the call-site edit in the SAME
       patch, so one revert restores everything. → `internal/transform/memoryartifact.go`
       (Test: `TestArtifactShipsInTheSamePatch`).
-- [ ] 2.2 🔴 **Byte-identical regeneration.** The same resolved config regenerates the artifact byte-for-
+- [x] 2.2 🔴 **Byte-identical regeneration.** The same resolved config regenerates the artifact byte-for-
       byte. → `internal/transform/memoryartifact_test.go` (Test: `TestArtifactRegeneratesByteIdentically`).
-- [ ] 2.3 The artifact carries the strategy and params **as data**, read from the binding document, so
+- [x] 2.3 The artifact carries the strategy and params **as data**, read from the binding document, so
       retuning a parameter is a document change rather than a code change (ADR-004's data/structure line).
       → `internal/transform/memoryartifact.go` (Test: `TestArtifactReadsParamsAsData`).
-- [ ] 2.4 🚫 The artifact imports nothing outside the language's standard library.
+- [x] 2.4 🚫 The artifact imports nothing outside the language's standard library.
       → `internal/transform/memoryartifact_test.go` (Test: `TestArtifactIsDependencyFree`).
 
 ## 3. The call-site rewriter — Python
 
-- [ ] 3.1 **Recall**: replace the written `messages=` argument with a call into the generated module. A
+- [x] 3.1 **Recall**: replace the written `messages=` argument with a call into the generated module. A
       pure expression replacement of an argument the author already wrote.
       → `internal/transform/memorymaterialize_span.go` (Test: `TestPythonMemoryRecallMaterializes`).
-- [ ] 3.2 **Record**: insert the record statement after the call, gated on the call being a simple
+- [x] 3.2 **Record**: insert the record statement after the call, gated on the call being a simple
       assignment at statement level. → `internal/transform/memorymaterialize_span.go`
       (Test: `TestPythonMemoryRecordMaterializes`).
-- [ ] 3.3 🔴 **BOTH HALVES OR REFUSE.** A call site that can carry the recall but not the record is
+- [x] 3.3 🔴 **BOTH HALVES OR REFUSE.** A call site that can carry the recall but not the record is
       REFUSED whole, naming which half is missing. A half-materialized memory reads from a store nothing
       fills — a behaviour the `config_hash` does not name.
       → `internal/transform/memorymaterialize_span.go` (Test: `TestHalfMaterializableMemoryRefusedWhole`).
-- [ ] 3.4 🔴 The rewritten source **reparses** and the edit is minimal — no untargeted line is touched.
+- [x] 3.4 🔴 The rewritten source **reparses** (executed through `python3`) and only the call site's own
+      two lines change — with **no newline introduced**, so engine.go's line-count invariant holds.
       → `internal/transform/memorymaterialize_span_test.go` (Test: `TestPythonMemoryEditIsMinimalAndReparses`).
-- [ ] 3.5 A `**kwargs` call site refuses with the CALL-SITE cause, not the platform cause — the reason is
+- [x] 3.5 A `**kwargs` call site refuses with the CALL-SITE cause, not the platform cause — the reason is
       the unpacking, and it stays true after every rewriter lands.
       → `internal/transform/memorymaterialize_span.go` (Test: `TestKwargsCallSiteRefusesAboutTheCall`).
 
@@ -158,3 +161,55 @@ which can be un-shipped once a customer has run them.
 
 - [ ] 8.1 Re-run against hermes-agent and report what MOVED and what did not.
       → `cmd/p17hermes` (extended) or `cmd/p18hermes`.
+
+---
+
+## 9. 🔴 Where this stopped, and the exact reason
+
+**18a is complete and landed. 18b is blocked on one named piece of engine work, and the materializer is
+deliberately NOT dispatched until it lands.**
+
+### What is done and verified
+
+| § | Delivered | Verified by |
+|---|---|---|
+| 1 | The memory runtime — key scheme, count-based lifetime, `Recall`/`Record` for all five strategies | 7 tests; determinism over 20 repetitions; every bound asserted under 500 turns; both host refusals asserted |
+| 2 | The generated artifact — dependency-free, byte-identical, params as data | Go↔Python **conformance test executes both** and compares; sabotaging Python retention turns it red |
+| 3 | The Python recall + record edits and the **both-halves-or-refuse** gate | Real discovery, real spans; the resulting source is executed through `python3` to prove it parses |
+
+### The blocker, precisely
+
+The materializer emits `agentmem.recall(...)` at the call site. Nothing imports `agentmem`. Adding
+`import agentmem` is an edit on **line 1** — an *untargeted line* — and `gateMinimal` rejects it:
+
+> `the rewrite would change pipeline.py:1, which is outside the targeted call site; a transform may not
+> edit untargeted lines`
+
+That gate is correct and load-bearing. Crossing it needs a **new edit class with its own admission rule**
+— the precedent `isSwap` (P15) and `bindingSite` (P13) already set — admitting exactly one import line at
+the top of a file whose call site is being materialized, and nothing else.
+
+🚫 **What was NOT done, and why.** Two shortcuts were available and both were refused:
+
+- **Loosen `gateMinimal`.** It would remove the untargeted-line check from *every* rewriter in the
+  package, forever, to serve one caller. That is the trade P15's decisions.md D-4 refuses by name.
+- **Ship the recall edit anyway.** It emits code calling a module that is not imported — broken source in
+  a customer's repository — and, if the import were somehow handled, a recall with no record is the
+  half-materialization D2 exists to forbid.
+
+So the span dispatch still points at P17's `spanRewriteMemory`, and **every memory override is still
+refused**. Nothing half-built ships.
+
+- [ ] 9.1 Add the memory-materialization **edit class**: one import insertion at the top of a
+      materialized file, admitted by its own rule, with the line-count invariant restated for it rather
+      than relaxed for everyone. → `internal/transform/engine.go`
+      (Test: `TestMemoryImportClassAdmitsOnlyItsOwnImport`).
+- [ ] 9.2 Wire `spanMaterializeMemory` into the span dispatch once 9.1 lands, and assert the artifact
+      ships in the SAME patch as the call-site edit.
+- [ ] 9.3 Then: §4 (Go), §5 (per-cell coverage), §6 (the operator wakes), §7 (the surfaces), §8 (hermes).
+
+### What this does NOT change
+
+🔴 P17's guarantees are all intact and re-asserted green: every memory override is refused with a typed
+`unsafeRewrite`, the totality canary still turns 28 cells red under sabotage, `none` still hashes as
+absent, and every P17 `config_hash` reproduces bit-for-bit.
