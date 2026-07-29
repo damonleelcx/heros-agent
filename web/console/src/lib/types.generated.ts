@@ -671,3 +671,28 @@ export interface RouteConditionView {
   targets?: string[] | null;
 }
 
+/** Response of `GET /api/p13/coverage`. */
+export interface AxisCoverageView {
+  version: string;
+  languages: string[] | null;
+  axes: string[] | null;
+  causes: CoverageCause[] | null;
+  cells: CoverageCell[] | null;
+}
+
+export interface CoverageCause {
+  id: string;
+  owner: string;
+  label: string;
+}
+
+export interface CoverageCell {
+  axis: string;
+  language: string;
+  form: string;
+  status: string;
+  cause?: string;
+  missing_artifact?: string;
+  note?: string;
+}
+

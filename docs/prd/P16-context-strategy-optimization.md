@@ -3,9 +3,9 @@
 | Field | Value |
 |---|---|
 | Phase / Milestone | P16 / M19 |
-| Target window | ~Weeks 46–58 (two waves: 16a context-policy materialization, then 16b retrieval-tuning) |
+| Target window | ~Weeks 46–64 (four waves: 16a context-policy materialization, 16b retrieval-tuning, 16c user-initiated change, then 16d all-language coverage) |
 | Lead role(s) | AI Engineer + Backend (co-leads) |
-| Supporting role(s) | System Designer, QA Engineer |
+| Supporting role(s) | System Designer, Frontend, DevOps, QA Engineer, Product Designer, Sales Operations |
 | Status | Draft |
 | OpenSpec change | `p16-context-strategy-optimization` |
 | Related | [P3 — Context + Skills + Sandbox](P3-context-skills-sandbox.md) · [P4 — Eval Harness](P4-eval-harness.md) · [P4.5 — Attribution + Diagnosis](P4.5-attribution-diagnosis.md) · [P5.5 — Proposals + Verification](P5.5-proposals-verification.md) · [P10 — Prompt & Model Studio](P10-prompt-model-studio.md) |
@@ -49,6 +49,18 @@ until each language's rewriter lands, and closes the RAG loop — top-k, chunk s
 as verified `OpRAGTune` proposals on held-out eval sets. Milestone **M19 — context is a first-class
 applicable axis** means a context change reaches a customer's build as a reviewable diff, and a context
 reduction is visible as fewer `eval_tokens_total` with no `task_success` regression.
+
+The per-language half of that promise is closed by wave **16d** (`context-language-coverage`) under the
+cross-axis [`language-coverage`](P13-prompt-model-optimization.md) contract. Selection materializes today
+in Go and Python; the engine's own note says TypeScript and JavaScript are "a row plus its splitter", and
+a scope statement with no way to be recorded as one ages into a product boundary. So coverage becomes a
+**total (language, policy)** table, the remaining splitters land, and one rule governs the growth:
+**retention is not per language** — which turns a policy retains *is* the policy, decided by the shared
+selection code, with the drop record produced by the same shared path so a newly covered language cannot
+delete turns without recording them. The refusal order this axis already had to correct once becomes a
+requirement: a policy whose content a model or retriever produces at run time refuses identically in every
+language, a call site that wrote no message list is told **that**, and only then is the splitter the
+honest answer.
 
 ## 2. Problem & context
 
@@ -149,6 +161,27 @@ hidden from the diff).
   summarizer or retriever SHALL reach it only through the trusted-host `HostServices` gateway
   ([`context_policies.go:79-85`](../../internal/registry/context_policies.go)); the model/retrieval
   call SHALL execute host-side, never from a sandboxed node.
+- **G11. A user can choose their own context strategy.** Selecting a policy and its parameters, declaring
+  or clearing a drop tolerance, and tuning retrieval SHALL be available as **user-initiated** changes on
+  the shared `authored-change` spine, with `Origin` recorded and never hashed.
+- **G12. The drop gate runs before the user commits, and never refuses on ignorance.** It SHALL be
+  evaluated at preflight before any eval spend; where the drop ratio has never been measured it SHALL
+  return an explicit `not-yet-measurable` verdict naming the missing measurement — never `admissible`,
+  never `refused`.
+- **G13. A user may set the policy but not the label.** Retrieval parameters SHALL be available only on a
+  classifier-labelled retrieval node, and no path SHALL let a user set that label to unlock them.
+- **G14. Loss is never sold as saving.** An authored context change SHALL claim nothing until the harness
+  runs, and `DropRatio` SHALL be presented as information discarded rather than tokens saved.
+- **G15. A selection policy SHALL be materializable in every registered language.** The context coverage
+  table SHALL carry an entry for **every (language, policy)** pair, and a language that cannot yet
+  materialize a selection SHALL name the **list splitter** as its missing artifact.
+- **G16. The list splitter SHALL be the only per-language part of a selection.** The retained-turn
+  decision, the drop record, and the drop-tolerance gate SHALL stay language-neutral, so adding a language
+  is adding a splitter and its coverage entry — and the drop record SHALL be unskippable in a newly
+  covered language exactly as it is in an existing one.
+- **G17. A policy refusal and a language refusal SHALL NOT be conflated.** A policy whose content is
+  produced at run time refuses **identically in every language**, and a call site that wrote no message
+  list refuses for **its own shape** — with the language question asked last in both cases.
 
 ### Non-goals (explicitly deferred or owned elsewhere)
 
@@ -178,6 +211,9 @@ hidden from the diff).
 | **QA engineer** (support) | A gate that can go **red**: a refusal test per language, a drop-past-tolerance rejection test, and a held-out-vs-tuning-set separation test. | "Context works" is asserted from a green build over a codemod that refuses everything. |
 | **Budget owner** (indirect, via P7/P9) | Context wins appear as reduced token spend on **linked** runs, with the same verified-savings discipline as any axis. | A token reduction the platform cannot apply is a saving nobody can bank. |
 
+| **Workflow owner choosing a strategy** (primary, 16c) | They pick the policy their workflow needs, set a drop tolerance, and are told what each policy would discard — or told plainly that it has not been measured yet. | Context strategy changes only when a diagnosis fires; a team that knows their node needs hierarchical summary has no way to say so. |
+| **Cost owner shrinking context** (16c) | A smaller context is applied with the loss shown as loss, and no saving is claimed until the harness rules. | A token reduction that looks like a win and is actually silent information loss. |
+
 Non-personas: the end user of the customer's own LLM product; platform operators (P8). Context content
 (prompt bodies, retrieved passages) never leaves the customer environment — the P11 boundary already
 forbids it, and P16 adds nothing that would.
@@ -192,6 +228,16 @@ forbids it, and P16 adds nothing that would.
   **refused before it runs**, so that eval budget is not spent proving an obviously-lossy change bad.
 - As an AI engineer, I want a RAG top-k / rerank / embedding change verified on data it was **not**
   tuned on, so that a retrieval "win" is real and not overfit.
+
+**Workflow owner making an active change (16c)**
+- As the owner of this workflow, I want to **choose the context policy myself**, because I know this node
+  summarizes badly and I should not have to wait for a diagnosis to say so.
+- As the owner, I want to be told **how much a policy would discard before I commit to it**, and — if the
+  platform has not measured that yet — I want it to **say so**, not guess in either direction.
+- As the owner, I want to **declare a drop tolerance** for a node and have the platform hold me to it
+  afterwards, including telling me if my current policy already exceeds it.
+- As the owner, I want a smaller context to be labeled **unverified**, with the drop ratio shown as
+  information discarded — not quoted back to me as a token saving I have not earned.
 
 **Backend engineer**
 - As the codemod owner, I want the context rewriter to land **per language**, with the un-built
@@ -269,6 +315,72 @@ Numbered FRs; each maps 1:1 to an OpenSpec requirement under
   (chunks prepended, conversation preserved) SHALL report `DropRatio` 0 and a positive `RetrievedChunks`
   count ([`context_policies.go:281-288`](../../internal/registry/context_policies.go)).
 
+### User-initiated change on this axis (capability `context-authoring`)
+
+The cross-axis rules are **FR21–FR33 of [P13](P13-prompt-model-optimization.md)** (capability
+`authored-change`) and apply here in full without restatement. What P16 adds is governed by **loss**, not
+by permission — this is the axis where a change silently destroys information.
+
+- **FR15.** A user SHALL be able to select a node's **context policy** and set its parameters, expressed
+  solely through the existing context override so it resolves, freezes, and participates in `config_hash`
+  through the existing field. Only **registered** policies SHALL be offered; free text SHALL NOT be a
+  selection path.
+- **FR16.** An authored context change on a node whose language has **no landed rewriter** SHALL be
+  refused at preflight naming the **node, the policy, and the language**, with the same typed cause the
+  transform raises, and the boundary SHALL be **stated** rather than the control being silently disabled.
+- **FR17.** The **drop-tolerance gate SHALL run at preflight**, before any evaluation spend. A policy
+  whose measured drop ratio for that node exceeds the node's declared tolerance SHALL be refused naming
+  the node, the tolerance, and the measured ratio.
+- **FR18.** 🔴 Where the resolved policy's drop ratio for that node has **never been measured**, preflight
+  SHALL return **`not-yet-measurable`** naming the missing measurement. It SHALL NOT return `admissible`
+  — that would assert a safety check that never ran — and it SHALL NOT return `refused` — that would make
+  the platform's measurement coverage the user's problem. **The gate never refuses on ignorance, and never
+  passes on ignorance.**
+- **FR19.** A user SHALL be able to **declare or clear** a node's drop tolerance. The attribute SHALL
+  remain additive and omit-when-absent, so declaring one re-hashes the node and clearing it reproduces the
+  pre-declaration `config_hash` **byte-identically**.
+- **FR20.** A declared tolerance the node's **current** policy already exceeds SHALL be **reported** —
+  naming the current policy and the measured ratio — not silently accepted.
+- **FR21.** Retrieval parameters SHALL be offered and accepted **only** on a node the pattern classifier
+  labels `RetrievalRAG`. No surface, flag, role, entitlement, or request parameter SHALL let a user set,
+  override, or declare that label.
+- **FR22.** An authored retrieval change, when verified, SHALL be **pinned** (retriever, parameters, seed)
+  so re-running the same `config_hash` issues the identical resolved retrieval request, and SHALL be
+  judged on a **platform-derived** held-out set **disjoint from the cases the authoring surface displayed
+  as motivation**.
+- **FR23.** An authored context change SHALL be applicable while `unverified`, with **no** token
+  reduction, cost saving, or quality effect attributed to it until the harness has run. `DropRatio` SHALL
+  be presented as **information the policy discarded**, never as a token or cost saving.
+
+### All-language coverage on this axis (capability `context-language-coverage`)
+
+The cross-axis rules — coverage as a **total** function over every registered language, per-cell claims,
+the three typed refusal classes and their specific-first evaluation order, one coverage source, executable
+evidence for every row, no gate weakened to reach a language, the versioned offline table, and coverage no
+plan can move — are **FR41–FR51 of [P13](P13-prompt-model-optimization.md)** (capability
+`language-coverage`). They apply here in full and are **not** restated.
+
+- **FR24.** The context coverage table SHALL carry an entry for **every (language, policy)** pair, each
+  stating one of: materialized by selection, equivalent to the unrewritten call site, or refused with a
+  named cause. A selection policy a language cannot yet materialize SHALL name the **list splitter** as
+  its missing artifact, and SHALL NOT describe the policy as unmaterializable.
+- **FR25.** A policy whose content is produced at run time — by a model call, a tiered summarizer, or a
+  retriever — SHALL be refused with the **same cause in every language**, and that cause SHALL NOT vary
+  with whether the language has a splitter or imply that one would carry it.
+- **FR26.** Per-language knowledge SHALL be confined to splitting a written list into its elements. The
+  retained-turn decision, the drop record, and the drop-tolerance gate SHALL be produced by the same
+  language-neutral path in every language; no language's splitter SHALL decide retention.
+- **FR27.** For a refused context change the **most specific true** cause SHALL be reported, evaluated in
+  the order: the policy → the registry row → the call site's own source → the language's splitter. A call
+  site that wrote **no message list** SHALL be told that, and SHALL refuse identically once its language's
+  splitter lands.
+- **FR28.** Materializing a selection SHALL record the dropped turns in **every** covered language,
+  produced by the shared path; the record SHALL be byte-comparable with the same selection in an existing
+  covered language, and no code path SHALL emit the deletion without producing it.
+- **FR29.** Before a user selects a policy, the authoring surface SHALL state — from the shared coverage
+  source — whether the node's language can materialize a selection, and SHALL render that as a **different
+  sentence** from a policy no language can materialize.
+
 ## 7. Non-functional requirements
 
 | # | Requirement | Target |
@@ -282,6 +394,13 @@ Numbered FRs; each maps 1:1 to an OpenSpec requirement under
 | **NFR7** | **Held-out verification** | The eval set a retrieval change is *verified* on is disjoint from the set it was *tuned* on, enforced by construction, not convention. |
 | **NFR8** | **Credential isolation** | No provider or retriever credential is exposed to a sandboxed node; every model/retrieval call is host-side through `HostServices`. |
 | **NFR9** | **Additivity / no one-way door** | No new `Dimension`, no registry-schema change, no `ContextSpec` change; new policies and the tolerance attribute are additive and reversible. |
+| **NFR10** | **The third verdict is structural** | `not-yet-measurable` is a first-class verdict the surface renders as its own state, not a variant of "disabled". Asserted by tests that an unmeasured input returns neither `admissible` nor `refused` — both directions, because each failure mode is a different lie. |
+| **NFR11** | **One drop gate, two callers** | The preflight verdict and the proposal-path admissibility decision are the same gate's output; a second predicate would let the editor bless what the engine rejects. |
+| **NFR12** | **Loss is never rendered as saving** | No surface presents `context_drop_ratio` or a token reduction on an `unverified` authored change as a saving or an improvement; asserted in the console tests, because this is the one number the axis exists to keep honest. |
+| **NFR13** | **The classifier is not user-settable** | No authoring path, parameter, role, or plan sets or overrides a node's pattern label; asserted over the enumerated authoring surface, not sampled. |
+| **NFR14** | **Coverage is total over (language, policy)** | Every registered language appears against every declared policy; a generated test fails on a missing pair. Absence is the one value the table may not carry — it renders as "this policy does not apply here", which for a *selection* policy is never true. |
+| **NFR15** | **The drop record is unskippable in a new language** | A selection materialized in a newly covered language produces a drop record byte-comparable with an existing language's, asserted rather than reviewed. This is the axis's honesty mechanism; a language that could delete turns without recording them would make `context_drop_ratio` quietly incomplete. |
+| **NFR16** | **Policy, source and language causes are provably distinct** | A run-time-produced policy refuses identically in a language with and without a splitter; a call site with no written message list reports **that** in both. Both directions asserted, and the ordering test goes red when reversed. |
 
 ## 8. System design summary
 
@@ -335,6 +454,9 @@ missing piece is the hardest one.
 | **D5** | **Retrieval pinned per measurement run** | Let the retriever run free and average over seeds | **L2 稳定 + reproducibility.** An unpinned retriever makes a `config_hash` non-reproducible — two runs of the same config disagree, and the whole lineage design (re-derive a result from its hash) breaks. Pin the retriever, seed the rerank, capture the `ResolvedRequest`. |
 | **D6** | **New policies are additions behind the existing interface** | Add policy-specific fields to `ContextSpec` / a `Dimension` variant | **L5 不可演进 + L6 不可扩展.** A schema change per policy is the extensibility failure the `Policy` interface + `Store.AddPolicy` were built to prevent. A `Name`/`ParamsSchema`/`Assemble` implementation plus a row is the whole cost. |
 | **D7** | **No new `Dimension`; reuse `DimContext`** | Introduce a `DimRetrieval` sub-axis for RAG tuning | **L5 不可演进.** Retrieval *is* a context policy (`rag-retrieval`) with params; a second dimension would split one axis's identity across two enum members and double the hash surface for no behavioral gain. |
+
+| **D8** | **Authoring is governed by loss; the drop gate never refuses — and never passes — on ignorance** | (a) treat an unmeasured drop ratio as a pass; (b) treat it as a failure; (c) let the user mark a node as retrieval to unlock retrieval params | **(a) L1 safety (honesty)** — returning `admissible` asserts a safety check succeeded when it never ran, on the one axis whose failure mode is *silent information loss*. **(b) L3 user-facing complexity** — fail-closed is right for membership questions (a tool outside the discovered set) but wrong here: the missing fact is about **our** measurement coverage, not the user's change, and blocking on it makes the axis unusable on every workflow that has not been evaluated — i.e. every new one. **(c) L1** — the classifier gate is what makes a retrieval parameter mean anything; a user who can set the label can unlock parameters that do nothing and then attribute a result to them. A misclassification is a defect to fix upstream, not an override to hand out. |
+| **D9** | **Every (language, policy) pair gets a value; the splitter is the only per-language part, and the policy question is asked first** | (a) keep "Go and Python only" as the terminal state; (b) let each language's rewriter decide retention for itself; (c) report a missing splitter as the reason whenever one is missing | **L6 + L1 + L3.** (a) is an ordering that hardened into an answer: the same deletion is sound in TypeScript and JavaScript — the engine's own comment says adding one is "a row plus its splitter" — so an absent row describes our backlog while rendering as *this policy does not apply to your code*, which for a **selection** policy is never true. (b) is the L1 error: retention is what the policy *means*, and a per-language retention decision would make one `config_hash` describe two different configurations, so the harness would compare them while calling them one. (c) is the mistake this axis already shipped once and corrected: the dominant real refusal is a call site that **wrote no message list** — nothing to select among, in any language, before or after a splitter lands — and a policy whose content does not exist until run time refuses identically everywhere. Both must be reported ahead of the language question. |
 
 ### 8.4 Data model additions
 
@@ -407,6 +529,122 @@ overlap and asserts the verdict is refused; (4) a windowing/compaction materiali
 **identical `ResolvedRequest`** under a fixed seed. If any of these cannot be made to fail, the
 corresponding guarantee is decoration.
 
+### 9.1 Wave 16c — user-initiated change, by role lens
+
+**System Designer — *three verdicts, because two of them would be lies.***
+Every other axis in this program needs two answers from preflight. This one needs three, and the third is
+the whole design. An unmeasured drop ratio cannot be reported as `admissible` — that claims a check ran —
+and cannot be reported as `refused` — that blames the user for our measurement coverage. `not-yet-
+measurable`, naming what is missing, is the only honest answer, and it is the posture the drop gate
+already ships; 16c's job is to make sure the authoring surface does not quietly flatten it into a disabled
+control. The other structural commitment is that preflight and the proposal path call **one** gate: a
+second predicate is how an editor starts blessing what the engine rejects.
+
+**Backend — *the gate runs before the spend, and the label is not an input.***
+The drop gate moves ahead of eval budget, which is the point of having it — refusing a lossy policy after
+paying to measure it is the cost the gate exists to avoid. Two refusals must name their specifics: an
+over-tolerance refusal names the node, the tolerance, **and the measured ratio** (a bare "exceeds
+tolerance" gives the user nothing to reason with), and a language refusal names the node, the policy, and
+the language. The classifier label is an **input** to what may be authored and never an **output** of it —
+no parameter, role, or plan sets it. And declaring/clearing a drop tolerance must be exactly reversible:
+clearing returns the byte-identical prior hash, because an additive attribute that does not cleanly
+subtract is not additive.
+
+**AI Engineer — *the user picks the strategy; the platform still picks the evidence.***
+An authored retrieval change is pinned when measured — retriever, parameters, seed — so the same
+`config_hash` reissues the identical resolved request. The held-out set is platform-derived and disjoint
+from the cases the surface **showed** the user as motivation, which is a slightly stronger condition than
+the operator path needs: a human who has been looking at five failing cases will tune to those five, so
+those five are precisely the ones that must not judge the result. Pure augmentation stays recorded as
+retrieval, not loss.
+
+**Frontend — *three states, and loss is never a saving.***
+Two rules carry the surface. First, `not-yet-measurable` renders as its **own** state with its own
+sentence — collapsing it into a greyed control tells the user "you can't" when the truth is "we haven't
+looked", and those lead to opposite actions. Second, `context_drop_ratio` is displayed as **information
+discarded**. The temptation here is strong and specific: a lossier policy shows fewer tokens, and a token
+count next to a green arrow is the easiest chart in the product to draw. On an `unverified` change it is
+also a lie. Beyond those: only registered policies, the language boundary stated with the language named,
+retrieval parameters gated by the classifier with the reason given, no capability removed, tokens only.
+
+**QA Engineer — *assert both directions of the third verdict.***
+The distinctive test here is a pair, not a single case: an unmeasured input must return neither
+`admissible` nor `refused`, and both halves need their own assertion, because each failure mode is a
+different bug with a different cause. Then the usual go-red set: over-tolerance, unsupported language,
+non-RAG retrieval parameters, unregistered policy — each seen red. Then the two that cannot be read from
+code: that no flag, role, or plan bypasses the drop gate or the classifier gate, and that clearing a
+declared tolerance returns the byte-identical prior hash. And downstream: after an authored policy change,
+read back the emitted diff, the record, **and the resolved policy frozen into the node** — the context
+axis is exactly where a resolved-but-not-applied override would be invisible from the handler's return.
+
+**DevOps — *the same three verdicts offline, and no new egress on a content-heavy axis.***
+The CLI reaches the same verdicts with the same cause text offline. This is the axis where the egress rule
+is most load-bearing: context content is prompt text and retrieved passages, and preflight is the natural
+place for an implementation to accidentally ship a sample outward to "check" it. The allowlist is
+unchanged, and the assertion covers preflight and diagnostics. Health signals name the verdict class, so
+an operator can answer "why is this node stuck at not-yet-measurable?" without a debugger.
+
+**Product Designer — *"we haven't measured this" is a fact about us, not a refusal of them.***
+The wording of the third verdict is the most important sentence in this wave. It should read as a
+statement about the platform's coverage, say what would make it measurable, and never look like a denial.
+The over-tolerance refusal, by contrast, is a real *no*, and it should carry the number the user needs to
+decide whether to relax the tolerance or pick another policy. And the vocabulary rule bites hardest here:
+a smaller context is **applied**, never *cheaper*, *leaner*, or *optimized*, until a verdict exists.
+
+**Sales Operations — *the drop gate is a measurement, not a guarantee.***
+Deliverable: customers choose their own context strategy and the platform shows what each one discards,
+with a tolerance they can set and be held to. The boundary that must always travel with it: the gate is a
+**measured** check, and where it has not measured, **it says so** — 🚫 never present the drop gate as a
+guarantee that no context will be lost. Two more refusals: there is no override at any tier, and a
+customer cannot relabel a node to unlock retrieval tuning. Token reduction is described as reduction, and
+never as a saving, until a verified delta says so.
+
+### 9.2 Wave 16d — all-language coverage, by role lens
+
+**AI Engineer (co-lead) — *retention is the meaning; it must not be per language.***
+The one thing that cannot be delegated to a language is which turns a policy retains, because that *is* the
+policy. If a TypeScript splitter decided retention for itself, one `config_hash` would describe two
+configurations and the harness would go on comparing them as one — the failure that makes every downstream
+number quietly wrong. So the shared `SelectionPolicy.Retain` decides, in every language, and a splitter
+answers exactly one question: what are the written elements of this list. The same discipline covers the
+drop record: it is produced by the shared path, so a newly covered language cannot delete turns without
+recording them, and `context_drop_ratio` cannot become quietly incomplete as coverage grows.
+
+**Backend (co-lead) — *the policy question, then the source, then the language.***
+This axis has already shipped the wrong ordering once and corrected it, which makes it the best evidence
+for the cross-axis rule. A call site that unpacks its arguments from a mapping has written **no message
+list**; there is nothing to select among, there will be nothing to select among after every splitter has
+landed, and telling that author their language is pending is true and useless. Above it sits a fact that
+is not about the language either: a summarized, tiered, or retrieved context does not exist in source at
+all, so it refuses identically in Go, in Python, and in a language with no splitter. Only after both is the
+splitter the honest answer. Adding TypeScript, JavaScript, Kotlin, Java and Rust is adding five splitters
+and five rows — no gate, no second retention path.
+
+**System Designer (support) — *totality is what stops a scope statement from aging into a boundary.***
+`spanContextMaterializers` carries Python and says, in its own comment, that TypeScript and JavaScript are
+"a row plus its splitter". That is a scope statement, and scope statements age into product boundaries
+whenever the data model has no way to say *we have not built this yet*. Making the (language, policy) table
+total is what keeps the comment's honesty available to every surface that renders coverage.
+
+**Frontend (support) — *two sentences that must never merge.***
+"This policy cannot be written into source at all" and "this language cannot select yet" have different
+next steps and different lifespans — the first has no "when". Rendering them as one disabled control is
+the failure mode this capability exists to prevent, and it is especially costly here because the policies
+users most want (summarization, RAG) are exactly the ones in the first category.
+
+**QA Engineer (support) — *the drop record is the assertion that travels.***
+Totality is generated over (registered language × declared policy). The ordering test needs a fixture that
+is both source-refusable and language-refusable and must go **red** when reversed. And the one that is
+easy to forget: a selection in a newly covered language must produce a drop record byte-comparable with
+the same selection in an existing one — because a language that emits the deletion without the record
+passes every test that only reads the diff.
+
+**DevOps, Product Designer + Sales Operations (support).** The offline table carries the (language, policy)
+cells, versioned and named in a refusal. The wording keeps the two boundaries apart: a missing splitter is
+*not yet applied by the platform*; a run-time-produced policy is *not expressible in source*, with no
+"when". And the claim stays per cell — 🚫 never "we optimize context in any language", which promises
+summarization materialization that refuses in **every** language, including Go.
+
 ## 10. Dependencies
 
 **Requires**
@@ -439,6 +677,18 @@ corresponding guarantee is decoration.
 | A new policy forces a registry-schema or `Dimension` change | System Designer | Policies are additions behind the `Policy` interface via `Store.AddPolicy`; no schema, no enum member (FR6, NFR9). |
 | A provider/retriever credential leaks to a sandboxed node | Backend | Every model/retrieval call is host-side through `HostServices` (FR9, NFR8). |
 | The drop-tolerance field breaks frozen `config_hash` golden vectors | System Designer | Additive, omit-when-absent — a node with no tolerance hashes byte-identically to pre-P16 (NFR3). |
+| An unmeasured drop ratio is reported as `admissible`, so the user believes a check ran | System Designer + QA | D8/FR18/NFR10 — the third verdict `not-yet-measurable` names the missing measurement; asserted that `admissible` is never returned for an unmeasured input. |
+| An unmeasured drop ratio is reported as `refused`, blocking every unevaluated workflow | Product Designer + Backend | D8/FR18 — the gate **never refuses on ignorance**; the missing fact concerns our coverage, not the user's change. |
+| A user relabels a node as retrieval to unlock retrieval tuning | Backend + QA | D8/FR21/NFR13 — the classifier label is not settable through any surface, parameter, role, or plan; asserted over the enumerated authoring surface. |
+| A token reduction from a lossier policy is displayed as a saving | Frontend + Sales Ops | D8 corollary/FR23/NFR12 — `DropRatio` renders as information discarded; an `unverified` change is attributed no saving. |
+| The editor's drop verdict and the engine's admissibility decision drift | System Designer | NFR11 — one gate, two callers; a second predicate is how an editor starts blessing what the engine rejects. |
+| A user verifies their own retrieval change on the cases they were shown | AI Engineer | FR22 — the held-out set is platform-derived and disjoint from the displayed motivation, which is stricter than the operator path needs and for good reason. |
+| Preflight becomes the first path that ships context content outward | DevOps | The P11 allowlist is unchanged and covers preflight and diagnostics; prompt text and retrieved passages cross no boundary. |
+| A language is absent from the context table and reads as "this policy does not apply here" | System Designer + QA | FR24/NFR14 — a **total** (language, policy) table, generated; a missing pair goes red. |
+| A user whose call site wrote no message list is told their language is pending | Backend + Product Designer | FR27/NFR16 — policy → row → source → **language last**; the ordering test goes red when reversed. |
+| A new language's splitter decides retention for itself | AI Engineer | FR26 — retention is decided by the shared policy code; a splitter answers only "what are the written elements". |
+| A newly covered language deletes turns without recording the drop | AI Engineer + QA | FR28/NFR15 — the drop record is produced by the shared path and asserted byte-comparable across languages. |
+| A run-time-produced policy is reported as a language gap | Backend | FR25 — it refuses with the same cause in every language, and the cause does not vary with splitter coverage. |
 
 ## 12. Rollout & test strategy
 
@@ -468,6 +718,53 @@ when a retrieval change is a **verified delta** measured on data it was not tune
 7. **Credential isolation** — no provider/retriever secret reaches a sandboxed node; the model/retrieval
    call is host-side.
 8. **Additivity** — a node with no tolerance hashes byte-identically to pre-P16; no new `Dimension`.
+
+**Wave 16c — context-authoring.** Policy selection, parameters, drop-tolerance declaration, and retrieval
+tuning as **user-initiated** changes on the shared `authored-change` spine. Ends when a workflow owner can
+choose a context policy from the console **and** the offline CLI; sees what it would discard before
+committing, or is told plainly that it has not been measured; can declare a tolerance and be held to it;
+cannot unlock retrieval parameters by relabelling a node; and gets a diff stamped `unverified` with the
+drop ratio shown as loss rather than saving. Independently revertible.
+
+**How 16c correctness is proven.**
+9. **Three verdicts, both directions** — an unmeasured drop ratio returns neither `admissible` nor
+   `refused`; each half asserted separately.
+10. **Gate before spend** — an over-tolerance refusal happens at preflight with no eval run enqueued, and
+    names the node, the tolerance, and the measured ratio.
+11. **One gate, two callers** — the preflight verdict and the proposal-path admissibility decision are the
+    same gate's output.
+12. **Label is not an input** — no surface, parameter, role, or plan sets a node's classifier label;
+    retrieval parameters refuse on a non-RAG node.
+13. **Tolerance is exactly reversible** — declaring re-hashes; clearing reproduces the pre-declaration
+    hash byte-identically.
+14. **Loss is not saving** — no surface renders `context_drop_ratio` or a token reduction on an
+    `unverified` change as a saving; augmentation still reports drop 0 with positive retrieved chunks.
+15. **Evidence stays platform-derived** — an authored retrieval verification is pinned, and its held-out
+    set is disjoint from the cases the surface displayed as motivation.
+16. **Downstream assertion** — after an authored policy change, the emitted diff, the append-only record,
+    and the **resolved policy frozen into the node** are each read back.
+
+**Wave 16d — context-language-coverage.** A list splitter and a coverage entry for every registered
+language, the totality check over (language, policy) that forces one, the refusal ordering that puts the
+policy and the call site's own source ahead of the language, and the drop record produced by the shared
+path in every language. Ends when the table is total; a selection materializes beyond Go and Python with
+retention decided by the shared policy code; a run-time-produced policy refuses identically everywhere; a
+call site that wrote no message list is told **that**; and a newly covered language's drop record is
+byte-comparable with an existing one's. Independently revertible: removing it returns the axis to its 16a
+cells with the refusals it already had.
+
+**How 16d correctness is proven.**
+17. **Totality is generated** — every registered language appears against every declared policy; adding a
+    frontend or a policy with no entry goes red (FR24, NFR14).
+18. **Retention is shared** — the same policy materialized in two languages retains the same turns,
+    decided by the shared code; no splitter decides retention (FR26).
+19. **The drop record travels** — a selection in a newly covered language produces a record
+    byte-comparable with an existing language's, and no path emits the deletion without it (FR28, NFR15).
+20. **Policy and source beat language** — a run-time-produced policy refuses identically with and without
+    a splitter, a call site with no written message list reports **that**, and reversing the order goes
+    red (FR25, FR27, NFR16).
+21. **Two sentences** — the surface renders "no language can materialize this policy" and "this language
+    cannot select yet" as distinct states (FR29).
 
 ## 13. Success metrics & acceptance criteria (M19 exit checklist)
 
@@ -500,6 +797,45 @@ when a retrieval change is a **verified delta** measured on data it was not tune
 - [ ] **A15.** A context reduction shows up as lower `eval_tokens_total` at non-regressing `task_success`
       through the axis-agnostic harness, with no context-specific eval or scoring change (G4, NFR6).
 - [ ] **A16.** A node declaring no drop tolerance hashes byte-identically to a pre-P16 node (NFR3, NFR9).
+- [ ] **A17.** A user can select a node's context policy and parameters from the console **and** the
+      offline CLI; only **registered** policies are offered and free text is not a selection path (G11,
+      FR15).
+- [ ] **A18.** An authored context change on a language with no landed rewriter is refused at preflight
+      naming the **node, the policy, and the language**, with the boundary stated rather than the control
+      silently disabled (FR16).
+- [ ] **A19.** The drop gate runs at **preflight before any eval spend**; an over-tolerance policy is
+      refused naming the node, the tolerance, and the **measured ratio** (G12, FR17, NFR11).
+- [ ] **A20.** 🔴 An unmeasured drop ratio returns **`not-yet-measurable`** naming the missing
+      measurement — and returns neither `admissible` nor `refused`, each asserted separately (G12, FR18,
+      NFR10).
+- [ ] **A21.** Declaring a drop tolerance re-hashes the node and clearing it reproduces the
+      pre-declaration `config_hash` **byte-identically** (FR19).
+- [ ] **A22.** A declared tolerance the current policy already exceeds is **reported**, naming the policy
+      and the measured ratio — not silently accepted (FR20).
+- [ ] **A23.** Retrieval parameters are offered and accepted only on a classifier-labelled retrieval node,
+      and **no** surface, flag, role, entitlement, or parameter sets that label (G13, FR21, NFR13).
+- [ ] **A24.** An authored retrieval verification is **pinned** and judged on a **platform-derived**
+      held-out set disjoint from the cases the surface displayed as motivation (FR22).
+- [ ] **A25.** An authored context change is applicable while `unverified` with **no** token, cost, or
+      quality effect attributed; `DropRatio` is rendered as **information discarded**, never as a saving
+      (G14, FR23, NFR12).
+
+### 13.1 Wave 16d acceptance
+
+- [ ] **A26.** The context coverage table carries an entry for **every (language, policy)** pair; a missing
+      pair fails a generated check, and each language gap names the **list splitter** (G15, FR24, NFR14).
+- [ ] **A27.** A selection materializes in a language beyond Go and Python, with retention decided by the
+      **shared** policy code and no splitter deciding it (G16, FR26).
+- [ ] **A28.** A newly covered language's **drop record** is produced by the shared path and is
+      byte-comparable with an existing language's; no code path emits the deletion without it (G16, FR28,
+      NFR15).
+- [ ] **A29.** A policy whose content is produced at run time refuses with the **same cause in every
+      language**, unaffected by splitter coverage (G17, FR25).
+- [ ] **A30.** A call site that wrote **no message list** is told **that**, in every language, and refuses
+      identically once its splitter lands — with the ordering test proven able to go **red** (G17, FR27,
+      NFR16).
+- [ ] **A31.** Before a policy is chosen, the surface states the node's language coverage and renders it as
+      a **different sentence** from a policy no language can materialize (FR29).
 
 ## 14. Open questions
 
@@ -517,3 +853,30 @@ when a retrieval change is a **verified delta** measured on data it was not tune
 4. **Whether `structured-extraction` is lossy** — extracting a structured summary from a conversation
    discards the surface form; whether that counts against drop tolerance or is treated as a
    representation change (like `full-history`'s identity) needs a decision before its `Lossy` flag is set.
+5. **Where the drop ratio for an unmeasured (policy, node) pair comes from.** FR18's third verdict says
+   what to do when it is missing; it does not say who fills it in. Proposed: a cheap measurement pass the
+   user can trigger from the `not-yet-measurable` state itself, so the verdict is a next step rather than
+   a dead end. Decide before 16c's console work, since it shapes what that state renders.
+6. **Whether a user-declared drop tolerance should be per-node or inheritable per-workflow.** Per-node is
+   what FR19 specifies and what the hash supports; a workflow-level default would be far less tedious on a
+   large graph but introduces a second place tolerance comes from. Proposed: per-node in 16c, with a
+   workflow default deferred — the coarse-to-fine direction is not a one-way door, the reverse is.
+7. **What happens to an applied authored context change when a later measurement shows it exceeds the
+   node's tolerance.** It was `not-yet-measurable` when applied and is now known to be over. Proposed:
+   report it on the node and in the record; never silently revert a customer's merged change — the same
+   posture P13 open question 8 takes for a downgrade that later fails verification.
+9. **Whether a language may be covered for `sliding-window` but not `semantic-compaction`.** Both are
+   `select` policies and share one deletion mechanic, so a splitter should carry both. But compaction's
+   retained set is content-dependent, and a language whose splitter cannot recover element *text*
+   faithfully (escapes, multi-line strings) could select correctly for windowing and wrongly for
+   compaction. Proposed: a splitter must return element text faithfully or not be admitted, keeping the
+   two policies together per language rather than letting coverage fragment inside one mechanic.
+10. **What a splitter does with a list that mixes written elements and a spread.** Python's `*history` and
+    the JavaScript spread name the same problem: some elements are written and some are not. Proposed:
+    the presence of a spread makes the list unselectable and refuses under `call-site-cannot-carry-it`
+    naming the spread — selecting among the written half while the unwritten half survives would produce a
+    diff whose retained set is not the policy's.
+11. **Whether the drop record should name the language.** It records which turns were not retained; the
+    record is currently language-free, which is what makes cross-language byte-comparison possible.
+    Proposed: keep it language-free and carry the language on the transform record instead, so the
+    comparison stays trivially assertable.

@@ -54,6 +54,21 @@ type ContextChoice struct {
 	Policy string // "summarization" | "sliding_window" | "topk" | …
 	// TopK is carried for the RAG top-k tune so the operator can prefer a larger window; 0 when N/A.
 	TopK int
+	// ChunkSize and EmbeddingModel are the other two retrieval knobs OpRAGTune proposes over (P16 task
+	// 6.2). Metadata only — the operator references the entry by Ref and never inlines these; they exist
+	// so a rationale can say WHAT changed and so two entries of the same policy are distinguishable.
+	// Zero/empty when the entry does not set them.
+	ChunkSize      int
+	EmbeddingModel string
+	// Lossy marks a policy that can drop information (summarization, compaction, extraction). It is the
+	// same distinction registry.AssembledContext.Lossy draws: a lossless policy's zero drop is a property
+	// of the policy, not a measurement, and the drop gate must not read the two alike (P16 task 5.3).
+	Lossy bool
+	// ExpectedDrop is the pre-verification estimate of the fraction of context this entry would drop,
+	// in [0,1]. It is platform metadata of exactly the kind ModelChoice.CostPerRun already is — an
+	// estimate that lets the drop gate judge a policy nothing has run yet. A MEASURED drop for this node
+	// always beats it (DropGate.Observed). Meaningless unless Lossy.
+	ExpectedDrop float64
 }
 
 const (
@@ -226,6 +241,14 @@ func cloneOverride(o variantspec.NodeOverride) variantspec.NodeOverride {
 		PromptRef:     o.PromptRef,
 		ContextPolicy: o.ContextPolicy,
 		ApplyMode:     o.ApplyMode,
+	}
+	// 🔴 The drop tolerance is COPIED BY VALUE, not aliased (P16 task 5.3). A candidate that shared the
+	// baseline's pointer would let a later mutation of one reach the other; a candidate that dropped it
+	// entirely would be a proposal the drop gate cannot judge — it would read "no tolerance" and admit a
+	// change the node's author had already ruled out.
+	if o.ContextDropTolerance != nil {
+		t := *o.ContextDropTolerance
+		out.ContextDropTolerance = &t
 	}
 	if o.SkillRefs != nil {
 		out.SkillRefs = append([]string(nil), o.SkillRefs...)

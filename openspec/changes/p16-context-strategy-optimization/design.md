@@ -65,6 +65,11 @@ This is also why the interim refusal gets a test that asserts it is **loud**: a 
 policy on an unbuilt language produces a typed error *and* does not transform as its base config. If
 that test cannot be made to fail, the guarantee is decoration.
 
+> **Scope note (Decision 9).** "The Go engine materializes context; every other language keeps
+> `refuseContext`" is an **ordering** decision, not a terminal state. Decision 9 and wave 16d make the
+> (language, policy) coverage table total and define what each remaining language actually needs — a list
+> splitter and a row, with retention and the drop record staying shared.
+
 ## Decision 2 — Context is materialized as code, inline, in the diff
 
 A materialized policy rewrites the message-assembly region of the call site, and the resolved assembly
@@ -156,6 +161,77 @@ split one axis's identity across two enum members, double the `config_hash` surf
 second resolveNode block and a second rewriter for behavior the `rag-retrieval` policy already models.
 The closed enum stays closed.
 
+## Decision 8 — Authoring on this axis is governed by loss, and the gate never refuses on ignorance
+
+A user may select a node's context policy and parameters, declare or clear its drop tolerance, and tune
+retrieval — all through the shared
+[`authored-change`](../p13-prompt-model-optimization/specs/authored-change/spec.md) contract. Three
+axis-specific rules. The **drop-tolerance gate runs at preflight**, before any eval spend, and where the
+policy's drop ratio for that node has never been measured it returns **`not-yet-measurable`** naming the
+missing measurement — never `admissible`, never `refused`. The **language boundary is stated before the
+user chooses**, naming the node, the policy, and the language. And **retrieval parameters are offered only
+on a classifier-labelled retrieval node**, with no user path to set that label.
+
+**Alternative rejected (a) — treat an unmeasured drop ratio as passing.** It keeps the flow moving and the
+node is probably fine. Rejected on **L1 safety (honesty)**: returning `admissible` asserts that a safety
+check succeeded when it never ran, and this is the axis where the thing being checked is *silent
+information loss* — the failure mode that produces a worse answer with no error anywhere. A user who is
+told "admissible" reasonably believes the drop gate looked.
+
+**Alternative rejected (b) — treat an unmeasured drop ratio as failing.** Fail-closed is the reflex, and
+it is right for *membership* questions (a tool outside the discovered set, a skill outside the registry).
+It is wrong here, on **L3 user-facing complexity**: the missing fact is about the **platform's measurement
+coverage**, not about the user's change. Blocking a legitimate authored change because we have not yet
+measured this policy on this node makes our incompleteness the user's problem, and would make the axis
+unusable on exactly the workflows that have not been evaluated yet — which is all new ones. The gate's
+existing posture is correct and is preserved: **it never refuses on ignorance**, and the third verdict is
+how it says so out loud.
+
+**Alternative rejected (c) — let the user mark a node as retrieval to unlock retrieval parameters.** It
+would help when the classifier is wrong, which it sometimes is. Rejected on **L1 safety**, and it is the
+same rule as *a user may not author the evidence*: the classifier gate is what makes a retrieval
+parameter meaningful, and a user who can set the label can unlock parameters on a node where they do
+nothing, then attribute a result to them. A misclassification is a classifier defect to fix upstream, not
+an override to hand out.
+
+**Corollary — drop ratio is loss, never a saving.** A policy that discards more of the conversation will
+show fewer tokens. Presenting that reduction as a saving on an `unverified` change would invert the
+meaning of the one number this axis exists to make honest. Drop ratio is displayed as information the
+policy discarded; whether that was worth it is a harness verdict.
+
+
+## Decision 9 — Every (language, policy) pair carries a value; retention stays shared, the splitter is per language
+
+`spanContextMaterializers` carries Python, and its own comment already says the honest thing: TypeScript
+and JavaScript are "a row plus its splitter", and "what is NOT in this table refuses through the last
+branch of spanRewriteContext, by name". That is a scope statement, and scope statements age into product
+boundaries the moment the data model has no way to express *we have not built this yet*. An absent row
+renders on every surface as *this policy does not apply to your code* — which, for a **selection** policy,
+is never true: the deletion is sound wherever a written message list can be split into its elements.
+
+**Coverage becomes total over (language × policy).** Every registered language appears against every
+declared policy, and each cell is one of: materialized by selection, equivalent to the unrewritten call
+site, or refused with a named cause. A language gap names the **list splitter**; a policy gap names the
+fact that the content does not exist in source. Wave 16d then adds the remaining splitters.
+
+**Retention is not per language — and this is the load-bearing half.** Which turns a policy retains *is*
+the policy. If a TypeScript splitter decided retention for itself, one `config_hash` would describe two
+different configurations, and the harness — which reads only the hash and the trace — would compare them
+as one. So the shared `SelectionPolicy.Retain` decides in every language, and a splitter answers exactly
+one question: what are the written elements of this list. *Rejected: let each language's rewriter
+implement the policy directly*, which is faster per language and turns the axis into N dialects of one
+contract. The drop record follows the same rule: produced by the shared path, so a newly covered language
+**cannot** delete turns without recording them, and `context_drop_ratio` cannot become quietly incomplete
+as coverage grows.
+
+**The policy and the source are asked before the language.** This axis shipped the wrong ordering once and
+corrected it, which makes it the best evidence for the cross-axis rule (P13 Decision 13). A summarized,
+tiered or retrieved context does not exist in source in **any** language — telling a Python author their
+rewriter is pending about it promises a rewriter that will never apply it. A call site that unpacks its
+arguments from a mapping has written **no message list** — nothing to select among today, and nothing to
+select among after every splitter has landed. Both are reported first; the splitter is the honest answer
+only when neither is true.
+
 ## Interfaces sketch
 
 ```
@@ -178,6 +254,22 @@ retrieval-tuning (OpRAGTune):
 data model:
   NodeOverride  += context_drop_tolerance? float64∈[0,1]   // additive, omit-when-absent
   ResolvedNode  += context_drop_tolerance? float64          // frozen when set; hashed additively
+
+// P16 16c — context-authoring: a second ORIGIN (see p13 authored-change)
+authoring.Draft{ Edits: node → { ContextPolicy?, PolicyParams?, DropTolerance?, RetrievalParams? } }
+preflight(draft) =
+    materializable(node.language, policy)
+      ? dropGate(policy, node)
+          measured ∧ ratio <= tolerance → admissible
+          measured ∧ ratio >  tolerance → refused{ node, tolerance, measured_ratio }   // BEFORE eval spend
+          UNMEASURED                    → not-yet-measurable{ missing }                // 🔴 never `admissible`,
+                                                                                       //    never `refused`
+      : refused{ node, policy, language }
+offer(node) = { policies: registry-registered,                       // never free text
+                retrieval_params: classifier(node) == RetrievalRAG } // 🔴 no user path sets the label
+verify(authored retrieval) = pin(retriever, params, seed)
+                             ∧ holdout platform-derived ∧ holdout ∩ shown-motivation == ∅
+display(drop_ratio) = "information discarded"                        // 🚫 never "tokens saved"
 ```
 
 ## Risks
@@ -190,5 +282,10 @@ data model:
 | A retrieval change overfits its tuning set | Decision 4 — verified on a held-out set disjoint by construction; an overlap is refused. |
 | An unpinned retriever makes `config_hash` non-reproducible | Decision 5 — pin retriever + params + seed; identical `ResolvedRequest` under a fixed seed. |
 | A new policy forces a schema or `Dimension` change | Decision 6 — additions behind the `Policy` interface via `Store.AddPolicy`; no schema, no enum member. |
+| An unmeasured drop ratio is treated as a pass, so the user believes a check ran that did not | Decision 8 — the third verdict `not-yet-measurable` names the missing measurement; `admissible` is never returned for an unmeasured input. |
+| An unmeasured drop ratio is treated as a failure, blocking every new workflow | Decision 8 — the gate **never refuses on ignorance**; the missing fact is about our measurement coverage, not the user's change. |
+| A user marks a node as retrieval to unlock retrieval parameters | Decision 8 — the classifier label is not user-settable through any surface, flag, or role; a misclassification is fixed upstream. |
+| An authored lossy policy is presented as a token saving | Decision 8 corollary — drop ratio is displayed as information discarded; an `unverified` change is attributed no saving. |
+| A user picks the held-out set that judges their own retrieval change | The shared *user may not author the evidence* rule — the split is platform-derived and disjoint from the cases shown as motivation. |
 | The drop-tolerance field breaks frozen `config_hash` golden vectors | Additive, omit-when-absent — a node with no tolerance hashes byte-identically to pre-P16. |
 | A summarizer/retriever credential leaks to a sandboxed node | Every model/retrieval call is host-side through `HostServices`; the policy never holds a secret. |

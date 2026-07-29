@@ -3,9 +3,9 @@
 | Field | Value |
 |---|---|
 | Phase / Milestone | P15 / M18 |
-| Target window | Three waves: 15a node-wiring operators (merge/reorder/prune), 15b wiring-safety as a first-class gate, then **15c call-site materialization** — the reorder-only slice of a wiring rewriter |
+| Target window | Five waves: 15a node-wiring operators (merge/reorder/prune), 15b wiring-safety as a first-class gate, **15c call-site materialization** — the reorder-only slice of a wiring rewriter — **15d user-initiated change** (`wiring-authoring`), then **15e all-language coverage** (`wiring-language-coverage`) |
 | Lead role(s) | System Designer + Backend (co-leads) |
-| Supporting role(s) | AI Engineer, QA Engineer |
+| Supporting role(s) | AI Engineer, Frontend, DevOps, QA Engineer, Product Designer, Sales Operations |
 | Status | Draft |
 | OpenSpec change | `p15-workflow-wiring-optimization` |
 | Related | [P2 — Config & Runtime](P2-config-runtime.md) · [P4 — Eval Harness](P4-eval-harness.md) · [P5.5 — Proposals & Verification](P5.5-proposals-verification.md) · [ADR-001](../adr/ADR-001-source-transformation-apply-model.md) |
@@ -52,7 +52,14 @@ data, and never when it would produce a workflow that does not type-check.
 insertion → config_hash). Free rewiring is **PARTIAL** (reorder is a single swap; prune rewires
 neighbours; parallelization and general rewiring are unbuilt). `OpMerge` is **reserved, UNIMPLEMENTED**.
 Source-level materialization of any wiring change is **ABSENT** (the transform engine emits none), so
-P15 carries an explicit **interim refusal** for it.
+P15 carries an explicit **interim refusal** for it. Where the rewriter does land (15c), it materializes in
+**Go and Python only** — a scope statement rather than a limit of the languages, since the per-language
+part of a move is one statement resolver. Wave **15e** (`wiring-language-coverage`) makes that a total,
+per-language table under the cross-axis [`language-coverage`](P13-prompt-model-optimization.md) contract
+and closes it, while keeping the plan, the coherence gate and the permutation invariant one neutral path
+— and while putting the **requested shape** and the source's structure ahead of the language in a refusal,
+because on a real repository "there is no adjacent transposable pair" is the answer far more often than
+"your language is pending".
 
 ## 2. Problem & context
 
@@ -134,6 +141,31 @@ whether a wiring proposal is surfaced at all). No P15 requirement edits any of t
   wiring change, a resolved spec whose `Order`/`Edges` differ from the discovered wiring SHALL be
   **refused at transform** (`unsafeRewrite`), naming the axis — never silently dropped nor applied as a
   no-op that would let a wiring `config_hash` be scored against unchanged code.
+- **G10. A user can rearrange the graph themselves.** Reorder, parallelize, merge, and prune SHALL be
+  available as **user-initiated** drafts on the shared `authored-change` spine, with `Origin` recorded and
+  never hashed.
+- **G11. The coherence gate moves left, and names the break.** Every authored wiring draft SHALL be
+  validated by the **same** gate at **preflight**, and an incoherent ordering SHALL be refused naming the
+  **consumer, the producer, and the field** - never a bare "invalid ordering".
+- **G12. A reconciling adapter is seen before it is agreed to.** An adapter that makes an authored
+  reordering admissible SHALL be shown as an **explicit inserted node with its rewired edges in the
+  preview, before submission**.
+- **G13. The gap between what the editor offers and what the transform applies SHALL be visible.** A shape
+  the transform cannot materialize SHALL be refused at preflight with the **shape named**, and SHALL NOT
+  be presented as an applicable change.
+- **G14. A refused wiring draft is never a scoreable variant.** It SHALL NOT be enqueued for evaluation,
+  its hash SHALL NOT be submitted for scoring, and it SHALL NOT appear among the workflow's variants -
+  because scoring a wiring hash against unchanged source is a false result, not a partial one.
+- **G15. A transposition SHALL be materializable in every registered language.** The wiring coverage table
+  SHALL carry an entry for **every** language discovery registers, and a language that cannot yet
+  materialize SHALL name the **statement resolver** as its missing artifact — not be described as
+  structurally incapable of the move.
+- **G16. The statement resolver SHALL be the only per-language part of a wiring move.** The plan, the
+  permutation invariant, the edge-set check, the coherence gate, and the emitted edit SHALL stay
+  language-neutral, so adding a language is adding a resolver and its coverage entry.
+- **G17. A shape refusal and a language refusal SHALL NOT be conflated.** A merge, a prune, a non-adjacent
+  move, more than one exchange, or a workflow with **no adjacent transposable pair** SHALL be refused by
+  **shape**, identically in every language, and SHALL NOT be reported as a missing rewriter.
 
 ### Non-goals (deferred or owned elsewhere)
 
@@ -161,6 +193,8 @@ whether a wiring proposal is surfaced at all). No P15 requirement edits any of t
 | **System designer / reviewer** | A wiring change arrives as a diff whose reordering is type-checked, with any bridging adapter visible as generated source in the same diff. | A rearranged graph reaches review with no evidence it type-checks, and coercions hide between nodes. |
 | **Platform engineer running the catalog** | `OpMerge` is a real catalog row with a prior, so proposals are complete and rankable alongside the content operators. | A reserved constant advertises a capability the catalog cannot produce. |
 | **QA engineer** | The compile gate can be made to **go red**: an incoherent reorder yields *no* runnable spec, provably. | "It's validated" is a claim no test can fail, which means it is decoration. |
+| **Workflow owner rearranging the graph** (primary, 15d) | They drag a node and are told, on the gesture, whether it is admissible, what it would break (consumer, producer, field), or which shape the platform cannot yet apply. | A graph editor that accepts every gesture and refuses at apply time - a machine for producing rearrangements that can never ship. |
+| **Reviewer of an authored reorder** (15d) | Any adapter that makes the reorder legal was visible in the preview before submission and appears as generated source in the diff. | A diff containing a component the author never saw proposed, which no reviewer can meaningfully assess. |
 
 Non-personas: the **end user of the customer's own LLM product** (P15 never changes runtime behavior a
 customer's users see except through a verified, merged delta); **operators** (P8) — wiring optimization
@@ -286,6 +320,73 @@ requires. The slice is a **transposition of two adjacent, independent sibling st
   produce a byte-identical diff, and the swap SHALL be its own inverse — applying the same transposition
   twice returns the original bytes.
 
+### User-initiated change on this axis (capability `wiring-authoring`)
+
+The cross-axis rules are **FR21-FR33 of [P13](P13-prompt-model-optimization.md)** (capability
+`authored-change`) and apply here in full without restatement. P15 adds only what this axis needs - and it
+needs more than the others, because **a graph editor looks like it can do anything while the transform
+materializes exactly one shape**.
+
+- **FR22.** A user SHALL be able to draft a **reorder**, a **parallelization**, a **merge**, and a
+  **prune**; every authored wiring draft SHALL be validated by the typed-contract coherence gate at
+  **preflight** - before submission and before any codemod is generated - using the **same** gate an
+  operator candidate passes, not a second validator.
+- **FR23.** An authored ordering that would leave a consumer's required input undefined SHALL be refused
+  at preflight naming the **consuming node**, the **producing node**, and the **field** that would become
+  undefined. A bare "invalid ordering" SHALL NOT be an acceptable refusal on this axis.
+- **FR24.** Where a catalogued adapter reconciles a producer-to-consumer mismatch in an authored draft,
+  the ordering SHALL be reported **adapted** and the adapter SHALL be presented as an **explicit inserted
+  node with its rewired edges in the preview, before the user submits**. The adapter SHALL ship as
+  generated source in the same reviewable diff and SHALL NOT be a hidden runtime coercion; adapter
+  identity SHALL remain deterministic.
+- **FR25.** An authored wiring change whose shape the transform cannot materialize - a merge, a prune, an
+  edge change, a non-adjacent move, more than one transposition at once, unprovable independence, or a
+  language with no statement materializer - SHALL be refused at preflight with the **shape named**, and
+  SHALL NOT be presented as an applicable change.
+- **FR26.** An unmaterializable authored wiring change SHALL NOT be presented as a **scoreable variant**:
+  no evaluation run SHALL be enqueued for it, its `config_hash` SHALL NOT be submitted for scoring, and it
+  SHALL NOT appear among the workflow's variants. Evaluating a wiring-changed `config_hash` against
+  unchanged source would score the base configuration under a variant's hash - a false result, and the
+  same failure the interim refusal exists to prevent.
+- **FR27.** Where the surface retains a refused wiring draft, it SHALL retain it as a **recorded intent**
+  explicitly marked as neither applicable nor scoreable, and SHALL NOT describe it as pending, queued, or
+  awaiting evaluation.
+- **FR28.** An authored **parallelization** SHALL be admissible only where the analysis **proves** the
+  nodes data-independent; unprovable independence SHALL be a refusal naming the blocking dependency.
+- **FR29.** A materializable authored transposition SHALL be applicable while `unverified`, with **no**
+  latency, token, cost, or quality benefit attributed to it until the harness has run.
+- **FR30.** Reverting an authored wiring change SHALL reproduce the parent `config_hash`
+  **byte-identically**, including any inserted adapters.
+
+### All-language coverage on this axis (capability `wiring-language-coverage`)
+
+The cross-axis rules — coverage as a **total** function over every registered language, per-cell claims,
+the three typed refusal classes and their specific-first evaluation order, one coverage source, executable
+evidence for every row, no gate weakened to reach a language, the versioned offline table, and coverage no
+plan can move — are **FR41–FR51 of [P13](P13-prompt-model-optimization.md)** (capability
+`language-coverage`). They apply here in full and are **not** restated.
+
+- **FR31.** The wiring coverage table SHALL carry an entry for **every** registered language, stating
+  whether an adjacent transposition can be materialized and, where it cannot, naming the **statement
+  resolver** as the missing artifact.
+- **FR32.** Per-language knowledge SHALL be confined to resolving a statement's boundaries. The plan, the
+  permutation invariant, the edge-set check, the coherence gate, and the emitted edit SHALL be produced by
+  the same language-neutral path in every language, and the permutation invariant SHALL be asserted
+  identically everywhere — an emission that fails it SHALL be refused, never emitted.
+- **FR33.** A wiring change that is **not a single adjacent transposition** — a merge, a prune, an added
+  or removed edge, a non-adjacent move, or more than one exchange — SHALL be refused with a cause naming
+  the **requested shape**, identically in a language with a resolver and one without, and SHALL NOT imply
+  that a resolver would carry it.
+- **FR34.** A workflow whose nodes are **not adjacent statements** SHALL be refused with a cause stating
+  that the source offers no transposable pair; the language SHALL NOT be named as the reason.
+- **FR35.** For a refused wiring change the **most specific true** cause SHALL be reported, evaluated in
+  the order: the requested shape → the coherence gate → the source's statement structure → the language's
+  resolver.
+- **FR36.** In **no** language, covered or not, SHALL an unmaterializable wiring draft become a scoreable
+  variant; and before a user expresses a move, the authoring surface SHALL state — from the shared
+  coverage source — whether the node's language can carry a transposition **and** whether the workflow
+  offers a transposable pair.
+
 ## 7. Non-functional requirements
 
 | # | Requirement | Target |
@@ -297,6 +398,13 @@ requires. The slice is a **transposition of two adjacent, independent sibling st
 | **NFR5** | **Eval-agnostic** | P15 adds no metric, no scorer, and no Dimension-label branch to the harness; a wiring-changed `config_hash` is scored by the existing `RunMetrics`. |
 | **NFR6** | **Adapter reviewability** | Every inserted adapter is present as generated source in the diff a reviewer reads; no coercion exists that is not in that diff. |
 | **NFR7** | **Verification-gated surfacing** | No wiring candidate is presented as a recommended change without a P5.5 verified delta on held-out data; a produced-but-unverified candidate is labelled exploratory, never a claim. |
+| **NFR8** | **Preflight and compile never disagree** | The verdict the authoring surface shows for a draft and the verdict `GateReorder` produces at compile are the **same gate's** output, asserted across every verdict class. A second validator would let the editor bless what the compiler rejects. |
+| **NFR9** | **A refused shape is unreachable by evaluation** | Machine-asserted: no code path enqueues an evaluation run, or submits a `config_hash` for scoring, for a wiring draft whose shape the transform refuses. This keeps a false measurement structurally impossible, not merely unlikely. |
+| **NFR10** | **Every gesture has a verdict at the moment it is made** | The editor's verdict for a drafted gesture is produced without a submit, a diff, or an eval run, and each of the three verdict classes renders distinctly. A gesture with no verdict is a gesture that will disappoint later. |
+| **NFR11** | **No hidden component reaches the diff** | Every inserted adapter appearing in an authored change's diff was visible in the preview the user submitted; asserted by comparing the preview's adapter set against the diff's. |
+| **NFR12** | **Coverage is total, and generated** | The wiring coverage table carries an entry for every registered language; a test enumerates the registered set and fails on a missing cell. A language absent from a table reads as "the move does not apply here", which is the opposite of the truth: discovery finds these statements fine. |
+| **NFR13** | **Shape and language refusals are provably distinct** | A merge requested on a node in a language with no resolver reports the **merge**; the test goes red if the resolver cause is reported first. This is the refusal users hit most on this axis — a real repository is far more likely to have no transposable pair than to be in an uncovered language. |
+| **NFR14** | **A resolver row is a proof** | Each language's statement resolver is admitted only with a fixture that emits a transposition in it and asserts both the permutation invariant and the reparse. No language reaches coverage by relaxing the invariant. |
 
 ## 8. System design summary
 
@@ -360,6 +468,10 @@ land its effect in `ResolvedConfig` → `config_hash`."
 | **D8** | **The permutation invariant is a NEW edit class with its own gate, not a loosening of the existing one** | Relax `gateMinimal`'s "no rewrite may change the file's line count" so a block move fits through | **L2 稳定 + L5 不可演进.** That rule is what makes "only the targeted lines changed" checkable at all; relaxing it for one rewriter removes the check for *every* rewriter, forever. A separate class keeps the old invariant intact for value rewrites and gives the swap a stronger one (same lines, reordered). |
 | **D9** | **Go and Python first; every other language refuses by name** | A generic line-based move for all seven frontends | **L1 安全.** Independence needs a parse. Go has `go/ast`; Python is whitespace-explicit and tree-sitter gives the spans. For the rest, a textual move would be a guess that compiles — the failure mode with no downstream net (P14 D-14.3, applied again). |
 
+| **D10** | **The graph editor tells the truth about every gesture, and a refused shape is not a scoreable variant** | Accept any rewiring and surface the refusal at apply time; insert reconciling adapters silently since the gate proves they drop nothing | **L3 + L2 + L1.** Dragging a node is a two-second gesture and this axis materializes exactly one shape, so an editor that accepts everything manufactures rearrangements that can never ship. Worse, an unmaterializable wiring change is not merely un-appliable but **unscoreable**: evaluating its `config_hash` against unchanged source scores the base configuration under a variant's hash - the same false result D5's interim refusal exists to prevent - so a refused draft sitting in a variant list "awaiting evaluation" has already told the user something untrue. On adapters, *an indirection never hides a value from review*: a user who reorders two nodes and receives a diff containing a component they never saw proposed cannot review it. The coherence gate is the right thing to move left precisely because it decides statically and cheaply - no eval spend, no model call, no build. |
+
+| **D11** | **Every registered language gets a statement resolver and a coverage entry; the shape question is asked before the language question** | (a) keep D9's "Go and Python first" as the terminal state; (b) reach the other five with a generic line-based move | **L6 + L3, and L1 for (b).** (a) was correct as an ordering and wrong as an endpoint: nothing about TypeScript, Kotlin, Java or Rust makes an adjacent transposition unsound — tree-sitter gives their statement boundaries as readily as Python's — so an absent row describes our backlog while rendering as "the move does not apply to your code". (b) is the same refusal D9 already made and it still holds: a textual move without a parse is a guess that compiles. The second half of this decision matters more in practice than the first: on a real repository the dominant refusal is **no adjacent transposable pair** or a requested shape this axis does not materialize, and both are true in Go today. Reporting those as "no wiring rewriter for your language" sends an engineer to wait for work that would not have helped them. |
+
 ### 8.4 Data model additions
 
 **None to the hashed configuration.** `Order`, `Edges`, and `InsertedAdapter` already exist on
@@ -418,6 +530,115 @@ coercion cannot hide. Determinism gets a test too — the same reorder yields th
 same `config_hash` — because "deterministic" is a promise a re-run can falsify. And the interim refusal
 (FR8) gets a case: a wiring-differing spec at transform returns the typed refusal, not a silent no-op.
 
+### 9.1 Wave 15d - user-initiated change, by role lens
+
+**System Designer - *the editor may not promise what the transform refuses.***
+This axis has the largest gap in the product between what a surface can express and what the engine can
+apply, and 15d's whole job is to keep that gap visible instead of letting the editor paper over it. Two
+structural commitments do the work. The coherence gate runs at **preflight**, using the same
+`GateReorder` an operator candidate passes - not a second validator, because a second validator will
+eventually bless what the compiler rejects. And a refused shape is **not a variant**: no eval run, no hash
+submitted for scoring, no row in the variant list. That second rule is the one that matters most, because
+the failure it prevents is not a bad UX but a **false measurement**.
+
+**Backend - *name all three, and probe the shape.***
+Two refusal paths, and both must be specific. An incoherent ordering names the **consumer, the producer,
+and the field** - a graph error that says only "invalid ordering" gives a user nothing to act on, and this
+axis is the one where the system genuinely knows the answer. A materializability refusal names the
+**shape**: merge, prune, edge change, non-adjacent, multi-swap, unprovable independence, or
+no-materializer for this language. The adapted path returns the inserted adapter node and its rewired
+edges in the preflight result itself, so the preview can render what the user is about to agree to, with
+adapter identity deterministic so the preview and the diff cannot disagree.
+
+**Frontend - *a verdict per gesture, and a refused draft that never looks pending.***
+The wiring surface is where this program's UX risk concentrates. Each gesture gets its verdict **as it is
+made**, not on submit - admissible, refused with the shape named, or adapted with the adapter drawn into
+the graph. The incoherence refusal highlights the consumer, the producer, and the field in the graph
+itself, because names in a toast are weaker than names on the nodes. And a refused draft must never appear
+in the variant list or wear the word "pending": a recorded intent is visually and semantically a different
+object from a variant, or the honesty of FR26 is lost at the last inch. As everywhere: no capability is
+removed from the existing surface, and tokens only.
+
+**AI Engineer - *the same harness, and nothing to score when there is nothing to apply.***
+A materializable authored transposition is scored by the axis-agnostic harness like any other
+configuration. The discipline unique to this axis is negative: there is no "score it anyway with the
+wiring ignored" mode, because that is exactly the scoring-against-unchanged-source failure. Where the
+transform refuses, the honest answer to "how would this perform?" is *we cannot measure that yet*.
+
+**QA Engineer - *the impossible thing must be provably impossible.***
+Beyond making every refusal class go red, one assertion carries this wave: **no code path enqueues an
+evaluation run or submits a `config_hash` for scoring for a wiring draft whose shape the transform
+refuses.** That is a structural claim, and it must be asserted structurally rather than by testing the
+handful of paths someone thought of. Then the permutation invariant on the applied swap - same line count,
+same multiset, changes confined to the two blocks - read back from the **emitted diff**, not from the
+handler's return. And reversal, including inserted adapters, back to a byte-identical parent hash.
+
+**DevOps - *the same shape names offline.***
+The CLI must produce the same verdict and the same **shape name** as the console, because a user
+diagnosing "why won't this apply?" across two surfaces with two vocabularies has two problems. Nothing new
+crosses the boundary: the graph structure is already inside it, and preflight must not become the first
+path that ships a call-site fact outward.
+
+**Product Designer - *two refusals, two different sentences.***
+"This breaks your graph" and "we cannot apply this shape yet" are different messages requiring different
+user actions, and collapsing them is the most likely design error here. The first names the break and
+invites a fix; the second names the shape and is honest that the limitation is ours. A recorded intent is
+described as retained, not applicable, not scored - never "pending", which implies someone is working on
+it. The inserted adapter needs its own moment: this reorder is only legal because we would add this
+component, shown before the user commits.
+
+**Sales Operations - *the graph editor is real; the applicable shape is one.***
+Deliverable: users rearrange the graph and the platform tells them the truth about every gesture -
+including type-safety breaks named down to the field. Always paired, because a demo of a graph editor
+implies far more: 🚫 only the **adjacent-transposition** shape is applied today; a merge, a prune, or an
+edge change is **refused by name**; and a refused shape is **not scoreable** - we will not show a number
+for a change we cannot apply. There is no override at any tier.
+
+### 9.2 Wave 15e — all-language coverage, by role lens
+
+**System Designer (co-lead) — *the resolver is the only per-language part, and that is a design property
+to defend.*** Everything that makes a wiring move safe is language-neutral already: the plan that admits
+exactly one adjacent transposition, the edge-set check, the coherence gate, and the line-permutation
+invariant that catches an emission which is not a permutation. What differs per language is one question —
+where does the statement enclosing this call site begin and end. Keeping it that way is the whole
+extensibility argument (L6): five languages become five resolvers plus five coverage rows, and no gate is
+written twice. The moment a language needs its own invariant or its own gate, this axis has acquired five
+dialects of one safety property, and the one that is subtly weaker will not be the one anyone audits.
+
+**Backend — *the shape question comes first, and on real repositories it is the answer.*** The refusal a
+user is most likely to hit here is not "your language has no resolver" — it is "this workflow has no
+adjacent transposable pair" or "a merge is not a transposition", and both of those are true in Go today.
+So the ordering rule is not a nicety on this axis; it is the difference between a sentence an engineer can
+act on and one that tells them to wait for work that will not help them. Beyond ordering: a resolver is
+admitted only with a fixture that emits a transposition and asserts **both** the permutation invariant and
+the reparse, and no language reaches coverage by relaxing the invariant.
+
+**AI Engineer (support) — *an unmaterializable draft is unscoreable in every language.*** This is the
+strictest rule on any axis and coverage growth does not soften it: a wiring change that cannot be
+materialized must not become a scoreable variant anywhere, covered or not, because evaluating its hash
+against unchanged source scores the base configuration under a variant's identity. Adding languages adds
+places to emit and therefore places to get this wrong; the structural assertion (no path enqueues a run for
+a refused draft) has to hold over the new engines too.
+
+**Frontend (support) — *two boundaries, stated before the drag.*** A user reaching for a node needs two
+facts the platform already holds: can this language carry a transposition, and does this workflow offer a
+transposable pair. Both come from the shared coverage source, both are stated before the gesture, and they
+are **different sentences** — the first has a "when", the second does not. An editor that accepts the drag
+and refuses afterwards manufactures rearrangements that can never ship, which is the failure 15d already
+named.
+
+**QA Engineer (support) — *the red run is on the ordering test.*** Totality is generated over the
+registered language set. The ordering test needs a fixture that is both shape-refusable and
+language-refusable and must go red when reversed. And the invariant test travels: every newly covered
+language emits a transposition whose result is asserted to be a permutation of the original lines, by the
+same assertion, not a per-language copy of it.
+
+**DevOps + Product Designer + Sales Operations (support).** The offline table carries the wiring cells,
+versioned and named in a refusal. The wording keeps the two boundaries apart: a missing resolver is *not
+yet applied by the platform*; a workflow with no transposable pair is a fact about the source with no
+"when" attached. And the claim is stated per cell — 🚫 never "we reorder workflows", which promises merges
+and prunes this axis refuses in every language, including the covered ones.
+
 ## 10. Dependencies
 
 **Requires**
@@ -446,6 +667,18 @@ same `config_hash` — because "deterministic" is a promise a re-run can falsify
 | A merge is surfaced that scores worse | AI Engineer | Verification-gated surfacing on held-out data (FR7/NFR7); a produced candidate is exploratory until confirmed. |
 | The wiring axis quietly acquires a bespoke metric | System | NFR5 — the harness stays axis-agnostic; no metric, no Dimension-label branch. |
 | `OpMerge`'s stored semantics change after proposals reference it | System | `decisions.md` fixes the semantics as a one-way door before any `mergeOp` ships. |
+| A graph editor accepts a rewiring nothing can apply, and the user learns at apply time | Frontend + System Designer | D10/FR22/FR25/NFR10 — the coherence gate and the materializability probe both run at **preflight**; every gesture gets a verdict as it is made, with the shape named. |
+| A refused wiring draft is scored against unchanged source | System Designer + QA | D10/FR26/NFR9 — a refused shape is **not a scoreable variant**; asserted structurally that no path enqueues an eval run or submits its hash. |
+| A reconciling adapter appears in a diff the author never saw proposed | Product Designer + Backend | D10/FR24/NFR11 — the adapter is an **explicit node in the preview before submission**, and the preview's adapter set is compared against the diff's. |
+| "Invalid ordering" is the whole refusal | Backend + Product Designer | FR23 — the refusal names the **consumer, producer, and field**, highlighted in the graph; the system knows the answer, so withholding it is a defect. |
+| A recorded intent reads as "pending", implying someone is working on it | Product Designer | FR27 — a recorded intent is described as retained, not applicable, not scored; it never appears among variants. |
+| An authored parallelization races on an unproven dependency | Backend + QA | FR28 — admissible only on **provable** data-independence; unprovable is a refusal naming the blocking dependency. |
+| An authored wiring change cannot be undone cleanly because of inserted adapters | Backend | FR30 — reversal reproduces the parent `config_hash` byte-identically, adapters included. |
+| A language is absent from the wiring table and reads as "the move does not apply here" | System Designer + QA | FR31/NFR12 — a **total** table over the registered language set, generated; a missing cell goes red. |
+| A user with no transposable pair is told their language has no rewriter | Backend + Product Designer | FR33/FR34/FR35/NFR13 — shape first, language last; the ordering test goes red when reversed. |
+| A new language's resolver is admitted on a passing emission without the invariant | Backend + QA | NFR14 — a resolver row requires a fixture asserting **both** the permutation invariant and the reparse. |
+| Adding languages multiplies the gate into per-language dialects | System Designer | FR32 — per-language knowledge is confined to statement boundaries; plan, invariant, edge check, gate and edit stay one neutral path. |
+| A refused draft in a newly covered language becomes a scoreable variant | AI Engineer + QA | FR36/NFR9 — the structural assertion holds over every engine: no path enqueues a run for a refused draft. |
 
 ## 12. Rollout & test strategy
 
@@ -474,6 +707,52 @@ un-materializable wiring.
    eval change.
 7. **Verification-gated surfacing** — a produced merge is presented as a recommended change only after a
    P5.5 verified delta on held-out data.
+
+**Wave 15d — wiring-authoring.** The graph editor gains user-initiated drafts on the shared
+`authored-change` spine, with the coherence gate moved to preflight, adapters shown before submission, and
+unmaterializable shapes refused by name and kept out of the variant list. Ends when a user can drag a node
+and receive an honest verdict on the gesture; an incoherent ordering names the consumer, producer, and
+field; an adapted ordering shows its adapter in the preview; a merge, prune, edge change, non-adjacent
+move, multi-swap, unprovable independence, or unsupported language is refused with the shape named; and a
+refused draft is provably unreachable by evaluation. Independently revertible.
+
+**How 15d correctness is proven.**
+8. **One gate, two callers** — the preflight verdict and the compile verdict are the same gate's output
+   across every verdict class (NFR8).
+9. **All three names** — an incoherent authored ordering names the consumer, the producer, and the field.
+10. **Adapter before submit** — an adapted preflight returns the inserted adapter node and rewired edges,
+    and the adapter set in the preview equals the adapter set in the diff (NFR11).
+11. **Shape named** — each unmaterializable shape refuses with its own name; each goes red.
+12. **Structurally unscoreable** — no code path enqueues an eval run or submits a hash for scoring for a
+    refused wiring draft (NFR9).
+13. **Recorded intent is not a variant** — a retained refused draft never appears among scoreable variants
+    and is never described as pending.
+14. **Permutation invariant downstream** — the applied swap's *emitted diff* has the same line count, the
+    same multiset, and changes confined to the two blocks.
+15. **Reversal is byte-exact** — undoing an authored wiring change reproduces the parent `config_hash`,
+    inserted adapters included.
+16. **No override** — no flag, role, plan, or entitlement lets a refused shape reach a diff or an eval run.
+
+**Wave 15e — wiring-language-coverage.** A statement resolver and a coverage entry for every registered
+language, the totality check that forces one, and the refusal ordering that puts the requested shape and
+the source's structure ahead of the language. Ends when the wiring table is total; a transposition
+materializes beyond Go and Python under the **same** permutation invariant and reparse assertions; a merge
+or a workflow with no transposable pair is refused by **shape**, identically everywhere; and no refused
+draft in any language becomes a scoreable variant. Independently revertible: removing it returns the axis
+to its 15c cells with the refusals it already had.
+
+**How 15e correctness is proven.**
+17. **Totality is generated** — every registered language has a wiring entry; adding a frontend with no
+    entry goes red (FR31, NFR12).
+18. **The invariant travels** — a transposition in a newly covered language is asserted by the same
+    permutation and reparse assertions the covered languages use; no per-language copy exists (FR32,
+    NFR14).
+19. **Shape beats language** — a merge requested in a language with no resolver reports the **merge**, and
+    reversing the check goes red (FR33, FR35, NFR13).
+20. **No pair is not no rewriter** — a workflow with no adjacent transposable pair is told that, without
+    the language being named (FR34).
+21. **Still unscoreable** — the structural assertion that no path enqueues a run for a refused draft holds
+    over every newly covered engine (FR36, NFR9).
 
 ## 13. Success metrics & acceptance criteria (M18 exit checklist)
 
@@ -508,6 +787,42 @@ un-materializable wiring.
 - [ ] **A13.** A produced wiring candidate is surfaced as a recommended change only after a P5.5 verified
       delta on held-out data (G5, FR7, NFR7). *判据:* an unverified candidate is labelled exploratory,
       never presented as a claim.
+- [ ] **A14.** A user can draft a reorder, parallelization, merge, and prune from the console **and** the
+      offline CLI, and every draft is validated by the **same** `GateReorder` at preflight (G10, G11,
+      FR22, NFR8). *Criterion:* preflight and compile agree across every verdict class.
+- [ ] **A15.** An incoherent authored ordering is refused naming the **consumer**, the **producer**, and
+      the **field**; a bare "invalid ordering" fails the test (G11, FR23).
+- [ ] **A16.** An adapted authored ordering shows the **inserted adapter node and rewired edges in the
+      preview before submission**, and the preview's adapter set equals the diff's (G12, FR24, NFR11).
+- [ ] **A17.** Each unmaterializable shape — merge, prune, edge change, non-adjacent move, multi-swap,
+      unprovable independence, no-materializer language — is refused at preflight with its **shape named**
+      and is not offered as applicable (G13, FR25, FR28).
+- [ ] **A18.** 🔴 No code path enqueues an evaluation run or submits a `config_hash` for scoring for a
+      refused wiring draft; it does not appear among the workflow's variants (G14, FR26, NFR9). *Criterion:*
+      asserted structurally, not by sampling known paths.
+- [ ] **A19.** A retained refused draft is labeled a **recorded intent** — not applicable, not scored, and
+      never described as pending or queued (FR27).
+- [ ] **A20.** A materializable authored transposition applies while `unverified` with **no** latency,
+      token, cost, or quality benefit attributed; its emitted diff satisfies the line-permutation
+      invariant (FR29).
+- [ ] **A21.** Reverting an authored wiring change reproduces the parent `config_hash` **byte-identically**,
+      inserted adapters included (FR30).
+- [ ] **A22.** Every gesture receives its verdict at the moment it is made, without a submit, a diff, or an
+      eval run; the three verdict classes render distinctly (NFR10).
+- [ ] **A23.** The wiring coverage table carries an entry for **every** registered language; a missing cell
+      fails a generated check, and each gap names the **statement resolver** (G15, FR31, NFR12).
+- [ ] **A24.** A transposition materializes in a language beyond Go and Python, with the permutation
+      invariant and the reparse asserted by the **same** assertions the covered languages use (G16, FR32,
+      NFR14).
+- [ ] **A25.** A merge, prune, edge change, non-adjacent move, or multi-swap is refused by **shape**,
+      identically in a language with a resolver and one without (G17, FR33).
+- [ ] **A26.** A workflow with **no adjacent transposable pair** is told **that**, and the language is not
+      named as the reason (G17, FR34).
+- [ ] **A27.** The most specific true cause is reported — shape → gate → statement structure → language —
+      and the ordering test is proven able to go **red** (FR35, NFR13).
+- [ ] **A28.** In **no** language does a refused wiring draft become a scoreable variant, and the authoring
+      surface states both boundaries — language coverage and the existence of a transposable pair — before
+      a move is expressed (FR36).
 
 ## 14. Open questions
 
@@ -523,3 +838,32 @@ un-materializable wiring.
    layer — the spec, gate, hash, and eval are already correct — but the exact rewriter surface
    (`rewrite.go`/`rewrite_span.go` dispatch for `Order`/`Edges`) is out of P15's scope and named as its
    unblocked follow-on.
+4. **Whether a recorded intent should become a candidate automatically when its shape becomes
+   materializable.** A user's refused merge is, in effect, a standing request. Proposed: notify, do not
+   auto-apply — the source has moved on since the intent was recorded, and silently materializing a
+   months-old intent is exactly the kind of unrequested action the platform must not take. Decide before
+   15d ships the recorded-intent store.
+5. **How much of the graph an authored draft may change at once.** 15d validates whatever is drafted, but
+   a single submission that reorders eight nodes produces a refusal list rather than a refusal. Proposed:
+   allow it, and return **all** refusals with their shapes rather than the first — a user rearranging a
+   graph needs the whole picture, not the first thing that stopped them.
+6. **Whether an authored parallelization is expressible at all before a runtime that honours it.** Marking
+   nodes parallelizable changes `Order`/`Edges` semantics, but the applied source only reflects it where
+   the materializer can express concurrency. Proposed: treat it as its own shape in the FR25 list, refused
+   by name until a materializer exists, rather than accepting the mark and quietly running serially.
+7. **What "adjacent" means in a language whose statements are not lines.** The Go and Python resolvers
+   lean on statements that occupy whole lines. A TypeScript chain, a Kotlin `apply` block, or a Rust
+   expression-statement can put two nodes on one line, where "adjacent transposition" is well-defined but
+   the line-permutation invariant is not. Proposed: a resolver reports the statement's byte span and the
+   invariant is asserted over **statement multiset**, with the line-count rule retained as the stricter
+   special case where statements are line-aligned. Ratify before the first non-line-oriented resolver
+   lands — this is the one place 15e could quietly weaken a gate.
+8. **Whether a language may be covered for the invariant but not for the coherence gate.** The gate reads
+   producer/consumer fields discovered by the frontend; a frontend with weaker field extraction could pass
+   the invariant and under-constrain the gate. Proposed: no — a coverage entry requires both, and a
+   language whose frontend cannot supply the gate's inputs stays a named gap rather than a half-covered
+   row.
+9. **How a resolver reports a statement it can locate but not classify.** Between "no resolver" and "a
+   resolved statement" sits "this construct is not one I model". Proposed: it is a
+   `call-site-cannot-carry-it` cause naming the construct, not a language gap — the same distinction
+   `**kwargs` draws on the context axis.

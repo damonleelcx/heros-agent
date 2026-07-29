@@ -122,22 +122,68 @@ func TestDynamicToolSetRefused(t *testing.T) {
 	}
 }
 
-// The same refusal for every tree-sitter language, which records no tool split at all. A selection
-// resolve accepted must not silently delete nothing here.
-//
-// It runs against a REAL Python fixture rather than a Go tree relabelled "python": a Go tree under a
-// Python language label fails earlier, at "no Python call site with this node_id", which would let this
-// test pass without the tools dimension ever being dispatched.
-func TestSpanToolPruneRefuses(t *testing.T) {
+// 🔴 Wave 14d turned this test around. It used to assert that a Python prune REFUSES because the
+// frontend recorded no tool split — a sentence that named the wrong owner, since deleting a written
+// element needs no rewriter work at all. The frontend records the split now
+// (discovery/toolsplit_span.go), so the prune MATERIALIZES, and what this pins is the deletion itself:
+// only the named element and its separator go, the file's line count does not move, and the survivors
+// are untouched.
+func TestSpanToolPruneDeletesTheNamedElement(t *testing.T) {
+	root := spanTarget(t, "pipeline.py", pyToolsSrc)
+	id := onlyNode(t, root, "python")
+
+	p, err := Generate(resolvedIn("python", map[string]variantspec.ResolvedOverride{
+		id: {ToolSelection: []string{`{"name": "search"}`}},
+	}), root)
+	if err != nil {
+		t.Fatalf("a prune over a written Python tool list must materialize: %v", err)
+	}
+	if p == nil || len(p.Files) == 0 {
+		t.Fatal("dropping a declared tool must emit a diff")
+	}
+	after := string(p.Files["pipeline.py"])
+	if strings.Contains(after, `"weather"`) {
+		t.Errorf("the pruned tool is still declared:\n%s", after)
+	}
+	if !strings.Contains(after, `"search"`) {
+		t.Errorf("the kept tool was deleted:\n%s", after)
+	}
+	// 🔴 The line-count rule, which is what keeps TouchedDimension.Line valid in both files.
+	if got, want := strings.Count(after, "\n"), strings.Count(pyToolsSrc, "\n"); got != want {
+		t.Errorf("a prune changed the file's line count: %d -> %d", want, got)
+	}
+}
+
+// A call site that writes NO tools argument still refuses — and the refusal is about the call site,
+// not about the language, because a pruner for this language refuses it for the same reason.
+func TestSpanToolPruneRefusesWhenNothingIsWritten(t *testing.T) {
 	root := spanTarget(t, "pipeline.py", pyModelSrc)
 	id := onlyNode(t, root, "python")
 
 	msg := refusalFor(t, resolvedIn("python", map[string]variantspec.ResolvedOverride{
 		id: {ToolSelection: []string{"weatherTool"}},
 	}), root)
-	mustContain(t, msg, "no tool split", "that the frontend, not the engine, is what is missing")
-	mustContain(t, msg, "REFUSED rather than applied to nothing", "that this is a refusal, not a silent no-op")
+	mustContain(t, msg, "writes no tools argument", "that the CALL SITE, not the engine, is the limit")
+	mustContain(t, msg, "delete nothing while claiming to", "why applying it anyway would be dishonest")
+	// 🚫 And it must not blame a missing pruner: one has landed, and it would refuse this too.
+	if strings.Contains(msg, "no pruner for this language") {
+		t.Errorf("a call-site fact was reported as a coverage gap:\n%s", msg)
+	}
 }
+
+// pyToolsSrc writes two tools out at the call site — the shape a prune deletes from.
+const pyToolsSrc = `import anthropic
+
+client = anthropic.Anthropic()
+
+
+def classify(ticket):
+    return client.messages.create(
+        model="claude-opus-4-6",
+        messages=[{"role": "user", "content": "Classify this ticket"}],
+        tools=[{"name": "search"}, {"name": "weather"}],
+    )
+`
 
 // A selection the call site cannot satisfy is refused rather than partially applied: reaching here
 // means the tree and the IR the selection was validated against disagree.

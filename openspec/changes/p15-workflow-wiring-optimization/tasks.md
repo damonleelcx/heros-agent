@@ -1,11 +1,15 @@
 # Tasks — P15: Workflow / Node-Wiring Optimization
 
-Three waves. **Wave 15a** = the node-wiring operators — implement `OpMerge`, broaden reorder toward free
+Four waves. **Wave 15a** = the node-wiring operators — implement `OpMerge`, broaden reorder toward free
 rewiring, confirm prune — every candidate derived, gated, and hashed. **Wave 15b** = wiring-safety as a
 first-class requirement set — reject-at-compile, adapter reconciliation in the diff, admissibility,
 deterministic identity, and the interim refusal for un-materializable wiring. **Wave 15c** = the
 call-site rewriter's first slice — a transposition of two adjacent, independent sibling statements,
-materialized as a *permutation of the file's lines*; everything else keeps 15b's refusal.
+materialized as a *permutation of the file's lines*; everything else keeps 15b's refusal. **Wave 15d** =
+user-initiated change (`wiring-authoring`), which depends on P13's shared `authored-change` contract
+landing first and is independently revertible. **Wave 15e** = all-language coverage
+(`wiring-language-coverage`, §20), which depends on P13's shared `language-coverage` contract landing
+first, is independent of 15d, and is likewise independently revertible.
 
 The first round shipped **docs** (the PRD + this OpenSpec change); this round shipped the **code** they
 specified, and every task now carries a `→ file (Test: Name)` pointer to the implementation and the test
@@ -15,11 +19,18 @@ pointer.
 ⚠️ **What is delivered and what is not.** The wiring axis is now produced (merge / free reorder /
 parallelize / prune), gated (`GateReorder`, one gate, adapter-augmenting), hashed (`Order`/`Edges` were
 already identity-bearing), scored by the existing harness, and surfaced only after verification. Source
-materialization of a rearrangement is still **ABSENT**: a wiring-differing spec is **refused at
-transform** naming the axis (§4), which changes the P5 editor's commit outcome for a genuine reorder
-from `committed` (with a diff that rewired nothing) to `rejected_transform`. That is the point of the
-round — a refusal is honest; a no-op would have let a wiring `config_hash` be scored against unchanged
-source.
+materialization is **PARTIAL**, and the boundary is a property of the source rather than of the
+operator: wave 15c materializes a **transposition of two adjacent, independent sibling statements** as a
+permutation of the file's lines (§17), and every other shape — a move across intervening code, a merge,
+a prune, a rewired edge — is **refused at transform** naming the axis (§4).
+
+🔴 The refusal's rule was **corrected by CI** during delivery, and the correction is load-bearing: the
+source states a relative order between two calls only when it **orders** them (consecutive sibling
+statements in one block). An ordering the source never stated is a *declaration*, not a rewire, and
+committing it is correct. So the P5 editor's commit outcome changed from `committed` (with a diff that
+rewired nothing) to `rejected_transform` for a spec whose node **set** differs from the source's — not
+for every reorder. See §4.3 and the ⚠️ correction note beneath it. That is the point of the round — a
+refusal is honest; a no-op would have let a wiring `config_hash` be scored against unchanged source.
 
 **Standing constraints.** The wiring axis lives entirely in `VariantSpec.Order`/`Edges`/`InsertedAdapter`
 — **no** new `Dimension`, registry `Kind`, `NodeOverride` field, or DB table. `Order`/`Edges` are
@@ -104,9 +115,11 @@ never silently dropped or no-op'd. A candidate is **surfaced only after P5.5 ver
       an adapter IS materialized in the same diff).
 - [x] 4.3 The refusal is **observable** in the transform result and names the axis, and **no diff** is
       emitted for the refused spec. → (Test: `TestWiringRefusalIsObservableNoDiff`, plus the user-visible
-      face at the API: `TestP5Commit_ReorderRefusedAtTransform` — a coherent reorder now commits as
-      `rejected_transform` naming the wiring axis, where before P15 it returned `committed` with a diff
-      that never rewired anything).
+      face at the API: `TestP5Commit_WiringOutcomes` in
+      [`internal/api/p5_test.go`](../../../internal/api/p5_test.go) — a spec whose node SET differs from
+      the source's commits as `rejected_transform` naming the wiring axis and carrying no diff, where
+      before P15 it returned `committed` with a diff that never rewired anything. The same test pins the
+      other half of the corrected rule below: an ordering the source does not state is **not** refused.)
 
 ### ⚠️ Correction, earned by CI (2026-07-28)
 
@@ -155,8 +168,12 @@ caught it, and it is what verified the fix.
       for the fixed match order) → [`internal/typedcontract/p15_wiring_test.go`](../../../internal/typedcontract/p15_wiring_test.go).
 - [x] 5.5 Assert an inserted adapter appears as **generated source in the same reviewable diff** — no
       coercion exists outside the diff. → (Test: `TestAdapterIsInReviewableDiff` — the file, the `--- /dev/null`
-      hunk, the declared contract inside the source, the `Touched` attribution, and a byte-identical
-      regeneration) → [`internal/transform/p15_wiring_test.go`](../../../internal/transform/p15_wiring_test.go).
+      hunk asserted as an adjacent pair with its `+++ b/` line, the declared contract inside the source,
+      every source line present in the diff so the reviewed and applied trees cannot differ, the
+      `Touched` attribution naming the adapter node AND its kind, a byte-identical regeneration, and the
+      load-bearing negative that no other file in the patch performs the coercion; verified red by
+      dropping the attribution kind and by keeping the adapter out of the diff)
+      → [`internal/transform/p15_wiring_test.go`](../../../internal/transform/p15_wiring_test.go).
 - [x] 5.6 Assert adapter **identity is deterministic** — same reorder → same adapter ids and `config_hash`.
       → [`rearrange.go:91-93`](../../../internal/variantspec/rearrange.go) (Test: `TestAdapterIdentityDeterministic`).
 
@@ -225,15 +242,46 @@ teaches them the tool is broken.
       than being swallowed. → `AXIS_NOTE` lookup returns undefined and the note is omitted (Test: `P15-4`).
 - [x] 9.4 Browser-verified against a rendered page, not only asserted: `/preview/p15` renders the SAME
       component the submit path renders, one linkable fixture per shape (reorder / merge / rewired edge /
-      un-annotated axis). → [`preview/p15/page.tsx`](../../../web/console/src/app/preview/p15/page.tsx).
-      Checked in Chrome at 1280×720 dark and 375×812 light: no console error, no horizontal overflow,
-      the verbatim disclosure opens, and the un-annotated axis correctly shows no console note.
-      `npm run build` + `npm test` green (249/249).
+      un-annotated axis), plus the applied case — a page of four refusals reads as a broken feature.
+      → [`preview/p15/page.tsx`](../../../web/console/src/app/preview/p15/page.tsx)
+      (Test: `9.4 the preview renders the SAME outcome cards the submit path renders`,
+      `9.4 one linkable fixture per shape, and the un-annotated axis is one of them` in
+      [`tests/wiring-authoring.test.mjs`](../../../web/console/tests/wiring-authoring.test.mjs) — the
+      second asserts the un-annotated fixture's axis is one `AXIS_NOTE` does **not** carry, so the
+      fixture cannot quietly stop proving anything; verified red by pointing it at `wiring`).
+      Browser-verified at 1280×720 and 375×812: no console error, no horizontal overflow (0 offending
+      elements at 375px), the verbatim disclosure opens carrying the engine's sentence, the applied
+      fixture renders the real diff, and the un-annotated axis correctly shows no console note.
+      `npm run build` + `npm test` green (315/315).
 
 ## 10. Delivery run — the axis against a real repository
 
 - [x] 10.1 Run the shipped code paths against **github.com/nousresearch/hermes-agent** (the same target as
       P5/P13/P14). → [`cmd/p15hermes`](../../../cmd/p15hermes/main.go); `go run ./cmd/p15hermes -repo /tmp/hermes-agent`.
+
+### ⚠️ Correction, earned by re-running the survey (2026-07-28)
+
+🔴 The 15c swap survey counted a **no-op as a materialization**. `transform.Generate` returns a nil error
+in two very different cases — a source reorder it wrote, and a declaration it accepted without writing
+anything — and the survey's `applied++` counted both. On hermes-agent that printed a column of
+`MATERIALIZED` lines and a `39 materialized, 0 refused` total, directly above this file's own sentence
+*"no pair in this repository is a transposition of two adjacent sibling statements."*
+
+The empty-diff case is **correct engine behaviour**: these pairs sit in different functions, so the
+source orders nothing between them and the swap is a declaration, not a rewire (that is exactly why §4's
+corrected gate does not refuse them). But it is also the precise shape of the failure this axis exists
+to prevent — a `config_hash` recording a rearranged graph, scored against source that was never rewired.
+Reporting it as *materialized* is how that failure gets read as a success. The survey now reports three
+outcomes (materialized / **inert (no diff)** / refused) and the totals agree with the prose.
+
+Two smaller defects in the sibling runners, found the same way: `cmd/p13hermes` ran its inline-refusal
+demonstration against a **hard-coded** `/tmp/hermes-agent` rather than `-repo`, so on any other checkout
+it "passed" by failing to find the path — a vacuous gate; and `cmd/p14hermes` still closed with
+*"hermes-agent is python -> not covered, which is why every binding above refused"*, which the coverage
+table printed immediately above it had already contradicted since the Python row landed in 14d. Blaming
+the language for a **call-site** refusal is the exact conflation the refusal ordering exists to prevent:
+it tells this repository's author to wait for a rewriter that would refuse their `**kwargs` call site on
+the day it ships. Both now read their answer from the data the run itself produced.
 
 Re-run on a **fresh `git clone --depth 1`** of the upstream repository at `fa7b0fcf5d6e` (26 discovered
 nodes) and on an older checkout at `528e3350374b` (40 nodes). Same behaviour on both; the node count
@@ -424,3 +472,169 @@ failure was **fail-closed** (those pairs were refused, never mis-swapped), which
 but a refusal with a wrong reason sends a user hunting a defect in their own code. `pyScan` now carries
 string state across lines, and `TestPythonScannerSurvivesDocstrings` keeps it.
 
+
+---
+
+## 19. Wave 15d — user-initiated change on this axis (`wiring-authoring`)
+
+> **Depends on P13's `authored-change` contract landing first.** Everything shared — one spine two
+> origins, `Origin` recorded never hashed, origin-blind refusals with **no override**, preflight's three
+> verdicts, `unverified` never a claim and never auto-merged, named conflicts, byte-exact reversal,
+> append-only audit, entitlement, offline CLI parity, no new egress, and *the user does not author the
+> evidence* — is inherited, **not** re-implemented here.
+>
+> 🔴 **The load-bearing risk of this wave is that a graph editor looks like it can do anything while the
+> transform materializes exactly one shape.** Every task below exists to keep that gap visible.
+
+**System Designer + Backend**
+
+- [x] 19.1 Write the `wiring-authoring` spec delta, referencing `authored-change` rather than restating
+      it. → [`specs/wiring-authoring/spec.md`](specs/wiring-authoring/spec.md).
+- [x] 19.2 Record Decision 10 (gate moves left; adapter shown before submit; refused shapes are not
+      scoreable variants) with the rejected alternatives. → [`design.md`](design.md).
+- [x] 19.3 🔴 **Run `GateReorder` → `ValidateOrdering` at preflight**, before submission and before any
+      codemod, reusing the same gate — not a second validator. → `internal/authoring/wiring.go`
+      (Test: `TestWiringPreflightUsesGateReorder`, `TestPreflightAndCompileAgreeOnEveryVerdict`).
+- [x] 19.4 🔴 **Name all three.** An incoherent authored ordering is refused naming the **consumer**, the
+      **producer**, and the **field** that would become undefined — never a bare "invalid ordering". →
+      `internal/authoring/wiring.go` (Test: `TestIncoherentAuthoredOrderingNamesConsumerProducerField`).
+- [x] 19.5 Return `adapted` with the **inserted adapter node and its rewired edges** in the preflight
+      result, so the preview can show it before submission; adapter identity stays deterministic. →
+      `internal/authoring/wiring.go` (Test: `TestAdaptedPreflightReturnsInsertedAdapter`,
+      `TestAuthoredAdapterIdentityDeterministic`).
+- [x] 19.6 🔴 **Probe materializability at preflight** via `planWiringSwap`, refusing with the **shape
+      named**: merge · prune · edge-change · non-adjacent · multi-swap · unprovable-independence ·
+      no-materializer(language). → `internal/authoring/wiring.go`
+      (Test: `TestUnmaterializableShapeRefusedByName`).
+- [x] 19.7 🔴🔴 **A refused wiring draft is NOT a scoreable variant.** No eval run is enqueued, no
+      `config_hash` is submitted for scoring, and it does not appear among the workflow's variants. This
+      is the one that prevents a false measurement. → `internal/authoring/wiring.go`
+      (Test: `TestRefusedWiringDraftIsNeverEnqueuedForEval`, `TestRefusedWiringDraftIsNotAVariant`).
+- [x] 19.8 Retain a refused draft only as an explicit **recorded intent**, marked neither applicable nor
+      scoreable. → `internal/authoring/wiring.go` (Test: `TestRecordedIntentIsNotAVariant`).
+- [x] 19.9 An authored **parallelization** is admissible only on **provable** data-independence; the
+      refusal names the blocking dependency. → `internal/authoring/wiring.go`
+      (Test: `TestAuthoredParallelizeRefusesUnprovableIndependence`).
+
+**Frontend**
+
+- [x] 19.10 🔴 The graph editor shows each gesture's verdict **as it is made** — admissible, refused
+      (shape named), adapted (adapter node visible) — not on submit. → `web/console/src/app/app/wiring/`
+      (Test: `tests/wiring-authoring.test.mjs` — "19.10 every gesture carries its own verdict, decided before submission", "19.10 the editor uses the same gate as the compiler, and says so").
+- [x] 19.11 🔴 Render the inserted adapter as a **visible node** in the preview with its rewired edges,
+      before the user submits. → `web/console/src/app/app/wiring/`
+      (Test: `tests/wiring-authoring.test.mjs` — "19.11 an inserted adapter is rendered as a visible node with its edge, before submit").
+- [x] 19.12 🔴 A refused draft is **never** shown in the variant list or as "awaiting evaluation"; a
+      recorded intent is visually and semantically distinct from a variant. → `web/console/`
+      (Test: `tests/wiring-authoring.test.mjs` — "19.12 a refused rearrangement is never shown as a variant or as pending", "19.12 each gesture states whether it can be evaluated at all").
+- [x] 19.13 Render the incoherence refusal with the consumer, producer, and field named, and highlight
+      them in the graph — a graph error with no names is unactionable. → `web/console/`
+      (Test: `tests/wiring-authoring.test.mjs` — "19.13 an incoherence refusal names the consumer, the producer and the field").
+- [x] 19.14 🔴 Adding authoring gestures removes **no** existing capability from the wiring surface;
+      design-system tokens only. → `web/console/` (Test: `tests/wiring-authoring.test.mjs` — "19.14 adding the editor removed no existing capability from the wiring surface", "19.14 the editor derives nothing and ranks nothing",
+      `npm run scan:tokens`).
+
+**DevOps + QA**
+
+- [x] 19.15 CLI parity: draft and preflight a wiring change offline, with the same typed cause and the
+      same shape name as the hosted surface. → `internal/cli/` (Test: `TestCLIWiringAuthoringOfflineParity`).
+- [x] 19.16 🔴 Every refusal class goes **red**: incoherent ordering, unprovable independence, each
+      unmaterializable shape, and each unsupported language. → (Test: `TestWiringAuthoringRefusalsGoRed`).
+- [x] 19.17 🔴 No flag, role, plan, or entitlement lets an authored wiring change reach a diff or an eval
+      run when the transform refuses its shape. → (Test: `TestNoOverrideForRefusedWiringShape`).
+- [x] 19.18 A materializable authored transposition applies while `unverified`, with **no** latency,
+      token, or quality benefit attributed. → (Test: `TestAuthoredTranspositionClaimsNothing`).
+- [x] 19.19 Assert downstream: after an authored transposition, read back the emitted diff and assert the
+      **line-permutation invariant** (same count, same multiset, changes confined to the two blocks) — a
+      2xx is not evidence. → (Test: `TestAuthoredSwapPreservesPermutationInvariant`).
+- [x] 19.20 Reversal: undoing an authored wiring change reproduces the parent `config_hash`
+      **byte-identically**, including any inserted adapters. → (Test: `TestWiringRevertReproducesParentHash`).
+
+**Product Designer + Sales Operations**
+
+- [x] 19.21 Specify the refusal wording per shape, and the distinction between *"this breaks your graph"*
+      (incoherent — names the break) and *"we cannot yet apply this shape"* (unmaterializable — names the
+      shape). Two different sentences, two different user actions. →
+      [`specs/wiring-authoring/spec.md`](specs/wiring-authoring/spec.md).
+- [x] 19.22 Specify that a recorded intent is described honestly — retained, not applicable, not scored —
+      and never as "pending". → [`specs/wiring-authoring/spec.md`](specs/wiring-authoring/spec.md).
+- [x] 19.23 State the claim and its boundary: users rearrange the graph and the platform tells them the
+      truth about every gesture; 🚫 only the adjacent-transposition shape applies today, a refused shape
+      is **not** scoreable, and there is no override. → PRD §9 Sales lens.
+
+---
+
+## 20. Wave 15e — all-language coverage on this axis (`wiring-language-coverage`)
+
+> **Depends on P13's `language-coverage` contract landing first.** Everything shared — totality over the
+> registered language set, per-cell claims, the three typed refusal classes and their specific-first
+> order, one coverage source, executable evidence per row, no gate weakened to reach a language, the
+> versioned offline table, and coverage no plan can move — is inherited, **not** re-implemented here.
+
+**Standing constraints for 15e.** The **statement resolver is the only per-language part**: the plan, the
+edge-set check, the coherence gate, the emitted edit and the permutation invariant stay one neutral path.
+The invariant is asserted over the **resolved statement multiset**, with the line-count rule kept as the
+stricter special case — 🚫 no language relaxes it. A refusal reports the **most specific true** cause:
+requested shape → coherence gate → statement structure → **language last**. An unmaterializable draft is
+**unscoreable in every language**, covered or not.
+
+**System Designer**
+
+- [x] 20.1 Write the `wiring-language-coverage` spec delta, referencing `language-coverage` rather than
+      restating it. → [`specs/wiring-language-coverage/spec.md`](specs/wiring-language-coverage/spec.md).
+- [x] 20.2 Record **D-5** (the resolver is the only per-language part; the invariant is asserted over the
+      statement multiset and never varies) and **Decision 11** (every registered language gets a resolver
+      and a row; the shape question is asked first), and mark Decision 9's "Go and Python first" as an
+      **ordering** decision. → [`decisions.md`](decisions.md) D-5, [`design.md`](design.md) Decision 11.
+- [x] 20.3 Expose wiring coverage as a **total** read over `statementResolvers` and the registered
+      language set, each gap naming the resolver as its missing artifact. →
+      `internal/transform/coverage.go` `wiringCoverage` (Test: `TestNoSurfaceHoldsItsOwnCoverageList`).
+- [x] 20.4 🔴 Totality is generated from `discovery.DefaultFrontends`; adding a frontend with no wiring
+      entry goes red. → (Test: `TestCoverageIsTotalOverRegisteredLanguages`).
+
+**Backend**
+
+- [x] 20.5 Generalize the permutation invariant to the **resolved statement multiset**, keeping the
+      line-count assertion as the stricter line-aligned case, in **one** implementation. →
+      `internal/transform/engine.go` `gateSwapPermutation` + `statementMultisetDiff`
+      (Test: `TestBraceResolversTransposeAndHoldTheInvariant`, `TestSwapGateRejectsNonPermutation`).
+- [x] 20.6 Add statement resolvers for typescript / javascript. → `internal/transform/wiringswap_brace.go`
+      `braceSyntaxes` (Test: `TestBraceResolversTransposeAndHoldTheInvariant/typescript`, `/javascript`).
+- [x] 20.7 Add statement resolvers for kotlin / java / rust. → `internal/transform/wiringswap_brace.go`
+      (Test: `TestBraceResolversTransposeAndHoldTheInvariant/kotlin`, `/java`, `/rust`).
+- [x] 20.8 🔴 A construct a resolver can **locate but not model** refuses as `call-site-cannot-carry-it`
+      naming the construct — never as a language gap. →
+      (Test: `TestUnmodelledConstructIsNotALanguageGap`).
+- [x] 20.9 🚫 **No per-language gate.** A structural test asserts the plan, the edge-set check, the
+      coherence gate and the invariant have exactly one implementation each. →
+      (Test: `TestWiringGatesAreLanguageNeutral`).
+
+**QA**
+
+- [x] 20.10 🔴 Each resolver row carries a fixture that emits a transposition and asserts **both** the
+      invariant and the reparse; a row without one is rejected. →
+      (Test: `TestBraceResolversTransposeAndHoldTheInvariant`, `TestEveryResolverRowHasAProof`).
+- [x] 20.11 🔴 **Shape beats language**: a merge requested in a language with no resolver reports the
+      merge; reversing the check goes red. → (Test: `TestShapeCauseBeatsLanguageCause`).
+- [x] 20.12 🔴 A workflow with **no adjacent transposable pair** is told that, with the language not named
+      as the reason. → `internal/transform/wiringswap.go` same-statement check
+      (Test: `TestNoTransposablePairIsNotALanguageRefusal`).
+- [x] 20.13 🔴 The structural "no eval run for a refused draft" assertion holds over **every** newly
+      covered engine. → (Test: `TestRefusedDraftUnscoreableInEveryLanguage`).
+
+**Frontend + DevOps**
+
+- [x] 20.14 State **both** boundaries before the drag — can this language carry a transposition, and does
+      this workflow offer a transposable pair — as two different sentences, from the shared source. →
+      `web/console/src/app/app/wiring/boundaries.tsx` (Test: `coverage.test.mjs`; browser-verified).
+- [x] 20.15 Carry the wiring cells in the CLI's versioned offline table; a refusal names the version and
+      the cause text matches the hosted surface. → `internal/cli/coverage.go`
+      (Test: `TestCoverageIsOfflineAndVersioned` — asserts totality over every axis including wiring).
+
+**Product Designer + Sales Operations**
+
+- [x] 20.16 Specify the two wordings: a missing resolver is **not yet applied by the platform**; a
+      workflow with no transposable pair is a fact about the source with no "when". →
+      `specs/wiring-language-coverage/spec.md`.
+- [x] 20.17 State the claim per cell: 🚫 never "we reorder workflows" — that promises merges and prunes
+      this axis refuses in **every** language, including the covered ones. → PRD §9.2 Sales lens.

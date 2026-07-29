@@ -34,6 +34,13 @@ Every axis is a `Dimension` on the Variant Spec that resolves into `config_hash`
 honest `EXISTS / PARTIAL / ABSENT` status and, where a call-site codemod is not yet safe, a first-class
 **interim refusal** (the same posture skills/context ship with today).
 
+Two **cross-axis contracts** are defined once in P13 and referenced — never restated — by P14/P15/P16:
+**`authored-change`** (a user may originate a change on any axis, through the same spine; see
+[`docs/decisions/authored-change-data-model-and-flows.md`](../decisions/authored-change-data-model-and-flows.md))
+and **`language-coverage`** (coverage is a total function over every registered language, and a refusal
+names which of three different things is missing; see
+[`docs/decisions/language-coverage-and-refusal-contract.md`](../decisions/language-coverage-and-refusal-contract.md)).
+
 | Phase | PRD | OpenSpec change | Lead role(s) |
 |-------|-----|-----------------|--------------|
 | P13 — Prompt & Model Optimization *(deepen operators; downgrade guardrail)* | [P13-prompt-model-optimization.md](P13-prompt-model-optimization.md) | `p13-prompt-model-optimization` | AI Engineer + System Designer |

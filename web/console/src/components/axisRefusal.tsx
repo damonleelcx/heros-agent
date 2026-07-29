@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+
 import { Banner, Chip, Row } from "@/components/primitives";
 import { Disclosure } from "@/components/figure";
 import { Diff } from "@/components/diff";
@@ -28,8 +30,13 @@ export const AXIS_NOTE: Record<string, string> = {
     "The node graph is part of a configuration and part of its hash, so this spec is a real, different configuration. What does not exist yet is a rewriter that moves, fuses, or deletes a call at the source. Applying it as a no-op would let this configuration be scored against code that was never rearranged, so it is declined instead.",
   skills:
     "Binding a skill means constructing SDK-specific tool values at the call site. That materialiser exists for Go; for this call site's language it does not, so the binding is declined rather than dropped from the diff.",
+  // 🔴 Rewritten for P16. The previous note said context could not be rewritten at all, which stopped
+  // being true the moment the Go materialiser landed — and a console that keeps saying "impossible"
+  // about something the platform now does is worse than one that says nothing: the reader stops
+  // believing the notes. Two things get a refusal on this axis now, and they are different problems
+  // with different answers, so the note names both.
   context:
-    "Context assembly is not a call-site argument — it is how the surrounding code builds the message list — so there is no expression to rewrite here.",
+    "Context assembly is not a call-site argument — it is how the surrounding code builds the message list — so applying a policy means rewriting that code. Go and Python do this for policies that SELECT among the turns already written (a window, a compaction). It is declined for a policy that assembles at run time — a summary or a retrieval has no answer in your source to select — for a call site that does not write its messages out (an unpacked kwargs dict has no turns to select among), and for a language whose rewriter has not landed yet. The policy still runs where it belongs; what is declined is writing it into your source.",
 };
 
 /**
@@ -81,21 +88,31 @@ export function AxisRefusal({
  *
  * # The invariant is stated, because it is the whole safety argument
  *
- * A reorder is control-flow surgery in general. This one is not: it exchanges two adjacent statements,
- * and the file that comes out has THE SAME LINES as the file that went in, reordered. A reviewer who
- * trusts only that sentence already knows the change cannot have altered what any line says — which is
- * why the sentence is on the card rather than in a design document.
+ * Each applied change carries a sentence a reviewer can trust ALONE — the property the engine checked
+ * before offering the diff. For a wiring transposition that is "the same lines, reordered"; for a
+ * context window it is "no line added or removed, nothing constructed". A reviewer who believes only
+ * that sentence already knows what the change cannot have done.
+ *
+ * 🔴 It is a REQUIRED PROP, not a constant. It was a constant until P16, hard-coded to the wiring
+ * axis — and the first caller from another axis rendered "the file's lines were reordered" over a diff
+ * that had deleted list elements, which is simply false. An invariant that is asserted by the component
+ * rather than supplied by the caller is an invariant nobody checked against the change it describes,
+ * and a false safety claim is worse than no claim: it is the sentence a reviewer stops reading the diff
+ * because of. Requiring it means a new axis cannot inherit another axis's guarantee by omission.
  */
 export function AxisApplied({
   axis,
   nodeId,
   what,
+  invariant,
   diff,
   filename,
 }: {
   axis: string;
   nodeId?: string;
   what: string;
+  /** The property the engine CHECKED before offering this diff, in the caller's own words. */
+  invariant: ReactNode;
   diff: string;
   filename?: string;
 }) {
@@ -109,11 +126,7 @@ export function AxisApplied({
           {nodeId ? <Chip title="the node the change is anchored to">{nodeId}</Chip> : null}
         </Row>
         <p>{what}</p>
-        <p>
-          <strong>The file&apos;s lines were reordered and nothing else changed.</strong> Same line
-          count, same lines — so this change cannot have altered what any line says, only when it runs.
-          That is checked before the diff is offered, not asserted here.
-        </p>
+        <p>{invariant}</p>
       </Banner>
       <Diff patch={diff} filename={filename} />
     </div>

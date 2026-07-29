@@ -60,6 +60,33 @@ func wrapped(client *anthropic.Client, ticket string) {
 	})
 }
 
+// ── context call sites (P16) ─────────────────────────────────────────────────────────────────────
+//
+// A context policy is not an argument to swap: it is HOW this code builds the message list. A
+// SELECTION policy (sliding-window, semantic-compaction) is materialized by deleting the turns it does
+// not retain — the same deletion mechanic a tool prune uses, applied to the message region.
+
+// history writes a four-turn conversation on ONE line, the shape a window materializes into cleanly.
+func history(client *anthropic.Client) {
+	client.Messages.New(nil, anthropic.MessageNewParams{Messages: []anthropic.MessageParam{turnOne, turnTwo, turnThree, turnFour}})
+}
+
+// stackedhistory writes one turn per line. A window here must not close the lines up: removing a line
+// would shift every line below it and invalidate the build gate's file:line attribution.
+func stackedhistory(client *anthropic.Client) {
+	client.Messages.New(nil, anthropic.MessageNewParams{Messages: []anthropic.MessageParam{
+		turnOne,
+		turnTwo,
+		turnThree,
+	}})
+}
+
+// runtimehistory assembles its messages at runtime. A window over it would mean guessing which of the
+// turns buildHistory() returns to drop — refused, never guessed.
+func runtimehistory(client *anthropic.Client, buildHistory func() []anthropic.MessageParam) {
+	client.Messages.New(nil, anthropic.MessageNewParams{Messages: buildHistory()})
+}
+
 // ── tool / skill call sites ──────────────────────────────────────────────────────────────────────
 //
 // P14: binding a skill CONSTRUCTS the SDK tool value rather than replacing an expression, so these

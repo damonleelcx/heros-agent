@@ -52,19 +52,32 @@ type spanRewriter func(site discovery.SpanCallSite, src []byte, o variantspec.Re
 
 // spanRewriters is the per-dimension table for every tree-sitter language, mirroring `rewriters`.
 //
-// skills and context are the SAME refusals the Go engine gives, and they share one implementation
-// rather than a re-worded copy (禁止分裂 source-of-truth): the reasons are not facts about Go. Binding
-// skills means constructing SDK-specific tool values in any language; context assembly is not a call
-// argument in any language, and P3 owns it everywhere.
+// skills refuses here with the SAME implementation the Go engine used to give, rather than a re-worded
+// copy (禁止分裂 source-of-truth): the reason is not a fact about Go — binding skills means constructing
+// SDK-specific tool values in any language.
+//
+// context is ASYMMETRIC, and deliberately so (P16 task 3.3). Go and Python materialize a selection
+// policy by deleting the messages it does not retain (contextmaterialize.go, contextmaterialize_span.go);
+// the remaining tree-sitter languages keep the interim refusal until each region rewriter lands.
+// Partial coverage is honest — a language without a rewriter refuses loudly and says so — and it is the
+// opposite of the silent no-op that would score a variant as its base configuration.
+//
+// 🔴 That refusal is now the LAST thing spanRewriteContext considers, not the first. A call site
+// passing `**kwargs` has no written message list for any rewriter to select among, so telling its
+// author "your language's rewriter is pending" is true and useless; the reason they can act on is the
+// unpacking. Ordering the questions specific-first is the whole of that fix.
 var spanRewriters = map[variantspec.Dimension]spanRewriter{
 	variantspec.DimModel:  spanRewriteModel,
 	variantspec.DimPrompt: spanRewritePrompt,
-	variantspec.DimSkills: func(s discovery.SpanCallSite, _ []byte, o variantspec.ResolvedOverride) ([]edit, error) {
-		return nil, refuseSkills(s.NodeID, o)
-	},
-	variantspec.DimContext: func(s discovery.SpanCallSite, _ []byte, o variantspec.ResolvedOverride) ([]edit, error) {
-		return nil, refuseContext(s.NodeID, o)
-	},
+	// P14 wave 14d: skills MATERIALIZE here now, for the (language, provider) cells that declare a
+	// tool-value spelling, and refuse by cell for the rest. The shape still comes from the pinned
+	// skill's sealed schema — that half was never language-specific — so what landed is a set of rows,
+	// not a second theory of binding. See skillbind_span.go.
+	variantspec.DimSkills: spanMaterializeSkills,
+	// P16: context materializes for Python (a selection policy deletes the turns it does not retain) and
+	// refuses for every other tree-sitter language — but the LANGUAGE question is asked last, after the
+	// policy, the row, the call and the source have each had their say. See contextmaterialize_span.go.
+	variantspec.DimContext: spanRewriteContext,
 	// P14 tool selection. It refuses here too, and for a reason of the same kind as the skills refusal
 	// but not identical to it, so it gets its own sentence rather than sharing one (see spanRewriteTools).
 	variantspec.DimTools: spanRewriteTools,
@@ -116,19 +129,23 @@ var argumentForms = map[string]argumentForm{
 	"python":     {namedArgs: true},
 	"typescript": {namedArgs: true},
 	"javascript": {namedArgs: true},
+	// 🔴 These three notes changed with P13 FR52, and the change is the point. They used to say "no row
+	// declares an arg_map", which was true and was the wrong fact: the rows had nothing to declare
+	// because the engine could only point INSIDE the argument list, and these SDKs bind before the call.
+	// The rows now declare a builder-chain or request-field locator, so what remains — and what these
+	// notes must say — is where to look when a row's binding is not written in this file.
 	"kotlin": {namedArgs: true,
-		registryNote: "no Kotlin row in the signature registry declares an arg_map, because the SDKs those " +
-			"rows cover (langchain4j, Spring AI, Bedrock) bind the model on a BUILDER at construction " +
-			"rather than at the call site, so there is no model or prompt argument here to point at — " +
-			"Kotlin's named arguments themselves ARE rewritable, and a row (or an llm-eval.yaml " +
-			"entrypoint) whose SDK names its arguments at the call site would be rewritten"},
+		registryNote: "the Kotlin rows cover SDKs (langchain4j, Spring AI) that bind the model on a " +
+			"BUILDER at construction, and those rows now declare that binding site — so a model bound by " +
+			"`.modelName(…)` in this file IS rewritten. A row with no arg_map at all means this entrypoint " +
+			"binds nowhere this engine locates"},
 	"java": {namedArgs: false,
-		registryNote: "and no Java row in the signature registry declares an arg_map either, because " +
-			"langchain4j, Spring AI and Bedrock bind the model on a builder at construction rather than " +
-			"at the call site"},
+		registryNote: "and the Java rows cover SDKs that bind the model on a builder at construction, " +
+			"which those rows now declare — so a model bound by `.modelName(…)` in this file IS rewritten"},
 	"rust": {namedArgs: false,
-		registryNote: "and no Rust row in the signature registry declares an arg_map either, because " +
-			"async-openai and the anthropic crate bind the model in a request struct built before the call"},
+		registryNote: "and the Rust rows cover crates (async-openai, anthropic) that bind the model in a " +
+			"REQUEST VALUE built before the call, which those rows now declare — so a model bound by " +
+			"`.model(…)` in this file IS rewritten"},
 }
 
 // noArgumentReason is the honest sentence for "this dimension has no argument to rewrite at this call
@@ -183,7 +200,11 @@ func spanRewriteModel(site discovery.SpanCallSite, src []byte, o variantspec.Res
 	// it is a property of SDKs, not of Go.
 	if hint := site.ProviderHint; hint != "" && entry.Spec.Provider != hint {
 		return nil, unsafeRewrite(site.NodeID, dim,
-			"call site is an %s SDK call but the override selects provider %q; swapping providers means "+
+			// The provider is named WITHOUT an indefinite article: %s is a provider name, and "an bedrock"
+			// / "a openai" are both reachable from one hard-coded article. Refusal copy is read by the
+			// person who has to act on it, and a sentence that reads as machine-assembled invites them to
+			// stop reading it.
+			"call site targets the %s SDK but the override selects provider %q; swapping providers means "+
 				"rewriting the SDK call itself (different client, params type, and response shape), which "+
 				"this engine does not do (ADR-002)", hint, entry.Spec.Provider)
 	}
@@ -194,7 +215,14 @@ func spanRewriteModel(site discovery.SpanCallSite, src []byte, o variantspec.Res
 	}
 	lit, err := spellString(site.Language, entry.Spec.ModelID)
 	if err != nil {
-		return nil, unsafeRewrite(site.NodeID, dim, "%v", err)
+		return nil, refuseShape(site.NodeID, dim, "%v", err)
+	}
+
+	// 🔴 P13 FR52: the SDK may bind the model BEFORE the call — a builder chain (Kotlin/Java) or a
+	// request value (Rust). The rule is unchanged (replace what the program wrote); only the place the
+	// engine looks for it is generalized.
+	if loc.Form.BindsBeforeTheCall() {
+		return spanBindingEdit(site, src, dim, loc, lit)
 	}
 
 	if v, ok := site.Keywords[loc.Name]; ok {
@@ -284,6 +312,26 @@ func spanRewritePrompt(site discovery.SpanCallSite, src []byte, o variantspec.Re
 		return nil, err
 	}
 
+	// A prompt bound before the call — an SDK that takes the text on a builder — is replaced at that
+	// binding site, under the same rules the model uses (P13 FR52). A slotted template still has nothing
+	// to bind to there, so that refusal is checked first and reads identically in both places.
+	if loc.Form.BindsBeforeTheCall() {
+		if slots := entry.Template.Slots(); len(slots) > 0 {
+			return nil, refuseShape(site.NodeID, dim,
+				"prompt %q declares slot(s) %v, but this call site binds its prompt as a fixed value with no "+
+					"runtime value to bind them to", entry.Name, slots)
+		}
+		rendered, rerr := entry.Template.Render(nil)
+		if rerr != nil {
+			return nil, refuseShape(site.NodeID, dim, "render prompt %q: %v", entry.Name, rerr)
+		}
+		lit, serr := spellString(site.Language, rendered)
+		if serr != nil {
+			return nil, refuseShape(site.NodeID, dim, "prompt %q: %v", entry.Name, serr)
+		}
+		return spanBindingEdit(site, src, dim, loc, lit)
+	}
+
 	v, ok := site.Keywords[loc.Name]
 	if !ok {
 		// 🚫 No insert branch, deliberately — the asymmetry with model is a decision, not an omission.
@@ -358,10 +406,15 @@ func spanRewritePrompt(site discovery.SpanCallSite, src []byte, o variantspec.Re
 // finding nothing, and reporting "the argument is not present" about an argument that is right there.
 func spanLocator(site discovery.SpanCallSite, loc *discovery.ArgLocator, dim string) (*discovery.ArgLocator, error) {
 	if loc == nil {
-		return nil, unsafeRewrite(site.NodeID, dim, "%s", noArgumentReason(site.Language, dim))
+		return nil, refuseShape(site.NodeID, dim, "%s", noArgumentReason(site.Language, dim))
+	}
+	// A binds-before-the-call locator is resolved by spanBindingEdit, not here: it addresses a statement
+	// that ran before this call rather than an argument of it.
+	if loc.Form.BindsBeforeTheCall() {
+		return loc, nil
 	}
 	if loc.Form != discovery.LocParamName || loc.Name == "" {
-		return nil, unsafeRewrite(site.NodeID, dim,
+		return nil, refuseShape(site.NodeID, dim,
 			"the registry row for this call site locates %s by %q, a form that needs type information to "+
 				"resolve; the %s frontend is a type-free parse and can resolve only a named argument, so "+
 				"this engine will not guess which expression the locator means",
@@ -422,11 +475,16 @@ var stringSyntaxes = map[string]stringSyntax{
 	"typescript": {},
 	"javascript": {},
 	"kotlin":     {escapeDollar: true},
-	// 🚫 Java and Rust are deliberately absent, not "missing". Neither can reach a spelling: they have
-	// no named-argument form, so every dimension refuses at spanLocator/insert long before a literal is
-	// built. A row here would be an entry no code path can use — 建了等未来用 — and it would quietly
-	// suggest those languages are one step from working, which is the impression this whole file exists
-	// to avoid giving.
+	// 🔴 Java and Rust used to be deliberately ABSENT, and the reasoning was sound at the time: neither
+	// has a named-argument form, so every dimension refused at spanLocator long before a literal was
+	// built, and a row here would have been an entry no code path could reach.
+	//
+	// P13 FR52 changed the premise rather than the rule. Their SDKs bind the model on a BUILDER or in a
+	// REQUEST VALUE, which spanBindingEdit now locates — so a literal really is reachable, and these
+	// rows are used rather than aspirational. Both languages write an ordinary double-quoted literal
+	// with C-style escapes and no interpolation sigil, which is exactly what the shared writer emits.
+	"java": {},
+	"rust": {},
 }
 
 // spellString renders s as a string literal in the target language, or refuses.
@@ -472,4 +530,69 @@ func spellString(language, s string) (string, error) {
 	}
 	b.WriteByte('"')
 	return b.String(), nil
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+// Rewriting a value the program bound BEFORE the call (P13 FR52)
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+
+// spanBindingEdit replaces the value a builder-chain call or a request-value field bound before this
+// call site, and is the whole of what made Kotlin, Java and Rust reachable.
+//
+// It changes nothing about the engine's founding rule — it still replaces an expression the program
+// already wrote. What changed is WHERE the engine is willing to look for that expression, and the
+// answer is now "the binding site the program used" rather than "an argument of this call".
+//
+// 🔴 Three refusals, and each names a different thing so a reader knows whose move it is:
+//
+//	no binding found      — the SDK binds nowhere this engine located: a fact about the SOURCE.
+//	more than one binding — the builder is SHARED, so a per-node change would alter a sibling node.
+//	an unreplaceable kind — an interpolated value the author is computing at run time.
+func spanBindingEdit(site discovery.SpanCallSite, src []byte, dim string, loc *discovery.ArgLocator, newValue string) ([]edit, error) {
+	binder := loc.Builder
+	if binder == "" {
+		binder = loc.Request
+	}
+	scan, recorded := site.BindingSites[dim]
+	if !recorded || scan.Occurrences == 0 {
+		return nil, refuseShape(site.NodeID, dim,
+			"the registry row for this call site says its SDK binds %s at %s `%s(…)` before the call, and "+
+				"this file does not write one — so there is no expression to replace. Bind it once in the same "+
+				"file as the call, or use an SDK that takes %s at the call site",
+			dim, bindingStyleName(loc.Form), binder, dim)
+	}
+	if scan.Occurrences > 1 {
+		return nil, refuseShape(site.NodeID, dim,
+			"this file writes `%s(…)` %d times before the call, so the %s binding is SHARED: replacing one "+
+				"would change every node built from it, and this engine cannot tell which of them the override "+
+				"was meant for. A per-node change that silently alters a sibling node is a false measurement, "+
+				"so it is refused rather than guessed",
+			binder, scan.Occurrences, dim)
+	}
+	if !scan.Found {
+		return nil, refuseShape(site.NodeID, dim,
+			"this file's `%s(…)` binding for %s could not be read as a single replaceable argument",
+			binder, dim)
+	}
+	if scan.Value.Kind == discovery.ArgInterpolatedString {
+		return nil, refuseShape(site.NodeID, dim,
+			"the `%s(…)` binding for %s splices a runtime value into its string, so replacing it whole would "+
+				"discard whatever it computes", binder, dim)
+	}
+	if err := checkSpan(site.NodeID, dim, scan.Value.Value, len(src)); err != nil {
+		return nil, err
+	}
+	return []edit{{
+		Start: scan.Value.Value.Start, End: scan.Value.Value.End,
+		New: newValue, NodeID: site.NodeID, Dim: dim, Binding: true,
+	}}, nil
+}
+
+// bindingStyleName names the SDK's binding style for a refusal, so the reader learns something about
+// their SDK rather than about our locator vocabulary.
+func bindingStyleName(f discovery.LocatorForm) string {
+	if f == discovery.LocRequestField {
+		return "a field of the request value it builds,"
+	}
+	return "a builder-chain call,"
 }

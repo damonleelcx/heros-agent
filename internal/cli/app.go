@@ -54,8 +54,12 @@ func Main(args []string, s Streams, env func(string) (string, bool), net NetComm
 		return codeOf(Discover(cfg, s), s, cmd)
 	case "apply":
 		return codeOf(Apply(cfg, s), s, cmd)
+	case "author":
+		return codeOf(Author(cfg, s), s, cmd)
 	case "eval":
 		return codeOf(Eval(cfg, s, ReferenceRuntime{}, gates), s, cmd)
+	case "coverage":
+		return codeOf(Coverage(cfg, s), s, cmd)
 	case "status":
 		authed, id := credentialStatus(cfg, env)
 		return codeOf(Status(cfg, s, authed, id), s, cmd)
@@ -97,6 +101,20 @@ func parse(cmd string, args []string, env func(string) (string, bool), s Streams
 	token := fs.String("token", "", "platform token (login)")
 	dryRun := fs.Bool("dry-run", false, "render the exact link payload without transmitting it")
 
+	// Authoring flags (P13 13c). Every value is optional at this layer; `author` enforces that at least
+	// one of them is present, so "you passed nothing to change" names itself rather than arriving as a
+	// generic flag error.
+	node := fs.String("node", "", "node id to change (author)")
+	model := fs.String("model", "", "set the node's model ref (author)")
+	prompt := fs.String("prompt", "", "set the node's prompt version ref (author)")
+	contextPolicy := fs.String("context-policy", "", "set the node's context policy ref (author)")
+	skillRefs := fs.String("skills", "", "set the node's bound skills, comma-separated, in order (author)")
+	toolKeep := fs.String("tools", "", "keep only these discovered tools, comma-separated (author)")
+	applyMode := fs.String("apply-mode", "", "inline | bound (author)")
+	dropTolerance := fs.String("drop-tolerance", "", "declare the node's context drop tolerance, 0..1 (author)")
+	clearDrop := fs.Bool("clear-drop-tolerance", false, "remove a declared drop tolerance — NOT the same as 0 (author)")
+	applyAuthored := fs.Bool("apply", false, "write the diff; without it, author previews and writes nothing")
+
 	// Gate flags (customer-configured quality gates).
 	minQuality := fs.Float64("min-quality", -1, "fail the build if quality is below this (0..1)")
 	maxCost := fs.Float64("max-cost-per-run", -1, "fail the build if cost/run exceeds this (USD)")
@@ -110,6 +128,8 @@ func parse(cmd string, args []string, env func(string) (string, bool), s Streams
 		"repo": ".", "config": "", "out": "", "report": "", "spec": "",
 		"commit": "", "repo-url": "", "workflow-id": "", "seeds": "5", "cases": "8",
 		"run": "", "dry-run": "false",
+		"node": "", "model": "", "prompt": "", "context-policy": "", "skills": "", "tools": "",
+		"apply-mode": "", "drop-tolerance": "", "clear-drop-tolerance": "false", "apply": "false",
 	}
 	r := NewResolver(defaults)
 	r.LoadEnv(env)
@@ -138,6 +158,16 @@ func parse(cmd string, args []string, env func(string) (string, bool), s Streams
 	put("repo", *repo)
 	put("config", *config)
 	put("out", *out)
+	put("node", *node)
+	put("model", *model)
+	put("prompt", *prompt)
+	put("context-policy", *contextPolicy)
+	put("skills", *skillRefs)
+	put("tools", *toolKeep)
+	put("apply-mode", *applyMode)
+	put("drop-tolerance", *dropTolerance)
+	put("clear-drop-tolerance", strconv.FormatBool(*clearDrop))
+	put("apply", strconv.FormatBool(*applyAuthored))
 	put("report", *report)
 	put("spec", *spec)
 	put("commit", *commit)
@@ -222,7 +252,11 @@ Usage:
 Local commands (no account, no network):
   discover   extract the Workflow IR + discovery report from a repository
   apply      realize a Variant Spec as a reviewable diff (worktree-isolated)
+  author     make a change yourself: preflight it, and with --apply write its diff
+             (answers admissible / refused-by-name / not-yet-measurable; never merges)
   eval       run a scored, multi-seed evaluation with your own keys
+  coverage   show what this build can APPLY, per axis and language — every registered
+             language appears on every axis, and a gap names what is missing
   status     show effective config with provenance, and the fixed contract facts
   version    print the CLI version and the contract versions it implements
 

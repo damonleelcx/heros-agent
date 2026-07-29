@@ -145,6 +145,15 @@ func generate(r *variantspec.Resolved, spec *variantspec.VariantSpec, root strin
 			for l := site.lineStart; l <= site.lineEnd; l++ {
 				allowedLines[site.fileRel][l] = true
 			}
+			// 🔴 A BINDING-SITE edit lands outside the call's own lines by construction: the SDK bound the
+			// value in an earlier statement (P13 FR52). It is admitted as its OWN line and nothing more —
+			// the window is not widened to the enclosing function, and a non-binding edit on that line
+			// still fails. New edit class, not a loosened gate (decisions.md D-4's discipline).
+			for _, e := range edits {
+				if e.bindingSite() {
+					allowedLines[site.fileRel][lineOf(src, e.Start)] = true
+				}
+			}
 			touched = append(touched, TouchedDimension{
 				NodeID: nodeID, Dim: string(dim), File: site.fileRel, Line: site.lineStart})
 		}
@@ -288,6 +297,17 @@ func gateSwapPermutation(rel string, src, out []byte, edits []edit) error {
 			Detail: fmt.Sprintf(format, args...)}
 	}
 
+	// 🔴 THE INVARIANT, in ONE implementation for every language (P15 20.5, decisions.md D-5 part 2).
+	//
+	// Two statements of the same rule. The LINE multiset is the stricter special case, and it is checked
+	// first because where it applies — Go and Python always, and every line-aligned brace statement — its
+	// failure message names the line a reader can go and look at. The STATEMENT multiset is the general
+	// form: the exchanged byte ranges must come back unedited, which stays true when statements stop
+	// being line-aligned (a TypeScript chain, a Rust expression-statement sharing a line).
+	//
+	// 🚫 Choosing the general formulation BEFORE the first non-line-aligned resolver landed is deliberate:
+	// a per-language relaxation is indistinguishable, in every passing run, from a per-language
+	// correctness, and the weakened one would be the least reviewed. Neither check is per language.
 	before, after := splitLines(src), splitLines(out)
 	if len(before) != len(after) {
 		return fail("the wiring swap changed %s from %d line(s) to %d: a transposition moves lines, it "+
@@ -296,6 +316,11 @@ func gateSwapPermutation(rel string, src, out []byte, edits []edit) error {
 	if missing, extra, ok := lineMultisetDiff(before, after); !ok {
 		return fail("the wiring swap did not preserve %s's lines: it would drop %q and introduce %q. A "+
 			"transposition may REORDER lines and may not edit one while moving it", rel, missing, extra)
+	}
+	if missing, extra, ok := statementMultisetDiff(src, out, edits); !ok {
+		return fail("the wiring swap did not preserve %s's statements: it would drop %q and introduce %q. "+
+			"A transposition may REORDER what the author wrote and may not edit any of it while moving it",
+			rel, missing, extra)
 	}
 
 	// Every changed line must lie inside one of the swapped blocks. The blocks are the edits' own byte
@@ -316,6 +341,25 @@ func gateSwapPermutation(rel string, src, out []byte, edits []edit) error {
 		}
 	}
 	return nil
+}
+
+// statementMultisetDiff reports whether the exchanged STATEMENTS survived the swap unedited: every
+// block's original bytes must appear in the result exactly as many times as before.
+//
+// This is the general form of the invariant. It is checked first because it is the one that stays true
+// when statements stop being line-aligned, and because its failure message names a STATEMENT — which is
+// what the author moved — rather than a line.
+func statementMultisetDiff(src, out []byte, edits []edit) (missing, extra string, ok bool) {
+	for _, e := range edits {
+		if e.Start < 0 || e.End > len(src) || e.Start > e.End {
+			return "", "", false
+		}
+		block := string(src[e.Start:e.End])
+		if strings.Count(string(out), block) < strings.Count(string(src), block) {
+			return block, e.New, false
+		}
+	}
+	return "", "", true
 }
 
 // lineMultisetDiff reports whether two line slices are permutations of each other, and if not, one

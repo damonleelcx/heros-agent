@@ -2,6 +2,8 @@ import { requireSession } from "@/lib/session";
 import { PageFrame, Section, Chip, Row, Banner } from "@/components/primitives";
 import { Tabs, type TabItem } from "@/components/tabs";
 import { AxisApplied, AxisRefusal } from "@/components/axisRefusal";
+import { WiringBoundaries } from "./boundaries";
+import { WiringEditor } from "./editor";
 
 /**
  * The node-wiring surface (P15, updated for wave 15c).
@@ -148,6 +150,12 @@ const OPERATORS = [
 function AppliedTab() {
   return (
     <div className="flex flex-col gap-6">
+      {/*
+        🔴 P15 20.14 — BOTH boundaries, stated before a reader reaches for a node. They are two different
+        facts with two different next steps, and an editor that accepts the drag and refuses afterwards
+        manufactures rearrangements that can never ship.
+      */}
+      <WiringBoundaries />
       <Section title="What was submitted">
         <p className="text-sm leading-relaxed text-muted-foreground">
           Two calls that sit next to each other in one function, share no name, and could legitimately
@@ -172,6 +180,13 @@ function AppliedTab() {
           nodeId="twoCalls"
           filename="wiring.go"
           what="The two statements were exchanged where they stand. Nothing was moved into or out of a block, no binding was rewritten, and no call was fused or deleted."
+          invariant={
+            <>
+              <strong>The file&apos;s lines were reordered and nothing else changed.</strong> Same line
+              count, same lines — so this change cannot have altered what any line says, only when it
+              runs. That is checked before the diff is offered, not asserted here.
+            </>
+          }
           diff={APPLIED_DIFF}
         />
       </Section>
@@ -256,6 +271,9 @@ export default async function WiringPage() {
   await requireSession();
   const tabs: TabItem[] = [
     { id: "axis", label: "The axis", content: <AxisTab /> },
+    // 🔴 The EDITOR tab (P15 15d). It comes second, right after the axis: a reader who is going to
+    // rearrange a graph should meet the verdicts before the worked examples of what gets declined.
+    { id: "editor", label: "Rearrange the graph", content: <WiringEditor /> },
     // The APPLIED case comes first among the outcomes, deliberately: a reader who opens this surface
     // and sees four refusals in a row learns the wrong thing about the axis.
     { id: "applied", label: "An applied reorder", content: <AppliedTab /> },

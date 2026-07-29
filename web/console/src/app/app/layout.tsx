@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { FileCode, FlaskConical, GitBranch, GitPullRequest, Home, Layers, Play, Settings, Share2, User } from "lucide-react";
+import { FileCode, FlaskConical, GitBranch, GitPullRequest, Home, Layers, PenLine, Play, Settings, Share2, SlidersHorizontal,
+  Grid3x3, User } from "lucide-react";
 import { requireSession } from "@/lib/session";
 import { visitedSubjects, routes, SUBJECT_LABELS } from "@/lib/subjects";
 import { NavLink } from "@/components/nav";
@@ -39,7 +40,12 @@ const SURFACES: Surface[] = [
   { href: "/app/transforms", label: "Transforms", icon: <FileCode /> },
   { href: "/app/delivery", label: "Delivery", icon: <GitPullRequest /> },
   { href: "/app/studio", label: "Studio", icon: <FlaskConical /> },
+  { href: "/app/authoring", label: "Author", icon: <PenLine /> },
   { href: "/app/wiring", label: "Wiring", icon: <Share2 /> },
+  { href: "/app/context", label: "Context", icon: <SlidersHorizontal /> },
+  // Coverage sits last in the primary group because it is the surface a reader reaches WHEN an axis
+  // declines — it explains the boundary the other surfaces enforce, rather than being a place to work.
+  { href: "/app/coverage", label: "Coverage", icon: <Grid3x3 /> },
 ];
 
 const SETTINGS: Surface[] = [
@@ -62,7 +68,10 @@ export default async function ConsoleLayout({ children }: { children: React.Reac
     { id: "s:delivery", group: "Surface", label: "Delivery", href: "/app/delivery" },
     { id: "s:variants", group: "Surface", label: "Variants", href: "/app/variants" },
     { id: "s:studio", group: "Surface", label: "Prompt & Model Studio", href: "/app/studio" },
+    { id: "s:authoring", group: "Surface", label: "Author a change", href: "/app/authoring" },
     { id: "s:wiring", group: "Surface", label: "Node wiring", href: "/app/wiring" },
+    { id: "s:context", group: "Surface", label: "Context strategy", href: "/app/context" },
+    { id: "s:coverage", group: "Surface", label: "Coverage — what applies where", href: "/app/coverage" },
     { id: "s:account", group: "Surface", label: "Plan and spend", href: routes.account() },
     ...visited.map((subject) => ({
       id: `v:${subject.kind}:${subject.id}`,

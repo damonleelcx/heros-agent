@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -156,23 +158,69 @@ func TestSkillToolTransformDeterministic(t *testing.T) {
 
 // ── 2.2 the interim refusal, per language and per provider ───────────────────────────────────────
 
-// A language with no landed materializer refuses — and refuses BEFORE producing any part of a diff.
+// 🔴 Wave 14d turned this test around, and the turn is the whole point of the wave.
+//
+// It used to assert that a Python skill binding REFUSES for want of a materializer. Python's spelling
+// rows have landed (skillbind_span.go), so what it asserts now is that the binding MATERIALIZES — from
+// the pinned skill's SEALED schema, exactly as Go does, because the shape was never the language-specific
+// part. An assertion that a capability is missing must be retired when the capability arrives, or the
+// suite starts defending the gap instead of the guarantee.
 //
 // 🔴 It runs against a REAL Python fixture, not a Go tree relabelled "python". Under a relabelled tree
-// Generate fails earlier, at "no Python call site with this node_id", and the test would go green
-// without the skills dimension ever being dispatched — passing for a reason that has nothing to do with
-// what it claims to prove.
+// Generate fails earlier, at "no Python call site with this node_id", and the test would pass for a
+// reason that has nothing to do with what it claims to prove.
+func TestSkillMaterializesInPython(t *testing.T) {
+	root := spanTarget(t, "pipeline.py", pyModelSrc)
+	id := onlyNode(t, root, "python")
+	entry := skillEntry(t, "search_kb", `{"type":"object","properties":{"query":{"type":"string"}}}`)
+
+	p, err := Generate(resolvedIn("python", map[string]variantspec.ResolvedOverride{
+		id: {Skills: []*registry.SkillEntry{entry}},
+	}), root)
+	if err != nil {
+		t.Fatalf("a bound skill on a covered (python, anthropic) cell must materialize: %v", err)
+	}
+	if p == nil || len(p.Files) == 0 {
+		t.Fatal("a materialized binding must emit a diff")
+	}
+	diff := string(p.Diff)
+	// The SHAPE comes from the sealed schema, and the SPELLING from the row: a Python dict with
+	// `input_schema`, carrying the schema's own property.
+	mustContain(t, diff, `"name": "search_kb"`, "the skill's registered name")
+	mustContain(t, diff, "input_schema", "the anthropic-python tool key")
+	mustContain(t, diff, `"query"`, "the property the SEALED schema declared")
+	// 🚫 And nothing of Go's spelling leaked across.
+	if strings.Contains(diff, "anthropic.ToolUnionParam") {
+		t.Errorf("the Go spelling was emitted into Python source:\n%s", diff)
+	}
+}
+
+// A language with no landed materializer refuses — and refuses BEFORE producing any part of a diff.
+//
+// The cell is reached through an UNCOVERED PROVIDER rather than an uncovered language, because every
+// registered language now has at least one spelling: "python is supported" is not "every Python call
+// site is supported", and this is the assertion that keeps that distinction honest.
 func TestUnappliedSkillRefusesAndEmitsNoDiff(t *testing.T) {
 	root := spanTarget(t, "pipeline.py", pyModelSrc)
 	id := onlyNode(t, root, "python")
 	entry := skillEntry(t, "search_kb", `{"type":"object","properties":{"query":{"type":"string"}}}`)
+
+	// Drop the (python, anthropic) spelling for the duration, so the refusal is driven by the TABLE
+	// rather than by an accident of the fixture.
+	cell := toolValueKey("python", "anthropic")
+	form, covered := toolValueForms[cell]
+	if !covered {
+		t.Fatal("the (python, anthropic) row must exist for this test to remove it")
+	}
+	delete(toolValueForms, cell)
+	t.Cleanup(func() { toolValueForms[cell] = form })
 
 	r := resolvedIn("python", map[string]variantspec.ResolvedOverride{
 		id: {Skills: []*registry.SkillEntry{entry}},
 	})
 	p, err := Generate(r, root)
 	if err == nil {
-		t.Fatal("a skill binding in a language with no materializer must refuse, not silently succeed")
+		t.Fatal("a skill binding in an uncovered cell must refuse, not silently succeed")
 	}
 	if !errors.Is(err, ErrUnsafeRewrite) {
 		t.Fatalf("want ErrUnsafeRewrite naming the refusal, got %v", err)
@@ -184,10 +232,14 @@ func TestUnappliedSkillRefusesAndEmitsNoDiff(t *testing.T) {
 	if !errors.As(err, &re) || re.NodeID != id || re.Dim != "skills" {
 		t.Fatalf("the refusal must name the node and the skills dimension, got %v", err)
 	}
+	if re.Cause != CauseNoMaterializer {
+		t.Errorf("a missing spelling is the one class that names work WE owe, got cause %q", re.Cause)
+	}
 	mustContain(t, re.Detail, "search_kb", "the skill the user asked for")
-	mustContain(t, re.Detail, "no materializer for this language has landed yet",
-		"that the language, not the request, is the limit")
-	mustContain(t, re.Detail, "REFUSED rather than dropped", "that this is not a silent drop")
+	mustContain(t, re.Detail, "no declared tool-value spelling", "that the CELL, not the request, is the limit")
+	mustContain(t, re.Detail, "Python", "the language half of the missing cell")
+	mustContain(t, re.Detail, "anthropic", "the provider half of the missing cell")
+	mustContain(t, re.Detail, "(python, openai)", "a cell that WOULD have worked, so the reader can act")
 }
 
 // The same refusal, exercised through the span engine's own dispatch rather than through a language
@@ -218,7 +270,7 @@ func TestSkillRefusesProviderWithNoDeclaredToolForm(t *testing.T) {
 			t.Skip("cohere gained a declared form; pick another uncovered provider for this test")
 		}
 	}
-	form, covered := toolValueForms["anthropic"]
+	form, covered := toolValueForms[toolValueKey("go", "anthropic")]
 	if !covered || form.sdkNote == "" {
 		t.Fatal("the anthropic row must declare the SDK generation its spelling targets")
 	}
@@ -227,8 +279,8 @@ func TestSkillRefusesProviderWithNoDeclaredToolForm(t *testing.T) {
 	ids := nodeIDs(t, root)
 	// The fixture's call sites are anthropic; drop the form for the duration of this test to prove the
 	// refusal is driven by the TABLE rather than by an accident of the fixture.
-	delete(toolValueForms, "anthropic")
-	t.Cleanup(func() { toolValueForms["anthropic"] = form })
+	delete(toolValueForms, toolValueKey("go", "anthropic"))
+	t.Cleanup(func() { toolValueForms[toolValueKey("go", "anthropic")] = form })
 
 	_, err := Generate(resolvedWith(map[string]variantspec.ResolvedOverride{
 		ids["agent"]: {Skills: []*registry.SkillEntry{
@@ -450,10 +502,10 @@ func TestMaterializerCoverageIsDerivedFromTheFormTable(t *testing.T) {
 			len(cov), len(toolValueForms))
 	}
 	for _, c := range cov {
-		if c.Language != "go" {
-			t.Errorf("only Go materializes today (D-14.4), coverage claims %q", c.Language)
+		if !slices.Contains(RegisteredLanguages(), c.Language) {
+			t.Errorf("coverage claims language %q, which discovery does not register", c.Language)
 		}
-		form, ok := toolValueForms[c.Provider]
+		form, ok := toolValueForms[toolValueKey(c.Language, c.Provider)]
 		if !ok {
 			t.Fatalf("coverage claims provider %q, which the form table does not carry", c.Provider)
 		}
@@ -510,9 +562,105 @@ func TestCoverageDocMatchesTheFormTable(t *testing.T) {
 			continue
 		}
 		provider := strings.TrimSpace(cols[2])
-		if _, ok := toolValueForms[provider]; !ok {
+		if _, ok := toolValueForms[toolValueKey("go", provider)]; !ok {
 			t.Errorf("the coverage doc claims provider %q, which the form table does not carry; the doc "+
 				"promises a capability the engine refuses", provider)
+		}
+	}
+}
+
+// ── P14 11.9 🔴 — a spelling row is a COMPILE CLAIM ─────────────────────────────────────────────
+
+// Every `(language, provider, SDK generation)` row asserts that these bytes are well-formed against that
+// SDK. This axis exists because a wrong tool schema *compiles*, so a row backed by anything less than an
+// executable check is the exact failure the capability was written to prevent, wearing a coverage badge.
+//
+// What "executable" means differs by what the engine can run here, and the difference is stated rather
+// than smoothed over:
+//
+//	Go rows   — the real build gate. `internal/proposal.BuildChecker` compiles the emitted source, so a
+//	            wrong Go spelling fails loudly before a reviewer sees it.
+//	span rows — the language's own reparse assertion in THIS suite, plus the production build gate,
+//	            which is `worktree.VerifierFor(language)` running in the customer's checkout with their
+//	            toolchain. The platform cannot run a Java build in its own CI; it can and does run one at
+//	            apply time, and that is where the claim is finally proven.
+//
+// 🚫 A row admitted on neither is rejected. That is what this test enforces.
+func TestEverySpellingRowHasABuildProof(t *testing.T) {
+	entry := skillEntry(t, "search_kb", `{"type":"object","properties":{"query":{"type":"string"}}}`)
+	skills := []*registry.SkillEntry{entry}
+
+	for cell, form := range toolValueForms {
+		// 1. The row EMITS. A row whose element renderer errors on an ordinary sealed schema is a claim
+		// nobody could have exercised.
+		got, err := toolListLiteral(form, skills)
+		if err != nil {
+			t.Errorf("(%s, %s): the row cannot emit a tool value for an ordinary schema: %v",
+				cell.language, cell.provider, err)
+			continue
+		}
+		if got == "" {
+			t.Errorf("(%s, %s): the row emitted nothing", cell.language, cell.provider)
+			continue
+		}
+		// 2. It emits a SINGLE LINE. gateMinimal rejects any edit containing a newline, so a multi-line
+		// spelling would be a row that can never be applied — green here, refused in production.
+		if strings.Contains(got, "\n") {
+			t.Errorf("(%s, %s): the spelling spans lines, which gateMinimal refuses:\n%s",
+				cell.language, cell.provider, got)
+		}
+		// 3. It NAMES the generation it targets. "anthropic is supported" is not true of a call site on a
+		// different SDK generation, so an unnamed row is an unbounded claim.
+		if form.sdkNote == "" {
+			t.Errorf("(%s, %s): the row does not name the SDK generation its spelling targets",
+				cell.language, cell.provider)
+		}
+		// 4. The language has a registered ENGINE, which is the set `worktree.verifiersByLanguage` is held
+		// to by its own test (`TestVerifiersCoverEveryFrontend`). A row for a language outside it would
+		// ship a spelling that could never be gated at apply time.
+		//
+		// 🚫 Asserted through the engine rather than by importing `worktree`: that package imports this
+		// one, so a direct check would be an import cycle. The two sets are tied together on the other
+		// side of the boundary, which is where the tie belongs.
+		if _, err := engineFor(cell.language); err != nil {
+			t.Errorf("(%s, %s): no engine is registered for this language, so its spelling could never be "+
+				"gated at apply time: %v", cell.language, cell.provider, err)
+		}
+		// 5. The emitted value carries the SEALED contract's property — the shape came from the pin, not
+		// from a guess.
+		if !strings.Contains(got, "query") {
+			t.Errorf("(%s, %s): the emitted value does not carry the sealed schema's property:\n%s",
+				cell.language, cell.provider, got)
+		}
+	}
+}
+
+// The Go rows specifically are proven by the REAL build gate: an emitted binding is compiled, and a
+// spelling that does not compile fails there rather than in a customer's repository.
+func TestGoSpellingRowsReachTheBuildGate(t *testing.T) {
+	root := newTarget(t)
+	ids := nodeIDs(t, root)
+	entry := skillEntry(t, "search_kb", `{"type":"object","properties":{"query":{"type":"string"}}}`)
+
+	p, err := Generate(resolvedWith(map[string]variantspec.ResolvedOverride{
+		ids["agent"]: {Skills: []*registry.SkillEntry{entry}},
+	}), root)
+	if err != nil {
+		t.Fatalf("the (go, anthropic) row must emit: %v", err)
+	}
+	// The emitted Go source must parse — the in-suite half of the gate. The compile half is
+	// internal/proposal.BuildChecker, which runs on the same artifact in the apply path.
+	eng, err := engineFor("go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rel, after := range p.Files {
+		before, rerr := os.ReadFile(filepath.Join(root, rel))
+		if rerr != nil {
+			t.Fatal(rerr)
+		}
+		if err := eng.reparse(rel, before, after); err != nil {
+			t.Fatalf("the emitted Go binding does not parse: %v", err)
 		}
 	}
 }

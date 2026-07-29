@@ -595,14 +595,22 @@ func TestMaterializedReorderOnBothEntrypoints(t *testing.T) {
 	}
 }
 
-// TestUnsupportedLanguageRefusesByName — 🔴 task 15.3.
+// TestUnsupportedLanguageRefusesByName — 🔴 task 15.3, retargeted by wave 15e.
+//
+// Kotlin has a resolver now (wiringswap_brace.go), so the language it had to be asked about moved to one
+// discovery does not register. The GUARANTEE is unchanged and is what this still pins: a language with
+// no statement resolver never gets a textual move attempted on it, and the refusal NAMES it.
 func TestUnsupportedLanguageRefusesByName(t *testing.T) {
-	_, err := materializeSwap("kotlin", []byte("fun main() {}\n"), &swapPlan{First: "a", Second: "b"}, 1, 1)
+	_, err := materializeSwap("elixir", []byte("defmodule M do\nend\n"), &swapPlan{First: "a", Second: "b"}, 1, 1)
 	if err == nil {
 		t.Fatal("a language with no statement materializer must refuse, never attempt a textual move")
 	}
-	if !strings.Contains(err.Error(), "Kotlin") {
+	if !strings.Contains(err.Error(), "elixir") {
 		t.Errorf("the refusal must NAME the language, got %v", err)
+	}
+	var re *RewriteError
+	if errors.As(err, &re) && re.Cause != CauseNoMaterializer {
+		t.Errorf("a missing resolver is the class that names work WE owe, got %q", re.Cause)
 	}
 }
 
@@ -673,9 +681,16 @@ func TestSwapRefusalMatrix(t *testing.T) {
 			lineA: 2, lineB: 3, want: "does not model",
 		},
 		{
-			what: "a language with no materializer", language: "rust",
+			// 🔴 Rust HAS a resolver now (wave 15e). What it does not have here is a transposable pair —
+			// which is a fact about the SOURCE, and the refusal must say so rather than blaming Rust.
+			what: "a Rust file with no transposable pair", language: "rust",
 			src:   "fn main() {}\n",
-			lineA: 1, lineB: 1, want: "Rust",
+			lineA: 1, lineB: 1, want: "same statement",
+		},
+		{
+			what: "a language with no resolver at all", language: "elixir",
+			src:   "defmodule M do\nend\n",
+			lineA: 1, lineB: 1, want: "elixir",
 		},
 	}
 	for _, c := range cases {

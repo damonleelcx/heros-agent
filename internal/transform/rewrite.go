@@ -82,7 +82,11 @@ func rewriteModel(site discovery.GoCallSite, src []byte, o variantspec.ResolvedO
 	// the wrong provider.
 	if hint := providerHintFor(site); hint != "" && entry.Spec.Provider != hint {
 		return nil, unsafeRewrite(site.NodeID, dim,
-			"call site is an %s SDK call but the override selects provider %q; swapping providers means "+
+			// The provider is named WITHOUT an indefinite article: %s is a provider name, and "an bedrock"
+			// / "a openai" are both reachable from one hard-coded article. Refusal copy is read by the
+			// person who has to act on it, and a sentence that reads as machine-assembled invites them to
+			// stop reading it.
+			"call site targets the %s SDK but the override selects provider %q; swapping providers means "+
 				"rewriting the SDK call itself (different client, params type, and response shape), which "+
 				"this engine does not do (ADR-002)", hint, entry.Spec.Provider)
 	}
@@ -408,32 +412,48 @@ func refuseSkills(nodeID string, o variantspec.ResolvedOverride) error {
 		names)
 }
 
-// rewriteContext refuses, and P3 is the named owner of the rewrite that would not refuse.
+// rewriteContext MATERIALIZES a resolved context policy at a Go call site (P16 task 2.2).
 //
-// The registry rows carry no context locator at all — context assembly is not an argument, it is how
-// the surrounding code builds the message list, which is why the IR records it as a description
-// ("static message list at the call site") rather than a position. P2 ships only the `full` policy
-// (PRD §3), and `full` is by definition what an un-rewritten call site already does, so refusing
-// costs P2 nothing: there is no context configuration expressible today that this refusal denies.
+// Go is the first — and, in 16a, the only — language whose context refusal is replaced by construction.
+// The construction, the per-policy coverage table it is gated on, and the argument that makes a
+// message-list rewrite safe live in contextmaterialize.go; this function is the dispatch table's entry
+// for the context dimension and nothing more.
 //
-// This is scope, not a gap. Context assembly becomes rewritable when there are real policies to
-// rewrite it TO, and those arrive with P3 (docs/prd/P3-context-skills-sandbox.md) — which owns both
-// the policies and the transform that realizes them.
-func rewriteContext(site discovery.GoCallSite, _ []byte, o variantspec.ResolvedOverride) ([]edit, error) {
-	return nil, refuseContext(site.NodeID, o)
+// 🔴 It still refuses, by name, for a policy that assembles at RUN TIME (summarization, retrieval) and
+// for a call site whose message list is built at runtime. "Go is supported" is not "every Go call site
+// is supported", and a refusal must say which half is missing.
+func rewriteContext(site discovery.GoCallSite, src []byte, o variantspec.ResolvedOverride) ([]edit, error) {
+	return materializeContext(site, src, o)
 }
 
-// refuseContext is the context refusal, shared by both engines — and it is if anything MORE
-// language-neutral than the skills one. No frontend's registry rows carry a context locator, in any
-// language, because context assembly is not an argument anywhere: it is how the surrounding code builds
-// the message list. P3 owns the rewrite that would not refuse, for every language at once.
-func refuseContext(nodeID string, o variantspec.ResolvedOverride) error {
-	return unsafeRewrite(nodeID, string(variantspec.DimContext),
+// refuseContext is the INTERIM refusal, for every language whose context materializer has not landed
+// (P16 task 3.2, design.md Decision 1). Today that is every tree-sitter language; Go no longer reaches it.
+//
+// 🔴 P16 OWNS this rewrite. The previous text named P3 as the owner, which was inaccurate in the way
+// that costs a reader real time: P3 shipped the policies and their host-side `Assemble` and never the
+// call-site rewrite, so a user who followed that pointer found a phase that had already shipped and no
+// rewrite. A refusal that sends the reader to the wrong place is a worse refusal than one that says
+// nothing, because it looks actionable.
+//
+// The reason itself is unchanged and still correct: context assembly is not an argument in any
+// language — it is how the surrounding code builds the message list — so materializing a policy is a
+// REGION rewrite, per language. Go's landed (contextmaterialize.go); the rest state that plainly rather
+// than no-op the override, because a silently-dropped context override is resolved, hashed, and scored
+// as the BASE configuration under the variant's hash. That is a false result, the worst thing an eval
+// platform can produce, and it is why this refusal is a specified, tested requirement rather than a
+// placeholder.
+func refuseContext(nodeID, language string, o variantspec.ResolvedOverride) error {
+	policy := "the resolved policy"
+	if o.Context != nil {
+		policy = strconv.Quote(o.Context.Spec.Policy)
+	}
+	return refuseNoMaterializer(nodeID, string(variantspec.DimContext),
 		"context assembly is not a call-site argument — it is how the surrounding code builds the "+
-			"message list, so the registry rows declare no context locator to rewrite. P2 ships only "+
-			"the `full` policy, which is by definition what this call site already does; policy %q "+
-			"needs the context-assembly rewrite owned by P3 (docs/prd/P3-context-skills-sandbox.md), "+
-			"not an argument swap", o.Context.Spec.Policy)
+			"message list — so materializing policy %s is a REGION rewrite of that code, per language. "+
+			"P16 owns that rewrite (docs/prd/P16-context-strategy-optimization.md) and has landed it for "+
+			"Go; the %s materializer is still being built, so this override is REFUSED rather than "+
+			"dropped — applying it as the base configuration would score a configuration that never ran",
+		policy, languageDisplay(language))
 }
 
 // ── P15: the interim refusal for un-materializable wiring ────────────────────────────────────────

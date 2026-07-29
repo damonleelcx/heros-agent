@@ -223,3 +223,109 @@ func TestWiringRefusalIsObservableNoDiff(t *testing.T) {
 		t.Errorf("the refusal must name the dropped node, got %q", re.Detail)
 	}
 }
+
+// ── §5.5 — the adapter is IN the reviewable diff, and coercion exists nowhere else ────────────────
+
+// P15 task 5.5. An `adapted` verdict means the platform inserted code that reshapes one node's output
+// to satisfy the next node's input. That is a semantic change to the running program, authored by the
+// platform rather than by the user — so the whole of it has to be visible in the artifact the user
+// reviews before merging.
+//
+// 🔴 The dangerous outcome this gate excludes is not a crash. It is an adapter that WORKS: the coercion
+// happens at run time inside the engine, the workflow produces correct output, and the diff the reviewer
+// approves says nothing about it. The reviewer would then have approved a rename they never saw. So the
+// assertion is not "an adapter exists" — it is that the adapter's source, its declared contract, and its
+// attribution are all carried by the same diff, and that the reviewer can regenerate it byte-for-byte.
+func TestAdapterIsInReviewableDiff(t *testing.T) {
+	resolved, spec := adaptedSpec()
+	p, err := GenerateTransform(resolved, spec, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	diff := string(p.Diff)
+	wantPath := AdapterPackageDir + "/" + adapterFileBase(renameAdapter()) + ".go"
+
+	// 1. THE FILE. The adapter is a file in the patch, not a run-time behaviour of the engine.
+	content, ok := p.Files[wantPath]
+	if !ok {
+		t.Fatalf("the adapter must be a file in the patch; %s is absent from %v", wantPath, sortedFileKeys(p.Files))
+	}
+
+	// 2. THE NEW-FILE HUNK. `--- /dev/null` is what makes a reviewer's tooling render this as an
+	// addition with every line shown, rather than as an opaque binary or a rename of something existing.
+	// Asserted as an adjacent pair so a `/dev/null` belonging to some other file cannot satisfy it.
+	newFileHunk := "--- /dev/null\n+++ b/" + wantPath + "\n"
+	if !strings.Contains(diff, newFileHunk) {
+		t.Fatalf("the adapter must enter the diff as a new-file hunk (%q):\n%s", newFileHunk, diff)
+	}
+	if !strings.Contains(diff, "@@ -0,0 +1,") {
+		t.Errorf("a new-file hunk must count its added lines, so nothing is hidden:\n%s", diff)
+	}
+
+	// 3. THE DECLARED CONTRACT, INSIDE THE SOURCE. The reviewer must be able to read what the coercion
+	// does from the diff alone — both sides of the rename — without consulting the catalog.
+	body := string(content)
+	for _, want := range []string{`"answer"`, `"response"`, "rename"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the generated adapter must state its contract in source; %q is missing:\n%s", want, body)
+		}
+	}
+	// The source in the patch and the source in the diff are the same bytes. A patch whose Files and
+	// Diff disagree would let the applied tree differ from the reviewed one.
+	for _, line := range splitLines(content) {
+		if line == "" {
+			continue
+		}
+		if !strings.Contains(diff, "+"+line+"\n") {
+			t.Fatalf("a line of the adapter source is absent from the diff, so the reviewed and applied "+
+				"trees differ:\n  line: %q", line)
+		}
+	}
+
+	// 4. THE ATTRIBUTION. `Touched` is what the console reads to say WHICH node this change belongs to.
+	// An untraced adapter file renders as an orphan the reviewer cannot attribute.
+	var found *TouchedDimension
+	for i := range p.Touched {
+		if p.Touched[i].File == wantPath {
+			found = &p.Touched[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("the adapter file carries no Touched attribution, so no surface can say which node it "+
+			"serves; touched = %+v", p.Touched)
+	}
+	if found.NodeID != "adapter:rename:A->B" {
+		t.Errorf("the attribution must name the adapter node, got %q", found.NodeID)
+	}
+	if found.Dim != "adapter:rename" {
+		t.Errorf("the attribution must name the adapter KIND, so a reviewer knows what class of coercion "+
+			"was inserted, got %q", found.Dim)
+	}
+
+	// 5. BYTE-IDENTICAL REGENERATION. A reviewer who regenerates must get exactly what they approved;
+	// otherwise "I reviewed this diff" is not a statement about the code that ships.
+	again, err := GenerateTransform(resolved, spec, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(again.Diff) != diff || again.DiffHash != p.DiffHash {
+		t.Fatal("regenerating the same spec produced a different diff — the reviewed artifact is not the " +
+			"artifact that ships")
+	}
+	if string(again.Files[wantPath]) != body {
+		t.Fatal("regenerating produced different adapter source for the same adapter")
+	}
+
+	// 🚫 THE LOAD-BEARING NEGATIVE: no coercion outside the diff. The rename is performed by the file the
+	// reviewer sees and by nothing else — no other file in the patch quietly moves answer→response.
+	for _, path := range sortedFileKeys(p.Files) {
+		if path == wantPath {
+			continue
+		}
+		if strings.Contains(string(p.Files[path]), `delete(out, "answer")`) {
+			t.Errorf("a second site performs the coercion (%s) — the adapter in the diff is not the whole "+
+				"of the change", path)
+		}
+	}
+}

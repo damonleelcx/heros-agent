@@ -241,13 +241,29 @@ type NodeOverride struct {
 	// denote one configuration and must share a config_hash, so the resolved projection sorts it —
 	// unlike SkillRefs, whose order is identity-bearing because the call site binds them in that order.
 	ToolSelection []string `json:"tool_selection,omitempty"`
+	// ContextDropTolerance is the fraction of source context this node's JOB can afford to lose, in
+	// [0,1] (P16 task 1.5, decisions.md D-2). It is read at proposal admissibility: a proposal whose
+	// resolved policy would drive this node's drop ratio past the tolerance is inadmissible — rejected
+	// before transform and before any eval spend.
+	//
+	// 🔴 It is a POINTER, and that is the whole of D-2. Additive, omit-when-absent: a node that declares
+	// no tolerance emits NO `context_drop_tolerance` key, so it serialises byte-identically to a pre-P16
+	// node and every frozen config_hash golden vector keeps reproducing. The alternative — an
+	// always-present float defaulting to 0.0 — would both move the frozen bytes and encode a hostile
+	// default (zero tolerance rejects every lossy policy). This is the same additive discipline
+	// Bindings and ToolSelection above already follow.
+	//
+	// 🚫 It is NOT a policy fact and does not belong on the context entry: whether a given drop is
+	// acceptable is a property of the node's job (a Retrieval node tolerates augmentation a
+	// Summarization node does not), and a policy is shared across nodes with different tolerances.
+	ContextDropTolerance *float64 `json:"context_drop_tolerance,omitempty"`
 }
 
 // isEmpty reports whether this override sets nothing. A node listed in the ordering with no
 // overrides is legitimate and common: it is a node that runs exactly as discovered.
 func (o NodeOverride) isEmpty() bool {
 	return o.ModelRef == "" && o.PromptRef == "" && len(o.SkillRefs) == 0 && o.ContextPolicy == "" &&
-		len(o.Bindings) == 0 && len(o.ToolSelection) == 0
+		len(o.Bindings) == 0 && len(o.ToolSelection) == 0 && o.ContextDropTolerance == nil
 }
 
 // SelectedTools returns the kept tool set in canonical (sorted, de-duplicated) order — the same order
@@ -384,6 +400,15 @@ func (s *VariantSpec) Validate() error {
 			// it would hide the misunderstanding rather than surface it.
 			return specErr(id, DimTools, ErrInvalidSpec, "tool_selection keeps %q twice", dup)
 		}
+		// Drop tolerance — a RATIO, so the only structural claim is its range (P16 task 1.5). Whether a
+		// given policy would exceed it needs the resolved policy and the node's measured drop, so that
+		// check lives at proposal admissibility, not here. A value outside [0,1] is rejected rather than
+		// clamped: "tolerate 1.5 of the context" is a misunderstanding, and silently reading it as 1.0
+		// would hide the misunderstanding behind a gate that then never bites.
+		if t := o.ContextDropTolerance; t != nil && (*t < 0 || *t > 1) {
+			return specErr(id, DimContext, ErrInvalidSpec,
+				"context_drop_tolerance is %v, want a ratio in [0,1]", *t)
+		}
 		// Binding structure — everything checkable without the IR or registries (kind is in the set; a
 		// non-literal binding names something). The scope/declared/contract checks and the exactly-once
 		// satisfaction rule need the IR and the resolved prompt, so they live in Resolve (task 3.2/3.4).
@@ -421,6 +446,10 @@ func (s *VariantSpec) Validate() error {
 
 // Refs returns every registry version_id the spec references, deduplicated and sorted. Used by
 // Resolve to fail closed on dangling refs, and by the UI to show what an author pinned.
+//
+// 🚫 ContextDropTolerance is deliberately absent, for the same reason ToolSelection is: it is a NUMBER,
+// not a registry address. Listing it here would send the loader looking up "0.2" as a version_id and
+// fail closed on a value that was never meant to be registered.
 func (s *VariantSpec) Refs() []string {
 	set := map[string]bool{}
 	for _, o := range s.Nodes {

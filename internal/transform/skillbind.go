@@ -70,8 +70,10 @@ import (
 // registry's own rows already make the same distinction (registry.yaml row 1: "v1 drops the F()
 // wrapper"), and this table follows the v1 spelling, which is what the checked-in fixtures use.
 type toolValueForm struct {
-	// sliceType is the Go type of the tools argument, e.g. "[]anthropic.ToolUnionParam".
-	sliceType string
+	// openList / closeList wrap the elements in this language's list syntax: "[]anthropic.ToolUnionParam{"
+	// … "}" in Go, "[" … "]" in Python. Two strings rather than a "sliceType" because outside Go the
+	// list is not named by a type.
+	openList, closeList string
 	// element renders ONE bound skill as an element of that slice. name is the skill's registered name;
 	// schema is the skill's sealed input schema, already decoded.
 	element func(name string, schema jsonSchemaDoc) (string, error)
@@ -79,7 +81,20 @@ type toolValueForm struct {
 	sdkNote string
 }
 
-// toolValueForms is the coverage table: provider → how to spell its tool list in Go.
+// toolValueCell is one coverage cell: a provider's tool-value spelling IN ONE LANGUAGE.
+//
+// 🔴 The key gained a language (P14 FR23). The old map was keyed by provider alone and read "Go" from
+// the fact that nothing else had a materializer — an assumption that was true exactly once and would
+// have been silently wrong the moment a second language landed. What is per language here is only the
+// SPELLING: the SHAPE still comes from the pinned skill's sealed schema, which is why a new language is
+// a set of rows and not a second source of truth about what a bound skill means.
+type toolValueCell struct{ language, provider string }
+
+func toolValueKey(language, provider string) toolValueCell {
+	return toolValueCell{language: strings.ToLower(strings.TrimSpace(language)), provider: provider}
+}
+
+// toolValueForms is the coverage table: (language, provider) → how to spell its tool list there.
 //
 // 🔴 It is THE source of truth for per-(language, provider) skill-materializer coverage (NFR7).
 // docs/decisions/p14-materializer-coverage.md is a human-readable copy of it, and
@@ -91,10 +106,10 @@ type toolValueForm struct {
 // tool-value spelling this engine has no evidence for, and the honest outcome is the refusal below, not
 // a guess. Bedrock is the clearest case: its tools live inside an opaque serialized body (the registry
 // row marks `input.ToolConfig`), so there is no Go tool value to construct at all.
-var toolValueForms = map[string]toolValueForm{
-	"anthropic": {
-		sliceType: "[]anthropic.ToolUnionParam",
-		sdkNote:   "anthropic-sdk-go v1 (the generation that drops the F() wrapper)",
+var toolValueForms = map[toolValueCell]toolValueForm{
+	{"go", "anthropic"}: {
+		openList: "[]anthropic.ToolUnionParam{", closeList: "}",
+		sdkNote: "anthropic-sdk-go v1 (the generation that drops the F() wrapper)",
 		element: func(name string, schema jsonSchemaDoc) (string, error) {
 			props, err := schema.propertiesLiteral()
 			if err != nil {
@@ -104,9 +119,9 @@ var toolValueForms = map[string]toolValueForm{
 				strconv.Quote(name), props), nil
 		},
 	},
-	"openai": {
-		sliceType: "[]openai.ChatCompletionToolUnionParam",
-		sdkNote:   "openai-go v1 (the generation with ChatCompletionToolUnionParam)",
+	{"go", "openai"}: {
+		openList: "[]openai.ChatCompletionToolUnionParam{", closeList: "}",
+		sdkNote: "openai-go v1 (the generation with ChatCompletionToolUnionParam)",
 		element: func(name string, schema jsonSchemaDoc) (string, error) {
 			whole, err := schema.wholeLiteral()
 			if err != nil {
@@ -133,8 +148,8 @@ type SkillMaterializerCoverage struct {
 // badge, and an emitted refusal cannot drift apart (NFR7, task 9.4).
 func MaterializerCoverage() []SkillMaterializerCoverage {
 	out := make([]SkillMaterializerCoverage, 0, len(toolValueForms))
-	for p, f := range toolValueForms {
-		out = append(out, SkillMaterializerCoverage{Language: "go", Provider: p, SDK: f.sdkNote})
+	for cell, f := range toolValueForms {
+		out = append(out, SkillMaterializerCoverage{Language: cell.language, Provider: cell.provider, SDK: f.sdkNote})
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Language != out[j].Language {
@@ -145,12 +160,16 @@ func MaterializerCoverage() []SkillMaterializerCoverage {
 	return out
 }
 
-// coveredProviders lists the providers a Go call site can materialize into, for a refusal that tells
-// the reader what WOULD have worked.
-func coveredProviders() []string {
-	out := make([]string, 0, len(toolValueForms))
+// coveredProviders lists the providers ONE language can materialize into, for a refusal that tells the
+// reader what WOULD have worked in the language they are actually writing in. Naming every provider in
+// every language would answer a question nobody asked and hide the one they did.
+func coveredProviders(language string) []string {
+	lang := strings.ToLower(strings.TrimSpace(language))
+	var out []string
 	for _, c := range MaterializerCoverage() {
-		out = append(out, c.Provider)
+		if c.Language == lang {
+			out = append(out, c.Provider)
+		}
 	}
 	return out
 }
@@ -169,16 +188,16 @@ func coveredProviders() []string {
 func materializeSkills(site discovery.GoCallSite, src []byte, o variantspec.ResolvedOverride) ([]edit, error) {
 	const dim = string(variantspec.DimSkills)
 
-	form, ok := toolValueForms[site.ProviderHint]
+	form, ok := toolValueForms[toolValueKey("go", site.ProviderHint)]
 	if !ok {
-		// Refused BY NAME, per D-14.4: the boundary is per (language, provider), and a reader of this
-		// message must be able to tell which half is missing.
-		return nil, unsafeRewrite(site.NodeID, dim,
-			"this Go call site's provider is %s, and this engine has no declared tool-value form for it, so "+
-				"there is no SDK shape to construct a bound skill into; the providers it can materialize are %v "+
-				"(decisions.md D-14.4). Binding %s here would mean guessing an SDK's tool type, and a guess that "+
-				"compiles is the failure mode with no downstream net",
-			providerDisplay(site.ProviderHint), coveredProviders(), skillNames(o))
+		// Refused BY NAME, per D-14.4/D-14.5: the boundary is per (language, provider), and a reader of
+		// this message must be able to tell which half is missing.
+		return nil, refuseNoMaterializer(site.NodeID, dim,
+			"this Go call site's provider is %s, and this engine has no declared tool-value spelling for "+
+				"(go, %s), so there is no SDK shape to construct a bound skill into; the providers it can "+
+				"materialize in Go are %v (decisions.md D-14.5). Binding %s here would mean guessing an SDK's "+
+				"tool type, and a guess that compiles is the failure mode with no downstream net",
+			providerDisplay(site.ProviderHint), site.ProviderHint, coveredProviders("go"), skillNames(o))
 	}
 
 	value, err := toolListLiteral(form, o.Skills)
@@ -252,7 +271,7 @@ func toolListLiteral(form toolValueForm, skills []*registry.SkillEntry) (string,
 		}
 		elems = append(elems, e)
 	}
-	return form.sliceType + "{" + strings.Join(elems, ", ") + "}", nil
+	return form.openList + strings.Join(elems, ", ") + form.closeList, nil
 }
 
 // isStaticToolList reports whether a tools expression is a list written out at the call site — the

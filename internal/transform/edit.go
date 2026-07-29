@@ -57,6 +57,9 @@ type edit struct {
 	// The flag is set in exactly one place (the wiring materializer) and read in exactly one place (the
 	// minimality gate), so there is no third caller to get it wrong.
 	Swap bool
+	// Binding marks an edit that replaces a value the program bound BEFORE the call — a builder-chain
+	// call or a request-value field (P13 FR52). See bindingSite().
+	Binding bool
 }
 
 // isSwap reports whether an edit set is a wiring transposition. A set is either all swap or none: a
@@ -70,6 +73,16 @@ func isSwap(edits []edit) bool {
 	}
 	return false
 }
+
+// bindingSite marks an edit that replaces a value the program bound BEFORE the call — a builder-chain
+// call or a request-value field (P13 FR52).
+//
+// 🔴 It exists so the minimality gate can admit exactly this edit's own line and nothing else. The
+// alternative — widening every node's allowed window to "the enclosing function" — would have removed
+// the untargeted-line check from every rewriter in the package, forever, to serve one caller. That is
+// the same trade P15's swap refused (decisions.md D-4): a NEW EDIT CLASS with its own admission rule,
+// never a loosened old one.
+func (e edit) bindingSite() bool { return e.Binding }
 
 // insertion reports whether this edit adds text rather than replacing an expression (Start == End),
 // which is what happens when a call site never set the field being overridden.
@@ -88,12 +101,29 @@ var (
 	ErrNodeNotFound = errors.New("transform: no call site for this node at source_revision")
 )
 
-// RewriteError names the node and dimension a failure is about.
+// RewriteError names the node and dimension a failure is about, and — for a refusal — WHICH KIND of
+// thing is missing (P13 FR43).
+//
+// # Why Cause is a field and not a sentence
+//
+// Detail is written for a human and is the right place for the specifics. But three genuinely different
+// failures reach this type, and they are answered by three different people:
+//
+//	CauseNotAtCallSite   — nobody. The value does not exist in source in ANY language.
+//	CauseCallSiteShape   — the customer's engineer. Their call site cannot express it.
+//	CauseNoMaterializer  — us. The artifact has not landed.
+//
+// A console badge, a CLI exit path and a test all have to branch on that distinction, and branching on
+// prose is how a reworded refusal silently changes behaviour. So the class is DATA, and the sentence
+// stays free to be as specific as it likes.
 type RewriteError struct {
 	NodeID string
 	Dim    string
 	Err    error
 	Detail string
+	// Cause is the refusal class. Empty on errors that are not refusals (ErrNodeNotFound, an internal
+	// failure); every ErrUnsafeRewrite carries one — TestEveryRefusalCarriesACauseClass holds it.
+	Cause CauseClass
 }
 
 func (e *RewriteError) Error() string {
@@ -112,8 +142,37 @@ func (e *RewriteError) Error() string {
 
 func (e *RewriteError) Unwrap() error { return e.Err }
 
+// unsafeRewrite is the un-classified refusal constructor, retained so that a refusal is never blocked on
+// choosing a class — but see refuseShape / refuseNoMaterializer / refuseNotAtCallSite, which are what
+// callers should reach for. A refusal built here defaults to CauseCallSiteShape, the only class that is
+// safe as a default: it says "this site cannot carry it", which is true of every refusal by
+// construction, and it never over-claims that the platform owes work.
 func unsafeRewrite(nodeID, dim, format string, args ...any) *RewriteError {
-	return &RewriteError{NodeID: nodeID, Dim: dim, Err: ErrUnsafeRewrite, Detail: fmt.Sprintf(format, args...)}
+	return &RewriteError{NodeID: nodeID, Dim: dim, Err: ErrUnsafeRewrite,
+		Detail: fmt.Sprintf(format, args...), Cause: CauseCallSiteShape}
+}
+
+// refuseShape refuses because THIS CALL SITE's own source cannot express the change — unpacked
+// arguments, a runtime-assembled list, an SDK that binds nowhere locatable, a registry row with no
+// locator. It stays true after every materializer lands.
+func refuseShape(nodeID, dim, format string, args ...any) *RewriteError {
+	return &RewriteError{NodeID: nodeID, Dim: dim, Err: ErrUnsafeRewrite,
+		Detail: fmt.Sprintf(format, args...), Cause: CauseCallSiteShape}
+}
+
+// refuseNoMaterializer refuses because the PLATFORM has not landed the artifact for this cell. It is the
+// only class that names work we owe, which is why nothing else may borrow it.
+func refuseNoMaterializer(nodeID, dim, format string, args ...any) *RewriteError {
+	return &RewriteError{NodeID: nodeID, Dim: dim, Err: ErrUnsafeRewrite,
+		Detail: fmt.Sprintf(format, args...), Cause: CauseNoMaterializer}
+}
+
+// refuseNotAtCallSite refuses because the value does not exist in source in ANY language — a summarized
+// context, a retrieved chunk set, a routing decision that belongs at the gateway. Identical in every
+// language, before and after any rewriter lands.
+func refuseNotAtCallSite(nodeID, dim, format string, args ...any) *RewriteError {
+	return &RewriteError{NodeID: nodeID, Dim: dim, Err: ErrUnsafeRewrite,
+		Detail: fmt.Sprintf(format, args...), Cause: CauseNotAtCallSite}
 }
 
 // applyEdits splices edits into src and returns the new bytes.

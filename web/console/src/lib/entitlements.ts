@@ -84,6 +84,22 @@ export const CAPABILITIES: ConsoleCapability[] = [
     unlockedBy: "Free",
   },
   {
+    // 🔴 P13 13c — authoring is mapped to the same feature the console itself is gated on, and NOT to a
+    // bespoke plan boundary the platform does not enforce. The platform checks an authoring permission
+    // per identity (internal/authoring Authorizer) and returns 402 for an unentitled plan / 403 for an
+    // unpermitted identity — two different remedies, kept as two different answers. This row exists so a
+    // reader who lacks it is told which plan carries it, rather than finding the surface missing.
+    //
+    // What is deliberately NOT claimed here: authoring does not unlock anything the engine refuses. A
+    // refusal is origin-blind and has no override at any tier, so no plan row can promise past one.
+    id: "authoring",
+    label: "Author a change yourself",
+    description:
+      "Set a model, prompt version, skill, tool selection or context policy directly, instead of waiting for a proposal. Every change goes through the same gates as a proposed one and is recorded unverified until a multi-seed evaluation runs.",
+    feature: "dashboard",
+    unlockedBy: "Team",
+  },
+  {
     id: "dashboard",
     label: "The console itself",
     description: "A browser surface over the platform, with a session instead of an API key.",

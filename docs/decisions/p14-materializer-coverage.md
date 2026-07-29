@@ -23,7 +23,8 @@ salesperson reads cannot drift apart."*
 
 | Artifact | Role |
 | --- | --- |
-| [`internal/transform/skillbind.go`](../../internal/transform/skillbind.go) `toolValueForms` | **The source of truth.** One row per provider whose Go tool value this engine knows how to spell, naming the SDK generation it targets. |
+| [`internal/transform/skillbind.go`](../../internal/transform/skillbind.go) `toolValueForms` | **The source of truth.** One row per **(language, provider)** cell whose tool value this engine knows how to spell, naming the SDK generation it targets. The syntactic spellings register into the same map from [`skillbind_span.go`](../../internal/transform/skillbind_span.go) — one table, not two. |
+| [`internal/transform/coverage.go`](../../internal/transform/coverage.go) `AxisCoverage()` | The **total** read across every axis × every registered language, where a gap is a present cell with a named cause rather than an absence. |
 | `transform.MaterializerCoverage()` | The exported read of that table. Anything that needs to *state* coverage calls this. |
 | The table below | A human-readable copy, **gated by a test** (`TestCoverageDocMatchesTheFormTable`) that fails if it stops matching. |
 
@@ -36,29 +37,65 @@ A copy with a gate is not a second source of truth; a copy without one is.
 | --- | --- | --- |
 | go | anthropic | anthropic-sdk-go v1 (the generation that drops the F() wrapper) |
 | go | openai | openai-go v1 (the generation with ChatCompletionToolUnionParam) |
+| javascript | anthropic | @anthropic-ai/sdk v0.2x (tools as objects with name/input_schema) |
+| javascript | openai | openai-node v4 (tools as objects with type: 'function') |
+| python | anthropic | anthropic-sdk-python v0.3x (tools as dicts with name/input_schema) |
+| python | openai | openai-python v1 (tools as dicts with type=function) |
+| typescript | anthropic | @anthropic-ai/sdk v0.2x (tools as objects with name/input_schema) |
+| typescript | openai | openai-node v4 (tools as objects with type: 'function') |
 <!-- END COVERAGE -->
 
-**Everything not in that table refuses, by name.** Specifically:
+**Everything not in that table refuses, by name** — and the name says **which of three things** is
+missing (P13 `language-coverage`). Specifically:
 
-- **Every language other than Go** keeps the interim refusal
-  ([`decisions.md`](../../openspec/changes/p14-skills-tools-optimization/decisions.md) D-14.3, D-14.4):
-  *"binding skills … requires constructing SDK-specific tool values at the call site, and no
-  materializer for this language has landed yet."* Discovery still finds those call sites and the IR
-  still records them — what is missing is the materializer, not the language.
-- **A Go call site whose provider has no row above** refuses naming the provider and listing the ones
-  that would have worked. "Go is supported" is not "every Go call site is supported".
-- **A Go call site whose tool set is assembled at runtime** refuses whatever the provider: there is no
-  static declaration to replace, and overwriting it would silently discard what it builds.
-- **A sealed contract with no `properties`** refuses rather than materializing an empty tool. An empty
-  property bag is a valid tool that accepts nothing — it compiles, and then fails every call the model
-  makes against it.
+- **A cell with no spelling** — Kotlin, Java and Rust today, and any provider without a row — refuses as
+  `no-materializer-for-this-language`, naming the cell and listing the cells that WOULD have worked.
+  Their SDKs bind tools on a **builder** or a **request value**, so closing them needs a registry row
+  declaring that binding site (P13 FR52/FR53) as well as a spelling.
+- **A call site whose provider has no row in ITS language** refuses naming the provider. "Python is
+  supported" is not "every Python call site is supported".
+- **A call site whose tool set is assembled at run time**, or whose arguments are **unpacked** from a
+  mapping, refuses as `call-site-cannot-carry-it` — in every language, before and after any row lands.
+  🔴 That refusal is reported **ahead of** the coverage question, because it stays true afterwards.
+- **An SDK that carries tools in an opaque serialized body** (Bedrock) refuses as a fact about that SDK:
+  there is no tool value to construct or delete in any language.
+- **A sealed contract with no `properties`** refuses rather than materializing an empty tool, in every
+  language. An empty property bag is a valid tool that accepts nothing — it parses, and then fails every
+  call the model makes against it.
 
-## Tool PRUNING coverage is separate, and narrower
+## Tool PRUNING coverage is separate, and it moved for a different reason
 
-Pruning is a different mechanic (a call-site deletion, not a construction), so it has its own boundary:
-**Go only**, and only where the node's tool set is written as a static list. The tree-sitter frontends
-record no tool split at all, so a prune there has nothing to prune *against* and refuses
-([`internal/transform/rewritetools.go`](../../internal/transform/rewritetools.go) `spanRewriteTools`).
+Pruning is a different mechanic (a call-site deletion, not a construction) and was blocked in a different
+package. The rewriter was never the problem: deleting a written element from a written list needs no
+per-SDK knowledge. What was missing was the **frontend recording which written element is which tool**.
+
+That landed in wave 14d ([`internal/discovery/toolsplit_span.go`](../../internal/discovery/toolsplit_span.go)),
+built on the shared list splitter ([`listsplit.go`](../../internal/discovery/listsplit.go)) that P16's
+context selection uses too — one implementation, per-language syntax as data. So pruning now covers
+**every language with a list splitter** (python, typescript, javascript, kotlin, java, rust) plus Go's
+AST path, and `discovery.RecordsToolSplit` is the single read behind both the coverage cell and the
+refusal.
+
+🚫 The pruner still **never infers** which element is which tool — not by position, not by text
+similarity, not by matching the selection against element text. A tool the frontend could not locate is
+recorded as *unlocatable*, explicitly, and every prune over it refuses (D-14.5 part 3).
+
+## The total table, and what is still open
+
+The table above lists the cells that MATERIALIZE. It is no longer the whole answer: `AxisCoverage()`
+emits a cell for **every** axis × **every** registered language, and a gap is a present cell carrying a
+cause and the artifact that would close it. `TestCoverageIsTotalOverRegisteredLanguages` fails the moment
+a frontend is added without one — absence is not a value.
+
+Still open on this axis, stated as the cells themselves state it:
+
+| Cell | Cause | What would close it |
+|---|---|---|
+| (kotlin \| java \| rust) × anthropic/openai — **binding** | `no-materializer-for-this-language` | a registry row declaring the SDK's **builder-chain / request-field** binding site (P13 FR52/FR53), plus the tool-value spelling for that cell |
+| any language × bedrock — **binding** | `call-site-cannot-carry-it` | nothing: the tools live in an opaque serialized body, so there is no value to construct in any language |
+
+The first row is platform work with a named artifact. The second is not, and must never borrow the
+first's wording — that distinction is the whole point of the cause classes.
 
 ## Adding a row
 

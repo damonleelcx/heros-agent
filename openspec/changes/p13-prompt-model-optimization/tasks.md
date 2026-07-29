@@ -1,8 +1,12 @@
 # Tasks — P13: Prompt & Model Optimization
 
-Two waves. **Wave 13a** = deeper prompt operators (`prompt-rewrite`), complete on its own. **Wave 13b**
+Four waves. **Wave 13a** = deeper prompt operators (`prompt-rewrite`), complete on its own. **Wave 13b**
 = model selection under a quality guardrail (`model-selection`), which is what [P6](../p6-autonomous-optimizer/)'s
-loop consumes.
+loop consumes. **Wave 13c** = user-initiated change: the cross-axis `authored-change` contract plus
+`prompt-model-authoring`, independently revertible and a prerequisite for P14/P15/P16's authoring waves.
+**Wave 13d** = language coverage: the cross-axis `language-coverage` contract plus
+`prompt-model-language-coverage`, independent of 13c, likewise independently revertible, and a
+prerequisite for P14/P15/P16's coverage waves (§17–§22).
 
 **This round ships specs, not code.** Documentation tasks are checked `[x]`; implementation tasks are
 left `[ ]` and each ends with an **evidence pointer** → the file that will carry it and the test that
@@ -14,6 +18,21 @@ rewrite that un-applies a node is **refused**, not dropped. A downgrade is admis
 held-out CI-overlap guardrail. Effects land **only** in existing `ResolvedNode` fields
 (`PromptRef`/`ModelRef`/`ProviderParams`) so `config_hash` participation is automatic — **no** new
 `Dimension`, `Kind`, table, oracle, or metric. Cost is `eval_cost_usd` and plan **names** only.
+
+**Standing constraints for 13c.** One spine, two origins — **no** authoring-only resolve/transform/gate.
+`Origin` is recorded, **never** hashed. Every refusal that binds an operator binds a user identically, and
+**no flag, role, plan, or parameter overrides one**. Refusal moves left: **preflight** names the cause
+before submission and spends nothing. An authored change may apply **unverified**, but `unverified` never
+enters the ledger, never counts in an aggregate, and never auto-merges. **A user may author the change; a
+user may not author the evidence.**
+
+**Standing constraints for 13d.** Coverage is a **total** function over (axis × registered language ×
+form) — **absence is not a value**. Every refusal carries one of **three** stable cause identifiers, and
+the **most specific true** one is reported: the change → the row → the call site's source → **the language
+last**. Every gap **names its missing artifact**. **One** coverage source is read by transform, preflight,
+console, CLI and every document, asserted in **both** directions. A row is admitted only on **executable
+evidence**, and **no gate is relaxed to reach a language**. The same override **means the same thing** in
+every language. Coverage is **identical on every plan**.
 
 ---
 
@@ -124,7 +143,270 @@ held-out CI-overlap guardrail. Effects land **only** in existing `ResolvedNode` 
       at customer call sites (ADR-002). Cost by plan **name** and `eval_cost_usd` only — no price. →
       PRD §9 Sales lens, `specs/model-selection/spec.md`.
 
-## 8. Documentation
+## 8. System Designer — The authored-change contract, before any authoring code (13c)
 
-- [x] 8.1 Cross-reference the PRD from both spec deltas and the design. → done in each file header.
-- [x] 8.2 On merge, fold the two P13 capability specs into `openspec/specs/`. → (folding step, at deploy).
+- [x] 8.1 Author the cross-axis `authored-change` spec delta — one spine two origins, origin-blind
+      refusals, preflight, unverified labeling, conflict/reversal/audit/offline/egress, and *a user may
+      not author the evidence*. → `specs/authored-change/spec.md`.
+- [x] 8.2 Author the `prompt-model-authoring` spec delta (model / params / prompt authoring within the
+      existing refusal set). → `specs/prompt-model-authoring/spec.md`.
+- [x] 8.3 Record Decisions 9–12 with the rejected alternatives (second apply path, expert override,
+      block-until-verified, presumed-fine verdict) arbitrated by the eight-level ordering. → `design.md`.
+- [x] 8.4 🔴 **Assert one spine.** A structural test enumerates transform entry points and asserts an
+      authored change reaches a diff through the same one, bypassing no gate an operator must pass. →
+      `internal/authoring/` (Test: `TestSingleApplyPathAcrossOrigins`).
+- [x] 8.5 🚫 **`Origin` is not hashed.** An authored and an operator-proposed configuration that are
+      byte-identical hash identically; P0 golden vectors reproduce. → `internal/confighash/`
+      (Test: `TestOriginDoesNotAffectConfigHash`, `TestGoldenVectorsStillReproduce`).
+
+## 9. Backend — Draft lifecycle, preflight, and the append-only record (13c)
+
+- [x] 9.1 Add the draft model: `ParentVariantID`, per-node edits, actor/tenant, `ForkedFromProposal`,
+      concurrency token. The parent is **never** mutated. → `internal/authoring/draft.go`
+      (Test: `TestDraftNeverMutatesParent`).
+- [x] 9.2 Implement **preflight**: resolve + gates + materializability probe returning
+      `admissible` / `refused{cause,node,field}` / `not-yet-measurable{missing}`, publishing nothing,
+      writing no diff, spending no eval budget. → `internal/authoring/preflight.go`
+      (Test: `TestPreflightSpendsNothing`, `TestPreflightNamesCauseAndNode`).
+- [x] 9.3 🔴 **Never refuse on ignorance.** An unmeasured admissibility input yields
+      `not-yet-measurable`, never `admissible` and never `refused`. → `internal/authoring/preflight.go`
+      (Test: `TestPreflightThirdVerdictOnUnknownInput`).
+- [x] 9.4 🔴 **Stale submit is a named conflict.** Two drafts from one parent yield two variants; a draft
+      whose parent advanced is refused by name, never overwriting. → `internal/authoring/submit.go`
+      (Test: `TestConcurrentDraftsYieldTwoVariants`, `TestStaleDraftRefusedByName`).
+- [x] 9.5 Implement **reversal**: re-derive from the recorded parent so the resulting `config_hash` is
+      byte-identical to pre-edit; never an in-place restore. → `internal/authoring/revert.go`
+      (Test: `TestRevertReproducesParentHashByteIdentical`).
+- [x] 9.6 Record every submitted authored change **append-only** (actor, tenant, ts, parent, axis,
+      `config_hash`, diff ref, origin, forked-from), following the P12 delivery-record posture. Schema,
+      migration and code land **together**; the migration is idempotent and guarded by semantics, not by
+      object name. → `internal/authoring/record.go`, `db/migrations/` (Test: `TestAuthoredRecordIsAppendOnly`).
+- [x] 9.7 🚫 **No override.** Assert no flag, role, plan, entitlement, or request parameter suppresses a
+      refusal; the refusal set is enumerated, not sampled. → `internal/authoring/`
+      (Test: `TestNoOverrideSuppressesAnyRefusal`).
+- [x] 9.8 Add preflight / submit / revert routes behind the entitlement + permission check, returning the
+      typed cause verbatim. A 403, a 404 and a transport failure stay three distinguishable outcomes. →
+      `internal/api/p13authoring.go` (Test: `TestFailureClassesDistinguishable` — 402 not-entitled, 403 not-permitted,
+      401 no-principal, 409 stale, 422 inadmissible, 502 record-unreachable and 503 not-mounted are each
+      asserted distinct, so no two classes collapse; `TestAuthoringActorComesFromTheSession`).
+
+## 10. AI Engineer — Authoring meets the guardrail (13c)
+
+- [x] 10.1 Route an authored change into the **same** candidate/verification structures with
+      `Origin: user`; no authoring-specific verdict type. → `internal/proposal/`, `internal/verification/`
+      (Test: `TestAuthoredChangeUsesSameVerdictPath`).
+- [x] 10.2 🔴 **The user does not author the evidence.** Case selection, held-out split and seeds stay
+      platform-derived for an authored verification run. → `internal/proposal/guardrail.go`
+      (Test: `TestAuthoredRunCannotSelectItsOwnCases`, `TestAuthoredHeldOutStillDisjoint`).
+- [x] 10.3 An authored downgrade that fails the held-out guardrail is reported a **quality regression**,
+      never an equal-quality tie. → `internal/verification/` (Test: `TestAuthoredDowngradeFailingGuardrailIsRegression`).
+- [x] 10.4 🚫 A forked proposal does **not** credit the originating operator in any operator-performance
+      figure. → `internal/proposal/gain.go` reporting (Test: `TestForkedProposalDoesNotCreditOperator`).
+
+## 11. Frontend — Authoring on the existing console surfaces (13c)
+
+- [x] 11.1 🔴 **Do not lose existing capability.** Adding authoring controls to the studio preserves every
+      prompt authoring, diffing, binding, and impact-analysis capability already shipped. →
+      `web/console/src/app/app/studio/` (Test: `tests/authoring.test.mjs` — "11.1 adding authoring to the studio removed no capability it already had").
+- [x] 11.2 Add model + provider-parameter authoring beside prompt authoring; **cross-provider models are
+      not offered**, and the boundary is stated rather than the list being silently short. →
+      `web/console/src/app/app/studio/` (Test: `tests/authoring.test.mjs` — "11.2 the studio offers model and provider-parameter authoring", "11.2 cross-provider models are absent AND the boundary is stated, not silently short").
+- [x] 11.3 Render preflight's three verdicts as **three** states — admissible, refused (cause + node +
+      field), not-yet-measurable (missing input). 🚫 Never collapse two "cannot" states into one. →
+      `web/console/src/app/app/studio/` (Test: `tests/authoring.test.mjs` — "11.3 preflight renders three distinct states, and not-yet-measurable is not a refusal").
+- [x] 11.4 🚫 **The surface derives nothing.** Every score, rank, interval, tie and verdict is rendered as
+      received; no client-side computation. → `web/console/` (Test: `tests/authoring.test.mjs` — "11.4 the authoring surface computes no score, rank, interval or comparison").
+- [x] 11.5 Display `unverified` wherever an authored change appears alongside verified deltas, in a
+      visually distinct class; the hazard palette stays reserved for hazard. → `web/console/`
+      (Test: `tests/authoring.test.mjs` — "11.5 every authored-change render carries its verification state").
+- [x] 11.6 New page/menu wiring is complete (route + navigation entry + permission gate) so no slot goes
+      silently missing; design-system tokens only — `npm run scan:tokens` stays green. → `web/console/`
+      (Test: `npm run scan:tokens`, `tests/authoring.test.mjs` — "11.6 the new surface is wired in all three places, so no slot goes silently missing").
+
+## 12. DevOps + Backend — Offline parity and operability (13c)
+
+- [x] 12.1 Add offline CLI authoring verbs that run the **same** gates and emit the **same** typed cause
+      with no account and no network. → `internal/cli/` (Test: `TestCLIAuthorsOfflineWithIdenticalCause`).
+- [x] 12.2 🚫 **No new egress.** Assert the preflight and submit payloads carry no prompt text, source,
+      diff, environment value, or credential, on every path including diagnostics. → `internal/api/`
+      (Test: `TestAuthoringPayloadAllowlisted`).
+- [x] 12.3 Emit authoring health/audit signals that are **externally readable** (submitted, refused-by-cause,
+      conflict, reverted) so an operator can diagnose without a debugger; event names and causes are
+      stable identifiers, not prose. → `internal/telemetry/` (Test: `TestAuthoringSignalsExternallyReadable`).
+- [x] 12.4 Confirm a deployment with authoring **disabled** behaves byte-identically to pre-13c, and that
+      enabling/disabling it is reversible with no migration rollback. → `deploy/`
+      (Test: `TestAuthoringDisabledIsPre13cBehavior`).
+
+## 13. QA — The gates that must be able to go red (13c)
+
+- [x] 13.1 🔴 A user **cannot** force a refused materialization: cross-provider swap, un-carryable inline
+      param, and un-applying prompt each refuse on the authoring path with the operator-path cause. →
+      (Test: `TestAuthoredRefusalsMatchOperatorRefusals`).
+- [x] 13.2 🔴 An unverified authored change contributes **zero** to every aggregate improvement, savings
+      and quality figure, and is absent from the verified-delta ledger. →
+      (Test: `TestUnverifiedContributesZeroToAggregates`).
+- [x] 13.3 🔴 An unverified authored change is **never auto-merged**, at any automation level. →
+      (Test: `TestUnverifiedNeverAutoMerges`).
+- [x] 13.4 Each gate is proven able to go **red**: a passing authored change and a refused one for each
+      refusal class — a green-only suite proves nothing. → (Test: `TestAuthoringGatesGoRed`).
+- [x] 13.5 Assert against the **downstream consumer**, not the handler's return: after an authored apply,
+      the recorded diff, the append-only record and the ledger state are each read back and asserted. A
+      2xx is not evidence of persistence. → (Test: `TestAuthoredApplyAssertsDownstreamState`).
+- [x] 13.6 Browser acceptance: author a model change, hit a refusal, revert, and read the rendered page —
+      a green build is compatible with a page that renders nothing. → (Test: `tests/authoring-acceptance.test.mjs`, run against the production build).
+
+## 14. Product Designer — What the user is offered, and what they are told (13c)
+
+- [x] 14.1 Specify the three preflight states in user-facing terms, with the unhappy paths named: which
+      node, which field, which slot, which reason — never a generic failure. →
+      `specs/authored-change/spec.md`, `specs/prompt-model-authoring/spec.md`.
+- [x] 14.2 Specify that a refusal offers the **legitimate path** where one exists (switch the node to
+      bound mode; route the provider at the gateway rather than the call site) instead of a dead end. →
+      `specs/prompt-model-authoring/spec.md`.
+- [x] 14.3 Specify the wording boundary: an authored change is *applied*, never *verified*, *improved*,
+      *optimized* or *safe*; interface text, the record's field, and the code name stay three layers. →
+      `specs/authored-change/spec.md`.
+
+## 15. Sales Operations — The claim and its boundary (13c)
+
+- [x] 15.1 State the deliverable claim: users can make **active changes** on this axis and the platform
+      applies them through the same gates it applies its own — and every such change is **labeled
+      unverified until the harness runs**. 🚫 Never present an authored change as an improvement. →
+      PRD §9 Sales lens.
+- [x] 15.2 State the refused boundary: authoring does **not** unlock cross-provider routing at customer
+      call sites, does **not** provide an override for a refusal, and does **not** let a customer choose
+      the cases that judge their own change. → PRD §9 Sales lens, `specs/authored-change/spec.md`.
+
+## 16. Documentation
+
+- [x] 16.1 Cross-reference the PRD from every spec delta and the design. → done in each file header.
+- [x] 16.2 Point P14/P15/P16's authoring capabilities at `authored-change` rather than restating it. →
+      done in each per-axis spec header.
+- [x] 16.3 Fold the six P13 capability specs into `openspec/specs/`. → `openspec/specs/{prompt-rewrite,
+      model-selection,authored-change,prompt-model-authoring,language-coverage,prompt-model-language-coverage}/spec.md`
+      — cross-references rewritten to the folded depth and verified to resolve.
+- [x] 16.4 Point P14/P15/P16's coverage capabilities at `language-coverage` rather than restating it. →
+      done in each per-axis spec header.
+
+---
+
+## 17. System Designer — The coverage contract, before any language work (13d)
+
+- [x] 17.1 Author the cross-axis `language-coverage` spec delta: totality over the registered language
+      set, per-cell claims, the three refusal classes and their evaluation order, one source, executable
+      evidence, semantic parity, the versioned offline table, the polyglot refusal, and coverage that no
+      plan can move. → `specs/language-coverage/spec.md`.
+- [x] 17.2 Author the axis-specific `prompt-model-language-coverage` spec delta: the binding-site
+      generalization, the registry row's binding form, per-language entries that name the missing
+      artifact, and the boundary stated before the picker. → `specs/prompt-model-language-coverage/spec.md`.
+- [x] 17.3 Record Decision 13 — coverage is a total table over cells, and the engine points at a binding
+      site rather than at a named argument — with what was rejected and why (the priority ordering: L6
+      extensibility, L3 user-facing complexity, L1 safety). →
+      `design.md` Decision 13.
+- [x] 17.4 Define the coverage record type: `(axis, language, form, status, cause_id, missing_artifact)`,
+      with `status ∈ {materializes, refuses}` and `cause_id` drawn from a closed set of three. It is a
+      **read over the engine's own tables**, never a second table written alongside them. →
+      `internal/transform/coverage.go` (Test: `TestNoSurfaceHoldsItsOwnCoverageList`, `TestEveryCoverageCellIsWellFormed`).
+- [x] 17.5 🔴 **Totality is generated, not written.** Enumerate the registered language set from
+      `discovery.DefaultFrontends` and assert every axis has an entry for every language; adding a
+      frontend with no entry fails. → `internal/transform/` (Test: `TestCoverageIsTotalOverRegisteredLanguages`).
+- [x] 17.6 🚫 **No second coverage list anywhere.** A structural test enumerates the surfaces that state
+      coverage (transform refusal, preflight, console, CLI, docs) and asserts each reads the one source.
+      → (Test: `TestNoSurfaceHoldsItsOwnCoverageList`).
+
+## 18. Backend — The three causes, their order, and the binding site (13d)
+
+- [x] 18.1 Introduce the three stable cause identifiers — `not-expressible-at-a-call-site`,
+      `call-site-cannot-carry-it`, `no-materializer-for-this-language` — on the refusal type, so a
+      consumer classifies without parsing prose. → `internal/transform/` (Test: `TestEveryCoverageCellIsWellFormed`, `TestCallSiteCauseBeatsLanguageCause`).
+- [x] 18.2 🔴 **Order the questions specific-first in every dimension's rewriter**: the change, then the
+      registry row, then the call site's source, then the language. → `internal/transform/`
+      (Test: `TestCallSiteCauseBeatsLanguageCause`, `TestCallSiteRefusalIsUnchangedByCoverage`).
+- [x] 18.3 🔴 The ordering test must be able to go **red**: a fixture that is both shape-refusable and
+      language-refusable asserts the shape cause, and reversing the order fails. →
+      (Test: `TestCallSiteCauseBeatsLanguageCause` — verified red by asking the language question first).
+- [x] 18.4 Generalize the locator from *named argument* to **binding site** with three forms — named
+      argument, builder-chain call, request-value field — keeping every existing form byte-identical. →
+      `internal/discovery/bindingsite.go`, `internal/transform/rewrite_span.go` `spanBindingEdit`
+      (Test: `TestGenerate_Kotlin_BuilderBoundModelMaterializes`, `TestGenerate_Java_BuilderBoundModelMaterializes`,
+      `TestGenerate_Rust_RequestFieldBoundModelMaterializes`).
+- [x] 18.5 Extend the signature registry row **additively** to declare the binding form and its locator;
+      an existing row parses and hashes unchanged. → `internal/discovery/registry.go` (`LocBuilderCall` / `LocRequestField`)
+      (Test: `TestBindingFormIsAdditiveToExistingRows`).
+- [x] 18.6 Add Kotlin rows for SDKs that bind at a call site or a locatable builder, and the Java/Rust
+      frontend extraction for builder-chain and request-field bindings. → `internal/discovery/registry.yaml`,
+      `internal/discovery/bindingsite.go` `locateRowBindings`
+      (Test: `TestBindingFormIsAdditiveToExistingRows`, the three materialization tests above).
+- [x] 18.7 🔴 A row whose SDK binds nowhere locatable refuses **naming the SDK and its binding style**,
+      classified `call-site-cannot-carry-it` — never as a language gap. →
+      (Test: `TestGenerate_Kotlin_UnwrittenBindingRefusesAboutTheSource`,
+      `TestGenerate_Java_UnwrittenBindingRefusesAboutTheSource`,
+      `TestGenerate_Kotlin_SharedBuilderRefusesNamingTheSharing`).
+- [x] 18.8 🚫 **No gate is relaxed to reach a language.** `engineFor`'s completeness check stays, the
+      binding-site edit is a NEW edit class admitting only its own line, and a test asserts no
+      configuration disables a gate for one language only. →
+      (Test: `TestNoLanguageSkipsAGate`, `TestBindingSiteAdmitsOnlyItsOwnLine`).
+
+## 19. AI Engineer — Coverage growth changes no measurement (13d)
+
+- [x] 19.1 🔴 Assert that adding a binding form, a row, or a language leaves every previously
+      materializable call site's emitted change **byte-identical** and every `config_hash` unchanged; P0
+      golden vectors reproduce. → (Test: `TestCoverageGrowthPreservesExistingDiffsAndHashes`,
+      `TestGoldenVectorsStillReproduce`).
+- [x] 19.2 🔴 **Semantic parity** — the same resolved override materialized in two languages expresses
+      the same configuration, over a shared fixture rather than by inspection. →
+      (Test: `TestSameOverrideMeansTheSameThingAcrossLanguages` over python/typescript/kotlin/java/rust,
+      `TestBoundSkillContractParityAcrossLanguages`).
+- [x] 19.3 Confirm the harness stays axis- **and** language-agnostic: a variant materialized in a newly
+      covered language is scored with **zero** eval change. → (Test: `TestNewLanguageNeedsNoEvalChange`).
+
+## 20. Frontend — Three causes are three sentences (13d)
+
+- [x] 20.1 Render the three refusal classes as three distinct states: *change your call site*, *this
+      cannot be written in source at all*, *the platform has not built this yet (artifact named)*. The
+      hazard palette stays reserved for hazard. → `web/console/src/components/coverage.tsx`
+      (Test: `coverage.test.mjs` — "each refusal class gets its own visual treatment", "the coverage
+      states do not spend the hazard palette"; browser-verified at `/app/coverage` and `/preview/coverage`).
+- [x] 20.2 State the boundary **before** the picker, from the shared source, naming the language and
+      the binding form; 🚫 never an empty selector. → `web/console/src/components/coverage.tsx`
+      `CoverageBoundary`, `src/app/app/wiring/boundaries.tsx`, `src/app/app/context/page.tsx`
+      (Test: `coverage.test.mjs` — "the boundary component states which boundary it is, and never renders
+      an empty picker").
+- [x] 20.3 Surface the per-axis coverage table as a read model rendered as received — no client-side
+      derivation of what a language supports. → `internal/api/coverage.go` (`GET /api/p13/coverage`,
+      takes no tenant/plan/role), `web/console/src/app/app/coverage/`
+      (Test: `coverage.test.mjs` — "the page renders the platform's verdict rather than computing one").
+- [x] 20.4 New page/menu wiring is complete (route + navigation entry + permission gate); design-system
+      tokens only. → `src/lib/routes.ts`, `src/app/app/layout.tsx` (rail + command path),
+      `src/lib/telemetry.ts` (route template) (Test: `npm run scan:tokens`, `craft.test.mjs` R19,
+      `coverage.test.mjs` — "coverage has a route and a command-path entry").
+
+## 21. DevOps + QA — The offline table, and the gates that must go red (13d)
+
+- [x] 21.1 Ship the CLI's **versioned** local coverage table; a refusal names the version and the typed
+      cause text matches the hosted surface, compared rather than inspected. → `internal/cli/coverage.go`
+      (`heros coverage`), `CoverageRefusalSuffix`, the `status` summary line
+      (Test: `TestCoverageIsOfflineAndVersioned`, `TestCoverageRefusalSuffixNamesTheVersion`,
+      `TestStatusReportsTheCoverageVersion`).
+- [x] 21.2 🔴 Every coverage row carries a **named executable proof**: a test that emits the change in
+      that cell and asserts the result parses, plus the build gate wherever source is constructed. A row
+      without one is rejected. → (Test: `TestEveryCoverageRowHasAProof` — asserted structurally against
+      the engine's own tables, so a row cannot be added by editing a doc).
+- [x] 21.3 🔴 A polyglot workflow refuses by name, listing the languages found, and emits no patch. →
+      `internal/transform/engines.go` `engineFor` (Test: `TestPolyglotWorkflowRefusesByName`).
+- [x] 21.4 🔴 Coverage is **identical on every plan**: the same call site under different plans and roles
+      yields the same verdict. → (Test: `TestCoverageIsPlanInvariant`).
+- [x] 21.5 Assert against the **downstream consumer**: after a materialization in a newly covered
+      language, read back the emitted diff, the reparse result, and the recorded coverage cell — a green
+      build is not evidence. → (Test: `TestNewLanguageAssertsDownstreamState`).
+
+## 22. Product Designer + Sales Operations — What the gap is called (13d)
+
+- [x] 22.1 Specify the wording boundary: an unmaterialized cell is **not yet applied by the platform**
+      and names its missing artifact; it is never a plan limitation, a setting, or something a flag would
+      unlock. → `specs/language-coverage/spec.md`.
+- [x] 22.2 Specify that a call site the platform will **never** apply does not borrow "not yet" — a
+      run-time-assembled value is a fact about the source and says so. → `specs/language-coverage/spec.md`.
+- [x] 22.3 State the claim and its boundary: the platform states, **per cell**, what it applies and what
+      it refuses. 🚫 "Go is supported" is never "every Go call site is supported," and coverage is
+      identical on every plan. → PRD §9.2 Sales lens.

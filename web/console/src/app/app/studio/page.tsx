@@ -2,12 +2,14 @@ import { PageFrame } from "@/components/primitives";
 import { Tabs } from "@/components/tabs";
 import { StudioMatrix } from "./matrix";
 import { Studio, BoundModeShowcase } from "./studio";
+import { StudioAuthoring } from "./authoring";
 
 /**
  * Prompt & Model Studio (P10 + M-series), laid out viewport-first (P9 NFR17). Its three sections —
  * the node × model MATRIX (primary), the PROMPT LIBRARY (authoring/diff), and the BOUND NODES view —
  * are in-page TABS, not a vertical stack: the matrix is the landing tab and nothing is pushed below the
- * fold. Nothing here is ranked: no score, no winner, no promotion path; a bound cell is "selected,
+ * fold. A fourth tab (P13 13c) adds MODEL and PROVIDER-PARAMETER authoring beside the prompt authoring
+ * that was already here — additive, so every capability the studio already had is exactly where it was. Nothing here is ranked: no score, no winner, no promotion path; a bound cell is "selected,
  * unverified," never "proven best."
  */
 export const metadata = { title: "Prompt & Model Studio" };
@@ -25,6 +27,7 @@ export default function StudioPage() {
           { id: "matrix", label: "Matrix", content: <StudioMatrix /> },
           { id: "library", label: "Prompt library", content: <Studio /> },
           { id: "bound", label: "Bound nodes", content: <BoundModeShowcase /> },
+          { id: "author", label: "Author", content: <StudioAuthoring /> },
         ]}
       />
     </PageFrame>

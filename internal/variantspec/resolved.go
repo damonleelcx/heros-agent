@@ -79,6 +79,16 @@ type ResolvedNode struct {
 	// a SET — two specs keeping the same tools in different authoring order describe one configuration
 	// and must share a config_hash, or every eval comparison fragments on a formatting difference.
 	ToolSelection []string `json:"tool_selection,omitempty"`
+	// ContextDropTolerance is the node's frozen drop tolerance (P16 task 1.5, decisions.md D-2).
+	// ADDITIVE and omitempty with a NIL-when-absent pointer: a node that declares no tolerance emits NO
+	// `context_drop_tolerance` key, so its canonical bytes are byte-identical to a pre-P16 node and the
+	// frozen golden vectors keep reproducing — the third application of the discipline Bindings and
+	// ToolSelection above follow.
+	//
+	// When set it participates in config_hash additively (JCS includes the present key), which is the
+	// correct identity: two variants that differ only in the drop a node tolerates are different
+	// configurations, because the second admits proposals the first rejects.
+	ContextDropTolerance *float64 `json:"context_drop_tolerance,omitempty"`
 }
 
 // ResolvedBinding is one slot's resolved binding: its kind and value, recorded explicitly (never

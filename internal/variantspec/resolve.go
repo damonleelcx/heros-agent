@@ -119,6 +119,11 @@ type ResolvedOverride struct {
 	// a parameter change, which materializes in BOUND mode and is REFUSED in inline mode (there is no
 	// call-site parameter rewriter — an inline param change would hash one thing and run another).
 	ParamTune bool
+	// ContextDropTolerance is the node's authored drop tolerance, carried through so the admissibility
+	// gate reads it from the RESOLVED override rather than re-reading the spec (P16 task 1.5). Nil when
+	// the node declares none — the gate then falls back to its pattern-derived default, which is a
+	// gate-time decision and deliberately not frozen into the hash.
+	ContextDropTolerance *float64
 }
 
 // Dimensions returns the dimensions this override actually sets, in a stable order. The Transform
@@ -312,6 +317,15 @@ func resolveNode(ctx context.Context, nodeID string, o NodeOverride, irNode *dis
 	} else {
 		node.ContextPolicy = irNode.ContextAssembly.Policy
 		node.ContextParams = map[string]any{}
+	}
+	// Drop tolerance freezes as authored, and ONLY as authored (P16 task 1.5, decisions.md D-2). No
+	// default is materialized here: the pattern-derived default belongs to the admissibility gate, which
+	// knows the node's pattern, and writing it into the hashed projection would make two specs that
+	// declared nothing hash differently the day the default changed.
+	if o.ContextDropTolerance != nil {
+		t := *o.ContextDropTolerance
+		node.ContextDropTolerance = &t
+		ro.ContextDropTolerance = &t
 	}
 
 	// ── tools (P14 task 5.3, decisions.md D-14.2) ──────────────────────────────────────────────────

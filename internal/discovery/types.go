@@ -73,6 +73,15 @@ type DetectedCallSite struct {
 	// tree it comes from is gone by then — an offset invented after the fact would be a guess.
 	// Always nil for the Go frontend, which splices from real go/ast positions instead (see codemod.go).
 	KeywordInsert *ArgInsert
+	// BindingSites are values the program bound BEFORE this call — a builder-chain call or a request
+	// value's field — keyed by IR dimension ("model"/"prompt"/"tools"). Populated only when the matched
+	// row's locator declares one of those forms (P13 FR52/FR53).
+	//
+	// It is a separate map from Keywords because the two are different FACTS about different places, and
+	// a rewriter must not be able to confuse them: replacing a keyword edits this call, replacing a
+	// binding site edits a statement that ran before it and may feed other calls. A single map would
+	// make that distinction a naming convention.
+	BindingSites map[string]BindingScan
 	// KeywordUnpacking is the unpacking (`**kwargs`, `*args`) that made KeywordInsert nil, when one
 	// did. It carries no permission — KeywordInsert is already nil, so the insertion is already
 	// refused — only the REASON, so the refusal a human reads names the line to look at instead of

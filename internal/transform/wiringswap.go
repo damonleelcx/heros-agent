@@ -66,10 +66,20 @@ type statementResolver func(src []byte, nodeID string, line int) (stmtBlock, err
 
 // statementResolvers is the per-language table (Decision 9). A language absent from it refuses BY NAME:
 // a textual move for a language whose structure nobody parsed is a guess that compiles.
-var statementResolvers = map[string]statementResolver{
-	"go":     resolveGoStatement,
-	"python": resolvePythonStatement,
-}
+// 🔴 Wave 15e: the brace languages are ROWS, added by braceResolver over a syntax table
+// (wiringswap_brace.go) rather than five hand-written resolvers. Decision 9's "Go and Python first" was
+// an ordering, and D-5 fixes the shape that carries the rest: the resolver is the only per-language
+// part, and the invariant, the plan, the edge check and the coherence gate stay one neutral path.
+var statementResolvers = func() map[string]statementResolver {
+	out := map[string]statementResolver{
+		"go":     resolveGoStatement,
+		"python": resolvePythonStatement,
+	}
+	for lang := range braceSyntaxes {
+		out[lang] = braceResolver(lang)
+	}
+	return out
+}()
 
 // swapPlan is a materializable wiring change: exactly two node ids that exchange places.
 type swapPlan struct {
@@ -139,11 +149,14 @@ func sameEdgeSet(a, b []variantspec.ResolvedEdge) bool {
 func materializeSwap(language string, src []byte, plan *swapPlan, firstLine, secondLine int) ([]edit, error) {
 	resolve, ok := statementResolvers[strings.ToLower(strings.TrimSpace(language))]
 	if !ok {
-		return nil, refuseWiringMaterialize(plan.First, fmt.Sprintf(
-			"no statement materializer has landed for %s (Go and Python are first — design Decision 9); "+
-				"moving a call in a language whose statements this engine did not parse would be a textual "+
-				"guess, and a guess that compiles is the failure mode with no downstream net",
-			languageDisplay(language)))
+		// 🔴 The ONE class here that names work the platform owes (P13 FR43). Every other wiring refusal
+		// is about the requested shape or the source, and must not borrow this wording.
+		return nil, refuseNoMaterializer(plan.First, wiringRefusalDim,
+			"no statement resolver has landed for %s, so this engine did not parse its statements; moving a "+
+				"call in a language whose boundaries it would have to guess is a textual guess, and a guess "+
+				"that compiles is the failure mode with no downstream net. The languages it can transpose "+
+				"are %s (decisions.md D-5)",
+			languageDisplay(language), strings.Join(StatementMaterializerLanguages(), ", "))
 	}
 
 	a, err := resolve(src, plan.First, firstLine)
@@ -156,6 +169,15 @@ func materializeSwap(language string, src []byte, plan *swapPlan, firstLine, sec
 	}
 	if a.startLine > b.startLine { // the plan names discovered order; the file decides which is first
 		a, b = b, a
+	}
+	// 🔴 Two nodes that resolve to the SAME statement are not a transposable pair — a fact about the
+	// source, in every language. Exchanging a statement with itself emits two edits that cancel, which
+	// would ship an empty change under a variant's hash.
+	if a.startLine == b.startLine && a.endLine == b.endLine {
+		return nil, refuseWiringMaterialize(a.nodeID, fmt.Sprintf(
+			"nodes %s and %s resolve to the same statement at line %d, so this workflow offers no adjacent "+
+				"pair to transpose here; that is a property of the source rather than of %s support",
+			a.nodeID, b.nodeID, a.startLine, languageDisplay(language)))
 	}
 	if err := admitSwap(src, a, b); err != nil {
 		return nil, err
@@ -332,4 +354,26 @@ func planSwapEdits(plan *swapPlan, sites map[string]boundSite, root, language st
 		line = second.lineStart
 	}
 	return TouchedDimension{NodeID: plan.First, Dim: wiringRefusalDim, File: first.fileRel, Line: line}, nil
+}
+
+// HasStatementMaterializer reports whether this language has a statement resolver — i.e. whether an
+// adjacent transposition can be emitted for it (P15 15d task 19.6).
+//
+// Exported so the AUTHORING surface can state the language boundary before a user drags anything, while
+// reading the same table `planWiringSwap` dispatches on. A second list in the console is how an editor
+// starts offering a swap the codemod then refuses.
+func HasStatementMaterializer(language string) bool {
+	_, ok := statementResolvers[strings.ToLower(strings.TrimSpace(language))]
+	return ok
+}
+
+// StatementMaterializerLanguages lists every language with a statement resolver, sorted, so a refusal can
+// say what WOULD have worked.
+func StatementMaterializerLanguages() []string {
+	out := make([]string, 0, len(statementResolvers))
+	for l := range statementResolvers {
+		out = append(out, l)
+	}
+	sort.Strings(out)
+	return out
 }

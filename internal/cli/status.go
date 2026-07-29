@@ -42,6 +42,9 @@ func Status(cfg Config, s Streams, authed bool, identity string) error {
 	}
 
 	s.Narratef("status: tool %s · contract %s · link endpoint %s", data.ToolVersion, data.ContractVersion, data.LinkEndpoint)
+	// The coverage table's version, so an operator sees which table this binary is refusing from without
+	// running a second command — the fact that makes a CLI/console disagreement diagnosable (P13 FR49).
+	s.Narratef("status: %s", coverageSummaryLine())
 	if authed {
 		s.Narratef("status: authenticated as %s", identity)
 	} else {

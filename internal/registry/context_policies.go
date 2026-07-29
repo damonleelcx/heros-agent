@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 )
 
 // This file implements the P3 context-engineering strategies behind the P2 Policy interface
@@ -111,6 +112,46 @@ func paramErr(policy, param, reason string) error {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// SelectionPolicy — the policies P16 can materialize into source
+// ─────────────────────────────────────────────────────────────────────────────
+
+// SelectionPolicy is a context policy whose assembly is a SUBSET of the input messages, chosen without
+// reading, rewriting, or synthesizing any message's content (P16 task 2.2).
+//
+// # Why this interface exists, and why it lives HERE rather than in the transform
+//
+// P16 materializes a context policy at a Go call site by DELETING the messages the policy does not
+// retain from the static list the author wrote. That is only sound if the codemod's idea of "which
+// messages survive" is the same one the host-side `Assemble` uses at run time. Two implementations of
+// that rule would be two answers to one question, and the failure mode is the worst this platform has:
+// a diff that windows differently than the policy the `config_hash` names, scored as that policy.
+//
+// So the rule is written ONCE, here, and `Assemble` is a caller of it exactly as the codemod is. A
+// policy that cannot express its assembly as a retained subset — because it summarizes, retrieves, or
+// re-encodes — does not implement this interface, and the transform's refusal for it is then a fact
+// about the type rather than a list someone has to remember to update.
+type SelectionPolicy interface {
+	Policy
+	// Retain returns the indexes of msgs the policy keeps, ascending, preserving source order. It never
+	// reads a message's content except to measure its size, and never returns an index twice.
+	Retain(params json.RawMessage, msgs []Message) ([]int, error)
+}
+
+// retainedTail is the shared shape of every selection policy implemented so far: keep the most recent
+// `keep` messages. Recency wins because a conversation's newest turns are the ones the model is
+// answering; dropping from the front is what both policies below already did.
+func retainedTail(total, keep int) []int {
+	if keep > total {
+		keep = total
+	}
+	out := make([]int, 0, keep)
+	for i := total - keep; i < total; i++ {
+		out = append(out, i)
+	}
+	return out
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // full-history (alias of the P2 `full` policy, under the context-strategies spec name)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -145,19 +186,26 @@ type slidingWindowParams struct {
 	WindowSize int `json:"window_size"`
 }
 
-func (SlidingWindowPolicy) Assemble(_ context.Context, _ HostServices, conv Conversation, params json.RawMessage, _ int64) (AssembledContext, error) {
+// Retain keeps the most recent window_size messages. It is the SINGLE definition of what this policy
+// windows to: Assemble below and P16's Go call-site materializer both read it, so a materialized
+// window and a runtime-assembled one cannot disagree.
+func (SlidingWindowPolicy) Retain(params json.RawMessage, msgs []Message) ([]int, error) {
 	var p slidingWindowParams
 	if err := strictUnmarshal("sliding-window", params, &p); err != nil {
-		return AssembledContext{}, err
+		return nil, err
 	}
 	if p.WindowSize <= 0 {
-		return AssembledContext{}, paramErr("sliding-window", "window_size", "must be > 0")
+		return nil, paramErr("sliding-window", "window_size", "must be > 0")
 	}
-	msgs := conv.Messages
-	if len(msgs) > p.WindowSize {
-		msgs = msgs[len(msgs)-p.WindowSize:]
+	return retainedTail(len(msgs), p.WindowSize), nil
+}
+
+func (sw SlidingWindowPolicy) Assemble(_ context.Context, _ HostServices, conv Conversation, params json.RawMessage, _ int64) (AssembledContext, error) {
+	keep, err := sw.Retain(params, conv.Messages)
+	if err != nil {
+		return AssembledContext{}, err
 	}
-	out := copyMessages(msgs)
+	out := selectMessages(conv.Messages, keep)
 	return AssembledContext{
 		Messages:           out,
 		AssembledTokens:    estimateTokens(out),
@@ -307,30 +355,40 @@ type compactionParams struct {
 	TargetTokens int `json:"target_tokens"`
 }
 
-func (SemanticCompactionPolicy) Assemble(_ context.Context, _ HostServices, conv Conversation, params json.RawMessage, _ int64) (AssembledContext, error) {
+// Retain keeps the most-recent messages whose running total stays within target_tokens. Walk
+// newest→oldest so recency wins; a single message larger than the target is kept alone (dropping
+// everything would assemble empty context, a worse failure than one over-budget message).
+// Deterministic: no map order, no clock, integer arithmetic only.
+//
+// Like SlidingWindowPolicy.Retain, this is the single definition the host-side assembly and P16's
+// call-site materializer share.
+func (SemanticCompactionPolicy) Retain(params json.RawMessage, msgs []Message) ([]int, error) {
 	var p compactionParams
 	if err := strictUnmarshal("semantic-compaction", params, &p); err != nil {
-		return AssembledContext{}, err
+		return nil, err
 	}
 	if p.TargetTokens <= 0 {
-		return AssembledContext{}, paramErr("semantic-compaction", "target_tokens", "must be > 0")
+		return nil, paramErr("semantic-compaction", "target_tokens", "must be > 0")
 	}
-	sourceTokens := estimateTokens(conv.Messages)
-	// Keep the most-recent messages whose running total stays within target_tokens. Walk newest→oldest
-	// so recency wins; a single message larger than the target is kept alone (dropping everything would
-	// assemble empty context, a worse failure than one over-budget message). Deterministic: no map order,
-	// no clock, integer arithmetic only.
-	kept := 0
-	total := 0
-	for i := len(conv.Messages) - 1; i >= 0; i-- {
-		t := estimateTokens(conv.Messages[i : i+1])
+	kept, total := 0, 0
+	for i := len(msgs) - 1; i >= 0; i-- {
+		t := estimateTokens(msgs[i : i+1])
 		if kept > 0 && total+t > p.TargetTokens {
 			break
 		}
 		total += t
 		kept++
 	}
-	out := copyMessages(conv.Messages[len(conv.Messages)-kept:])
+	return retainedTail(len(msgs), kept), nil
+}
+
+func (sc SemanticCompactionPolicy) Assemble(_ context.Context, _ HostServices, conv Conversation, params json.RawMessage, _ int64) (AssembledContext, error) {
+	keep, err := sc.Retain(params, conv.Messages)
+	if err != nil {
+		return AssembledContext{}, err
+	}
+	sourceTokens := estimateTokens(conv.Messages)
+	out := selectMessages(conv.Messages, keep)
 	assembled := estimateTokens(out)
 	return AssembledContext{
 		Messages:           out,
@@ -339,6 +397,201 @@ func (SemanticCompactionPolicy) Assemble(_ context.Context, _ HostServices, conv
 		DropRatio:          dropRatio(sourceTokens, assembled),
 		Lossy:              true,
 	}, nil
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// hierarchical-summary {summarizer_model_ref, recent_verbatim}   (P16 task 4.2)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// HierarchicalSummaryPolicy keeps the most recent `recent_verbatim` turns EXACTLY as written and
+// replaces everything older with a single summary produced host-side. It is the two-tier shape of
+// conversational memory: recency verbatim, history compressed.
+//
+// # Why this is a new POLICY and not a new field, a new spec shape, or a new Dimension
+//
+// It costs a `Name` / `ParamsSchema` / `Assemble` implementation and a row through `Store.AddPolicy`
+// (store.go). Nothing else moves: no registry schema, no `ContextSpec` change, no `Dimension` member.
+// That is the whole point of the interface P2 landed and P3 filled — a policy validates its own params
+// at registration without the registry ever learning its shape (design.md Decision 6, decisions.md D-1).
+//
+// # Why ONE summarizer call, not one per tier
+//
+// The determinism contract for a host-calling policy is a single captured `ResolvedRequest` — the
+// handle two runs are proved identical at (NFR2). A policy that issued N calls would have N requests
+// and one field to report them in, so its determinism claim would be partial by construction. One call
+// over the summarized tier keeps the handle complete and honest. A future N-tier variant is a different
+// policy with a different name, which is exactly the extensibility this interface buys.
+type HierarchicalSummaryPolicy struct{}
+
+func (HierarchicalSummaryPolicy) Name() string { return "hierarchical-summary" }
+
+func (HierarchicalSummaryPolicy) ParamsSchema() json.RawMessage {
+	return json.RawMessage(`{"type":"object","properties":{"summarizer_model_ref":{"type":"string","minLength":1},"recent_verbatim":{"type":"integer","minimum":1}},"required":["summarizer_model_ref","recent_verbatim"],"additionalProperties":false}`)
+}
+
+type hierarchicalParams struct {
+	SummarizerModelRef string `json:"summarizer_model_ref"`
+	RecentVerbatim     int    `json:"recent_verbatim"`
+}
+
+func (HierarchicalSummaryPolicy) Assemble(ctx context.Context, host HostServices, conv Conversation, params json.RawMessage, seed int64) (AssembledContext, error) {
+	var p hierarchicalParams
+	if err := strictUnmarshal("hierarchical-summary", params, &p); err != nil {
+		return AssembledContext{}, err
+	}
+	if p.SummarizerModelRef == "" {
+		return AssembledContext{}, paramErr("hierarchical-summary", "summarizer_model_ref", "must not be empty")
+	}
+	if p.RecentVerbatim <= 0 {
+		return AssembledContext{}, paramErr("hierarchical-summary", "recent_verbatim", "must be > 0")
+	}
+	if host == nil {
+		return AssembledContext{}, paramErr("hierarchical-summary", "",
+			"requires host services to reach the summarizer model")
+	}
+
+	split := len(conv.Messages) - p.RecentVerbatim
+	if split <= 0 {
+		// The whole conversation fits in the verbatim tier, so there is no history to summarize. Pass it
+		// through unchanged rather than call the summarizer over nothing: a summary of an empty history is
+		// a model call that costs money and adds no information, and it would make the assembly depend on
+		// a provider for a result that is a copy of the input.
+		out := copyMessages(conv.Messages)
+		return AssembledContext{
+			Messages:           out,
+			AssembledTokens:    estimateTokens(out),
+			SourceMessageCount: len(conv.Messages),
+			DropRatio:          0,
+			Lossy:              true, // the POLICY is lossy; this run happened to drop nothing (see below)
+		}, nil
+	}
+
+	older := copyMessages(conv.Messages[:split])
+	req := ResolvedRequest{
+		Op:       "summarize",
+		ModelRef: p.SummarizerModelRef,
+		Seed:     seed,
+		Messages: older,
+	}
+	summary, err := host.Summarize(ctx, req)
+	if err != nil {
+		return AssembledContext{}, fmt.Errorf("hierarchical-summary: summarizer %q failed: %w",
+			p.SummarizerModelRef, err)
+	}
+
+	out := make([]Message, 0, 1+p.RecentVerbatim)
+	out = append(out, Message{Role: "system", Content: summary})
+	out = append(out, copyMessages(conv.Messages[split:])...)
+	sourceTokens := estimateTokens(conv.Messages)
+	assembled := estimateTokens(out)
+	return AssembledContext{
+		Messages:           out,
+		AssembledTokens:    assembled,
+		SourceMessageCount: len(conv.Messages),
+		DropRatio:          dropRatio(sourceTokens, assembled),
+		Lossy:              true,
+		ResolvedRequest:    &req,
+	}, nil
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// structured-extraction {fields}   (P16 task 4.3, PRD §14 Q4)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// StructuredExtractionPolicy replaces the conversation with one system message carrying the declared
+// fields and their values, harvested from the conversation deterministically: for each declared field,
+// the value is the remainder of the line after the LAST `field:` marker in the conversation. LLM-free
+// and byte-identical across runs.
+//
+// # 🔴 It is LOSSY, and that is a DECISION, not a default (PRD §14 Q4)
+//
+// The tempting reading is that extraction is a representation change, like `full-history` — the same
+// information in a tidier shape, and therefore lossless. It is not, and the difference is exactly what
+// drop tolerance exists to catch: extraction is a PROJECTION. Everything in the conversation that is
+// not one of the declared fields is unrecoverable afterwards, so a downstream node that needed a detail
+// outside the schema has lost it. Marking it lossless would mean the drop-tolerance gate never fired on
+// the one policy whose whole mechanism is discarding what the schema did not name — the gate would be
+// decoration on precisely the case it was built for.
+//
+// So `Lossy` is true and the drop is MEASURED, not assumed: a run that extracted a conversation which
+// was already almost entirely field markers reports a small drop, and a run that threw away pages of
+// discussion reports a large one. The gate reads the measurement, never the flag alone.
+//
+// # Fail-closed on a field the conversation does not carry
+//
+// A declared field with no value is an error, not an omission. Assembling a context missing a field the
+// configuration declared would run the node on inputs it was not configured for and report the result
+// under a `config_hash` that claims the field was there.
+type StructuredExtractionPolicy struct{}
+
+func (StructuredExtractionPolicy) Name() string { return "structured-extraction" }
+
+func (StructuredExtractionPolicy) ParamsSchema() json.RawMessage {
+	return json.RawMessage(`{"type":"object","properties":{"fields":{"type":"array","minItems":1,"items":{"type":"string","minLength":1}}},"required":["fields"],"additionalProperties":false}`)
+}
+
+type extractionParams struct {
+	Fields []string `json:"fields"`
+}
+
+func (StructuredExtractionPolicy) Assemble(_ context.Context, _ HostServices, conv Conversation, params json.RawMessage, _ int64) (AssembledContext, error) {
+	var p extractionParams
+	if err := strictUnmarshal("structured-extraction", params, &p); err != nil {
+		return AssembledContext{}, err
+	}
+	if len(p.Fields) == 0 {
+		return AssembledContext{}, paramErr("structured-extraction", "fields", "must declare at least one field")
+	}
+
+	// Field order follows the DECLARED order, never sorted: the params are part of config_hash, so the
+	// author's order is identity-bearing and the assembled bytes must follow it.
+	var b strings.Builder
+	for i, f := range p.Fields {
+		v, ok := lastFieldValue(conv.Messages, f)
+		if !ok {
+			return AssembledContext{}, paramErr("structured-extraction", f,
+				"the conversation carries no value for this declared field; extracting anyway would assemble "+
+					"a context missing a field the configuration declares")
+		}
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(f)
+		b.WriteString(": ")
+		b.WriteString(v)
+	}
+
+	out := []Message{{Role: "system", Content: b.String()}}
+	sourceTokens := estimateTokens(conv.Messages)
+	assembled := estimateTokens(out)
+	return AssembledContext{
+		Messages:           out,
+		AssembledTokens:    assembled,
+		SourceMessageCount: len(conv.Messages),
+		// Measured, not assumed — see the type's doc comment. A projection that happened to keep almost
+		// everything reports almost no drop, and the gate reads the number.
+		DropRatio: dropRatio(sourceTokens, assembled),
+		Lossy:     true,
+	}, nil
+}
+
+// lastFieldValue finds the value of `field:` in the conversation, taking the LAST occurrence so a later
+// correction wins over an earlier statement — the same recency rule every other policy here follows.
+func lastFieldValue(msgs []Message, field string) (string, bool) {
+	marker := field + ":"
+	var found string
+	var ok bool
+	for _, m := range msgs {
+		for _, line := range strings.Split(m.Content, "\n") {
+			idx := strings.Index(line, marker)
+			if idx < 0 {
+				continue
+			}
+			found = strings.TrimSpace(line[idx+len(marker):])
+			ok = true
+		}
+	}
+	return found, ok
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -384,6 +637,17 @@ func strictUnmarshal(policy string, params json.RawMessage, dst any) error {
 func copyMessages(in []Message) []Message {
 	out := make([]Message, len(in))
 	copy(out, in)
+	return out
+}
+
+// selectMessages materializes a Retain result: the retained messages, in source order, copied.
+func selectMessages(in []Message, keep []int) []Message {
+	out := make([]Message, 0, len(keep))
+	for _, i := range keep {
+		if i >= 0 && i < len(in) {
+			out = append(out, in[i])
+		}
+	}
 	return out
 }
 

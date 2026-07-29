@@ -64,6 +64,15 @@ type Engine struct {
 	// Gate refuses contract-violating candidates. Nil admits every candidate (used by pure operator
 	// tests where wiring never changes); production wires NewTypedContractGate(IR).
 	Gate ContractGate
+	// DropTolerance is the drop-tolerance admissibility gate (P16 task 5.3). Its zero value is a working
+	// gate that judges on the menu's estimates; a caller with eval telemetry populates Observed so it
+	// judges on measurements where it has them.
+	//
+	// It is a SEPARATE field from Gate, not a second implementation of ContractGate, because the two ask
+	// different questions of different things: the contract gate asks whether the candidate's GRAPH is
+	// coherent, and this one asks whether the candidate's context loss is more than this NODE's job can
+	// take. Folding them together would make one refusal reason answer for both.
+	DropTolerance DropGate
 }
 
 // Propose runs the catalog over every target and returns the admissible candidates plus recorded
@@ -96,6 +105,16 @@ func (e Engine) Propose(targets []Target) Emission {
 				continue
 			}
 			for _, c := range cands {
+				// 🔴 The drop gate runs FIRST, before the contract gate and long before anything is
+				// compiled, transformed, or run (P16 task 5.3 / FR8). Its whole value is being early: a
+				// policy that would drop more than the node's job tolerates is not a candidate to MEASURE,
+				// it is a candidate to reject, and rejecting it after the multi-seed spend would prove the
+				// same thing for the price of an eval run.
+				if ok, reason := e.DropTolerance.Admit(c, e.Menu, t.Pattern); !ok {
+					em.Refusals = append(em.Refusals, Refusal{Operator: c.Operator, NodeID: c.NodeID,
+						Reason: reason})
+					continue
+				}
 				if e.Gate != nil {
 					gated, ok, reason := e.Gate.Admit(c)
 					if !ok {
