@@ -381,37 +381,53 @@ func contextCoverage(lang string) []CoverageCell {
 	return out
 }
 
-// memoryCoverage reads the builtin strategy set — the same closed vocabulary RegisterMemory validates
-// against — and answers for every (language, strategy) cell (P17).
+// memoryCoverage reads the builtin strategy set and the MATERIALIZER TABLE, and answers for every
+// (language, strategy) cell (P17, narrowed per-cell by P18 §5.1).
 //
-// 🔴 It is UNIFORM across languages, and that uniformity is the claim, not a shortcut. Skills and context
-// are asymmetric because what is missing there is a per-language artifact (a tool-value spelling, a list
-// splitter), so one language's cell can flip to materializes while another's does not. Memory is missing
-// something else entirely: a memory RUNTIME plus a codemod that introduces a store, a lifetime, a key
-// scheme, and read/write points. No language has one. Rendering a language in this axis's refusal — "the
-// Rust rewriter is pending" — would imply some other language's is not, which is false, and would send a
-// user to wait for the wrong thing.
+// 🔴 This read was UNIFORM under P17 and is not any more, and the change is the honest one rather than a
+// loosening. P17's uniformity was a true claim about a true state: nothing was missing per-language,
+// because a memory RUNTIME was missing everywhere. P18 shipped that runtime and a Python materializer,
+// so the axis became asymmetric exactly like skills and context — and a table that kept saying "this is
+// missing in every language" would now be lying in the OPPOSITE direction, over-refusing rather than
+// over-claiming. Both are the same defect: a coverage claim that does not match the engine.
 //
-// `none` materializes, because the identity strategy is genuinely equivalent to the un-rewritten call
-// site — exactly as `full`/identity does in the context axis. That is not a courtesy row: it is what
-// makes "none ≡ absent" true at the coverage layer too, so a user who selects `none` is not told their
-// no-op was refused.
+// It derives from HasMemoryMaterializer — the same table spanMaterializeMemory dispatches on — so the
+// claim and the behaviour cannot disagree.
+//
+// `none` materializes everywhere, because the identity strategy is genuinely equivalent to the
+// un-rewritten call site — exactly as `full`/identity does in the context axis. That is what makes
+// "none ≡ absent" true at the coverage layer too, so a user selecting `none` is never told their no-op
+// was refused.
+//
+// 🚫 A `materializes` cell is a claim about the (language, strategy) PAIR, not a promise about every call
+// site in it: the record half needs a statement-level assignment, and a call site without one is refused
+// by shape. That is the same granularity contextCoverage uses, and the Note says so rather than leaving a
+// reader to discover it at apply time.
 func memoryCoverage(lang string) []CoverageCell {
 	const axis = string(variantspec.DimMemory)
+	hasMaterializer := HasMemoryMaterializer(lang)
 	var out []CoverageCell
 	for _, st := range registry.BuiltinMemoryStrategies() {
 		cell := CoverageCell{Axis: axis, Language: lang, Form: st.Name()}
-		if st.Name() == registry.StrategyNone {
+		switch {
+		case st.Name() == registry.StrategyNone:
 			cell.Status = CoverageMaterializes
 			cell.Note = "the identity strategy; equivalent to the un-rewritten call site, so nothing is emitted"
-			out = append(out, cell)
-			continue
+		case hasMaterializer:
+			cell.Status = CoverageMaterializes
+			cell.Note = "materialized by wrapping the written message list with a recall and recording the " +
+				"turn after the call — BOTH halves or the call site is refused, because a memory that reads " +
+				"a store nothing fills behaves as `none`. Needs a written message list and a statement-level " +
+				"assignment; a call site with neither is refused by shape. The generated module requires a " +
+				"session id and raises rather than defaulting one"
+		default:
+			cell.Status = CoverageRefuses
+			cell.Cause = CauseNoMaterializer
+			cell.MissingArtifact = "a " + lang + " memory module and its call-site rewriter (memoryMaterializers)"
+			cell.Note = "the memory runtime is shared and has landed; what is missing for this language is " +
+				"the emitted module a rewritten call site would call, and the rewriter that emits it " +
+				"(covered today: " + strings.Join(MemoryMaterializerLanguages(), ", ") + ")"
 		}
-		cell.Status = CoverageRefuses
-		cell.Cause = CauseNoMaterializer
-		cell.MissingArtifact = "a memory runtime (a store, a lifetime, and a key scheme) plus the call-site rewriter that reads and writes it"
-		cell.Note = "a memory strategy is read and written BETWEEN invocations, so no expression — and no " +
-			"region — at the call site holds it; this is missing in every language, not this one"
 		out = append(out, cell)
 	}
 	return out

@@ -2,7 +2,6 @@ package api
 
 import (
 	"encoding/json"
-	"strings"
 	"testing"
 
 	"github.com/heros-foreal/agentd/internal/registry"
@@ -19,11 +18,11 @@ import (
 func TestMemoryReadModelStatesTheBoundaryBeforeAnyChoice(t *testing.T) {
 	v := memoryReadModel("go")
 
-	// 🔴 FR20. At M20 the answer is no, and the payload says so up front.
+	// 🔴 Go has no memory materializer, so the answer for Go is no — and the payload says so up front.
+	// (P17 asserted this of EVERY language; P18 made it per-language, which the Python case below pins.)
 	if v.Boundary.Applicable {
-		t.Fatal("the read model reports memory as applicable; the transform refuses every non-identity " +
-			"strategy in every language, and a surface built on this payload would promise a change that " +
-			"is then refused")
+		t.Fatal("the read model reports memory as applicable for Go; Go has no emitted memory module, and " +
+			"a surface built on this payload would promise a change that is then refused")
 	}
 	if v.Boundary.MissingArtifact == "" {
 		t.Error("the boundary names no missing artifact; a client would render \"unavailable\" with no reason, " +
@@ -86,7 +85,41 @@ func TestMemoryReadModelOffersTheClosedVocabulary(t *testing.T) {
 		t.Errorf("the payload marks %d identity strategies, want exactly 1", identity)
 	}
 	if applying != 0 {
-		t.Errorf("%d non-identity strategies claim to apply while the transform refuses them all", applying)
+		t.Errorf("%d non-identity strategies claim to apply for Go, which has no materializer", applying)
+	}
+}
+
+// TestMemoryReadModelFlipsForACoveredLanguage — P18 §7.1. The boundary is PER-CELL now, and the payload
+// must say so rather than repeating P17's flat no.
+//
+// 🔴 This is the test that would have caught the surface keeping P17's copy after the capability landed.
+// Over-refusing and over-claiming are the same defect — a coverage claim that does not match the engine —
+// and the first is the one a team never notices, because nobody files a bug about being told "no".
+func TestMemoryReadModelFlipsForACoveredLanguage(t *testing.T) {
+	covered := transform.MemoryMaterializerLanguages()
+	if len(covered) == 0 {
+		t.Skip("no language has a memory materializer yet")
+	}
+	lang := covered[0]
+	v := memoryReadModel(lang)
+
+	if !v.Boundary.Applicable {
+		t.Fatalf("language %q has a memory materializer and the payload still reports the axis as "+
+			"inapplicable; the surface is over-refusing, which is the same defect as over-claiming and the "+
+			"one nobody files a bug about", lang)
+	}
+	var applying int
+	for _, s := range v.Strategies {
+		if !s.Identity && s.Applies {
+			applying++
+		}
+	}
+	if applying == 0 {
+		t.Errorf("no non-identity strategy reports Applies for %q, though the engine materializes them", lang)
+	}
+	// The control is still live and the change is still authorable — that never depended on materializability.
+	if !v.Boundary.AuthorableAnyway {
+		t.Error("the payload stopped reporting the change as authorable")
 	}
 }
 
@@ -134,9 +167,13 @@ func TestMemoryBoundaryDerivesFromTheEngineCoverage(t *testing.T) {
 					"must not be able to disagree", s.Strategy, s.Applies, c.Status)
 			}
 		}
-		// The missing artifact travels verbatim, so a user is told what to wait for.
-		if c.MissingArtifact != "" && !strings.Contains(v.Boundary.MissingArtifact, "runtime") {
-			t.Errorf("the boundary's missing artifact %q does not name the runtime the engine names (%q)",
+		// The missing artifact travels VERBATIM from the engine, so a user is told exactly what to wait
+		// for. 🔴 P17 asserted this named "the runtime"; P18 shipped the runtime, so what is missing for
+		// an uncovered language is now its module and rewriter. Asserting the old word would be asserting
+		// something the engine no longer believes.
+		if c.MissingArtifact != "" && v.Boundary.MissingArtifact != c.MissingArtifact {
+			t.Errorf("the boundary's missing artifact %q is not the engine's (%q); the surface must render "+
+				"the engine's sentence rather than a paraphrase that can drift",
 				v.Boundary.MissingArtifact, c.MissingArtifact)
 		}
 	}

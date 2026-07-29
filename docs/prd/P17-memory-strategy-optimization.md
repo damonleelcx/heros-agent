@@ -20,6 +20,13 @@
 > **Money-in-git rule.** No dollar amounts, percentages, or price bands appear in this document. Plans
 > are referred to by **name only** — Free / Team / Business / Enterprise.
 
+> **Status update — superseded in part by [P18](P18-memory-runtime.md).** This PRD specifies memory as
+> *modeled and refused*, and its refusal named what was missing: a memory runtime plus the call-site
+> rewriter that reads and writes it. P18 shipped both. Memory now **materializes** at a Python call site
+> that writes its message list and assigns its result, and still refuses — with a typed cause — everywhere
+> else. Read FR11/FR12's "refused at transform" as *refused where the cell has no materializer*; the
+> no-silent-drop guarantee behind them is unchanged and re-asserted in P18.
+
 ## 1. Summary
 
 Every optimization axis on this platform is a **Dimension**: a node's model, prompt, skills, or context

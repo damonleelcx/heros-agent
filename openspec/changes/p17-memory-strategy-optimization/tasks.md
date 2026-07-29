@@ -1,5 +1,13 @@
 # Tasks — P17: Memory Strategy Optimization
 
+> **Superseded in part by [P18](../p18-memory-runtime/).** P17's refusal named two missing artifacts —
+> a memory runtime and the call-site rewriter that reads and writes it. P18 built both, so three P17
+> claims are no longer true and have been updated **in place** rather than left standing:
+> the axis is no longer uniform across languages (Python materializes); `memoryCoverage` is now a
+> per-cell read of the materializer table; and the console no longer says the limit is
+> language-independent. **Every P17 guarantee survives unchanged** — no silent drop, a typed refusal for
+> every uncovered cell, `none` ≡ absent, and every `config_hash` bit-for-bit identical.
+
 Three waves. **Wave 20a** = the `memory-store` registry Kind and the *modeled, refused* `DimMemory`
 Dimension — a complete phase on its own: a memory strategy can be referenced, resolved, hashed, and
 **refused** at transform. **Wave 20b** = the `OpMemoryPolicy` operator and the metric wiring, so the

@@ -91,23 +91,30 @@ func TestMemoryOverrideRefusedInASTEngine(t *testing.T) {
 	}
 }
 
-// TestMemoryOverrideRefusedInSpanEngine — task 7.2 🔴. The other engine, so no target language applies a
-// memory change through the path the first test does not cover.
+// TestMemoryOverrideRefusedInSpanEngine — task 7.2 🔴, as P18 leaves it.
+//
+// 🔴 This test's CLAIM changed when P18 landed, and the change is the point rather than a maintenance
+// chore. P17 asserted that every span-engine cell refuses with CauseNoMaterializer, because no language
+// had one. Python now does. Keeping the old assertion would have meant asserting a falsehood; deleting
+// the test would have dropped the guarantee. So it splits along the line P18 actually drew:
+//
+//	an UNCOVERED language      → still CauseNoMaterializer. Nothing the author writes could help.
+//	a COVERED language whose
+//	call site cannot carry it  → CauseCallSiteShape. The author CAN act on it.
+//
+// What did NOT change, and is re-asserted below: no memory override is ever silently dropped, and a
+// refusal never produces a diff.
 func TestMemoryOverrideRefusedInSpanEngine(t *testing.T) {
-	root := spanTarget(t, "pipeline.py", pyMultiTurnSrc)
-	id := onlyNode(t, root, "python")
+	t.Run("an uncovered language refuses about the platform", func(t *testing.T) {
+		root := spanTarget(t, "pipeline.ts", tsMultiTurnSrc)
+		id := onlyNode(t, root, "typescript")
 
-	for _, strategy := range realStrategies(t) {
-		t.Run(strategy, func(t *testing.T) {
-			p, err := Generate(resolvedIn("python", map[string]variantspec.ResolvedOverride{
-				id: {Memory: memoryEntry(t, strategy)},
+		for _, strategy := range realStrategies(t) {
+			p, err := Generate(resolvedIn("typescript", map[string]variantspec.ResolvedOverride{
+				id: memoryOverride(t, strategy),
 			}), root)
 			if err == nil {
-				t.Fatalf("the span engine APPLIED a %s memory override; the Go engine's refusal would then "+
-					"be a formality that every tree-sitter language routes around", strategy)
-			}
-			if !errors.Is(err, ErrUnsafeRewrite) {
-				t.Fatalf("err = %v, want ErrUnsafeRewrite", err)
+				t.Fatalf("a language with no emitted memory module APPLIED a %s override", strategy)
 			}
 			if p != nil {
 				t.Error("a refused memory override produced a patch")
@@ -116,8 +123,37 @@ func TestMemoryOverrideRefusedInSpanEngine(t *testing.T) {
 			if !errors.As(err, &re) || re.Dim != string(variantspec.DimMemory) || re.Cause != CauseNoMaterializer {
 				t.Fatalf("refusal = %#v, want a memory/no-materializer RewriteError", err)
 			}
-		})
-	}
+		}
+	})
+
+	t.Run("a covered language refuses about the call site", func(t *testing.T) {
+		// pyMultiTurnSrc RETURNS its call, so the record half has no name to record from. Python has a
+		// materializer, so blaming the platform here would send the author to wait for something that has
+		// already landed.
+		root := spanTarget(t, "pipeline.py", pyMultiTurnSrc)
+		id := onlyNode(t, root, "python")
+
+		for _, strategy := range realStrategies(t) {
+			p, err := Generate(resolvedIn("python", map[string]variantspec.ResolvedOverride{
+				id: memoryOverride(t, strategy),
+			}), root)
+			if err == nil {
+				t.Fatalf("a call site that cannot carry the RECORD half materialized a %s override; that "+
+					"emits a memory which reads a store nothing fills", strategy)
+			}
+			if p != nil {
+				t.Error("a refused memory override produced a patch")
+			}
+			var re *RewriteError
+			if !errors.As(err, &re) || re.Dim != string(variantspec.DimMemory) {
+				t.Fatalf("refusal = %#v, want a memory RewriteError", err)
+			}
+			if re.Cause != CauseCallSiteShape {
+				t.Errorf("cause = %q, want %q: Python HAS a materializer, so the honest cause is this "+
+					"call site's shape — which the author can change", re.Cause, CauseCallSiteShape)
+			}
+		}
+	})
 }
 
 // TestMemoryRefusalTypedAndProducesNoDiff — task 7.3 🔴. The refusal must be DISTINGUISHABLE from
@@ -240,6 +276,7 @@ func TestMemoryRefusalTotalityCanary(t *testing.T) {
 
 		var root, nodeID string
 		if lang == "go" {
+			fx.file = "" // the Go fixture is multi-file; the half-check below reads the span file only
 			root = newTarget(t)
 			nodeID = nodeIDs(t, root)["classify"]
 		} else {
@@ -259,12 +296,35 @@ func TestMemoryRefusalTotalityCanary(t *testing.T) {
 
 		for _, strategy := range realStrategies(t) {
 			p, err := Generate(resolvedIn(lang, map[string]variantspec.ResolvedOverride{
-				nodeID: {Memory: memoryEntry(t, strategy)},
+				nodeID: memoryOverride(t, strategy),
 			}), root)
+
+			// 🔴 The canary's claim WIDENED when P18 landed, and this is the widening. P17 asserted every
+			// override comes back refused, because nothing could materialize. Now some can — so the
+			// invariant that actually matters is the one that was always underneath: an override is either
+			// materialized COMPLETELY or refused with a typed cause. There is no third outcome, and in
+			// particular there is no half.
 			if err == nil {
-				t.Errorf("[%s/%s] the override was NOT refused; some path drops it or emits an edit", lang, strategy)
+				if p == nil {
+					t.Errorf("[%s/%s] neither a patch nor a refusal — the override was DROPPED", lang, strategy)
+					continue
+				}
+				after := string(p.Files[fx.file])
+				hasRecall := strings.Contains(after, "agentmem.recall(")
+				hasRecord := strings.Contains(after, "agentmem.record(")
+				if hasRecall != hasRecord {
+					t.Errorf("[%s/%s] a HALF-materialized memory shipped (recall=%v record=%v). A memory "+
+						"that reads a store nothing fills — or fills one nothing reads — behaves as `none` "+
+						"while its config_hash claims %s:\n%s", lang, strategy, hasRecall, hasRecord, strategy, after)
+				}
+				if !hasRecall {
+					t.Errorf("[%s/%s] the patch carries neither half; the override reached the source as "+
+						"nothing at all", lang, strategy)
+				}
+				covered++
 				continue
 			}
+
 			var re *RewriteError
 			if !errors.As(err, &re) || re.Dim != string(variantspec.DimMemory) {
 				t.Errorf("[%s/%s] refused for the wrong reason: %v", lang, strategy, err)
@@ -291,80 +351,59 @@ func TestMemoryRefusalTotalityCanary(t *testing.T) {
 	}
 }
 
-// TestMemoryCoverageIsUniformAndRefuses — the coverage table is what the AUTHORING surface reads to state
-// the boundary before a user chooses (P17 D7). If it disagreed with the engine, the surface would promise
-// something the transform then refuses — or vice versa.
-func TestMemoryCoverageIsUniformAndRefuses(t *testing.T) {
+// TestMemoryCoverageReflectsMaterializers — P18 §5.1, replacing P17's uniformity assertion.
+//
+// 🔴 P17 asserted this table was UNIFORM across languages. That was a true claim about a true state —
+// nothing was per-language, because the memory RUNTIME was missing everywhere. P18 shipped it plus a
+// Python materializer, so the axis became asymmetric, and a test still demanding uniformity would be
+// demanding a lie. What survives, and is asserted harder: the table is TOTAL, it matches the ENGINE cell
+// for cell, and no cell claims a capability the engine refuses.
+func TestMemoryCoverageReflectsMaterializers(t *testing.T) {
 	cells := CoverageFor(string(variantspec.DimMemory))
-	if len(cells) == 0 {
-		t.Fatal("the memory axis has no coverage cells; the authoring surface would have nothing to read " +
-			"and would have to hard-code a second sentence")
-	}
-
 	wantCells := len(RegisteredLanguages()) * registry.MemoryStrategySetSize
 	if len(cells) != wantCells {
-		t.Errorf("memory coverage has %d cells, want %d (every language × every strategy); coverage on this "+
+		t.Fatalf("memory coverage has %d cells, want %d (every language × every strategy); coverage on this "+
 			"axis is a TOTAL function, and a missing cell renders as \"not applicable\"", len(cells), wantCells)
 	}
 
-	byForm := map[string]map[string]CoverageCell{}
 	for _, c := range cells {
-		if byForm[c.Form] == nil {
-			byForm[c.Form] = map[string]CoverageCell{}
-		}
-		byForm[c.Form][c.Language] = c
-	}
+		identity := c.Form == registry.StrategyNone
+		covered := HasMemoryMaterializer(c.Language)
 
-	for _, st := range registry.BuiltinMemoryStrategies() {
-		langs, ok := byForm[st.Name()]
-		if !ok {
-			t.Errorf("strategy %q has no coverage cells", st.Name())
-			continue
+		wantMaterializes := identity || covered
+		if got := c.Status == CoverageMaterializes; got != wantMaterializes {
+			t.Errorf("[%s/%s] coverage says materializes=%v, the engine's materializer table says %v; the "+
+				"claim and the behaviour must not be able to disagree", c.Language, c.Form, got, wantMaterializes)
 		}
-		for lang, c := range langs {
-			if st.Name() == registry.StrategyNone {
-				if c.Status != CoverageMaterializes {
-					t.Errorf("[%s/none] status is %q, want materializes: the identity strategy is equivalent "+
-						"to the un-rewritten call site, and a user selecting it must not be told it was refused",
-						lang, c.Status)
-				}
-				continue
-			}
-			if c.Status != CoverageRefuses {
-				t.Errorf("[%s/%s] coverage claims %q while the engine refuses; the authoring surface would "+
-					"promise a change the transform then declines", lang, st.Name(), c.Status)
-			}
+		if c.Status == CoverageRefuses {
 			if c.Cause != CauseNoMaterializer {
-				t.Errorf("[%s/%s] cause is %q, want %q — the platform owes this artifact, not the customer",
-					lang, st.Name(), c.Cause, CauseNoMaterializer)
+				t.Errorf("[%s/%s] cause = %q, want %q — the runtime has landed, so what is missing for this "+
+					"language is ours to build", c.Language, c.Form, c.Cause, CauseNoMaterializer)
 			}
 			if c.MissingArtifact == "" {
-				t.Errorf("[%s/%s] a no-materializer refusal names no missing artifact, so nobody can tell "+
-					"what would close it", lang, st.Name())
+				t.Errorf("[%s/%s] a no-materializer refusal names no missing artifact", c.Language, c.Form)
+			}
+			// 🔴 And it must point at what DOES work, or a reader cannot tell whether the axis works anywhere.
+			for _, lang := range MemoryMaterializerLanguages() {
+				if !strings.Contains(c.Note, lang) {
+					t.Errorf("[%s/%s] the refusal note does not name %q among the covered languages: %q",
+						c.Language, c.Form, lang, c.Note)
+				}
 			}
 		}
 	}
 
-	// 🔴 UNIFORMITY. Unlike skills and context, memory must not vary by language: what is missing is a
-	// memory runtime, not a per-language rewriter, and a per-language cell would tell a Rust user to wait
-	// for a Rust artifact that is not the blocker.
-	for form, langs := range byForm {
-		var first *CoverageCell
-		for lang, c := range langs {
-			if first == nil {
-				cc := c
-				first = &cc
-				continue
-			}
-			if c.Status != first.Status || c.Cause != first.Cause || c.MissingArtifact != first.MissingArtifact {
-				t.Errorf("strategy %q answers differently for %s than for %s; the memory axis is uniform "+
-					"across languages because the missing artifact is a runtime, not a rewriter",
-					form, lang, first.Language)
-			}
-			// And no cell may name a language as the blocker.
-			if strings.Contains(strings.ToLower(c.Note), strings.ToLower(lang)) && lang != "" {
-				t.Errorf("[%s/%s] the coverage note names the language as the reason: %q. That implies some "+
-					"other language's rewriter has landed, which is false", lang, form, c.Note)
+	// 🚫 A materializing cell must state its PRECONDITIONS. It is a claim about a (language, strategy)
+	// pair, not a promise about every call site in it — and a reader who discovers the record half's
+	// requirement at apply time has been told half the truth.
+	for _, c := range cells {
+		if c.Status != CoverageMaterializes || c.Form == registry.StrategyNone {
+			continue
+		}
+		for _, must := range []string{"BOTH halves", "session"} {
+			if !strings.Contains(c.Note, must) {
+				t.Errorf("[%s/%s] the materializing note omits %q; a precondition a reader meets at apply "+
+					"time instead of at read time is a precondition we hid: %q", c.Language, c.Form, must, c.Note)
 			}
 		}
 	}
@@ -377,29 +416,31 @@ func TestMemoryRefusalSuite(t *testing.T) {
 	t.Run("AST engine", TestMemoryOverrideRefusedInASTEngine)
 	t.Run("span engine", TestMemoryOverrideRefusedInSpanEngine)
 	t.Run("typed and no diff", TestMemoryRefusalTypedAndProducesNoDiff)
+	t.Run("coverage matches the engine", TestMemoryCoverageReflectsMaterializers)
 	t.Run("totality canary", TestMemoryRefusalTotalityCanary)
 	t.Run("none is a no-op", TestMemoryNoneAppliesAsNoOp)
-
-	t.Run("the refusal does not blame the language", func(t *testing.T) {
-		root := spanTarget(t, "pipeline.py", pyMultiTurnSrc)
-		id := onlyNode(t, root, "python")
-		_, err := Generate(resolvedIn("python", map[string]variantspec.ResolvedOverride{
-			id: {Memory: memoryEntry(t, "vector-recall")},
+	t.Run("an uncovered language's refusal names what IS covered", func(t *testing.T) {
+		// 🔴 P17 asserted here that the refusal says the gap is language-INDEPENDENT. P18 made that false
+		// for Python, so the assertion moved to what is still true and still load-bearing: a refusal must
+		// tell the reader which languages DO work, and must not leave them thinking their configuration
+		// was thrown away. That is the difference between a refusal and a dead end.
+		root := spanTarget(t, "pipeline.ts", tsMultiTurnSrc)
+		id := onlyNode(t, root, "typescript")
+		_, err := Generate(resolvedIn("typescript", map[string]variantspec.ResolvedOverride{
+			id: memoryOverride(t, "vector-recall"),
 		}), root)
 		if err == nil {
 			t.Fatal("not refused")
 		}
 		msg := strings.ToLower(err.Error())
-		// It must say the gap is everywhere, not here. "the python materializer is still being built"
-		// would send a user to wait for the wrong thing.
-		if !strings.Contains(msg, "any language") && !strings.Contains(msg, "every language") {
-			t.Errorf("the refusal does not say the gap is language-independent, so a reader will assume "+
-				"another language works: %v", err)
+		for _, covered := range MemoryMaterializerLanguages() {
+			if !strings.Contains(msg, covered) {
+				t.Errorf("the refusal does not name %q among the covered languages, so a reader cannot tell "+
+					"whether the axis works anywhere: %v", covered, err)
+			}
 		}
-		// And it must not leave the user thinking their configuration was thrown away.
-		if !strings.Contains(msg, "hashes") && !strings.Contains(msg, "resolves") {
-			t.Errorf("the refusal does not tell the user what their change DID accomplish (it resolves and "+
-				"hashes), which is the difference between a refusal and a dead end: %v", err)
+		if !strings.Contains(msg, "refused rather than") {
+			t.Errorf("the refusal does not say the override was refused rather than dropped: %v", err)
 		}
 	})
 }

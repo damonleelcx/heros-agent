@@ -207,7 +207,7 @@ func hashMovesIffMemoryMoves(ir *discovery.IR, base *variantspec.VariantSpec, re
 // ── §4 the refusal, on every node ────────────────────────────────────────────────────────────────
 
 func refuseAtTransform(ir *discovery.IR, base *variantspec.VariantSpec, regs *memRegs, repo string) {
-	fmt.Println("--- 4. 🔴 every non-identity strategy is REFUSED at transform, on every node ---")
+	fmt.Println("--- 4. 🔴 what the transform does with a memory override, on every node ---")
 
 	var refused, applied, otherErr int
 	var sample string
@@ -254,8 +254,12 @@ func refuseAtTransform(ir *discovery.IR, base *variantspec.VariantSpec, regs *me
 		fmt.Println("     claiming a memory strategy this repository never had.")
 		log.Fatal("a memory override was applied")
 	}
-	fmt.Println("  ✅ no diff was produced for any memory override, anywhere. Nothing was dropped:")
-	fmt.Println("     every one came back as a typed refusal naming the memory dimension.")
+	fmt.Println("  ✅ nothing was dropped: every override came back either materialized or as a typed")
+	fmt.Println("     refusal naming the memory dimension. On THIS repository the answer is refusal")
+	fmt.Println("     everywhere — and the REASON is what moved. It is no longer \"the platform has not")
+	fmt.Println("     built it\" (ours, temporary); it is \"your call site unpacks its arguments\" (theirs,")
+	fmt.Println("     permanent, and actionable). Python materializes memory; hermes-agent's call sites")
+	fmt.Println("     assemble their requests elsewhere, so there is no written message list to wrap.")
 	fmt.Println()
 	fmt.Println("  the engine's sentence, verbatim:")
 	for _, line := range wrap(sample, 92) {
@@ -288,8 +292,9 @@ func refuseAtTransform(ir *discovery.IR, base *variantspec.VariantSpec, regs *me
 	}
 	fmt.Printf("  coverage table: %d cells over %d languages — materializes=%d refuses=%d\n",
 		len(cells), len(langs), byStatus[transform.CoverageMaterializes], byStatus[transform.CoverageRefuses])
-	fmt.Println("  🔴 UNIFORM across languages. What is missing is a memory RUNTIME, not this language's")
-	fmt.Println("     rewriter — so no language is named as the blocker, in the engine or in the console.")
+	fmt.Printf("  materializing languages: %s\n", strings.Join(transform.MemoryMaterializerLanguages(), ", "))
+	fmt.Println("  🔴 The axis is PER-CELL now. The shared memory runtime has landed; a language materializes")
+	fmt.Println("     once its own module and call-site rewriter have, and is refused BY NAME until then.")
 	fmt.Println()
 }
 

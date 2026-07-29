@@ -10,8 +10,9 @@ import { STRATEGIES, BOUNDARY } from "./strategies";
  * # What makes this axis different from every other one
  *
  * On the model, prompt, skills, tools, context and wiring surfaces, an authored change reaches the
- * reader's source as a diff and is merely *unscored* until the harness runs. Here it does not reach the
- * source at all: the transform refuses every memory change, in both engines, in every language.
+ * reader's source as a diff and is merely *unscored* until the harness runs. Memory is the axis where
+ * whether it reaches the source AT ALL depends on the cell — Python call sites materialize it, and every
+ * other language is refused by name until its module lands.
  *
  * That makes this the hardest surface in the console to write honestly, because the temptation runs in
  * two opposite directions and both are wrong:
@@ -21,9 +22,9 @@ import { STRATEGIES, BOUNDARY } from "./strategies";
  *   - Let them compose a change and refuse at the end. Technically honest; practically a bait-and-switch,
  *     because the platform knew before they started.
  *
- * So: the boundary is stated FIRST, the controls stay live, and the refusal is shown in its own state
- * beside the real thing the change did produce — a configuration that resolves, hashes, records, and
- * survives to the day a rewriter can apply it.
+ * So: the boundary is stated FIRST and PER CELL, the controls stay live everywhere, and a refusal is
+ * shown in its own state beside the real thing the change did produce — a configuration that resolves,
+ * hashes, records, and survives to the day its rewriter lands.
  *
  * # Memory is not context
  *
@@ -40,18 +41,18 @@ import { STRATEGIES, BOUNDARY } from "./strategies";
 export const dynamic = "force-dynamic";
 
 /**
- * COVERAGE mirrors `transform.CoverageFor("memory")`. Every non-identity strategy refuses, in every
- * language, with the same cause — and that uniformity is the claim, not a shortcut.
+ * COVERAGE mirrors `transform.CoverageFor("memory")`, which is now a PER-CELL read of the materializer
+ * table rather than the uniform refusal it was before the memory runtime landed.
  *
- * `tests/memory.test.mjs` reads the registry's own Go source and asserts this table agrees with it,
- * strategy for strategy. Without that gate this is a second source of truth, and its failure is silent.
+ * `tests/memory.test.mjs` reads the registry's and the engine's own Go source and asserts this agrees
+ * with them. Without that gate this is a second source of truth, and its failure is silent.
  */
 const COVERAGE = STRATEGIES.map((s) => ({
   strategy: s.strategy,
-  mode: s.identity ? "applies" : "authorable, not applied",
+  mode: s.identity ? "applies everywhere" : `applies in ${BOUNDARY.applicableIn.join(", ")}`,
   what: s.identity
     ? "The identity strategy. It changes nothing, so there is nothing to write into your source and no diff is the correct diff — not a missing one."
-    : "Resolves, hashes, and is recorded. Refused at the transform because a store read and written between invocations has no expression at any call site, in any language.",
+    : "Where the language has a memory module: the written message list is wrapped in a recall, and the turn is recorded after the call — both halves, or the call site is refused whole. Elsewhere it still resolves, hashes, and is recorded, and is refused by name rather than quietly applied.",
 }));
 
 /** What separates this axis from the context axis, in the terms a reader thinks in. */
@@ -105,16 +106,18 @@ function BoundaryTab() {
           </tbody>
         </DataTable>
         <p className="hint">
-          That second row is the whole reason a memory change cannot be applied today: there is no
-          argument, and no region of code, at the call site that holds it.
+          That second row is why memory needed a runtime and a generated module before it could be
+          applied at all: there is no argument, and no region of code, at the call site that holds a
+          store. What a materialized call site gets instead is a call into that module.
         </p>
       </Section>
 
       <Section title="What this platform writes into your source">
         <p className="max-w-3xl text-sm leading-relaxed text-muted-foreground">
-          The table is the same one the engine refuses from. Note what it does <em>not</em> vary by:
-          language. Every language answers identically, because the missing piece is{" "}
-          {BOUNDARY.missingArtifact} — not a per-language rewriter.
+          The table is the same one the engine materializes and refuses from, and it <em>does</em> vary by
+          language: the shared memory runtime has landed, and a language materializes once its own module
+          and call-site rewriter have. A language without one is refused by name and told which languages
+          do work — never quietly applied.
         </p>
         <DataTable
           caption="What each memory strategy does at a call site, and why"
@@ -129,7 +132,7 @@ function BoundaryTab() {
               <tr key={c.strategy}>
                 <td className="mono text-sm align-top">{c.strategy}</td>
                 <td className="align-top">
-                  <Chip tone={c.mode === "applies" ? "ok" : "warn"} title="what this platform does with the strategy">
+                  <Chip tone="ok" title="what this platform does with the strategy">
                     {c.mode}
                   </Chip>
                 </td>
@@ -149,10 +152,16 @@ function BoundaryTab() {
             is right.
           </p>
           <p>
-            So a memory override ends in one of two states and never a third:{" "}
-            <strong>refused</strong> (nothing was written, and the reason names the strategy) or{" "}
-            <strong>equivalent</strong> (the identity strategy, which changes nothing — so no diff is the
-            correct diff).
+            So a memory override ends in one of three states and never a fourth:{" "}
+            <strong>materialized</strong> (both halves — the recall and the record — are in the diff),{" "}
+            <strong>refused</strong> (nothing was written, and the reason names the strategy or the call
+            site), or <strong>equivalent</strong> (the identity strategy, which changes nothing).
+          </p>
+          <p>
+            There is deliberately no <em>partially applied</em>. A memory that recalls from a store
+            nothing ever fills, or fills one nothing ever reads, behaves exactly like no memory at all
+            while its configuration hash claims otherwise — so a call site that can carry only one half is
+            refused whole.
           </p>
         </Banner>
       </Section>
@@ -218,8 +227,9 @@ export default async function MemoryPage() {
       lede={
         <>
           Set a node&apos;s memory strategy yourself, instead of waiting for a diagnosis to propose one.
-          The change resolves, hashes, and is recorded — and it is refused at the transform until a memory
-          runtime lands, which this surface states before you choose rather than after.
+          The change resolves, hashes, and is recorded everywhere; it is written into your source where
+          the language has a memory module, and refused by name where it does not. This surface states
+          which you are in before you choose, rather than after.
         </>
       }
     >

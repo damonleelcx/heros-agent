@@ -24,9 +24,10 @@ import { STRATEGIES, BOUNDARY, type Strategy } from "./strategies";
  *   2. THE CONTROL IS LIVE, NOT DISABLED. Every strategy is selectable and every parameter is editable.
  *      A greyed-out control says nothing about WHY, and invites the belief that some other strategy,
  *      language, or plan would unlock it. The reason is stated instead.
- *   3. A REFUSAL IS NEVER RENDERED AS SUCCESS. There is no "Apply" button on this surface, because
- *      there is nothing to apply. What the reader gets is the real preflight verdict — `refused` — in
- *      its own visual state, next to the real `config_hash` their selection produces.
+ *   3. A REFUSAL IS NEVER RENDERED AS SUCCESS, and — since the runtime landed — a MATERIALIZATION is
+ *      never rendered as more than it is. The reader gets the real preflight verdict in its own visual
+ *      state, next to the real `config_hash` their selection produces, and the change is still stamped
+ *      `unverified` until the harness has run.
  *
  * # What the reader actually gains, and why it is not nothing
  *
@@ -38,8 +39,8 @@ import { STRATEGIES, BOUNDARY, type Strategy } from "./strategies";
  *
  * # 🚫 What is deliberately absent
  *
- * No Apply. No Force. No "advanced mode". No plan upsell beside the boundary. The thing that is missing
- * is a runtime, and no argument, role, or plan builds one.
+ * No Force. No "advanced mode". No plan upsell beside the boundary. Where a cell does not materialize,
+ * what is missing is an artifact we owe — and no argument, role, or plan builds one.
  */
 
 /** The node this surface demonstrates against. One node, named, so the reader knows what they changed. */
@@ -94,7 +95,9 @@ export function MemoryAuthoring() {
    *   nothing chosen        → no verdict at all (a verdict about nothing would be noise)
    *   required param empty  → refused, naming the parameter — the schema's own rejection, before seal
    *   `none` chosen         → admissible; the identity strategy changes nothing, so nothing is refused
-   *   anything else         → refused, with the engine's reason: no memory runtime, in any language
+   *   anything else         → admissible on this node, because it is a Python call site that writes its
+   *                           messages and assigns its result — both halves land. A node missing either
+   *                           is refused WHOLE, naming which half.
    */
   const verdict: PreflightResult | null = useMemo(() => {
     if (!strategy) return null;
@@ -117,14 +120,16 @@ export function MemoryAuthoring() {
         nodes: [NODE_ID],
       };
     }
+    // This demo node is a Python call site that writes its message list and assigns the call's result,
+    // so both halves land and the change materializes. A node missing either — an unpacked `**kwargs`
+    // call, or one that returns the call directly — is refused WHOLE, naming which half is missing.
     return {
-      verdict: "refused",
-      node_id: NODE_ID,
-      field: "memory",
-      shape: "memory strategy",
-      cause: `memory strategy "${strategy.strategy}" is a store this node would read and write BETWEEN invocations, so there is no expression — and no region — at this call site that holds it: materializing one means introducing a store, a lifetime, a key scheme, and read/write points across code you own. That is a memory runtime plus a codemod, and neither has landed in ANY language, so this override is REFUSED rather than dropped. Your configuration is still real: it resolves, it hashes, and it materializes unchanged once the rewriter lands. What it does not do is reach your source today`,
+      verdict: "admissible",
+      config_hash: configHash,
+      dimensions: ["memory"],
+      nodes: [NODE_ID],
     };
-  }, [strategy, missing]);
+  }, [strategy, missing, configHash]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -133,22 +138,33 @@ export function MemoryAuthoring() {
         before they invest effort, and the limit must be attributed to the platform's missing artifact
         rather than to their call site, their language, or their choice of strategy.
       */}
-      <Banner tone="info" title="You can set a memory strategy today. It will not reach your source yet.">
+      <Banner tone="info" title="Where a memory change reaches your source, and where it does not">
         <p>
-          Choosing a strategy below is a real change: it resolves, it produces a{" "}
+          Choosing a strategy below is a real change wherever you are: it resolves, it produces a{" "}
           <span className="mono">config_hash</span>, it is recorded against your identity with a pointer
-          to the variant it came from, and it appears in lineage next to every other configuration. What
-          it does <strong>not</strong> do at this milestone is get written into your repository.
+          to the variant it came from, and it appears in lineage next to every other configuration.
         </p>
         <p>
-          {BOUNDARY.reason} What is missing is{" "}
-          <strong className="font-medium">{BOUNDARY.missingArtifact}</strong>.
+          {BOUNDARY.reason} Today that means{" "}
+          <strong className="font-medium">{BOUNDARY.applicableIn.join(", ")}</strong> call sites are
+          rewritten to read and write memory; a language without one is still waiting for{" "}
+          <strong className="font-medium">{BOUNDARY.missingArtifact}</strong>, and is refused rather than
+          quietly applied.
         </p>
         <p>
-          <strong>This is not about your language.</strong> Every language refuses a memory change
-          identically, because the missing piece is a runtime rather than a per-language rewriter. There
-          is no plan, role, or flag that changes this — and the controls below stay usable anyway, because
-          a disabled control would tell you none of the above.
+          <strong>Two things are true even where it does apply</strong>, and you should know both before
+          you choose rather than after:
+        </p>
+        <ul className="flex flex-col gap-1">
+          {BOUNDARY.preconditions.map((p) => (
+            <li key={p} className="text-sm leading-snug text-muted-foreground">
+              {p}
+            </li>
+          ))}
+        </ul>
+        <p>
+          There is no plan, role, or flag that changes any of this — and the controls below stay usable
+          everywhere, because a disabled control would tell you none of the above.
         </p>
       </Banner>
 
@@ -191,8 +207,8 @@ export function MemoryAuthoring() {
                         applies
                       </Chip>
                     ) : (
-                      <Chip tone="warn" title="authorable today; not written into your source until the runtime lands">
-                        not applied yet
+                      <Chip tone="ok" title="materialized where the language has a memory module; refused by name elsewhere">
+                        applies in {BOUNDARY.applicableIn.join(", ")}
                       </Chip>
                     )}
                   </span>

@@ -85,21 +85,32 @@ export const STRATEGIES: Strategy[] = [
 /**
  * THE BOUNDARY, mirrored from `transform.CoverageFor("memory")`.
  *
- * At this milestone every non-identity strategy refuses in EVERY language, because what is missing is a
- * memory runtime — a store, a lifetime, a key scheme — plus the call-site rewriter that reads and writes
- * it. Not a per-language rewriter.
+ * 🔴 This constant CHANGED when the memory runtime landed, and the change is the honest one rather than
+ * a copy edit. It used to say the limit was independent of your language, because it was: nothing had a
+ * materializer, and what was missing — a memory runtime — was missing everywhere. That runtime shipped,
+ * and Python's call-site rewriter with it. Keeping the old sentence would have been lying in the
+ * OPPOSITE direction: over-refusing rather than over-claiming.
  *
- * 🔴 That distinction is the whole reason this constant exists rather than a sentence in the page.
- * Saying "your language's support is pending" would imply another language works and would send the
- * reader to wait for the wrong thing.
+ * Both are the same defect — a claim that does not match the engine — and over-refusing is the one a
+ * team never notices, because nobody files a bug about being told "no".
  */
+export const MATERIALIZED_LANGUAGES = ["python"] as const;
+
+/** What a language without a materializer is still waiting for. Per-language now, not per-axis. */
 export const BOUNDARY = {
-  applicable: false,
-  missingArtifact:
-    "a memory runtime (a store, a lifetime, and a key scheme) plus the call-site rewriter that reads and writes it",
+  /** Per-cell: true where the language has an emitted module. */
+  applicableIn: MATERIALIZED_LANGUAGES,
+  missingArtifact: "that language's memory module and its call-site rewriter",
   reason:
-    "A memory strategy is read and written BETWEEN invocations, so no expression — and no region — at the call site holds it. This is missing in every language, not in yours.",
-  languageIsTheBlocker: false,
+    "The memory runtime has landed and Python call sites materialize it. What a remaining language is waiting for is the emitted module a rewritten call site would call, and the rewriter that emits it.",
   /** Modeling is never refused; only materialization is. This is what keeps the control live. */
   authorableAnyway: true,
+  /**
+   * The preconditions a materializing cell still carries. A reader who meets these at apply time instead
+   * of here has been told half the truth.
+   */
+  preconditions: [
+    "The call site must write its message list, and assign the call's result to a name — memory is a read AND a write, and a call site that can carry only one is refused whole.",
+    "Your program must supply a session id (HEROS_MEMORY_SESSION, or agentmem.set_session). The generated module raises rather than defaulting one, because a defaulted session merges conversations that must stay separate.",
+  ],
 } as const;

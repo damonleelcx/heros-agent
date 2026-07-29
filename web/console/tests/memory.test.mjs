@@ -110,37 +110,54 @@ test("the boundary is stated BEFORE the picker (P17 FR20)", async () => {
   );
 });
 
-test("the boundary blames the platform, never the language (P17 FR20, decisions.md D7)", async () => {
+test("the boundary is PER-CELL and names what is covered (P18 §7.2)", async () => {
   const mirror = await read(MIRROR);
   const authoring = await read(AUTHORING);
 
-  assert.match(
+  // 🔴 P17 asserted this surface says the limit is language-INDEPENDENT, and that was correct while
+  // nothing had a materializer. P18 shipped the runtime and a Python rewriter, so that sentence became
+  // false — and a surface still carrying it would be lying in the OPPOSITE direction: over-refusing
+  // rather than over-claiming. Both are the same defect, and over-refusing is the one nobody reports,
+  // because nobody files a bug about being told "no".
+  assert.doesNotMatch(
+    authoring,
+    /not about your language/i,
+    "the surface still claims the limit is independent of the language. That was true before the memory " +
+      "runtime landed and is false now — Python call sites materialize.",
+  );
+  assert.doesNotMatch(
     mirror,
-    /languageIsTheBlocker:\s*false/,
-    "the mirror does not state that the language is NOT the blocker; a surface that implied otherwise " +
-      "would send the reader to wait for a per-language rewriter that is not what is missing",
+    /missing in every language/i,
+    "the mirrored boundary still says the gap is in every language",
   );
 
-  // 🔴 The forbidden sentence, in every shape it plausibly takes. Memory is uniform across languages —
-  // no language has a materializer — so naming one as pending implies another works.
-  for (const forbidden of [
-    /the (Go|Python|TypeScript|Rust|Java|Kotlin|JavaScript) (memory )?materializer is still being built/i,
-    /your language('s)? (memory )?(rewriter|support) is pending/i,
-    /not supported (in|for) (your|this) language/i,
-  ]) {
-    assert.doesNotMatch(
-      authoring,
-      forbidden,
-      `the surface blames a language for the memory refusal (${forbidden}). What is missing is a memory ` +
-        `RUNTIME, in every language — saying otherwise sends the reader to wait for the wrong thing.`,
-    );
-  }
-
-  // And it says the uniformity out loud, because a reader will assume the opposite by default.
+  // What it must say instead: which languages ARE covered, sourced from one list.
+  assert.match(mirror, /MATERIALIZED_LANGUAGES/, "the mirror declares no covered-language list");
+  assert.match(mirror, /"python"/, "the covered-language list does not include python");
   assert.match(
     authoring,
-    /not about your language|every language refuses/i,
-    "the surface never tells the reader the limit is language-independent, so they will assume it is not",
+    /applicableIn/,
+    "the surface does not render the covered-language list, so a reader cannot tell where it applies",
+  );
+
+  // 🔴 And the PRECONDITIONS a materializing cell still carries must be stated up front. A reader who
+  // meets "your call site must assign its result" at apply time has been told half the truth.
+  assert.match(mirror, /preconditions/, "the mirror states no preconditions for a materializing cell");
+  assert.match(
+    mirror,
+    /read AND a write|both/i,
+    "the preconditions do not mention that both halves must land, which is the one that decides whether " +
+      "a given call site works",
+  );
+  assert.match(
+    mirror,
+    /session/i,
+    "the preconditions do not mention the session id, which the generated module raises without",
+  );
+  assert.match(
+    authoring,
+    /BOUNDARY\.preconditions/,
+    "the surface does not render the preconditions before the choice",
   );
 });
 
@@ -266,24 +283,30 @@ test("the surface keeps memory and context disjoint (P17 decisions.md D2)", asyn
   );
 });
 
-test("the engine's memory coverage is uniform across languages (P17)", async () => {
+test("the engine's memory coverage is derived from the materializer table (P18 §5.1)", async () => {
   const cov = await readRepo(COVERAGE);
   const fn = cov.slice(cov.indexOf("func memoryCoverage("), cov.indexOf("func sortedPolicyNames("));
   assert.ok(fn.length > 0, "parser drift: memoryCoverage is no longer in coverage.go");
 
-  // 🔴 The engine's own table must not branch on language for this axis. If it ever did, the mirror's
-  // "this is not about your language" claim would become false, and this test — not a reader — should
-  // be what discovers that.
-  assert.doesNotMatch(
+  // 🔴 P17 asserted this function must NOT branch on language, because the axis was uniform. P18 made it
+  // per-cell, so the assertion inverts: it must derive from the materializer table, and it must still
+  // classify an uncovered cell as a platform gap rather than the customer's problem.
+  assert.match(
     fn,
-    /if\s+lang\s*==|switch\s+lang/,
-    "memoryCoverage branches on language; the memory axis is uniform because what is missing is a " +
-      "runtime, and a per-language answer would make the console's statement false",
+    /HasMemoryMaterializer/,
+    "memoryCoverage no longer derives from the materializer table; the coverage claim and the rewriter's " +
+      "behaviour could then disagree",
   );
   assert.match(
     fn,
     /CauseNoMaterializer/,
-    "memory refusals are not classed as a platform gap; only that class names work we owe",
+    "an uncovered memory cell is not classed as a platform gap; only that class names work we owe",
+  );
+  assert.match(
+    fn,
+    /MemoryMaterializerLanguages/,
+    "an uncovered cell's note does not name the covered languages, so a reader cannot tell whether the " +
+      "axis works anywhere",
   );
 });
 

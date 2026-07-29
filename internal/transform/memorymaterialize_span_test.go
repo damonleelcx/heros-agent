@@ -1,6 +1,7 @@
 package transform
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -47,9 +48,26 @@ def chat(question):
     )
 `
 
+// defaultMemoryParams are schema-valid params per strategy. A fixture with EMPTY params is not a
+// simpler fixture — the runtime rejects `max_entries: 0` because retaining nothing is `none` under
+// another name, so an empty-params fixture tests the rejection rather than the materialization.
+var defaultMemoryParams = map[string]string{
+	"none":           `{}`,
+	"scratchpad":     `{"max_entries":4}`,
+	"summary-buffer": `{"max_tokens":2000,"keep_last_turns":2}`,
+	"vector-recall":  `{"top_k":3,"embedding_ref":"text-embedding-3-small"}`,
+	"entity-memory":  `{"entity_keys":["user_name","project"]}`,
+}
+
 func memoryOverride(t *testing.T, strategy string) variantspec.ResolvedOverride {
 	t.Helper()
-	return variantspec.ResolvedOverride{Memory: memoryEntry(t, strategy)}
+	e := memoryEntry(t, strategy)
+	params, ok := defaultMemoryParams[strategy]
+	if !ok {
+		t.Fatalf("no default params for strategy %q", strategy)
+	}
+	e.Spec.Params = json.RawMessage(params)
+	return variantspec.ResolvedOverride{Memory: e}
 }
 
 // materializeAt runs the memory materializer against a REAL discovered call site.

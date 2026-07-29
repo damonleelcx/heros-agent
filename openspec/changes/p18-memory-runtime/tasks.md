@@ -123,20 +123,20 @@ which can be un-shipped once a customer has run them.
 
 ## 4. The call-site rewriter — Go
 
-- [ ] 4.1 Recall + record at a Go call site, through the generated Go artifact.
-      → `internal/transform/memorymaterialize.go` (Test: `TestGoMemoryMaterializes`).
-- [ ] 4.2 🔴 Both-halves-or-refuse holds identically in the AST engine.
-      → `internal/transform/memorymaterialize.go` (Test: `TestGoHalfMaterializableRefusedWhole`).
+- [ ] 4.1 Recall + record at a Go call site, through a generated Go artifact. **NOT DONE.** Go has no
+      emitted module, so `memoryMaterializers` excludes it and every Go cell refuses with
+      `CauseNoMaterializer` naming the missing module — the honest state, not a silent gap.
+- [ ] 4.2 🔴 Both-halves-or-refuse in the AST engine. Blocked on 4.1.
 
 ## 5. Coverage, and lifting the refusal per cell
 
-- [ ] 5.1 `memoryCoverage` stops being uniform: it reads the materializer table, so a covered
+- [x] 5.1 `memoryCoverage` stops being uniform: it reads the materializer table, so a covered
       (language, strategy, call-shape) cell reports `materializes` and every other still refuses with its
       own cause. → `internal/transform/coverage.go` (Test: `TestMemoryCoverageReflectsMaterializers`).
-- [ ] 5.2 🔴 **The refusal is narrowed, never removed.** Every cell without a materializer still returns a
+- [x] 5.2 🔴 **The refusal is narrowed, never removed.** Every cell without a materializer still returns a
       typed `unsafeRewrite`, and the P17 totality canary still passes for those cells.
       → `internal/transform/p17_memory_test.go` (Test: `TestMemoryRefusalTotalityCanary`).
-- [ ] 5.3 🔴 `config_hash` is untouched: every P17 hash reproduces bit-for-bit. This phase changes what is
+- [x] 5.3 🔴 `config_hash` is untouched: every P17 hash reproduces bit-for-bit. This phase changes what is
       EMITTED, never what a configuration IS.
       → `internal/variantspec/p17_memory_resolve_test.go` (Test: `TestNoneMemoryHashesAsAbsent`).
 
@@ -150,17 +150,35 @@ which can be un-shipped once a customer has run them.
 
 ## 7. The surfaces stop saying "no language has one"
 
-- [ ] 7.1 The console boundary now reports per-cell applicability instead of a flat no, still read from
+- [x] 7.1 The console boundary now reports per-cell applicability instead of a flat no, still read from
       the engine's coverage table. → `web/console/src/app/app/memory/`
       (Test: `web/console/tests/memory.test.mjs`).
-- [ ] 7.2 🔴 The P17 copy that says the gap is language-independent must CHANGE, because it is no longer
+- [x] 7.2 🔴 The P17 copy that says the gap is language-independent must CHANGE, because it is no longer
       true. A surface that kept saying it would be lying in the opposite direction.
       → `web/console/src/app/app/memory/strategies.ts` (Test: `memory.test.mjs` — boundary-is-per-cell).
 
 ## 8. Verification on a real repository
 
-- [ ] 8.1 Re-run against hermes-agent and report what MOVED and what did not.
-      → `cmd/p17hermes` (extended) or `cmd/p18hermes`.
+- [x] 8.1 Re-run against hermes-agent and report what MOVED and what did not. → `cmd/p17hermes`.
+
+**The finding: the count did not move, and the REASON did.** On hermes-agent@`528e335` (31 Python nodes)
+the run is still **186 (node × strategy) combinations, 186 refusals, 0 diffs** — identical to P17's. What
+changed is the sentence, and it is the whole value of the phase for this repository:
+
+| | P17 | P18 |
+|---|---|---|
+| cause class | `CauseNoMaterializer` — **ours** | `CauseCallSiteShape` — **theirs** |
+| the sentence | "no memory module has been generated for any language" | "this call site passes `**summary_kwargs`, so the request is assembled elsewhere; there is no written list here to read from or append to" |
+| what the reader does | wait for us | write the messages at the call site, or apply the strategy where the mapping is built |
+| lifespan | temporary | **permanent** — it stays true after every rewriter lands |
+
+Coverage moved from **materializes=7** (only the `none` identity cells) to **materializes=11** — the four
+non-identity Python strategies now materialize. hermes-agent does not benefit, because every one of its
+31 call sites unpacks its arguments; a Python call site that writes its message list and assigns its
+result does, and that path is executed end-to-end in `TestMemoryMaterializesEndToEnd`.
+
+🚫 This is deliberately NOT reported as "186 refusals became 186 diffs". It did not, and the run says so
+with a count rather than a claim.
 
 ---
 
@@ -200,11 +218,11 @@ the top of a file whose call site is being materialized, and nothing else.
 So the span dispatch still points at P17's `spanRewriteMemory`, and **every memory override is still
 refused**. Nothing half-built ships.
 
-- [ ] 9.1 Add the memory-materialization **edit class**: one import insertion at the top of a
+- [x] 9.1 Add the memory-materialization **edit class**: one import insertion at the top of a
       materialized file, admitted by its own rule, with the line-count invariant restated for it rather
       than relaxed for everyone. → `internal/transform/engine.go`
       (Test: `TestMemoryImportClassAdmitsOnlyItsOwnImport`).
-- [ ] 9.2 Wire `spanMaterializeMemory` into the span dispatch once 9.1 lands, and assert the artifact
+- [x] 9.2 Wire `spanMaterializeMemory` into the span dispatch once 9.1 lands, and assert the artifact
       ships in the SAME patch as the call-site edit.
 - [ ] 9.3 Then: §4 (Go), §5 (per-cell coverage), §6 (the operator wakes), §7 (the surfaces), §8 (hermes).
 

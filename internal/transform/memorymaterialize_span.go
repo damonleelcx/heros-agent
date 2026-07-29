@@ -183,6 +183,83 @@ func memoryRecallTarget(site discovery.SpanCallSite, src []byte, dim, strategy s
 	return arg.Value, nil
 }
 
+// memoryImportName is the module the materialized call site calls. One constant, read by the import
+// edit and by the emitted call text, so the two cannot name different modules.
+const memoryImportName = "agentmem"
+
+// memoryImportEdit builds the single import line a materialized Python file needs, or refuses.
+//
+// # Where the line goes, and why it is not offset 0
+//
+// 🔴 Inserting at the top of the file is wrong in two ways that a passing test would not show:
+//
+//   - before a module DOCSTRING, the docstring stops being one. `"""..."""` is only `__doc__` when it
+//     is the first statement; put an import above it and it silently becomes a bare string expression,
+//     and the module loses its documentation with no error anywhere.
+//   - before `from __future__ import ...`, the file stops compiling — a future import must be the first
+//     statement, and Python raises SyntaxError.
+//
+// So the anchor is the first TOP-LEVEL import that is not a `__future__` import, and the line goes
+// immediately before it. That position is past any docstring (a docstring precedes imports) and past
+// every future import (they are skipped), in every file, without parsing.
+//
+// A file with no such import is REFUSED rather than guessed at. It is also a file that is not calling an
+// SDK, so the refusal costs nothing real.
+func memoryImportEdit(src []byte, nodeID, dim string) (edit, error) {
+	lines := strings.Split(string(src), "\n")
+	offset := 0
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		isImport := strings.HasPrefix(trimmed, "import ") || strings.HasPrefix(trimmed, "from ")
+		topLevel := len(line) == len(strings.TrimLeft(line, " \t"))
+		future := strings.HasPrefix(trimmed, "from __future__")
+		if isImport && topLevel && !future {
+			return edit{
+				Start: offset, End: offset,
+				New:    "import " + memoryImportName + "\n",
+				NodeID: nodeID, Dim: dim, Import: true,
+			}, nil
+		}
+		offset += len(line) + 1
+	}
+	return edit{}, refuseShape(nodeID, dim,
+		"this file declares no top-level import, so there is no position where `import %s` is certainly "+
+			"legal: above a module docstring it would silently stop being one, and above a `__future__` "+
+			"import it would not compile. A file with no imports is also not calling an SDK, so there is "+
+			"nothing here for memory to attach to",
+		memoryImportName)
+}
+
+// hasMemoryEdit / firstMemoryEdit identify a file that needs the import.
+func hasMemoryEdit(edits []edit) bool {
+	for _, e := range edits {
+		if e.Dim == string(variantspec.DimMemory) {
+			return true
+		}
+	}
+	return false
+}
+
+// memoryWasMaterialized reports whether any file actually received memory edits, so the artifact is
+// emitted only alongside a real call-site rewrite.
+func memoryWasMaterialized(editsByFile map[string][]edit) bool {
+	for _, edits := range editsByFile {
+		if hasMemoryEdit(edits) {
+			return true
+		}
+	}
+	return false
+}
+
+func firstMemoryEdit(edits []edit) edit {
+	for _, e := range edits {
+		if e.Dim == string(variantspec.DimMemory) {
+			return e
+		}
+	}
+	return edit{}
+}
+
 // truncateForMessage shortens a source fragment for a refusal sentence without hiding what it was.
 func truncateForMessage(s string, max int) string {
 	s = strings.Join(strings.Fields(s), " ")
