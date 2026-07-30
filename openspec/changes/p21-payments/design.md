@@ -37,6 +37,80 @@ you ack**; and **corrections are additive — an error is fixed by a credit/refu
 Two more come from P7 and are preserved, not re-opened: **the platform holds provider handles only, never card
 data**, and **gainshare bills only verified, merged savings.**
 
+## Ratification — the three one-way doors, decided before any code (task 1.1)
+
+Three of the eight decisions below are **one-way doors**: cheap to hold now, expensive-to-impossible to
+recover later. They are ratified here, jointly by Sales Operations (who carries the commercial
+consequence) and the System Designer (who carries the architectural one), *before* implementation
+starts — which is the only moment ratification is worth anything.
+
+| Door | Ratified as | What "later" costs if it is not held now |
+|---|---|---|
+| **D1** — Stripe behind the existing `Provider` interface; **the interface does not widen** | **Ratified.** `stripe.Provider` satisfies `billing.Provider` byte-for-byte. A second processor is a second implementation, never a re-plumb. | A Stripe-typed billing package makes "add a second/regional processor" a rewrite of every call site. Procurement asks for this *after* the contract is signed, when the rewrite is least affordable. |
+| **D2** — Checkout / Payment Element; **the card never touches the platform** | **Ratified.** Card data goes browser→Stripe. The platform stores a handle, and `account.NewHandle` refuses a Luhn-valid PAN. | A PAN that has been in a log, a span, or a heap dump cannot be un-leaked. PCI scope, once entered, is left by audit, not by a patch. |
+| **D7** — **Opaque price refs**; no price value in code, manifest, or bundle | **Ratified.** A concrete price lives in Stripe; the platform holds `plancfg.PlanConfig.PriceRefs` only. | A price in git is in git forever, every environment becomes a place the number drifts, and every price change becomes a deploy. |
+
+**Why these three and not the other five.** D3/D4/D5/D6/D8 are all *correctness* decisions — get one
+wrong and a test goes red, or an incident teaches it, and the fix is local. These three are *shape*
+decisions: getting one wrong is not caught by a test at all, it is discovered the day someone asks for
+the thing the shape forbids. 八级法则 L2 says decide at the highest level that separates the options and
+do not fall back down for a lower-level convenience; L2 is exactly what a one-way door demands, so they
+are ratified up front rather than deferred to the first PR that trips over them.
+
+Each is enforced structurally, not by review habit — the point of ratifying is that the ratification has
+teeth:
+
+- **D1** — a contract-parity suite runs every caller against both `StubProvider` and `stripe.Provider`,
+  plus an interface-shape test asserting no Stripe type is reachable from `billing.Provider`.
+- **D2** — the BFF mints a Checkout session server-side and no platform route accepts a card field;
+  `account.NewHandle`'s PAN refusal is the second, independent guard.
+- **D7** — the auto-discovering plan-config fence, extended below to the payment UI (task 1.2).
+
+## Plan ↔ `price_ref` is configuration, not git (task 1.2)
+
+The mapping from a plan to its Stripe price is **configuration**: the Stripe price IDs live in the config
+store (and the prices themselves in Stripe, administered by Finance), reached through
+[`plancfg.PlanConfig.PriceRefs`](../../../internal/plancfg/plancfg.go). Nothing in git holds a plan
+catalog or a priced value, and that claim is a *test*, not a paragraph:
+[`plancfg/gitfence_test.go`](../../../internal/plancfg/gitfence_test.go) enumerates the whole git index
+every run.
+
+P21 adds one surface the P7 fence could not have anticipated — **the payment UI**, where a price is most
+tempting to hardcode "just for display". The fence is therefore extended to cover git-tracked payment/
+billing UI sources (`TestNoPricedLiteralInPaymentUI`), and the console keeps its build-time
+`scan-bundle.mjs` price scan over the JavaScript the browser actually downloads. Two layers, because they
+fail differently: the Go fence catches the literal at commit time in any file, the bundle scan catches
+whatever survives a build — including a value that arrived through a dependency.
+
+Both fences are **proven to go red** (`TestPaymentUIPriceDetectorGoesRed`), for the reason P7 states: a
+guard that has never been shown to fire is decoration.
+
+## Commercial honesty (task 1.3)
+
+Money is where a product's claims are cashed, so the billing surface carries the strictest honesty rules
+in the system. Four, each with the failure it prevents:
+
+1. **Plans are named, never priced, in anything the platform ships.** Free / Team / Business / Enterprise.
+   The number is Stripe's and Finance's. A number in a screen, a doc, or a bundle outlives the moment it
+   was true and ships anyway.
+2. **Dunning and refund behavior described in the UI and the docs match Stripe's actual behavior.** The
+   console renders the *mirrored* provider state (D5) — if Stripe says `past_due`, the page says
+   past-due, on Stripe's schedule, with Stripe's grace window. The platform does not describe a dunning
+   policy it does not implement, and it does not recompute one it does not own.
+3. **The phrase "risk is controlled" (风险可控) appears nowhere** — not in the UI, not in the docs, not in
+   a support reply. The honest form is *risk is observable*: what the system can actually promise is that
+   every charge is idempotent, every correction is additive and audited, and every figure traces to the
+   record that justified it. Claiming control over a payment processor's outcomes is a promise made with
+   someone else's system.
+4. **No internal profile, bundle, script, or component name appears in a customer-facing billing
+   message.** A customer reads "your payment could not be processed — update your card to restore
+   auto-merge", never a mechanism name. An internal identifier in a billing message is a support ticket
+   nobody can answer and a hint nobody needed.
+
+The first is machine-enforced (the fences above). The second is structural (the UI renders mirrored state
+and has no branch that computes dunning). The third and fourth are review responsibilities, stated here
+so a reviewer has something to point at rather than an opinion to defend.
+
 ## Decision 1 — Stripe behind the existing `Provider` interface; the interface does not widen
 
 **Chosen:** a `stripe.Provider` that satisfies the **existing** [`billing.Provider`](../../../internal/billing/provider.go)

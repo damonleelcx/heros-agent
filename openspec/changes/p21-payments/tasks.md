@@ -7,13 +7,13 @@ matrix**, and — because this is money — a note on which of the three correct
 persist-then-ack / reversible) it touches.
 
 ## 1. Sales Operations + System Designer — Decide the one-way doors first (blocks everything else)
-- [ ] 1.1 Ratify **D1 (Stripe behind the existing `Provider` interface; interface does not widen)**, **D2
+- [x] 1.1 Ratify **D1 (Stripe behind the existing `Provider` interface; interface does not widen)**, **D2
       (Checkout/Element — card never touches the platform)**, and **D7 (opaque price refs; no price in
       code/bundle)** in `design.md`; these are cheap now and expensive later.
-- [ ] 1.2 Confirm the plan↔`price_ref` mapping is **configuration** (Stripe price IDs in the config store / Stripe),
+- [x] 1.2 Confirm the plan↔`price_ref` mapping is **configuration** (Stripe price IDs in the config store / Stripe),
       not git; extend the P7 auto-discovering plan-config fence (`plancfg/gitfence_test.go`) to cover the payment UI
       / client bundle so a priced literal fails the build.
-- [ ] 1.3 Write the **commercial honesty** notes: plans by name only; dunning and refund behavior in UI/docs match
+- [x] 1.3 Write the **commercial honesty** notes: plans by name only; dunning and refund behavior in UI/docs match
       Stripe's actual behavior; the word "风险可控" appears nowhere; no internal profile/bundle/script name in a
       customer-facing billing message.
 

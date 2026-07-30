@@ -64,6 +64,70 @@ func pricedPlanValue(path, content string) bool {
 	return rePricedNumber.MatchString(content)
 }
 
+// ── P21 task 1.2: the same fence, extended to the PAYMENT UI ────────────────
+//
+// P7's fence covers the shapes a plan catalog is LOADED from — data files. P21 adds the one surface P7
+// could not have anticipated: a payment UI, where a price is most tempting to hardcode "just for
+// display". Decision 7 says a price value exists in Stripe and nowhere else, so a priced literal in a
+// React source file is the same violation as one in a JSON catalog, and it must fail the same way.
+//
+// It stays AUTO-DISCOVERING rather than becoming a list of billing files: an allowlist protects only the
+// files somebody remembered to add, and the marketing page that quotes a monthly figure is exactly the
+// file nobody remembers. So the selector is "every git-tracked source a web application ships"
+// (`web/**/src/**`), and the narrowing is done on PLAN CONTEXT — a priced literal is only a plan price
+// where the path or the file is talking about plans, billing, checkout, invoices or subscriptions.
+//
+// The client bundle — the JavaScript the browser actually downloads — is covered by the console's own
+// build-time `scripts/scan-bundle.mjs`, which runs as the last step of `npm run build`. Two layers,
+// because they fail differently: this one catches the literal at commit time in any file, that one
+// catches whatever survives a build, including a value that arrived through a dependency.
+
+// uiExts are the file kinds a payment surface is written in.
+var uiExts = map[string]bool{
+	".ts": true, ".tsx": true, ".js": true, ".jsx": true, ".mjs": true, ".css": true, ".html": true,
+}
+
+var (
+	// rePlanContext is the narrowing: a number is a PLAN PRICE only where plans are being discussed.
+	rePlanContext = regexp.MustCompile(`(?i)\b(plan|billing|checkout|invoice|subscription|subscribe|pricing|price_ref)`)
+	// rePricedLiteral is the money shape. The dollar branch requires two digits or a decimal on purpose:
+	// `$1`..`$9` are regex backreferences in a `.replace()` call, and a fence that cried wolf on those
+	// would be switched off within a week.
+	rePricedLiteral = regexp.MustCompile(`(?i)(\$\s?(\d{2,}|\d+\.\d))|` +
+		`(\b\d[\d,]*(\.\d+)?\s?(usd|eur|gbp)\b)|` +
+		`(\b(price|amount|unit_price|rate|fee|percent|pct|usd_per|monthly|annual)[a-z_]*\s*[:=]\s*['"` + "`" + `]?-?\d)|` +
+		`(\d\s?(/\s?mo\b|/\s?month\b|per\s+seat\b|per\s+month\b))`)
+)
+
+// shippedUISource reports whether path is UI source that a browser can end up executing — anything
+// under a web application's `src/`. Build scripts and test files are deliberately outside the fence:
+// they never reach a browser, and two of them (`scripts/scan-bundle.mjs`, the console's acceptance
+// tests) are the price fences THEMSELVES, whose patterns necessarily spell out the shapes a price
+// takes. A fence that flagged its own sibling fence would be switched off within a week — and the
+// built output those scripts guard is covered by `scan-bundle.mjs` at build time, so nothing is lost.
+func shippedUISource(path string) bool {
+	if !uiExts[strings.ToLower(filepath.Ext(path))] {
+		return false
+	}
+	p := filepath.ToSlash(path)
+	return strings.HasPrefix(p, "web/") && strings.Contains(p, "/src/")
+}
+
+// pricedPaymentUI reports whether a UI source carries a priced literal in a plan/billing context.
+// Factored out so the detector itself can be proven to fire (TestPaymentUIPriceDetectorGoesRed).
+//
+// The plan context is taken from the PATH or the CONTENT: a figure in `.../pricing/page.tsx` is a plan
+// price by location even if the sentence around it never says "plan".
+func pricedPaymentUI(path, content string) bool {
+	if !shippedUISource(path) {
+		return false
+	}
+	if !rePlanContext.MatchString(path) && !rePlanContext.MatchString(content) {
+		return false
+	}
+	return rePricedLiteral.MatchString(content)
+}
+
 // repoRoot walks up from the test's working directory to the git root.
 func repoRoot(t *testing.T) string {
 	t.Helper()
@@ -165,6 +229,99 @@ func TestPlanCatalogDetectorGoesRed(t *testing.T) {
 	for _, c := range mustIgnore[:3] {
 		if looksLikePlanCatalog(c.path, c.body) {
 			t.Errorf("catalog detector false-positived on %s", c.name)
+		}
+	}
+}
+
+// TestNoPricedLiteralInPaymentUI is P21 task 1.2: the fence extended to the payment UI.
+//
+// It enumerates the git index exactly as the catalog fence does — same walk, same anti-vacuity — and
+// asserts no git-tracked UI source carries a priced literal while talking about plans. The payment UI is
+// the surface Decision 7 is most often violated on, because "just show the price on the button" reads as
+// a rendering decision rather than as a price committed to git.
+func TestNoPricedLiteralInPaymentUI(t *testing.T) {
+	root := repoRoot(t)
+	cmd := exec.Command("git", "ls-files", "-z")
+	cmd.Dir = root
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git ls-files: %v", err)
+	}
+	files := strings.Split(strings.TrimRight(string(out), "\x00"), "\x00")
+
+	scanned := 0
+	for _, rel := range files {
+		if rel == "" || !shippedUISource(rel) {
+			continue
+		}
+		abs := filepath.Join(root, rel)
+		st, err := os.Stat(abs)
+		if err != nil || st.IsDir() || st.Size() > 1<<20 {
+			continue
+		}
+		b, err := os.ReadFile(abs)
+		if err != nil {
+			continue
+		}
+		scanned++
+		if pricedPaymentUI(rel, string(b)) {
+			t.Errorf("%s carries a PRICED LITERAL in a plan/billing context — a concrete price lives in "+
+				"Stripe and is referenced only by its opaque price_ref (P21 design Decision 7). Read the "+
+				"figure back from the billing API instead of writing it into the UI", rel)
+		}
+	}
+
+	// Anti-vacuity: this repository ships two web applications. A run that found almost no UI sources is
+	// a fence looking at the wrong tree, and its silence would be mistaken for a clean result.
+	if scanned < 20 {
+		t.Fatalf("scanned only %d git-tracked UI sources — the payment-UI fence is not seeing the web "+
+			"applications, so its assertions would be vacuously true", scanned)
+	}
+	t.Logf("scanned %d git-tracked UI sources for priced literals in a plan/billing context", scanned)
+}
+
+// TestPaymentUIPriceDetectorGoesRed proves the payment-UI fence can FAIL — the same anti-decoration
+// discipline the catalog detector holds itself to. These are the exact byte shapes a hardcoded price
+// takes in a React payment surface.
+func TestPaymentUIPriceDetectorGoesRed(t *testing.T) {
+	mustCatch := []struct{ name, path, body string }{
+		{"dollar amount on a plan button", "web/console/src/app/app/billing/page.tsx",
+			`<button>Subscribe to Team — $49/mo</button>`},
+		{"decimal amount in a plan card", "web/console/src/components/billing.tsx",
+			`const label = "Business plan, $199.00 per month";`},
+		{"currency-suffixed figure", "web/console/src/app/(public)/pricing/page.tsx",
+			`<p>Team: 49 USD billed monthly</p>`},
+		{"priced field in a plan map", "web/console/src/lib/plans.ts",
+			`export const plans = [{ id: "team", monthly_amount: 49 }];`},
+		{"per-seat rate", "web/admin-console/src/billing/seats.tsx",
+			`<span>Subscription: 12 per seat</span>`},
+	}
+	for _, c := range mustCatch {
+		if !pricedPaymentUI(c.path, c.body) {
+			t.Errorf("payment-UI price detector missed %s", c.name)
+		}
+	}
+
+	mustIgnore := []struct{ name, path, body string }{
+		// The legitimate shape: a plan by NAME and an opaque reference.
+		{"plan by name only", "web/console/src/app/app/billing/page.tsx",
+			`<h2>Your plan: {view.plan_name}</h2><p>price_ref {view.price_ref}</p>`},
+		// A figure read back from the API is the whole point — it is not a literal.
+		{"figure from the API", "web/console/src/app/app/billing/page.tsx",
+			`<Stat label="Spend under management" value={view.sum} note={view.sum_unit} />`},
+		// Regex backreferences are why the dollar branch requires two digits or a decimal.
+		{"regex backreference", "web/console/src/lib/format.ts",
+			`return s.replace(/(\d)(\d{3})/g, "$1,$2"); // plan label formatting`},
+		// A number outside any plan context is somebody else's concern.
+		{"unrelated number", "web/console/src/components/monitor.tsx",
+			`const timeoutMs = 3000; const retries = 5;`},
+		// Non-UI extensions belong to the catalog fence above, not this one.
+		{"go source", "internal/billing/stripe.go",
+			`// the plan's price_ref, never an amount: 49 would be a price in git`},
+	}
+	for _, c := range mustIgnore {
+		if pricedPaymentUI(c.path, c.body) {
+			t.Errorf("payment-UI price detector false-positived on %s", c.name)
 		}
 	}
 }
