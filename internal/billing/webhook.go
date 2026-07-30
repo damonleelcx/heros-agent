@@ -51,6 +51,11 @@ const (
 	WebhookSubscriptionCanceled WebhookType = "customer.subscription.deleted"
 	WebhookChargeRefunded       WebhookType = "charge.refunded"
 	WebhookChargeDisputeCreated WebhookType = "charge.dispute.created"
+	// WebhookPaymentMethodAttached and WebhookCheckoutCompleted are P21's collection events. They carry
+	// the DISPLAY facts about a payment method — brand, last four — which the console needs so a
+	// customer can tell which card is on file. The platform mirrors them; it stores no card.
+	WebhookPaymentMethodAttached WebhookType = "payment_method.attached"
+	WebhookCheckoutCompleted     WebhookType = "checkout.session.completed"
 )
 
 // WebhookPayload is the provider's event body.
@@ -72,6 +77,10 @@ type WebhookPayload struct {
 	// on the provider's object — not a plan the provider invented — which is why the entitlement sync
 	// may act on it.
 	PlanID string `json:"plan_id,omitempty"`
+	// PaymentMethodBrand / Last4 are the DISPLAY characters a collection event carries. Not card data:
+	// four digits and a brand name, which is what a page needs and all a leak could yield.
+	PaymentMethodBrand string `json:"payment_method_brand,omitempty"`
+	PaymentMethodLast4 string `json:"payment_method_last4,omitempty"`
 }
 
 // SignedWebhook is a raw inbound delivery: the bytes as received and the signature header.
@@ -221,6 +230,18 @@ type BillingState struct {
 	PaymentFailed      bool      `json:"payment_failed"`
 	PastDue            bool      `json:"past_due"`
 	UpdatedAt          time.Time `json:"updated_at"`
+
+	// PaymentMethodPresent / Brand / Last4 are the mirrored DISPLAY facts about the card on file
+	// (P21 task 6.3). They are what Stripe returns for display and what a customer needs in order to
+	// answer "which card is this" — they are not card data, they are not a token, and they are not
+	// enough to charge anything.
+	//
+	// 🔴 There is deliberately no field here that could hold a PAN, an expiry-complete number, or a
+	// payment-method secret. The platform holds the provider's handle and these four display characters,
+	// because that is all a page needs and all a leak could yield.
+	PaymentMethodPresent bool   `json:"payment_method_present"`
+	PaymentMethodBrand   string `json:"payment_method_brand,omitempty"`
+	PaymentMethodLast4   string `json:"payment_method_last4,omitempty"`
 }
 
 // StateStore is the durable mirror of the provider-owned billing state (P21 task 4.3).
@@ -439,6 +460,12 @@ type stripeEventObject struct {
 		Start int64 `json:"start"`
 	} `json:"period"`
 	PeriodStart int64 `json:"period_start"`
+	// Card is the display half of a payment method. Stripe returns nothing here that could be used to
+	// charge anything, and the projection reads no other field of it.
+	Card struct {
+		Brand string `json:"brand"`
+		Last4 string `json:"last4"`
+	} `json:"card"`
 }
 
 // decodeWebhook turns a delivery body into the platform's payload.
@@ -475,6 +502,9 @@ func (s *Service) decodeWebhook(body []byte) (WebhookPayload, error) {
 		ChargeRef:       firstNonEmpty(obj.Charge, chargeRefOf(obj)),
 		PlanID:          obj.Metadata["platform_plan_id"],
 		Period:          periodOf(obj),
+
+		PaymentMethodBrand: obj.Card.Brand,
+		PaymentMethodLast4: obj.Card.Last4,
 	}
 	if obj.Object == "invoice" {
 		p.InvoiceRef = obj.ID
@@ -618,6 +648,17 @@ func (s *Service) applyWebhook(p WebhookPayload) (BillingState, error) {
 		st.PastDue = p.Status == "past_due"
 	case WebhookSubscriptionCanceled:
 		st.SubscriptionStatus = "canceled"
+	case WebhookPaymentMethodAttached, WebhookCheckoutCompleted:
+		// Collection succeeded. Mirrored, never computed — and only the display characters.
+		if p.PaymentMethodBrand != "" || p.PaymentMethodLast4 != "" {
+			st.PaymentMethodPresent = true
+			st.PaymentMethodBrand, st.PaymentMethodLast4 = p.PaymentMethodBrand, p.PaymentMethodLast4
+		} else if p.Type == WebhookCheckoutCompleted {
+			// A completed checkout means a payment method exists even when the event did not carry its
+			// display characters. Saying "a card is on file, details unavailable" is honest; saying nothing
+			// would read as "no card", which is a different fact with a different next action.
+			st.PaymentMethodPresent = true
+		}
 	case WebhookChargeRefunded, WebhookChargeDisputeCreated:
 		// The money movement itself is the provider's; the platform records the correction through the
 		// audited Credit/Refund path, never by inventing a ledger row from a webhook. A webhook is a

@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/heros-foreal/agentd/internal/stripefake"
 )
 
 // secretfence_test.go is P21 task 3.3: **no Stripe secret exists in a git-tracked file**.
@@ -119,8 +121,8 @@ func TestStripeSecretDetectorGoesRed(t *testing.T) {
 
 	mustIgnore := map[string]string{
 		// This repository's own placeholders, which must remain writable without disabling the fence.
-		"test placeholder":    testStripeKey,
-		"live placeholder":    liveStripeKey,
+		"test placeholder":    stripefake.TestKey,
+		"live placeholder":    stripefake.LiveKey,
 		"prefix in prose":     "Stripe keys are prefixed sk_test_ or sk_live_, and the prefix is what the mode check reads.",
 		"reserved name":       SecretBillingAPIKey + " / " + SecretBillingWebhookSigning,
 		"unrelated long word": "subscription_items_usage_record_summaries",

@@ -646,6 +646,128 @@ func meteredItem(sub stripeSubscription, priceRef string) (string, error) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Collection (P21 tasks 6.1, 6.2) — the capability P7 left out
+// ─────────────────────────────────────────────────────────────────────────────
+
+type stripeCheckoutSession struct {
+	ID           string `json:"id"`
+	URL          string `json:"url"`
+	ClientSecret string `json:"client_secret"`
+	ExpiresAt    int64  `json:"expires_at"`
+	Status       string `json:"status"`
+}
+
+// CreateCheckoutSession mints a Stripe Checkout session server-side.
+//
+// 🔴 This is design Decision 2 in one method. What comes back is a URL (hosted Checkout) or a client
+// secret (the embedded Payment Element) — never a form the platform renders and never a field the
+// platform reads. The card travels browser→Stripe, so "the platform never stores a card" is a
+// STRUCTURAL fact rather than a policy: there is no code path here that could receive one.
+//
+// The session is short-lived and single-purpose. `customer` binds it to a Stripe customer the platform
+// already holds a handle for, so a session cannot be re-pointed at somebody else's account.
+func (p *StripeProvider) CreateCheckoutSession(ctx context.Context, req CheckoutRequest) (CheckoutSession, error) {
+	if req.ProviderCustomerHandle == "" {
+		return CheckoutSession{}, fmt.Errorf("%w: a checkout session needs a provider customer handle", ErrProviderRejected)
+	}
+	if req.PriceRef == "" {
+		return CheckoutSession{}, fmt.Errorf("%w: a checkout session needs the plan's opaque price reference — the platform never sends an amount", ErrProviderRejected)
+	}
+	if req.SuccessURL == "" || req.CancelURL == "" {
+		return CheckoutSession{}, fmt.Errorf("%w: a checkout session needs both a success and a cancel return URL — a customer who abandons checkout must land somewhere the product chose", ErrProviderRejected)
+	}
+
+	form := url.Values{}
+	form.Set("mode", "subscription")
+	form.Set("customer", req.ProviderCustomerHandle)
+	form.Set("line_items[0][price]", req.PriceRef)
+	form.Set("line_items[0][quantity]", "1")
+	form.Set("success_url", req.SuccessURL)
+	form.Set("cancel_url", req.CancelURL)
+	// The plan travels on the SUBSCRIPTION the session creates, which is what the entitlement sync reads
+	// off the lifecycle event later. Without it, `invoice.paid` would arrive naming no plan.
+	if req.PlanID != "" {
+		form.Set("subscription_data[metadata][platform_plan_id]", req.PlanID)
+		form.Set("metadata[platform_plan_id]", req.PlanID)
+	}
+	if req.CustomerID != "" {
+		form.Set("subscription_data[metadata]["+metaCustomerID+"]", req.CustomerID)
+		form.Set("metadata["+metaCustomerID+"]", req.CustomerID)
+	}
+
+	res, err := p.do(ctx, http.MethodPost, "/v1/checkout/sessions", form, req.IdempotencyKey)
+	if err != nil {
+		return CheckoutSession{}, err
+	}
+	var s stripeCheckoutSession
+	if err := decode(res, &s); err != nil {
+		return CheckoutSession{}, err
+	}
+	if s.ID == "" || (s.URL == "" && s.ClientSecret == "") {
+		return CheckoutSession{}, fmt.Errorf("%w: stripe returned a checkout session with nowhere to send the browser", ErrProviderRejected)
+	}
+	p.markSeen(req.IdempotencyKey, s.ID, res.replayed)
+
+	out := CheckoutSession{SessionRef: s.ID, URL: s.URL, ClientSecret: s.ClientSecret}
+	if s.ExpiresAt > 0 {
+		out.ExpiresAt = time.Unix(s.ExpiresAt, 0).UTC()
+	}
+	return out, nil
+}
+
+// UpdateSubscriptionPrice moves an existing subscription onto a different plan's price reference.
+//
+// Proration is STRIPE'S. `proration_behavior=create_prorations` asks Stripe to do what it does; the
+// platform neither computes nor stores the result, which is why there is no amount anywhere in this
+// method or in what it returns.
+func (p *StripeProvider) UpdateSubscriptionPrice(ctx context.Context, req UpdateSubscriptionRequest) (SubscriptionResult, error) {
+	if req.SubscriptionRef == "" || req.PriceRef == "" {
+		return SubscriptionResult{}, fmt.Errorf("%w: a plan change needs the subscription reference and the new plan's price reference", ErrProviderRejected)
+	}
+	sub, err := p.subscription(ctx, req.SubscriptionRef)
+	if err != nil {
+		return SubscriptionResult{}, err
+	}
+	// The item being repriced is the recurring one. Repricing a METERED item would silently re-rate the
+	// period's usage, so the licensed item is selected explicitly rather than by position.
+	item := ""
+	for _, it := range sub.Items.Data {
+		if it.Price.Recurring.UsageType != "metered" {
+			item = it.ID
+			break
+		}
+	}
+	if item == "" {
+		return SubscriptionResult{}, fmt.Errorf("%w: subscription %s has no non-metered item to reprice", ErrProviderRejected, sub.ID)
+	}
+
+	form := url.Values{}
+	form.Set("items[0][id]", item)
+	form.Set("items[0][price]", req.PriceRef)
+	form.Set("proration_behavior", "create_prorations")
+	if req.PlanID != "" {
+		form.Set("metadata[platform_plan_id]", req.PlanID)
+	}
+	if req.PlanName != "" {
+		form.Set("metadata[platform_plan_name]", req.PlanName)
+	}
+
+	res, err := p.do(ctx, http.MethodPost, "/v1/subscriptions/"+url.PathEscape(req.SubscriptionRef), form, req.IdempotencyKey)
+	if err != nil {
+		return SubscriptionResult{}, err
+	}
+	var updated stripeSubscription
+	if err := decode(res, &updated); err != nil {
+		return SubscriptionResult{}, err
+	}
+	p.markSeen(req.IdempotencyKey, updated.ID, res.replayed)
+	return SubscriptionResult{SubscriptionRef: updated.ID, Status: updated.Status}, nil
+}
+
+// Compile-time proof that the Stripe provider carries the optional collection capability.
+var _ CollectionProvider = (*StripeProvider)(nil)
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Metered usage
 // ─────────────────────────────────────────────────────────────────────────────
 

@@ -90,6 +90,21 @@
       ],
       "type": "object"
     },
+    "BillingUnavailableView": {
+      "properties": {
+        "detail": {
+          "type": "string"
+        },
+        "retryable": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "detail",
+        "retryable"
+      ],
+      "type": "object"
+    },
     "BillingView": {
       "description": "Response of GET /api/p7/customers/{customer_id}/billing",
       "properties": {
@@ -547,6 +562,24 @@
         "spec_diff",
         "state"
       ],
+      "type": "object"
+    },
+    "CheckoutView": {
+      "description": "Response of POST /api/p21/customers/{customer_id}/checkout-session",
+      "properties": {
+        "client_secret": {
+          "type": "string"
+        },
+        "expires_at": {
+          "type": "string"
+        },
+        "session_ref": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
       "type": "object"
     },
     "ClusterRow": {
@@ -1655,6 +1688,76 @@
       ],
       "type": "object"
     },
+    "PaymentMethodView": {
+      "properties": {
+        "brand": {
+          "type": "string"
+        },
+        "last4": {
+          "type": "string"
+        },
+        "present": {
+          "type": "boolean"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "restore_path": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "present"
+      ],
+      "type": "object"
+    },
+    "PaymentView": {
+      "description": "Response of GET /api/p21/customers/{customer_id}/payment",
+      "properties": {
+        "billing": {
+          "$ref": "#/$defs/BillingView"
+        },
+        "collection_available": {
+          "type": "boolean"
+        },
+        "payment_method": {
+          "$ref": "#/$defs/PaymentMethodView"
+        },
+        "plans": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/PlanOptionView"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unavailable": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BillingUnavailableView"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "billing",
+        "collection_available",
+        "payment_method",
+        "plans"
+      ],
+      "type": "object"
+    },
     "PenaltyView": {
       "properties": {
         "amount": {
@@ -1690,6 +1793,64 @@
         "optimized_sum",
         "period",
         "sum"
+      ],
+      "type": "object"
+    },
+    "PlanChangeView": {
+      "description": "Response of POST /api/p21/customers/{customer_id}/plan",
+      "properties": {
+        "changed": {
+          "type": "boolean"
+        },
+        "checkout_required": {
+          "type": "boolean"
+        },
+        "plan_id": {
+          "type": "string"
+        },
+        "plan_name": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "changed",
+        "checkout_required",
+        "plan_id",
+        "plan_name"
+      ],
+      "type": "object"
+    },
+    "PlanOptionView": {
+      "properties": {
+        "current": {
+          "type": "boolean"
+        },
+        "direction": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "plan_id": {
+          "type": "string"
+        },
+        "rank": {
+          "type": "integer"
+        },
+        "subscribable": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "current",
+        "direction",
+        "name",
+        "plan_id",
+        "rank",
+        "subscribable"
       ],
       "type": "object"
     },
@@ -2813,6 +2974,9 @@
     "BoardView": {
       "$ref": "#/$defs/BoardView"
     },
+    "CheckoutView": {
+      "$ref": "#/$defs/CheckoutView"
+    },
     "DeliveriesView": {
       "$ref": "#/$defs/DeliveriesView"
     },
@@ -2821,6 +2985,12 @@
     },
     "PRResult": {
       "$ref": "#/$defs/PRResult"
+    },
+    "PaymentView": {
+      "$ref": "#/$defs/PaymentView"
+    },
+    "PlanChangeView": {
+      "$ref": "#/$defs/PlanChangeView"
     },
     "ProposalSurface": {
       "$ref": "#/$defs/ProposalSurface"

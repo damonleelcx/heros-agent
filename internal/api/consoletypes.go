@@ -77,6 +77,11 @@ func ConsoleViewTypes() []ConsoleViewType {
 		// ── P7 · plan, entitlements, spend ───────────────────────────────────
 		{Name: "BillingView", Sample: BillingView{}, Endpoint: "GET /api/p7/customers/{customer_id}/billing"},
 
+		// ── P21 · payment collection (plans by name, payment method, checkout) ──
+		{Name: "PaymentView", Sample: PaymentView{}, Endpoint: "GET /api/p21/customers/{customer_id}/payment"},
+		{Name: "CheckoutView", Sample: CheckoutView{}, Endpoint: "POST /api/p21/customers/{customer_id}/checkout-session"},
+		{Name: "PlanChangeView", Sample: PlanChangeView{}, Endpoint: "POST /api/p21/customers/{customer_id}/plan"},
+
 		// ── P12 · forge delivery state + route condition ─────────────────────
 		{Name: "DeliveriesView", Sample: DeliveriesView{}, Endpoint: "GET /api/p12/deliveries"},
 	}

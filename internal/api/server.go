@@ -83,6 +83,10 @@ type Server struct {
 	// MountBillingWebhook when a deployment exposes it (P21 task 4.2). See p21.go for the posture.
 	billingWebhook BillingWebhookSink
 
+	// p21 is the P21 collection surface (plans by name, payment-method status, checkout), mounted by
+	// MountP21Payments when available.
+	p21 PaymentsSource
+
 	// secrets is the live provider-credential source, reported by /readyz.
 	//
 	// The SOURCE, never a credential: this holds the thing that can produce secrets precisely so the

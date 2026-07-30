@@ -36,5 +36,6 @@ export const routes = {
   scorecard: (variantId: string) => `/app/variants/${encodeURIComponent(variantId)}/scorecard`,
   studio: () => "/app/studio",
   account: () => "/app/account",
+  billing: () => "/app/billing",
   delivery: () => "/app/delivery",
 };

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/heros-foreal/agentd/internal/providergateway"
+	"github.com/heros-foreal/agentd/internal/stripefake"
 )
 
 // stripe_test.go is P21 section 2: the Stripe provider, exercised over the wire against the fake Stripe.
@@ -24,6 +25,14 @@ const (
 
 var stripeClock = func() time.Time { return time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC) }
 
+// newFakeStripe starts an in-process Stripe bound to the test's lifetime.
+func newFakeStripe(t *testing.T) *stripefake.Server {
+	t.Helper()
+	f := stripefake.New()
+	t.Cleanup(f.Close)
+	return f
+}
+
 // stripeSecrets builds a Secrets seam holding a TEST key.
 func stripeSecrets(t *testing.T, key string) Secrets {
 	t.Helper()
@@ -38,9 +47,9 @@ func stripeSecrets(t *testing.T, key string) Secrets {
 }
 
 // newStripe wires the provider at a fake Stripe in test mode.
-func newStripe(t *testing.T, f *fakeStripe) *StripeProvider {
+func newStripe(t *testing.T, f *stripefake.Server) *StripeProvider {
 	t.Helper()
-	p, err := NewStripeProvider(stripeSecrets(t, testStripeKey), ModeTest, stripeClock, WithStripeBaseURL(f.URL()))
+	p, err := NewStripeProvider(stripeSecrets(t, stripefake.TestKey), ModeTest, stripeClock, WithStripeBaseURL(f.URL()))
 	if err != nil {
 		t.Fatalf("new stripe provider: %v", err)
 	}
@@ -371,7 +380,7 @@ func TestStripeCreditIsAdditiveAndLeavesTheOriginalIntact(t *testing.T) {
 	if !ok {
 		t.Fatal("the original charge object was REMOVED by the correction — corrections are additive")
 	}
-	if after.quantity != before.quantity || after.price != before.price {
+	if after.Quantity != before.Quantity || after.Price != before.Price {
 		t.Errorf("the original charge was MODIFIED by the correction: %+v -> %+v", before, after)
 	}
 	if n := f.CreditCount(); n != 1 {

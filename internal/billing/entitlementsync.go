@@ -172,12 +172,8 @@ func (s *Service) freePlanID() string {
 	return FreePlanID
 }
 
-// changePlan performs the audited plan change: ledger row, then the plan itself.
+// changePlan performs the audited plan change for one lifecycle event.
 func (s *Service) changePlan(p WebhookPayload, planID, why string) (planSyncOutcome, error) {
-	acct, err := s.accounts.Get(p.CustomerID)
-	if err != nil {
-		return planSyncOutcome{}, fmt.Errorf("billing: entitlement sync: %w", err)
-	}
 	plan, err := s.plans.ResolvePlan(planID)
 	if err != nil {
 		// A plan the configuration does not know is refused rather than set. Setting it would leave the
@@ -185,35 +181,56 @@ func (s *Service) changePlan(p WebhookPayload, planID, why string) (planSyncOutc
 		// fail closed for a customer who paid.
 		return planSyncOutcome{}, fmt.Errorf("billing: entitlement sync cannot resolve plan %q: %w", planID, err)
 	}
+	changed, err := s.applyPlanChange(p.CustomerID, planID, "webhook:"+p.ProviderEventID, why)
+	if err != nil {
+		return planSyncOutcome{}, err
+	}
+	return planSyncOutcome{Changed: changed, PlanID: plan.PlanID, Reason: why}, nil
+}
+
+// applyPlanChange is THE audited plan change — the one path both the webhook sync and the console's
+// own subscribe/upgrade/downgrade go through.
+//
+// One path rather than two, because the audit is the point: two implementations of "move the plan and
+// record why" is one implementation that eventually forgets the second half, and the row that goes
+// missing is the one nobody notices until they need it.
+//
+// It reports whether the plan actually moved. A no-op change authors NO row: an audit entry claiming a
+// change that did not happen is worse than no entry, because it is read as evidence.
+func (s *Service) applyPlanChange(customerID, planID, cause, why string) (bool, error) {
+	acct, err := s.accounts.Get(customerID)
+	if err != nil {
+		return false, fmt.Errorf("billing: plan change: %w", err)
+	}
+	plan, err := s.plans.ResolvePlan(planID)
+	if err != nil {
+		return false, fmt.Errorf("billing: plan change cannot resolve plan %q: %w", planID, err)
+	}
 	if acct.ActivePlanID == plan.PlanID && acct.PlanConfigVersion == plan.Version {
-		// Already there. Not an error and not a row: a redelivery that changes nothing must not author an
-		// audit entry claiming a change happened.
-		return planSyncOutcome{PlanID: plan.PlanID, Reason: why}, nil
+		return false, nil
 	}
 
 	reason := fmt.Sprintf("%s: plan %s -> %s", why, displayOrID(acct.ActivePlanID), plan.DisplayName)
-	cause := "webhook:" + p.ProviderEventID
-	key := PlanChangeIdempotencyKey(p.CustomerID, plan.PlanID, cause)
+	key := PlanChangeIdempotencyKey(customerID, plan.PlanID, cause)
 
 	// ── 1. AUDIT FIRST — see the file comment on ordering ─────────────────────
-	_, err = s.ledger.Append(BillingEvent{
-		CustomerID:     p.CustomerID,
+	if _, err := s.ledger.Append(BillingEvent{
+		CustomerID:     customerID,
 		Type:           TypePlanChange,
 		IdempotencyKey: key,
 		CausedBy:       cause,
 		Reason:         reason,
 		Status:         StatusRecorded,
 		CreatedAt:      s.now().UTC(),
-	})
-	if err != nil && !errors.Is(err, ErrDuplicateKey) {
-		return planSyncOutcome{}, fmt.Errorf("billing: audit plan change: %w", err)
+	}); err != nil && !errors.Is(err, ErrDuplicateKey) {
+		return false, fmt.Errorf("billing: audit plan change: %w", err)
 	}
 
 	// ── 2. MOVE THE PLAN, pinning the config version it resolved under ────────
-	if _, err := s.accounts.SetPlan(p.CustomerID, plan.PlanID, plan.Version); err != nil {
-		return planSyncOutcome{}, fmt.Errorf("billing: set plan: %w", err)
+	if _, err := s.accounts.SetPlan(customerID, plan.PlanID, plan.Version); err != nil {
+		return false, fmt.Errorf("billing: set plan: %w", err)
 	}
-	return planSyncOutcome{Changed: true, PlanID: plan.PlanID, Reason: reason}, nil
+	return true, nil
 }
 
 func displayOrID(planID string) string {

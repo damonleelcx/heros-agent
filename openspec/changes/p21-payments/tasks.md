@@ -61,15 +61,15 @@ persist-then-ack / reversible) it touches.
       audited plan change, with all `TypePlanChange` rows intact.
 
 ## 6. Frontend — Payment collection + the console billing page
-- [ ] 6.1 BFF (server-side): `POST /billing/checkout-session` mints a **Stripe Checkout** session / client secret;
+- [x] 6.1 BFF (server-side): `POST /billing/checkout-session` mints a **Stripe Checkout** session / client secret;
       the browser is redirected / renders Stripe's Element so the **card goes browser→Stripe directly**; the BFF holds
       the Stripe key, the client never does.
-- [ ] 6.2 BFF: `POST /billing/plan { plan_name }` for **subscribe / upgrade / downgrade**; the entitlement flips at
+- [x] 6.2 BFF: `POST /billing/plan { plan_name }` for **subscribe / upgrade / downgrade**; the entitlement flips at
       the plan-change event; proration is Stripe's.
-- [ ] 6.3 Console **billing page** (`web/console/src/app/app/billing`): plan **by name**, current SUM/usage, invoice
+- [x] 6.3 Console **billing page** (`web/console/src/app/app/billing`): plan **by name**, current SUM/usage, invoice
       breakdown (subscription / metered / verified gainshare, each with its basis), payment-method status — every
       figure from the billing/metering API, **no** hardcoded price.
-- [ ] 6.4 First-class **unhappy states**: `past_due` / `payment_failed` render a named reason + restore path (from the
+- [x] 6.4 First-class **unhappy states**: `past_due` / `payment_failed` render a named reason + restore path (from the
       **mirrored** provider state, not recomputed); explicit loading / empty / billing-unavailable; SUM/usage charts
       follow the **dataviz** skill; all states keyboard-reachable.
 

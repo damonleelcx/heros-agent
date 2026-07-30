@@ -734,6 +734,40 @@
     stroke: color-mix(in oklab, var(--graph-text-muted) 70%, transparent);
   }
 
+  /* ── The bar chart's vocabulary · P21 ──────────────────────────────────
+   *
+   * Thin marks, a recessive track, rounded data-ends anchored to the baseline, and a 2px surface gap
+   * between adjacent bars. The over-allowance state is carried by a WORD in the label as well as by
+   * hue — a bar that says "over" only in red says nothing to a colour-blind reader, and the whole
+   * point of the usage chart is which meter is over.
+   */
+
+  .bar__track {
+    fill: color-mix(in oklab, var(--graph-text-muted) 12%, transparent);
+  }
+
+  .bar {
+    fill: var(--series-1);
+  }
+
+  .bar--over {
+    fill: var(--warn);
+  }
+
+  /* The allowance is a LINE, not a second bar: it is a threshold, and drawing it as a bar would invite
+     a reader to compare two lengths when only one of them is a quantity. */
+  .bar__limit {
+    stroke: var(--graph-text-muted);
+    stroke-width: 1.5;
+    stroke-dasharray: 3 3;
+  }
+
+  .bar__value {
+    fill: var(--graph-text);
+    font-family: var(--font-mono);
+    font-size: var(--type-axis);
+  }
+
   .legend__mark {
     @apply block size-2.5 shrink-0;
   }

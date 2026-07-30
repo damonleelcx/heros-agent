@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/heros-foreal/agentd/internal/providergateway"
+	"github.com/heros-foreal/agentd/internal/stripefake"
 )
 
 // stripemode_test.go is P21 section 3: the secret posture and the test/live separation.
@@ -93,7 +94,7 @@ func TestStripeFailsClosedWithNoCredential(t *testing.T) {
 
 // TestStripeModeZeroValueIsTestAndFollowsTheRolloutFlag is task 3.2's first half.
 func TestStripeModeZeroValueIsTestAndFollowsTheRolloutFlag(t *testing.T) {
-	secrets := stripeSecrets(t, testStripeKey)
+	secrets := stripeSecrets(t, stripefake.TestKey)
 
 	// The ZERO value: a deployment that configured nothing charges nothing real.
 	zero, err := NewStripeProvider(secrets, "", stripeClock)
@@ -128,7 +129,7 @@ func TestStripeModeZeroValueIsTestAndFollowsTheRolloutFlag(t *testing.T) {
 	if err := r.Enable(ModeLive); err != nil {
 		t.Fatalf("enable live: %v", err)
 	}
-	live, err := NewStripeProviderForRollout(stripeSecrets(t, liveStripeKey), r, stripeClock)
+	live, err := NewStripeProviderForRollout(stripeSecrets(t, stripefake.LiveKey), r, stripeClock)
 	if err != nil {
 		t.Fatalf("provider: %v", err)
 	}
@@ -155,7 +156,7 @@ func TestALiveKeyDoesNotResolveForATestSurface(t *testing.T) {
 	ctx := context.Background()
 
 	// LIVE key, TEST surface → refused before any call.
-	testSurface, err := NewStripeProvider(stripeSecrets(t, liveStripeKey), ModeTest, stripeClock, WithStripeBaseURL(f.URL()))
+	testSurface, err := NewStripeProvider(stripeSecrets(t, stripefake.LiveKey), ModeTest, stripeClock, WithStripeBaseURL(f.URL()))
 	if err != nil {
 		t.Fatalf("provider: %v", err)
 	}
@@ -172,7 +173,7 @@ func TestALiveKeyDoesNotResolveForATestSurface(t *testing.T) {
 	}
 
 	// TEST key, LIVE surface → refused too. Silent no-op billing is not a safe failure.
-	liveSurface, err := NewStripeProvider(stripeSecrets(t, testStripeKey), ModeLive, stripeClock, WithStripeBaseURL(f.URL()))
+	liveSurface, err := NewStripeProvider(stripeSecrets(t, stripefake.TestKey), ModeLive, stripeClock, WithStripeBaseURL(f.URL()))
 	if err != nil {
 		t.Fatalf("provider: %v", err)
 	}
@@ -191,7 +192,7 @@ func TestALiveKeyDoesNotResolveForATestSurface(t *testing.T) {
 	}
 
 	// And the matched pair works, so the guard is a guard rather than a wall.
-	ok, err := NewStripeProvider(stripeSecrets(t, testStripeKey), ModeTest, stripeClock, WithStripeBaseURL(f.URL()))
+	ok, err := NewStripeProvider(stripeSecrets(t, stripefake.TestKey), ModeTest, stripeClock, WithStripeBaseURL(f.URL()))
 	if err != nil {
 		t.Fatalf("provider: %v", err)
 	}
@@ -208,7 +209,7 @@ func TestATestModeProviderMovesNoRealMoney(t *testing.T) {
 	f.SetRequireLiveKey(true) // this fake is now a LIVE Stripe account
 	ctx := context.Background()
 
-	p, err := NewStripeProvider(stripeSecrets(t, testStripeKey), ModeTest, stripeClock, WithStripeBaseURL(f.URL()))
+	p, err := NewStripeProvider(stripeSecrets(t, stripefake.TestKey), ModeTest, stripeClock, WithStripeBaseURL(f.URL()))
 	if err != nil {
 		t.Fatalf("provider: %v", err)
 	}
