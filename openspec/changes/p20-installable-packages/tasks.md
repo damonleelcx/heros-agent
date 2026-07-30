@@ -205,3 +205,14 @@ Homebrew / Scoop-winget / deb-rpm / container) with every "not affected" row exp
       same per-release attestation; `AuditClaims` is wired into the release gate over both documents and is proven
       red on a planted overclaim while proven NOT to fire on the honest disclosure. Both disclosed limits and all
       three unpublishable channels appear, each with its reason and its answer.
+
+## 10. Run for nousresearch/hermes-agent
+
+- [x] 10.1 Run the delivered distribution against the real repository with the binary a user actually gets:
+      install through `scripts/install.sh` (signature verified), then `cmd/p20hermes` drives `version`,
+      `doctor`, `discover`, `eval`, `coverage`, an endpoints-closed re-run, and `upgrade`.
+      → **7/7 green** on `nousresearch/hermes-agent` @ `8eb06e75b9db` (8,034 files): **26 nodes discovered in
+      9.97s**, **eval quality 0.8109**, 7 registered languages, doctor clean, and the endpoints-closed re-run
+      returned the same 26 nodes. This is the check an installer test cannot make — the tree-sitter frontends are
+      CGO, and a wrongly packaged binary links and then cannot parse. Covered: `darwin/arm64` only; the other
+      four matrix rows need their own runners (D1). Full output in `docs/release/p20-evidence.md` §1.

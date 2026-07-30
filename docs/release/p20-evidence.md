@@ -100,6 +100,42 @@ version.
 
 Suites: `web/console` **355/355**; Go `make go` clean; `internal/distribution` and `internal/release` green.
 
+### The distribution against a real third-party repository — `cmd/p20hermes`
+
+The smoke matrix exercises the installed binary against *this* repository's fixture: one node, known shape,
+written by us. That is the right fixture for testing an installer and the wrong one for the question a customer
+asks. So the binary installed through the real `install.sh` — verification and all — was run against
+**nousresearch/hermes-agent** at `8eb06e75b9db` (8,034 files; 3,653 Python, 1,275 TypeScript, 591 TSX).
+
+```
+=== P20 distribution — run for https://github.com/nousresearch/hermes-agent ===
+binary     : .smoke/hermesrun/host/bin/heros        ← installed by scripts/install.sh, signature verified
+platform   : macOS 12+ (Apple silicon) (darwin/arm64)
+
+✅ installed version            tool_version="0.20.0-smoke.1"
+✅ doctor reports actionably    7 checks, gaps=none
+✅ discover                     26 nodes, 0 edges in 9.97s · workflow_id=workflow
+✅ eval produces a number       quality=0.8109 via runtime "reference" in 9.96s
+✅ coverage is answerable       7 registered languages
+✅ works with no platform       re-ran discover with the endpoints closed: 26 nodes (same as before)
+🔵 upgrade is honest offline    cannot reach the release index … only this one needs the network
+
+  7 checks · 0 failed · 1 reported as refusals
+  covered: darwin/arm64 only. The other four rows of the matrix need their own runners (D1).
+```
+
+This is the check the installer tests cannot make: the tree-sitter frontends are CGO, and a binary that was
+built or packaged wrong links fine and then cannot parse. 26 nodes out of 8,000 files of somebody else's
+multi-language code is the artifact working, not a download working.
+
+The re-run with the platform endpoints pointed at a closed port returned **the same 26 nodes**, which is the
+offline guarantee asserted rather than assumed.
+
+**One harness bug, recorded because the first report was wrong.** The coverage check read `languages`; the field
+is `registered_languages`. It reported *0 registered languages* for a command that had answered correctly with
+all seven — a reader of that report would have gone hunting for a broken coverage table. The runner now reads
+the field the payload actually has.
+
 ---
 
 ## 2 · What could NOT be run here, and why
