@@ -48,6 +48,20 @@ const CREDENTIAL_ENV = ["CONSOLE_PLATFORM_CREDENTIAL", "CONSOLE_TENANT_ASSERTION
 // figure with a separator — rather than a bare `$1`. Minified framework code is full of
 // `.replace(re, "$1")` regex backreferences, and a fence that flagged those would cry wolf on every
 // build until somebody disabled it. A real price in this domain always carries decimals.
+// Stripe credential shapes (P21 task 3.3). The console holds NO Stripe secret: it receives a
+// short-lived, server-minted Checkout session URL / client secret and nothing else. A secret key or a
+// webhook signing secret in the bundle is the one place a secret may never be, and unlike a leaked
+// price it cannot be fixed by an edit — the key is compromised the moment the bundle is served.
+//
+// Each pattern requires a long ALPHANUMERIC run after the prefix, which is what a Stripe key is, so
+// prose naming the prefix does not trip it. A PUBLISHABLE key (`pk_test_` / `pk_live_`) is deliberately
+// absent: it is designed to be in a browser, and flagging it would teach people to disable the scan.
+const STRIPE_SECRET_PATTERNS = [
+  { name: "Stripe secret key", re: /\bsk_(live|test)_[A-Za-z0-9]{16,}/ },
+  { name: "Stripe restricted key", re: /\brk_(live|test)_[A-Za-z0-9]{16,}/ },
+  { name: "Stripe webhook signing secret", re: /\bwhsec_[A-Za-z0-9]{16,}/ },
+];
+
 const PRICE_PATTERNS = [
   /\$\s?\d[\d,]*\.\d/,
   /\b\d[\d,]*\.\d+\s?(usd|eur|gbp)\b/i,
@@ -201,6 +215,11 @@ async function main() {
     for (const name of CREDENTIAL_ENV) {
       if (content.includes(name)) findings.push(`CREDENTIAL: reference to ${name} in shipped bundle ${file}`);
     }
+    for (const { name, re } of STRIPE_SECRET_PATTERNS) {
+      // The MATCH is never printed. Printing it would move the credential from the bundle into the CI
+      // log, which is the same exposure one system downstream.
+      if (re.test(content)) findings.push(`STRIPE SECRET: something shaped like a ${name} in shipped bundle ${file}`);
+    }
     for (const pattern of PRICE_PATTERNS) {
       const match = content.match(pattern);
       if (match) findings.push(`PRICE: literal ${JSON.stringify(match[0])} in shipped bundle ${file}`);
@@ -233,7 +252,7 @@ async function main() {
   console.log(
     `bundle scan passed: ${scanned} client chunk(s) scanned, ${bytes} shipped bytes ` +
       `(${headroom} under the ${PAYLOAD_CEILING_BYTES}-byte ceiling), ` +
-      `no credential material, priced literal, or decorative runtime.`,
+      `no credential material, Stripe secret, priced literal, or decorative runtime.`,
   );
 }
 

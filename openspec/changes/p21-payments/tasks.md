@@ -34,12 +34,12 @@ persist-then-ack / reversible) it touches.
       (buffer + retry via `FlushPending`), a distinct error on a rejection (stop).
 
 ## 3. Backend + DevOps — Secret posture and test/live separation
-- [ ] 3.1 Wire the Stripe API key and webhook signing secret through the **Secrets seam** under the P7 reserved
+- [x] 3.1 Wire the Stripe API key and webhook signing secret through the **Secrets seam** under the P7 reserved
       names `SecretBillingAPIKey` / `SecretBillingWebhookSigning`; resolve **fail-closed**; confirm `/readyz`'s
       `secrets_source` covers them.
-- [ ] 3.2 Separate **test mode and live mode** via the P7 rollout flag (`rollout.go`) whose zero value is **test**; a
+- [x] 3.2 Separate **test mode and live mode** via the P7 rollout flag (`rollout.go`) whose zero value is **test**; a
       **live** key SHALL NOT resolve for a test surface and a **test** event SHALL move no real money.
-- [ ] 3.3 Assert **no Stripe secret** is in git / manifest / log / trace / client bundle (build-time scan), and the
+- [x] 3.3 Assert **no Stripe secret** is in git / manifest / log / trace / client bundle (build-time scan), and the
       **console holds none** (only a server-minted Checkout session / client secret).
 
 ## 4. Backend — The inbound webhook path (verify → dedupe → persist → ack)

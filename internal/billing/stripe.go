@@ -188,6 +188,21 @@ func NewStripeProvider(secrets Secrets, mode Mode, clock Clock, opts ...StripeOp
 	return p, nil
 }
 
+// NewStripeProviderForRollout builds the provider in the mode the P7 rollout flag is in (task 3.2).
+//
+// This is how a DEPLOYMENT constructs it, and the reason it exists rather than a caller reading
+// `rollout.Mode()` and passing it along: there must be exactly one answer to "is this process moving
+// real money", and two places that derive it are two places that can disagree. A nil rollout is the
+// fully dark zero value — test mode — because a deployment that forgot to wire the flag must charge
+// nothing real rather than inherit whatever the last caller passed.
+func NewStripeProviderForRollout(secrets Secrets, rollout *Rollout, clock Clock, opts ...StripeOption) (*StripeProvider, error) {
+	mode := ModeTest
+	if rollout != nil {
+		mode = rollout.Mode()
+	}
+	return NewStripeProvider(secrets, mode, clock, opts...)
+}
+
 // Describe names the provider and its MODE for the readiness surface — the identity, never a credential.
 //
 // The mode is part of the identity on purpose: "which processor" and "is it moving real money" are the
