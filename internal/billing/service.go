@@ -53,8 +53,12 @@ type Service struct {
 	deliveries DeliveryStore
 	// states mirrors the provider-owned invoice/subscription state per customer — what the UI's
 	// payment-failed / past-due / dunning states render from. Mirrored, never computed.
+	//
+	// It is a StateStore rather than a map (P21 task 4.3) so that "the effect was persisted" is a claim
+	// the webhook path can FAIL to make. With a map it is unrepresentable, and a persist-then-ack test
+	// against a code path that cannot go wrong is a restatement of the implementation, not a test.
 	stateMu sync.Mutex
-	states  map[string]BillingState
+	states  StateStore
 
 	// rollout is the P7 feature flag. Nil means "no rollout gate configured", which is the correct
 	// behaviour for a test harness; a DEPLOYMENT wires one, and its zero value is fully dark.
@@ -99,7 +103,16 @@ func NewService(p Provider, l Ledger, accts account.Store, plans *plancfg.Resolv
 		return nil, errors.New("billing: provider, ledger, account store, plan resolver and meter are all required")
 	}
 	return &Service{provider: p, ledger: l, accounts: accts, plans: plans, meter: m, secrets: secrets,
-		now: time.Now, subs: map[string]string{}, states: map[string]BillingState{}}, nil
+		now: time.Now, subs: map[string]string{}, states: NewMemStates()}, nil
+}
+
+// WithStates replaces the mirrored-state store. A deployment wires the durable one; a test wires one it
+// can take down, which is how the persist-then-ack failure is injected rather than imagined.
+func (s *Service) WithStates(st StateStore) *Service {
+	if st != nil {
+		s.states = st
+	}
+	return s
 }
 
 // SetClock injects a deterministic clock (tests).

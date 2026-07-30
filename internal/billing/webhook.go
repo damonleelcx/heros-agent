@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -117,6 +118,16 @@ type DeliveryStore interface {
 	// false — and it must do so atomically, because two concurrent redeliveries that both "check then
 	// insert" would both proceed.
 	Claim(providerEventID string, typ WebhookType, at time.Time) (won bool, err error)
+	// Release withdraws a claim this caller won but could not complete (P21 task 4.3).
+	//
+	// It exists because the claim is taken BEFORE the effect is persisted — it has to be, or two
+	// concurrent redeliveries both proceed — and that ordering opens exactly one gap: the claim
+	// persists, the effect does not, and the provider's retry then finds the claim and applies nothing.
+	// That is an event acked-but-unrecorded by a slower route, which is the failure persist-then-ack
+	// exists to prevent. Releasing the claim before returning a non-2xx closes it: the retry re-claims
+	// and re-applies. Releasing a claim that was never won is a no-op, so a double release cannot
+	// re-open a delivery that did succeed.
+	Release(providerEventID string) error
 	Seen(providerEventID string) bool
 	Count() int
 }
@@ -151,6 +162,18 @@ func (d *MemDeliveries) Claim(id string, typ WebhookType, at time.Time) (bool, e
 	}
 	d.rows[id] = WebhookDelivery{ProviderEventID: id, Type: typ, ProcessedAt: at.UTC()}
 	return true, nil
+}
+
+// Release withdraws a claim. It is deliberately tolerant of an unknown id: a release for a delivery
+// that was never claimed must not be an error, or the failure path would have its own failure path.
+func (d *MemDeliveries) Release(id string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.down {
+		return errors.New("billing: webhook delivery store unavailable — the claim could not be released, so the effect must be reconciled rather than retried")
+	}
+	delete(d.rows, id)
+	return nil
 }
 
 // Seen reports whether a delivery was already processed.
@@ -195,6 +218,55 @@ type BillingState struct {
 	UpdatedAt          time.Time `json:"updated_at"`
 }
 
+// StateStore is the durable mirror of the provider-owned billing state (P21 task 4.3).
+//
+// It is an interface rather than a map field because "the effect was persisted" has to be a claim the
+// endpoint can FAIL to make. With a map, a persistence failure is unrepresentable, and the
+// persist-then-ack test would be asserting against a code path that cannot go wrong — which is not a
+// test, it is a restatement of the implementation.
+type StateStore interface {
+	// Put persists a customer's mirrored provider state. An error means NOT PERSISTED: the caller must
+	// return a non-2xx so the provider retries.
+	Put(BillingState) error
+	// Get returns the mirrored state, or the zero value for a customer with none.
+	Get(customerID string) BillingState
+}
+
+// MemStates is the in-memory mirror.
+type MemStates struct {
+	mu   sync.Mutex
+	rows map[string]BillingState
+	down bool
+}
+
+// NewMemStates builds an empty state mirror.
+func NewMemStates() *MemStates { return &MemStates{rows: map[string]BillingState{}} }
+
+// SetDown flips the mirror between available and unavailable — the persistence-failure seam.
+func (m *MemStates) SetDown(v bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.down = v
+}
+
+// Put persists one customer's mirrored state.
+func (m *MemStates) Put(st BillingState) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.down {
+		return errors.New("billing: billing state store unavailable — the mirrored provider state was NOT persisted")
+	}
+	m.rows[st.CustomerID] = st
+	return nil
+}
+
+// Get returns a customer's mirrored state.
+func (m *MemStates) Get(customerID string) BillingState {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.rows[customerID]
+}
+
 // WebhookResult reports what one delivery did.
 type WebhookResult struct {
 	ProviderEventID string      `json:"provider_event_id"`
@@ -221,22 +293,7 @@ func (s *Service) HandleWebhook(ctx context.Context, in SignedWebhook) (WebhookR
 	}
 
 	// ── 1. VERIFY, before anything is parsed into a decision ──────────────────
-	if strings.TrimSpace(in.Signature) == "" {
-		return WebhookResult{}, ErrNoSignature
-	}
-	if s.secrets == nil {
-		return WebhookResult{}, fmt.Errorf("%w: no webhook signing secret is configured", ErrSecretUnavailable)
-	}
-	secret, err := s.secrets.WebhookSigningSecret(ctx)
-	if err != nil {
-		// FAIL CLOSED: with no secret we cannot verify, and an unverifiable webhook must not be trusted.
-		return WebhookResult{}, err
-	}
-	want := SignWebhook(secret, in.Timestamp, in.Body)
-	if !hmac.Equal([]byte(want), []byte(in.Signature)) {
-		return WebhookResult{}, ErrBadSignature
-	}
-	if err := s.checkSkew(in.Timestamp); err != nil {
+	if err := s.verifySignature(ctx, in); err != nil {
 		return WebhookResult{}, err
 	}
 
@@ -258,8 +315,21 @@ func (s *Service) HandleWebhook(ctx context.Context, in SignedWebhook) (WebhookR
 			State: s.BillingState(p.CustomerID)}, nil
 	}
 
-	// ── 3. APPLY the side effect ──────────────────────────────────────────────
-	state := s.applyWebhook(p)
+	// ── 3. PERSIST the side effect ────────────────────────────────────────────
+	state, err := s.applyWebhook(p)
+	if err != nil {
+		// The claim was won but the effect did not persist. Withdraw the claim so the provider's retry
+		// re-applies rather than being deduped into nothing — see DeliveryStore.Release.
+		if rerr := s.deliveries.Release(p.ProviderEventID); rerr != nil {
+			// Neither the effect nor the release persisted. This is the one case that cannot be fixed by
+			// a retry, so it is reported as a GAP to reconcile rather than swallowed: the delivery is
+			// claimed, nothing was applied, and a redelivery would apply nothing.
+			return WebhookResult{}, fmt.Errorf("%w: the delivery claim for %s could not be released after the "+
+				"effect failed to persist — this event must be RECONCILED against the provider, not waited for: %v",
+				ErrWebhookNotPersisted, p.ProviderEventID, rerr)
+		}
+		return WebhookResult{}, fmt.Errorf("%w: %v", ErrWebhookNotPersisted, err)
+	}
 	// The provider's invoice/subscription state is a revenue signal in its own right: it is how the
 	// dunning funnel becomes visible before a customer calls about it.
 	if st := firstNonEmpty(state.InvoiceStatus, state.SubscriptionStatus); st != "" {
@@ -268,13 +338,111 @@ func (s *Service) HandleWebhook(ctx context.Context, in SignedWebhook) (WebhookR
 	return WebhookResult{ProviderEventID: p.ProviderEventID, Type: p.Type, Applied: true, State: state}, nil
 }
 
+// verifySignature is step 1 in isolation: the signature is checked against the signing secret from the
+// seam BEFORE a byte of the body is parsed into a decision.
+//
+// It accepts two encodings of the same HMAC, and the reason is worth stating rather than leaving as a
+// surprise: the material signed is identical (`"<timestamp>.<body>"`, HMAC-SHA256), only the transport
+// differs. Stripe packs the timestamp and one-or-more signatures into a SINGLE header
+// (`t=…,v1=…,v1=…`); P7's own form carries them in separate fields. Supporting both means the P21
+// endpoint speaks Stripe's scheme without P7's existing callers changing, and there is exactly one
+// verification implementation rather than two that can drift.
+//
+// Multiple `v1=` values are accepted because that is what a SECRET ROTATION looks like on the wire:
+// Stripe signs with both the old and the new secret during the overlap window. A verifier that read
+// only the first would reject half of the deliveries in the exact window where a rejection is most
+// expensive to diagnose.
+func (s *Service) verifySignature(ctx context.Context, in SignedWebhook) error {
+	if strings.TrimSpace(in.Signature) == "" {
+		return ErrNoSignature
+	}
+	if s.secrets == nil {
+		return fmt.Errorf("%w: no webhook signing secret is configured", ErrSecretUnavailable)
+	}
+	secret, err := s.secrets.WebhookSigningSecret(ctx)
+	if err != nil {
+		// FAIL CLOSED: with no secret we cannot verify, and an unverifiable webhook must not be trusted.
+		return err
+	}
+
+	stamp, candidates := parseStripeSignature(in.Signature)
+	if stamp == "" {
+		// P7's form: the timestamp travels beside the signature rather than inside the header.
+		stamp, candidates = in.Timestamp, []string{in.Signature}
+	}
+
+	want := SignWebhook(secret, stamp, in.Body)
+	ok := false
+	for _, got := range candidates {
+		// hmac.Equal, not ==: a byte-by-byte comparison that returns early leaks, through timing, how
+		// much of a forged signature was correct.
+		if hmac.Equal([]byte(want), []byte(got)) {
+			ok = true
+		}
+	}
+	if !ok {
+		return ErrBadSignature
+	}
+	// The timestamp is checked AFTER the signature, and only then is it trustworthy: it is inside the
+	// signed material, so a verified timestamp is one the sender committed to and an attacker cannot
+	// move. Checking it first would be checking an attacker-supplied number.
+	return s.checkSkew(stamp)
+}
+
+// StripeSignatureHeader is the header Stripe signs its deliveries with.
+const StripeSignatureHeader = "Stripe-Signature"
+
+// parseStripeSignature splits a `Stripe-Signature` header into its timestamp and its `v1` signatures.
+//
+// It returns an empty timestamp when the value is not in that form, which is how verifySignature tells
+// the two encodings apart without a mode flag threaded through the call.
+func parseStripeSignature(header string) (timestamp string, signatures []string) {
+	if !strings.Contains(header, "t=") {
+		return "", nil
+	}
+	for _, part := range strings.Split(header, ",") {
+		k, v, found := strings.Cut(strings.TrimSpace(part), "=")
+		if !found {
+			continue
+		}
+		switch k {
+		case "t":
+			timestamp = v
+		case "v1":
+			// Re-prefixed to the form SignWebhook produces, so there is one canonical shape being
+			// compared rather than a comparison that strips a prefix on one side only.
+			signatures = append(signatures, "v1="+v)
+		}
+	}
+	if timestamp == "" || len(signatures) == 0 {
+		return "", nil
+	}
+	return timestamp, signatures
+}
+
+// StripeSignatureFor builds the `Stripe-Signature` header value for a body — the exact bytes Stripe
+// would send. It is the signing half of the verifier above, kept beside it so the two cannot drift, and
+// it is what the endpoint's tests and the demo sign with.
+func StripeSignatureFor(secret string, at time.Time, body []byte) string {
+	ts := strconv.FormatInt(at.UTC().Unix(), 10)
+	sig := strings.TrimPrefix(SignWebhook(secret, ts, body), "v1=")
+	return "t=" + ts + ",v1=" + sig
+}
+
 func (s *Service) checkSkew(stamp string) error {
 	if stamp == "" {
 		return fmt.Errorf("%w: no timestamp", ErrWebhookStaleStamp)
 	}
+	// Two encodings, one meaning: Stripe signs Unix seconds, P7's own form carries RFC3339. Both are
+	// accepted here for the same reason verifySignature accepts both headers — the signed material is
+	// identical and a second skew implementation is a second thing to get wrong.
 	t, err := time.Parse(time.RFC3339, stamp)
 	if err != nil {
-		return fmt.Errorf("%w: unparseable timestamp %q", ErrWebhookStaleStamp, stamp)
+		secs, nerr := strconv.ParseInt(stamp, 10, 64)
+		if nerr != nil {
+			return fmt.Errorf("%w: unparseable timestamp %q", ErrWebhookStaleStamp, stamp)
+		}
+		t = time.Unix(secs, 0).UTC()
 	}
 	d := s.now().Sub(t)
 	if d < 0 {
@@ -289,10 +457,10 @@ func (s *Service) checkSkew(stamp string) error {
 // applyWebhook mirrors the provider's state. It computes nothing: each branch copies what the provider
 // said. An unknown type updates nothing and is acknowledged — a provider adding an event must not break
 // the endpoint, and guessing at an unknown event is worse than ignoring it.
-func (s *Service) applyWebhook(p WebhookPayload) BillingState {
+func (s *Service) applyWebhook(p WebhookPayload) (BillingState, error) {
 	s.stateMu.Lock()
 	defer s.stateMu.Unlock()
-	st := s.states[p.CustomerID]
+	st := s.states.Get(p.CustomerID)
 	st.CustomerID = p.CustomerID
 	st.UpdatedAt = s.now().UTC()
 
@@ -317,11 +485,10 @@ func (s *Service) applyWebhook(p WebhookPayload) BillingState {
 		// audited Credit/Refund path, never by inventing a ledger row from a webhook. A webhook is a
 		// notification, not an authorization to write to the billing ledger.
 	}
-	if s.states == nil {
-		s.states = map[string]BillingState{}
+	if err := s.states.Put(st); err != nil {
+		return BillingState{}, err
 	}
-	s.states[p.CustomerID] = st
-	return st
+	return st, nil
 }
 
 func firstNonEmpty(vals ...string) string {
@@ -337,5 +504,64 @@ func firstNonEmpty(vals ...string) string {
 func (s *Service) BillingState(customerID string) BillingState {
 	s.stateMu.Lock()
 	defer s.stateMu.Unlock()
-	return s.states[customerID]
+	return s.states.Get(customerID)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// P21 task 4.2/4.3 — the endpoint's whole body
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ErrWebhookNotPersisted is returned when the delivery could not be durably recorded. It is the one
+// error that MUST become a non-2xx: an HTTP 200 to Stripe is a promise the event was recorded, and
+// Stripe stops retrying an event it thinks succeeded.
+var ErrWebhookNotPersisted = errors.New("billing: the webhook delivery was NOT durably recorded")
+
+// WebhookAck is one delivery's outcome, including the HTTP status the endpoint must return.
+//
+// The status is decided HERE rather than at the HTTP boundary because it encodes a money decision — a
+// non-2xx is a request for Stripe to retry — and that decision must not be re-derived by a handler that
+// cannot see whether the effect was persisted. The handler's job is to write the number down.
+type WebhookAck struct {
+	ProviderEventID string      `json:"provider_event_id,omitempty"`
+	Type            WebhookType `json:"type,omitempty"`
+	Duplicate       bool        `json:"duplicate"`
+	Applied         bool        `json:"applied"`
+	// Status is the HTTP status the endpoint returns.
+	Status int `json:"-"`
+	// Reason is a short, non-sensitive explanation for a non-2xx. It never carries the payload, the
+	// signature, or the secret — a rejected webhook's diagnostics must not become a second leak.
+	Reason string `json:"reason,omitempty"`
+}
+
+// HandleStripeWebhook is the inbound endpoint's whole body: verify → dedupe → persist → ack.
+//
+// ## The status codes are the contract, not a formatting choice
+//
+//	200  applied, or a redelivery that applied nothing. Both mean DURABLY OURS. Stripe stops retrying.
+//	400  the delivery is not from Stripe, or cannot be processed at all: unsigned, forged, stale, no
+//	     event id, unparseable. Retrying it would produce the same answer forever.
+//	500  the delivery IS from Stripe and was NOT recorded. This is the important one: it is how the
+//	     platform asks for the retry that at-least-once delivery exists to provide.
+//
+// The 400/500 split is the whole design. Answering 400 for a persistence failure would tell Stripe the
+// event is permanently unprocessable and it would eventually stop — turning a transient database
+// problem into a silently lost subscription change. Answering 200 would do it immediately.
+func (s *Service) HandleStripeWebhook(ctx context.Context, body []byte, signatureHeader string) WebhookAck {
+	res, err := s.HandleWebhook(ctx, SignedWebhook{Body: body, Signature: signatureHeader})
+	switch {
+	case err == nil:
+		return WebhookAck{
+			ProviderEventID: res.ProviderEventID, Type: res.Type,
+			Duplicate: res.Duplicate, Applied: res.Applied, Status: 200,
+		}
+	case errors.Is(err, ErrWebhookNotPersisted),
+		errors.Is(err, ErrSecretUnavailable):
+		// Not recorded (or not verifiable because the secret is unreachable). Either way the platform
+		// must NOT ack: it wants the redelivery.
+		return WebhookAck{Status: 500, Reason: err.Error()}
+	default:
+		// Unsigned, forged, stale, unparseable, no event id, or no delivery store. None of these
+		// improves on a retry.
+		return WebhookAck{Status: 400, Reason: err.Error()}
+	}
 }

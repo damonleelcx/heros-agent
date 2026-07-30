@@ -43,13 +43,13 @@ persist-then-ack / reversible) it touches.
       **console holds none** (only a server-minted Checkout session / client secret).
 
 ## 4. Backend — The inbound webhook path (verify → dedupe → persist → ack)
-- [ ] 4.1 Extend `internal/billing/webhook.go` to the real **`Stripe-Signature`** scheme; verify **before** any side
+- [x] 4.1 Extend `internal/billing/webhook.go` to the real **`Stripe-Signature`** scheme; verify **before** any side
       effect and **before** parsing the body into a decision; reject unsigned / forged / stale-timestamp.
-- [ ] 4.2 Add the `POST /billing/webhook` route in `internal/api/server.go` (the **one** inbound-from-internet path);
+- [x] 4.2 Add the `POST /billing/webhook` route in `internal/api/server.go` (the **one** inbound-from-internet path);
       dedupe on Stripe's **event id** via `webhook_delivery`; a redelivery applies nothing and returns 2xx.
-- [ ] 4.3 **Persist-then-ack**: persist the dedupe claim and the effect **before** returning 2xx; a persistence
+- [x] 4.3 **Persist-then-ack**: persist the dedupe claim and the effect **before** returning 2xx; a persistence
       failure returns **non-2xx** so Stripe retries; a detected gap is reconciled, never dropped. *(load-bearing)*
-- [ ] 4.4 Mirror subscription-lifecycle events into the provider-owned `BillingState` **verbatim** (no recomputed
+- [x] 4.4 Mirror subscription-lifecycle events into the provider-owned `BillingState` **verbatim** (no recomputed
       dunning); a `charge.refunded` / dispute webhook authors **no** ledger row (P7 rule preserved).
 
 ## 5. Backend — Subscription → entitlement sync (reversible, audited)

@@ -79,6 +79,10 @@ type Server struct {
 	// wrong about both.
 	billingCapability BillingCapabilityDescriber
 
+	// billingWebhook is the ONE inbound-from-internet path — Stripe's webhook endpoint, mounted by
+	// MountBillingWebhook when a deployment exposes it (P21 task 4.2). See p21.go for the posture.
+	billingWebhook BillingWebhookSink
+
 	// secrets is the live provider-credential source, reported by /readyz.
 	//
 	// The SOURCE, never a credential: this holds the thing that can produce secrets precisely so the

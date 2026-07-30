@@ -98,11 +98,18 @@ func TestNoStripeSecretInAGitTrackedFile(t *testing.T) {
 // TestStripeSecretDetectorGoesRed proves the fence can FAIL. A guard that has never been shown to fire
 // is decoration — and this one guards the least recoverable mistake in the change.
 func TestStripeSecretDetectorGoesRed(t *testing.T) {
+	// 🔴 The fixtures are ASSEMBLED AT RUNTIME rather than written as literals, and that is not a
+	// stylistic choice: a red-test fixture for this fence is by construction key-shaped, so a literal
+	// here would make the fence fail on its own source file. Excluding this file from the walk was the
+	// obvious alternative and it is the wrong one — the first excluded file is how an allowlist starts,
+	// and the file the fence cannot see is exactly where a key would end up. Concatenation keeps the
+	// committed bytes un-key-shaped while the detector still sees the full shape.
+	const tail = "51QabcdefghijklmnopqrstuvwxyZ"
 	mustCatch := map[string]string{
-		"live key in a manifest":     `STRIPE_KEY: ` + "s"+"k"+"_"+"l"+"i"+"v"+"e"+"_" + `51QabcdefghijklmnopqrstuvwxyZ`,
-		"test key in a fixture":      `{"key":"` + "s"+"k"+"_"+"t"+"e"+"s"+"t"+"_" + `51QabcdefghijklmnopqrstuvwxyZ` + `"}`,
-		"restricted key in a script": `export K=` + "r"+"k"+"_"+"l"+"i"+"v"+"e"+"_" + `51QabcdefghijklmnopqrstuvwxyZ`,
-		"webhook secret in an env":   `STRIPE_WEBHOOK_SECRET=` + "w"+"h"+"s"+"e"+"c"+"_" + `AbCdEfGhIjKlMnOpQrStUvWx`,
+		"live key in a manifest":     "STRIPE_KEY: " + ("s"+"k"+"_"+"l"+"i"+"v"+"e"+"_") + tail,
+		"test key in a fixture":      `{"key":"` + ("s"+"k"+"_"+"t"+"e"+"s"+"t"+"_") + tail + `"}`,
+		"restricted key in a script": "export K=" + ("r"+"k"+"_"+"l"+"i"+"v"+"e"+"_") + tail,
+		"webhook secret in an env":   "STRIPE_WEBHOOK_SECRET=" + ("w"+"h"+"s"+"e"+"c"+"_") + tail,
 	}
 	for name, body := range mustCatch {
 		if !anyStripeSecretShape(body) {
