@@ -136,6 +136,7 @@ var (
 	apiKeyFlag  = flag.String("api-key", "", "Stripe API key for -stripe-base; never logged")
 	liveMode    = flag.Bool("live", false, "run the rollout in LIVE mode (refused unless a live key is supplied)")
 	startOnFree = flag.Bool("start-free", true, "start the account on Free so the checkout → grant path is exercised")
+	breakPrice  = flag.String("break-price", "", "leave this price reference UNCONFIGURED at the provider, so the preflight's red path is visible")
 )
 
 // The billing periods: three closed months, the last one after the optimizations merged.
@@ -284,6 +285,21 @@ func build(repoDir string) (*state, error) {
 	}
 	st.provider = provider
 
+	// The provider account's PRICE OBJECTS. Against a real Stripe account these are created by Finance
+	// and this block does nothing; against the in-process one there is no Finance, so the demo seeds
+	// them — and `-break-price` leaves one out on purpose, because a configuration check nobody has seen
+	// fire is a configuration check nobody believes.
+	if st.fake != nil {
+		for _, plan := range plans.Plans() {
+			for _, ref := range plan.PriceRefs {
+				if ref == "" || ref == *breakPrice {
+					continue
+				}
+				st.fake.SeedPrice(ref, true)
+			}
+		}
+	}
+
 	// ── 3. Account — on FREE, with no payment method. The starting state of a
 	//      customer who has not paid yet, which is what the collection surface
 	//      exists for. ────────────────────────────────────────────────────────
@@ -355,6 +371,22 @@ func build(repoDir string) (*state, error) {
 	observer.SetClock(now)
 	svc.WithRollout(rollout).WithObserver(observer)
 	st.svc = svc
+
+	// ── PREFLIGHT, before anything charges (Decision 9) ───────────────────────
+	rep, perr := svc.PreflightPricing(ctx)
+	switch {
+	case perr != nil:
+		st.record("pricing preflight", false, "%v", perr)
+		for _, u := range rep.Unresolved {
+			st.record("  unresolved price", false, "plan %s / %s / %q — %s", u.PlanName, u.Kind, u.PriceRef, u.Reason)
+		}
+	case !rep.Verified:
+		st.record("pricing preflight", false, "NOT verified: %s", rep.Detail)
+	default:
+		st.record("pricing preflight", true,
+			"%d configured price reference(s) resolve at the provider — a placeholder would have been named here, not at the period's first charge",
+			rep.Checked)
+	}
 
 	if err := st.runPeriod(ctx); err != nil {
 		return nil, err
@@ -568,6 +600,7 @@ func (s *state) report() {
 	}
 	fmt.Println()
 	fmt.Printf("  rollout:   %s\n", s.rollout)
+	fmt.Printf("  pricing:   %s\n", s.svc.Describe()["pricing"])
 	if len(s.missing) > 0 {
 		fmt.Printf("  ⚠ files not in this checkout: %s\n", strings.Join(s.missing, ", "))
 	}

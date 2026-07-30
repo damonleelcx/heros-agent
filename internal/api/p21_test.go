@@ -37,6 +37,7 @@ func TestReadyz_NamesTheBillingProviderAndItsCredentialSource(t *testing.T) {
 	// credentials resolve from. Never a credential, never a credential's id.
 	s.SetBillingCapability(describeStub{
 		"provider": "stripe(test)", "secrets_source": "aws-secrets-manager", "secrets_detail": "region eu-west-1",
+		"pricing": "verified:7",
 	})
 
 	rr := httptest.NewRecorder()
@@ -62,6 +63,13 @@ func TestReadyz_NamesTheBillingProviderAndItsCredentialSource(t *testing.T) {
 	if prov["secrets_source"] != "aws-secrets-manager" {
 		t.Errorf("billing_provider.secrets_source = %v — the billing credential's source must be externally "+
 			"readable, or the claim that it comes from the seam is unverifiable", prov["secrets_source"])
+	}
+	// The price-reference preflight's stored summary (P21 Decision 9). "The billing service is up" and
+	// "the billing service can charge" are different claims, and a readiness surface that reported only
+	// the first would be confidently wrong in the one case that matters.
+	if prov["pricing"] != "verified:7" {
+		t.Errorf("billing_provider.pricing = %v — /readyz must say whether the configured price references "+
+			"resolve, or a deployment can be 'ready' and unable to charge", prov["pricing"])
 	}
 
 	// The rollout is still reported separately: which gates are open and which processor is behind them

@@ -764,8 +764,47 @@ func (p *StripeProvider) UpdateSubscriptionPrice(ctx context.Context, req Update
 	return SubscriptionResult{SubscriptionRef: updated.ID, Status: updated.Status}, nil
 }
 
-// Compile-time proof that the Stripe provider carries the optional collection capability.
-var _ CollectionProvider = (*StripeProvider)(nil)
+// ResolvePrice reports whether a price reference exists in the Stripe account (Decision 9).
+//
+// A READ, and only a read: `GET /v1/prices/{id}`. It creates nothing, so running it repeatedly changes
+// nothing at Stripe — which is what lets it run at deploy, in CI, and on demand without anyone having to
+// think about what it might have left behind.
+//
+// A 404 comes back as `ErrProviderRejected`, which is the correct class: the reference is wrong and no
+// amount of retrying will make it right. An outage stays `ErrProviderUnavailable`, so the preflight can
+// tell "your configuration is wrong" from "we could not check" — two conditions with different owners.
+func (p *StripeProvider) ResolvePrice(ctx context.Context, priceRef string) error {
+	if strings.TrimSpace(priceRef) == "" {
+		return fmt.Errorf("%w: empty price reference", ErrProviderRejected)
+	}
+	res, err := p.do(ctx, http.MethodGet, "/v1/prices/"+url.PathEscape(priceRef), nil, "")
+	if err != nil {
+		return err
+	}
+	var price struct {
+		ID     string `json:"id"`
+		Active bool   `json:"active"`
+	}
+	if err := decode(res, &price); err != nil {
+		return err
+	}
+	if price.ID == "" {
+		return fmt.Errorf("%w: stripe returned no price for %q", ErrProviderRejected, priceRef)
+	}
+	if !price.Active {
+		// An archived price resolves and cannot be charged on. Reporting it as fine would be the shape
+		// check this decision rejected, one layer up.
+		return fmt.Errorf("%w: price %q exists but is ARCHIVED, so a charge against it would fail", ErrProviderRejected, priceRef)
+	}
+	return nil
+}
+
+// Compile-time proof that the Stripe provider carries the optional collection and verification
+// capabilities. Neither is on the `Provider` interface, which is the point.
+var (
+	_ CollectionProvider = (*StripeProvider)(nil)
+	_ PriceVerifier      = (*StripeProvider)(nil)
+)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Metered usage

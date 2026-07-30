@@ -65,6 +65,10 @@ type Service struct {
 	subPlans map[string]string
 	// freePlan is the degradation target. Empty means FreePlanID.
 	freePlan string
+	// pricing caches the last price-reference preflight (Decision 9). Cached rather than probed per
+	// request: /readyz reports it, and resolving prices on every readiness check would make a provider
+	// latency spike read as this service being unhealthy.
+	pricing pricingCache
 
 	// rollout is the P7 feature flag. Nil means "no rollout gate configured", which is the correct
 	// behaviour for a test harness; a DEPLOYMENT wires one, and its zero value is fully dark.
@@ -134,6 +138,14 @@ func (s *Service) Provider() Provider { return s.provider }
 // Describe names the live provider and secrets source — the health signal, never a credential.
 func (s *Service) Describe() map[string]string {
 	out := map[string]string{"provider": s.provider.Describe()}
+	// The PRICING preflight's stored summary (Decision 9). "not_run" is a distinct answer from
+	// "verified": a surface that reported the second for the first would tell an operator their pricing
+	// is fine when nothing has checked it.
+	if rep, ran := s.PricingStatus(); ran {
+		out["pricing"] = rep.Summary()
+	} else {
+		out["pricing"] = "not_run"
+	}
 	if s.secrets != nil {
 		info := s.secrets.Describe()
 		out["secrets_source"] = info.Kind

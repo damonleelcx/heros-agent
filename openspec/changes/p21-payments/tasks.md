@@ -122,7 +122,7 @@ instead of leaving it as a footnote on an unticked box.
       block on §13, an NFR, a risk, and an open question naming who owns creating them.
 - [x] 11.2 **OpenSpec**: add the **preflight** requirement to the `stripe-billing-provider` delta and a design
       decision for it; re-fold the capability into `openspec/specs/`.
-- [ ] 11.3 **Backend**: implement the preflight — resolve **every** configured `price_ref` at the provider and
+- [x] 11.3 **Backend**: implement the preflight — resolve **every** configured `price_ref` at the provider and
       name the ones that do not resolve, **before** anything charges; surface the result on the readiness
       signal. A wrong price id must fail at configuration time, not mid-period at the first charge.
 - [ ] 11.4 **Backend + DevOps**: make a real-account run possible **without a code edit** — `cmd/p21hermes`

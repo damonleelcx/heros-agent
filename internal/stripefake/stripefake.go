@@ -75,6 +75,8 @@ type Server struct {
 	usage      map[string]map[string]float64 // subscription item id -> period key -> total
 	credits    map[string]map[string]any
 	refunds    map[string]map[string]any
+	// prices are the price references this account knows: id -> active.
+	prices map[string]bool
 	// owner maps a subscription to its customer. Beside the subs map rather than on fakeSub so the
 	// object serializer stays a pure function of fakeSub.
 	owner map[string]string
@@ -150,7 +152,7 @@ func New() *Server {
 		subs: map[string]*fakeSub{}, items: map[string]*fakeItem{}, invoices: map[string]*fakeInvoice{},
 		usage: map[string]map[string]float64{}, credits: map[string]map[string]any{},
 		refunds: map[string]map[string]any{}, idem: map[string]idemEntry{}, calls: map[string]int{},
-		owner: map[string]string{},
+		owner: map[string]string{}, prices: map[string]bool{},
 	}
 	f.srv = httptest.NewServer(http.HandlerFunc(f.handle))
 	return f
@@ -262,6 +264,24 @@ func (f *Server) SeedSubscription(platformCustomerID, subPrice, meteredPrice str
 	f.subs[sub.id] = sub
 	f.owner[sub.id] = cus
 	return cus, sub.id, mi.id
+}
+
+// getPrice resolves a price reference. Only SEEDED prices resolve — a fake that resolved anything would
+// make the preflight vacuous, which is the one thing a configuration check must never be.
+func (f *Server) getPrice(id string) (int, []byte) {
+	active, known := f.prices[id]
+	if !known {
+		return errBody(http.StatusNotFound, "invalid_request_error", "resource_missing", "no such price: "+id)
+	}
+	return okBody(map[string]any{"id": id, "object": "price", "active": active})
+}
+
+// SeedPrice registers a price the account knows. `active=false` models an ARCHIVED price: it resolves
+// and cannot be charged on, which is exactly the case a local shape check would wave through.
+func (f *Server) SeedPrice(id string, active bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.prices[id] = active
 }
 
 // SeedCustomerHandle registers a customer under a handle the PLATFORM already holds.
@@ -465,6 +485,8 @@ func (f *Server) route(r *http.Request, form url.Values) (int, []byte) {
 		return f.getInvoiceItem(strings.TrimPrefix(path, "/v1/invoiceitems/"))
 	case r.Method == http.MethodGet && path == "/v1/invoices":
 		return f.listInvoices(form)
+	case r.Method == http.MethodGet && strings.HasPrefix(path, "/v1/prices/"):
+		return f.getPrice(strings.TrimPrefix(path, "/v1/prices/"))
 	case r.Method == http.MethodPost && path == "/v1/checkout/sessions":
 		return f.createCheckoutSession(form)
 	case r.Method == http.MethodPost && path == "/v1/credit_notes":
