@@ -79,6 +79,27 @@ jobs:
           set -euo pipefail
           go run ./cmd/herosdist plan \
             --tag "${{ inputs.tag }}" --ref "${{ github.ref }}" | tee -a "$GITHUB_OUTPUT"
+      # 🔴 Fail here, in seconds, rather than in the image job after the whole matrix has built.
+      #
+      # The image job authenticates to ghcr.io with this run's GITHUB_TOKEN, which is scoped to THIS repository.
+      # It therefore cannot create a package under any other owner's namespace. Before the first rehearsal tag
+      # this constant said `heros-foreal`, an account that does not exist on GitHub at all — the image job would
+      # have failed on permissions, and because publish needs it, twenty minutes of building on five runners
+      # would have produced nothing.
+      - name: assert the image namespace is one this run can push to
+        run: |
+          set -euo pipefail
+          want="${{ github.repository_owner }}"
+          got="$(go run ./cmd/herosdist plan --tag "${{ inputs.tag }}" --ref "${{ github.ref }}" \
+                 | sed -n 's/^image_tags=ghcr\.io\/\([^/]*\)\/.*/\1/p' | head -n1)"
+          if [ "$got" != "$want" ]; then
+            echo "::error::the container image is configured as ghcr.io/$got/… but this run can only push under"\
+                 "ghcr.io/$want/… (GITHUB_TOKEN is scoped to ${{ github.repository }}). Set"\
+                 "distribution.ImageRepo/ImageOwner to $want, or give the image job a token for $got."
+            exit 1
+          fi
+          echo "image namespace $got matches the publishing owner"
+
       - name: state the plan
         run: |
           echo "### Release plan" >> "$GITHUB_STEP_SUMMARY"

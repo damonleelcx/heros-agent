@@ -14,7 +14,7 @@ import type { InstallView } from "@/lib/types.generated";
  * second export supplies a delivered posture so both renderings can be seen side by side.
  */
 export const PREVIEW_INSTALL: InstallView = {
-  "matrix_version": "targets-3d139fbdcc42895a",
+  "matrix_version": "targets-ce4e186bbfe883cf",
   "documented_release": "v0.20.0",
   "ratified_posture": "sign-notarize",
   "targets": [
@@ -97,7 +97,7 @@ export const PREVIEW_INSTALL: InstallView = {
       "arch": "any",
       "support": "limit",
       "limit": "no native musl binary \u2014 the CLI links CGO tree-sitter frontends against glibc, and a glibc binary does not run on musl (D6)",
-      "answer": "use the container image ghcr.io/heros-foreal/heros:<version>, which carries the same CLI in a glibc base",
+      "answer": "use the container image ghcr.io/damonleelcx/heros:<version>, which carries the same CLI in a glibc base",
       "channels": null
     }
   ],
@@ -175,10 +175,10 @@ export const PREVIEW_INSTALL: InstallView = {
       "publication": "published",
       "verification": "the image is digest-pinnable and is built in the same run from the same verified binary; pull by digest to pin exactly what you audited",
       "manager_owned": true,
-      "install": "docker run --rm -v \"$PWD:/repo\" ghcr.io/heros-foreal/heros:0.20.0 discover --repo /repo",
-      "upgrade": "docker pull ghcr.io/heros-foreal/heros:<newer>",
-      "uninstall": "docker rmi ghcr.io/heros-foreal/heros:0.20.0",
-      "pin": "docker run --rm ghcr.io/heros-foreal/heros:0.20.0   (or @sha256:\u2026 for a digest pin)"
+      "install": "docker run --rm -v \"$PWD:/repo\" ghcr.io/damonleelcx/heros:0.20.0 discover --repo /repo",
+      "upgrade": "docker pull ghcr.io/damonleelcx/heros:<newer>",
+      "uninstall": "docker rmi ghcr.io/damonleelcx/heros:0.20.0",
+      "pin": "docker run --rm ghcr.io/damonleelcx/heros:0.20.0   (or @sha256:\u2026 for a digest pin)"
     },
     {
       "id": "homebrew",

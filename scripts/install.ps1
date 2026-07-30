@@ -207,7 +207,7 @@ try {
             '  2. install with a package manager, which verifies the checksum from the signed manifest:',
             '       winget install HerosForeal.Heros',
             '  3. use the container image, which needs no local install:',
-            '       docker run --rm -v "${PWD}:/repo" ghcr.io/heros-foreal/heros:latest discover --repo /repo')
+            '       docker run --rm -v "${PWD}:/repo" ghcr.io/damonleelcx/heros:latest discover --repo /repo')
     }
 
     $signers = Join-Path $tmp 'allowed_signers'

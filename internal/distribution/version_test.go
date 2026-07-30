@@ -118,3 +118,56 @@ func TestCompareRefusesToCallADowngradeAnUpgrade(t *testing.T) {
 		}
 	}
 }
+
+// TestImageNamespaceIsThePublishingOwner is the pre-flight this repository learned to need the hard way.
+//
+// Before the first rehearsal tag, ImageRepo said `ghcr.io/heros-foreal/heros` — and `heros-foreal` does not exist
+// on GitHub, as either a user or an org. The image job authenticates to ghcr.io with the run's own GITHUB_TOKEN,
+// scoped to the building repository, so it could never have created a package under that namespace. It would have
+// failed on permissions, and since `publish` needs `image`, a full five-runner matrix would have produced nothing.
+//
+// The failure was cheap to find and expensive to hit. This test plus the plan-time assertion in release.yml make
+// it a seconds-long red instead of a twenty-minute one.
+func TestImageNamespaceIsThePublishingOwner(t *testing.T) {
+	const registry = "ghcr.io/"
+	if !strings.HasPrefix(ImageRepo, registry) {
+		t.Fatalf("ImageRepo %q is not a ghcr.io path; the workflow's login and the plan-time namespace check both "+
+			"assume it is", ImageRepo)
+	}
+	rest := strings.TrimPrefix(ImageRepo, registry)
+	parts := strings.SplitN(rest, "/", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		t.Fatalf("ImageRepo %q is not ghcr.io/<owner>/<name>", ImageRepo)
+	}
+	if parts[0] != ImageOwner {
+		t.Errorf("ImageRepo's namespace is %q but ImageOwner says %q — the gate compares ImageOwner, so a "+
+			"disagreement here means the gate is checking the wrong value", parts[0], ImageOwner)
+	}
+	// The owner must be the one that actually builds and pushes. It is asserted against the module's own
+	// repository owner as recorded in PackageHomepage, which is the one place the GitHub repo is named.
+	const homepagePrefix = "https://github.com/"
+	if !strings.HasPrefix(PackageHomepage, homepagePrefix) {
+		t.Fatalf("PackageHomepage %q is not a github.com URL", PackageHomepage)
+	}
+	repoOwner := strings.SplitN(strings.TrimPrefix(PackageHomepage, homepagePrefix), "/", 2)[0]
+	if ImageOwner != repoOwner {
+		t.Errorf("the image publishes under ghcr.io/%s/… but the repository that builds it is owned by %q.\n"+
+			"A run's GITHUB_TOKEN is scoped to its own repository, so it cannot create a package in another "+
+			"owner's namespace: the image job would fail on permissions and publish would produce nothing. "+
+			"Either set ImageOwner/ImageRepo to %q, or give the image job a token that can write to %q.",
+			ImageOwner, repoOwner, repoOwner, ImageOwner)
+	}
+}
+
+// TestTheMuslAnswerPointsAtTheRealImage — the Alpine row's answer is the command a user with no other option
+// pastes. A second, stale copy of the image path there is a `docker pull` that 404s for exactly the reader who
+// had nowhere else to go.
+func TestTheMuslAnswerPointsAtTheRealImage(t *testing.T) {
+	musl, ok := TargetFor("linux", "")
+	if !ok {
+		t.Fatal("no musl row in the matrix")
+	}
+	if !strings.Contains(musl.Answer, ImageRepo) {
+		t.Errorf("the musl row's answer (%q) does not name %s", musl.Answer, ImageRepo)
+	}
+}

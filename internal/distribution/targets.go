@@ -122,7 +122,10 @@ var targets = []Target{
 		GOOS: "linux", GOARCH: "", Platform: "Alpine / any musl Linux",
 		Support: SupportLimit,
 		Limit:   "no native musl binary — the CLI links CGO tree-sitter frontends against glibc, and a glibc binary does not run on musl (D6)",
-		Answer:  "use the container image ghcr.io/heros-foreal/heros:<version>, which carries the same CLI in a glibc base",
+		// Built from ImageRepo rather than spelled out: this sentence is what a user on Alpine pastes, and a
+		// second copy of the image path is a `docker pull` that 404s for exactly the reader who had no other
+		// option.
+		Answer: "use the container image " + ImageRepo + ":<version>, which carries the same CLI in a glibc base",
 	},
 }
 

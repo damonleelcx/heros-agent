@@ -234,7 +234,7 @@ sudo rpm -i https://github.com/damonleelcx/heros-agent/releases/download/v0.20.0
 **container image** — darwin, linux, windows
 
 ```sh
-docker run --rm -v "$PWD:/repo" ghcr.io/heros-foreal/heros:0.20.0 discover --repo /repo
+docker run --rm -v "$PWD:/repo" ghcr.io/damonleelcx/heros:0.20.0 discover --repo /repo
 ```
 
 #### Auditing the install script before you pipe it
@@ -264,7 +264,7 @@ The full story — installing, upgrading, rolling back, what the first-run OS wa
 #### Not supported — stated, because a blank reads as *should work*
 
 - **Windows 11 (arm64)** — not built — no native windows/arm64 runner in the matrix, and the CGO tree-sitter frontends make a cross-build a different, less-tested artifact (D1). Instead: run the windows/amd64 build under Windows' x64 emulation, or ask for the row: adding it is a new runner, not a redesign.
-- **Alpine / any musl Linux** — no native musl binary — the CLI links CGO tree-sitter frontends against glibc, and a glibc binary does not run on musl (D6). Instead: use the container image ghcr.io/heros-foreal/heros:<version>, which carries the same CLI in a glibc base.
+- **Alpine / any musl Linux** — no native musl binary — the CLI links CGO tree-sitter frontends against glibc, and a glibc binary does not run on musl (D6). Instead: use the container image ghcr.io/damonleelcx/heros:<version>, which carries the same CLI in a glibc base.
 
 Also generated but **not yet installable**, and listed so nobody plans around them:
 

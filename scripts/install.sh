@@ -142,7 +142,7 @@ detect_target() {
           "and shipping a half-tested static build would fail inside your CI instead of here." \
           "" \
           "Use the container image, which carries the same CLI in a glibc base:" \
-          "  docker run --rm -v \"\$PWD:/repo\" ghcr.io/heros-foreal/heros:latest discover --repo /repo"
+          "  docker run --rm -v \"\$PWD:/repo\" ghcr.io/damonleelcx/heros:latest discover --repo /repo"
     fi
   fi
 }
@@ -289,7 +289,7 @@ verify_signature() { # verify_signature <manifest> <sshsig> <rawsig>
       "  2. install an ed25519-capable verifier and re-run:" \
       "       macOS: brew install openssh    ·    Debian/Ubuntu: apt-get install -y openssh-client" \
       "  3. use the container image, which needs no local install:" \
-      "       docker run --rm -v \"\$PWD:/repo\" ghcr.io/heros-foreal/heros:latest discover --repo /repo"
+      "       docker run --rm -v \"\$PWD:/repo\" ghcr.io/damonleelcx/heros:latest discover --repo /repo"
 }
 
 # ── 5. choose an install directory ──────────────────────────────────────────────────────────────────────

@@ -124,7 +124,21 @@ func (v Version) RequiresSignature() bool { return v.Channel != ChannelDev }
 // It is a constant rather than a workflow variable because it appears in the image build, the README, the
 // musl limit row's answer, and `heros doctor`'s Alpine refusal — and a repository name that is right in
 // three of those four places is a broken `docker pull` for the reader who hit the fourth.
-const ImageRepo = "ghcr.io/heros-foreal/heros"
+//
+// 🔴 The NAMESPACE must be the owner of the repository that builds it. This said `heros-foreal` until
+// 2026-07-30, when a pre-flight check before the first rehearsal tag found that `heros-foreal` does not exist
+// on GitHub at all (404 as both a user and an org). The image job authenticates to ghcr.io with the run's own
+// GITHUB_TOKEN, which is scoped to this repository — so it could never have created a package under someone
+// else's namespace. The `image` job would have failed on permissions, and because `publish` needs it, the
+// release would have produced nothing after twenty minutes of building on five runners.
+//
+// `TestImageNamespaceIsThePublishingOwner` and a plan-time assertion in release.yml now hold this to the
+// repository owner, so the mismatch fails in seconds rather than after the matrix.
+const ImageRepo = "ghcr.io/damonleelcx/heros"
+
+// ImageOwner is the namespace ImageRepo publishes under — the segment that must equal the building
+// repository's owner. Split out so the gate compares a value rather than parsing a string in two places.
+const ImageOwner = "damonleelcx"
 
 // ImageTags is the container tags this version publishes (task 3.6). GA also moves ":latest"; a
 // prerelease never does — a rehearsal that moves :latest is a rehearsal that shipped.
