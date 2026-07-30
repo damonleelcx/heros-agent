@@ -118,6 +118,51 @@ posture is worth more than a number.
 |-------|-----|-----------------|--------------|
 | P23 — Legal Surface & Developer Documentation *(Terms + Privacy Notice as versioned artifacts; append-only consent records; three-tier generated docs; accuracy fences)* | [P23-legal-and-developer-docs.md](P23-legal-and-developer-docs.md) | `p23-legal-and-docs` | Product Designer + Frontend + Sales Operations |
 
+### Seeing the System — P24, P26
+
+Two phases that add no product feature and instead close the platform's two remaining blind spots: *we cannot
+see the people using this*, and *the operator cannot see most of what we built*.
+
+**P24 — Product Analytics & Error Monitoring** installs Google Analytics 4, Microsoft Clarity and Sentry. It is
+unusual for this program: every other phase added a capability the posture permitted, and **this one modifies a
+posture currently enforced by tests** — the `default-src 'self'` CSP whose own comment says an analytics tag
+"does not render, it is REFUSED", two live assertions that the shipped CSP names no `https://` origin, P9 FR35,
+and the P23 note above that a third-party badge is refused because the no-third-party posture is worth more than
+a number. So the amendment is **narrow, per route prefix, and announced**: the tenant and operator prefixes keep
+`default-src 'self'` and *gain* a per-prefix assertion; the public prefix becomes bounded by a checked-in origin
+allowlist. **Clarity is refused outright on `/app/**` and the operator console** — a session recorder pointed at
+prompt text, diffs and cross-tenant aggregates would export the exact content class the P11 egress allowlist was
+built to keep in. GA4 never gets a browser tag on a tenant page; console usage is emitted server-side with a
+**closed surface enum**, because a URL under `/app` carries variant, run, node and tenant ids. Sentry events are
+**constructed from an allowlist** (the `internal/runlink` pattern) rather than scrubbed, and the message body is
+dropped unless it is a central `error.code`. All three are **absent by default everywhere except our own hosted
+deployment**, and the air-gapped package asserts zero external origins at package-build time. The phase also
+leaves the guard *stronger*: a per-origin browser-measured transfer budget, because `scan-bundle.mjs` measures
+only `.next/static` and would have stopped a 3D library while not noticing three trackers.
+
+**P26 — Operator Console Refresh** reconciles the P8 operator console with the fourteen phases that landed after
+it. The gap is one grep — `internal/adminops/` and `internal/api/p8.go` import nothing from `forgedelivery`,
+`deliveryrecord`, `changedelivery`, `distribution` or `runlink` — so an operator cannot see a delivery, a release,
+a signing key, an axis refusal, or the link coverage that qualifies a SUM figure. The behavioural consequence is
+worse than any missing page: **impersonation has become the workaround**, so the platform's most privileged read
+is answering routine lookups. Four read-only surfaces close the gaps; three honesty corrections land *first*
+(coverage beside every derived figure, `unverified` authored changes provably excluded, the audit chain's real
+merge-path coverage stated). But the phase's **product is a fence** — a checked-in operator-surface ledger with a
+build failure for any capability that resolves to neither a surface nor a reasoned absence, because fourteen
+phases of drift happened with nothing failing, and a refresh that closes nine gaps and leaves that property
+intact buys eighteen months rather than fixing anything. Success is measured in **impersonations displaced**, not
+pages shipped, so the phase can fail visibly.
+
+> **There is no P25.** The token `p25` already denotes **P2.5 — Metrics & Observability** in this repository
+> (`/p25/monitor`, the Gantt id in [`../implementation-timeline/README.md`](../implementation-timeline/README.md),
+> `internal/api/monitor.go`). Reusing it for a new phase would make `p25` ambiguous in exactly the places an
+> operator greps during an incident, so the operator-console phase is numbered **P26**.
+
+| Phase | PRD | OpenSpec change | Lead role(s) |
+|-------|-----|-----------------|--------------|
+| P24 — Product Analytics & Error Monitoring *(GA4 + Clarity on the public prefix only; Sentry allowlist-constructed; consent by category; the origin fence extended)* | [P24-analytics-and-error-monitoring.md](P24-analytics-and-error-monitoring.md) | `p24-analytics-error-monitoring` | Frontend + DevOps |
+| P26 — Operator Console Refresh *(the surface ledger + its build fence; delivery, release, axis and oversight surfaces; three honesty corrections)* | [P26-operator-console-refresh.md](P26-operator-console-refresh.md) | `p26-operator-console-refresh` | Frontend + Backend |
+
 ## PRD template
 
 Every phase PRD follows this structure:
