@@ -56,6 +56,38 @@ of the period will be refused (loudly, which is the intended failure, but it wil
 `cmd/p21hermes` demonstrates the refusal on purpose: a constraint nobody has seen fire is a constraint
 nobody believes.
 
+## The run against a real repository
+
+`cmd/p21hermes` drives the whole path against a real checkout of
+[nousresearch/hermes-agent](https://github.com/nousresearch/hermes-agent).
+
+```
+checkout:  nousresearch/hermes-agent @ 937222f4e
+provider:  stripe(test)  (in-process Stripe — no credential, no real money)
+rollout:   billing=enabled provider_mode=test gainshare=enabled auto_merge_entitlement=enabled
+result:    18 step(s), 0 failed
+```
+
+Real in that run: the repository (its files are checked and its HEAD is what the gainshare evidence
+points at — deleting one of the named source files makes the demo report it), and the entire P21 code
+path end to end. Stubbed: the per-node spend figures, which the demo says in its own output rather than
+letting a reader assume otherwise.
+
+What the run demonstrates, in order: a Stripe customer handle (never a card) → a server-minted checkout
+session → the payment method mirrored from a webhook (brand and last four only) → `invoice.paid`
+granting the plan by an audited change → a redelivery applying nothing → a forged delivery rejected
+before any parse → a subscription on the plan's opaque price reference → the period's SUM reported as a
+quantity → a metered charge that stays one charge across a retry → a fractional quantity **refused**
+rather than rounded → an additive credit with the original intact → an invoice read back with every line
+naming its basis → reconciliation against Stripe's recorded usage → the dunning grace window keeping the
+entitlement → the boundary degrading to Free without deleting anything → paying restoring it → and the
+gainshare invariant, where **the larger verified saving is the one that bills nothing** because it was
+never merged.
+
+The console renders it: the billing page against this run shows the plan by name, the period's SUM and
+usage, the invoice line with its basis, the payment method, and the verified-savings table in which
+`handle_max_iterations` carries the period's largest saving and the words *not billed*.
+
 ## Live-mode cutover (V2) — NOT taken
 
 Gated on **both** (PRD Q5): this checklist green against a real Stripe test account, **and** one
