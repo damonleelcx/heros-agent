@@ -125,7 +125,7 @@ instead of leaving it as a footnote on an unticked box.
 - [x] 11.3 **Backend**: implement the preflight — resolve **every** configured `price_ref` at the provider and
       name the ones that do not resolve, **before** anything charges; surface the result on the readiness
       signal. A wrong price id must fail at configuration time, not mid-period at the first charge.
-- [ ] 11.4 **Backend + DevOps**: make a real-account run possible **without a code edit** — `cmd/p21hermes`
+- [x] 11.4 **Backend + DevOps**: make a real-account run possible **without a code edit** — `cmd/p21hermes`
       takes `-plans <path>` so a catalog carrying real Stripe price ids can be published from a config store,
       and the API key comes from the **environment or stdin** rather than a command-line flag (a flag puts a
       credential in shell history and in `ps` output).

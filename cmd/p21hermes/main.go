@@ -29,6 +29,17 @@
 //	go run ./cmd/p21hermes -repo /tmp/hermes-agent            # run the period, print the report, exit
 //	go run ./cmd/p21hermes -repo /tmp/hermes-agent -serve     # …then serve the console's platform API
 //
+// Against a REAL Stripe test account, which needs the three artefacts in PRD §10.1 — a test key, a
+// webhook signing secret, and price objects whose ids are in the catalog you publish:
+//
+//	export STRIPE_API_KEY=sk_test_…          # or pass -api-key-stdin and pipe it
+//	go run ./cmd/p21hermes -repo /tmp/hermes-agent \
+//	  -stripe-base https://api.stripe.com -plans ./my-stripe-catalog.json
+//
+// 🔴 The key is NOT a command-line flag. A flag puts a credential in shell history and in `ps` output
+// for every user on the box, which is the same class of exposure the Secrets seam exists to prevent —
+// and a demo that taught the wrong habit would be teaching it to the person most likely to copy it.
+//
 // With `-serve`, run the console against it:
 //
 //	cd web/console && PLATFORM_API_BASE=http://127.0.0.1:4399 \
@@ -37,6 +48,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"flag"
 	"fmt"
@@ -133,7 +145,8 @@ var (
 	serve       = flag.Bool("serve", false, "serve the console's platform API after running the period")
 	addr        = flag.String("addr", "127.0.0.1:4399", "listen address for -serve")
 	stripeBase  = flag.String("stripe-base", "", "Stripe API base URL; empty starts an in-process fake in TEST mode")
-	apiKeyFlag  = flag.String("api-key", "", "Stripe API key for -stripe-base; never logged")
+	keyStdin    = flag.Bool("api-key-stdin", false, "read the Stripe API key from stdin (one line) instead of the environment")
+	plansFlag   = flag.String("plans", "", "path to a plan catalog to publish; empty uses the built-in placeholder catalog")
 	liveMode    = flag.Bool("live", false, "run the rollout in LIVE mode (refused unless a live key is supplied)")
 	startOnFree = flag.Bool("start-free", true, "start the account on Free so the checkout → grant path is exercised")
 	breakPrice  = flag.String("break-price", "", "leave this price reference UNCONFIGURED at the provider, so the preflight's red path is visible")
@@ -184,24 +197,27 @@ func main() {
 
 // state is the wired P21 stack plus the api.P7Source and api.PaymentsSource implementations.
 type state struct {
-	repoDir   string
-	headSHA   string
-	plans     *plancfg.Resolver
-	accounts  *account.MemStore
-	usage     *metering.MemUsageStore
-	meter     *metering.Meter
-	gate      *entitlement.Gate
-	svc       *billing.Service
-	provider  *billing.StripeProvider
-	rollout   *billing.Rollout
-	fake      *stripefake.Server
-	nodes     []hermesNode
-	missing   []string
-	steps     []step
-	subRef    string
-	checkout  billing.CheckoutSession
-	wrongRef  string
-	creditRef string
+	repoDir  string
+	headSHA  string
+	plans    *plancfg.Resolver
+	accounts *account.MemStore
+	usage    *metering.MemUsageStore
+	meter    *metering.Meter
+	gate     *entitlement.Gate
+	svc      *billing.Service
+	provider *billing.StripeProvider
+	rollout  *billing.Rollout
+	fake     *stripefake.Server
+	nodes    []hermesNode
+	// meteredPrice is the Team plan's metered price reference, read from the PUBLISHED catalog rather
+	// than typed here — a literal would defeat the whole point of `-plans`.
+	meteredPrice string
+	missing      []string
+	steps        []step
+	subRef       string
+	checkout     billing.CheckoutSession
+	wrongRef     string
+	creditRef    string
 }
 
 // step is one line of the demo's evidence log: what was attempted, and what actually happened.
@@ -233,13 +249,23 @@ func build(repoDir string) (*state, error) {
 	}
 
 	// ── 1. Plan configuration, from a config store on disk (never git) ────────
-	cfgDir, err := os.MkdirTemp("", "p21hermes-config-*")
-	if err != nil {
-		return nil, err
-	}
-	cfgPath := filepath.Join(cfgDir, "plans.json")
-	if err := os.WriteFile(cfgPath, []byte(hermesCatalog), 0o600); err != nil {
-		return nil, err
+	//
+	// `-plans` is what makes a real-account run possible without editing this file: the built-in catalog
+	// carries PLACEHOLDER price references (`price_ref_team_sub`), which 404 against a real Stripe
+	// account. A catalog whose ids are real Stripe prices is published the same way — from a config
+	// store, never from git — and the preflight below is what tells you whether you got it right.
+	cfgPath := *plansFlag
+	if cfgPath == "" {
+		cfgDir, derr := os.MkdirTemp("", "p21hermes-config-*")
+		if derr != nil {
+			return nil, derr
+		}
+		cfgPath = filepath.Join(cfgDir, "plans.json")
+		if err := os.WriteFile(cfgPath, []byte(hermesCatalog), 0o600); err != nil {
+			return nil, err
+		}
+	} else if _, err := os.Stat(cfgPath); err != nil {
+		return nil, fmt.Errorf("read the plan catalog at %s: %w", cfgPath, err)
 	}
 	plans := plancfg.NewResolver(plancfg.NewFileSource(cfgPath), plancfg.NewMemAudit())
 	plans.SetClock(now)
@@ -248,14 +274,29 @@ func build(repoDir string) (*state, error) {
 	}
 	st.plans = plans
 
+	// The demo's own assumptions about the catalog, checked LOUDLY. A published catalog missing the
+	// plans this demo drives would otherwise produce a confusing half-run.
+	for _, want := range []string{"free", "team"} {
+		if _, rerr := plans.ResolvePlan(want); rerr != nil {
+			return nil, fmt.Errorf("the published catalog has no %q plan, which this demo drives: %w", want, rerr)
+		}
+	}
+	teamPlan, err := plans.ResolvePlan("team")
+	if err != nil {
+		return nil, err
+	}
+	st.meteredPrice = teamPlan.PriceRefs["metered"]
+
 	// ── 2. Stripe — the in-process one by default ─────────────────────────────
-	base, apiKey := *stripeBase, *apiKeyFlag
+	base, apiKey := *stripeBase, ""
 	if base == "" {
 		st.fake = stripefake.New()
 		base, apiKey = st.fake.URL(), stripefake.TestKey
-	}
-	if apiKey == "" {
-		return nil, fmt.Errorf("-stripe-base needs -api-key (the key is read here and never logged)")
+	} else {
+		var kerr error
+		if apiKey, kerr = stripeAPIKey(); kerr != nil {
+			return nil, kerr
+		}
 	}
 	secrets, err := billing.NewManagedSecrets(providergateway.StaticSecrets{
 		billing.SecretBillingAPIKey:         {APIKey: apiKey},
@@ -447,7 +488,7 @@ func (s *state) runPeriod(ctx context.Context) error {
 		// in-process Stripe there is no Finance, so the demo seeds it; against a real account this line
 		// does nothing and the item is already there.
 		if s.fake != nil {
-			s.fake.SeedMeteredItem(sub.SubscriptionRef, "price_ref_team_metered")
+			s.fake.SeedMeteredItem(sub.SubscriptionRef, s.meteredPrice)
 		}
 		if res, rerr := s.svc.ReportUsage(ctx, customerID, ctxLast, metering.MetricSUM); rerr != nil {
 			s.record("report usage", false, "%v", rerr)
@@ -562,7 +603,7 @@ func (s *state) demonstrateFractionalRefusal(ctx context.Context) {
 		ProviderCustomerHandle: acct.ProviderCustomerHandle,
 		Kind:                   billing.KindMetered,
 		Period:                 periods[len(periods)-1].ID,
-		PriceRef:               "price_ref_team_metered",
+		PriceRef:               s.meteredPrice,
 		Quantity:               2.5,
 		IdempotencyKey:         "demo:fractional-quantity",
 		Description:            "demo: a quantity Stripe cannot record exactly",
@@ -625,6 +666,29 @@ func (s *state) report() {
 	fmt.Println("  Stubbed inputs: the per-node spend figures. Everything else — the repository, the")
 	fmt.Println("  Stripe conversation, the idempotency keys, the signature verification, the plan")
 	fmt.Println("  changes and the corrections — is the shipped code path.")
+}
+
+// stripeAPIKey resolves the key for a real-Stripe run, from the environment or from stdin.
+//
+// 🔴 Never from a flag. A command-line flag puts the credential in shell history and in `ps` output for
+// every user on the box — the same exposure the Secrets seam exists to prevent, and the one a demo is
+// most likely to teach by example. In a deployment the key comes from the seam; this is the one-off
+// local path, and it is the least-bad version of one.
+func stripeAPIKey() (string, error) {
+	if *keyStdin {
+		line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+		key := strings.TrimSpace(line)
+		if key == "" {
+			return "", fmt.Errorf("-api-key-stdin was given but stdin carried no key: %v", err)
+		}
+		return key, nil
+	}
+	if key := strings.TrimSpace(os.Getenv("STRIPE_API_KEY")); key != "" {
+		return key, nil
+	}
+	return "", fmt.Errorf("-stripe-base needs a Stripe API key.\n" +
+		"  export STRIPE_API_KEY=<your Stripe TEST key>     # not a flag: a flag lands in shell history and in ps\n" +
+		"  …or pipe it:  echo $KEY | go run ./cmd/p21hermes -repo <repo> -stripe-base <url> -api-key-stdin")
 }
 
 func gitHead(dir string) (string, error) {
