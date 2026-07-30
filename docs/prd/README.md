@@ -89,6 +89,34 @@ the operator console (its own `admin.*` origin) stand on.
 | P21 — Stripe Payments *(real Stripe behind the P7 Provider interface; checkout; idempotent webhooks; entitlement sync)* | [P21-stripe-payments.md](P21-stripe-payments.md) | `p21-payments` | Sales Operations + Backend |
 | P22 — SSO & Identity *(customer OIDC/SAML behind the ADR-008 seam; operator SSO+MFA made real)* | [P22-sso-identity.md](P22-sso-identity.md) | `p22-sso` | System Designer + Backend |
 
+**P21 is implemented.** Its three capabilities are folded into the live spec set —
+[`stripe-billing-provider`](../../openspec/specs/stripe-billing-provider/spec.md),
+[`payment-collection`](../../openspec/specs/payment-collection/spec.md),
+[`billing-webhooks`](../../openspec/specs/billing-webhooks/spec.md) — and it ships with two operational
+documents rather than only code: the
+[billing-webhook ingress runbook](../decisions/p21-billing-webhook-ingress.md) (the one
+inbound-from-internet path, its secret wiring, and what to do when it misbehaves) and the
+[customer-facing billing copy](../sales/P21-billing-copy.md) (what a billing message may and may not
+say, with the banned phrases enforced at build time).
+
+What it depends on, and what depends on it:
+
+| Relationship | Phase | Why it matters to P21 |
+|---|---|---|
+| **Implements** | [P7 — Billing & Metering](P7-billing-metering.md) | P21 fills P7's `Provider` box and changes nothing above it: the interface, the append-only ledger, the derived idempotency keys, the correction path and the entitlement gate are P7's and are consumed verbatim. |
+| **Reads only** | [P5.5 — Proposals & Verification](P5.5-proposals-verification.md) | Gainshare bills from the verified-delta ledger for **merged** PRs and nothing else. P21 does not loosen this; the invariant is re-asserted against the real provider. |
+| **Renders in** | [P9 — Web Console](P9-web-console.md) | The billing page and its BFF. The console holds no Stripe key and no price; the card goes browser→Stripe. |
+| **Deployed by** | [P19 — Deployment & Delivery](P19-deployment-delivery.md) | The webhook endpoint is the single documented inbound path in P19's otherwise egress-only network model. |
+| **Constrained by** | [ADR-002](../adr/ADR-002-provider-gateway-serves-platform-callers.md) | The platform is never in a customer's production request path. Billing is internal commerce: if the billing path is down, a customer's transformed program is unaffected. |
+
+Run it against a real repository:
+
+```bash
+git clone https://github.com/nousresearch/hermes-agent /tmp/hermes-agent
+go run ./cmd/p21hermes -repo /tmp/hermes-agent            # the whole period, printed
+go run ./cmd/p21hermes -repo /tmp/hermes-agent -serve     # …and serve the console's platform API
+```
+
 ## PRD template
 
 Every phase PRD follows this structure:

@@ -107,11 +107,26 @@ persist-then-ack / reversible) it touches.
       at period end", gainshare → "verified and merged" with evidence links; no internal mechanism leaks.
 
 ## 10. Documentation & fold-in
-- [ ] 10.1 Cross-link the PRD, this change, P7, P5.5, P9, P19, and ADR-002; add the P21 row to `docs/prd/README.md`.
-- [ ] 10.2 On deploy, fold the three delta specs into `openspec/specs/` (drop the `## ADDED` headers).
+- [x] 10.1 Cross-link the PRD, this change, P7, P5.5, P9, P19, and ADR-002; add the P21 row to `docs/prd/README.md`.
+- [x] 10.2 On deploy, fold the three delta specs into `openspec/specs/` (drop the `## ADDED` headers).
 
 ## Verification record
+
+Recorded in [`docs/decisions/p21-m16-exit-checklist.md`](../../../docs/decisions/p21-m16-exit-checklist.md),
+item by item, with what each claim rests on.
+
 - [ ] V1 M16 exit checklist (PRD §13) fully green against **one** Stripe test-mode stack (claims simultaneously true).
+      **NOT CLAIMED.** Eleven of twelve items are green, and the twelfth (attach a payment method with a
+      test card) is green on the platform side. But all of it ran against an **in-process** Stripe, not a
+      real Stripe test account, and the checklist says *"against one Stripe test-mode stack"*. The
+      remaining step is one command with a Stripe test key this repository does not and must not hold:
+      `go run ./cmd/p21hermes -repo <hermes> -stripe-base https://api.stripe.com -api-key <test key>`.
+      Ticking this box before that runs would be the exact claim-without-evidence this change spends its
+      whole budget preventing.
 - [ ] V2 Live-mode cutover gated on the M16 checklist **and** one reconciled test-mode period signed off by Finance
       (PRD Q5); the rollout flag flips to live only then.
-- [ ] V3 Edition/deployment-form impact matrix attached to every P21 PR.
+      **NOT TAKEN**, and correctly so: neither gate is satisfied. The rollout flag stays at its zero
+      value, which is test. The cutover sequence is in the ingress runbook §6.
+- [x] V3 Edition/deployment-form impact matrix attached to every P21 PR.
+      Every commit in this change carries a three-row Personal / Trial / Production matrix with a reason
+      on each row, including the `N` rows — an unexplained `N` is the half of the rule that gets skipped.

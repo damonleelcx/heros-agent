@@ -338,3 +338,23 @@ charge.refunded / charge.dispute.created     -> mirror only; NO ledger row from 
   (preserved, not loosened); estimated/un-merged saving raises no charge.
 - **The webhook endpoint is a soft attack surface** → one documented inbound path, signature-gated before any side
   effect, timestamp-bounded replay window, rate-aware (D3, mirror of P19's egress allowlist).
+
+## Where this landed
+
+| What | Where |
+|---|---|
+| The Stripe provider | [`internal/billing/stripe.go`](../../../internal/billing/stripe.go) |
+| Collection (checkout, plan change by name) | [`internal/billing/collection.go`](../../../internal/billing/collection.go) |
+| The entitlement sync | [`internal/billing/entitlementsync.go`](../../../internal/billing/entitlementsync.go) |
+| The inbound endpoint | [`internal/api/p21.go`](../../../internal/api/p21.go) → `POST /billing/webhook` |
+| The billing page + its BFF | [`web/console/src/app/app/billing`](../../../web/console/src/app/app/billing) |
+| The in-process Stripe (tests + demo only) | [`internal/stripefake`](../../../internal/stripefake) — a fence fails the build if a shipping package reaches it |
+| Run it against a real repository | [`cmd/p21hermes`](../../../cmd/p21hermes) |
+| The ingress runbook | [`docs/decisions/p21-billing-webhook-ingress.md`](../../../docs/decisions/p21-billing-webhook-ingress.md) |
+| The customer-facing copy | [`docs/sales/P21-billing-copy.md`](../../../docs/sales/P21-billing-copy.md) |
+| The M16 verification record | [`docs/decisions/p21-m16-exit-checklist.md`](../../../docs/decisions/p21-m16-exit-checklist.md) |
+
+The three capabilities are folded into the live spec set:
+[`stripe-billing-provider`](../../specs/stripe-billing-provider/spec.md),
+[`payment-collection`](../../specs/payment-collection/spec.md),
+[`billing-webhooks`](../../specs/billing-webhooks/spec.md).
