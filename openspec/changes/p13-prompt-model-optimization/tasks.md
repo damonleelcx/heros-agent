@@ -410,3 +410,95 @@ every language. Coverage is **identical on every plan**.
 - [x] 22.3 State the claim and its boundary: the platform states, **per cell**, what it applies and what
       it refuses. 🚫 "Go is supported" is never "every Go call site is supported," and coverage is
       identical on every plan. → PRD §9.2 Sales lens.
+
+## 23. Wave 13e — how a change reaches a running agent (`change-delivery`, `prompt-model-delivery`)
+
+> Deferred by design: this wave is **docs-first**. The decision is
+> [ADR-010](../../../docs/adr/ADR-010-runtime-gradual-rollout.md); nothing below writes a rollout into a
+> customer tree until the binding document schema change is specified, because
+> [ADR-009](../../../docs/adr/ADR-009-binding-document-format.md) already established that the document's
+> shape is a one-way door the moment it ships.
+
+**System Designer**
+
+- [x] 23.1 🔴 **Delivery as a total function.** Specify (axis × change × route) with no absent cell, and
+      the reported state for a change no route can deliver. A change that falls out of the table
+      silently is the defect this wave exists to remove. → `specs/change-delivery/spec.md`
+      (Test: `TestDeliveryTableIsTotalOverEveryAxis`).
+- [x] 23.2 Specify the two routes and their **asymmetry** — source is the default and the only road to
+      permanence; runtime is temporary and evidence-producing. 🚫 Never presented as a tier or as
+      interchangeable. → `specs/change-delivery/spec.md`.
+- [x] 23.3 🔴 **The precursor rule.** No path converts a rollout into a durable configuration without a
+      merged pull request; a completed rollout's state is **not** `delivered`. → `specs/change-delivery/spec.md`
+      (Test: `TestRolloutNeverReachesDeliveredState`).
+- [x] 23.4 Specify the three eligibility causes and their evaluation order — `notRuntimeResolvable` →
+      `nodeNotBound` → `noRolloutBinding` — and why a permanent boundary is announced first. →
+      `specs/change-delivery/spec.md` (Test: `TestEligibilityCauseOrderPrefersTheBoundary`).
+- [x] 23.5 State that the runtime route reuses the **one** resolve-hash-gate spine; a rollout-only
+      resolve path, hash derivation, or gate is forbidden. → `specs/change-delivery/spec.md`
+      (Test: `TestRolloutArmAndMaterializedChangeHashIdentically`).
+
+**Backend**
+
+- [x] 23.6 🔴 **Arm assignment is deterministic and offline.** A pure function of rollout identity and a
+      caller-supplied key; no random source, no wall-clock, no process id, no replica-local state. Two
+      replicas agree without coordination, and a past assignment replays exactly. →
+      (Test: `TestArmAssignmentIsPureAndReplicaAgnostic`, `TestArmAssignmentReplaysWithoutATable`).
+- [x] 23.7 A caller with no assignment key gets per-invocation assignment, and the **weaker guarantee is
+      recorded** rather than a key being synthesized. → (Test: `TestMissingAssignmentKeyIsRecordedNotSynthesized`).
+- [x] 23.8 🔴 **Arm-level `config_hash` attribution.** Every invocation emits the hash of the arm it
+      resolved, plus rollout id and arm as separate fields. A resolver emitting the rollout's identity
+      where an arm hash belongs **fails the run** — the same class as resolving an unrequested
+      configuration (ADR-004 H1). This is what keeps two runs of one hash comparable, which is the
+      objection ADR-002 raised against per-node runtime decisions. →
+      (Test: `TestCandidateInvocationRecordsCandidateHash`, `TestRolloutIdentityInHashSlotFailsTheRun`).
+- [x] 23.9 Bounded expiry, evaluated with no network call and no human present; an expired rollout serves
+      the **parent**; extension only by a new document change. →
+      (Test: `TestExpiredRolloutServesParentOffline`).
+- [x] 23.10 🔴 **Local guard, human resume.** A tripped guard falls back to the parent in-process and
+      records the cause with **no call to the platform**; it does not resume on a timer or on the
+      condition clearing. → (Test: `TestGuardTripRevertsWithoutPlatform`, `TestRolloutDoesNotSelfResume`).
+- [x] 23.11 A rollout is **inert** during eval and verification runs (the resolver is pinned), and its
+      production evidence never enters the verified-delta ledger. →
+      (Test: `TestRolloutIsInertUnderPinnedResolver`, `TestRolloutEvidenceIsNotAVerifiedDelta`).
+- [x] 23.12 Entitlement enforced **server-side**; an active or unreadable halt blocks new rollouts and
+      fails closed; a halt does **not** reach into a customer's process to stop a running one. →
+      (Test: `TestRolloutEntitlementIsServerSide`, `TestUnreadableHaltFailsClosed`).
+
+**Backend — this axis's own cells**
+
+- [x] 23.13 Model id (within one provider), inference params, and prompt version are rollout-eligible on
+      a `bound` node; the same change on an `inline` node reports `nodeNotBound` and the source route is
+      unaffected. → `specs/prompt-model-delivery/spec.md` (Test: `TestBoundNodeFieldsAreRolloutEligible`).
+- [x] 23.14 🔴 **The provider cell.** A provider-crossing model change is `notRuntimeResolvable` in every
+      apply mode, naming the SDK call rewrite, and 🚫 never suggesting a `bound` migration. The two model
+      cells appear separately in the table. → `specs/prompt-model-delivery/spec.md`
+      (Test: `TestProviderCrossingRefusesBeforeApplyModeIsRead`).
+- [x] 23.15 Each arm carries a **complete resolved configuration**, never a delta against the other arm,
+      so both arms' effective values are readable in the diff (ADR-004 H2). →
+      `specs/prompt-model-delivery/spec.md` (Test: `TestBothArmsAreReadableWithoutComposition`).
+- [x] 23.16 A guardrail-rejected downgrade cannot be a rollout candidate; an undecided verdict may be,
+      and the ambiguity is recorded on the rollout. → `specs/prompt-model-delivery/spec.md`
+      (Test: `TestGuardrailVerdictBoundsRolloutAuthoring`).
+- [x] 23.17 An authored change is rollout-eligible on the same cell rules and stays `unverified` — a
+      rollout SHALL NOT launder it into a result. → `specs/prompt-model-delivery/spec.md`
+      (Test: `TestRolloutDoesNotUpgradeAnAuthoredChange`).
+
+**Frontend + Product Designer**
+
+- [x] 23.18 Render the delivery state as a **route table**, not a status word: which route delivered,
+      which refused, and the cause with its owner. A change refused by both routes reads as
+      **undeliverable**, never as pending, queued, or in review. →
+      `web/console/src/app/app/delivery/` (Test: `delivery.test.mjs`).
+- [x] 23.19 A `notRuntimeResolvable` row is structurally distinct from a `noRolloutBinding` row — the
+      first carries no artifact, no milestone, no "not yet"; the second names the missing field and its
+      owner. → (Test: `TestBoundaryAndBacklogRowsAreDistinguishable`).
+- [x] 23.20 Specify the wording boundary: a rollout is described as **evidence under real load**, never
+      as a deployment, a release, or a result. 🚫 "Rolled out" is never "shipped". → PRD §9 lenses.
+
+**QA**
+
+- [x] 23.21 🔴 **The gate that must go red.** Sabotage each of: arm-hash attribution, expiry, guard
+      revert, the precursor rule, and the eligibility order — each sabotage turns a distinct test red.
+      A delivery guarantee that cannot be made to fail is decoration.
+      → (Test: `TestDeliveryGuaranteesAreSabotageable`).

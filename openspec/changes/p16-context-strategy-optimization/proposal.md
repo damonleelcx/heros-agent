@@ -107,11 +107,24 @@ proposals on **held-out** eval sets with the retriever **pinned** per measuremen
   time refuses **identically in every language**, a call site that wrote **no message list** is told
   **that** — before and after its splitter lands — and only then is the language the honest answer. The
   cross-axis rules come from **P13's `language-coverage`** and are referenced, never restated.
+- **New capability `context-delivery` (wave 16e).** This axis's delivery cells, under P13's
+  [`change-delivery`](../p13-prompt-model-optimization/specs/change-delivery/spec.md) contract and
+  [ADR-010](../../../docs/adr/ADR-010-runtime-gradual-rollout.md). "Context strategy" is one name for
+  two things that land in different columns: a **retrieval parameter is a number**, so the runtime
+  route refuses it only as `noRolloutBinding` with a named missing field; a **selection policy is a
+  deletion** of written turns, so it is `notRuntimeResolvable`, permanently. The requirement that
+  matters most is neither — it is that the **drop record survives the second route**. This axis's
+  central guarantee is that a context decision records what it discarded, unskippable by construction;
+  a second path by which a context decision can take effect is precisely where an unskippable
+  guarantee becomes skippable, so the rule is stated as a property of the decision rather than of the
+  route: whatever chooses what the model sees records what it dropped, whichever arm chose it.
 
 ## Impact
 
 - **Affected capabilities:** `context-policy` (new), `retrieval-tuning` (new), `context-language-coverage` (new, 16d), `context-authoring` (new,
-  16c). Consumed, not modified: **`authored-change` (P13 — referenced, never restated)**,
+  16c), `context-delivery` (new, 16e). Consumed, not modified:
+  **`authored-change` (P13 — referenced, never restated)**,
+  **`change-delivery` (P13 — referenced, never restated)**,
   `entitlements` (P7), `web-console` (P9), `cli`/`ci` (P11), and:
   `variant-spec`/`resolution` (P2), `context-strategies`/registry (P3), `pattern-classifier` (P3.5),
   `eval-harness`/`scoring` (P4), `attribution-diagnosis` (P4.5), `proposals-verification` (P5.5),

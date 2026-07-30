@@ -333,3 +333,38 @@ identically in **every** language, before and after any splitter lands.
       `specs/context-language-coverage/spec.md`.
 - [x] 10.18 State the claim per cell: 🚫 never "we optimize context in any language" — that promises
       summarization materialization which refuses in **every** language, including Go. → PRD §9.2 Sales lens.
+
+## 11. Wave 16e — delivery cells on this axis (`context-delivery`)
+
+> Cross-axis rules come from **P13's `change-delivery`** and
+> [ADR-010](../../../docs/adr/ADR-010-runtime-gradual-rollout.md); they are referenced, never restated.
+
+**System Designer**
+
+- [x] 11.1 🔴 **The axis splits, and not where a reader expects.** A retrieval parameter is a number →
+      `noRolloutBinding` with a named missing field, ours to fix. A selection policy is a **deletion** of
+      written turns → `notRuntimeResolvable`, permanent. Specify them as separate cells whose causes are
+      not inferred from each other. → `specs/context-delivery/spec.md`
+      (Test: `TestRetrievalAndPolicyCarryDifferentCauses`).
+
+**Backend**
+
+- [x] 11.2 🔴 **The drop record survives the second route.** A candidate-arm context decision produces a
+      drop record through the **same unskippable path** as a parent-arm one, byte-comparable in shape,
+      and no arm, route, or apply mode bypasses the recording. A second way for a context decision to
+      take effect is exactly where an unskippable guarantee becomes skippable. →
+      (Test: `TestBothArmsRecordTheDrop`, `TestNoPathTakesEffectWithoutARecord`).
+- [x] 11.3 The drop-tolerance gate runs **before** rollout authoring and 🚫 still never refuses on
+      ignorance — an unknown tolerance is recorded and carried, not treated as a rejection. →
+      (Test: `TestDropToleranceGatesRolloutAuthoring`, `TestUnknownToleranceDoesNotBlockAuthoring`).
+- [x] 11.4 A retrieval change whose held-out verdict was refused for an **overlapping split** cannot be a
+      rollout candidate; the refusal names the overlap, not the delivery route. →
+      (Test: `TestOverlappingSplitBlocksRolloutAuthoring`).
+
+**Frontend + Product Designer**
+
+- [x] 11.5 Render the two context cells separately, and the retrieval cell as one that can gain a row
+      rather than a structural impossibility. → `web/console/src/app/app/context/`
+      (Test: `context.test.mjs`, `delivery.test.mjs`).
+- [x] 11.6 State the claim per cell: 🚫 never "we tune your context live" — retention refuses the runtime
+      route in **every** language. → PRD §9.2 Sales lens.

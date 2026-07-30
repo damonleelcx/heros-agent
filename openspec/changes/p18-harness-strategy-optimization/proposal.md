@@ -68,6 +68,18 @@ modelled, resolved, and hashed, but **refused at transform** with a typed `unsaf
   scoring change** — the axis rides `task_success`/`eval_cost_usd`/`eval_latency_ms`
   (`internal/evalharness/metricnames.go`) unchanged; a bespoke harness-quality metric, if ever needed, is
   an additive `RegisterMetric` (`registry.go:86`), not this phase.
+- **New capability `harness-delivery`.** This axis's delivery cells, under P13's
+  [`change-delivery`](../p13-prompt-model-optimization/specs/change-delivery/spec.md) contract and
+  [ADR-010](../../../docs/adr/ADR-010-runtime-gradual-rollout.md). A **scaffold is structure** —
+  swapping a node onto a reason-and-act loop changes how many calls the program makes and in what
+  control flow, which no document can introduce: `notRuntimeResolvable`, permanent. But a strategy's
+  **`max_turns`, retry budget and stop condition are numbers** on a loop that is already written:
+  `noRolloutBinding`, ours to fix. The distinction this axis must not lose is between two refusals that
+  both mention the runtime and mean opposite things — **`hostAbsent`** (the strategy is deliverable,
+  its host service is simply not running, and it refuses rather than substituting) versus
+  **`notRuntimeResolvable`** (it cannot be delivered as data at all, host or no host). One is answered
+  by starting a service; the other cannot be answered, and rendering them alike sends an operator to
+  restart something that was never the problem.
 
 ## Impact
 
@@ -152,7 +164,8 @@ never reach a customer's source, and the interim refusal is indefinite rather th
 ### Impact (addendum)
 
 - **Affected capabilities:** `harness-runtime` (new), `harness-materialization` (new), `harness-authoring`
-  (new). `agent-loop`'s refusal requirement is **modified** — narrowed per cell, not removed.
+  (new), `harness-delivery` (new). Consumed, not modified: **`change-delivery` (P13 — referenced, never
+  restated)**. `agent-loop`'s refusal requirement is **modified** — narrowed per cell, not removed.
 - **Affected code/systems:** `internal/harnessruntime` (new), `internal/transform`
   (`harnessartifact*.go`, `harnessmaterialize*.go`, `coverage.go`), `internal/registry/authoring.go`
   (the validate-without-register path the surface calls), `web/console` (`/app/harness`).

@@ -268,6 +268,29 @@ of a heavier scaffold is invisible until it runs, and a second apply path is a s
 both. Origin is **recorded and never hashed**: a user-authored configuration and an operator-proposed one
 that spell the same strategy are byte-identical downstream.
 
+## Decision 13 — A scaffold is structure, its bounds are numbers, and `hostAbsent` is a third thing
+
+**Context.** P13's `change-delivery` asks each axis which of its changes are data. For this axis the
+answer is genuinely mixed, and the axis already owns a *different* refusal that mentions the runtime.
+
+**Decision.** Two delivery cells. A **strategy swap** changes how many calls the program makes and in what
+control flow — a loop, which no document introduces: `notRuntimeResolvable`, permanent, naming the control
+loop. **`max_turns`, the retry budget and the stop condition** are parameters of a loop already written:
+`noRolloutBinding`, naming the absent field. And where the parameter cell does open, an arm admits only
+values inside the strategy's declared `ParamsSchema`, validated by the **same** check the registry applies
+at seal — a rollout must not become the one place a bound can be removed.
+
+**The distinction this axis must not lose.** `hostAbsent` (from `harness-runtime`) says the strategy is
+deliverable and its host service is simply not running, so it refuses rather than substituting.
+`notRuntimeResolvable` says it cannot be delivered as data at all, host or no host. One is answered by
+starting a service; the other cannot be answered. Rendering them alike sends an operator to restart
+something that was never the problem, and a delivery refusal therefore never offers a service start as a
+remedy.
+
+**Totality is extended, not assumed.** The harness canary now pushes a node carrying a real strategy
+through **each** route and requires both to refuse, with a sabotaged refusal on either turning the cell
+red. A route added without extending the canary would quietly convert the refusal into decoration.
+
 ## Interfaces sketch (addendum)
 
 ```

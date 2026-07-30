@@ -221,6 +221,27 @@ then the coherence gate, then the source's statement structure, then the languag
 the resolver can locate but does not model is a `call-site-cannot-carry-it` cause naming the construct —
 not a language gap — the same distinction the context axis draws for an unpacked argument mapping.
 
+## Decision 12 — Wiring is permanently outside the runtime route, and the gate has no second door
+
+**Context.** P13's `change-delivery` adds a second delivery route beside a gate whose entire purpose is
+to produce **nothing** for an incoherent ordering. That adjacency is the hazard.
+
+**Decision.** Every wiring cell is `notRuntimeResolvable`, **permanently**. Order and concurrency are
+compiled program structure; a document that could reorder statements in a built binary would be an
+interpreter, and shipping an interpreter into a customer's process to rearrange their own code is a larger
+change to their system than any optimization justifies. The cell carries no artifact and no date, and a
+later table that moves it to "pending" is claiming an ability that cannot exist.
+
+**And the rule the second route exists to be constrained by.** A change the coherence gate rejected yields
+no runnable spec, so it is **not authorable as a rollout candidate**, not deliverable as a pull request,
+and reaches a customer's process by no path. Without this stated explicitly, "the rewriter refused, so
+roll it out instead" is an available and plausible reading, and it would turn the strongest safety gate in
+the system into a speed bump.
+
+**Why say it rather than imply it.** The refusal here degrades slowly and quietly — first into a roadmap
+item, then into an exception. NFR15 and NFR16 make both halves executable: no path admits a gate-rejected
+ordering, and no wiring cell can acquire a date.
+
 ## Interfaces sketch
 
 ```

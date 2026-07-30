@@ -282,6 +282,47 @@ can prove it is a run. Trading L1/L2 for reach would produce exactly the failure
 own comment names: *a change that compiles and then degrades quality invisibly*. Reach is worth nothing if
 what arrives is wrong.
 
+## Decision 14 — Delivery is a total function, and the second route runs in the customer's process
+
+**Context.** Delivery was one chain: rewriter → diff → pull request → human merge. It says nothing about
+the case the coverage tables make common — the rewriter refuses, so there is no diff, so nothing ships and
+nothing is said. A verified change on an axis with no materializer produces a silence indistinguishable
+from neglect.
+
+**Decision.** Two moves, in this order, because the second is only safe once the first exists.
+
+*First, fix the shape of the claim.* Delivery is a **total function** over (axis × change × route): every
+cell names a route or a typed cause, and "no route can deliver this" is a **reported state** carrying the
+expected route and the refusing cause. This is deliberately the same move `language-coverage` made — a
+spread that was discoverable only by reading several tables becomes one table with no absent cells.
+
+*Then add the route.* A gradual rollout is a **two-armed binding document** resolved by ADR-004's
+generated accessor **inside the customer's own process**. Not our gateway: ADR-002 refused a place in
+their runtime, ADR-005 refused a standing credential to their repository, and a platform-served rollout
+would re-open both to buy an L3 convenience. The accessor is already in the request path — theirs, not
+ours — so riding it adds no credential, no network dependency, and no new blast radius.
+
+**What was rejected.** Serving a share of their production traffic (ADR-002's rejected option wearing a
+rollout's clothing). Shadow execution (doubles their provider spend for evidence the harness already
+produces, and never measures a user-facing outcome). Rollout *instead of* a pull request (their repository
+would stop describing what their agent does, and every later codemod would compute against a source that
+is not what runs). Auto-resume after a guard trip (automating the direction that re-exposes traffic to a
+known regression is the platform overriding a reviewed configuration on its own authority).
+
+**Why the four properties are load-bearing, not decoration.** Assignment is a pure function of rollout
+identity and a caller-supplied key, so every replica agrees with no coordination and a past assignment
+replays exactly. Every invocation emits **its arm's own** `config_hash` — this is precisely ADR-002's
+"two runs of the same `config_hash` would no longer be comparable" objection, answered by making the arm
+the unit of record rather than dodged by claiming it does not apply. Expiry serves the **parent**, so a
+forgotten rollout cannot become the durable configuration. And permanence still costs a codemod, a pull
+request and a merge, so ADR-001's "the shipped source is the source of record" survives contact with a
+second route.
+
+**The asymmetry that is not a compromise.** Revert is automatic and local; resume is human. Reverting
+moves toward the configuration that was already running and already reviewed, so automating it costs
+nothing safety values. Resuming moves toward the configuration that just failed under load. Those are
+different acts and do not get the same permission.
+
 ## Interfaces sketch
 
 ```

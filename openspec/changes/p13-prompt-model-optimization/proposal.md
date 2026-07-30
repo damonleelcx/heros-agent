@@ -132,6 +132,30 @@ eval, scoring, transform, registry, or schema change is required.**
   guardrail reads the existing `task_success` and its CI. The skills/context codemod refusals are **not**
   addressed; the P10 studio gains no score, rank, winner, or promotion path (*the studio is not an
   evaluator*); and cost stays `eval_cost_usd` and plan **names** only, never a price.
+- **New capability `change-delivery` (the third cross-axis contract, defined once here).** Delivery
+  today is one chain — a rewriter produces a diff, [P12](../p12-forge-delivery/) opens a pull request,
+  a human merges — and it has no statement at all for what happens when the **first link refuses**,
+  which the coverage tables say is the common case. A verified change on an axis with no materializer
+  produces silence that is indistinguishable from a proposal nobody got to. So delivery becomes a
+  **total function** over (axis × change × route): every cell names a route that delivers it or a
+  typed cause that refused it, and a change no route can deliver is a **reported state**. On that
+  footing a second route is added under [ADR-010](../../../docs/adr/ADR-010-runtime-gradual-rollout.md)
+  — a **gradual rollout** that is a two-armed binding document resolved **inside the customer's own
+  process** ([ADR-004](../../../docs/adr/ADR-004-runtime-config-binding.md)'s accessor, not our
+  gateway): deterministic offline arm assignment, every invocation attributed to its **arm's own**
+  `config_hash` (so ADR-002's comparability objection is answered rather than dodged), a bounded
+  expiry that serves the parent, local guard-tripping revert with **human** resume, inert during
+  measurement runs, and **never** a way to make a change permanent — that still costs a codemod, a
+  pull request, and a merge. Referenced by [P14](../p14-skills-tools-optimization/),
+  [P15](../p15-workflow-wiring-optimization/), [P16](../p16-context-strategy-optimization/),
+  [P17](../p17-memory-strategy-optimization/) and [P18](../p18-harness-strategy-optimization/) rather
+  than restated.
+- **New capability `prompt-model-delivery`.** This axis's own cells — and it is the **only** axis whose
+  runtime route is live, because model id, inference params and prompt version are precisely the fields
+  [ADR-009](../../../docs/adr/ADR-009-binding-document-format.md) already fixed in the binding document.
+  The cell that must not blur: a **provider-crossing** model change is `notRuntimeResolvable`, because
+  swapping the provider rewrites the SDK call itself (ADR-002), and a user reading "model is
+  rollout-eligible" must not conclude they can canary one vendor against another.
 
 ## Impact
 
@@ -139,7 +163,10 @@ eval, scoring, transform, registry, or schema change is required.**
   cross-axis — referenced by [P14](../p14-skills-tools-optimization/), [P15](../p15-workflow-wiring-optimization/)
   and [P16](../p16-context-strategy-optimization/) rather than restated), `prompt-model-authoring` (new),
   `language-coverage` (new, cross-axis — referenced by the same three rather than restated),
-  `prompt-model-language-coverage` (new).
+  `prompt-model-language-coverage` (new), `change-delivery` (new, cross-axis — referenced by
+  [P14](../p14-skills-tools-optimization/), [P15](../p15-workflow-wiring-optimization/),
+  [P16](../p16-context-strategy-optimization/), [P17](../p17-memory-strategy-optimization/) and
+  [P18](../p18-harness-strategy-optimization/) rather than restated), `prompt-model-delivery` (new).
   Consumed, not modified: `proposal-engine`/`verification` (P5.5),
   `prompt-authoring`/`runtime-config-binding` (P10), `eval-harness`/`scoring` (P4),
   `pattern-classifier` (P3.5), `diagnosis` (P4.5), `workflow-ir`/`config-hash` (P0),

@@ -340,6 +340,44 @@ verification runs.
   same rewriter with the same typed cause, and pass the same gates. There SHALL be no authoring-only
   resolve path, transform path, or gate.
 
+### This axis's delivery cells (capability `memory-delivery`)
+
+Cross-axis rules are defined once in [P13](P13-prompt-model-optimization.md) §6 (`change-delivery`,
+FR57–FR68) and [ADR-010](../adr/ADR-010-runtime-gradual-rollout.md); they are referenced, not restated.
+
+> **This is the axis that made the cross-axis contract necessary, and the reason is not flattering.**
+> A memory strategy is modelled, resolved, hashed, proposed — and then refused at transform in both
+> engines, in every language. Before this section that was the end of the sentence: no diff, so no pull
+> request, so nothing, and a verified memory proposal produced a silence indistinguishable from a
+> proposal nobody had gotten to.
+>
+> The runtime route does not rescue it, and the reason is worth stating precisely rather than hedging: a
+> memory strategy needs a **store** that persists between invocations, and a binding document carries
+> values, not a running store — which we do not ship into the customer's tree. So this axis is
+> `notRuntimeResolvable` for a reason that is **contingent** rather than permanent. Unlike wiring, a
+> memory runtime could exist. The table must say which of those two it is, because the difference is
+> what tells a reader whether to ask again.
+>
+> What this buys is therefore not a route. It is that a memory proposal now says *"undeliverable, by
+> both routes, for these two named reasons"* — the difference between a product that refuses and a
+> product that appears broken.
+
+- **FR34.** A memory change SHALL report the source route's typed transform refusal and the runtime
+  route's `notRuntimeResolvable` cause as two distinct, separately readable causes, neither inferred
+  from the other.
+- **FR35.** A memory change SHALL be reported as **undeliverable**, and SHALL NOT be rendered as queued,
+  awaiting review, or in progress.
+- **FR36.** The memory runtime-route refusal SHALL name the missing runtime component, SHALL be
+  structurally distinguishable from a permanent boundary, and SHALL carry no delivery date, milestone,
+  or commitment — naming a missing component is not a promise to build it.
+- **FR37.** A change whose resulting strategy is `none` SHALL report that there is **nothing to
+  deliver** — neither a delivery nor a refusal.
+- **FR38.** Authoring a rollout whose candidate arm carries a memory strategy other than `none` SHALL be
+  refused with the same typed cause the transform returns, no document carrying a memory strategy SHALL
+  be written, and no path SHALL exist by which a memory strategy reaches a customer's process.
+- **FR39.** A delivery report SHALL NOT upgrade a refused proposal: its refused-not-scored status SHALL
+  be unchanged, and no memory win SHALL be reported anywhere.
+
 ## 7. Non-functional requirements
 
 | # | Requirement | Target |
@@ -356,6 +394,8 @@ verification runs.
 | **NFR10** | **The refusal is stated before the choice, not after it** | The authoring surface renders the M20 no-materializer boundary *before* a strategy is selected, sourced from the same coverage fact the transform refuses from — never a second hand-written sentence that can drift from the engine's behaviour. Asserted in the console tests. |
 | **NFR11** | **A refusal is never rendered as success** | No surface presents a refused memory change as applied, delivered, partially applied, or improved, and `refused` renders as its own state, distinct from `failed` and `pending`. This is the one presentation the axis exists to keep honest: at M20 the refusal *is* the outcome, so a UI that softens it is the whole lie. |
 | **NFR12** | **Clearing is byte-exact** | Selecting a strategy and then clearing it reproduces the prior `config_hash` byte-identically, and `none` hashes identically to cleared — so a user can back out of an authored memory change with no residue in the hash. |
+| **NFR13** | **Refusal totality spans both routes** | The P17 totality canary is extended: a node constructed to make a memory strategy take effect by **either** route comes back refused, and sabotaging the refusal on either route turns the cell red. A refusal that cannot be made to fail is decoration, and adding a route without extending the canary would quietly make it one. |
+| **NFR14** | **Contingent is rendered differently from permanent** | A test asserts the memory row names a missing runtime component while the P15 wiring row names a boundary, and that neither borrows the other's rendering. A reader deciding whether to ask again is reading exactly this distinction. |
 
 ## 8. System design summary
 
@@ -591,6 +631,20 @@ change against a memory bottleneck, and that proposal is honestly surfaced as re
       at M20, and no memory win is reported anywhere (G9, FR15, D6).
 - [ ] **A15.** The memory improvement signal is the classifier's existing metric set with no new metric and
       no taxonomy change (G10, FR16).
+
+- [ ] **A16.** A memory change reports **two** separately readable causes — the typed transform refusal
+      and `notRuntimeResolvable` naming the absent store — and reads as undeliverable, never as queued or
+      in review (FR34, FR35).
+- [ ] **A17.** The memory row names a missing runtime component, renders distinguishably from P15's
+      permanent boundary, and carries no date or commitment (FR36, NFR14).
+- [ ] **A18.** A change resolving to `none` reports **nothing to deliver** — not a delivery, not a
+      refusal (FR37).
+- [ ] **A19.** 🔴 Authoring a rollout with a memory candidate arm is refused with the transform's typed
+      cause; no document carrying a memory strategy is written; a node built to make a strategy take
+      effect by either route comes back refused, and sabotaging either refusal turns the cell red
+      (FR38, NFR13).
+- [ ] **A20.** A delivery report leaves a memory proposal refused-not-scored, and no memory win is
+      reported anywhere (FR39).
 
 ## 14. Open questions
 

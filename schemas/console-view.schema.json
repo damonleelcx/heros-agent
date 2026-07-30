@@ -626,6 +626,102 @@
       ],
       "type": "object"
     },
+    "ChangeDeliveryView": {
+      "description": "Response of GET /api/p13/delivery",
+      "properties": {
+        "causes": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/DeliveryCauseMeta"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cells": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/DeliveryCellView"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "languages": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "routes": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/DeliveryRouteMeta"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_cells": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/DeliverySourceCellView"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "states": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/DeliveryStateMeta"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "causes",
+        "cells",
+        "languages",
+        "routes",
+        "source_cells",
+        "states",
+        "version"
+      ],
+      "type": "object"
+    },
     "ClusterRow": {
       "properties": {
         "label": {
@@ -893,6 +989,141 @@
       "required": [
         "deliveries",
         "route"
+      ],
+      "type": "object"
+    },
+    "DeliveryCauseMeta": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "owner": {
+          "type": "string"
+        },
+        "permanent": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "owner",
+        "permanent"
+      ],
+      "type": "object"
+    },
+    "DeliveryCellView": {
+      "properties": {
+        "axis": {
+          "type": "string"
+        },
+        "bound_only": {
+          "type": "boolean"
+        },
+        "cause": {
+          "type": "string"
+        },
+        "change": {
+          "type": "string"
+        },
+        "contingent": {
+          "type": "boolean"
+        },
+        "missing_artifact": {
+          "type": "string"
+        },
+        "missing_component": {
+          "type": "string"
+        },
+        "note": {
+          "type": "string"
+        },
+        "owner": {
+          "type": "string"
+        },
+        "permanent": {
+          "type": "boolean"
+        },
+        "route": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "axis",
+        "change",
+        "route",
+        "status"
+      ],
+      "type": "object"
+    },
+    "DeliveryRouteMeta": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "permanence": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "permanence"
+      ],
+      "type": "object"
+    },
+    "DeliverySourceCellView": {
+      "properties": {
+        "cause": {
+          "type": "string"
+        },
+        "change": {
+          "type": "string"
+        },
+        "language": {
+          "type": "string"
+        },
+        "missing_artifact": {
+          "type": "string"
+        },
+        "note": {
+          "type": "string"
+        },
+        "permanent": {
+          "type": "boolean"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "change",
+        "language",
+        "status"
+      ],
+      "type": "object"
+    },
+    "DeliveryStateMeta": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "label"
       ],
       "type": "object"
     },
@@ -2959,6 +3190,9 @@
     },
     "BoardView": {
       "$ref": "#/$defs/BoardView"
+    },
+    "ChangeDeliveryView": {
+      "$ref": "#/$defs/ChangeDeliveryView"
     },
     "DeliveriesView": {
       "$ref": "#/$defs/DeliveriesView"

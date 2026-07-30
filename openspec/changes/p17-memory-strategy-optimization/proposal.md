@@ -86,11 +86,24 @@ So P17 ships the modeling and a **first-class refusal**, not a codemod, and clai
   `MemoryManagement` metric set and adds none. No within-call context work (that is
   [P16](../p16-context-strategy-optimization/)'s `DimContext`). No second cost model and no bespoke
   scoring path — eval stays axis-agnostic on `config_hash` + `Trace`.
+- **New capability `memory-delivery`.** This axis's delivery cells, under P13's
+  [`change-delivery`](../p13-prompt-model-optimization/specs/change-delivery/spec.md) contract and
+  [ADR-010](../../../docs/adr/ADR-010-runtime-gradual-rollout.md) — and this is the axis that made the
+  cross-axis contract necessary. **Both routes refuse.** The source route refuses at transform, as it
+  already did. The runtime route refuses too, because a memory strategy needs a **store** that persists
+  between invocations and a binding document carries values, not a running store. So what this buys is
+  not a route: it is that a memory proposal now says *"undeliverable, by both routes, for these two
+  named reasons"* instead of producing a silence indistinguishable from neglect. The memory refusal is
+  recorded as **contingent** — a memory runtime could exist — and rendered distinguishably from
+  P15's permanent boundary, because that difference is what tells a reader whether to ask again. It is
+  named without a date, because naming a missing component is not a promise to build it.
 
 ## Impact
 
-- **Affected capabilities:** `memory-store` (new), `memory-policy` (new), `memory-authoring` (new).
+- **Affected capabilities:** `memory-store` (new), `memory-policy` (new), `memory-authoring` (new),
+  `memory-delivery` (new).
   Consumed, not modified: **`authored-change` (P13 — referenced, never restated)**,
+  **`change-delivery` (P13 — referenced, never restated)**,
   `variant-spec`/`config-hash` (P2), `registry` (P0/P2), `discovery-engine`/`workflow-ir` (P1),
   `transform-engine` (P2), `pattern-classifier` (P4.5), `proposal-catalog` (P4.5), `eval-harness`/`scoring`
   (P4). Kept disjoint: `context-assembly` (P16).

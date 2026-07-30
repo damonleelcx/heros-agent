@@ -424,3 +424,43 @@ its ceiling.
 
 🚫 Deliberately NOT reported as "the harness axis works on hermes-agent". 2 of 186 did; the run says so
 with a count rather than a claim.
+
+## 15. Delivery cells on this axis (`harness-delivery`)
+
+> Cross-axis rules come from **P13's `change-delivery`** and
+> [ADR-010](../../../docs/adr/ADR-010-runtime-gradual-rollout.md); they are referenced, never restated.
+
+**System Designer**
+
+- [x] 15.1 🔴 **A scaffold is structure; its bounds are numbers.** A strategy swap changes how many calls
+      the program makes and in what control flow → `notRuntimeResolvable`, permanent, naming the control
+      loop. `max_turns`, retry budget and stop condition are parameters of a loop already written →
+      `noRolloutBinding`, naming the absent field. Separate cells, neither cause inferred from the other.
+      → `specs/harness-delivery/spec.md` (Test: `TestStrategyAndParamsCarryDifferentCauses`).
+- [x] 15.2 🔴 **`hostAbsent` is not `notRuntimeResolvable`.** One says the strategy is deliverable but its
+      host service is not running (and refuses rather than substituting); the other says it cannot be
+      delivered as data at all, host or no host. Rendering them alike sends an operator to restart
+      something that was never the problem. An absent host does **not** change delivery eligibility, and
+      a delivery refusal 🚫 never offers starting a service as a remedy. → `specs/harness-delivery/spec.md`
+      (Test: `TestHostAbsentAndNotRuntimeResolvableAreDistinct`).
+
+**Backend**
+
+- [x] 15.3 The strategy swap refuses the runtime route in every cell and in every apply mode; 🚫 no
+      `bound` migration is suggested. → (Test: `TestHarnessSwapRefusesEveryRuntimeCell`).
+- [x] 15.4 A rollout arm admits only values inside the strategy's declared `ParamsSchema` — an absent,
+      unbounded, or non-positive turn ceiling is refused by the **same** validation the registry applies
+      at seal, and a parameter the candidate strategy does not declare stays inexpressible rather than
+      ignored. → (Test: `TestRolloutArmCannotRemoveABound`, `TestInapplicableParamStaysInexpressible`).
+- [x] 15.5 🔴 Authoring a rollout whose candidate arm swaps the strategy is refused with the transform's
+      typed cause, and no document carrying a harness strategy is written. The totality canary is
+      extended to cover the second route, and a sabotaged refusal on either turns the cell red. →
+      `internal/transform/p18_harness_test.go`
+      (Test: `TestHarnessRefusalTotalityCanaryCoversBothRoutes`).
+
+**Frontend + Product Designer**
+
+- [x] 15.6 Render the strategy cell, the params cell, and the host condition as three distinct states
+      from the shared source. → `web/console/src/app/app/harness/` (Test: `harness.test.mjs`).
+- [x] 15.7 State the claim per cell: 🚫 never "we can change your agent's loop live" — the scaffold
+      refuses the runtime route in **every** language. → PRD §9.2 Sales lens.

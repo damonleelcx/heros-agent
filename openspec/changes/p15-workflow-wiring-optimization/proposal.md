@@ -112,11 +112,23 @@ is axis-agnostic — it consumes `config_hash` + `Trace`, never a Dimension labe
   So a refusal reports the **most specific true** cause — shape → gate → statement structure → **language
   last** — and an unmaterializable draft stays unscoreable in **every** language, covered or not. The
   cross-axis rules come from **P13's `language-coverage`** and are referenced, never restated.
+- **New capability `wiring-delivery` (wave 15f).** This axis's delivery cells, under P13's
+  [`change-delivery`](../p13-prompt-model-optimization/specs/change-delivery/spec.md) contract and
+  [ADR-010](../../../docs/adr/ADR-010-runtime-gradual-rollout.md). Every wiring cell is
+  `notRuntimeResolvable` **permanently**: order and concurrency are compiled program structure, and a
+  document that could reorder statements in a built binary would be an interpreter we have no business
+  shipping into a customer's process. A later table that quietly moves any of these into "pending"
+  would be claiming an ability that cannot exist. The second rule is the one this axis needs most: a
+  change the **coherence gate rejected** yields no runnable spec and is therefore **not authorable as
+  a rollout candidate either** — a second route arriving beside a gate whose purpose is to produce
+  nothing is exactly where someone reasons "the rewriter refused, so roll it out instead," and that
+  reading would turn the strongest gate in the system into a speed bump.
 
 ## Impact
 
 - **Affected capabilities:** `node-wiring` (new), `wiring-safety` (new), `wiring-materialization` (new,
-  15c), `wiring-authoring` (new, 15d), `wiring-language-coverage` (new, 15e). Consumed, not modified: `workflow-ir` (P1),
+  15c), `wiring-authoring` (new, 15d), `wiring-language-coverage` (new, 15e), `wiring-delivery` (new, 15f).
+  Consumed, not modified: **`change-delivery` (P13 — referenced, never restated)**, `workflow-ir` (P1),
   `config-layer`/`runtime` (P2), `typed-contract` (P3), `eval-harness`/`scoring` (P4),
   `diagnosis`/`proposal` (P5.5), **`authored-change` (P13 — referenced, never restated)**,
   `entitlements` (P7), `web-console` (P9), `cli`/`ci` (P11).

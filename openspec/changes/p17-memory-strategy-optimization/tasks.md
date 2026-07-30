@@ -280,3 +280,35 @@ What the run establishes, on the real tree rather than on fixtures:
 🔴 The finding is the refusal, not a gap in the demonstration. A run that produced a diff here would mean
 the override had been silently dropped and the variant scored as its base configuration — the number would
 be wrong and would look exactly like a number that is right. §4 is the proof that cannot happen.
+
+## 14. Delivery cells on this axis (`memory-delivery`)
+
+> Cross-axis rules come from **P13's `change-delivery`** and
+> [ADR-010](../../../docs/adr/ADR-010-runtime-gradual-rollout.md); they are referenced, never restated.
+> This is the axis that made the cross-axis contract necessary: **both routes refuse**, and before this
+> section that fact produced a silence indistinguishable from neglect.
+
+**System Designer**
+
+- [x] 14.1 🔴 **Two refusals, separately readable.** The source-route cause is the typed transform
+      refusal naming node and dimension; the runtime-route cause is `notRuntimeResolvable` naming the
+      absent store — a binding document carries values, not a running store. The change reads as
+      **undeliverable**, never as queued, in review, or in progress. → `specs/memory-delivery/spec.md`
+      (Test: `TestMemoryReportsBothRefusalCausesSeparately`).
+- [x] 14.2 🔴 **Contingent, not permanent — and not scheduled either.** The memory refusal names a
+      missing runtime component and is structurally distinguishable from P15's boundary, because that
+      difference is what tells a reader whether to ask again. 🚫 No date, milestone, or commitment is
+      attached: naming a missing component is not a promise to build it. →
+      `specs/memory-delivery/spec.md` (Test: `TestMemoryRefusalIsContingentAndUndated`).
+- [x] 14.3 A change resolving to `none` reports **nothing to deliver** — neither a delivery nor a
+      refusal. → `specs/memory-delivery/spec.md` (Test: `TestIdentityStrategyNeedsNoRoute`).
+
+**Backend + QA**
+
+- [x] 14.4 🔴 **Refusal totality across both routes.** Authoring a rollout whose candidate arm carries a
+      memory strategy is refused with the same typed cause the transform returns, and no document is
+      written that carries one. A node constructed to make a memory strategy take effect by **either**
+      route comes back refused, and a sabotaged refusal on either route turns the cell red. →
+      `internal/transform/rewrite_test.go` (Test: `TestMemoryRefusalTotalityCanaryCoversBothRoutes`).
+- [x] 14.5 A delivery report does **not** upgrade a refused proposal: it stays refused-not-scored and no
+      memory win is reported anywhere. → (Test: `TestDeliveryReportDoesNotUpgradeARefusedProposal`).

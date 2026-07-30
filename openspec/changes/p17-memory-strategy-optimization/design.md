@@ -203,6 +203,28 @@ Clearing reproduces the prior `config_hash` byte-identically, and `none` is indi
 
 (Full record: [decisions.md D7](./decisions.md). Spec: [`specs/memory-authoring/spec.md`](./specs/memory-authoring/spec.md).)
 
+## Decision 8 — Both routes refuse, and saying so is the deliverable
+
+**Context.** Decision 4 refuses memory at transform, in both engines, in every language. Before P13's
+`change-delivery` that was the end of the sentence: no diff, so no pull request, so nothing — and a
+verified memory proposal produced a silence that looked exactly like a proposal nobody had gotten to.
+
+**Decision.** The runtime route refuses too, and for a reason worth stating precisely rather than hedging:
+a memory strategy needs a **store** that persists between invocations, and a binding document carries
+values, not a running store — one we do not ship into the customer's tree. So a memory change now reports
+**two separately readable causes** and reads as **undeliverable** rather than pending.
+
+**Contingent, not permanent — and not scheduled either.** Unlike P15's wiring boundary, a memory runtime
+*could* exist, so the row names the missing component and renders distinguishably from a boundary, because
+that difference is exactly what tells a reader whether to ask again. It carries no date: naming a missing
+component is not a promise to build it.
+
+**What this does not change.** The refusal totality is extended, not softened — a node built to make a
+memory strategy take effect by **either** route comes back refused, and the canary turns red if either
+refusal is sabotaged. A delivery report does not upgrade a refused proposal; it stays refused-not-scored,
+and no memory win is reported anywhere. A change resolving to `none` reports **nothing to deliver**, which
+is a third value and not a quiet success.
+
 ## Interfaces sketch
 
 ```
