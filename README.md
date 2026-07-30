@@ -74,46 +74,33 @@ The full engineering plan is committed and specified:
 
 - **[Implementation timeline](docs/implementation-timeline/README.md)** — system overview, critical
   path, role-ownership matrix, Gantt, and milestones (M0 → M15).
-- **[Product Requirements Documents](docs/prd/README.md)** — one PRD per phase (P0 → P22).
+- **[Product Requirements Documents](docs/prd/README.md)** — one PRD per phase, grouped by program, with
+  each phase's lead roles and the rationale for its band. **This is the per-phase source of truth**; the
+  table below is a map, not a second copy of it.
 - **[OpenSpec change sets](openspec/)** — behavioral, testable specs (`SHALL` requirements with
   scenarios); see [`openspec/AGENTS.md`](openspec/AGENTS.md) for the format and
   [`openspec/project.md`](openspec/project.md) for conventions.
 
 ### Phases
 
-| Phase | Delivers |
-|---|---|
-| **P0** | Foundations — Workflow IR + metric-event schema + storage/lineage |
-| **P1** | Discovery MVP (multi-language static analysis — Go via `go/ast`, other languages via tree-sitter) |
-| **P2** | Config Layer (source-transformation engine) + Runtime |
-| **P2.5** | Metrics & Observability substrate (OpenTelemetry) |
-| **P3** | Context strategies + Skill Registry + Sandbox |
-| **P3.5** | Pattern Classifier |
-| **P4** | Eval Harness + eval-set generation + scoring |
-| **P4.5** | Attribution + Diagnosis |
-| **P5** | Typed I/O contracts + Re-arrangement + Dynamic tracing |
-| **P5.5** | Proposal operators + Verification gate |
-| **P6** | Autonomous optimizer |
-| **P7** | Billing, Metering & Entitlements |
-| **P8** | Admin & Operations Console (internal operator surface — RBAC, tenant/billing admin, fleet controls, audit log; a separate Next.js app on its own origin) |
-| **P9** | Web Console (the customer-facing dashboard — Next.js + BFF, one design system, no API key in the browser) |
-| **P10** | Prompt & Model Studio (prompt authoring + versioning, variable bindings, per-node model/prompt selection, runtime config binding) |
-| **P11** | CLI & CI Integration (offline-first CLI on every plan; opt-in run linking that gives SUM metering its input) |
-| **P12** | Forge Delivery (the optimization PR — CI-mediated by default, hosted Git App opt-in; the gainshare input) |
-| **P13** | Prompt & Model Optimization (deepening the one axis that already ships) |
-| **P14** | Skills & Tools Optimization (making the skill axis apply, and splitting tools from skills) |
-| **P15** | Workflow / Node-Wiring Optimization (turning the graph's shape into an optimization axis) |
-| **P16** | Context Strategy Optimization (making the richest modeled axis actually applicable) |
-| **P17** | Memory Strategy Optimization (what an agent remembers becomes a tunable dimension) |
-| **P18** | Harness Strategy Optimization (the scaffold around a node becomes a tunable dimension) |
-| **P19** | Deployment & Delivery (the platform as a thing you can stand up) |
-| **P20** | Installable Packages & Self-Serve Distribution (GitHub-Release pipeline; native installers; signature-verified before `PATH`; onboarding + self-update) |
-| **P21** | Stripe Payments (real Stripe behind the P7 `billing.Provider` interface — checkout, metered usage, idempotent signature-verified webhooks, entitlement sync) |
-| **P22** | SSO & Identity (customer OIDC/SAML behind the ADR-008 seam; operator SSO + MFA made real) |
+Thirty phases in nine programs. Each row links to the program's phases; the
+[PRD index](docs/prd/README.md) carries the per-phase detail.
 
-Phases **P13 → P18** form the **Optimization Axis Expansion**: each takes a dimension the IR already
-models and makes it a *verified, applicable* optimization axis under the same "diagnosis proposes,
-verification decides" gate.
+| Program | Phases | Delivers |
+|---|---|---|
+| **Foundations & Discovery** | [P0](docs/prd/P0-foundations.md) · [P1](docs/prd/P1-discovery-mvp.md) · [P2](docs/prd/P2-config-runtime.md) · [P2.5](docs/prd/P2.5-metrics-observability.md) · [P3](docs/prd/P3-context-skills-sandbox.md) · [P3.5](docs/prd/P3.5-pattern-classifier.md) | Workflow IR, metric-event schema and lineage; multi-language static analysis (Go via `go/ast`, the rest via tree-sitter); the source-transformation engine and runtime; the OpenTelemetry substrate everything else measures against; context strategies, the Skill Registry, the sandbox, and the pattern classifier |
+| **Evaluation & Improvement** | [P4](docs/prd/P4-eval-harness.md) · [P4.5](docs/prd/P4.5-attribution-diagnosis.md) · [P5](docs/prd/P5-contracts-rearrange-tracing.md) · [P5.5](docs/prd/P5.5-proposals-verification.md) · [P6](docs/prd/P6-autonomous-optimizer.md) | The eval harness, eval-set generation and scoring; attribution and diagnosis; typed I/O contracts, re-arrangement and dynamic tracing; the proposal operators and the **verification gate** that decides; and the autonomous optimizer that runs the loop |
+| **Commerce & Consoles** | [P7](docs/prd/P7-billing-metering.md) · [P8](docs/prd/P8-admin-console.md) · [P9](docs/prd/P9-web-console.md) · [P10](docs/prd/P10-prompt-model-studio.md) | Billing, metering and entitlements; the internal **operator** console (RBAC, tenant/billing admin, fleet controls, audit log); the customer-facing **web** console (Next.js + BFF, no API key in the browser); and the Prompt & Model Studio |
+| **Distribution Surfaces** | [P11](docs/prd/P11-cli-ci-integration.md) · [P12](docs/prd/P12-forge-delivery.md) | The offline-first CLI, free on every plan, with opt-in run linking that gives SUM metering its input; and forge delivery — the optimization PR, CI-mediated by default |
+| **Optimization Axis Expansion** | [P13](docs/prd/P13-prompt-model-optimization.md) · [P14](docs/prd/P14-skills-tools-optimization.md) · [P15](docs/prd/P15-workflow-wiring-optimization.md) · [P16](docs/prd/P16-context-strategy-optimization.md) · [P17](docs/prd/P17-memory-strategy-optimization.md) · [P18](docs/prd/P18-harness-strategy-optimization.md) | Six axes: prompt & model, skills & tools, node wiring, context strategy, memory, harness. Each takes a dimension the IR already models and makes it a *verified, applicable* optimization axis — scored by the **axis-agnostic** harness, under the same "diagnosis proposes, verification decides" gate |
+| **Deployment & Packaging** | [P19](docs/prd/P19-deployment-delivery.md) · [P20](docs/prd/P20-installable-packages.md) | The platform as something you can stand up (Docker Compose, Kubernetes, air-gapped); and the `heros` CLI as installable packages — GitHub-Release pipeline, native install channels, verification before the binary reaches `PATH`, onboarding and self-update |
+| **Identity & Payments** | [P21](docs/prd/P21-stripe-payments.md) · [P22](docs/prd/P22-sso-identity.md) | Real Stripe behind the P7 `billing.Provider` interface — checkout, metered usage, idempotent signature-verified webhooks, entitlement sync; and SSO — customer OIDC/SAML behind the ADR-008 seam, plus operator SSO + MFA made real |
+| **Published Word** | [P23](docs/prd/P23-legal-and-developer-docs.md) | The two read-not-computed surfaces: Terms and Privacy Notice as versioned artifacts with append-only consent records, and three-tier developer documentation — both held honest by build-time accuracy fences |
+| **Seeing the System** | [P24](docs/prd/P24-analytics-and-error-monitoring.md) · [P26](docs/prd/P26-operator-console-refresh.md) | Product analytics and error monitoring, installed under a per-prefix origin fence that keeps every tenant surface at `default-src 'self'`; and the operator-console refresh, whose product is a **build fence** that makes oversight drift fail rather than accumulate |
+
+There is no **P25** — the token `p25` already denotes P2.5 in this repository (`/p25/monitor`, the Gantt
+id, `internal/api/monitor.go`), so reusing it would make it ambiguous exactly where someone greps during
+an incident.
 
 ## Repository layout (today)
 
