@@ -167,6 +167,17 @@ The private half was printed once, in the session that generated it, and is **no
 it as a repository secret named `HEROS_RELEASE_PRIVATE_KEY`. Do that through GitHub's own UI or `gh secret set`
 — it is a credential, and it should not pass through anything that keeps a history.
 
+> **2026-07-30 — this advice was right and was still violated, so the key was rotated.**
+> "Printed once, in the session that generated it" is the whole problem: that session kept a transcript, and the
+> private half of `heros-release-2026b` was later recovered from it in cleartext. The key had signed only the
+> `v0.20.0-rc.4` draft rehearsal — whose assets are reachable only through the authenticated API — so nothing in
+> the field trusted it, and it was **removed** rather than demoted, in the same commit that added
+> `heros-release-2026c`. See `docs/release/install.md` § rotation.
+>
+> The procedure that replaced it never lets the private half reach stdout: generate under a tight `umask` into a
+> file, set the secret from that file, echo only the public line, then move the file into a password manager.
+> `herossign keygen` writing both halves to stdout is what made the safe-looking version of this unsafe.
+
 The P11 launch key (`heros-release-2026a`, `1f117664…`) was **removed** rather than kept as an accepted key: it
 never had a private half configured and no tag was ever signed with it, so no binary in the field has ever
 verified anything against it. Keeping it would have widened the trust root for compatibility with a release

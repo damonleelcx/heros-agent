@@ -99,7 +99,7 @@ If Sam already has a `heros` he trusts, one command does both checks with the ro
 
 ```sh
 heros verify-release --manifest SHA256SUMS
-# → heros verify-release: ✅ verified 5 of 5 listed artifacts (…) — manifest signed by release key heros-release-2026b
+# → heros verify-release: ✅ verified 5 of 5 listed artifacts (…) — manifest signed by release key heros-release-2026c
 ```
 
 He can go further and rebuild it: see
@@ -190,10 +190,18 @@ Only step 4 breaks anything, and only for a binary older than step 2. A **compro
 leaked key is deleted in the same commit that adds its replacement, and the release notes say so — a deliberate,
 announced break, which is narrower than the alternative.
 
-Current trust root: `heros-release-2026b`. The P11 launch key `heros-release-2026a` was removed rather than kept
-as accepted, because it never signed a published release and no installed binary has ever verified anything
-against it; keeping it would have widened the set of keys that can produce a trusted release in exchange for
-compatibility with a release that does not exist.
+Current trust root: `heros-release-2026c`, active since 2026-07-30.
+
+It replaced `heros-release-2026b` under the **compromise** path described just above, and the details are stated
+rather than glossed: 2026b's private half was found in cleartext in a local tool transcript, because
+`herossign keygen` prints both halves to stdout and that output had been captured to a log. No overlap window was
+offered, and none was needed — 2026b signed the `v0.20.0-rc.4` rehearsal and nothing else. That release was a
+draft, whose assets are reachable only through the authenticated API, so no installed binary has ever verified
+anything against 2026b. Deleting it in the same commit that added 2026c cost nobody a working install.
+
+The P11 launch key `heros-release-2026a` was removed on the same reasoning: it never signed a published release
+either. In both cases keeping the old key as accepted would have widened the set of keys that can produce a
+trusted release, in exchange for compatibility with a release that does not exist.
 
 ---
 

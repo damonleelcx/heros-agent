@@ -50,7 +50,7 @@ $Repo = 'damonleelcx/heros-agent'
 $Releases = if ($env:HEROS_RELEASE_BASE_URL) { $env:HEROS_RELEASE_BASE_URL } else { "https://github.com/$Repo/releases" }
 $Api      = if ($env:HEROS_RELEASE_API_URL)  { $env:HEROS_RELEASE_API_URL }  else { "https://api.github.com/repos/$Repo/releases" }
 
-$PubKeySsh    = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIE1dBt9XASaK+63cfsGWH7TSgAemTvz67p9e3I8wPMln'
+$PubKeySsh    = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMniGcZXM+AMZ6J5ldw3N7P3PZp6fJHsKvbgRGNzK1YK'
 $SignerId     = 'heros-release'
 $SigNamespace = 'file'
 

@@ -83,12 +83,25 @@ type TrustKey struct {
 // change, recorded in docs/release/install.md's rotation section, and named in the release notes.
 var trustRoot = []TrustKey{
 	{
-		ID:   "heros-release-2026b",
-		Hex:  "4d5d06df5701268afbaddc7ec1961fb4d28007a64efcfaee9f5edc8f303cc967",
+		ID:   "heros-release-2026c",
+		Hex:  "c9e219c65733e00c67a27995dc3737b3f73d9a7a7c91ec2af6e04463732b560a",
 		Role: RoleActive,
-		Note: "P20 release key, 2026-07-29; the first key with a configured CI secret, and therefore the " +
-			"first that can sign a published release.",
+		Note: "P20 release key, 2026-07-30; replaces heros-release-2026b, whose private half was found in " +
+			"cleartext in a local tool transcript before any release was published.",
 	},
+	// 🔴 heros-release-2026b (4d5d06df…) was REMOVED, on the same grounds as 2026a below.
+	//
+	// Its private half was recovered from a plaintext CLI transcript on 2026-07-30 — `herossign keygen`
+	// prints both halves to stdout, and that output was captured to a log file. The key signed the
+	// v0.20.0-rc.4 rehearsal and nothing else: `publish` produced a DRAFT, whose assets are reachable only
+	// through the authenticated API, and no GA tag existed. So no binary in the field has ever verified
+	// against 2026b, and keeping it as RoleAccepted would preserve trust in a key of known-doubtful
+	// confidentiality in exchange for compatibility with a release nobody could install.
+	//
+	// The lesson is recorded here rather than only in a commit message: a key printed to a terminal is a
+	// key in every log that terminal wrote to. Generate into a file with a tight umask, set the secret from
+	// that file, and never let the private half reach stdout.
+	//
 	// 🔴 The P11 launch key (heros-release-2026a, 1f117664…) was REMOVED rather than demoted to
 	// RoleAccepted, and that is deliberate.
 	//

@@ -33,7 +33,7 @@ Homebrew / Scoop-winget / deb-rpm / container) with every "not affected" row exp
       → Local rehearsal of the full spine is implemented and **green** (`make release-rehearse`, plus
       `make release-rehearse-redcheck` proving the completeness gate refuses). The **remote half is handed
       off**: `HEROS_RELEASE_PRIVATE_KEY` must be installed as a repo secret by the owner (key generated
-      2026-07-29, public half committed as `heros-release-2026b`), then `git push origin v0.20.0-rc.1`
+      2026-07-29, public half committed as `heros-release-2026b`; ROTATED to `heros-release-2026c` 2026-07-30), then `git push origin v0.20.0-rc.1`
       publishes the draft. Recorded in `docs/release/p20-evidence.md`.
 
 ## 3. DevOps — Native install channels (each verifies before PATH)
@@ -206,8 +206,8 @@ Homebrew / Scoop-winget / deb-rpm / container) with every "not affected" row exp
       → **BLOCKED on the owner, deliberately not checked off.** The pipeline is complete and its spine is green
       locally (`make release-rehearse`), the re-run-reproduces property is proven by test, and the publish path has
       zero manual steps by construction. It cannot be *executed* until `HEROS_RELEASE_PRIVATE_KEY` is installed as
-      a repository secret (the key was generated 2026-07-29; the public half is committed as
-      `heros-release-2026b`) and a tag is pushed. Steps in `docs/release/p20-evidence.md` §3.
+      a repository secret (the key was generated 2026-07-29 and ROTATED to `heros-release-2026c` on
+      2026-07-30 after its private half was found in a cleartext transcript) and a tag is pushed. Steps in `docs/release/p20-evidence.md` §3.
 - [x] 9.3 Tamper red-check red on tampering; reproducibility gate green.
       → Tamper refusals proven in **both** environments and in four shapes (tampered binary, rewritten manifest,
       missing signature, foreign key), plus `verify-release` and `heros upgrade` refusing independently, plus the

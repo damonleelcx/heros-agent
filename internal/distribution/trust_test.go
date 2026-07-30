@@ -33,7 +33,7 @@ func TestPostureBIsActuallyDelivered(t *testing.T) {
 	if ChosenPosture != PostureDocumentedClear {
 		t.Skip("posture is not (B)")
 	}
-	unsigned := Attestation{Version: "0.20.0", SignedManifest: true, SigningKeyID: "heros-release-2026b"}
+	unsigned := Attestation{Version: "0.20.0", SignedManifest: true, SigningKeyID: "heros-release-2026c"}
 
 	mac := unsigned.FirstRunNotice("darwin", "/usr/local/bin/heros")
 	if !strings.Contains(mac, "xattr -d com.apple.quarantine /usr/local/bin/heros") {

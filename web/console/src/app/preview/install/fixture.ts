@@ -248,8 +248,8 @@ export const PREVIEW_INSTALL: InstallView = {
 export const PREVIEW_INSTALL_PUBLISHED: InstallView = {
   ...PREVIEW_INSTALL,
   delivered: {
-    version: "0.20.0-rc.1",
-    signing_key_id: "heros-release-2026b",
+    version: "0.20.0",
+    signing_key_id: "heros-release-2026c",
     claims: [
       {
         id: "signed-manifest",

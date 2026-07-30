@@ -11,12 +11,12 @@ import (
 // and the specific way it must NOT fail is on the honest disclosure.
 
 func unsignedRelease() Attestation {
-	return Attestation{Version: "0.20.0", SignedManifest: true, SigningKeyID: "heros-release-2026b"}
+	return Attestation{Version: "0.20.0", SignedManifest: true, SigningKeyID: "heros-release-2026c"}
 }
 
 func fullySignedRelease() Attestation {
 	return Attestation{
-		Version: "0.21.0", SignedManifest: true, SigningKeyID: "heros-release-2026b",
+		Version: "0.21.0", SignedManifest: true, SigningKeyID: "heros-release-2026c",
 		MacOS:   OSTrust{GOOS: "darwin", CodeSigned: true, Notarized: true, Publisher: "Heros Foreal", Identity: "TEAM1234"},
 		Windows: OSTrust{GOOS: "windows", CodeSigned: true, Publisher: "Heros Foreal", Identity: "aa:bb"},
 	}
