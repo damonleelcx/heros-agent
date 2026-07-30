@@ -146,7 +146,7 @@ exists to prevent.
 | Not run | Why | Where it IS covered |
 |---|---|---|
 | `scripts/install.ps1`, executed | No native `pwsh` on this host; the amd64 PowerShell image is **killed (exit 137)** under emulation | `scripts/install_smoke.ps1` on a real `windows-2022` runner — `.github/workflows/install-smoke.yml` |
-| A fresh **macOS** machine | This is the maintainer's machine. Every macOS result above is honestly labelled "NOT a clean OS" | the `macos-14` row of the install-smoke workflow (its LibreSSL-only `openssl` makes it the row that matters most) |
+| A fresh **macOS** machine | This is the maintainer's machine. Every macOS result above is honestly labelled "NOT a clean OS" | the `macos-15` row of the install-smoke workflow (its LibreSSL-only `openssl` makes it the row that matters most). Recorded as `macos-14` when this evidence was taken; that image is deprecated and the row moved. |
 | The four non-native build targets | D1 is five runners for five targets; this host is one of them | `release.yml`'s build matrix |
 | `gh release` publish + the published-asset verify | Needs a repository token and a Release | `release.yml`'s publish and smoke jobs |
 | Homebrew / Scoop / winget **installs** | The tap, bucket and upstream PR do not exist. The manifests are generated and attached; nothing a package manager reads points at them | reported as **undelivered** by the channel contract, on every surface, with the blocker named |

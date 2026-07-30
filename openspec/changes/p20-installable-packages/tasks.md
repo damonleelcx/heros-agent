@@ -136,8 +136,9 @@ Homebrew / Scoop-winget / deb-rpm / container) with every "not affected" row exp
       heros) against a real natively-built linux/arm64 binary — 7/7 cases including all four refusals — plus a
       full run on this macOS host. `install.ps1`: **not executable here** (no native `pwsh`; the amd64 image is
       killed under emulation), so its live run is `scripts/install_smoke.ps1` on a real `windows-2022` runner via
-      the new `.github/workflows/install-smoke.yml`, which also adds a fresh `macos-14` row — that image is the
-      one that matters most, since its `/usr/bin/openssl` is LibreSSL and cannot verify ed25519 at all. The four
+      the new `.github/workflows/install-smoke.yml`, which also adds a fresh macOS row (`macos-14` when this was
+      written, `macos-15` since that image's deprecation) — that row is the one that matters most, since its
+      `/usr/bin/openssl` is LibreSSL and cannot verify ed25519 at all. The four
       refusals run there with no secret; the happy path is conditional and **says when it did not run**.
 
 ## 7. QA — Fresh-machine smoke matrix + tamper red-check (the gate)

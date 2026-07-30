@@ -49,7 +49,7 @@ jobs:
         # macOS is included specifically because its verifier situation is the awkward one: /usr/bin/openssl is
         # LibreSSL and cannot verify ed25519 at all, so this job is what proves the ssh-keygen path works on a
         # stock image rather than only on a machine with Homebrew openssl.
-        runner: [ubuntu-22.04, macos-14]
+        runner: [ubuntu-22.04, macos-15]
     env:
       CGO_ENABLED: "1"
     steps:

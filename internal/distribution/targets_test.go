@@ -65,21 +65,54 @@ func TestDisclosedLimitsAreStatedTotally(t *testing.T) {
 // matches the target. A row whose runner does not match would be a cross-CGO build — the exact stability
 // risk D1 refuses — and it would pass every other test in this file.
 func TestShippedRowsNameANativeRunner(t *testing.T) {
-	nativeOS := map[string]string{"macos": "darwin", "ubuntu": "linux", "windows": "windows"}
 	for _, tt := range Shipped() {
 		if tt.Runner == "" {
 			t.Errorf("%s: shipped with no runner — nothing builds it", tt.Key())
 			continue
 		}
-		family := strings.SplitN(tt.Runner, "-", 2)[0]
-		if nativeOS[family] != tt.GOOS {
+		// The host is looked up, never inferred from the label's shape. `macos-15` is arm64 and
+		// `macos-15-intel` is x86_64, so any suffix rule confident enough to decide that pair decides it
+		// wrong — and a wrong answer here reads as "native" while producing the cross-CGO artifact D1 exists
+		// to refuse.
+		goos, goarch, known := RunnerHost(tt.Runner)
+		if !known {
+			t.Errorf("%s: runner %q is not in the reviewed runner table — its OS/arch is unknown, so nothing "+
+				"here can claim the build is native (D1). Add it to runnerHosts deliberately.", tt.Key(), tt.Runner)
+			continue
+		}
+		if goos != tt.GOOS {
 			t.Errorf("%s: runner %q is a %s host — that is a cross-CGO build, which D1 refuses",
-				tt.Key(), tt.Runner, nativeOS[family])
+				tt.Key(), tt.Runner, goos)
 		}
-		isARMRunner := strings.HasSuffix(tt.Runner, "-arm") || tt.Runner == "macos-14"
-		if (tt.GOARCH == "arm64") != isARMRunner {
-			t.Errorf("%s: runner %q arch does not match the target arch — cross-CGO (D1)", tt.Key(), tt.Runner)
+		if goarch != tt.GOARCH {
+			t.Errorf("%s: runner %q is a %s host but the row targets %s — cross-CGO (D1)",
+				tt.Key(), tt.Runner, goarch, tt.GOARCH)
 		}
+	}
+}
+
+// TestDarwinRowsAgreeWithTheDeploymentFloor keeps the two darwin Platform strings and MacOSFloor from
+// drifting. The floor is a claim a user's Mac enforces at launch: if the rows say "macOS 12+" while the
+// build pins 15.0, the binary is rejected by the OS on exactly the machines the matrix promised.
+func TestDarwinRowsAgreeWithTheDeploymentFloor(t *testing.T) {
+	major := strings.SplitN(MacOSFloor, ".", 2)[0]
+	for _, tt := range Shipped() {
+		if tt.GOOS != "darwin" {
+			continue
+		}
+		if !strings.Contains(tt.Platform, "macOS "+major+"+") {
+			t.Errorf("%s: platform %q does not state the built floor macOS %s+ (MacOSFloor=%s)",
+				tt.Key(), tt.Platform, major, MacOSFloor)
+		}
+	}
+	b, err := os.ReadFile(filepath.Join("..", "..", "scripts", "release-cli.sh"))
+	if err != nil {
+		t.Skipf("release script not readable: %v", err)
+	}
+	// The script is where the floor is actually applied. A constant that no build reads is a comment.
+	if !strings.Contains(string(b), "MACOSX_DEPLOYMENT_TARGET:-"+MacOSFloor) {
+		t.Errorf("release-cli.sh does not default MACOSX_DEPLOYMENT_TARGET to %s — the darwin binaries would "+
+			"take their floor from whichever runner image built them", MacOSFloor)
 	}
 }
 

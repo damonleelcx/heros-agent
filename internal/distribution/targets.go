@@ -72,6 +72,40 @@ type Target struct {
 	Channels []string
 }
 
+// MacOSFloor is the oldest macOS the darwin binaries are built to run on, as a deployment target. It is
+// the number in the two darwin rows' Platform strings, and scripts/release-cli.sh exports it as
+// MACOSX_DEPLOYMENT_TARGET and then asserts the linker recorded it.
+//
+// 🔴 It is stated rather than inherited because the default is a trap: with no deployment target set,
+// clang stamps the BUILD HOST's OS version into LC_BUILD_VERSION, so the floor a user actually gets is
+// decided by whichever runner image GitHub had that week. When macos-13 was retired and these rows moved
+// to macOS 15 hosts, an unpinned build would have quietly raised the floor from 13 to 15 while every
+// surface kept saying "macOS 12+" — a false claim that no test in this package could see.
+const MacOSFloor = "12.0"
+
+// runnerHosts maps each GitHub-hosted runner label this contract uses to the OS/arch of the machine
+// behind it. It is a TABLE and not a pattern match on the label, because the labels are not systematic:
+// `ubuntu-22.04-arm` is arm64 by suffix, but `macos-15` is arm64 with NO suffix while `macos-15-intel` is
+// x86_64 WITH one. Inferring arch from the label's shape gets that pair exactly backwards, and the D1
+// native-runner test is the one place a wrong answer produces a cross-CGO build nothing downstream catches.
+//
+// An unknown label is not guessed. RunnerHost reports it as unknown and the D1 test fails, which is the
+// correct outcome when GitHub retires an image and a new label arrives unreviewed.
+var runnerHosts = map[string]struct{ GOOS, GOARCH string }{
+	"macos-15-intel":   {"darwin", "amd64"},
+	"macos-15":         {"darwin", "arm64"},
+	"ubuntu-22.04":     {"linux", "amd64"},
+	"ubuntu-22.04-arm": {"linux", "arm64"},
+	"windows-2022":     {"windows", "amd64"},
+}
+
+// RunnerHost reports the OS/arch of a runner label. `known` is false for any label not in the reviewed
+// table — callers must treat that as a refusal, never as a default.
+func RunnerHost(label string) (goos, goarch string, known bool) {
+	h, ok := runnerHosts[label]
+	return h.GOOS, h.GOARCH, ok
+}
+
 // Key is the "goos/goarch" identity used in asset names and log lines. An arch-less row keys as
 // "linux/*", which is never a Go target and so can never be mistaken for one.
 func (t Target) Key() string {
@@ -89,12 +123,12 @@ func (t Target) Key() string {
 var targets = []Target{
 	{
 		GOOS: "darwin", GOARCH: "amd64", Platform: "macOS 12+ (Intel)",
-		Runner: "macos-13", Support: SupportShipped,
+		Runner: "macos-15-intel", Support: SupportShipped,
 		Channels: []string{"curl-sh", "homebrew", "container"},
 	},
 	{
 		GOOS: "darwin", GOARCH: "arm64", Platform: "macOS 12+ (Apple silicon)",
-		Runner: "macos-14", Support: SupportShipped,
+		Runner: "macos-15", Support: SupportShipped,
 		Channels: []string{"curl-sh", "homebrew", "container"},
 	},
 	{

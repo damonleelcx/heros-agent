@@ -14,7 +14,7 @@ import type { InstallView } from "@/lib/types.generated";
  * second export supplies a delivered posture so both renderings can be seen side by side.
  */
 export const PREVIEW_INSTALL: InstallView = {
-  "matrix_version": "targets-ce4e186bbfe883cf",
+  "matrix_version": "targets-01db3d54ab55cab1",
   "documented_release": "v0.20.0",
   "ratified_posture": "documented-clear",
   "targets": [
@@ -23,7 +23,7 @@ export const PREVIEW_INSTALL: InstallView = {
       "platform": "macOS 12+ (Intel)",
       "arch": "amd64",
       "support": "shipped",
-      "runner": "macos-13",
+      "runner": "macos-15-intel",
       "channels": [
         "curl-sh",
         "homebrew",
@@ -35,7 +35,7 @@ export const PREVIEW_INSTALL: InstallView = {
       "platform": "macOS 12+ (Apple silicon)",
       "arch": "arm64",
       "support": "shipped",
-      "runner": "macos-14",
+      "runner": "macos-15",
       "channels": [
         "curl-sh",
         "homebrew",

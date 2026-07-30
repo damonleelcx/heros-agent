@@ -113,13 +113,33 @@ reviewed change, not a docs edit (`TestTargetMatrixIsFrozen`).
 
 | OS | arch | Native binary | Native runner | Channels |
 |---|---|---|---|---|
-| macOS 12+ (Intel) | amd64 | ✅ | `macos-13` | curl\|sh, Homebrew, container |
-| macOS 12+ (Apple silicon) | arm64 | ✅ | `macos-14` | curl\|sh, Homebrew, container |
+| macOS 12+ (Intel) | amd64 | ✅ | `macos-15-intel` | curl\|sh, Homebrew, container |
+| macOS 12+ (Apple silicon) | arm64 | ✅ | `macos-15` | curl\|sh, Homebrew, container |
 | Linux glibc 2.31+ | amd64 | ✅ | `ubuntu-22.04` | curl\|sh, Homebrew, `.deb`, `.rpm`, container |
 | Linux glibc 2.31+ | arm64 | ✅ | `ubuntu-22.04-arm` | curl\|sh, Homebrew, `.deb`, `.rpm`, container |
 | Windows 10/11 | amd64 | ✅ | `windows-2022` | PowerShell, Scoop, winget |
 | Windows 11 | arm64 | ⛔ **not built** | — | run the amd64 build under x64 emulation |
 | Alpine / any musl Linux | any | ⛔ **not built** (glibc CGO) | — | `ghcr.io/damonleelcx/heros:<version>` |
+
+**Runner labels expire, and D1 makes that a contract problem.** The macOS rows first named `macos-13` and
+`macos-14`; both images have since been retired or deprecated by GitHub (2025-12-04 and 2026-11-02), and a
+retired label does not fail — the job simply queues until it times out, which reads as a slow release rather
+than an impossible one. Two consequences are now built in rather than remembered:
+
+1. **Runner arch is a reviewed table, not a pattern.** `distribution.runnerHosts` maps each label to its
+   host OS/arch and `RunnerHost` refuses unknown labels. The label shapes are not systematic —
+   `macos-15` is arm64 while `macos-15-intel` is x86_64, the reverse of the `-arm` suffix convention — so
+   any inference rule confident enough to decide that pair decides it wrong, and a wrong answer here is
+   precisely the cross-CGO build D1 exists to refuse.
+2. **The macOS floor is pinned, not inherited.** With no deployment target set, clang stamps the *build
+   host's* OS version into `LC_BUILD_VERSION`, so "macOS 12+" silently becomes "as new as whatever image
+   GitHub gave us" — a claim the user's Mac enforces at launch. `distribution.MacOSFloor` states it,
+   `release-cli.sh` exports it as `MACOSX_DEPLOYMENT_TARGET` and then reads the built binary back with
+   `otool -l` to confirm the linker honoured it.
+
+There is also a horizon worth naming now: GitHub retires x86_64 macOS entirely when the macOS 15 image goes,
+in **Fall 2027**. `darwin/amd64` therefore becomes a ⛔ row on a known date. The matrix already has the shape
+for saying so, so that will be a row edit, not a redesign.
 
 The **⛔ rows are rows**, not absences. This is the P13 coverage lesson: a matrix listing only what works
 forces the reader to infer everything else from a blank, and a blank reads as *should work — must be your

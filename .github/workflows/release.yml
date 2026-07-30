@@ -125,8 +125,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { goos: darwin, goarch: amd64, runner: macos-13 }
-          - { goos: darwin, goarch: arm64, runner: macos-14 }
+          # macos-15-intel is x86_64 and macos-15 is arm64 — the label shapes are inverted from the ubuntu
+          # rows, so read the table in distribution.runnerHosts rather than the suffix. Both replaced retired
+          # or deprecated images: macos-13 was fully unsupported on 2025-12-04, macos-14 on 2026-11-02.
+          - { goos: darwin, goarch: amd64, runner: macos-15-intel }
+          - { goos: darwin, goarch: arm64, runner: macos-15 }
           - { goos: linux, goarch: amd64, runner: ubuntu-22.04 }
           - { goos: linux, goarch: arm64, runner: ubuntu-22.04-arm }
           - { goos: windows, goarch: amd64, runner: windows-2022 }
@@ -700,8 +703,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { runner: macos-13, shell: bash }
-          - { runner: macos-14, shell: bash }
+          - { runner: macos-15-intel, shell: bash }
+          - { runner: macos-15, shell: bash }
           - { runner: ubuntu-22.04, shell: bash }
           - { runner: ubuntu-22.04-arm, shell: bash }
           - { runner: windows-2022, shell: pwsh }
