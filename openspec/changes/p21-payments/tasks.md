@@ -18,19 +18,19 @@ persist-then-ack / reversible) it touches.
       customer-facing billing message.
 
 ## 2. Backend — The Stripe provider (implements the existing interface)
-- [ ] 2.1 Author `internal/billing/stripe.go`: a `stripe.Provider` satisfying `billing.Provider` byte-for-byte —
+- [x] 2.1 Author `internal/billing/stripe.go`: a `stripe.Provider` satisfying `billing.Provider` byte-for-byte —
       `EnsureCustomer`, `CreateSubscription`, `Subscription`, `ReportUsage`, `RaiseCharge`, `IssueCredit`, `Invoice`,
       `RecordedUsage`, `Describe`. Construct it with the Secrets seam and the P7 rollout mode; **do not widen the
       interface**.
-- [ ] 2.2 Pass the P7-derived idempotency key (`ledger.go` `*IdempotencyKey` helpers) as Stripe's **`Idempotency-Key`**
+- [x] 2.2 Pass the P7-derived idempotency key (`ledger.go` `*IdempotencyKey` helpers) as Stripe's **`Idempotency-Key`**
       on every charge-bearing call; surface `Duplicate=true` when Stripe returns the original.
-- [ ] 2.3 `CreateSubscription` on the plan's **opaque `price_ref`**; proration Stripe's; **no amount** computed or
+- [x] 2.3 `CreateSubscription` on the plan's **opaque `price_ref`**; proration Stripe's; **no amount** computed or
       stored. `ReportUsage` reports a **quantity** to a Stripe metered item (multiply nothing).
-- [ ] 2.4 `IssueCredit` issues an **additive** Stripe credit note / refund against a prior charge; never reduces or
+- [x] 2.4 `IssueCredit` issues an **additive** Stripe credit note / refund against a prior charge; never reduces or
       voids the original.
-- [ ] 2.5 `Invoice` read-back maps to `billing.Invoice` and passes `Invoice.Validate` (resold-token line rejected,
+- [x] 2.5 `Invoice` read-back maps to `billing.Invoice` and passes `Invoice.Validate` (resold-token line rejected,
       every line names a basis); `RecordedUsage` returns Stripe's recorded metered usage for reconciliation.
-- [ ] 2.6 Map Stripe transport errors to the **outage vs. rejection** split: `ErrProviderUnavailable` on an outage
+- [x] 2.6 Map Stripe transport errors to the **outage vs. rejection** split: `ErrProviderUnavailable` on an outage
       (buffer + retry via `FlushPending`), a distinct error on a rejection (stop).
 
 ## 3. Backend + DevOps — Secret posture and test/live separation
