@@ -108,7 +108,10 @@ func TestMissingAssignmentKeyIsRecordedNotSynthesized(t *testing.T) {
 func TestCandidateInvocationRecordsCandidateHash(t *testing.T) {
 	r := testRollout()
 	sawCandidate, sawParent := false, false
-	for i := 0; i < 2000 && !(sawCandidate && sawParent); i++ {
+	for i := 0; i < 2000; i++ {
+		if sawCandidate && sawParent {
+			break
+		}
 		got := Resolve(r, AssignmentKey{Value: fmt.Sprintf("u%d", i), Supplied: true}, testNow, GuardState{})
 		switch got.Arm {
 		case ArmCandidate:
