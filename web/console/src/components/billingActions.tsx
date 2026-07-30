@@ -205,6 +205,16 @@ function PlanButton({
       </Chip>
     );
   }
+  if (plan.unavailable) {
+    // 🔴 Not set up with the payment provider yet (P21 Decision 9). The control is DISABLED and says
+    // why. Offering it would send the customer to a checkout that fails on somebody else's
+    // configuration — the worst version of this state, because it looks like they did something wrong.
+    return (
+      <Chip tone="warn" title="This plan is not yet configured with the payment provider, so checkout would fail">
+        {plan.name} — not available yet
+      </Chip>
+    );
+  }
   return (
     <button className="button" type="button" disabled={disabled} onClick={onSelect}>
       {busy ? "Working…" : `${label(plan.direction)} to ${plan.name}`}

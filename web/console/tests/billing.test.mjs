@@ -209,6 +209,37 @@ test("an empty period is a real state, not a failure (FR12)", async () => {
   assert.match(html, /No invoice lines for this period/, "an unbilled period is distinguished from an unreachable provider");
 });
 
+test("a plan the provider does not know is a FOURTH state, and its control is disabled", async () => {
+  answering(
+    200,
+    payment({
+      pricing_issue: { plans: ["Business"], checked_at: "2026-07-30T10:00:00Z" },
+      plans: [
+        { plan_id: "free", name: "Free", rank: 0, current: false, direction: "downgrade", subscribable: false, unavailable: false },
+        { plan_id: "team", name: "Team", rank: 1, current: true, direction: "current", subscribable: true, unavailable: false },
+        { plan_id: "business", name: "Business", rank: 2, current: false, direction: "upgrade", subscribable: true, unavailable: true },
+      ],
+    }),
+  );
+  const { html } = await get("/app/billing");
+
+  assert.match(html, /The Business plan cannot be purchased right now/, "the state is named, and names the plan");
+  assert.match(html, /Nothing has been charged/, "it says nobody was charged");
+  assert.match(html, /nothing, from you/, "the next action is honestly 'none' — it is not the customer's to fix");
+  // 🔴 The control is DISABLED and says why, rather than being offered and failing at checkout on
+  // somebody else's configuration.
+  assert.match(html, /Business[\s\S]{0,30}not available yet/, "the plan's control says it is unavailable");
+  assert.doesNotMatch(html, /Upgrade to Business/, "an unbuyable plan is not offered");
+
+  // 🔴 No operator fact reaches the customer: not the reference, not the provider's error.
+  assert.doesNotMatch(html, /price_ref_/, "the price reference stays an operator fact");
+  assert.doesNotMatch(html, /resource_missing|no such price/i, "the provider's error stays an operator fact");
+
+  // It is a DIFFERENT state from the other three, not a rebadged one.
+  assert.doesNotMatch(html, /Billing is temporarily unavailable/, "misconfigured is not 'unavailable'");
+  assert.doesNotMatch(html, /A payment did not go through/, "misconfigured is not 'past due'");
+});
+
 test("a provider that cannot collect payment offers no control that would fail", async () => {
   answering(200, payment({ collection_available: false, payment_method: { present: false } }));
   const { html } = await get("/app/billing");

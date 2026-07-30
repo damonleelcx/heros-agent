@@ -646,6 +646,7 @@ export interface PaymentView {
   plans: PlanOptionView[] | null;
   payment_method: PaymentMethodView;
   collection_available: boolean;
+  pricing_issue?: PricingIssueView | null;
   unavailable?: BillingUnavailableView | null;
 }
 
@@ -656,6 +657,7 @@ export interface PlanOptionView {
   current: boolean;
   direction: string;
   subscribable: boolean;
+  unavailable: boolean;
 }
 
 export interface PaymentMethodView {
@@ -665,6 +667,11 @@ export interface PaymentMethodView {
   status?: string;
   reason?: string;
   restore_path?: string;
+}
+
+export interface PricingIssueView {
+  plans: string[] | null;
+  checked_at?: string;
 }
 
 export interface BillingUnavailableView {

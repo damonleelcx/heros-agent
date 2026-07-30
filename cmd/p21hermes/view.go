@@ -219,11 +219,28 @@ func (s *state) Payment(customer, periodID string) (api.PaymentView, bool) {
 	}
 	v := api.PaymentView{Billing: b, CollectionAvailable: s.svc.CollectionAvailable()}
 
+	// The price-reference preflight, seen from the CUSTOMER's side (Decision 9): which plans cannot be
+	// bought right now. The reference that failed and the provider's words stay on /readyz — two
+	// audiences, two surfaces.
+	unpurchasable := s.svc.UnpurchasablePlans()
 	for _, opt := range s.svc.PlanOptions(customer) {
 		v.Plans = append(v.Plans, api.PlanOptionView{
 			PlanID: opt.PlanID, Name: opt.Name, Rank: opt.Rank, Current: opt.Current,
 			Direction: opt.Direction, Subscribable: opt.Subscribable,
+			Unavailable: unpurchasable[opt.PlanID],
 		})
+	}
+	if len(unpurchasable) > 0 {
+		issue := &api.PricingIssueView{}
+		for _, opt := range v.Plans {
+			if opt.Unavailable {
+				issue.Plans = append(issue.Plans, opt.Name)
+			}
+		}
+		if rep, ran := s.svc.PricingStatus(); ran {
+			issue.CheckedAt = rep.RanAt.Format("2006-01-02T15:04:05Z07:00")
+		}
+		v.PricingIssue = issue
 	}
 
 	st := s.svc.BillingState(customer)

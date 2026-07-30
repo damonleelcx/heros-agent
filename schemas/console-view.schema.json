@@ -1739,6 +1739,16 @@
             }
           ]
         },
+        "pricing_issue": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PricingIssueView"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "unavailable": {
           "anyOf": [
             {
@@ -1842,6 +1852,9 @@
         },
         "subscribable": {
           "type": "boolean"
+        },
+        "unavailable": {
+          "type": "boolean"
         }
       },
       "required": [
@@ -1850,7 +1863,32 @@
         "name",
         "plan_id",
         "rank",
-        "subscribable"
+        "subscribable",
+        "unavailable"
+      ],
+      "type": "object"
+    },
+    "PricingIssueView": {
+      "properties": {
+        "checked_at": {
+          "type": "string"
+        },
+        "plans": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "plans"
       ],
       "type": "object"
     },

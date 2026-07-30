@@ -74,6 +74,11 @@ type PaymentView struct {
 	// CollectionAvailable is false when the wired provider cannot collect a payment method. The console
 	// asks BEFORE rendering the control, so a customer is never offered a button that cannot work.
 	CollectionAvailable bool `json:"collection_available"`
+	// PricingIssue, when set, is the misconfigured-billing state: one or more plans cannot be purchased
+	// because their price does not resolve at the payment provider. It is a DIFFERENT fact from
+	// Unavailable (the provider is unreachable) and from an empty period, and rendering any of them as
+	// another is the mistake the unhappy-state discipline exists to prevent.
+	PricingIssue *PricingIssueView `json:"pricing_issue,omitempty"`
 	// Unavailable, when set, is the named reason the billing provider could not be reached. It is a
 	// first-class state (task 6.4): "billing is temporarily unavailable" and "you have no invoice" are
 	// different facts, and rendering the second for the first is a lie the page tells confidently.
@@ -92,6 +97,10 @@ type PlanOptionView struct {
 	// Subscribable is false for a plan with no subscription price reference (the free tier); the control
 	// is then absent rather than present-and-broken.
 	Subscribable bool `json:"subscribable"`
+	// Unavailable is true when this plan's price does not resolve at the payment provider, so it cannot
+	// be bought right now (P21 Decision 9). The control is disabled and SAYS SO, rather than being
+	// offered and failing at checkout.
+	Unavailable bool `json:"unavailable"`
 }
 
 // PaymentMethodView is the payment-method status, mirrored from the provider.
@@ -110,6 +119,19 @@ type PaymentMethodView struct {
 	// what the customer does about it. A dunning banner with no next step is an alarm.
 	Reason      string `json:"reason,omitempty"`
 	RestorePath string `json:"restore_path,omitempty"`
+}
+
+// PricingIssueView is the customer's half of the price-reference preflight.
+//
+// 🔴 It carries plan NAMES and nothing else. The reference that failed, the provider's error and the
+// charge kind are operator facts on `/readyz`; a customer needs to know they cannot buy this right now
+// and that nobody has been charged. Putting an internal identifier in front of them would be the
+// mechanism leak the billing copy rules forbid.
+type PricingIssueView struct {
+	// Plans is the customer-facing names of the plans that cannot be purchased right now.
+	Plans []string `json:"plans"`
+	// CheckedAt is when the platform last checked, so the state is not read as permanent.
+	CheckedAt string `json:"checked_at,omitempty"`
 }
 
 // BillingUnavailableView is the named "we could not reach billing" state.

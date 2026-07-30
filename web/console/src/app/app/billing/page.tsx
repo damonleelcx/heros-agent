@@ -143,6 +143,7 @@ function Body({ view }: { view: PaymentView }) {
   return (
     <>
       {unhappy ? <DunningBanner view={view} /> : null}
+      {view.pricing_issue ? <PricingIssueBanner issue={view.pricing_issue} /> : null}
 
       <Section
         title="Your plan"
@@ -243,6 +244,46 @@ function Body({ view }: { view: PaymentView }) {
         )}
       </Section>
     </>
+  );
+}
+
+/**
+ * PricingIssueBanner is the MISCONFIGURED state (P21 Decision 9) — a fourth unhappy state, and a
+ * different fact from the other three.
+ *
+ *   unavailable   we could not reach the payment provider          → come back
+ *   past due      the provider says a payment did not go through    → update your card
+ *   empty         nothing recorded this period                      → nothing to do
+ *   MISCONFIGURED this plan is not set up with the provider yet     → not your problem, and not your fault
+ *
+ * 🔴 It names PLANS and nothing else. The price reference that failed to resolve, the provider's error
+ * and the charge kind are operator facts — they are on the readiness endpoint, where whoever runs this
+ * platform can act on them. Putting an internal identifier in front of a customer would be the
+ * mechanism leak the billing copy rules forbid, and it would ask them to debug somebody else's
+ * configuration.
+ *
+ * The other half of the state is in the plan control itself: an unavailable plan's button is DISABLED
+ * and says why, rather than being offered and failing at checkout.
+ */
+function PricingIssueBanner({ issue }: { issue: NonNullable<PaymentView["pricing_issue"]> }) {
+  const plans = issue.plans ?? [];
+  if (plans.length === 0) return null;
+  const list = plans.join(", ");
+
+  return (
+    <Banner tone="warn" title={plans.length === 1 ? `The ${list} plan cannot be purchased right now` : "Some plans cannot be purchased right now"}>
+      <p>
+        {list} {plans.length === 1 ? "is" : "are"} not yet set up with the payment provider, so checkout
+        for {plans.length === 1 ? "it" : "them"} is disabled. Nothing has been charged, and your current
+        plan and everything on it are unaffected.
+      </p>
+      <p>
+        <span className="font-medium text-foreground">Next: </span>
+        nothing, from you. Whoever operates this platform can see exactly which configuration is missing
+        and is the only one who can add it.
+      </p>
+      {issue.checked_at ? <p className="caption">last checked {issue.checked_at}</p> : null}
+    </Banner>
   );
 }
 

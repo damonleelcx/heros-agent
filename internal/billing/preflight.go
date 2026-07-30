@@ -174,6 +174,33 @@ func (s *Service) PreflightPricing(ctx context.Context) (PricingPreflight, error
 // the second for the first would tell an operator their pricing is fine when nothing has checked it.
 func (s *Service) PricingStatus() (PricingPreflight, bool) { return s.pricing.load() }
 
+// UnpurchasablePlans is the cached preflight seen from the CUSTOMER's side: which plans cannot be bought
+// right now, keyed by plan id.
+//
+// 🔴 It returns plan ids and nothing else. The console must not render the price reference, the
+// provider's error, or which charge kind failed — those are operator facts, they live on `/readyz` and
+// in the preflight report, and putting them in front of a customer would be the internal-mechanism leak
+// the billing copy rules forbid. What a customer needs is "you cannot buy this right now, nobody is at
+// fault, and it is being dealt with"; what an operator needs is the reference. Two audiences, two
+// surfaces.
+//
+// A preflight that has not run returns nothing: "we did not check" must not render as "everything is
+// broken" any more than as "everything is fine".
+func (s *Service) UnpurchasablePlans() map[string]bool {
+	rep, ran := s.pricing.load()
+	if !ran || !rep.Verified {
+		return nil
+	}
+	out := map[string]bool{}
+	for _, u := range rep.Unresolved {
+		out[u.PlanID] = true
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 func (c *pricingCache) store(rep PricingPreflight) {
 	c.mu.Lock()
 	defer c.mu.Unlock()

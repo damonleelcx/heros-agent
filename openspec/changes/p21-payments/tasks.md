@@ -129,7 +129,7 @@ instead of leaving it as a footnote on an unticked box.
       takes `-plans <path>` so a catalog carrying real Stripe price ids can be published from a config store,
       and the API key comes from the **environment or stdin** rather than a command-line flag (a flag puts a
       credential in shell history and in `ps` output).
-- [ ] 11.5 **Frontend**: a **misconfigured-billing** state on the console billing page — distinct from
+- [x] 11.5 **Frontend**: a **misconfigured-billing** state on the console billing page — distinct from
       unavailable, empty, and past-due — naming which plan's price reference does not resolve and whose job it
       is to fix it; keyboard-reachable, browser-verified.
 - [ ] 11.6 **QA + Docs**: the preflight goes red on a bad reference and green on good ones; the env/stdin key
