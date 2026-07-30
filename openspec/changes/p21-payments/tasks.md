@@ -80,24 +80,24 @@ persist-then-ack / reversible) it touches.
       commits; keep it gated behind the P7 gainshare flag (P5.5 live + estimated-saving-bills-nothing green).
 
 ## 8. QA — The correctness gate (money invariants as machine assertions)
-- [ ] 8.1 **Contract parity**: the P7 billing suite passes against `stripe.Provider` in test mode exactly as against
+- [x] 8.1 **Contract parity**: the P7 billing suite passes against `stripe.Provider` in test mode exactly as against
       `StubProvider`; every caller compiles and runs against both. *(FR1)*
-- [ ] 8.2 **Never-double-charge**: retry a charge / redeliver a webhook N times against Stripe test mode → **one**
+- [x] 8.2 **Never-double-charge**: retry a charge / redeliver a webhook N times against Stripe test mode → **one**
       Stripe object + **one** ledger row; the recorded-then-lost failure does not double-charge. *(FR2, FR7, FR14)*
-- [ ] 8.3 **Persist-then-ack** *(load-bearing)*: inject a persistence failure → endpoint returns **non-2xx** so
+- [x] 8.3 **Persist-then-ack** *(load-bearing)*: inject a persistence failure → endpoint returns **non-2xx** so
       Stripe retries; **no** acked-but-unrecorded event exists. *(FR15)*
-- [ ] 8.4 **Signature / replay**: unsigned, forged, and stale-timestamp webhooks each rejected **before** any side
+- [x] 8.4 **Signature / replay**: unsigned, forged, and stale-timestamp webhooks each rejected **before** any side
       effect; a valid redelivery is a 2xx applying nothing. *(FR13, FR14)*
-- [ ] 8.5 **Entitlement sync**: paid grants the plan; canceled/failed degrades to Free at the boundary by an audited
+- [x] 8.5 **Entitlement sync**: paid grants the plan; canceled/failed degrades to Free at the boundary by an audited
       plan change; paying restores it — both directions, ledger rows intact. *(FR17)*
-- [ ] 8.6 **Reversibility** *(load-bearing)*: inject a wrong charge → correct via credit → originals intact, net
+- [x] 8.6 **Reversibility** *(load-bearing)*: inject a wrong charge → correct via credit → originals intact, net
       right, no data loss. *(FR5, NFR5)*
-- [ ] 8.7 **Secret / test-live**: Stripe key + signing secret from the seam, in **no** span/label/log/bundle; a
+- [x] 8.7 **Secret / test-live**: Stripe key + signing secret from the seam, in **no** span/label/log/bundle; a
       **live** key does not resolve for a test surface; default mode moves no real money. *(NFR3, NFR4)*
-- [ ] 8.8 **Collection / UI**: Stripe Checkout with a test card → subscription active → billing page renders (plan
+- [x] 8.8 **Collection / UI**: Stripe Checkout with a test card → subscription active → billing page renders (plan
       name / SUM / invoice breakdown / payment method) → upgrade → downgrade → past-due; card never posts to the
       platform, **no** secret in the bundle, **no** hardcoded price. *(FR8–FR12)*
-- [ ] 8.9 **Reconciliation / no-resale**: a seeded drift between platform usage and Stripe's recorded usage is
+- [x] 8.9 **Reconciliation / no-resale**: a seeded drift between platform usage and Stripe's recorded usage is
       **surfaced**; **no** invoice line represents resold provider tokens. *(NFR6, `Invoice.Validate`)*
 
 ## 9. Product Designer + DevOps — The billing runbook and the inbound-path posture
