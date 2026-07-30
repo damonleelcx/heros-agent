@@ -273,6 +273,38 @@ preserves it against a live processor and adds nothing that can delete.
 **Rejected — "fix the wrong charge" by editing or voiding the original.** Destroys the audit trail and the
 reconstructability that make the bill trustworthy.
 
+## Decision 9 — the provider account's configuration is verified before it is charged against, not by charging against it
+
+**Chosen:** a **preflight** resolves every `price_ref` in the published plan configuration against the
+provider — a read, never a write — and names each one that does not resolve by plan, charge kind and
+reference. It runs at configuration time and its result is on the readiness surface. A wrong reference is
+therefore a *stated* condition rather than a rejected charge in the middle of a period.
+
+**Why (L2 稳定 / L4 运维).** Decision 7 makes a price an opaque reference the platform cannot validate by
+inspection — which is the right trade, and it has a consequence: the only thing that knows whether
+`price_ref_team_sub` means anything is the provider. Without a preflight, the first code that finds out
+is `RaiseCharge`, at the first charge of the period, and the answer arrives as `ErrProviderRejected` —
+correct, unretryable, and maximally badly timed. The customer's period has already accrued; the charge
+that should close it cannot be raised; and the operator learns about it from a failed charge rather than
+from a configuration check they could have run at deploy.
+
+The same reasoning is why it is **read-only**. A preflight that created a probe subscription to prove a
+price works would be a preflight that moves money to check whether money can move, and the first time it
+half-failed it would leave an artefact nobody expected on a customer's account.
+
+It also answers a question the platform is otherwise unable to answer honestly: *is this deployment
+configured to bill at all?* "The billing service is up" and "the billing service can charge" are
+different claims, and a readiness surface that reported only the first would be confidently wrong in the
+one case that matters.
+
+**Rejected — validate the reference's shape locally.** Tempting (a Stripe price id starts `price_`), and
+worthless: a well-shaped id for a price that was archived, or that belongs to the other mode's account,
+passes a shape check and fails a charge. The only authority on whether a reference resolves is the thing
+that resolves it.
+
+**Rejected — let the first charge find out.** That is the status quo this decision exists to remove. It
+converts a five-second configuration check into a billing incident.
+
 ## Interfaces sketch
 
 ```

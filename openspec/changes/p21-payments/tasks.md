@@ -120,7 +120,7 @@ instead of leaving it as a footnote on an unticked box.
       signing secret** (one per mode), and **real Stripe price objects** whose ids replace the placeholder
       `price_ref_*` values, with metered prices denominated in the meter's **integral unit** — as a precondition
       block on §13, an NFR, a risk, and an open question naming who owns creating them.
-- [ ] 11.2 **OpenSpec**: add the **preflight** requirement to the `stripe-billing-provider` delta and a design
+- [x] 11.2 **OpenSpec**: add the **preflight** requirement to the `stripe-billing-provider` delta and a design
       decision for it; re-fold the capability into `openspec/specs/`.
 - [ ] 11.3 **Backend**: implement the preflight — resolve **every** configured `price_ref` at the provider and
       name the ones that do not resolve, **before** anything charges; surface the result on the readiness

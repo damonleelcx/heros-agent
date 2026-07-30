@@ -1,7 +1,7 @@
 # Stripe Billing Provider — Spec (folded from P21)
 
 Product rationale: [`../../../docs/prd/P21-stripe-payments.md`](../../../docs/prd/P21-stripe-payments.md)
-§6 (FR1–FR7) and §7. Architecture decisions: [`design.md`](../../changes/p21-payments/design.md) Decisions 1, 4, 8. Implements the
+§6 (FR1–FR7) and §7. Architecture decisions: [`design.md`](../../changes/p21-payments/design.md) Decisions 1, 4, 8, 9. Implements the
 **existing** [`billing.Provider`](../../../internal/billing/provider.go) interface built by
 [`p7-billing-metering`](../../changes/p7-billing-metering/); reuses the P7 idempotency keys
 ([`ledger.go`](../../../internal/billing/ledger.go)) and the additive-correction path
@@ -11,7 +11,8 @@ Covers the **concrete Stripe implementation** of the P7 billing abstraction: a `
 `billing.Provider` without changing it, passing the P7-derived idempotency key to Stripe on every charge-bearing
 call, placing customers on **opaque price references** with proration Stripe's, reporting metered **quantities**
 (never amounts), issuing **additive** credits/refunds, reading invoices back through `Invoice.Validate`, and
-preserving the **outage vs. rejection** split.
+preserving the **outage vs. rejection** split — and verifying, before any of it charges, that every
+configured price reference actually resolves at the provider.
 
 > This capability is a *substitution*, not a new API surface. The interface, the ledger, the charge protocol, and
 > the correction path are P7's and do not change; P21 fills the `Provider` box with Stripe so a **second** processor
@@ -113,6 +114,32 @@ SHALL return Stripe's recorded metered usage for reconciliation.
 - **WHEN** reconciliation reads Stripe's recorded usage for a customer-period
 - **THEN** `RecordedUsage` returns the metered quantities Stripe recorded
 - **AND** they can be compared against the platform's usage records without a write to either ledger.
+
+### Requirement: Every configured price reference SHALL be verified at the provider before anything charges against it
+
+The platform SHALL provide a **preflight** that resolves **every** `price_ref` in the published plan
+configuration against the provider and reports, for each one that does not resolve, **which plan, which charge
+kind, and which reference** failed. The preflight SHALL be side-effect-free — it reads, it never creates — and its
+result SHALL be externally readable on the readiness surface. A price reference that does not resolve SHALL NOT be
+discovered by a rejected charge during a billing period.
+
+#### Scenario: A placeholder price reference is named before it can reject a charge
+
+- **WHEN** a plan carries a `price_ref` that does not exist in the provider account
+- **THEN** the preflight reports that plan, that charge kind, and that reference as unresolved
+- **AND** the failure is visible before a period's first charge rather than as a rejection during one.
+
+#### Scenario: A fully configured account preflights clean
+
+- **WHEN** every plan's price references resolve at the provider
+- **THEN** the preflight reports no unresolved reference, and it names how many it checked
+- **AND** a preflight that checked nothing is reported as unverified rather than as clean.
+
+#### Scenario: The preflight creates nothing
+
+- **WHEN** the preflight runs
+- **THEN** it performs read operations only and creates no customer, subscription, charge, or price
+- **AND** running it repeatedly changes nothing at the provider.
 
 ### Requirement: The Stripe provider SHALL distinguish an outage from a rejection so the P7 outage buffer works unchanged
 
