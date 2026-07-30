@@ -86,6 +86,10 @@ plaintext `Secret`, and CI fails if one is ever committed.
   the rollout within a bounded window instead of replacing healthy pods with broken ones.
 - **PodDisruptionBudgets** on every multi-replica workload mean a node drain cannot remove a service's
   last replica.
+- **Inbound is one door.** The only route that accepts unsolicited internet traffic is Stripe's
+  webhook, `POST /billing/webhook`, and it is mounted only where a deployment collects payments. Its
+  posture, its secret wiring and its runbook are
+  [`docs/decisions/p21-billing-webhook-ingress.md`](../docs/decisions/p21-billing-webhook-ingress.md).
 - **NetworkPolicy** default-denies and permits only the seam flows; **egress is an allowlist** — only
   the platform service reaches an external provider, and the air-gapped overlay replaces even that with
   an on-prem gateway and no public egress.

@@ -115,6 +115,36 @@ test("every invoice line names the basis that justified it (FR6)", async () => {
   assert.match(html, /There is no amount on this page/, "the page states why no amount is shown");
 });
 
+test("gainshare shows what it did NOT bill, and how large it was", async () => {
+  answering(
+    200,
+    payment({
+      billing: {
+        savings: {
+          gainshare_consent: true,
+          consent_available: true,
+          baseline_sum: 1400,
+          optimized_sum: 1260,
+          verified_savings: 140,
+          unit: "USD",
+          none_verified: false,
+          billed: [{ ref: "vd:small", baseline_sum: 500, optimized_sum: 400, savings: 100, merge_commit: "abc1234" }],
+          excluded: [{ ref: "vd:big", reason: "verified but NOT merged — a saving that is not in effect bills nothing", would_have_been: 800 }],
+        },
+      },
+    }),
+  );
+  const { html } = await get("/app/billing");
+
+  assert.match(html, /vd:small/, "the billed saving is listed");
+  // 🔴 The excluded one is the point. The platform's gainshare claim is only checkable if a customer
+  // can see the savings it declined to bill — and here the largest one is the one that billed nothing.
+  assert.match(html, /vd:big/, "the saving that was NOT billed is listed");
+  assert.match(html, /800/, "and how large it would have been");
+  assert.match(html, /verified but NOT merged/, "with the reason it was not billed");
+  assert.match(html, /not billed/, "the row is labelled, not merely styled");
+});
+
 test("the payment-method status is rendered from the mirrored provider state", async () => {
   answering(200, payment());
   const { html } = await get("/app/billing");

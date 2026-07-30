@@ -107,9 +107,14 @@ in the system. Four, each with the failure it prevents:
    auto-merge", never a mechanism name. An internal identifier in a billing message is a support ticket
    nobody can answer and a hint nobody needed.
 
-The first is machine-enforced (the fences above). The second is structural (the UI renders mirrored state
-and has no branch that computes dunning). The third and fourth are review responsibilities, stated here
-so a reviewer has something to point at rather than an opinion to defend.
+The first is machine-enforced (the fences above). The second is structural (the UI renders mirrored
+state and has no branch that computes dunning). The third is machine-enforced too — the console's
+`scan-claims.mjs` fails the build on the banned phrase in any shipped file, and it is proven to fire —
+because a rule that can be written as a guard should not be written only as a document. The fourth stays
+a review responsibility: "no internal mechanism name" is not a fixed string, and a scan that tried to
+enumerate one would be a scan somebody disables. It is stated here so a reviewer has something to point
+at rather than an opinion to defend, with the checklist in
+[`docs/sales/P21-billing-copy.md`](../../../docs/sales/P21-billing-copy.md) §8.
 
 ## Decision 1 — Stripe behind the existing `Provider` interface; the interface does not widen
 

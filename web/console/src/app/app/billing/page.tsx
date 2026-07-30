@@ -204,6 +204,8 @@ function Body({ view }: { view: PaymentView }) {
         )}
       </Section>
 
+      <VerifiedSavings view={view} />
+
       <Section
         title="Invoice breakdown"
         aside={billing.invoice?.status ? `provider status: ${billing.invoice.status}` : "no invoice yet"}
@@ -241,6 +243,83 @@ function Body({ view }: { view: PaymentView }) {
         )}
       </Section>
     </>
+  );
+}
+
+/**
+ * VerifiedSavings shows what gainshare billed — and, the part that makes the claim checkable, what it
+ * DID NOT.
+ *
+ * 🔴 The excluded rows are not a nicety. The platform's gainshare claim is that it bills only for
+ * savings it verified and a human merged, and the only way a customer can believe that is to see the
+ * savings it declined to bill and how large they were. On a real repository the largest verified saving
+ * is often the un-merged one; showing that it billed nothing is worth more than any sentence about
+ * integrity.
+ */
+function VerifiedSavings({ view }: { view: PaymentView }) {
+  const savings = view.billing.savings;
+  if (!savings || !savings.consent_available) return null;
+
+  const billed = savings.billed ?? [];
+  const excluded = savings.excluded ?? [];
+  if (billed.length === 0 && excluded.length === 0) return null;
+
+  return (
+    <Section title="Verified savings" aside="billed only when verified AND merged">
+      {savings.none_verified ? (
+        <p className="hint">
+          Nothing was verified and merged this period, so gainshare billed nothing. That is a real
+          state — not a measured zero, and not a figure that failed to load.
+        </p>
+      ) : null}
+
+      <DataTable
+        caption="Every saving considered this period, whether it was billed, and the evidence or the reason"
+        columns={[
+          { key: "ref", label: "Saving" },
+          { key: "billed", label: "Billed" },
+          { key: "amount", label: `Savings (${savings.unit})`, numeric: true },
+          { key: "why", label: "Evidence, or why not" },
+        ]}
+      >
+        <tbody>
+          {billed.map((row) => (
+            <tr key={row.ref}>
+              <td className="mono text-sm">{row.ref}</td>
+              <td>
+                <Chip tone="ok">billed</Chip>
+              </td>
+              <td className="num mono">{score(row.savings)}</td>
+              <td>
+                <span className="caption mono">merge {row.merge_commit}</span>
+                {row.method ? (
+                  <p className="caption mt-1">
+                    held out on {row.method.holdout_cases} case(s) over {row.method.seeds} seed(s)
+                  </p>
+                ) : null}
+              </td>
+            </tr>
+          ))}
+          {excluded.map((row) => (
+            <tr key={row.ref}>
+              <td className="mono text-sm">{row.ref}</td>
+              <td>
+                <Chip tone="unknown">not billed</Chip>
+              </td>
+              <td className="num mono">{score(row.would_have_been)}</td>
+              <td>
+                <span className="caption">{row.reason}</span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </DataTable>
+      <p className="caption">
+        The &ldquo;not billed&rdquo; column is the point. A saving that was measured but never merged is
+        a saving that is not in effect, so it bills nothing however large it is — and this table shows
+        you how large it was.
+      </p>
+    </Section>
   );
 }
 

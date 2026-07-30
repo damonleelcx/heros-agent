@@ -101,9 +101,9 @@ persist-then-ack / reversible) it touches.
       **surfaced**; **no** invoice line represents resold provider tokens. *(NFR6, `Invoice.Validate`)*
 
 ## 9. Product Designer + DevOps — The billing runbook and the inbound-path posture
-- [ ] 9.1 Document the webhook endpoint as the **one inbound-from-internet path** for the P19 ingress model:
+- [x] 9.1 Document the webhook endpoint as the **one inbound-from-internet path** for the P19 ingress model:
       signature-gated, timestamp-bounded replay window, rate-aware; state the test/live secret wiring.
-- [ ] 9.2 Write the customer-facing billing/dunning copy honestly: past-due → restore path, downgrade → "takes effect
+- [x] 9.2 Write the customer-facing billing/dunning copy honestly: past-due → restore path, downgrade → "takes effect
       at period end", gainshare → "verified and merged" with evidence links; no internal mechanism leaks.
 
 ## 10. Documentation & fold-in
