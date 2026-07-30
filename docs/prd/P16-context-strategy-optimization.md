@@ -381,6 +381,40 @@ plan can move — are **FR41–FR51 of [P13](P13-prompt-model-optimization.md)**
   source — whether the node's language can materialize a selection, and SHALL render that as a **different
   sentence** from a policy no language can materialize.
 
+### This axis's delivery cells (capability `context-delivery`)
+
+Cross-axis rules are defined once in [P13](P13-prompt-model-optimization.md) §6 (`change-delivery`,
+FR57–FR68) and [ADR-010](../adr/ADR-010-runtime-gradual-rollout.md); they are referenced, not restated.
+
+> **"Context strategy" is one name for two things that land in different columns.** A retrieval
+> parameter is a **number** — a `top_k`, a budget, a similarity floor — exactly the kind of fact the
+> binding document was built to carry, refused today only because the schema has no field. A selection
+> policy is a **deletion**: the materializer applies it by removing the turns the policy does not retain
+> from the constructed message list, and no document can perform a deletion in built code.
+>
+> The requirement that matters most is neither of those. It is that the **drop record survives the
+> second route.** This axis's central honesty guarantee is that a context change which discards
+> information records what it discarded, unskippable by construction rather than by discipline. A second
+> path by which a context decision can take effect is precisely where an unskippable guarantee quietly
+> becomes skippable — so the rule is a property of the decision, not of the route.
+
+- **FR52.** A change confined to a retrieval parameter SHALL be refused for the runtime route with cause
+  `noRolloutBinding`, naming the absent binding document field and attributing the owner to the
+  platform. It SHALL NOT be reported as `notRuntimeResolvable`.
+- **FR53.** A change to which turns a node retains SHALL be refused for the runtime route with cause
+  `notRuntimeResolvable` in every language, naming the deletion of written turns, and SHALL NOT be
+  presented as pending work.
+- **FR54.** Retrieval parameters and selection policy SHALL appear as separate cells whose causes are not
+  inferred from one another, and the retrieval cell SHALL be distinguishable from a permanent boundary.
+- **FR55.** A candidate-arm context decision SHALL produce a drop record through the **same unskippable
+  path** as a parent-arm decision, byte-comparable in shape. No arm, route, or apply mode SHALL bypass
+  the recording.
+- **FR56.** The drop-tolerance gate SHALL run before a context change may be authored as a rollout
+  candidate, and SHALL still NOT refuse on ignorance — an unknown tolerance is recorded and carried with
+  the rollout, not treated as a rejection.
+- **FR57.** A retrieval change whose held-out verdict was refused for an **overlapping split** SHALL NOT
+  be authorable as a rollout candidate, and the refusal SHALL name the overlap rather than the route.
+
 ## 7. Non-functional requirements
 
 | # | Requirement | Target |
@@ -401,6 +435,8 @@ plan can move — are **FR41–FR51 of [P13](P13-prompt-model-optimization.md)**
 | **NFR14** | **Coverage is total over (language, policy)** | Every registered language appears against every declared policy; a generated test fails on a missing pair. Absence is the one value the table may not carry — it renders as "this policy does not apply here", which for a *selection* policy is never true. |
 | **NFR15** | **The drop record is unskippable in a new language** | A selection materialized in a newly covered language produces a drop record byte-comparable with an existing language's, asserted rather than reviewed. This is the axis's honesty mechanism; a language that could delete turns without recording them would make `context_drop_ratio` quietly incomplete. |
 | **NFR16** | **Policy, source and language causes are provably distinct** | A run-time-produced policy refuses identically in a language with and without a splitter; a call site with no written message list reports **that** in both. Both directions asserted, and the ordering test goes red when reversed. |
+| **NFR17** | **The recording has no second path** | A structural assertion that every way a context decision can take effect passes through the drop record — enumerated over arms, routes and apply modes, not spot-checked. Adding a path without extending the assertion fails the build; this is what keeps "unskippable" true after the axis grows a second route. |
+| **NFR18** | **The split is legible in one glance** | A test asserts the retrieval cell and the policy cell carry different causes and render differently in the console, the offline table and the API. Collapsing "context is not rollout-eligible" into one row turns it red. |
 
 ## 8. System design summary
 
@@ -645,6 +681,42 @@ cells, versioned and named in a refusal. The wording keeps the two boundaries ap
 "when". And the claim stays per cell — 🚫 never "we optimize context in any language", which promises
 summarization materialization that refuses in **every** language, including Go.
 
+### 9.x Wave 16e — delivery cells on this axis, by role lens
+
+**System Designer — *the axis splits, and not where a reader expects.***
+A retrieval parameter is a **number** — a `top_k`, a budget, a similarity floor — exactly the kind of
+fact the binding document was built to carry, refused today only because the schema has no field. A
+selection policy is a **deletion**: the materializer applies it by removing the turns the policy does
+not retain from a constructed message list, and no document performs a deletion in built code. One is
+ours to close; the other cannot be. A single "context is not rollout-eligible" row tells one reader to
+stop asking about something we can build and the other to wait for something that will never arrive.
+
+**Backend + QA — *the recording has no second path, and that is now a structural claim.***
+This axis's guarantee is that a context change which discards information records what it discarded,
+unskippable **by construction**: `Assemble` always calls `Record`, so the ordinary path cannot forget.
+🔴 But "unskippable" is only ever true against the paths that existed when it was written, and a rollout
+is a second way for a context decision to take effect. So NFR17 enumerates every exported function that
+hands back an assembled context and requires each to reach `Record` — adding an entry point beside the
+recording one fails the build rather than passing quietly.
+
+One subtlety worth keeping: a **lossless** policy publishes no drop-ratio event at all, because
+`Record` carries `Lossy` across rather than inferring it from `DropRatio > 0`. A lossless policy's 0.0
+means "cannot drop"; a lossy policy's 0.0 means "measured no drop". A test that demanded a drop signal
+from every arm would be demanding that the axis break that distinction.
+
+**Product Designer — *the gate runs first, and still never refuses on ignorance.***
+Drop-tolerance gates rollout authoring. But an unknown tolerance is **recorded and carried with the
+rollout**, not treated as a rejection — refusing because nobody has annotated an item would block every
+change on a workflow nobody has annotated, which is most of them.
+
+**Sales Operations — *what may be said about this axis.***
+
+| Say | Never say | Why |
+|---|---|---|
+| "retrieval parameters are a field we have not shipped yet" | "context tuning is not supported" | One cell is ours to close; saying neither is possible misrepresents both. |
+| "a context change records what it discarded" | "context optimization is lossless" | Some policies are lossy by design; the guarantee is the *record*, not the absence of loss. |
+| "retention changes ship as a reviewed diff" | 🚫 "we tune your context live" | Retention refuses the runtime route in **every** language. |
+
 ## 10. Dependencies
 
 **Requires**
@@ -836,6 +908,19 @@ cells with the refusals it already had.
       NFR16).
 - [ ] **A31.** Before a policy is chosen, the surface states the node's language coverage and renders it as
       a **different sentence** from a policy no language can materialize (FR29).
+
+- [ ] **A32.** A retrieval-parameter change reports `noRolloutBinding` naming the absent document field
+      and the platform as owner; a retention-policy change reports `notRuntimeResolvable` in every
+      language with no artifact attached (FR52, FR53).
+- [ ] **A33.** The two context cells render separately with different causes in the console, the offline
+      table and the API, and the retrieval cell reads as one that can gain a row (FR54, NFR18).
+- [ ] **A34.** 🔴 Both arms of a rollout produce a byte-comparable drop record through the same path, and
+      the enumeration of ways a context decision can take effect shows **no** path that bypasses the
+      recording (FR55, NFR17).
+- [ ] **A35.** The drop-tolerance gate blocks rollout authoring for a change it rejected, and an unknown
+      tolerance is recorded and carried rather than treated as a rejection (FR56).
+- [ ] **A36.** A retrieval change whose held-out verdict was refused for an overlapping split cannot be a
+      rollout candidate, and the refusal names the overlap (FR57).
 
 ## 14. Open questions
 

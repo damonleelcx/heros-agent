@@ -269,6 +269,42 @@ Numbered FRs; each maps 1:1 to an OpenSpec requirement under
   grant. The added turns SHALL NOT widen egress or tool scope beyond what the node already holds, and the
   increased turn/tool-call surface SHALL be **observable** in the trace, not merely asserted.
 
+### This axis's delivery cells (capability `harness-delivery`)
+
+Cross-axis rules are defined once in [P13](P13-prompt-model-optimization.md) §6 (`change-delivery`,
+FR57–FR68) and [ADR-010](../adr/ADR-010-runtime-gradual-rollout.md); they are referenced, not restated.
+
+> **A scaffold is structure; its bounds are numbers.** Swapping a node from a single call onto a
+> reason-and-act loop changes how many calls the program makes and in what control flow — that is a loop,
+> and no binding document introduces one. But `max_turns`, the retry budget and the stop condition are
+> parameters of a loop that is **already written**, and those are data in exactly the sense the document
+> was designed for.
+>
+> The distinction this axis must not lose is between two refusals that both mention the runtime and mean
+> opposite things. **`hostAbsent`** says the strategy is deliverable and its host service simply is not
+> running, so it refuses rather than substituting. **`notRuntimeResolvable`** says it cannot be delivered
+> as data at all, host or no host. One is answered by starting a service; the other cannot be answered.
+> A table that renders them alike sends an operator to restart something that was never the problem.
+
+- **FR46.** A harness strategy swap SHALL be refused for the runtime route with cause
+  `notRuntimeResolvable` in every language, for every strategy, and in every apply mode, naming the
+  introduction of a control loop and suggesting no `bound` migration.
+- **FR47.** A change confined to a strategy's bounded parameters — turn ceiling, retry budget, stop
+  condition — SHALL be refused with cause `noRolloutBinding`, naming the absent binding document field.
+  It SHALL NOT be reported as `notRuntimeResolvable`.
+- **FR48.** The strategy cell and the parameter cell SHALL appear separately in the delivery table, with
+  neither cause inferred from the other.
+- **FR49.** Where a bounded parameter becomes rollout-eligible, an arm SHALL admit only values inside the
+  strategy's declared `ParamsSchema`. An absent, unbounded, or non-positive turn ceiling SHALL be refused
+  by the **same** validation the registry applies at seal, and a parameter the candidate strategy does
+  not declare SHALL stay inexpressible rather than ignored.
+- **FR50.** The `hostAbsent` execution refusal and the `notRuntimeResolvable` delivery cause SHALL be
+  separate, separately readable conditions. An absent host SHALL NOT change delivery eligibility, and a
+  delivery refusal SHALL NOT offer starting a host service as a remedy.
+- **FR51.** Authoring a rollout whose candidate arm swaps the harness strategy SHALL be refused with the
+  transform's typed cause, no document carrying a harness strategy SHALL be written, and the totality
+  canary SHALL cover both routes.
+
 ## 7. Non-functional requirements
 
 | # | Requirement | Target |
@@ -408,6 +444,41 @@ to a different strategy), bounded autonomy (a strategy cannot express an unbound
 cost without a commensurate `task_success` gain — which must be **rejected**, because a gate that never
 rejects is decoration.
 
+### 9.x Delivery cells on this axis, by role lens
+
+**System Designer — *a scaffold is structure; its bounds are numbers.***
+Swapping a node onto a reason-and-act loop changes how many calls the program makes and in what control
+flow. That is a loop, and no binding document introduces one — permanent, on the same footing as
+wiring. But `max_turns`, the retry budget and the stop condition are parameters of a loop **already
+written**, which is data in exactly the sense the document was designed for. Two cells, two causes, and
+a table that carried one "harness" row would be wrong about both.
+
+**Backend — *a rollout must not become the one place a bound can be removed.***
+Where the parameter cell opens, an arm admits only values inside the strategy's declared `ParamsSchema`,
+validated by the **same function** the registry applies at seal — passed in rather than
+re-implemented. A second validator would drift, and it would drift toward permissive, because that is
+the direction that makes a failing request succeed. A parameter the strategy does not declare stays
+**inexpressible** rather than ignored: silently dropping it is how a user sets a ceiling, sees nothing
+change, and has nothing to read.
+
+**DevOps + QA — *the distinction that costs an afternoon when it is lost.***
+`hostAbsent` says the strategy is deliverable and its host service is simply not running here and now —
+it refuses rather than substituting, and starting the service fixes it. `notRuntimeResolvable` says the
+change cannot be delivered as data at all, host or no host, and nothing fixes it. They are carried as
+**different fields**: an execution condition travels beside the routes and does not alter delivery
+eligibility, and a delivery refusal never mentions a host service or offers restarting one. NFR16 makes
+that executable; NFR17 extends the totality canary so a node built to carry a real strategy comes back
+refused on **each** route.
+
+**Sales Operations — *what may be said about this axis.***
+
+| Say | Never say | Why |
+|---|---|---|
+| "the scaffold is modelled, hashed and proposed" | "we optimize your agent loop automatically" | It is refused at transform wherever no materializer exists, and refused by the runtime route everywhere. |
+| "turn ceilings are a field we have not shipped" | "harness tuning is not supported" | One cell is ours to close; saying neither is possible misrepresents both. |
+| "a heavier scaffold has to earn its cost" | "more turns means better answers" | Admissibility is decided on held-out data, and a heavier loop that answers no better is rejected. |
+| 🚫 — | "we can change your agent's loop live" | The scaffold refuses the runtime route in **every** language. |
+
 ## 10. Dependencies
 
 **Requires**
@@ -500,6 +571,20 @@ surface guarantee for autonomous turns.
       add no egress/tool scope, and the enlarged surface is **observable** in the trace (G11, FR19, NFR6).
 - [ ] **A14.** An unresolvable/malformed `HarnessRef` fails the resolve closed naming the ref; a
       cross-dimension ref fails closed (NFR8, NFR9).
+
+- [ ] **A27.** A harness strategy swap reports `notRuntimeResolvable` in every language, every strategy
+      and both apply modes, naming the control loop and suggesting no `bound` migration (FR46).
+- [ ] **A28.** A bounded-parameter change reports `noRolloutBinding` naming the absent document field,
+      and the strategy cell and parameter cell render as separate rows with different causes (FR47, FR48).
+- [ ] **A29.** A rollout arm cannot carry an absent, unbounded or non-positive turn ceiling — refused by
+      the same validation the registry applies at seal — and an inapplicable parameter stays
+      inexpressible rather than ignored (FR49).
+- [ ] **A30.** 🔴 `hostAbsent` and `notRuntimeResolvable` render as distinct conditions everywhere; an
+      absent host does not change delivery eligibility, and no delivery refusal offers starting a service
+      as a remedy (FR50, NFR16).
+- [ ] **A31.** 🔴 Authoring a rollout with a harness candidate arm is refused with the transform's typed
+      cause, no document carrying a strategy is written, and the totality canary comes back refused on
+      **each** route — with a sabotaged refusal on either turning the cell red (FR51, NFR17).
 
 ## 14. Open questions
 
@@ -655,6 +740,8 @@ never reach a customer's source, and an *interim* refusal is indefinite by anoth
 | **NFR13** | **Coverage is derived** | The coverage read and the transform's answer for the same cell are asserted equal; a hand-maintained copy is a test failure. |
 | **NFR14** | **Identity untouched** | Every `config_hash` minted under 18a reproduces bit-for-bit after the rewriter lands. |
 | **NFR15** | **Cost stated before the choice** | For any strategy whose ceiling exceeds one turn, the surface states that per-run cost and latency may multiply up to that ceiling, and that whether it is worth it is verification's answer, not the selection's. |
+| **NFR16** | **The two runtime refusals never merge** | A test asserts `hostAbsent` and `notRuntimeResolvable` render as distinct conditions in the console, the offline table and the API, and that a delivery refusal never names a host service. Merging them turns it red — the cost of the merge is an operator restarting the wrong thing. |
+| **NFR17** | **Refusal totality spans both routes** | The harness totality canary is extended so a node built to carry a real strategy comes back refused on **each** route, and a sabotaged refusal on either turns the cell red. Adding a route without extending the canary would quietly make the refusal decoration. |
 
 ## 16. Additional acceptance criteria (M21 exit checklist, addendum)
 

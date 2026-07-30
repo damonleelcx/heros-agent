@@ -82,5 +82,8 @@ func ConsoleViewTypes() []ConsoleViewType {
 
 		// ── P13 13d · total per-axis, per-language coverage ───────────────────
 		{Name: "AxisCoverageView", Sample: coverageView{}, Endpoint: "GET /api/p13/coverage"},
+
+		// ── P13 13e · how an accepted change reaches a running agent ──────────
+		{Name: "ChangeDeliveryView", Sample: ChangeDeliveryView{}, Endpoint: "GET /api/p13/delivery"},
 	}
 }

@@ -638,3 +638,41 @@ requested shape → coherence gate → statement structure → **language last**
       `specs/wiring-language-coverage/spec.md`.
 - [x] 20.17 State the claim per cell: 🚫 never "we reorder workflows" — that promises merges and prunes
       this axis refuses in **every** language, including the covered ones. → PRD §9.2 Sales lens.
+
+## 21. Wave 15f — delivery cells on this axis (`wiring-delivery`)
+
+> Cross-axis rules come from **P13's `change-delivery`** and
+> [ADR-010](../../../docs/adr/ADR-010-runtime-gradual-rollout.md); they are referenced, never restated.
+> This wave declares only this axis's cells — and this axis is the one whose refusal must never soften.
+
+**System Designer**
+
+- [x] 21.1 🔴 **Permanent, not pending.** Every wiring cell is `notRuntimeResolvable`: order and
+      concurrency are compiled program structure, and a document that could reorder statements in a built
+      binary would be an interpreter shipped into the customer's process. Specify it as a **boundary**,
+      with no artifact and no date, and structurally distinct from a `noRolloutBinding` row. →
+      `specs/wiring-delivery/spec.md` (Test: `TestWiringCellsAreBoundariesNotBacklog`).
+- [x] 21.2 The answer does not change with apply mode — a `bound` node is not "closer to possible". →
+      `specs/wiring-delivery/spec.md` (Test: `TestBoundNodeDoesNotUnlockWiring`).
+
+**Backend**
+
+- [x] 21.3 🔴 **The gate is not routed around.** A change the coherence gate rejected yields no runnable
+      spec and is therefore **not authorable as a rollout candidate**, not deliverable as a pull request,
+      and reaches a customer's process by no path. This is the rule the second route exists to be
+      constrained by: without it, "the rewriter refused, so roll it out instead" turns the strongest gate
+      in the system into a speed bump. → (Test: `TestGateRejectedOrderingCannotBeRolledOut`,
+      `TestNoDeliveryPathExistsForAGateRejectedChange`).
+- [x] 21.4 A rejected transform reports **undeliverable** with both routes' causes named — the rejection
+      for source, `notRuntimeResolvable` for runtime — and 🚫 neither as pending. →
+      (Test: `TestRejectedTransformReportsBothRoutes`).
+- [x] 21.5 A gate-passed, materializable swap still ships as a pull request unchanged; the runtime
+      refusal does **not** appear as a warning on that delivery. →
+      (Test: `TestSourceRouteIsUnchangedForCoveredSwaps`).
+
+**Frontend + Product Designer**
+
+- [x] 21.6 The wiring row renders with no missing artifact and no expected date, visually distinct from a
+      backlog row. → `web/console/src/app/app/wiring/` (Test: `coverage.test.mjs`).
+- [x] 21.7 State the boundary in the sales lens: 🚫 never "we can reorder your workflow live" — this axis
+      refuses the runtime route in **every** language, including the covered ones. → PRD §9.2 Sales lens.

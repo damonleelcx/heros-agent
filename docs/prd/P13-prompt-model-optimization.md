@@ -237,6 +237,17 @@ is not an evaluator*.
   parameter value stated by a **builder-chain call** or a **request-value field** SHALL be locatable and
   rewritable, exactly as a named argument is — so a language whose SDKs bind before the call is a registry
   and frontend question, never a "this language is unsupported" answer.
+- **G22. An accepted change SHALL reach a running agent by a named route, or say which route was expected
+  and why it did not.** Delivery becomes a total function over (axis × change × route). A verified change
+  on an axis with no materializer currently produces silence indistinguishable from neglect; that
+  silence becomes a reported state with a cause and an owner.
+- **G23. A change SHALL be tryable under real load without being permanent.** A gradual rollout gives
+  exposure control between "unmerged" and "everyone", and it is a **precursor** — permanence still costs
+  a codemod, a pull request, and a human merge.
+- **G24. The second route SHALL cost no new reach into the customer's system.** Arms resolve inside their
+  own process, in the accessor ADR-004 already ships into their tree. No credential, no traffic through
+  us, no uptime coupling — and every invocation still attributes to the arm's own `config_hash`, so
+  measurement comparability is preserved rather than traded away.
 
 ### Non-goals (explicitly deferred or owned elsewhere)
 
@@ -565,6 +576,79 @@ Defined once here and referenced — never restated — by
   materializable call site's emitted change **byte-identical** and every `config_hash` unchanged; no
   previously refused call site SHALL become silently applied without its own coverage entry.
 
+### How a change reaches a running agent (capability `change-delivery`, cross-axis)
+
+Defined once here and referenced — never restated — by P14–P18. Architecture decision:
+[ADR-010](../adr/ADR-010-runtime-gradual-rollout.md).
+
+> **Why this is in P13 and not in P12.** P12 built the pull request, and the pull request is correct.
+> What it never had to say is what happens when the chain's **first link refuses** — because before six
+> optimization axes existed, a refusing rewriter was an exception. Read against the coverage tables it
+> is now the common case: memory refuses in every language, harness refuses in every language, skill
+> binding materializes in Go for two providers. No diff means no pull request means **nothing ships**,
+> and the product currently says nothing about that. It can prove a change is better and then deliver a
+> silence that looks exactly like a proposal nobody got to.
+
+- **FR57.** Delivery SHALL be a **total function** over (axis × change × route): every cell SHALL name a
+  route that delivers it or a typed refusal cause. A cell SHALL NOT be absent, blank, or unknown.
+- **FR58.** A change no route can deliver SHALL be a **reported state** recorded against the change,
+  naming the expected route and the refusing cause. It SHALL NOT be silently discarded, and SHALL NOT be
+  presented as delivered or pending.
+- **FR59.** There SHALL be exactly two routes — the **source route** (call-site materialization carried
+  by a P12 pull request) and the **runtime route** (a gradual rollout under a binding document). The
+  source route SHALL remain the default, and the two SHALL NOT be presented as interchangeable or as a
+  product tier.
+- **FR60.** The runtime route SHALL be a **precursor**, not a terminal state. Permanence SHALL require a
+  materialization, a pull request, and a human merge; a completed rollout's delivery state SHALL NOT be
+  `delivered`, and no path SHALL make a rollout durable without a merged pull request.
+- **FR61.** Arm resolution SHALL occur **inside the customer's own process**, in the generated binding
+  accessor. The platform SHALL NOT receive, proxy, or observe production invocations as part of a
+  rollout, and the accessor SHALL NOT open a connection to the platform to resolve an arm.
+- **FR62.** Arm assignment SHALL be a pure function of the rollout's identity and a caller-supplied
+  stable key — no random source, no wall-clock, no process id, no replica-local state. Two replicas
+  SHALL agree without coordination, and a past assignment SHALL replay exactly. A caller supplying no
+  key SHALL get per-invocation assignment, and the weaker guarantee SHALL be recorded rather than a key
+  synthesized.
+- **FR63.** Every invocation SHALL emit the `config_hash` of **the arm it resolved**, with the rollout id
+  and arm as separate fields. Emitting a rollout identity where an arm hash belongs SHALL **fail the
+  run**, on the same footing as resolving an unrequested configuration ([ADR-004](../adr/ADR-004-runtime-config-binding.md)
+  H1). This is what keeps two runs of one `config_hash` comparable, which is the objection
+  [ADR-002](../adr/ADR-002-provider-gateway-serves-platform-callers.md) raised against deciding per node
+  at runtime.
+- **FR64.** A rollout SHALL declare a bounded expiry fixed when written; after expiry the accessor SHALL
+  serve the **parent** arm, evaluated with no network call and no human present. Extension SHALL require
+  a new document change.
+- **FR65.** A tripped guard SHALL fall back to the parent arm in-process and record the cause, with **no
+  call to the platform**. A reverted rollout SHALL NOT resume on its own, on a timer, or on the
+  condition clearing; resuming SHALL require an authored document change delivered as a merged pull
+  request.
+- **FR66.** Runtime-route eligibility SHALL be published per cell as eligible or refused with cause
+  `notRuntimeResolvable`, `nodeNotBound`, or `noRolloutBinding`, evaluated **in that order**, with the
+  first applicable cause reported. A `notRuntimeResolvable` cell SHALL be presented as a boundary — no
+  completion date, backlog item, or "not yet" framing.
+- **FR67.** A rollout SHALL be **inert** during evaluation and verification runs (the resolver is
+  pinned), and its production evidence SHALL NOT enter the verified-delta ledger or be counted as a win,
+  a regression, or a tie.
+- **FR68.** The runtime route SHALL reuse the single resolve-hash-gate spine. A rollout-only resolve
+  path, hash derivation, or gate SHALL NOT exist, and authoring or activating a rollout SHALL be
+  entitlement-gated server-side, blocked by an active halt, and fail closed on an unreadable halt state.
+
+### This axis's delivery cells (capability `prompt-model-delivery`)
+
+- **FR69.** On a `bound` node, a change confined to the model id **within one provider**, to inference
+  parameters, or to the prompt template version SHALL be eligible for the runtime route. The same change
+  on an `inline` node SHALL report `nodeNotBound`, and the source route SHALL be unaffected.
+- **FR70.** A **provider-crossing** model change SHALL be refused for the runtime route with cause
+  `notRuntimeResolvable` in every apply mode, naming the SDK call rewrite (ADR-002), and SHALL NOT
+  suggest a `bound` migration. The two model cells SHALL appear separately in the delivery table.
+- **FR71.** Each rollout arm SHALL reference a **complete resolved configuration** present in the
+  binding document, never a delta against the other arm, so both arms' effective values are readable in
+  the diff (ADR-004 H2).
+- **FR72.** A model change the held-out guardrail decided against SHALL NOT be authorable as a rollout
+  candidate. An undecided verdict SHALL be authorable only with the ambiguity recorded on the rollout.
+- **FR73.** An authored change SHALL be rollout-eligible under the same per-cell rules, SHALL remain
+  stamped `unverified`, and SHALL NOT be converted into a result by having accumulated rollout evidence.
+
 ## 7. Non-functional requirements
 
 | # | Requirement | Target |
@@ -592,6 +676,10 @@ Defined once here and referenced — never restated — by
 | **NFR21** | **A coverage row is a proof, not a claim** | Adding a cell requires a test that emits the change in it and asserts the result parses, plus the build gate wherever source is constructed. A row admitted without one is rejected in review *and* by the check that every row has a named proof. |
 | **NFR22** | **Cross-language semantic parity** | The same resolved override materialized in two languages expresses the same configuration, asserted over a shared fixture rather than inspected. This is what stops coverage growth from turning one spec into seven dialects. |
 | **NFR23** | **Offline coverage is versioned and self-identifying** | The command line carries a versioned copy of the table, reports the same typed cause text, and names the version in a refusal, so a hosted/offline disagreement is attributable rather than mysterious. |
+| **NFR24** | **Assignment determinism** | For a fixed rollout identity and assignment key, the arm is identical across replicas, processes, and replays, with no coordination and no stored assignment table. Asserted by replaying a past assignment, not by inspecting the code for `rand`. |
+| **NFR25** | **No runtime dependency on the platform** | With the platform unreachable, arm assignment, guard evaluation and expiry all continue unchanged and the customer's program does not fail, stall, or alter behaviour. This is ADR-004 H4's posture applied to a second value: fail-static, never a startup dependency, never fail-open. |
+| **NFR26** | **Measurement fidelity under a rollout** | A verification run against a node carrying an active rollout executes the configuration the run requested. A verified delta is never produced from a partially exposed configuration, and a run whose emitted arm hash disagrees with the requested hash is failed rather than scored. |
+| **NFR27** | **Refusal survival across routes** | Every `notRuntimeResolvable` and `noRolloutBinding` cell is asserted by a test that turns red when the refusal is sabotaged. A delivery guarantee that cannot be made to fail is decoration. |
 
 ## 8. System design summary
 
@@ -952,6 +1040,53 @@ is the fastest way to lose the next renewal. Refused out loud: coverage is **ide
 there is no tier, flag, or role that materializes a cell the engine refuses; and a coverage gap is never
 presented as something a contract can move.
 
+### 9.3 Wave 13e — how a change reaches a running agent, by role lens
+
+**System Designer (co-lead) — *the second route is shaped by two refusals we already made.***
+The obvious gradual rollout — we serve a share of the customer's production traffic from a configuration
+we hold — is not a new idea to evaluate. It is [ADR-002](../adr/ADR-002-provider-gateway-serves-platform-callers.md)'s
+rejected option C wearing a rollout's clothing, and ADR-005 already extended the same refusal to their
+repository. What survives is the seam [ADR-004](../adr/ADR-004-runtime-config-binding.md) already shipped
+into their tree: a two-armed binding document resolved by the generated accessor **inside their own
+process**. That component is already in the request path — theirs, not ours — so riding it adds no
+credential, no network dependency, and no new blast radius. The single hardest requirement is FR63:
+every invocation is attributed to **its arm's own** `config_hash`. That is ADR-002's comparability
+objection answered rather than dodged, and it is what keeps the eval spine intact while two
+configurations run at once.
+
+**Backend — *every function in this package is pure, and that is a requirement rather than a style.***
+The code runs on the customer's machine, so there is no clock to read (`now` is a parameter), no random
+source (assignment is SHA-256 over rollout id + key), no replica-local state (two replicas agree with no
+coordination because there is nowhere to coordinate), and no network call on any path — assignment,
+expiry and guard evaluation all work with the platform unreachable. The share is integer basis points
+because a float share invites a float comparison, and a float comparison is where determinism dies
+quietly across architectures.
+
+**QA — *the fences must be able to go red.***
+Each guarantee is deliberately violated in `TestDeliveryGuaranteesAreSabotageable`, and each violation
+must be caught by a **distinct** mechanism: if two sabotages trip the same check, one guarantee is not
+actually enforced. The specific one to keep watching is the boundary/backlog asymmetry — a permanent
+cell that acquires a missing artifact is how "we will never do this" quietly becomes "we have not done
+this yet".
+
+**Product Designer + Sales Operations — *a rollout is evidence under real load, and never a shipment.***
+This is the wording boundary this wave exists to fix, and it is the one most likely to erode, because
+every adjacent product in the category uses these words to mean deployment.
+
+| Say | Never say | Why |
+|---|---|---|
+| "a rollout produces evidence under real load" | "we roll out your improvements" | It never merges anything. Permanence costs a codemod, a pull request, and a human. |
+| "rollout-eligible" | "auto-deployed", "auto-shipped", "released" | Eligibility is a property of the change; nothing is deployed by us at all. |
+| "it expires to the parent arm" | "it stays until you turn it off" | The bound is fixed when written and is not extendable except by a new document change. |
+| "it reverts itself in your process" | "we roll it back for you" | The revert is local and platform-free. We are not in the path and cannot be. |
+| "undeliverable — here is the cause" | "pending", "queued", "in review" | 🚫 A dead end must never borrow a queue position. This is the exact silence P13 13e removes. |
+
+🚫 **"Rolled out" is never "shipped".** A completed rollout's delivery state is not `delivered`, and no
+surface, deck, or email may imply otherwise — the state machine refuses to produce it (FR60), so any
+claim to the contrary is a claim the product itself contradicts. And coverage of the runtime route is
+**identical on every plan**: the delivery table takes no plan, role, or tenant, because what a route can
+carry is a property of the change rather than of what someone paid.
+
 ## 10. Dependencies
 
 **Requires**
@@ -1007,6 +1142,10 @@ presented as something a contract can move.
 | Two languages implement "the same" override slightly differently | AI Engineer + Backend | FR48/NFR22 — semantic parity asserted over a shared fixture; a divergence is a defect, not a per-language behavior. |
 | The console's list of supported languages drifts from the engine's | Frontend + Backend | FR46 — one coverage source, asserted in **both** directions (the surface offering what the engine refuses, and the engine materializing what no surface offers). |
 | The offline CLI refuses something the hosted surface accepts, with no way to tell why | DevOps | FR49/NFR23 — the local table is versioned and the refusal names its version. |
+| A rollout becomes the durable configuration by being forgotten, and the customer's repo stops describing what their agent does | Backend + Product | FR60/FR64 — bounded expiry serving the **parent**, no extension without a document change, and no path to permanence that skips a merged pull request. |
+| The runtime route is used to route around a gate the rewriter refused for | System Design + QA | FR68 + the per-axis rules (P15 most sharply) — one resolve-hash-gate spine, and a gate-rejected change is not authorable as a rollout candidate on any axis. |
+| A rollout blurs the measurement spine — two runs of one `config_hash` stop being comparable | Backend + QA | FR63/NFR26 — arm-level hash attribution on every invocation, a failed run on mismatch, and a pinned resolver during measurement. This is ADR-002's stated objection, answered rather than inherited. |
+| Sales reads "gradual rollout" as "we deploy improvements for you" | Product + Sales Ops | FR59/FR60 — a rollout is evidence under real load, is temporary by construction, and never merges anything. The wording boundary is a task, not a hope. |
 | A coverage gap is sold, or heard, as a plan boundary | Sales Ops + Product Designer | FR51 — an unmaterialized cell is *not yet applied by the platform*, identical on every plan; no tier, flag, or role materializes a refused cell. |
 | Generalizing the locator to builder and struct binding sites changes an existing diff | Backend + QA | FR53/FR56 — the declaration is additive; previously materializable call sites emit byte-identical changes and golden vectors reproduce. |
 
@@ -1099,6 +1238,35 @@ the refusals it already had.
 28. **Coverage growth disturbs nothing** — after adding a binding form, a row, or a language, previously
     materializable call sites emit byte-identical changes and P0 golden vectors reproduce (FR56).
 
+**Wave 13e — how a change reaches a running agent (`change-delivery`, `prompt-model-delivery`).**
+Delivery becomes a total function; the second route is added under
+[ADR-010](../adr/ADR-010-runtime-gradual-rollout.md). This wave is **docs-first and deliberately so**:
+nothing writes a rollout into a customer tree until the binding document's schema change is specified,
+because [ADR-009](../adr/ADR-009-binding-document-format.md) already established that the document's
+shape becomes a public contract the instant a released version writes it into a customer repository.
+Ends when a change on any axis reports a route or a named cause, and a rollout on a `bound` node
+assigns deterministically, attributes to its arm's hash, expires to the parent, and reverts locally.
+
+**How correctness is proven for 13e.**
+29. **Totality** — every (axis × change × route) cell has a value; a change no route delivers is a
+    reported state naming route and cause, never silence (FR57, FR58).
+30. **Precursor** — a completed rollout is not `delivered`, and no enumerated path makes it durable
+    without a merged pull request (FR60).
+31. **Determinism** — a replayed rollout identity plus key reproduces the arm exactly, on any replica,
+    with no stored table (FR62, NFR24).
+32. **Attribution** — a candidate invocation records the candidate's own `config_hash`; a resolver that
+    emits the rollout identity in that slot fails the run (FR63, NFR26).
+33. **Independence** — with the platform unreachable, assignment, guards and expiry all still work and
+    the customer's program is unaffected (FR61, NFR25).
+34. **Expiry and revert** — an expired rollout serves the parent offline; a tripped guard reverts
+    in-process with no platform call and does not self-resume (FR64, FR65).
+35. **Cause order** — a cell that is both `notRuntimeResolvable` and unbound reports the boundary, and
+    the boundary carries no date (FR66).
+36. **Inertness** — a verification run ignores an active rollout, and rollout evidence writes no
+    verified delta (FR67, NFR26).
+37. **Sabotage** — each of attribution, expiry, guard revert, the precursor rule and the cause order
+    turns a distinct test red when broken (NFR27).
+
 ## 13. Success metrics & acceptance criteria (M16 exit checklist)
 
 - [ ] **A1.** The catalog emits distinct instruction-harden / few-shot-curate / prompt-compress /
@@ -1186,6 +1354,33 @@ the refusals it already had.
 - [ ] **A39.** Adding a binding form, a registry row, or a language leaves every previously materializable
       change **byte-identical**, every `config_hash` unchanged, and every added cell backed by an
       executable proof with **no** gate relaxed (FR47, FR56, NFR21, NFR22).
+- [ ] **A40.** Every (axis × change × route) cell carries a route or a typed cause; a change no route can
+      deliver is a reported state naming both, and is never rendered as pending (G22, FR57, FR58).
+- [ ] **A41.** A completed rollout's state is not `delivered`, and no path makes a rollout permanent
+      without a merged pull request (G23, FR60).
+- [ ] **A42.** Arm assignment replays exactly from rollout identity + key, agrees across replicas with no
+      coordination, and uses no random source or wall-clock (FR62, NFR24).
+- [ ] **A43.** Every invocation emits its **arm's own** `config_hash`; a rollout identity in that slot
+      fails the run (G24, FR63, NFR26).
+- [ ] **A44.** With the platform unreachable, assignment, guard evaluation and expiry are unchanged and
+      the customer's program is unaffected (FR61, NFR25).
+- [ ] **A45.** An expired rollout serves the parent with no network call; a tripped guard reverts
+      in-process without contacting the platform and does not self-resume (FR64, FR65).
+- [ ] **A46.** A cell that is both `notRuntimeResolvable` and unbound reports the boundary first, and no
+      boundary cell carries a date, milestone, or "not yet" (FR66).
+- [ ] **A47.** A verification run against a node with an active rollout measures the requested
+      configuration, and rollout evidence appears in no verified-delta record (FR67, NFR26).
+- [ ] **A48.** A provider-crossing model change is refused for the runtime route in every apply mode,
+      naming the SDK rewrite and suggesting no `bound` migration; the two model cells are separate rows
+      (FR70).
+- [ ] **A49.** Both rollout arms' effective resolved values are readable in the pull request without
+      composing a delta (FR71, ADR-004 H2).
+- [ ] **A50.** A guardrail-rejected downgrade cannot be a rollout candidate; an undecided verdict is
+      carried on the rollout rather than hidden (FR72).
+- [ ] **A51.** An authored change accumulating rollout evidence stays `unverified` and is reported as no
+      one's win (FR73).
+- [ ] **A52.** 🔴 Sabotaging arm attribution, expiry, guard revert, the precursor rule, or the cause
+      order each turns a distinct test red (NFR27).
 
 ## 14. Open questions
 
@@ -1242,3 +1437,18 @@ the refusals it already had.
     A tool-value spelling is generation-specific; an argument locator usually is not — until an SDK renames
     the argument. Proposed: keep the model/prompt key at (language, row) and let the row carry the
     generation it was written against, revisiting if a rename actually bites.
+14. **Whether a guard trip should be observable to the platform before the customer's next telemetry
+    export.** FR65 makes the revert local and platform-free, which is right for safety and leaves us
+    blind until their exporter runs. Proposed: accept the blindness — a push channel is a runtime
+    dependency wearing an observability costume — and surface the trip from the telemetry already being
+    sent. Ratify before the console renders a rollout's health.
+15. **Whether a rollout on a node with no verified delta is permitted or only marked.** ADR-004 H3
+    permits-and-marks for a *resolution*; a rollout is a stronger act, because it exposes production
+    traffic rather than changing a value someone chose. Proposed: permit under the same marking, since
+    forbidding it pushes operators to work around the mechanism — but decide explicitly rather than
+    inheriting H3 by default.
+16. **What the rollout's assignment key is, at the API boundary.** FR62 requires a caller-supplied stable
+    key and records the weaker per-invocation guarantee when none arrives. What has not been settled is
+    whether the accessor asks for it, reads it from an ambient context, or both — and the answer changes
+    what a customer must edit at every call site. Decide before the schema is fixed, because ADR-009
+    makes it a one-way door.

@@ -108,11 +108,22 @@ door the moment a consumer depends on the shape.
   or a run-time-assembled tool list is told **that**, and told a materializer would not change it, rather
   than being told to wait for its language. The cross-axis rules come from **P13's `language-coverage`**
   and are referenced, never restated.
+- **New capability `skill-tool-delivery` (wave 14e).** This axis's delivery cells, under P13's
+  [`change-delivery`](../p13-prompt-model-optimization/specs/change-delivery/spec.md) contract and
+  [ADR-010](../../../docs/adr/ADR-010-runtime-gradual-rollout.md). Both of this axis's runtime-route
+  refusals are real and they are **not the same refusal**: binding a skill is *construction* of a
+  provider SDK tool value, which no binding document can hold in any version —
+  `notRuntimeResolvable`, permanent; selecting among tools the program **already constructs** is a
+  set, which a document could hold — `noRolloutBinding`, with a named missing field and an owner on
+  our side. One row saying "tools are not rollout-eligible" would tell every reader the wrong one of
+  those. The unpacked-argument call site keeps getting the same honest answer from **both** routes:
+  its own shape, not its language and not our schema.
 
 ## Impact
 
 - **Affected capabilities:** `skill-binding` (new), `tool-selection` (new), `skill-tool-authoring` (new,
-  14c), `skill-tool-language-coverage` (new, 14d). Consumed, not modified: `discovery-engine` (P1), `transform`/codemod (P2), `registry`/skills (P3),
+  14c), `skill-tool-language-coverage` (new, 14d), `skill-tool-delivery` (new, 14e). Consumed, not modified:
+  **`change-delivery` (P13 — referenced, never restated)**, `discovery-engine` (P1), `transform`/codemod (P2), `registry`/skills (P3),
   `pattern-classifier` (P3.5), `eval-harness`/`scoring` (P4/P4.5), `proposal-catalog`/`verification`
   (P5.5), **`authored-change` (P13 — referenced, never restated)**, `entitlements` (P7), `web-console`
   (P9), `cli`/`ci` (P11), `forge-delivery` (P12).

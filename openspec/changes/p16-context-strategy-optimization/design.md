@@ -232,6 +232,28 @@ arguments from a mapping has written **no message list** — nothing to select a
 select among after every splitter has landed. Both are reported first; the splitter is the honest answer
 only when neither is true.
 
+## Decision 10 — The axis splits for delivery, and the drop record survives the split
+
+**Context.** "Context strategy" is one name for two facts that land in different delivery columns, and
+this axis's central guarantee — that a change discarding information records what it discarded — was made
+unskippable against **one** apply path.
+
+**Decision.** Split the cells. A **retrieval parameter is a number** (`top_k`, a budget, a floor) — the
+kind of fact the binding document exists to carry, refused today only because no field exists:
+`noRolloutBinding`, ours. A **selection policy is a deletion** — the materializer applies it by removing
+the turns the policy does not retain from a constructed message list, which no document performs in built
+code: `notRuntimeResolvable`, permanent.
+
+**The part that matters more than the split.** State the recording as a property of the **decision**, not
+of the route: whatever chooses what the model sees records what it dropped, through the same path, in the
+same shape, whichever arm chose it. An unskippable guarantee is unskippable only against the paths that
+existed when it was written; a second path is exactly where it quietly becomes a convention. NFR17 makes
+the enumeration structural, so adding a path without extending it fails the build.
+
+**Gates run first, and still do not refuse on ignorance.** Drop-tolerance gates rollout authoring, and an
+unknown tolerance is recorded and carried rather than treated as a rejection — the same rule the axis
+already holds at Propose, extended rather than restated.
+
 ## Interfaces sketch
 
 ```

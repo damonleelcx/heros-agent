@@ -390,3 +390,46 @@ and a browser check of the new console surface at `/preview/p14`.
 - [x] 11.25 State the claim per **cell**: 🚫 "Go is supported" is never "every Go call site is supported",
       binding and pruning are quoted separately, and coverage is identical on every plan. → PRD §9.2
       Sales lens.
+
+## 12. Wave 14e — delivery cells on this axis (`skill-tool-delivery`)
+
+> Cross-axis rules come from **P13's `change-delivery`** and
+> [ADR-010](../../../docs/adr/ADR-010-runtime-gradual-rollout.md); they are referenced, never restated.
+> This wave declares only this axis's cells.
+
+**System Designer**
+
+- [x] 12.1 🔴 **Two refusals, not one.** Skill binding is `notRuntimeResolvable` (constructing a provider
+      SDK tool value is code, and no document version could hold one without becoming a request-time code
+      generator); the offered tool set is `noRolloutBinding` (a set is data the schema does not yet
+      carry). They sit one row apart and point at opposite conclusions — *stop asking* versus *ask again
+      after the schema lands*. → `specs/skill-tool-delivery/spec.md`
+      (Test: `TestBindingAndToolSetCarryDifferentCauses`).
+- [x] 12.2 The binding refusal carries **no** missing artifact, milestone, or "not yet" framing in any
+      surface. → `specs/skill-tool-delivery/spec.md` (Test: `TestSkillBindingRefusalIsNotABacklogItem`).
+
+**Backend**
+
+- [x] 12.3 Skill binding refuses the runtime route in **every** (language, provider) cell, independent of
+      apply mode. → (Test: `TestSkillBindingRefusesEveryRuntimeCell`).
+- [x] 12.4 The tool-set cell names the **absent document field** and attributes the owner to the platform;
+      it is neither `notRuntimeResolvable` nor `nodeNotBound`. →
+      (Test: `TestToolSetNamesTheMissingField`).
+- [x] 12.5 🔴 **The frontend gap keeps its own name.** A prune blocked because discovery records no tool
+      split for a call site reports the **frontend** gap — distinguishable from `noRolloutBinding` and
+      from a missing materializer, because those are three different backlogs. →
+      (Test: `TestFrontendGapIsNotADeliveryCause`).
+- [x] 12.6 🔴 An unpacked-argument call site gets the **same** answer from both routes: its own shape.
+      🚫 Neither route tells that author to wait for a materializer or for a schema field — they would
+      still have nothing to bind or prune the day both land. →
+      (Test: `TestUnpackedCallSiteGetsOneAnswerFromBothRoutes`).
+- [x] 12.7 Where both routes refuse, **both** causes are recorded and surfaced against the change, and
+      the change reads as undeliverable rather than pending. →
+      (Test: `TestBothRefusalsAreSurfacedTogether`).
+
+**Frontend + Product Designer**
+
+- [x] 12.8 Render binding and tool-set as separate rows with separate causes; 🚫 never one "tools are not
+      rollout-eligible" row. → `web/console/src/app/app/delivery/` (Test: `delivery.test.mjs`).
+- [x] 12.9 State the claim per cell in the sales lens: 🚫 "we tune your tools live" promises a rollout
+      this axis refuses for binding in **every** language and provider. → PRD §9.2 Sales lens.

@@ -208,6 +208,7 @@ func New(db *sql.DB, cfg config.Config) *Server {
 	// property of this BUILD rather than of a tenant: it takes no tenant, no plan and no role, which is
 	// what makes "coverage is identical on every plan" structural instead of a policy.
 	s.Mux.HandleFunc("GET /api/p13/coverage", s.handleCoverage)
+	s.Mux.HandleFunc("GET /api/p13/delivery", s.handleDelivery)
 	// P17 20c — the memory-authoring read model, registered here for the same reason: the strategy
 	// vocabulary and the applicability boundary are properties of this BUILD, not of a tenant, so no
 	// plan or role can move them. It is a READ only; a memory change is authored through the existing

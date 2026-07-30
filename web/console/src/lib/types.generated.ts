@@ -696,3 +696,57 @@ export interface CoverageCell {
   note?: string;
 }
 
+/** Response of `GET /api/p13/delivery`. */
+export interface ChangeDeliveryView {
+  version: string;
+  routes: DeliveryRouteMeta[] | null;
+  causes: DeliveryCauseMeta[] | null;
+  states: DeliveryStateMeta[] | null;
+  languages: string[] | null;
+  cells: DeliveryCellView[] | null;
+  source_cells: DeliverySourceCellView[] | null;
+}
+
+export interface DeliveryRouteMeta {
+  id: string;
+  label: string;
+  permanence: string;
+}
+
+export interface DeliveryCauseMeta {
+  id: string;
+  owner: string;
+  permanent: boolean;
+  label: string;
+}
+
+export interface DeliveryStateMeta {
+  id: string;
+  label: string;
+}
+
+export interface DeliveryCellView {
+  axis: string;
+  change: string;
+  route: string;
+  status: string;
+  cause?: string;
+  owner?: string;
+  permanent?: boolean;
+  missing_artifact?: string;
+  note?: string;
+  contingent?: boolean;
+  missing_component?: string;
+  bound_only?: boolean;
+}
+
+export interface DeliverySourceCellView {
+  change: string;
+  language: string;
+  status: string;
+  cause?: string;
+  permanent?: boolean;
+  missing_artifact?: string;
+  note?: string;
+}
+

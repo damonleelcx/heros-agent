@@ -204,6 +204,27 @@ distinction that keeps a coverage table from turning into a promise nobody can k
 a new `config_hash` and is a scoreable configuration, not a cosmetic edit. The authoring surface must not
 present it as one.
 
+## Decision 10 — This axis refuses the runtime route twice, and the two refusals must not be merged
+
+**Context.** P13's `change-delivery` adds a second delivery route. This axis is eligible for none of it
+today, and the tempting summary — "tools are not rollout-eligible" — is one row that would answer two
+different questions with the same wrong answer.
+
+**Decision.** Two cells with two causes. **Binding a skill is construction** of a provider SDK tool value;
+a binding document holds data, not a constructed value, and no schema version could hold one without
+becoming a code generator that runs at request time — `notRuntimeResolvable`, permanent, no date.
+**Selecting among tools the program already constructs is a set**, which a document carries naturally —
+`noRolloutBinding`, with a named missing field and an owner on our side.
+
+**Why it matters.** The two conclusions are opposite: *stop asking* versus *ask again once the schema
+lands*. This is the same failure this axis already corrected once for language coverage, where a call
+site's own shape was being reported as its language's gap. A merged row would reintroduce it on a new
+axis.
+
+**The third thing that stays separate.** A call site passing arguments as an unpacked mapping has nothing
+to bind and nothing to select, and would still have nothing the day both the materializer and the schema
+field land. Both routes tell that author about their **call site**, not about our backlog.
+
 ## Interfaces sketch
 
 ```

@@ -387,6 +387,34 @@ plan can move — are **FR41–FR51 of [P13](P13-prompt-model-optimization.md)**
   coverage source — whether the node's language can carry a transposition **and** whether the workflow
   offers a transposable pair.
 
+### This axis's delivery cells (capability `wiring-delivery`)
+
+Cross-axis rules are defined once in [P13](P13-prompt-model-optimization.md) §6 (`change-delivery`,
+FR57–FR68) and [ADR-010](../adr/ADR-010-runtime-gradual-rollout.md); they are referenced, not restated.
+
+> **This is the axis whose refusal must never soften, and the axis where the second route is most
+> tempting as an escape hatch.** Order and concurrency are compiled program structure; a document that
+> could reorder statements in a built binary would be an interpreter, and shipping an interpreter into a
+> customer's process to rearrange their own code is a larger change to their system than any
+> optimization could justify. And this is the axis with a gate that **rejects at compile** — a second
+> route arriving beside a gate whose whole purpose is to produce nothing is exactly where someone
+> reasons "the rewriter refused, so roll it out instead."
+
+- **FR52.** Every wiring change — ordering, parallelization, merge, prune, edge change — SHALL be refused
+  for the runtime route with cause `notRuntimeResolvable`, in every language, for every call-site shape,
+  and independent of the node's apply mode. A `bound` node SHALL NOT be reported as closer to possible.
+- **FR53.** The wiring refusal SHALL be presented as a **boundary** in every surface: no milestone, no
+  backlog item, no named missing artifact, no "not yet", and structurally distinguishable from a cell
+  that names a missing artifact.
+- **FR54.** A wiring change the coherence gate rejected SHALL produce no runnable spec and SHALL
+  therefore be **unauthorable as a rollout candidate**, undeliverable as a pull request, and reachable
+  by no path into a customer's process.
+- **FR55.** A rejected wiring transform SHALL report **undeliverable** with both routes' causes named —
+  the rejection for the source route, `notRuntimeResolvable` for the runtime route — and SHALL NOT be
+  reported as awaiting delivery, awaiting review, or in progress.
+- **FR56.** A gate-passed, materializable wiring change SHALL continue to be delivered by the source
+  route unchanged, and the runtime route's refusal SHALL NOT appear as a warning on that delivery.
+
 ## 7. Non-functional requirements
 
 | # | Requirement | Target |
@@ -405,6 +433,8 @@ plan can move — are **FR41–FR51 of [P13](P13-prompt-model-optimization.md)**
 | **NFR12** | **Coverage is total, and generated** | The wiring coverage table carries an entry for every registered language; a test enumerates the registered set and fails on a missing cell. A language absent from a table reads as "the move does not apply here", which is the opposite of the truth: discovery finds these statements fine. |
 | **NFR13** | **Shape and language refusals are provably distinct** | A merge requested on a node in a language with no resolver reports the **merge**; the test goes red if the resolver cause is reported first. This is the refusal users hit most on this axis — a real repository is far more likely to have no transposable pair than to be in an uncovered language. |
 | **NFR14** | **A resolver row is a proof** | Each language's statement resolver is admitted only with a fixture that emits a transposition in it and asserts both the permutation invariant and the reparse. No language reaches coverage by relaxing the invariant. |
+| **NFR15** | **The gate has no second door** | A structural assertion over every delivery path: no path enqueues, authors, or delivers a gate-rejected ordering. Adding a route without extending this assertion fails the build, because the assertion is what makes "the gate is the only way in" a fact rather than a convention. |
+| **NFR16** | **The boundary cannot acquire a date** | The wiring cells are asserted to carry no artifact and no expected date in the console, the offline table, and the API. A change that gives any wiring cell a "not yet" rendering turns a test red — the refusal degrading into a roadmap item is the failure mode, and it is a slow one. |
 
 ## 8. System design summary
 
@@ -639,6 +669,38 @@ yet applied by the platform*; a workflow with no transposable pair is a fact abo
 "when" attached. And the claim is stated per cell — 🚫 never "we reorder workflows", which promises merges
 and prunes this axis refuses in every language, including the covered ones.
 
+### 9.x Wave 15f — delivery cells on this axis, by role lens
+
+**System Designer — *the refusal that must never soften.***
+Order and concurrency are compiled program structure. A document that could reorder statements in a
+built binary would be an interpreter, and shipping an interpreter into a customer's process to
+rearrange their own code is a larger change to their system than any optimization justifies. So every
+wiring cell is `notRuntimeResolvable` permanently — no artifact, no date, no "not yet". This refusal
+degrades slowly if left unasserted: first into a roadmap item, then into an exception, and by then the
+product is promising something that cannot be built. NFR16 makes it executable.
+
+**Backend + QA — *the gate has no second door.***
+This axis has a gate that rejects at compile: an incoherent ordering yields no runnable spec, so no
+codemod, no diff, no pull request. A second delivery route arriving beside a gate whose whole purpose is
+to produce *nothing* is exactly where someone reasons "the rewriter refused, so roll it out instead."
+The authoring gate therefore checks the gate verdict **before** eligibility, so a gate-rejected change
+on an otherwise rollout-eligible cell is still refused as gate-rejected. If that order were reversed,
+the check would pass for exactly the cases it exists to catch.
+
+**Product Designer — *undeliverable is a state, not a queue position.***
+A rejected reorder reports **undeliverable** with both routes' causes named — the rejection for source,
+`notRuntimeResolvable` for runtime. 🚫 Never "pending", never "in review". And a gate-passed swap in a
+covered language still ships as a pull request with its evidence, unchanged: the runtime route's refusal
+does not appear as a warning on a delivery that is working.
+
+**Sales Operations — *what may be said about this axis.***
+
+| Say | Never say | Why |
+|---|---|---|
+| "reordering ships as a reviewed pull request" | "we can reorder your workflow live" | 🚫 The runtime route refuses this axis in **every** language, including the covered ones. |
+| "we transpose adjacent independent statements" | "we reorder workflows" | That promises merges, prunes and edge changes this axis refuses everywhere. |
+| "an incoherent ordering is rejected before anything is generated" | "we will try it and see" | The gate produces no runnable spec at all, and no route goes around it. |
+
 ## 10. Dependencies
 
 **Requires**
@@ -823,6 +885,18 @@ to its 15c cells with the refusals it already had.
 - [ ] **A28.** In **no** language does a refused wiring draft become a scoreable variant, and the authoring
       surface states both boundaries — language coverage and the existence of a transposable pair — before
       a move is expressed (FR36).
+
+- [ ] **A29.** Every wiring cell reports `notRuntimeResolvable` in every language and in both apply
+      modes; a `bound` node does not change the answer (FR52).
+- [ ] **A30.** No wiring cell carries an artifact, milestone, or expected date in the console, the CLI's
+      offline table, or the API, and each renders distinguishably from a `noRolloutBinding` cell
+      (FR53, NFR16).
+- [ ] **A31.** 🔴 A gate-rejected ordering is unauthorable as a rollout candidate, undeliverable as a
+      pull request, and reaches a customer's process by no enumerated path (FR54, NFR15).
+- [ ] **A32.** A rejected transform reads as **undeliverable** with both routes' causes named, and as
+      neither pending nor in review (FR55).
+- [ ] **A33.** A gate-passed adjacent-statement swap in a covered language still ships as a pull request
+      with its evidence, unchanged, and carries no runtime-route warning (FR56).
 
 ## 14. Open questions
 

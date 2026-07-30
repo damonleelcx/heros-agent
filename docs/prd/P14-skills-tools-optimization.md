@@ -395,6 +395,34 @@ language, the versioned offline table, and coverage no plan can move — are **F
   either still refused or covered by its own new entry, and every `config_hash` unchanged — a node that
   binds no skill and prunes no tool SHALL still hash byte-identically to pre-P14.
 
+### This axis's delivery cells (capability `skill-tool-delivery`)
+
+Cross-axis rules are defined once in [P13](P13-prompt-model-optimization.md) §6 (`change-delivery`,
+FR57–FR68) and [ADR-010](../adr/ADR-010-runtime-gradual-rollout.md); they are referenced, not restated.
+
+> **This axis refuses the runtime route twice, for opposite reasons.** Binding a skill is *construction*
+> of a provider SDK tool value — a binding document holds data, not a constructed value, and no version
+> of the schema could hold one without becoming a code generator that runs at request time. Selecting
+> among tools the program **already constructs** is a set, and a set is exactly what a document carries.
+> One row saying "tools are not rollout-eligible" tells every reader the wrong one of those.
+
+- **FR53.** A skill binding change SHALL be refused for the runtime route with cause
+  `notRuntimeResolvable` in **every** (language, provider) cell and in every apply mode, naming
+  construction of a provider SDK tool value as the reason.
+- **FR54.** A change confined to which already-constructed tools a call offers SHALL be refused with
+  cause `noRolloutBinding`, naming the absent binding document field and attributing the owner to the
+  platform. It SHALL NOT be reported as `notRuntimeResolvable` or as `nodeNotBound`.
+- **FR55.** Where a prune is blocked because the discovery frontend records no tool split for a call
+  site, the reported condition SHALL name the **frontend gap** — distinguishable from `noRolloutBinding`
+  and from a missing materializer, because those are three different backlogs.
+- **FR56.** A call site that passes its arguments as an unpacked mapping SHALL be told its own **shape**
+  by both routes. Neither route SHALL name the language or the document schema, because that author
+  would still have nothing to bind or prune the day both arrive.
+- **FR57.** Where both routes refuse, both causes SHALL be recorded and surfaced against the change, and
+  the change SHALL read as undeliverable rather than pending.
+- **FR58.** The skill binding refusal SHALL carry no missing artifact, milestone, or "not yet" framing in
+  any surface, and SHALL be structurally distinguishable from a cell that names a missing artifact.
+
 ## 7. Non-functional requirements
 
 | # | Requirement | Target |
@@ -412,6 +440,8 @@ language, the versioned offline table, and coverage no plan can move — are **F
 | **NFR11** | **Coverage is total on both mechanics** | Binding coverage and pruning coverage each carry an entry for every registered language; a generated test over the registered language set fails on a missing cell. Two tables, both total — because a language that can prune and cannot bind is the normal case here, not an anomaly. |
 | **NFR12** | **The two refusals are provably distinct** | A test asserts that a call site with unpacked arguments or a run-time-assembled tool set reports **that** cause in a language with no materializer, and that the same call site refuses identically once the materializer lands. The test goes red if the language cause is reported first. |
 | **NFR13** | **A spelling row is a compile claim** | Each `(language, provider, SDK generation)` row is admitted only with a test that emits the tool value in that cell and a build gate that proves it compiles against the named generation. A wrong spelling must fail loudly at build, never quietly at run time — this is the one axis where the whole refusal existed because a wrong shape *compiles*. |
+| **NFR14** | **Two refusals never collapse into one** | The binding cell and the tool-set cell are asserted to carry different causes in every surface and in the offline table; a test goes red if either is rendered with the other's cause. They point at opposite conclusions — *stop asking* versus *ask again* — so merging them is a defect, not a simplification. |
+| **NFR15** | **Refusal survival across routes** | Every cell's runtime-route refusal is asserted by a test that turns red when the refusal is sabotaged, on the same footing as the language-coverage refusals. |
 
 ## 8. System design summary
 
@@ -720,6 +750,37 @@ one, and a coverage claim quoted at language granularity is how that becomes a c
 of a scoping conversation. Refused out loud: coverage is identical on every plan, and no tier unlocks a
 cell the engine refuses.
 
+### 9.3 Wave 14e — delivery cells on this axis, by role lens
+
+**System Designer — *two refusals one row apart, pointing opposite ways.***
+Binding a skill is CONSTRUCTION of a provider SDK's tool value: a binding document holds data, not a
+constructed value, and a schema that could hold one would be a code generator running at request time.
+That is permanent. Selecting among tools the program **already constructs** is a set, which a document
+carries naturally — that is a schema gap with an owner on our side. The two cells sit one row apart and
+answer *stop asking* versus *ask again once the field lands*. A single "tools are not rollout-eligible"
+row tells every reader the wrong one, and this axis has already made that exact mistake once, when a
+call site's own shape was reported as its language's gap.
+
+**Backend — *three backlogs, and the refusal picks one.***
+A prune blocked because discovery records no tool split is a **frontend** gap. A prune blocked because
+no rewriter landed is a **rewriter** gap. A selection blocked because the document has no field is a
+**schema** gap. The delivery layer's job is to pass the transform's cause through UNTRANSLATED; the
+moment it re-labels one as another, someone files against the wrong package.
+
+**Product Designer — *the unpacked call site gets one answer, from both routes.***
+An author whose call site passes arguments as an unpacked mapping has nothing to bind and nothing to
+select, and would still have nothing the day both the materializer and the schema field land. Both
+routes therefore name **their call site**, and neither offers them something to wait for. Getting this
+wrong is generous-sounding and cruel: it costs someone a release cycle of waiting.
+
+**Sales Operations — *what may be said about this axis.***
+
+| Say | Never say | Why |
+|---|---|---|
+| "tool selection is a schema gap we own" | "tools are not supported" | One of the two cells is ours to close and the other cannot be; collapsing them misrepresents both. |
+| "skill binding is written into your source" | "we tune your tools live" | Binding constructs code. There is no runtime route for it, in any language, on any plan. |
+| "coverage is per (language, provider, SDK generation)" | "Go is supported" | 🚫 Never "Go is supported" — a Go call site whose provider has no declared spelling is not covered, and coverage is identical on every plan. |
+
 ## 10. Dependencies
 
 **Requires**
@@ -935,6 +996,22 @@ revertible: removing it returns the axis to its 14a/14b cells with the refusals 
       the ordering test proven able to go red (G18, FR29, NFR12).
 - [ ] **A31.** Adding a language, spelling, SDK generation, or frontend split leaves every previously
       materializable binding and prune **byte-identical**, and every `config_hash` unchanged (FR31).
+
+- [ ] **A32.** Skill binding is refused for the runtime route in **every** (language, provider) cell and
+      in every apply mode, naming SDK tool-value construction (FR53).
+- [ ] **A33.** The tool-set cell reports `noRolloutBinding`, names the absent document field, and
+      attributes the owner to the platform — never `notRuntimeResolvable`, never `nodeNotBound` (FR54).
+- [ ] **A34.** The binding cell and the tool-set cell render as separate rows with different causes in
+      the console, the CLI's offline table, and the API; merging either into the other turns a test red
+      (FR53, FR54, NFR14).
+- [ ] **A35.** A prune blocked by a missing frontend tool split reports the **frontend gap**,
+      distinguishable from `noRolloutBinding` and from a missing materializer (FR55).
+- [ ] **A36.** An unpacked-argument call site receives its own shape as the cause from **both** routes,
+      and neither directs the author to wait for a materializer or a schema field (FR56).
+- [ ] **A37.** A change refused by both routes surfaces both causes and reads as undeliverable, never as
+      pending (FR57).
+- [ ] **A38.** The binding refusal carries no artifact, milestone, or "not yet" in any surface, and
+      sabotaging any runtime-route refusal turns a test red (FR58, NFR15).
 
 ## 14. Open questions
 
