@@ -717,6 +717,37 @@ jobs:
           fi
           echo "fresh: $(uname -srm)"
 
+      # 🔴 A DRAFT release's assets are not fetchable from the public releases/download/ URL — only an
+      # authenticated API call can reach them. A prerelease tag publishes a draft (by design: a rehearsal that
+      # shows up as a real Release teaches users to install rehearsals), so on that channel the installer is
+      # pointed at a loopback server holding the REAL published assets, fetched with `gh`.
+      #
+      # What that changes and what it does not: install.sh still runs end to end — detect, download, checksum,
+      # verify the signature against its pinned key, place on PATH, fail closed — against the exact bytes the
+      # Release carries. The one thing it does not exercise on a draft is the public URL, and the job SAYS so.
+      # A GA tag takes the public path with no server in the middle.
+      - name: stage the published assets (draft only — a draft is not publicly fetchable)
+        if: needs.plan.outputs.draft == 'true'
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          root="${{ runner.temp }}/fixture"
+          dl="$root/releases/download/${{ needs.plan.outputs.tag }}"
+          mkdir -p "$dl" "$root/api"
+          gh release download "${{ needs.plan.outputs.tag }}" --dir "$dl" --clobber
+          printf '{"tag_name":"%s"}' "${{ needs.plan.outputs.tag }}" > "$root/api/latest"
+          python3 -m http.server 8731 --bind 127.0.0.1 --directory "$root" >/dev/null 2>&1 &
+          for _ in $(seq 1 40); do
+            curl -fsS "http://127.0.0.1:8731/api/latest" >/dev/null 2>&1 && break
+            sleep 0.25
+          done
+          echo "HEROS_RELEASE_BASE_URL=http://127.0.0.1:8731/releases" >> "$GITHUB_ENV"
+          echo "HEROS_RELEASE_API_URL=http://127.0.0.1:8731/api" >> "$GITHUB_ENV"
+          echo "::notice::draft release — install.sh runs against the real published assets over loopback."\
+               "The PUBLIC download URL is exercised by a GA tag, not by this rehearsal."
+
       - name: install from the published release (POSIX)
         if: matrix.shell == 'bash'
         shell: bash
@@ -782,6 +813,8 @@ jobs:
         run: |
           set -euo pipefail
           rm -rf tamper && mkdir tamper && cd tamper
+          # `gh` rather than curl: this must work for a draft too, and a draft's assets are only reachable
+          # through the authenticated API.
           gh release download "${{ needs.plan.outputs.tag }}" --dir . --clobber
           heros verify-release --manifest SHA256SUMS >/dev/null
           echo "the published release verifies"
