@@ -74,9 +74,9 @@ persist-then-ack / reversible) it touches.
       follow the **dataviz** skill; all states keyboard-reachable.
 
 ## 7. AI Engineer — Gainshare charging preserves the verified-only invariant
-- [ ] 7.1 A gainshare charge via Stripe SHALL read **only** the P5.5 verified-delta ledger for merged PRs (P7 FR3/
+- [x] 7.1 A gainshare charge via Stripe SHALL read **only** the P5.5 verified-delta ledger for merged PRs (P7 FR3/
       FR12 preserved); an estimated / un-merged saving raises **no** charge — P21 does not loosen this.
-- [ ] 7.2 Every gainshare Stripe charge traces through the ledger `evidence` to the verifying delta refs + merge
+- [x] 7.2 Every gainshare Stripe charge traces through the ledger `evidence` to the verifying delta refs + merge
       commits; keep it gated behind the P7 gainshare flag (P5.5 live + estimated-saving-bills-nothing green).
 
 ## 8. QA — The correctness gate (money invariants as machine assertions)

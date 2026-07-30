@@ -264,6 +264,32 @@ func (f *Server) SeedSubscription(platformCustomerID, subPrice, meteredPrice str
 	return cus, sub.id, mi.id
 }
 
+// SeedCustomerHandle registers a customer under a handle the PLATFORM already holds.
+//
+// It models the ordinary case rather than a convenience: an account created before this process
+// started already carries a provider handle, and a test that had to mint a fresh one would be testing
+// a path only a brand-new customer takes.
+func (f *Server) SeedCustomerHandle(handle, platformCustomerID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.customers[handle] = map[string]any{"id": handle, "object": "customer",
+		"metadata": map[string]string{metaCustomerID: platformCustomerID}}
+	f.byPlatform[platformCustomerID] = handle
+}
+
+// SeedSubscriptionFor attaches a subscription with a flat and a metered item to an existing customer.
+func (f *Server) SeedSubscriptionFor(handle, subPrice, meteredPrice string) (subRef, meteredItemID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	sub := &fakeSub{id: f.next("sub"), status: "active"}
+	sub.items = append(sub.items, fakeSubItem{id: f.next("si"), priceRef: subPrice, usageType: "licensed"})
+	mi := fakeSubItem{id: f.next("si"), priceRef: meteredPrice, usageType: "metered"}
+	sub.items = append(sub.items, mi)
+	f.subs[sub.id] = sub
+	f.owner[sub.id] = handle
+	return sub.id, mi.id
+}
+
 // SeedOwnInvoiceLine adds a line Stripe authored itself — the recurring subscription line, which carries
 // no platform metadata. It exists so the read-back's "every line names a basis" fallback is exercised by
 // a line the platform did not create, which is the only kind that can reach it.
