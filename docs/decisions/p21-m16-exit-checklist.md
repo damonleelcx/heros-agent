@@ -102,6 +102,25 @@ The console renders it: the billing page against this run shows the plan by name
 usage, the invoice line with its basis, the payment method, and the verified-savings table in which
 `handle_max_iterations` carries the period's largest saving and the words *not billed*.
 
+## Against a REAL Stripe test account (2026-07-30)
+
+Run against Stripe's own API with a test key and a catalog carrying that account's real price ids
+(`acct_1Ty5Ze…`, "Heros Agent sandbox", US/USD, test mode). **14 of 17 steps green.** What it changed
+about this record:
+
+| What the real account taught | Outcome |
+|---|---|
+| The pinned API version was too old — Checkout refused under `2024-06-20` | **Product bug, fixed.** Pin moved to `2025-03-31.basil` on both the provider and the fake, which state the wire independently, so the suite went red until both moved. An in-process Stripe answers whatever version it is told; only the wire can invalidate a pin. |
+| Stripe **replays cached ERRORS** for a repeated idempotency key | **Operational finding, documented** in the ingress runbook. A call that failed for a since-fixed reason keeps failing until the key rotates; the key carries the plan config version, so republishing the catalog rotates it. |
+| The configuration held **product** ids where price ids belong | **Diagnostic added.** The preflight names it and says how to find the right id, instead of relaying Stripe's "no such price". |
+| Two demo steps reported **vacuous passes** — "0 invoice lines, every one names its basis" | **Fixed.** Both now report NOTHING TO CHECK, which is a fail, because a claim about an empty set is not evidence. |
+| A paid subscription cannot be created for a customer with no payment method | **Correct behaviour on both sides**, now reported as a stated condition: in the real flow Checkout creates the subscription, after the card is entered on Stripe's page. |
+
+Still blocked on the account's configuration, not on code: **no metered price and no gainshare price
+exist**, so metered reporting, the metered charge, invoice read-back and reconciliation have nothing to
+run against. They report NOTHING TO CHECK rather than passing. Creating those prices needs the Q7 unit
+decision — the platform reports a whole-unit quantity and refuses to round one.
+
 ## Live-mode cutover (V2) — NOT taken
 
 Gated on **both** (PRD Q5): this checklist green against a real Stripe test account, **and** one

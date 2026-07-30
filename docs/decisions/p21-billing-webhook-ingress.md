@@ -199,6 +199,24 @@ them. It is not their configuration.
 the check ran, or the wired provider cannot resolve prices at all. Neither means the configuration is
 wrong; both mean nobody has checked it.
 
+### A call that failed for a since-fixed reason keeps failing
+
+**Stripe replays a cached ERROR for a repeated idempotency key.** Fix the bug, redeploy, run again — and
+the same 400 comes back, quoting the original failure. The message can name a condition that is no
+longer true, which makes it look like the fix did not land.
+
+Observed for real: a Checkout session refused under a stale pinned API version kept returning
+*"Managed Payments is not supported on API version 2024-06-20"* long after the pin had moved, because
+every retry presented the same key and Stripe replayed the stored response.
+
+The key is derived and carries the plan config version (`checkout:<customer>:<plan>:<config version>`),
+so **republishing the plan configuration rotates it** — which is what a configuration change is supposed
+to do anyway. That is the fix, and it is deliberately not "make up a new key": a fresh key per attempt
+would defeat the entire never-double-charge mechanism.
+
+If the failure was a platform bug rather than a configuration one, republish the catalog under a new
+version to move past the cached response. Do **not** reach for a random key.
+
 ### A customer says they were charged twice
 
 They were not, or the ledger is lying — and the ledger is the thing to check first:

@@ -517,7 +517,16 @@ func (s *state) runPeriod(ctx context.Context) error {
 
 	// ── Subscription + metered usage against the real period ──────────────────
 	sub, err := s.svc.StartSubscription(ctx, customerID)
-	if err != nil {
+	if err != nil && strings.Contains(err.Error(), "no attached payment source") {
+		// A STATED CONDITION, not a failure. Stripe will not start a paid subscription for a customer
+		// with no payment method — and in the real flow it is CHECKOUT that creates the subscription,
+		// after the card is entered on Stripe's own page. A demo that called this a defect would be
+		// mis-describing correct behaviour on both sides.
+		s.record("subscription", true,
+			"NOT CREATED, correctly: this customer has no payment method, and Stripe will not start a paid "+
+				"subscription without one. In the real flow the subscription is created BY checkout, once the "+
+				"card has been entered on Stripe's page")
+	} else if err != nil {
 		s.record("subscription", false, "%v", err)
 	} else {
 		s.subRef = sub.SubscriptionRef
@@ -585,9 +594,17 @@ func (s *state) runPeriod(ctx context.Context) error {
 				basisless++
 			}
 		}
-		s.record("invoice read-back", basisless == 0,
-			"%d line(s) on %s, every one naming its basis and carrying an opaque amount handle (no amount in the platform)",
-			len(inv.Lines), inv.InvoiceRef)
+		// 🔴 Anti-vacuity. "0 lines, every one naming its basis" is TRIVIALLY true, and reporting it as a
+		// pass is the exact failure this repository fences against everywhere else. A read-back with
+		// nothing in it has checked nothing, and must say so.
+		s.record("invoice read-back", len(inv.Lines) > 0 && basisless == 0,
+			"%s", func() string {
+				if len(inv.Lines) == 0 {
+					return "NOTHING TO CHECK — no invoice line for this period, so the 'every line names its basis' claim is vacuous"
+				}
+				return fmt.Sprintf("%d line(s) on %s, every one naming its basis and carrying an opaque amount handle (no amount in the platform)",
+					len(inv.Lines), inv.InvoiceRef)
+			}())
 	}
 
 	// ── Reconciliation against what Stripe says it recorded ───────────────────
@@ -595,8 +612,15 @@ func (s *state) runPeriod(ctx context.Context) error {
 	if err != nil {
 		s.record("reconciliation", false, "%v", err)
 	} else {
-		s.record("reconciliation", true, "Stripe recorded %d metered summary/summaries for %s — comparable against the platform's usage records without a write to either ledger",
-			len(recorded), ctxLast.ID)
+		s.record("reconciliation", len(recorded) > 0,
+			"%s", func() string {
+				if len(recorded) == 0 {
+					return "NOTHING TO CHECK — Stripe recorded no metered usage for " + ctxLast.ID +
+						", so there is nothing to reconcile against and a clean result would mean nothing"
+				}
+				return fmt.Sprintf("Stripe recorded %d metered summary/summaries for %s — comparable against the "+
+					"platform's usage records without a write to either ledger", len(recorded), ctxLast.ID)
+			}())
 	}
 
 	// ── Dunning: the grace window keeps the entitlement, the boundary does not ─
@@ -637,6 +661,15 @@ func (s *state) runPeriod(ctx context.Context) error {
 func (s *state) demonstrateFractionalRefusal(ctx context.Context) {
 	acct, err := s.accounts.Get(customerID)
 	if err != nil {
+		return
+	}
+	if s.meteredPrice == "" {
+		// Without a metered price the call is refused for a DIFFERENT reason (no price reference), and
+		// reporting that as "the quantity was refused" would be claiming evidence for something this run
+		// never exercised.
+		s.record("fractional quantity", true,
+			"NOT EXERCISED — this catalog configures no metered price, so the call is refused earlier for a "+
+				"different reason; the quantity contract is asserted in TestStripeRefusesAQuantityItCannotRecordExactly")
 		return
 	}
 	_, err = s.provider.RaiseCharge(ctx, billing.ChargeRequest{

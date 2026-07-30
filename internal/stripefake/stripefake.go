@@ -50,7 +50,12 @@ const (
 	metaBasis      = "platform_basis"
 	// stripeAPIVersion is the version the provider pins. The fake REFUSES anything else, so an unpinned
 	// or drifted integration fails loudly here rather than against the real API.
-	stripeAPIVersion = "2024-06-20"
+	//
+	// It is written out here rather than imported from `billing` on purpose, and this is the moment that
+	// justified it: when the real account forced the pin forward, this constant had to move too, and the
+	// suite went red until it did. A shared constant would have moved silently on both sides and proved
+	// nothing about the wire.
+	stripeAPIVersion = "2025-03-31.basil"
 )
 
 const (

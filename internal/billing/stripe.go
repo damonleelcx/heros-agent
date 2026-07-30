@@ -62,7 +62,13 @@ const (
 	// stripeAPIVersion pins the API shape this file was written against. Pinned rather than floating: an
 	// unpinned integration changes behaviour when someone else ships, which for money is the worst
 	// possible way to find out.
-	stripeAPIVersion = "2024-06-20"
+	//
+	// Moved from 2024-06-20 after a real Stripe account refused a Checkout session with
+	// "Managed Payments is not supported on API version 2024-06-20". That is the whole argument for
+	// running against a real account before believing a green suite: an in-process Stripe answers
+	// whatever version it is told, so the pin can be years stale and every test still passes. The
+	// version is a wire fact, and only the wire can invalidate it.
+	stripeAPIVersion = "2025-03-31.basil"
 	// stripeTimeout bounds one Stripe call. There is no bare http.Client here — an outbound client with
 	// no timeout is a goroutine that never returns and a charge whose outcome is never learned.
 	stripeTimeout = 30 * time.Second
