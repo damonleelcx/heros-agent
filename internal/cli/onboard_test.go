@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -290,70 +291,116 @@ func TestOnboardingWorksWithNetworkingDenied(t *testing.T) {
 	}
 }
 
-// TestCLIPackageNetworkLinkageIsNotWidened is the structural half of task 5.6 — with a documented exception
-// this test exists to make visible rather than to launder.
+// TestCLIPackageLinksNoNetworkStack is the structural half of the offline guarantee (P20 task 5.6), and it is
+// an outright BAN.
 //
-// # What was found, and why the test is a baseline rather than a ban
+// # Why this is a ban and was briefly a baseline
 //
-// `internal/cli`'s own doc comment used to claim that this package "never imports net/http", making the offline
-// guarantee structural. That claim STOPPED BEING TRUE before P20: `author.go` (P13) imports internal/authoring,
-// which reaches internal/providergateway, which links net/http for the provider adapters and the AWS SDK. So
-// the import graph of the offline surface can, today, reach a network stack.
+// `internal/cli`'s doc comment has always claimed that this package cannot reach the network because it does not
+// link a network stack in. That claim was FALSE from P13 until it was fixed: `author.go` imports
+// internal/authoring, and five levels down that graph `internal/telemetry` imported `internal/providergateway`
+// — which links an HTTP client and the AWS SDK — purely to NAME the struct its observer callback is handed.
 //
-// Nothing dials — `TestLocalWorkflowRunsWithNetworkingDenied` proves the BEHAVIOUR under a deny-all dialer, and
-// that is the guarantee users actually have. But the structural version of it is gone, and P20 will not pretend
-// otherwise: the comment in app.go has been corrected to say what is true.
+//	internal/cli → authoring/authoringwire → proposal → attribution/diagnosis
+//	             → evalharness/linkage → telemetry → providergateway → net/http
 //
-// So this test does the one useful thing available: it pins the KNOWN chain and fails if the offline surface
-// grows a NEW one. P20's own additions (distribution, release, worktree, transform) each link no network stack,
-// and `heros upgrade` is injected through NetCommands precisely so it stays that way.
+// Nothing dialed, and `TestLocalWorkflowRunsWithNetworkingDenied` proved the behaviour under a deny-all dialer.
+// But "nothing dials today" is a property of the current code, while "it cannot dial" is a property of the
+// build — and only the second one survives someone adding a feature in a hurry. P20 found the gap and pinned it
+// as a baseline rather than papering over it; the fix extracted the observation vocabulary into
+// `internal/providercall`, a leaf package with no transport, so telemetry names what it is handed without
+// linking what produced it.
 //
-// Restoring the structural guarantee means breaking authoring's dependency on providergateway. That is a change
-// inside P13's design, not a distribution change, so it is recorded rather than attempted here.
-func TestCLIPackageNetworkLinkageIsNotWidened(t *testing.T) {
+// The list of tolerated importers is therefore EMPTY, and it must stay empty. If a command needs the network it
+// belongs in `internal/clilink`, injected through `cli.NetCommands` — which is exactly how `login`, `link` and
+// `upgrade` reach it.
+//
+// # Why the whole transitive graph, not just direct imports
+//
+// Because the defect this catches was five hops away. A test that checked only this package's direct imports
+// would have passed throughout the three phases the claim was false — the offending import was in a package
+// nobody editing the CLI would think to look at.
+func TestCLIPackageLinksNoNetworkStack(t *testing.T) {
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go toolchain not available")
 	}
-	// knownNetworkImporters are the direct imports of this package that already reach a network stack. The
-	// list is the baseline; anything else is a regression this test must catch.
-	knownNetworkImporters := map[string]string{
-		"github.com/heros-foreal/agentd/internal/authoring":     "P13 `author` → authoring → providergateway",
-		"github.com/heros-foreal/agentd/internal/authoringwire": "P13 `author` → authoringwire → authoring → providergateway",
+
+	// 🔴 Empty, and that is the assertion. An entry here would be a documented hole in the offline guarantee;
+	// adding one is a decision that needs the doc comment in app.go corrected in the same change.
+	tolerated := map[string]string{}
+
+	// The transitive dependency set of THIS package (not of its tests: a test may legitimately import net/http,
+	// and offline_runtime_test.go does exactly that to install a deny-all dialer).
+	deps := exec.Command("go", "list", "-deps", ".")
+	deps.Env = append(os.Environ(), "GOWORK=off")
+	out, err := deps.CombinedOutput()
+	if err != nil {
+		t.Fatalf("go list -deps: %v\n%s", err, out)
+	}
+	graph := strings.Fields(string(out))
+
+	// The stdlib packages that constitute "a network stack" for this purpose: something that can open a
+	// connection to a host. `net` itself is deliberately NOT here — `os/exec` and the DNS resolver pull it in on
+	// some platforms, and banning it would make the gate impossible to satisfy for reasons unrelated to egress.
+	forbidden := map[string]bool{
+		"net/http": true, "net/smtp": true, "net/rpc": true, "net/http/httptrace": true,
+	}
+	for _, dep := range graph {
+		if !forbidden[dep] {
+			continue
+		}
+		// Name the shortest path to the offender, because "cli links net/http" is not actionable on its own —
+		// the useful output is WHICH import brought it in.
+		via := networkPathVia(t, dep)
+		t.Errorf("internal/cli links %s, via %s.\n"+
+			"The offline command surface must not be able to open a connection: `discover`, `apply`, `eval`, "+
+			"`doctor` and `init` are free and offline, and that is a property of the BUILD, not of everyone "+
+			"remembering. A command that needs the network belongs in internal/clilink, injected as a "+
+			"NetCommand — that is what login, link and upgrade do.", dep, via)
 	}
 
+	for imp, why := range tolerated {
+		t.Errorf("the tolerated-importer list is not empty: %s (%s). It exists only to be empty; an entry is a "+
+			"documented hole in the offline guarantee and requires app.go's claim to be corrected to match.", imp, why)
+	}
+}
+
+// networkPathVia reports which of this package's direct heros imports reaches dep, so a failure names the edge
+// to cut rather than only the symptom.
+func networkPathVia(t *testing.T, dep string) string {
+	t.Helper()
 	direct := exec.Command("go", "list", "-f", "{{range .Imports}}{{.}}\n{{end}}", ".")
 	direct.Env = append(os.Environ(), "GOWORK=off")
 	out, err := direct.CombinedOutput()
 	if err != nil {
-		t.Fatalf("go list: %v\n%s", err, out)
+		return "(could not resolve the path: " + err.Error() + ")"
 	}
+	var carriers []string
 	for _, imp := range strings.Fields(string(out)) {
+		if imp == dep {
+			return "a DIRECT import"
+		}
 		if !strings.HasPrefix(imp, "github.com/heros-foreal/") {
-			// A direct standard-library network import would be an outright violation with no history.
-			switch imp {
-			case "net/http", "net/smtp", "net/rpc":
-				t.Errorf("internal/cli imports %s DIRECTLY — a command that needs the network belongs in "+
-					"internal/clilink, injected as a NetCommand", imp)
+			continue
+		}
+		sub := exec.Command("go", "list", "-deps", imp)
+		sub.Env = append(os.Environ(), "GOWORK=off")
+		sout, serr := sub.CombinedOutput()
+		if serr != nil {
+			continue
+		}
+		for _, d := range strings.Fields(string(sout)) {
+			if d == dep {
+				carriers = append(carriers, strings.TrimPrefix(imp, "github.com/heros-foreal/agentd/"))
+				break
 			}
-			continue
 		}
-		deps := exec.Command("go", "list", "-deps", imp)
-		deps.Env = append(os.Environ(), "GOWORK=off")
-		dout, derr := deps.CombinedOutput()
-		if derr != nil {
-			continue
-		}
-		if !strings.Contains(string(dout), "\nnet/http\n") && !strings.HasPrefix(string(dout), "net/http\n") {
-			continue
-		}
-		if why, known := knownNetworkImporters[imp]; known {
-			t.Logf("known network linkage: %s (%s) — behaviour is covered by the network-denied runtime test", imp, why)
-			continue
-		}
-		t.Errorf("internal/cli gained a NEW import that links net/http: %s.\n"+
-			"The offline command surface must not widen its reach to a network stack. If the command needs the "+
-			"network, put it in internal/clilink and inject it as a NetCommand — that is what `upgrade` does.", imp)
 	}
+	if len(carriers) == 0 {
+		return "(no direct import carries it — check the test's own imports)"
+	}
+	sort.Strings(carriers)
+	return strings.Join(carriers, ", ")
 }
 
 // TestUpgradeAdviceDefersToTheOwningManager — the decision D7 requires, made from the path alone and therefore

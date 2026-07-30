@@ -98,12 +98,18 @@ Homebrew / Scoop-winget / deb-rpm / container) with every "not affected" row exp
       → There is no version notice at all: the release index is reached from exactly one call site, reachable
       only by typing `upgrade`. No background goroutine, no timer, nothing to opt out of. No telemetry — the
       only headers on the one outbound request are User-Agent and Accept, asserted by test.
-      ⚠️ **Found while asserting this**: `internal/cli` — documented as never importing `net/http` — has
-      transitively linked it since P13 (`author.go` → `internal/authoring` → `internal/providergateway`). No
-      local command dials (the deny-all-dialer runtime test still passes, and that is the guarantee users
-      have), but the *structural* claim was false. The comment in `app.go` is corrected, and
-      `TestCLIPackageNetworkLinkageIsNotWidened` pins the known chain so it cannot get worse. Restoring the
-      structural guarantee is a change inside P13's design and is filed separately, not silently absorbed.
+      ⚠️ **Found while asserting this, and since FIXED**: `internal/cli` — documented as never importing
+      `net/http` — had transitively linked it since P13. The root was not where it looked: `go list` showed
+      `internal/providergateway` was the ONLY direct `net/http` importer in the CLI's ~90-package graph and
+      `internal/telemetry` its ONLY entry point — one edge, five hops down, and telemetry imported an HTTP client
+      and the AWS SDK purely to NAME the struct its observer callback receives. Splitting `internal/authoring`
+      (the obvious move) would not have worked and would have fixed nothing for the other five packages on the
+      chain. The observation vocabulary (`Observer`, `CallInfo`, `Usage`, `StopReason`, `ErrTimeout`) moved to a
+      new leaf package `internal/providercall`; `providergateway` re-exports all five as **type aliases**, so its
+      API did not change by one character. `TestCLIPackageLinksNoNetworkStack` is now an outright **ban** over the
+      whole transitive graph, red-checked in both the direct and the transitive case, and
+      `TestProvidercallLinksNoTransport` stops the leaf from ever regaining a transport. `app.go` makes the
+      unqualified claim again. Evidence: `docs/release/p20-evidence.md` §4.
 - [x] 5.7 Confirm local commands (`discover`/`apply`/`eval`/`version`/`doctor`/`init`) work **offline with no
       account** (P11 free-tier durability preserved).
 

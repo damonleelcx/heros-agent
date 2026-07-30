@@ -6,11 +6,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/heros-foreal/agentd/internal/providergateway"
+	"github.com/heros-foreal/agentd/internal/providercall"
 )
 
 // Instrument is the substrate's attach point at the provider gateway (Decision 1). It implements
-// providergateway.Observer, so wiring it is `gateway.New(secrets, providergateway.WithObserver(inst))`
+// providercall.Observer — which IS providergateway.Observer, an alias of the same interface — so wiring it
+// is still `gateway.New(secrets, providergateway.WithObserver(inst))`
 // — one line at deploy time, ZERO lines in any workflow. From then on every Gateway.Complete emits the
 // full per-call operational taxonomy and a node span, and there is no execution path through the
 // Runtime that produces an un-instrumented provider call (the Requirement's second scenario).
@@ -46,7 +47,7 @@ func NewInstrument(sink Sink, prices *PriceBook, opts ...Option) (*Instrument, e
 // OnCall is the gateway hook, fired exactly once per logical provider call (after all retries). It is
 // the whole of "operational metrics with zero user code": everything below is derived from what the
 // gateway already knows (CallInfo) and the run context the run path already attached (RunContext).
-func (i *Instrument) OnCall(ctx context.Context, info providergateway.CallInfo) {
+func (i *Instrument) OnCall(ctx context.Context, info providercall.CallInfo) {
 	rc, ok := FromContext(ctx)
 	if !ok {
 		// A provider call with no run context is not attributable to the seven tags. Emitting
@@ -73,7 +74,7 @@ func (i *Instrument) OnCall(ctx context.Context, info providergateway.CallInfo) 
 		attempts:       info.Attempts,
 		rateLimited:    info.RateLimited,
 		isError:        info.Err != nil,
-		isTimeout:      errors.Is(info.Err, providergateway.ErrTimeout),
+		isTimeout:      errors.Is(info.Err, providercall.ErrTimeout),
 		idempotencyKey: rc.IdempotencyKey(),
 	}
 
@@ -93,7 +94,7 @@ func (i *Instrument) OnCall(ctx context.Context, info providergateway.CallInfo) 
 }
 
 // nodeSpan builds one node execution's span under the run span, following the GenAI conventions.
-func (i *Instrument) nodeSpan(rc RunContext, d callDetail, info providergateway.CallInfo, now time.Time) Span {
+func (i *Instrument) nodeSpan(rc RunContext, d callDetail, info providercall.CallInfo, now time.Time) Span {
 	status, msg := SpanStatusOK, ""
 	if info.Err != nil {
 		status, msg = SpanStatusError, info.Err.Error() // already scrubbed by the gateway

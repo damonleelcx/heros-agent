@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/heros-foreal/agentd/internal/providercall"
 	"github.com/heros-foreal/agentd/internal/registry"
 )
 
@@ -41,8 +42,11 @@ var (
 	ErrProvider = errors.New("providergateway: provider rejected the request")
 	// ErrTransient: the call failed after exhausting retries on retryable failures.
 	ErrTransient = errors.New("providergateway: provider unavailable after retries")
-	// ErrTimeout: the per-call deadline expired.
-	ErrTimeout = errors.New("providergateway: call timed out")
+	// ErrTimeout: the per-call deadline expired. Re-exported from internal/providercall — the same error
+	// VALUE, so `errors.Is(err, providergateway.ErrTimeout)` and `errors.Is(err, providercall.ErrTimeout)`
+	// are the same question. It lives there because an OBSERVER branches on it when classifying a call,
+	// which makes it part of the observation vocabulary rather than part of the transport.
+	ErrTimeout = providercall.ErrTimeout
 )
 
 // Role is a normalized message role.
@@ -95,25 +99,24 @@ type Request struct {
 
 // StopReason is a normalized stop reason. Providers spell these differently ("stop"/"end_turn",
 // "length"/"max_tokens", "tool_calls"/"tool_use"); the executor branches on one vocabulary.
-type StopReason string
+//
+// Re-exported from internal/providercall, along with Usage: both are carried inside CallInfo, so they had
+// to travel with it. See observe.go for why the observation vocabulary moved out of this package.
+type StopReason = providercall.StopReason
 
 const (
-	StopEndTurn       StopReason = "end_turn"
-	StopMaxTokens     StopReason = "max_tokens"
-	StopToolUse       StopReason = "tool_use"
-	StopContentFilter StopReason = "content_filter"
-	StopOther         StopReason = "other"
+	StopEndTurn       = providercall.StopEndTurn
+	StopMaxTokens     = providercall.StopMaxTokens
+	StopToolUse       = providercall.StopToolUse
+	StopContentFilter = providercall.StopContentFilter
+	StopOther         = providercall.StopOther
 )
 
 // Usage is normalized token accounting. P2.5 attaches cost metrics here; the field names are the
 // GenAI semantic conventions' shape so that instrumentation is a read, not a translation.
-type Usage struct {
-	InputTokens      int
-	OutputTokens     int
-	ThinkingTokens   int
-	CacheReadTokens  int
-	CacheWriteTokens int
-}
+//
+// Re-exported from internal/providercall (see StopReason above).
+type Usage = providercall.Usage
 
 // Response is a normalized completion response.
 type Response struct {

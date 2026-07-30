@@ -197,20 +197,49 @@ exists fails at the signing step on purpose** — that is the fail-closed design
 
 ---
 
-## 4 · One finding outside P20's scope
+## 4 · One finding outside P20's scope — now FIXED
 
 `internal/cli` — documented in its own header as never importing `net/http`, "the offline guarantee made
-structural" — has transitively linked it since P13:
+structural" — had transitively linked it since P13. P20 found it, corrected the false comment, and pinned the
+chain as a baseline rather than laundering it. It has since been **fixed**, and the fix is not where the shape of
+the problem suggested.
+
+**Where the network actually entered.** `go list` over the whole graph showed `internal/providergateway` was the
+*only* direct `net/http` importer among `internal/cli`'s ~90 transitive dependencies, and `internal/telemetry`
+was its *only* entry point — one edge, five hops down:
 
 ```
-internal/cli/author.go → internal/authoring + internal/authoringwire → internal/providergateway → net/http
+internal/cli → authoring/authoringwire → proposal → attribution/diagnosis
+             → evalharness/linkage → telemetry → providergateway → net/http
 ```
 
-No local command dials, and `TestLocalWorkflowRunsWithNetworkingDenied` still passes under a deny-all dialer,
-so the guarantee **users have** is intact. The *structural* version of it was not. The false comment is
-corrected, and `TestCLIPackageNetworkLinkageIsNotWidened` pins the two known importers as a baseline and fails
-on any new one — so P20's own additions are held to the rule and the existing breach is visible instead of
-laundered.
+Telemetry's production code used exactly three symbols from providergateway: `CallInfo`, `ErrTimeout` and
+`Observer` (everything else — `Gateway`, `New`, `StaticSecrets` — was test-only). It imported an HTTP client and
+the AWS SDK **to name the struct its observer callback is handed.**
 
-Fixing it means breaking `authoring`'s dependency on `providergateway`, which is a change inside P13's design
-rather than a distribution change. It is filed separately rather than absorbed here.
+**Why the obvious fix was the wrong one.** Splitting `internal/authoring` (the shape the task suggested) would
+not have worked: `authoring.Draft` legitimately needs `proposal`, which needs `attribution`, which needs
+`telemetry`. It would also have fixed nothing for the other five packages on that chain. The root was one edge in
+a shared package, so that is what was cut.
+
+**The fix.** The observation vocabulary — `Observer`, `CallInfo`, `Usage`, `StopReason`, `ErrTimeout` — moved into
+a new leaf package, `internal/providercall`, which has no transport and no in-repo dependencies. Everything that
+*makes* a call (request types, adapters, retry loop, credentials) stayed in `providergateway`, because that is
+what the network dependency is for. `providergateway` re-exports all five names as **type aliases**, so its API
+did not change by one character: an alias is type identity, so an observer written against `providercall.Observer`
+still satisfies `providergateway.Observer`, and every `providergateway.CallInfo{…}` call site still compiles.
+
+| Verified | How |
+|---|---|
+| `internal/cli` links no network stack | `go list -deps ./internal/cli` — no `net/http`, over the whole transitive graph |
+| The gate is a ban, not a baseline | `TestCLIPackageLinksNoNetworkStack`, tolerated-importer map **empty** |
+| The gate can go red — transitively | re-adding telemetry's import → `internal/cli links net/http, via internal/authoring, internal/authoringwire` |
+| The gate can go red — directly | a planted `_ "net/http"` in the package → `via a DIRECT import` |
+| The aliases are identity, end to end | `telemetry/instrument_test.go` builds a real `providergateway.New(…WithObserver(inst))` with an `Instrument` whose `OnCall` takes a `providercall.CallInfo`, and passes |
+| Nothing else broke | `make go` green; `providergateway`, `telemetry`, `attribution`, `diagnosis`, `proposal`, `authoring`, `authoringwire` all pass |
+| The fix cannot be undone quietly | `TestProvidercallLinksNoTransport` fails if the leaf package ever grows a transport or an in-repo import |
+
+The behavioural test (`TestLocalWorkflowRunsWithNetworkingDenied`, a deny-all dialer) still exists and still
+passes. The two are not redundant: it stayed green for the entire three phases the structural claim was false,
+which is precisely why the structural one had to exist. The `app.go` doc comment now makes the unqualified claim
+again, and records how it broke — nobody added a network call; someone imported a package for a type name.

@@ -15,19 +15,25 @@ import (
 // naming the input, and nothing ever prompts.
 //
 // The platform-facing commands (login, link, upgrade) are INJECTED as NetCommands rather than implemented
-// here. The intent is that the offline surface cannot reach the network because it does not link a network
-// stack in — the guarantee made structural rather than promised.
+// here, so this package — the whole offline surface — does not link a network stack. That is the offline
+// guarantee made structural: the code that runs discovery/apply/eval cannot reach the network, because there is
+// nothing in its build that can open a connection.
 //
-// 🔴 That structural guarantee is currently INCOMPLETE, and saying so is the point. `author.go` (P13) imports
-// internal/authoring, which reaches internal/providergateway, which links net/http for the provider adapters
-// and the AWS SDK. So this package's import graph CAN reach a network stack today, even though no local command
-// dials: TestLocalWorkflowRunsWithNetworkingDenied proves the behaviour under a deny-all dialer, and that
-// runtime proof is the guarantee users actually have.
+// Two tests hold it, and they are not redundant — they fail for different reasons:
 //
-// The claim was corrected rather than quietly left standing (P20 task 5.6). TestCLIPackageNetworkLinkageIsNotWidened
-// pins the known chain and fails on any NEW one, so the situation cannot get worse while it is being fixed;
-// restoring the structural version means breaking authoring's dependency on providergateway, which is a change
-// inside P13's design rather than a distribution change.
+//	TestCLIPackageLinksNoNetworkStack        the BUILD cannot reach net/http, over the whole transitive graph
+//	TestLocalWorkflowRunsWithNetworkingDenied  the BEHAVIOUR survives a deny-all dialer at run time
+//
+// 🔴 The structural half was FALSE from P13 until it was fixed, and the way it broke is worth knowing, because
+// it will be how it breaks again. Nobody added a network call. `internal/telemetry` — five hops down the graph
+// from `author.go` — imported `internal/providergateway` purely to NAME the struct its observer callback is
+// handed, and providergateway links an HTTP client and the AWS SDK. One import, for one type name, in a package
+// nobody editing the CLI would think to open. The behavioural test stayed green the whole time, which is exactly
+// why the structural one has to exist.
+//
+// The fix was to extract the observation vocabulary into `internal/providercall`, a leaf package with no
+// transport: telemetry can name what it is handed without linking what produced it. See that package's doc for
+// the reasoning, and providergateway/observe.go for the aliases that kept its API unchanged.
 
 // NetCommands are the platform-facing commands, supplied by a package that may import net/http. When
 // nil, invoking a net command is an operational error rather than a panic.
