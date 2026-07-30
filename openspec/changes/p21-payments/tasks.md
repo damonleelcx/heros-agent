@@ -110,6 +110,32 @@ persist-then-ack / reversible) it touches.
 - [x] 10.1 Cross-link the PRD, this change, P7, P5.5, P9, P19, and ADR-002; add the P21 row to `docs/prd/README.md`.
 - [x] 10.2 On deploy, fold the three delta specs into `openspec/specs/` (drop the `## ADDED` headers).
 
+## 11. Sales Operations + DevOps + Backend — Stripe account prerequisites (what stands between "the code is right" and V1)
+
+V1 is unticked not because the platform is unfinished but because **three artefacts do not exist yet**, and two
+of them cannot be produced by this repository. Naming them as a section makes the remaining distance visible
+instead of leaving it as a footnote on an unticked box.
+
+- [x] 11.1 **PRD**: document the three prerequisites — a Stripe **test secret key**, a **per-endpoint webhook
+      signing secret** (one per mode), and **real Stripe price objects** whose ids replace the placeholder
+      `price_ref_*` values, with metered prices denominated in the meter's **integral unit** — as a precondition
+      block on §13, an NFR, a risk, and an open question naming who owns creating them.
+- [ ] 11.2 **OpenSpec**: add the **preflight** requirement to the `stripe-billing-provider` delta and a design
+      decision for it; re-fold the capability into `openspec/specs/`.
+- [ ] 11.3 **Backend**: implement the preflight — resolve **every** configured `price_ref` at the provider and
+      name the ones that do not resolve, **before** anything charges; surface the result on the readiness
+      signal. A wrong price id must fail at configuration time, not mid-period at the first charge.
+- [ ] 11.4 **Backend + DevOps**: make a real-account run possible **without a code edit** — `cmd/p21hermes`
+      takes `-plans <path>` so a catalog carrying real Stripe price ids can be published from a config store,
+      and the API key comes from the **environment or stdin** rather than a command-line flag (a flag puts a
+      credential in shell history and in `ps` output).
+- [ ] 11.5 **Frontend**: a **misconfigured-billing** state on the console billing page — distinct from
+      unavailable, empty, and past-due — naming which plan's price reference does not resolve and whose job it
+      is to fix it; keyboard-reachable, browser-verified.
+- [ ] 11.6 **QA + Docs**: the preflight goes red on a bad reference and green on good ones; the env/stdin key
+      path is asserted and the flag path refuses; the ingress runbook §4 and the M16 record carry the
+      preconditions.
+
 ## Verification record
 
 Recorded in [`docs/decisions/p21-m16-exit-checklist.md`](../../../docs/decisions/p21-m16-exit-checklist.md),

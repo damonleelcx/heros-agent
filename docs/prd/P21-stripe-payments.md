@@ -333,6 +333,13 @@ These map 1:1 to the OpenSpec requirements under
 - **NFR11 — Commercial honesty.** Plans are named; dunning and refund behavior in the UI and the docs match
   Stripe's actual behavior and the sales conversation; the word "风险可控" appears nowhere; no internal
   profile/bundle/script name leaks into a customer-facing billing message.
+- **NFR12 — The provider account's configuration is a precondition, and it is CHECKABLE.** Every
+  `price_ref` a plan carries SHALL resolve at the provider **before** anything charges against it, and a
+  reference that does not resolve SHALL be named — which plan, which charge kind, which reference — rather
+  than surfacing as a rejected charge mid-period. A metered price SHALL be denominated in the meter's
+  **integral unit**, because the platform reports a whole-unit quantity and refuses to round one
+  (rounding silently changes what a customer is billed). This is configuration the platform does not own
+  and therefore cannot fix; what it owes is to say precisely what is wrong and whose job it is.
 
 ## 8. System design summary
 
@@ -556,6 +563,31 @@ favorable fixture.
 - **Unblocks:** **M16 — real payments live (first real dollar).** The subscription + metered + gainshare revenue
   that P7 specified can now actually move, idempotently and reversibly, through Stripe.
 
+### 10.1 Stripe account prerequisites — the three artefacts this repository cannot produce
+
+The platform code is complete and exercised end to end against an in-process Stripe. What separates that
+from the M16 checklist's *"against one Stripe test-mode stack"* is **three artefacts that live in the
+Stripe account**, two of which are credentials this repository must never contain. They are listed here
+rather than left as a footnote because "the code is right" and "V1 can run" are different claims, and
+conflating them is how a phase reports itself finished while nothing can actually be charged.
+
+| # | Artefact | Shape | Owner | Why it is not optional |
+|---|---|---|---|---|
+| **A** | Stripe **test secret key** | `sk_test_…` (or `rk_test_…`) | DevOps, from the Stripe dashboard into the Secrets seam under `billing_provider` | Every outbound call authenticates with it. The mode check reads the **prefix**, so a live key is refused on a test surface and an unrecognized prefix is refused outright — assuming "probably test" is how a live key reaches a test surface. |
+| **B** | **Webhook signing secret**, one **per endpoint** | `whsec_…`, into the seam under `billing_webhook` | DevOps | Inbound deliveries are authenticated by signature and nothing else. **One per mode**: sharing a secret across a test and a live endpoint means a test event verifies against a live deployment. During a rotation Stripe signs with both, and the verifier accepts either. |
+| **C** | **Real Stripe price objects** | `price_…` ids replacing the placeholder `price_ref_*` values in the plan catalog | Finance creates the prices; DevOps publishes the catalog to the config store | A `price_ref` is opaque **to the platform** — but Stripe resolves it. A placeholder 404s on the first charge of the period, which is the worst possible moment to discover it. **Metered prices must be denominated in the meter's integral unit** (NFR12), because the platform reports a whole-unit quantity and refuses to round one. |
+
+Two properties of this list are worth stating explicitly, because both are design outcomes rather than
+accidents:
+
+- **The platform never holds A or B.** They are resolved from the Secrets seam at the moment of use
+  (D6), so there is no field, config file, or manifest for them to sit in — and the credential fence
+  fails the build if anything key-shaped reaches a git-tracked file.
+- **C is configuration, not code** (D7). Changing a price is Finance editing Stripe and republishing a
+  catalog; it is not a deploy. That is the whole reason the platform holds a reference rather than a
+  value — and it is also why a wrong reference is a *configuration* failure the platform must diagnose
+  rather than a bug it can fix.
+
 ## 11. Risks & mitigations
 
 | # | Risk | Owner | Mitigation |
@@ -570,6 +602,7 @@ favorable fixture.
 | R8 | Stripe outage blocks the product or bills the window twice. | DevOps | Product keeps running; usage **buffered** and reported idempotently on recovery, so the window bills **once** (NFR8); billing page degrades to a clear message. |
 | R9 | Gainshare bills an unverified/estimated saving once real money is flowing. | AI / Backend | Gainshare reads **only** the P5.5 verified-delta ledger for merged PRs (G9, preserved from P7); estimated/un-merged saving raises no charge; test stays green. |
 | R10 | Dunning/refund UI tells a softer story than Stripe is actually running. | Sales Ops / Product | Provider state mirrored **verbatim** (FR16); UI renders the real `past_due`/`payment_failed` with a restore path (FR12); refunds are additive and real (FR5). |
+| R12 | A plan's `price_ref` does not exist in the Stripe account (a placeholder was never replaced, or a price was archived), and it is discovered by a rejected charge mid-period. | DevOps / Finance | A **preflight** resolves every configured `price_ref` at the provider before anything charges and names each one that fails — plan, kind, reference (NFR12); the result is on the readiness signal and rendered as a first-class *misconfigured* state in the console, distinct from "unavailable" and from "empty". |
 | R11 | The webhook endpoint is a soft inbound attack surface. | DevOps / Backend | One documented inbound path (NFR7); signature-gated before any side effect, timestamp-bounded replay window, rate-aware (FR13); unsigned/forged/stale rejected before state moves. |
 
 ## 12. Rollout & test strategy
@@ -608,6 +641,15 @@ favorable fixture.
   charging via Stripe stays gated behind the P7 gainshare flag (P5.5 live + estimated-saving-bills-nothing green).
 
 ## 13. Success metrics & acceptance criteria (M16 exit checklist)
+
+> **Preconditions — the checklist cannot be run, let alone green, until all three exist.** They are the
+> artefacts in §10.1: **(A)** a Stripe test secret key in the Secrets seam, **(B)** a webhook signing
+> secret for the test endpoint, and **(C)** real Stripe price objects whose ids have replaced every
+> placeholder `price_ref_*`, with metered prices denominated in the meter's integral unit.
+>
+> Until then the checklist is green against an **in-process** Stripe and says so
+> ([`docs/decisions/p21-m16-exit-checklist.md`](../decisions/p21-m16-exit-checklist.md)) — which is a
+> real claim about the platform and **not** the claim this checklist makes.
 
 - [ ] A real **`stripe.Provider` implements `billing.Provider`** without changing the interface; **every existing
       caller runs unchanged** against both the stub and Stripe (contract-parity suite green).
@@ -657,6 +699,14 @@ favorable fixture.
   the M16 checklist alone, or a Finance sign-off on a reconciled test-mode period? *Recommendation: both — the
   checklist green **and** one reconciled test-mode billing period Finance has signed off, so the first live dollar
   follows a proven, reconciled dry run.*
+- **Q7 — Who creates the price objects, and in what unit?** §10.1(C) says Finance creates them and DevOps
+  publishes the catalog — but the *denomination* is a joint decision with engineering consequences: the
+  platform reports a whole-unit quantity and **refuses** to round a fractional one, so a metered price
+  must be denominated in a unit the meter produces integrally (e.g. the smallest unit of the SUM meter
+  rather than whole currency units). *Recommendation: Finance owns the amount, engineering owns the unit,
+  and neither ships without the other — the preflight (NFR12) is what makes a mismatch visible before a
+  period rather than during one. Decide the unit per meter at the same time the price is created, and
+  record it beside the price in the config store.*
 - **Q6 — Stripe Tax and multi-currency.** Does the first delivery enable Stripe Tax and multiple currencies, or
   single-currency + tax-later? *Recommendation: single presentment currency + Stripe Tax on, since tax is
   Stripe's (non-goal to reimplement); multi-currency is a Stripe-side configuration follow-up that needs no
