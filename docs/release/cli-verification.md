@@ -1,5 +1,10 @@
 # Verifying a `heros` CLI release (P11 supply chain)
 
+> This page is the verification steps as a reference. For the install-and-trust story — which channel to use,
+> what the installer already checked for you, upgrading, rolling back, and how the release key rotates — see
+> [`install.md`](install.md). The two are held consistent by `TestRepositoryDocsMakeNoUnearnedClaim`, which
+> audits both against what a release actually delivered.
+
 The `heros` CLI runs **inside your CI with access to your repository**, so a compromised release is a
 compromise of every build it runs in. This page is the documented verification step (P11 NFR8, task
 6.2): it is runnable with **no account and no network** beyond the download, and it is exercised by an

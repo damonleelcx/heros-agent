@@ -10,8 +10,15 @@ This capability requires the posture be **decided, delivered, and stated honestl
 and never over-claimed.
 
 > Cost-escalation-path: signing/notarization is a recurring spend **and** an organizational identity commitment;
-> the rulebook forbids self-deciding it. The decision is escalated to the user; the default is the
-> always-available documented-clear path until signing is funded.
+> the rulebook forbids self-deciding it. The decision is escalated to the user.
+>
+> **Resolved: (b) documented-clear, ratified 2026-07-30.** Escalated and answered (a) sign+notarize on
+> 2026-07-29, then reversed by the same owner on cost. Both entries are kept in `design.md`'s decision log.
+> The requirements below are written as *a choice explicitly decided and delivered* rather than as a particular
+> branch, so they are satisfied by (b) exactly as they would have been by (a) — what they forbid is defaulting
+> silently or over-claiming, and neither depends on which branch won. The ratified value lives in
+> `distribution.ChosenPosture` and is pinned by test; `TestPostureBIsActuallyDelivered` additionally asserts the
+> clear command is surfaced by the installer, because a posture documented but not shown is not a posture.
 
 ## ADDED Requirements
 

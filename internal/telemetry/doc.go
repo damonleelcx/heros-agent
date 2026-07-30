@@ -4,7 +4,10 @@
 //
 // # What it does
 //
-//   - Auto-instruments the P2 provider gateway (internal/providergateway) and the run/node execution
+//   - Auto-instruments the P2 provider gateway (through internal/providercall's Observer seam — this
+//     package deliberately does NOT import internal/providergateway, which links an HTTP client and the
+//     AWS SDK, because doing so put net/http in reach of every package that can reach telemetry,
+//     including the CLI's offline surface) and the run/node execution
 //     path so every provider call and every node execution emits operational metrics + an OpenTelemetry
 //     span with ZERO workflow-author code (Decision 1). The single attach point is the gateway's
 //     Observer seam; a node cannot execute through the Runtime without being instrumented.

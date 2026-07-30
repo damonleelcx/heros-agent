@@ -1,0 +1,70 @@
+{
+  "report_version": "1.0.0",
+  "workflow": {
+    "id": "example.com/sample",
+    "repo": {
+      "url": "local://samplerepo",
+      "commit_sha": "0000000"
+    },
+    "language": "go"
+  },
+  "summary": {
+    "files_scanned": 3,
+    "files_skipped": 1,
+    "packages_scanned": 3,
+    "call_sites_detected": 1,
+    "nodes_emitted": 1,
+    "edges_emitted": 0,
+    "dedup_merges": 0,
+    "ambiguity_flags": 2
+  },
+  "detections_by_source": {
+    "declared": 0,
+    "framework": 0,
+    "registry": 1
+  },
+  "nodes": [
+    {
+      "node_id": "n_68fcfb1cd916ed9b",
+      "detected_by": [
+        "registry"
+      ],
+      "basis": [
+        "selector_import"
+      ],
+      "signature_row": "anthropic.messages.new",
+      "unresolved_fields": [
+        "model",
+        "prompt"
+      ],
+      "variable_at_runtime": false
+    }
+  ],
+  "ambiguity_flags": [
+    {
+      "node_id": "n_68fcfb1cd916ed9b",
+      "field": "model",
+      "reason": "model argument not present at the call site (construction/env-bound)",
+      "code": "MODEL_CONSTRUCTION_BOUND",
+      "p5_candidate": true
+    },
+    {
+      "node_id": "n_68fcfb1cd916ed9b",
+      "field": "prompt",
+      "reason": "prompt argument not present at the call site",
+      "code": "PROMPT_UNRESOLVED",
+      "p5_candidate": true
+    }
+  ],
+  "dedup_merges": [],
+  "declaration_diagnostics": [],
+  "file_diagnostics": [
+    {
+      "code": "PARSE_ERROR",
+      "severity": "error",
+      "file": "broken/bad.go",
+      "message": "/Users/damon/Downloads/repos/heros-agent/internal/discovery/testdata/samplerepo/broken/bad.go:3:12: expected ')', found '{'"
+    }
+  ],
+  "framework_subgraphs": null
+}

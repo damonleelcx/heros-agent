@@ -4,55 +4,32 @@ import (
 	"context"
 	"time"
 
+	"github.com/heros-foreal/agentd/internal/providercall"
 	"github.com/heros-foreal/agentd/internal/registry"
 )
 
-// Observer is the seam P2.5's OpenTelemetry instrumentation attaches to (task 6.4: "structure
-// run/node/transform records so P2.5 OTel instrumentation attaches at the gateway and the
-// transform/build/run path with ZERO application change").
+// The observation vocabulary — Observer, CallInfo, Usage, StopReason and ErrTimeout — now lives in
+// `internal/providercall`, and this package re-exports it. Nothing about the contract changed: an alias is
+// type IDENTITY, so `providergateway.CallInfo` and `providercall.CallInfo` are one type, and an observer
+// written against either satisfies both.
 //
-// "Zero application change" is the whole requirement, and it is a claim about THIS package, not about
-// P2.5. It holds only if there is somewhere to attach that is not an edit here. So: an interface, and
-// a hook that is already called on every path Complete can take.
+// # Why it moved
 //
-// Why an Observer rather than importing OTel now: P2.5 has not picked its span store or its TSDB yet
-// (storage-decision-record §1, OQ1). Taking the dependency today would bake a choice this phase has
-// no standing to make, and P2 would be carrying an SDK it never calls. An interface costs one
-// indirection and leaves the decision where it belongs.
-type Observer interface {
-	// OnCall fires once per completed Complete, success or failure, AFTER all retries. Exactly once
-	// per logical call, because that is what a span is — CallInfo.Attempts carries the retries.
-	OnCall(ctx context.Context, info CallInfo)
-}
+// `internal/telemetry` implements Observer, and it imported THIS package purely to name the value it is
+// handed. That import made `net/http` — which this package links, for the adapters and the AWS SDK —
+// reachable from everything that could reach telemetry, including `internal/cli`, whose entire guarantee
+// is that it cannot reach the network because it does not link a network stack in. One import for one
+// struct name cost a structural guarantee five levels up the graph.
+//
+// Splitting the vocabulary out costs nothing: describing a call that is over needs no transport. What
+// stays here is everything that MAKES a call — the request types, the adapters, the retry loop, the
+// credentials — because that is what the network dependency is for.
 
-// CallInfo is everything an instrument needs about one provider call.
-//
-// The fields are chosen against P0's seven-tag contract (metric-event.schema.json:
-// {variant_id, run_id, node_id, case_id, seed, timestamp, config_hash}) so P2.5 can emit a
-// conformant event without reaching back into the gateway for anything. The tags the GATEWAY cannot
-// know — variant_id, run_id, node_id, case_id, config_hash — arrive on IdempotencyKey's coordinates
-// and via the context the caller passes; the gateway supplies what only it knows: which provider
-// answered, how much it cost in tokens, how long it took, and how many attempts it really took.
-type CallInfo struct {
-	Provider string
-	ModelID  string
-	// ModelVersionID is the registry entry's content address, so an event can be joined back to the
-	// exact model version without re-resolving it.
-	ModelVersionID string
-	IdempotencyKey string
-	Seed           *int64
-	Attempts       int
-	Duration       time.Duration
-	Usage          Usage
-	StopReason     StopReason
-	// RateLimited reports whether ANY attempt in this logical call received a 429 (task 1.5's
-	// rate-limit-hit metric). A retried-then-succeeded call still saw the rate limit, so this is
-	// separate from Err: the outage signal must survive the recovery.
-	RateLimited bool
-	// Err is the terminal error, nil on success. It is already scrubbed — an observer that logs this
-	// cannot leak a credential, which matters because logging it is exactly what an observer is for.
-	Err error
-}
+// Observer is the seam instrumentation attaches to. See providercall.Observer.
+type Observer = providercall.Observer
+
+// CallInfo is everything an instrument needs about one provider call. See providercall.CallInfo.
+type CallInfo = providercall.CallInfo
 
 // WithObserver attaches an instrument. Nil-safe: the zero Gateway has no observer and calls no hook.
 func WithObserver(o Observer) Option { return func(g *Gateway) { g.observer = o } }

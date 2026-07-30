@@ -28,6 +28,128 @@ mandatory and fail-closed on every channel** (安全); **the release has no manu
 copies, or merges (运维, DevOps rule 2/3); and **version is a single source of truth** — the tag — that every
 manifest derives from and never a second hand-written copy (维护, backend "展示=执行").
 
+## Ratification record (task 1)
+
+The one-way doors below were decided **before** any pipeline, installer, or manifest existed, because each
+is cheap now and expensive later. Where a decision has a code home, that home — not this document — is the
+thing a build can check; the row names it so a reader can get from the decision to its gate in one step.
+
+| Decision | State | Ratified | Enforced by |
+|---|---|---|---|
+| **D1** native-runner matrix, no cross-CGO | ✅ ratified | 2026-07-29 | `distribution.Shipped()` rows carry a `Runner`; `TestShippedRowsNameANativeRunner` fails on a runner whose OS/arch differs from the target, and `TestReleaseWorkflowMatchesTargetContract` holds `release.yml` to the same set |
+| **D2** ed25519 floor, cosign opt-in | ✅ ratified | 2026-07-29 | `release.VerifyTrusted` is the only verifier any channel calls; `Attestation.Verified()` is the signed-manifest floor and is *not* satisfied by OS code signing |
+| **D3** OS trust: sign+notarize vs documented clear | ✅ escalated · answered **(A)** 2026-07-29 · **REVERSED to (B) documented-clear 2026-07-30** | product owner, both times (PRD OQ1) | `distribution.ChosenPosture`, pinned by `TestChosenPostureIsTheRatifiedDecision`; `TestPostureBIsActuallyDelivered` asserts the workaround is surfaced, not merely documented |
+| **D5** manifests generated, never hand-edited | ✅ ratified | 2026-07-29 | every channel manifest is emitted by `cmd/herosdist` from the tag + `SHA256SUMS`; `TestGeneratedManifestsCarryNoSecondVersion` fails on a hand-written version |
+
+### D3 — what was escalated, what was answered, and what changed
+
+The escalation was deliberate: (A) commits **recurring money** (Apple Developer Program, a code-signing
+certificate) **and an organizational identity**, and the rulebook forbids an implementer from self-deciding
+a spend or an identity commitment. Both paths were put with their costs.
+
+**The decision log, both entries** — because a log showing only the current answer cannot tell a later reader
+whether the question was ever asked:
+
+| Date | Answer | Reason given |
+|---|---|---|
+| 2026-07-29 | **(A)** Developer-ID sign + notarize on macOS, Authenticode on Windows | best first-run UX; no scare screen |
+| 2026-07-30 | **(B)** ship unsigned, surface the one-command clear — **RATIFIED** | no spend on signing |
+
+What (B) obliges, and what it does not:
+
+- Every macOS and Windows artifact ships **unsigned by the OS**, and every surface says so plainly.
+- The workaround must be **in front of the user**, not merely in a document: the installer prints the
+  pasteable `xattr -d com.apple.quarantine <the actual install path>` and the SmartScreen step, the README
+  carries both, and `TestPostureBIsActuallyDelivered` fails if either goes missing. A posture whose answer
+  lives only in a design document is indistinguishable from having no posture — which §5 of the PRD describes
+  as the state that reads like *malware* rather than *unsigned*.
+- Publisher metadata is still declared wherever a package can carry it (winget `Publisher`, nfpm
+  `maintainer`/`vendor`). That a **bare `.exe` can carry none** — on Windows the Authenticode signature *is*
+  the publisher declaration — is disclosed rather than glossed.
+- **Homebrew and Scoop sidestep the cliff entirely**: a package manager fetches and places the binary, so it
+  is not quarantined the way a double-clicked download is. Investing in those channels was always the larger
+  half of the UX answer, which is why (B) is a smaller regression than it first looks — and why the tap and
+  bucket repositories are now the highest-value thing left undone.
+- The **verification floor is unchanged** (D2): the ed25519 signature over `SHA256SUMS` is what every channel
+  checks, offline, with no account. OS code signing was always a UX upgrade layered on top, never a
+  substitute — `Attestation.Verified()` deliberately ignores it, so the *security* story is identical under
+  either answer. What (B) costs is a first-run warning, not a weaker guarantee.
+
+**What the reversal cost in code: nothing user-facing.** Every claim was already rendered from `Attestation` —
+what a release actually delivered — never from the ratified posture, so flipping the constant changed no
+sentence anywhere in the product. This reversal is the event that proved the split was worth having: had the
+claims been driven by the decision, (A) would have begun promising notarization the day it was given, and (B)
+would have silently withdrawn the promise a day later.
+
+The pipeline **keeps** its signing steps, gated and inert. They cost nothing to leave, they cannot make a claim
+on their own (every attestation flag comes from a marker file a step actually wrote), and keeping them makes a
+future decision to fund signing a **secrets change rather than a pipeline change**. Their log notices say
+signing is *not part of the ratified posture* rather than *not yet provisioned* — the second would send a
+maintainer looking for a budget that was deliberately declined.
+
+### Signing-key management and rotation (task 1.4)
+
+- The **private key is only ever a CI secret**, consumed by `release-cli.sh` in `${VAR:?}` refuse-to-start
+  form. It is never in the repository, a log, or an artifact.
+- The **trust root is compiled in** (`internal/release/trustroot.go`) and mirrored, for human use, in
+  `docs/release/heros-release.pub`. A downloaded key would prove nothing: whoever can serve a binary can
+  serve a key. The two copies are held identical by `TestTrustRootMatchesPublishedKey`.
+- The trust root is a **key set with roles**, exactly one `active` (signs) and any number of `accepted`
+  (verify only), because rotation must be planned before it is needed. A single-key verifier makes rotation
+  a flag day: the moment a new key signs, every installed binary rejects every new release and the only
+  repair is an unverified reinstall — the hole the signature exists to close.
+- **Rotation is additive and staged:** publish the next public key as `accepted` → release once more with
+  the old key (every binary in the field now trusts both) → flip the roles → after the overlap window (one
+  minor version, stated in `docs/release/install.md`) delete the old entry. `TestRotationOverlapVerifiesBothKeys`
+  rehearses all four steps with real signatures.
+- **Compromise skips the overlap:** the leaked key is deleted in the same commit that adds its replacement,
+  and the release notes say so. A deliberate, announced break is narrower than the alternative.
+
+### Supported-target matrix, frozen as a contract (task 1.3)
+
+A matrix on a README is a contract the moment it is published. So the matrix lives in
+`internal/distribution` and the README's table is checked against it; adding or dropping a row is a
+reviewed change, not a docs edit (`TestTargetMatrixIsFrozen`).
+
+| OS | arch | Native binary | Native runner | Channels |
+|---|---|---|---|---|
+| macOS 12+ (Intel) | amd64 | ✅ | `macos-15-intel` | curl\|sh, Homebrew, container |
+| macOS 12+ (Apple silicon) | arm64 | ✅ | `macos-15` | curl\|sh, Homebrew, container |
+| Linux glibc 2.31+ | amd64 | ✅ | `ubuntu-22.04` | curl\|sh, Homebrew, `.deb`, `.rpm`, container |
+| Linux glibc 2.31+ | arm64 | ✅ | `ubuntu-22.04-arm` | curl\|sh, Homebrew, `.deb`, `.rpm`, container |
+| Windows 10/11 | amd64 | ✅ | `windows-2022` | PowerShell, Scoop, winget |
+| Windows 11 | arm64 | ⛔ **not built** | — | run the amd64 build under x64 emulation |
+| Alpine / any musl Linux | any | ⛔ **not built** (glibc CGO) | — | `ghcr.io/damonleelcx/heros:<version>` |
+
+**Runner labels expire, and D1 makes that a contract problem.** The macOS rows first named `macos-13` and
+`macos-14`; both images have since been retired or deprecated by GitHub (2025-12-04 and 2026-11-02), and a
+retired label does not fail — the job simply queues until it times out, which reads as a slow release rather
+than an impossible one. Two consequences are now built in rather than remembered:
+
+1. **Runner arch is a reviewed table, not a pattern.** `distribution.runnerHosts` maps each label to its
+   host OS/arch and `RunnerHost` refuses unknown labels. The label shapes are not systematic —
+   `macos-15` is arm64 while `macos-15-intel` is x86_64, the reverse of the `-arm` suffix convention — so
+   any inference rule confident enough to decide that pair decides it wrong, and a wrong answer here is
+   precisely the cross-CGO build D1 exists to refuse.
+2. **The macOS floor is pinned, not inherited.** With no deployment target set, clang stamps the *build
+   host's* OS version into `LC_BUILD_VERSION`, so "macOS 12+" silently becomes "as new as whatever image
+   GitHub gave us" — a claim the user's Mac enforces at launch. `distribution.MacOSFloor` states it,
+   `release-cli.sh` exports it as `MACOSX_DEPLOYMENT_TARGET` and then reads the built binary back with
+   `otool -l` to confirm the linker honoured it.
+
+There is also a horizon worth naming now: GitHub retires x86_64 macOS entirely when the macOS 15 image goes,
+in **Fall 2027**. `darwin/amd64` therefore becomes a ⛔ row on a known date. The matrix already has the shape
+for saying so, so that will be a row edit, not a redesign.
+
+The **⛔ rows are rows**, not absences. This is the P13 coverage lesson: a matrix listing only what works
+forces the reader to infer everything else from a blank, and a blank reads as *should work — must be your
+setup*. A user on `windows/arm64` who finds no row concludes the download is broken and opens a ticket. So
+`TargetFor` returns limit rows too, and every refusal names one, with its reason and its answer.
+`TestDisclosedLimitsAreStatedTotally` fails on a limit that carries either without the other.
+
+The **glibc floor (2.31+) is part of the contract.** "Linux" with no version is the kind of claim that
+becomes a support ticket the first time someone tries CentOS 7.
+
 ## Decision 1 — Native-runner build matrix, not cross-CGO
 
 **Chosen:** `release.yml` builds each target on its **native GitHub-hosted runner** (macOS runner →
@@ -79,10 +201,14 @@ unsigned `.exe`. The two honest resolutions have very different costs:
 
 **Chosen posture (process, not a silent pick):** this is a **cost-escalation-path** decision — the rulebook
 forbids self-deciding a spend or an identity commitment. So the design **states both paths with their costs and
-escalates the choice to the user** (PRD OQ1). The **default the pipeline ships without a decision** is (B) —
-because (B) is always-available and never *claims* more than it delivers (安全/诚实), while (A) can be added
-later purely additively (sign the same artifacts, notarize, re-attach) with **no change to the verification
-floor** (D2). Crucially: **Homebrew and Scoop installs are not quarantined the way a double-clicked download is**
+escalates the choice to the user** (PRD OQ1). Answered **(A) on 2026-07-29** and **reversed to (B) on
+2026-07-30** by the same owner, on cost — see the decision log in the ratification record above.
+
+**(B) is ratified: ship unsigned, with the one-command clear surfaced by the installer and the README.** The
+claim is rendered from `distribution.Attestation` (a per-release fact) and never from the ratified posture,
+which is why the reversal changed no user-visible sentence. If signing is ever funded, (A) layers on
+additively — sign the same artifacts, notarize, re-attach — with **no change to the verification floor** (D2),
+and the pipeline's inert signing steps mean that is a secrets change rather than a redesign. Crucially: **Homebrew and Scoop installs are not quarantined the way a double-clicked download is**
 (the package manager fetches and places the binary), so investing in the `brew`/`scoop` channels (D5) already
 removes the Gatekeeper/SmartScreen cliff for most users — which is why (A) is a UX *upgrade*, not a
 prerequisite.
@@ -117,7 +243,7 @@ reviewer (who runs the P11 verify steps by hand), never as the happy path.
 
 **Chosen:** the Homebrew formula, Scoop manifest, winget manifest, and nfpm `.deb`/`.rpm` configs are
 **templated from the release** — version = the tag, URLs = the Release asset URLs, checksums = the emitted
-`SHA256SUMS` — and written/PR'd by the release pipeline. The `ghcr.io/heros-foreal/heros` image is built and
+`SHA256SUMS` — and written/PR'd by the release pipeline. The `ghcr.io/damonleelcx/heros` image is built and
 pushed by the same pipeline, digest-pinned.
 
 **Why (L7 维护, backend "单一真相源，展示=执行").** A hand-maintained formula carries a **second copy** of the
@@ -131,7 +257,7 @@ source; forbidden.
 
 ## Decision 6 — Container image is the musl/Alpine answer, not a static-musl native build
 
-**Chosen:** Alpine/musl and generic-CI users are served by the **published container image** (`ghcr.io/heros-foreal/heros`),
+**Chosen:** Alpine/musl and generic-CI users are served by the **published container image** (`ghcr.io/damonleelcx/heros`),
 which carries the glibc CLI in a glibc base; native musl binaries are a **disclosed limit** (NFR5), not shipped
 in the first cut.
 
