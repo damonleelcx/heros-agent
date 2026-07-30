@@ -155,7 +155,13 @@ func parseManifest(text string) map[string]string {
 	for _, line := range strings.Split(text, "\n") {
 		fields := strings.Fields(strings.TrimSpace(line))
 		if len(fields) == 2 && len(fields[0]) == 64 {
-			out[fields[1]] = strings.ToLower(fields[0])
+			// 🔴 A leading `*` is the coreutils BINARY-MODE marker, not part of the filename: the format is
+			// "<hash><space><' '|'*'><name>", and `sha256sum -c` accepts both modes. Git-bash on Windows
+			// defaults to binary mode, so the windows/amd64 runner writes "<hash> *heros-...exe" while every
+			// POSIX runner writes "<hash>  heros-...". Keeping the `*` files the claim under a name no
+			// artifact has, and the merge then reports the checksum as MISSING — which reads as "the build
+			// job did not upload its SHA256SUMS" when the job did exactly that.
+			out[strings.TrimPrefix(fields[1], "*")] = strings.ToLower(fields[0])
 		}
 	}
 	return out

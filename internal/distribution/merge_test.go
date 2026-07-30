@@ -40,6 +40,66 @@ func fullRelease(t *testing.T, root, version string) {
 	}
 }
 
+// TestParseManifestAcceptsBinaryModeLines is a regression test for the v0.20.0-rc.2 merge failure.
+//
+// `sha256sum` writes "<hash><space><mode><name>" where mode is ' ' for text and '*' for binary. Git-bash on
+// the windows-2022 runner defaults to BINARY mode, so that one runner's manifest reads "<hash> *heros-...exe"
+// while the four POSIX runners write two spaces. The parser used strings.Fields and kept the `*`, filing the
+// claim under a name no artifact has — so the merge reported the windows checksum as missing and refused,
+// with a message blaming the build job for not uploading a SHA256SUMS it had in fact uploaded.
+//
+// Every test helper here wrote the text-mode form, which is why five green builds could still produce an
+// unmergeable release. The fixture below is the exact byte layout the runner produced.
+func TestParseManifestAcceptsBinaryModeLines(t *testing.T) {
+	const hash = "18964f3ac42c603e086fb072480a8207230a3ccab8808db53d6e06c4275bf959"
+	for _, tc := range []struct{ name, line string }{
+		{"text mode (POSIX runners)", hash + "  heros-0.20.0-windows-amd64.exe"},
+		{"binary mode (git-bash on windows-2022)", hash + " *heros-0.20.0-windows-amd64.exe"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ParseManifest(tc.line)
+			if sum, ok := got["heros-0.20.0-windows-amd64.exe"]; !ok || sum != hash {
+				t.Errorf("parsed %q as %v — the asset's own name must be the key, or the merge cross-check "+
+					"silently finds no claim for a file that carried one", tc.line, got)
+			}
+		})
+	}
+}
+
+// TestMergeCrossChecksABinaryModeRunnerBundle proves it end to end: a bundle whose manifest is in binary
+// mode must merge, not be reported as missing its checksum. The unit test above would still pass if
+// CollectRunnerArtifacts looked the claim up under a differently-normalised key.
+func TestMergeCrossChecksABinaryModeRunnerBundle(t *testing.T) {
+	root := t.TempDir()
+	for _, tt := range Shipped() {
+		name := AssetName("0.20.0", tt.GOOS, tt.GOARCH)
+		content := "binary bytes for " + name
+		runnerBundle(t, root, "build-"+tt.GOOS+"-"+tt.GOARCH, name, content)
+		if tt.GOOS != "windows" {
+			continue
+		}
+		// Rewrite just the windows bundle's manifest the way git-bash does.
+		sum := sha256.Sum256([]byte(content))
+		line := fmt.Sprintf("%s *%s\n", hex.EncodeToString(sum[:]), name)
+		p := filepath.Join(root, "build-"+tt.GOOS+"-"+tt.GOARCH, "SHA256SUMS")
+		if err := os.WriteFile(p, []byte(line), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	arts, err := CollectRunnerArtifacts(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range arts {
+		if a.ClaimedSum == "" {
+			t.Errorf("%s arrived with no claimed checksum — a binary-mode manifest was not understood", a.Name)
+		}
+	}
+	if _, err := Merge(arts); err != nil {
+		t.Fatalf("merge refused a release whose windows runner wrote a binary-mode manifest: %v", err)
+	}
+}
+
 // TestMergeProducesOneSortedManifest — the merged manifest must be a function of its contents, not of the
 // order five parallel jobs finished in, or the signature over it is noise.
 func TestMergeProducesOneSortedManifest(t *testing.T) {
