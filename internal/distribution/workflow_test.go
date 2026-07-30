@@ -1,7 +1,6 @@
 package distribution
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -151,7 +150,7 @@ func TestReleaseScriptStampsTheOneVersionVariable(t *testing.T) {
 	if !strings.Contains(script, `LDFLAGS="${HEROS_LDFLAGS:-`) {
 		t.Error("release-cli.sh does not accept HEROS_LDFLAGS — CI would compute the version twice")
 	}
-	if !strings.Contains(script, fmt.Sprintf("%s", `sig="$(go run ./cmd/herossign sign`)) {
+	if !strings.Contains(script, `sig="$(go run ./cmd/herossign sign`) {
 		t.Error("release-cli.sh writes the signature with a redirect — a failed signing would leave a " +
 			"zero-byte .sig that later steps read as a present signature")
 	}

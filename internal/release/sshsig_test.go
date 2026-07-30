@@ -52,7 +52,7 @@ func TestSSHSigVerifiesWithRealSSHKeygen(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer f.Close()
+		defer func() { _ = f.Close() }()
 		cmd := exec.Command(bin, "-Y", "verify", "-f", signers, "-I", "heros-release",
 			"-n", SSHSigNamespace, "-s", sigPath)
 		cmd.Stdin = f
@@ -96,7 +96,7 @@ func TestSSHSigRejectsAForeignKey(t *testing.T) {
 		SSHPublicKeyLine(otherPub, "not-the-signer")+"\n"), 0o644)
 
 	f, _ := os.Open(msgPath)
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	cmd := exec.Command(bin, "-Y", "verify", "-f", signers, "-I", "heros-release", "-n", SSHSigNamespace, "-s", sigPath)
 	cmd.Stdin = f
 	if out, err := cmd.CombinedOutput(); err == nil {
@@ -137,7 +137,7 @@ func TestBothSignatureEncodingsCoverTheSameBytes(t *testing.T) {
 
 	run := func(path string) error {
 		f, _ := os.Open(path)
-		defer f.Close()
+		defer func() { _ = f.Close() }()
 		cmd := exec.Command(bin, "-Y", "verify", "-f", signers, "-I", "heros-release",
 			"-n", SSHSigNamespace, "-s", sigPath)
 		cmd.Stdin = f

@@ -385,7 +385,7 @@ func checkToolchains(repo string) []Check {
 			Detail:     "cannot create a temporary directory to probe the toolchains: " + err.Error(),
 			NextAction: "check that TMPDIR points somewhere writable"}}
 	}
-	defer os.RemoveAll(empty)
+	defer func() { _ = os.RemoveAll(empty) }()
 
 	var out []Check
 	for _, lang := range langs {

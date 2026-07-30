@@ -62,14 +62,23 @@ func TestProvidercallLinksNoTransport(t *testing.T) {
 // real `providergateway.New(…, providergateway.WithObserver(inst))` with an Instrument whose OnCall takes a
 // `providercall.CallInfo`, and it passes. This test states the property directly so that a future change from
 // alias to distinct type fails HERE, naming the reason, instead of failing as a wall of errors in six packages.
-func TestGatewayAliasesAreTypeIdentity(t *testing.T) {
-	// Assignable in both directions with no conversion — the definition of an alias.
-	var viaLeaf providercall.CallInfo
-	var viaGateway providergateway.CallInfo = viaLeaf
-	viaLeaf = viaGateway
-	_ = viaLeaf
+// identical does not compile unless its two arguments have the same type: both parameters are the one type
+// parameter T, and type inference will not unify two distinct named types even when one is convertible to the
+// other. Calling it is therefore a compile-time assertion of type IDENTITY, which is what "alias" means.
+func identical[T any](_, _ T) {}
 
-	var usage providergateway.Usage = providercall.Usage{InputTokens: 1}
+func TestGatewayAliasesAreTypeIdentity(t *testing.T) {
+	// Identity, stated directly. `identical` binds both arguments to ONE type parameter, so each line below
+	// compiles only if the two names denote the SAME type — Go will not unify two distinct named types, and a
+	// conversion cannot rescue it. That is strictly stronger than the assignment form this replaced, which
+	// only demonstrated assignability.
+	identical(providercall.CallInfo{}, providergateway.CallInfo{})
+	identical(providercall.Usage{}, providergateway.Usage{})
+
+	// And the alias has to carry VALUES across the package boundary, not merely type-check: this is built as a
+	// leaf Usage, asserted to be the gateway's Usage, and read back.
+	usage := providercall.Usage{InputTokens: 1}
+	identical(usage, providergateway.Usage{})
 	if usage.InputTokens != 1 {
 		t.Fatalf("Usage did not survive the alias: %+v", usage)
 	}

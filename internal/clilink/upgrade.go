@@ -213,7 +213,7 @@ func (c Commands) latestVersion(cfg cli.Config) (distribution.Version, error) {
 			Msg: "upgrade: cannot reach the release index — " + err.Error() +
 				". Every other command works offline; only this one needs the network.", Err: err}
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return distribution.Version{}, &cli.ExitError{Code: cli.ExitOperational,
 			Msg: fmt.Sprintf("upgrade: the release index answered %d", resp.StatusCode)}
@@ -243,7 +243,7 @@ func (c Commands) fetch(url string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("%s answered %d", url, resp.StatusCode)
 	}
@@ -272,9 +272,9 @@ func replaceBinary(exe string, data []byte) error {
 			" — the verified download was NOT installed. Re-run with write access, or use the install script.", Err: err}
 	}
 	tmpName := tmp.Name()
-	defer os.Remove(tmpName) // no-op once the rename has succeeded
+	defer func() { _ = os.Remove(tmpName) }() // no-op once the rename has succeeded
 	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
+		_ = tmp.Close() // best-effort: the write error below is the one worth reporting
 		return &cli.ExitError{Code: cli.ExitOperational, Msg: "upgrade: cannot write the new binary", Err: err}
 	}
 	if err := tmp.Close(); err != nil {

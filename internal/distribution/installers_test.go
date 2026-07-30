@@ -84,7 +84,7 @@ func TestInstallScriptsFailClosed(t *testing.T) {
 		t.Fatalf("install.sh no longer has a recognisable verify-then-install sequence "+
 			"(checksum=%d signature=%d place=%d)", iChecksum, iSignature, iInstall)
 	}
-	if !(iChecksum < iSignature && iSignature < iInstall) {
+	if iChecksum >= iSignature || iSignature >= iInstall {
 		t.Errorf("install.sh's order is wrong (checksum=%d signature=%d install=%d): both verifications must "+
 			"complete before anything is placed on PATH", iChecksum, iSignature, iInstall)
 	}
@@ -123,7 +123,7 @@ func TestInstallScriptsFailClosed(t *testing.T) {
 	if iPsHash < 0 || iPsSig < 0 || iPsCopy < 0 {
 		t.Fatal("install.ps1 no longer has a recognisable verify-then-install sequence")
 	}
-	if !(iPsHash < iPsSig && iPsSig < iPsCopy) {
+	if iPsHash >= iPsSig || iPsSig >= iPsCopy {
 		t.Errorf("install.ps1's order is wrong (hash=%d sig=%d copy=%d)", iPsHash, iPsSig, iPsCopy)
 	}
 }

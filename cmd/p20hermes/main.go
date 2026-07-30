@@ -161,7 +161,7 @@ func main() {
 	if err != nil {
 		fatal(err.Error())
 	}
-	defer os.RemoveAll(work)
+	defer func() { _ = os.RemoveAll(work) }()
 	irPath := filepath.Join(work, "ir.json")
 	reportPath := filepath.Join(work, "report.json")
 
@@ -242,7 +242,7 @@ func main() {
 	//
 	// Every command above ran with no account and no platform reachable. This asserts it rather than assuming
 	// it: the endpoints are pointed at a closed port, and a command that needed them would fail here.
-	out, stderr, oerr := run2(bin, *repo, map[string]string{
+	out, _, oerr := run2(bin, *repo, map[string]string{
 		"HEROS_RELEASE_API_URL":  "http://127.0.0.1:9/closed",
 		"HEROS_RELEASE_BASE_URL": "http://127.0.0.1:9/closed",
 	}, "discover", "--out", filepath.Join(work, "ir2.json"), "--report", filepath.Join(work, "r2.json"),
@@ -304,7 +304,7 @@ func run2(bin, repo string, env map[string]string, args ...string) (string, stri
 	// A HOME of its own, so the run cannot read or write the developer's credential file. This runner must not
 	// be able to accidentally exercise the linked path.
 	tmpHome, _ := os.MkdirTemp("", "p20hermes-home-")
-	defer os.RemoveAll(tmpHome)
+	defer func() { _ = os.RemoveAll(tmpHome) }()
 	cmd.Env = append(os.Environ(), "HOME="+tmpHome, "HEROS_CONFIG_DIR="+tmpHome)
 	for k, v := range env {
 		cmd.Env = append(cmd.Env, k+"="+v)
