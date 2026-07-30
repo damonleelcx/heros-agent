@@ -67,6 +67,11 @@ type WebhookPayload struct {
 	// platform mirrors it; it never derives it.
 	Status    string `json:"status,omitempty"`
 	CreatedAt string `json:"created_at,omitempty"`
+	// PlanID is the plan the subscription behind this event grants, read from the metadata the platform
+	// stamped when it created the subscription (P21 task 5.1). It is the PLATFORM's plan id travelling
+	// on the provider's object — not a plan the provider invented — which is why the entitlement sync
+	// may act on it.
+	PlanID string `json:"plan_id,omitempty"`
 }
 
 // SignedWebhook is a raw inbound delivery: the bytes as received and the signature header.
@@ -277,6 +282,10 @@ type WebhookResult struct {
 	// Applied is true when a side effect was performed.
 	Applied bool         `json:"applied"`
 	State   BillingState `json:"state"`
+	// PlanChanged / PlanID report the entitlement sync (P21 task 5). Reported rather than logged so the
+	// endpoint can answer "did this event move what the customer can do" without a second query.
+	PlanChanged bool   `json:"plan_changed,omitempty"`
+	PlanID      string `json:"plan_id,omitempty"`
 }
 
 // WebhookMaxSkew bounds how old a signed timestamp may be. Five minutes is the provider convention and
@@ -297,9 +306,9 @@ func (s *Service) HandleWebhook(ctx context.Context, in SignedWebhook) (WebhookR
 		return WebhookResult{}, err
 	}
 
-	var p WebhookPayload
-	if err := json.Unmarshal(in.Body, &p); err != nil {
-		return WebhookResult{}, fmt.Errorf("%w: %v", ErrWebhookMalformed, err)
+	p, err := s.decodeWebhook(in.Body)
+	if err != nil {
+		return WebhookResult{}, err
 	}
 	if p.ProviderEventID == "" {
 		return WebhookResult{}, ErrWebhookNoEventID
@@ -330,12 +339,28 @@ func (s *Service) HandleWebhook(ctx context.Context, in SignedWebhook) (WebhookR
 		}
 		return WebhookResult{}, fmt.Errorf("%w: %v", ErrWebhookNotPersisted, err)
 	}
+	// ── 4. SYNC THE ENTITLEMENT, still before the ack ─────────────────────────
+	//
+	// Inside the persist step rather than after it: an entitlement change applied after the 2xx would be
+	// an effect the platform promised to have recorded and had not — the same acked-but-unrecorded
+	// failure, one layer up. A failure here takes the same release-then-non-2xx path as any other.
+	sync, err := s.syncEntitlement(p)
+	if err != nil {
+		if rerr := s.deliveries.Release(p.ProviderEventID); rerr != nil {
+			return WebhookResult{}, fmt.Errorf("%w: the delivery claim for %s could not be released after the "+
+				"entitlement sync failed — this event must be RECONCILED against the provider: %v",
+				ErrWebhookNotPersisted, p.ProviderEventID, rerr)
+		}
+		return WebhookResult{}, fmt.Errorf("%w: entitlement sync: %v", ErrWebhookNotPersisted, err)
+	}
+
 	// The provider's invoice/subscription state is a revenue signal in its own right: it is how the
 	// dunning funnel becomes visible before a customer calls about it.
 	if st := firstNonEmpty(state.InvoiceStatus, state.SubscriptionStatus); st != "" {
 		s.observe.InvoiceState(p.CustomerID, p.Period, st)
 	}
-	return WebhookResult{ProviderEventID: p.ProviderEventID, Type: p.Type, Applied: true, State: state}, nil
+	return WebhookResult{ProviderEventID: p.ProviderEventID, Type: p.Type, Applied: true, State: state,
+		PlanChanged: sync.Changed, PlanID: sync.PlanID}, nil
 }
 
 // verifySignature is step 1 in isolation: the signature is checked against the signing secret from the
@@ -387,6 +412,119 @@ func (s *Service) verifySignature(ctx context.Context, in SignedWebhook) error {
 	// signed material, so a verified timestamp is one the sender committed to and an attacker cannot
 	// move. Checking it first would be checking an attacker-supplied number.
 	return s.checkSkew(stamp)
+}
+
+// stripeEnvelope is Stripe's real event shape: an envelope whose `data.object` is the object the event
+// is about (an invoice, a subscription, a charge).
+type stripeEnvelope struct {
+	ID   string      `json:"id"`
+	Type WebhookType `json:"type"`
+	Data struct {
+		Object json.RawMessage `json:"object"`
+	} `json:"data"`
+}
+
+// stripeEventObject is the union of the fields the platform reads off `data.object`. It is a
+// PROJECTION, deliberately narrow: the platform acts on the lifecycle, not on Stripe's whole object
+// model, and a field this struct does not name is a field no decision here can depend on.
+type stripeEventObject struct {
+	ID           string            `json:"id"`
+	Object       string            `json:"object"`
+	Customer     string            `json:"customer"`
+	Status       string            `json:"status"`
+	Subscription string            `json:"subscription"`
+	Charge       string            `json:"charge"`
+	Metadata     map[string]string `json:"metadata"`
+	Period       struct {
+		Start int64 `json:"start"`
+	} `json:"period"`
+	PeriodStart int64 `json:"period_start"`
+}
+
+// decodeWebhook turns a delivery body into the platform's payload.
+//
+// It accepts two shapes, and the reason is the same one verifySignature has: the P7 form is the
+// platform's own projection, used by the demo, the tests and any provider that speaks it, while a real
+// Stripe delivery is an ENVELOPE around the object the event is about. Projecting Stripe's shape here —
+// once, at the boundary — is what keeps every decision below written against one payload type rather
+// than against two, which is how a lifecycle branch ends up handling one shape and not the other.
+func (s *Service) decodeWebhook(body []byte) (WebhookPayload, error) {
+	var env stripeEnvelope
+	if err := json.Unmarshal(body, &env); err != nil {
+		return WebhookPayload{}, fmt.Errorf("%w: %v", ErrWebhookMalformed, err)
+	}
+	if len(env.Data.Object) == 0 {
+		// The P7 flat form.
+		var p WebhookPayload
+		if err := json.Unmarshal(body, &p); err != nil {
+			return WebhookPayload{}, fmt.Errorf("%w: %v", ErrWebhookMalformed, err)
+		}
+		return p, nil
+	}
+
+	var obj stripeEventObject
+	if err := json.Unmarshal(env.Data.Object, &obj); err != nil {
+		return WebhookPayload{}, fmt.Errorf("%w: data.object: %v", ErrWebhookMalformed, err)
+	}
+
+	p := WebhookPayload{
+		ProviderEventID: env.ID,
+		Type:            env.Type,
+		Status:          obj.Status,
+		SubscriptionRef: firstNonEmpty(obj.Subscription, subscriptionRefOf(obj)),
+		ChargeRef:       firstNonEmpty(obj.Charge, chargeRefOf(obj)),
+		PlanID:          obj.Metadata["platform_plan_id"],
+		Period:          periodOf(obj),
+	}
+	if obj.Object == "invoice" {
+		p.InvoiceRef = obj.ID
+	}
+	// The mirrored state is keyed by the PLATFORM's customer id, and Stripe's object names a Stripe
+	// handle. The metadata the platform stamped wins where it exists; otherwise the account store is
+	// asked which of its accounts holds that handle. Guessing — or keying the mirror by Stripe's handle
+	// instead — would give the console a state it cannot look up.
+	p.CustomerID = firstNonEmpty(obj.Metadata[metaCustomerID], s.customerForHandle(obj.Customer))
+	return p, nil
+}
+
+func subscriptionRefOf(o stripeEventObject) string {
+	if o.Object == "subscription" {
+		return o.ID
+	}
+	return ""
+}
+
+func chargeRefOf(o stripeEventObject) string {
+	if o.Object == "charge" {
+		return o.ID
+	}
+	return ""
+}
+
+// periodOf derives the platform's period key from whichever period field the object carries. An object
+// with neither yields "" rather than today's month: a period guessed from the clock would attribute a
+// late delivery to the wrong period, which is a drift the reconciler would then report as a mystery.
+func periodOf(o stripeEventObject) string {
+	switch {
+	case o.Period.Start > 0:
+		return periodKey(o.Period.Start)
+	case o.PeriodStart > 0:
+		return periodKey(o.PeriodStart)
+	}
+	return ""
+}
+
+// customerForHandle resolves a provider customer handle back to the platform customer id.
+func (s *Service) customerForHandle(handle string) string {
+	if handle == "" || s.accounts == nil {
+		return ""
+	}
+	for _, a := range s.accounts.List() {
+		if a.ProviderCustomerHandle == handle {
+			return a.CustomerID
+		}
+	}
+	return ""
 }
 
 // StripeSignatureHeader is the header Stripe signs its deliveries with.

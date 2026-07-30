@@ -59,6 +59,12 @@ type Service struct {
 	// against a code path that cannot go wrong is a restatement of the implementation, not a test.
 	stateMu sync.Mutex
 	states  StateStore
+	// subPlans is the platform's own record of which plan a customer's subscription grants (P21 task
+	// 5.1). A Stripe INVOICE event carries no plan, so without this the entitlement sync would have to
+	// guess one — and a guessed plan is entitlements nobody sold.
+	subPlans map[string]string
+	// freePlan is the degradation target. Empty means FreePlanID.
+	freePlan string
 
 	// rollout is the P7 feature flag. Nil means "no rollout gate configured", which is the correct
 	// behaviour for a test harness; a DEPLOYMENT wires one, and its zero value is fully dark.
@@ -103,7 +109,8 @@ func NewService(p Provider, l Ledger, accts account.Store, plans *plancfg.Resolv
 		return nil, errors.New("billing: provider, ledger, account store, plan resolver and meter are all required")
 	}
 	return &Service{provider: p, ledger: l, accounts: accts, plans: plans, meter: m, secrets: secrets,
-		now: time.Now, subs: map[string]string{}, states: NewMemStates()}, nil
+		now: time.Now, subs: map[string]string{}, states: NewMemStates(),
+		subPlans: map[string]string{}}, nil
 }
 
 // WithStates replaces the mirrored-state store. A deployment wires the durable one; a test wires one it

@@ -53,11 +53,11 @@ persist-then-ack / reversible) it touches.
       dunning); a `charge.refunded` / dispute webhook authors **no** ledger row (P7 rule preserved).
 
 ## 5. Backend — Subscription → entitlement sync (reversible, audited)
-- [ ] 5.1 On `invoice.paid` / `subscription.updated(active)`: set the account's active plan via `account.SetPlan`
+- [x] 5.1 On `invoice.paid` / `subscription.updated(active)`: set the account's active plan via `account.SetPlan`
       (pinning the plan config version) + a `TypePlanChange` ledger row; the entitlement gate reflects it.
-- [ ] 5.2 On `subscription.deleted` / dunning grace-end: degrade to **Free at the period boundary** by an audited
+- [x] 5.2 On `subscription.deleted` / dunning grace-end: degrade to **Free at the period boundary** by an audited
       plan change; **delete nothing**; keep the entitlement through the grace window Stripe is retrying in.
-- [ ] 5.3 Assert the degradation is **reversible**: a subsequent paid subscription restores the plan by another
+- [x] 5.3 Assert the degradation is **reversible**: a subsequent paid subscription restores the plan by another
       audited plan change, with all `TypePlanChange` rows intact.
 
 ## 6. Frontend — Payment collection + the console billing page

@@ -1,0 +1,224 @@
+package billing
+
+import (
+	"errors"
+	"fmt"
+	"strings"
+)
+
+// entitlementsync.go is P21 section 5: what a customer can do follows what they pay for — in BOTH
+// directions, by an audited plan change, and never by deleting anything.
+//
+// ## The three properties, and why each is a property rather than a preference
+//
+//   - **AUDITED.** Every move is `account.SetPlan` (pinning the plan config version) PLUS a
+//     `TypePlanChange` ledger row. "Why did this tenant lose auto-merge" is the first question support
+//     is asked, and it has to be answerable from the ledger rather than from someone's memory of a
+//     deploy.
+//   - **REVERSIBLE.** Paying again is another plan change that restores the plan. Degradation is
+//     therefore a forward operation, exactly as a correction is, and every prior row stays intact.
+//   - **NEVER A DELETE.** Nothing here removes an account, a usage record, or a billing row. A
+//     degrade-by-delete is irreversible and unauditable, which are the two things money state may never
+//     be.
+//
+// ## Why the audit row is written BEFORE the plan moves
+//
+// The two writes can fail independently, so the order decides which inconsistency is possible. Row
+// first means the failure mode is *an audit row whose plan change did not land* — visible, reconcilable,
+// and re-driven by the provider's next retry. Plan first means the failure mode is *a plan change with
+// no audit row*, which is invisible: nothing in the system knows to look for it, and the question
+// "when did this tenant move to Free" has no answer at all.
+//
+// ## What the grace window is, and why nothing happens during it
+//
+// `invoice.payment_failed` and `past_due` mirror state and change NO plan. That is not leniency — it is
+// refusing to fight Stripe's dunning schedule. Stripe is still retrying the card during that window; a
+// platform that degraded on the first failure would yank a paying customer's access over a transient
+// decline and then have to put it back. The degrade happens at the boundary Stripe's schedule defines,
+// which arrives as `customer.subscription.deleted` (or an `updated` carrying a terminal status).
+
+// FreePlanID is the plan a lapsed subscription degrades to. It is a constant rather than a literal at
+// the call site for the same reason every other name in this package is: a plan id spelled two ways is
+// a degradation that silently lands nowhere.
+const FreePlanID = "free"
+
+// ErrNoDegradeTarget is returned when the free plan is not in the published configuration.
+//
+// It FAILS CLOSED — the account keeps its current plan — because the alternative is moving a customer
+// to a plan that does not exist, which resolves to no entitlements at all. Being over-entitled for an
+// hour while somebody publishes the plan config is a smaller wrong than being locked out of a product
+// that was paid for.
+var ErrNoDegradeTarget = errors.New("billing: the free plan is not in the published plan configuration, so a degradation has nowhere to land")
+
+// WithFreePlan overrides the degradation target. A deployment whose free tier is named something else
+// sets it once, here, rather than at each call site.
+func (s *Service) WithFreePlan(planID string) *Service {
+	if strings.TrimSpace(planID) != "" {
+		s.freePlan = planID
+	}
+	return s
+}
+
+// RecordSubscriptionPlan remembers which plan a customer's subscription grants.
+//
+// It exists because a Stripe event carries the plan only where the platform stamped it on the
+// subscription's metadata, and an invoice event carries no plan at all. This is the platform's own
+// record of "what did this customer subscribe to", consulted when the event does not say.
+func (s *Service) RecordSubscriptionPlan(customerID, planID string) {
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	if s.subPlans == nil {
+		s.subPlans = map[string]string{}
+	}
+	s.subPlans[customerID] = planID
+}
+
+// SubscriptionPlan is the plan the platform recorded for a customer's subscription, if any.
+func (s *Service) SubscriptionPlan(customerID string) string {
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	return s.subPlans[customerID]
+}
+
+// PlanChangeIdempotencyKey identifies one plan change. Derived, never typed at a call site — the same
+// discipline ledger.go applies to every other key, and for the same reason: the key IS the identity of
+// the change, and two spellings of it are two rows for one event.
+//
+// The CAUSE is part of the key so that two different events moving a customer to the same plan (a
+// cancel, then a re-subscribe, then another cancel) stay distinct rows, while a redelivery of one event
+// is recognized as the same change.
+func PlanChangeIdempotencyKey(customerID, planID, cause string) string {
+	return fmt.Sprintf("plan_change:%s:%s:%s", customerID, planID, cause)
+}
+
+// planSyncOutcome describes what a lifecycle event did to the entitlement. It is returned rather than
+// logged so the endpoint can report it and a test can assert on it.
+type planSyncOutcome struct {
+	// Changed is true when the account's plan actually moved.
+	Changed bool
+	// PlanID is the plan in force after the event.
+	PlanID string
+	// Reason is why — the same sentence that goes on the ledger row.
+	Reason string
+}
+
+// syncEntitlement moves the account's plan in response to one applied lifecycle event.
+//
+// It is called from inside the webhook's PERSIST step, before the ack, and not from a caller afterwards.
+// That placement is load-bearing: an entitlement change applied after the 2xx would be an effect the
+// platform promised to have recorded and had not, which is the same acked-but-unrecorded failure
+// persist-then-ack exists to prevent — just one layer up.
+func (s *Service) syncEntitlement(p WebhookPayload) (planSyncOutcome, error) {
+	if s.accounts == nil || s.plans == nil {
+		return planSyncOutcome{}, nil
+	}
+	if strings.TrimSpace(p.CustomerID) == "" {
+		// An event the platform could not attribute to one of its accounts changes no entitlement. It is
+		// not an error: Stripe sends events for objects the platform did not create, and guessing which
+		// account they belong to would be worse than doing nothing.
+		return planSyncOutcome{}, nil
+	}
+
+	switch p.Type {
+	case WebhookInvoicePaid:
+		return s.grantPlan(p, "invoice paid")
+
+	case WebhookSubscriptionUpdated:
+		switch p.Status {
+		case "active", "trialing":
+			return s.grantPlan(p, "subscription active")
+		case "canceled", "unpaid", "incomplete_expired":
+			// A terminal status IS the grace-end: Stripe has finished retrying.
+			return s.degradeToFree(p, "subscription "+p.Status)
+		}
+		// past_due and every other non-terminal status: mirror only. The grace window is Stripe's.
+		return planSyncOutcome{}, nil
+
+	case WebhookSubscriptionCanceled:
+		return s.degradeToFree(p, "subscription canceled")
+
+	case WebhookInvoicePaymentFailed, WebhookSubscriptionPastDue:
+		// 🔴 Deliberately nothing. See the file comment: this is the grace window Stripe is retrying in,
+		// and degrading here would fight the dunning schedule the platform does not own.
+		return planSyncOutcome{}, nil
+	}
+	return planSyncOutcome{}, nil
+}
+
+// grantPlan sets the account to the plan its subscription pays for.
+func (s *Service) grantPlan(p WebhookPayload, why string) (planSyncOutcome, error) {
+	planID := firstNonEmpty(p.PlanID, s.SubscriptionPlan(p.CustomerID))
+	if planID == "" {
+		// The event names no plan and the platform recorded none. Doing nothing is correct: granting a
+		// guessed plan is granting entitlements nobody sold.
+		return planSyncOutcome{}, nil
+	}
+	return s.changePlan(p, planID, why)
+}
+
+// degradeToFree moves the account to the free tier at the boundary. It DELETES NOTHING.
+func (s *Service) degradeToFree(p WebhookPayload, why string) (planSyncOutcome, error) {
+	free := s.freePlanID()
+	if _, err := s.plans.ResolvePlan(free); err != nil {
+		return planSyncOutcome{}, fmt.Errorf("%w (%s): %v", ErrNoDegradeTarget, free, err)
+	}
+	return s.changePlan(p, free, why)
+}
+
+func (s *Service) freePlanID() string {
+	if s.freePlan != "" {
+		return s.freePlan
+	}
+	return FreePlanID
+}
+
+// changePlan performs the audited plan change: ledger row, then the plan itself.
+func (s *Service) changePlan(p WebhookPayload, planID, why string) (planSyncOutcome, error) {
+	acct, err := s.accounts.Get(p.CustomerID)
+	if err != nil {
+		return planSyncOutcome{}, fmt.Errorf("billing: entitlement sync: %w", err)
+	}
+	plan, err := s.plans.ResolvePlan(planID)
+	if err != nil {
+		// A plan the configuration does not know is refused rather than set. Setting it would leave the
+		// account pointing at a definition nothing can resolve, and every entitlement check would then
+		// fail closed for a customer who paid.
+		return planSyncOutcome{}, fmt.Errorf("billing: entitlement sync cannot resolve plan %q: %w", planID, err)
+	}
+	if acct.ActivePlanID == plan.PlanID && acct.PlanConfigVersion == plan.Version {
+		// Already there. Not an error and not a row: a redelivery that changes nothing must not author an
+		// audit entry claiming a change happened.
+		return planSyncOutcome{PlanID: plan.PlanID, Reason: why}, nil
+	}
+
+	reason := fmt.Sprintf("%s: plan %s -> %s", why, displayOrID(acct.ActivePlanID), plan.DisplayName)
+	cause := "webhook:" + p.ProviderEventID
+	key := PlanChangeIdempotencyKey(p.CustomerID, plan.PlanID, cause)
+
+	// ── 1. AUDIT FIRST — see the file comment on ordering ─────────────────────
+	_, err = s.ledger.Append(BillingEvent{
+		CustomerID:     p.CustomerID,
+		Type:           TypePlanChange,
+		IdempotencyKey: key,
+		CausedBy:       cause,
+		Reason:         reason,
+		Status:         StatusRecorded,
+		CreatedAt:      s.now().UTC(),
+	})
+	if err != nil && !errors.Is(err, ErrDuplicateKey) {
+		return planSyncOutcome{}, fmt.Errorf("billing: audit plan change: %w", err)
+	}
+
+	// ── 2. MOVE THE PLAN, pinning the config version it resolved under ────────
+	if _, err := s.accounts.SetPlan(p.CustomerID, plan.PlanID, plan.Version); err != nil {
+		return planSyncOutcome{}, fmt.Errorf("billing: set plan: %w", err)
+	}
+	return planSyncOutcome{Changed: true, PlanID: plan.PlanID, Reason: reason}, nil
+}
+
+func displayOrID(planID string) string {
+	if planID == "" {
+		return "(none)"
+	}
+	return planID
+}
