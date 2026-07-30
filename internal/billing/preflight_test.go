@@ -5,6 +5,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/heros-foreal/agentd/internal/stripefake"
 )
 
 // preflight_test.go is P21 task 11.3/11.6: the price-reference preflight, and the three ways it must not
@@ -123,6 +125,35 @@ func TestPreflightCatchesAnArchivedPrice(t *testing.T) {
 	if !strings.Contains(rep.Unresolved[0].Reason, "ARCHIVED") {
 		t.Errorf("the reason does not say the price is archived, which is a different fix from a wrong id: %q",
 			rep.Unresolved[0].Reason)
+	}
+}
+
+// TestPreflightNamesAProductIdMistakenForAPriceId is the mistake this integration actually made.
+//
+// A Stripe PRODUCT id is a real object of the wrong kind, and Stripe's own 404 for it says "no such
+// price" — true, and it sends the reader looking for a price that was never the problem. The fix is to
+// look up the product's prices, so the message says that.
+func TestPreflightNamesAProductIdMistakenForAPriceId(t *testing.T) {
+	f := newFakeStripe(t)
+	p, err := NewStripeProvider(stripeSecrets(t, stripefake.TestKey), ModeTest, stripeClock, WithStripeBaseURL(f.URL()))
+	if err != nil {
+		t.Fatalf("provider: %v", err)
+	}
+
+	err = p.ResolvePrice(context.Background(), "prod_Uyq6ubPcNC0pB1")
+	if !errors.Is(err, ErrProviderRejected) {
+		t.Fatalf("a product id must be rejected, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "PRODUCT id") {
+		t.Errorf("the refusal does not say it is a product id: %q", err)
+	}
+	if !strings.Contains(err.Error(), "/v1/prices?product=") {
+		t.Errorf("the refusal does not say how to find the right id: %q", err)
+	}
+	// It is refused WITHOUT a round trip — the shape is unambiguous and the diagnosis is better than
+	// Stripe's own.
+	if n := f.Calls("GET /v1/prices/{id}"); n != 0 {
+		t.Errorf("a product id cost %d Stripe call(s); the shape alone is conclusive here", n)
 	}
 }
 

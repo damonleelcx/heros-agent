@@ -774,10 +774,19 @@ func (p *StripeProvider) UpdateSubscriptionPrice(ctx context.Context, req Update
 // amount of retrying will make it right. An outage stays `ErrProviderUnavailable`, so the preflight can
 // tell "your configuration is wrong" from "we could not check" — two conditions with different owners.
 func (p *StripeProvider) ResolvePrice(ctx context.Context, priceRef string) error {
-	if strings.TrimSpace(priceRef) == "" {
+	ref := strings.TrimSpace(priceRef)
+	if ref == "" {
 		return fmt.Errorf("%w: empty price reference", ErrProviderRejected)
 	}
-	res, err := p.do(ctx, http.MethodGet, "/v1/prices/"+url.PathEscape(priceRef), nil, "")
+	// 🔴 The most common way this goes wrong, named before the round trip: a PRODUCT id where a price id
+	// belongs. Stripe's own 404 for it says "no such price", which is true and sends the reader looking
+	// for a price that was never the problem — the id is a real object of the wrong kind, and a product
+	// has one or more prices hanging off it. A subscription is created on a PRICE, never on a product.
+	if strings.HasPrefix(ref, "prod_") {
+		return fmt.Errorf("%w: %q is a PRODUCT id, not a price id — a subscription is created on a price. "+
+			"Look up the product's prices (GET /v1/prices?product=%s) and configure one of those", ErrProviderRejected, ref, ref)
+	}
+	res, err := p.do(ctx, http.MethodGet, "/v1/prices/"+url.PathEscape(ref), nil, "")
 	if err != nil {
 		return err
 	}
@@ -789,12 +798,12 @@ func (p *StripeProvider) ResolvePrice(ctx context.Context, priceRef string) erro
 		return err
 	}
 	if price.ID == "" {
-		return fmt.Errorf("%w: stripe returned no price for %q", ErrProviderRejected, priceRef)
+		return fmt.Errorf("%w: stripe returned no price for %q", ErrProviderRejected, ref)
 	}
 	if !price.Active {
 		// An archived price resolves and cannot be charged on. Reporting it as fine would be the shape
 		// check this decision rejected, one layer up.
-		return fmt.Errorf("%w: price %q exists but is ARCHIVED, so a charge against it would fail", ErrProviderRejected, priceRef)
+		return fmt.Errorf("%w: price %q exists but is ARCHIVED, so a charge against it would fail", ErrProviderRejected, ref)
 	}
 	return nil
 }

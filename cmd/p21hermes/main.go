@@ -141,15 +141,16 @@ func hermesTargets() []hermesNode {
 }
 
 var (
-	repoFlag    = flag.String("repo", "", "path to the hermes-agent checkout (required)")
-	serve       = flag.Bool("serve", false, "serve the console's platform API after running the period")
-	addr        = flag.String("addr", "127.0.0.1:4399", "listen address for -serve")
-	stripeBase  = flag.String("stripe-base", "", "Stripe API base URL; empty starts an in-process fake in TEST mode")
-	keyStdin    = flag.Bool("api-key-stdin", false, "read the Stripe API key from stdin (one line) instead of the environment")
-	plansFlag   = flag.String("plans", "", "path to a plan catalog to publish; empty uses the built-in placeholder catalog")
-	liveMode    = flag.Bool("live", false, "run the rollout in LIVE mode (refused unless a live key is supplied)")
-	startOnFree = flag.Bool("start-free", true, "start the account on Free so the checkout → grant path is exercised")
-	breakPrice  = flag.String("break-price", "", "leave this price reference UNCONFIGURED at the provider, so the preflight's red path is visible")
+	repoFlag      = flag.String("repo", "", "path to the hermes-agent checkout (required)")
+	serve         = flag.Bool("serve", false, "serve the console's platform API after running the period")
+	addr          = flag.String("addr", "127.0.0.1:4399", "listen address for -serve")
+	stripeBase    = flag.String("stripe-base", "", "Stripe API base URL; empty starts an in-process fake in TEST mode")
+	keyStdin      = flag.Bool("api-key-stdin", false, "read the Stripe API key from stdin (one line) instead of the environment")
+	plansFlag     = flag.String("plans", "", "path to a plan catalog to publish; empty uses the built-in placeholder catalog")
+	preflightOnly = flag.Bool("preflight-only", false, "resolve every configured price reference and exit; changes NOTHING at the provider")
+	liveMode      = flag.Bool("live", false, "run the rollout in LIVE mode (refused unless a live key is supplied)")
+	startOnFree   = flag.Bool("start-free", true, "start the account on Free so the checkout → grant path is exercised")
+	breakPrice    = flag.String("break-price", "", "leave this price reference UNCONFIGURED at the provider, so the preflight's red path is visible")
 )
 
 // The billing periods: three closed months, the last one after the optimizations merged.
@@ -173,6 +174,13 @@ func main() {
 	st, err := build(*repoFlag)
 	if err != nil {
 		log.Fatalf("p21hermes: %v", err)
+	}
+	if *preflightOnly {
+		// The DEPLOY GATE shape: resolve every configured price reference, print what is wrong, exit
+		// non-zero if anything is. It has created nothing — which is what makes it safe to run against a
+		// live account before anyone has decided to trust it.
+		st.reportPreflight()
+		return
 	}
 	st.report()
 
@@ -218,6 +226,32 @@ type state struct {
 	checkout     billing.CheckoutSession
 	wrongRef     string
 	creditRef    string
+	// preflight is the price-reference report, kept for -preflight-only's own output.
+	preflight billing.PricingPreflight
+}
+
+// reportPreflight prints the deploy-gate answer and exits non-zero when the account is not ready.
+//
+// It is deliberately terse and machine-greppable: this is the thing a CI step or a deploy hook runs, and
+// its whole job is to say "this account can charge" or "it cannot, and here is precisely why".
+func (s *state) reportPreflight() {
+	rep := s.preflight
+	fmt.Printf("P21 pricing preflight — %s\n", s.svc.Describe()["provider"])
+	fmt.Printf("  status:   %s\n", rep.Summary())
+	fmt.Printf("  checked:  %d configured price reference(s)\n", rep.Checked)
+	if rep.Detail != "" {
+		fmt.Printf("  detail:   %s\n", rep.Detail)
+	}
+	if len(rep.Unresolved) > 0 {
+		fmt.Println("\n  UNRESOLVED — each of these would reject a charge:")
+		for _, u := range rep.Unresolved {
+			fmt.Printf("    plan %-12s kind %-12s ref %-34s %s\n", u.PlanName, u.Kind, u.PriceRef, u.Reason)
+		}
+	}
+	fmt.Println("\n  Nothing was created. This run resolves prices and does not write.")
+	if !rep.OK() {
+		os.Exit(1)
+	}
 }
 
 // step is one line of the demo's evidence log: what was attempted, and what actually happened.
@@ -414,6 +448,8 @@ func build(repoDir string) (*state, error) {
 	st.svc = svc
 
 	// ── PREFLIGHT, before anything charges (Decision 9) ───────────────────────
+	//
+	// With -preflight-only this is the whole run: nothing below it executes, so nothing is created.
 	rep, perr := svc.PreflightPricing(ctx)
 	switch {
 	case perr != nil:
@@ -429,6 +465,10 @@ func build(repoDir string) (*state, error) {
 			rep.Checked)
 	}
 
+	if *preflightOnly {
+		st.preflight = rep
+		return st, nil
+	}
 	if err := st.runPeriod(ctx); err != nil {
 		return nil, err
 	}
