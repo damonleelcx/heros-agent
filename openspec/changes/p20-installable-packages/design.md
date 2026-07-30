@@ -38,28 +38,54 @@ thing a build can check; the row names it so a reader can get from the decision 
 |---|---|---|---|
 | **D1** native-runner matrix, no cross-CGO | ✅ ratified | 2026-07-29 | `distribution.Shipped()` rows carry a `Runner`; `TestShippedRowsNameANativeRunner` fails on a runner whose OS/arch differs from the target, and `TestReleaseWorkflowMatchesTargetContract` holds `release.yml` to the same set |
 | **D2** ed25519 floor, cosign opt-in | ✅ ratified | 2026-07-29 | `release.VerifyTrusted` is the only verifier any channel calls; `Attestation.Verified()` is the signed-manifest floor and is *not* satisfied by OS code signing |
-| **D3** OS trust: sign+notarize vs documented clear | ✅ **escalated and answered — (A) sign + notarize both OSes** | 2026-07-29, product owner (PRD OQ1) | `distribution.ChosenPosture`, pinned by `TestChosenPostureIsTheRatifiedDecision`; delivery is a separate per-release fact (see below) |
+| **D3** OS trust: sign+notarize vs documented clear | ✅ escalated · answered **(A)** 2026-07-29 · **REVERSED to (B) documented-clear 2026-07-30** | product owner, both times (PRD OQ1) | `distribution.ChosenPosture`, pinned by `TestChosenPostureIsTheRatifiedDecision`; `TestPostureBIsActuallyDelivered` asserts the workaround is surfaced, not merely documented |
 | **D5** manifests generated, never hand-edited | ✅ ratified | 2026-07-29 | every channel manifest is emitted by `cmd/herosdist` from the tag + `SHA256SUMS`; `TestGeneratedManifestsCarryNoSecondVersion` fails on a hand-written version |
 
-### D3 — what was escalated, what was answered, and what that obliges
+### D3 — what was escalated, what was answered, and what changed
 
 The escalation was deliberate: (A) commits **recurring money** (Apple Developer Program, a code-signing
 certificate) **and an organizational identity**, and the rulebook forbids an implementer from self-deciding
-a spend or an identity commitment. Both paths were put with their costs; the product owner chose **(A):
-Developer-ID sign + notarize on macOS, Authenticode on Windows.**
+a spend or an identity commitment. Both paths were put with their costs.
 
-What (A) obliges, and what it does not:
+**The decision log, both entries** — because a log showing only the current answer cannot tell a later reader
+whether the question was ever asked:
 
-- The pipeline **carries** the signing and notarization steps, gated on the signing secrets, and a GA
-  release **fails closed** rather than shipping unsigned once a signing identity is configured.
-- It does **not** make any artifact signed. That is why `Posture` (the decision) and `Attestation` (what a
-  given release delivered) are **separate types**. Every user-visible sentence — installer banner, README,
-  release notes, console surface — renders from the `Attestation`. Until the certificates exist, a release
-  honestly describes itself as unsigned and keeps printing the one-command quarantine clear; on the day
-  they land, that sentence disappears from every surface at once because no surface holds a copy of it.
-- The **verification floor is unchanged** either way (D2): the ed25519 signature over `SHA256SUMS` is what
-  every channel checks, offline, with no account. OS code signing is a UX upgrade layered on top, never a
-  substitute — `Attestation.Verified()` deliberately ignores it.
+| Date | Answer | Reason given |
+|---|---|---|
+| 2026-07-29 | **(A)** Developer-ID sign + notarize on macOS, Authenticode on Windows | best first-run UX; no scare screen |
+| 2026-07-30 | **(B)** ship unsigned, surface the one-command clear — **RATIFIED** | no spend on signing |
+
+What (B) obliges, and what it does not:
+
+- Every macOS and Windows artifact ships **unsigned by the OS**, and every surface says so plainly.
+- The workaround must be **in front of the user**, not merely in a document: the installer prints the
+  pasteable `xattr -d com.apple.quarantine <the actual install path>` and the SmartScreen step, the README
+  carries both, and `TestPostureBIsActuallyDelivered` fails if either goes missing. A posture whose answer
+  lives only in a design document is indistinguishable from having no posture — which §5 of the PRD describes
+  as the state that reads like *malware* rather than *unsigned*.
+- Publisher metadata is still declared wherever a package can carry it (winget `Publisher`, nfpm
+  `maintainer`/`vendor`). That a **bare `.exe` can carry none** — on Windows the Authenticode signature *is*
+  the publisher declaration — is disclosed rather than glossed.
+- **Homebrew and Scoop sidestep the cliff entirely**: a package manager fetches and places the binary, so it
+  is not quarantined the way a double-clicked download is. Investing in those channels was always the larger
+  half of the UX answer, which is why (B) is a smaller regression than it first looks — and why the tap and
+  bucket repositories are now the highest-value thing left undone.
+- The **verification floor is unchanged** (D2): the ed25519 signature over `SHA256SUMS` is what every channel
+  checks, offline, with no account. OS code signing was always a UX upgrade layered on top, never a
+  substitute — `Attestation.Verified()` deliberately ignores it, so the *security* story is identical under
+  either answer. What (B) costs is a first-run warning, not a weaker guarantee.
+
+**What the reversal cost in code: nothing user-facing.** Every claim was already rendered from `Attestation` —
+what a release actually delivered — never from the ratified posture, so flipping the constant changed no
+sentence anywhere in the product. This reversal is the event that proved the split was worth having: had the
+claims been driven by the decision, (A) would have begun promising notarization the day it was given, and (B)
+would have silently withdrawn the promise a day later.
+
+The pipeline **keeps** its signing steps, gated and inert. They cost nothing to leave, they cannot make a claim
+on their own (every attestation flag comes from a marker file a step actually wrote), and keeping them makes a
+future decision to fund signing a **secrets change rather than a pipeline change**. Their log notices say
+signing is *not part of the ratified posture* rather than *not yet provisioned* — the second would send a
+maintainer looking for a budget that was deliberately declined.
 
 ### Signing-key management and rotation (task 1.4)
 
@@ -93,7 +119,7 @@ reviewed change, not a docs edit (`TestTargetMatrixIsFrozen`).
 | Linux glibc 2.31+ | arm64 | ✅ | `ubuntu-22.04-arm` | curl\|sh, Homebrew, `.deb`, `.rpm`, container |
 | Windows 10/11 | amd64 | ✅ | `windows-2022` | PowerShell, Scoop, winget |
 | Windows 11 | arm64 | ⛔ **not built** | — | run the amd64 build under x64 emulation |
-| Alpine / any musl Linux | any | ⛔ **not built** (glibc CGO) | — | `ghcr.io/heros-foreal/heros:<version>` |
+| Alpine / any musl Linux | any | ⛔ **not built** (glibc CGO) | — | `ghcr.io/damonleelcx/heros:<version>` |
 
 The **⛔ rows are rows**, not absences. This is the P13 coverage lesson: a matrix listing only what works
 forces the reader to infer everything else from a blank, and a blank reads as *should work — must be your
@@ -155,14 +181,14 @@ unsigned `.exe`. The two honest resolutions have very different costs:
 
 **Chosen posture (process, not a silent pick):** this is a **cost-escalation-path** decision — the rulebook
 forbids self-deciding a spend or an identity commitment. So the design **states both paths with their costs and
-escalates the choice to the user** (PRD OQ1). **Answered 2026-07-29: (A) — sign + notarize on both OSes**
-(see the ratification record above). The pipeline therefore carries the signing and notarization steps, and
-a GA release fails closed rather than shipping unsigned once a signing identity is configured.
+escalates the choice to the user** (PRD OQ1). Answered **(A) on 2026-07-29** and **reversed to (B) on
+2026-07-30** by the same owner, on cost — see the decision log in the ratification record above.
 
-Until the certificates exist, what a release *delivers* is still (B), and it **says so** — the claim is
-rendered from `distribution.Attestation` (a per-release fact), never from the ratified posture, so no prose
-has to be corrected on the day the identity lands. (A) layers on additively (sign the same artifacts,
-notarize, re-attach) with **no change to the verification floor** (D2). Crucially: **Homebrew and Scoop installs are not quarantined the way a double-clicked download is**
+**(B) is ratified: ship unsigned, with the one-command clear surfaced by the installer and the README.** The
+claim is rendered from `distribution.Attestation` (a per-release fact) and never from the ratified posture,
+which is why the reversal changed no user-visible sentence. If signing is ever funded, (A) layers on
+additively — sign the same artifacts, notarize, re-attach — with **no change to the verification floor** (D2),
+and the pipeline's inert signing steps mean that is a secrets change rather than a redesign. Crucially: **Homebrew and Scoop installs are not quarantined the way a double-clicked download is**
 (the package manager fetches and places the binary), so investing in the `brew`/`scoop` channels (D5) already
 removes the Gatekeeper/SmartScreen cliff for most users — which is why (A) is a UX *upgrade*, not a
 prerequisite.
@@ -197,7 +223,7 @@ reviewer (who runs the P11 verify steps by hand), never as the happy path.
 
 **Chosen:** the Homebrew formula, Scoop manifest, winget manifest, and nfpm `.deb`/`.rpm` configs are
 **templated from the release** — version = the tag, URLs = the Release asset URLs, checksums = the emitted
-`SHA256SUMS` — and written/PR'd by the release pipeline. The `ghcr.io/heros-foreal/heros` image is built and
+`SHA256SUMS` — and written/PR'd by the release pipeline. The `ghcr.io/damonleelcx/heros` image is built and
 pushed by the same pipeline, digest-pinned.
 
 **Why (L7 维护, backend "单一真相源，展示=执行").** A hand-maintained formula carries a **second copy** of the
@@ -211,7 +237,7 @@ source; forbidden.
 
 ## Decision 6 — Container image is the musl/Alpine answer, not a static-musl native build
 
-**Chosen:** Alpine/musl and generic-CI users are served by the **published container image** (`ghcr.io/heros-foreal/heros`),
+**Chosen:** Alpine/musl and generic-CI users are served by the **published container image** (`ghcr.io/damonleelcx/heros`),
 which carries the glibc CLI in a glibc base; native musl binaries are a **disclosed limit** (NFR5), not shipped
 in the first cut.
 

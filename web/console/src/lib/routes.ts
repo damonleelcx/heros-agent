@@ -41,5 +41,6 @@ export const routes = {
   coverage: () => "/app/coverage",
   account: () => "/app/account",
   delivery: () => "/app/delivery",
-  install: () => "/app/install",
+  // Public: no session. The people who need it do not have an account yet — see src/app/install/page.tsx.
+  install: () => "/install",
 };

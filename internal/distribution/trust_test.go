@@ -8,13 +8,45 @@ import (
 // trust_test.go is the honesty gate at the type level (tasks 1.2, 4.3). Every test here describes a way a
 // release could tell a user something it had not delivered.
 
-// TestChosenPostureIsTheRatifiedDecision pins the escalated answer. If someone later "simplifies" the
-// posture back to (B), this fails and they have to go and get the decision changed by the person who owns
-// the budget — which is the whole point of escalating it.
+// TestChosenPostureIsTheRatifiedDecision pins the escalated answer, so the posture cannot be changed by an
+// implementer as a code edit — it takes the person who owns the budget, which is the whole point of escalating
+// it. This test has already done its job once: it failed when the constant was flipped, and the flip only stood
+// because the owner had actually asked for it.
+//
+// Decision history (both recorded, because a log showing only the current answer cannot tell a later reader
+// whether the question was ever asked):
+//
+//	2026-07-29  escalated (PRD OQ1 / task 1.2) → answered (A) sign + notarize
+//	2026-07-30  reversed by the same owner → (B) documented clear; no spend on signing
 func TestChosenPostureIsTheRatifiedDecision(t *testing.T) {
-	if ChosenPosture != PostureSignNotarize {
-		t.Fatalf("chosen posture = %q; D3 was escalated (PRD OQ1) and answered (A) sign+notarize on "+
-			"2026-07-29. Changing it requires the same escalation, not a code edit.", ChosenPosture)
+	if ChosenPosture != PostureDocumentedClear {
+		t.Fatalf("chosen posture = %q; D3 was escalated (PRD OQ1), answered (A) on 2026-07-29 and reversed to "+
+			"(B) documented-clear on 2026-07-30 on cost. Changing it requires the same escalation to the person "+
+			"who owns the spend, not a code edit.", ChosenPosture)
+	}
+}
+
+// TestPostureBIsActuallyDelivered — (B) is not "do nothing". It is a promise that the ANSWER is in front of the
+// user, and a posture whose workaround is only in a design document is indistinguishable from having no posture,
+// which is the state the PRD describes as reading like malware.
+func TestPostureBIsActuallyDelivered(t *testing.T) {
+	if ChosenPosture != PostureDocumentedClear {
+		t.Skip("posture is not (B)")
+	}
+	unsigned := Attestation{Version: "0.20.0", SignedManifest: true, SigningKeyID: "heros-release-2026b"}
+
+	mac := unsigned.FirstRunNotice("darwin", "/usr/local/bin/heros")
+	if !strings.Contains(mac, "xattr -d com.apple.quarantine /usr/local/bin/heros") {
+		t.Errorf("(B) is ratified but the macOS notice does not carry the pasteable clear command: %q", mac)
+	}
+	win := unsigned.FirstRunNotice("windows", `C:\heros.exe`)
+	if !strings.Contains(win, "Run anyway") {
+		t.Errorf("(B) is ratified but the Windows notice does not carry the SmartScreen step: %q", win)
+	}
+	// And the publisher disclosure, which (B) makes load-bearing: with no Authenticode signature there is
+	// nothing on the .exe itself, and a user who reads "unknown publisher" deserves to know why.
+	if !strings.Contains(win, PackagePublisher) {
+		t.Errorf("(B) is ratified but the Windows notice does not name where the publisher IS declared: %q", win)
 	}
 }
 

@@ -57,10 +57,13 @@ const SURFACES: Surface[] = [
 ];
 
 const SETTINGS: Surface[] = [
-  // Install sits in the settings group rather than the primary rail because it is a surface a reader visits
-  // ONCE — to get the binary, or to answer a security review — and not a place to work. Putting it in the
-  // working set would push a surface somebody uses daily one row further from the top.
-  { href: "/app/install", label: "Install", icon: <HardDriveDownload /> },
+  // Install is the one rail entry that leaves the console: the page is PUBLIC (/install), because its readers
+  // are people who do not have the CLI and therefore have no account. It is linked rather than duplicated —
+  // two copies of an install command is exactly the drift the distribution contract exists to prevent.
+  //
+  // It sits in the settings group rather than the primary rail because it is a surface a reader visits ONCE —
+  // to get the binary, or to answer a security review — not a place to work.
+  { href: "/install", label: "Install", icon: <HardDriveDownload /> },
   { href: "/app/configure", label: "Configure", icon: <Settings /> },
   { href: "/app/account", label: "Account", icon: <User /> },
 ];
@@ -86,7 +89,7 @@ export default async function ConsoleLayout({ children }: { children: React.Reac
     { id: "s:memory", group: "Surface", label: "Memory strategy", href: "/app/memory" },
     { id: "s:harness", group: "Surface", label: "Harness strategy", href: "/app/harness" },
     { id: "s:coverage", group: "Surface", label: "Coverage — what applies where", href: "/app/coverage" },
-    { id: "s:install", group: "Surface", label: "Install the CLI — channels, platforms, trust", href: "/app/install" },
+    { id: "s:install", group: "Surface", label: "Install the CLI — channels, platforms, trust", href: "/install" },
     { id: "s:account", group: "Surface", label: "Plan and spend", href: routes.account() },
     ...visited.map((subject) => ({
       id: `v:${subject.kind}:${subject.id}`,

@@ -174,7 +174,16 @@ jobs:
           HEROS_LDFLAGS: ${{ needs.plan.outputs.ldflags }}
         run: bash scripts/release-cli.sh "${{ needs.plan.outputs.version }}"
 
-      # ── OS code signing (D3 option A, ratified 2026-07-29) ─────────────────────────────────────────────
+      # ── OS code signing — INERT: not part of the ratified posture ───────────────────────────────────────
+      #
+      # 🔴 D3 was answered (A) sign+notarize on 2026-07-29 and REVERSED to (B) documented-clear on 2026-07-30:
+      # no spend on signing. These steps therefore never run with credentials, and that is the intended end
+      # state, not a gap waiting on a budget.
+      #
+      # They are kept rather than deleted for one reason: if signing is ever funded, it becomes a secrets change
+      # instead of a pipeline change — and the attestation, the claim gate and the installer notices already
+      # handle the signed case correctly. They cannot make a claim on their own: every attestation flag is
+      # derived from a marker file the step wrote, so an inert step marks nothing.
       #
       # It happens HERE, in the build job, and not later: `codesign` and `signtool` MUTATE the binary, so a
       # signature applied after the per-runner SHA256SUMS was computed would invalidate every checksum
@@ -185,11 +194,9 @@ jobs:
       # binary, which is the honest scope of the claim — the release notes say "reproducible up to the OS code
       # signature" rather than implying the published bytes rebuild exactly.
       #
-      # Both steps are gated on their secrets existing. That is not laxness: the posture decision is funded but
-      # the identities are not yet provisioned, and a pipeline that failed every release until a certificate was
-      # purchased would turn a UX upgrade into a release blocker. What must NOT happen is a release CLAIMING a
-      # signature it did not apply — which is why the attestation flags below come from these steps' own
-      # outputs, never from a constant.
+      # Both steps tolerate absent credentials, which under (B) they always will be. What must NOT happen is a
+      # release CLAIMING a signature it did not apply — which is why the attestation flags below come from these
+      # steps' own outputs, never from a constant.
       - id: macsign
         name: macOS · Developer ID sign + notarize
         if: matrix.goos == 'darwin'
@@ -209,9 +216,9 @@ jobs:
           echo "notarized=false" >> "$GITHUB_OUTPUT"
           echo "stapled=false"   >> "$GITHUB_OUTPUT"
           if [ -z "${APPLE_CERT_P12:-}" ] || [ -z "${APPLE_SIGNING_IDENTITY:-}" ]; then
-            echo "::notice::no Apple signing identity configured — this release will be attested as NOT"\
-                 "code-signed and NOT notarized, and every surface will say so. D3 option (A) is ratified;"\
-                 "provision APPLE_CERT_P12 / APPLE_SIGNING_IDENTITY / APPLE_API_KEY_P8 to deliver it."
+            echo "::notice::macOS signing is not part of the ratified posture (D3-B, 2026-07-30): this release"\
+                 "is attested as NOT code-signed and NOT notarized, and every surface says so, including the"\
+                 "one-command quarantine clear the installer prints. This is the intended state, not a gap."
             exit 0
           fi
 
@@ -266,7 +273,7 @@ jobs:
         run: |
           "signed=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           if (-not $env:WINDOWS_CERT_PFX) {
-            Write-Host "::notice::no Windows signing certificate configured — this release will be attested as NOT Authenticode-signed, and every surface will say so. Provision WINDOWS_CERT_PFX to deliver D3 option (A) on Windows."
+            Write-Host "::notice::Windows signing is not part of the ratified posture (D3-B, 2026-07-30): this release is attested as NOT Authenticode-signed, and every surface says so, including the SmartScreen step the installer prints. This is the intended state, not a gap."
             exit 0
           }
           $bin = "dist/heros-${{ needs.plan.outputs.version }}-windows-amd64.exe"

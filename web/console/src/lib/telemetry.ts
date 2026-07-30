@@ -41,6 +41,10 @@ type UpstreamEvent = {
  * mode to prefer over silently logging an identifier.
  */
 const PATH_TEMPLATES: Array<[RegExp, string]> = [
+  // P20 — the install/distribution contract, read by the PUBLIC install surface. Listed so its upstream
+  // calls are searchable; an unlisted route logs as /unknown, which this file's own comment calls visibly
+  // wrong, and the first real load of the install page produced exactly that.
+  [/^\/api\/p20\/install$/, "/api/p20/install"],
   [/^\/api\/p2\/runs\/[^/]+$/, "/api/p2/runs/{run_id}"],
   [/^\/api\/p2\/transforms\/[^/]+\/[^/]+$/, "/api/p2/transforms/{config_hash}/{source_revision}"],
   [/^\/api\/p2\/specs\/resolve$/, "/api/p2/specs/resolve"],

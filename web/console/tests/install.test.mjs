@@ -26,9 +26,9 @@ const read = (rel) => readFile(join(root, rel), "utf8");
 const readRepo = (rel) => readFile(join(repo, rel), "utf8");
 
 const COMPONENT = "src/components/install.tsx";
-const PAGE = "src/app/app/install/page.tsx";
+const PAGE = "src/app/install/page.tsx";
 const PREVIEW = "src/app/preview/install/page.tsx";
-const DATA = "src/app/app/install/data.ts";
+const DATA = "src/app/install/data.ts";
 const CHANNELS = "internal/distribution/channels.go";
 
 // 🔴 The publication states are DATA shared with the engine. The console branches on them, so a renamed state
@@ -164,23 +164,60 @@ test("the page carries no local copy of the distribution contract", async () => 
   );
 });
 
+// 🔴 The install page must NOT be behind a session. Its readers are people who do not have the CLI yet and
+// therefore have no account, and the page itself tells them the CLI is free and needs none — a sign-in wall in
+// front of that is a contradiction the page refutes two paragraphs later. It lived at /app/install until that
+// was caught.
+test("the install surface is public — no session, no tenant", async () => {
+  const [page, data] = await Promise.all([read(PAGE), read(DATA)]);
+  // Checked against the CODE, with comments stripped. The page's doc comment explains why it has no session and
+  // names `requireSession()` while doing so; a check that fired on that sentence would be "fixed" by deleting
+  // the explanation, which is the wrong direction — the same mistake a `telemetry` source scan made earlier in
+  // this phase, caught the same way.
+  const pageCode = stripComments(page);
+  assert.ok(
+    !/from "@\/lib\/session"/.test(pageCode),
+    "the install page imports the session module — the audience for 'how do I install the free CLI' is " +
+      "precisely the people who cannot sign in",
+  );
+  assert.ok(
+    !/\brequireSession\s*\(/.test(pageCode),
+    "the install page calls requireSession()",
+  );
+  assert.ok(
+    !stripComments(data).includes("tenantId"),
+    "the install data loader takes a tenantId — it reads an endpoint that has no tenant, and requiring one " +
+      "would put the page back behind a session",
+  );
+  assert.ok(
+    data.includes("platformFetchPublic"),
+    "the loader does not use the session-less door; platformFetch's required tenantId exists to stop a " +
+      "tenant-scoped call from compiling without a session, and it must not be satisfied with a fake value",
+  );
+});
+
 test("the surface is reachable by navigation and by the command path", async () => {
   const [layout, routes] = await Promise.all([read("src/app/app/layout.tsx"), read("src/lib/routes.ts")]);
-  assert.ok(layout.includes('"/app/install"'), "the install surface is not in the navigation rail");
+  assert.ok(layout.includes('"/install"'), "the install surface is not in the navigation rail");
   assert.ok(
     layout.includes('label: "Install the CLI'),
     "the install surface is not in the command path — a surface reachable only by typing a URL is one most " +
       "readers never learn exists",
   );
-  assert.ok(routes.includes("install: () =>"), "routes.ts has no canonical route for the install surface");
+  assert.ok(
+    routes.includes('install: () => "/install"'),
+    "routes.ts does not point at the PUBLIC install route — a console-only route would put it back behind the " +
+      "session gate for the readers who need it most",
+  );
 });
 
-test("the preview shows both trust postures, so the difference can be seen rather than asserted", async () => {
+test("the preview shows both trust states, so the difference can be seen rather than asserted", async () => {
   const preview = await read(PREVIEW);
   assert.ok(
-    preview.includes("PREVIEW_INSTALL_SIGNED"),
-    "the preview does not render a delivered posture beside the undelivered one; whether a reader can tell " +
-      "them apart at a glance is the property the signing spend buys, and no test can establish it",
+    preview.includes("PREVIEW_INSTALL_PUBLISHED"),
+    "the preview does not render a published release's posture beside the no-release-yet one. Whether one " +
+      "EARNED claim and three UNEARNED ones are distinguishable at a glance is what this section exists for, " +
+      "and no test can establish it — it has to be looked at",
   );
   assert.ok(
     preview.includes("PendingChannelRow"),
@@ -198,3 +235,9 @@ test("the install surface states the free-vs-paid boundary", async () => {
       "customer's engineer is actually checking for",
   );
 });
+
+/** stripComments removes block and line comments so a source check tests the CODE rather than the prose about
+ * it. Crude on purpose: these files contain no `//` inside a string literal that would matter. */
+function stripComments(source) {
+  return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+}

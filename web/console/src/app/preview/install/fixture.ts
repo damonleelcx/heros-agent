@@ -16,7 +16,7 @@ import type { InstallView } from "@/lib/types.generated";
 export const PREVIEW_INSTALL: InstallView = {
   "matrix_version": "targets-ce4e186bbfe883cf",
   "documented_release": "v0.20.0",
-  "ratified_posture": "sign-notarize",
+  "ratified_posture": "documented-clear",
   "targets": [
     {
       "key": "darwin/amd64",
@@ -233,17 +233,22 @@ export const PREVIEW_INSTALL: InstallView = {
 };
 
 /**
- * PREVIEW_INSTALL_SIGNED is the same contract with a release that DID deliver its OS trust properties — the
- * state the project is buying with the D3-(A) decision.
+ * PREVIEW_INSTALL_PUBLISHED is the posture a release ACTUALLY ships under the ratified (B) decision: the
+ * checksum manifest is signed with the release key, and nothing is signed by the OS.
  *
- * It exists because the two renderings must be compared by eye. A test can assert that two icons differ; it
- * cannot tell you whether a reader can see, at a glance, that one download is notarized and the other is not —
- * and that glance is the entire purpose of this section.
+ * It replaced a fully-signed "for comparison" fixture. That one existed to let a reader see, at a glance, what
+ * the D3-(A) spend was buying — and on 2026-07-30 the owner reversed D3 to (B): no spend on signing. Keeping a
+ * notarized rendering around would have shown a state this project does not intend to reach, which is the same
+ * class of mistake as claiming it.
+ *
+ * What still has to be seen rather than asserted: that one EARNED claim and three UNEARNED ones are
+ * distinguishable at a glance, by icon, by colour, and by the wording of the sentence. That is the whole job of
+ * this section, and it is exercised better by the real posture than by an aspirational one.
  */
-export const PREVIEW_INSTALL_SIGNED: InstallView = {
+export const PREVIEW_INSTALL_PUBLISHED: InstallView = {
   ...PREVIEW_INSTALL,
   delivered: {
-    version: "0.20.0",
+    version: "0.20.0-rc.1",
     signing_key_id: "heros-release-2026b",
     claims: [
       {
@@ -253,13 +258,13 @@ export const PREVIEW_INSTALL_SIGNED: InstallView = {
       },
       {
         id: "macos-signed",
-        earned: true,
-        text: "The macOS binaries are Developer ID code-signed (Heros Foreal).",
+        earned: false,
+        text: "The macOS binaries carry no Apple code signature.",
       },
       {
         id: "macos-notarized",
-        earned: true,
-        text: "The macOS binaries are notarized by Apple. The ticket is NOT stapled, because a bare executable cannot carry one \u2014 Gatekeeper confirms the notarization with an online check the first time you run it, so the first run needs a network.",
+        earned: false,
+        text: "The macOS binaries are NOT notarized. macOS quarantines internet downloads: clear the flag with the one command the installer prints, or install with Homebrew, which is not quarantined.",
       },
       {
         id: "windows-signed",

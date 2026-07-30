@@ -59,20 +59,26 @@ Homebrew / Scoop-winget / deb-rpm / container) with every "not affected" row exp
 ## 4. DevOps + Product — OS-trust posture (Gatekeeper / SmartScreen)
 - [x] 4.1 Implement the **chosen** macOS posture (D3): Developer-ID sign + notarize in the pipeline, **or** the
       documented `xattr -d com.apple.quarantine` step surfaced in installer output + README.
-      → (A) chosen: the pipeline carries `codesign --timestamp --options runtime` + `notarytool submit --wait`
-      on both macOS runners, in the BUILD job (signing mutates the binary, so it must precede the checksums),
-      gated on the Apple secrets so an unprovisioned identity discloses rather than blocks. Until they exist the
-      delivered posture is honestly (B) and `install.sh` prints the pasteable `xattr` line — driven by
-      `Attestation.FirstRunNotice`, so it disappears by itself the day notarization lands.
+      → **(B) is the ratified posture** (answered (A) 2026-07-29, reversed on cost 2026-07-30 — both recorded in
+      `design.md`'s decision log). `install.sh` prints the pasteable `xattr -d com.apple.quarantine <install
+      path>` line, driven by `Attestation.FirstRunNotice`, and `TestPostureBIsActuallyDelivered` fails if it
+      goes missing — a posture documented but not *shown* is not a posture.
+      The pipeline keeps `codesign --timestamp --options runtime` + `notarytool submit --wait` as **inert,
+      gated** steps in the BUILD job (signing mutates the binary, so it must precede the checksums). They cannot
+      claim anything: every attestation flag comes from a marker file a step actually wrote. Keeping them makes
+      funding signing later a secrets change rather than a pipeline change.
       **Stapling is recorded separately from notarization**: `stapler` cannot attach a ticket to a bare
-      executable, so a notarized `heros` needs Gatekeeper's online check on first run, and the claim says so.
+      executable, so a notarized `heros` would need Gatekeeper's online check on first run — modelled and
+      claimed correctly even though (B) means it will not be exercised.
 - [x] 4.2 Implement the **chosen** Windows posture: Authenticode sign, **or** the documented "More info → Run
       anyway" step; declare publisher metadata on `.msi`/`.exe` either way.
-      → `signtool sign /fd SHA256 /tr <rfc3161>` in the Windows build job, gated on `WINDOWS_CERT_PFX`.
+      → **(B) ratified**: the `.exe` ships unsigned and the installer prints the "More info → Run anyway" step.
+      `signtool sign /fd SHA256 /tr <rfc3161>` remains as an inert, gated step.
       Publisher metadata is declared where a package can carry it (winget `Publisher`, nfpm
       `maintainer`/`vendor`); the **bare `.exe` carries none of its own and the release says so** — on Windows
       the Authenticode signature *is* the publisher declaration, so an unsigned `.exe` shows no publisher in its
-      file properties. Disclosed rather than papered over.
+      file properties. Under (B) that disclosure is permanent rather than temporary, which makes stating it
+      plainly more important, not less.
 - [x] 4.3 **Honesty gate:** release notes + README claim **only** the trust properties delivered — never
       "notarized"/"signed" for a channel that isn't (Sales lens).
       → `distribution.AuditClaims` inventories the claim vocabulary and refuses an unearned affirmative, while

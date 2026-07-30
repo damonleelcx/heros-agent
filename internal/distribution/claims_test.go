@@ -135,53 +135,63 @@ func TestRepositoryDocsMakeNoUnearnedClaim(t *testing.T) {
 	}
 }
 
-// TestPostureIsImplementedInThePipeline — D3 was answered (A), which obliges the pipeline to CARRY the signing
-// steps. A ratified posture with no steps in the workflow is a decision nobody acted on, and the gap would only
-// surface when someone finally bought the certificates.
-func TestPostureIsImplementedInThePipeline(t *testing.T) {
+// TestRatifiedPostureIsHonouredByThePipeline checks the pipeline against whichever posture is ratified — both
+// branches, so the test stays meaningful across a reversal instead of silently skipping.
+//
+// Under (A) the obligation is that the signing steps EXIST: a ratified posture with no steps in the workflow is
+// a decision nobody acted on, and the gap would surface only when someone finally bought the certificates.
+//
+// Under (B) — ratified 2026-07-30 — the obligation is the opposite one and easier to get wrong: nothing may
+// CLAIM signing, and the workaround must be surfaced rather than merely documented. The steps are allowed to
+// remain (gated and inert) so that funding signing later is a secrets change rather than a pipeline change; what
+// is not allowed is a workflow that reads as though signing were coming when it is not.
+func TestRatifiedPostureIsHonouredByThePipeline(t *testing.T) {
 	b, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "release.yml"))
 	if err != nil {
 		t.Fatalf("release workflow not readable: %v", err)
 	}
 	wf := string(b)
-	if ChosenPosture != PostureSignNotarize {
-		t.Skip("posture is not (A); no signing steps are required")
-	}
-	for _, needle := range []struct{ text, why string }{
-		{"codesign", "no macOS code-signing step (task 4.1)"},
-		{"notarytool", "no Apple notarization step (task 4.1)"},
-		{"signtool", "no Windows Authenticode step (task 4.2)"},
-		{"--macos-signed", "the attestation is never told whether macOS signing ran"},
-		{"--windows-signed", "the attestation is never told whether Windows signing ran"},
-		{"APPLE_", "no Apple signing secrets are referenced"},
-		{"WINDOWS_CERT", "no Windows signing certificate secret is referenced"},
-	} {
-		if !strings.Contains(wf, needle.text) {
-			t.Errorf("release.yml: %s (missing %q)", needle.why, needle.text)
+
+	if ChosenPosture == PostureSignNotarize {
+		for _, needle := range []struct{ text, why string }{
+			{"codesign", "no macOS code-signing step (task 4.1)"},
+			{"notarytool", "no Apple notarization step (task 4.1)"},
+			{"signtool", "no Windows Authenticode step (task 4.2)"},
+			{"--macos-signed", "the attestation is never told whether macOS signing ran"},
+			{"--windows-signed", "the attestation is never told whether Windows signing ran"},
+		} {
+			if !strings.Contains(wf, needle.text) {
+				t.Errorf("release.yml: %s (missing %q)", needle.why, needle.text)
+			}
 		}
+		return
 	}
-	// A missing secret must NOT fail the release: the posture is ratified but the identities are not yet
-	// provisioned, and a pipeline that refused every release until a certificate was purchased would turn a UX
-	// upgrade into a release blocker.
+
+	// ── (B) is ratified ────────────────────────────────────────────────────────────────────────────────
 	//
-	// The guard is a shell test inside the step rather than an `if:` expression, and that is the better shape:
-	// the step still runs, still logs a notice explaining what was not delivered, and still writes its marker
-	// file. A skipped step writes nothing, and the merge job then cannot tell "not configured" from "crashed".
-	if !strings.Contains(wf, `[ -z "${APPLE_CERT_P12:-}" ]`) {
-		t.Error("release.yml's macOS signing step does not tolerate an absent Apple identity — every release " +
-			"would fail until a certificate is purchased")
+	// Whatever signing machinery remains must be incapable of making a claim on its own. The attestation flags
+	// are derived from marker files a step wrote, never hard-coded, so an inert step cannot mark a release as
+	// signed.
+	if strings.Contains(wf, "--macos-notarized") && !strings.Contains(wf, "grep -q '^notarized=true'") {
+		t.Error("release.yml can pass --macos-notarized without a marker written by a step that ran — under " +
+			"(B) nothing signs, so any path to that flag is a path to an unearned claim")
 	}
-	if !strings.Contains(wf, "if (-not $env:WINDOWS_CERT_PFX)") {
-		t.Error("release.yml's Windows signing step does not tolerate an absent certificate")
+	if strings.Contains(wf, "--windows-signed") && !strings.Contains(wf, `grep -q '^signed=true' "$win"`) {
+		t.Error("release.yml can pass --windows-signed without a marker written by a step that ran")
 	}
-	// …and when it is absent, it must SAY what was not delivered rather than passing quietly.
-	if !strings.Contains(wf, "will be attested as NOT") {
-		t.Error("release.yml's signing steps skip silently — an undelivered posture must be disclosed in the log, " +
-			"not inferred from the absence of a step")
+	// The notices must say signing is NOT PLANNED. Under (A) they said "not yet provisioned", which under (B) is
+	// a promise nobody intends to keep — and a maintainer reading it would go looking for a budget.
+	if strings.Contains(wf, "D3 option (A) is ratified") {
+		t.Error("release.yml still tells a reader that option (A) is ratified; the posture was reversed to (B) " +
+			"on 2026-07-30 and the notices must not describe signing as merely unprovisioned")
 	}
-	// And the attestation flags must be derived from the step's outcome, never hard-coded true.
-	if strings.Contains(wf, "--macos-notarized ") && !strings.Contains(wf, "steps.macsign.outputs") {
-		t.Error("release.yml passes --macos-notarized without deriving it from the signing step's own output — " +
-			"a hard-coded flag is exactly the claim-without-delivery task 4.3 forbids")
+	if !strings.Contains(wf, "not part of the ratified posture") {
+		t.Error("release.yml's signing steps do not state that signing is outside the ratified posture — an " +
+			"inert step with no explanation reads as one that is about to be switched on")
+	}
+	// And the release must still be publishable with no signing identity at all, which is the whole of (B).
+	if !strings.Contains(wf, `[ -z "${APPLE_CERT_P12:-}" ]`) || !strings.Contains(wf, "if (-not $env:WINDOWS_CERT_PFX)") {
+		t.Error("release.yml's signing steps are not tolerant of absent credentials — under (B) there will never " +
+			"be any, so an intolerant step would block every release forever")
 	}
 }

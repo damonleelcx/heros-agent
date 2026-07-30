@@ -313,3 +313,67 @@ export function platformApiBase(): string {
 export function upstreamTimeoutMs(): number {
   return UPSTREAM_TIMEOUT_MS;
 }
+
+/**
+ * PUBLIC_SCOPE is the tenant value a session-less surface sends.
+ *
+ * It is a sentinel, not a tenant, and it is spelled so that nobody reading a platform access log mistakes it
+ * for one. A public page has no session by construction — that is the point of it — so the honest header is
+ * "there is no tenant here", not a plausible-looking identifier borrowed from somewhere.
+ *
+ * 🔴 ASCII ONLY, and that is not a style preference. This was first written with an em dash in it, and
+ * `fetch` threw `TypeError: Cannot convert argument to a ByteString` before opening a socket — HTTP header
+ * values are Latin-1. The BFF caught it and reported a TRANSPORT failure, so the page rendered its honest
+ * "unavailable" banner and the real cause (a dash) was invisible from the browser. `isHeaderSafe` below turns
+ * that into a loud failure at the call site instead.
+ */
+const PUBLIC_SCOPE = "public-surface-no-session";
+
+/**
+ * isHeaderSafe reports whether a value can legally be an HTTP header value.
+ *
+ * Header values are ByteStrings: any code point above 255 makes `fetch` throw before it connects, which
+ * surfaces as an indistinguishable "transport failure". Checking here means the error names the value.
+ */
+function isHeaderSafe(value: string): boolean {
+  for (const ch of value) {
+    if (ch.codePointAt(0)! > 255) return false;
+  }
+  return true;
+}
+
+/**
+ * platformFetchPublic reads an endpoint that is a property of the RELEASE rather than of a tenant, from a
+ * surface that has no session.
+ *
+ * # Why this exists at all, given `platformFetch` deliberately requires a tenant
+ *
+ * `platformFetch`'s required `tenantId` is a compile-time guard: a call site that has not resolved a session
+ * cannot compile, because a request must not be trusted to describe its own authority. That guard is right for
+ * every surface that renders tenant data, and it is exactly wrong for the install page — a page whose readers
+ * do not have accounts yet, and whose whole message is that they do not need one.
+ *
+ * # Why this is not a hole in that guard
+ *
+ * It is usable only against endpoints that take no tenant, no plan and no role, and the server enforces that
+ * by SIGNATURE: `handleP20Install` accepts none of them, so a future contributor who wants to vary the answer
+ * per tenant has to change the handler's shape first, and this door stops fitting. The credential still crosses
+ * exactly one boundary, and no session is read, forged, or implied.
+ *
+ * A caller that needs tenant-scoped data and reaches for this instead gets an answer with no tenant in it,
+ * which is a visible bug rather than a silent authority escalation.
+ */
+export async function platformFetchPublic<T>(
+  path: string,
+  options?: Omit<FetchOptions, "tenantId">,
+): Promise<PlatformOutcome<T>> {
+  if (!isHeaderSafe(PUBLIC_SCOPE)) {
+    // Loud, and at the call site. A non-Latin-1 scope makes every public read fail as a "transport failure",
+    // which renders as the page's honest unavailable banner — correct behaviour hiding a one-character bug.
+    throw new Error(
+      `the console BFF's public scope ${JSON.stringify(PUBLIC_SCOPE)} is not a legal HTTP header value ` +
+        "(header values are Latin-1); every public read would fail as an unexplained transport error",
+    );
+  }
+  return platformFetch<T>(path, { ...options, tenantId: PUBLIC_SCOPE });
+}

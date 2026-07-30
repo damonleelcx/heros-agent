@@ -23,9 +23,11 @@ import (
 // the notarization actually ran, and `FirstRunNotice()` keeps telling the user the quarantine-clearing
 // command for exactly as long as the release still needs it.
 //
-// This is also what makes D3-A implementable today: the decision is funded and ratified, the pipeline
-// carries the signing steps, and until the signing secrets exist the delivered posture is honestly the
-// unsigned one — with no prose to go back and correct on the day the certificates land.
+// This is also what let the decision REVERSE without touching a single user-facing sentence. D3 was answered
+// (A) sign+notarize on 2026-07-29 and reversed to (B) on 2026-07-30 on cost; because every claim renders from
+// Attestation, nothing in the product said anything different on either day. Had the claims been driven by the
+// ratified posture, the first answer would have started promising notarization the moment it was given, and the
+// reversal would have quietly withdrawn it.
 
 // Posture is the ratified OS-trust decision.
 type Posture string
@@ -38,16 +40,36 @@ const (
 	PostureDocumentedClear Posture = "documented-clear"
 )
 
-// ChosenPosture is the ratified decision: D3 option (A), sign + notarize on BOTH macOS and Windows.
+// ChosenPosture is the ratified decision: D3 option (B), ship unsigned with the one-command clear documented.
 //
-// Escalated to and decided by the product owner on 2026-07-29 (PRD OQ1 / task 1.2) — not self-decided,
-// because it commits recurring spend and an organizational identity, and the rulebook puts a
-// cost-escalation path above an implementer's convenience.
+// # The decision, and the fact that it changed
 //
-// What this constant does and does not do: it obliges the PIPELINE to carry the signing and notarization
-// steps and obliges the release to FAIL rather than silently ship unsigned on a GA channel once the
-// signing identity is configured. It does not, by itself, make any artifact signed — see Attestation.
-const ChosenPosture = PostureSignNotarize
+// Escalated to the product owner on 2026-07-29 (PRD OQ1 / task 1.2), because it commits recurring spend and an
+// organizational identity and the rulebook forbids an implementer deciding that. Answered (A) sign + notarize.
+//
+// **Reversed to (B) on 2026-07-30, by the same owner: no spend on signing.** Both answers are recorded rather
+// than the first being overwritten — a decision log that shows only the current answer cannot tell a later
+// reader whether a question was ever asked, and this one was asked, answered, and revisited on cost.
+//
+// # What (B) obliges
+//
+//   - every macOS and Windows artifact ships UNSIGNED by the OS, and every surface says so;
+//   - the one-command clear (`xattr -d com.apple.quarantine …`) and the SmartScreen step are surfaced in the
+//     installer output and the README — a posture is only (B) if the answer is actually in front of the user;
+//   - publisher metadata is still declared wherever a package can carry it (winget, .deb/.rpm), and the fact
+//     that a bare .exe cannot carry any is disclosed rather than glossed.
+//
+// # What did NOT change, and why that is the point
+//
+// Nothing user-facing. Every claim was already rendered from `Attestation` — what a release actually delivered —
+// never from this constant, so reversing the decision changed no sentence anywhere. That is exactly the property
+// the Posture/Attestation split was built for: had the claims been driven by the ratified posture, flipping it
+// would have silently rewritten the trust story on every surface in the product.
+//
+// The pipeline keeps its (gated) signing steps. They are dead today and cost nothing, and keeping them means a
+// future decision to fund signing is a secrets change rather than a pipeline change — see release.yml, whose
+// notices now say signing is not planned rather than not yet provisioned.
+const ChosenPosture = PostureDocumentedClear
 
 // OSTrust is what a release actually delivered on one OS. Every field is a fact about the artifacts, set
 // by the pipeline from the outcome of a step that ran — never from the posture above.

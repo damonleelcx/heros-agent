@@ -1,4 +1,3 @@
-import { requireSession } from "@/lib/session";
 import { PageFrame, Section, Chip, Row, Banner } from "@/components/primitives";
 import { Tabs, type TabItem } from "@/components/tabs";
 import {
@@ -14,7 +13,19 @@ import { fetchInstall } from "./data";
 /**
  * The install surface (P20) — "how do I get this, on what, and can I trust it".
  *
- * # Why a console page for something a README could hold
+ * # Why this page has NO session
+ *
+ * It lived at /app/install, behind `requireSession()`, until that was called out as nonsense — and it was. The
+ * readers of this page are the people who do not have the CLI yet, and therefore have no account; the page's own
+ * copy tells them the CLI is free and needs none. A sign-in wall in front of that is a contradiction the page
+ * refutes two paragraphs below the wall.
+ *
+ * So it sits at /install, outside the console shell, on the root layout — the same placement /preview uses, and
+ * for the same reason: no session, no tenant, nothing that stops serving when the platform's auth does. The
+ * console's navigation links here rather than duplicating it, because two copies of an install command is the
+ * drift this whole contract exists to prevent.
+ *
+ * # Why a page at all for something a README could hold
  *
  * Because a README cannot be checked against the code, and this particular README drifts in a specific
  * direction: toward listing channels that exist as build artifacts but that nobody can actually install from.
@@ -31,8 +42,7 @@ import { fetchInstall } from "./data";
 export const dynamic = "force-dynamic";
 
 export default async function InstallPage() {
-  const session = await requireSession();
-  const view = await fetchInstall(session.tenantId);
+  const view = await fetchInstall();
 
   if (!view) {
     return (

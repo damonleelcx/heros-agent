@@ -8,7 +8,7 @@ import {
   VerifyItYourself,
   FreeAndPaid,
 } from "@/components/install";
-import { PREVIEW_INSTALL, PREVIEW_INSTALL_SIGNED } from "./fixture";
+import { PREVIEW_INSTALL, PREVIEW_INSTALL_PUBLISHED } from "./fixture";
 
 /**
  * A self-contained preview of the install surface, seeded with the engine's own distribution contract so the
@@ -92,8 +92,8 @@ export default function InstallPreview() {
                 <Section title="No release published yet — the honest rendering">
                   <TrustPosture view={view} />
                 </Section>
-                <Section title="A release that delivered its posture — for comparison">
-                  <TrustPosture view={PREVIEW_INSTALL_SIGNED} />
+                <Section title="The posture a published release actually ships">
+                  <TrustPosture view={PREVIEW_INSTALL_PUBLISHED} />
                 </Section>
                 <VerifyItYourself />
               </>
