@@ -201,6 +201,85 @@ The egress allowlist, output format, and exit codes are referenceable contracts 
 [`docs/decisions/p11-contracts.md`](docs/decisions/p11-contracts.md); release verification is in
 [`docs/release/cli-verification.md`](docs/release/cli-verification.md).
 
+<!-- BEGIN GENERATED INSTALL SECTION — `make readme-install` regenerates it -->
+
+### Install
+
+`heros` is one self-contained binary. `discover`, `apply`, `eval`, `doctor` and `init` work **offline with no account** — there is nothing to sign up for to get a first result.
+
+**curl | sh** — darwin, linux
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/damonleelcx/heros-agent/v0.20.0/scripts/install.sh | sh
+```
+
+**PowerShell (irm | iex)** — windows
+
+```sh
+irm https://raw.githubusercontent.com/damonleelcx/heros-agent/v0.20.0/scripts/install.ps1 | iex
+```
+
+**.deb package** — linux
+
+```sh
+curl -fsSLO https://github.com/damonleelcx/heros-agent/releases/download/v0.20.0/heros_0.20.0_amd64.deb && sudo dpkg -i heros_0.20.0_amd64.deb
+```
+
+**.rpm package** — linux
+
+```sh
+sudo rpm -i https://github.com/damonleelcx/heros-agent/releases/download/v0.20.0/heros-0.20.0.x86_64.rpm
+```
+
+**container image** — darwin, linux, windows
+
+```sh
+docker run --rm -v "$PWD:/repo" ghcr.io/heros-foreal/heros:0.20.0 discover --repo /repo
+```
+
+#### Auditing the install script before you pipe it
+
+The URL above is pinned to the `v0.20.0` tag, so it cannot change under you, and the script is covered by the same signed manifest as the binaries. To read it before running it:
+
+```sh
+curl -fsSLO https://raw.githubusercontent.com/damonleelcx/heros-agent/v0.20.0/scripts/install.sh
+# then compare its sha256 against the install.sh line in that release's SHA256SUMS
+less install.sh && sh install.sh
+```
+
+#### Verifying a release yourself (offline, no account)
+
+Every channel above performs these two steps for you and **refuses to place the binary on your PATH** if either fails. To run them by hand:
+
+```sh
+sha256sum -c SHA256SUMS          # or: shasum -a 256 -c SHA256SUMS
+ssh-keygen -Y verify -f allowed_signers -I heros-release \
+  -n file -s SHA256SUMS.sshsig < SHA256SUMS
+```
+
+`allowed_signers` ships with the release; the same key is published as [`docs/release/heros-release.pub`](docs/release/heros-release.pub) for the raw-ed25519 path. Neither step needs a network or an account. `ssh-keygen` rather than `openssl` because stock macOS ships LibreSSL, which cannot verify ed25519 at all — the same signature is published in both encodings.
+
+The full story — installing, upgrading, rolling back, what the first-run OS warning means, and how the release key rotates — is [`docs/release/install.md`](docs/release/install.md).
+
+#### Not supported — stated, because a blank reads as *should work*
+
+- **Windows 11 (arm64)** — not built — no native windows/arm64 runner in the matrix, and the CGO tree-sitter frontends make a cross-build a different, less-tested artifact (D1). Instead: run the windows/amd64 build under Windows' x64 emulation, or ask for the row: adding it is a new runner, not a redesign.
+- **Alpine / any musl Linux** — no native musl binary — the CLI links CGO tree-sitter frontends against glibc, and a glibc binary does not run on musl (D6). Instead: use the container image ghcr.io/heros-foreal/heros:<version>, which carries the same CLI in a glibc base.
+
+Also generated but **not yet installable**, and listed so nobody plans around them:
+
+- **Homebrew** — the formula is generated from the signed manifest and attached to every Release, but the tap repository heros-foreal/homebrew-tap does not exist yet and pushing to it needs a token secret. Until then `brew install heros-foreal/tap/heros` would fail.
+- **Scoop** — the manifest is generated and attached to every Release, but the bucket repository heros-foreal/scoop-bucket does not exist yet and pushing to it needs a token secret.
+- **winget** — the three-file winget manifest is generated and attached to every Release, but publication is a pull request into microsoft/winget-pkgs whose review and merge are not ours to schedule.
+
+#### What is free, and what is not
+
+The **CLI is free, with no account, forever**: `discover`, `apply`, `eval`, `coverage`, `doctor`, `init`, `version` and `upgrade` all run locally and send no telemetry.
+
+The **paid upgrade is the hosted platform**: `heros login` and `heros link` push run results to a tenant, which is what buys the console — leaderboards across runs, attribution scorecards, autonomous proposals and pull requests, and team-wide history. Nothing in the free path is degraded to sell it, and no local command starts requiring an account later.
+
+<!-- END GENERATED INSTALL SECTION -->
+
 ### The web console
 
 The console is a **separate component** — a Next.js app with its own backend-for-frontend — rather

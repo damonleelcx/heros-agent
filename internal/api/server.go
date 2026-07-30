@@ -214,6 +214,10 @@ func New(db *sql.DB, cfg config.Config) *Server {
 	// plan or role can move them. It is a READ only; a memory change is authored through the existing
 	// /api/p13/authoring routes, because there is one spine and two origins.
 	s.Mux.HandleFunc("GET /api/p17/memory", s.handleMemory)
+	// P20 — the install/distribution read model, registered here for the same reason: the supported-target
+	// matrix, the install channels and the trust posture are properties of the RELEASE, not of a tenant, so no
+	// entitlement can move a row. It takes no tenant, no plan and no role.
+	s.Mux.HandleFunc("GET /api/p20/install", s.handleP20Install)
 
 	var h http.Handler = s.Mux
 	if cfg.AuthMode == "required" {

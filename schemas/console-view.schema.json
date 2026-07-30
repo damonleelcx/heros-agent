@@ -722,6 +722,89 @@
       ],
       "type": "object"
     },
+    "ChannelView": {
+      "properties": {
+        "blocker": {
+          "type": "string"
+        },
+        "delivered": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "install": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "manager_owned": {
+          "type": "boolean"
+        },
+        "oses": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pin": {
+          "type": "string"
+        },
+        "publication": {
+          "type": "string"
+        },
+        "uninstall": {
+          "type": "string"
+        },
+        "upgrade": {
+          "type": "string"
+        },
+        "verification": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "delivered",
+        "id",
+        "install",
+        "label",
+        "manager_owned",
+        "oses",
+        "pin",
+        "publication",
+        "uninstall",
+        "upgrade",
+        "verification"
+      ],
+      "type": "object"
+    },
+    "ClaimView": {
+      "properties": {
+        "earned": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "earned",
+        "id",
+        "text"
+      ],
+      "type": "object"
+    },
     "ClusterRow": {
       "properties": {
         "label": {
@@ -963,6 +1046,34 @@
         "n_weak",
         "oracle_coverage",
         "residual"
+      ],
+      "type": "object"
+    },
+    "DeliveredTrustView": {
+      "properties": {
+        "claims": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/ClaimView"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "signing_key_id": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "claims",
+        "version"
       ],
       "type": "object"
     },
@@ -1636,6 +1747,64 @@
         "taxonomy_version",
         "unclassified",
         "workflow_id"
+      ],
+      "type": "object"
+    },
+    "InstallView": {
+      "description": "Response of GET /api/p20/install",
+      "properties": {
+        "channels": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/ChannelView"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "delivered": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DeliveredTrustView"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "documented_release": {
+          "type": "string"
+        },
+        "matrix_version": {
+          "type": "string"
+        },
+        "ratified_posture": {
+          "type": "string"
+        },
+        "targets": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/TargetView"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "channels",
+        "documented_release",
+        "matrix_version",
+        "ratified_posture",
+        "targets"
       ],
       "type": "object"
     },
@@ -2816,6 +2985,52 @@
       ],
       "type": "object"
     },
+    "TargetView": {
+      "properties": {
+        "answer": {
+          "type": "string"
+        },
+        "arch": {
+          "type": "string"
+        },
+        "channels": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "key": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "string"
+        },
+        "platform": {
+          "type": "string"
+        },
+        "runner": {
+          "type": "string"
+        },
+        "support": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "arch",
+        "channels",
+        "key",
+        "platform",
+        "support"
+      ],
+      "type": "object"
+    },
     "TopologyView": {
       "properties": {
         "edges": {
@@ -3199,6 +3414,9 @@
     },
     "GraphView": {
       "$ref": "#/$defs/GraphView"
+    },
+    "InstallView": {
+      "$ref": "#/$defs/InstallView"
     },
     "PRResult": {
       "$ref": "#/$defs/PRResult"

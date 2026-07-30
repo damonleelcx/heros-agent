@@ -750,3 +750,51 @@ export interface DeliverySourceCellView {
   note?: string;
 }
 
+/** Response of `GET /api/p20/install`. */
+export interface InstallView {
+  matrix_version: string;
+  documented_release: string;
+  ratified_posture: string;
+  delivered?: DeliveredTrustView | null;
+  targets: TargetView[] | null;
+  channels: ChannelView[] | null;
+}
+
+export interface DeliveredTrustView {
+  version: string;
+  signing_key_id?: string;
+  claims: ClaimView[] | null;
+}
+
+export interface ClaimView {
+  id: string;
+  text: string;
+  earned: boolean;
+}
+
+export interface TargetView {
+  key: string;
+  platform: string;
+  arch: string;
+  support: string;
+  runner?: string;
+  limit?: string;
+  answer?: string;
+  channels: string[] | null;
+}
+
+export interface ChannelView {
+  id: string;
+  label: string;
+  oses: string[] | null;
+  delivered: boolean;
+  publication: string;
+  blocker?: string;
+  verification: string;
+  manager_owned: boolean;
+  install: string;
+  upgrade: string;
+  uninstall: string;
+  pin: string;
+}
+

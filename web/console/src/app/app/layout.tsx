@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Brain, FileCode, FlaskConical, GitBranch, GitPullRequest, Home, Layers, PenLine, Play, Settings, Share2, SlidersHorizontal,
-  Grid3x3, Repeat, User } from "lucide-react";
+  Grid3x3, HardDriveDownload, Repeat, User } from "lucide-react";
 import { requireSession } from "@/lib/session";
 import { visitedSubjects, routes, SUBJECT_LABELS } from "@/lib/subjects";
 import { NavLink } from "@/components/nav";
@@ -57,6 +57,10 @@ const SURFACES: Surface[] = [
 ];
 
 const SETTINGS: Surface[] = [
+  // Install sits in the settings group rather than the primary rail because it is a surface a reader visits
+  // ONCE — to get the binary, or to answer a security review — and not a place to work. Putting it in the
+  // working set would push a surface somebody uses daily one row further from the top.
+  { href: "/app/install", label: "Install", icon: <HardDriveDownload /> },
   { href: "/app/configure", label: "Configure", icon: <Settings /> },
   { href: "/app/account", label: "Account", icon: <User /> },
 ];
@@ -82,6 +86,7 @@ export default async function ConsoleLayout({ children }: { children: React.Reac
     { id: "s:memory", group: "Surface", label: "Memory strategy", href: "/app/memory" },
     { id: "s:harness", group: "Surface", label: "Harness strategy", href: "/app/harness" },
     { id: "s:coverage", group: "Surface", label: "Coverage — what applies where", href: "/app/coverage" },
+    { id: "s:install", group: "Surface", label: "Install the CLI — channels, platforms, trust", href: "/app/install" },
     { id: "s:account", group: "Surface", label: "Plan and spend", href: routes.account() },
     ...visited.map((subject) => ({
       id: `v:${subject.kind}:${subject.id}`,

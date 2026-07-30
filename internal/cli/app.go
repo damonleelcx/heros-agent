@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 )
@@ -13,16 +14,30 @@ import (
 // construction (PRD FR8): a FlagSet parses arguments, a missing required input exits invalid-config
 // naming the input, and nothing ever prompts.
 //
-// The two platform-facing commands (login, link) are INJECTED as NetCommands rather than implemented
-// here, so this package — the whole offline surface — never imports net/http. That is the offline
-// guarantee made structural: the code that runs discovery/apply/eval cannot reach the network because
-// it does not link the network in.
+// The platform-facing commands (login, link, upgrade) are INJECTED as NetCommands rather than implemented
+// here. The intent is that the offline surface cannot reach the network because it does not link a network
+// stack in — the guarantee made structural rather than promised.
+//
+// 🔴 That structural guarantee is currently INCOMPLETE, and saying so is the point. `author.go` (P13) imports
+// internal/authoring, which reaches internal/providergateway, which links net/http for the provider adapters
+// and the AWS SDK. So this package's import graph CAN reach a network stack today, even though no local command
+// dials: TestLocalWorkflowRunsWithNetworkingDenied proves the behaviour under a deny-all dialer, and that
+// runtime proof is the guarantee users actually have.
+//
+// The claim was corrected rather than quietly left standing (P20 task 5.6). TestCLIPackageNetworkLinkageIsNotWidened
+// pins the known chain and fails on any NEW one, so the situation cannot get worse while it is being fixed;
+// restoring the structural version means breaking authoring's dependency on providergateway, which is a change
+// inside P13's design rather than a distribution change.
 
 // NetCommands are the platform-facing commands, supplied by a package that may import net/http. When
 // nil, invoking a net command is an operational error rather than a panic.
 type NetCommands interface {
 	Login(cfg Config, s Streams) error
 	Link(cfg Config, s Streams) error
+	// Upgrade is here rather than in this package for the same reason: it is the ONE command that must
+	// reach the network, and keeping it out is what makes "no update check on the hot path" (P20 task 5.6)
+	// structural instead of a promise — the code that runs discover/apply/eval does not link a network stack.
+	Upgrade(cfg Config, s Streams) error
 }
 
 // Main is the process entry point. It parses args, resolves config with provenance, dispatches, and
@@ -30,8 +45,10 @@ type NetCommands interface {
 // os.Exit itself — the caller owns the process boundary.
 func Main(args []string, s Streams, env func(string) (string, bool), net NetCommands) int {
 	if len(args) < 1 {
-		usage(s.Err)
-		return ExitInvalidCfg
+		// A bare `heros` GREETS (P20 task 5.1). It used to print usage and exit 3 (invalid-config), which
+		// treated curiosity as a malformed invocation — and a tool that exits non-zero when run with no
+		// arguments teaches CI authors to append `|| true`, after which a real failure is invisible too.
+		return codeOf(Greeting(s, runtime.GOOS, runtime.GOARCH), s, "greeting")
 	}
 	cmd := args[0]
 	rest := args[1:]
@@ -60,6 +77,12 @@ func Main(args []string, s Streams, env func(string) (string, bool), net NetComm
 		return codeOf(Eval(cfg, s, ReferenceRuntime{}, gates), s, cmd)
 	case "coverage":
 		return codeOf(Coverage(cfg, s), s, cmd)
+	case "init":
+		return codeOf(Init(cfg, s), s, cmd)
+	case "doctor":
+		return codeOf(Doctor(cfg, s, env), s, cmd)
+	case "verify-release":
+		return codeOf(VerifyRelease(cfg, s), s, cmd)
 	case "status":
 		authed, id := credentialStatus(cfg, env)
 		return codeOf(Status(cfg, s, authed, id), s, cmd)
@@ -73,6 +96,12 @@ func Main(args []string, s Streams, env func(string) (string, bool), net NetComm
 			return report(operational("link is a platform command and is unavailable in this build", nil), s, cmd)
 		}
 		return codeOf(net.Link(cfg, s), s, cmd)
+	case "upgrade":
+		if net == nil {
+			return report(operational("upgrade needs the network and is unavailable in this build; "+
+				"reinstall with the install script instead", nil), s, cmd)
+		}
+		return codeOf(net.Upgrade(cfg, s), s, cmd)
 	default:
 		s.Narratef("heros: unknown command %q", cmd)
 		usage(s.Err)
@@ -101,6 +130,12 @@ func parse(cmd string, args []string, env func(string) (string, bool), s Streams
 	token := fs.String("token", "", "platform token (login)")
 	dryRun := fs.Bool("dry-run", false, "render the exact link payload without transmitting it")
 
+	// Onboarding + release-verification flags (P20 section 5).
+	force := fs.Bool("force", false, "overwrite an existing config (init)")
+	manifest := fs.String("manifest", "", "path to a downloaded SHA256SUMS (verify-release)")
+	sig := fs.String("sig", "", "path to the detached signature (verify-release; default <manifest>.sig)")
+	asset := fs.String("asset", "", "comma-separated asset names to check (verify-release; default: every listed asset present on disk)")
+
 	// Authoring flags (P13 13c). Every value is optional at this layer; `author` enforces that at least
 	// one of them is present, so "you passed nothing to change" names itself rather than arriving as a
 	// generic flag error.
@@ -128,6 +163,7 @@ func parse(cmd string, args []string, env func(string) (string, bool), s Streams
 		"repo": ".", "config": "", "out": "", "report": "", "spec": "",
 		"commit": "", "repo-url": "", "workflow-id": "", "seeds": "5", "cases": "8",
 		"run": "", "dry-run": "false",
+		"force": "false", "manifest": "", "sig": "", "asset": "",
 		"node": "", "model": "", "prompt": "", "context-policy": "", "skills": "", "tools": "",
 		"apply-mode": "", "drop-tolerance": "", "clear-drop-tolerance": "false", "apply": "false",
 	}
@@ -178,6 +214,10 @@ func parse(cmd string, args []string, env func(string) (string, bool), s Streams
 	put("run", *run)
 	put("token", *token)
 	put("dry-run", strconv.FormatBool(*dryRun))
+	put("force", strconv.FormatBool(*force))
+	put("manifest", *manifest)
+	put("sig", *sig)
+	put("asset", *asset)
 
 	cfg := r.Resolve()
 
@@ -249,6 +289,10 @@ heros — the LLM-workflow evaluation CLI (free on every plan; works offline wit
 Usage:
   heros <command> [flags]
 
+Getting started (no account, no network, no config file):
+  init       write a starter llm-eval.yaml whose defaults already work (never clobbers yours)
+  doctor     check this machine is ready, and name the ONE next action for each gap
+
 Local commands (no account, no network):
   discover   extract the Workflow IR + discovery report from a repository
   apply      realize a Variant Spec as a reviewable diff (worktree-isolated)
@@ -259,6 +303,13 @@ Local commands (no account, no network):
              language appears on every axis, and a gap names what is missing
   status     show effective config with provenance, and the fixed contract facts
   version    print the CLI version and the contract versions it implements
+  verify-release  verify a downloaded release: checksums, then the signature over the manifest,
+             against the release key compiled into this binary (offline; the same routine
+             the installer and 'heros upgrade' use)
+
+Update (the only command that reaches the network for a version; nothing else ever checks):
+  upgrade    fetch the latest release, verify it, replace this binary in place — a no-op when
+             current, and it defers to your package manager when one owns this file
 
 Platform commands (explicit, authenticated; transmit only to https://heros-agent.space):
   login      store a platform token

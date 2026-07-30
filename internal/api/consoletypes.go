@@ -85,5 +85,8 @@ func ConsoleViewTypes() []ConsoleViewType {
 
 		// ── P13 13e · how an accepted change reaches a running agent ──────────
 		{Name: "ChangeDeliveryView", Sample: ChangeDeliveryView{}, Endpoint: "GET /api/p13/delivery"},
+
+		// ── P20 · how to install it, and what the release actually delivered ──
+		{Name: "InstallView", Sample: installView{}, Endpoint: "GET /api/p20/install"},
 	}
 }

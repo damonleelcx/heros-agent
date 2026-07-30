@@ -22,7 +22,11 @@ set -euo pipefail
 VERSION="${1:-0.11.0-dev}"
 OUT="${OUT:-dist}"
 PKG="./cmd/heros"
-LDFLAGS="-s -w -X github.com/heros-foreal/agentd/internal/cli.ToolVersion=${VERSION}"
+# The ldflags come from ONE place. In CI, `herosdist plan` computes them from the tag and passes them in
+# through HEROS_LDFLAGS, so the version stamped into the binary and the version in every generated package
+# manifest have a single source (P20 task 2.4). The fallback below is the same string for a local build;
+# TestReleaseScriptStampsTheOneVersionVariable holds the two forms together.
+LDFLAGS="${HEROS_LDFLAGS:--s -w -X github.com/heros-foreal/agentd/internal/cli.ToolVersion=${VERSION}}"
 
 # The native target for this runner. GOOS/GOARCH default to the host; override to build a matched
 # cross-target only when a CGO cross-toolchain is configured.
@@ -41,8 +45,18 @@ echo "release-cli: wrote ${OUT}/SHA256SUMS"
 # Sign the manifest if a key is available. A real release sets HEROS_RELEASE_PRIVATE_KEY from a secret;
 # without one, the manifest is still checksum-verifiable, just unsigned.
 if [ -n "${HEROS_RELEASE_PRIVATE_KEY:-}" ]; then
-  go run ./cmd/herossign sign --in "${OUT}/SHA256SUMS" > "${OUT}/SHA256SUMS.sig"
-  echo "release-cli: signed ${OUT}/SHA256SUMS → ${OUT}/SHA256SUMS.sig"
+  # Captured through a command substitution, NOT a `>` redirect: a redirect creates the .sig file before
+  # the signer runs, so a failed signing would leave a zero-byte signature that every later step reads as
+  # "a signature is present". With `set -e`, a failing substitution stops the script and no file appears.
+  sig="$(go run ./cmd/herossign sign --in "${OUT}/SHA256SUMS")"
+  printf '%s\n' "${sig}" > "${OUT}/SHA256SUMS.sig"
+  # The SAME signature in OpenSSH sshsig form. It exists because the installer must verify before placing a
+  # binary on PATH and cannot use the binary it just downloaded to do it — and stock macOS ships LibreSSL,
+  # which cannot verify ed25519, while `ssh-keygen -Y verify` is present wherever openssh-client is.
+  sshsig="$(go run ./cmd/herossign sign --ssh --in "${OUT}/SHA256SUMS")"
+  printf '%s' "${sshsig}" > "${OUT}/SHA256SUMS.sshsig"
+  go run ./cmd/herossign signers > "${OUT}/allowed_signers"
+  echo "release-cli: signed ${OUT}/SHA256SUMS → SHA256SUMS.sig + SHA256SUMS.sshsig (+ allowed_signers)"
 else
   echo "release-cli: HEROS_RELEASE_PRIVATE_KEY unset — manifest is checksum-verifiable but UNSIGNED"
 fi

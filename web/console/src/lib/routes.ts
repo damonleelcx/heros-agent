@@ -41,4 +41,5 @@ export const routes = {
   coverage: () => "/app/coverage",
   account: () => "/app/account",
   delivery: () => "/app/delivery",
+  install: () => "/app/install",
 };

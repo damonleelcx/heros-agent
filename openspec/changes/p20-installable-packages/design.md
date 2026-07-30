@@ -28,6 +28,82 @@ mandatory and fail-closed on every channel** (安全); **the release has no manu
 copies, or merges (运维, DevOps rule 2/3); and **version is a single source of truth** — the tag — that every
 manifest derives from and never a second hand-written copy (维护, backend "展示=执行").
 
+## Ratification record (task 1)
+
+The one-way doors below were decided **before** any pipeline, installer, or manifest existed, because each
+is cheap now and expensive later. Where a decision has a code home, that home — not this document — is the
+thing a build can check; the row names it so a reader can get from the decision to its gate in one step.
+
+| Decision | State | Ratified | Enforced by |
+|---|---|---|---|
+| **D1** native-runner matrix, no cross-CGO | ✅ ratified | 2026-07-29 | `distribution.Shipped()` rows carry a `Runner`; `TestShippedRowsNameANativeRunner` fails on a runner whose OS/arch differs from the target, and `TestReleaseWorkflowMatchesTargetContract` holds `release.yml` to the same set |
+| **D2** ed25519 floor, cosign opt-in | ✅ ratified | 2026-07-29 | `release.VerifyTrusted` is the only verifier any channel calls; `Attestation.Verified()` is the signed-manifest floor and is *not* satisfied by OS code signing |
+| **D3** OS trust: sign+notarize vs documented clear | ✅ **escalated and answered — (A) sign + notarize both OSes** | 2026-07-29, product owner (PRD OQ1) | `distribution.ChosenPosture`, pinned by `TestChosenPostureIsTheRatifiedDecision`; delivery is a separate per-release fact (see below) |
+| **D5** manifests generated, never hand-edited | ✅ ratified | 2026-07-29 | every channel manifest is emitted by `cmd/herosdist` from the tag + `SHA256SUMS`; `TestGeneratedManifestsCarryNoSecondVersion` fails on a hand-written version |
+
+### D3 — what was escalated, what was answered, and what that obliges
+
+The escalation was deliberate: (A) commits **recurring money** (Apple Developer Program, a code-signing
+certificate) **and an organizational identity**, and the rulebook forbids an implementer from self-deciding
+a spend or an identity commitment. Both paths were put with their costs; the product owner chose **(A):
+Developer-ID sign + notarize on macOS, Authenticode on Windows.**
+
+What (A) obliges, and what it does not:
+
+- The pipeline **carries** the signing and notarization steps, gated on the signing secrets, and a GA
+  release **fails closed** rather than shipping unsigned once a signing identity is configured.
+- It does **not** make any artifact signed. That is why `Posture` (the decision) and `Attestation` (what a
+  given release delivered) are **separate types**. Every user-visible sentence — installer banner, README,
+  release notes, console surface — renders from the `Attestation`. Until the certificates exist, a release
+  honestly describes itself as unsigned and keeps printing the one-command quarantine clear; on the day
+  they land, that sentence disappears from every surface at once because no surface holds a copy of it.
+- The **verification floor is unchanged** either way (D2): the ed25519 signature over `SHA256SUMS` is what
+  every channel checks, offline, with no account. OS code signing is a UX upgrade layered on top, never a
+  substitute — `Attestation.Verified()` deliberately ignores it.
+
+### Signing-key management and rotation (task 1.4)
+
+- The **private key is only ever a CI secret**, consumed by `release-cli.sh` in `${VAR:?}` refuse-to-start
+  form. It is never in the repository, a log, or an artifact.
+- The **trust root is compiled in** (`internal/release/trustroot.go`) and mirrored, for human use, in
+  `docs/release/heros-release.pub`. A downloaded key would prove nothing: whoever can serve a binary can
+  serve a key. The two copies are held identical by `TestTrustRootMatchesPublishedKey`.
+- The trust root is a **key set with roles**, exactly one `active` (signs) and any number of `accepted`
+  (verify only), because rotation must be planned before it is needed. A single-key verifier makes rotation
+  a flag day: the moment a new key signs, every installed binary rejects every new release and the only
+  repair is an unverified reinstall — the hole the signature exists to close.
+- **Rotation is additive and staged:** publish the next public key as `accepted` → release once more with
+  the old key (every binary in the field now trusts both) → flip the roles → after the overlap window (one
+  minor version, stated in `docs/release/install.md`) delete the old entry. `TestRotationOverlapVerifiesBothKeys`
+  rehearses all four steps with real signatures.
+- **Compromise skips the overlap:** the leaked key is deleted in the same commit that adds its replacement,
+  and the release notes say so. A deliberate, announced break is narrower than the alternative.
+
+### Supported-target matrix, frozen as a contract (task 1.3)
+
+A matrix on a README is a contract the moment it is published. So the matrix lives in
+`internal/distribution` and the README's table is checked against it; adding or dropping a row is a
+reviewed change, not a docs edit (`TestTargetMatrixIsFrozen`).
+
+| OS | arch | Native binary | Native runner | Channels |
+|---|---|---|---|---|
+| macOS 12+ (Intel) | amd64 | ✅ | `macos-13` | curl\|sh, Homebrew, container |
+| macOS 12+ (Apple silicon) | arm64 | ✅ | `macos-14` | curl\|sh, Homebrew, container |
+| Linux glibc 2.31+ | amd64 | ✅ | `ubuntu-22.04` | curl\|sh, Homebrew, `.deb`, `.rpm`, container |
+| Linux glibc 2.31+ | arm64 | ✅ | `ubuntu-22.04-arm` | curl\|sh, Homebrew, `.deb`, `.rpm`, container |
+| Windows 10/11 | amd64 | ✅ | `windows-2022` | PowerShell, Scoop, winget |
+| Windows 11 | arm64 | ⛔ **not built** | — | run the amd64 build under x64 emulation |
+| Alpine / any musl Linux | any | ⛔ **not built** (glibc CGO) | — | `ghcr.io/heros-foreal/heros:<version>` |
+
+The **⛔ rows are rows**, not absences. This is the P13 coverage lesson: a matrix listing only what works
+forces the reader to infer everything else from a blank, and a blank reads as *should work — must be your
+setup*. A user on `windows/arm64` who finds no row concludes the download is broken and opens a ticket. So
+`TargetFor` returns limit rows too, and every refusal names one, with its reason and its answer.
+`TestDisclosedLimitsAreStatedTotally` fails on a limit that carries either without the other.
+
+The **glibc floor (2.31+) is part of the contract.** "Linux" with no version is the kind of claim that
+becomes a support ticket the first time someone tries CentOS 7.
+
 ## Decision 1 — Native-runner build matrix, not cross-CGO
 
 **Chosen:** `release.yml` builds each target on its **native GitHub-hosted runner** (macOS runner →
@@ -79,10 +155,14 @@ unsigned `.exe`. The two honest resolutions have very different costs:
 
 **Chosen posture (process, not a silent pick):** this is a **cost-escalation-path** decision — the rulebook
 forbids self-deciding a spend or an identity commitment. So the design **states both paths with their costs and
-escalates the choice to the user** (PRD OQ1). The **default the pipeline ships without a decision** is (B) —
-because (B) is always-available and never *claims* more than it delivers (安全/诚实), while (A) can be added
-later purely additively (sign the same artifacts, notarize, re-attach) with **no change to the verification
-floor** (D2). Crucially: **Homebrew and Scoop installs are not quarantined the way a double-clicked download is**
+escalates the choice to the user** (PRD OQ1). **Answered 2026-07-29: (A) — sign + notarize on both OSes**
+(see the ratification record above). The pipeline therefore carries the signing and notarization steps, and
+a GA release fails closed rather than shipping unsigned once a signing identity is configured.
+
+Until the certificates exist, what a release *delivers* is still (B), and it **says so** — the claim is
+rendered from `distribution.Attestation` (a per-release fact), never from the ratified posture, so no prose
+has to be corrected on the day the identity lands. (A) layers on additively (sign the same artifacts,
+notarize, re-attach) with **no change to the verification floor** (D2). Crucially: **Homebrew and Scoop installs are not quarantined the way a double-clicked download is**
 (the package manager fetches and places the binary), so investing in the `brew`/`scoop` channels (D5) already
 removes the Gatekeeper/SmartScreen cliff for most users — which is why (A) is a UX *upgrade*, not a
 prerequisite.
