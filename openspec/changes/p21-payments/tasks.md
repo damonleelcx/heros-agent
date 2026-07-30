@@ -132,7 +132,7 @@ instead of leaving it as a footnote on an unticked box.
 - [x] 11.5 **Frontend**: a **misconfigured-billing** state on the console billing page — distinct from
       unavailable, empty, and past-due — naming which plan's price reference does not resolve and whose job it
       is to fix it; keyboard-reachable, browser-verified.
-- [ ] 11.6 **QA + Docs**: the preflight goes red on a bad reference and green on good ones; the env/stdin key
+- [x] 11.6 **QA + Docs**: the preflight goes red on a bad reference and green on good ones; the env/stdin key
       path is asserted and the flag path refuses; the ingress runbook §4 and the M16 record carry the
       preconditions.
 
@@ -145,10 +145,13 @@ item by item, with what each claim rests on.
       **NOT CLAIMED.** Eleven of twelve items are green, and the twelfth (attach a payment method with a
       test card) is green on the platform side. But all of it ran against an **in-process** Stripe, not a
       real Stripe test account, and the checklist says *"against one Stripe test-mode stack"*. The
-      remaining step is one command with a Stripe test key this repository does not and must not hold:
-      `go run ./cmd/p21hermes -repo <hermes> -stripe-base https://api.stripe.com -api-key <test key>`.
-      Ticking this box before that runs would be the exact claim-without-evidence this change spends its
-      whole budget preventing.
+      remaining distance is the three artefacts in §11 / PRD §10.1 — a test key, a webhook signing
+      secret, and real price objects — two of which this repository must never hold. With all three it is
+      one command and no code edit:
+      `STRIPE_API_KEY=<test key> go run ./cmd/p21hermes -repo <hermes> -stripe-base https://api.stripe.com -plans <catalog>`,
+      and the preflight names any price reference that is still wrong before anything charges. Ticking
+      this box before that runs would be the exact claim-without-evidence this change spends its whole
+      budget preventing.
 - [ ] V2 Live-mode cutover gated on the M16 checklist **and** one reconciled test-mode period signed off by Finance
       (PRD Q5); the rollout flag flips to live only then.
       **NOT TAKEN**, and correctly so: neither gate is satisfied. The rollout flag stays at its zero

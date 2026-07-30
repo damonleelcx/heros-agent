@@ -14,13 +14,26 @@ idempotent replay, the key-reuse refusal, an outage mode and the ambiguous recor
 🔴 **That is not the same as a real Stripe test account, and this record does not claim it is.** The
 checklist's own words are *"against one Stripe test-mode stack"*, and a stack whose Stripe is in this
 process has not exercised Stripe's real API version, its real error envelopes, its real idempotency
-window, or its real webhook delivery. The remaining step is mechanical and needs a credential this
-repository does not and must not contain:
+window, or its real webhook delivery.
+
+What is left is **three artefacts** (PRD §10.1), not one command: a Stripe **test secret key**, a
+**webhook signing secret** for that endpoint, and **real price objects** whose ids replace the
+placeholder `price_ref_*` values, with metered prices denominated in the meter's integral unit. Two of
+them are credentials this repository must never contain; the third is configuration only the Stripe
+account owner can create.
+
+With all three in hand it is one command, and it needs no code edit:
 
 ```bash
+export STRIPE_API_KEY=<your Stripe TEST key>     # not a flag: a flag lands in shell history and in ps
 go run ./cmd/p21hermes -repo /path/to/hermes-agent \
-  -stripe-base https://api.stripe.com -api-key <a Stripe TEST key>
+  -stripe-base https://api.stripe.com -plans ./your-catalog.json
 ```
+
+The **preflight** runs first and tells you whether artefact (C) is right before anything charges: it
+resolves every configured reference and names each failure by plan, kind and reference. `/readyz`
+reports the same as `billing_provider.pricing`. Running it is the cheapest possible check that the
+account is ready, and `-break-price` shows what it looks like when it is not.
 
 Everything the platform side can prove is proven. What is left is the half only Stripe can answer.
 
@@ -39,6 +52,7 @@ Everything the platform side can prove is proven. What is left is the half only 
 | 9 | Gainshare bills only verified, merged savings; an estimated / un-merged saving raises no charge | ✅ | `TestGainshareOverStripeBillsOnlyVerifiedMergedSavings` (six ways to fail, each asserting no ledger row **and** no Stripe object) |
 | 10 | Stripe key + signing secret from the Secrets seam; in no git/manifest/log/trace/bundle; test and live separated | ✅ | `TestStripeCredentialsComeFromTheSeamUnderTheP7ReservedNames`, `TestALiveKeyDoesNotResolveForATestSurface`, `TestNoStripeSecretInAGitTrackedFile` (whole git index, proven to fire), `scan-bundle.mjs` |
 | 11 | Usage is reconcilable against Stripe; a seeded drift is surfaced; no invoice line resells provider tokens | ✅ | `TestReconciliationSurfacesDriftAgainstStripe`, `TestNoResoldTokenLineSurvivesTheStripeReadBack` |
+| 13 | Every configured price reference resolves at the provider before anything charges, and a failure is named by plan / kind / reference | ✅ | `TestPreflightNamesEveryUnresolvedReference`, `TestPreflightCatchesAnArchivedPrice`, `TestPreflightDistinguishesAnOutageFromAMisconfiguration`, `TestPreflightIsReadOnly`; reported on `/readyz` as `billing_provider.pricing`, and rendered as a first-class misconfigured state in the console |
 | 12 | The webhook endpoint is the one documented inbound path, and the platform is never in a customer's production request path | ✅ | [`p21-billing-webhook-ingress.md`](p21-billing-webhook-ingress.md); `TestBillingWebhookRouteIsUnmountedByDefault`, `TestBillingWebhookRouteBoundsTheBody` |
 
 ## One constraint the implementation surfaced, and did not paper over

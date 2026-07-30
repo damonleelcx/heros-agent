@@ -99,17 +99,48 @@ next call rather than at the next restart.
 A **separate signing secret per mode** is required. Stripe issues one per endpoint, and sharing one
 across a test and a live endpoint means a test event verifies against a live deployment.
 
+### The third artefact: the price objects
+
+Credentials A and B get a deployment talking to Stripe. They do not get it **charging**: every plan's
+`price_ref` must be a price that exists in that Stripe account, and a metered price must be denominated
+in the meter's **integral unit** (the platform reports a whole-unit quantity and refuses to round one).
+See PRD §10.1 for who owns what.
+
+A wrong reference used to surface as a rejected charge at the period's first charge. It now surfaces at
+configuration time:
+
+```
+billing_provider.pricing on /readyz:
+  verified:7            every configured reference resolves
+  unresolved:2          two do not — the report names plan / kind / reference
+  unverified            the provider could not be reached, or cannot resolve prices at all
+  no_prices_configured  the catalog carries no price (an all-free deployment)
+  not_run               nothing has checked — NOT the same as "fine"
+```
+
+Run it against a real account before trusting it:
+
+```bash
+export STRIPE_API_KEY=<your Stripe TEST key>     # not a flag: a flag lands in shell history and in ps
+go run ./cmd/p21hermes -repo <hermes-agent> \
+  -stripe-base https://api.stripe.com -plans ./your-catalog.json
+```
+
 ## 5. What `/readyz` tells you
 
 ```json
 {
   "billing_rollout":  { "billing": "enabled", "provider_mode": "test", "gainshare": "disabled", ... },
-  "billing_provider": { "provider": "stripe(test)", "secrets_source": "aws-secrets-manager" }
+  "billing_provider": { "provider": "stripe(test)", "secrets_source": "aws-secrets-manager",
+                        "pricing": "verified:7" }
 }
 ```
 
-Two fields, two questions, deliberately not merged: **which gates are open** and **which processor is
-behind them, resolving credentials from where**. The failure this makes checkable is a deployment whose
+Three questions, deliberately not merged: **which gates are open**, **which processor is behind them
+and where its credentials resolve from**, and **whether this deployment can actually charge**. The last
+is `pricing` — "the billing service is up" and "the billing service can charge" are different claims,
+and a readiness surface that reported only the first would be confidently wrong in the one case that
+matters. The failure this makes checkable is a deployment whose
 LLM credentials come from a manager while its billing credentials quietly come from somewhere else,
 with a health endpoint confidently wrong about both.
 
@@ -149,6 +180,24 @@ fix it: the claim is standing and the redelivery would be deduped into nothing.
 
 Reconcile against the provider: the subscription's live state is Stripe's, and re-applying it is the
 audited plan-change path, not a database edit.
+
+### A plan cannot be purchased / `pricing` says `unresolved`
+
+The preflight resolved every configured price reference and at least one is not in this Stripe account.
+The report names **plan, charge kind and reference** for each — that is everything needed to fix it, and
+the fix is in the config store or in Stripe, never in code.
+
+Usual causes, in order: a placeholder `price_ref_*` that was never replaced; a price created in the
+*other* mode's account; a price that was **archived** (it resolves and cannot be charged on, which is
+why a shape check would have missed it).
+
+The customer's console shows this as a named state with the affected plan's control disabled — it does
+not show them the reference or the provider's error, and it tells them the next action is nothing, from
+them. It is not their configuration.
+
+`unverified` is a different answer and needs a different look: either the provider was unreachable when
+the check ran, or the wired provider cannot resolve prices at all. Neither means the configuration is
+wrong; both mean nobody has checked it.
 
 ### A customer says they were charged twice
 
