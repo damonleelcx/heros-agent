@@ -55,3 +55,49 @@ export const SESSION_COOKIE_OPTIONS = {
   secure: process.env.NODE_ENV === "production",
   path: "/",
 } as const;
+
+/**
+ * SIGNIN_FLOW_COOKIE carries the id of an in-flight federated sign-in (P22 task 3.1).
+ *
+ * # Why it is here rather than next to the flow store that uses it
+ *
+ * It was written next to the flow store first, and `tests/security.test.mjs` failed — correctly. The
+ * invariant that file enforces is that **credential cookie flags are set in exactly one place**, so
+ * there is one thing to audit and one thing to get wrong. A second `httpOnly: true` three directories
+ * away is precisely the drift that invariant exists to catch, and the honest fix is to obey it rather
+ * than to widen the assertion.
+ *
+ * # What it holds, and what it deliberately does not
+ *
+ * An opaque flow id. Not the PKCE verifier, not the nonce, not the `state` — those stay server-side in
+ * `lib/idp/flow.ts`, keyed by this id, for the same reason the session record stays server-side while
+ * the browser holds only a token. What the browser has is a handle; what it can do with the handle is
+ * exactly nothing except present it back.
+ *
+ * The flow id in this cookie is the BROWSER half of the CSRF defense. The `state` in the callback URL
+ * is the other half, and neither alone completes a sign-in.
+ */
+export const SIGNIN_FLOW_COOKIE = "heros_console_signin";
+
+/**
+ * SIGNIN_FLOW_COOKIE_OPTIONS is the flow cookie's flags.
+ *
+ * `sameSite: "lax"` for the same reason the session cookie uses it, and the reason is load-bearing
+ * here rather than incidental: the IdP returns the browser to `/auth/callback` as a **cross-site
+ * top-level GET navigation**, and `strict` means exactly "do not send this cookie on one". A `strict`
+ * flow cookie produces a sign-in that fails its own CSRF check every single time — the identity
+ * version of the payment defect recorded above.
+ *
+ * `path: "/auth"` because the cookie is meaningless anywhere else; a credential cookie scoped to where
+ * it is used is one fewer thing riding on every request in the product.
+ *
+ * No `maxAge` here, matching `SESSION_COOKIE_OPTIONS`: the lifetime is a bound owned by the module
+ * that owns the record (`MAX_FLOW_AGE_SECONDS`), and the route applies it — so the bound has one
+ * definition rather than a copy in a file that cannot import it.
+ */
+export const SIGNIN_FLOW_COOKIE_OPTIONS = {
+  httpOnly: true,
+  sameSite: "lax",
+  secure: process.env.NODE_ENV === "production",
+  path: "/auth",
+} as const;

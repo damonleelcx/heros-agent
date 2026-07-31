@@ -97,6 +97,17 @@ type SessionStore struct {
 	now      Clock
 	secrets  Secrets
 	observer Observer
+	// principals is the RECONCILE READ for offboarding (P22 task 6.3, event-write-reconcile-read).
+	//
+	// `Disable` and `RevokeAllFor` are two writes, and "A must be accompanied by B" held only by
+	// convention is an invariant one hurried call site breaks. So authorization also asks whether the
+	// principal is still active, on the path every admin request must pass through. Offboarding then
+	// takes effect even if somebody disables a principal and forgets to revoke — the sessions are dead
+	// at the next request either way.
+	//
+	// Optional so a unit test that only exercises session mechanics need not build a directory; the
+	// wired console always supplies one, and `Offboard` is the explicit door that does both writes.
+	principals *PrincipalStore
 }
 
 // SessionConfig configures a store.
@@ -111,6 +122,8 @@ type SessionConfig struct {
 	// Observer receives session-denial events. Nil records nothing, which is acceptable only in a
 	// unit test that asserts something else; the wired console always passes one.
 	Observer Observer
+	// Principals lets Authorize deny a disabled principal's live sessions. See the field comment.
+	Principals *PrincipalStore
 }
 
 // NewSessionStore builds a store.
@@ -130,12 +143,13 @@ func NewSessionStore(cfg SessionConfig) (*SessionStore, error) {
 		now = func() time.Time { return time.Now().UTC() }
 	}
 	return &SessionStore{
-		sessions: map[string]Session{},
-		byAdmin:  map[string]map[string]struct{}{},
-		ttl:      ttl,
-		now:      now,
-		secrets:  cfg.Secrets,
-		observer: cfg.Observer,
+		sessions:   map[string]Session{},
+		byAdmin:    map[string]map[string]struct{}{},
+		ttl:        ttl,
+		now:        now,
+		secrets:    cfg.Secrets,
+		observer:   cfg.Observer,
+		principals: cfg.Principals,
 	}, nil
 }
 
@@ -211,7 +225,39 @@ func (s *SessionStore) Authorize(ctx context.Context, token string) (Session, er
 		s.emit(Event{Kind: EventSessionDeniedExpired, AdminID: sess.AdminID, SessionID: id, At: now})
 		return Session{}, ErrSessionExpired
 	}
+	if s.principals != nil {
+		// The reconcile read. A disabled principal holds no live session, whether or not anybody
+		// remembered to revoke — which is what makes "disable ⇒ revoked" an invariant rather than a
+		// two-step procedure somebody performs correctly most of the time.
+		if p, ok := s.principals.ByID(sess.AdminID); !ok || !p.Active() {
+			s.emit(Event{Kind: EventSessionDeniedRevoked, AdminID: sess.AdminID, SessionID: id,
+				Detail: "the principal is no longer active", At: now})
+			return Session{}, ErrSessionRevoked
+		}
+	}
 	return sess, nil
+}
+
+// Offboard disables a principal AND revokes every session it holds, in that order.
+//
+// # Why the order, and why this exists beside the two primitives
+//
+// Disable first: between the two writes, a principal that is already disabled cannot obtain a NEW
+// session while the old ones are being revoked. Revoking first would leave a window in which the
+// operator being offboarded can sign in again.
+//
+// It exists as one function because P22 task 6.3 makes "disable ⇒ revoke all sessions" a requirement,
+// and a requirement expressed as two calls is a requirement somebody half-performs. `Disable` and
+// `RevokeAllFor` remain, because an incident responder revoking sessions without withdrawing access is
+// a real and different action.
+func (s *SessionStore) Offboard(adminID, byAdminID string) (int, error) {
+	if s.principals == nil {
+		return 0, errors.New("adminidentity: offboarding needs the principal directory — wire SessionConfig.Principals")
+	}
+	if err := s.principals.Disable(adminID); err != nil {
+		return 0, err
+	}
+	return s.RevokeAllFor(adminID, byAdminID), nil
 }
 
 // Revoke ends a session immediately. The next request presenting it is denied.

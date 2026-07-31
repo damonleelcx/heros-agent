@@ -217,7 +217,7 @@ last "because it will be refused anyway" — that restraint is why nothing there
 
 ## 8. Verification on a real repository
 
-- [x] 8.1 Re-run against hermes-agent and report what MOVED and what did not. → `cmd/p17hermes`.
+- [x] 8.1 Re-run against hermes-agent and report what MOVED and what did not. → `cmd/proof/memorystrategy`.
 
 **The finding: the count did not move, and the REASON did.** On hermes-agent@`528e335` (31 Python nodes)
 the run is still **186 (node × strategy) combinations, 186 refusals, 0 diffs** — identical to P17's. What

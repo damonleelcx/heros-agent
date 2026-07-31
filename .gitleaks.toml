@@ -5,12 +5,64 @@ title = "heros-agent secret scan"
 [extend]
 useDefault = true
 
+# ── P22 · identity secrets (task 5.3) ────────────────────────────────────────────────────────────
+#
+# The default rule set already catches a bare private key. These two rules catch what it cannot: an
+# identity credential assigned to one of THIS platform's names, which looks like an ordinary
+# configuration line to a generic scanner.
+#
+# Why identity gets its own rules rather than relying on the generic entropy heuristics: an OIDC client
+# secret and a SAML SP key MINT IDENTITIES. A leaked provider API key spends money until it is rotated;
+# a leaked identity secret lets somebody complete another person's sign-in, and by the time anybody
+# notices, it has already been used. That asymmetry is the argument for a specific rule rather than a
+# hope that the entropy check fires.
+#
+# Both rules deliberately require a VALUE with real length, and both allow the repository's placeholder
+# conventions, because a rule that fires on `CONSOLE_IDP_CLIENT_SECRET=` in an env-example is a rule
+# somebody switches off in the first week.
+
+[[rules]]
+id = "heros-identity-secret-assignment"
+description = "An identity secret (OIDC client secret / SAML SP key / admin IdP secret) assigned a value"
+regex = '''(?i)(CONSOLE_IDP_CLIENT_SECRET|CONSOLE_SAML_SP_PRIVATE_KEY|ADMIN_IDP_CLIENT_SECRET|HEROS_ADMIN_(SSO|MFA|SESSION)_SIGNING)\s*[:=]\s*['"]?([A-Za-z0-9/+_.\-]{16,})'''
+  # `regexTarget = "line"` matters. Without it the allowlist is matched against the extracted SECRET,
+  # and a placeholder is recognised only if the placeholder text happens to land inside the capture —
+  # which is exactly the kind of near-miss that makes an allowlist look present and behave absent.
+  # This was not reasoned out; it was found by running the scanner against a probe file whose fourth
+  # line said `change-me-before-you-deploy-this` and watching it get flagged anyway.
+  [[rules.allowlists]]
+  description = "Placeholders, ${VAR} interpolation, and the harness/dev values that authenticate nothing."
+  regexTarget = "line"
+  regexes = [
+    '''\$\{''',
+    '''(?i)(change-?me|replace-?me|placeholder|example|redacted|from-secrets-manager)''',
+    '''(?i)(not-a-secret|do-not-ship|harness-|local-dev-)''',
+  ]
+
+[[rules]]
+id = "heros-identity-tenant-map"
+description = "A populated CONSOLE_IDP_TENANT_MAP — the deployment's federation topology, not for git"
+# Not a credential, and still not committable: it names every IdP this deployment trusts and every
+# domain each tenant owns, which is a reconnaissance map of the customer base.
+regex = '''CONSOLE_IDP_TENANT_MAP\s*[:=]\s*['"]?\{[^}]*"tenant"'''
+  [[rules.allowlists]]
+  description = "Interpolation, and the documentation/test topologies that name nobody real."
+  regexTarget = "line"
+  regexes = ['''\$\{''', '''(?i)(change-?me|replace-?me|placeholder|example\.|acme\.test|\.test")''']
+
 [allowlist]
 description = "Non-secret placeholders and templates that must not be flagged."
 paths = [
   '''config\.example\.json''',        # placeholders only (keys live in env / secrets manager)
   '''docs/decisions/secrets-baseline\.md''',
   '''docs/decisions/otel-genai-conventions\.md''',
+
+  # P22's design and specification documents SHOW the shape of the tenant map, which is the point of
+  # them — `"tenant": "<id>"` next to a fictional `acme.okta.com`. Same category as the two decision
+  # documents above, and allowlisted by PATH for the same reason: the alternative is loosening the rule
+  # itself so that a real map stops being detected everywhere.
+  '''openspec/(changes/p22-sso|specs/sso-identity)/.*\.md''',
+  '''docs/prd/P22-sso-identity\.md''',
 ]
 regexes = [
   '''PREFER env''',                   # the template's guidance strings

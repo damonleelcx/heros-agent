@@ -291,7 +291,7 @@ build gate, not a review habit.
 To see it against a real repository with no provider account, point it at the hermes demo:
 
 ```bash
-go run ./cmd/p9hermes -repo /path/to/hermes-agent      # serves the platform API on :4321
+go run ./cmd/proof/customerconsole -repo /path/to/hermes-agent      # serves the platform API on :4321
 ```
 
 The console's own checks run with `npm test` (214 cases) and `npm run build`, which runs the token,

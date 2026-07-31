@@ -40,7 +40,37 @@ const CLIENT_DIR = join(process.cwd(), ".next", "static");
 
 // The env var NAMES, not their values — a value here would itself be the leak. If the build
 // environment holds the real credential we compare against it directly.
-const CREDENTIAL_ENV = ["CONSOLE_PLATFORM_CREDENTIAL", "CONSOLE_TENANT_ASSERTIONS"];
+//
+// The identity entries are P22 task 3.3. They matter for a reason the platform credential does not
+// illustrate: an OIDC client secret and a SAML SP private key MINT IDENTITIES, so a leak is not a
+// disclosure to be rotated at leisure — it is an attacker able to complete somebody else's sign-in.
+// `CONSOLE_IDP_TENANT_MAP` is here too, and it is not a secret: it is the deployment's federation
+// topology (which IdP belongs to which tenant, and which domains that tenant owns), which is a
+// reconnaissance gift and belongs on the server side with everything else.
+//
+// `CONSOLE_IDP_CLIENT_ID` is deliberately ABSENT. An OIDC client id is a public identifier that
+// travels in the authorization URL by design; flagging it would be flagging the protocol, and a fence
+// that cries wolf is a fence somebody switches off.
+const CREDENTIAL_ENV = [
+  "CONSOLE_PLATFORM_CREDENTIAL",
+  "CONSOLE_TENANT_ASSERTIONS",
+  "CONSOLE_IDP_CLIENT_SECRET",
+  "CONSOLE_IDP_TENANT_MAP",
+  "CONSOLE_SAML_SP_PRIVATE_KEY",
+];
+
+// Identity material by SHAPE, for the case the build environment does not hold the value (P22 task
+// 3.3). The env comparison above catches "the deployment's own secret shipped"; these catch "a secret
+// shipped" — a key pasted into a component during debugging, a fixture key committed with a test.
+//
+// A PEM private key header is unambiguous: there is no legitimate reason for one to be in a browser
+// bundle, ever. The logical names are the `Secrets` seam's reserved names, and a bundle containing one
+// means client code is reaching for a server-side credential path.
+const IDENTITY_SECRET_PATTERNS = [
+  { name: "a PEM private key", re: /-----BEGIN (RSA |EC |ENCRYPTED |)PRIVATE KEY-----/ },
+  { name: "the OIDC client-secret logical name", re: /\bconsole_idp_client_secret\b/ },
+  { name: "the SAML SP key logical name", re: /\bconsole_saml_sp_private_key\b/ },
+];
 
 // A currency amount, a percentage, or a named price-band value.
 //
@@ -219,6 +249,10 @@ async function main() {
       // The MATCH is never printed. Printing it would move the credential from the bundle into the CI
       // log, which is the same exposure one system downstream.
       if (re.test(content)) findings.push(`STRIPE SECRET: something shaped like a ${name} in shipped bundle ${file}`);
+    }
+    for (const { name, re } of IDENTITY_SECRET_PATTERNS) {
+      // Same rule: the match is never printed. An identity secret in a CI log is an identity secret.
+      if (re.test(content)) findings.push(`IDENTITY SECRET: something shaped like ${name} in shipped bundle ${file}`);
     }
     for (const pattern of PRICE_PATTERNS) {
       const match = content.match(pattern);

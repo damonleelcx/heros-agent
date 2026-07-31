@@ -135,3 +135,41 @@ request path (ADR-002); billing is platform-internal commerce.
 - **WHEN** the billing/webhook path is unavailable
 - **THEN** a customer's transformed program continues calling its own providers unaffected
 - **AND** no deploy artifact routes customer production traffic through the platform's billing path.
+
+### Requirement: The webhook endpoint SHALL be registered per mode with an enumerated event set, and an unhandled event type SHALL be acked rather than failed
+
+Each mode SHALL have its **own** registered endpoint with **its own** signing secret and an **explicit, enumerated
+event-type subscription**, recorded in the ingress runbook with its URL and mode. An event whose type the platform
+does not handle SHALL be **acked as understood-and-ignored** — a 2xx that applies nothing — rather than returning
+a 5xx that fills the provider's retry queue.
+
+#### Scenario: A test endpoint's signing secret does not verify a live delivery
+
+- **WHEN** two endpoints exist, one per mode
+- **THEN** each has its own signing secret, and a delivery signed for one does not verify against the other
+- **AND** no deployment shares one signing secret across modes.
+
+#### Scenario: An unhandled event type is acked, not failed
+
+- **WHEN** the provider delivers an event whose type the platform does not handle
+- **THEN** the endpoint returns 2xx and applies nothing
+- **AND** no retry queue accumulates for events nobody asked for.
+
+### Requirement: A dispute SHALL author no ledger row and SHALL surface as a named divergence
+
+A dispute or chargeback moves money the platform did not author. The webhook SHALL mirror the state and SHALL
+author **no** billing-ledger row (the P7 rule stands). The movement SHALL surface through reconciliation as a
+**named** divergence, so it is closed by a human through the audited credit/refund path rather than absorbed
+silently.
+
+#### Scenario: A dispute webhook writes no ledger row
+
+- **WHEN** a `charge.dispute.created` event is delivered and applied
+- **THEN** the provider-owned state is mirrored
+- **AND** no billing-ledger row is authored by the webhook.
+
+#### Scenario: The resulting disagreement is named, not absorbed
+
+- **WHEN** reconciliation compares the platform's records against the provider's after a dispute
+- **THEN** the divergence is surfaced with the customer, period and amount it concerns
+- **AND** it is never resolved by overwriting either record.

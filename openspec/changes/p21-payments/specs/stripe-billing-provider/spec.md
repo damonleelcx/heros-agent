@@ -158,3 +158,47 @@ exactly once.
 - **WHEN** Stripe rejects a request (not an outage)
 - **THEN** the provider returns a distinct, non-outage error
 - **AND** the caller does not hammer Stripe with retries of a deliberately refused call.
+
+### Requirement: Stripe artefacts SHALL be mode-scoped, and the preflight SHALL run in the mode the deployment is running in
+
+The API key, the webhook endpoint and its signing secret, the customer handles, and the **price references** SHALL
+be treated as **per-mode** artefacts that live mode does not inherit from test mode. The preflight SHALL resolve
+the catalog **in the mode the deployment is running in**, and every readiness line or verification record naming
+the provider SHALL **name that mode**. A key whose mode does not match the surface SHALL be **refused** — in both
+directions — not warned about.
+
+#### Scenario: A clean test-mode preflight is not reported as a statement about live
+
+- **WHEN** the preflight resolves every reference in test mode
+- **THEN** the readiness line records the result **together with the mode it was observed in**
+- **AND** no surface reports the live catalog as verified on the strength of a test-mode result.
+
+#### Scenario: A live catalog is preflighted in live mode before the first live charge
+
+- **WHEN** the deployment is configured for live mode
+- **THEN** the preflight resolves the **live** catalog's references at the provider before anything charges
+- **AND** a reference that resolves in test but not in live is named by plan, kind and reference.
+
+#### Scenario: A key whose mode does not match the surface is refused
+
+- **WHEN** a test-mode key is resolved for a live surface, or a live-mode key for a test surface
+- **THEN** the provider refuses to construct rather than proceeding with a warning
+- **AND** an unrecognised key prefix is refused outright rather than assumed to be test.
+
+### Requirement: A rate limit SHALL be an outage and a decline SHALL be a rejection
+
+Provider **HTTP 429** responses and lock-contention errors SHALL map to `ErrProviderUnavailable`, so the P7 outage
+buffer holds the work and `FlushPending` drains the window exactly once. **Card declines** and invalid-request
+errors SHALL map to a distinct rejection error that stops. Both mappings SHALL be asserted.
+
+#### Scenario: A rate-limited window is billed once, not lost
+
+- **WHEN** the provider returns 429 during a charge-bearing call
+- **THEN** the provider returns `ErrProviderUnavailable` and the ledger row stays pending
+- **AND** `FlushPending` bills the window exactly once on recovery, with no usage discarded.
+
+#### Scenario: A declined card stops instead of retrying
+
+- **WHEN** the provider declines a payment
+- **THEN** the provider returns a rejection error distinct from an outage
+- **AND** the caller does not retry a card that a retry cannot make succeed.

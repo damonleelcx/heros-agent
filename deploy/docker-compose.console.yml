@@ -48,6 +48,24 @@ services:
       # `dev` refuses to start in production, by design.
       CONSOLE_TENANT_IDENTITY: ${CONSOLE_TENANT_IDENTITY:-configured}
       CONSOLE_TENANT_ASSERTIONS: ${CONSOLE_TENANT_ASSERTIONS:?set CONSOLE_TENANT_ASSERTIONS from your secret store}
+      # ── Identity federation (P22 task 7.2) ──────────────────────────────────────────────────────
+      #
+      # `${VAR:-}` interpolation only — a literal here is a hardcoded credential, and
+      # scripts/deploy/check-no-plaintext-secrets.sh fails the build on one. The defaults keep an
+      # open-core deployment (which federates with nobody) working unchanged: `configured` is still the
+      # default mechanism, and an unset identity variable is simply an absent federation.
+      CONSOLE_IDP_ISSUER: ${CONSOLE_IDP_ISSUER:-}
+      CONSOLE_IDP_CLIENT_ID: ${CONSOLE_IDP_CLIENT_ID:-}
+      CONSOLE_IDP_CLIENT_SECRET: ${CONSOLE_IDP_CLIENT_SECRET:-}
+      CONSOLE_IDP_REDIRECT_ALLOWLIST: ${CONSOLE_IDP_REDIRECT_ALLOWLIST:-}
+      CONSOLE_IDP_TENANT_MAP: ${CONSOLE_IDP_TENANT_MAP:-}
+      CONSOLE_SAML_IDP_ENTITY_ID: ${CONSOLE_SAML_IDP_ENTITY_ID:-}
+      CONSOLE_SAML_SP_ENTITY_ID: ${CONSOLE_SAML_SP_ENTITY_ID:-}
+      CONSOLE_SAML_IDP_METADATA_URL: ${CONSOLE_SAML_IDP_METADATA_URL:-}
+      CONSOLE_SAML_ACS_ALLOWLIST: ${CONSOLE_SAML_ACS_ALLOWLIST:-}
+      CONSOLE_SAML_SP_PRIVATE_KEY: ${CONSOLE_SAML_SP_PRIVATE_KEY:-}
+      HEROS_SECRETS_SOURCE: ${HEROS_SECRETS_SOURCE:-env}
+      HEROS_SECRETS_DIR: ${HEROS_SECRETS_DIR:-/var/run/secrets/heros}
       CONSOLE_SESSION_TTL_SECONDS: ${CONSOLE_SESSION_TTL_SECONDS:-28800}
       CONSOLE_UPSTREAM_TIMEOUT_MS: ${CONSOLE_UPSTREAM_TIMEOUT_MS:-10000}
       NODE_ENV: production

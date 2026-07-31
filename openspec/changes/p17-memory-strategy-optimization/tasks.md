@@ -263,7 +263,7 @@ refusal faithfully, up front, without either hiding it or making the surface poi
 ## 13. Verification on a real repository
 
 - [x] 13.1 Drive every P17 code path against **github.com/nousresearch/hermes-agent** at `528e335`
-      (31 Python nodes). → `cmd/p17hermes` (`go run ./cmd/p17hermes -repo /tmp/hermes-agent`).
+      (31 Python nodes). → `cmd/proof/memorystrategy` (`go run ./cmd/proof/memorystrategy -repo /tmp/hermes-agent`).
 
 What the run establishes, on the real tree rather than on fixtures:
 

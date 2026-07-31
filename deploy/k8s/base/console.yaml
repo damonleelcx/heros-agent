@@ -39,6 +39,27 @@ spec:
               valueFrom: { secretKeyRef: { name: heros-console, key: platform-credential } }
             - name: CONSOLE_TENANT_ASSERTIONS
               valueFrom: { secretKeyRef: { name: heros-console, key: tenant-assertions } }
+            # ── P22 identity (task 7.2) ───────────────────────────────────────────────────────────
+            #
+            # The four values below arrive at RUNTIME, which is the whole point: one image federates
+            # against Okta for one customer and Entra for another, and "onboard a customer" is a config
+            # change rather than a release. A baked-in issuer would mean the image an operator verified
+            # is not the image they run.
+            #
+            # `CONSOLE_TENANT_IDENTITY` stays `configured` in this base. An overlay sets `oidc` or
+            # `saml` and supplies the issuer/client id/allowlists; a base that federated by default
+            # would make the open-core deployment — which federates with nobody — the exception.
+            - name: CONSOLE_IDP_CLIENT_SECRET
+              valueFrom: { secretKeyRef: { name: heros-console, key: idp-client-secret, optional: true } }
+            - name: CONSOLE_SAML_SP_PRIVATE_KEY
+              valueFrom: { secretKeyRef: { name: heros-console, key: saml-sp-private-key, optional: true } }
+            - name: CONSOLE_IDP_TENANT_MAP
+              valueFrom: { secretKeyRef: { name: heros-console, key: idp-tenant-map, optional: true } }
+            # Which SOURCE identity credentials resolve from, reported on /api/health so the claim is
+            # checkable from the running system rather than from this file. `env` here because the
+            # External Secrets Operator has already materialised the values into this pod's environment
+            # with no bootstrap secret; an air-gapped overlay sets `file` and mounts them instead.
+            - { name: HEROS_SECRETS_SOURCE, value: "env" }
           # Probes read the console's OWN health endpoint (never a rendered page).
           livenessProbe:
             httpGet: { path: /api/health, port: http }

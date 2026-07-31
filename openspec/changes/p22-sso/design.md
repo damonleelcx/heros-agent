@@ -243,6 +243,103 @@ signature" tells an attacker which half they got wrong and helps no real user.
 **Rejected — a reflected or wildcard redirect target / distinguishing refusal reasons.** A reflected redirect is
 an open redirect by construction; distinct refusal reasons are a probing oracle. Both rejected at L1.
 
+## Decision 10 — Okta is the named reference provider; the mechanism stays generic
+
+**Chosen:** one **real** provider — Okta — is run end to end on both identity domains, and everything
+Okta-shaped lives in **configuration and a registration recipe**. No verifier gains a provider branch, a
+provider enum, or a per-provider claim mapping.
+
+**Why (L6 可扩展, plus a commercial reason that is real).** Two things are true at once. A buyer's
+security team cannot verify a standard; they can verify a deployment, and *"we federate with your Okta"*
+is the sentence they ask for. And the moment "Okta support" becomes a code path, the next provider is a
+second code path, and the abstraction that made the seam worth building is gone — the first branch is
+always the cheap one.
+
+So the increment is deliberately shaped so that satisfying it for Okta satisfies it for Entra or Ping:
+issuer registration is a string the deployment supplies, key rotation is a property of any provider's key
+set, certificate rollover is a property of any SAML IdP, and the recipe is a document. The check is
+crude and effective: a provider brand appearing in verifier **logic** — as opposed to a comment, a
+fixture, or a document — is a review failure.
+
+**Rejected — an Okta adapter.** It would work immediately and would make the second provider a second
+adapter. The cost is paid later, by somebody else, which is exactly the shape L6 exists to refuse.
+
+**Rejected — stay provider-neutral indefinitely.** Neutrality is not a claim anyone can test. A phase
+that never names a provider never finds out that a real discovery document has a trailing slash.
+
+## Decision 11 — the issuer registration is the exact `iss` string; no normalisation, no suffix matching
+
+**Chosen:** an issuer registration records the issuer **exactly as the token will spell it**, validated at
+load (absolute `https`, no trailing slash), and compared by **string equality**. A well-formed but
+unregistered issuer produces a **named configuration diagnosis** for the operator — distinct from "an
+identity we do not recognise" — while the end user receives the same single generic refusal.
+
+**Why (L1 安全, with an L4 运维 corollary).** The security half first: any comparison looser than equality
+is a hole. Suffix matching trusts `okta.com.attacker.example`; prefix matching trusts anything under a
+path; "helpful" normalisation makes the trusted set something a reviewer has to simulate rather than
+read.
+
+The operations half is why the diagnosis matters. Okta alone spells its issuer three ways — the **org**
+authorization server (`https://<org>.okta.com`), a **custom** one (`https://<org>.okta.com/oauth2/<id>`),
+and either of those under an org **custom domain**. Registering the wrong one is not a security failure;
+it fails closed, which is correct. It is a *diagnosis* failure: the operator sees "not provisioned",
+concludes the tenant map is wrong, and goes looking in the right file for the wrong reason. Naming the
+mismatch — *the token asserts an issuer we do not trust* — turns an afternoon into a minute, and costs
+one branch in an error path that never reaches the user.
+
+**Rejected — match on host, or on the org portion of the URL.** It would make all three spellings work
+without configuration, and it is precisely the leniency that makes a look-alike domain a valid issuer.
+
+## Decision 12 — signing material is a set with a rotation window; refresh is bounded
+
+**Chosen:** keys are selected by `kid` from a set that legitimately carries several and rotates on the
+provider's schedule; an unknown `kid` MAY trigger **at most one refresh per bounded interval** and then
+refuses. A SAML registration holds **every currently-valid** certificate (or resolves the set from IdP
+metadata). Discovery, key-set, metadata and readiness fetches are cached with a floor.
+
+**Why (L2 稳定 / L4 运维, and an L1 edge).** Rotation is routine at the provider and must be a non-event
+here; a verifier that pins one key or one certificate converts the customer's scheduled maintenance into
+our outage, and the outage arrives without a deploy on our side to blame it on.
+
+The bound on refresh is the part that is easy to get wrong, because the naive fix is the obvious one:
+*if we see a `kid` we do not know, fetch the key set*. But `kid` is attacker-controlled input, so that
+rule hands anyone a way to make us hammer the customer's identity org — and the org's request limits are
+**shared with every other application that customer runs on it**. The damage lands on systems that are
+not ours, caused by a request pattern we chose. That is not a performance question.
+
+**Rejected — refetch on every unknown `kid`.** Correct-looking, and a rate-limit weapon aimed at a third
+party.
+
+**Rejected — pin a single key / a single certificate.** Simple, until the first rotation.
+
+## Decision 13 — no directory back-channel; the deactivation window is the session TTL, and it is published
+
+**Chosen:** the platform does not poll or subscribe to the customer's directory. A user deactivated at
+the IdP starts **no new session**, and any session already held ends **when it expires** — bounded by the
+configurable console session TTL, whose default is documented. Every surface discussing revocation states
+**which** revocation it means: platform-side (immediate, next request) or IdP-side (bounded by the TTL).
+The operator domain keeps its explicit path — disabling the principal revokes their live sessions now.
+
+**Why (L1 安全, decided against L3 UX).** The market expects "disable in the IdP, dead everywhere at
+once", and the platform cannot do it. There were two ways to close the gap and one of them is worse than
+the gap.
+
+**Rejected — poll the IdP's admin API.** This is the version that "works". It requires the customer to
+issue us a **standing, high-privilege directory credential** so we can read who is active — a permanent
+new secret with read access to their whole user directory, held by us, in exchange for shortening a
+window bounded by a session TTL the customer can already configure. Their security review would be right
+to refuse it, and we would be right to expect them to. A larger permanent risk is not a mitigation for a
+smaller bounded one.
+
+**Rejected — say it propagates immediately and ship TTL-bounded behaviour.** The same gap, with the cost
+moved to the first customer who tests it, and paid in trust rather than in engineering. The honest,
+smaller claim survives contact with a security questionnaire; the larger one does not survive contact
+with a browser tab.
+
+**What is deferred, and named:** push-based revocation via SCIM or event hooks. It is sold when built.
+The trigger for building it is observable rather than scheduled — the first customer whose policy
+requires it, or the first deployment forced to shorten its TTL past usability to compensate.
+
 ## Interfaces sketch
 
 The customer seam contract is **unchanged** — only its implementation and the routes around it are new:
@@ -296,6 +393,101 @@ internal/adminidentity/
 }
 ```
 
+## Ratification record — the one-way doors, closed before the first verifier
+
+Task 1.1. Decisions **D1**, **D2** and **D5** are a *published federation contract with the customer's IT
+organization*: once a tenant's IdP is pointed at us, changing the mechanism, the claim set, or the operator
+domain boundary is a migration for every federated tenant, not a refactor (🔴 `careful-api-creation`). They are
+therefore ratified **here, before any verifier exists**, so that no verifier's convenience gets to argue with
+them later.
+
+| Door | Ratified as | What is now closed |
+|---|---|---|
+| **D1** — the seam is the only thing that changes | Decision 1 | Nothing above `verify(assertion) → { tenantId }` may learn a mechanism word. The fence is `tests/sso-identity.test.mjs` §NFR1, not review. |
+| **D2** — OIDC primary, SAML enterprise, **one** seam | Decision 2 | The mechanism is a *deployment* property, never a platform-global one; a third mechanism is a fourth `PROVIDER` value, never a second seam. |
+| **D5** — operator IdP real+pluggable behind the **existing** seam; disjoint domain | Decision 5 | `adminidentity.IdentityProvider` is not rebuilt, `Verify`/`Describe` do not move, and the operator domain never becomes reachable from a customer origin. |
+
+Ratification is dated by construction: every clause above has a test that fails if it stops being true (task 8),
+and the tests were written before the verifiers they fence (task 8 precedes the green in the section order).
+
+## The federation contract — one source both verifiers derive from
+
+Task 1.2. OIDC and SAML are two *encodings* of the same three questions: **who signed this**, **what did they
+say about the subject**, and **how long is that true for**. Writing those answers twice is how a security fence
+becomes decorative — the second copy drifts, and the drift is invisible because both halves pass their own
+tests. So the contract is a **single module** the two verifiers *derive from* rather than *agree with*:
+[`web/console/src/lib/idp/federation.ts`](../../../web/console/src/lib/idp/federation.ts).
+
+**1 · The trusted issuer set.** A federation trusts exactly the issuers named in the injected map — an OIDC
+`iss` or a SAML `entityID`, compared as an exact string after trimming. There is no wildcard, no suffix match,
+and no "any issuer with a valid signature": a signature proves *someone* signed, and the issuer set is what
+turns that into *someone we federate with*. An assertion from an unlisted issuer is refused before its
+signature is even checked, because verifying first would let an unlisted party choose which of our code paths
+runs.
+
+**2 · The claims mapped.** Exactly four, and nothing else crosses the seam:
+
+| Contract claim | OIDC source | SAML source | Used for |
+|---|---|---|---|
+| `issuer` | `iss` | `<Issuer>` / `entityID` | selecting the registration |
+| `subject` | `sub` | `<NameID>` | the stable identity handle |
+| `email` | `email` (only when `email_verified` is `true`) | `NameID` of format `emailAddress`, or the `email` attribute | domain mapping / JIT |
+| `emailDomain` | derived from `email`, lowercased, after the last `@` | same | domain mapping / JIT |
+
+`email` is dropped unless the IdP says it verified it. An unverified email is a *self-asserted string* and
+mapping a tenant off one is the cross-tenant hole NFR9 exists to close. Everything else the IdP sends —
+groups, roles, names, `amr`, custom attributes — is **not read**, because a claim we read is a claim a customer
+IdP can change to move authority, and P22 has exactly one authority decision to make: which tenant.
+
+**3 · Validity and freshness bounds.** One set, applied to both encodings:
+
+| Bound | Value | Why this number |
+|---|---|---|
+| `MAX_ASSERTION_AGE` | 120 s | The window between the IdP's redirect and our callback is a network round trip, not a workflow. Matches `adminidentity.MaxAssertionAge` deliberately — two spellings of "fresh" is how one of them stops being enforced. |
+| `CLOCK_SKEW` | 60 s | The only tolerance. Applied symmetrically to `iat`/`NotBefore` and `exp`/`NotOnOrAfter`, so a slightly-fast IdP is usable and a stale assertion is still stale. |
+| `MAX_FLOW_AGE` | 600 s | How long a begun sign-in may take to come back. It bounds the `state`/PKCE record's life; a flow older than this is refused and its record dropped. |
+| one-time guard | per `jti`/`AssertionID` | An assertion is usable **once**. Without it, freshness alone leaves a 120 s replay window, and 120 s is plenty. |
+
+An assertion missing a bound it needs (no `exp`, no `NotOnOrAfter`) is refused rather than defaulted — 🔴
+`no-lazy-defaults`: a default here is a bound we invented on the IdP's behalf.
+
+**4 · One refusal reason.** Every failure above returns the same generic string. Distinguishing "unknown
+issuer" from "bad signature" from "stale" tells an attacker which half they got wrong and helps no real user
+(Decision 9). The *cause* is recorded server-side as a security event, where the operator can read it and the
+attacker cannot.
+
+## Tenant-mapping config shape
+
+Task 1.3. Confirmed as the shape in the interfaces sketch, injected exactly the way `CONSOLE_TENANT_ASSERTIONS`
+is — a single environment-borne JSON document, `CONSOLE_IDP_TENANT_MAP`, changeable without a deploy and with
+no compiled per-tenant branch anywhere:
+
+```jsonc
+{
+  "strategy": "domain" | "per-issuer" | "jit",   // required; an unknown strategy refuses to boot
+  "issuers": {
+    "https://acme.okta.com": {                    // OIDC `iss` or SAML entityID — exact match
+      "tenant": "cus_acme",                       // the ONE tenant this registration resolves to
+      "verified_domains": ["acme.com"],           // domains THIS registration has proven it owns
+      "jit_allow": ["acme.com"]                   // optional; JIT only under an explicit allow rule
+    }
+  }
+}
+```
+
+Three properties make this a mapping rather than a suggestion:
+
+- **A domain is owned by a registration, not asserted by a token.** `verified_domains` hangs off the *issuer
+  entry*, so "IdP A asserts an `acme.com` email" resolves to tenant B **only if IdP A is B's registered
+  issuer**. That single piece of nesting is the whole of NFR9; a flat `domain → tenant` table would let any
+  federated IdP claim any tenant's domain by minting one claim.
+- **JIT is an allow rule, never a fallback.** `jit_allow` is per-registration and empty by default. An
+  identity matching no rule is a **security event**, not a signup.
+- **The strategies are validated at load, not at sign-in.** An unparseable or unknown-strategy map throws at
+  module load, exactly as `CONSOLE_TENANT_ASSERTIONS` does today (ADR-004 fail-static): a console that boots
+  and then refuses every login looks like a broken product, and a console that boots and maps *loosely* is
+  worse.
+
 ## Risks
 
 - **The mechanism leaks above the seam** → Decision 1 + the NFR1 "unchanged above the seam" regression test; a
@@ -313,3 +505,21 @@ internal/adminidentity/
   verified factor ⇒ no session.
 - **Operator surface reachable from a customer session** → Decision 5: disjoint origin + cookie jar + principal
   type; no promotion path from `auth.Principal`; a cross-origin unreachability test.
+- **Everything is green and no real provider has been met** → Decision 10: one real org, run end to end on both
+  domains. Refusals stay with the repository's own IdP (only it can be told to misbehave); **acceptances** move to
+  the real org, because only a real provider proves its discovery document parses and its key set loads. A record
+  that does not say which one produced a green is not a record.
+- **The registered issuer is not the asserted issuer** (three legitimate spellings) → Decision 11: exact-match
+  registration validated at load, plus a **named** configuration diagnosis distinct from "unknown identity". The
+  refusal was always correct; what was missing was a sentence telling the operator which file to open.
+- **A routine key or certificate rotation becomes our outage** → Decision 12: selection by `kid` over a set,
+  bounded refresh, and a SAML registration that accepts every currently-valid certificate.
+- **An unknown-`kid` flood spends the customer's org rate budget** → Decision 12: refresh is rate-bounded and probes
+  are cached with a floor. The blast radius lands on the customer's *other* applications, which is why this sits
+  with the security items rather than the performance ones.
+- **The offboarding claim is bigger than the behaviour** → Decision 13: the true effect is stated everywhere it
+  appears (no new session; existing session bounded by the published TTL), and the push version is named as a
+  follow-up rather than implied. Polling the directory was rejected as a larger permanent risk than the bounded
+  window it would close.
+- **Naming a provider grows a provider branch** → Decision 10: Okta contributes configuration and documentation;
+  a provider brand in verifier logic is a review failure.

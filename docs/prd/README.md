@@ -106,6 +106,42 @@ inbound-from-internet path, its secret wiring, and what to do when it misbehaves
 [customer-facing billing copy](../sales/P21-billing-copy.md) (what a billing message may and may not
 say, with the banned phrases enforced at build time).
 
+**What "implemented" claims, and what it does not.** The M16 checklist is green against a **real Stripe
+test account** (2026-07-30) — the wire, not an in-process double, on a customer created by that run. Moving
+to the real wire found seven defects, five in shipped code, which is the argument for doing it stated as a
+number. **Live mode is untaken and inherits none of that account's artefacts**: the key, the webhook endpoint
+and its signing secret, the customer handles and the price ids are all per-mode objects, and the live catalog
+has to be preflighted in live mode before anything charges. That second checklist is
+[P21 §13.1](P21-stripe-payments.md), it is not green, and it is deliberately kept separate — the first
+checklist is a claim about the platform, the second is a claim about an account.
+
+**P22 is implemented.** Its two capabilities are folded into the live spec set —
+[`sso-identity`](../../openspec/specs/sso-identity/spec.md) (the customer OIDC/SAML seam, tenant mapping,
+and the identity security posture) and
+[`operator-sso-mfa`](../../openspec/specs/operator-sso-mfa/spec.md) (the P8 operator surface made real) —
+and it ships with the [identity copy and commitment boundary](../sales/P22-identity-copy.md): what we
+sell, what we explicitly do **not** commit to (SCIM, a per-seat user/audit model, transformed-program
+identity), and the questions a security reviewer always asks.
+
+**What "implemented" claims, and what it does not.** Both verifiers are green — against a signing identity
+provider **this repository runs**. That is the right way to prove a *refusal*: a fixture can be told to send
+a stale assertion, a wrapped signature, or a token signed with the wrong key, and a real provider cannot. It
+proves nothing about *acceptance* — whether a real discovery document parses, a real key set loads and
+rotates, a real assertion shape verifies. **No real org has been federated with yet.** The read-only probe
+([`liveidp_test.go`](../../internal/adminidentity/liveidp_test.go)) has been ready since the module was
+written and skips, because nobody has pointed it at one. That checklist is
+[P22 §13.1](P22-sso-identity.md) — Okta first — and it is not green. One correction it forces is worth
+knowing before a sales conversation: **there is no directory back-channel**, so a user disabled at the
+customer's IdP starts no new session but keeps an existing one until it expires, bounded by the console
+session TTL.
+
+Two things are worth reading even if you never touch the code. First, **the seam did not move**: the
+session store, cookie, revocation, scope derivation and fail-closed middleware are byte-for-byte what
+ADR-008 built, fenced by pinned digests plus a rule that no mechanism word may appear above the seam.
+Second, **operator MFA is now an invariant rather than a claim** — the OIDC and SAML admin providers
+deliberately do not read `amr`, `acr` or `<AuthnContextClassRef>`, so a misconfigured IdP MFA policy
+still results in denial on the surface that can halt the fleet.
+
 What it depends on, and what depends on it:
 
 | Relationship | Phase | Why it matters to P21 |
@@ -120,8 +156,8 @@ Run it against a real repository:
 
 ```bash
 git clone https://github.com/nousresearch/hermes-agent /tmp/hermes-agent
-go run ./cmd/p21hermes -repo /tmp/hermes-agent            # the whole period, printed
-go run ./cmd/p21hermes -repo /tmp/hermes-agent -serve     # …and serve the console's platform API
+go run ./cmd/proof/payments -repo /tmp/hermes-agent            # the whole period, printed
+go run ./cmd/proof/payments -repo /tmp/hermes-agent -serve     # …and serve the console's platform API
 ```
 
 ### Published-Word Surfaces — P23

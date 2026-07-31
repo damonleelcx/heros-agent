@@ -138,7 +138,7 @@ Run it against a real account before trusting it:
 
 ```bash
 export STRIPE_API_KEY=<your Stripe TEST key>     # not a flag: a flag lands in shell history and in ps
-go run ./cmd/p21hermes -repo <hermes-agent> \
+go run ./cmd/proof/payments -repo <hermes-agent> \
   -stripe-base https://api.stripe.com -plans ./your-catalog.json -preflight-only
 ```
 

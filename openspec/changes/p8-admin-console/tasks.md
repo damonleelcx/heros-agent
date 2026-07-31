@@ -358,7 +358,7 @@ privileged actions.
       without a described reason is exactly what 15.18 exists to catch.
 
 > **§16 record — 2026-07-24.** Build green (token scan · `next build` · bundle scan), **41 cases, 39
-> pass, 0 fail**, and walked in a browser against `cmd/p8hermes`.
+> pass, 0 fail**, and walked in a browser against `cmd/proof/operatorconsole`.
 >
 > **16.1/16.2** — the operator `Stat` already existed and already outranked its frame; it now resolves
 > through the **shared** `--text-stat-sm` so the hierarchy is a property of the token set rather than a
@@ -492,7 +492,7 @@ told the operator something false.
 > **§17 record — 2026-07-24.** Token scan · `tsc` · **43 cases, 41 pass, 0 fail** · `next build` ·
 > bundle scan (**845 461 bytes**, 554 539 under the ceiling — the three faces are 160 kB of `woff2`
 > and are not JavaScript) · visual baseline green across 11 routes. Walked in a real browser against
-> `cmd/p8hermes` on the **production** build, in both themes and at 768 px.
+> `cmd/proof/operatorconsole` on the **production** build, in both themes and at 768 px.
 >
 > 🔎 **The two defects worth the restyle on their own.** Both were invisible to a green build, and
 > both are now machine-fenced. FR24 was *false on screen while true in the markup* — the requirement

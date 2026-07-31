@@ -105,3 +105,30 @@ the client.
 - **WHEN** the billing data is loading, empty, or the billing provider is temporarily unavailable
 - **THEN** the page renders an explicit loading / empty / "billing temporarily unavailable" state
 - **AND** it never blocks the rest of the product or renders a blank error.
+
+### Requirement: A payment awaiting customer authentication SHALL be its own state, distinct from a failure
+
+When a payment requires the cardholder to authenticate (SCA / 3-D Secure), the resulting subscription state SHALL
+be **mirrored verbatim** from the provider and rendered as its **own** state — carrying the provider's own action
+link — distinct from `past_due` and from `payment_failed`. The platform SHALL NOT retry such a payment
+automatically, and SHALL NOT describe it as a declined card.
+
+#### Scenario: A card requiring authentication renders a waiting state, not a failure
+
+- **WHEN** a subscription is incomplete because the payment requires customer authentication
+- **THEN** the billing page renders a named "your bank needs to confirm this payment" state with the provider's
+  action link
+- **AND** it is visually and textually distinct from `payment_failed`, and keyboard-reachable.
+
+#### Scenario: An authentication-pending payment is not retried automatically
+
+- **WHEN** a payment is waiting on the cardholder to authenticate
+- **THEN** the platform performs no automatic retry of that payment
+- **AND** the next action shown belongs to the cardholder, not to the platform.
+
+#### Scenario: A declined card and an authentication-pending payment give different instructions
+
+- **WHEN** the two states are compared
+- **THEN** the declined card asks the customer to update their payment method
+- **AND** the authentication-pending payment asks the customer to complete authentication — the two messages are
+  never merged into one.

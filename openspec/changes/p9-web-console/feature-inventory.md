@@ -382,7 +382,7 @@ takes the HTML file **and** its Go handler together, so no route is left serving
 
 All five files are removed, each with its `go:embed` directive and its UI handler, leaving **no route
 serving a stale asset**. The API routes are untouched: only the page handlers went, which is why
-`cmd/p9hermes` still serves `/api/p35/…` and the console still renders it.
+`cmd/proof/customerconsole` still serves `/api/p35/…` and the console still renders it.
 
 Also removed: the **seven Go tests** that asserted properties of those pages. A page's tests go with
 the page — but what they protected did not, and the mapping is written down in `p2_test.go` rather than

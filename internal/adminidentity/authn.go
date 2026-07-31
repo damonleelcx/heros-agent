@@ -73,6 +73,28 @@ type Assertion struct {
 	MFA MFAEvidence `json:"mfa"`
 	// Signature is an HMAC over {issuer, subject, issued_at} keyed by the SSO signing secret.
 	Signature string `json:"signature"`
+
+	// Token is the raw federated credential a REAL provider verifies (P22 task 6.1): an OIDC ID token,
+	// or a base64 SAML Response.
+	//
+	// # Why the seam grew a field instead of a second interface
+	//
+	// `Verify(ctx, Assertion) (Claims, error)` is the contract every P8 caller is written against, and
+	// ADR-008's whole argument is that the mechanism must be a replaceable implementation of ONE
+	// function rather than a shape the callers learn. A second interface for "the real ones" would be
+	// exactly the leak that argument forbids. So the struct carries the material each provider kind
+	// needs, and each kind reads only its own: `HMACProvider` ignores `Token` entirely, and the OIDC
+	// and SAML providers ignore `Signature` and the IdP's `MFA` claim.
+	//
+	// It is never logged. `Event` has no field it could travel in, which is the property that survives
+	// a debugging session.
+	Token string `json:"-"`
+	// Nonce binds the token to the browser flow the console began, when the console supplies one. A
+	// provider that is given a nonce and receives a token without it refuses.
+	Nonce string `json:"-"`
+	// Factor is the SECOND FACTOR the operator presented to the PLATFORM (P22 task 6.2) — a TOTP code
+	// or a WebAuthn assertion. It is not the IdP's claim about a factor, and that difference is NFR8.
+	Factor PresentedFactor `json:"-"`
 }
 
 // Claims is a verified assertion's usable content.
@@ -235,17 +257,66 @@ type Authenticator struct {
 	sessions   *SessionStore
 	observer   Observer
 	now        Clock
+	// factors verifies the second factor the PLATFORM enrolled, rather than the one the IdP claims
+	// (P22 task 6.2). Nil is permitted only for the fixture provider — see NewAuthenticatorFor.
+	factors FactorVerifier
 }
 
-// NewAuthenticator wires the login path.
-func NewAuthenticator(provider IdentityProvider, principals *PrincipalStore, sessions *SessionStore, observer Observer) (*Authenticator, error) {
-	if provider == nil || principals == nil || sessions == nil {
+// AuthenticatorConfig wires the login path.
+type AuthenticatorConfig struct {
+	Provider   IdentityProvider
+	Principals *PrincipalStore
+	Sessions   *SessionStore
+	Observer   Observer
+	// Factors verifies a platform-enrolled second factor. REQUIRED for any real provider.
+	Factors FactorVerifier
+	// Production refuses a test-mode IdP. Set from the deployment environment, not inferred.
+	Production bool
+	Now        Clock
+}
+
+// NewAuthenticatorFor wires the login path and enforces the two invariants P22 adds.
+//
+// # Why these are construction-time and not runtime checks
+//
+// Both are properties of a DEPLOYMENT, and both fail in the direction that looks fine:
+//
+//   - A real IdP with no platform factor verifier authenticates on SSO alone. Every login succeeds,
+//     nothing errors, and the operator surface has quietly become single-factor. Refusing to construct
+//     is the only version of this check that cannot be missed, because there is no request to observe.
+//   - A production console pointed at the fixture `TestMode` issuer accepts assertions signed with a
+//     key that exists to make tests runnable. The customer seam already refuses to BOOT in that
+//     situation (`identity.ts`, `CONSOLE_TENANT_IDENTITY=dev`); this is the same guard on the surface
+//     that can halt the fleet, and it says what is wrong once, to the person doing the deploy.
+func NewAuthenticatorFor(cfg AuthenticatorConfig) (*Authenticator, error) {
+	if cfg.Provider == nil || cfg.Principals == nil || cfg.Sessions == nil {
 		return nil, errors.New("adminidentity: an authenticator needs an admin IdP, a principal store and a session store")
 	}
+	info := cfg.Provider.Describe()
+	if cfg.Production && info.TestMode {
+		return nil, fmt.Errorf("adminidentity: the %s provider is running in test mode and must not be used in production", info.Kind)
+	}
+	if info.Kind != ProviderKindHMAC && cfg.Factors == nil {
+		return nil, fmt.Errorf("adminidentity: the %s provider proves only the SSO subject — a platform-verified second factor is required, because the IdP's own MFA claim is a configuration of a system this code does not control", info.Kind)
+	}
+	now := cfg.Now
+	if now == nil {
+		now = func() time.Time { return time.Now().UTC() }
+	}
 	return &Authenticator{
-		provider: provider, principals: principals, sessions: sessions, observer: observer,
-		now: func() time.Time { return time.Now().UTC() },
+		provider: cfg.Provider, principals: cfg.Principals, sessions: cfg.Sessions,
+		observer: cfg.Observer, factors: cfg.Factors, now: now,
 	}, nil
+}
+
+// NewAuthenticator wires the login path with the fixture provider's shape.
+//
+// Kept because P8's launch path and every P8 test already call it by this name. It delegates, so the
+// invariants above apply to it too — which is why it works for `HMACProvider` and refuses a real one.
+func NewAuthenticator(provider IdentityProvider, principals *PrincipalStore, sessions *SessionStore, observer Observer) (*Authenticator, error) {
+	return NewAuthenticatorFor(AuthenticatorConfig{
+		Provider: provider, Principals: principals, Sessions: sessions, Observer: observer,
+	})
 }
 
 // Authenticate performs the SSO + MFA exchange and issues a session on success.
@@ -253,6 +324,16 @@ func NewAuthenticator(provider IdentityProvider, principals *PrincipalStore, ses
 // Every denial path emits an event before returning, so "no MFA ⇒ denied AND logged" holds without a
 // caller remembering to log it.
 func (a *Authenticator) Authenticate(ctx context.Context, assertion Assertion) (Session, string, error) {
+	return a.AuthenticateWithChallenge(ctx, assertion, nil)
+}
+
+// AuthenticateWithChallenge is Authenticate with the WebAuthn challenge this login was issued.
+//
+// The challenge is per-login and server-minted; a WebAuthn assertion that does not sign over it is a
+// replay of an earlier one. It is a separate entry point rather than a fifth field on `Assertion`
+// because it is OURS — the console generated it — and mixing what we issued with what the IdP and the
+// operator sent is how a verifier ends up trusting the wrong half.
+func (a *Authenticator) AuthenticateWithChallenge(ctx context.Context, assertion Assertion, challenge []byte) (Session, string, error) {
 	claims, err := a.provider.Verify(ctx, assertion)
 	if err != nil {
 		kind := EventLoginDeniedBadAssertion
@@ -274,7 +355,29 @@ func (a *Authenticator) Authenticate(ctx context.Context, assertion Assertion) (
 			Detail: "principal is not MFA-enrolled on the platform side", At: a.now()})
 		return Session{}, "", ErrMFANotEnrolled
 	}
-	return sessionAndToken(a.sessions.Issue(ctx, p, claims.MFAFactor))
+
+	// The PLATFORM-VERIFIED second factor (P22 task 6.2, NFR8). This runs for every provider kind that
+	// has a verifier wired, and it is the ONLY MFA gate for the real ones — `OIDCProvider` and
+	// `SAMLProvider` return an empty `MFAFactor` on purpose, because a claim from a system we do not
+	// control is not an invariant. A misconfigured IdP MFA policy therefore still denies here.
+	factor := claims.MFAFactor
+	if a.factors != nil {
+		if !assertion.Factor.Present() {
+			a.emit(Event{Kind: EventLoginDeniedNoMFA, AdminID: p.AdminID, SSOSubject: claims.Subject,
+				Detail: "no platform-verified second factor was presented", At: a.now()})
+			return Session{}, "", ErrMFARequired
+		}
+		verified, err := a.factors.Verify(ctx, p.AdminID, assertion.Factor, challenge)
+		if err != nil {
+			a.emit(Event{Kind: EventLoginDeniedNoMFA, AdminID: p.AdminID, SSOSubject: claims.Subject,
+				Detail: err.Error(), At: a.now()})
+			// One denial for a wrong code, a wrong signature and an unenrolled factor: the operator
+			// reads the detail in the event, the person signing in reads one generic message.
+			return Session{}, "", fmt.Errorf("%w: %v", ErrMFARequired, err)
+		}
+		factor = verified
+	}
+	return sessionAndToken(a.sessions.Issue(ctx, p, factor))
 }
 
 // Describe reports the live admin IdP for the readiness surface.

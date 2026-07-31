@@ -455,7 +455,7 @@ fails calibration, an all-tie board.
 - [x] Leaderboard rows show **score ± CI, component breakdown, gate pass/fail, `config_hash`
       lineage**; a **Pareto view** renders the quality/cost/latency frontier.
 
-> **Verified 2026-07-22** by `TestM5ExitChecklist` (`internal/p4e2e`), which runs one in-process
+> **Verified 2026-07-22** by `TestM5ExitChecklist` (`internal/evale2e`), which runs one in-process
 > pipeline from IR to leaderboard and asserts every item above against what it actually produces,
 > plus the live-Postgres proofs (`make pg-proof`) and the browser verification recorded in
 > `openspec/changes/p4-eval-harness/ui-verification.md`.

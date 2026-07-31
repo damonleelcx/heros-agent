@@ -87,6 +87,27 @@ type AdminDeps struct {
 	// never an MFA bypass. A production deployment leaves it nil and the /testmode/assert route 404s.
 	TestModeIdP *adminidentity.IdPFixture
 
+	// IdP, when set, is the REAL OIDC admin identity provider performing the browser flow (P22).
+	//
+	// It is the same object as Authenticator's provider, typed — the flow needs AuthorizationURL and
+	// Exchange, which are deliberately NOT on the IdentityProvider seam. The seam is about VERIFYING an
+	// assertion, and putting a protocol-shaped method on it would be the mechanism leaking into the
+	// contract that exists to hide it.
+	//
+	// Nil in a test-mode deployment, and the two federated routes 404 — so there is no half-wired
+	// federated surface to reach in a console that has no real IdP.
+	IdP *adminidentity.OIDCProvider
+
+	// Challenges mints the single-use WebAuthn challenges the login path consumes. Nil disables the
+	// challenge route, and a WebAuthn login then fails on an empty challenge — which is the correct
+	// direction for a deployment that has not wired one.
+	Challenges *adminidentity.ChallengeStore
+
+	// Factors is the platform's MFA enrolment directory (P22 task 6.2). Nil disables the enrolment
+	// route; the login path still requires a platform-verified factor, so a deployment with no
+	// directory authenticates nobody rather than everybody.
+	Factors *adminidentity.FactorStore
+
 	// Rollout is the P8 rollout state, reported on the readiness surface. Nil serves everything (a
 	// self-hosted deployment with no waved rollout); a wired one reports which waves are live.
 	Rollout *adminops.Rollout
@@ -165,6 +186,9 @@ func (a *AdminAPI) routes() {
 	m.HandleFunc("POST /admin/api/session", a.handleLogin)
 	m.HandleFunc("DELETE /admin/api/session", a.handleLogout)
 	m.HandleFunc("POST /admin/api/testmode/assert", a.handleTestModeAssert)
+	m.HandleFunc("POST /admin/api/idp/start", a.handleIdPStart)
+	m.HandleFunc("POST /admin/api/mfa/challenge", a.handleMFAChallenge)
+	m.HandleFunc("POST /admin/api/mfa/enroll", a.session(a.handleEnrollFactor))
 	m.HandleFunc("GET /admin/api/me", a.session(a.handleMe))
 
 	m.HandleFunc("GET /admin/api/tenants", a.session(a.mounted(a.deps.Tenants != nil, "tenant", a.handleTenants)))
@@ -259,14 +283,89 @@ func (a *AdminAPI) session(next func(http.ResponseWriter, *http.Request)) http.H
 // ── Session ─────────────────────────────────────────────────────────────────────────────────────
 
 func (a *AdminAPI) handleLogin(w http.ResponseWriter, r *http.Request) {
+	// Two shapes, one door.
+	//
+	// `assertion` is the fixture path a test-mode deployment uses. `code`/`code_verifier` is the real
+	// federated path: the BFF completed the browser half and holds the PKCE verifier, and the platform
+	// completes the credential half — the client secret is resolved HERE, through the Secrets seam, so
+	// the operator BFF never holds a second credential (oidcflow.go explains why that split).
+	//
+	// `Assertion.Token`, `.Nonce` and `.Factor` are `json:"-"` and stay that way: the request DTO below
+	// carries them INWARD, while the struct still cannot serialise them outward into a log or an event.
+	// That asymmetry is the point — it was the property that blocked this route before P22, and the fix
+	// is a decode shape, not weakening the struct.
 	var body struct {
 		Assertion adminidentity.Assertion `json:"assertion"`
+
+		Code         string `json:"code"`
+		CodeVerifier string `json:"code_verifier"`
+		Nonce        string `json:"nonce"`
+		RedirectURI  string `json:"redirect_uri"`
+
+		Factor struct {
+			TOTP     string `json:"totp"`
+			WebAuthn *struct {
+				CredentialID      string `json:"credential_id"`
+				AuthenticatorData string `json:"authenticator_data"`
+				ClientDataJSON    string `json:"client_data_json"`
+				Signature         string `json:"signature"`
+			} `json:"webauthn"`
+		} `json:"factor"`
+		// ChallengeID names a challenge THIS PLATFORM minted. Not the challenge itself — see the
+		// consumption below, and `adminidentity/challenge.go` for why that difference is the whole
+		// replay guard rather than a detail of it.
+		ChallengeID string `json:"challenge_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeAdminError(w, http.StatusBadRequest, "bad_request", err.Error(), nil)
 		return
 	}
-	sess, token, err := a.deps.Authenticator.Authenticate(r.Context(), body.Assertion)
+
+	assertion := body.Assertion
+	if strings.TrimSpace(body.Code) != "" {
+		if a.deps.IdP == nil {
+			writeAdminError(w, http.StatusNotFound, "not_federated",
+				"this deployment has no federated admin identity provider", nil)
+			return
+		}
+		idToken, err := a.deps.IdP.Exchange(r.Context(), adminidentity.ExchangeRequest{
+			Code: body.Code, CodeVerifier: body.CodeVerifier, RedirectURI: body.RedirectURI,
+		})
+		if err != nil {
+			// One status for every exchange failure. The IdP's own error text is never propagated: it
+			// is attacker-influenced and would end up rendered on our sign-in page.
+			writeAdminError(w, http.StatusUnauthorized, "authentication_failed", err.Error(), nil)
+			return
+		}
+		assertion.Token = idToken
+		assertion.Nonce = body.Nonce
+	}
+
+	// The factor the OPERATOR presented to the PLATFORM. Never the IdP's claim about one.
+	assertion.Factor.TOTP = body.Factor.TOTP
+	if wa := body.Factor.WebAuthn; wa != nil {
+		decoded, err := decodeWebAuthn(wa.CredentialID, wa.AuthenticatorData, wa.ClientDataJSON, wa.Signature)
+		if err != nil {
+			writeAdminError(w, http.StatusBadRequest, "bad_request", err.Error(), nil)
+			return
+		}
+		assertion.Factor.WebAuthn = decoded
+	}
+	// The challenge is looked up, never accepted. A challenge the CLIENT supplies proves only that the
+	// client can supply a challenge: an attacker replaying a captured WebAuthn assertion sends the
+	// matching challenge alongside it, the two agree, and the signature verifies perfectly. Consuming a
+	// server-minted, single-use value is what makes the assertion answer THIS login.
+	var challenge []byte
+	if a.deps.Challenges != nil && strings.TrimSpace(body.ChallengeID) != "" {
+		if value, ok := a.deps.Challenges.Consume(body.ChallengeID); ok {
+			challenge = value
+		}
+		// A miss leaves `challenge` nil, and the WebAuthn verifier refuses an empty challenge. Failing
+		// by omission here is deliberate: a distinct "unknown challenge" reply would tell an attacker
+		// which half of a replay went stale.
+	}
+
+	sess, token, err := a.deps.Authenticator.AuthenticateWithChallenge(r.Context(), assertion, challenge)
 	if err != nil {
 		// One status for every authentication failure: probing must not learn whether the subject
 		// exists, whether MFA was the problem, or whether the principal is disabled.

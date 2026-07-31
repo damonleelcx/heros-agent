@@ -20,14 +20,14 @@ PARITY_DIR ?= .parity
 
 .DEFAULT_GOAL := ci
 
-.PHONY: ci go build vet fmt test schema lint db-proof pg-proof verifier-proof tidy-check clean help p4-board-demo \
+.PHONY: ci go build vet fmt test schema lint db-proof pg-proof verifier-proof tidy-check clean help demo-evalboard \
         deploy-lint \
         console-types console-types-check console-test \
         build-discover discovery-ci discovery-throughput \
         discovery-parity-snapshot discovery-parity-verify \
         discovery-sandbox-proof discovery-sandbox-proof-redcheck \
         sandbox-proof sandbox-proof-redcheck \
-        p35-calibration p35-graph-demo p55-demo p7-billing-demo p7-ui-states \
+        classifier-calibration demo-patterngraph demo-proposals demo-billing demo-billing-states \
         release-rehearse release-rehearse-redcheck readme-install packaging-proof install-smoke install-smoke-refusals
 
 ## ci: the locally-provable gate (go + schema + console-types + discovery-ci). Lint/db-proof run as their own CI jobs.
@@ -86,20 +86,20 @@ schema:
 	$(PYTHON) schemas/test_schema_evolution.py
 	$(PYTHON) schemas/spike_io_contract.py
 
-## p35-calibration: print the P3.5 pattern-classifier calibration table (per-detector TP/FP/FN,
+## classifier-calibration: print the P3.5 pattern-classifier calibration table (per-detector TP/FP/FN,
 ##                  recall/precision and confidence bands over the hand-labeled fixture set) and the
 ##                  M4 exit checklist, verdict by verdict. Already covered by `make test`; this target
 ##                  exists so the NUMBERS are readable rather than merely green — a detector's
 ##                  confidence is a claim, and a claim wants evidence a human can look at.
-p35-calibration:
+classifier-calibration:
 	$(GO) test -count=1 -v -run 'TestCalibrationAgainstHandLabeledFixtures|TestM4ExitChecklist|TestDumpShowsEveryStage' ./internal/patternclassifier/
 
-## p35-graph-demo: serve the P3.5 pattern-classified graph view against REAL classifier output, so the
+## demo-patterngraph: serve the P3.5 pattern-classified graph view against REAL classifier output, so the
 ##                 rule-vs-llm distinction and the "not yet classified" empty state can be checked in a
 ##                 browser. Asserting on markup proves only that the string I wrote is the string I
 ##                 wrote; three states have to be seen to be verified.
-p35-graph-demo:
-	$(GO) run ./cmd/p35graphdemo
+demo-patterngraph:
+	$(GO) run ./cmd/demo/patterngraph
 
 ## build-discover: build the Discovery CLI to bin/discover
 build-discover:
@@ -202,48 +202,48 @@ db-proof:
 pg-proof:
 	bash db/migrations/postgres/run_pg_docker.sh $(GO) test -tags pgproof -count=1 ./internal/registry/ ./internal/variantspec/ ./internal/worktree/ ./internal/executor/ ./internal/runqueue/ ./internal/submit/ ./internal/e2e/ ./internal/telemetry/ ./internal/evalrun/ ./internal/metering/
 
-## p4-board-demo: stand up the P4 eval board against a live fan-out with a stubbed provider.
+## demo-evalboard: stand up the P4 eval board against a live fan-out with a stubbed provider.
 ##                Everything between the queue and the pixel is the shipped path: the eval set comes
 ##                from the gap-filling loop, the runs go through the bounded worker pool, the
 ##                evaluators score real telemetry spans, and the board is the computed view over the
 ##                score cache. Use -extra-variants to exercise the board's virtualization at scale.
-p4-board-demo:
-	$(GO) run ./cmd/p4boarddemo
+demo-evalboard:
+	$(GO) run ./cmd/demo/evalboard
 
-## p55-demo: serve the P5.5 ranked-recommendation + verification surface (task 7.7). Every verdict on
+## demo-proposals: serve the P5.5 ranked-recommendation + verification surface (task 7.7). Every verdict on
 ##           screen comes out of internal/verification.Verify (significance + regression + nothing-
 ##           unverified); the ONLY stub is the EvalRunner (provider), so the five outcomes (known-good,
 ##           noise, overfit, cost-regression, cluster-regression), the held-out labelling, the trend
 ##           view, and the Assisted PR-open gate can be SEEN. Pass -level advisory to check the default.
-p55-demo:
-	$(GO) run ./cmd/p55demo
+demo-proposals:
+	$(GO) run ./cmd/demo/proposals
 
-## p7-billing-demo: serve the P7 billing/usage surface against the REAL 7a+7b stack — SUM derived from
+## demo-billing: serve the P7 billing/usage surface against the REAL 7a+7b stack — SUM derived from
 ##           real P2.5 cost events, plans from a config store on disk (never git), entitlements from the
 ##           real gate, and gainshare computed from a P5.5 verified-delta ledger that deliberately holds
 ##           an ESTIMATE and an UN-MERGED proposal alongside two verified, merged deltas. The ONLY stub
 ##           is the billing provider (Stripe-style, test mode). Asserting on a payload proves the
 ##           payload; the paywall, the dunning banner and the "considered and not billed" group have to
 ##           be SEEN. Flags drive each first-class state:
-##             make p7-billing-demo P7FLAGS="-plan team -over-limit -payment-failed -drift -no-consent"
-p7-billing-demo:
-	$(GO) run ./cmd/p7demo $(P7FLAGS)
+##             make demo-billing P7FLAGS="-plan team -over-limit -payment-failed -drift -no-consent"
+demo-billing:
+	$(GO) run ./cmd/demo/billing $(P7FLAGS)
 
-## p7-ui-states: print the exact command for each first-class billing state, so the browser check
+## demo-billing-states: print the exact command for each first-class billing state, so the browser check
 ##           (task 9.7) is a repeatable procedure rather than a thing somebody once did. Every state
 ##           below has to be SEEN: asserting on a payload proves the payload, and the paywall, the
 ##           dunning banner and the "considered and not billed" group are the reason the surface exists.
-p7-ui-states:
+demo-billing-states:
 	@echo "Drive each state in a browser at http://127.0.0.1:8097/p7/billing:"
 	@echo "  1. plan-select + usage/SUM + invoice + verified gainshare evidence:"
-	@echo "       make p7-billing-demo P7FLAGS='-plan enterprise'"
+	@echo "       make demo-billing P7FLAGS='-plan enterprise'"
 	@echo "  2. over-limit with upgrade path (+ dunning + reconciliation drift):"
-	@echo "       make p7-billing-demo P7FLAGS='-plan team -over-limit -payment-failed -drift'"
+	@echo "       make demo-billing P7FLAGS='-plan team -over-limit -payment-failed -drift'"
 	@echo "  3. gainshare consent absent (the control is absent, not broken):"
-	@echo "       make p7-billing-demo P7FLAGS=\"-plan team -no-consent\""
+	@echo "       make demo-billing P7FLAGS=\"-plan team -no-consent\""
 	@echo "  4. consent grant/revoke round trip: click 'Revoke consent' / 'Give consent' on -plan enterprise"
 	@echo "  5. rollout DARK — reads work, nothing is charged:"
-	@echo "       make p7-billing-demo P7FLAGS='-dark'   then GET /readyz"
+	@echo "       make demo-billing P7FLAGS='-dark'   then GET /readyz"
 	@echo ""
 	@echo "The no-hardcoded-money rule is machine-checked, not eyeballed: internal/api TestClientHardcodesNoMoney."
 

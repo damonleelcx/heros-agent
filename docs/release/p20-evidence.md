@@ -100,7 +100,7 @@ version.
 
 Suites: `web/console` **355/355**; Go `make go` clean; `internal/distribution` and `internal/release` green.
 
-### The distribution against a real third-party repository — `cmd/p20hermes`
+### The distribution against a real third-party repository — `cmd/proof/distribution`
 
 The smoke matrix exercises the installed binary against *this* repository's fixture: one node, known shape,
 written by us. That is the right fixture for testing an installer and the wrong one for the question a customer

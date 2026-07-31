@@ -126,7 +126,7 @@
 
 Added after §1–8 were complete and green. The fixture-driven checklist could not surface these,
 because a fixture is built by the same person as the thing it tests. Driver:
-`go run ./cmd/p4boarddemo -ir <discovery output>` over `nousresearch/hermes-agent@e57918a`
+`go run ./cmd/demo/evalboard -ir <discovery output>` over `nousresearch/hermes-agent@e57918a`
 (40 call sites, 0 edges, 0 pattern labels, all I/O contracts `{"type":"object"}`).
 
 - [x] 9.1 **Vacuous coverage.** A dimension with zero obligations reported `achieved = 1.0`, i.e.

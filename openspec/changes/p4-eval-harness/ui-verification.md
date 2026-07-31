@@ -9,7 +9,7 @@ Reproduce:
 
 ```
 make p4-board-demo                          # 4 variants
-go run ./cmd/p4boarddemo -extra-variants 80 # 84 variants, for the virtualization check
+go run ./cmd/demo/evalboard -extra-variants 80 # 84 variants, for the virtualization check
 
 # The board moved to the console in the P9 cutover; the demo serves the read model, the console
 # serves the screen.
@@ -106,7 +106,7 @@ them worth recording.
 
 ## Scope limit — what has NOT been scored
 
-Every board in this record was produced by `cmd/p4boarddemo`, whose **prober and run handler are
+Every board in this record was produced by `cmd/demo/evalboard`, whose **prober and run handler are
 hardcoded to the demo's fixture topology** (`router` → `branch_a`/`branch_b` → `reflect`). They ignore
 the IR they are handed.
 

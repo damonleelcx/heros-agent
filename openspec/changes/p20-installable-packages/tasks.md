@@ -222,7 +222,7 @@ Homebrew / Scoop-winget / deb-rpm / container) with every "not affected" row exp
 ## 10. Run for nousresearch/hermes-agent
 
 - [x] 10.1 Run the delivered distribution against the real repository with the binary a user actually gets:
-      install through `scripts/install.sh` (signature verified), then `cmd/p20hermes` drives `version`,
+      install through `scripts/install.sh` (signature verified), then `cmd/proof/distribution` drives `version`,
       `doctor`, `discover`, `eval`, `coverage`, an endpoints-closed re-run, and `upgrade`.
       → **7/7 green** on `nousresearch/hermes-agent` @ `8eb06e75b9db` (8,034 files): **26 nodes discovered in
       9.97s**, **eval quality 0.8109**, 7 registered languages, doctor clean, and the endpoints-closed re-run

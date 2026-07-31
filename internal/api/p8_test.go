@@ -340,7 +340,7 @@ func TestAdminAPIRequiresACredential(t *testing.T) {
 // one surface did not serve that surface and politely decline the rest: the first request to any other
 // route panicked the process, taking down the surfaces that WERE wired, the kill switch among them.
 //
-// That stopped being hypothetical when `cmd/p21hermes` began serving this API for billing oversight
+// That stopped being hypothetical when `cmd/proof/payments` began serving this API for billing oversight
 // alone, over the real Stripe-backed billing service. This asserts the honest answer instead: 501,
 // which the console's error taxonomy already carried as `not_mounted` — "this deployment does not
 // carry it, nothing is wrong".

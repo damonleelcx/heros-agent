@@ -5,7 +5,7 @@
 > behavior is **rendered-browser evidence, never a green build** — a rule this console has already
 > earned three times over.
 >
-> **Date:** 2026-07-24. **Against:** `cmd/p9hermes` over a real `github.com/NousResearch/hermes-agent`
+> **Date:** 2026-07-24. **Against:** `cmd/proof/customerconsole` over a real `github.com/NousResearch/hermes-agent`
 > checkout (40 discovered call sites), plus a stub platform for the responses a real deployment cannot
 > be made to produce on demand.
 

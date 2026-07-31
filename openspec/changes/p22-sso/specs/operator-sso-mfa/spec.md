@@ -80,3 +80,24 @@ never a secret id.
 #### Scenario: The live admin IdP is named on /readyz
 - **WHEN** `/readyz` is read
 - **THEN** it reports `admin_idp` with the live provider's kind and issuer, and never a key or a secret id
+
+### Requirement: Operator MFA SHALL be proven against a token the real provider issued
+
+The invariant that a valid SSO assertion alone issues **no** session SHALL be demonstrated against an ID token
+**minted by the live admin identity provider**, carrying an authentication-method claim that asserts multi-factor
+authentication. The platform SHALL still deny, because the factor it requires is one **it** verified. A
+demonstration using only a locally minted token SHALL NOT be recorded as proof of this requirement, and every
+record SHALL name the provider it was observed against.
+
+#### Scenario: A real provider's MFA claim is not a factor
+
+- **WHEN** the live admin IdP issues an ID token whose authentication-method claim asserts multi-factor
+  authentication, and no platform-verified factor is present
+- **THEN** no operator session is issued
+- **AND** the denial is the existing MFA-required denial, unchanged by the provider being real.
+
+#### Scenario: A record names the provider it was observed against
+
+- **WHEN** an operator-identity verification result is recorded
+- **THEN** it names whether it was observed against the live provider or a local fixture
+- **AND** a fixture result is not reported in words that let a reader take it for a live one.

@@ -42,14 +42,40 @@ const (
 	SecretAdminSessionSigning = "admin_session_signing"
 )
 
+// TOTPSeedName is the reserved logical name a principal's TOTP seed is held under (P22 task 6.4).
+//
+// Derived rather than free-form so an enrollment cannot invent a name nobody provisioned — the same
+// argument the three constants above make, extended to a per-principal secret. The seed lives in the
+// manager under this name and NEVER in the enrollment directory: a directory record carrying a seed
+// would be a credential store with an ordinary backup policy.
+func TOTPSeedName(adminID string) string { return "admin_totp_seed/" + adminID }
+
 // SecretNames is every logical name this package reads. Enumerated so a deployment checklist and the
 // tests iterate the REAL set rather than a hand-copied list that stops covering a secret added later.
-var SecretNames = []string{SecretAdminSSOSigning, SecretAdminMFASigning, SecretAdminSessionSigning}
+var SecretNames = []string{
+	SecretAdminSSOSigning, SecretAdminMFASigning, SecretAdminSessionSigning,
+	// P22 adds the real IdP's client secret. A per-principal TOTP seed is NOT here: it is provisioned
+	// at enrollment rather than at deploy, so a deployment checklist that listed it would be asking an
+	// operator to provision a secret for a principal that does not exist yet.
+	SecretAdminOIDCClientSecret,
+}
 
 // ErrSecretUnavailable is returned when an admin secret cannot be sourced. It FAILS CLOSED: no
 // signing key means no session is issued and no session is verified — never a fallback to an
 // unsigned or unverified path.
 var ErrSecretUnavailable = errors.New("adminidentity: credential unavailable from the secrets manager")
+
+// EnvSecretName is the environment variable a logical admin-identity name is injected under.
+//
+// `admin_oidc_client_secret` -> `HEROS_ADMIN_OIDC_CLIENT_SECRET`. The same uppercase-the-logical-name
+// convention the customer console uses, so an operator provisioning both surfaces learns one rule.
+//
+// This is the `env` source's contract and nothing more: a MANAGED deployment resolves the same logical
+// name from AWS Secrets Manager (which takes arbitrary names), and an air-gapped one from a mounted
+// file. The logical name is the constant across all three — the env var is one source's spelling of it.
+func EnvSecretName(logical string) string {
+	return "HEROS_" + strings.ToUpper(strings.ReplaceAll(logical, "/", "_"))
+}
 
 // Secrets supplies the admin identity credentials at the moment of use.
 type Secrets interface {
@@ -59,6 +85,14 @@ type Secrets interface {
 	MFASigningKey(ctx context.Context) ([]byte, error)
 	// SessionSigningKey returns the key admin session tokens are signed with.
 	SessionSigningKey(ctx context.Context) ([]byte, error)
+	// Named returns any admin-identity credential by its reserved logical name (P22).
+	//
+	// Added for the per-principal secrets P22 introduces — a TOTP seed, an OIDC client secret — which
+	// cannot have a method each. The three methods above are kept rather than folded into this one on
+	// purpose: they are the names a reader of the login path needs to see spelled out, and a call site
+	// reading `secrets.Named(ctx, "admin_sso_signing")` is a call site where a typo is a runtime
+	// failure instead of a compile error.
+	Named(ctx context.Context, name string) ([]byte, error)
 	// Describe names the SOURCE for the readiness surface — never a secret, never a secret's id.
 	Describe() providergateway.SourceInfo
 }
@@ -89,6 +123,14 @@ func (m *ManagedSecrets) MFASigningKey(ctx context.Context) ([]byte, error) {
 // SessionSigningKey returns the admin session signing key.
 func (m *ManagedSecrets) SessionSigningKey(ctx context.Context) ([]byte, error) {
 	return m.fetch(ctx, SecretAdminSessionSigning)
+}
+
+// Named returns any admin-identity credential by its reserved logical name.
+func (m *ManagedSecrets) Named(ctx context.Context, name string) ([]byte, error) {
+	if strings.TrimSpace(name) == "" {
+		return nil, fmt.Errorf("%w: an empty logical name resolves nothing", ErrSecretUnavailable)
+	}
+	return m.fetch(ctx, name)
 }
 
 func (m *ManagedSecrets) fetch(ctx context.Context, name string) ([]byte, error) {

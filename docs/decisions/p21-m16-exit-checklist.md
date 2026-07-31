@@ -57,12 +57,12 @@ across Team / Business / Enterprise, and one US dollar of verified merged saving
 The reasoning, the rejected alternatives, and what the decision costs are in
 [`p21-metered-unit-and-pricing.md`](p21-metered-unit-and-pricing.md).
 
-`cmd/p21hermes` still demonstrates the refusal on purpose: a constraint nobody has seen fire is a
+`cmd/proof/payments` still demonstrates the refusal on purpose: a constraint nobody has seen fire is a
 constraint nobody believes.
 
 ## The run against a real repository
 
-`cmd/p21hermes` drives the whole path against a real checkout of
+`cmd/proof/payments` drives the whole path against a real checkout of
 [nousresearch/hermes-agent](https://github.com/nousresearch/hermes-agent).
 
 ```
