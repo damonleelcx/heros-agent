@@ -322,6 +322,17 @@ func GainshareIdempotencyKey(customerID, period string) string {
 // CorrectionIdempotencyKey derives the key for a correction against a specific event. The correcting
 // reason is part of the key so two DIFFERENT corrections against one charge remain distinct, while a
 // retry of the SAME correction is recognized as one.
-func CorrectionIdempotencyKey(kind EventType, againstEventID, reason string) string {
-	return fmt.Sprintf("%s:%s:%s", kind, againstEventID, reason)
+//
+// 🔴 The CUSTOMER is in the key, and this was not always so. Every other charge-bearing key here is
+// customer-scoped; this one was not, which left it resting entirely on billing-event ids being unique
+// across the whole deployment. Where they are only unique per ledger — a per-tenant sequence, a
+// restarted in-memory ledger, a restore — two customers' corrections collide on one key, and the
+// provider answers the second with the FIRST customer's credit note. That is one customer's refund
+// recorded against another's account, and nothing in either ledger would look wrong afterwards.
+//
+// A real Stripe test account is what surfaced it: two runs under different customers produced the same
+// correction key and Stripe refused the second as an idempotency conflict. The refusal is the good
+// outcome; the same collision with matching parameters would have silently returned the wrong object.
+func CorrectionIdempotencyKey(kind EventType, customerID, againstEventID, reason string) string {
+	return fmt.Sprintf("%s:%s:%s:%s", kind, customerID, againstEventID, reason)
 }

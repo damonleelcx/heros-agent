@@ -30,6 +30,9 @@ func newFakeStripe(t *testing.T) *stripefake.Server {
 	t.Helper()
 	f := stripefake.New()
 	t.Cleanup(f.Close)
+	// The account owner creates the meter; the platform never does. Seeded here because every metered
+	// path needs one to exist, exactly as a real account needs one created before it can be reported to.
+	f.SeedMeter(stripeSUMMeterEvent)
 	return f
 }
 
@@ -121,7 +124,13 @@ func TestStripeCarriesTheP7IdempotencyKeyOnEveryChargeBearingCall(t *testing.T) 
 	if err != nil {
 		t.Fatalf("RaiseCharge: %v", err)
 	}
-	creditKey := CorrectionIdempotencyKey(TypeCredit, "be_000001", "over-charged")
+	// A credit note is issued against a FINAL invoice — Stripe refuses one against a draft. In
+	// production the billing cycle finalizes it; here it is asked for explicitly, which is the same
+	// ordering the real flow has.
+	if _, err := p.IssueInvoice(ctx, "cus_acme", stripeJuly); err != nil {
+		t.Fatalf("IssueInvoice: %v", err)
+	}
+	creditKey := CorrectionIdempotencyKey(TypeCredit, "cus_acme", "be_000001", "over-charged")
 	if _, err := p.IssueCredit(ctx, CreditRequest{
 		ProviderCustomerHandle: handle, AgainstRef: charge.ChargeRef, Reason: "over-charged",
 		IdempotencyKey: creditKey,
@@ -277,7 +286,7 @@ func TestStripeReportUsageSendsAQuantityAndMultipliesNothing(t *testing.T) {
 	f := newFakeStripe(t)
 	p := newStripe(t, f)
 	ctx := context.Background()
-	handle, subRef, meteredItem := f.SeedSubscription("cus_acme", stripeSubPrice, stripeMeteredPrice)
+	handle, subRef, _ := f.SeedSubscription("cus_acme", stripeSubPrice, stripeMeteredPrice)
 
 	res, err := p.ReportUsage(ctx, UsageReport{
 		ProviderCustomerHandle: handle, SubscriptionRef: subRef, Metric: "sum", Period: stripeJuly,
@@ -291,26 +300,107 @@ func TestStripeReportUsageSendsAQuantityAndMultipliesNothing(t *testing.T) {
 		t.Fatal("no usage handle")
 	}
 
-	// Stripe holds the QUANTITY the platform reported — unscaled, unmultiplied, attributed to the period
-	// the platform named rather than to the wall clock at report time.
-	got, ok := f.Usage(meteredItem, stripeJuly)
+	// Stripe's METER holds the QUANTITY the platform reported — unscaled, unmultiplied, attributed to
+	// the period the platform named rather than to the wall clock at report time.
+	got, ok := f.MeterUsage(stripeSUMMeterEvent, handle, stripeJuly)
 	if !ok {
-		t.Fatalf("stripe recorded no usage for %s in %s — the report landed in the wrong period", meteredItem, stripeJuly)
+		t.Fatalf("stripe's meter recorded no usage for %s in %s — the report landed in the wrong period", handle, stripeJuly)
 	}
 	if got != 7 {
 		t.Errorf("stripe recorded quantity %v, want the reported 7 — the platform multiplies nothing", got)
 	}
 
-	// A re-report of the same period CONVERGES rather than accumulating (`action=set`).
-	if _, err := p.ReportUsage(ctx, UsageReport{
+	// A RETRY of the same report under the same key is recognized and adds nothing. This is the
+	// property `action=set` used to provide and the deterministic identifier now provides instead —
+	// and it is provided by STRIPE refusing the second event, not by the platform re-asserting a total.
+	again, err := p.ReportUsage(ctx, UsageReport{
 		ProviderCustomerHandle: handle, SubscriptionRef: subRef, Metric: "sum", Period: stripeJuly,
-		Quantity: 9, PriceRef: stripeMeteredPrice,
-		IdempotencyKey: UsageReportIdempotencyKey("cus_acme", stripeJuly, "sum") + ":corrected",
-	}); err != nil {
-		t.Fatalf("re-report: %v", err)
+		Quantity: 7, PriceRef: stripeMeteredPrice,
+		IdempotencyKey: UsageReportIdempotencyKey("cus_acme", stripeJuly, "sum"),
+	})
+	if err != nil {
+		t.Fatalf("a retried report must succeed as a duplicate, not fail: %v", err)
 	}
-	if got, _ := f.Usage(meteredItem, stripeJuly); got != 9 {
-		t.Errorf("a re-report accumulated to %v instead of converging on 9 — that is a double count", got)
+	if !again.Duplicate {
+		t.Error("a retried report was not reported as a Duplicate — the evidence that idempotency worked")
+	}
+	if again.UsageRef != res.UsageRef {
+		t.Errorf("the retry returned a different usage handle (%q vs %q); the identifier is meant to be stable", again.UsageRef, res.UsageRef)
+	}
+	if got, _ := f.MeterUsage(stripeSUMMeterEvent, handle, stripeJuly); got != 7 {
+		t.Errorf("a retry moved the meter to %v — that is a double count", got)
+	}
+}
+
+// TestARederivedSUMDoesNotOverwriteWhatStripeAlreadyRecorded pins the ONE way the meter path is weaker
+// than the `action=set` path it replaced, so that the weakness is a checked fact rather than a claim in
+// a comment.
+//
+// A meter aggregates and cannot set. So a period re-derived to a different figure and reported under a
+// NEW identifier does not correct Stripe's total — it adds to it. The platform does not paper over
+// that by emitting compensating events, because repairing the provider's ledger by overwrite is what
+// P7 Decision 7 refuses. It is left for the reconciler to SURFACE, and the test that it does surface it
+// is TestReconciliationSurfacesDriftAgainstStripe.
+func TestARederivedSUMDoesNotOverwriteWhatStripeAlreadyRecorded(t *testing.T) {
+	f := newFakeStripe(t)
+	p := newStripe(t, f)
+	ctx := context.Background()
+	handle, subRef, _ := f.SeedSubscription("cus_acme", stripeSubPrice, stripeMeteredPrice)
+
+	report := func(qty float64, key string) {
+		t.Helper()
+		if _, err := p.ReportUsage(ctx, UsageReport{
+			ProviderCustomerHandle: handle, SubscriptionRef: subRef, Metric: "sum", Period: stripeJuly,
+			Quantity: qty, PriceRef: stripeMeteredPrice, IdempotencyKey: key,
+		}); err != nil {
+			t.Fatalf("report %v: %v", qty, err)
+		}
+	}
+	report(7, UsageReportIdempotencyKey("cus_acme", stripeJuly, "sum"))
+	report(9, UsageReportIdempotencyKey("cus_acme", stripeJuly, "sum")+":rederived")
+
+	got, _ := f.MeterUsage(stripeSUMMeterEvent, handle, stripeJuly)
+	if got != 16 {
+		t.Fatalf("meter total = %v, want 16 — a meter AGGREGATES, and a test asserting 9 would be "+
+			"asserting a set that this path cannot perform", got)
+	}
+	// And the divergence is visible to the reconciler, which is the whole point of leaving it alone.
+	recs, err := p.RecordedUsage(ctx, "cus_acme", stripeJuly)
+	if err != nil {
+		t.Fatalf("RecordedUsage: %v", err)
+	}
+	if len(recs) != 1 || recs[0].Quantity != 16 {
+		t.Fatalf("RecordedUsage = %+v, want one row of 16 that a reconciler can compare against the "+
+			"platform's own figure and call a drift", recs)
+	}
+}
+
+// TestReportUsageRefusesAPeriodOutsideStripesBackfillWindow is the refusal the real account taught.
+//
+// Stripe accepts a meter event no more than 35 days before its timestamp. The tempting workaround —
+// stamp it `now` so it is accepted — would attribute an old period's usage to this month, and every
+// downstream figure would be wrong in a way no error ever surfaces. So it is refused instead, loudly.
+func TestReportUsageRefusesAPeriodOutsideStripesBackfillWindow(t *testing.T) {
+	f := newFakeStripe(t)
+	p := newStripe(t, f)
+	ctx := context.Background()
+	handle, subRef, _ := f.SeedSubscription("cus_acme", stripeSubPrice, stripeMeteredPrice)
+
+	// stripeClock is 2026-08-01, so 2026-05 began 92 days earlier — well outside the window.
+	_, err := p.ReportUsage(ctx, UsageReport{
+		ProviderCustomerHandle: handle, SubscriptionRef: subRef, Metric: "sum", Period: "2026-05",
+		Quantity: 7, PriceRef: stripeMeteredPrice,
+		IdempotencyKey: UsageReportIdempotencyKey("cus_acme", "2026-05", "sum"),
+	})
+	if !errors.Is(err, ErrUsagePeriodTooOld) {
+		t.Fatalf("a period outside the backfill window must be refused as ErrUsagePeriodTooOld, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "wrong period") {
+		t.Errorf("the refusal does not say WHY it refuses rather than restamping: %q", err)
+	}
+	// 🔴 And it refused BEFORE writing anything.
+	if _, ok := f.MeterUsage(stripeSUMMeterEvent, handle, "2026-05"); ok {
+		t.Error("the refused report still reached stripe's meter")
 	}
 }
 
@@ -364,6 +454,9 @@ func TestStripeCreditIsAdditiveAndLeavesTheOriginalIntact(t *testing.T) {
 	}
 	before, _ := f.Item(charge.ChargeRef)
 
+	if _, err := p.IssueInvoice(ctx, "cus_acme", stripeJuly); err != nil {
+		t.Fatalf("IssueInvoice: %v", err)
+	}
 	credit, err := p.IssueCredit(ctx, CreditRequest{
 		ProviderCustomerHandle: handle, AgainstRef: charge.ChargeRef,
 		Reason: "billed against the wrong period", IdempotencyKey: "credit:be_000001:wrong-period",

@@ -128,6 +128,14 @@ type StripeProvider struct {
 	baseURL string
 	http    *http.Client
 
+	// meterEvent is the Stripe billing-meter event name metered usage is reported under. It is
+	// configuration, not a price: a meter is Stripe's record of WHAT WAS USED, and it carries no
+	// amount, so naming it here breaks no money-in-git rule. The id behind the name is resolved once
+	// and memoized in meterID.
+	meterEvent string
+	meterMu    sync.Mutex
+	meterID    string
+
 	customers stripeCustomerCache
 
 	// seen records, per idempotency key, the object id the FIRST call produced. It is how Duplicate is
@@ -145,6 +153,20 @@ type StripeOption func(*StripeProvider)
 // WithStripeBaseURL points the provider at a different API root. It exists for the fake-Stripe tests.
 func WithStripeBaseURL(u string) StripeOption {
 	return func(p *StripeProvider) { p.baseURL = strings.TrimRight(u, "/") }
+}
+
+// WithStripeMeterEvent names the Stripe billing meter metered usage is reported under.
+//
+// Account configuration rather than plan configuration: there is ONE meter for SUM across every plan,
+// because a meter records what was used and the plans differ only in what that usage costs — which is
+// the price's job. A per-plan meter would make the same customer's usage land in different ledgers
+// depending on which plan they were on mid-period, and reconciliation would have to re-derive which.
+func WithStripeMeterEvent(name string) StripeOption {
+	return func(p *StripeProvider) {
+		if n := strings.TrimSpace(name); n != "" {
+			p.meterEvent = n
+		}
+	}
 }
 
 // WithStripeHTTPClient injects the HTTP client (a transport with a recorder, a test server's client).
@@ -180,13 +202,14 @@ func NewStripeProvider(secrets Secrets, mode Mode, clock Clock, opts ...StripeOp
 		clock = time.Now
 	}
 	p := &StripeProvider{
-		secrets:   secrets,
-		mode:      mode,
-		now:       clock,
-		baseURL:   stripeBaseURL,
-		http:      &http.Client{Timeout: stripeTimeout},
-		customers: stripeCustomerCache{by: map[string]string{}},
-		seen:      map[string]string{},
+		secrets:    secrets,
+		mode:       mode,
+		now:        clock,
+		baseURL:    stripeBaseURL,
+		http:       &http.Client{Timeout: stripeTimeout},
+		meterEvent: stripeSUMMeterEvent,
+		customers:  stripeCustomerCache{by: map[string]string{}},
+		seen:       map[string]string{},
 	}
 	for _, o := range opts {
 		o(p)
@@ -622,35 +645,6 @@ func (p *StripeProvider) subscription(ctx context.Context, ref string) (stripeSu
 	return sub, nil
 }
 
-// meteredItem finds the subscription item a metered report belongs on.
-//
-// It matches on the plan's `price_ref` when one is given, and falls back to the single metered item when
-// the subscription has exactly one. It does NOT guess between several: reporting usage against the wrong
-// item bills the right quantity at the wrong price, which reconciliation would show as agreement.
-func meteredItem(sub stripeSubscription, priceRef string) (string, error) {
-	if priceRef != "" {
-		for _, it := range sub.Items.Data {
-			if it.Price.ID == priceRef {
-				return it.ID, nil
-			}
-		}
-	}
-	var metered []string
-	for _, it := range sub.Items.Data {
-		if it.Price.Recurring.UsageType == "metered" {
-			metered = append(metered, it.ID)
-		}
-	}
-	if len(metered) == 1 {
-		return metered[0], nil
-	}
-	if priceRef != "" {
-		return "", fmt.Errorf("%w: subscription %s has no item on price %s", ErrProviderRejected, sub.ID, priceRef)
-	}
-	return "", fmt.Errorf("%w: subscription %s has %d metered items and the report names no price reference — refusing to guess which one to bill",
-		ErrProviderRejected, sub.ID, len(metered))
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Collection (P21 tasks 6.1, 6.2) — the capability P7 left out
 // ─────────────────────────────────────────────────────────────────────────────
@@ -779,7 +773,7 @@ func (p *StripeProvider) UpdateSubscriptionPrice(ctx context.Context, req Update
 // A 404 comes back as `ErrProviderRejected`, which is the correct class: the reference is wrong and no
 // amount of retrying will make it right. An outage stays `ErrProviderUnavailable`, so the preflight can
 // tell "your configuration is wrong" from "we could not check" — two conditions with different owners.
-func (p *StripeProvider) ResolvePrice(ctx context.Context, priceRef string) error {
+func (p *StripeProvider) ResolvePrice(ctx context.Context, kind, priceRef string) error {
 	ref := strings.TrimSpace(priceRef)
 	if ref == "" {
 		return fmt.Errorf("%w: empty price reference", ErrProviderRejected)
@@ -799,6 +793,7 @@ func (p *StripeProvider) ResolvePrice(ctx context.Context, priceRef string) erro
 	var price struct {
 		ID     string `json:"id"`
 		Active bool   `json:"active"`
+		Type   string `json:"type"`
 	}
 	if err := decode(res, &price); err != nil {
 		return err
@@ -811,6 +806,41 @@ func (p *StripeProvider) ResolvePrice(ctx context.Context, priceRef string) erro
 		// check this decision rejected, one layer up.
 		return fmt.Errorf("%w: price %q exists but is ARCHIVED, so a charge against it would fail", ErrProviderRejected, ref)
 	}
+	return checkPriceShape(kind, ref, price.Type)
+}
+
+// checkPriceShape rejects a price of the wrong SHAPE for the charge kind it is configured under.
+//
+// 🔴 This is the check that separates "the id exists" from "the id works", and the difference is a
+// whole billing period. Existence and activity are what a preflight naturally checks, and both pass
+// for a price that will still fail at the first charge — because the two ways the platform moves money
+// accept opposite shapes, and Stripe only says so at the moment it refuses:
+//
+//   - a SUBSCRIPTION is created on a `recurring` price;
+//   - a metered or gainshare charge is an invoice item, and an invoice item accepts `one_time` ONLY —
+//     "The price specified is set to `type=recurring` but this field only accepts prices with
+//     `type=one_time`."
+//
+// Configure them the wrong way round and every preflight is green until the period closes. That is the
+// exact failure this whole preflight exists to move earlier, so it belongs here rather than in a
+// runbook step someone performs once.
+func checkPriceShape(kind, ref, priceType string) error {
+	switch ChargeKind(kind) {
+	case KindSubscription:
+		if priceType != "" && priceType != "recurring" {
+			return fmt.Errorf("%w: price %q is type=%s, but a subscription is created on a RECURRING price. "+
+				"Create a recurring price on the same product and configure that", ErrProviderRejected, ref, priceType)
+		}
+	case KindMetered, KindGainshare:
+		if priceType != "" && priceType != "one_time" {
+			return fmt.Errorf("%w: price %q is type=%s, but a %s charge is raised as an INVOICE ITEM and stripe accepts "+
+				"only a one_time price there. Create a one_time price on the same product, denominated in the meter's "+
+				"integral unit, and configure that", ErrProviderRejected, ref, priceType, kind)
+		}
+	}
+	// An unknown kind is NOT rejected here. Kinds are a closed set enforced at the charge call site
+	// (RaiseCharge); duplicating that refusal in a read-only preflight would mean a config store that
+	// grew a new kind could not even be INSPECTED until this file caught up.
 	return nil
 }
 
@@ -819,38 +849,68 @@ func (p *StripeProvider) ResolvePrice(ctx context.Context, priceRef string) erro
 var (
 	_ CollectionProvider = (*StripeProvider)(nil)
 	_ PriceVerifier      = (*StripeProvider)(nil)
+	_ InvoiceIssuer      = (*StripeProvider)(nil)
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Metered usage
 // ─────────────────────────────────────────────────────────────────────────────
 
-type stripeUsageRecord struct {
-	ID string `json:"id"`
-}
+// stripeSUMMeterEvent is the DEFAULT billing-meter event name metered usage is reported under.
+// Overridable with WithStripeMeterEvent, because the meter is created in the Stripe account and the
+// account owner names it, not this file.
+const stripeSUMMeterEvent = "heros_sum"
 
-// ReportUsage reports a metered QUANTITY for {customer, period, metric} to Stripe's metered item.
+// stripeMeterBackfillWindow is how far back Stripe accepts a meter event, measured from the event's
+// timestamp. It is Stripe's limit, restated here so the refusal below can explain itself; the wire's
+// own words are "The event timestamp cannot be more than 35 days in past."
+const stripeMeterBackfillWindow = 35 * 24 * time.Hour
+
+// meterEventExists is Stripe's refusal of a REPEATED meter-event identifier.
 //
-// It multiplies nothing. Stripe applies the price the `price_ref` names; the platform hands over a
-// count and holds no amount at any point in this method.
+// 🔴 Matched on the message, because Stripe sends no error `code` for it — the envelope carries only
+// `type: invalid_request_error` and this sentence. A message match is a fragile join, so it is written
+// down rather than hidden, and it is arranged to fail SAFE: if Stripe rewords it the match stops
+// firing and a retry surfaces as an error, which is the direction a billing failure should fall.
+const meterEventExists = "already exists with identifier"
+
+// ErrUsagePeriodTooOld is a period Stripe will not accept a meter event for any more.
 //
-// `action=set` rather than `increment`: the P7 usage record is an UPSERT of "what was used this period",
-// so a re-report of the same {customer, period, metric} must converge on the same recorded total rather
-// than accumulate. With `increment`, a retry after an ambiguous failure would double the usage — the
-// idempotency key covers the retry Stripe sees, and `set` covers the one it does not.
+// 🔴 The alternative — stamping the event with `now` so it is accepted — is refused. It would attribute
+// last quarter's usage to this month, and every downstream figure would be wrong in a way no error ever
+// surfaces. Attribution follows the period the usage happened in, or it does not happen.
+var ErrUsagePeriodTooOld = errors.New("billing: the period is outside the provider's usage-reporting window")
+
+// ReportUsage reports a metered QUANTITY for {customer, period, metric} to Stripe's billing meter.
+//
+// It multiplies nothing. Stripe applies the price the plan's `price_ref` names; the platform hands over
+// a count and holds no amount at any point in this method.
+//
+// 🔴 This posts a METER EVENT, not the legacy subscription-item usage record, and the wire forced the
+// change rather than taste: under the pinned API version Stripe refuses to create a metered price that
+// is not meter-backed — *"Starting with Stripe version `2025-03-31.basil`, metered prices must be backed
+// by meters"* — so the metered subscription item the old path reported against cannot be created at all.
+// Only a real account can produce that sentence; an in-process Stripe answers whatever it is told.
+//
+// The old path used `action=set`, so a re-report converged instead of accumulating. A meter event cannot
+// set — it aggregates. Convergence is preserved by a DETERMINISTIC identifier: the P7 idempotency key is
+// derived from {customer, period, metric}, so a retry of the same report carries the same identifier and
+// Stripe refuses the second event outright. That is stronger than `set` in one way — Stripe enforces it,
+// rather than the platform re-asserting a total — and weaker in exactly one way, which is stated rather
+// than papered over: a period whose SUM is later RE-DERIVED to a different figure cannot overwrite what
+// Stripe already recorded. Emitting a second event to "top up" the total would be the platform repairing
+// the provider's ledger by overwrite, which P7 Decision 7 refuses. The divergence is left for
+// [StripeProvider.RecordedUsage] and the reconciler to SURFACE, which is the whole reason both exist.
 func (p *StripeProvider) ReportUsage(ctx context.Context, req UsageReport) (UsageResult, error) {
-	if req.SubscriptionRef == "" {
-		return UsageResult{}, fmt.Errorf("%w: metered usage is reported against a subscription item, and no subscription reference was given", ErrProviderRejected)
+	if req.ProviderCustomerHandle == "" {
+		return UsageResult{}, fmt.Errorf("%w: metered usage is reported against a Stripe customer, and no customer handle was given", ErrProviderRejected)
+	}
+	if req.IdempotencyKey == "" {
+		// Without it there is no identifier, and without an identifier a retry after an ambiguous
+		// failure silently doubles the period. Refusing is the only safe answer.
+		return UsageResult{}, fmt.Errorf("%w: a meter event needs the P7 idempotency key as its identifier — without one, a retry would double-count the period", ErrProviderRejected)
 	}
 	qty, err := stripeQuantity(req.Quantity)
-	if err != nil {
-		return UsageResult{}, err
-	}
-	sub, err := p.subscription(ctx, req.SubscriptionRef)
-	if err != nil {
-		return UsageResult{}, err
-	}
-	item, err := meteredItem(sub, req.PriceRef)
 	if err != nil {
 		return UsageResult{}, err
 	}
@@ -859,25 +919,33 @@ func (p *StripeProvider) ReportUsage(ctx context.Context, req UsageReport) (Usag
 	// period the platform's usage record does. `p.now()` would attribute a late report to the wrong
 	// period — the exact drift the reconciler would then surface as a mystery.
 	ts := periodTimestamp(req.Period, p.now())
+	if age := p.now().UTC().Sub(ts); age > stripeMeterBackfillWindow {
+		return UsageResult{}, fmt.Errorf("%w: period %s began %s ago and stripe accepts a meter event no more than %s back; "+
+			"reporting it now would attribute the usage to the wrong period, so it is refused instead",
+			ErrUsagePeriodTooOld, req.Period, age.Round(24*time.Hour), stripeMeterBackfillWindow)
+	}
 
 	form := url.Values{}
-	form.Set("quantity", strconv.FormatInt(qty, 10))
+	form.Set("event_name", p.meterEvent)
+	form.Set("identifier", req.IdempotencyKey)
 	form.Set("timestamp", strconv.FormatInt(ts.Unix(), 10))
-	form.Set("action", "set")
+	form.Set("payload[stripe_customer_id]", req.ProviderCustomerHandle)
+	form.Set("payload[value]", strconv.FormatInt(qty, 10))
 
-	res, err := p.do(ctx, http.MethodPost, "/v1/subscription_items/"+url.PathEscape(item)+"/usage_records", form, req.IdempotencyKey)
+	res, err := p.do(ctx, http.MethodPost, "/v1/billing/meter_events", form, req.IdempotencyKey)
 	if err != nil {
+		if errors.Is(err, ErrProviderRejected) && strings.Contains(err.Error(), meterEventExists) {
+			// Not a failure. Stripe is saying this exact report is ALREADY in its meter, which is what
+			// Duplicate means; returning an error would make a correct retry look like a broken one.
+			return UsageResult{UsageRef: req.IdempotencyKey, Duplicate: true}, nil
+		}
 		return UsageResult{}, err
 	}
-	var rec stripeUsageRecord
-	if err := decode(res, &rec); err != nil {
-		return UsageResult{}, err
-	}
-	if rec.ID == "" {
-		return UsageResult{}, fmt.Errorf("%w: stripe returned a usage record with no id", ErrProviderRejected)
-	}
-	dup := p.markSeen(req.IdempotencyKey, rec.ID, res.replayed)
-	return UsageResult{UsageRef: rec.ID, Duplicate: dup}, nil
+
+	// A meter event carries no server-assigned id — the identifier IS its handle, and it is the same
+	// string on every retry, which is what makes the usage record's ProviderUsageRef stable across one.
+	dup := p.markSeen(req.IdempotencyKey, req.IdempotencyKey, res.replayed)
+	return UsageResult{UsageRef: req.IdempotencyKey, Duplicate: dup}, nil
 }
 
 // periodTimestamp returns a timestamp inside the named period, or `fallback` when the period is not a
@@ -904,6 +972,7 @@ func periodKey(unix int64) string {
 type stripeInvoiceItem struct {
 	ID       string            `json:"id"`
 	Invoice  string            `json:"invoice"`
+	Quantity int64             `json:"quantity"`
 	Metadata map[string]string `json:"metadata"`
 }
 
@@ -932,7 +1001,10 @@ func (p *StripeProvider) RaiseCharge(ctx context.Context, req ChargeRequest) (Ch
 
 	form := url.Values{}
 	form.Set("customer", req.ProviderCustomerHandle)
-	form.Set("price", req.PriceRef)
+	// 🔴 `pricing[price]`, not `price`. Under the pinned API version the flat parameter is gone —
+	// Stripe answers a bare `price` with "Received unknown parameter: price. Did you mean pricing?" —
+	// and the price it accepts must be `type=one_time`. Both facts are only observable on the wire.
+	form.Set("pricing[price]", req.PriceRef)
 	form.Set("quantity", strconv.FormatInt(qty, 10))
 	if req.Description != "" {
 		form.Set("description", req.Description)
@@ -1016,14 +1088,21 @@ func (p *StripeProvider) IssueCredit(ctx context.Context, req CreditRequest) (Cr
 	// A credit note is issued against the INVOICE the corrected line sits on, and names that line. The
 	// invoice is resolved from the item rather than passed in, so a caller cannot credit the wrong
 	// invoice by supplying one.
-	invoiceRef, err := p.invoiceOfItem(ctx, req.AgainstRef)
+	invoiceRef, lineRef, qty, err := p.creditTargetFor(ctx, req.AgainstRef)
 	if err != nil {
 		return CreditResult{}, err
 	}
 	form := url.Values{}
 	form.Set("invoice", invoiceRef)
 	form.Set("lines[0][type]", "invoice_line_item")
-	form.Set("lines[0][invoice_line_item]", req.AgainstRef)
+	form.Set("lines[0][invoice_line_item]", lineRef)
+	// 🔴 A QUANTITY, never an amount. Stripe requires one or the other — "`quantity` or `amount` is
+	// required when crediting an invoice line item" — and the choice between them is the whole design in
+	// one parameter. `amount` would mean the platform computing how much money to give back; `quantity`
+	// means it names how many units to reverse and Stripe applies the same price it charged. Crediting
+	// the full quantity is what makes the correction the exact inverse of the charge rather than a
+	// second, differently-derived figure.
+	form.Set("lines[0][quantity]", strconv.FormatInt(qty, 10))
 	form.Set("memo", req.Reason)
 	form.Set("metadata["+metaBasis+"]", req.Reason)
 	res, err := p.do(ctx, http.MethodPost, "/v1/credit_notes", form, req.IdempotencyKey)
@@ -1042,22 +1121,55 @@ func (p *StripeProvider) IssueCredit(ctx context.Context, req CreditRequest) (Cr
 }
 
 // invoiceOfItem resolves the invoice a charge sits on.
-func (p *StripeProvider) invoiceOfItem(ctx context.Context, itemRef string) (string, error) {
+// creditTargetFor resolves the invoice ITEM a correction names into the three things a Stripe credit
+// note actually needs: the invoice, the invoice LINE on it, and the quantity to reverse.
+//
+// 🔴 The line id is not the item id, and it cannot be derived from it. Under the pinned API version
+// Stripe refuses the item id outright — *"Old `id` values cannot be used to specify an invoice line
+// item in this API version"* — so the line has to be FOUND, by matching the invoice's lines against the
+// item that produced each one. Guessing at the id shape would work until Stripe changed it, which is
+// exactly what already happened here once.
+func (p *StripeProvider) creditTargetFor(ctx context.Context, itemRef string) (invoiceRef, lineRef string, quantity int64, err error) {
 	res, err := p.do(ctx, http.MethodGet, "/v1/invoiceitems/"+url.PathEscape(itemRef), nil, "")
 	if err != nil {
-		return "", err
+		return "", "", 0, err
 	}
 	var item stripeInvoiceItem
 	if err := decode(res, &item); err != nil {
-		return "", err
+		return "", "", 0, err
 	}
 	if item.ID == "" {
-		return "", fmt.Errorf("%w: cannot credit unknown charge %s", ErrProviderRejected, itemRef)
+		return "", "", 0, fmt.Errorf("%w: cannot credit unknown charge %s", ErrProviderRejected, itemRef)
 	}
 	if item.Invoice == "" {
-		return "", fmt.Errorf("%w: charge %s is not on an invoice yet — an uninvoiced item is resolved by not invoicing it, not by crediting it", ErrProviderRejected, itemRef)
+		return "", "", 0, fmt.Errorf("%w: charge %s is not on an invoice yet — an uninvoiced item is resolved by not invoicing it, not by crediting it", ErrProviderRejected, itemRef)
 	}
-	return item.Invoice, nil
+
+	res, err = p.do(ctx, http.MethodGet, "/v1/invoices/"+url.PathEscape(item.Invoice), nil, "")
+	if err != nil {
+		return "", "", 0, err
+	}
+	var inv stripeInvoiceObject
+	if err := decode(res, &inv); err != nil {
+		return "", "", 0, err
+	}
+	for _, l := range inv.Lines.Data {
+		if l.Parent.InvoiceItemDetails.InvoiceItem != itemRef {
+			continue
+		}
+		// 🔴 The quantity is read back from STRIPE's copy of the line, not taken from the platform's
+		// ledger row. A correction must reverse what was actually charged; sourcing the figure from the
+		// platform's own record would credit what the platform BELIEVES was charged, and the one
+		// situation a correction exists for is the situation where those two have diverged.
+		qty := int64(l.Quantity)
+		if qty <= 0 {
+			return "", "", 0, fmt.Errorf("%w: stripe reports quantity %v on line %s, and a credit note must name a quantity to reverse",
+				ErrProviderRejected, l.Quantity, l.ID)
+		}
+		return item.Invoice, l.ID, qty, nil
+	}
+	return "", "", 0, fmt.Errorf("%w: charge %s is on invoice %s but no line on that invoice was produced by it, so there is nothing to credit",
+		ErrProviderRejected, itemRef, item.Invoice)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1081,14 +1193,27 @@ type stripeInvoiceLine struct {
 	Description string            `json:"description"`
 	Quantity    float64           `json:"quantity"`
 	Metadata    map[string]string `json:"metadata"`
-	Type        string            `json:"type"`
-	Price       struct {
-		ID string `json:"id"`
-	} `json:"price"`
+	// Pricing is where the pinned API version puts the price behind a line. The pre-Basil `price.id`
+	// is gone; a struct that still read it would silently produce an empty price on every line, and
+	// the only visible symptom would be a slightly less specific fallback basis — the kind of decay
+	// that survives a green suite for years.
+	Pricing struct {
+		PriceDetails struct {
+			Price   string `json:"price"`
+			Product string `json:"product"`
+		} `json:"price_details"`
+	} `json:"pricing"`
 	Period struct {
 		Start int64 `json:"start"`
 		End   int64 `json:"end"`
 	} `json:"period"`
+	// Parent links a line back to the invoice ITEM that produced it. The two have different ids and
+	// no derivable relationship, so a correction that knows only the item id has to come through here.
+	Parent struct {
+		InvoiceItemDetails struct {
+			InvoiceItem string `json:"invoice_item"`
+		} `json:"invoice_item_details"`
+	} `json:"parent"`
 	Proration bool `json:"proration"`
 }
 
@@ -1179,8 +1304,8 @@ func mapInvoiceLine(invoiceID string, l stripeInvoiceLine) InvoiceLine {
 		// the platform stamped none, the basis is the Stripe object itself, which is a true and
 		// checkable answer to "why is this line here".
 		basis = "stripe_invoice_line:" + invoiceID + "/" + l.ID
-		if l.Price.ID != "" {
-			basis += "@" + l.Price.ID
+		if id := l.Pricing.PriceDetails.Price; id != "" {
+			basis += "@" + id
 		}
 	}
 	desc := l.Description
@@ -1197,18 +1322,167 @@ func mapInvoiceLine(invoiceID string, l stripeInvoiceLine) InvoiceLine {
 	}
 }
 
-type stripeUsageSummaryList struct {
-	Data []stripeUsageSummary `json:"data"`
+type stripeMeterSummaryList struct {
+	Data []stripeMeterSummary `json:"data"`
 }
 
-type stripeUsageSummary struct {
-	ID     string `json:"id"`
-	Period struct {
-		Start int64 `json:"start"`
-		End   int64 `json:"end"`
-	} `json:"period"`
-	TotalUsage float64 `json:"total_usage"`
-	Item       string  `json:"subscription_item"`
+type stripeMeterSummary struct {
+	ID              string  `json:"id"`
+	AggregatedValue float64 `json:"aggregated_value"`
+	StartTime       int64   `json:"start_time"`
+	EndTime         int64   `json:"end_time"`
+}
+
+// meterIDFor resolves the configured meter EVENT NAME to the meter id the summaries endpoint is keyed
+// by, and memoizes it.
+//
+// Resolved rather than configured: the event name is the thing a human writes into a config store and
+// the thing that appears in every meter event, while the id is a Stripe-generated string nobody can
+// verify by eye. Asking an operator to keep both in sync is asking for the day they disagree.
+func (p *StripeProvider) meterIDFor(ctx context.Context) (string, error) {
+	p.meterMu.Lock()
+	defer p.meterMu.Unlock()
+	if p.meterID != "" {
+		return p.meterID, nil
+	}
+	form := url.Values{}
+	form.Set("limit", "100")
+	form.Set("status", "active")
+	res, err := p.do(ctx, http.MethodGet, "/v1/billing/meters", form, "")
+	if err != nil {
+		return "", err
+	}
+	var list struct {
+		Data []struct {
+			ID        string `json:"id"`
+			EventName string `json:"event_name"`
+		} `json:"data"`
+	}
+	if err := decode(res, &list); err != nil {
+		return "", err
+	}
+	for _, m := range list.Data {
+		if m.EventName == p.meterEvent {
+			p.meterID = m.ID
+			return m.ID, nil
+		}
+	}
+	// Named, not generic: "no active billing meter with event name X" tells an operator what to create,
+	// where a bare "not found" sends them reading code.
+	return "", fmt.Errorf("%w: the Stripe account has no ACTIVE billing meter with event name %q, so metered usage has nowhere to be recorded or read back from",
+		ErrProviderRejected, p.meterEvent)
+}
+
+// MeterEvent is the billing-meter event name this provider reports metered usage under. Exposed for
+// the readiness surface and the runbook: an operator who cannot see which meter a deployment writes to
+// cannot check that the meter exists.
+func (p *StripeProvider) MeterEvent() string { return p.meterEvent }
+
+// InvoiceIssuer is the OPTIONAL capability of asking the provider to ISSUE a customer's pending charges
+// as an invoice now, rather than waiting for the billing cycle to do it.
+//
+// 🔴 Deliberately NOT on [Provider], and deliberately not used by the charging path. In production the
+// subscription's own cycle closes the period and sweeps up the pending invoice items — the platform does
+// not decide when a customer is invoiced, and a system that could would be one mis-scheduled job away
+// from invoicing everybody twice. What this exists for is the case where someone needs the period's
+// invoice to exist NOW: a test-mode verification run, or an operator reconciling a period out of band.
+type InvoiceIssuer interface {
+	// IssueInvoice creates the invoice carrying the customer's pending charges and returns its ref.
+	IssueInvoice(ctx context.Context, customerID, period string) (string, error)
+}
+
+// IssueInvoice makes the period's invoice exist and be FINAL, and is idempotent about it.
+//
+// Three steps, and each one is there because leaving it out produced a wrong answer against a real
+// account:
+//
+//  1. **Look for the period's invoice first.** Stripe only sweeps invoice items whose `invoice` is
+//     null, so a second call would create an EMPTY draft beside the one already holding the period's
+//     lines — and then finalize the empty one. Something called from a verification run gets called
+//     twice; it has to converge.
+//  2. **Create it only if there is none**, sweeping the pending items in. Without
+//     `pending_invoice_items_behavior=include` the items are left where they are and the invoice comes
+//     back empty, which reads exactly like "the charges were never raised".
+//  3. **Finalize it.** A draft is not an issued invoice: Stripe refuses to credit one ("You cannot
+//     create a credit note for a draft invoice"), so a correction against a draft period is impossible.
+//     Finalizing with `auto_advance=false` makes the invoice real WITHOUT Stripe attempting collection
+//     — issuing an invoice and taking money are two decisions, and this method makes only the first.
+func (p *StripeProvider) IssueInvoice(ctx context.Context, customerID, period string) (string, error) {
+	handle, err := p.resolveCustomer(ctx, customerID)
+	if err != nil {
+		return "", err
+	}
+
+	ref, status, err := p.invoiceForPeriod(ctx, handle, period)
+	if err != nil {
+		return "", err
+	}
+	if ref == "" {
+		form := url.Values{}
+		form.Set("customer", handle)
+		form.Set("auto_advance", "false")
+		form.Set("pending_invoice_items_behavior", "include")
+		form.Set("metadata["+metaPeriod+"]", period)
+		res, cerr := p.do(ctx, http.MethodPost, "/v1/invoices", form, "")
+		if cerr != nil {
+			return "", cerr
+		}
+		var inv struct {
+			ID     string `json:"id"`
+			Status string `json:"status"`
+		}
+		if derr := decode(res, &inv); derr != nil {
+			return "", derr
+		}
+		if inv.ID == "" {
+			return "", fmt.Errorf("%w: stripe returned an invoice with no id", ErrProviderRejected)
+		}
+		ref, status = inv.ID, inv.Status
+	}
+
+	if status != "draft" {
+		return ref, nil
+	}
+	form := url.Values{}
+	form.Set("auto_advance", "false")
+	res, err := p.do(ctx, http.MethodPost, "/v1/invoices/"+url.PathEscape(ref)+"/finalize", form, "")
+	if err != nil {
+		return "", err
+	}
+	var final struct {
+		ID string `json:"id"`
+	}
+	if err := decode(res, &final); err != nil {
+		return "", err
+	}
+	if final.ID == "" {
+		return "", fmt.Errorf("%w: stripe finalized invoice %s and returned no id", ErrProviderRejected, ref)
+	}
+	return final.ID, nil
+}
+
+// invoiceForPeriod finds the customer's existing invoice carrying lines for a period, with its status.
+// An empty ref means there is none — which is a normal answer, not an error.
+func (p *StripeProvider) invoiceForPeriod(ctx context.Context, handle, period string) (ref, status string, err error) {
+	form := url.Values{}
+	form.Set("customer", handle)
+	form.Set("limit", "100")
+	res, err := p.do(ctx, http.MethodGet, "/v1/invoices", form, "")
+	if err != nil {
+		return "", "", err
+	}
+	var list stripeInvoiceList
+	if err := decode(res, &list); err != nil {
+		return "", "", err
+	}
+	for _, inv := range list.Data {
+		for _, l := range inv.Lines.Data {
+			if linePeriod(l) == period {
+				return inv.ID, inv.Status, nil
+			}
+		}
+	}
+	return "", "", nil
 }
 
 // RecordedUsage returns what STRIPE says it recorded for a customer-period — the reconciler's right-hand
@@ -1217,53 +1491,75 @@ type stripeUsageSummary struct {
 // The provider is the system of record for "what was CHARGED"; `usage_record` is the platform's system
 // of record for "what was USED" (P7 design Decision 7). This method is deliberately read-only and takes
 // no write path: the reconciler is structurally incapable of repairing by overwrite.
+//
+// 🔴 It reads the METER's event summaries rather than a subscription item's usage summaries, for the
+// same wire reason [StripeProvider.ReportUsage] posts meter events — and this is the half that makes
+// the move safe. Because the meter is an independent ledger, Stripe's record of what was used is
+// genuinely INDEPENDENT of the invoice item the platform raised to charge for it. Reconciling the two
+// therefore compares two separately-authored numbers, which is the only comparison worth making; a
+// reconciliation that read back the platform's own charge would agree with itself by construction.
 func (p *StripeProvider) RecordedUsage(ctx context.Context, customerID, period string) ([]RecordedUsage, error) {
 	handle, err := p.resolveCustomer(ctx, customerID)
 	if err != nil {
 		return nil, err
 	}
-	subs, err := p.customerSubscriptions(ctx, handle)
+	meter, err := p.meterIDFor(ctx)
 	if err != nil {
 		return nil, err
 	}
-
-	var out []RecordedUsage
-	for _, sub := range subs {
-		for _, it := range sub.Items.Data {
-			if it.Price.Recurring.UsageType != "metered" {
-				continue
-			}
-			form := url.Values{}
-			form.Set("limit", "100")
-			res, err := p.do(ctx, http.MethodGet, "/v1/subscription_items/"+url.PathEscape(it.ID)+"/usage_record_summaries", form, "")
-			if err != nil {
-				return nil, err
-			}
-			var list stripeUsageSummaryList
-			if err := decode(res, &list); err != nil {
-				return nil, err
-			}
-			for _, s := range list.Data {
-				if periodKey(s.Period.Start) != period {
-					continue
-				}
-				out = append(out, RecordedUsage{
-					// The metric is the platform's, and the price reference is what ties a Stripe item to
-					// the plan's metered meter. Reporting the price ref as the metric would be reporting
-					// Stripe's vocabulary as the platform's.
-					Metric:   meterNameFor(it.Price.ID),
-					Period:   period,
-					Quantity: s.TotalUsage,
-					UsageRef: s.ID,
-				})
-			}
-		}
+	start, ok := parsePeriodKey(period)
+	if !ok {
+		return nil, fmt.Errorf("%w: %q is not a period key the meter can be queried by", ErrProviderRejected, period)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Metric < out[j].Metric })
-	return out, nil
+	end := start.AddDate(0, 1, 0)
+
+	form := url.Values{}
+	form.Set("customer", handle)
+	form.Set("start_time", strconv.FormatInt(start.Unix(), 10))
+	form.Set("end_time", strconv.FormatInt(end.Unix(), 10))
+	form.Set("limit", "100")
+	res, err := p.do(ctx, http.MethodGet, "/v1/billing/meters/"+url.PathEscape(meter)+"/event_summaries", form, "")
+	if err != nil {
+		return nil, err
+	}
+	var list stripeMeterSummaryList
+	if err := decode(res, &list); err != nil {
+		return nil, err
+	}
+
+	// Stripe may bucket the window into several summaries. They are SUMMED rather than returned one per
+	// bucket, because the reconciler compares a period total against a period total; handing it three
+	// rows for one period would make it report a drift that is only a bucketing artefact.
+	var total float64
+	var refs []string
+	for _, sum := range list.Data {
+		total += sum.AggregatedValue
+		refs = append(refs, sum.ID)
+	}
+	if len(list.Data) == 0 {
+		// An empty read is NOT zero usage. Reporting it as a zero row would let the reconciler compare
+		// the platform's figure against a number Stripe never stated, and call the difference a drift.
+		return nil, nil
+	}
+	sort.Strings(refs)
+	return []RecordedUsage{{
+		Metric:   meterNameFor(p.meterEvent),
+		Period:   period,
+		Quantity: total,
+		UsageRef: strings.Join(refs, ","),
+	}}, nil
 }
 
-// meterNameFor maps a Stripe price reference to the platform meter it backs.
+// parsePeriodKey is the inverse of periodKey: a month key to the instant that month starts, in UTC.
+func parsePeriodKey(period string) (time.Time, bool) {
+	t, err := time.ParseInLocation("2006-01", period, time.UTC)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return t, true
+}
+
+// meterNameFor maps a Stripe meter event name to the platform meter it carries.
 //
 // The platform reports exactly one metered meter to Stripe today — SUM — so this is a statement of that
 // fact rather than a lookup table waiting to be filled in. When a second metered meter is configured,

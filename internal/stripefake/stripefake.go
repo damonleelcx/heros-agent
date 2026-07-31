@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -77,11 +78,17 @@ type Server struct {
 	subs       map[string]*fakeSub
 	items      map[string]*fakeItem // invoice item id -> item
 	invoices   map[string]*fakeInvoice
-	usage      map[string]map[string]float64 // subscription item id -> period key -> total
 	credits    map[string]map[string]any
 	refunds    map[string]map[string]any
-	// prices are the price references this account knows: id -> active.
-	prices map[string]bool
+	// meters are the account's billing meters: event name -> meter id.
+	meters map[string]string
+	// meterEvents is the identifier dedupe set. Stripe refuses a repeated identifier outright, and
+	// that refusal is what makes a retried usage report converge instead of accumulating.
+	meterEvents map[string]bool
+	// meterUsage is event name -> customer handle -> period key -> aggregated total.
+	meterUsage map[string]map[string]map[string]float64
+	// prices are the price references this account knows.
+	prices map[string]fakePrice
 	// owner maps a subscription to its customer. Beside the subs map rather than on fakeSub so the
 	// object serializer stays a pure function of fakeSub.
 	owner map[string]string
@@ -105,6 +112,15 @@ type Server struct {
 	seenIdem []string
 }
 
+// fakePrice is a seeded price. The TYPE is carried because it is the half of a price reference that
+// a preflight cannot infer and that Stripe enforces at the moment of charge: an invoice item accepts
+// only `one_time`, a subscription only `recurring`. A fake that modelled existence but not type would
+// wave through the exact misconfiguration the preflight was extended to catch.
+type fakePrice struct {
+	active bool
+	typ    string
+}
+
 type idemEntry struct {
 	op     string
 	status int
@@ -124,7 +140,12 @@ type fakeSubItem struct {
 }
 
 type fakeItem struct {
-	id       string
+	id string
+	// lineID is the id of the INVOICE LINE this item produces, and it is deliberately a different
+	// string from id. Stripe's are different too, and a fake that reused one id for both would let a
+	// provider send the wrong one and still pass — which is exactly how the credit-note path stayed
+	// broken until a real account refused it.
+	lineID   string
 	invoice  string
 	customer string
 	price    string
@@ -155,9 +176,11 @@ func New() *Server {
 	f := &Server{
 		customers: map[string]map[string]any{}, byPlatform: map[string]string{},
 		subs: map[string]*fakeSub{}, items: map[string]*fakeItem{}, invoices: map[string]*fakeInvoice{},
-		usage: map[string]map[string]float64{}, credits: map[string]map[string]any{},
-		refunds: map[string]map[string]any{}, idem: map[string]idemEntry{}, calls: map[string]int{},
-		owner: map[string]string{}, prices: map[string]bool{},
+		credits: map[string]map[string]any{},
+		meters:  map[string]string{}, meterEvents: map[string]bool{},
+		meterUsage: map[string]map[string]map[string]float64{},
+		refunds:    map[string]map[string]any{}, idem: map[string]idemEntry{}, calls: map[string]int{},
+		owner: map[string]string{}, prices: map[string]fakePrice{},
 	}
 	f.srv = httptest.NewServer(http.HandlerFunc(f.handle))
 	return f
@@ -240,13 +263,6 @@ func (f *Server) Item(id string) (Item, bool) {
 }
 
 // Usage returns the total Stripe holds for a subscription item in a period.
-func (f *Server) Usage(itemID, period string) (float64, bool) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	v, ok := f.usage[itemID][period]
-	return v, ok
-}
-
 func (f *Server) next(prefix string) string {
 	f.seq++
 	return fmt.Sprintf("%s_%06d", prefix, f.seq)
@@ -274,19 +290,30 @@ func (f *Server) SeedSubscription(platformCustomerID, subPrice, meteredPrice str
 // getPrice resolves a price reference. Only SEEDED prices resolve — a fake that resolved anything would
 // make the preflight vacuous, which is the one thing a configuration check must never be.
 func (f *Server) getPrice(id string) (int, []byte) {
-	active, known := f.prices[id]
+	pr, known := f.prices[id]
 	if !known {
 		return errBody(http.StatusNotFound, "invalid_request_error", "resource_missing", "no such price: "+id)
 	}
-	return okBody(map[string]any{"id": id, "object": "price", "active": active})
+	return okBody(map[string]any{"id": id, "object": "price", "active": pr.active, "type": pr.typ})
 }
 
-// SeedPrice registers a price the account knows. `active=false` models an ARCHIVED price: it resolves
-// and cannot be charged on, which is exactly the case a local shape check would wave through.
+// SeedPrice registers a price the account knows, with no declared type. `active=false` models an
+// ARCHIVED price: it resolves and cannot be charged on, which is exactly the case a local shape check
+// would wave through.
 func (f *Server) SeedPrice(id string, active bool) {
+	f.SeedPriceOfType(id, active, "")
+}
+
+// SeedPriceOfType registers a price WITH its Stripe type — `one_time` or `recurring`.
+//
+// Separate from SeedPrice rather than a wider signature on it, because the untyped form models a real
+// state as well: a price whose type this test does not care about. What the two must never collapse
+// into is a fake that assumes a type, since the assumption would be right exactly as often as the
+// configuration it is supposed to be checking.
+func (f *Server) SeedPriceOfType(id string, active bool, typ string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.prices[id] = active
+	f.prices[id] = fakePrice{active: active, typ: typ}
 }
 
 // SeedCustomerHandle registers a customer under a handle the PLATFORM already holds.
@@ -336,7 +363,7 @@ func (f *Server) SeedTokenLine(customerHandle, period, kind, description string)
 	defer f.mu.Unlock()
 	inv := f.invoiceFor(customerHandle)
 	it := &fakeItem{
-		id: f.next("ii"), invoice: inv.id, customer: customerHandle, price: "price_ref_tokens",
+		id: f.next("ii"), lineID: f.next("il"), invoice: inv.id, customer: customerHandle, price: "price_ref_tokens",
 		quantity: 1, desc: description,
 		metadata: map[string]string{metaKind: kind, metaPeriod: period, metaBasis: description},
 	}
@@ -350,7 +377,10 @@ func (f *Server) invoiceFor(customer string) *fakeInvoice {
 			return inv
 		}
 	}
-	inv := &fakeInvoice{id: f.next("in"), customer: customer, status: "open"}
+	// A new invoice is a DRAFT, as Stripe's is. Starting it `open` would skip the finalize step
+	// entirely on this side and leave the provider's draft handling unexercised — which is how the
+	// credit-note path passed here while a real Stripe refused it.
+	inv := &fakeInvoice{id: f.next("in"), customer: customer, status: "draft"}
 	f.invoices[inv.id] = inv
 	return inv
 }
@@ -478,18 +508,29 @@ func (f *Server) route(r *http.Request, form url.Values) (int, []byte) {
 		return f.getSubscription(strings.TrimPrefix(path, "/v1/subscriptions/"))
 	case r.Method == http.MethodPost && strings.HasPrefix(path, "/v1/subscriptions/"):
 		return f.updateSubscription(strings.TrimPrefix(path, "/v1/subscriptions/"), form)
-	case r.Method == http.MethodPost && strings.HasSuffix(path, "/usage_records"):
-		item := strings.TrimSuffix(strings.TrimPrefix(path, "/v1/subscription_items/"), "/usage_records")
-		return f.recordUsage(item, form)
-	case r.Method == http.MethodGet && strings.HasSuffix(path, "/usage_record_summaries"):
-		item := strings.TrimSuffix(strings.TrimPrefix(path, "/v1/subscription_items/"), "/usage_record_summaries")
-		return f.usageSummaries(item)
+	// 🔴 The legacy /v1/subscription_items/{id}/usage_records pair is GONE, not merely unused. Under
+	// the pinned API version a metered price must be meter-backed, so the subscription item those
+	// endpoints reported against cannot be created — and a fake that still answered them would let a
+	// provider that never moved off the dead path stay green forever.
+	case r.Method == http.MethodPost && path == "/v1/billing/meter_events":
+		return f.createMeterEvent(form)
+	case r.Method == http.MethodGet && path == "/v1/billing/meters":
+		return f.listMeters()
+	case r.Method == http.MethodGet && strings.HasSuffix(path, "/event_summaries"):
+		id := strings.TrimSuffix(strings.TrimPrefix(path, "/v1/billing/meters/"), "/event_summaries")
+		return f.meterEventSummaries(id, form)
 	case r.Method == http.MethodPost && path == "/v1/invoiceitems":
 		return f.createInvoiceItem(form)
 	case r.Method == http.MethodGet && strings.HasPrefix(path, "/v1/invoiceitems/"):
 		return f.getInvoiceItem(strings.TrimPrefix(path, "/v1/invoiceitems/"))
 	case r.Method == http.MethodGet && path == "/v1/invoices":
 		return f.listInvoices(form)
+	case r.Method == http.MethodPost && path == "/v1/invoices":
+		return f.issueInvoice(form)
+	case r.Method == http.MethodPost && strings.HasSuffix(path, "/finalize"):
+		return f.finalizeInvoice(strings.TrimSuffix(strings.TrimPrefix(path, "/v1/invoices/"), "/finalize"))
+	case r.Method == http.MethodGet && strings.HasPrefix(path, "/v1/invoices/"):
+		return f.getInvoice(strings.TrimPrefix(path, "/v1/invoices/"))
 	case r.Method == http.MethodGet && strings.HasPrefix(path, "/v1/prices/"):
 		return f.getPrice(strings.TrimPrefix(path, "/v1/prices/"))
 	case r.Method == http.MethodPost && path == "/v1/checkout/sessions":
@@ -607,48 +648,126 @@ func (f *Server) listSubscriptions(form url.Values) (int, []byte) {
 	return okBody(map[string]any{"object": "list", "data": data})
 }
 
-func (f *Server) recordUsage(item string, form url.Values) (int, []byte) {
-	if !f.hasItem(item) {
-		return errBody(http.StatusNotFound, "invalid_request_error", "resource_missing", "no such subscription item: "+item)
+// SeedMeter registers a billing meter the account knows, and returns its id. Test setup: a meter is
+// created by the ACCOUNT OWNER in Stripe, never by this platform, so there is no code path that makes
+// one and no test may pretend otherwise.
+func (f *Server) SeedMeter(eventName string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if id, ok := f.meters[eventName]; ok {
+		return id
 	}
-	qty, err := strconv.ParseFloat(form.Get("quantity"), 64)
+	id := f.next("mtr")
+	f.meters[eventName] = id
+	return id
+}
+
+// MeterUsage is what the meter aggregated for one customer-period. The reconciler's right-hand side,
+// exposed so a test can assert the number Stripe holds rather than the number the platform sent.
+func (f *Server) MeterUsage(eventName, customerHandle, period string) (float64, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	v, ok := f.meterUsage[eventName][customerHandle][period]
+	return v, ok
+}
+
+// createMeterEvent is POST /v1/billing/meter_events.
+//
+// 🔴 A repeated `identifier` is REFUSED, which is Stripe's real behaviour and the property the whole
+// convergence argument rests on. Note what the refusal does NOT carry: Stripe sends no error `code`
+// for it, only this sentence, so the provider has to match the message. That is stated here rather
+// than smoothed over, because a fake that invented a tidy code would let the provider match on one
+// that does not exist on the wire.
+func (f *Server) createMeterEvent(form url.Values) (int, []byte) {
+	name := form.Get("event_name")
+	if _, ok := f.meters[name]; !ok {
+		return errBody(http.StatusBadRequest, "invalid_request_error", "",
+			"Invalid event_name: "+name+". No active meter found with this event name.")
+	}
+	id := form.Get("identifier")
+	if id == "" {
+		return errBody(http.StatusBadRequest, "invalid_request_error", "parameter_missing", "identifier is required")
+	}
+	if f.meterEvents[id] {
+		return errBody(http.StatusBadRequest, "invalid_request_error", "",
+			"An event already exists with identifier "+id+".")
+	}
+	handle := form.Get("payload[stripe_customer_id]")
+	if _, ok := f.customers[handle]; !ok {
+		return errBody(http.StatusBadRequest, "invalid_request_error", "",
+			"Invalid payload: no such customer "+handle)
+	}
+	val, err := strconv.ParseFloat(form.Get("payload[value]"), 64)
 	if err != nil {
-		return errBody(http.StatusBadRequest, "invalid_request_error", "parameter_invalid_integer", "quantity must be an integer")
+		return errBody(http.StatusBadRequest, "invalid_request_error", "parameter_invalid_integer", "payload[value] must be a number")
 	}
 	ts, _ := strconv.ParseInt(form.Get("timestamp"), 10, 64)
 	period := time.Unix(ts, 0).UTC().Format("2006-01")
-	if f.usage[item] == nil {
-		f.usage[item] = map[string]float64{}
+
+	// 🔴 The 35-day backfill window Stripe enforces is deliberately NOT modelled. This fake has no
+	// clock, and a time-dependent fake would make the suite pass in July and fail in September for
+	// reasons no one could reproduce. The provider's own refusal is what is tested, against an
+	// injected clock, in TestReportUsageRefusesAPeriodOutsideStripesBackfillWindow.
+	f.meterEvents[id] = true
+	if f.meterUsage[name] == nil {
+		f.meterUsage[name] = map[string]map[string]float64{}
 	}
-	// `set` semantics: the platform's usage record is an upsert of "what was used", so a re-report
-	// converges rather than accumulating.
-	if form.Get("action") == "increment" {
-		f.usage[item][period] += qty
-	} else {
-		f.usage[item][period] = qty
+	if f.meterUsage[name][handle] == nil {
+		f.meterUsage[name][handle] = map[string]float64{}
 	}
-	return okBody(map[string]any{"id": f.next("mbur"), "object": "usage_record", "quantity": qty})
+	// AGGREGATES, it does not set. That is the whole reason the identifier has to be deterministic.
+	f.meterUsage[name][handle][period] += val
+	return okBody(map[string]any{
+		"object": "billing.meter_event", "event_name": name, "identifier": id,
+		"timestamp": ts, "payload": map[string]any{"stripe_customer_id": handle, "value": form.Get("payload[value]")},
+	})
 }
 
-func (f *Server) hasItem(item string) bool {
-	for _, s := range f.subs {
-		for _, it := range s.items {
-			if it.id == item {
-				return true
-			}
+func (f *Server) listMeters() (int, []byte) {
+	data := []any{}
+	names := make([]string, 0, len(f.meters))
+	for n := range f.meters {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, n := range names {
+		data = append(data, map[string]any{
+			"id": f.meters[n], "object": "billing.meter", "event_name": n, "status": "active",
+		})
+	}
+	return okBody(map[string]any{"object": "list", "data": data})
+}
+
+func (f *Server) meterEventSummaries(meterID string, form url.Values) (int, []byte) {
+	name := ""
+	for n, id := range f.meters {
+		if id == meterID {
+			name = n
+			break
 		}
 	}
-	return false
-}
+	if name == "" {
+		return errBody(http.StatusNotFound, "invalid_request_error", "resource_missing", "no such meter: "+meterID)
+	}
+	handle := form.Get("customer")
+	start, _ := strconv.ParseInt(form.Get("start_time"), 10, 64)
+	end, _ := strconv.ParseInt(form.Get("end_time"), 10, 64)
 
-func (f *Server) usageSummaries(item string) (int, []byte) {
 	data := []any{}
-	for period, total := range f.usage[item] {
-		start, _ := time.ParseInLocation("2006-01", period, time.UTC)
+	periods := make([]string, 0, len(f.meterUsage[name][handle]))
+	for period := range f.meterUsage[name][handle] {
+		periods = append(periods, period)
+	}
+	sort.Strings(periods)
+	for _, period := range periods {
+		t, _ := time.ParseInLocation("2006-01", period, time.UTC)
+		if t.Unix() < start || t.Unix() >= end {
+			continue
+		}
 		data = append(data, map[string]any{
-			"id": "urs_" + item + "_" + period, "object": "usage_record_summary",
-			"period":      map[string]any{"start": start.Unix(), "end": start.AddDate(0, 1, 0).Unix()},
-			"total_usage": total, "subscription_item": item,
+			"id": "mtrusg_" + meterID + "_" + period, "object": "billing.meter_event_summary",
+			"aggregated_value": f.meterUsage[name][handle][period],
+			"start_time":       t.Unix(), "end_time": t.AddDate(0, 1, 0).Unix(),
 		})
 	}
 	return okBody(map[string]any{"object": "list", "data": data})
@@ -659,8 +778,24 @@ func (f *Server) createInvoiceItem(form url.Values) (int, []byte) {
 	if _, ok := f.customers[cus]; !ok {
 		return errBody(http.StatusNotFound, "invalid_request_error", "resource_missing", "no such customer: "+cus)
 	}
-	if form.Get("price") == "" {
-		return errBody(http.StatusBadRequest, "invalid_request_error", "parameter_missing", "price is required")
+	// 🔴 The flat `price` parameter is GONE under the pinned API version. Stripe's own reply to it is
+	// the one reproduced here, question mark and all — a fake that quietly accepted the old spelling
+	// would let the provider keep sending a parameter the wire ignores, and the only symptom would be
+	// an invoice item with no price on it.
+	if form.Get("price") != "" {
+		return errBody(http.StatusBadRequest, "invalid_request_error", "parameter_unknown",
+			"Received unknown parameter: price. Did you mean pricing?")
+	}
+	ref := form.Get("pricing[price]")
+	if ref == "" {
+		return errBody(http.StatusBadRequest, "invalid_request_error", "parameter_missing", "pricing[price] is required")
+	}
+	// An invoice item accepts a ONE-TIME price only. This is the refusal that makes the metered and
+	// gainshare price references structurally different objects from the subscription one, and the
+	// reason a single `price_refs` entry could never have served both.
+	if pr, known := f.prices[ref]; known && pr.typ != "" && pr.typ != "one_time" {
+		return errBody(http.StatusBadRequest, "invalid_request_error", "parameter_invalid",
+			"The price specified is set to `type="+pr.typ+"` but this field only accepts prices with `type=one_time`.")
 	}
 	if _, err := strconv.ParseInt(form.Get("quantity"), 10, 64); err != nil {
 		return errBody(http.StatusBadRequest, "invalid_request_error", "parameter_invalid_integer", "quantity must be an integer")
@@ -668,7 +803,7 @@ func (f *Server) createInvoiceItem(form url.Values) (int, []byte) {
 	qty, _ := strconv.ParseFloat(form.Get("quantity"), 64)
 	inv := f.invoiceFor(cus)
 	it := &fakeItem{
-		id: f.next("ii"), invoice: inv.id, customer: cus, price: form.Get("price"),
+		id: f.next("ii"), lineID: f.next("il"), invoice: inv.id, customer: cus, price: ref,
 		quantity: qty, desc: form.Get("description"), metadata: map[string]string{},
 	}
 	for _, k := range []string{metaKind, metaPeriod, metaBasis} {
@@ -684,7 +819,15 @@ func (f *Server) itemObject(it *fakeItem) map[string]any {
 	return map[string]any{
 		"id": it.id, "object": "invoiceitem", "invoice": it.invoice, "customer": it.customer,
 		"quantity": it.quantity, "description": it.desc, "metadata": it.metadata,
-		"price": map[string]any{"id": it.price},
+		"pricing": basilPricing(it.price),
+	}
+}
+
+// basilPricing is the `pricing` sub-object the pinned API version nests a price reference inside.
+func basilPricing(priceRef string) map[string]any {
+	return map[string]any{
+		"type":          "price_details",
+		"price_details": map[string]any{"price": priceRef},
 	}
 }
 
@@ -696,6 +839,42 @@ func (f *Server) getInvoiceItem(id string) (int, []byte) {
 	return okBody(f.itemObject(it))
 }
 
+// issueInvoice is POST /v1/invoices.
+//
+// This fake attaches an invoice item to an invoice the moment it is created (invoiceFor), so there is
+// never a pending item to sweep and this reduces to returning the invoice that already holds them. It
+// is NOT a no-op stub: it exists so the provider's IssueInvoice is exercised against a wire on both
+// sides, and so the demo takes the same branch here as it does against a real account.
+func (f *Server) issueInvoice(form url.Values) (int, []byte) {
+	cus := form.Get("customer")
+	if _, ok := f.customers[cus]; !ok {
+		return errBody(http.StatusNotFound, "invalid_request_error", "resource_missing", "no such customer: "+cus)
+	}
+	inv := f.invoiceFor(cus)
+	return okBody(map[string]any{"id": inv.id, "object": "invoice", "status": inv.status, "customer": cus})
+}
+
+// getInvoice is GET /v1/invoices/{id}. It shares the object builder with the list route, so the two
+// cannot drift into describing the same invoice differently.
+// finalizeInvoice is POST /v1/invoices/{id}/finalize. A draft becomes `open`: real, creditable, and
+// with no collection attempted.
+func (f *Server) finalizeInvoice(id string) (int, []byte) {
+	inv, ok := f.invoices[id]
+	if !ok {
+		return errBody(http.StatusNotFound, "invalid_request_error", "resource_missing", "no such invoice: "+id)
+	}
+	inv.status = "open"
+	return okBody(f.invoiceObject(inv))
+}
+
+func (f *Server) getInvoice(id string) (int, []byte) {
+	inv, ok := f.invoices[id]
+	if !ok {
+		return errBody(http.StatusNotFound, "invalid_request_error", "resource_missing", "no such invoice: "+id)
+	}
+	return okBody(f.invoiceObject(inv))
+}
+
 func (f *Server) listInvoices(form url.Values) (int, []byte) {
 	cus := form.Get("customer")
 	data := []any{}
@@ -703,31 +882,48 @@ func (f *Server) listInvoices(form url.Values) (int, []byte) {
 		if inv.customer != cus {
 			continue
 		}
-		lines := []any{}
-		for _, it := range f.items {
-			if it.invoice != inv.id {
-				continue
-			}
-			lines = append(lines, map[string]any{
-				"id": it.id, "object": "line_item", "description": it.desc,
-				"quantity": it.quantity, "metadata": it.metadata,
-				"price": map[string]any{"id": it.price},
-			})
-		}
-		for _, own := range inv.own {
-			lines = append(lines, map[string]any{
-				"id": own.id, "object": "line_item", "description": own.description,
-				"quantity": own.quantity, "metadata": map[string]string{},
-				"price":  map[string]any{"id": own.priceRef},
-				"period": map[string]any{"start": own.periodStart, "end": own.periodStart},
-			})
-		}
-		data = append(data, map[string]any{
-			"id": inv.id, "object": "invoice", "status": inv.status, "customer": inv.customer,
-			"lines": map[string]any{"object": "list", "data": lines},
-		})
+		data = append(data, f.invoiceObject(inv))
 	}
 	return okBody(map[string]any{"object": "list", "data": data})
+}
+
+// invoiceObject serializes one invoice with its lines. Shared by the list and retrieve routes so the
+// two cannot drift into describing the same invoice differently — which would let a provider read a
+// field on one path that does not exist on the other.
+func (f *Server) invoiceObject(inv *fakeInvoice) map[string]any {
+	lines := []any{}
+	for _, it := range f.items {
+		if it.invoice != inv.id {
+			continue
+		}
+		lines = append(lines, map[string]any{
+			"id": it.lineID, "object": "line_item", "description": it.desc,
+			"quantity": it.quantity, "metadata": it.metadata,
+			// The line points back at the item that produced it. Their ids differ, so this linkage is
+			// the ONLY way a correction holding an item id can find the line to credit.
+			"parent": map[string]any{
+				"type":                 "invoice_item_details",
+				"invoice_item_details": map[string]any{"invoice_item": it.id},
+			},
+			// 🔴 `pricing.price_details.price`, which is where the pinned API version puts it. The
+			// pre-Basil `price.id` is not emitted at all: leaving it in "for safety" would let a
+			// provider that still reads the old field keep passing here while losing the price on the
+			// real wire — precisely the decay a version pin exists to make loud.
+			"pricing": basilPricing(it.price),
+		})
+	}
+	for _, own := range inv.own {
+		lines = append(lines, map[string]any{
+			"id": own.id, "object": "line_item", "description": own.description,
+			"quantity": own.quantity, "metadata": map[string]string{},
+			"pricing": basilPricing(own.priceRef),
+			"period":  map[string]any{"start": own.periodStart, "end": own.periodStart},
+		})
+	}
+	return map[string]any{
+		"id": inv.id, "object": "invoice", "status": inv.status, "customer": inv.customer,
+		"lines": map[string]any{"object": "list", "data": lines},
+	}
 }
 
 // createCheckoutSession mints the hosted collection surface.
@@ -754,35 +950,60 @@ func (f *Server) createCheckoutSession(form url.Values) (int, []byte) {
 	})
 }
 
-// SeedMeteredItem attaches a metered item to an existing subscription and returns its id.
-//
-// This models STRIPE-ACCOUNT CONFIGURATION, not platform code: a metered subscription item exists
-// because Finance configured a metered price and attached it, and the platform's job is only to report
-// a quantity against it. Seeding it here rather than having the platform create it keeps that division
-// honest — the `Provider` interface has one price reference per subscription and P21 does not widen it.
-func (f *Server) SeedMeteredItem(subID, priceRef string) string {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	sub, ok := f.subs[subID]
-	if !ok {
-		return ""
-	}
-	item := fakeSubItem{id: f.next("si"), priceRef: priceRef, usageType: "metered"}
-	sub.items = append(sub.items, item)
-	return item.id
-}
-
 func (f *Server) createCreditNote(form url.Values) (int, []byte) {
 	inv := form.Get("invoice")
-	if _, ok := f.invoices[inv]; !ok {
+	invObj, ok := f.invoices[inv]
+	if !ok {
 		return errBody(http.StatusNotFound, "invalid_request_error", "resource_missing", "no such invoice: "+inv)
 	}
+	// 🔴 Stripe's refusal, reproduced. A draft is not an issued invoice, and crediting one is
+	// meaningless — there is nothing yet to take back.
+	if invObj.status == "draft" {
+		return errBody(http.StatusBadRequest, "invalid_request_error", "parameter_invalid",
+			"You cannot create a credit note for a draft invoice.")
+	}
 	line := form.Get("lines[0][invoice_line_item]")
-	if _, ok := f.items[line]; !ok {
+	var it *fakeItem
+	for _, cand := range f.items {
+		if cand.lineID == line {
+			it = cand
+			break
+		}
+		if cand.id == line {
+			// 🔴 Stripe's own refusal, reproduced. The invoice ITEM id is a real id of the wrong kind
+			// here, and accepting it would make this fake more forgiving than the wire.
+			return errBody(http.StatusBadRequest, "invalid_request_error", "parameter_invalid",
+				"Old `id` values cannot be used to specify an invoice line item in this API version. "+
+					"Please use the current value of the `id` field of the invoice line item object.")
+		}
+	}
+	if it == nil {
 		return errBody(http.StatusBadRequest, "invalid_request_error", "resource_missing", "no such invoice line item: "+line)
 	}
+	// 🔴 Stripe's own requirement, reproduced verbatim. A fake that credited a line without one would
+	// hide the single most important question a correction asks — HOW MUCH is being reversed — and the
+	// provider would have shipped a credit note Stripe refuses.
+	qty := form.Get("lines[0][quantity]")
+	if qty == "" && form.Get("lines[0][amount]") == "" {
+		return errBody(http.StatusBadRequest, "invalid_request_error", "parameter_missing",
+			"`quantity` or `amount` is required when crediting an invoice line item.")
+	}
+	if qty != "" {
+		n, err := strconv.ParseFloat(qty, 64)
+		if err != nil || n <= 0 {
+			return errBody(http.StatusBadRequest, "invalid_request_error", "parameter_invalid_integer",
+				"lines[0][quantity] must be a positive integer")
+		}
+		// A credit for MORE units than were charged is not a correction, it is a gift. Stripe refuses
+		// it and so does this.
+		if n > it.quantity {
+			return errBody(http.StatusBadRequest, "invalid_request_error", "parameter_invalid",
+				fmt.Sprintf("Cannot credit %v units against a line of %v.", n, it.quantity))
+		}
+	}
 	id := f.next("cn")
-	f.credits[id] = map[string]any{"id": id, "object": "credit_note", "invoice": inv, "memo": form.Get("memo")}
+	f.credits[id] = map[string]any{"id": id, "object": "credit_note", "invoice": inv,
+		"memo": form.Get("memo"), "quantity": qty}
 	return okBody(f.credits[id])
 }
 

@@ -47,6 +47,12 @@ const (
 	WebhookInvoicePaymentFailed WebhookType = "invoice.payment_failed"
 	WebhookInvoiceFinalized     WebhookType = "invoice.finalized"
 	WebhookSubscriptionUpdated  WebhookType = "customer.subscription.updated"
+	// WebhookSubscriptionCreated is what Stripe sends for a subscription CHECKOUT just created — and it
+	// is the only subscription event a self-serve signup produces. Stripe does not follow it with an
+	// `.updated`, so a platform that handled only `.updated` would mirror no status for precisely the
+	// customers who just paid: the console's provider-status chip and its past-due states would have
+	// nothing to render from until something else happened to that subscription.
+	WebhookSubscriptionCreated WebhookType = "customer.subscription.created"
 	WebhookSubscriptionPastDue  WebhookType = "customer.subscription.past_due"
 	WebhookSubscriptionCanceled WebhookType = "customer.subscription.deleted"
 	WebhookChargeRefunded       WebhookType = "charge.refunded"
@@ -460,6 +466,21 @@ type stripeEventObject struct {
 		Start int64 `json:"start"`
 	} `json:"period"`
 	PeriodStart int64 `json:"period_start"`
+	// Parent is where the pinned API version puts an invoice's link back to the SUBSCRIPTION that
+	// produced it — both the subscription ref and, decisively, the subscription's metadata.
+	//
+	// 🔴 This is not a nicety. A real `invoice.paid` for a Checkout-created subscription carries
+	// `metadata: {}` on the invoice itself and no top-level `subscription`: the plan the customer just
+	// bought lives ONLY here. Reading only the flat fields means every real self-serve upgrade arrives
+	// naming no plan and no subscription, the entitlement sync has nothing to act on, and the customer
+	// pays without being granted anything. The demo never saw it because it authors P7-flat events that
+	// carry `plan_id` directly — a real account is the only thing that can tell you this.
+	Parent struct {
+		SubscriptionDetails struct {
+			Subscription string            `json:"subscription"`
+			Metadata     map[string]string `json:"metadata"`
+		} `json:"subscription_details"`
+	} `json:"parent"`
 	// Card is the display half of a payment method. Stripe returns nothing here that could be used to
 	// charge anything, and the projection reads no other field of it.
 	Card struct {
@@ -494,13 +515,18 @@ func (s *Service) decodeWebhook(body []byte) (WebhookPayload, error) {
 		return WebhookPayload{}, fmt.Errorf("%w: data.object: %v", ErrWebhookMalformed, err)
 	}
 
+	// The subscription's own metadata, where the pinned API version files it on an invoice. Read
+	// through a helper so every field below consults the same fallback rather than three of them
+	// remembering to and one forgetting.
+	subMeta := obj.Parent.SubscriptionDetails.Metadata
+
 	p := WebhookPayload{
 		ProviderEventID: env.ID,
 		Type:            env.Type,
 		Status:          obj.Status,
-		SubscriptionRef: firstNonEmpty(obj.Subscription, subscriptionRefOf(obj)),
+		SubscriptionRef: firstNonEmpty(obj.Subscription, obj.Parent.SubscriptionDetails.Subscription, subscriptionRefOf(obj)),
 		ChargeRef:       firstNonEmpty(obj.Charge, chargeRefOf(obj)),
-		PlanID:          obj.Metadata["platform_plan_id"],
+		PlanID:          firstNonEmpty(obj.Metadata["platform_plan_id"], subMeta["platform_plan_id"]),
 		Period:          periodOf(obj),
 
 		PaymentMethodBrand: obj.Card.Brand,
@@ -513,7 +539,7 @@ func (s *Service) decodeWebhook(body []byte) (WebhookPayload, error) {
 	// handle. The metadata the platform stamped wins where it exists; otherwise the account store is
 	// asked which of its accounts holds that handle. Guessing — or keying the mirror by Stripe's handle
 	// instead — would give the console a state it cannot look up.
-	p.CustomerID = firstNonEmpty(obj.Metadata[metaCustomerID], s.customerForHandle(obj.Customer))
+	p.CustomerID = firstNonEmpty(obj.Metadata[metaCustomerID], subMeta[metaCustomerID], s.customerForHandle(obj.Customer))
 	return p, nil
 }
 
@@ -632,6 +658,15 @@ func (s *Service) applyWebhook(p WebhookPayload) (BillingState, error) {
 	st.CustomerID = p.CustomerID
 	st.UpdatedAt = s.now().UTC()
 
+	// 🔴 Remember what the PROVIDER created. A subscription made by Checkout is one the platform never
+	// saw the creation of, and without capturing its ref here the next plan change has nothing to
+	// repoint — so it starts another checkout and the customer ends up paying for two subscriptions.
+	// Recorded from any delivery that names one, because the event that carries it varies with the
+	// flow: `customer.subscription.created` for a signup, `invoice.paid` for a renewal.
+	if p.SubscriptionRef != "" {
+		s.subs[p.CustomerID] = p.SubscriptionRef
+	}
+
 	switch p.Type {
 	case WebhookInvoicePaid:
 		st.InvoiceStatus, st.LastInvoiceRef = "paid", p.InvoiceRef
@@ -643,7 +678,7 @@ func (s *Service) applyWebhook(p WebhookPayload) (BillingState, error) {
 		st.InvoiceStatus, st.LastInvoiceRef = "open", p.InvoiceRef
 	case WebhookSubscriptionPastDue:
 		st.SubscriptionStatus, st.PastDue = "past_due", true
-	case WebhookSubscriptionUpdated:
+	case WebhookSubscriptionCreated, WebhookSubscriptionUpdated:
 		st.SubscriptionStatus = p.Status
 		st.PastDue = p.Status == "past_due"
 	case WebhookSubscriptionCanceled:

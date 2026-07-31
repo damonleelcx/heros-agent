@@ -66,7 +66,7 @@ func (s *Service) correct(ctx context.Context, customerID, againstEventID, reaso
 			"resolved by not settling it, not by crediting it", againstEventID)
 	}
 
-	key := CorrectionIdempotencyKey(typ, againstEventID, reason)
+	key := CorrectionIdempotencyKey(typ, customerID, againstEventID, reason)
 
 	// Write-ahead, exactly as a charge does: the correction is durable before the provider is asked, so
 	// an ambiguous failure leaves a resumable record rather than an invisible maybe-credit.

@@ -46,8 +46,15 @@ import (
 // preflight, and the honest way to express "cannot" is an interface it does not implement — which the
 // report then states as UNVERIFIED rather than silently passing off "we did not check" as "it is fine".
 type PriceVerifier interface {
-	// ResolvePrice reports whether a price reference exists at the provider. It performs a READ.
-	ResolvePrice(ctx context.Context, priceRef string) error
+	// ResolvePrice reports whether a price reference exists at the provider AND is the right shape for
+	// the charge kind it is configured under. It performs a READ.
+	//
+	// The kind is a parameter because existence is not the whole question: the two ways money moves
+	// accept opposite price shapes (a subscription needs a recurring price, an invoice-item charge
+	// needs a one-time one), so "does this id resolve" cannot be answered usefully without knowing
+	// what it is going to be used for. Widening this interface is allowed where widening [Provider] is
+	// not — this one is P21's own, and Decision 1 fences the P7 contract, not every interface.
+	ResolvePrice(ctx context.Context, kind, priceRef string) error
 }
 
 // UnresolvedPrice is one configured reference the provider does not know.
@@ -141,7 +148,7 @@ func (s *Service) PreflightPricing(ctx context.Context) (PricingPreflight, error
 				continue
 			}
 			rep.Checked++
-			if err := verifier.ResolvePrice(ctx, ref); err != nil {
+			if err := verifier.ResolvePrice(ctx, kind, ref); err != nil {
 				if errors.Is(err, ErrProviderUnavailable) {
 					// An outage is not a misconfiguration. Reporting it as one would send an operator to
 					// fix a config store while the provider is simply down.

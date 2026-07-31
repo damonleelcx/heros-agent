@@ -140,7 +140,7 @@ func TestPreflightNamesAProductIdMistakenForAPriceId(t *testing.T) {
 		t.Fatalf("provider: %v", err)
 	}
 
-	err = p.ResolvePrice(context.Background(), "prod_Uyq6ubPcNC0pB1")
+	err = p.ResolvePrice(context.Background(), string(KindSubscription), "prod_Uyq6ubPcNC0pB1")
 	if !errors.Is(err, ErrProviderRejected) {
 		t.Fatalf("a product id must be rejected, got %v", err)
 	}
@@ -284,16 +284,100 @@ func TestPreflightDoesNotGateCharges(t *testing.T) {
 	}
 
 	// The charge still runs, and still succeeds, because the provider — not the cached report — decides.
-	sub, err := s.svc.StartSubscription(context.Background(), "cus_acme")
-	if err != nil {
+	if _, err := s.svc.StartSubscription(context.Background(), "cus_acme"); err != nil {
 		t.Fatalf("a failed preflight blocked a subscription the provider would have accepted: %v", err)
 	}
-	s.seedMeteredItem(sub.SubscriptionRef)
 	if _, err := s.svc.Charge(context.Background(), "cus_acme", july, KindMetered,
 		MeteredChargeIdempotencyKey("cus_acme", july.ID, "sum")); err != nil {
 		t.Fatalf("a failed preflight blocked a charge the provider would have accepted: %v", err)
 	}
 	if n := f.ItemCount(); n != 1 {
 		t.Errorf("%d charge objects, want 1", n)
+	}
+}
+
+// TestPreflightRejectsAPriceOfTheWrongShape is the third thing the real Stripe account taught, and the
+// most expensive one to learn late.
+//
+// A price reference can EXIST, be ACTIVE, and still be unusable, because the two ways this system moves
+// money accept opposite shapes: a subscription is created on a `recurring` price, while a metered or
+// gainshare charge is an invoice item and Stripe accepts only `one_time` there. Configure them the wrong
+// way round and existence-and-active — everything a preflight naturally checks — is green right up until
+// the period closes and the first charge is refused.
+//
+// Both directions are asserted. Only checking the metered one would leave the symmetric mistake, which
+// is just as easy to make, discoverable only in production.
+func TestPreflightRejectsAPriceOfTheWrongShape(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		wrong    string // the reference given the wrong type
+		typ      string
+		wantWord string
+	}{
+		{"a recurring price under the metered kind", "price_ref_team_metered", "recurring", "one_time"},
+		{"a recurring price under the gainshare kind", "price_ref_ent_gainshare", "recurring", "one_time"},
+		{"a one-time price under the subscription kind", "price_ref_biz_sub", "one_time", "RECURRING"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newParityStack(t, "stripe")
+			f := currentFake(t, s)
+			for _, ref := range fixturePrices {
+				if ref == tc.wrong {
+					f.SeedPriceOfType(ref, true, tc.typ)
+					continue
+				}
+				// Everything else is the RIGHT shape, so the report must name exactly one problem and
+				// not smear the failure across the catalog.
+				if strings.HasSuffix(ref, "_sub") {
+					f.SeedPriceOfType(ref, true, "recurring")
+				} else {
+					f.SeedPriceOfType(ref, true, "one_time")
+				}
+			}
+
+			rep, err := s.svc.PreflightPricing(context.Background())
+			if !errors.Is(err, ErrPricingMisconfigured) {
+				t.Fatalf("a wrong-shaped price returned %v, want ErrPricingMisconfigured", err)
+			}
+			if len(rep.Unresolved) != 1 {
+				t.Fatalf("named %d problems, want exactly 1: %+v", len(rep.Unresolved), rep.Unresolved)
+			}
+			got := rep.Unresolved[0]
+			if got.PriceRef != tc.wrong {
+				t.Errorf("named %q, want %q", got.PriceRef, tc.wrong)
+			}
+			// 🔴 The reason must say what shape is needed. "Does not resolve" would send someone hunting
+			// for a missing price that is sitting right there in the account.
+			if !strings.Contains(got.Reason, tc.wantWord) {
+				t.Errorf("the reason does not name the shape it needs (%q): %q", tc.wantWord, got.Reason)
+			}
+			if !strings.Contains(got.Reason, tc.typ) {
+				t.Errorf("the reason does not name the shape it FOUND (%q): %q", tc.typ, got.Reason)
+			}
+		})
+	}
+}
+
+// TestPreflightStillPassesWhenEveryPriceIsTheRightShape is the green half of the shape check.
+//
+// Without it the test above proves only that the preflight can fail, not that the shape rule admits the
+// configuration a working account actually has — and a rule that rejects everything also "catches" every
+// misconfiguration.
+func TestPreflightStillPassesWhenEveryPriceIsTheRightShape(t *testing.T) {
+	s := newParityStack(t, "stripe")
+	f := currentFake(t, s)
+	for _, ref := range fixturePrices {
+		if strings.HasSuffix(ref, "_sub") {
+			f.SeedPriceOfType(ref, true, "recurring")
+		} else {
+			f.SeedPriceOfType(ref, true, "one_time")
+		}
+	}
+	rep, err := s.svc.PreflightPricing(context.Background())
+	if err != nil || !rep.OK() {
+		t.Fatalf("a correctly shaped catalog did not preflight clean: %v / %+v", err, rep)
+	}
+	if rep.Checked != len(fixturePrices) {
+		t.Errorf("checked %d, want %d", rep.Checked, len(fixturePrices))
 	}
 }

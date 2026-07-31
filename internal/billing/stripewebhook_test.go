@@ -370,3 +370,140 @@ func TestWebhookAckLeaksNothing(t *testing.T) {
 
 // unixOf is the timestamp encoding Stripe signs with.
 func unixOf(t time.Time) string { return strconv.FormatInt(t.UTC().Unix(), 10) }
+
+// TestRealCheckoutInvoicePaidGrantsThePlanFromTheSubscriptionsMetadata is the defect a real self-serve
+// checkout exposed, written against the payload Stripe actually sent.
+//
+// 🔴 The shape is the whole point, so it is reproduced rather than simplified: on a real `invoice.paid`
+// for a subscription CHECKOUT created, the invoice carries `metadata: {}` and NO top-level
+// `subscription`. The plan the customer just paid for exists only at
+// `parent.subscription_details.metadata`. Reading the flat fields alone yields no plan and no
+// subscription ref, the entitlement sync has nothing to act on, and the customer is charged without
+// being granted anything — silently, with a 200 on the webhook and an "applied" in the log.
+//
+// The demo could never have caught this: it authors P7-flat events that carry `plan_id` directly.
+func TestRealCheckoutInvoicePaidGrantsThePlanFromTheSubscriptionsMetadata(t *testing.T) {
+	h := newHarness(t, "free")
+
+	// Verbatim shape of a Stripe 2025-03-31.basil invoice.paid for a Checkout-created subscription.
+	body := []byte(`{
+	  "id": "evt_real_checkout",
+	  "type": "invoice.paid",
+	  "data": { "object": {
+	    "id": "in_real",
+	    "object": "invoice",
+	    "customer": "cus_stripe_handle",
+	    "status": "paid",
+	    "metadata": {},
+	    "parent": {
+	      "type": "subscription_details",
+	      "subscription_details": {
+	        "subscription": "sub_real",
+	        "metadata": {
+	          "platform_customer_id": "cus_acme",
+	          "platform_plan_id": "business"
+	        }
+	      }
+	    }
+	  }}
+	}`)
+
+	p, err := h.svc.decodeWebhook(body)
+	if err != nil {
+		t.Fatalf("decodeWebhook: %v", err)
+	}
+	if p.PlanID != "business" {
+		t.Errorf("PlanID = %q, want \"business\" — read from parent.subscription_details.metadata, "+
+			"because a real invoice carries none of its own", p.PlanID)
+	}
+	if p.SubscriptionRef != "sub_real" {
+		t.Errorf("SubscriptionRef = %q, want \"sub_real\" — the flat `subscription` field is gone in this API version", p.SubscriptionRef)
+	}
+	if p.CustomerID != "cus_acme" {
+		t.Errorf("CustomerID = %q, want \"cus_acme\" — resolvable without an account-store lookup because "+
+			"the platform stamped it on the subscription at checkout", p.CustomerID)
+	}
+}
+
+// TestSubscriptionCreatedMirrorsStatusAndGrantsThePlan is the second half of the self-serve gap.
+//
+// Stripe sends `customer.subscription.created` for a subscription Checkout just made, and does NOT
+// follow it with an `.updated`. A platform handling only `.updated` mirrors no status for exactly the
+// customers who have just paid — so the console's provider-status chip, and every unhappy state derived
+// from it, has nothing to render from until something unrelated happens to that subscription.
+func TestSubscriptionCreatedMirrorsStatusAndGrantsThePlan(t *testing.T) {
+	h := newHarness(t, "free")
+
+	body := []byte(`{
+	  "id": "evt_sub_created",
+	  "type": "customer.subscription.created",
+	  "data": { "object": {
+	    "id": "sub_real",
+	    "object": "subscription",
+	    "customer": "cus_stripe_handle",
+	    "status": "active",
+	    "metadata": { "platform_customer_id": "cus_acme", "platform_plan_id": "business" }
+	  }}
+	}`)
+
+	p, err := h.svc.decodeWebhook(body)
+	if err != nil {
+		t.Fatalf("decodeWebhook: %v", err)
+	}
+	if p.Type != WebhookSubscriptionCreated {
+		t.Fatalf("type = %q", p.Type)
+	}
+	st, err := h.svc.applyWebhook(p)
+	if err != nil {
+		t.Fatalf("applyWebhook: %v", err)
+	}
+	// 🔴 The provider's own word, carried verbatim. Empty here is the defect: a paid customer whose
+	// status the console cannot show.
+	if st.SubscriptionStatus != "active" {
+		t.Errorf("mirrored SubscriptionStatus = %q, want \"active\" — a brand-new paid subscription "+
+			"leaves the console with nothing to render", st.SubscriptionStatus)
+	}
+	if st.PastDue {
+		t.Error("a newly created active subscription must not mirror as past due")
+	}
+}
+
+// TestCheckoutCreatedSubscriptionIsRememberedSoTheNextChangeRepointsIt is the double-billing defect.
+//
+// 🔴 The failure it fences is not a wrong number on a screen — it is a customer paying twice. In the
+// real self-serve flow the platform does not create the subscription; Checkout does, on Stripe's page.
+// If the platform does not capture the reference from the lifecycle event, the next plan change finds
+// no subscription to repoint, correctly concludes "this must be a checkout", and starts another one —
+// leaving two ACTIVE subscriptions on the customer, each individually correct.
+func TestCheckoutCreatedSubscriptionIsRememberedSoTheNextChangeRepointsIt(t *testing.T) {
+	h := newHarness(t, "free")
+
+	// Precondition: the platform created nothing, so it knows of no subscription.
+	if ref := h.svc.SubscriptionRef("cus_acme"); ref != "" {
+		t.Fatalf("precondition: expected no subscription ref, got %q", ref)
+	}
+
+	body := []byte(`{
+	  "id": "evt_checkout_sub",
+	  "type": "customer.subscription.created",
+	  "data": { "object": {
+	    "id": "sub_from_checkout",
+	    "object": "subscription",
+	    "customer": "cus_stripe_handle",
+	    "status": "active",
+	    "metadata": { "platform_customer_id": "cus_acme", "platform_plan_id": "business" }
+	  }}
+	}`)
+	p, err := h.svc.decodeWebhook(body)
+	if err != nil {
+		t.Fatalf("decodeWebhook: %v", err)
+	}
+	if _, err := h.svc.applyWebhook(p); err != nil {
+		t.Fatalf("applyWebhook: %v", err)
+	}
+
+	if ref := h.svc.SubscriptionRef("cus_acme"); ref != "sub_from_checkout" {
+		t.Fatalf("SubscriptionRef = %q, want \"sub_from_checkout\" — without it the next upgrade opens a "+
+			"second checkout and the customer ends up subscribed twice", ref)
+	}
+}

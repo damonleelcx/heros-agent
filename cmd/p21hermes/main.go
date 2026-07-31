@@ -61,6 +61,8 @@ import (
 	"time"
 
 	"github.com/heros-foreal/agentd/internal/account"
+	"github.com/heros-foreal/agentd/internal/adminfixture"
+	"github.com/heros-foreal/agentd/internal/adminops"
 	"github.com/heros-foreal/agentd/internal/api"
 	"github.com/heros-foreal/agentd/internal/billing"
 	"github.com/heros-foreal/agentd/internal/config"
@@ -75,7 +77,8 @@ import (
 
 const (
 	workflowID = "nousresearch/hermes-agent"
-	customerID = "cus_nousresearch"
+	// defaultCustomerID is the platform customer this demo bills. Overridable with -customer, see there.
+	defaultCustomerID = "cus_nousresearch"
 	// webhookSecret is the signing secret this demo signs its own deliveries with. It goes through the
 	// Secrets seam exactly as a real one does — the demo does not get a shortcut the product does not
 	// have — and it is not key-shaped, so the repository's credential fence does not have to make an
@@ -140,6 +143,9 @@ func hermesTargets() []hermesNode {
 	}
 }
 
+// customerID is the platform customer this run bills, resolved from -customer in main.
+var customerID = defaultCustomerID
+
 var (
 	repoFlag      = flag.String("repo", "", "path to the hermes-agent checkout (required)")
 	serve         = flag.Bool("serve", false, "serve the console's platform API after running the period")
@@ -150,7 +156,18 @@ var (
 	preflightOnly = flag.Bool("preflight-only", false, "resolve every configured price reference and exit; changes NOTHING at the provider")
 	liveMode      = flag.Bool("live", false, "run the rollout in LIVE mode (refused unless a live key is supplied)")
 	startOnFree   = flag.Bool("start-free", true, "start the account on Free so the checkout → grant path is exercised")
-	breakPrice    = flag.String("break-price", "", "leave this price reference UNCONFIGURED at the provider, so the preflight's red path is visible")
+	meterEvent    = flag.String("meter-event", "heros_sum", "the Stripe billing meter event name metered usage is reported under")
+	adminAddr     = flag.String("admin-addr", "", "also serve the OPERATOR admin API here (e.g. 127.0.0.1:4311), backed by THIS run's real billing service")
+	// customerFlag exists because a REAL account keeps what a run leaves behind.
+	//
+	// The platform's idempotency keys are deterministic — that is the point of them — so a second run
+	// under the same customer replays the first run's Stripe objects instead of creating its own. That
+	// is correct behaviour and terrible evidence: the run would "pass" by pointing at objects an earlier
+	// run made. Giving a verification run its own customer id makes every object in it one that THIS run
+	// created, which is the only thing an exit checklist can honestly rest on.
+	customerFlag = flag.String("customer", defaultCustomerID,
+		"the platform customer id to run as; give a fresh one per real-account verification run so every Stripe object is created by that run")
+	breakPrice = flag.String("break-price", "", "leave this price reference UNCONFIGURED at the provider, so the preflight's red path is visible")
 )
 
 // The billing periods: three closed months, the last one after the optimizations merged.
@@ -164,6 +181,10 @@ func now() time.Time { return periods[len(periods)-1].End.Add(-time.Hour) }
 
 func main() {
 	flag.Parse()
+	customerID = strings.TrimSpace(*customerFlag)
+	if customerID == "" {
+		customerID = defaultCustomerID
+	}
 	log.SetFlags(0)
 	if *repoFlag == "" {
 		log.Fatal("p21hermes: -repo is required.\n" +
@@ -194,6 +215,12 @@ func main() {
 	srv.SetBillingRollout(st.rollout)
 	srv.SetBillingCapability(st.svc)
 
+	if *adminAddr != "" {
+		if err := st.serveAdmin(*adminAddr); err != nil {
+			log.Fatalf("p21hermes: admin API: %v", err)
+		}
+	}
+
 	fmt.Printf("\nP21 on %s\n", workflowID)
 	fmt.Printf("  payment read model:  http://%s/api/p21/customers/%s/payment\n", *addr, customerID)
 	fmt.Printf("  webhook endpoint:    http://%s/billing/webhook   (the ONE inbound-from-internet path)\n", *addr)
@@ -201,6 +228,64 @@ func main() {
 	fmt.Printf("  provider:            %s\n", st.svc.Describe()["provider"])
 	fmt.Printf("  rollout:             %s\n", st.rollout)
 	log.Fatal(http.ListenAndServe(*addr, srv.Handler))
+}
+
+// adminPlatformCredential is the shared secret the operator BFF presents. A demo value, and named as
+// one: it is not a credential in the sense the Secrets seam means, and nothing about this run should
+// be taken as a template for how a deployment sources the real one.
+const adminPlatformCredential = "p21hermes-demo-platform-credential-do-not-ship"
+
+// serveAdmin starts the OPERATOR admin API on its own listener, backed by THIS run's billing service.
+//
+// # Why this exists
+//
+// The operator console had only one way to be served — `cmd/p8hermes`, which stands up its own
+// in-memory billing stack against a STUB provider. So Billing-Ops could look at billing oversight and
+// see synthetic tenants, while the real Stripe-backed records lived in a different process it could
+// not reach. An oversight surface that cannot see the money it is meant to oversee is a demo of a
+// surface, not the surface.
+//
+// 🔴 Its own LISTENER, not a route group on the customer server. P8 Decision 11: the operator console
+// is a separate application on a separate origin, so the isolation between a tenant session and a
+// cross-tenant capability is enforced by the browser rather than by our routing being right. Sharing a
+// process is fine; sharing an origin is not.
+//
+// Only the BILLING surface is mounted. Every other operator service is nil, and the admin API now
+// answers those routes with `not_mounted` — an honest "this deployment does not carry it" rather than
+// a fault. That is the truth about this process: it is the P21 billing stack, not a fleet manager.
+func (s *state) serveAdmin(addr string) error {
+	layer, err := adminfixture.Build("p21admin", func() time.Time { return time.Now().UTC() })
+	if err != nil {
+		return err
+	}
+	// The SAME billing.Service the customer surface uses — the whole point. A second service here
+	// would mean two ledgers, and an oversight page reading the one nobody was charged against.
+	billOversight, err := adminops.NewBillingService(layer.Executor, s.svc, metering.NewMemVerifiedDeltas())
+	if err != nil {
+		return err
+	}
+	adminAPI, err := api.NewAdminAPI(api.AdminDeps{
+		PlatformCredential: adminPlatformCredential,
+		Authenticator:      layer.Authenticator,
+		Sessions:           layer.Sessions,
+		Gate:               layer.Gate,
+		Executor:           layer.Executor,
+		Billing:            billOversight,
+		TestModeIdP:        layer.TestModeIdP,
+		Now:                func() time.Time { return time.Now().UTC() },
+	})
+	if err != nil {
+		return err
+	}
+	go func() { log.Fatal(http.ListenAndServe(addr, adminAPI.Handler)) }()
+
+	fmt.Printf("\nOperator admin API on http://%s — billing oversight over THIS run's real Stripe records\n", addr)
+	fmt.Printf("  tenant to look up:   %s\n", customerID)
+	fmt.Printf("  sign in as:          sso|billing_ops   (any MFA factor)\n")
+	fmt.Printf("  other surfaces:      not mounted — this process is the billing stack, not the fleet\n")
+	fmt.Printf("  start the console:   cd web/admin-console && ADMIN_API_BASE=http://%s \\\n", addr)
+	fmt.Printf("                         ADMIN_PLATFORM_CREDENTIAL=%s npm run dev\n", adminPlatformCredential)
+	return nil
 }
 
 // state is the wired P21 stack plus the api.P7Source and api.PaymentsSource implementations.
@@ -354,11 +439,18 @@ func build(repoDir string) (*state, error) {
 	rollout.EnableAutoMergeEntitlement()
 	st.rollout = rollout
 
-	provider, err := billing.NewStripeProviderForRollout(secrets, rollout, now, billing.WithStripeBaseURL(base))
+	provider, err := billing.NewStripeProviderForRollout(secrets, rollout, now,
+		billing.WithStripeBaseURL(base), billing.WithStripeMeterEvent(*meterEvent))
 	if err != nil {
 		return nil, err
 	}
 	st.provider = provider
+	if st.fake != nil {
+		// The meter is created by the ACCOUNT OWNER in Stripe — there is no code path that makes one,
+		// which is why a real-account run needs it created first (see the runbook). Against the
+		// in-process Stripe there is no account owner, so the demo seeds it and says so.
+		st.fake.SeedMeter(provider.MeterEvent())
+	}
 
 	// The provider account's PRICE OBJECTS. Against a real Stripe account these are created by Finance
 	// and this block does nothing; against the in-process one there is no Finance, so the demo seeds
@@ -531,21 +623,20 @@ func (s *state) runPeriod(ctx context.Context) error {
 	} else {
 		s.subRef = sub.SubscriptionRef
 		s.record("subscription", true, "%s on the plan's opaque price_ref, status %q (Stripe's word)", sub.SubscriptionRef, sub.Status)
+	}
 
-		// A metered subscription item exists because FINANCE configured a metered price and attached it
-		// — it is Stripe-account configuration, not something the platform creates. Against the
-		// in-process Stripe there is no Finance, so the demo seeds it; against a real account this line
-		// does nothing and the item is already there.
-		if s.fake != nil {
-			s.fake.SeedMeteredItem(sub.SubscriptionRef, s.meteredPrice)
-		}
-		if res, rerr := s.svc.ReportUsage(ctx, customerID, ctxLast, metering.MetricSUM); rerr != nil {
-			s.record("report usage", false, "%v", rerr)
-		} else {
-			s.record("report usage", true,
-				"the period's SUM QUANTITY reported to Stripe's metered item as %s — a quantity, never an amount; the platform multiplies nothing",
-				res.UsageRef)
-		}
+	// 🔴 Usage reporting is OUTSIDE the subscription branch, and that is the meter model asserting
+	// itself rather than a tidy-up. A meter event is keyed on the CUSTOMER, so what a customer used is
+	// recordable whether or not a subscription exists yet — which is the ordinary state of affairs, since
+	// the subscription is created by Checkout after the card is entered. Under the old subscription-item
+	// path this call had nowhere to go without a subscription, so it lived in the else-branch; leaving it
+	// there would have meant a customer mid-signup silently accruing usage Stripe never heard about.
+	if res, rerr := s.svc.ReportUsage(ctx, customerID, ctxLast, metering.MetricSUM); rerr != nil {
+		s.record("report usage", false, "%v", rerr)
+	} else {
+		s.record("report usage", true,
+			"the period's SUM QUANTITY reported to Stripe's billing METER as %s — a quantity, never an amount; the platform multiplies nothing",
+			res.UsageRef)
 	}
 
 	rec, err := s.usage.Get(metering.Key{CustomerID: customerID, Period: ctxLast.ID, Metric: metering.MetricSUM})
@@ -569,7 +660,32 @@ func (s *state) runPeriod(ctx context.Context) error {
 	// ── The fractional-quantity refusal, shown rather than described ──────────
 	s.demonstrateFractionalRefusal(ctx)
 
+	// ── Issue the period's invoice, so the read-back has something to read ────
+	//
+	// In production nobody does this: the subscription's own cycle closes the period and sweeps up the
+	// pending invoice items. A verification run happens INSIDE the period, when that has not happened
+	// yet, and an invoice read-back with no invoice would report NOTHING TO CHECK for a reason that has
+	// nothing to do with whether the read-back works. So the demo asks for now what Stripe would do at
+	// period close, and says that is what it did.
+	{
+		var issuer billing.InvoiceIssuer = s.provider
+		if ref, ierr := issuer.IssueInvoice(ctx, customerID, ctxLast.ID); ierr != nil {
+			s.record("issue period invoice", false, "%v", ierr)
+		} else {
+			s.record("issue period invoice", true,
+				"%s issued and FINALIZED with auto_advance=false, so it is a real invoice and nothing is "+
+					"collected — this is what Stripe's billing cycle does at period close, asked for now so the "+
+					"read-back has an invoice to read and the correction has one to credit", ref)
+		}
+	}
+
 	// ── A wrong charge, corrected ADDITIVELY ──────────────────────────────────
+	//
+	// 🔴 AFTER the invoice is issued, and the real account is what taught the ordering. A Stripe credit
+	// note is issued against an INVOICE, so an invoice item still sitting pending cannot be credited —
+	// the platform's own refusal says so: "an uninvoiced item is resolved by not invoicing it, not by
+	// crediting it". Running the credit first passed against an in-process Stripe that attaches items to
+	// an invoice the moment they are created, and failed the moment a real Stripe held them pending.
 	if s.wrongRef != "" {
 		credit, cerr := s.svc.Credit(ctx, customerID, s.wrongRef, "demo: charged against the wrong period")
 		if cerr != nil {
@@ -608,19 +724,43 @@ func (s *state) runPeriod(ctx context.Context) error {
 	}
 
 	// ── Reconciliation against what Stripe says it recorded ───────────────────
-	recorded, err := s.provider.RecordedUsage(ctx, customerID, ctxLast.ID)
-	if err != nil {
+	//
+	// Stripe aggregates meter events ASYNCHRONOUSLY — a summary appears tens of seconds after the event
+	// is accepted. So this waits, briefly and visibly, rather than reading once and reporting an empty
+	// result as a drift. The wait is bounded: if the summary never arrives the step FAILS, because
+	// "we did not wait long enough" and "Stripe recorded nothing" must not be reported as the same thing.
+	recorded, waited, err := s.recordedUsageWithRetry(ctx, ctxLast.ID)
+	switch {
+	case err != nil:
 		s.record("reconciliation", false, "%v", err)
-	} else {
-		s.record("reconciliation", len(recorded) > 0,
-			"%s", func() string {
-				if len(recorded) == 0 {
-					return "NOTHING TO CHECK — Stripe recorded no metered usage for " + ctxLast.ID +
-						", so there is nothing to reconcile against and a clean result would mean nothing"
-				}
-				return fmt.Sprintf("Stripe recorded %d metered summary/summaries for %s — comparable against the "+
-					"platform's usage records without a write to either ledger", len(recorded), ctxLast.ID)
-			}())
+	case len(recorded) == 0:
+		s.record("reconciliation", false,
+			"NOTHING TO CHECK — Stripe reported no metered usage for %s after waiting %s, so there is nothing "+
+				"to reconcile against and a clean result would mean nothing", ctxLast.ID, waited)
+	default:
+		// 🔴 Assert the VALUE, not the row count. "Stripe returned a row" is the check that passes while
+		// the number in it is wrong, and a wrong number is the only failure mode reconciliation has.
+		platform, perr := s.usage.Get(metering.Key{CustomerID: customerID, Period: ctxLast.ID, Metric: metering.MetricSUM})
+		switch {
+		case perr != nil:
+			s.record("reconciliation", false, "the platform has no usage record for %s to compare: %v", ctxLast.ID, perr)
+		case recorded[0].Quantity != platform.Quantity:
+			s.record("reconciliation", false,
+				"DRIFT: the platform recorded %.0f for %s and Stripe recorded %.0f — surfaced, not repaired; "+
+					"neither ledger is written by this comparison",
+				platform.Quantity, ctxLast.ID, recorded[0].Quantity)
+		default:
+			s.record("reconciliation", true,
+				"platform %.0f == Stripe %.0f for %s (%s, ref %s%s) — two independently authored figures agree, "+
+					"and the comparison writes to neither ledger",
+				platform.Quantity, recorded[0].Quantity, ctxLast.ID, recorded[0].Metric, recorded[0].UsageRef,
+				func() string {
+					if waited > 0 {
+						return fmt.Sprintf(", after %s waiting for Stripe to aggregate", waited)
+					}
+					return ""
+				}())
+		}
 	}
 
 	// ── Dunning: the grace window keeps the entitlement, the boundary does not ─
@@ -652,6 +792,38 @@ func (s *state) runPeriod(ctx context.Context) error {
 		"%.0f of verified saving is billable (merged); %.0f is verified but NOT merged and bills nothing — the larger number is the one that bills nothing",
 		billable, blocked)
 	return nil
+}
+
+// recordedUsageWithRetry reads Stripe's recorded usage, waiting for the meter to aggregate.
+//
+// Bounded and reported: it returns how long it waited so the run can say so, because "it worked" and
+// "it worked after 40 seconds" are different operational facts and the second one belongs in a runbook.
+func (s *state) recordedUsageWithRetry(ctx context.Context, period string) ([]billing.RecordedUsage, time.Duration, error) {
+	const (
+		interval = 5 * time.Second
+		limit    = 90 * time.Second
+	)
+	var waited time.Duration
+	for {
+		recorded, err := s.provider.RecordedUsage(ctx, customerID, period)
+		if err != nil {
+			return nil, waited, err
+		}
+		if len(recorded) > 0 || waited >= limit {
+			return recorded, waited, nil
+		}
+		// The in-process Stripe aggregates synchronously, so this loop never runs a second pass against
+		// it. Sleeping regardless would add a minute and a half to every offline demo run.
+		if s.fake != nil {
+			return recorded, waited, nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil, waited, ctx.Err()
+		case <-time.After(interval):
+			waited += interval
+		}
+	}
 }
 
 // demonstrateFractionalRefusal shows the quantity contract firing.

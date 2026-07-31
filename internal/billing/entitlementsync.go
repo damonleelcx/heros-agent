@@ -123,7 +123,7 @@ func (s *Service) syncEntitlement(p WebhookPayload) (planSyncOutcome, error) {
 	case WebhookInvoicePaid:
 		return s.grantPlan(p, "invoice paid")
 
-	case WebhookSubscriptionUpdated:
+	case WebhookSubscriptionCreated, WebhookSubscriptionUpdated:
 		switch p.Status {
 		case "active", "trialing":
 			return s.grantPlan(p, "subscription active")

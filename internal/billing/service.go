@@ -198,12 +198,38 @@ func (s *Service) StartSubscription(ctx context.Context, customerID string) (Sub
 }
 
 // SubscriptionRef is the provider subscription handle held for a customer, if any.
-func (s *Service) SubscriptionRef(customerID string) string { return s.subs[customerID] }
+func (s *Service) SubscriptionRef(customerID string) string {
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	return s.subs[customerID]
+}
+
+// recordSubscriptionRef remembers a subscription the PROVIDER created, so a later plan change can
+// repoint it instead of creating a second one.
+//
+// 🔴 This is the half that was missing, and the bug it caused is the worst kind: it charged twice.
+// Only StartSubscription used to write this map, but in the real self-serve flow the platform does not
+// create the subscription — CHECKOUT does, on Stripe's own page. So after a customer paid, the
+// platform held no reference to what they had bought. The next upgrade found no subscription to
+// repoint, correctly concluded "this must be a checkout", and sent them through Checkout again — which
+// created a SECOND active subscription beside the first. The customer is then billed for both, and
+// every screen still looks right, because each individual subscription is exactly what it claims to be.
+//
+// A real Stripe account is what surfaced it: two active subscriptions on one customer, $19.99 and
+// $29.99, both correct in isolation.
+func (s *Service) recordSubscriptionRef(customerID, ref string) {
+	if customerID == "" || ref == "" {
+		return
+	}
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	s.subs[customerID] = ref
+}
 
 // SubscriptionState reads the provider's own subscription state — including dunning. The platform
 // REFLECTS it; it never recomputes it.
 func (s *Service) SubscriptionState(ctx context.Context, customerID string) (SubscriptionResult, error) {
-	ref := s.subs[customerID]
+	ref := s.SubscriptionRef(customerID)
 	if ref == "" {
 		return SubscriptionResult{}, fmt.Errorf("billing: no subscription for %s", customerID)
 	}

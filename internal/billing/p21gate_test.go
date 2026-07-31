@@ -50,10 +50,6 @@ type parityStack struct {
 	chargeCount func() int
 	// setDown drives the provider into an outage.
 	setDown func(bool)
-	// seedMeteredItem models the STRIPE-ACCOUNT configuration a metered price needs. It is a no-op for
-	// the stub, which has no account to configure — the difference is in Stripe's data, not in the
-	// platform's code path, and collapsing the two would hide that.
-	seedMeteredItem func(subscriptionRef string)
 	// failureInjector is the fake behind a stripe stack, for the two tests that legitimately need to
 	// drive a failure. It is deliberately not the provider: the parity suite must not be able to reach
 	// past the interface, or it would stop being a parity suite.
@@ -86,7 +82,7 @@ func newParityStack(t *testing.T, providerName string) *parityStack {
 		t.Fatalf("secrets: %v", err)
 	}
 
-	stack := &parityStack{setDown: func(bool) {}, seedMeteredItem: func(string) {}}
+	stack := &parityStack{setDown: func(bool) {}}
 	var provider Provider
 	switch providerName {
 	case "stub":
@@ -103,7 +99,6 @@ func newParityStack(t *testing.T, providerName string) *parityStack {
 		provider = p
 		stack.chargeCount = f.ItemCount
 		stack.setDown = f.SetDown
-		stack.seedMeteredItem = func(subRef string) { f.SeedMeteredItem(subRef, "price_ref_team_metered") }
 		stack.failureInjector = f
 	default:
 		t.Fatalf("unknown provider %q", providerName)
@@ -169,7 +164,6 @@ func TestContractParity(t *testing.T) {
 			if sub.SubscriptionRef == "" || sub.Status == "" {
 				t.Fatalf("subscription = %+v, want a handle and the provider's own status", sub)
 			}
-			s.seedMeteredItem(sub.SubscriptionRef)
 
 			// The change is AUDITED even though it moves no money yet.
 			if rows := s.svc.Ledger().Events("cus_acme", ""); len(rows) != 1 || rows[0].Type != TypeSubscriptionChange {
@@ -217,6 +211,7 @@ func TestContractParity(t *testing.T) {
 			}
 
 			// ── Correct it, additively ────────────────────────────────────────
+			issuePeriodInvoice(t, s.svc.Provider(), "cus_acme", july.ID)
 			credit, err := s.svc.Credit(ctx, "cus_acme", first.EventID, "parity: corrected")
 			if err != nil {
 				t.Fatalf("Credit: %v", err)
@@ -368,11 +363,9 @@ func TestReversibilityOverStripe(t *testing.T) {
 	s := newParityStack(t, "stripe")
 	ctx := context.Background()
 
-	sub, err := s.svc.StartSubscription(ctx, "cus_acme")
-	if err != nil {
+	if _, err := s.svc.StartSubscription(ctx, "cus_acme"); err != nil {
 		t.Fatalf("StartSubscription: %v", err)
 	}
-	s.seedMeteredItem(sub.SubscriptionRef)
 
 	wrong, err := s.svc.Charge(ctx, "cus_acme", july, KindMetered,
 		MeteredChargeIdempotencyKey("cus_acme", july.ID, string(metering.MetricSUM)))
@@ -381,6 +374,7 @@ func TestReversibilityOverStripe(t *testing.T) {
 	}
 	before := len(s.svc.Ledger().Events("cus_acme", ""))
 
+	issuePeriodInvoice(t, s.svc.Provider(), "cus_acme", july.ID)
 	credit, err := s.svc.Credit(ctx, "cus_acme", wrong.EventID, "billed against the wrong period")
 	if err != nil {
 		t.Fatalf("Credit: %v", err)
@@ -487,11 +481,9 @@ func TestCollectionFlowOverStripe(t *testing.T) {
 		t.Error("a plan change with no payment method must report CheckoutRequired — 'you have not paid yet' is a step, not an error")
 	}
 
-	sub, err := s.svc.StartSubscription(ctx, "cus_acme")
-	if err != nil {
+	if _, err := s.svc.StartSubscription(ctx, "cus_acme"); err != nil {
 		t.Fatalf("StartSubscription: %v", err)
 	}
-	s.seedMeteredItem(sub.SubscriptionRef)
 
 	// ── Upgrade, then downgrade — each an audited plan change ─────────────────
 	up, err := s.svc.ChangePlan(ctx, "cus_acme", "Business")
@@ -552,11 +544,9 @@ func TestReconciliationSurfacesDriftAgainstStripe(t *testing.T) {
 	s := newParityStack(t, "stripe")
 	ctx := context.Background()
 
-	sub, err := s.svc.StartSubscription(ctx, "cus_acme")
-	if err != nil {
+	if _, err := s.svc.StartSubscription(ctx, "cus_acme"); err != nil {
 		t.Fatalf("StartSubscription: %v", err)
 	}
-	s.seedMeteredItem(sub.SubscriptionRef)
 
 	// The platform recorded the period's usage and never reported it. Stripe therefore has none — the
 	// "the provider is missing our usage" drift.
@@ -629,5 +619,23 @@ func TestNoResoldTokenLineSurvivesTheStripeReadBack(t *testing.T) {
 	f.SeedTokenLine(acct.ProviderCustomerHandle, july.ID, "provider_tokens", "LLM tokens resold")
 	if _, err := s.svc.Provider().Invoice(context.Background(), "cus_acme", july.ID); !errors.Is(err, ErrResoldTokens) {
 		t.Errorf("a resold-token line survived the read-back: %v", err)
+	}
+}
+
+// issuePeriodInvoice makes the period's invoice FINAL where the provider can do that, so a correction
+// has something to credit.
+//
+// Guarded rather than asserted, and the guard is the honest part: Stripe refuses a credit note against
+// a draft invoice, while the stub provider has no invoice lifecycle at all. Requiring the capability
+// would fail the stub for lacking a concept it does not need; skipping the step for Stripe would fail
+// the correction. Parity means both run the same test, not that both take the same wire steps.
+func issuePeriodInvoice(t *testing.T, p Provider, customerID, period string) {
+	t.Helper()
+	issuer, ok := p.(InvoiceIssuer)
+	if !ok {
+		return
+	}
+	if _, err := issuer.IssueInvoice(context.Background(), customerID, period); err != nil {
+		t.Fatalf("IssueInvoice: %v", err)
 	}
 }
