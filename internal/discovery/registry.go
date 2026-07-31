@@ -18,6 +18,24 @@ const (
 )
 
 // LocatorForm is how an argument value is addressed (design doc 04 §2.4). Four real forms plus const/opaque.
+//
+// # Why two of these are not at the call site at all (P13 FR52/FR53)
+//
+// The first four forms all address something INSIDE the call's own argument list, and that assumption —
+// unstated, because for Go and Python it is always true — is what made Java, Kotlin and Rust look
+// unrewritable. They are not. Their SDKs state the model somewhere else:
+//
+//	OpenAiChatModel.builder().modelName("gpt-4o").build()   // Kotlin/Java: a BUILDER, before the call
+//	CreateChatCompletionRequestArgs::default().model("…")   // Rust: a REQUEST VALUE, before the call
+//
+// A locator that can only point inside the argument list has nothing to say about either, so the row
+// declares no arg_map, and the engine reports "no locator" — which reads as "this language cannot be
+// rewritten" when the truth is "this SDK binds two statements earlier". LocBuilderCall and
+// LocRequestField name those two places, so the row can point at them and the rewriter can replace what
+// the program already wrote — the same rule as everywhere else, applied at the site the program used.
+//
+// 🔴 Additive by construction: an existing row parses byte-identically and its hash is untouched. These
+// forms are only reachable from YAML keys no existing row carries.
 type LocatorForm string
 
 const (
@@ -27,7 +45,21 @@ const (
 	LocOptionCtor LocatorForm = "option"     // variadic functional option: WithModel(x)
 	LocConst      LocatorForm = "const"      // declaration asserts a literal value (llm-eval only)
 	LocOpaque     LocatorForm = "opaque"     // inherently unresolvable => sentinel + flag (I5)
+	// LocBuilderCall — the value is set by a builder-chain method call evaluated before the call site:
+	// `.modelName("gpt-4o")`. Builder names the method.
+	LocBuilderCall LocatorForm = "builder"
+	// LocRequestField — the value is a field of a request value constructed before the call site:
+	// `.model("gpt-4o")` on a request-args struct, or `model: "…"` in a struct literal. Request names
+	// the field/setter.
+	LocRequestField LocatorForm = "request_field"
 )
+
+// BindsBeforeTheCall reports whether this form addresses a binding site OUTSIDE the call's argument
+// list. A rewriter uses it to decide which locator machinery to run; coverage uses it to name the form
+// honestly rather than reporting "no named argument".
+func (f LocatorForm) BindsBeforeTheCall() bool {
+	return f == LocBuilderCall || f == LocRequestField
+}
 
 // ArgLocator says WHERE an IR field lives in a call. The extractor (§4) decides resolvable-vs-unresolved;
 // the locator only names the location. Its YAML is a shorthand: {field: "x"} | {option: "WithModel"} |
@@ -40,26 +72,37 @@ type ArgLocator struct {
 	Option string
 	Const  any
 	Unwrap []string // value-wrappers to see through: ["aws.String"], ["openai.F"], ["anthropic.F"]
+	// Builder is the builder-chain method that sets this value (LocBuilderCall): "modelName".
+	Builder string
+	// Request is the field or setter on the request value that carries it (LocRequestField): "model".
+	Request string
 }
 
 // UnmarshalYAML infers Form from which shorthand key is present, so rows/declarations stay terse.
 func (a *ArgLocator) UnmarshalYAML(value *yaml.Node) error {
 	var raw struct {
-		Index  *int     `yaml:"index"`
-		Name   string   `yaml:"name"`
-		Field  string   `yaml:"field"`
-		Option string   `yaml:"option"`
-		Const  any      `yaml:"const"`
-		Form   string   `yaml:"form"`
-		Unwrap []string `yaml:"unwrap"`
+		Index   *int     `yaml:"index"`
+		Name    string   `yaml:"name"`
+		Field   string   `yaml:"field"`
+		Option  string   `yaml:"option"`
+		Const   any      `yaml:"const"`
+		Form    string   `yaml:"form"`
+		Unwrap  []string `yaml:"unwrap"`
+		Builder string   `yaml:"builder"`
+		Request string   `yaml:"request_field"`
 	}
 	if err := value.Decode(&raw); err != nil {
 		return err
 	}
 	a.Unwrap = raw.Unwrap
+	a.Builder, a.Request = raw.Builder, raw.Request
 	switch {
 	case raw.Form == string(LocOpaque):
 		a.Form = LocOpaque
+	case raw.Builder != "":
+		a.Form = LocBuilderCall
+	case raw.Request != "":
+		a.Form = LocRequestField
 	case raw.Const != nil:
 		a.Form, a.Const = LocConst, raw.Const
 	case raw.Index != nil:
@@ -71,7 +114,7 @@ func (a *ArgLocator) UnmarshalYAML(value *yaml.Node) error {
 	case raw.Option != "":
 		a.Form, a.Option = LocOptionCtor, raw.Option
 	default:
-		return fmt.Errorf("arg locator: no recognized form (index/name/field/option/const/opaque)")
+		return fmt.Errorf("arg locator: no recognized form (index/name/field/option/const/opaque/builder/request_field)")
 	}
 	return nil
 }

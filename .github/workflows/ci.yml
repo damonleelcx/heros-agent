@@ -34,6 +34,28 @@ jobs:
         run: make go
       - name: go.mod tidy check
         run: make tidy-check
+      # 🔴 The reproducibility gate, named as its own REQUIRED step (P20 task 7.6).
+      #
+      # It already runs inside `make go`, so this looks redundant — and it is not. Reproducibility is the
+      # property that lets a third party rebuild a release and confirm the bytes, which is the whole basis of the
+      # supply-chain claim; a gate that exists only as one of nine hundred tests is a gate nobody can see pass,
+      # and the day it starts skipping (a missing toolchain makes it t.Skip) nothing goes red. Running it by name
+      # means the step appears in every check run, and `-count=1` means a cached PASS cannot stand in for a run.
+      - name: reproducible-build gate (required)
+        env:
+          CGO_ENABLED: "1"
+        run: |
+          set -euo pipefail
+          out="$(go test -count=1 -v -run 'TestReproducibleBuild' ./internal/release/ 2>&1)"
+          printf '%s\n' "$out"
+          # A skip is not a pass. If the toolchain is missing the test skips silently, and a required gate that
+          # can silently skip is the "env-gated tripwire" this project has been burned by before.
+          if printf '%s' "$out" | grep -q '^--- SKIP'; then
+            echo "::error::TestReproducibleBuild SKIPPED — a required gate must run, not opt out"
+            exit 1
+          fi
+          printf '%s' "$out" | grep -q '^--- PASS: TestReproducibleBuild' \
+            || { echo "::error::TestReproducibleBuild did not report PASS"; exit 1; }
 
   # P19 deploy gates. Its own job — cheap, no toolchain — so a manifest change that breaks digest
   # pinning, image-set parity, or leaks a plaintext Secret fails the build the same way a Go break does.
@@ -99,6 +121,21 @@ jobs:
       - uses: golangci/golangci-lint-action@v7
         with:
           version: v2.12.2
+          # 🔴 The analysis cache is skipped deliberately, and the reason is that it changes the ANSWER.
+          #
+          # staticcheck's SA5011 (nil dereference) needs a cross-package fact — that `t.Fatal` does not
+          # return — and that fact is not part of what the restored cache carries. When a package's
+          # diagnostics come back from cache without it, every `if x == nil { t.Fatal(…) }` in the repo
+          # reports as a possible nil dereference. On 2026-07-29 that produced 34 such issues in test
+          # files nobody had touched, in packages the branch never went near, while the same commit had
+          # linted clean 20 minutes earlier and a cold local run of the identical v2.12.2 binary reported
+          # 0 issues — and re-running the untouched earlier commit reproduced the failure, which is what
+          # ruled the source out.
+          #
+          # A lint that answers differently depending on what a cache happened to hold is not a gate: it
+          # fails clean branches and would pass dirty ones just as easily. ~1 minute per run buys an
+          # answer that matches what `golangci-lint run ./...` gives a developer on their own machine.
+          skip-cache: true
 
   schema:
     name: schema-validation + contract proofs

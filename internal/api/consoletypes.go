@@ -84,5 +84,14 @@ func ConsoleViewTypes() []ConsoleViewType {
 
 		// ── P12 · forge delivery state + route condition ─────────────────────
 		{Name: "DeliveriesView", Sample: DeliveriesView{}, Endpoint: "GET /api/p12/deliveries"},
+
+		// ── P13 13d · total per-axis, per-language coverage ───────────────────
+		{Name: "AxisCoverageView", Sample: coverageView{}, Endpoint: "GET /api/p13/coverage"},
+
+		// ── P13 13e · how an accepted change reaches a running agent ──────────
+		{Name: "ChangeDeliveryView", Sample: ChangeDeliveryView{}, Endpoint: "GET /api/p13/delivery"},
+
+		// ── P20 · how to install it, and what the release actually delivered ──
+		{Name: "InstallView", Sample: installView{}, Endpoint: "GET /api/p20/install"},
 	}
 }

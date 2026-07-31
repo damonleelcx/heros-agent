@@ -14,20 +14,24 @@ import (
 // fakeRegistries is an in-memory Registries. Resolve's contract is "fail closed on anything that does
 // not resolve", so what these tests need is control over what resolves — not a database.
 type fakeRegistries struct {
-	models   map[string]*registry.ModelEntry
-	prompts  map[string]*registry.PromptEntry
-	skills   map[string]*registry.SkillEntry
-	contexts map[string]*registry.ContextEntry
+	models    map[string]*registry.ModelEntry
+	prompts   map[string]*registry.PromptEntry
+	skills    map[string]*registry.SkillEntry
+	contexts  map[string]*registry.ContextEntry
+	memories  map[string]*registry.MemoryEntry
+	harnesses map[string]*registry.HarnessEntry
 	// calls counts lookups, so a test can prove resolution ABORTED rather than carried on.
 	calls int
 }
 
 func newFakeRegistries() *fakeRegistries {
 	return &fakeRegistries{
-		models:   map[string]*registry.ModelEntry{},
-		prompts:  map[string]*registry.PromptEntry{},
-		skills:   map[string]*registry.SkillEntry{},
-		contexts: map[string]*registry.ContextEntry{},
+		models:    map[string]*registry.ModelEntry{},
+		prompts:   map[string]*registry.PromptEntry{},
+		skills:    map[string]*registry.SkillEntry{},
+		contexts:  map[string]*registry.ContextEntry{},
+		memories:  map[string]*registry.MemoryEntry{},
+		harnesses: map[string]*registry.HarnessEntry{},
 	}
 }
 
@@ -58,6 +62,68 @@ func (f *fakeRegistries) ResolveContextPolicy(_ context.Context, id string) (*re
 		return e, nil
 	}
 	return nil, registry.ErrNotFound
+}
+
+// ResolveMemory looks up ONLY the memory map (P17). Its own map, and not a shared one keyed by id, is
+// what makes the cross-dimension fail-closed check meaningful in these tests: a context ref handed here
+// must miss, exactly as it would against the real store, where the Kind is part of the content address.
+func (f *fakeRegistries) ResolveMemory(_ context.Context, id string) (*registry.MemoryEntry, error) {
+	f.calls++
+	if e, ok := f.memories[id]; ok {
+		return e, nil
+	}
+	return nil, registry.ErrNotFound
+}
+
+// ResolveHarness looks up ONLY the harness map (P18), for the same reason ResolveMemory looks up only
+// its own: a memory or context ref handed here must miss, exactly as it would against the real store,
+// where the Kind is part of the content address.
+func (f *fakeRegistries) ResolveHarness(_ context.Context, id string) (*registry.HarnessEntry, error) {
+	f.calls++
+	if e, ok := f.harnesses[id]; ok {
+		return e, nil
+	}
+	return nil, registry.ErrNotFound
+}
+
+// addHarness seals a real harness entry into the fake registry — sealed, not hand-built, so the
+// version_id the tests resolve is the one the production seal path would produce for the same content.
+func (f *fakeRegistries) addHarness(t *testing.T, ref, name, strategy, params string) *registry.HarnessEntry {
+	t.Helper()
+	st := registry.HarnessStrategyNamed(strategy)
+	if st == nil {
+		t.Fatalf("addHarness: %q is not a builtin harness strategy", strategy)
+	}
+	if params == "" {
+		params = "{}"
+	}
+	e := &registry.HarnessEntry{
+		VersionID: ref, Name: name, Strategy: st,
+		Spec: registry.HarnessSpec{Strategy: strategy, Params: json.RawMessage(params)},
+	}
+	if f.harnesses == nil {
+		f.harnesses = map[string]*registry.HarnessEntry{}
+	}
+	f.harnesses[ref] = e
+	return e
+}
+
+// addMemory seals a real memory entry into the fake registry — sealed, not hand-built, so the version_id
+// the tests resolve is the one the production seal path would produce for the same content.
+func (f *fakeRegistries) addMemory(t *testing.T, ref, name, strategy, params string) *registry.MemoryEntry {
+	t.Helper()
+	st := registry.MemoryStrategyNamed(strategy)
+	if st == nil {
+		t.Fatalf("addMemory: %q is not a builtin strategy", strategy)
+	}
+	e := &registry.MemoryEntry{
+		VersionID: ref,
+		Name:      name,
+		Spec:      registry.MemorySpec{Strategy: strategy, Params: json.RawMessage(params)},
+		Strategy:  st,
+	}
+	f.memories[ref] = e
+	return e
 }
 
 func ptrF(f float64) *float64 { return &f }

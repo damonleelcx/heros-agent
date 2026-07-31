@@ -31,6 +31,11 @@ const ROOT = new URL("..", import.meta.url).pathname;
 
 const SRC = {
   configure: "src/app/app/configure/configurator.tsx",
+  // P15's declined-change card. It is its own file because the submit path and /preview/p15 render the
+  // SAME element — a preview of a re-implementation would check a page no customer sees.
+  axisRefusal: "src/components/axisRefusal.tsx",
+  wiring: "src/app/app/wiring/page.tsx",
+  shell: "src/app/app/layout.tsx",
   transform: "src/app/app/transforms/[configHash]/[sourceRevision]/page.tsx",
   run: "src/app/app/runs/[runId]/page.tsx",
   watch: "src/app/app/runs/[runId]/watch.tsx",
@@ -158,6 +163,45 @@ item("P2-10", "build-rejected is its own failure state, generated and reviewed b
   "build-rejected", /never run|not run|does not build/i);
 item("P2-11", "success carries the reader into the transform and the run", "configure",
   "config_hash", "run_id");
+
+// P15 adds an outcome the console did not previously distinguish: a REFUSAL. A 400 that names a
+// dimension means the platform read the spec, understood exactly what was asked for, and declined that
+// one axis — which is a different thing from a submission that failed, and invites a different next
+// step. Rendering it as a generic failure sends the reader to re-submit something that will never be
+// accepted; the wiring axis (P15) will produce this outcome for every rearrangement until a source
+// rewriter lands, so it is the axis's primary user-facing state, not an edge case.
+item("P15-1", "a dimension-named 400 is a refusal with its own state, not a generic failure", "configure",
+  /kind: "refused"/, /body\.dimension/, "declined");
+item("P15-2", "the refusal names the axis and says nothing was persisted and a retry will not help", "axisRefusal",
+  "Declined, not attempted", "Nothing was persisted", /declined again/i);
+item("P15-3", "the wiring axis explains why a rearrangement is declined rather than applied as a no-op", "axisRefusal",
+  "AXIS_NOTE", "wiring", /no-op/);
+item("P15-4", "an axis with no console note still renders the platform's own sentence", "axisRefusal",
+  /note \? <p>\{note\}<\/p> : null/, "verbatim");
+item("P15-5", "the wiring axis has a surface in the console app, reachable from the navigation", "shell",
+  '{ href: "/app/wiring", label: "Wiring"', '"s:wiring"');
+item("P15-6", "the wiring surface splits its sections into a real tablist, not a stack", "wiring",
+  /<Tabs tabs=\{tabs\}/, /id: "axis"/, /EXAMPLES\.map/);
+item("P15-7", "the wiring surface renders the SAME refusal card the submit path renders", "wiring",
+  "AxisRefusal", '@/components/axisRefusal');
+item("P15-8", "the wiring surface says its examples are not the tenant's data", "wiring",
+  /worked examples/i, /this tenant/i);
+// 15c — the axis stopped being wholly declined, and the surface has to show that or it teaches the
+// wrong thing: a page of four refusals reads as a broken feature however carefully each one is worded.
+item("P15-9", "the wiring surface shows an APPLIED reorder, not only declined ones", "wiring",
+  "AxisApplied", /id: "applied"/, /An applied reorder/);
+item("P15-10", "the applied state carries the engine's REAL diff, not a description of one", "wiring",
+  "APPLIED_DIFF", "--- a/wiring.go", "+++ b/wiring.go");
+// P16 moved this sentence from the COMPONENT to the CALLER, and the move is the point. The invariant
+// was hard-coded to the wiring axis, so the first applied change from another axis (a context window,
+// which DELETES list elements) rendered "the file's lines were reordered" over a diff where that is
+// simply false. A safety claim asserted on behalf of a change the component knows nothing about is the
+// sentence a reviewer stops reading the diff because of. The wiring page still states it — that is what
+// this item guards — and `AxisApplied` now REQUIRES each caller to supply its own.
+item("P15-11", "the applied card states the permutation invariant that makes the change safe", "wiring",
+  "reordered and nothing else changed", /same lines/i);
+item("P16-1", "the applied card takes its invariant from the caller rather than asserting one", "axisRefusal",
+  "invariant: ReactNode");
 
 item("P2-12", "a transform loads by config_hash + source_revision", "transform",
   "config_hash", "source_revision");

@@ -111,6 +111,12 @@ export function scoped(session: Session) {
     // Tenant-scoped server-side from the session's credential + X-Console-Tenant header, like every
     // other read. The console never sends a customer id in the path.
     deliveries: () => `/api/p12/deliveries`,
+
+    // ── P13 13e · how an accepted change reaches a running agent ──────────
+    // Plan-invariant and tenant-invariant: what a route can carry is a property of the CHANGE, not of
+    // what someone paid. The handler takes no tenant at all; the session still scopes the call so
+    // there is one call convention rather than two.
+    deliveryRoutes: () => `/api/p13/delivery`,
   };
 }
 

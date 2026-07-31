@@ -5,7 +5,14 @@
 //
 //	herossign keygen                                  → prints PUBLIC and PRIVATE hex keys
 //	herossign sign   --key <hexpriv> --in SHA256SUMS  → prints the hex signature
+//	herossign sign --ssh --in SHA256SUMS              → prints the same signature in OpenSSH sshsig form
+//	herossign signers                                 → prints the allowed_signers file for `ssh-keygen -Y verify`
 //	herossign verify --pub <hexpub>  --in SHA256SUMS --sig SHA256SUMS.sig
+//
+// The `--ssh` form exists because the installer must verify BEFORE placing a binary on PATH and must not use
+// the binary it just downloaded to do it (that is circular). It needs an ed25519 verifier a stock machine
+// already has — and stock macOS ships LibreSSL, which cannot verify ed25519, while `ssh-keygen -Y verify` is
+// present everywhere openssh-client is. Same key, same bytes, second encoding. See internal/release/sshsig.go.
 package main
 
 import (
@@ -29,6 +36,8 @@ func main() {
 		keygen()
 	case "sign":
 		sign(os.Args[2:])
+	case "signers":
+		signers()
 	case "verify":
 		verify(os.Args[2:])
 	default:
@@ -38,7 +47,8 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: herossign keygen | sign --key <hex> --in <file> | verify --pub <hex> --in <file> --sig <file>")
+	fmt.Fprintln(os.Stderr, "usage: herossign keygen | sign [--ssh] --key <hex> --in <file> | "+
+		"signers | verify --pub <hex> --in <file> --sig <file>")
 }
 
 func keygen() {
@@ -54,6 +64,7 @@ func sign(args []string) {
 	fs := flag.NewFlagSet("sign", flag.ExitOnError)
 	key := fs.String("key", "", "hex ed25519 private key (or $HEROS_RELEASE_PRIVATE_KEY)")
 	in := fs.String("in", "SHA256SUMS", "manifest to sign")
+	sshForm := fs.Bool("ssh", false, "emit the signature in OpenSSH sshsig form instead of raw hex")
 	_ = fs.Parse(args)
 	k := *key
 	if k == "" {
@@ -67,7 +78,19 @@ func sign(args []string) {
 	if err != nil {
 		fatal(err)
 	}
+	if *sshForm {
+		// Printed without a trailing newline of our own: the armored form already ends with one, and an
+		// extra blank line makes ssh-keygen reject the file.
+		fmt.Print(release.SSHSigArmored(ed25519.PrivateKey(raw), data, release.SSHSigNamespace))
+		return
+	}
 	fmt.Println(release.Sign(ed25519.PrivateKey(raw), data))
+}
+
+// signers prints the allowed_signers file `ssh-keygen -Y verify -f` needs, derived from the published trust
+// root so the two verifiers cannot disagree about which keys are acceptable.
+func signers() {
+	fmt.Print(release.AllowedSigners())
 }
 
 func verify(args []string) {

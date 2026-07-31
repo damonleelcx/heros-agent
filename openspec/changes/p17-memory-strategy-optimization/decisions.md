@@ -1,12 +1,13 @@
 # P17 — Recorded decisions (System Designer, §1)
 
-Six contracts that must be fixed **before any code ships**, because each is a one-way door. This is a
+Seven contracts that must be fixed **before any code ships**, because each is a one-way door. This is a
 **greenfield** axis: memory has never been modeled, so these decisions define its shape for every future
 reader. Three of them create or extend a frozen contract (a new registry `Kind` + table, a new closed
 `Dimension`, an additive extension to the P0 `config_hash`); two define a behavioral boundary that cannot
 be cleanly un-drawn (memory-vs-context, the interim refusal); one binds the operator to the platform's core
-principle. Each walks: **Problem → Decision → Why appropriate → Alternatives + decision point (rejected on
-L-level) → Effect**, and carries its governing 八级法则 level.
+principle; and one (**D7**) binds the *user-originated* path to the same refusal, which is the decision
+most exposed to product pressure. Each walks: **Problem → Decision → Why appropriate → Alternatives +
+decision point (rejected on L-level) → Effect**, and carries its governing 八级法则 level.
 
 ---
 
@@ -228,3 +229,63 @@ worst trade in the ordering.
 until the rewrite lands; no scored memory win is reported anywhere at M20 (tasks 8.1–8.5, 9.6). When a
 future memory-runtime phase lifts the refusal, the operator wakes with no change to its contract — its
 worth was always going to be decided by the harness.
+
+---
+
+## D7 — A user may **author** a memory change; the platform **refuses to apply it**, but never silently, never late, and never disguised as success
+
+**Problem.** Every other optimization axis lets a workflow owner originate a change themselves, on P13's
+shared [`authored-change`](../p13-prompt-model-optimization/specs/authored-change/spec.md) spine: one
+pipeline, two origins, `Origin` recorded and never hashed, *a user may author the change, a user may not
+author the evidence.* Memory should be no different — an engineer who knows their agent re-reads a stale
+fact every third turn should be able to pin `summary-buffer(max_tokens=2000)` on that node without waiting
+for the catalog to nominate it. But **D4 refuses the transform**. The shared contract's central allowance —
+*an authored change may be applied without a verification verdict, because it is the user's own
+repository* — therefore **cannot fire on this axis at M20**. What is a user allowed to do, and what is the
+platform allowed to show them? A one-way door: the states a surface can render and the records an apply
+path can write are contracts the moment either exists.
+
+**Decision.** Bind the shared contract, and split the refusal precisely: **modeling is not refused,
+materialization is.** A user MAY select a node's strategy and params from the closed builtin set and MAY
+clear it; the selection resolves, hashes, seals a registry entry, records `user` origin + actor + parent
+pointer, and diffs in lineage — a real `config_hash`, re-materializable unchanged the day the rewriter
+lands. A user MAY NOT get a diff, an apply, a delivery, or a number. Three rules make the refusal
+survivable rather than a dead end:
+
+1. **Stated before the choice.** The surface renders the M20 no-materializer boundary *before* a strategy
+   is selected, read from **the same coverage fact the engine refuses from** — not a hand-written sentence
+   beside it.
+2. **Raised at preflight, with the transform's own typed cause.** Before any worktree, build, or eval
+   spend, naming the node, the `memory` dimension, and the deferred call-site materialization.
+3. **Never rendered as success.** `refused` is its own state, distinct from `failed` and from `pending`; no
+   surface or record shows applied, delivered, or partially applied; nothing is scored.
+
+**Why this is the appropriate design.** The alternative framings both fail on the axis's own terms. Refusing
+to let the user *author* would confuse "we cannot write this into your source" with "you may not express
+this," and would throw away the part that is completely safe and genuinely useful — a pinned, hashed,
+comparable configuration that survives to the rewrite. Letting the user *apply* would require a second
+apply path, which is a second place for every gate to be wrong (the exact thing the shared contract's "one
+spine" clause exists to forbid). Stating the boundary **before** the choice rather than after is the
+product half of the same honesty D4 enforces in the engine: a refusal a user discovers only after
+composing a change is technically honest and practically a bait-and-switch, and an inert greyed-out
+control is worse still — it tells the user nothing about *why*, and invites them to believe some other
+strategy, language, or plan would unlock it. Sourcing that sentence from the coverage fact rather than
+writing it twice is 禁止分裂 source-of-truth: two sentences are two things to keep true, and the copy in
+the UI is the one that will drift.
+
+**Alternatives + decision point.**
+
+| Option | What the user gets | Failure mode | Level |
+|---|---|---|---|
+| No authoring on this axis until the rewriter lands | nothing | discards a safe, useful, fully-modeled capability; the axis is unusable for the large fraction of its value that needs no codemod | rejected **L5/L6** |
+| Authoring with a **second** apply path that "applies" the record | an applied-looking change | a second place for every gate to be wrong; a lineage record claiming a configuration the source never had — D4's silent-drop failure, re-introduced one layer up | rejected **L1** |
+| Authoring, refusal **discovered at apply** | a composed change, then a wall | technically honest, practically a bait-and-switch; the user spends effort against a boundary the platform knew about before they started | rejected **L1/L8** |
+| Live control + **boundary stated up front**, refused at preflight, never scored (**chosen**) | a real hashed variant, an honest limit, no surprises | user cannot apply today — **stated plainly, before they choose** | — |
+
+**Effect.** A workflow owner can select, parameterize, and clear a node's memory strategy and see the exact
+`config_hash` it produces; the surface says up front that it cannot be written to source at M20 and why;
+the apply path refuses at preflight with the transform's cause; nothing is ever shown as applied or scored.
+Clearing reproduces the prior hash byte-identically and `none` is indistinguishable from cleared, so a user
+can back out with no residue. When a future memory-runtime phase lifts the refusal, the authored variants
+already stored materialize with no re-authoring and no change to this contract — which is the test of
+whether the split between modeling and materialization was drawn in the right place.

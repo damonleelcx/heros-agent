@@ -28,6 +28,34 @@ type PromptOptimizer interface {
 // ErrUngrounded is returned when a rewrite would not be grounded in any attached failing case.
 var ErrUngrounded = errors.New("proposal: prompt rewrite is not grounded in any attached failing case")
 
+// ErrNoChange is returned when a strategy is grounded but finds nothing to change in the base prompt —
+// no exemplar to curate, no redundancy to remove, no slack to compress. It is the "silent" half of
+// grounded-or-silent (P13 §2): an operator that has nothing to do emits no candidate, and this is not
+// an error the batch reports. Distinct from ErrUngrounded (no cases to ground on at all).
+var ErrNoChange = errors.New("proposal: prompt strategy is grounded but has no change to make")
+
+// PromptStrategy names the deeper prompt operator a rewrite realizes (P13 §2, design Decision 1). It
+// parameterizes the OPTIMIZER seam — NOT an operator mode: each strategy is driven by its own catalog
+// row with its own admissibility, so the four operators stay four independently-admissible rows while
+// sharing one grounded, immutable-publish emission path.
+type PromptStrategy string
+
+const (
+	// StrategyFormatConstraint is the original grounded rewrite: pin the violated output contract and
+	// avoid the observed failures. It is the default (empty) strategy for backward compatibility.
+	StrategyFormatConstraint PromptStrategy = ""
+	// StrategyInstructionHarden hardens an under-specified prompt with explicit, imperative constraints
+	// grounded in the observed failures.
+	StrategyInstructionHarden PromptStrategy = "instruction_harden"
+	// StrategyFewShotCurate removes dead / duplicate exemplars from a few-shot prompt.
+	StrategyFewShotCurate PromptStrategy = "few_shot_curate"
+	// StrategyCompress reduces tokens (collapse blank runs, trailing whitespace) WITHOUT dropping any
+	// live {{slot}} — a slot-dropping compression is refused at resolve (task 2.6), never here.
+	StrategyCompress PromptStrategy = "prompt_compress"
+	// StrategyRedundancyRemove drops exact-duplicate instruction lines.
+	StrategyRedundancyRemove PromptStrategy = "redundancy_remove"
+)
+
 // FailingCaseGrounding is the minimal, PII-free projection of one failing case the optimizer grounds
 // on: the case id, the observed failure reason, and the (already content-hashed) trace reference. The
 // raw trace is NEVER inlined here — it lives in the object store keyed by TraceRef (§2.3).
@@ -53,6 +81,9 @@ type PromptOptimizeRequest struct {
 	// a format constraint pinning them (design Decision 3: "add format-constraint/schema where the
 	// contract was violated").
 	RequiredFields []string `json:"required_fields,omitempty"`
+	// Strategy selects which deeper prompt operator this edit realizes (P13 §2). Empty is the original
+	// format-constraint rewrite.
+	Strategy PromptStrategy `json:"strategy,omitempty"`
 }
 
 // PromptEdit is the optimizer's output: a new prompt body, the format-constraint it added, and the
@@ -120,15 +151,37 @@ func newGrounding(req PromptOptimizeRequest) (GroundingBundle, error) {
 // provider (the codebase's "the only stub is the provider" discipline).
 type SelfRefineOptimizer struct{}
 
-// Optimize refines the base prompt using the attached failing cases. It refuses (ErrUngrounded) when
-// no cases are attached.
+// Optimize refines the base prompt using the attached failing cases, dispatching on the request's
+// strategy. It refuses (ErrUngrounded) when no cases are attached — grounded-or-silent applies to every
+// strategy — and declines (ErrNoChange) when a grounded strategy has nothing to change.
 func (SelfRefineOptimizer) Optimize(req PromptOptimizeRequest) (PromptEdit, error) {
 	g, err := newGrounding(req)
 	if err != nil {
 		return PromptEdit{}, err
 	}
 
-	// Build the format constraint from the violated contract fields and the observed failure reasons.
+	var newBody, constraint string
+	switch req.Strategy {
+	case StrategyInstructionHarden:
+		newBody, constraint, err = hardenInstructions(req, g)
+	case StrategyFewShotCurate:
+		newBody, err = curateFewShot(req)
+	case StrategyCompress:
+		newBody, err = compressPrompt(req)
+	case StrategyRedundancyRemove:
+		newBody, err = removeRedundancy(req)
+	default:
+		newBody, constraint = formatConstraintRewrite(req, g)
+	}
+	if err != nil {
+		return PromptEdit{}, err
+	}
+	return PromptEdit{NewPromptBody: newBody, FormatConstraint: constraint, Grounding: g}, nil
+}
+
+// formatConstraintRewrite is the original grounded rewrite: pin the violated output contract and name
+// the observed failures. Kept byte-for-byte so the existing prompt-rewrite behavior is unchanged.
+func formatConstraintRewrite(req PromptOptimizeRequest, g GroundingBundle) (newBody, constraint string) {
 	var b strings.Builder
 	if len(req.RequiredFields) > 0 {
 		fields := append([]string(nil), req.RequiredFields...)
@@ -137,8 +190,6 @@ func (SelfRefineOptimizer) Optimize(req PromptOptimizeRequest) (PromptEdit, erro
 		b.WriteString(strings.Join(fields, ", "))
 		b.WriteString(".")
 	}
-	// Ground the instruction in the specific observed failures, so the edit is legibly derived from
-	// them rather than generic.
 	reasons := distinctReasons(g.Cases)
 	if len(reasons) > 0 {
 		if b.Len() > 0 {
@@ -148,16 +199,131 @@ func (SelfRefineOptimizer) Optimize(req PromptOptimizeRequest) (PromptEdit, erro
 		b.WriteString(strings.Join(reasons, "; "))
 		b.WriteString(".")
 	}
-	constraint := b.String()
-
-	newBody := strings.TrimRight(req.BasePromptBody, "\n")
+	constraint = b.String()
+	newBody = strings.TrimRight(req.BasePromptBody, "\n")
 	if constraint != "" {
 		if newBody != "" {
 			newBody += "\n\n"
 		}
 		newBody += constraint
 	}
-	return PromptEdit{NewPromptBody: newBody, FormatConstraint: constraint, Grounding: g}, nil
+	return newBody, constraint
+}
+
+// hardenInstructions appends an explicit, imperative constraint that answers the observed
+// under-specification failures. Grounded-or-silent: newGrounding already refused a caseless request, so
+// a grounded harden always has at least one observed failure to answer.
+func hardenInstructions(req PromptOptimizeRequest, g GroundingBundle) (newBody, constraint string, err error) {
+	reasons := distinctReasons(g.Cases)
+	var b strings.Builder
+	b.WriteString("Follow every instruction above exactly and completely; do not omit, reinterpret, or ")
+	b.WriteString("add steps.")
+	if len(reasons) > 0 {
+		b.WriteString(" Specifically address the under-specified cases that produced: ")
+		b.WriteString(strings.Join(reasons, "; "))
+		b.WriteString(".")
+	}
+	constraint = b.String()
+	newBody = strings.TrimRight(req.BasePromptBody, "\n")
+	if newBody != "" {
+		newBody += "\n\n"
+	}
+	newBody += constraint
+	return newBody, constraint, nil
+}
+
+// curateFewShot removes exact-duplicate exemplar lines (a dead exemplar repeated verbatim carries no
+// signal and only spends context). Silent when the prompt has no exemplars to curate.
+func curateFewShot(req PromptOptimizeRequest) (string, error) {
+	lines := strings.Split(req.BasePromptBody, "\n")
+	seenExemplar := map[string]bool{}
+	out := make([]string, 0, len(lines))
+	removed := 0
+	sawExemplar := false
+	for _, ln := range lines {
+		trimmed := strings.TrimSpace(ln)
+		if isExemplarLine(trimmed) {
+			sawExemplar = true
+			key := strings.ToLower(trimmed)
+			if seenExemplar[key] {
+				removed++
+				continue // drop the duplicate exemplar
+			}
+			seenExemplar[key] = true
+		}
+		out = append(out, ln)
+	}
+	if !sawExemplar || removed == 0 {
+		return "", ErrNoChange
+	}
+	return strings.Join(out, "\n"), nil
+}
+
+// compressPrompt reduces tokens by collapsing runs of blank lines to one and trimming trailing
+// whitespace, WITHOUT touching any line that carries a {{slot}} (dropping a live slot is refused at
+// resolve, task 2.6 — never silently here). Silent when there is no slack to reclaim.
+func compressPrompt(req PromptOptimizeRequest) (string, error) {
+	lines := strings.Split(req.BasePromptBody, "\n")
+	out := make([]string, 0, len(lines))
+	prevBlank := false
+	changed := false
+	for _, ln := range lines {
+		trimmed := strings.TrimRight(ln, " \t")
+		if trimmed != ln {
+			changed = true
+		}
+		if trimmed == "" {
+			if prevBlank {
+				changed = true
+				continue // collapse consecutive blank lines
+			}
+			prevBlank = true
+		} else {
+			prevBlank = false
+		}
+		out = append(out, trimmed)
+	}
+	compressed := strings.TrimRight(strings.Join(out, "\n"), "\n")
+	if compressed != strings.TrimRight(req.BasePromptBody, "\n") {
+		changed = true
+	}
+	if !changed || compressed == req.BasePromptBody {
+		return "", ErrNoChange
+	}
+	return compressed, nil
+}
+
+// removeRedundancy drops exact-duplicate non-empty instruction lines, keeping the first occurrence and
+// preserving order. Silent when no line repeats. A line carrying a {{slot}} is never dropped as a
+// duplicate — its runtime binding is load-bearing even if the literal text repeats.
+func removeRedundancy(req PromptOptimizeRequest) (string, error) {
+	lines := strings.Split(req.BasePromptBody, "\n")
+	seen := map[string]bool{}
+	out := make([]string, 0, len(lines))
+	removed := 0
+	for _, ln := range lines {
+		key := strings.TrimSpace(ln)
+		if key != "" && !strings.Contains(ln, "{{") && seen[key] {
+			removed++
+			continue
+		}
+		if key != "" {
+			seen[key] = true
+		}
+		out = append(out, ln)
+	}
+	if removed == 0 {
+		return "", ErrNoChange
+	}
+	return strings.Join(out, "\n"), nil
+}
+
+// isExemplarLine reports whether a trimmed line opens a few-shot exemplar. Conservative: it matches the
+// common "Example" / "Example N:" lead-ins, so curation only touches lines that are clearly exemplars.
+func isExemplarLine(trimmed string) bool {
+	low := strings.ToLower(trimmed)
+	return strings.HasPrefix(low, "example:") || strings.HasPrefix(low, "example ") ||
+		strings.HasPrefix(low, "e.g.")
 }
 
 func distinctReasons(cases []FailingCaseGrounding) []string {

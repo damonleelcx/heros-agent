@@ -57,6 +57,20 @@
 /p6hermes
 /p21hermes
 
+# The per-phase hermes runners (cmd/*hermes). Each is a ~18MB Mach-O left behind by `go build`, and
+# `git add -A` sweeps them in silently: the list above was already one build ahead of the tree. Listed
+# explicitly rather than as a glob, so a NEW binary at the root is still a thing someone has to look at.
+/authoringhermes
+/oaxhermes
+/p7hermes
+/p8hermes
+/p9hermes
+/p12hermes
+/p13hermes
+/p14hermes
+/p15hermes
+/p16hermes
+
 # P11 CLI local run store (customer-side; never committed) + release output
 /.heros/
 /dist/

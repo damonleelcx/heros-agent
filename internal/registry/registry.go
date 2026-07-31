@@ -58,6 +58,22 @@ const (
 	KindPrompt  Kind = "prompt"
 	KindSkill   Kind = "skill"
 	KindContext Kind = "context"
+	// KindMemory holds versioned MEMORY strategies — what an agent carries ACROSS invocations (P17,
+	// decisions.md D1). It is its own Kind, and not a discriminated subtype of KindContext, precisely
+	// because the Kind is hashed into the version_id: two dimensions sharing one id namespace could
+	// collide on a single id, and a memory ref pasted into the context dimension would then RESOLVE —
+	// silently binding the wrong strategy — instead of failing closed. That guarantee is the reason
+	// this constant exists, and it costs one table.
+	KindMemory Kind = "memory"
+	// KindHarness holds versioned HARNESS strategies — the control loop a node's call runs inside (P18,
+	// decisions.md D-1). A sixth Kind for the same reason there is a fifth: the Kind is hashed into the
+	// version_id, so a harness ref pasted into the memory or context dimension fails CLOSED instead of
+	// resolving and silently binding the wrong thing.
+	//
+	// 🚫 It is deliberately not a mode of KindContext or KindMemory. A scaffold is not what a call carries
+	// (context) nor what it remembers (memory); it is how many calls happen and in what loop. Three
+	// dimensions sharing one id namespace could collide on a single id, and the failure would be silent.
+	KindHarness Kind = "harness"
 )
 
 // Table names. A closed set of package constants — never caller input — because they are formatted
@@ -67,6 +83,8 @@ const (
 	tablePrompt  = "prompt_entry"
 	tableSkill   = "skill_entry"
 	tableContext = "context_entry"
+	tableMemory  = "memory_entry"
+	tableHarness = "harness_entry"
 )
 
 // Sentinel errors. The P2 Loader (task 3.1) must fail closed on an unresolved ref and distinguish

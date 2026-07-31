@@ -35,8 +35,8 @@ import (
 	"strings"
 )
 
-// Dimension is one of a node's four independently-overridable dimensions (FR2). Typed rather than
-// stringly so that every error can name one and the set stays closed.
+// Dimension is one of a node's independently-overridable dimensions (FR2). Typed rather than stringly
+// so that every error can name one and the set stays CLOSED.
 type Dimension string
 
 const (
@@ -44,7 +44,52 @@ const (
 	DimPrompt  Dimension = "prompt"
 	DimSkills  Dimension = "skills"
 	DimContext Dimension = "context"
+	// DimTools is tool SELECTION — which of the tools a node already offers the model it keeps
+	// (P14, decisions.md D-14.2). It is a fifth member of the closed enum, and it is deliberately NOT
+	// folded into DimSkills: a tool is selected (a call-site DELETION of an already-present element)
+	// while a skill is bound (a CONSTRUCTION from a sealed contract), and conflating them in the
+	// dimension layer would re-introduce, one level up, exactly the confusion D-14.1 splits in the IR.
+	//
+	// 🚫 There is no new registry `Kind` behind it. A tool is already identified by its call site, so
+	// sealing it into the registry would invent a second identity for something that has one; a selection
+	// is validated against the node's DISCOVERED tool set instead, fail-closed — the same pattern as an
+	// `env` binding against DeclaredEnv and an `expr` binding against in_scope.
+	DimTools Dimension = "tools"
+	// DimMemory is what the agent CARRIES ACROSS invocations — a store read and written between turns
+	// (P17, decisions.md D2). It is a sixth member of the closed enum, and it is deliberately NOT a mode
+	// of DimContext: memory persists across invocations and sessions, while context assembly is how a
+	// SINGLE call builds its message list. The codebase already draws that line — MemoryManagement's
+	// confirmation signal is "memory read/write against a store between turns"
+	// (internal/patternclassifier/taxonomy.go) — and the *between-turns* clause is the boundary.
+	//
+	// Collapsing the two would let a cross-session concern masquerade as a within-call one, and a merged
+	// Dimension can never be cleanly un-merged once specs and hashes depend on it.
+	//
+	// 🔴 Unlike DimTools, this one DOES have a registry Kind behind it (registry.KindMemory): a memory
+	// strategy is a (strategy, params) pair authored independently of any call site, so it has no
+	// call-site identity to reuse. The Kind is hashed into the version_id, which is what makes a memory
+	// ref pasted into another dimension fail closed instead of silently resolving.
+	DimMemory Dimension = "memory"
+	// DimHarness is the SCAFFOLD around a node's call — how many turns it runs and in what control loop
+	// (P18, decisions.md D-2). It is a seventh member of the closed enum, and it is deliberately NOT a
+	// mode of DimContext or DimMemory: those describe what ONE call carries and what it remembers between
+	// calls, while this one decides how many calls happen at all. Two variants identical in model, prompt,
+	// skills, context and memory but one running a single shot and the other a bounded ReAct loop are
+	// different computations, and collapsing them into an existing dimension would make a scaffold change
+	// masquerade as a param change in the hash.
+	//
+	// 🔴 Like DimMemory and unlike DimTools, it has a registry Kind behind it (registry.KindHarness): a
+	// strategy is a (strategy, params) pair authored independently of any call site, so it has no
+	// call-site identity to reuse. The Kind is hashed into the version_id, which is what makes a harness
+	// ref pasted into another dimension fail closed instead of silently resolving.
+	DimHarness Dimension = "harness"
 )
+
+// Dimensions is the closed enum, in a stable order. Exported so a consumer iterating dimensions cannot
+// silently miss one that was added — the alternative is a hand-written list somewhere else that drifts.
+func Dimensions() []Dimension {
+	return []Dimension{DimModel, DimPrompt, DimSkills, DimContext, DimTools, DimMemory, DimHarness}
+}
 
 // Sentinel errors. Typed so the Loader, the UI, and P4 can tell "you asked for something that does
 // not exist" from "we cannot safely do what you asked" — the first is the author's mistake, the
@@ -81,6 +126,22 @@ var (
 	// that call site, an env binding names an undeclared variable, or an input binding violates the
 	// node's typed contract.
 	ErrBindingOutOfScope = errors.New("variantspec: binding references something not available at the call site")
+
+	// ErrRewriteUnappliesNode (P13 task 2.6, design Decision 3): a prompt rewrite whose slot-set change
+	// drops a slot the discovered call site still supplies a value for would leave that runtime value
+	// unbound — un-applying the node. It is REFUSED at resolve with the slot named (via P10 impact
+	// analysis), never silently dropped or emitted as an un-bindable diff. Reported through
+	// SpecError{NodeID, Dim: DimPrompt, Ref: slot} like every other binding failure (task 3.2).
+	ErrRewriteUnappliesNode = errors.New("variantspec: a prompt rewrite drops a slot the call site still supplies, un-applying the node")
+
+	// ErrToolNotDiscovered (P14, decisions.md D-14.2): a tool selection names a tool the IR does not
+	// record for that node. FAIL CLOSED — the selection is rejected at resolve rather than applied to
+	// nothing, because "keep only these three tools" applied to a set that does not contain one of them
+	// silently means something different from what the author wrote.
+	//
+	// It is its OWN sentinel and not ErrUnresolvedRef: a tool is not a registry entry, so "this ref does
+	// not resolve" would send the reader to look up a version_id that was never supposed to exist.
+	ErrToolNotDiscovered = errors.New("variantspec: tool selection names a tool this node does not offer")
 )
 
 // BindingKind is the source of a prompt-slot binding (P10 task 3.1). The kind is recorded EXPLICITLY,
@@ -195,12 +256,98 @@ type NodeOverride struct {
 	// names; a slot with no entry here must be satisfied by an identically-spelled call-site expression
 	// or the spec is rejected at resolve (task 3.3).
 	Bindings map[string]BindingSource `json:"bindings,omitempty"`
+	// ToolSelection is the KEPT subset of the node's discovered tools (P14, DimTools). Optional and
+	// additive: omitempty + nil-when-empty, so a spec that prunes nothing serialises exactly as it did
+	// before this field existed (decisions.md D-1.4, applied a second time).
+	//
+	// 🔴 The entries are DISCOVERED CALL-SITE IDENTIFIERS, not registry version_ids — a tool has no
+	// registry identity (D-14.2). That is why this field does not feed Refs(): there is nothing here for
+	// a registry to resolve, and listing it among the refs would send the loader looking for entries that
+	// were never registered.
+	//
+	// It is a SET, not a sequence. Two specs that keep the same tools in different authoring order
+	// denote one configuration and must share a config_hash, so the resolved projection sorts it —
+	// unlike SkillRefs, whose order is identity-bearing because the call site binds them in that order.
+	ToolSelection []string `json:"tool_selection,omitempty"`
+	// ContextDropTolerance is the fraction of source context this node's JOB can afford to lose, in
+	// [0,1] (P16 task 1.5, decisions.md D-2). It is read at proposal admissibility: a proposal whose
+	// resolved policy would drive this node's drop ratio past the tolerance is inadmissible — rejected
+	// before transform and before any eval spend.
+	//
+	// 🔴 It is a POINTER, and that is the whole of D-2. Additive, omit-when-absent: a node that declares
+	// no tolerance emits NO `context_drop_tolerance` key, so it serialises byte-identically to a pre-P16
+	// node and every frozen config_hash golden vector keeps reproducing. The alternative — an
+	// always-present float defaulting to 0.0 — would both move the frozen bytes and encode a hostile
+	// default (zero tolerance rejects every lossy policy). This is the same additive discipline
+	// Bindings and ToolSelection above already follow.
+	//
+	// 🚫 It is NOT a policy fact and does not belong on the context entry: whether a given drop is
+	// acceptable is a property of the node's job (a Retrieval node tolerates augmentation a
+	// Summarization node does not), and a policy is shared across nodes with different tolerances.
+	ContextDropTolerance *float64 `json:"context_drop_tolerance,omitempty"`
+	// MemoryRef is a memory-registry version_id naming a sealed (strategy, params) entry — what this node
+	// CARRIES ACROSS invocations (P17 task 3.2, decisions.md D3).
+	//
+	// 🔴 Additive and `omitempty`: a node that binds no memory emits NO `memory_ref` key, so it
+	// serialises byte-identically to a pre-P17 override and every frozen config_hash golden vector keeps
+	// reproducing. This is the fourth application of the discipline Bindings, ToolSelection and
+	// ContextDropTolerance above follow, and it is the whole of D3 — an always-present field would move
+	// the canonical bytes of EVERY existing node and orphan every keyed row.
+	//
+	// 🚫 It is a version_id and nothing else. A spec that inlined a strategy's params would be a
+	// configuration whose content lives outside any registry, so it could never be resolved back from a
+	// config_hash months later — rejected at resolve with ErrInlineDefinition, exactly like every other
+	// ref (FR3).
+	MemoryRef string `json:"memory_ref,omitempty"`
+	// HarnessRef is a harness-registry version_id naming a sealed (strategy, params) entry — the control
+	// loop this node's call runs inside (P18 task 3.2, decisions.md D-2, D-8).
+	//
+	// 🔴 Additive and `omitempty`: a node that binds no harness emits NO `harness_ref` key, so it
+	// serialises byte-identically to a pre-P18 override and every frozen config_hash golden vector keeps
+	// reproducing. This is the fifth application of the discipline Bindings, ToolSelection,
+	// ContextDropTolerance and MemoryRef above follow — an always-present field would move the canonical
+	// bytes of EVERY existing node and orphan every keyed row.
+	//
+	// 🚫 It is a version_id and nothing else. A spec that inlined a strategy's params would be a
+	// configuration whose content lives outside any registry, so it could never be resolved back from a
+	// config_hash months later — rejected at resolve with ErrInlineDefinition, exactly like every other
+	// ref (FR4).
+	//
+	// 🚫 It never reorders anything. A harness wraps a node or consumes an ordered edge set P15 defined;
+	// the wiring says what the edges ARE, the harness says what loop runs over them (decisions.md D-5).
+	HarnessRef string `json:"harness_ref,omitempty"`
 }
 
 // isEmpty reports whether this override sets nothing. A node listed in the ordering with no
 // overrides is legitimate and common: it is a node that runs exactly as discovered.
 func (o NodeOverride) isEmpty() bool {
-	return o.ModelRef == "" && o.PromptRef == "" && len(o.SkillRefs) == 0 && o.ContextPolicy == "" && len(o.Bindings) == 0
+	return o.ModelRef == "" && o.PromptRef == "" && len(o.SkillRefs) == 0 && o.ContextPolicy == "" &&
+		len(o.Bindings) == 0 && len(o.ToolSelection) == 0 && o.ContextDropTolerance == nil &&
+		o.MemoryRef == "" && o.HarnessRef == ""
+}
+
+// SelectedTools returns the kept tool set in canonical (sorted, de-duplicated) order — the same order
+// the resolved projection hashes, so a caller comparing two selections compares the SET rather than the
+// order they happened to be written in. Nil when nothing is selected.
+//
+// 🚫 Deliberately NOT named Refs and deliberately not folded into VariantSpec.Refs(): these are
+// call-site identifiers, and a registry lookup for one of them would fail on something that was never
+// meant to be registered.
+func (o NodeOverride) SelectedTools() []string {
+	if len(o.ToolSelection) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	out := make([]string, 0, len(o.ToolSelection))
+	for _, t := range o.ToolSelection {
+		if seen[t] {
+			continue
+		}
+		seen[t] = true
+		out = append(out, t)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // Edge is one graph edge in the spec's declared ordering.
@@ -226,6 +373,28 @@ type InsertedAdapter struct {
 	Params    map[string]any `json:"params"`
 	InSchema  map[string]any `json:"in_schema"`
 	OutSchema map[string]any `json:"out_schema"`
+}
+
+// HarnessGroup is a harness that wraps an ORDERED EDGE SET rather than a single node — the group form of
+// the scaffold axis (P18 FR15, decisions.md D-5).
+//
+// 🔴 The edge set is EXPLICIT, and that is the whole of D-5. A group harness could have inferred its own
+// subgraph, which would be more convenient and would be a SECOND definition of the edges — one that can
+// drift from the wiring the executor actually walks. So the group CONSUMES P15's wiring: every edge here
+// must be an edge the spec already declares. The wiring says what the edges ARE; the harness says what
+// loop runs over them.
+//
+// 🚫 A group harness never reorders. Validate rejects an edge the spec does not declare, which makes
+// "compose with wiring, never re-derive it" mechanical rather than a rule to remember — a group that
+// invented an edge would be expressing a rearrangement through the wrong axis.
+type HarnessGroup struct {
+	// HarnessRef is a harness-registry version_id, on exactly the same terms as NodeOverride.HarnessRef:
+	// a reference and nothing else, inline definitions rejected.
+	HarnessRef string `json:"harness_ref"`
+	// Edges is the ordered edge set the loop runs over. Order is identity-bearing: a loop over a→b→c is
+	// not the same computation as one over c→b→a, so the resolved projection preserves it rather than
+	// sorting.
+	Edges []Edge `json:"edges"`
 }
 
 // VariantSpec is the canonical desired-state config (FR3).
@@ -256,6 +425,9 @@ type VariantSpec struct {
 	// Nodes maps node_id -> its override. A node in Order with no entry here runs as discovered.
 	Nodes map[string]NodeOverride `json:"nodes"`
 	Edges []Edge                  `json:"edges"`
+	// HarnessGroups are harnesses that wrap an ordered edge set rather than a single node (P18 FR15).
+	// Additive and omitempty: a spec that declares none serialises byte-identically to a pre-P18 spec.
+	HarnessGroups []HarnessGroup `json:"harness_groups,omitempty"`
 }
 
 // Validate checks the spec's internal structure — everything checkable without touching the IR or
@@ -300,6 +472,45 @@ func (s *VariantSpec) Validate() error {
 		if dup := firstDuplicate(o.SkillRefs); dup != "" {
 			return specErr(id, DimSkills, ErrInvalidSpec, "skill_refs binds %q twice", dup)
 		}
+		// Tool selection — the structure checkable without the IR. Whether the named tools EXIST at the
+		// node is the IR's question and lives in Resolve, exactly as a skill_ref's existence does.
+		for i, t := range o.ToolSelection {
+			if t == "" {
+				return specErr(id, DimTools, ErrInvalidSpec, "tool_selection[%d] is empty", i)
+			}
+		}
+		if dup := firstDuplicate(o.ToolSelection); dup != "" {
+			// A duplicate is rejected rather than de-duplicated: a selection is a SET, so writing a tool
+			// twice means the author believes something about it that is not true, and silently collapsing
+			// it would hide the misunderstanding rather than surface it.
+			return specErr(id, DimTools, ErrInvalidSpec, "tool_selection keeps %q twice", dup)
+		}
+		// Drop tolerance — a RATIO, so the only structural claim is its range (P16 task 1.5). Whether a
+		// given policy would exceed it needs the resolved policy and the node's measured drop, so that
+		// check lives at proposal admissibility, not here. A value outside [0,1] is rejected rather than
+		// clamped: "tolerate 1.5 of the context" is a misunderstanding, and silently reading it as 1.0
+		// would hide the misunderstanding behind a gate that then never bites.
+		if t := o.ContextDropTolerance; t != nil && (*t < 0 || *t > 1) {
+			return specErr(id, DimContext, ErrInvalidSpec,
+				"context_drop_tolerance is %v, want a ratio in [0,1]", *t)
+		}
+		// Memory ref — the one thing checkable without the registry: that it is a REFERENCE at all
+		// (P17 task 3.2 / 5.6). An inlined strategy definition is a structural error, not a dangling ref,
+		// so it gets ErrInlineDefinition rather than ErrUnresolvedRef: the author did not point at a
+		// missing entry, they declined to point at one. See inlinesDefinition for what counts and why.
+		if inlinesDefinition(o.MemoryRef) {
+			return &SpecError{NodeID: id, Dim: DimMemory, Ref: o.MemoryRef, Err: ErrInlineDefinition,
+				Detail: "memory_ref carries an inline strategy definition; it must be a memory-registry " +
+					"version_id, so the configuration is resolvable back from a config_hash"}
+		}
+		// Harness ref — the same one thing checkable without the registry: that it is a REFERENCE at all
+		// (P18 task 3.2). Same helper, so there is one inline-vs-reference rule in the package rather than
+		// a second that can disagree with it.
+		if inlinesDefinition(o.HarnessRef) {
+			return &SpecError{NodeID: id, Dim: DimHarness, Ref: o.HarnessRef, Err: ErrInlineDefinition,
+				Detail: "harness_ref carries an inline strategy definition; it must be a harness-registry " +
+					"version_id, so the configuration is resolvable back from a config_hash"}
+		}
 		// Binding structure — everything checkable without the IR or registries (kind is in the set; a
 		// non-literal binding names something). The scope/declared/contract checks and the exactly-once
 		// satisfaction rule need the IR and the resolved prompt, so they live in Resolve (task 3.2/3.4).
@@ -313,6 +524,40 @@ func (s *VariantSpec) Validate() error {
 			// name something — an empty reference cannot be validated or materialised.
 			if b.Kind != BindLiteral && b.Value == "" {
 				return specErr(id, DimPrompt, ErrInvalidSpec, "slot %q binding of kind %q has an empty value", slot, b.Kind)
+			}
+		}
+	}
+
+	// Harness groups: the ref is a reference, the edge set is non-empty, and — the load-bearing check —
+	// every edge is one the spec ALREADY DECLARES (P18 FR15, decisions.md D-5). That last rule is what
+	// makes "a group harness composes with wiring and never re-derives it" mechanical: a group naming an
+	// edge the graph does not have would be expressing a rearrangement through the harness axis, which
+	// is P15's job and not this one's.
+	declared := map[Edge]bool{}
+	for _, e := range s.Edges {
+		declared[e] = true
+	}
+	for i, g := range s.HarnessGroups {
+		if inlinesDefinition(g.HarnessRef) {
+			return &SpecError{Dim: DimHarness, Ref: g.HarnessRef, Err: ErrInlineDefinition,
+				Detail: fmt.Sprintf("harness_groups[%d].harness_ref carries an inline strategy definition; "+
+					"it must be a harness-registry version_id", i)}
+		}
+		if g.HarnessRef == "" {
+			return specErr("", DimHarness, ErrInvalidSpec, "harness_groups[%d] declares no harness_ref", i)
+		}
+		if len(g.Edges) == 0 {
+			return specErr("", DimHarness, ErrInvalidSpec,
+				"harness_groups[%d] wraps no edges; a group harness with an empty scope is a node harness "+
+					"written the hard way, and it would hash as a change that loops over nothing", i)
+		}
+		for j, e := range g.Edges {
+			if !declared[e] {
+				return specErr("", DimHarness, ErrInvalidSpec,
+					"harness_groups[%d].edges[%d] (%s -> %s, %s) is not an edge this spec declares; a group "+
+						"harness CONSUMES the wiring rather than defining it, so an edge the graph does not "+
+						"have would be a second, divergent definition of what the executor walks",
+					i, j, e.FromNodeID, e.ToNodeID, e.Kind)
 			}
 		}
 	}
@@ -337,10 +582,14 @@ func (s *VariantSpec) Validate() error {
 
 // Refs returns every registry version_id the spec references, deduplicated and sorted. Used by
 // Resolve to fail closed on dangling refs, and by the UI to show what an author pinned.
+//
+// 🚫 ContextDropTolerance is deliberately absent, for the same reason ToolSelection is: it is a NUMBER,
+// not a registry address. Listing it here would send the loader looking up "0.2" as a version_id and
+// fail closed on a value that was never meant to be registered.
 func (s *VariantSpec) Refs() []string {
 	set := map[string]bool{}
 	for _, o := range s.Nodes {
-		for _, r := range []string{o.ModelRef, o.PromptRef, o.ContextPolicy} {
+		for _, r := range []string{o.ModelRef, o.PromptRef, o.ContextPolicy, o.MemoryRef, o.HarnessRef} {
 			if r != "" {
 				set[r] = true
 			}
@@ -349,12 +598,36 @@ func (s *VariantSpec) Refs() []string {
 			set[r] = true
 		}
 	}
+	for _, g := range s.HarnessGroups {
+		if g.HarnessRef != "" {
+			set[g.HarnessRef] = true
+		}
+	}
 	out := make([]string, 0, len(set))
 	for r := range set {
 		out = append(out, r)
 	}
 	sort.Strings(out)
 	return out
+}
+
+// inlinesDefinition reports whether a ref field carries a DEFINITION rather than a reference to one
+// (FR3, P17 task 5.6). It is the one inline-vs-reference test in the package, read by Validate (the
+// structural gate) and again by resolveNode (defense in depth, for a caller that assembled a Resolve
+// by hand) — 禁止分裂 source-of-truth: two copies would be two rules to keep true.
+//
+// A version_id is an opaque token. A JSON object or array is the shape params take, so a ref whose
+// first non-space byte is `{` or `[` is an author writing the strategy out instead of registering it.
+// That is the mistake FR3 exists to catch, and catching it here means it is caught BEFORE any diff,
+// worktree, or provider call exists.
+//
+// 🚫 Deliberately NOT a 64-hex format check. Refs are opaque to this package — a test registry, a
+// future addressing scheme, or a shortened alias are all legitimate references, and rejecting them
+// would be this layer inventing a registry rule it does not own. What it CAN say is "this is not a
+// reference at all", and it says only that.
+func inlinesDefinition(ref string) bool {
+	t := strings.TrimSpace(ref)
+	return strings.HasPrefix(t, "{") || strings.HasPrefix(t, "[")
 }
 
 func firstDuplicate(xs []string) string {

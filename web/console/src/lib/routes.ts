@@ -35,7 +35,13 @@ export const routes = {
     `/app/transforms/${encodeURIComponent(configHash)}/${encodeURIComponent(sourceRevision)}`,
   scorecard: (variantId: string) => `/app/variants/${encodeURIComponent(variantId)}/scorecard`,
   studio: () => "/app/studio",
+  authoring: () => "/app/authoring",
+  wiring: () => "/app/wiring",
+  harness: () => "/app/harness",
+  coverage: () => "/app/coverage",
   account: () => "/app/account",
   billing: () => "/app/billing",
   delivery: () => "/app/delivery",
+  // Public: no session. The people who need it do not have an account yet — see src/app/install/page.tsx.
+  install: () => "/install",
 };

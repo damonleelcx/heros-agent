@@ -22,14 +22,36 @@ type Store struct {
 	// policies are the context-policy implementations RegisterContextPolicy will accept. Seeded with
 	// the builtins (P2 ships only `full`); P3 adds its policies via AddPolicy.
 	policies map[string]Policy
+
+	// strategies are the memory-strategy implementations RegisterMemory will accept (P17). Seeded with
+	// the closed builtin set; a future memory-runtime phase adds to it via AddMemoryStrategy, which is
+	// the same seam AddPolicy is. Kept in its OWN map rather than sharing `policies`: a memory strategy
+	// and a context policy are different dimensions (decisions.md D2), and one map keyed by name would
+	// let `full` and a same-named strategy shadow each other.
+	strategies map[string]MemoryStrategy
+
+	// harnesses are the harness-strategy implementations RegisterHarness will accept (P18). Seeded with
+	// the closed builtin set; AddHarnessStrategy is the same seam AddPolicy and AddMemoryStrategy are.
+	// Its OWN map, for the reason `strategies` is its own: a harness strategy and a memory strategy are
+	// different dimensions, and one map keyed by name would let a same-named entry in either shadow the
+	// other — silently binding a scaffold where a memory was asked for.
+	harnesses map[string]HarnessStrategy
 }
 
 // NewStore returns a Store over an open Postgres handle and a blob store for prompt bodies.
-// The `full` context policy is registered; see AddPolicy for P3's.
+// The `full` context policy is registered; see AddPolicy for P3's. The five builtin memory strategies
+// are registered; see AddMemoryStrategy.
 func NewStore(db *sql.DB, blobs BlobStore) *Store {
-	s := &Store{db: db, blobs: blobs, policies: map[string]Policy{}}
+	s := &Store{db: db, blobs: blobs, policies: map[string]Policy{},
+		strategies: map[string]MemoryStrategy{}, harnesses: map[string]HarnessStrategy{}}
 	for _, p := range BuiltinPolicies() {
 		s.policies[p.Name()] = p
+	}
+	for _, st := range BuiltinMemoryStrategies() {
+		s.strategies[st.Name()] = st
+	}
+	for _, st := range BuiltinHarnessStrategies() {
+		s.harnesses[st.Name()] = st
 	}
 	return s
 }

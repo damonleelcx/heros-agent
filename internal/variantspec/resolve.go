@@ -17,6 +17,16 @@ type Registries interface {
 	ResolvePrompt(ctx context.Context, versionID string) (*registry.PromptEntry, error)
 	ResolveSkill(ctx context.Context, versionID string) (*registry.SkillEntry, error)
 	ResolveContextPolicy(ctx context.Context, versionID string) (*registry.ContextEntry, error)
+	// ResolveMemory resolves a memory-registry version_id (P17 task 4.1). It is its OWN method, and not a
+	// mode of ResolveContextPolicy, for the reason decisions.md D2 keeps the dimensions apart: memory
+	// persists ACROSS invocations, context is within one call, and one method returning either would let
+	// a cross-session concern resolve through a within-call path.
+	ResolveMemory(ctx context.Context, versionID string) (*registry.MemoryEntry, error)
+	// ResolveHarness resolves a harness-registry version_id (P18 task 3.3). Its OWN method for the reason
+	// ResolveMemory is: a harness is a different Kind with a different id space, and one method returning
+	// either would let a scaffold resolve through a memory path — the exact cross-dimension confusion the
+	// Kind is hashed into the version_id to prevent.
+	ResolveHarness(ctx context.Context, versionID string) (*registry.HarnessEntry, error)
 }
 
 // Resolved is a spec resolved against the IR and the registries: the hashed configuration plus the
@@ -51,6 +61,65 @@ type Resolved struct {
 	// ApplyModes records each overridden node's apply mode (P10 task 7.1), defaulting to inline. NOT
 	// part of config_hash — how a value is written is not part of the configuration it denotes.
 	ApplyModes map[string]ApplyMode
+	// DiscoveredWiring is the wiring the IR recorded at source_revision — the order and edges the
+	// checked-out SOURCE actually has, as opposed to the ones this spec ASKS for (P15 task 4.2).
+	//
+	// The two can differ, and the difference is the whole of the wiring axis: `Order`/`Edges` are
+	// identity-bearing, so a reorder/merge/prune is a new config_hash — but no rewriter materializes it
+	// as source yet. Carrying the discovered wiring here is what lets the transform engine TELL that a
+	// spec is asking for a rewire it cannot perform, and refuse instead of emitting a diff that changes
+	// only the node contents while the config_hash claims a different graph.
+	//
+	// 🚫 NOT part of config_hash, exactly as SourceRevision and Language are not: it is a property of
+	// the tree, not of the configuration. It rides here for the reason Language does — this struct is
+	// the one place a spec and the IR it was resolved against are already joined, so a caller cannot
+	// supply a wiring from a different IR than the hash was computed over.
+	DiscoveredWiring Wiring
+	// HarnessGroups are the resolved group harnesses, carried beside the hashed projection so the
+	// transform can name the exact edge set it is refusing (P18 task 5.3). Nil when the spec declares
+	// none, which is the common case.
+	HarnessGroups []ResolvedGroupOverride
+}
+
+// ResolvedGroupOverride is one group harness as the transform sees it: the registry entry the author
+// pinned, and the ordered edge set it wraps. The entry rather than the projection, for the same reason
+// ResolvedOverride carries entries — a refusal has to name what the author wrote.
+type ResolvedGroupOverride struct {
+	Entry *registry.HarnessEntry
+	Edges []ResolvedEdge
+}
+
+// Wiring is a graph's shape: the node order and the edges between them. It is the same pair
+// `config_hash` covers, in the same resolved spelling, so a comparison between what a spec asks for
+// and what the source has is a comparison of like with like.
+//
+// Empty means NOT RECORDED, which is different from "an empty graph": a caller that assembled a
+// Resolved by hand (the P5 editor, a codemod test) may have no IR to read, and the transform's wiring
+// check declines to conclude anything from an absent record rather than refusing everything.
+type Wiring struct {
+	Order []string       `json:"order"`
+	Edges []ResolvedEdge `json:"edges"`
+}
+
+// Recorded reports whether any discovered wiring was captured.
+func (w Wiring) Recorded() bool { return len(w.Order) > 0 }
+
+// WiringOf projects a discovered IR into the wiring shape. The node order is the IR's own order —
+// what Discovery found, in the order it found it — and the edges are copied verbatim; the optional
+// provenance/confidence fields are deliberately dropped, because whether an edge was recovered or
+// framework-certain does not change what the source WIRES.
+func WiringOf(ir *discovery.IR) Wiring {
+	if ir == nil {
+		return Wiring{}
+	}
+	w := Wiring{Order: make([]string, 0, len(ir.Nodes)), Edges: make([]ResolvedEdge, 0, len(ir.Edges))}
+	for _, n := range ir.Nodes {
+		w.Order = append(w.Order, n.NodeID)
+	}
+	for _, e := range ir.Edges {
+		w.Edges = append(w.Edges, ResolvedEdge{FromNodeID: e.FromNodeID, ToNodeID: e.ToNodeID, Kind: e.Kind})
+	}
+	return w
 }
 
 // ResolvedOverride carries the resolved registry entries for one node's overridden dimensions. A nil
@@ -60,6 +129,45 @@ type ResolvedOverride struct {
 	Prompt  *registry.PromptEntry
 	Skills  []*registry.SkillEntry
 	Context *registry.ContextEntry
+	// ToolSelection is the KEPT tool set, canonical (sorted, validated against the node's discovered
+	// tools). The transform derives the DELETIONS from it — everything the call site declares that this
+	// set does not keep. Carrying the kept set rather than the dropped one is deliberate: the kept set is
+	// what the author wrote and what config_hash records, so the two cannot disagree.
+	ToolSelection []string
+	// ParamTune marks a model override that changes ONLY the provider parameters (temperature,
+	// max-tokens) and not the provider or model id — a P13 parameter tune, not a model swap (design
+	// Decision 7). It is transform-facing and NOT part of config_hash (the HASHED effect is
+	// ResolvedNode.ProviderParams): its only job is to tell the transform that this override's effect is
+	// a parameter change, which materializes in BOUND mode and is REFUSED in inline mode (there is no
+	// call-site parameter rewriter — an inline param change would hash one thing and run another).
+	ParamTune bool
+	// ContextDropTolerance is the node's authored drop tolerance, carried through so the admissibility
+	// gate reads it from the RESOLVED override rather than re-reading the spec (P16 task 1.5). Nil when
+	// the node declares none — the gate then falls back to its pattern-derived default, which is a
+	// gate-time decision and deliberately not frozen into the hash.
+	ContextDropTolerance *float64
+	// Memory is the resolved memory strategy — what this node carries ACROSS invocations (P17 task 4.1).
+	// Nil means the node did not override memory; non-nil means it did, INCLUDING when the strategy it
+	// selected is `none`.
+	//
+	// 🔴 That distinction is load-bearing and is why this is a pointer rather than a string. "No override"
+	// and "an override that selects the identity strategy" produce the same HASHED bytes (D3: none ≡
+	// absent) but are different facts about what the author asked for, and the transform has to be able to
+	// tell them apart: an explicit `none` is a no-op it applies silently, while a real strategy is a
+	// refusal it must raise. Collapsing them would either refuse `none` (wrong — the identity strategy
+	// changes nothing, so there is nothing to refuse) or skip the refusal entirely.
+	Memory *registry.MemoryEntry
+	// Harness is the resolved harness strategy — the control loop this node's call runs inside (P18 task
+	// 3.3). Nil means the node did not override the harness; non-nil means it did, INCLUDING when the
+	// strategy it selected is `single-shot`.
+	//
+	// 🔴 That distinction is load-bearing and is why this is a pointer rather than a string. "No override"
+	// and "an override that selects the identity strategy" produce the same HASHED bytes (D-8:
+	// single-shot ≡ absent) but are different facts about what the author asked for, and the transform has
+	// to tell them apart: an explicit `single-shot` is a no-op it applies silently, while a multi-turn
+	// strategy is either materialized or refused. Collapsing them would either refuse `single-shot` (wrong
+	// — one turn is exactly the un-rewritten call site) or skip the decision entirely.
+	Harness *registry.HarnessEntry
 }
 
 // Dimensions returns the dimensions this override actually sets, in a stable order. The Transform
@@ -77,6 +185,32 @@ func (o ResolvedOverride) Dimensions() []Dimension {
 	}
 	if o.Context != nil {
 		out = append(out, DimContext)
+	}
+	if len(o.ToolSelection) > 0 {
+		out = append(out, DimTools)
+	}
+	// Memory is reported iff the node OVERRODE it — including an override that selects `none`. See the
+	// Memory field's comment: the transform needs to tell "no override" from "the identity strategy",
+	// because one is skipped and the other is a no-op it applies. A node that never mentioned memory is
+	// never dispatched here, which is how FR2's per-dimension independence stays mechanical.
+	if o.Memory != nil {
+		out = append(out, DimMemory)
+	}
+	// Harness is reported iff the node OVERRODE it — including an override that selects `single-shot`, for
+	// the reason the Harness field's comment gives: the transform must be able to tell "no override" from
+	// "the identity strategy", because one is never dispatched and the other is a no-op it applies.
+	if o.Harness != nil {
+		out = append(out, DimHarness)
+	}
+	return out
+}
+
+// discoveredToolNames lists the tools the IR records for a node, for a rejection a human has to act on:
+// "you asked to keep X" is only actionable next to "the node offers Y and Z".
+func discoveredToolNames(irNode *discovery.IRNode) []string {
+	out := make([]string, 0, len(irNode.Tools))
+	for _, t := range irNode.Tools {
+		out = append(out, t.Name)
 	}
 	return out
 }
@@ -107,6 +241,9 @@ func Resolve(ctx context.Context, spec *VariantSpec, ir *discovery.IR, regs Regi
 		Overrides:      map[string]ResolvedOverride{},
 		ApplyModes:     map[string]ApplyMode{},
 		Config:         ResolvedConfig{IRVersion: ir.IRVersion, Nodes: []ResolvedNode{}, Edges: []ResolvedEdge{}},
+		// What the SOURCE wires, carried beside what the spec asks for, so the transform engine can tell
+		// a wiring change from a content change (P15 task 4.2). Read-only, never hashed.
+		DiscoveredWiring: WiringOf(ir),
 	}
 
 	for _, nodeID := range spec.Order {
@@ -134,6 +271,27 @@ func Resolve(ctx context.Context, spec *VariantSpec, ir *discovery.IR, regs Regi
 	// manual literal would keep compiling and silently leave the new field zero in the hashed output.
 	for _, e := range spec.Edges {
 		out.Config.Edges = append(out.Config.Edges, ResolvedEdge(e))
+	}
+
+	// Group harnesses (P18 FR15, decisions.md D-5). Resolved after the nodes so a group naming an edge
+	// between nodes that failed to resolve never gets here — and projected in the spec's declared order,
+	// because a loop over a→b→c is not a loop over c→b→a.
+	for i, g := range spec.HarnessGroups {
+		entry, err := regs.ResolveHarness(ctx, g.HarnessRef)
+		if err != nil {
+			return nil, refError("", DimHarness, g.HarnessRef, err)
+		}
+		params, err := decodeParams(entry.Spec.Params)
+		if err != nil {
+			return nil, specErr("", DimHarness, ErrUnresolvedRef,
+				"harness_groups[%d]: entry %s has params that are not a JSON object: %v", i, entry.VersionID, err)
+		}
+		rg := ResolvedHarnessGroup{Harness: ResolvedHarness{Strategy: entry.Spec.Strategy, Params: params}}
+		for _, e := range g.Edges {
+			rg.Edges = append(rg.Edges, ResolvedEdge(e))
+		}
+		out.Config.HarnessGroups = append(out.Config.HarnessGroups, rg)
+		out.HarnessGroups = append(out.HarnessGroups, ResolvedGroupOverride{Entry: entry, Edges: rg.Edges})
 	}
 
 	hash, err := out.Config.Hash()
@@ -168,6 +326,14 @@ func resolveNode(ctx context.Context, nodeID string, o NodeOverride, irNode *dis
 			MaxTokens:      entry.Spec.Params.MaxTokens,
 			ThinkingBudget: entry.Spec.Params.ThinkingBudget,
 		})
+		// A model override that keeps the SAME provider+model_id but changes the params is a parameter
+		// tune (P13 Decision 7), not a model swap. Flag it so the transform materializes it in bound mode
+		// and refuses it inline — never a silent same-model, changed-params inline edit that hashes one
+		// thing and runs another.
+		if entry.Spec.Provider == irNode.Model.Provider && entry.Spec.ModelID == irNode.Model.ModelID &&
+			!paramsEqual(node.ProviderParams, copyParams(irNode.Model.Params)) {
+			ro.ParamTune = true
+		}
 	} else {
 		// The discovered binding. A model the discovery engine could not resolve statically is
 		// "unresolved" in the IR; that is a faithful record of the call site, and it is pinned by
@@ -229,6 +395,133 @@ func resolveNode(ctx context.Context, nodeID string, o NodeOverride, irNode *dis
 	} else {
 		node.ContextPolicy = irNode.ContextAssembly.Policy
 		node.ContextParams = map[string]any{}
+	}
+	// Drop tolerance freezes as authored, and ONLY as authored (P16 task 1.5, decisions.md D-2). No
+	// default is materialized here: the pattern-derived default belongs to the admissibility gate, which
+	// knows the node's pattern, and writing it into the hashed projection would make two specs that
+	// declared nothing hash differently the day the default changed.
+	if o.ContextDropTolerance != nil {
+		t := *o.ContextDropTolerance
+		node.ContextDropTolerance = &t
+		ro.ContextDropTolerance = &t
+	}
+
+	// ── memory (P17 task 4.1, decisions.md D3/D4) ──────────────────────────────────────────────────
+	//
+	// The merge rule is the same as every other dimension's: an override resolves to a registry entry
+	// pinned by its immutable version_id; no override falls back to the DISCOVERED default, pinned by
+	// source_revision. Discovery emits `none` for every node today (there is no static evidence of a
+	// cross-invocation store at a call site), so the fallback is inert — but it is WIRED, not assumed,
+	// because the resolver's job is to leave nothing to defaulting and an assumption here would be a
+	// silent default the day discovery learns to detect one.
+	//
+	// 🔴 What does NOT happen here is the refusal. A spec carrying a MemoryRef resolves cleanly and
+	// produces a stable config_hash; only the TRANSFORM refuses (decisions.md D4). Blocking at resolve
+	// would throw away the modeling, hashing, and proposal that are entirely safe and correct, and would
+	// make the axis useless for the large fraction of its value that needs no codemod.
+	if o.MemoryRef != "" {
+		// Defense in depth against a caller that assembled a Resolve by hand and skipped Validate. Same
+		// helper, so there is one inline-vs-reference rule rather than two that can disagree.
+		if inlinesDefinition(o.MemoryRef) {
+			return ro, node, &SpecError{NodeID: nodeID, Dim: DimMemory, Ref: o.MemoryRef, Err: ErrInlineDefinition,
+				Detail: "memory_ref carries an inline strategy definition; it must be a memory-registry " +
+					"version_id, so the configuration is resolvable back from a config_hash"}
+		}
+		entry, err := regs.ResolveMemory(ctx, o.MemoryRef)
+		if err != nil {
+			return ro, node, refError(nodeID, DimMemory, o.MemoryRef, err)
+		}
+		ro.Memory = entry
+		// `none` ≡ absent (D3): the identity strategy emits NO memory key, so an explicitly-`none` node
+		// canonicalizes byte-identically to a node that never mentioned memory and the P0 golden vectors
+		// keep reproducing. The override is still recorded on `ro` — the transform must be able to see
+		// that the author asked for something, even when what they asked for changes nothing.
+		if !entry.IsNone() {
+			params, err := decodeParams(entry.Spec.Params)
+			if err != nil {
+				return ro, node, specErr(nodeID, DimMemory, ErrUnresolvedRef,
+					"memory entry %s has params that are not a JSON object: %v", entry.VersionID, err)
+			}
+			node.Memory = &ResolvedMemory{Strategy: entry.Spec.Strategy, Params: params}
+		}
+	} else if base := irNode.MemoryDefault(); base != registry.StrategyNone {
+		// The discovered default, pinned by source_revision like any other un-overridden dimension. No
+		// params: the IR records WHICH strategy a call site already implements, not how it is tuned —
+		// inventing params here would be this layer guessing at a configuration nobody wrote.
+		node.Memory = &ResolvedMemory{Strategy: base, Params: map[string]any{}}
+	}
+
+	// ── harness (P18 task 3.3, decisions.md D-2/D-8) ───────────────────────────────────────────────
+	//
+	// The merge rule is every other dimension's: an override resolves to a registry entry pinned by its
+	// immutable version_id; no override falls back to the DISCOVERED default, pinned by source_revision.
+	// Discovery emits `single-shot` for every node it cannot PROVE runs a loop, so the fallback is usually
+	// inert — but it is WIRED rather than assumed, because a node whose source already implements a ReAct
+	// loop has a different default, and an assumption here would silently claim it was a single shot.
+	//
+	// 🔴 What does NOT happen here is the refusal or the materialization. A spec carrying a HarnessRef
+	// resolves cleanly and produces a stable config_hash; only the TRANSFORM decides whether this cell can
+	// carry it (decisions.md D-4, narrowed per cell by D-11). Blocking at resolve would throw away the
+	// modeling, hashing and proposal that are entirely safe and correct.
+	if o.HarnessRef != "" {
+		// Defense in depth against a caller that assembled a Resolve by hand and skipped Validate.
+		if inlinesDefinition(o.HarnessRef) {
+			return ro, node, &SpecError{NodeID: nodeID, Dim: DimHarness, Ref: o.HarnessRef, Err: ErrInlineDefinition,
+				Detail: "harness_ref carries an inline strategy definition; it must be a harness-registry " +
+					"version_id, so the configuration is resolvable back from a config_hash"}
+		}
+		entry, err := regs.ResolveHarness(ctx, o.HarnessRef)
+		if err != nil {
+			return ro, node, refError(nodeID, DimHarness, o.HarnessRef, err)
+		}
+		ro.Harness = entry
+		// `single-shot` with no params ≡ absent (D-8): the identity strategy emits NO harness key, so an
+		// explicitly-single-shot node canonicalizes byte-identically to a node that never mentioned a
+		// harness and the P0 golden vectors keep reproducing. The override is still recorded on `ro` — the
+		// transform must be able to see that the author asked for something, even when what they asked for
+		// changes nothing.
+		params, err := decodeParams(entry.Spec.Params)
+		if err != nil {
+			return ro, node, specErr(nodeID, DimHarness, ErrUnresolvedRef,
+				"harness entry %s has params that are not a JSON object: %v", entry.VersionID, err)
+		}
+		if !entry.IsSingleShot() || len(params) > 0 {
+			node.Harness = &ResolvedHarness{Strategy: entry.Spec.Strategy, Params: params}
+		}
+	} else if base := irNode.HarnessDefault(); base != registry.StrategySingleShot {
+		// The discovered default, pinned by source_revision like any other un-overridden dimension. No
+		// params: the IR records WHICH scaffold a call site already implements, not how it is tuned —
+		// inventing params here would be this layer guessing at a configuration nobody wrote.
+		node.Harness = &ResolvedHarness{Strategy: base, Params: map[string]any{}}
+	}
+
+	// ── tools (P14 task 5.3, decisions.md D-14.2) ──────────────────────────────────────────────────
+	//
+	// A tool selection is VALIDATED AGAINST THE NODE'S DISCOVERED TOOL SET and fails closed. This is the
+	// third application of a pattern the codebase has already proved twice — an `env` binding validated
+	// against DeclaredEnv, an `expr` binding validated against in_scope — and it fails in the same safe
+	// direction: a selection naming a tool the IR does not record for this node is REJECTED here, before
+	// any diff exists, rather than applied to nothing and shipped as a prune that pruned nothing.
+	//
+	// 🔴 An IR that predates the split is also a rejection, not a pass. `Tools == nil` means "this IR
+	// does not record tools", which is NOT "this node offers none" — treating the two alike would accept
+	// every selection against every pre-P14 IR, which is precisely the false acceptance fail-closed
+	// exists to prevent.
+	if len(o.ToolSelection) > 0 {
+		if !irNode.ToolsRecorded() {
+			return ro, node, &SpecError{NodeID: nodeID, Dim: DimTools, Err: ErrToolNotDiscovered,
+				Detail: "the IR at this source_revision records no tool set for this node (it predates the " +
+					"tools/skills split), so a selection over it cannot be validated and is refused rather " +
+					"than applied to an unknown set"}
+		}
+		for _, name := range o.ToolSelection {
+			if !irNode.DeclaresTool(name) {
+				return ro, node, &SpecError{NodeID: nodeID, Dim: DimTools, Ref: name, Err: ErrToolNotDiscovered,
+					Detail: fmt.Sprintf("the node's discovered tool set is %v", discoveredToolNames(irNode))}
+			}
+		}
+		ro.ToolSelection = o.SelectedTools()
+		node.ToolSelection = ro.ToolSelection
 	}
 
 	// ── bindings (P10 tasks 3.2–3.5, 3.8) ──────────────────────────────────────────────────────────
@@ -305,6 +598,30 @@ func validateBindings(nodeID string, o NodeOverride, irNode *discovery.IRNode, i
 		}
 	}
 
+	// 1b. Un-apply refusal (P13 task 2.6, design Decision 3). A rewrite publishes a NEW pinned prompt;
+	//     if that prompt's slot set drops a variable the DISCOVERED call site still supplies a value for,
+	//     the runtime value would no longer bind — the node is un-applied. Refuse here, at resolve,
+	//     naming the slot (P10 impact analysis), rather than emitting a diff that silently discards it.
+	//
+	//     Engages only when the prompt was actually overridden (a rewrite) AND the discovered prompt
+	//     declared variables: the discovered prompt's own variables are the baseline the call site feeds,
+	//     so a pinned prompt that no longer declares one of them is the un-apply case Decision 3 refuses.
+	//     A slot the rewrite ADDS but the call site does not supply is the mirror case, caught by the
+	//     satisfaction loop below (ErrUnsatisfiedSlot).
+	if o.PromptRef != "" {
+		for _, v := range irNode.Prompt.Variables {
+			if slotSet[v] {
+				continue // the rewrite kept this slot; the runtime value still binds
+			}
+			if _, rebound := o.Bindings[v]; rebound {
+				continue // an explicit binding re-supplies it; not un-applied
+			}
+			return nil, &SpecError{NodeID: nodeID, Dim: DimPrompt, Ref: v, Err: ErrRewriteUnappliesNode,
+				Detail: fmt.Sprintf("the rewritten prompt no longer declares slot %q, but the call site "+
+					"still supplies a value for it; the rewrite would un-apply this node", v)}
+		}
+	}
+
 	// 2. Exactly-once satisfaction (task 3.3), gated as documented above.
 	if irNode.CallSite.InScopeRecorded() || len(o.Bindings) > 0 {
 		for _, slot := range slots {
@@ -360,6 +677,21 @@ func refError(nodeID string, dim Dimension, ref string, err error) error {
 			Detail: fmt.Sprintf("the registry entry is corrupt: %v", err)}
 	}
 	return fmt.Errorf("variantspec: node %q, dimension %q, ref %q: %w", nodeID, dim, ref, err)
+}
+
+// paramsEqual reports whether two provider-param maps hold the same keys and values. Used only to tell
+// a parameter tune from a no-op model override; never a hash input.
+func paramsEqual(a, b map[string]any) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, av := range a {
+		bv, ok := b[k]
+		if !ok || av != bv {
+			return false
+		}
+	}
+	return true
 }
 
 func copyParams(in map[string]any) map[string]any {

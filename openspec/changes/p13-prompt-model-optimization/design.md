@@ -146,6 +146,183 @@ Because P13 opens **no** one-way door — no new `Dimension` (the enum at
 [`spec.go:42`](../../../internal/variantspec/spec.go) stays four members), no new `Kind`, no new table —
 there is **no** pre-code contract that warrants a `decisions.md`, and this change deliberately ships none.
 
+## Decision 9 — One spine, two origins: an authored change reuses the proposal pipeline entirely
+
+A user-originated change is derived from a parent variant, resolved, hashed, gated, transformed and
+(optionally) scored by **the same components** that process an operator candidate. `Origin`
+(`operator` | `user`) plus actor and tenant ride on the candidate/transform/delivery records. There is no
+authoring-only resolve, transform, or gate.
+
+**Alternative rejected — a direct "edit and apply" path that writes the node override straight to a
+diff.** It is dramatically less code: skip derivation, skip the gate, emit the rewrite. Rejected on
+**L2 stability + L5 evolvability**, with L8 explicitly refused as a justification. Every safety property this
+platform has is a property of that one pipeline — un-apply refusal at resolve, cross-provider refusal at
+transform, `GateReorder` before codemod, drop-tolerance before eval spend. A second path does not
+*inherit* those; it **re-implements or omits** them, and the omissions are invisible until a user hits
+one. The specific failure is concrete and known: the same class of bug as a silently-dropped override,
+where a config hashes one thing and the emitted code does another. Two origins on one spine costs a
+`Origin` field and a preflight entry point; two spines costs every future gate being added twice, forever.
+That is the definition of an unevolvable design, and L3 (the lowest rank can never outrank anything above it) forbids buying it with
+implementation convenience.
+
+**Corollary — `Origin` is recorded, never hashed.** `config_hash` is purely structural, so a user-authored
+configuration and a byte-identical operator-proposed one hash the same and are scored once. Putting origin
+in the hash would fork identity by authorship, break P0's golden vectors for every pre-existing config,
+and make "did we already measure this?" unanswerable.
+
+## Decision 10 — Refusals are origin-blind, and there is no override flag
+
+Every refusal — cross-provider swap, un-apply, un-carryable inline param, unsupported-language
+materializer, typed-contract violation, drop-tolerance exceedance — is raised for a user under exactly the
+same conditions and with the same typed cause as for an operator. No plan, role, entitlement, or request
+parameter suppresses one.
+
+**Alternative rejected — a "force" / "I know what I'm doing" override for authenticated owners.** It is
+the single most requested affordance in tools like this, and it feels respectful of the expert user.
+Rejected on **L1 safety + L2 stability**. The refusals are not paternalism about *taste*; each one exists
+because the emitted artifact would be **wrong in a way the user cannot see at the moment of choosing**. A
+cross-provider swap does not become correct because a human asked for it — the SDK client, params type,
+and response shape still differ, and the diff still compiles and then calls the wrong provider in
+production. A dropped inline param still means the run's `config_hash` describes a configuration that did
+not execute. An override converts a loud, typed, pre-submit refusal into a silent production defect, and
+the person who authored it is the one least able to detect it. The honest affordance is not a bypass but a
+**better refusal**: name the cause, name the node, name the field, and — where a legitimate path exists —
+name it (switch the node to `bound` mode; change the provider at the gateway, not the call site).
+
+## Decision 11 — Refusal moves left: preflight is the authoring path's one genuinely new mechanism
+
+A draft is evaluated *before* submission and returns `admissible` / `refused(named cause, offending node
+or field)` / `not-yet-measurable`. Preflight publishes nothing, writes no diff, and spends no eval budget.
+
+**Alternative rejected — reuse the existing refusal points and let the user discover the outcome after
+submitting.** No new endpoint, no new state. Rejected on **L3 user-facing complexity**, which outranks the
+implementation saving by five levels. An operator is a program: discovering a refusal after generating a
+candidate costs it nothing. A human is not: they will have written a prompt, chosen a model, and formed an
+intention before the platform says "this node's language has no materializer." Worse, the two most common
+authoring refusals are *structural properties of the node* — its apply mode, its provider, its language —
+which are knowable **before the user types anything**. Withholding a fact the system already knows until
+after the user has done the work is the exact UX failure the interaction-simplicity rule names. Preflight
+also enforces the third verdict: where an admissibility input has never been measured, it returns
+`not-yet-measurable` rather than guessing — a gate that **never refuses on ignorance**, matching the
+posture P16's drop-tolerance gate already ships.
+
+## Decision 12 — Authoring may apply without a verdict, but may never produce a claim
+
+An authored change may be applied and produce a diff with no verification run. It is stamped `unverified`,
+is excluded from the verified-delta ledger and every aggregate improvement or savings figure, and never
+auto-merges. Verification, when requested, is judged by the unchanged harness — including the held-out
+guardrail — and the user does not choose the cases, the split, or the seeds.
+
+**Alternative rejected (a) — block the apply until verification passes.** The strictest reading of
+*verification decides*, and it keeps one rule for everything. Rejected on **L3**, and on a boundary error:
+verification decides what the platform may **claim**, not what the customer may **do with their own
+repository**. Blocking would also break P11's offline-first contract outright — a CLI that cannot apply an
+edit without a network round trip and an eval budget is not offline-first — and would make the cheapest,
+most obvious edits (fix a typo in a prompt, pin a model the team already standardized on) the most
+expensive operations in the product.
+
+**Alternative rejected (b) — let an authored change carry a verdict of "presumed fine" or inherit the
+parent's.** Convenient for dashboards, and it keeps the ledger dense. Rejected on **L1 safety (honesty)** —
+the same rule that forbids an ungrounded rewrite from being ranked. A configuration the harness never ran
+has no verdict, and inventing one destroys the only property that makes the ledger worth reading. So the
+label is structural, not cosmetic: `unverified` is a state the ledger filters on, not a badge in a UI that
+a future refactor can drop.
+
+**The line, stated once:** *a user may author the change; a user may not author the evidence.* Case
+selection, held-out splits, and seeds stay platform-derived, because an authored downgrade verified on
+cases its author picked is precisely the overfitting Decision 4 exists to prevent — and a human has the
+same incentive as `OpModelDowngrade` and better tools for satisfying it.
+
+## Decision 13 — Coverage is a total table over cells, and the engine points at a binding site
+
+**What was rejected:** (a) closing the language gaps by adding a Java rewriter, a Kotlin rewriter and a
+Rust rewriter as three pieces of work; (b) continuing to list only the cells that work, letting absence
+mean "no".
+
+Two failures hide inside "the platform is Go-only", and neither is the one the phrase describes.
+
+**The first is that absence is not a value.** Today coverage lives in five tables across three packages —
+`argumentForms`, `toolValueForms`, `spanContextMaterializers`, `contextForms`, `statementResolvers` — and
+each states what *is* there. A reader wanting to know what happens to Rust finds nothing, and *nothing*
+renders identically to "not applicable" on every surface that consumes it. So the one state the platform
+most needs to express — **we have not built this yet, and here is the artifact that would close it** — is
+the state the data model cannot hold. Making coverage a **total function** over (axis × registered
+language × form) is therefore not documentation work; it is the difference between a gap that has an owner
+and a gap that has a shrug. And it forces a second, harder honesty: three genuinely different things are
+being confused. *No language can carry this change* (a summarized context does not exist in source), *this
+call site cannot carry it* (arguments unpacked from a mapping; a tool list assembled at run time), and
+*this language has no materializer yet* are answered by the platform's designer, the customer's engineer,
+and the platform's backlog respectively. Collapsing them sends the reader to the wrong one — and the most
+common real refusal, on the most common real repository, is the middle one. Hence the ordering rule:
+**the change, then the row, then the source, then the language** — the language question asked last,
+which is exactly the correction P16 had to make after shipping the context refusal the other way round.
+
+**The second is that three languages do not need three rewriters.** They need one concept the engine does
+not have. `rewrite.go`'s founding rule is *replace an expression the call site already wrote*, and the
+locator that finds it assumes the expression is a **named argument**. Kotlin disproves the "unsupported
+language" reading on its own: Kotlin has named arguments, `kotlinAnalyzer` produces real spans and a real
+insert point, and the rewriter would work — but every Kotlin row declares no `arg_map`, because
+langchain4j, Spring AI and Bedrock bind the model on a **builder** at construction, so `generate(...)`
+has no model argument to point at. Java and Rust arrive at the same place from the other side: no named
+argument form at all, and a model bound in a builder chain or a request struct assembled before the call.
+
+So the generalization is: the engine locates a **binding site**, of which a named argument is one form, a
+**builder-chain call** is a second, and a **request-value field** is a third. Registry rows declare which
+form their SDK binds at, additively, so an existing row is untouched and every hash it participates in is
+unchanged. After that, Kotlin is a **registry row**, Java and Rust are a **frontend extraction plus rows**,
+and the next SDK that binds somewhere new costs a row rather than a project — the L6 extensibility test
+(*do not exhaust cases with if/else where a configuration table belongs*), applied to a missing concept
+rather than to a missing branch.
+
+**What this decision explicitly does not license.** Coverage is never reached by weakening a gate: no
+guessed SDK spelling, no skipped reparse assertion, no inferred binding site. A row is admitted on
+**executable evidence** — the language's reparse assertion, plus the build gate wherever the change
+constructs source — because a row is a claim that this spelling is well-formed, and the only thing that
+can prove it is a run. Trading L1/L2 for reach would produce exactly the failure the skill materializer's
+own comment names: *a change that compiles and then degrades quality invisibly*. Reach is worth nothing if
+what arrives is wrong.
+
+## Decision 14 — Delivery is a total function, and the second route runs in the customer's process
+
+**Context.** Delivery was one chain: rewriter → diff → pull request → human merge. It says nothing about
+the case the coverage tables make common — the rewriter refuses, so there is no diff, so nothing ships and
+nothing is said. A verified change on an axis with no materializer produces a silence indistinguishable
+from neglect.
+
+**Decision.** Two moves, in this order, because the second is only safe once the first exists.
+
+*First, fix the shape of the claim.* Delivery is a **total function** over (axis × change × route): every
+cell names a route or a typed cause, and "no route can deliver this" is a **reported state** carrying the
+expected route and the refusing cause. This is deliberately the same move `language-coverage` made — a
+spread that was discoverable only by reading several tables becomes one table with no absent cells.
+
+*Then add the route.* A gradual rollout is a **two-armed binding document** resolved by ADR-004's
+generated accessor **inside the customer's own process**. Not our gateway: ADR-002 refused a place in
+their runtime, ADR-005 refused a standing credential to their repository, and a platform-served rollout
+would re-open both to buy an L3 convenience. The accessor is already in the request path — theirs, not
+ours — so riding it adds no credential, no network dependency, and no new blast radius.
+
+**What was rejected.** Serving a share of their production traffic (ADR-002's rejected option wearing a
+rollout's clothing). Shadow execution (doubles their provider spend for evidence the harness already
+produces, and never measures a user-facing outcome). Rollout *instead of* a pull request (their repository
+would stop describing what their agent does, and every later codemod would compute against a source that
+is not what runs). Auto-resume after a guard trip (automating the direction that re-exposes traffic to a
+known regression is the platform overriding a reviewed configuration on its own authority).
+
+**Why the four properties are load-bearing, not decoration.** Assignment is a pure function of rollout
+identity and a caller-supplied key, so every replica agrees with no coordination and a past assignment
+replays exactly. Every invocation emits **its arm's own** `config_hash` — this is precisely ADR-002's
+"two runs of the same `config_hash` would no longer be comparable" objection, answered by making the arm
+the unit of record rather than dodged by claiming it does not apply. Expiry serves the **parent**, so a
+forgotten rollout cannot become the durable configuration. And permanence still costs a codemod, a pull
+request and a merge, so ADR-001's "the shipped source is the source of record" survives contact with a
+second route.
+
+**The asymmetry that is not a compromise.** Revert is automatic and local; resume is human. Reverting
+moves toward the configuration that was already running and already reviewed, so automating it costs
+nothing safety values. Resuming moves toward the configuration that just failed under load. Those are
+different acts and do not get the same permission.
+
 ## Interfaces sketch
 
 ```
@@ -170,6 +347,35 @@ Refusals (typed, loud, no diff):
   slot-set change un-applies → refused at resolve, slot named (P10 impact analysis)
 
 Hash participation: PromptRef | ModelRef | ProviderParams already in ResolvedNode → config_hash automatic.
+
+Authoring (13c — a second ORIGIN on the pipeline above, never a second pipeline):
+
+  Draft {                                   // in-memory / draft store; NOT a variant until submitted
+    ParentVariantID   : id                  // immutable parent; never mutated (AC-7)
+    Edits             : node → {ModelRef?, ProviderParams?, PromptRef?}
+    Actor, Tenant     : identity            // recorded, never hashed
+    ForkedFromProposal: candidate_id?       // set when a proposal was edited (operator NOT credited)
+    ConcurrencyToken  : opaque              // stale submit ⇒ named conflict, never a lost update
+  }
+
+  preflight(Draft) → admissible
+                   | refused{cause, node, field}      // same typed causes as the operator path
+                   | not-yet-measurable{missing}      // never refuse on ignorance
+      = resolve(derive(parent, edits)) → gates → materializability probe
+        …publishes nothing, writes no diff, spends no eval budget
+
+  submit(Draft) → Variant{ParentVariantID, Origin: user, Actor, Tenant}
+                → the SAME resolve → config_hash → transform → (optional) eval → verdict
+
+  verification_state ∈ { unverified, verified{verdict} }
+      unverified ⇒ ∉ verified-delta ledger, ∉ any aggregate figure, ∄ auto-merge
+      the user requests a run; the PLATFORM derives cases, held-out split, seeds
+
+  revert(authored) → new Variant derived from recorded parent
+                     ⇒ config_hash == pre-edit config_hash, byte-identical   // never in-place restore
+
+  Record (append-only, P12 delivery-record posture):
+    {actor, tenant, ts, parent, axis, config_hash, diff_ref, origin, forked_from?}
 ```
 
 ## Risks
@@ -184,3 +390,15 @@ Hash participation: PromptRef | ModelRef | ProviderParams already in ResolvedNod
 | The phase grows a contract by accident | Decision 8 — effects land only in existing fields; P0 golden vectors still reproduce; no new `Dimension`/`Kind`/table/metric. |
 | Insufficient held-out data yields a false tie | An explicit `inadmissible-insufficient-data` verdict below a declared floor, not a silent pass (open question 2). |
 | A single-seed result decides a change | Multi-seed CIs and the tie rule — the same P4 machinery, no second implementation. |
+| Authoring grows a second apply path whose gates drift from the first | Decision 9 — one spine, two origins; a structural test asserts a single transform entry point and that no authored change reaches a diff bypassing a gate an operator must pass. |
+| An "expert override" is added later and silently disables a refusal | Decision 10 — refusals are origin-blind by construction and a test asserts no flag, role, plan, or parameter suppresses one; the refusal set is enumerated, not sampled. |
+| An unverified authored change is counted as an improvement | Decision 12 — `unverified` is a ledger-filtering state, not a UI badge; a test asserts unverified changes contribute zero to every aggregate figure. |
+| A user verifies their own change on cases they picked | Decision 12 — case selection, held-out split and seeds are platform-derived; the disjointness assertion from Decision 4 covers the authored path too. |
+| A lost update silently discards a colleague's edit | Decision 9 — drafts carry a concurrency token against an immutable parent; a stale submit is a **named conflict**, and two edits from one parent yield two variants. |
+| An operator's win-rate is inflated by humans fixing its proposals | A forked proposal records its origin and the operator is **not** credited with the authored outcome. |
+| Authoring leaks prompt text or source across the boundary | The P11 allowlist is unchanged and covers preflight; a test asserts the preflight payload carries no prompt text, source, diff, env value, or credential. |
+| A language is absent from a coverage table and reads as "not applicable" | Decision 13 — coverage is a **total** function over (axis × registered language × form); a generated test over the registered language set fails on any missing cell. |
+| A user is told their language is unsupported when their own call site is the problem | Decision 13 — three typed causes with stable identifiers, reported most-specific-first with the language asked **last**; the ordering test goes red when reversed. |
+| Coverage is extended by guessing an SDK spelling | Decision 13 — a row is admitted only on executable evidence (reparse, plus the build gate where source is constructed), and no gate is relaxed to reach a language. |
+| Generalizing the locator changes an existing diff or hash | Decision 13 — the binding-form declaration is additive; previously materializable call sites emit byte-identical changes and P0 golden vectors reproduce. |
+| Two languages implement the same override differently | Decision 13 — semantic parity asserted over a shared fixture; a divergence is a defect, never a per-language behavior. |

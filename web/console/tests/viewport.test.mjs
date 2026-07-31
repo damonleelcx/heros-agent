@@ -46,3 +46,59 @@ test("the studio splits its sections into tabs with the matrix as the landing ta
   assert.ok(idx.every((i) => i >= 0), "all three studio sections must remain as tabs");
   assert.ok(idx[0] < idx[1] && idx[1] < idx[2], "Matrix must be the landing tab");
 });
+
+// The proposal surfaces are the deepest pages in the console — a full source diff plus its evidence — so
+// they are exactly the pages the fixed-height shell cannot rescue with a body scroll. These guard the
+// split, and specifically the two things that must NOT move into a tab.
+test("the proposal detail page splits its review into tabs, with the verdict OUTSIDE them", async () => {
+  const page = await read("src/app/app/workflows/[workflowId]/proposals/[proposalId]/page.tsx");
+  assert.ok(/<Tabs/.test(page), "the proposal detail page must use Tabs, not a vertical stack");
+  assert.ok(/decisionTab\(/.test(page), "Decision must be a tab rather than a section below the fold");
+
+  // 🔴 The refusal and the withheld banner must render BEFORE the tabs. A verdict a reader has to select
+  // a tab to discover is a verdict that can be missed, and both of these say the change did not happen.
+  const refusalAt = page.indexOf("<RefusalNotice");
+  const bannerAt = page.indexOf("This proposal was withheld");
+  const tabsAt = page.indexOf("<Tabs");
+  assert.ok(refusalAt > -1 && refusalAt < tabsAt, "the refusal must render above the tabs, not inside one");
+  assert.ok(bannerAt > -1 && bannerAt < tabsAt, "the withheld banner must render above the tabs");
+});
+
+test("the proposals list splits recommended from withheld into tabs, and keeps both counts visible", async () => {
+  const page = await read("src/app/app/workflows/[workflowId]/proposals/page.tsx");
+  assert.ok(/<Tabs/.test(page), "the proposals list must use Tabs, not two stacked grids");
+  for (const id of ['id: "recommended"', 'id: "withheld"']) {
+    assert.ok(page.includes(id), `both groups must remain as tabs (${id})`);
+  }
+  // The counts live in "This surface", above the tabs: a group nobody selects must still be countable.
+  const countsAt = page.indexOf("withheld</Chip>");
+  assert.ok(countsAt > -1 && countsAt < page.indexOf("<Tabs"),
+    "the recommended/withheld counts must stay above the tabs so neither group can be missed");
+});
+
+test("a review presentation exposes its sections as tabs rather than rendering a stack", async () => {
+  for (const [file, fn] of [
+    ["src/components/p14SkillsTools.tsx", "p14ReviewTabs"],
+    ["src/components/p13Optimization.tsx", "p13ReviewTabs"],
+  ]) {
+    const src = await read(file);
+    assert.ok(src.includes(`export function ${fn}(`),
+      `${file} must expose ${fn} so the page composes tabs instead of receiving a stack`);
+    assert.ok(/TabItem/.test(src), `${file} must return TabItem[]`);
+  }
+});
+
+// A tablist inside a tablist is two roving tab-stops fighting over the arrow keys. The preview pages
+// pick a FIXTURE (navigation, a shareable URL) and tab its SECTIONS — never both with tabs.
+test("no page nests one tablist inside another", async () => {
+  for (const file of ["src/app/preview/p13/page.tsx", "src/app/preview/p14/page.tsx"]) {
+    const src = await read(file);
+    // Comments are stripped first: these files EXPLAIN why the picker is not a tablist, and prose that
+    // names <Tabs> is not a second tablist. A guard that counted the explanation would punish the comment.
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    const tabsUses = code.match(/<Tabs\b/g) ?? [];
+    assert.equal(tabsUses.length, 1, `${file} must render exactly one Tabs, got ${tabsUses.length}`);
+    assert.ok(/aria-label="Preview fixture"/.test(src),
+      `${file} must pick its fixture with links, not a second tablist`);
+  }
+});

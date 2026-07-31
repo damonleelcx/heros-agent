@@ -444,6 +444,9 @@ export interface Card {
   narration: string;
   can_open_pr: boolean;
   pr_disabled_reason?: string;
+  refused_node_id?: string;
+  refused_dimension?: string;
+  refused_reason?: string;
 }
 
 export interface DimChange {
@@ -451,6 +454,8 @@ export interface DimChange {
   dimension: string;
   from: string;
   to: string;
+  kind?: string;
+  items?: string[] | null;
 }
 
 export interface TrendView {
@@ -720,5 +725,132 @@ export interface RouteConditionView {
   detail?: string;
   next_action?: string;
   targets?: string[] | null;
+}
+
+/** Response of `GET /api/p13/coverage`. */
+export interface AxisCoverageView {
+  version: string;
+  languages: string[] | null;
+  axes: string[] | null;
+  causes: CoverageCause[] | null;
+  cells: CoverageCell[] | null;
+}
+
+export interface CoverageCause {
+  id: string;
+  owner: string;
+  label: string;
+}
+
+export interface CoverageCell {
+  axis: string;
+  language: string;
+  form: string;
+  status: string;
+  cause?: string;
+  missing_artifact?: string;
+  note?: string;
+}
+
+/** Response of `GET /api/p13/delivery`. */
+export interface ChangeDeliveryView {
+  version: string;
+  routes: DeliveryRouteMeta[] | null;
+  causes: DeliveryCauseMeta[] | null;
+  states: DeliveryStateMeta[] | null;
+  languages: string[] | null;
+  cells: DeliveryCellView[] | null;
+  source_cells: DeliverySourceCellView[] | null;
+}
+
+export interface DeliveryRouteMeta {
+  id: string;
+  label: string;
+  permanence: string;
+}
+
+export interface DeliveryCauseMeta {
+  id: string;
+  owner: string;
+  permanent: boolean;
+  label: string;
+}
+
+export interface DeliveryStateMeta {
+  id: string;
+  label: string;
+}
+
+export interface DeliveryCellView {
+  axis: string;
+  change: string;
+  route: string;
+  status: string;
+  cause?: string;
+  owner?: string;
+  permanent?: boolean;
+  missing_artifact?: string;
+  note?: string;
+  contingent?: boolean;
+  missing_component?: string;
+  bound_only?: boolean;
+}
+
+export interface DeliverySourceCellView {
+  change: string;
+  language: string;
+  status: string;
+  cause?: string;
+  permanent?: boolean;
+  missing_artifact?: string;
+  note?: string;
+}
+
+/** Response of `GET /api/p20/install`. */
+export interface InstallView {
+  matrix_version: string;
+  documented_release: string;
+  ratified_posture: string;
+  delivered?: DeliveredTrustView | null;
+  targets: TargetView[] | null;
+  channels: ChannelView[] | null;
+}
+
+export interface DeliveredTrustView {
+  version: string;
+  signing_key_id?: string;
+  claims: ClaimView[] | null;
+}
+
+export interface ClaimView {
+  id: string;
+  text: string;
+  earned: boolean;
+}
+
+export interface TargetView {
+  key: string;
+  platform: string;
+  arch: string;
+  support: string;
+  runner?: string;
+  limit?: string;
+  answer?: string;
+  channels: string[] | null;
+}
+
+export interface ChannelView {
+  id: string;
+  label: string;
+  oses: string[] | null;
+  delivered: boolean;
+  publication: string;
+  blocker?: string;
+  verification: string;
+  manager_owned: boolean;
+  install: string;
+  upgrade: string;
+  uninstall: string;
+  pin: string;
 }
 

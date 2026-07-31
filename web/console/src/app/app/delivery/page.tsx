@@ -1,6 +1,16 @@
 import Link from "next/link";
-import type { DeliveriesView, DeliveryView } from "@/lib/types.generated";
+import type { ChangeDeliveryView, DeliveriesView, DeliveryView } from "@/lib/types.generated";
 import { load } from "@/lib/view";
+import { platformFetch } from "@/lib/platformApi";
+import { requireSession } from "@/lib/session";
+import { Tabs, type TabItem } from "@/components/tabs";
+import {
+  DeliveryRouteLedger,
+  DeliveryRouteLegend,
+  DeliverySourceReality,
+  DeliveryStateLegend,
+  undeliverableChanges,
+} from "@/components/deliveryRoutes";
 import {
   PageFrame,
   Section,
@@ -17,29 +27,128 @@ import {
 /**
  * Delivery.
  *
- * The loop from a verified proposal to an outcome on the customer's repository, made visible: each
- * delivery's state (open / merged / closed / superseded) linked back to the proposal that produced it,
- * and — the part silence would hide — the delivery-route CONDITION rendered as a condition with a next
- * action rather than as an empty list (FR13). This surface inherits P9's rules unchanged: the token
- * system, English strings, render-as-received, the four data states, and browser-rendered acceptance.
+ * Two questions live here, and before P13 13e only the first had a surface:
+ *
+ *   "What reached my repository?"       — the pull requests, their outcome, the route condition (P12).
+ *   "How does a change reach it AT ALL?" — the route ledger (P13 13e).
+ *
+ * The second matters because the honest answer is usually *it does not*. Read against the coverage
+ * tables, most cells have no materializer: memory refuses in every language, harness refuses in every
+ * language, skill binding materializes in Go for two providers. When the rewriter refuses there is no
+ * diff, so there is no pull request, so nothing appears on the first tab — and an empty list is exactly
+ * what "nobody has gotten to it yet" looks like. The ledger turns that silence into a stated reason
+ * with an owner.
+ *
+ * 🔴 The two are tabs of one surface rather than two pages, because a reader who finds no delivery needs
+ * the explanation one click away, not one navigation away.
  */
 export const dynamic = "force-dynamic";
 
 export default async function DeliveryPage() {
   const { outcome } = await load<DeliveriesView>((paths) => paths.deliveries(), ["route"]);
-  return (
-    <PageFrame
-      eyebrow="Delivery"
-      title="Forge delivery"
-      lede="Every verified optimization that reached a pull request on your repository, and its outcome. A human merges; the platform never does below the Autonomous level."
-      wide
-    >
-      {!outcome.ok ? (
+  const routes = await fetchDeliveryRoutes();
+
+  const tabs: TabItem[] = [
+    {
+      id: "pull-requests",
+      label: "Pull requests",
+      content: !outcome.ok ? (
         <Failure kind={outcome.kind} error={outcome.error} denial={outcome.denial} subject="delivery" />
       ) : (
         <Body view={outcome.data} />
-      )}
+      ),
+    },
+    { id: "routes", label: "Routes", content: <RoutesTab view={routes} /> },
+  ];
+
+  return (
+    <PageFrame
+      eyebrow="Delivery"
+      title="How a change reaches your agent"
+      lede="Every verified optimization that reached a pull request on your repository — and, for the ones that cannot, which route was expected and why it refused. A human merges; the platform never does below the Autonomous level."
+      wide
+    >
+      <Tabs tabs={tabs} />
     </PageFrame>
+  );
+}
+
+/**
+ * fetchDeliveryRoutes reads the route ledger.
+ *
+ * 🚫 There is no local fallback table. A console carrying its own copy of what each route can deliver
+ * would be the second delivery table the contract exists to prevent, and it would drift in the usual
+ * direction — the copy is always the optimistic one. When the platform cannot be read, the tab says so
+ * rather than rendering a plausible table nobody verified.
+ */
+async function fetchDeliveryRoutes(): Promise<ChangeDeliveryView | null> {
+  const session = await requireSession();
+  const outcome = await platformFetch<ChangeDeliveryView>("/api/p13/delivery", {
+    tenantId: session.tenantId,
+  });
+  return outcome.ok ? outcome.data : null;
+}
+
+function RoutesTab({ view }: { view: ChangeDeliveryView | null }) {
+  if (!view) {
+    return (
+      <Banner tone="warn" title="The route ledger is unavailable">
+        This tab states what each delivery route can and cannot carry. Showing a partial answer would be
+        worse than showing none, because a missing row reads as &ldquo;not applicable&rdquo; — a claim
+        about your code that nobody made.
+      </Banner>
+    );
+  }
+
+  const cells = view.cells ?? [];
+  const runtimeLive = cells.filter((c) => c.route === "runtime" && c.status === "delivers").length;
+  // 🔴 The join, not the ledger alone: a change is undeliverable only when the runtime route refuses AND
+  // every language refuses the source route. See undeliverableChanges().
+  const undeliverable = undeliverableChanges(view).size;
+
+  return (
+    <>
+      <Banner tone="info" title="A rollout is evidence, not delivery">
+        A gradual rollout runs inside your own process, assigns each unit of work to an arm
+        deterministically, expires to the parent arm, and reverts itself if a guard trips — without
+        reaching the platform. It never merges anything. Permanence still costs a codemod, a pull
+        request, and a human.
+      </Banner>
+
+      <Section title="What each route carries" aside={`read against coverage table ${view.version}`}>
+        <Stats>
+          <Stat
+            label="Rollout-eligible"
+            value={runtimeLive}
+            note="changes a bound node can try under real load"
+          />
+          <Stat
+            label="Undeliverable"
+            value={undeliverable}
+            note="every route refuses — each names why"
+          />
+        </Stats>
+        <DeliveryRouteLedger view={view} />
+      </Section>
+
+      <Section
+        title="Whose move is a refusal"
+        aside="the identifier selects the treatment, never the sentence"
+      >
+        <DeliveryRouteLegend view={view} />
+      </Section>
+
+      <Section
+        title="Will the pull-request route produce a diff"
+        aside="this is the half that varies by language"
+      >
+        <DeliverySourceReality view={view} />
+      </Section>
+
+      <Section title="Delivery states" aside="a closed set, with no “pending”">
+        <DeliveryStateLegend view={view} />
+      </Section>
+    </>
   );
 }
 
@@ -72,6 +181,10 @@ function Body({ view }: { view: DeliveriesView }) {
               <p>
                 When a proposal passes the verification gate and a route is configured, it is delivered
                 as a pull request and appears here. This is a real state, not a failure to load.
+              </p>
+              <p>
+                If you expected one and it never arrived, the Routes tab says which route was expected
+                and why it refused. Most changes are refused by the rewriter rather than queued.
               </p>
             </Empty>
           ) : (

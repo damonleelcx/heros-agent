@@ -27,6 +27,7 @@ func newTarget(t *testing.T) string {
 	for src, dst := range map[string]string{
 		"testdata/target/go.mod.txt":      "go.mod",
 		"testdata/target/pipeline.go.txt": "pipeline.go",
+		"testdata/target/wiring.go.txt":   "wiring.go",
 	} {
 		b, err := os.ReadFile(src)
 		if err != nil {
@@ -348,6 +349,21 @@ func TestGenerate_RejectsProviderSwapAsACallSiteRewrite(t *testing.T) {
 
 // The dimensions this engine will not rewrite refuse with a reason, naming node and dimension — FR5's
 // "a call site the transform cannot rewrite safely", rejected before anything is applied.
+//
+// 🔴 `skills` USED to be listed here and is not any more: P14 task 2.1 replaced the Go refusal with real
+// materialization from the skill's sealed schema (skillbind.go, decisions.md D-14.4). It has not become
+// unconditional — a Go call site whose provider has no declared tool-value form, and one whose tool set
+// is assembled at runtime, both still refuse — but those refusals are per (provider, call site) rather
+// than per dimension, so they live with the materializer's own tests in skillbind_test.go. Leaving a
+// blanket "skills always refuses" case here would have kept passing (an entry with no sealed schema
+// refuses for a different reason) while asserting a contract that is no longer true.
+//
+// 🔴 `context` under a SELECTION policy has moved the same way: P16 task 2.2 replaced the Go refusal
+// with real materialization (contextmaterialize.go), so `full` no longer refuses here — it is the
+// identity policy, and a call site that writes its messages out already assembles exactly that. What
+// still refuses, and what this case now pins, is a policy that assembles at RUN TIME: a summarizer's
+// output is not in the source to select, so materializing it would mean writing a model's answer into a
+// diff. Leaving the `full` case here would have kept asserting a contract P16 deliberately retired.
 func TestGenerate_RefusesConstructionDimensionsWithAReason(t *testing.T) {
 	root := newTarget(t)
 	ids := nodeIDs(t, root)
@@ -357,11 +373,9 @@ func TestGenerate_RefusesConstructionDimensionsWithAReason(t *testing.T) {
 		override variantspec.ResolvedOverride
 		wantDim  string
 	}{
-		{"skills", variantspec.ResolvedOverride{
-			Skills: []*registry.SkillEntry{{VersionID: strings.Repeat("s", 64), Name: "search"}}}, "skills"},
-		{"context", variantspec.ResolvedOverride{
+		{"context-host-calling", variantspec.ResolvedOverride{
 			Context: &registry.ContextEntry{VersionID: strings.Repeat("x", 64), Name: "c",
-				Spec: registry.ContextSpec{Policy: "full"}}}, "context"},
+				Spec: registry.ContextSpec{Policy: "summarization"}}}, "context"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

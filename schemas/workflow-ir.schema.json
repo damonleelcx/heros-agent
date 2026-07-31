@@ -161,8 +161,48 @@
         },
         "tools_skills": {
           "type": "array",
-          "description": "Bound tool/skill names available at this call site.",
+          "description": "Bound tool/skill names available at this call site. FROZEN and never repurposed: P14 split tools from skills ADDITIVELY into the optional `tools`/`skills` properties below, leaving this conflated view exactly as pre-P14 consumers read it (openspec/changes/p14-skills-tools-optimization/decisions.md D-14.1).",
           "items": { "type": "string", "minLength": 1 }
+        },
+        "tools": {
+          "type": "array",
+          "description": "Optional (P14, additive — no MAJOR bump). The provider-native tools this node offers the model, split out of the frozen `tools_skills` list. A tool is SELECTED (kept or pruned) against this discovered set, fail-closed; it is never resolved from a registry ref, because a tool is already identified by its call site (D-14.2). ABSENT means this IR predates the split, which is NOT the same as \"this node offers no tools\" — a consumer that conflated the two would accept a selection over nothing.",
+          "items": {
+            "type": "object",
+            "required": ["name"],
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "description": "The tool's discovered call-site identifier — how a tool selection names it."
+              },
+              "declared_at": {
+                "type": "object",
+                "description": "Where this tool sits as a STATIC, deletable element of a written list. ABSENT is load-bearing: it means the node's tool set is assembled at runtime, so there is no declaration a prune could delete, and the transform REFUSES with ErrUnsafeRewrite rather than guessing (FR14, D-14.3). The file is the node's own call_site.file and is not repeated here.",
+                "required": ["line", "index"],
+                "additionalProperties": false,
+                "properties": {
+                  "line": { "type": "integer", "minimum": 1 },
+                  "index": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "Position in the written list, so a deletion addresses the element rather than searching for text that may appear more than once."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "skills": {
+          "type": "array",
+          "description": "Optional (P14, additive — no MAJOR bump). The registered platform capabilities this node binds, split out of the frozen `tools_skills` list. A skill is BOUND by constructing a value from its sealed contract — the opposite mechanic to a tool's selection — which is why the two cannot share one slice.",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "memory": {
+          "type": "string",
+          "description": "Optional (P17, additive — no MAJOR bump). The memory strategy this node already implements: what it carries ACROSS invocations and sessions, as opposed to `context_assembly`, which is how a SINGLE call builds its message list. Absent means the document predates the field and is read as `none`. Discovery emits `none` for every node, which is a claim about the evidence rather than a placeholder: a store read and written between turns is not visible at the single call site P1 extracts, which is why `MemoryManagement` is a behavioral pattern and not a structural one.",
+          "minLength": 1
         },
         "context_assembly": {
           "type": "object",

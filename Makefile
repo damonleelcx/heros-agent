@@ -10,6 +10,7 @@
 #   make pg-proof  # live-Postgres registry proofs (needs only Docker)
 #   make verifier-proof  # live-toolchain proofs of the 7 language gates (needs those toolchains)
 #   make discovery-sandbox-proof  # least-privilege worker runtime proof (needs only Docker)
+#   make release-rehearse         # run the release pipeline's spine locally on a rehearsal tag (P20 2.6/2.7)
 
 GO      ?= go
 PYTHON  ?= python3
@@ -26,7 +27,8 @@ PARITY_DIR ?= .parity
         discovery-parity-snapshot discovery-parity-verify \
         discovery-sandbox-proof discovery-sandbox-proof-redcheck \
         sandbox-proof sandbox-proof-redcheck \
-        p35-calibration p35-graph-demo p55-demo p7-billing-demo p7-ui-states
+        p35-calibration p35-graph-demo p55-demo p7-billing-demo p7-ui-states \
+        release-rehearse release-rehearse-redcheck readme-install packaging-proof install-smoke install-smoke-refusals
 
 ## ci: the locally-provable gate (go + schema + console-types + discovery-ci). Lint/db-proof run as their own CI jobs.
 ci: go schema console-types-check discovery-ci
@@ -256,3 +258,46 @@ clean:
 
 help:
 	@grep -E '^## ' $(MAKEFILE_LIST) | sed 's/## /  /'
+
+## release-rehearse: run the P20 release spine locally against a rehearsal tag — plan, native build, version
+## stamp, reproducibility gate, merge with cross-check, sign, attest, fail-closed gate, notes. Needs no
+## secret and publishes nothing. This is what makes the release gates debuggable without pushing a tag.
+release-rehearse:
+	GOWORK=off bash scripts/release-rehearse.sh $(TAG)
+
+## release-rehearse-redcheck: guards the guard — runs the rehearsal with FOUR of the five targets absent and
+## requires the completeness gate to refuse. A gate never shown to reject is treated as absent.
+release-rehearse-redcheck:
+	@echo "== release gate red-check: an incomplete matrix must be REFUSED =="
+	@if GOWORK=off bash scripts/release-rehearse.sh $(or $(TAG),v0.20.0-rc.1) --real-only 2>&1 \
+	    | tee /dev/stderr | grep -q "release gate  *: ⛔ refused"; then \
+	  echo "== red-check PASS: the gate refused an incomplete matrix =="; \
+	else \
+	  echo "== red-check FAIL: the gate did NOT refuse an incomplete matrix =="; exit 1; \
+	fi
+
+## readme-install: regenerate the README's install section from the channel contract (D5/task 8.1). The section
+## is generated-and-checked rather than hand-written, so a channel that becomes unavailable cannot keep sending
+## users to a command that fails. TestReadmeInstallSectionMatchesContract is the gate.
+readme-install:
+	GOWORK=off $(GO) run ./cmd/herosdist readme $(if $(TAG),--tag $(TAG),) $(if $(DIST),--dir $(DIST),) --write
+	@echo "== README install section regenerated =="
+
+## packaging-proof: hand every generated package manifest to the tool that reads it — ruby for the formula, a
+## JSON/YAML parse for scoop and winget, a real nfpm .deb/.rpm build, and a container image that is BUILT AND
+## RUN. Content tests cannot tell you whether the consuming tool accepts the file.
+packaging-proof:
+	GOWORK=off bash scripts/packaging_proof.sh $(or $(DIST),dist)
+
+## install-smoke-refusals: the four tamper/refusal cases only. Needs NO signing key, because every one of them
+## must be refused regardless of which key signed the fixture — the installers pin their own. This is the mode
+## CI runs on a pull request.
+install-smoke-refusals:
+	GOWORK=off $(PYTHON) scripts/install_smoke.py --host --refusals-only
+
+## install-smoke: fresh-machine install matrix + tamper red-check for scripts/install.sh — on this host and in a
+## genuinely clean debian:12 container with a real natively-built linux binary. Needs
+## HEROS_RELEASE_PRIVATE_KEY, because the point is that the key PINNED in the installer verifies; it fails
+## rather than skips without it.
+install-smoke:
+	GOWORK=off $(PYTHON) scripts/install_smoke.py

@@ -64,6 +64,24 @@ proposals on **held-out** eval sets with the retriever **pinned** per measuremen
   retrieval change that would push a node past its drop tolerance is **inadmissible** (the drop gate
   applied to retrieval). Pure augmentation is recorded as retrieval, not loss: `DropRatio` 0 with a
   positive `RetrievedChunks` count.
+- **New capability `context-authoring` (wave 16c).** The context axis gains a **second origin**: a user
+  selects a node's context policy and parameters, declares or clears its **drop tolerance**, and tunes
+  retrieval directly — instead of waiting for `OpContextPolicy` or `OpRAGTune` to fire. It consumes the
+  shared [`authored-change`](../p13-prompt-model-optimization/specs/authored-change/spec.md) contract
+  unchanged, and adds the three rules this axis needs, all of which are about **loss** rather than
+  permission. First, **the drop-tolerance gate runs at preflight**, before any eval spend: a policy whose
+  measured drop ratio exceeds the node's tolerance is refused naming the node, the tolerance, and the
+  measured ratio — and where that ratio has **never been measured**, preflight returns the third verdict
+  **`not-yet-measurable`** naming the missing measurement. 🔴 It never returns `admissible` (which would
+  assert a safety check that did not run) and never returns `refused` (which would make the platform's
+  measurement coverage the user's problem) — **the gate never refuses on ignorance**. Second, the
+  **language boundary is stated before the user chooses**, naming the node, the policy, and the language,
+  with the same typed cause the transform raises. Third, **retrieval parameters are offered only on a
+  node the classifier labels `RetrievalRAG`, and no surface, flag, or role lets a user set that label** —
+  the same rule as *a user may not author the evidence*. An authored retrieval change is **pinned** when
+  measured and judged on a **platform-derived held-out set disjoint from the cases shown as motivation**.
+  An authored context change applies while `unverified` with **no** token or cost saving attributed, and
+  `DropRatio` is displayed as **information discarded**, never as a saving.
 - **Not changed here.** No new `Dimension` — `DimContext` already exists and is reused for retrieval,
   which is a `rag-retrieval` policy with params, not a `DimRetrieval`. No registry-schema change and no
   `ContextSpec` change — new policies are rows behind the `Policy` interface. No new telemetry family —
@@ -74,9 +92,40 @@ proposals on **held-out** eval sets with the retriever **pinned** per measuremen
   axis and `OpReorder`, owned by P5). No skills materialization (the sibling `refuseSkills` is its own
   axis and phase).
 
+- **New capability `context-language-coverage` (wave 16d).** `spanContextMaterializers`
+  ([`contextmaterialize_span.go:70`](../../../internal/transform/contextmaterialize_span.go)) carries
+  Python and says, in its own comment, that TypeScript and JavaScript are *"a row plus its splitter"* —
+  a scope statement that ages into a product boundary the moment the data model has no way to say *we have
+  not built this yet*. 16d makes context coverage a **total** table over **(language, policy)** pairs,
+  each language gap naming the **list splitter** as its missing artifact, and adds the remaining
+  splitters. The invariant that governs the growth is that **retention is not per language**: which turns
+  a policy retains *is* the policy, so the shared selection code decides it in every language and a
+  splitter answers exactly one question — what are the written elements of this list. The drop record is
+  produced by the same shared path, so a newly covered language cannot delete turns without recording
+  them and `context_drop_ratio` cannot become quietly incomplete as coverage grows. And the refusal order
+  this axis already had to correct once is made a requirement: a policy whose content is produced at run
+  time refuses **identically in every language**, a call site that wrote **no message list** is told
+  **that** — before and after its splitter lands — and only then is the language the honest answer. The
+  cross-axis rules come from **P13's `language-coverage`** and are referenced, never restated.
+- **New capability `context-delivery` (wave 16e).** This axis's delivery cells, under P13's
+  [`change-delivery`](../p13-prompt-model-optimization/specs/change-delivery/spec.md) contract and
+  [ADR-010](../../../docs/adr/ADR-010-runtime-gradual-rollout.md). "Context strategy" is one name for
+  two things that land in different columns: a **retrieval parameter is a number**, so the runtime
+  route refuses it only as `noRolloutBinding` with a named missing field; a **selection policy is a
+  deletion** of written turns, so it is `notRuntimeResolvable`, permanently. The requirement that
+  matters most is neither — it is that the **drop record survives the second route**. This axis's
+  central guarantee is that a context decision records what it discarded, unskippable by construction;
+  a second path by which a context decision can take effect is precisely where an unskippable
+  guarantee becomes skippable, so the rule is stated as a property of the decision rather than of the
+  route: whatever chooses what the model sees records what it dropped, whichever arm chose it.
+
 ## Impact
 
-- **Affected capabilities:** `context-policy` (new), `retrieval-tuning` (new). Consumed, not modified:
+- **Affected capabilities:** `context-policy` (new), `retrieval-tuning` (new), `context-language-coverage` (new, 16d), `context-authoring` (new,
+  16c), `context-delivery` (new, 16e). Consumed, not modified:
+  **`authored-change` (P13 — referenced, never restated)**,
+  **`change-delivery` (P13 — referenced, never restated)**,
+  `entitlements` (P7), `web-console` (P9), `cli`/`ci` (P11), and:
   `variant-spec`/`resolution` (P2), `context-strategies`/registry (P3), `pattern-classifier` (P3.5),
   `eval-harness`/`scoring` (P4), `attribution-diagnosis` (P4.5), `proposals-verification` (P5.5),
   `prompt-model-studio` apply-mode (P10).
@@ -99,3 +148,8 @@ proposals on **held-out** eval sets with the retriever **pinned** per measuremen
   with a better-owned message (other languages).
 - **Sequencing:** **16a** (context-policy materialization on the Go engine + the interim refusal + the
   drop gate) is a complete phase on its own. **16b** (retrieval tuning + held-out verification) follows.
+  **16c** (`context-authoring`) follows 16b and depends on P13's shared `authored-change` contract landing
+  first; it is independently revertible, returning the axis to a single origin with no upstream change.
+  **16d** (`context-language-coverage`) depends on P13's shared `language-coverage` contract landing
+  first, is independent of 16c, and is likewise independently revertible — removing it returns the axis
+  to its 16a cells with the refusals it already had.

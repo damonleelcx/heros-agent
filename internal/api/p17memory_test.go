@@ -1,0 +1,199 @@
+package api
+
+import (
+	"encoding/json"
+	"testing"
+
+	"github.com/heros-foreal/agentd/internal/registry"
+	"github.com/heros-foreal/agentd/internal/transform"
+	"github.com/heros-foreal/agentd/internal/variantspec"
+)
+
+// P17 §9/§10 — the read model behind the memory-authoring surface.
+//
+// The console renders whatever this returns, so every honesty rule D7 fixes has to be true HERE, in the
+// payload, before any pixel exists. A test at the React layer could be made to pass with a hard-coded
+// string; this one cannot.
+
+func TestMemoryReadModelStatesTheBoundaryBeforeAnyChoice(t *testing.T) {
+	v := memoryReadModel("go")
+
+	// 🔴 Go materializes SOME strategies and permanently refuses others, so the headline is "applicable"
+	// and the refusing cells are still stated. P17 asserted a flat no for every language; P18 §4 made it
+	// per (language, strategy), and a test still demanding the flat no would demand a lie.
+	if !v.Boundary.Applicable {
+		t.Fatal("the read model reports memory as inapplicable for Go, though Go materializes the " +
+			"content-blind strategies; over-refusing is the same defect as over-claiming")
+	}
+	if v.Boundary.Reason == "" {
+		t.Error("the boundary carries no reason sentence for the cells that still refuse")
+	}
+	// 🔴 The language is never the blocker on its own — the refusing Go cells refuse because of what the
+	// STRATEGY needs, not because Go is unsupported.
+	if v.Boundary.LanguageIsTheBlocker {
+		t.Error("the payload blames the language for the refusal")
+	}
+	// 🔴 And the control stays live: modeling is not refused, only materialization is.
+	if !v.Boundary.AuthorableAnyway {
+		t.Error("the payload does not tell the client the change is still authorable; a client would " +
+			"reasonably disable the control, and a disabled control says nothing about why")
+	}
+}
+
+func TestMemoryReadModelOffersTheClosedVocabulary(t *testing.T) {
+	v := memoryReadModel("go")
+
+	if len(v.Strategies) != registry.MemoryStrategySetSize {
+		t.Fatalf("the payload offers %d strategies, the registry has %d; an option the registry does not "+
+			"know fails at seal, and one it knows that is not offered is unreachable",
+			len(v.Strategies), registry.MemoryStrategySetSize)
+	}
+	if v.Dimension != string(variantspec.DimMemory) {
+		t.Errorf("dimension = %q, want %q — the client must label the edit from the server's enum", v.Dimension, variantspec.DimMemory)
+	}
+
+	var identity, applying int
+	for _, s := range v.Strategies {
+		if len(s.ParamsSchema) == 0 {
+			t.Errorf("strategy %q carries no params schema; the form would have nothing to render and "+
+				"nothing to validate against", s.Strategy)
+		}
+		// The schema must be real JSON — a client renders fields from it.
+		var probe map[string]any
+		if err := json.Unmarshal(s.ParamsSchema, &probe); err != nil {
+			t.Errorf("strategy %q's params schema is not a JSON object: %v", s.Strategy, err)
+		}
+		if s.Title == "" || s.Description == "" {
+			t.Errorf("strategy %q has no human layer", s.Strategy)
+		}
+		if s.Identity {
+			identity++
+			// 🔴 Per-strategy applicability, not one flag for the axis: `none` genuinely applies (it
+			// changes nothing) while every other strategy refuses. Collapsing them would either claim
+			// memory works or claim the identity strategy is unavailable.
+			if !s.Applies {
+				t.Errorf("the identity strategy %q reports Applies=false; selecting `none` is a no-op the "+
+					"engine accepts, and a user must be able to state it", s.Strategy)
+			}
+		} else if s.Applies {
+			applying++
+		}
+	}
+	if identity != 1 {
+		t.Errorf("the payload marks %d identity strategies, want exactly 1", identity)
+	}
+	// Go applies the content-blind strategies and refuses the content-reading ones, so SOME apply and some
+	// do not. Asserting either extreme would be wrong.
+	if applying == 0 {
+		t.Error("no non-identity strategy applies for Go, though it materializes the content-blind ones")
+	}
+	if applying == len(v.Strategies)-1 {
+		t.Error("every non-identity strategy claims to apply for Go; the ones that read message text " +
+			"cannot run on a content-blind runtime")
+	}
+}
+
+// TestMemoryReadModelFlipsForACoveredLanguage — P18 §7.1. The boundary is PER-CELL now, and the payload
+// must say so rather than repeating P17's flat no.
+//
+// 🔴 This is the test that would have caught the surface keeping P17's copy after the capability landed.
+// Over-refusing and over-claiming are the same defect — a coverage claim that does not match the engine —
+// and the first is the one a team never notices, because nobody files a bug about being told "no".
+func TestMemoryReadModelFlipsForACoveredLanguage(t *testing.T) {
+	covered := transform.MemoryMaterializerLanguages()
+	if len(covered) == 0 {
+		t.Skip("no language has a memory materializer yet")
+	}
+	lang := covered[0]
+	v := memoryReadModel(lang)
+
+	if !v.Boundary.Applicable {
+		t.Fatalf("language %q has a memory materializer and the payload still reports the axis as "+
+			"inapplicable; the surface is over-refusing, which is the same defect as over-claiming and the "+
+			"one nobody files a bug about", lang)
+	}
+	var applying int
+	for _, s := range v.Strategies {
+		if !s.Identity && s.Applies {
+			applying++
+		}
+	}
+	if applying == 0 {
+		t.Errorf("no non-identity strategy reports Applies for %q, though the engine materializes them", lang)
+	}
+	// The control is still live and the change is still authorable — that never depended on materializability.
+	if !v.Boundary.AuthorableAnyway {
+		t.Error("the payload stopped reporting the change as authorable")
+	}
+}
+
+// 🚫 An unknown or empty language must not silently answer "yes". A boundary computed for the wrong
+// language is a claim about code the reader does not have.
+func TestMemoryReadModelFailsClosedOnUnknownLanguage(t *testing.T) {
+	for _, lang := range []string{"", "elixir"} {
+		v := memoryReadModel(lang)
+		if v.Boundary.Applicable {
+			t.Errorf("language %q was reported applicable; absence of coverage is not permission", lang)
+		}
+		if v.Boundary.MissingArtifact == "" || v.Boundary.Reason == "" {
+			t.Errorf("language %q yielded an unexplained boundary: %+v", lang, v.Boundary)
+		}
+		// The vocabulary is still offered — a user can author against a language the engine cannot
+		// materialize for; that is the whole modeling-vs-materialization split.
+		if len(v.Strategies) != registry.MemoryStrategySetSize {
+			t.Errorf("language %q was offered %d strategies; authoring does not depend on materializability",
+				lang, len(v.Strategies))
+		}
+	}
+}
+
+// The boundary is DERIVED from the engine's coverage table, not written here. This is the test that
+// would go red if someone replaced the derivation with a literal — and the one that will quietly start
+// reporting "applicable" the day a memory rewriter lands, with no copy edit.
+func TestMemoryBoundaryDerivesFromTheEngineCoverage(t *testing.T) {
+	cells := transform.CoverageFor(string(variantspec.DimMemory))
+	if len(cells) == 0 {
+		t.Fatal("the engine reports no memory coverage; the read model would have nothing to derive from")
+	}
+
+	v := memoryReadModel("go")
+	// Every non-identity refusal in the engine must be reflected as a non-applying strategy here.
+	for _, c := range cells {
+		if c.Language != "go" || c.Form == registry.StrategyNone {
+			continue
+		}
+		for _, s := range v.Strategies {
+			if s.Strategy != c.Form {
+				continue
+			}
+			if s.Applies != (c.Status == transform.CoverageMaterializes) {
+				t.Errorf("strategy %q: payload says applies=%v, engine says %q; the surface and the engine "+
+					"must not be able to disagree", s.Strategy, s.Applies, c.Status)
+			}
+		}
+		// The missing artifact travels VERBATIM from the engine, so a user is told exactly what to wait
+		// for. 🔴 P17 asserted this named "the runtime"; P18 shipped the runtime, so what is missing for
+		// an uncovered language is now its module and rewriter. Asserting the old word would be asserting
+		// something the engine no longer believes.
+		if c.MissingArtifact != "" && v.Boundary.MissingArtifact != c.MissingArtifact {
+			t.Errorf("the boundary's missing artifact %q is not the engine's (%q); the surface must render "+
+				"the engine's sentence rather than a paraphrase that can drift",
+				v.Boundary.MissingArtifact, c.MissingArtifact)
+		}
+	}
+}
+
+// 🚫 No second apply path. A memory change goes through the existing authoring routes; this endpoint is
+// a read. If it ever grew a mutation, every gate on the authored path would have a bypass.
+func TestMemoryEndpointIsReadOnly(t *testing.T) {
+	// Structural: the handler ignores everything but the language query parameter, so there is no body
+	// it could act on. Asserting via the read model's inputs is the closest honest proxy — a mutation
+	// would need state this function does not take.
+	a := memoryReadModel("go")
+	b := memoryReadModel("go")
+	ja, _ := json.Marshal(a)
+	jb, _ := json.Marshal(b)
+	if string(ja) != string(jb) {
+		t.Fatal("two identical reads produced different payloads; the endpoint is carrying state")
+	}
+}

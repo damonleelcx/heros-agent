@@ -158,6 +158,19 @@ type RawCallSite struct {
 	KeywordInsert     *ArgInsert          // where a keyword arg could be ADDED; nil => nowhere (see ArgInsert)
 	KeywordUnpacking  *ArgUnpacking       // the unpacking that made KeywordInsert nil; nil otherwise
 	PositionalStrings []string            // string-literal positional args in order (for framework builder calls)
+	// CallSpan is the byte span of the CALL EXPRESSION itself — `client.messages.create(...)`, opening
+	// name through closing paren (P18 §11).
+	//
+	// 🔴 It exists because a HARNESS is a loop AROUND the call, not a replacement of one of its arguments,
+	// so it is the first rewrite in this engine that needs the call's own extent. The memory rewriter
+	// named exactly this as its clean follow-up: it worked around the absence by appending its second
+	// statement with a `;`, and recorded that "deriving one by scanning for balanced parens is precisely
+	// the guess rewrite_span.go declines". This is the non-guess — the analyzer already has the node, so
+	// the span costs one field rather than a heuristic.
+	//
+	// Zero when the analyzer did not record one, which a rewriter must treat as "no span" and refuse
+	// rather than as offset 0.
+	CallSpan ArgSpan
 }
 
 // argInsertAtEnd builds an ArgInsert that splices at the END of a delimited container (an argument
@@ -263,6 +276,18 @@ type SyntacticUnit struct {
 	Imports     map[string]string // local name -> module/import path
 	ImportPaths map[string]bool   // set of imported module paths
 	CallSites   []RawCallSite
+	// Src is the unit's source bytes, filled in by the walker after Analyze returns.
+	//
+	// It exists because the P14 tool split has to read the TEXT an argument span points at, and the parse
+	// tree is closed by then (`defer tree.Close()`) — the same constraint that made ArgValue carry spans
+	// rather than nodes. Carrying the bytes the spans are relative to is what makes those spans usable
+	// without re-reading the file and risking a different revision. Analyzers do not set it; the walker
+	// does, so no analyzer can forget.
+	Src []byte
+	// Language is the analyzer's language label, carried for the same reason SpanCallSite.Language is:
+	// the code that splits a written list has to know whose syntax to split it as, and a caller that had
+	// to remember would eventually name the wrong one.
+	Language string
 }
 
 // LanguageAnalyzer parses ONE language's source into normalized units. The tree-sitter parser (or any
@@ -404,6 +429,7 @@ func (f *SyntacticFrontend) eachUnit(repo string, diags *[]Diagnostic, fn func(S
 				}
 			}()
 			unit, adiags := f.analyzer.Analyze(rel, src)
+			unit.Src, unit.Language = src, f.Language()
 			*diags = append(*diags, adiags...)
 			fn(unit)
 		}()
@@ -434,6 +460,7 @@ func detectSyntacticUnit(unit SyntacticUnit, reg *Registry, decl *declaredIndex)
 			FileRel: unit.RelPath, LineStart: cs.LineStart, LineEnd: cs.LineEnd,
 			Keywords: cs.Keywords, KeywordInsert: cs.KeywordInsert,
 			KeywordUnpacking: cs.KeywordUnpacking, Invocation: cs.Invocation,
+			CallSpan: cs.CallSpan,
 		}
 		if row, basis, ok := matchRegistryRows(reg, unit.Imports, importsPath, cs.Root, cs.RootIdent, cs.Chain); ok {
 			s := base
@@ -460,10 +487,16 @@ func detectSyntacticUnit(unit SyntacticUnit, reg *Registry, decl *declaredIndex)
 		}
 	}
 
+	// Binding sites are located AFTER matching, because only the matched row says which method or field
+	// binds the value — and BEFORE Merge, so a merged site keeps the location its own row implied.
+	for i := range sites {
+		sites[i].BindingSites = locateRowBindings(unit.Src, unit.Language, sites[i])
+	}
+
 	merged, merges := Merge(sites)
 	nodes := make([]ExtractedNode, 0, len(merged))
 	for _, s := range merged {
-		nodes = append(nodes, extractSyntacticFloor(s))
+		nodes = append(nodes, extractSyntacticFloor(s, unit.Src, unit.Language))
 	}
 	return nodes, len(sites), merges
 }
@@ -471,7 +504,7 @@ func detectSyntacticUnit(unit SyntacticUnit, reg *Registry, decl *declaredIndex)
 // extractSyntacticFloor is the type-free extraction floor (10.5, resolves PRD Q7): resolve a field only
 // when it is a keyword string literal; otherwise emit the `unresolved` sentinel + a flagged reason. It
 // never guesses (I5). This is the honest boundary for tree-sitter frontends (no type resolution).
-func extractSyntacticFloor(s DetectedCallSite) ExtractedNode {
+func extractSyntacticFloor(s DetectedCallSite, unitSrc []byte, language string) ExtractedNode {
 	n := ExtractedNode{NodeID: s.NodeID, Site: s}
 	n.Invocation = invocationFromHint(s.Invocation)
 
@@ -500,6 +533,10 @@ func extractSyntacticFloor(s DetectedCallSite) ExtractedNode {
 	}
 
 	n.ToolsSkills = []string{}
+	// 🔴 P14 wave 14d: the tool split is RECORDED here, for every syntactic language with a list
+	// splitter. `ToolsSkills` above stays `[]` — it is frozen, and its emptiness is part of the bytes a
+	// pre-P14 IR reproduces; the split fields are nil-when-empty and additive beside it.
+	n.Tools, n.Skills = classifySyntacticToolsSkills(s, unitSrc, language)
 	n.Context = ContextAssembly{Policy: "inline_messages", Description: "static call site (syntactic frontend; no type resolution)"}
 	return n
 }

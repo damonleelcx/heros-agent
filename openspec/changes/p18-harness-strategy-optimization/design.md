@@ -170,3 +170,158 @@ scoring:      unchanged — eval harness scores by config_hash+Trace, no new met
 | A group harness drifts from P15's wiring | Decision 5 — the harness composes with, never re-derives, the ordered edge set; it never reorders. |
 | Scope creep into a runtime topology engine | Non-goal — the removed harness stays removed; only `critic-loop`'s pattern survives, as data, not resurrected runtime. |
 | An unbounded or unresolvable strategy | Params validated at seal; `max_turns`/retry budget bounded; an unresolvable ref fails the resolve closed naming the ref. |
+
+---
+
+# Addendum — the harness runtime, the call-site rewriter, and the authored change
+
+Decisions 1–7 above described an axis that is **modelled, hashed and refused**. Two requirements arrived
+after them: a user must be able to make an **active change** to their harness strategy, and the axis must
+have a **runtime and a call-site rewriter** so that change can reach source. The decisions below add
+those. Contracts of record: [`decisions.md`](decisions.md) D-8 … D-13.
+
+## Context (what changes, and what deliberately does not)
+
+The refusal of Decision 4 named exactly two missing artifacts: *a harness runtime (a bounded loop, a stop
+condition, and a continuation rule) plus the call-site rewriter that drives it.* This addendum builds both
+and **narrows the refusal per cell** — never wholesale. `config_hash` is untouched: what changes is what
+the transform *emits* and what a surface *offers*, never what a configuration *is*.
+
+## Decision 8 — The resolved field is a projection `{strategy, params}`, not the `version_id`
+
+Tasks 3.4 and the Decision 3 sketch both wrote `ResolvedNode.HarnessRef string` — a registry id in the
+hashed projection.
+
+**Alternative rejected — keep the `version_id` as written.** It is what the task says, and it is one
+fewer type. Rejected on **L5 evolvability** and single-source-of-truth: `resolved.go` freezes the rule
+that `config_hash` denotes a *configuration*, not a set of registry rows, so two entries spelling one
+strategy with one params set must share a hash. A `version_id` in the projection forks a configuration
+per entry, permanently, and a hash is not revisable once rows key on it. The field becomes
+`Harness *ResolvedHarness{Strategy, Params}`, the shape `ResolvedMemory` already proved. See
+[`decisions.md`](decisions.md) D-8.
+
+## Decision 9 — DRIVE AND DECIDE, or refuse
+
+A loop is two capabilities: **driving** the call again, and **deciding** whether to. A materialization
+emits both or refuses the call site whole, naming the missing half.
+
+**Alternative rejected — emit the drive half alone, with `max_turns` as the universal stop.** It covers
+every strategy in every language immediately, and it compiles. Rejected on **L1 safety**: a fixed-N loop
+under `reflexion`'s name is `single-shot` run N times and priced N times, reported under a `config_hash`
+that claims a self-correcting scaffold. That is the harness form of *"a memory that recalls from a store
+nothing fills"* — the failure the sibling phase's D2 exists to forbid — and the fact that it is cheap to
+build is an L8 argument, which never outranks L1.
+
+**What each half needs, and therefore where each is available:**
+
+| Half | Needs | Python | Go |
+|---|---|---|---|
+| **Drive** — re-invoke the call | a re-evaluable call expression, and a place to put the result | yes | yes (generic over the SDK's type, no import) |
+| **Decide** — evaluate the stop condition | read the response's **text** | yes — a message is a `dict` | **no** — a message is the customer's SDK type |
+
+So Go materializes exactly the identity (`single-shot`) and refuses the rest with `CauseNotAtCallSite` —
+the same permanent asymmetry the memory materializer carries, for the same reason, and it carries **no
+missing artifact** because there is nothing to build.
+
+## Decision 10 — The generated runtime makes no provider call and dispatches no tool
+
+`react-loop` wants the customer's tool executor; `plan-execute` wants a planner turn and a step executor;
+`critic-loop` wants a call to a separate critic model. The artifact performs none of them: they are
+**host services**, injected by a caller that has one, and a strategy whose service is absent **refuses**
+rather than degrading.
+
+**Alternative rejected — have the artifact reuse the client already at the call site for the critic
+turn.** The client is right there; it would work today. Rejected on **L1 safety**: a generated file that
+calls a provider puts a **credential in the customer's process** and spends it on turns the author never
+wrote — a new egress surface created by a codemod, which is precisely what the standing L1 note forbids
+compounding. Rejected again on **L2 stability**: the critic is a different model entry, so its failure
+fails a call the author cannot see or retry.
+
+The consequence is stated rather than hidden: **at a call site there is no injection point**, so three of
+the five strategies refuse there by name. `single-shot` and `reflexion` need no host service — reflexion's
+"self-critique" is a *second turn of the same call*, with the prior answer and a declared reflection
+instruction appended — so those two are what Python materializes.
+
+## Decision 11 — The refusal is narrowed per cell; `single-shot` is the identity
+
+`harnessCoverage` stops being uniform and becomes a **read of the materializer table**, per
+`(language, strategy, call-shape)`. Covered cells materialize; every other cell still returns a typed
+`unsafeRewrite` with its own cause, and Decision 4's totality canary still passes for them.
+
+**Alternative rejected — one flat verdict per axis.** One sentence, one surface, no table. Rejected on
+**L3 user complexity** and L1 honesty: after a rewriter lands, a flat "refused" tells a covered user to
+wait for work already done, and a flat "supported" tells an uncovered user it works. Both are the same
+defect — a coverage claim that does not match the engine — and only a per-cell read is wrong in neither
+direction.
+
+## Decision 12 — The authored change rides the existing override, with no second apply path
+
+A user selects a strategy from the closed builtin set, supplies schema-valid params, and may clear it;
+the change is expressed **solely** through `NodeOverride.HarnessRef`, resolves through the same resolver,
+transforms through the same rewriter, and passes the same admissibility gate an `OpHarnessStrategy`
+proposal passes.
+
+**Alternative rejected — an authoring-only apply path that skips the admissibility gate.** The user chose
+it, so why gate it. Rejected on **L1 honesty** and **L5 evolvability**: the gate exists because the cost
+of a heavier scaffold is invisible until it runs, and a second apply path is a second definition of what
+"shipped" means — two truths about one configuration, which cannot be un-forked once surfaces depend on
+both. Origin is **recorded and never hashed**: a user-authored configuration and an operator-proposed one
+that spell the same strategy are byte-identical downstream.
+
+## Decision 13 — A scaffold is structure, its bounds are numbers, and `hostAbsent` is a third thing
+
+**Context.** P13's `change-delivery` asks each axis which of its changes are data. For this axis the
+answer is genuinely mixed, and the axis already owns a *different* refusal that mentions the runtime.
+
+**Decision.** Two delivery cells. A **strategy swap** changes how many calls the program makes and in what
+control flow — a loop, which no document introduces: `notRuntimeResolvable`, permanent, naming the control
+loop. **`max_turns`, the retry budget and the stop condition** are parameters of a loop already written:
+`noRolloutBinding`, naming the absent field. And where the parameter cell does open, an arm admits only
+values inside the strategy's declared `ParamsSchema`, validated by the **same** check the registry applies
+at seal — a rollout must not become the one place a bound can be removed.
+
+**The distinction this axis must not lose.** `hostAbsent` (from `harness-runtime`) says the strategy is
+deliverable and its host service is simply not running, so it refuses rather than substituting.
+`notRuntimeResolvable` says it cannot be delivered as data at all, host or no host. One is answered by
+starting a service; the other cannot be answered. Rendering them alike sends an operator to restart
+something that was never the problem, and a delivery refusal therefore never offers a service start as a
+remedy.
+
+**Totality is extended, not assumed.** The harness canary now pushes a node carrying a real strategy
+through **each** route and requires both to refuse, with a sabotaged refusal on either turning the cell
+red. A route added without extending the canary would quietly convert the refusal into decoration.
+
+## Interfaces sketch (addendum)
+
+```
+internal/harnessruntime
+  Decision   = { Continue bool, Reason StopReason }        // StopReason: ceiling | satisfied | strategy-terminal
+  Plan(strategy, params, turn, answerText) Decision        // ONE definition of a strategy's loop behaviour
+  Run(cfg, invoke) (Result, error)                         // bounded by construction: turn <= max_turns, always
+  Result     = { Answer, Turns int, Stop StopReason, Trace []TurnRecord }   // observable, never hashed
+  HostService: ToolInvoker | Planner | Critic              // NOT bound at a call site -> the strategy refuses
+
+generated artifact (per language, dependency-free, byte-identically regenerated)
+  agentharness.run(node_id, invoke, messages, params)      // params READ AS DATA from the binding document
+
+python call site
+  resp = client.messages.create(model=M, messages=msgs)
+    ->  resp = agentharness.run("node", lambda _m: client.messages.create(model=M, messages=_m), msgs)
+        # ONE edit, one line, no newline introduced; the written message argument becomes the loop's parameter
+
+go call site
+  single-shot only (identity: nothing emitted). Multi-turn refuses: CauseNotAtCallSite, no missing artifact.
+
+coverage      harnessCoverage(language) reads the materializer table, per (language, strategy) cell
+config_hash   UNCHANGED — this addendum changes what is EMITTED, never what a configuration IS
+```
+
+## Risks (addendum)
+
+| Risk | Mitigation |
+|---|---|
+| A half-materialized loop ships (drive without decide) | Decision 9 — both halves computed **before** any edit is emitted; a test asserts the refusal names the missing half. |
+| A generated file reaches a provider or dispatches a tool | Decision 10 — host services are injected, never called from the artifact; a test asserts the emitted module imports nothing outside the standard library. |
+| A coverage sentence drifts from the engine after the rewriter lands | Decision 11 — coverage is a read of the dispatch table, not a second table. |
+| An authored change is presented as a win | Decision 12 — `unverified` by construction; refused cells surface as **refused-not-scored**; no metric is attributed. |
+| The runtime's trace leaks into identity | [`decisions.md`](decisions.md) D-13 — the trace is a property of a run; every 18a hash reproduces bit-for-bit. |

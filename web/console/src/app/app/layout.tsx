@@ -1,14 +1,21 @@
 import Link from "next/link";
 import {
+  Brain,
   CreditCard,
   FileCode,
   FlaskConical,
   GitBranch,
   GitPullRequest,
+  Grid3x3,
+  HardDriveDownload,
   Home,
   Layers,
+  PenLine,
   Play,
+  Repeat,
   Settings,
+  Share2,
+  SlidersHorizontal,
   User,
 } from "lucide-react";
 import { requireSession } from "@/lib/session";
@@ -50,9 +57,30 @@ const SURFACES: Surface[] = [
   { href: "/app/transforms", label: "Transforms", icon: <FileCode /> },
   { href: "/app/delivery", label: "Delivery", icon: <GitPullRequest /> },
   { href: "/app/studio", label: "Studio", icon: <FlaskConical /> },
+  { href: "/app/authoring", label: "Author", icon: <PenLine /> },
+  { href: "/app/wiring", label: "Wiring", icon: <Share2 /> },
+  { href: "/app/context", label: "Context", icon: <SlidersHorizontal /> },
+  // Memory sits beside Context because a reader confuses the two more often than any other pair, and
+  // adjacency is where the distinction is cheapest to make: within one call vs across invocations.
+  { href: "/app/memory", label: "Memory", icon: <Brain /> },
+  // Harness sits after Memory because the three are the axes a reader most often conflates, and the
+  // order teaches the distinction: within one call (context), across calls (memory), around the call
+  // (harness). It is also the only one that can multiply what a node costs, so it is the last one a
+  // reader reaches rather than the first.
+  { href: "/app/harness", label: "Harness", icon: <Repeat /> },
+  // Coverage sits last in the primary group because it is the surface a reader reaches WHEN an axis
+  // declines — it explains the boundary the other surfaces enforce, rather than being a place to work.
+  { href: "/app/coverage", label: "Coverage", icon: <Grid3x3 /> },
 ];
 
 const SETTINGS: Surface[] = [
+  // Install is the one rail entry that leaves the console: the page is PUBLIC (/install), because its readers
+  // are people who do not have the CLI and therefore have no account. It is linked rather than duplicated —
+  // two copies of an install command is exactly the drift the distribution contract exists to prevent.
+  //
+  // It sits in the settings group rather than the primary rail because it is a surface a reader visits ONCE —
+  // to get the binary, or to answer a security review — not a place to work.
+  { href: "/install", label: "Install", icon: <HardDriveDownload /> },
   { href: "/app/configure", label: "Configure", icon: <Settings /> },
   { href: "/app/billing", label: "Billing", icon: <CreditCard /> },
   { href: "/app/account", label: "Account", icon: <User /> },
@@ -73,6 +101,13 @@ export default async function ConsoleLayout({ children }: { children: React.Reac
     { id: "s:delivery", group: "Surface", label: "Delivery", href: "/app/delivery" },
     { id: "s:variants", group: "Surface", label: "Variants", href: "/app/variants" },
     { id: "s:studio", group: "Surface", label: "Prompt & Model Studio", href: "/app/studio" },
+    { id: "s:authoring", group: "Surface", label: "Author a change", href: "/app/authoring" },
+    { id: "s:wiring", group: "Surface", label: "Node wiring", href: "/app/wiring" },
+    { id: "s:context", group: "Surface", label: "Context strategy", href: "/app/context" },
+    { id: "s:memory", group: "Surface", label: "Memory strategy", href: "/app/memory" },
+    { id: "s:harness", group: "Surface", label: "Harness strategy", href: "/app/harness" },
+    { id: "s:coverage", group: "Surface", label: "Coverage — what applies where", href: "/app/coverage" },
+    { id: "s:install", group: "Surface", label: "Install the CLI — channels, platforms, trust", href: "/install" },
     { id: "s:account", group: "Surface", label: "Plan and spend", href: routes.account() },
     { id: "s:billing", group: "Surface", label: "Billing and payment method", href: routes.billing() },
     ...visited.map((subject) => ({

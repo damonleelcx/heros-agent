@@ -129,8 +129,11 @@ func projectCost(cand Candidate, base *variantspec.VariantSpec, menu Menu) CostO
 }
 
 // blastRadius counts the node dimensions the candidate changes vs the baseline — the risk badge.
+//
+// It passes no IR: the IR only makes a change's NAMES legible, and a count does not read them. Threading
+// one through here would suggest the number depends on it, and it does not.
 func blastRadius(base, cand *variantspec.VariantSpec) int {
-	return len(specDiff(base, cand))
+	return len(specDiff(base, cand, nil))
 }
 
 // violatedConstraint returns the name of the first hard constraint a candidate breaches, or "".

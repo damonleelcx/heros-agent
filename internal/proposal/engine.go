@@ -22,6 +22,10 @@ type Target struct {
 	BasePromptBody string
 	Groundings     []FailingCaseGrounding
 	RequiredFields []string
+	// Usage is the P14 tool/skill selection evidence for this node (which capabilities the eval set
+	// exercised, which errored). Assembled by the caller from the run traces; absent means "no evidence
+	// recorded", and the selection operators then emit nothing.
+	Usage ToolUsage
 }
 
 // Refusal records a candidate the engine declined to surface, and why — either an inadmissible
@@ -49,6 +53,10 @@ type Engine struct {
 	Menu Menu
 	// Base is the baseline Variant Spec candidates are derived from.
 	Base *variantspec.VariantSpec
+	// BaseVariantID is the baseline's config_hash, when the caller has resolved it. Wiring candidates
+	// record it as their ParentVariantID (P15 design Decision 2). Empty is legitimate: a caller that
+	// has not resolved the baseline supplies nothing rather than a made-up id.
+	BaseVariantID string
 	// Optimizer produces grounded prompt rewrites. Nil disables the prompt-rewrite operator.
 	Optimizer PromptOptimizer
 	// IR is the discovered IR, used by the contract gate and the wiring operators.
@@ -56,6 +64,15 @@ type Engine struct {
 	// Gate refuses contract-violating candidates. Nil admits every candidate (used by pure operator
 	// tests where wiring never changes); production wires NewTypedContractGate(IR).
 	Gate ContractGate
+	// DropTolerance is the drop-tolerance admissibility gate (P16 task 5.3). Its zero value is a working
+	// gate that judges on the menu's estimates; a caller with eval telemetry populates Observed so it
+	// judges on measurements where it has them.
+	//
+	// It is a SEPARATE field from Gate, not a second implementation of ContractGate, because the two ask
+	// different questions of different things: the contract gate asks whether the candidate's GRAPH is
+	// coherent, and this one asks whether the candidate's context loss is more than this NODE's job can
+	// take. Folding them together would make one refusal reason answer for both.
+	DropTolerance DropGate
 }
 
 // Propose runs the catalog over every target and returns the admissible candidates plus recorded
@@ -88,13 +105,27 @@ func (e Engine) Propose(targets []Target) Emission {
 				continue
 			}
 			for _, c := range cands {
+				// 🔴 The drop gate runs FIRST, before the contract gate and long before anything is
+				// compiled, transformed, or run (P16 task 5.3 / FR8). Its whole value is being early: a
+				// policy that would drop more than the node's job tolerates is not a candidate to MEASURE,
+				// it is a candidate to reject, and rejecting it after the multi-seed spend would prove the
+				// same thing for the price of an eval run.
+				if ok, reason := e.DropTolerance.Admit(c, e.Menu, t.Pattern); !ok {
+					em.Refusals = append(em.Refusals, Refusal{Operator: c.Operator, NodeID: c.NodeID,
+						Reason: reason})
+					continue
+				}
 				if e.Gate != nil {
-					ok, reason, _ := e.Gate.Admit(c)
+					gated, ok, reason := e.Gate.Admit(c)
 					if !ok {
 						em.Refusals = append(em.Refusals, Refusal{Operator: c.Operator, NodeID: c.NodeID,
 							Reason: reason})
 						continue
 					}
+					// The spec that leaves the gate is the one that gets compiled: on an `adapted` verdict it
+					// carries the inserted adapters, so the diff a reviewer reads contains the bridge the
+					// gate admitted (P15 task 3.2 / decisions.md D-2).
+					c = gated
 				}
 				em.Candidates = append(em.Candidates, c)
 			}
@@ -129,6 +160,7 @@ func (e Engine) inputFor(op Operator, t Target) OperatorInput {
 		Signal:          t.Signal,
 		Pattern:         t.Pattern,
 		Base:            e.Base,
+		BaseVariantID:   e.BaseVariantID,
 		Menu:            e.Menu,
 		Bottleneck:      t.Bottleneck,
 		PromptOptimizer: e.Optimizer,
@@ -136,6 +168,7 @@ func (e Engine) inputFor(op Operator, t Target) OperatorInput {
 		BasePromptBody:  t.BasePromptBody,
 		Groundings:      t.Groundings,
 		RequiredFields:  t.RequiredFields,
+		Usage:           t.Usage,
 	}
 }
 

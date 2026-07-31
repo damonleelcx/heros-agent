@@ -123,6 +123,11 @@ type Server struct {
 	// p12 is the P12 forge-delivery surface (console delivery read model + CI-mediated fetch/report),
 	// mounted by MountP12 when available. It holds no forge credential.
 	p12 P12Source
+
+	// p13authoring is the P13 13c user-authoring surface (preflight / submit / revert / history),
+	// mounted by MountP13Authoring when available. A deployment without it behaves exactly as it did
+	// before 13c — which is what makes the wave independently revertible.
+	p13authoring P13AuthoringSource
 }
 
 // ComponentProbe reports whether a dependent component is reachable.
@@ -232,6 +237,20 @@ func New(db *sql.DB, cfg config.Config) *Server {
 	s := &Server{DB: db, Cfg: cfg, Mux: http.NewServeMux()}
 	s.Mux.HandleFunc("GET /healthz", s.handleHealthz)
 	s.Mux.HandleFunc("GET /readyz", s.handleReadyz)
+	// P13 13d — the total coverage read model. Registered beside health because, like health, it is a
+	// property of this BUILD rather than of a tenant: it takes no tenant, no plan and no role, which is
+	// what makes "coverage is identical on every plan" structural instead of a policy.
+	s.Mux.HandleFunc("GET /api/p13/coverage", s.handleCoverage)
+	s.Mux.HandleFunc("GET /api/p13/delivery", s.handleDelivery)
+	// P17 20c — the memory-authoring read model, registered here for the same reason: the strategy
+	// vocabulary and the applicability boundary are properties of this BUILD, not of a tenant, so no
+	// plan or role can move them. It is a READ only; a memory change is authored through the existing
+	// /api/p13/authoring routes, because there is one spine and two origins.
+	s.Mux.HandleFunc("GET /api/p17/memory", s.handleMemory)
+	// P20 — the install/distribution read model, registered here for the same reason: the supported-target
+	// matrix, the install channels and the trust posture are properties of the RELEASE, not of a tenant, so no
+	// entitlement can move a row. It takes no tenant, no plan and no role.
+	s.Mux.HandleFunc("GET /api/p20/install", s.handleP20Install)
 
 	var h http.Handler = s.Mux
 	if cfg.AuthMode == "required" {

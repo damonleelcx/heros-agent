@@ -130,7 +130,36 @@ func editRegions(src, out []byte, edits []edit) []region {
 		regions = append(regions, r)
 		delta += len(e.New) - (e.End - e.Start)
 	}
-	return regions
+	return coalesce(regions)
+}
+
+// coalesce merges regions that touch the SAME line into one.
+//
+// 🔴 Without this, two edits on one line print that line twice — once per region — as two -/+ pairs.
+// That output is wrong in both ways a diff can be: it does not apply (`git apply` sees a context line
+// it already consumed), and it over-reports, claiming two changed lines where one changed. Both are
+// exactly the failure the file header says deriving hunks from edits exists to avoid; the derivation
+// was right and the grouping simply assumed one edit per line.
+//
+// P16 is what surfaced it: materializing a window over a one-line message list deletes several
+// elements from a single line. A tool prune over a one-line tool list had the same shape, so this fixes
+// that diff too. Regions arrive sorted by old start, so one backward look is enough.
+func coalesce(regions []region) []region {
+	if len(regions) == 0 {
+		return nil
+	}
+	out := []region{regions[0]}
+	for _, r := range regions[1:] {
+		prev := &out[len(out)-1]
+		if r.oldStart <= prev.oldEnd {
+			prev.oldEnd = maxInt(prev.oldEnd, r.oldEnd)
+			prev.newStart = min(prev.newStart, r.newStart)
+			prev.newEnd = maxInt(prev.newEnd, r.newEnd)
+			continue
+		}
+		out = append(out, r)
+	}
+	return out
 }
 
 // groupRegions batches regions into hunks. Two regions share a hunk when the gap between them is

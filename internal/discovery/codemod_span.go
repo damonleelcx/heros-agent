@@ -59,6 +59,14 @@ type SpanCallSite struct {
 	// Opacity names IR fields inherently unresolvable for this entrypoint (e.g. Bedrock's serialized
 	// body). Carried so a rewriter can refuse with the real reason rather than "argument not present".
 	Opacity []string
+	// BindingSites are the values this call's row says are bound BEFORE the call — a builder-chain call
+	// or a request value's field — keyed by IR dimension. Empty for every row that points inside the
+	// argument list, so the existing rewriters see no change at all (P13 FR52).
+	BindingSites map[string]BindingScan
+	// CallSpan is the byte span of the call expression itself — the extent a harness loop wraps (P18
+	// §11). Zero when the analyzer recorded none; a rewriter must refuse rather than read that as
+	// offset 0.
+	CallSpan ArgSpan
 
 	FileRel            string
 	LineStart, LineEnd int
@@ -98,8 +106,9 @@ func IndexSpanCallSites(root, language string, reg *Registry) (map[string]SpanCa
 			out[s.NodeID] = SpanCallSite{
 				NodeID: s.NodeID, Language: fe.Language(), ArgMap: s.ArgMap,
 				ProviderHint: s.ProviderHint, Keywords: s.Keywords, KeywordInsert: s.KeywordInsert,
-				KeywordUnpacking: s.KeywordUnpacking, Opacity: s.Opacity,
-				FileRel: s.FileRel, LineStart: s.LineStart, LineEnd: s.LineEnd,
+				KeywordUnpacking: s.KeywordUnpacking, Opacity: s.Opacity, BindingSites: s.BindingSites,
+				CallSpan: s.CallSpan,
+				FileRel:  s.FileRel, LineStart: s.LineStart, LineEnd: s.LineEnd,
 			}
 		}
 	})

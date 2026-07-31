@@ -1,0 +1,17 @@
+package target
+
+import "github.com/anthropics/anthropic-sdk-go"
+
+// twoCalls is the shape the wiring materializer exists for: two adjacent statements that each make
+// their own model call, share no name, and could legitimately run in either order. Which of them runs
+// first is a measurable choice — exactly what the wiring axis proposes and what 15c can now apply.
+func twoCalls(client *anthropic.Client) {
+	prepare(client)
+	first := client.Messages.New(nil, anthropic.MessageNewParams{Model: anthropic.ModelClaudeSonnet4})
+	second := client.Messages.New(nil, anthropic.MessageNewParams{Model: anthropic.ModelClaudeOpus4_6})
+	report(first, second)
+}
+
+func prepare(client *anthropic.Client) {}
+
+func report(a, b any) {}

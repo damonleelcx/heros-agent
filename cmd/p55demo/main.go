@@ -38,16 +38,23 @@ const baseCfg = "000000000000000000000000000000000000000000000000000000000000000
 
 // fixture is one proposal to verify + how to present it. The verdict is produced by the real gate.
 type fixture struct {
-	proposal    verification.Proposal
-	pres        proposal.Presentation
-	buildStatus string
+	proposal verification.Proposal
+	pres     proposal.Presentation
+	// status is the candidate's real proposal.BuildStatus. It drives the surface through api.CardFor,
+	// so this demo cannot disagree with production about what a status means — which is exactly how a
+	// third status (P14's `refused`) would otherwise have been rendered as a verified zero delta here.
+	status   proposal.BuildStatus
+	baseSucc map[string]float64
 	// perCaseSuccess for baseline and candidate, so the stubbed runner returns reproducible deltas.
-	baseSucc, candSucc map[string]float64
-	candCost, candLat  float64
-	// buildFailed proposals never run the gate; they go straight to the withheld section.
-	buildFailed bool
-	buildLog    string
+	candSucc          map[string]float64
+	candCost, candLat float64
+	// buildLog is present only for a build_failed candidate.
+	buildLog string
 }
+
+// verified reports whether this fixture reaches the verification gate at all. A candidate that never
+// built, or that the transform refused, has nothing to run.
+func (f fixture) verified() bool { return f.status == proposal.BuildBuilt }
 
 func succ(v float64, over ...map[string]float64) map[string]float64 {
 	m := map[string]float64{}
@@ -76,7 +83,7 @@ func fixtures() []fixture {
 				DiagID: "diag-router", EvidenceCaseIDs: []string{"g1", "g2", "g3"},
 				Rationale: "capability gap on 3 case(s) → stronger router model", SourceDiff: diff("router", `Model: "haiku"`, `Model: "sonnet-5"`),
 				SpecDiff: []proposal.DimChange{{NodeID: "router", Dimension: "model", From: "haiku", To: "sonnet-5"}}},
-			buildStatus: "built", baseSucc: succ(0.3), candSucc: succ(0.95), candCost: 0.012, candLat: 620,
+			status: proposal.BuildBuilt, baseSucc: succ(0.3), candSucc: succ(0.95), candCost: 0.012, candLat: 620,
 		},
 		// 2. RAG add-rerank — real gain but NO held-out split (all cases generated it) → not-held-out.
 		{
@@ -86,7 +93,7 @@ func fixtures() []fixture {
 				DiagID: "diag-rag", EvidenceCaseIDs: []string{"h4", "h5"},
 				Rationale: "retrieval miss → add rerank skill cohere-rerank", SourceDiff: diff("rag", "skills: [retriever]", "skills: [retriever, rerank]"),
 				SpecDiff: []proposal.DimChange{{NodeID: "rag", Dimension: "skills", From: "1 skill(s)", To: "2 skill(s)"}}},
-			buildStatus: "built", baseSucc: succ(0.4), candSucc: succ(0.85), candCost: 0.011, candLat: 540,
+			status: proposal.BuildBuilt, baseSucc: succ(0.4), candSucc: succ(0.85), candCost: 0.011, candLat: 540,
 		},
 		// 3. prompt rewrite — fixes cluster A but breaks cluster B → gate_failed (regression), cases
 		//    fixed AND broken side by side.
@@ -101,10 +108,10 @@ func fixtures() []fixture {
 				Rationale:  "output-contract violation → grounded prompt rewrite + format constraint",
 				SourceDiff: diff("answer", `prompt: "Answer."`, `prompt: "Answer. Return JSON {label}."`),
 				SpecDiff:   []proposal.DimChange{{NodeID: "answer", Dimension: "prompt", From: "prompt://a", To: "prompt://b"}}},
-			buildStatus: "built",
-			baseSucc:    succ(0.3, map[string]float64{"b1": 0.9, "b2": 0.9, "b3": 0.9, "b4": 0.9}),
-			candSucc:    succ(0.95, map[string]float64{"b1": 0.1, "b2": 0.1, "b3": 0.1, "b4": 0.1}),
-			candCost:    0.011, candLat: 520,
+			status:   proposal.BuildBuilt,
+			baseSucc: succ(0.3, map[string]float64{"b1": 0.9, "b2": 0.9, "b3": 0.9, "b4": 0.9}),
+			candSucc: succ(0.95, map[string]float64{"b1": 0.1, "b2": 0.1, "b3": 0.1, "b4": 0.1}),
+			candCost: 0.011, candLat: 520,
 		},
 		// 4. model downgrade — a noise proposal (true-zero held-out delta) → gate_failed (tie).
 		{
@@ -114,7 +121,7 @@ func fixtures() []fixture {
 				DiagID: "diag-sum", EvidenceCaseIDs: []string{"g1"},
 				Rationale: "cost bottleneck → downgrade to cheaper model", SourceDiff: diff("summarize", `Model: "opus"`, `Model: "haiku"`),
 				SpecDiff: []proposal.DimChange{{NodeID: "summarize", Dimension: "model", From: "opus", To: "haiku"}}},
-			buildStatus: "built", baseSucc: succ(0.5), candSucc: succ(0.5), candCost: 0.004, candLat: 300,
+			status: proposal.BuildBuilt, baseSucc: succ(0.5), candSucc: succ(0.5), candCost: 0.004, candLat: 300,
 		},
 		// 5. context-policy switch whose codemod does not build → build_failed (never verified).
 		{
@@ -122,7 +129,56 @@ func fixtures() []fixture {
 				DiagID: "diag-plan", EvidenceCaseIDs: []string{"h6"}, ConfigHash: hash("ctxbad"),
 				Rationale: "context overflow → switch to summarization", SourceDiff: diff("planner", "ctx: window", "ctx: summariz(") + " // syntax error",
 				SpecDiff: []proposal.DimChange{{NodeID: "planner", Dimension: "context", From: "window", To: "summarization"}}},
-			buildFailed: true, buildLog: "pipeline.go:42: syntax error: unexpected (",
+			status: proposal.BuildFailed, buildLog: "pipeline.go:42: syntax error: unexpected (",
+		},
+		// 6. P14 skill binding the TRANSFORM REFUSED — the third status, and the one this demo exists to
+		//    keep honest. It never built, never ran, and has no verdict; the surface must say so by name
+		//    rather than render a zero delta for a change nobody made (decisions.md D-14.3, task 8.2).
+		{
+			pres: proposal.Presentation{Operator: proposal.OpAddSkill, NodeID: "agent", Pattern: "tool_use",
+				DiagID: "diag-agent", EvidenceCaseIDs: []string{"h1", "h2"}, ConfigHash: hash("refusedskill"),
+				Rationale: "missing/erroring tool → bind skill search_kb from the registry",
+				SpecDiff: []proposal.DimChange{{NodeID: "agent", Dimension: "skills",
+					From: "0 skill(s)", To: "1 skill(s)", Kind: proposal.KindSkillBind, Items: []string{"search_kb@99"}}},
+				Refusal: &proposal.ChangeRefusal{NodeID: "agent", Dimension: "skills",
+					Reason: "binding skills [search_kb] requires constructing SDK-specific tool values at the " +
+						"call site, and no materializer for this language has landed yet (Go is the first — " +
+						"decisions.md D-14.4); this engine only replaces value expressions here, so the binding " +
+						"is REFUSED rather than dropped"}},
+			status: proposal.BuildRefused,
+		},
+		// 7. P14 tool prune that DID build and verified — the counterpart, so the surface shows a tool
+		//    selection next to a skill binding and the two do not read as one change.
+		{
+			proposal: verification.Proposal{ProposalID: "p-toolprune", CandidateConfigHash: hash("toolprune"),
+				BaselineConfigHash: baseCfg, SourceRevision: "rev1", DiffHash: "d7", GeneratingCaseIDs: []string{"g1"}},
+			pres: proposal.Presentation{Operator: proposal.OpToolPrune, NodeID: "agent", Pattern: "tool_use",
+				EvidenceCaseIDs: []string{"g1"},
+				Rationale:       "tool sqlTool is declared but the eval set never calls it → prune it",
+				SourceDiff: diff("agent", "Tools: []ToolUnionParam{weatherTool, sqlTool, searchTool}",
+					"Tools: []ToolUnionParam{weatherTool, searchTool}"),
+				SpecDiff: []proposal.DimChange{{NodeID: "agent", Dimension: "tools",
+					From: "3 tool(s): searchTool, sqlTool, weatherTool", To: "2 tool(s): searchTool, weatherTool",
+					Kind: proposal.KindToolPrune, Items: []string{"sqlTool"}}}},
+			status: proposal.BuildBuilt, baseSucc: succ(0.5), candSucc: succ(0.72), candCost: 0.008, candLat: 460,
+		},
+		// 8. P14 skill binding that DID materialize and verify. It is the counterpart to #6: the same
+		//    operator, on a call site whose (language, provider) pair HAS a materializer, so the diff is a
+		//    real construction from the skill's sealed input schema rather than a refusal. Both are kept,
+		//    because "this axis applies" and "this axis is refused here" are the two things a reader of the
+		//    skill surface has to be able to tell apart.
+		{
+			proposal: verification.Proposal{ProposalID: "p-bindskill", CandidateConfigHash: hash("bindskill"),
+				BaselineConfigHash: baseCfg, SourceRevision: "rev1", DiffHash: "d8", GeneratingCaseIDs: []string{"g1", "g2"}},
+			pres: proposal.Presentation{Operator: proposal.OpAddSkill, NodeID: "agent", Pattern: "tool_use",
+				DiagID: "diag-agent", EvidenceCaseIDs: []string{"g1", "g2"},
+				Rationale: "missing/erroring tool on 2 case(s) → bind skill search_kb from the registry",
+				SourceDiff: diff("agent", "anthropic.MessageNewParams{}",
+					`anthropic.MessageNewParams{Tools: []anthropic.ToolUnionParam{{OfTool: &anthropic.ToolParam{Name: "search_kb", `+
+						`InputSchema: anthropic.ToolInputSchemaParam{Properties: map[string]any{"query": map[string]any{"type": "string"}}}}}}}`),
+				SpecDiff: []proposal.DimChange{{NodeID: "agent", Dimension: "skills",
+					From: "0 skill(s)", To: "1 skill(s)", Kind: proposal.KindSkillBind, Items: []string{"search_kb@99"}}}},
+			status: proposal.BuildBuilt, baseSucc: succ(0.45), candSucc: succ(0.88), candCost: 0.013, candLat: 700,
 		},
 	}
 }
@@ -197,7 +253,7 @@ func build(level verification.AutomationLevel) source {
 	byConfig := map[string]runData{}
 	for i := range fx {
 		f := &fx[i]
-		if f.buildFailed {
+		if !f.verified() {
 			continue
 		}
 		// Give each proposal its own baseline config so per-proposal baselines never collide.
@@ -209,16 +265,18 @@ func build(level verification.AutomationLevel) source {
 
 	var recs, withheld []api.Card
 	for _, f := range fx {
-		if f.buildFailed {
-			withheld = append(withheld, api.BuildFailedCard(f.pres, f.buildLog))
-			continue
+		var v verification.Verdict
+		if f.verified() {
+			got, err := verification.Verify(context.Background(), runner, f.proposal, evalSet, verification.DefaultConfig())
+			if err != nil {
+				log.Fatalf("verify %s: %v", f.proposal.ProposalID, err)
+			}
+			v = got
 		}
-		v, err := verification.Verify(context.Background(), runner, f.proposal, evalSet, verification.DefaultConfig())
-		if err != nil {
-			log.Fatalf("verify %s: %v", f.proposal.ProposalID, err)
-		}
-		card := api.BuildCard(f.pres, f.buildStatus, v, level)
-		if v.Passed() {
+		// ONE routing decision, shared with production: the status picks the card, and both halves
+		// (it built AND its verdict passed) pick the list.
+		card := api.CardFor(f.pres, f.status, f.buildLog, v, level)
+		if api.Recommendable(f.status, v) {
 			recs = append(recs, card)
 		} else {
 			withheld = append(withheld, card)

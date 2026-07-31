@@ -131,6 +131,74 @@ for the source specification.
 - Customers use their **own provider keys** — the platform **never resells tokens**.
 - **Only verified savings are billable** — gainshare/verified-savings billing draws exclusively on the P5.5 verified-delta ledger; unverified savings are never billed.
 
+### User-initiated change on an axis (P13 `authored-change`, consumed by P14–P16)
+
+- **One spine, two origins.** A change originated by a **user** is derived, resolved, hashed, gated,
+  transformed and (on request) scored by the **same** components that process an operator candidate.
+  There is **no** authoring-only resolve, transform, or gate — a second apply path is a second place for
+  every safety gate to be wrong, and the gates are the platform.
+- **`Origin` is recorded, never hashed.** `config_hash` stays purely structural: a user-authored
+  configuration and a byte-identical operator-proposed one hash the same and are the same measurement.
+  Origin, actor, and tenant live on the candidate / transform / delivery record.
+- **Every refusal that binds an operator binds a user identically, and there is no override.** No plan,
+  role, entitlement, flag, or request parameter materializes a configuration the transform refuses. A
+  refusal exists because the artifact would be wrong in a way the author cannot see at the moment of
+  choosing; a human asking for it does not make the SDK, the slot, or the language match.
+- **Refusal moves left.** A draft is **preflighted** before submission and returns exactly one of
+  `admissible`, `refused` (named cause + offending node/field), or `not-yet-measurable` (named missing
+  input). Preflight publishes nothing, writes no diff, and spends no eval budget. **A gate never refuses
+  on ignorance — and never passes on ignorance.**
+- **An authored change may apply; it may never claim.** It MAY be applied without a verdict — it is the
+  customer's repository — and is stamped **`unverified`**: outside the verified-delta ledger, contributing
+  zero to every aggregate improvement/savings/quality figure, and **never auto-merged**. `unverified` is a
+  state the ledger filters on, not a badge a refactor can drop.
+- **A user may author the change; a user may not author the evidence.** Case selection, held-out splits,
+  seeds, and repetition counts stay platform-derived. Classifier labels are inputs to what may be
+  authored, never outputs of it.
+- **Selection is fail-closed; drafts never mutate their parent.** Authored values are chosen from what the
+  platform sealed or discovered, never free text. A stale submission is a **named conflict**, not a lost
+  update, and every authored change has a reversal that reproduces the parent `config_hash`
+  **byte-identically**.
+- **Authoring adds no egress and works offline.** The CLI authors with no account and no network, reaching
+  the same verdict with the same typed cause text; prompt text, source, diffs, environment values and
+  credentials cross no boundary on any authoring path, including preflight and diagnostics.
+
+### Language coverage on an axis (P13 `language-coverage`, consumed by P14–P16)
+
+- **Coverage is a total function, and absence is not a value.** Every axis publishes an entry for every
+  language the discovery frontend registers and every form that axis binds against — the provider and SDK
+  generation for a tool value, the registry row for a binding, the policy for a context selection, the
+  statement form for a wiring move. A cell the axis cannot apply is **present with a named cause**. An
+  absent row renders on every surface as *not applicable*, which is a claim about the customer's code; it
+  is the one thing coverage data must never say by accident.
+- **A refusal names which of three different things is missing.**
+  `not-expressible-at-a-call-site` (the value does not exist until run time),
+  `call-site-cannot-carry-it` (unpacked arguments, a run-time-assembled list, no row locator, a binding
+  the frontend did not record), and `no-materializer-for-this-language` are answered by the platform's
+  designer, the customer's engineer, and the platform's backlog respectively. They are distinguishable by
+  a **stable identifier**, not by prose.
+- **The most specific true cause wins, and the language question is asked last.** The order is: the
+  change → the registry row → the call site's own source → the language. A call site refused for its own
+  shape refuses **identically** after that language's materializer lands, which is exactly why naming the
+  language would have been useless.
+- **Every registered language is a target, and no gate is weakened to reach one.** A gap names the
+  artifact that would close it (a form row, a list splitter, a statement resolver, a registry row, a
+  frontend field). A coverage row is admitted only on **executable evidence** — the language's reparse
+  assertion, plus the build gate wherever the change constructs source — never on a document, and never
+  by relaxing a check for one language.
+- **One coverage source, read by everything that states coverage.** The transform's refusal, preflight,
+  the console, the CLI and every published table read the same source, asserted in **both** directions:
+  a surface may not offer a cell the engine refuses, and the engine may not materialize a cell no surface
+  offers.
+- **The same override means the same thing in every language.** A language's materializer never applies a
+  broader, narrower, or different interpretation; a divergence is a defect, not a per-language behavior.
+  What differs per language is the *spelling*, never the *meaning* — which is why the shape of a bound
+  skill comes from its sealed schema and the retention of a context policy comes from the shared
+  selection code.
+- **A coverage gap is not a plan boundary.** It is *not yet applied by the platform*, identical on every
+  plan; no tier, role, flag, or setting materializes a cell the engine refuses. And a call site the
+  platform will never apply does not borrow "not yet" — it is a fact about the source, with no "when".
+
 ## OpenSpec workflow
 
 This project uses OpenSpec for spec-driven development. See [`AGENTS.md`](AGENTS.md) for the

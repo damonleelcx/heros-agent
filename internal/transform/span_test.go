@@ -639,48 +639,141 @@ public class Triage {
 // 🔴 Java's call sites are DISCOVERED — Discovery finds this one and puts it in the IR — and are not
 // rewritable, for a reason that is a fact about Java and about the registry rows, not a gap in this
 // engine. The refusal must say which, because "unsupported" would send the reader nowhere.
-func TestGenerate_Java_RefusalNamesTheRealCause(t *testing.T) {
+// 🔴 Java's refusal, retargeted the same way Kotlin's was. The old assertions ("Java has no
+// named-argument form", "no Java row declares an arg_map") were true sentences about the wrong fact:
+// langchain4j binds the model on a BUILDER, which P13 FR52 now locates. What must still be true is that
+// a file which does not WRITE that builder is refused with a sentence about the source.
+func TestGenerate_Java_UnwrittenBindingRefusesAboutTheSource(t *testing.T) {
 	root := spanTarget(t, "Triage.java", javaSrc)
 	id := onlyNode(t, root, "java")
 
 	msg := refusalFor(t, resolvedIn("java", map[string]variantspec.ResolvedOverride{
-		id: {Model: modelEntry("anthropic", "claude-sonnet-5")},
+		id: {Model: modelEntry("openai", "gpt-5-mini")},
 	}), root)
 
-	mustContain(t, msg, "Java has no named-argument form", "the LANGUAGE-level cause")
-	mustContain(t, msg, "no place to insert one", "that insertion is impossible too, not just replacement")
-	mustContain(t, msg, "no Java row in the signature registry declares an arg_map",
-		"the REGISTRY-level cause, which is independent of the language one")
-	mustContain(t, msg, "bind the model on a builder at construction", "WHY those rows have no arg_map")
-	// Not a generic brush-off.
+	mustContain(t, msg, "binds model at a builder-chain call", "the SDK's binding STYLE")
+	mustContain(t, msg, "this file does not write one", "that the SOURCE is the limit")
+	// Not a generic brush-off, and not a language claim.
 	if strings.Contains(strings.ToLower(msg), "unsupported") {
 		t.Errorf("Java was refused as 'unsupported', which is false — Discovery finds this call site.\ngot: %s", msg)
 	}
+	if strings.Contains(msg, "Java has no named-argument form") {
+		t.Errorf("Java was blamed for lacking named arguments, which is no longer the operative fact — its "+
+			"SDK binds on a builder and that binding IS rewritable.\ngot: %s", msg)
+	}
 }
 
-const rustSrc = `use async_openai::Client;
+// 🔴 Wave 13d turned all three of these around, and the turn is the record of the boundary moving.
+//
+// They used to assert that Java, Kotlin and Rust REFUSE, each for its own honest reason — Java and Rust
+// for having no named-argument form, Kotlin for having no row with an arg_map. Every one of those
+// sentences was true and none of them was the operative fact. The operative fact was that the engine
+// only knew how to point at an ARGUMENT, while these SDKs bind the model on a BUILDER (langchain4j,
+// Spring AI) or in a REQUEST VALUE (async-openai). P13 FR52 generalized the locator to a binding site,
+// and all three became rewritable without a single new rewriter.
+//
+// What they assert now is the pair that matters: a file that WRITES the binding is materialized, and a
+// file that does not is refused with a sentence about the SOURCE — never about the language.
+
+const javaBoundSrc = `package com.example;
+
+import dev.langchain4j.model.openai.OpenAiChatModel;
+
+public class Triage {
+    private final OpenAiChatModel model = OpenAiChatModel.builder()
+        .apiKey(System.getenv("OPENAI_API_KEY"))
+        .modelName("gpt-4o")
+        .build();
+
+    public String classify(String ticket) {
+        return model.generate("Classify this ticket");
+    }
+}
+`
+
+func TestGenerate_Java_BuilderBoundModelMaterializes(t *testing.T) {
+	root := spanTarget(t, "Triage.java", javaBoundSrc)
+	id := onlyNode(t, root, "java")
+
+	p, err := Generate(resolvedIn("java", map[string]variantspec.ResolvedOverride{
+		id: {Model: modelEntry("openai", "gpt-5-mini")},
+	}), root)
+	if err != nil {
+		t.Fatalf("a builder-bound Java model must materialize (P13 FR52): %v", err)
+	}
+	after := string(p.Files["Triage.java"])
+	if !strings.Contains(after, `.modelName("gpt-5-mini")`) {
+		t.Errorf("the builder call was not rewritten:\n%s", after)
+	}
+	if strings.Contains(after, `"gpt-4o"`) {
+		t.Errorf("the previous model is still bound:\n%s", after)
+	}
+	// 🔴 Only the binding moved: the API-key line is a sibling builder call and must be untouched.
+	if !strings.Contains(after, `.apiKey(System.getenv("OPENAI_API_KEY"))`) {
+		t.Errorf("a sibling builder call was disturbed:\n%s", after)
+	}
+}
+
+const kotlinBoundSrc = `package com.example
+
+import dev.langchain4j.model.openai.OpenAiChatModel
+
+class Triage {
+    private val model = OpenAiChatModel.builder()
+        .modelName("gpt-4o")
+        .build()
+
+    fun classify(ticket: String): String {
+        return model.generate("Classify this ticket")
+    }
+}
+`
+
+func TestGenerate_Kotlin_BuilderBoundModelMaterializes(t *testing.T) {
+	root := spanTarget(t, "Triage.kt", kotlinBoundSrc)
+	id := onlyNode(t, root, "kotlin")
+
+	p, err := Generate(resolvedIn("kotlin", map[string]variantspec.ResolvedOverride{
+		id: {Model: modelEntry("openai", "gpt-5-mini")},
+	}), root)
+	if err != nil {
+		t.Fatalf("a builder-bound Kotlin model must materialize (P13 FR52): %v", err)
+	}
+	if !strings.Contains(string(p.Files["Triage.kt"]), `.modelName("gpt-5-mini")`) {
+		t.Errorf("the builder call was not rewritten:\n%s", p.Files["Triage.kt"])
+	}
+}
+
+const rustBoundSrc = `use async_openai::Client;
+use async_openai::types::CreateChatCompletionRequestArgs;
 
 pub async fn classify(client: &Client, ticket: &str) -> String {
+    let request = CreateChatCompletionRequestArgs::default()
+        .model("gpt-4o")
+        .build()
+        .unwrap();
     let response = client.chat().create(request).await.unwrap();
     response.to_string()
 }
 `
 
-func TestGenerate_Rust_RefusalNamesTheRealCause(t *testing.T) {
-	root := spanTarget(t, "lib.rs", rustSrc)
+func TestGenerate_Rust_RequestFieldBoundModelMaterializes(t *testing.T) {
+	root := spanTarget(t, "lib.rs", rustBoundSrc)
 	sites := spanSites(t, root, "rust")
 	var id string
 	for k := range sites {
 		id = k
 	}
 
-	msg := refusalFor(t, resolvedIn("rust", map[string]variantspec.ResolvedOverride{
+	p, err := Generate(resolvedIn("rust", map[string]variantspec.ResolvedOverride{
 		id: {Model: modelEntry("openai", "gpt-5-mini")},
 	}), root)
-
-	mustContain(t, msg, "Rust has no named-argument form", "the LANGUAGE-level cause")
-	mustContain(t, msg, "no Rust row in the signature registry declares an arg_map", "the REGISTRY-level cause")
-	mustContain(t, msg, "request struct built before the call", "WHY those rows have no arg_map")
+	if err != nil {
+		t.Fatalf("a request-field-bound Rust model must materialize (P13 FR52): %v", err)
+	}
+	if !strings.Contains(string(p.Files["lib.rs"]), `.model("gpt-5-mini")`) {
+		t.Errorf("the request field was not rewritten:\n%s", p.Files["lib.rs"])
+	}
 }
 
 const kotlinSrc = `package com.example
@@ -694,11 +787,11 @@ class Triage(private val model: ChatLanguageModel) {
 }
 `
 
-// 🔴 Kotlin's refusal must NOT be Java's. Kotlin HAS named arguments and this engine rewrites them
-// (proved by TestSpanRewriter_KotlinNamedArgumentIsRewritable below); what is missing is a registry row,
-// and the fix is a row for an SDK that names its arguments at the call site — not engine work. Blaming
-// the language would send a reader to fix the wrong thing, forever.
-func TestGenerate_Kotlin_RefusalBlamesTheRegistryNotTheLanguage(t *testing.T) {
+// 🔴 P13 18.7 — a call site whose SDK binds nowhere THIS FILE writes refuses with a sentence about the
+// SOURCE. The model here is injected, so the builder ran in some other file; there is no expression to
+// replace, and that is a fact the author can act on. 🚫 It must not be reported as a language gap: the
+// language is rewritable, as the three tests above prove.
+func TestGenerate_Kotlin_UnwrittenBindingRefusesAboutTheSource(t *testing.T) {
 	root := spanTarget(t, "Triage.kt", kotlinSrc)
 	id := onlyNode(t, root, "kotlin")
 
@@ -706,28 +799,86 @@ func TestGenerate_Kotlin_RefusalBlamesTheRegistryNotTheLanguage(t *testing.T) {
 		id: {Model: modelEntry("anthropic", "claude-sonnet-5")},
 	}), root)
 
-	mustContain(t, msg, "declares no model locator", "that the ROW is what is missing")
-	mustContain(t, msg, "no Kotlin row in the signature registry declares an arg_map", "the registry-level cause")
-	mustContain(t, msg, "bind the model on a BUILDER at construction", "WHY those rows have no arg_map")
-	mustContain(t, msg, "Kotlin's named arguments themselves ARE rewritable",
-		"that the engine is not the limitation")
-	if strings.Contains(msg, "Kotlin has no named-argument form") {
-		t.Errorf("Kotlin was given Java's refusal, which is false — Kotlin has named arguments.\ngot: %s", msg)
+	mustContain(t, msg, "binds model at a builder-chain call", "the SDK's binding STYLE")
+	mustContain(t, msg, "this file does not write one", "that the SOURCE, not the platform, is the limit")
+	mustContain(t, msg, "Bind it once in the same file", "a route the author can actually take")
+	// 🚫 None of the old language-blaming sentences may come back.
+	for _, wrong := range []string{
+		"Kotlin has no named-argument form",
+		"no materializer for this language",
+		"no Kotlin row in the signature registry declares an arg_map",
+	} {
+		if strings.Contains(msg, wrong) {
+			t.Errorf("the refusal blames the language or the registry for a source fact (%q):\n%s", wrong, msg)
+		}
 	}
 }
 
-// ── skills / context still refuse, in every language ─────────────────────────────────────────────
+// 🔴 P13 §14 Q11 — a SHARED builder refuses by name. One builder feeding two call sites has one model,
+// so a per-node override would silently change the sibling node too: a false measurement wearing a
+// change's clothes. The refusal quotes the count so the author can find both.
+func TestGenerate_Kotlin_SharedBuilderRefusesNamingTheSharing(t *testing.T) {
+	root := spanTarget(t, "Triage.kt", `package com.example
 
-func TestGenerate_Python_SkillsAndContextStillRefuse(t *testing.T) {
+import dev.langchain4j.model.openai.OpenAiChatModel
+
+class Triage {
+    private val fast = OpenAiChatModel.builder().modelName("gpt-4o-mini").build()
+    private val slow = OpenAiChatModel.builder().modelName("gpt-4o").build()
+
+    fun classify(ticket: String): String {
+        return slow.generate("Classify this ticket")
+    }
+}
+`)
+	id := onlyNode(t, root, "kotlin")
+
+	msg := refusalFor(t, resolvedIn("kotlin", map[string]variantspec.ResolvedOverride{
+		id: {Model: modelEntry("openai", "gpt-5-mini")},
+	}), root)
+	mustContain(t, msg, "SHARED", "that the builder feeds more than one node")
+	mustContain(t, msg, "2 times", "how many bindings there are, so the author can find them")
+	mustContain(t, msg, "false measurement", "why guessing one would be worse than refusing")
+}
+
+// ── skills still refuse everywhere; context now depends on the language ──────────────────────────
+
+// 🔴 This test has now been turned around TWICE, and both turns are the record of a boundary moving.
+// It first asserted that CONTEXT refuses in Python (Python's selection materializer landed, so that went);
+// it then asserted that SKILLS refuse in Python (wave 14d's spelling rows landed, so that goes too).
+// What it pins now is the refusal that survives both: a skill whose SEALED CONTRACT carries no argument
+// shape refuses in EVERY language, because an empty property bag is a valid tool that accepts nothing —
+// it parses, and then fails every call the model makes against it.
+func TestGenerate_Python_SkillWithNoSealedShapeRefuses(t *testing.T) {
+	root := spanTarget(t, "pipeline.py", pyModelSrc)
+	id := onlyNode(t, root, "python")
+
+	msg := refusalFor(t, resolvedIn("python", map[string]variantspec.ResolvedOverride{
+		id: {Skills: []*registry.SkillEntry{{VersionID: strings.Repeat("s", 64), Name: "search_kb"}}},
+	}), root)
+	mustContain(t, msg, "search_kb", "the skill it refused")
+	mustContain(t, msg, "sealed input schema", "that the CONTRACT is what is missing")
+	// 🚫 And it must not blame the language: this refusal is identical in Go.
+	if strings.Contains(msg, "no declared tool-value spelling") {
+		t.Errorf("a contract-shaped refusal was reported as a coverage gap:\n%s", msg)
+	}
+}
+
+// A context policy that assembles at RUN TIME refuses in Python for the POLICY's reason, and says so
+// without promising a rewriter — no rewriter will ever write a model's answer into source.
+func TestGenerate_Python_RunTimeContextPolicyRefusesOnThePolicy(t *testing.T) {
 	root := spanTarget(t, "pipeline.py", pyModelSrc)
 	id := onlyNode(t, root, "python")
 
 	msg := refusalFor(t, resolvedIn("python", map[string]variantspec.ResolvedOverride{
 		id: {Context: &registry.ContextEntry{VersionID: strings.Repeat("x", 64), Name: "c",
-			Spec: registry.ContextSpec{Policy: "full"}}},
+			Spec: registry.ContextSpec{Policy: "rag-retrieval"}}},
 	}), root)
-	mustContain(t, msg, "context assembly is not a call-site argument", "the shared context refusal")
-	mustContain(t, msg, "P3", "who owns the rewrite that would not refuse")
+	mustContain(t, msg, "RETRIEVING chunks", "the policy's own reason")
+	mustContain(t, msg, "host-side where it belongs", "that the capability is not lost")
+	if strings.Contains(msg, "materializer is still being built") {
+		t.Errorf("a run-time policy was told to wait for a language rewriter that would refuse it too.\ngot: %s", msg)
+	}
 }
 
 // ── the dispatch table itself ────────────────────────────────────────────────────────────────────

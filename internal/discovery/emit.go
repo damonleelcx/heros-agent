@@ -103,7 +103,175 @@ type IRNode struct {
 	// Reserved in P0, unset by Discovery, populated by the P3.5 classifier. omitempty: an unlabelled
 	// node must serialise byte-identically to how it did before P3.5.
 	PatternLabels []IRPatternLabel `json:"pattern_labels,omitempty"`
+
+	// ── P14 tools≠skills split (decisions.md D-14.1) ────────────────────────────────────────────────
+	//
+	// ToolsSkills above conflates two things with OPPOSITE apply mechanics: a *tool* is a provider-native
+	// function the model may call, SELECTED (kept or pruned) from what the model is offered; a *skill* is
+	// a registered platform capability with a sealed contract, BOUND by constructing a value. One flat
+	// slice cannot express "prune this unused tool" without the same sentence also reading as "unbind
+	// this platform skill".
+	//
+	// 🔴 The split is ADDITIVE and ToolsSkills is FROZEN. Both fields are `omitempty` and nil-when-empty
+	// (the DeclaredEnv pattern, :39-43), so an IR that predates them serialises byte-identically, the P0
+	// golden vectors keep reproducing, and every `config_hash`-keyed row stays addressable. ToolsSkills
+	// is never repurposed: it remains the conflated view a pre-P14 consumer reads.
+	//
+	// The FRONTEND populates these at extraction, because it is the only component that can see which
+	// discovered entry is which. A consumer never re-derives the split — a re-derivation would be a
+	// second classifier, and two classifiers are two answers.
+	Tools  []IRTool `json:"tools,omitempty"`
+	Skills []string `json:"skills,omitempty"`
+
+	// Memory is the memory strategy this node ALREADY implements at source_revision — what it carries
+	// ACROSS invocations (P17 task 6.1). It is the per-node DEFAULT the resolver merges an override onto,
+	// so resolution never has to invent a base.
+	//
+	// 🔴 ADDITIVE and omitempty, and the empty string means `none` (see MemoryDefault). An IR that
+	// predates this field serialises byte-identically, the P0 golden vectors keep reproducing, and every
+	// config_hash-keyed row stays addressable — the same discipline Tools/Skills above follow.
+	//
+	// 🚫 Discovery emits `none` for every node today, and that is a statement about the EVIDENCE, not a
+	// placeholder. A memory strategy is a store read and written BETWEEN turns (patternclassifier
+	// taxonomy.go: "memory read/write against a store between turns"), so it is not visible in the single
+	// call site P1 extracts — the same reason `MemoryManagement` is a BEHAVIORAL pattern and not a
+	// structural one. Guessing a strategy from an imported library name would be a plausible-but-wrong
+	// default of exactly the kind this codebase declines; `none` is the honest floor, and a future
+	// trace-backed detector is what will raise it.
+	Memory string `json:"memory,omitempty"`
+
+	// Harness is the control loop this node's call ALREADY runs inside at source_revision — its scaffold
+	// (P18 task 4.1). The per-node DEFAULT the resolver merges an override onto, so resolution never has
+	// to invent a base.
+	//
+	// 🔴 ADDITIVE and omitempty, and the empty string means `single-shot` (see HarnessDefault). An IR that
+	// predates this field serialises byte-identically, the P0 golden vectors keep reproducing, and every
+	// config_hash-keyed row stays addressable — the same discipline Tools/Skills/Memory above follow.
+	//
+	// 🚫 Discovery emits `single-shot` for every node today, and — as with Memory — that is a statement
+	// about the EVIDENCE rather than a placeholder. The tempting signal is right there: InvocationSemantics
+	// already records `loop` when the call sits inside one (invocationFor). It is the WRONG signal. A `for`
+	// loop over a list of tickets fires the node many times with no scaffold at all, while an agent loop is
+	// the MODEL deciding to take another turn; the two are indistinguishable from loop depth. Emitting
+	// `react-loop` because a call sat in a `for` would be a plausible-but-wrong default that then hashes
+	// into a configuration nobody authored. `single-shot` is the honest floor, and a detector that can tell
+	// the two apart is what will raise it.
+	Harness string `json:"harness,omitempty"`
 }
+
+// HarnessDefault returns the node's discovered harness strategy, defaulting to `single-shot`.
+//
+// The empty string and `single-shot` are ONE state, resolved here so no caller has to remember which
+// spelling it received — the same accessor/inverse pair MemoryDefault and omitDefaultMemory form, for the
+// same reason: the two spellings arrive from different places (an omitted key from a pre-P18 IR, an
+// explicit value from this emitter) and a caller comparing against either literal would misread the other.
+func (n IRNode) HarnessDefault() string {
+	if n.Harness == "" {
+		return "single-shot"
+	}
+	return n.Harness
+}
+
+// omitDefaultHarness is HarnessDefault's inverse, used by the emitter: the default strategy is written as
+// ABSENCE so it costs no bytes, and everything else is written verbatim.
+//
+// The two are inverses on purpose and are declared adjacent for the same reason: if one learned a new
+// default and the other did not, a node would round-trip into a different scaffold than it was emitted
+// with, silently — and a silently-changed scaffold is a silently-changed bill.
+func omitDefaultHarness(s string) string {
+	if s == "single-shot" {
+		return ""
+	}
+	return s
+}
+
+// MemoryDefault returns the node's discovered memory strategy, defaulting to `none`.
+//
+// The empty string and `none` are ONE state, resolved here so no caller has to remember which spelling it
+// received. That matters because the two spellings arrive from different places — an omitted key from a
+// pre-P17 IR, an explicit "none" from this emitter — and a caller comparing against "" would treat a
+// current IR as unrecorded while a caller comparing against "none" would treat an old one as unrecorded.
+// One accessor, one answer.
+func (n IRNode) MemoryDefault() string {
+	if n.Memory == "" {
+		return "none"
+	}
+	return n.Memory
+}
+
+// omitDefaultMemory is MemoryDefault's inverse, used by the emitter: the default strategy is written as
+// ABSENCE so it costs no bytes, and everything else is written verbatim. The pair is what makes
+// "the resolver always resolves against a concrete base" true without every node carrying a key that
+// says nothing — the concreteness lives in the accessor, which is the only way anyone reads the field.
+//
+// The two are inverses on purpose and are declared adjacent for the same reason: if one learned a new
+// default and the other did not, a node would round-trip into a different strategy than it was emitted
+// with, silently.
+func omitDefaultMemory(s string) string {
+	if s == "none" {
+		return ""
+	}
+	return s
+}
+
+// IRTool is one provider-native tool the node offers the model, as the call site declares it.
+//
+// A tool is identified by the text the CALL SITE wrote, not by a registry version_id, and that is a
+// decision rather than an omission: a tool is already identified by its call site, so sealing it into
+// the registry would invent a second identity for something that already has one (decisions.md D-14.2).
+// A tool selection names tools by these identifiers and is validated against this set, fail-closed.
+type IRTool struct {
+	Name string `json:"name"`
+	// DeclaredAt locates the tool as a STATIC, deletable element of a written list.
+	//
+	// 🔴 nil is load-bearing and is not "unknown": it means the node's tool set is ASSEMBLED AT RUNTIME,
+	// so there is no declaration a prune could delete. That is exactly the case FR14 / D-14.3 require the
+	// transform to REFUSE rather than guess at, and recording it here is what lets the refusal name the
+	// reason instead of reporting a tool it could not find.
+	DeclaredAt *IRToolLocation `json:"declared_at,omitempty"`
+}
+
+// Locatable reports whether this tool is a static declaration a prune could delete. A tool that is not
+// locatable drives the FR14 refusal.
+func (t IRTool) Locatable() bool { return t.DeclaredAt != nil }
+
+// IRToolLocation is where a statically-declared tool sits in its list. The file is the node's own
+// call_site.file — repeating it here would be a second copy of one fact — so only the position within
+// the file and within the list is recorded.
+type IRToolLocation struct {
+	Line int `json:"line"`
+	// Index is the tool's position in the written list, so a deletion addresses the element rather than
+	// searching for text that may appear more than once.
+	Index int `json:"index"`
+}
+
+// DeclaresTool reports whether name is one of the tools the IR records for this node. This is the
+// fail-closed check a tool selection is validated against — the same shape as IR.DeclaresEnv and
+// IRCallSite.HasInScope, and for the same reason: a selection over a tool the node does not offer must
+// be rejected, never applied to nothing.
+func (n IRNode) DeclaresTool(name string) bool {
+	for _, t := range n.Tools {
+		if t.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// ToolByName returns the recorded tool and whether it was found.
+func (n IRNode) ToolByName(name string) (IRTool, bool) {
+	for _, t := range n.Tools {
+		if t.Name == name {
+			return t, true
+		}
+	}
+	return IRTool{}, false
+}
+
+// ToolsRecorded reports whether this node carries a P14 tool split at all. nil (absent) means "this IR
+// predates the split", which is NOT the same as "this node offers no tools" — a consumer that conflated
+// them would treat every pre-P14 node as tool-free and silently accept a selection over nothing.
+func (n IRNode) ToolsRecorded() bool { return n.Tools != nil || n.Skills != nil }
 
 type IRCallSite struct {
 	File      string `json:"file"`
@@ -242,6 +410,28 @@ func buildNode(n ExtractedNode) IRNode {
 		Prompt:          IRPrompt{Inline: n.Prompt.Inline, Variables: vars},
 		ToolsSkills:     tools,
 		ContextAssembly: IRContextAssembly{Policy: n.Context.Policy, Description: n.Context.Description},
+		// P14 split — passed through NIL-WHEN-EMPTY, deliberately unlike ToolsSkills above, which is
+		// normalised to `[]`. ToolsSkills' emptiness is part of the frozen bytes; these fields' ABSENCE
+		// is what has to stay byte-compatible, and absence is achieved by omission, not by an empty array.
+		Tools:  n.Tools,
+		Skills: n.Skills,
+		// P17 — the per-node memory default, passed through OMITTED-AT-DEFAULT, exactly as Tools/Skills
+		// above are: `none` emits no key, so a pre-P17 document and a current one that found no memory
+		// strategy serialise byte-identically and the golden IR fixture keeps reproducing.
+		//
+		// 🔴 The distinction Tools needs — "not recorded" is NOT "offers none", which is why ToolsRecorded()
+		// exists — deliberately does not arise here, and that is an argument rather than an oversight.
+		// Discovery's floor for memory is `none` at EVERY node (deriveMemory), so an absent key and a
+		// recorded `none` mean the same thing and MemoryDefault() maps both to `none`. There is no
+		// false-acceptance hiding in the collapse, so paying for the distinction in churned bytes across
+		// every stored IR would buy nothing.
+		Memory: omitDefaultMemory(n.Memory),
+		// P18 — the per-node harness default, passed through OMITTED-AT-DEFAULT for exactly the reasons
+		// Memory above is: `single-shot` emits no key, so a pre-P18 document and a current one that proved
+		// no loop serialise byte-identically and the golden IR fixture keeps reproducing. Discovery's floor
+		// is `single-shot` at EVERY node (deriveHarness), so an absent key and a recorded `single-shot`
+		// mean the same thing and HarnessDefault() maps both to it.
+		Harness: omitDefaultHarness(n.Harness),
 		// Permissive typed I/O-contract stubs (P1 allowance — doc 01 §2.1). Refinable additively.
 		IOContract: IRIOContract{
 			InputSchema:  map[string]any{"type": "object"},

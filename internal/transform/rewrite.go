@@ -6,6 +6,7 @@ import (
 	"go/ast"
 	"go/printer"
 	"go/token"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -56,6 +57,17 @@ var rewriters = map[variantspec.Dimension]rewriter{
 	variantspec.DimPrompt:  rewritePrompt,
 	variantspec.DimSkills:  rewriteSkills,
 	variantspec.DimContext: rewriteContext,
+	variantspec.DimTools:   rewriteTools,
+	// P18: memory refuses here with a reason SPECIFIC to Go, not the shared one. The read half would
+	// work; the write half needs a per-provider conversion from the SDK response type to its message
+	// type, which does not arise in Python where both are the same duck-typed shape. See
+	// memorymaterialize.go — the refusal names which half is blocked, which "Go is unsupported" would not.
+	variantspec.DimMemory: materializeMemory,
+	// P18: harness. `single-shot` is the IDENTITY and emits nothing — one turn is exactly the
+	// un-rewritten call site, so there is nothing to refuse. Every other strategy is decided by
+	// harnessmaterialize.go, which materializes a cell only when the generated runtime can both DRIVE the
+	// call and DECIDE whether to run again, and refuses by name otherwise (decisions.md D-9).
+	variantspec.DimHarness: materializeHarness,
 }
 
 // rewriteModel rewrites the model argument to the override's model id.
@@ -80,7 +92,11 @@ func rewriteModel(site discovery.GoCallSite, src []byte, o variantspec.ResolvedO
 	// the wrong provider.
 	if hint := providerHintFor(site); hint != "" && entry.Spec.Provider != hint {
 		return nil, unsafeRewrite(site.NodeID, dim,
-			"call site is an %s SDK call but the override selects provider %q; swapping providers means "+
+			// The provider is named WITHOUT an indefinite article: %s is a provider name, and "an bedrock"
+			// / "a openai" are both reachable from one hard-coded article. Refusal copy is read by the
+			// person who has to act on it, and a sentence that reads as machine-assembled invites them to
+			// stop reading it.
+			"call site targets the %s SDK but the override selects provider %q; swapping providers means "+
 				"rewriting the SDK call itself (different client, params type, and response shape), which "+
 				"this engine does not do (ADR-002)", hint, entry.Spec.Provider)
 	}
@@ -368,59 +384,393 @@ func renderExpr(fset *token.FileSet, e ast.Expr) string {
 	return b.String()
 }
 
-// rewriteSkills refuses, with the reason.
+// rewriteSkills MATERIALIZES a bound skill at a Go call site (P14 task 2.1, decisions.md D-14.4).
 //
-// Binding skills means constructing SDK tool values — an `[]anthropic.ToolParam{{Name: …,
-// InputSchema: …}}` whose shape differs per SDK and per SDK version. The registry entry has the JSON
-// schema (FR8), but turning that into correct Go for an arbitrary SDK is code generation, not
-// argument substitution, and a subtly-wrong tool schema is the kind of change that compiles and then
-// degrades quality invisibly — the worst possible failure for an eval platform.
-func rewriteSkills(site discovery.GoCallSite, _ []byte, o variantspec.ResolvedOverride) ([]edit, error) {
-	return nil, refuseSkills(site.NodeID, o)
+// Go is the first — and, in 14a, the only — language whose skill refusal is replaced by construction.
+// The construction itself, the per-provider coverage table it is gated on, and the argument this whole
+// change rests on live in skillbind.go; this function is the dispatch table's entry for the skills
+// dimension and nothing more.
+//
+// 🔴 It still refuses, by name, for a Go call site whose PROVIDER has no declared tool-value form, and
+// for a tool set the call site assembles at runtime. "Go is supported" is not "every Go call site is
+// supported", and a refusal must say which half is missing.
+func rewriteSkills(site discovery.GoCallSite, src []byte, o variantspec.ResolvedOverride) ([]edit, error) {
+	return materializeSkills(site, src, o)
 }
 
-// refuseSkills is the skills refusal, shared by both engines.
+// refuseSkills is the INTERIM refusal, for every language whose materializer has not landed (P14 task
+// 2.2, decisions.md D-14.3). Today that is every tree-sitter language; Go no longer reaches it.
 //
-// One implementation because the reason is not a fact about Go: constructing an SDK's tool values from
-// a JSON schema is code generation in every language, and a subtly-wrong tool schema compiles and
-// degrades quality invisibly in every language. Two copies of this sentence would be two things to keep
-// true (禁止分裂 source-of-truth).
+// One implementation, shared by every span engine, because the reason is not a fact about any one of
+// them: constructing an SDK's tool values from a JSON schema is code generation, and at the syntactic
+// floor there is no typed evidence to check the construction against — the same blindness rewrite_span.go
+// documents for prompts, worse here because a construction has no original expression to compare to.
+// Two copies of this sentence would be two things to keep true (禁止分裂 source-of-truth).
+//
+// 🚫 This is never a silent drop and never a partial diff. A test asserting that a dropped SkillRef
+// still "succeeds" is itself a failing test (task 2.3): the node would run without the binding while
+// its config_hash still claimed it, and the eval would score a configuration that never existed.
 func refuseSkills(nodeID string, o variantspec.ResolvedOverride) error {
 	names := make([]string, 0, len(o.Skills))
 	for _, s := range o.Skills {
 		names = append(names, s.Name)
 	}
 	return unsafeRewrite(nodeID, string(variantspec.DimSkills),
-		"binding skills %v requires constructing SDK-specific tool values at the call site; this "+
-			"engine only replaces value expressions", names)
+		"binding skills %v requires constructing SDK-specific tool values at the call site, and no "+
+			"materializer for this language has landed yet (Go is the first — decisions.md D-14.4); this "+
+			"engine only replaces value expressions here, so the binding is REFUSED rather than dropped",
+		names)
 }
 
-// rewriteContext refuses, and P3 is the named owner of the rewrite that would not refuse.
+// rewriteContext MATERIALIZES a resolved context policy at a Go call site (P16 task 2.2).
 //
-// The registry rows carry no context locator at all — context assembly is not an argument, it is how
-// the surrounding code builds the message list, which is why the IR records it as a description
-// ("static message list at the call site") rather than a position. P2 ships only the `full` policy
-// (PRD §3), and `full` is by definition what an un-rewritten call site already does, so refusing
-// costs P2 nothing: there is no context configuration expressible today that this refusal denies.
+// Go is the first — and, in 16a, the only — language whose context refusal is replaced by construction.
+// The construction, the per-policy coverage table it is gated on, and the argument that makes a
+// message-list rewrite safe live in contextmaterialize.go; this function is the dispatch table's entry
+// for the context dimension and nothing more.
 //
-// This is scope, not a gap. Context assembly becomes rewritable when there are real policies to
-// rewrite it TO, and those arrive with P3 (docs/prd/P3-context-skills-sandbox.md) — which owns both
-// the policies and the transform that realizes them.
-func rewriteContext(site discovery.GoCallSite, _ []byte, o variantspec.ResolvedOverride) ([]edit, error) {
-	return nil, refuseContext(site.NodeID, o)
+// 🔴 It still refuses, by name, for a policy that assembles at RUN TIME (summarization, retrieval) and
+// for a call site whose message list is built at runtime. "Go is supported" is not "every Go call site
+// is supported", and a refusal must say which half is missing.
+func rewriteContext(site discovery.GoCallSite, src []byte, o variantspec.ResolvedOverride) ([]edit, error) {
+	return materializeContext(site, src, o)
 }
 
-// refuseContext is the context refusal, shared by both engines — and it is if anything MORE
-// language-neutral than the skills one. No frontend's registry rows carry a context locator, in any
-// language, because context assembly is not an argument anywhere: it is how the surrounding code builds
-// the message list. P3 owns the rewrite that would not refuse, for every language at once.
-func refuseContext(nodeID string, o variantspec.ResolvedOverride) error {
-	return unsafeRewrite(nodeID, string(variantspec.DimContext),
+// refuseContext is the INTERIM refusal, for every language whose context materializer has not landed
+// (P16 task 3.2, design.md Decision 1). Today that is every tree-sitter language; Go no longer reaches it.
+//
+// 🔴 P16 OWNS this rewrite. The previous text named P3 as the owner, which was inaccurate in the way
+// that costs a reader real time: P3 shipped the policies and their host-side `Assemble` and never the
+// call-site rewrite, so a user who followed that pointer found a phase that had already shipped and no
+// rewrite. A refusal that sends the reader to the wrong place is a worse refusal than one that says
+// nothing, because it looks actionable.
+//
+// The reason itself is unchanged and still correct: context assembly is not an argument in any
+// language — it is how the surrounding code builds the message list — so materializing a policy is a
+// REGION rewrite, per language. Go's landed (contextmaterialize.go); the rest state that plainly rather
+// than no-op the override, because a silently-dropped context override is resolved, hashed, and scored
+// as the BASE configuration under the variant's hash. That is a false result, the worst thing an eval
+// platform can produce, and it is why this refusal is a specified, tested requirement rather than a
+// placeholder.
+func refuseContext(nodeID, language string, o variantspec.ResolvedOverride) error {
+	policy := "the resolved policy"
+	if o.Context != nil {
+		policy = strconv.Quote(o.Context.Spec.Policy)
+	}
+	return refuseNoMaterializer(nodeID, string(variantspec.DimContext),
 		"context assembly is not a call-site argument — it is how the surrounding code builds the "+
-			"message list, so the registry rows declare no context locator to rewrite. P2 ships only "+
-			"the `full` policy, which is by definition what this call site already does; policy %q "+
-			"needs the context-assembly rewrite owned by P3 (docs/prd/P3-context-skills-sandbox.md), "+
-			"not an argument swap", o.Context.Spec.Policy)
+			"message list — so materializing policy %s is a REGION rewrite of that code, per language. "+
+			"P16 owns that rewrite (docs/prd/P16-context-strategy-optimization.md) and has landed it for "+
+			"Go; the %s materializer is still being built, so this override is REFUSED rather than "+
+			"dropped — applying it as the base configuration would score a configuration that never ran",
+		policy, languageDisplay(language))
+}
+
+// ── P15: the interim refusal for un-materializable wiring ────────────────────────────────────────
+//
+// The wiring axis (`Order`/`Edges`) is fully MODELED and fully HASHED: a reorder, a merge, or a prune
+// produces a Variant Spec that resolves to a different `config_hash`. What does not exist is a
+// rewriter that turns that graph into source — moving a call, fusing two calls, deleting a call are
+// AST surgery on the user's control flow, not the value replacement this engine performs.
+//
+// 🔴 So the honest outcome is a REFUSAL, and the alternative is the worst failure this system has.
+// Silently no-op'ing the wiring would let the engine "succeed": the diff would rewrite the node
+// CONTENTS, the build would pass, the eval would run — and the score would be attributed to a
+// `config_hash` claiming a graph the source never had. That is a FALSE MEASUREMENT, not a missing
+// feature, and it would poison the verified-delta ledger that every later decision reads. A platform
+// whose principle is "verification decides" cannot afford one measurement that means nothing.
+//
+// This is the same refuse-until-safe shape as refuseSkills (P14) and refuseContext (P3-owned):
+// modeled, resolvable, hashable, materialization deferred and STATED. When a wiring rewriter lands it
+// replaces this function and nothing upstream changes.
+//
+// An inserted ADAPTER is not refused: it IS materializable — EmitAdapter generates its source into the
+// same diff (decisions.md D-2) — so the comparison below collapses adapter hops before deciding, and a
+// coherent-but-adapted spec passes.
+
+// wiringRefusalDim is the axis name carried on the refusal. It is a plain string and deliberately NOT
+// a variantspec.Dimension: the wiring axis is Order/Edges, and minting a Dimension const for it would
+// be the second representation task 1.4 forbids. The error still names the axis, which is what a
+// reader needs.
+const wiringRefusalDim = "wiring"
+
+// refuseWiring is the typed refusal: an ErrUnsafeRewrite naming the wiring axis and the specific
+// difference, so the reader learns WHICH rewire was asked for, not just that something was refused.
+func refuseWiring(nodeID, difference string) error {
+	return unsafeRewrite(nodeID, wiringRefusalDim,
+		"this spec asks for a wiring change (%s), but no call-site rewriter materializes a node "+
+			"rearrangement as source — moving, fusing, or deleting a call is control-flow surgery, not the "+
+			"value replacement this engine performs. It is REFUSED rather than applied as a no-op: a no-op "+
+			"would let this spec's config_hash, which already records the new graph, be scored against "+
+			"source that was never rewired — a false measurement, not a missing feature", difference)
+}
+
+// checkWiring compares the wiring a spec ASKS for against the wiring the source HAS, and returns the
+// refusal when they differ. spec may be nil (the plain Generate path, where the resolved config is the
+// only statement of the desired wiring).
+//
+// It concludes nothing when no discovered wiring was recorded: a Resolved assembled by hand has no IR
+// behind it, and refusing on absent evidence would block every caller that never had a graph to
+// compare against. The production path (variantspec.Resolve) always records it.
+// checkWiring is MATERIALIZE-OR-REFUSE, over the wiring the SOURCE ACTUALLY STATES (P15 15c, corrected).
+//
+// # What the source states, and what it does not
+//
+// This is the whole of the correctness argument, and the first version of it was wrong in a way CI
+// caught: it compared the spec's `Order` against the IR's NODE-EMISSION order and treated any
+// difference as "the spec asks to rearrange the graph". Emission order is a discovery walk artifact —
+// which file was read first — not a claim about execution. Twelve pre-existing specs that override only
+// a model or a prompt were refused for wiring because their author listed the nodes in the workflow's
+// logical sequence rather than in the order Discovery happened to emit them.
+//
+// The source states a relative order between two calls only when it actually orders them: when their
+// call sites are CONSECUTIVE SIBLING STATEMENTS in one block. Two calls in different functions, or
+// different files, have no source-stated order at all — `Order` there is the author's declaration of
+// the workflow's shape, which is what a Variant Spec's ordering has always been for, and it contradicts
+// nothing in the tree.
+//
+// Edges are out of the comparison entirely, for the reason P14 learned with `Tools == nil`: an IR that
+// records no edge means NOT RECORDED, never "no edge". A syntactic frontend infers few edges and a spec
+// legitimately declares the ones the coherence gate needs; treating a declared edge as a request to
+// rewire source refuses a change nobody asked for.
+//
+// So exactly three outcomes remain:
+//
+//	the node SET differs (a merge or a prune)   → REFUSE. The source demonstrably still contains the
+//	                                              call, so scoring this config_hash would be false.
+//	a source-ordered PAIR is inverted           → materialize it if it is the one shape we can
+//	                                              (an adjacent transposition), else REFUSE.
+//	anything else                               → nothing to do: the source states no order to contradict.
+func checkWiring(r *variantspec.Resolved, spec *variantspec.VariantSpec, sites map[string]boundSite, root string) (*swapPlan, error) {
+	if r == nil || !r.DiscoveredWiring.Recorded() {
+		return nil, nil
+	}
+	order, _ := desiredWiring(r, spec)
+	if len(order) == 0 {
+		return nil, nil // nothing was asked for
+	}
+
+	// 1. The node SET. A node the spec drops is still in the tree, and a node it adds is not — either
+	// way the running code is not the graph the hash records.
+	if missing, extra, ok := nodeSetDiff(r.DiscoveredWiring.Order, order); !ok {
+		return nil, refuseWiring(firstNonEmpty(missing, extra), describeNodeSetDiff(missing, extra))
+	}
+
+	// 2. The pairs the SOURCE orders. Nothing else is evidence of a rearrangement.
+	pairs, err := sourceOrderedPairs(r.Language, sites, root)
+	if err != nil {
+		return nil, err
+	}
+	pos := map[string]int{}
+	for i, id := range order {
+		pos[id] = i
+	}
+	var inverted []sourcePair
+	for _, p := range pairs {
+		if pos[p.first] > pos[p.second] {
+			inverted = append(inverted, p)
+		}
+	}
+	if len(inverted) == 0 {
+		return nil, nil
+	}
+	if len(inverted) == 1 {
+		if plan, ok := planAdjacentSwap(order, inverted[0]); ok {
+			return plan, nil
+		}
+	}
+	p := inverted[0]
+	return nil, refuseWiring(p.first, fmt.Sprintf(
+		"the source runs %s then %s as consecutive statements in %s, and this spec asks for the opposite "+
+			"order (%d source-ordered pair(s) inverted)", p.first, p.second, p.file, len(inverted)))
+}
+
+// sourcePair is two nodes the SOURCE puts in a definite order: consecutive sibling statements.
+type sourcePair struct {
+	first, second string
+	file          string
+	firstLine     int
+	secondLine    int
+}
+
+// sourceOrderedPairs finds every pair of call sites the source itself orders — same file, consecutive
+// sibling statements with nothing but blank lines between them.
+//
+// It deliberately reuses the SAME admissibility the materializer requires (`admitSwap`'s structural
+// half). That is not a coincidence to be refactored away: the set of pairs whose order the source
+// states IS the set of pairs a transposition could exchange, so one predicate answers both questions
+// and they can never drift apart.
+func sourceOrderedPairs(language string, sites map[string]boundSite, root string) ([]sourcePair, error) {
+	resolve, ok := statementResolvers[strings.ToLower(strings.TrimSpace(language))]
+	if !ok {
+		// A language with no statement resolver states no order this engine can read. That is not a
+		// refusal: it means the spec's ordering contradicts nothing we can see, which is the honest
+		// position for a frontend that never parsed statements.
+		return nil, nil
+	}
+
+	byFile := map[string][]string{}
+	for id, s := range sites {
+		byFile[s.fileRel] = append(byFile[s.fileRel], id)
+	}
+	var out []sourcePair
+	for _, rel := range sortedStringKeys(byFile) {
+		ids := byFile[rel]
+		if len(ids) < 2 {
+			continue
+		}
+		src, err := readFile(root, rel)
+		if err != nil {
+			return nil, err
+		}
+		sort.Slice(ids, func(i, j int) bool { return sites[ids[i]].lineStart < sites[ids[j]].lineStart })
+		for i := 0; i+1 < len(ids); i++ {
+			a, errA := resolve(src, ids[i], sites[ids[i]].lineStart)
+			b, errB := resolve(src, ids[i+1], sites[ids[i+1]].lineStart)
+			if errA != nil || errB != nil {
+				continue // a statement this engine cannot read states no order it can act on
+			}
+			if admitSwap(src, a, b) != nil {
+				continue // not consecutive siblings: the source does not order these two
+			}
+			out = append(out, sourcePair{first: ids[i], second: ids[i+1], file: rel,
+				firstLine: a.startLine, secondLine: b.startLine})
+		}
+	}
+	return out, nil
+}
+
+// planAdjacentSwap admits the inverted pair only when the spec places the two nodes NEXT TO each other:
+// an exchange of neighbours. A pair inverted across other nodes is a move, which this engine does not do.
+func planAdjacentSwap(order []string, p sourcePair) (*swapPlan, bool) {
+	i, j := -1, -1
+	for k, id := range order {
+		if id == p.first {
+			i = k
+		}
+		if id == p.second {
+			j = k
+		}
+	}
+	if i < 0 || j < 0 || i != j+1 {
+		return nil, false
+	}
+	return &swapPlan{First: p.first, Second: p.second}, true
+}
+
+// nodeSetDiff reports whether two orderings name the same nodes, and if not, one concrete node from
+// each side. Sorted, so the same defect always produces the same message.
+func nodeSetDiff(discovered, desired []string) (missing, extra string, ok bool) {
+	have := map[string]bool{}
+	for _, id := range discovered {
+		have[id] = true
+	}
+	want := map[string]bool{}
+	for _, id := range desired {
+		want[id] = true
+	}
+	var miss, ext []string
+	for id := range have {
+		if !want[id] {
+			miss = append(miss, id)
+		}
+	}
+	for id := range want {
+		if !have[id] {
+			ext = append(ext, id)
+		}
+	}
+	if len(miss) == 0 && len(ext) == 0 {
+		return "", "", true
+	}
+	sort.Strings(miss)
+	sort.Strings(ext)
+	if len(miss) > 0 {
+		missing = miss[0]
+	}
+	if len(ext) > 0 {
+		extra = ext[0]
+	}
+	return missing, extra, false
+}
+
+func describeNodeSetDiff(missing, extra string) string {
+	switch {
+	case missing != "" && extra != "":
+		return fmt.Sprintf("this spec drops node %s and adds node %s; the source still contains the call "+
+			"the spec dropped", missing, extra)
+	case missing != "":
+		return fmt.Sprintf("this spec drops node %s — a merge or a prune — but the source still contains "+
+			"that call, so the graph this config_hash records is not the graph that would run", missing)
+	default:
+		return fmt.Sprintf("this spec adds node %s, which the source does not contain", extra)
+	}
+}
+
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
+}
+
+func sortedStringKeys(m map[string][]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// desiredWiring is the wiring the spec asks for, with inserted-adapter hops collapsed back to the edge
+// they bridge — an adapter is generated source in the same diff, so it is not an un-materializable
+// rewire and must not read as one.
+func desiredWiring(r *variantspec.Resolved, spec *variantspec.VariantSpec) ([]string, []variantspec.ResolvedEdge) {
+	var order []string
+	var edges []variantspec.ResolvedEdge
+	if spec != nil && len(spec.Order) > 0 {
+		order = append(order, spec.Order...)
+		for _, e := range spec.Edges {
+			edges = append(edges, variantspec.ResolvedEdge(e))
+		}
+	} else {
+		for _, n := range r.Config.Nodes {
+			order = append(order, n.NodeID)
+		}
+		edges = append(edges, r.Config.Edges...)
+	}
+
+	adapters := map[string]variantspec.InsertedAdapter{}
+	if spec != nil {
+		for _, a := range spec.InsertedAdapters {
+			adapters[a.AdapterNodeID] = a
+		}
+	}
+	if len(adapters) == 0 {
+		return order, edges
+	}
+
+	kept := order[:0:0]
+	for _, id := range order {
+		if _, isAdapter := adapters[id]; !isAdapter {
+			kept = append(kept, id)
+		}
+	}
+	// Collapse producer→adapter→consumer back to producer→consumer; drop the two hops.
+	collapsed := make([]variantspec.ResolvedEdge, 0, len(edges))
+	for _, e := range edges {
+		if a, ok := adapters[e.ToNodeID]; ok && e.FromNodeID == a.FromNodeID {
+			collapsed = append(collapsed, variantspec.ResolvedEdge{
+				FromNodeID: a.FromNodeID, ToNodeID: a.ToNodeID, Kind: e.Kind})
+			continue
+		}
+		if _, ok := adapters[e.FromNodeID]; ok {
+			continue // the adapter→consumer half of a hop already accounted for
+		}
+		collapsed = append(collapsed, e)
+	}
+	return kept, collapsed
 }
 
 // byteRange converts an AST node's positions to byte offsets in the original file.
@@ -450,6 +800,19 @@ func insertStructField(fset *token.FileSet, cl *ast.CompositeLit, src []byte, na
 		text += ", " // an existing element follows; keep it a valid literal
 	}
 	return edit{Start: at, End: at, New: text}, nil
+}
+
+// refuseInlineParamTune is P13 task 3.6 / Decision 7: a parameter tune (temperature/max-tokens) on an
+// INLINE node has no call-site rewriter. This engine replaces value EXPRESSIONS the call site already
+// wrote; a params struct field the author may never have written is not one of them, so synthesizing it
+// would be SDK-shaped code generation (the ADR-001 top risk), and dropping it would hash one thing and
+// run another (P10 reconciliation fails such a run). Both are refused; only BOUND mode carries a param
+// tune, where it lives in the binding document as data.
+func refuseInlineParamTune(nodeID string) error {
+	return unsafeRewrite(nodeID, string(variantspec.DimModel),
+		"this override is a parameter tune (temperature/max-tokens) on an inline node, but there is no "+
+			"call-site parameter rewriter; a param tune can only be materialized in bound apply mode "+
+			"(ADR-004), so it is refused here rather than silently dropped")
 }
 
 // providerHintFor returns the provider the matched registry row declares for this call site, if any.

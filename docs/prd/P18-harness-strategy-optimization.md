@@ -269,6 +269,42 @@ Numbered FRs; each maps 1:1 to an OpenSpec requirement under
   grant. The added turns SHALL NOT widen egress or tool scope beyond what the node already holds, and the
   increased turn/tool-call surface SHALL be **observable** in the trace, not merely asserted.
 
+### This axis's delivery cells (capability `harness-delivery`)
+
+Cross-axis rules are defined once in [P13](P13-prompt-model-optimization.md) §6 (`change-delivery`,
+FR57–FR68) and [ADR-010](../adr/ADR-010-runtime-gradual-rollout.md); they are referenced, not restated.
+
+> **A scaffold is structure; its bounds are numbers.** Swapping a node from a single call onto a
+> reason-and-act loop changes how many calls the program makes and in what control flow — that is a loop,
+> and no binding document introduces one. But `max_turns`, the retry budget and the stop condition are
+> parameters of a loop that is **already written**, and those are data in exactly the sense the document
+> was designed for.
+>
+> The distinction this axis must not lose is between two refusals that both mention the runtime and mean
+> opposite things. **`hostAbsent`** says the strategy is deliverable and its host service simply is not
+> running, so it refuses rather than substituting. **`notRuntimeResolvable`** says it cannot be delivered
+> as data at all, host or no host. One is answered by starting a service; the other cannot be answered.
+> A table that renders them alike sends an operator to restart something that was never the problem.
+
+- **FR46.** A harness strategy swap SHALL be refused for the runtime route with cause
+  `notRuntimeResolvable` in every language, for every strategy, and in every apply mode, naming the
+  introduction of a control loop and suggesting no `bound` migration.
+- **FR47.** A change confined to a strategy's bounded parameters — turn ceiling, retry budget, stop
+  condition — SHALL be refused with cause `noRolloutBinding`, naming the absent binding document field.
+  It SHALL NOT be reported as `notRuntimeResolvable`.
+- **FR48.** The strategy cell and the parameter cell SHALL appear separately in the delivery table, with
+  neither cause inferred from the other.
+- **FR49.** Where a bounded parameter becomes rollout-eligible, an arm SHALL admit only values inside the
+  strategy's declared `ParamsSchema`. An absent, unbounded, or non-positive turn ceiling SHALL be refused
+  by the **same** validation the registry applies at seal, and a parameter the candidate strategy does
+  not declare SHALL stay inexpressible rather than ignored.
+- **FR50.** The `hostAbsent` execution refusal and the `notRuntimeResolvable` delivery cause SHALL be
+  separate, separately readable conditions. An absent host SHALL NOT change delivery eligibility, and a
+  delivery refusal SHALL NOT offer starting a host service as a remedy.
+- **FR51.** Authoring a rollout whose candidate arm swaps the harness strategy SHALL be refused with the
+  transform's typed cause, no document carrying a harness strategy SHALL be written, and the totality
+  canary SHALL cover both routes.
+
 ## 7. Non-functional requirements
 
 | # | Requirement | Target |
@@ -408,6 +444,41 @@ to a different strategy), bounded autonomy (a strategy cannot express an unbound
 cost without a commensurate `task_success` gain — which must be **rejected**, because a gate that never
 rejects is decoration.
 
+### 9.x Delivery cells on this axis, by role lens
+
+**System Designer — *a scaffold is structure; its bounds are numbers.***
+Swapping a node onto a reason-and-act loop changes how many calls the program makes and in what control
+flow. That is a loop, and no binding document introduces one — permanent, on the same footing as
+wiring. But `max_turns`, the retry budget and the stop condition are parameters of a loop **already
+written**, which is data in exactly the sense the document was designed for. Two cells, two causes, and
+a table that carried one "harness" row would be wrong about both.
+
+**Backend — *a rollout must not become the one place a bound can be removed.***
+Where the parameter cell opens, an arm admits only values inside the strategy's declared `ParamsSchema`,
+validated by the **same function** the registry applies at seal — passed in rather than
+re-implemented. A second validator would drift, and it would drift toward permissive, because that is
+the direction that makes a failing request succeed. A parameter the strategy does not declare stays
+**inexpressible** rather than ignored: silently dropping it is how a user sets a ceiling, sees nothing
+change, and has nothing to read.
+
+**DevOps + QA — *the distinction that costs an afternoon when it is lost.***
+`hostAbsent` says the strategy is deliverable and its host service is simply not running here and now —
+it refuses rather than substituting, and starting the service fixes it. `notRuntimeResolvable` says the
+change cannot be delivered as data at all, host or no host, and nothing fixes it. They are carried as
+**different fields**: an execution condition travels beside the routes and does not alter delivery
+eligibility, and a delivery refusal never mentions a host service or offers restarting one. NFR16 makes
+that executable; NFR17 extends the totality canary so a node built to carry a real strategy comes back
+refused on **each** route.
+
+**Sales Operations — *what may be said about this axis.***
+
+| Say | Never say | Why |
+|---|---|---|
+| "the scaffold is modelled, hashed and proposed" | "we optimize your agent loop automatically" | It is refused at transform wherever no materializer exists, and refused by the runtime route everywhere. |
+| "turn ceilings are a field we have not shipped" | "harness tuning is not supported" | One cell is ours to close; saying neither is possible misrepresents both. |
+| "a heavier scaffold has to earn its cost" | "more turns means better answers" | Admissibility is decided on held-out data, and a heavier loop that answers no better is rejected. |
+| 🚫 — | "we can change your agent's loop live" | The scaffold refuses the runtime route in **every** language. |
+
 ## 10. Dependencies
 
 **Requires**
@@ -501,6 +572,20 @@ surface guarantee for autonomous turns.
 - [ ] **A14.** An unresolvable/malformed `HarnessRef` fails the resolve closed naming the ref; a
       cross-dimension ref fails closed (NFR8, NFR9).
 
+- [ ] **A27.** A harness strategy swap reports `notRuntimeResolvable` in every language, every strategy
+      and both apply modes, naming the control loop and suggesting no `bound` migration (FR46).
+- [ ] **A28.** A bounded-parameter change reports `noRolloutBinding` naming the absent document field,
+      and the strategy cell and parameter cell render as separate rows with different causes (FR47, FR48).
+- [ ] **A29.** A rollout arm cannot carry an absent, unbounded or non-positive turn ceiling — refused by
+      the same validation the registry applies at seal — and an inapplicable parameter stays
+      inexpressible rather than ignored (FR49).
+- [ ] **A30.** 🔴 `hostAbsent` and `notRuntimeResolvable` render as distinct conditions everywhere; an
+      absent host does not change delivery eligibility, and no delivery refusal offers starting a service
+      as a remedy (FR50, NFR16).
+- [ ] **A31.** 🔴 Authoring a rollout with a harness candidate arm is refused with the transform's typed
+      cause, no document carrying a strategy is written, and the totality canary comes back refused on
+      **each** route — with a sabotaged refusal on either turning the cell red (FR51, NFR17).
+
 ## 14. Open questions
 
 1. **How deep does discovery go in proving a non-`single-shot` default?** M21 records `single-shot`
@@ -517,3 +602,172 @@ surface guarantee for autonomous turns.
 4. **When does the control-loop codemod stop refusing?** The refusal is the seam a later phase lands in
    (as P3 landed in `refuseContext`). Which phase proves the bounded-loop rewrite safe, and for which
    languages first, is out of scope for M21 and tracked against the transform engine's roadmap.
+
+---
+
+# Addendum — the harness runtime, the call-site rewriter, and the authored change
+
+| Field | Value |
+|---|---|
+| Adds to | §3 (goals G12–G17), §6 (FR22–FR45), §7 (NFR10–NFR15), §13 (A15–A26) |
+| Capabilities | `harness-runtime` (new) · `harness-materialization` (new) · `harness-authoring` (new) · `agent-loop` (refusal **narrowed per cell**, not removed) |
+| Contracts of record | [`decisions.md`](../../openspec/changes/p18-harness-strategy-optimization/decisions.md) D-8 … D-13 |
+
+## 15. What this addendum adds, and why the phase was not complete without it
+
+Sections 1–14 describe an axis that is **modelled, hashed, proposed, and refused**. Two things were
+missing, and each is load-bearing rather than cosmetic.
+
+**A user could not make an active change to their harness strategy.** As written, a scaffold changes only
+when `OpHarnessStrategy` proposes one. That makes harness the one operator-only axis: model, prompt,
+skills, context, wiring and memory all bind the cross-axis `authored-change` contract — *a user MAY author
+the change, a user MAY NOT author the evidence* — and harness must too, through the **same** override,
+the **same** resolver, the **same** transform, and the **same** admissibility gate. A second apply path
+would be a second definition of what "shipped" means.
+
+**The refusal named two missing artifacts, and nothing was building them.** G6 refuses a `HarnessRef` at
+transform because *"materializing a control loop is code generation."* That sentence names precisely what
+is absent: **a harness runtime** — a bounded loop, a stop condition, and a continuation rule — and **the
+call-site rewriter** that drives it. Without both, the axis can be authored, hashed and compared but can
+never reach a customer's source, and an *interim* refusal is indefinite by another name.
+
+### 15.1 Additional goals
+
+- **G12. There is a harness runtime.** The platform SHALL define each builtin strategy's loop — the
+  continue/stop decision and the continuation rule — **once**, bounded by construction, deterministic, and
+  callable by the generated artifact rather than re-derived per language.
+- **G13. There is a call-site rewriter.** A resolved harness SHALL be materializable as source at a call
+  site wherever it can be materialized **honestly**, and refused by name wherever it cannot.
+- **G14. DRIVE AND DECIDE, or refuse.** A cell SHALL materialize only when the runtime can both re-invoke
+  the call **and** evaluate the strategy's stop condition against the response. A call site that can carry
+  one half but not the other SHALL be refused **whole**, naming the missing half.
+- **G15. The generated module reaches nothing new.** The emitted artifact SHALL make no provider call,
+  dispatch no tool, read no credential, and import nothing outside the standard library. A planner, a tool
+  executor and a critic are **injected host services**; a strategy whose service is absent SHALL refuse
+  rather than substitute a lighter loop.
+- **G16. The refusal narrows per cell; it is never removed.** Coverage SHALL become a read of the
+  materializer table per `(language, strategy, call-shape)`. `single-shot` is the identity and
+  materializes everywhere; every uncovered cell SHALL still return a typed `unsafeRewrite` with its own
+  cause class.
+- **G17. A user can change their scaffold, and is told the truth before they choose.** A user SHALL be
+  able to select, parameterize and clear a node's harness strategy; the **per-cell** boundary and the
+  **added per-run cost** of a heavier scaffold SHALL be stated **before** the choice, from the engine's own
+  coverage source; and the change SHALL claim nothing until verification has run.
+
+### 15.2 Additional functional requirements
+
+#### The harness runtime (capability `harness-runtime`)
+
+- **FR22.** A harness runtime SHALL define, for every strategy in the closed builtin set, a
+  `Plan(strategy, params, turn, answer) → continue | stop(reason)` decision and the continuation rule that
+  produces the next turn's input. A strategy in the sealed vocabulary without a loop definition SHALL fail
+  loudly rather than degrading to a single shot.
+- **FR23.** The loop SHALL be **bounded by construction**: no strategy and no combination of params SHALL
+  express an unbounded loop, and the executed turn count SHALL never exceed the sealed `max_turns`.
+- **FR24.** A run that terminates because it reached the ceiling SHALL record that reason, distinguishably
+  from a run that terminated because its stop condition was satisfied.
+- **FR25.** The loop SHALL be **deterministic**: identical strategy, params and answers SHALL produce an
+  identical turn count, stop reason and per-turn record. The runtime SHALL read no clock and no random
+  source.
+- **FR26.** The runtime SHALL make **no provider call**, dispatch **no tool**, open **no network
+  connection**, and read **no credential**.
+- **FR27.** A planner, a tool executor and a critic SHALL be **injected host services**. A strategy
+  requiring one that was not supplied SHALL refuse with a typed error **naming the service**, and SHALL NOT
+  fall back to a lighter strategy's loop.
+- **FR28.** A run SHALL expose the number of turns executed, the stop reason, and a per-turn record. None
+  of these SHALL participate in `config_hash`.
+- **FR29.** The added turns SHALL execute the caller-supplied turn function and nothing else; the runtime
+  SHALL NOT widen the egress destinations, tool grants, or filesystem scope available at the call site.
+
+#### The call-site rewriter (capability `harness-materialization`)
+
+- **FR30.** A cell SHALL materialize only when **both** halves are available — the call is re-invocable and
+  the stop condition is evaluable against the response — and both SHALL be resolved **before** the first
+  edit is emitted.
+- **FR31.** A call site that can carry one half but not the other SHALL be refused **whole**, naming which
+  half is missing.
+- **FR32.** `single-shot` SHALL be the identity: it emits nothing, materializes in every language, and is
+  never reported as refused.
+- **FR33.** A strategy requiring a host service SHALL be refused at a call site — which offers no injection
+  point — **naming the service**, and SHALL NOT be degraded to a strategy that does not need one. This
+  covers `react-loop` (tool execution), `plan-execute` (planning and step execution) and `critic-loop` (a
+  separate critic call).
+- **FR34.** The emitted artifact SHALL import nothing outside its language's standard library.
+- **FR35.** The emitted artifact SHALL regenerate **byte-identically** from the same resolved
+  configuration.
+- **FR36.** The emitted artifact SHALL ship in the **same patch** as the call-site edit, so one revert
+  restores both.
+- **FR37.** The emitted artifact SHALL read the strategy and its params **as data** from the binding
+  document, so retuning a bound parameter is a document change and not a code change.
+- **FR38.** Coverage SHALL be a **read of the materializer table** per `(language, strategy, call-shape)`,
+  never a second table, so a coverage claim cannot drift from the engine's behaviour in either direction.
+- **FR39.** Every cell without a materializer SHALL still return a typed `unsafeRewrite` carrying its own
+  cause class, and the resolved configuration SHALL still carry the override — **refuse, never drop**
+  remains true wherever it still applies.
+- **FR40.** A cause class SHALL be assigned honestly: a permanent language fact (a response whose text is
+  not readable without importing the customer's SDK) SHALL be `not-expressible-at-a-call-site` and SHALL
+  carry **no** missing artifact; only a genuinely absent platform artifact SHALL be
+  `no-materializer-for-this-language`.
+- **FR41.** Materialization SHALL change only what the transform **emits**. Every `config_hash` minted
+  before the rewriter landed SHALL reproduce bit-for-bit after it, and a stored harness configuration SHALL
+  materialize without being re-authored.
+
+#### The authored change (capability `harness-authoring`)
+
+- **FR42.** A user SHALL be able to select a node's harness strategy from the closed builtin set and supply
+  its params, expressed **solely** through the existing `HarnessRef` override. Free text SHALL NOT be a
+  selection path; params violating the strategy's schema — including a param the strategy does not declare
+  — SHALL be rejected **before** the entry is sealed, naming the parameter.
+- **FR43.** A user SHALL be able to **clear** a node's harness strategy, and clearing SHALL reproduce the
+  pre-selection `config_hash` byte-identically. `single-shot` with no params SHALL be indistinguishable
+  from cleared.
+- **FR44.** The authoring surface SHALL state the **per-cell** boundary and the **added per-run cost** of a
+  heavier scaffold **before** the user chooses, read from the engine's own coverage source. A control SHALL
+  NOT be silently disabled; where a selection cannot be applied, the reason SHALL be readable and SHALL
+  distinguish a missing platform artifact from a fact about the user's call site or language.
+- **FR45.** An authored harness change SHALL be stamped `unverified`, SHALL claim no `task_success`, cost
+  or latency effect until verification has run, and — where its cell refuses — SHALL be surfaced as
+  **refused-not-scored**, never as a win, a regression, or a tie. Exactly **one** transform entry point and
+  **one** admissibility gate SHALL serve both origins; there SHALL be no authoring-only apply path.
+
+### 15.3 Additional non-functional requirements
+
+| # | Requirement | Target |
+|---|---|---|
+| **NFR10** | **Both halves or refuse** | A half-materializable call site is refused whole; a test asserts the refusal names the missing half and would fail if a partial loop were emitted. |
+| **NFR11** | **No new reachability** | The emitted artifact's import set is asserted to be standard-library-only, and no provider client, credential, or network destination is reachable from the runtime. |
+| **NFR12** | **Byte-identical regeneration** | The same resolved configuration regenerates the artifact byte-for-byte; asserted, not assumed. |
+| **NFR13** | **Coverage is derived** | The coverage read and the transform's answer for the same cell are asserted equal; a hand-maintained copy is a test failure. |
+| **NFR14** | **Identity untouched** | Every `config_hash` minted under 18a reproduces bit-for-bit after the rewriter lands. |
+| **NFR15** | **Cost stated before the choice** | For any strategy whose ceiling exceeds one turn, the surface states that per-run cost and latency may multiply up to that ceiling, and that whether it is worth it is verification's answer, not the selection's. |
+| **NFR16** | **The two runtime refusals never merge** | A test asserts `hostAbsent` and `notRuntimeResolvable` render as distinct conditions in the console, the offline table and the API, and that a delivery refusal never names a host service. Merging them turns it red — the cost of the merge is an operator restarting the wrong thing. |
+| **NFR17** | **Refusal totality spans both routes** | The harness totality canary is extended so a node built to carry a real strategy comes back refused on **each** route, and a sabotaged refusal on either turns the cell red. Adding a route without extending the canary would quietly make the refusal decoration. |
+
+## 16. Additional acceptance criteria (M21 exit checklist, addendum)
+
+- [ ] **A15.** A harness runtime defines every builtin strategy's loop once; a strategy in the sealed
+      vocabulary without a definition fails loudly (G12, FR22).
+- [ ] **A16.** The turn count never exceeds the sealed `max_turns`, for every strategy and every params
+      combination (G12, FR23, NFR5).
+- [ ] **A17.** Reaching the ceiling is recorded and is distinguishable from a satisfied stop condition
+      (FR24).
+- [ ] **A18.** The loop is deterministic over repeated execution (FR25, NFR4).
+- [ ] **A19.** The runtime makes no provider call and dispatches no tool; a missing host service refuses by
+      name rather than substituting (G15, FR26, FR27, NFR11).
+- [ ] **A20.** A half-materializable call site is refused **whole**, naming the missing half; both halves
+      are computed before any edit is emitted (G14, FR30, FR31, NFR10).
+- [ ] **A21.** `single-shot` emits nothing, materializes in every language, and is never reported as
+      refused (G16, FR32).
+- [ ] **A22.** `react-loop`, `plan-execute` and `critic-loop` are refused at every call site, each naming
+      the host service a generated module may not supply (FR33).
+- [ ] **A23.** The emitted artifact imports only the standard library, regenerates byte-identically, ships
+      in the same patch as the call-site edit, and reads its params as data (FR34–FR37, NFR12).
+- [ ] **A24.** Coverage is a read of the materializer table; the coverage answer and the transform's answer
+      agree for every cell, and every uncovered cell still returns a typed `unsafeRewrite` (G16, FR38–FR40,
+      NFR13).
+- [ ] **A25.** Every `config_hash` minted under 18a reproduces bit-for-bit after the rewriter lands, and a
+      stored authored configuration materializes without being re-authored (FR41, NFR14).
+- [ ] **A26.** A user can select, parameterize and clear a node's harness strategy; clearing reproduces the
+      prior hash byte-identically; the per-cell boundary and the added per-run cost are stated before the
+      choice; the change claims nothing until verification runs; and exactly one transform entry point and
+      one admissibility gate serve both origins (G17, FR42–FR45, NFR15).

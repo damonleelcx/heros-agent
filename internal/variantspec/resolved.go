@@ -40,6 +40,26 @@ type ResolvedConfig struct {
 	IRVersion string         `json:"ir_version"`
 	Nodes     []ResolvedNode `json:"nodes"`
 	Edges     []ResolvedEdge `json:"edges"`
+	// HarnessGroups are the resolved group harnesses — a strategy plus the ordered edge set it loops over
+	// (P18 FR15, decisions.md D-5). ADDITIVE and omitempty with a nil-when-empty slice: a configuration
+	// that declares none emits NO `harness_groups` key, so its canonical bytes are byte-identical to a
+	// pre-P18 configuration and the frozen golden vectors keep reproducing.
+	//
+	// It sits at the CONFIG level rather than on a node because its scope is a set of edges, and putting a
+	// multi-node fact on one of those nodes would make the group's identity depend on which node was
+	// picked to carry it.
+	HarnessGroups []ResolvedHarnessGroup `json:"harness_groups,omitempty"`
+}
+
+// ResolvedHarnessGroup is one resolved group harness: the strategy projection and the ordered edge set it
+// runs over. Both participate in config_hash — a loop over a different edge set is a different
+// computation, and so is the same edge set under a different strategy.
+//
+// 🚫 The edges are the ones the SPEC declared, copied verbatim and never re-derived (D-5). Their order is
+// preserved rather than sorted: a loop over a→b→c is not a loop over c→b→a.
+type ResolvedHarnessGroup struct {
+	Harness ResolvedHarness `json:"harness"`
+	Edges   []ResolvedEdge  `json:"edges"`
 }
 
 // ResolvedNode is one static definition with every dimension resolved to an exact value.
@@ -69,6 +89,84 @@ type ResolvedNode struct {
 	// frozen bytes. This field is new, so its ABSENCE is what must stay byte-compatible — achieved by
 	// omission, not by an empty object.
 	Bindings map[string]ResolvedBinding `json:"bindings,omitempty"`
+	// ToolSelection is the kept subset of the node's discovered tools (P14, DimTools; decisions.md
+	// D-14.2). ADDITIVE and omitempty with a nil-when-empty slice: a node that prunes nothing emits NO
+	// `tool_selection` key, so its canonical bytes are byte-identical to a pre-P14 node and the frozen
+	// golden vectors keep reproducing — the same discipline Bindings above follows.
+	//
+	// It is SORTED, unlike SkillRefs. That asymmetry is the contract, not an inconsistency: skill order
+	// is identity-bearing because the call site binds them in that order, while a tool selection denotes
+	// a SET — two specs keeping the same tools in different authoring order describe one configuration
+	// and must share a config_hash, or every eval comparison fragments on a formatting difference.
+	ToolSelection []string `json:"tool_selection,omitempty"`
+	// ContextDropTolerance is the node's frozen drop tolerance (P16 task 1.5, decisions.md D-2).
+	// ADDITIVE and omitempty with a NIL-when-absent pointer: a node that declares no tolerance emits NO
+	// `context_drop_tolerance` key, so its canonical bytes are byte-identical to a pre-P16 node and the
+	// frozen golden vectors keep reproducing — the third application of the discipline Bindings and
+	// ToolSelection above follow.
+	//
+	// When set it participates in config_hash additively (JCS includes the present key), which is the
+	// correct identity: two variants that differ only in the drop a node tolerates are different
+	// configurations, because the second admits proposals the first rejects.
+	ContextDropTolerance *float64 `json:"context_drop_tolerance,omitempty"`
+	// Memory is the node's resolved memory strategy — what it carries ACROSS invocations (P17 task 4.2,
+	// decisions.md D3). ADDITIVE and omitempty with a NIL-when-absent pointer: a node with no memory
+	// strategy emits NO `memory` key, so its canonical bytes are byte-identical to a pre-P17 node and the
+	// frozen golden vectors keep reproducing — the fourth application of the discipline Bindings,
+	// ToolSelection and ContextDropTolerance above follow.
+	//
+	// 🔴 `none` ≡ ABSENT. The identity strategy resolves to a NIL pointer here, not to
+	// `{"strategy":"none"}`, so a node that explicitly selects `none` and a node that never mentioned
+	// memory produce the same bytes and the same config_hash. That equality is what lets a user back out
+	// of an authored memory change with no residue in the hash, and it is asserted rather than assumed
+	// (TestNoneMemoryHashesAsAbsent).
+	//
+	// When present it participates in config_hash structurally — JCS sorts the params keys, so the hash
+	// depends on the params SET rather than their authoring order, and it changes iff the strategy or a
+	// param changes. That is the correct identity: two variants differing in what a node remembers between
+	// turns are different configurations, whatever else they share.
+	//
+	// 🚫 It is NOT the memory registry's version_id. Like every other field here this is a PROJECTION —
+	// config_hash denotes a CONFIGURATION, not a set of registry rows, so two specs pinning different
+	// entries with the same strategy and params describe one computation and must share a hash.
+	Memory *ResolvedMemory `json:"memory,omitempty"`
+	// Harness is the node's resolved harness strategy — the control loop its call runs inside (P18 task
+	// 3.4, decisions.md D-3, D-8). ADDITIVE and omitempty with a NIL-when-absent pointer: a node with no
+	// harness strategy emits NO `harness` key, so its canonical bytes are byte-identical to a pre-P18 node
+	// and the frozen golden vectors keep reproducing — the fifth application of the discipline Bindings,
+	// ToolSelection, ContextDropTolerance and Memory above follow.
+	//
+	// 🔴 `single-shot` with no params ≡ ABSENT. The identity strategy resolves to a NIL pointer here, not
+	// to `{"strategy":"single-shot"}`, so a node that explicitly selects it and a node that never mentioned
+	// a harness produce the same bytes and the same config_hash. That equality is what lets a user back out
+	// of an authored harness change with no residue in the hash, and it is asserted rather than assumed
+	// (TestSingleShotHarnessHashesAsAbsent).
+	//
+	// 🔴 It is a PROJECTION — `{strategy, params}` — and NOT the harness registry's version_id, which is
+	// what task 3.4 first said (decisions.md D-8 records the correction). config_hash denotes a
+	// CONFIGURATION, not a set of registry rows: two specs pinning different harness entries that spell the
+	// same strategy with the same params describe ONE computation and must share a hash. A version_id here
+	// would fork one configuration per entry, permanently, and a hash is not revisable once rows key on it.
+	Harness *ResolvedHarness `json:"harness,omitempty"`
+}
+
+// ResolvedHarness is a node's resolved harness strategy: which strategy, and the params it runs with. The
+// hashed projection of a harness registry entry — the strategy NAME and the params, never the version_id,
+// for the reason ResolvedNode's doc comment gives.
+//
+// 🚫 It carries no turn count, no stop reason and no trace. Those are properties of a RUN, and hashing one
+// would give a single configuration as many hashes as it had outcomes (decisions.md D-13).
+type ResolvedHarness struct {
+	Strategy string         `json:"strategy"`
+	Params   map[string]any `json:"params"`
+}
+
+// ResolvedMemory is a node's resolved memory strategy: which strategy, and the params it runs with. This
+// is the hashed projection of a memory registry entry — the strategy NAME and the params, never the
+// version_id, for the reason ResolvedNode's doc comment gives.
+type ResolvedMemory struct {
+	Strategy string         `json:"strategy"`
+	Params   map[string]any `json:"params"`
 }
 
 // ResolvedBinding is one slot's resolved binding: its kind and value, recorded explicitly (never
@@ -136,6 +234,10 @@ func (rc ResolvedConfig) normalized() ResolvedConfig {
 	}
 	out.Edges = make([]ResolvedEdge, 0, len(rc.Edges))
 	out.Edges = append(out.Edges, rc.Edges...)
+	// 🔴 NOT normalized to an empty slice. Unlike Edges above — whose emptiness is part of the frozen
+	// golden bytes — this field is new, so its ABSENCE is what must stay byte-compatible, and absence is
+	// achieved by leaving it nil (omitempty), never by an empty array.
+	out.HarnessGroups = rc.HarnessGroups
 	return out
 }
 

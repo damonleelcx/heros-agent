@@ -1,0 +1,26 @@
+{
+  "version": "0.20.0-rc.1",
+  "macos": {
+    "GOOS": "darwin",
+    "CodeSigned": false,
+    "Notarized": false,
+    "Publisher": "",
+    "Identity": ""
+  },
+  "windows": {
+    "GOOS": "windows",
+    "CodeSigned": false,
+    "Notarized": false,
+    "Publisher": "",
+    "Identity": ""
+  },
+  "signed_manifest": true,
+  "signing_key_id": "heros-release-2026b",
+  "assets": [
+    "heros-0.20.0-rc.1-darwin-amd64",
+    "heros-0.20.0-rc.1-darwin-arm64",
+    "heros-0.20.0-rc.1-linux-amd64",
+    "heros-0.20.0-rc.1-linux-arm64",
+    "heros-0.20.0-rc.1-windows-amd64.exe"
+  ]
+}

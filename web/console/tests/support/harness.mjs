@@ -22,6 +22,7 @@ import { join } from "node:path";
 import { createServer } from "node:http";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
+import { existsSync } from "node:fs";
 
 /** TENANT is the tenant the test assertion resolves to. */
 export const TENANT = "tenant-hermes";
@@ -85,6 +86,50 @@ async function freePort() {
 }
 
 /**
+ * Two guards, because a `.next` fails these tests in two different ways and each names a different
+ * fix. requireProductionBuild catches NO build (run `npm run build`); assertProductionBuild catches a
+ * build a dev server has since clobbered (stop `next dev`, then rebuild). Both were written
+ * independently against the same afternoon-costing symptom — ~100 sign-in assertion failures for a
+ * sign-in page that is entirely correct — and neither subsumes the other, so both stay.
+ *
+ * requireProductionBuild fails LOUD when `.next` is not a usable production build.
+ *
+ * # Why this check earns its place
+ *
+ * Without it, a missing or clobbered build produces the single most misleading failure this suite can
+ * emit. `next start` boots, answers `/api/health`, and then serves pages assembled from a half-written
+ * manifest — so every test that signs in fails with "the sign-in page rendered no form action". That
+ * sentence sends the reader to `signin/page.tsx`, where the form and its `action` are plainly present
+ * and correct, and there is nothing to find. A hundred tests then report a defect that does not exist.
+ *
+ * The clobbering cause is not obvious either: `next dev` and `next start` share ONE `.next` directory,
+ * so a dev server left running anywhere against this console rewrites the build these tests depend on,
+ * continuously, from another terminal. That is why the message below names it — the fix is "stop the dev
+ * server", and no amount of reading the sign-in page reveals that.
+ *
+ * A precondition reported as a precondition costs one line; reported as a hundred assertion failures it
+ * costs an afternoon.
+ */
+function requireProductionBuild() {
+  const buildID = join(process.cwd(), ".next", "BUILD_ID");
+  if (existsSync(buildID)) return;
+  throw new Error(
+    [
+      `no production build at ${buildID}`,
+      "",
+      "These tests run `next start`, which needs a build that `next dev` does not produce.",
+      "  1. run `npm run build` in web/console",
+      "  2. make sure NO `next dev` is running against this directory - dev and start share one",
+      "     .next, so a dev server rewrites the build out from under this suite while it runs",
+      "     (check with: pgrep -fl 'next dev')",
+      "",
+      "Failing here on purpose: without this check the suite reports ~100 sign-in assertion failures",
+      "for a sign-in page that is entirely correct.",
+    ].join("\n"),
+  );
+}
+
+/**
  * assertProductionBuild refuses to run against a `.next` a dev server has written into.
  *
  * # Why this is a hard refusal and not a warning
@@ -108,12 +153,12 @@ async function assertProductionBuild() {
   throw new Error(
     "`.next` has been written by a dev server, so these tests would run against a DEVELOPMENT build " +
       "under production settings and fail at sign-in for reasons unrelated to what they assert.\n" +
-      "  Stop `next dev`, then:  rm -rf .next && npm run build && npm test",
-  );
+      "  Stop `next dev`, then:  rm -rf .next && npm run build && npm test",  );
 }
 
 /** startConsole starts `next start` on a free port, wired to `platformBase`. */
 export async function startConsole(platformBase, extraEnv = {}, attempt = 0) {
+  requireProductionBuild();
   await assertProductionBuild();
   const port = await freePort();
   const child = spawn("npx", ["next", "start", "--port", String(port)], {

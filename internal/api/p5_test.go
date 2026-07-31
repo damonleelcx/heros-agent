@@ -346,3 +346,46 @@ func (b bigSource) IR(id string) (*discovery.IR, bool) {
 	}
 	return b.ir, true
 }
+
+// P15 task 4.3 — the P5 commit path's wiring outcome, corrected.
+//
+// The first version of this test asserted that ANY reorder commits as `rejected_transform`. That was
+// the over-broad gate CI caught: the engine was comparing the spec's Order against the IR's
+// node-EMISSION order and calling every difference a rearrangement.
+//
+// The truthful rule: the source states a relative order between two calls only when it ORDERS them —
+// consecutive sibling statements in one block. This stub IR has no tree behind it at all, so nothing
+// states an order and a reorder is a DECLARATION, not a rewire. What is still refused here is a spec
+// whose node SET differs from the source's: the call the spec dropped is demonstrably still there, so
+// its config_hash would be scored against a program that runs one more node than the graph records.
+func TestP5Commit_WiringOutcomes(t *testing.T) {
+	s := newP5Server(t)
+	commit := func(body string) commitResponse {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, "/api/p5/workflows/wf/commit", strings.NewReader(body))
+		rec := httptest.NewRecorder()
+		s.Mux.ServeHTTP(rec, req)
+		var c commitResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &c); err != nil {
+			t.Fatalf("decode: %v (%s)", err, rec.Body.String())
+		}
+		return c
+	}
+
+	// A reorder of calls nothing orders: committed, because there is no source order to contradict.
+	if c := commit(`{"parent_variant_id":"wf:root","order":["C","B","A"],"edges":[]}`); c.Status != "committed" {
+		t.Fatalf("an ordering the source does not state must not be refused, got %q (%s)", c.Status, c.BuildError)
+	}
+
+	// A PRUNE: the spec drops node C. Still refused, still naming the wiring axis, still no diff.
+	c := commit(`{"parent_variant_id":"wf:root","order":["A","B"],"edges":[]}`)
+	if c.Status != "rejected_transform" {
+		t.Fatalf("dropping a node the source still contains must be refused, got %q", c.Status)
+	}
+	if !strings.Contains(c.BuildError, "wiring") {
+		t.Fatalf("the refusal must name the wiring axis, got %q", c.BuildError)
+	}
+	if c.Diff != "" || c.DiffHash != "" {
+		t.Fatalf("a refused commit must produce no diff, got %q", c.Diff)
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -63,15 +64,44 @@ func (p *Patch) IsEmpty() bool { return len(p.Diff) == 0 }
 // revision is the caller that must guarantee the tree matches it.
 // It dispatches on the workflow's LANGUAGE (ADR-003 decision 1). See engines.
 func Generate(r *variantspec.Resolved, root string) (*Patch, error) {
+	return generate(r, nil, root)
+}
+
+// generate is the one implementation both entrypoints share. `spec` is optional: the P2 submit path
+// (Generate) has only the resolved projection, while the P5 commit path (GenerateTransform) also has
+// the authored spec — and the spec is where a pure re-arrangement lives, since it changes no override
+// and therefore leaves no trace in `Overrides`. Passing it through rather than duplicating the wiring
+// decision in two callers is what keeps ONE gate: a second copy is a second thing to keep true.
+func generate(r *variantspec.Resolved, spec *variantspec.VariantSpec, root string) (*Patch, error) {
 	if r == nil {
 		return nil, fmt.Errorf("transform: Generate requires a resolved spec")
 	}
+	// 🔴 P15 task 4.2 / 15.1 — before anything is indexed, read, or rewritten: the wiring is either the
+	// source's own, or the ONE shape this engine can materialize (an adjacent transposition), or it is
+	// refused. Deciding here rather than after the per-node loop is what makes it impossible to emit a
+	// partial diff that rewrites the contents of a graph nobody rewired.
 	eng, err := engineFor(r.Language)
 	if err != nil {
 		return nil, err
 	}
 	sites, err := eng.index(root)
 	if err != nil {
+		return nil, err
+	}
+	// 🔴 P15 task 4.2 / 15.1 — the wiring decision, before any file is read or rewritten: the spec
+	// either wires what the source wires, or asks for the ONE shape this engine can materialize (an
+	// adjacent transposition of two sibling statements), or is refused. It runs after indexing because
+	// the only evidence of a source-stated ORDER is where the call sites actually are (see checkWiring);
+	// it still runs before any edit, so a refused wiring cannot leave a partial diff behind.
+	plan, err := checkWiring(r, spec, sites, root)
+	if err != nil {
+		return nil, err
+	}
+	// 🔴 P18 task 5.3 — a GROUP harness, decided here for the same reason the wiring is: its scope is a
+	// set of edges rather than a node, so dispatching it from whichever node came first in the loop below
+	// would make its refusal depend on iteration order. Deciding before anything is read or rewritten is
+	// what makes it impossible to leave a partial diff behind for a group that was going to be refused.
+	if err := checkGroupHarness(r); err != nil {
 		return nil, err
 	}
 
@@ -93,6 +123,17 @@ func Generate(r *variantspec.Resolved, root string) (*Patch, error) {
 					languageDisplay(r.Language), root)}
 		}
 
+		// P13 Decision 7 — a parameter tune (same model, changed params) has no call-site rewriter. In
+		// BOUND mode it is materialized by GenerateBoundArtifacts (as data in the binding document), so
+		// there is nothing to rewrite inline here — skip it. In INLINE mode it is REFUSED with a named
+		// cause, never silently dropped (task 3.6).
+		if override.ParamTune {
+			if r.ApplyModes[nodeID].Mode() == variantspec.ApplyBound {
+				continue
+			}
+			return nil, refuseInlineParamTune(nodeID)
+		}
+
 		for _, dim := range override.Dimensions() {
 			src, err := readFile(root, site.fileRel)
 			if err != nil {
@@ -112,9 +153,63 @@ func Generate(r *variantspec.Resolved, root string) (*Patch, error) {
 			for l := site.lineStart; l <= site.lineEnd; l++ {
 				allowedLines[site.fileRel][l] = true
 			}
+			// 🔴 A BINDING-SITE edit lands outside the call's own lines by construction: the SDK bound the
+			// value in an earlier statement (P13 FR52). It is admitted as its OWN line and nothing more —
+			// the window is not widened to the enclosing function, and a non-binding edit on that line
+			// still fails. New edit class, not a loosened gate (decisions.md D-4's discipline).
+			for _, e := range edits {
+				if e.bindingSite() {
+					allowedLines[site.fileRel][lineOf(src, e.Start)] = true
+				}
+			}
 			touched = append(touched, TouchedDimension{
 				NodeID: nodeID, Dim: string(dim), File: site.fileRel, Line: site.lineStart})
 		}
+	}
+
+	// P18 §9.1 — the memory import. It is added after the per-node loop, and per FILE rather than per
+	// node, because that is what it is: two memory nodes in one file need ONE import, and emitting it
+	// from the per-site materializer would produce a duplicate the gate then rejects — a refusal caused
+	// by our own emission rather than by anything the user wrote.
+	//
+	// 🔴 It also SHIFTS attribution. Every recorded line below the insertion point moves down by one in
+	// the transformed file, and the build gate reads transformed-file coordinates (it compiles the
+	// transformed tree). Adjusting here keeps a compiler diagnostic attributable to the node that caused
+	// it, which is one of the two things the line-count invariant existed to protect.
+	for _, rel := range sortedKeys(editsByFile) {
+		for _, need := range generatedImportsFor(editsByFile[rel]) {
+			src, err := readFile(root, rel)
+			if err != nil {
+				return nil, err
+			}
+			imp, err := need.build(src, r.Language, root)
+			if err != nil {
+				return nil, err
+			}
+			editsByFile[rel] = append(editsByFile[rel], imp)
+			impLine := lineOf(src, imp.Start)
+			if allowedLines[rel] == nil {
+				allowedLines[rel] = map[int]bool{}
+			}
+			allowedLines[rel][impLine] = true
+			for i := range touched {
+				if touched[i].File == rel && touched[i].Line >= impLine {
+					touched[i].Line++
+				}
+			}
+		}
+	}
+
+	// P15 15c task 15.2 — the wiring transposition, emitted into the SAME patch as the content edits so
+	// one revert takes both. It is added after the per-node loop because its admissibility depends on the
+	// file's statements, not on any override, and because a wiring change that cannot be materialized
+	// must refuse before a partial patch exists.
+	if plan != nil {
+		swapTouched, err := planSwapEdits(plan, sites, root, r.Language, editsByFile)
+		if err != nil {
+			return nil, err
+		}
+		touched = append(touched, swapTouched)
 	}
 
 	patch := &Patch{
@@ -137,6 +232,46 @@ func Generate(r *variantspec.Resolved, root string) (*Patch, error) {
 		}
 		patch.Files[rel] = out
 		diffs = append(diffs, unifiedDiff(rel, src, out, editsByFile[rel])...)
+	}
+
+	// P18 §2 — the generated memory module and its params document, emitted into the SAME patch as the
+	// call-site edits so one revert restores all of it. Emitted only when a call site was actually
+	// rewritten for memory: a module in a customer's tree that nothing calls is dead code we put there.
+	if memoryWasMaterialized(editsByFile) {
+		memFiles, err := GenerateMemoryArtifacts(r, r.Language)
+		if err != nil {
+			return nil, err
+		}
+		for _, path := range sortedFileKeys(memFiles) {
+			if _, exists := patch.Files[path]; exists {
+				return nil, fmt.Errorf("transform: the memory artifact would overwrite %s, which this patch "+
+					"already changes; a generated file must never clobber the customer's own source", path)
+			}
+			patch.Files[path] = memFiles[path]
+			diffs = append(diffs, newFileDiff(path, memFiles[path])...)
+			patch.Touched = append(patch.Touched, TouchedDimension{
+				Dim: string(variantspec.DimMemory), File: path, Line: 1})
+		}
+	}
+
+	// P18 §11 — the generated harness module and its params document, on exactly the same terms as the
+	// memory artifact above: same patch as the call-site edits so one revert restores all of it, and
+	// emitted only when a call site was actually rewritten.
+	if harnessWasMaterialized(editsByFile) {
+		harnessFiles, err := GenerateHarnessArtifacts(r, r.Language)
+		if err != nil {
+			return nil, err
+		}
+		for _, path := range sortedFileKeys(harnessFiles) {
+			if _, exists := patch.Files[path]; exists {
+				return nil, fmt.Errorf("transform: the harness artifact would overwrite %s, which this patch "+
+					"already changes; a generated file must never clobber the customer's own source", path)
+			}
+			patch.Files[path] = harnessFiles[path]
+			diffs = append(diffs, newFileDiff(path, harnessFiles[path])...)
+			patch.Touched = append(patch.Touched, TouchedDimension{
+				Dim: string(variantspec.DimHarness), File: path, Line: 1})
+		}
 	}
 
 	patch.Diff = diffs
@@ -163,6 +298,26 @@ func Generate(r *variantspec.Resolved, root string) (*Patch, error) {
 // answer it — but it is NOT optional, and a language whose engine omitted it would be caught by
 // engineFor rather than quietly skipping the check (see langEngine).
 func gateMinimal(rel string, src, out []byte, edits []edit, allowed map[int]bool, reparse reparser) error {
+	// A WIRING TRANSPOSITION is a different class of edit and gets a different — stronger — check
+	// (P15 15c, decisions.md D-4). It is not routed through the rules below because it would fail the
+	// first of them by construction: a swap moves whole lines, and every rule below exists to forbid
+	// exactly that for a VALUE rewrite. Relaxing them instead would have removed the check from every
+	// rewriter in the package, forever, to serve one caller.
+	if isSwap(edits) {
+		if err := gateSwapPermutation(rel, src, out, edits); err != nil {
+			return err
+		}
+		return reparseOrReject(rel, src, out, edits, reparse)
+	}
+	// A MEMORY MATERIALIZATION is the third edit class (P18 §9.1). It is routed here for the same reason
+	// a swap is: it would fail the line-count rule below by construction, because it adds an import line.
+	// Its own rule is stricter, not laxer — see gateMemoryImport.
+	if isGeneratedImport(edits) {
+		if err := gateGeneratedImports(rel, src, out, edits, allowed); err != nil {
+			return err
+		}
+		return reparseOrReject(rel, src, out, edits, reparse)
+	}
 	for line := range changedLines(src, edits) {
 		if !allowed[line] {
 			e := edits[0]
@@ -196,11 +351,274 @@ func gateMinimal(rel string, src, out []byte, edits []edit, allowed map[int]bool
 					rel, from, to, to-from)}
 		}
 	}
+	return reparseOrReject(rel, src, out, edits, reparse)
+}
+
+// reparseOrReject is the "the result still parses" half of the gate, shared by both edit classes. A
+// splice that produced invalid source is rejected here rather than at the build gate, because this one
+// can name the node and the dimension.
+func reparseOrReject(rel string, src, out []byte, edits []edit, reparse reparser) error {
 	if err := reparse(rel, src, out); err != nil {
 		e := edits[0]
 		return &RewriteError{NodeID: e.NodeID, Dim: e.Dim, Err: ErrUnsafeRewrite, Detail: err.Error()}
 	}
 	return nil
+}
+
+// gateGeneratedImports is the generated-module materializations' gate (P18 §9.1, widened by §11
+// to admit one import line per generated module rather than exactly one overall — so a node carrying
+// BOTH a memory and a harness materialization passes without either rule being loosened).
+//
+// 🔴 It asserts the one property that makes an import insertion reviewable without reading the codemod:
+// THE OUTPUT IS THE INPUT'S LINES WITH EXACTLY ONE IMPORT LINE INSERTED, and every other difference
+// confined to a targeted call-site line. Five checks, each catching a different way of being wrong:
+//
+//	exactly one import edit    two would leave a duplicate import, or an import for a module the file
+//	                           does not call
+//	it is an INSERTION         Start == End: it replaces nothing, so it cannot delete code by claiming
+//	                           to add some
+//	its text is ONE import     a single `import <name>` line, matched against a pattern. This is what
+//	                           stops the class being a general "insert arbitrary lines" escape hatch —
+//	                           the thing a future contributor would most naturally reach for it as.
+//	line count +1 exactly      not +2, not 0; the shift attribution accounts for is the shift that
+//	                           happened
+//	lines match, minus one     removing the inserted line from the output must reproduce the input
+//	                           EXCEPT on allowed lines. This is the check that makes the class safe: if
+//	                           it holds, nothing outside the targeted call site changed, and the one
+//	                           thing that moved is a line whose content the previous check pinned.
+//
+// A rewriter cannot satisfy these by accident. A reviewer who trusts only this assertion still knows the
+// change added one import and altered nothing else outside the call site it named.
+func gateGeneratedImports(rel string, src, out []byte, edits []edit, allowed map[int]bool) error {
+	blame := edits[0]
+	fail := func(format string, args ...any) error {
+		return &RewriteError{NodeID: blame.NodeID, Dim: blame.Dim, Err: ErrUnsafeRewrite,
+			Detail: fmt.Sprintf(format, args...)}
+	}
+
+	var imports []edit
+	seen := map[string]bool{}
+	for _, e := range edits {
+		if !e.Import {
+			continue
+		}
+		// 🔴 DISTINCT modules only. Two edits inserting the same import would leave a duplicate; the
+		// count below admits one line per generated module, which is what lets a node carrying BOTH a
+		// memory and a harness materialization pass without either gate being loosened.
+		if seen[e.New] {
+			return fail("%s would gain the import %q twice; each generated module is imported once", rel, e.New)
+		}
+		seen[e.New] = true
+		imports = append(imports, e)
+	}
+	if len(imports) == 0 {
+		return fail("%s was routed through the generated-import gate with no import edit", rel)
+	}
+	insertedAt := map[int]bool{}
+	for _, imp := range imports {
+		if imp.Start != imp.End {
+			return fail("the generated import edit for %s replaces bytes [%d,%d) instead of inserting; this "+
+				"class may add a line and may not remove one", rel, imp.Start, imp.End)
+		}
+		if !memoryImportLine.MatchString(imp.New) {
+			return fail("the generated import edit for %s would insert %q, which is not a single import "+
+				"line. This class exists to add ONE import per generated module; admitting arbitrary text "+
+				"would make it the insert-anything escape hatch the untargeted-line rule exists to prevent",
+				rel, imp.New)
+		}
+		insertedAt[lineOf(src, imp.Start)-1] = true
+	}
+
+	before, after := splitLines(src), splitLines(out)
+	if len(after) != len(before)+len(imports) {
+		return fail("the materialization changed %s from %d line(s) to %d; this class adds exactly one "+
+			"import line per generated module (%d here), and attribution below the insertion is shifted by "+
+			"exactly that", rel, len(before), len(after), len(imports))
+	}
+
+	// Where the lines landed, in the OUTPUT's coordinates. Every edit inserted at a line boundary, and
+	// several may share one — applyEdits emits them in order at the same offset, so the inserted block
+	// starts at that boundary and is as long as the number of edits that chose it.
+	var insertedIdx []int
+	for k := range insertedAt {
+		insertedIdx = append(insertedIdx, k)
+	}
+	sort.Ints(insertedIdx)
+	var removed []int
+	shift := 0
+	for _, k := range insertedIdx {
+		n := 0
+		for _, imp := range imports {
+			if lineOf(src, imp.Start)-1 == k {
+				n++
+			}
+		}
+		for i := 0; i < n; i++ {
+			idx := k + shift + i
+			if idx < 0 || idx >= len(after) {
+				return fail("a generated import for %s landed outside the file", rel)
+			}
+			if !memoryImportLine.MatchString(after[idx] + "\n") {
+				return fail("the materialization of %s did not put its import where it claimed (line %d is "+
+					"%q); the shift attribution relies on knowing which line moved", rel, idx+1, after[idx])
+			}
+			removed = append(removed, idx)
+		}
+		shift += n
+	}
+
+	// Remove the inserted lines and compare what is left against the input, line for line.
+	drop := map[int]bool{}
+	for _, i := range removed {
+		drop[i] = true
+	}
+	reduced := make([]string, 0, len(before))
+	for i, line := range after {
+		if drop[i] {
+			continue
+		}
+		reduced = append(reduced, line)
+	}
+	if len(reduced) != len(before) {
+		return fail("removing %s's inserted import line(s) leaves %d line(s) against %d in the input",
+			rel, len(reduced), len(before))
+	}
+	for i := range before {
+		if reduced[i] == before[i] {
+			continue
+		}
+		if !allowed[i+1] {
+			return fail("the materialization would change %s:%d, which is outside the targeted call site; "+
+				"adding an import does not license editing anything else", rel, i+1)
+		}
+	}
+	return nil
+}
+
+// memoryImportLine is the ONLY text this edit class may insert. Anchored at both ends and permitting a
+// single module name, because a looser pattern is how a class meant for one import becomes a way to
+// insert arbitrary source past the minimality gate.
+var memoryImportLine = regexp.MustCompile(`^import (?:[a-zA-Z_][a-zA-Z0-9_]*|"[^"\n]+")\n$`)
+
+// gateSwapPermutation is the wiring transposition's gate (P15 15c task 12.2, FR18).
+//
+// 🔴 It asserts the one property that makes a statement swap reviewable without reading the codemod:
+// THE OUTPUT IS THE INPUT'S LINES, REORDERED. Three checks, and each catches a different way of being
+// wrong:
+//
+//	line COUNT unchanged      a move that dropped or duplicated a line
+//	line MULTISET unchanged   a move that also EDITED a line while carrying it — re-indentation, a
+//	                          trailing-comma fix, a "harmless" whitespace normalisation. This is the
+//	                          check that makes the class safe: if it holds, not one character of the
+//	                          file's content changed, only the order of its lines.
+//	changed lines ⊆ blocks    a move that disturbed code outside the two statements it claimed to swap
+//
+// A rewriter cannot satisfy these by accident, and a reviewer who trusts only this assertion still
+// knows the change cannot have altered what any line SAYS.
+func gateSwapPermutation(rel string, src, out []byte, edits []edit) error {
+	blame := edits[0]
+	fail := func(format string, args ...any) error {
+		return &RewriteError{NodeID: blame.NodeID, Dim: blame.Dim, Err: ErrUnsafeRewrite,
+			Detail: fmt.Sprintf(format, args...)}
+	}
+
+	// 🔴 THE INVARIANT, in ONE implementation for every language (P15 20.5, decisions.md D-5 part 2).
+	//
+	// Two statements of the same rule. The LINE multiset is the stricter special case, and it is checked
+	// first because where it applies — Go and Python always, and every line-aligned brace statement — its
+	// failure message names the line a reader can go and look at. The STATEMENT multiset is the general
+	// form: the exchanged byte ranges must come back unedited, which stays true when statements stop
+	// being line-aligned (a TypeScript chain, a Rust expression-statement sharing a line).
+	//
+	// 🚫 Choosing the general formulation BEFORE the first non-line-aligned resolver landed is deliberate:
+	// a per-language relaxation is indistinguishable, in every passing run, from a per-language
+	// correctness, and the weakened one would be the least reviewed. Neither check is per language.
+	before, after := splitLines(src), splitLines(out)
+	if len(before) != len(after) {
+		return fail("the wiring swap changed %s from %d line(s) to %d: a transposition moves lines, it "+
+			"never adds or removes one", rel, len(before), len(after))
+	}
+	if missing, extra, ok := lineMultisetDiff(before, after); !ok {
+		return fail("the wiring swap did not preserve %s's lines: it would drop %q and introduce %q. A "+
+			"transposition may REORDER lines and may not edit one while moving it", rel, missing, extra)
+	}
+	if missing, extra, ok := statementMultisetDiff(src, out, edits); !ok {
+		return fail("the wiring swap did not preserve %s's statements: it would drop %q and introduce %q. "+
+			"A transposition may REORDER what the author wrote and may not edit any of it while moving it",
+			rel, missing, extra)
+	}
+
+	// Every changed line must lie inside one of the swapped blocks. The blocks are the edits' own byte
+	// ranges, in ORIGINAL coordinates, which is the same space changedLines reports in.
+	inBlock := map[int]bool{}
+	for _, e := range edits {
+		for l := lineOf(src, e.Start); l <= lineOf(src, maxInt(e.Start, e.End-1)); l++ {
+			inBlock[l] = true
+		}
+	}
+	for i := range before {
+		if before[i] == after[i] {
+			continue
+		}
+		if !inBlock[i+1] { // changedLines and lineOf are 1-based
+			return fail("the wiring swap changed %s:%d, which is outside both swapped statements; a "+
+				"transposition may only disturb the two blocks it exchanges", rel, i+1)
+		}
+	}
+	return nil
+}
+
+// statementMultisetDiff reports whether the exchanged STATEMENTS survived the swap unedited: every
+// block's original bytes must appear in the result exactly as many times as before.
+//
+// This is the general form of the invariant. It is checked first because it is the one that stays true
+// when statements stop being line-aligned, and because its failure message names a STATEMENT — which is
+// what the author moved — rather than a line.
+func statementMultisetDiff(src, out []byte, edits []edit) (missing, extra string, ok bool) {
+	for _, e := range edits {
+		if e.Start < 0 || e.End > len(src) || e.Start > e.End {
+			return "", "", false
+		}
+		block := string(src[e.Start:e.End])
+		if strings.Count(string(out), block) < strings.Count(string(src), block) {
+			return block, e.New, false
+		}
+	}
+	return "", "", true
+}
+
+// lineMultisetDiff reports whether two line slices are permutations of each other, and if not, one
+// concrete line from each side of the difference — a message that names the offending line is what
+// turns a failed invariant into something a person can act on.
+func lineMultisetDiff(before, after []string) (missing, extra string, ok bool) {
+	count := make(map[string]int, len(before))
+	for _, l := range before {
+		count[l]++
+	}
+	for _, l := range after {
+		count[l]--
+	}
+	// Sorted iteration: the reported line must not depend on map ordering, or the same defect produces
+	// a different message on every run and nobody can tell two failures apart.
+	keys := make([]string, 0, len(count))
+	for k, v := range count {
+		if v != 0 {
+			keys = append(keys, k)
+		}
+	}
+	if len(keys) == 0 {
+		return "", "", true
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		if count[k] > 0 && missing == "" {
+			missing = k
+		}
+		if count[k] < 0 && extra == "" {
+			extra = k
+		}
+	}
+	return missing, extra, false
 }
 
 // reparser is gateMinimal's "the result still parses" assertion for one language.
