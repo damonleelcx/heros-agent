@@ -37,6 +37,85 @@ you ack**; and **corrections are additive — an error is fixed by a credit/refu
 Two more come from P7 and are preserved, not re-opened: **the platform holds provider handles only, never card
 data**, and **gainshare bills only verified, merged savings.**
 
+## Ratification — the three one-way doors, decided before any code (task 1.1)
+
+Three of the eight decisions below are **one-way doors**: cheap to hold now, expensive-to-impossible to
+recover later. They are ratified here, jointly by Sales Operations (who carries the commercial
+consequence) and the System Designer (who carries the architectural one), *before* implementation
+starts — which is the only moment ratification is worth anything.
+
+| Door | Ratified as | What "later" costs if it is not held now |
+|---|---|---|
+| **D1** — Stripe behind the existing `Provider` interface; **the interface does not widen** | **Ratified.** `stripe.Provider` satisfies `billing.Provider` byte-for-byte. A second processor is a second implementation, never a re-plumb. | A Stripe-typed billing package makes "add a second/regional processor" a rewrite of every call site. Procurement asks for this *after* the contract is signed, when the rewrite is least affordable. |
+| **D2** — Checkout / Payment Element; **the card never touches the platform** | **Ratified.** Card data goes browser→Stripe. The platform stores a handle, and `account.NewHandle` refuses a Luhn-valid PAN. | A PAN that has been in a log, a span, or a heap dump cannot be un-leaked. PCI scope, once entered, is left by audit, not by a patch. |
+| **D7** — **Opaque price refs**; no price value in code, manifest, or bundle | **Ratified.** A concrete price lives in Stripe; the platform holds `plancfg.PlanConfig.PriceRefs` only. | A price in git is in git forever, every environment becomes a place the number drifts, and every price change becomes a deploy. |
+
+**Why these three and not the other five.** D3/D4/D5/D6/D8 are all *correctness* decisions — get one
+wrong and a test goes red, or an incident teaches it, and the fix is local. These three are *shape*
+decisions: getting one wrong is not caught by a test at all, it is discovered the day someone asks for
+the thing the shape forbids. 八级法则 L2 says decide at the highest level that separates the options and
+do not fall back down for a lower-level convenience; L2 is exactly what a one-way door demands, so they
+are ratified up front rather than deferred to the first PR that trips over them.
+
+Each is enforced structurally, not by review habit — the point of ratifying is that the ratification has
+teeth:
+
+- **D1** — a contract-parity suite runs every caller against both `StubProvider` and `stripe.Provider`,
+  plus an interface-shape test asserting no Stripe type is reachable from `billing.Provider`.
+- **D2** — the BFF mints a Checkout session server-side and no platform route accepts a card field;
+  `account.NewHandle`'s PAN refusal is the second, independent guard.
+- **D7** — the auto-discovering plan-config fence, extended below to the payment UI (task 1.2).
+
+## Plan ↔ `price_ref` is configuration, not git (task 1.2)
+
+The mapping from a plan to its Stripe price is **configuration**: the Stripe price IDs live in the config
+store (and the prices themselves in Stripe, administered by Finance), reached through
+[`plancfg.PlanConfig.PriceRefs`](../../../internal/plancfg/plancfg.go). Nothing in git holds a plan
+catalog or a priced value, and that claim is a *test*, not a paragraph:
+[`plancfg/gitfence_test.go`](../../../internal/plancfg/gitfence_test.go) enumerates the whole git index
+every run.
+
+P21 adds one surface the P7 fence could not have anticipated — **the payment UI**, where a price is most
+tempting to hardcode "just for display". The fence is therefore extended to cover git-tracked payment/
+billing UI sources (`TestNoPricedLiteralInPaymentUI`), and the console keeps its build-time
+`scan-bundle.mjs` price scan over the JavaScript the browser actually downloads. Two layers, because they
+fail differently: the Go fence catches the literal at commit time in any file, the bundle scan catches
+whatever survives a build — including a value that arrived through a dependency.
+
+Both fences are **proven to go red** (`TestPaymentUIPriceDetectorGoesRed`), for the reason P7 states: a
+guard that has never been shown to fire is decoration.
+
+## Commercial honesty (task 1.3)
+
+Money is where a product's claims are cashed, so the billing surface carries the strictest honesty rules
+in the system. Four, each with the failure it prevents:
+
+1. **Plans are named, never priced, in anything the platform ships.** Free / Team / Business / Enterprise.
+   The number is Stripe's and Finance's. A number in a screen, a doc, or a bundle outlives the moment it
+   was true and ships anyway.
+2. **Dunning and refund behavior described in the UI and the docs match Stripe's actual behavior.** The
+   console renders the *mirrored* provider state (D5) — if Stripe says `past_due`, the page says
+   past-due, on Stripe's schedule, with Stripe's grace window. The platform does not describe a dunning
+   policy it does not implement, and it does not recompute one it does not own.
+3. **The phrase "risk is controlled" (风险可控) appears nowhere** — not in the UI, not in the docs, not in
+   a support reply. The honest form is *risk is observable*: what the system can actually promise is that
+   every charge is idempotent, every correction is additive and audited, and every figure traces to the
+   record that justified it. Claiming control over a payment processor's outcomes is a promise made with
+   someone else's system.
+4. **No internal profile, bundle, script, or component name appears in a customer-facing billing
+   message.** A customer reads "your payment could not be processed — update your card to restore
+   auto-merge", never a mechanism name. An internal identifier in a billing message is a support ticket
+   nobody can answer and a hint nobody needed.
+
+The first is machine-enforced (the fences above). The second is structural (the UI renders mirrored
+state and has no branch that computes dunning). The third is machine-enforced too — the console's
+`scan-claims.mjs` fails the build on the banned phrase in any shipped file, and it is proven to fire —
+because a rule that can be written as a guard should not be written only as a document. The fourth stays
+a review responsibility: "no internal mechanism name" is not a fixed string, and a scan that tried to
+enumerate one would be a scan somebody disables. It is stated here so a reviewer has something to point
+at rather than an opinion to defend, with the checklist in
+[`docs/sales/P21-billing-copy.md`](../../../docs/sales/P21-billing-copy.md) §8.
+
 ## Decision 1 — Stripe behind the existing `Provider` interface; the interface does not widen
 
 **Chosen:** a `stripe.Provider` that satisfies the **existing** [`billing.Provider`](../../../internal/billing/provider.go)
@@ -194,6 +273,38 @@ preserves it against a live processor and adds nothing that can delete.
 **Rejected — "fix the wrong charge" by editing or voiding the original.** Destroys the audit trail and the
 reconstructability that make the bill trustworthy.
 
+## Decision 9 — the provider account's configuration is verified before it is charged against, not by charging against it
+
+**Chosen:** a **preflight** resolves every `price_ref` in the published plan configuration against the
+provider — a read, never a write — and names each one that does not resolve by plan, charge kind and
+reference. It runs at configuration time and its result is on the readiness surface. A wrong reference is
+therefore a *stated* condition rather than a rejected charge in the middle of a period.
+
+**Why (L2 稳定 / L4 运维).** Decision 7 makes a price an opaque reference the platform cannot validate by
+inspection — which is the right trade, and it has a consequence: the only thing that knows whether
+`price_ref_team_sub` means anything is the provider. Without a preflight, the first code that finds out
+is `RaiseCharge`, at the first charge of the period, and the answer arrives as `ErrProviderRejected` —
+correct, unretryable, and maximally badly timed. The customer's period has already accrued; the charge
+that should close it cannot be raised; and the operator learns about it from a failed charge rather than
+from a configuration check they could have run at deploy.
+
+The same reasoning is why it is **read-only**. A preflight that created a probe subscription to prove a
+price works would be a preflight that moves money to check whether money can move, and the first time it
+half-failed it would leave an artefact nobody expected on a customer's account.
+
+It also answers a question the platform is otherwise unable to answer honestly: *is this deployment
+configured to bill at all?* "The billing service is up" and "the billing service can charge" are
+different claims, and a readiness surface that reported only the first would be confidently wrong in the
+one case that matters.
+
+**Rejected — validate the reference's shape locally.** Tempting (a Stripe price id starts `price_`), and
+worthless: a well-shaped id for a price that was archived, or that belongs to the other mode's account,
+passes a shape check and fails a charge. The only authority on whether a reference resolves is the thing
+that resolves it.
+
+**Rejected — let the first charge find out.** That is the status quo this decision exists to remove. It
+converts a five-second configuration check into a billing incident.
+
 ## Interfaces sketch
 
 ```
@@ -259,3 +370,23 @@ charge.refunded / charge.dispute.created     -> mirror only; NO ledger row from 
   (preserved, not loosened); estimated/un-merged saving raises no charge.
 - **The webhook endpoint is a soft attack surface** → one documented inbound path, signature-gated before any side
   effect, timestamp-bounded replay window, rate-aware (D3, mirror of P19's egress allowlist).
+
+## Where this landed
+
+| What | Where |
+|---|---|
+| The Stripe provider | [`internal/billing/stripe.go`](../../../internal/billing/stripe.go) |
+| Collection (checkout, plan change by name) | [`internal/billing/collection.go`](../../../internal/billing/collection.go) |
+| The entitlement sync | [`internal/billing/entitlementsync.go`](../../../internal/billing/entitlementsync.go) |
+| The inbound endpoint | [`internal/api/p21.go`](../../../internal/api/p21.go) → `POST /billing/webhook` |
+| The billing page + its BFF | [`web/console/src/app/app/billing`](../../../web/console/src/app/app/billing) |
+| The in-process Stripe (tests + demo only) | [`internal/stripefake`](../../../internal/stripefake) — a fence fails the build if a shipping package reaches it |
+| Run it against a real repository | [`cmd/p21hermes`](../../../cmd/p21hermes) |
+| The ingress runbook | [`docs/decisions/p21-billing-webhook-ingress.md`](../../../docs/decisions/p21-billing-webhook-ingress.md) |
+| The customer-facing copy | [`docs/sales/P21-billing-copy.md`](../../../docs/sales/P21-billing-copy.md) |
+| The M16 verification record | [`docs/decisions/p21-m16-exit-checklist.md`](../../../docs/decisions/p21-m16-exit-checklist.md) |
+
+The three capabilities are folded into the live spec set:
+[`stripe-billing-provider`](../../specs/stripe-billing-provider/spec.md),
+[`payment-collection`](../../specs/payment-collection/spec.md),
+[`billing-webhooks`](../../specs/billing-webhooks/spec.md).

@@ -1,6 +1,23 @@
 import Link from "next/link";
-import { Brain, FileCode, FlaskConical, GitBranch, GitPullRequest, Home, Layers, PenLine, Play, Settings, Share2, SlidersHorizontal,
-  Grid3x3, HardDriveDownload, Repeat, User } from "lucide-react";
+import {
+  Brain,
+  CreditCard,
+  FileCode,
+  FlaskConical,
+  GitBranch,
+  GitPullRequest,
+  Grid3x3,
+  HardDriveDownload,
+  Home,
+  Layers,
+  PenLine,
+  Play,
+  Repeat,
+  Settings,
+  Share2,
+  SlidersHorizontal,
+  User,
+} from "lucide-react";
 import { requireSession } from "@/lib/session";
 import { visitedSubjects, routes, SUBJECT_LABELS } from "@/lib/subjects";
 import { NavLink } from "@/components/nav";
@@ -65,6 +82,7 @@ const SETTINGS: Surface[] = [
   // to get the binary, or to answer a security review — not a place to work.
   { href: "/install", label: "Install", icon: <HardDriveDownload /> },
   { href: "/app/configure", label: "Configure", icon: <Settings /> },
+  { href: "/app/billing", label: "Billing", icon: <CreditCard /> },
   { href: "/app/account", label: "Account", icon: <User /> },
 ];
 
@@ -91,6 +109,7 @@ export default async function ConsoleLayout({ children }: { children: React.Reac
     { id: "s:coverage", group: "Surface", label: "Coverage — what applies where", href: "/app/coverage" },
     { id: "s:install", group: "Surface", label: "Install the CLI — channels, platforms, trust", href: "/install" },
     { id: "s:account", group: "Surface", label: "Plan and spend", href: routes.account() },
+    { id: "s:billing", group: "Surface", label: "Billing and payment method", href: routes.billing() },
     ...visited.map((subject) => ({
       id: `v:${subject.kind}:${subject.id}`,
       group: SUBJECT_LABELS[subject.kind],

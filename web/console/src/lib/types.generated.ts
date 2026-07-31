@@ -645,6 +645,62 @@ export interface DriftView {
   provider_quantity: number;
 }
 
+/** Response of `GET /api/p21/customers/{customer_id}/payment`. */
+export interface PaymentView {
+  billing: BillingView;
+  plans: PlanOptionView[] | null;
+  payment_method: PaymentMethodView;
+  collection_available: boolean;
+  pricing_issue?: PricingIssueView | null;
+  unavailable?: BillingUnavailableView | null;
+}
+
+export interface PlanOptionView {
+  plan_id: string;
+  name: string;
+  rank: number;
+  current: boolean;
+  direction: string;
+  subscribable: boolean;
+  unavailable: boolean;
+}
+
+export interface PaymentMethodView {
+  present: boolean;
+  brand?: string;
+  last4?: string;
+  status?: string;
+  reason?: string;
+  restore_path?: string;
+}
+
+export interface PricingIssueView {
+  plans: string[] | null;
+  checked_at?: string;
+}
+
+export interface BillingUnavailableView {
+  detail: string;
+  retryable: boolean;
+}
+
+/** Response of `POST /api/p21/customers/{customer_id}/checkout-session`. */
+export interface CheckoutView {
+  url?: string;
+  client_secret?: string;
+  session_ref?: string;
+  expires_at?: string;
+}
+
+/** Response of `POST /api/p21/customers/{customer_id}/plan`. */
+export interface PlanChangeView {
+  plan_id: string;
+  plan_name: string;
+  status?: string;
+  changed: boolean;
+  checkout_required: boolean;
+}
+
 /** Response of `GET /api/p12/deliveries`. */
 export interface DeliveriesView {
   deliveries: DeliveryView[] | null;

@@ -102,6 +102,31 @@ type BillingOversight struct {
 	// Exceptions counts the gainshare charges whose evidence does not hold — the number an operator
 	// triages first.
 	Exceptions int `json:"exceptions"`
+	// PlanHistory is every audited plan change for this tenant, newest first, across ALL periods.
+	//
+	// 🔴 Deliberately not period-scoped, and that is the whole reason it exists. A plan change is not a
+	// periodic event — the ledger writes it with no period at all — so the period-filtered invoice list
+	// above can never contain one. Before this field, an operator asking the most ordinary question
+	// there is ("why is this tenant on Enterprise, and who moved them there?") had no surface that
+	// answered it: the audited trail P7 is careful to keep was visible nowhere in the console.
+	PlanHistory []PlanChangeLine `json:"plan_history,omitempty"`
+}
+
+// PlanChangeLine is one audited move between plans.
+//
+// It carries no quantity and no provider reference because a plan change is neither a charge nor a
+// measurement: it is a statement that entitlement moved, when, and on the strength of what.
+type PlanChangeLine struct {
+	EventID string `json:"event_id"`
+	// Status is the ledger status, carried rather than assumed. A plan change is recorded, not settled,
+	// so anything else here is worth an operator's attention.
+	Status string `json:"status"`
+	// CausedBy names the platform record that justified the move — a subscription lifecycle event, an
+	// operator override — which is what makes the trail auditable without asking the provider.
+	CausedBy string `json:"caused_by"`
+	// Reason is the human sentence the ledger stored, e.g. "invoice paid: plan free -> Team".
+	Reason    string `json:"reason,omitempty"`
+	CreatedAt string `json:"created_at"`
 }
 
 // BillingService is the operator's billing oversight and correction surface.
@@ -157,6 +182,22 @@ func (s *BillingService) Oversight(ctx context.Context, tenantID string, period 
 		if !g.Valid() {
 			out.Exceptions++
 		}
+	}
+
+	// The plan trail, read with an EMPTY period so the ledger's period filter does not drop it. Newest
+	// first: an operator opening this page is answering a question about now, and reads downwards into
+	// history.
+	for _, ev := range s.billing.Ledger().Events(tenantID, "") {
+		if ev.Type != billing.TypePlanChange {
+			continue
+		}
+		out.PlanHistory = append([]PlanChangeLine{{
+			EventID:   ev.EventID,
+			Status:    string(ev.Status),
+			CausedBy:  ev.CausedBy,
+			Reason:    ev.Reason,
+			CreatedAt: ev.CreatedAt.UTC().Format("2006-01-02T15:04:05Z07:00"),
+		}}, out.PlanHistory...)
 	}
 
 	alerts := &collectingAlerts{}

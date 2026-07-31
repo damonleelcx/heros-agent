@@ -53,8 +53,22 @@ type Service struct {
 	deliveries DeliveryStore
 	// states mirrors the provider-owned invoice/subscription state per customer — what the UI's
 	// payment-failed / past-due / dunning states render from. Mirrored, never computed.
+	//
+	// It is a StateStore rather than a map (P21 task 4.3) so that "the effect was persisted" is a claim
+	// the webhook path can FAIL to make. With a map it is unrepresentable, and a persist-then-ack test
+	// against a code path that cannot go wrong is a restatement of the implementation, not a test.
 	stateMu sync.Mutex
-	states  map[string]BillingState
+	states  StateStore
+	// subPlans is the platform's own record of which plan a customer's subscription grants (P21 task
+	// 5.1). A Stripe INVOICE event carries no plan, so without this the entitlement sync would have to
+	// guess one — and a guessed plan is entitlements nobody sold.
+	subPlans map[string]string
+	// freePlan is the degradation target. Empty means FreePlanID.
+	freePlan string
+	// pricing caches the last price-reference preflight (Decision 9). Cached rather than probed per
+	// request: /readyz reports it, and resolving prices on every readiness check would make a provider
+	// latency spike read as this service being unhealthy.
+	pricing pricingCache
 
 	// rollout is the P7 feature flag. Nil means "no rollout gate configured", which is the correct
 	// behaviour for a test harness; a DEPLOYMENT wires one, and its zero value is fully dark.
@@ -99,7 +113,17 @@ func NewService(p Provider, l Ledger, accts account.Store, plans *plancfg.Resolv
 		return nil, errors.New("billing: provider, ledger, account store, plan resolver and meter are all required")
 	}
 	return &Service{provider: p, ledger: l, accounts: accts, plans: plans, meter: m, secrets: secrets,
-		now: time.Now, subs: map[string]string{}, states: map[string]BillingState{}}, nil
+		now: time.Now, subs: map[string]string{}, states: NewMemStates(),
+		subPlans: map[string]string{}}, nil
+}
+
+// WithStates replaces the mirrored-state store. A deployment wires the durable one; a test wires one it
+// can take down, which is how the persist-then-ack failure is injected rather than imagined.
+func (s *Service) WithStates(st StateStore) *Service {
+	if st != nil {
+		s.states = st
+	}
+	return s
 }
 
 // SetClock injects a deterministic clock (tests).
@@ -114,6 +138,14 @@ func (s *Service) Provider() Provider { return s.provider }
 // Describe names the live provider and secrets source — the health signal, never a credential.
 func (s *Service) Describe() map[string]string {
 	out := map[string]string{"provider": s.provider.Describe()}
+	// The PRICING preflight's stored summary (Decision 9). "not_run" is a distinct answer from
+	// "verified": a surface that reported the second for the first would tell an operator their pricing
+	// is fine when nothing has checked it.
+	if rep, ran := s.PricingStatus(); ran {
+		out["pricing"] = rep.Summary()
+	} else {
+		out["pricing"] = "not_run"
+	}
 	if s.secrets != nil {
 		info := s.secrets.Describe()
 		out["secrets_source"] = info.Kind
@@ -166,12 +198,42 @@ func (s *Service) StartSubscription(ctx context.Context, customerID string) (Sub
 }
 
 // SubscriptionRef is the provider subscription handle held for a customer, if any.
-func (s *Service) SubscriptionRef(customerID string) string { return s.subs[customerID] }
+func (s *Service) SubscriptionRef(customerID string) string {
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	return s.subs[customerID]
+}
+
+// recordSubscriptionRefLocked remembers a subscription the PROVIDER created, so a later plan change
+// can repoint it instead of creating a second one.
+//
+// 🔴 The CALLER HOLDS stateMu, which is why this does not take it: the only caller is applyWebhook,
+// which already holds it for the duration of the mirror update, and sync.Mutex is not reentrant — a
+// self-locking version of this deadlocks the webhook path the first time an event names a
+// subscription. The `Locked` suffix is the contract; the alternative was a bare map write at the call
+// site, which is the same thing with nothing to read.
+//
+// 🔴 This is the half that was missing, and the bug it caused is the worst kind: it charged twice.
+// Only StartSubscription used to write this map, but in the real self-serve flow the platform does not
+// create the subscription — CHECKOUT does, on Stripe's own page. So after a customer paid, the
+// platform held no reference to what they had bought. The next upgrade found no subscription to
+// repoint, correctly concluded "this must be a checkout", and sent them through Checkout again — which
+// created a SECOND active subscription beside the first. The customer is then billed for both, and
+// every screen still looks right, because each individual subscription is exactly what it claims to be.
+//
+// A real Stripe account is what surfaced it: two active subscriptions on one customer, $19.99 and
+// $29.99, both correct in isolation.
+func (s *Service) recordSubscriptionRefLocked(customerID, ref string) {
+	if customerID == "" || ref == "" {
+		return
+	}
+	s.subs[customerID] = ref
+}
 
 // SubscriptionState reads the provider's own subscription state — including dunning. The platform
 // REFLECTS it; it never recomputes it.
 func (s *Service) SubscriptionState(ctx context.Context, customerID string) (SubscriptionResult, error) {
-	ref := s.subs[customerID]
+	ref := s.SubscriptionRef(customerID)
 	if ref == "" {
 		return SubscriptionResult{}, fmt.Errorf("billing: no subscription for %s", customerID)
 	}

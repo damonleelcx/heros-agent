@@ -35,6 +35,31 @@ const MANIFEST = join(ROOT, "src", "content", "capabilities.ts");
 // The public surface. Everything under /app is behind a session and makes no marketing claim.
 const PUBLIC_DIRS = [join(ROOT, "src", "app", "(public)"), join(ROOT, "src", "components", "marketing")];
 
+/**
+ * BANNED_PHRASES are the sentences this product may not say ANYWHERE it ships — public surface, signed-in
+ * console, error copy, all of it (docs/sales/P21-billing-copy.md §1.3).
+ *
+ * "Risk is controlled" is the head of the list and the reason the list exists: the platform does not
+ * control a payment processor's outcomes, a provider's dunning schedule, or whether a card clears. What
+ * it can honestly promise is that risk is OBSERVABLE — every charge idempotent, every correction
+ * additive and audited, every figure traceable to the record that justified it. A claim of control is a
+ * promise made with somebody else's system, and it is the claim that gets quoted back during an
+ * incident.
+ *
+ * The rest are the billing-specific over-claims: a schedule the platform does not set, a deletion that
+ * never happens, and a subscription confirmed before the provider confirmed it.
+ */
+const BANNED_PHRASES = [
+  { phrase: "风险可控", say: "risk is observable — name what the system actually guarantees" },
+  { phrase: "risk is controlled", say: "risk is observable" },
+  { phrase: "risk is controllable", say: "risk is observable" },
+  { phrase: "guaranteed not to be charged", say: "state the idempotency guarantee: a retry produces one charge" },
+  { phrase: "your data will be deleted", say: "nothing is deleted — a plan change is audited and reversible" },
+];
+
+/** SCAN_ALL_DIRS is every shipped source file, because a banned phrase is banned everywhere. */
+const SCAN_ALL_DIRS = [join(ROOT, "src")];
+
 async function exists(path) {
   try {
     await readFile(path, "utf8");
@@ -80,9 +105,32 @@ async function manifestIds() {
   return { shipped, listed };
 }
 
+/** bannedPhrases walks every shipped source and reports any phrase the product may not say. */
+async function bannedPhrases() {
+  const findings = [];
+  let scanned = 0;
+  for (const dir of SCAN_ALL_DIRS) {
+    for await (const file of walk(dir)) {
+      scanned += 1;
+      const source = (await readFile(file, "utf8")).toLowerCase();
+      const rel = relative(ROOT, file);
+      for (const { phrase, say } of BANNED_PHRASES) {
+        // The phrase is matched case-insensitively and the FILE is named, never the surrounding
+        // sentence: a scan that quoted the copy back would make the CI log the second place it lives.
+        if (source.includes(phrase.toLowerCase())) {
+          findings.push(`BANNED PHRASE: ${rel} says "${phrase}" — say instead: ${say}`);
+        }
+      }
+    }
+  }
+  return { findings, scanned };
+}
+
 async function main() {
   const claims = new Map(); // id -> [file, …]
   let scanned = 0;
+
+  const banned = await bannedPhrases();
 
   for (const dir of PUBLIC_DIRS) {
     for await (const file of walk(dir)) {
@@ -99,8 +147,17 @@ async function main() {
     }
   }
 
+  if (banned.findings.length > 0) {
+    console.error(`claim scan FAILED — ${banned.findings.length} banned phrase(s):`);
+    for (const f of banned.findings) console.error(`  - ${f}`);
+    process.exit(1);
+  }
+
   if (claims.size === 0) {
-    console.log(`claim scan passed: ${scanned} public file(s), no capability claim rendered yet.`);
+    console.log(
+      `claim scan passed: ${scanned} public file(s), no capability claim rendered yet; ` +
+        `${banned.scanned} shipped file(s) carry no banned phrase.`,
+    );
     return;
   }
 
@@ -133,7 +190,10 @@ async function main() {
     process.exit(1);
   }
 
-  console.log(`claim scan passed: ${claims.size} claim(s), all shipped and attributed to an owning phase.`);
+  console.log(
+    `claim scan passed: ${claims.size} claim(s), all shipped and attributed to an owning phase; ` +
+      `${banned.scanned} shipped file(s) carry no banned phrase.`,
+  );
 }
 
 main().catch((error) => {

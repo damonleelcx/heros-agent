@@ -45,3 +45,23 @@ test("the tenant detail page uses tabs, not a 6-section stack", async () => {
     assert.ok(page.includes(kept), `the redesign must keep ${kept}`);
   }
 });
+
+// The scroll region only scrolls if its children refuse to shrink. This is the other half of the
+// fixed-height model, and leaving it implicit cost real records: on a 944px viewport the billing page
+// rendered "INVOICES — 2 events" above a table showing NEITHER of them.
+//
+// `.page__body` is a flex column with `overflow-y: auto`. Flex children default to `flex-shrink: 1`,
+// so when the page exceeded the viewport the sections COMPRESSED rather than overflowing. The region
+// then measured `scrollHeight === clientHeight`, concluded it fitted, and produced no scrollbar; and
+// `.section` clips (its rounded corners need `overflow: hidden`), so the squeezed-out rows were
+// invisible AND unreachable. No error, no scrollbar, no cue — the worst way for an oversight surface
+// to lose the records it exists to show.
+test("the page body's children do not shrink, so the bounded scroll region actually scrolls", async () => {
+  const css = await read("src/app/globals.css");
+  assert.match(
+    css,
+    /\.page__body\s*>\s*\*\s*\{[^}]*flex-shrink:\s*0/,
+    "`.page__body > *` must set flex-shrink: 0 — without it the sections compress to fit, the scroll " +
+      "region never reports overflow, and content past the fold is clipped away silently",
+  );
+});

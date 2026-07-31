@@ -168,9 +168,51 @@ export default async function BillingPage({
               )}
             </Section>
 
+            {/* The plan trail, ABOVE the invoices, because it answers the first question an operator
+                has about a tenant — which plan, since when, and on the strength of what. It is not
+                period-scoped: a plan change carries no period, so the period-filtered invoice list
+                below can never contain one. */}
+            <Section
+              title="Plan history"
+              aside={`${(view.plan_history ?? []).length} changes, all periods`}
+              flush={(view.plan_history ?? []).length > 0}
+            >
+              {(view.plan_history ?? []).length === 0 ? (
+                <EmptyState
+                  what="plan changes for this tenant"
+                  hint="This tenant has never moved between plans."
+                />
+              ) : (
+                <DataTable
+                  caption="Every audited plan change, newest first. Entitlement moves are recorded, never deleted."
+                  columns={[
+                    { label: "Event" },
+                    { label: "What changed" },
+                    { label: "Status" },
+                    { label: "Caused by" },
+                    { label: "When" },
+                  ]}
+                >
+                  {(view.plan_history ?? []).map((line) => (
+                    <tr key={line.event_id}>
+                      <th scope="row" className="mono">
+                        {line.event_id}
+                      </th>
+                      <td>{line.reason || "—"}</td>
+                      <td>
+                        <Pill tone="neutral">{line.status}</Pill>
+                      </td>
+                      <td className="mono">{line.caused_by || "—"}</td>
+                      <td>{timestamp(line.created_at)}</td>
+                    </tr>
+                  ))}
+                </DataTable>
+              )}
+            </Section>
+
             <Section
               title="Invoices"
-              aside={`${view.invoices.length} events`}
+              aside={`${view.invoices.length} events, period ${view.period}`}
               flush={view.invoices.length > 0}
             >
               {view.invoices.length === 0 ? (

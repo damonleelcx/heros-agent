@@ -35,10 +35,8 @@ import (
 	"time"
 
 	"github.com/heros-foreal/agentd/internal/account"
-	"github.com/heros-foreal/agentd/internal/adminaudit"
-	"github.com/heros-foreal/agentd/internal/adminidentity"
+	"github.com/heros-foreal/agentd/internal/adminfixture"
 	"github.com/heros-foreal/agentd/internal/adminops"
-	"github.com/heros-foreal/agentd/internal/adminrbac"
 	"github.com/heros-foreal/agentd/internal/api"
 	"github.com/heros-foreal/agentd/internal/billing"
 	"github.com/heros-foreal/agentd/internal/metering"
@@ -51,7 +49,6 @@ import (
 )
 
 const (
-	adminIssuer = "https://admin-idp.test.heros.internal"
 	// platformCredential is the BFF credential this demo prints for the console to use. In production
 	// it comes from the secrets manager and never appears on a terminal.
 	platformCredential = "p8hermes-demo-platform-credential-do-not-ship"
@@ -117,62 +114,15 @@ func main() {
 // test build the identical graph.
 func wire(repoDir string) (api.AdminDeps, error) {
 	now := func() time.Time { return time.Now().UTC() }
-	audit := adminaudit.NewMemoryStore(now)
 
-	// ── identity: four admin principals, one per role ──
-	grants := adminrbac.NewGrantStore(now)
-	for _, r := range adminrbac.Roles {
-		if _, err := grants.Seed("adm-"+string(r), r, "p8hermes fixture: one principal per role"); err != nil {
-			return api.AdminDeps{}, err
-		}
-	}
-	gate, err := adminrbac.NewGate(grants, audit, now)
+	// The identity, authorization and command layer is SHARED with the other demo that serves this
+	// console (cmd/p21hermes). Built here rather than copied so the two cannot drift into letting an
+	// operator sign in to one surface and not the other.
+	layer, err := adminfixture.Build("p8", now)
 	if err != nil {
 		return api.AdminDeps{}, err
 	}
-
-	// ── observability: admin activity onto the P2.5 substrate, with anomaly alerts ──
-	adminTel := adminops.NewTelemetry(adminops.TelemetrySinkFunc(func(m adminops.Metric) {
-		// In production this hands off to the P2.5 collector. The demo logs the metric NAME and its
-		// non-sensitive dimensions, never a secret (there is no field for one).
-		log.Printf("p8 metric %s %v %v", m.Name, m.Value, m.Dimensions)
-	}), nil, now)
-	adminTel.OnAlert(func(a adminops.Alert) { log.Printf("p8 ANOMALY %s: %s", a.Metric, a.Description) })
-
-	secrets, err := adminidentity.FixtureSecrets("p8hermes-sso", "p8hermes-mfa", "p8hermes-session")
-	if err != nil {
-		return api.AdminDeps{}, err
-	}
-	provider, err := adminidentity.NewHMACProvider(adminidentity.HMACProviderConfig{Issuer: adminIssuer, Secrets: secrets, Now: now, TestMode: true})
-	if err != nil {
-		return api.AdminDeps{}, err
-	}
-	sessions, err := adminidentity.NewSessionStore(adminidentity.SessionConfig{Now: now, Secrets: secrets, Observer: adminTel})
-	if err != nil {
-		return api.AdminDeps{}, err
-	}
-	principals := adminidentity.NewPrincipalStore()
-	for _, r := range adminrbac.Roles {
-		if err := principals.Put(adminidentity.Principal{
-			AdminID: "adm-" + string(r), SSOSubject: "sso|" + string(r), MFAEnrolled: true,
-			Status: adminidentity.StatusActive, CreatedAt: now(),
-		}); err != nil {
-			return api.AdminDeps{}, err
-		}
-	}
-	idp, err := adminidentity.NewIdPFixture(adminIssuer, secrets, now)
-	if err != nil {
-		return api.AdminDeps{}, err
-	}
-	authn, err := adminidentity.NewAuthenticator(provider, principals, sessions, adminTel)
-	if err != nil {
-		return api.AdminDeps{}, err
-	}
-
-	exec, err := adminops.NewExecutor(gate, audit, adminTel, now)
-	if err != nil {
-		return api.AdminDeps{}, err
-	}
+	audit, gate, exec := layer.Audit, layer.Gate, layer.Executor
 
 	// ── plan configuration + synthetic tenants ──
 	src := plancfg.NewMemSource()
@@ -360,8 +310,8 @@ func wire(repoDir string) (api.AdminDeps, error) {
 
 	return api.AdminDeps{
 		PlatformCredential: platformCredential,
-		Authenticator:      authn,
-		Sessions:           sessions,
+		Authenticator:      layer.Authenticator,
+		Sessions:           layer.Sessions,
 		Gate:               gate,
 		Executor:           exec,
 		Tenants:            tenantSvc,
@@ -374,7 +324,7 @@ func wire(repoDir string) (api.AdminDeps, error) {
 		CrossTenant:        crossSvc,
 		Audit:              auditSvc,
 		GDPR:               gdprSvc,
-		TestModeIdP:        idp,
+		TestModeIdP:        layer.TestModeIdP,
 		Rollout:            rollout,
 		Now:                now,
 	}, nil

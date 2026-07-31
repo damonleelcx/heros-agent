@@ -1702,6 +1702,27 @@ kbd {
   gap: var(--stack);
 }
 
+/* 🔴 The children must NOT shrink, or the scroll region above never scrolls.
+ *
+ * `.page__body` is a flex column and, on desktop, the single bounded scroll region. Flex children
+ * default to `flex-shrink: 1`, so when the page is taller than the viewport the sections COMPRESSED
+ * to fit instead of overflowing. Two things followed, and both were silent:
+ *
+ *   1. the scroll region measured `scrollHeight === clientHeight` — it believed it fitted, so no
+ *      scrollbar appeared and `overflow-y: auto` never engaged;
+ *   2. `.section` clips (`overflow: hidden`, which its rounded corners need), so the squeezed-out
+ *      content was simply invisible.
+ *
+ * On a 944px-tall viewport the billing page rendered "INVOICES — 2 events" above a table showing NONE
+ * of them: both rows existed in the DOM, below the section's clip, unreachable by scrolling. An
+ * oversight surface that hides the records it exists to show, and says nothing, is worse than one that
+ * fails — the operator has no cue that anything is missing.
+ *
+ * Sections keep their natural height; the body overflows; the scroll region does its job. */
+.page__body > * {
+  flex-shrink: 0;
+}
+
 /* ══════════════════════════════════════════════════════════════════════════
    Tabs — split a stacked page into in-page tabs, one section on screen at a time
    ══════════════════════════════════════════════════════════════════════════ */

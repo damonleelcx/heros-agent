@@ -414,11 +414,22 @@ test("every capability in the command path is also reachable by navigation", asy
   const rail = [...layout.matchAll(/\{\s*href:\s*"([^"]+)"/g)].map((m) => m[1]);
   assert.ok(rail.length >= 7, "the rail is expected to declare every surface");
 
+  // `routes.overview()` and the like resolve to a literal the rail also uses; comparing the
+  // EXPRESSION would pass on two different routes that happen to be written the same way, so the
+  // helper calls are resolved to their value first.
+  //
+  // The resolution is read from routes.ts rather than hard-coded here. A hand-maintained list of "the
+  // few helpers we know about" fails the day a surface is added through a helper the list has not
+  // heard of — which is a red build about the TEST, not about the console, and the fix is always to
+  // extend the list rather than to look at what it was guarding.
+  const routesSource = await read("src/lib/routes.ts");
+  const zeroArg = new Map(
+    [...routesSource.matchAll(/(\w+):\s*\(\)\s*=>\s*"([^"]+)"/g)].map((m) => [`routes.${m[1]}()`, m[2]]),
+  );
+  assert.ok(zeroArg.size >= 5, "routes.ts is expected to declare the console's fixed surfaces");
+
   for (const href of palette) {
-    // `routes.overview()` and the like resolve to a literal the rail also uses; comparing the
-    // EXPRESSION would pass on two different routes that happen to be written the same way, so the
-    // few helper calls are resolved to their known value first.
-    const expected = href === "routes.overview()" ? "/app" : href === "routes.configure()" ? "/app/configure" : href === "routes.account()" ? "/app/account" : href;
+    const expected = zeroArg.get(href) ?? href;
     assert.ok(
       rail.includes(expected),
       `${expected} is offered in the command path but is not in the navigation (R19)`,

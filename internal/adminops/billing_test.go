@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/heros-foreal/agentd/internal/adminaudit"
@@ -551,4 +552,57 @@ func containsStr(xs []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// TestOversightShowsThePlanTrailTheInvoiceListStructurallyCannot is the gap a real operator hit.
+//
+// 🔴 A plan change is written to the ledger with NO period — it is not a periodic event. The invoice
+// list is period-filtered (`Events(tenant, period)`, which skips any row whose period differs), so it
+// can never contain one. The result was an oversight page that showed a metered charge and its credit
+// while three audited plan changes for the same tenant were invisible, and an operator asking "why is
+// this tenant on Enterprise, and who moved them there?" had no surface that answered it.
+//
+// The fix is a separate, deliberately UNFILTERED trail — not stamping a period onto an event that has
+// none, which would make "period" mean two different things in one ledger.
+func TestOversightShowsThePlanTrailTheInvoiceListStructurallyCannot(t *testing.T) {
+	h := newHarness(t)
+	ctx := h.ctx(adminrbac.RoleBillingOps)
+
+	// Two audited plan changes, exactly as the entitlement sync writes them: no period.
+	for _, r := range []struct{ cause, reason string }{
+		{"subscription:sub_1", "invoice paid: plan free -> Business"},
+		{"subscription:sub_2", "invoice paid: plan Business -> Enterprise"},
+	} {
+		if _, err := h.billing.Ledger().Append(billing.BillingEvent{
+			CustomerID: tenantAcme, Type: billing.TypePlanChange,
+			IdempotencyKey: r.cause, CausedBy: r.cause, Reason: r.reason,
+			Status: billing.StatusRecorded, CreatedAt: time.Now().UTC(),
+		}); err != nil {
+			t.Fatalf("append plan change: %v", err)
+		}
+	}
+
+	view, err := h.bills.Oversight(ctx, tenantAcme, h.period)
+	if err != nil {
+		t.Fatalf("Oversight: %v", err)
+	}
+
+	// The invoice list still does not carry them — that is correct, and asserting it keeps the two
+	// surfaces from quietly merging.
+	for _, inv := range view.Invoices {
+		if inv.Type == string(billing.TypePlanChange) {
+			t.Errorf("a period-less plan change appeared in the period-filtered invoice list: %+v", inv)
+		}
+	}
+
+	if len(view.PlanHistory) != 2 {
+		t.Fatalf("plan history has %d entries, want 2 — the audited trail is invisible again", len(view.PlanHistory))
+	}
+	// Newest first: an operator reads "what is true now" and then downwards into history.
+	if !strings.Contains(view.PlanHistory[0].Reason, "Enterprise") {
+		t.Errorf("newest entry is %q, want the Enterprise move first", view.PlanHistory[0].Reason)
+	}
+	if view.PlanHistory[0].CausedBy == "" {
+		t.Error("a plan change with no cause is not auditable — it says entitlement moved and nothing about why")
+	}
 }

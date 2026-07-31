@@ -98,6 +98,15 @@ export function scoped(session: Session) {
     billing: (period?: string) =>
       `/api/p7/customers/${encode(tenantId)}/billing` + (period ? `?period=${encode(period)}` : ""),
 
+    // ── P21 · payment collection ──────────────────────────────────────────
+    // Tenant-keyed, like the P7 billing read and for the same reason: these are the only routes whose
+    // subject IS the tenant, and the tenant comes from the session. A customer id from the client would
+    // be a scope-widening attempt, and there is no parameter here that could carry one.
+    payment: (period?: string) =>
+      `/api/p21/customers/${encode(tenantId)}/payment` + (period ? `?period=${encode(period)}` : ""),
+    checkoutSession: () => `/api/p21/customers/${encode(tenantId)}/checkout-session`,
+    changePlan: () => `/api/p21/customers/${encode(tenantId)}/plan`,
+
     // ── P12 · forge delivery state ────────────────────────────────────────
     // Tenant-scoped server-side from the session's credential + X-Console-Tenant header, like every
     // other read. The console never sends a customer id in the path.

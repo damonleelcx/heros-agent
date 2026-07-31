@@ -68,6 +68,25 @@ type Server struct {
 	// scrolled past three restarts ago cannot answer it.
 	billing BillingRolloutDescriber
 
+	// billingCapability names the live billing PROVIDER and the source its credentials come from
+	// (P21 task 3.1), reported by /readyz.
+	//
+	// It is separate from `billing` above because the two answer different questions and can disagree in
+	// a way that matters: the rollout says which gates are open, this says WHICH PROCESSOR is behind
+	// them and WHERE its credential resolves from. The failure mode this makes checkable is the one
+	// billing/secrets.go names — a deployment whose LLM credentials come from a manager while its
+	// BILLING credentials quietly come from an environment variable, with a health endpoint confidently
+	// wrong about both.
+	billingCapability BillingCapabilityDescriber
+
+	// billingWebhook is the ONE inbound-from-internet path — Stripe's webhook endpoint, mounted by
+	// MountBillingWebhook when a deployment exposes it (P21 task 4.2). See p21.go for the posture.
+	billingWebhook BillingWebhookSink
+
+	// p21 is the P21 collection surface (plans by name, payment-method status, checkout), mounted by
+	// MountP21Payments when available.
+	p21 PaymentsSource
+
 	// secrets is the live provider-credential source, reported by /readyz.
 	//
 	// The SOURCE, never a credential: this holds the thing that can produce secrets precisely so the
@@ -191,6 +210,20 @@ type BillingRolloutDescriber interface {
 // SetBillingRollout records the live P7 rollout so /readyz can report which gates are open.
 func (s *Server) SetBillingRollout(d BillingRolloutDescriber) { s.billing = d }
 
+// BillingCapabilityDescriber names the live billing provider and its credential source. Satisfied by
+// *billing.Service.Describe; a one-method interface rather than an import, for the same reason
+// BillingRolloutDescriber is one: /readyz needs the words, not the type.
+type BillingCapabilityDescriber interface {
+	Describe() map[string]string
+}
+
+// SetBillingCapability records the live billing capability so /readyz can report which processor is
+// wired and which source its credentials resolve from (P21 task 3.1).
+//
+// It reports the source's IDENTITY, never a credential and never a credential's id — the same rule
+// SetSecretsSource follows, and the reason billing.Service.Describe has no field that could carry one.
+func (s *Server) SetBillingCapability(d BillingCapabilityDescriber) { s.billingCapability = d }
+
 // SetSecretsSource records which secrets source is live so /readyz can report it.
 //
 // This exists because health-signal-surface is not satisfied by a log line at boot: "the deployment
@@ -272,6 +305,11 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 		// Absent rather than "unknown" when unset: a deployment that wired no billing rollout has none,
 		// and saying so by omission beats inventing a status for it.
 		body["billing_rollout"] = s.billing.Describe()
+	}
+	if s.billingCapability != nil {
+		// Which processor, and where its credentials come from. Absent rather than "unknown" when
+		// unset, exactly like the two signals above.
+		body["billing_provider"] = s.billingCapability.Describe()
 	}
 
 	// Component aggregation (P9 FR25, P19 topology). The service's OWN health is not the deployment's

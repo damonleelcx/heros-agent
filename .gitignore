@@ -16,6 +16,7 @@
 /p5hermesui
 /p35graphdemo
 /p4boarddemo
+/p8hermes
 /bin/
 *.exe
 
@@ -40,10 +41,21 @@
 
 # macOS
 .DS_Store
+
+# Demo binaries built at the repo root by `go build -o <name> ./cmd/<name>`.
+#
+# They are build output, not source: ~20MB each, they rebuild in seconds, and a committed one is a
+# binary nobody reviews sitting in every clone forever. The list is explicit rather than a glob so an
+# actual source file named after a command cannot be ignored by accident.
+#
+# ⚠️ authoringhermes, oaxhermes, p13hermes, p14hermes and p15hermes are ALREADY TRACKED from earlier
+# phases (~86MB between them). Ignoring a path does not untrack it. Removing them is a separate,
+# deliberate change against those phases' history, not a side effect of this one.
 /p55demo
 /p55hermes
 /p6demo
 /p6hermes
+/p21hermes
 
 # The per-phase hermes runners (cmd/*hermes). Each is a ~18MB Mach-O left behind by `go build`, and
 # `git add -A` sweeps them in silently: the list above was already one build ahead of the tree. Listed

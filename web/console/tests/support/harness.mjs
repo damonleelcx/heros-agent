@@ -17,11 +17,12 @@
 // the security assertions are about what SHIPS. Rendered-browser acceptance (R11) runs against `next dev`
 // separately, for the opposite reason: it needs hot reload and a browser-usable cookie over plain HTTP.
 
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { createServer } from "node:http";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
 
 /** TENANT is the tenant the test assertion resolves to. */
 export const TENANT = "tenant-hermes";
@@ -85,6 +86,12 @@ async function freePort() {
 }
 
 /**
+ * Two guards, because a `.next` fails these tests in two different ways and each names a different
+ * fix. requireProductionBuild catches NO build (run `npm run build`); assertProductionBuild catches a
+ * build a dev server has since clobbered (stop `next dev`, then rebuild). Both were written
+ * independently against the same afternoon-costing symptom — ~100 sign-in assertion failures for a
+ * sign-in page that is entirely correct — and neither subsumes the other, so both stay.
+ *
  * requireProductionBuild fails LOUD when `.next` is not a usable production build.
  *
  * # Why this check earns its place
@@ -122,9 +129,37 @@ function requireProductionBuild() {
   );
 }
 
+/**
+ * assertProductionBuild refuses to run against a `.next` a dev server has written into.
+ *
+ * # Why this is a hard refusal and not a warning
+ *
+ * `next dev` overwrites the production chunks and manifests with its own. `next start` then serves a
+ * DEVELOPMENT build under production environment variables, and the identity guard behaves differently
+ * enough that ~95 of these tests fail at sign-in — with assertion messages about billing copy and
+ * missing plan names, none of which mention the actual cause.
+ *
+ * That failure has now cost two debugging passes in this repository, and both times the tests were
+ * right and the tree was wrong. A build the tests cannot trust must say so in one line, the way
+ * `scan-bundle.mjs` already refuses to weigh a contaminated tree, rather than producing ninety-five
+ * confident and unrelated failures.
+ */
+async function assertProductionBuild() {
+  try {
+    await readFile(join(process.cwd(), ".next", "static", "development", "_buildManifest.js"), "utf8");
+  } catch {
+    return; // no dev artefacts — this is a production build
+  }
+  throw new Error(
+    "`.next` has been written by a dev server, so these tests would run against a DEVELOPMENT build " +
+      "under production settings and fail at sign-in for reasons unrelated to what they assert.\n" +
+      "  Stop `next dev`, then:  rm -rf .next && npm run build && npm test",  );
+}
+
 /** startConsole starts `next start` on a free port, wired to `platformBase`. */
 export async function startConsole(platformBase, extraEnv = {}, attempt = 0) {
   requireProductionBuild();
+  await assertProductionBuild();
   const port = await freePort();
   const child = spawn("npx", ["next", "start", "--port", String(port)], {
     cwd: process.cwd(),
