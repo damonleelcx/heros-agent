@@ -4,6 +4,121 @@
   "note": "Anchors are a published contract. A removed or renamed slug fails the build unless the same change adds a redirect.",
   "pages": [
     {
+      "route": "/docs/concepts/glossary",
+      "source": "docs/en/concepts/glossary.md",
+      "anchors": [
+        "workflow-ir",
+        "node",
+        "variant",
+        "variant-spec",
+        "confighash",
+        "dimension",
+        "verified-delta",
+        "refusal-as-buildstatus",
+        "unclassified-region",
+        "gate",
+        "coverage",
+        "automation-level",
+        "delivery-record"
+      ]
+    },
+    {
+      "route": "/docs/concepts/refusals",
+      "source": "docs/en/concepts/refusals.md",
+      "anchors": [
+        "why-this-design-exists",
+        "the-shape-of-every-refusal",
+        "seeing-them-all-at-once",
+        "why-the-three-causes-are-kept-apart",
+        "refusals-you-will-meet-elsewhere",
+        "how-to-act-on-one",
+        "what-this-page-does-not-do"
+      ]
+    },
+    {
+      "route": "/docs/guides/bring-your-own-keys",
+      "source": "docs/en/guides/bring-your-own-keys.md",
+      "anchors": [
+        "the-short-version",
+        "where-they-come-from",
+        "what-sees-them-and-what-cannot",
+        "cost-is-on-your-account",
+        "running-with-no-keys-at-all",
+        "checking-what-is-configured",
+        "if-a-key-leaks-anyway"
+      ]
+    },
+    {
+      "route": "/docs/guides/configure-a-variant",
+      "source": "docs/en/guides/configure-a-variant.md",
+      "anchors": [
+        "the-two-ways-in",
+        "preflight-a-change",
+        "write-the-diff",
+        "reading-the-diff",
+        "turning-a-diff-into-a-variant-spec",
+        "what-has-not-happened-yet",
+        "common-surprises"
+      ]
+    },
+    {
+      "route": "/docs/guides/run-an-eval",
+      "source": "docs/en/guides/run-an-eval.md",
+      "anchors": [
+        "run-it",
+        "why-five-seeds-and-not-one",
+        "reading-the-scorecard",
+        "1-is-there-a-difference-at-all",
+        "2-did-anything-you-configured-fail",
+        "3-what-was-not-covered",
+        "4-who-judged-it",
+        "where-the-run-goes",
+        "cost-before-you-are-surprised-by-it",
+        "common-surprises",
+        "next"
+      ]
+    },
+    {
+      "route": "/docs/guides/take-delivery",
+      "source": "docs/en/guides/take-delivery.md",
+      "anchors": [
+        "the-credential-posture-first",
+        "what-has-to-be-true-before-a-change-is-delivered",
+        "what-the-pull-request-contains",
+        "reviewing-one",
+        "merging",
+        "idempotency",
+        "what-this-does-not-do"
+      ]
+    },
+    {
+      "route": "/docs/guides/use-the-studio",
+      "source": "docs/en/guides/use-the-studio.md",
+      "anchors": [
+        "where-it-is",
+        "the-rule-nothing-here-is-ranked",
+        "binding-a-configuration",
+        "reading-the-matrix-honestly",
+        "from-the-studio-to-a-shipped-change",
+        "why-no-api-key-ever-reaches-your-browser"
+      ]
+    },
+    {
+      "route": "/docs/guides/wire-ci",
+      "source": "docs/en/guides/wire-ci.md",
+      "anchors": [
+        "the-one-rule-this-integration-is-built-around",
+        "use-the-published-workflow",
+        "or-the-composite-action-if-you-need-the-steps",
+        "running-with-no-account-at-all",
+        "permissions",
+        "what-arrives-on-the-pull-request",
+        "choosing-gates-that-will-not-be-disabled",
+        "timing-and-cost-honestly",
+        "what-it-will-not-do"
+      ]
+    },
+    {
       "route": "/docs/reference/cli",
       "source": "docs/en/reference/cli.md",
       "anchors": [
@@ -81,22 +196,59 @@
       "route": "/docs/start/quickstart",
       "source": "docs/en/start/quickstart.md",
       "anchors": [
-        "what-you-need",
-        "what-happens"
+        "before-you-start",
+        "build-the-graph",
+        "what-you-get",
+        "reading-the-result",
+        "edges-0-is-a-finding-not-a-failure",
+        "where-the-files-go",
+        "what-just-did-not-happen",
+        "next"
       ]
     },
     {
       "route": "/legal/privacy/v/1.0.0",
       "source": "legal/en/privacy/1.0.0.md",
       "anchors": [
-        "placeholder"
+        "1-the-fact-that-shapes-everything-below",
+        "2-what-we-collect-when-you-deal-with-us-directly",
+        "3-what-the-service-stores-about-your-work",
+        "4-retention-stated-as-it-actually-is",
+        "5-who-else-sees-data",
+        "6-records-of-your-acceptance",
+        "7-your-rights-and-the-route-that-actually-exists",
+        "what-erasure-does-precisely",
+        "8-security-described-rather-than-claimed",
+        "9-changes-to-this-notice",
+        "10-contact",
+        "11-what-this-notice-deliberately-does-not-say"
       ]
     },
     {
       "route": "/legal/terms/v/1.0.0",
       "source": "legal/en/terms/1.0.0.md",
       "anchors": [
-        "placeholder"
+        "1-what-the-service-does-and-what-it-does-not-do",
+        "2-your-account-and-your-responsibilities",
+        "3-acceptable-use",
+        "4-plans-fees-and-how-the-meter-works",
+        "41-plans",
+        "42-the-metered-charge",
+        "43-gainshare",
+        "44-payment-changes-and-cancellation",
+        "45-corrections-and-refunds",
+        "46-taxes",
+        "5-your-data-your-code-and-your-keys",
+        "6-confidentiality",
+        "7-availability",
+        "8-suspension-and-termination",
+        "9-warranties-and-disclaimer",
+        "10-limitation-of-liability",
+        "11-indemnity",
+        "12-changes-to-these-terms",
+        "13-governing-law-and-disputes",
+        "14-general",
+        "15-what-these-terms-deliberately-do-not-claim"
       ]
     }
   ]
