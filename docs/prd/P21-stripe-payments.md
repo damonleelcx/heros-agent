@@ -699,14 +699,21 @@ accidents:
   the M16 checklist alone, or a Finance sign-off on a reconciled test-mode period? *Recommendation: both — the
   checklist green **and** one reconciled test-mode billing period Finance has signed off, so the first live dollar
   follows a proven, reconciled dry run.*
-- **Q7 — Who creates the price objects, and in what unit?** §10.1(C) says Finance creates them and DevOps
-  publishes the catalog — but the *denomination* is a joint decision with engineering consequences: the
-  platform reports a whole-unit quantity and **refuses** to round a fractional one, so a metered price
-  must be denominated in a unit the meter produces integrally (e.g. the smallest unit of the SUM meter
-  rather than whole currency units). *Recommendation: Finance owns the amount, engineering owns the unit,
-  and neither ships without the other — the preflight (NFR12) is what makes a mismatch visible before a
-  period rather than during one. Decide the unit per meter at the same time the price is created, and
-  record it beside the price in the config store.*
+- **Q7 — Who creates the price objects, and in what unit? — ANSWERED (2026-07-30).** The unit is **one US
+  dollar of spend under management**, and one US dollar of verified merged saving for gainshare. It is
+  the only unit the platform can report integrally without multiplying anything: the SUM meter's own
+  figure is USD, the platform hands it over unaltered, and `stripeQuantity` refuses a fraction rather
+  than rounding it. The division of ownership stands as recommended — **Finance owns the rate,
+  engineering owns the unit** — and the preflight now enforces more than the recommendation asked for:
+  it checks each reference's **shape** as well as its existence, because a metered price of the wrong
+  type is green on every existence check and fails at the period's first charge.
+  The decision, the rejected alternatives (cents, micro-dollars, per-$1,000, rounding at the meter,
+  letting Stripe bill the subscription item directly), and what it costs — sub-dollar SUM cannot be
+  billed — are in [`docs/decisions/p21-metered-unit-and-pricing.md`](../decisions/p21-metered-unit-and-pricing.md).
+  Rates configured in the test sandbox: 3% / 2% / 1% of SUM on Team / Business / Enterprise, 20%
+  gainshare on Enterprise, every one a whole number of cents so Stripe rounds nothing either. Those
+  rates are a working default satisfying the unit constraint, **not a commercial commitment** — Finance
+  still owns that number, and V2 remains gated on their sign-off.
 - **Q6 — Stripe Tax and multi-currency.** Does the first delivery enable Stripe Tax and multiple currencies, or
   single-currency + tax-later? *Recommendation: single presentment currency + Stripe Tax on, since tax is
   Stripe's (non-goal to reimplement); multi-currency is a Stripe-side configuration follow-up that needs no

@@ -99,12 +99,28 @@ next call rather than at the next restart.
 A **separate signing secret per mode** is required. Stripe issues one per endpoint, and sharing one
 across a test and a live endpoint means a test event verifies against a live deployment.
 
-### The third artefact: the price objects
+### The third artefact: the price objects, and the meter
 
-Credentials A and B get a deployment talking to Stripe. They do not get it **charging**: every plan's
-`price_ref` must be a price that exists in that Stripe account, and a metered price must be denominated
-in the meter's **integral unit** (the platform reports a whole-unit quantity and refuses to round one).
-See PRD §10.1 for who owns what.
+Credentials A and B get a deployment talking to Stripe. They do not get it **charging**. Four things
+must exist in the account, and three of them are shapes rather than merely ids:
+
+| What | Shape | Why that shape |
+|---|---|---|
+| `price_refs["subscription"]` | `type=recurring` | a subscription is created on a recurring price |
+| `price_refs["metered"]` | `type=one_time` | it is charged as an **invoice item**, and Stripe accepts only one-time prices there |
+| `price_refs["gainshare"]` | `type=one_time` | same path |
+| the billing **meter** | active, `sum` over `payload.value`, customer by `stripe_customer_id` | it is where usage is reported and read back for reconciliation; it carries no price and bills nothing |
+
+Metered and gainshare prices must be denominated in the meter's **integral unit** — the platform reports
+a whole-unit quantity and refuses to round one. The unit in force, and why, is in
+[`p21-metered-unit-and-pricing.md`](p21-metered-unit-and-pricing.md). See PRD §10.1 for who owns what.
+
+🔴 **Do not attach the meter to a price on the subscription.** Stripe would then invoice the metered
+usage itself while the platform's invoice item invoices it again — the same period billed twice. The
+meter is a ledger, not a biller.
+
+The meter's event name is deployment configuration (`WithStripeMeterEvent`, default `heros_sum`); the
+meter **id** is resolved from it, so nobody has to keep two strings in sync.
 
 A wrong reference used to surface as a rejected charge at the period's first charge. It now surfaces at
 configuration time:
@@ -123,8 +139,27 @@ Run it against a real account before trusting it:
 ```bash
 export STRIPE_API_KEY=<your Stripe TEST key>     # not a flag: a flag lands in shell history and in ps
 go run ./cmd/p21hermes -repo <hermes-agent> \
-  -stripe-base https://api.stripe.com -plans ./your-catalog.json
+  -stripe-base https://api.stripe.com -plans ./your-catalog.json -preflight-only
 ```
+
+`-preflight-only` resolves every reference and **writes nothing**, which is what makes it safe to point
+at an account before anyone has decided to trust this deployment. Drop the flag to run the whole flow;
+add `-customer <fresh-id>` when the run is evidence, so every Stripe object in it was created by that
+run rather than replayed from an earlier one under the same deterministic key.
+
+### Three operational facts the wire imposes
+
+1. **Meter events expire after 35 days.** Stripe refuses one timestamped more than 35 days before now,
+   so a period must be reported **during it, or within ~4 days of its close**. The platform refuses
+   rather than restamping to `now` (`ErrUsagePeriodTooOld`) — restamping would attribute an old period's
+   usage to the current month, and nothing downstream would look wrong.
+2. **Meter aggregation is asynchronous**, ~40–50s observed in test mode. A reconciliation run
+   immediately after reporting will read nothing. Wait and retry; treat a persistently empty read as a
+   failure, never as agreement.
+3. **Stripe may replay a cached ERROR for a repeated idempotency key.** A call that failed for a
+   since-fixed reason can keep failing until the key rotates. Correction keys carry the customer id and
+   the corrected event id; charge keys carry the plan config version, so republishing the catalog
+   rotates them.
 
 ## 5. What `/readyz` tells you
 
@@ -132,7 +167,7 @@ go run ./cmd/p21hermes -repo <hermes-agent> \
 {
   "billing_rollout":  { "billing": "enabled", "provider_mode": "test", "gainshare": "disabled", ... },
   "billing_provider": { "provider": "stripe(test)", "secrets_source": "aws-secrets-manager",
-                        "pricing": "verified:7" }
+                        "pricing": "verified:8" }
 }
 ```
 

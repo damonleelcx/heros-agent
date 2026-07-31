@@ -141,21 +141,27 @@ instead of leaving it as a footnote on an unticked box.
 Recorded in [`docs/decisions/p21-m16-exit-checklist.md`](../../../docs/decisions/p21-m16-exit-checklist.md),
 item by item, with what each claim rests on.
 
-- [ ] V1 M16 exit checklist (PRD §13) fully green against **one** Stripe test-mode stack (claims simultaneously true).
-      **NOT CLAIMED.** Eleven of twelve items are green, and the twelfth (attach a payment method with a
-      test card) is green on the platform side. But all of it ran against an **in-process** Stripe, not a
-      real Stripe test account, and the checklist says *"against one Stripe test-mode stack"*. The
-      remaining distance is the three artefacts in §11 / PRD §10.1 — a test key, a webhook signing
-      secret, and real price objects — two of which this repository must never hold. With all three it is
-      one command and no code edit:
-      `STRIPE_API_KEY=<test key> go run ./cmd/p21hermes -repo <hermes> -stripe-base https://api.stripe.com -plans <catalog>`,
-      and the preflight names any price reference that is still wrong before anything charges. Ticking
-      this box before that runs would be the exact claim-without-evidence this change spends its whole
-      budget preventing.
+- [x] V1 M16 exit checklist (PRD §13) green against **one** Stripe test-mode stack (claims simultaneously true).
+      **CLAIMED, 2026-07-30**, against `acct_1Ty5Ze…` ("Heros Agent sandbox", US/USD, test mode) over
+      `https://api.stripe.com`: `go run ./cmd/p21hermes -repo <hermes> -stripe-base https://api.stripe.com
+      -plans <catalog> -customer <fresh>` → **20 steps, 0 failed**, on a customer created by that run so
+      no object in it came from an earlier one. The three artefacts §11 named now all exist: a test key,
+      a signing secret, and real price objects — the last of which needed the **Q7 unit decision**,
+      recorded in [`p21-metered-unit-and-pricing.md`](../../../docs/decisions/p21-metered-unit-and-pricing.md).
+      One item is green with a **stated remainder**: nobody has typed a test card into Stripe's own
+      Checkout page. The session is real and minted server-side; entering the card is deliberately left
+      to a human.
+      🔴 Reaching green found **seven defects**, five in shipped code — including a correction
+      idempotency key that was not customer-scoped, which could have returned one customer's credit note
+      for another customer's correction. All are listed, with what each rests on, in
+      [`p21-m16-exit-checklist.md`](../../../docs/decisions/p21-m16-exit-checklist.md).
 - [ ] V2 Live-mode cutover gated on the M16 checklist **and** one reconciled test-mode period signed off by Finance
       (PRD Q5); the rollout flag flips to live only then.
-      **NOT TAKEN**, and correctly so: neither gate is satisfied. The rollout flag stays at its zero
-      value, which is test. The cutover sequence is in the ingress runbook §6.
+      **NOT TAKEN**, and correctly so. The FIRST gate is now satisfied — V1 is green against a real
+      Stripe test account — but the second is not: no reconciled test-mode period has been signed off by
+      Finance, and the rates configured in the sandbox are a working default chosen to satisfy the unit
+      constraint, not a commercial decision anyone has made. The rollout flag stays at its zero value,
+      which is test. The cutover sequence is in the ingress runbook §6.
 - [x] V3 Edition/deployment-form impact matrix attached to every P21 PR.
       Every commit in this change carries a three-row Personal / Trial / Production matrix with a reason
       on each row, including the `N` rows — an unexplained `N` is the half of the rule that gets skipped.
