@@ -282,6 +282,45 @@ test("the public surface uses the same token set as the console", async () => {
   }
 });
 
+/**
+ * P23 task 7.1 — one control per destination in the public header, and Docs reachable on a phone.
+ *
+ * The header carried a plain "Sign in" link and an "Open the console" button, both pointing at
+ * `/signin`. At mobile width, where the `md:inline` links are hidden, they rendered side by side: two
+ * controls, two different words, one destination. A reader tapping the quieter one to find out what the
+ * product is got a sign-in form.
+ *
+ * This is asserted rather than fixed once, because the duplicate reappears every time somebody adds a
+ * call to action — and it is invisible on a desktop, where the other links space the two apart.
+ */
+test("the public header has one control per destination, and Docs survives at mobile width", async () => {
+  const src = await read("src/app/(public)/layout.tsx");
+  const header = src.slice(src.indexOf("<header"), src.indexOf("</header>"));
+
+  // Strip comments first: the header's own comment explains the rule and quotes the paths it is about.
+  const markup = header.replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
+
+  const hrefs = [...markup.matchAll(/href=\{?"?([^"}\s]+)"?\}?/g)].map((m) => m[1]);
+  const internal = hrefs.filter((href) => href.startsWith("/"));
+  const duplicated = internal.filter((href, i) => internal.indexOf(href) !== i);
+  assert.deepEqual(
+    duplicated,
+    [],
+    `two header controls point at the same place (${duplicated.join(", ")}). One destination, one control — ` +
+      `at mobile width the duplicates end up adjacent and the quieter one reads as something else.`,
+  );
+
+  // Docs must NOT be hidden behind a breakpoint. It is the only route into the product that costs
+  // nothing, and a phone is where a reader who has not decided yet is standing.
+  const docsLink = markup.slice(markup.indexOf('href="/docs"') - 300, markup.indexOf('href="/docs"'));
+  assert.ok(markup.includes('href="/docs"'), "the public header does not link to the documentation");
+  assert.doesNotMatch(
+    docsLink,
+    /hidden[^"]*md:inline/,
+    "the Docs link is hidden below the md breakpoint — it is the one nav link that must survive on a phone",
+  );
+});
+
 async function* walk(dir) {
   for (const entry of await readdir(join(ROOT, dir), { withFileTypes: true })) {
     const rel = join(dir, entry.name);

@@ -44,8 +44,22 @@ export default function PublicLayout({ children }: { children: React.ReactNode }
           >
             Plans
           </a>
+          {/*
+            🔴 "Docs" occupies the slot a second "Sign in" used to.
+
+            The header had TWO controls pointing at `/signin` — a text link and the accent button — and
+            at mobile width, where the three `md:inline` links are hidden, they sat side by side: two
+            adjacent controls, different words, same destination. A reader tapping the quieter one to
+            find out what this is gets a sign-in form, which is the opposite of what the smaller-looking
+            affordance promised.
+
+            One destination gets one control. The button keeps the sign-in slot because it is the
+            conversion action, and the text link becomes the thing a reader who is not ready to sign in
+            actually wants: the documentation. It is NOT `md:inline` — it is the one nav link that must
+            survive on a phone, because it is the only route into the product that costs nothing.
+          */}
           <Link
-            className="hidden text-sm text-marketing-ink/50 transition-colors hover:text-marketing-ink/80 md:inline"
+            className="text-sm text-marketing-ink/50 transition-colors hover:text-marketing-ink/80"
             href="/docs"
           >
             Docs
@@ -73,17 +87,26 @@ export default function PublicLayout({ children }: { children: React.ReactNode }
             GitHub<span className="visually-hidden"> (opens an external site)</span>
             <span aria-hidden="true"> ↗</span>
           </a>
-          <Link
-            className="text-sm text-marketing-ink/70 transition-colors hover:text-marketing-ink"
-            href="/signin"
-          >
-            Sign in
-          </Link>
+          {/*
+            ONE control per destination.
+
+            The header carried a plain "Sign in" link AND an "Open the console" button, both pointing at
+            `/signin`. At mobile width — where the three `md:inline` links are hidden — they ended up
+            adjacent: two controls, two different words, one destination. A reader tapping the quieter
+            one to find out what this product is gets a sign-in form.
+
+            The button keeps the slot and takes the plainer label, because the hero already carries
+            "Open the console" as its primary call to action and a header repeating it is the same
+            button twice on one screen. The freed slot went to Docs, above.
+
+            `public-surface.test.mjs` asserts no two header controls share a destination — a rule rather
+            than a tidy-up, because this duplicate reappears every time somebody adds a call to action.
+          */}
           <Link
             className="rounded-lg bg-marketing-accent px-4 py-2 text-sm font-medium text-marketing-accent-ink transition-opacity hover:opacity-90"
             href="/signin"
           >
-            Open the console
+            Sign in
           </Link>
         </div>
       </header>
