@@ -1,5 +1,6 @@
 import { identityHealth, identitySecretsSource } from "@/lib/identity";
 import { platformApiBase, upstreamTimeoutMs } from "@/lib/platformApi";
+import { loadLegalCorpus } from "@/lib/reading/legal";
 
 /**
  * The console component's machine-readable health (FR25, 🔴 `health-signal-surface`).
@@ -37,6 +38,20 @@ import { platformApiBase, upstreamTimeoutMs } from "@/lib/platformApi";
  *
  * It is public because it carries no tenant data and because a health endpoint behind authentication
  * cannot be probed by the thing that most needs to probe it.
+ *
+ * # Why the LEGAL DOCUMENT IDENTITIES are here (P23 task 11.2)
+ *
+ * "Which legal text is live on this cluster" must be a `curl`, not an investigation. During an incident,
+ * a dispute or an audit, the question is asked about a specific deployment — and answering it by reading
+ * a git tag is answering a different question, because content ships in the console IMAGE and a cluster
+ * can be running a previous one.
+ *
+ * `/legal/manifest.json` is the full answer and is also public. This carries the same identities beside
+ * the deployment's other configuration facts, so one probe reports what an operator actually needs
+ * together: which platform, which identity provider, which documents.
+ *
+ * It reads the corpus from this container's own filesystem — no upstream call, so a platform outage
+ * cannot make the health endpoint slow or wrong.
  */
 export const dynamic = "force-dynamic";
 
@@ -44,6 +59,27 @@ export async function GET() {
   // The KIND, the ISSUER and the verdict — never a client id, never an allowlist, never a secret's
   // logical name. This endpoint is public by necessity, so everything it says is said to everybody.
   const identity = await identityHealth();
+
+  /*
+   * A corpus that cannot be read is REPORTED, not omitted. An absent `documents` key would be
+   * indistinguishable from a deployment with no legal documents, and those are very different states —
+   * the second is a configuration choice, the first is a broken image.
+   */
+  let documents: Record<string, { version: string; hash: string; effective_date: string }> | { error: string };
+  try {
+    const corpus = await loadLegalCorpus();
+    documents = {};
+    for (const [kind, live] of Object.entries(corpus.current)) {
+      if (!live) continue;
+      documents[kind] = {
+        version: live.frontMatter.version,
+        hash: live.contentHash,
+        effective_date: live.frontMatter.effective_date,
+      };
+    }
+  } catch (error) {
+    documents = { error: error instanceof Error ? error.message : "the legal corpus could not be read" };
+  }
   return Response.json(
     {
       component: "console",
@@ -57,6 +93,9 @@ export async function GET() {
       identity_secrets_source: identitySecretsSource(),
       credential_configured: Boolean(process.env.CONSOLE_PLATFORM_CREDENTIAL),
       upstream_timeout_ms: upstreamTimeoutMs(),
+      // Which legal text is live on THIS deployment. The full manifest, with every historical version,
+      // is at /legal/manifest.json.
+      legal_documents: documents,
     },
     { headers: { "cache-control": "no-store" } },
   );

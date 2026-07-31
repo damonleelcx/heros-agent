@@ -114,6 +114,20 @@ const CASES = [
     expect: /documents `POST \/v1\/workflows\/discover`.*no\s+machine-readable API artifact/s,
   },
   {
+    name: "12.5 — scan-cli refuses an exit code whose documented meaning disagrees with the contract",
+    script: "scan-cli.mjs",
+    fixture: "exit-code-meaning",
+    // 🔴 1 and 2 have OPPOSITE remedies. Swapping them in documentation makes a CI job act on a lie:
+    // "your gate failed" gets retried and "our tool broke" gets treated as a real regression.
+    expect: /exit code 1 is documented as "operational-error"/,
+  },
+  {
+    name: "12.6 — scan-docs-claims refuses an install command for a channel the pipeline does not publish",
+    script: "scan-docs-claims.mjs",
+    fixture: "unpublished-channel",
+    expect: /which the pipeline does not publish yet/,
+  },
+  {
     name: "scan-install refuses a hand-typed checksum",
     script: "scan-install.mjs",
     fixture: "hand-typed-checksum",

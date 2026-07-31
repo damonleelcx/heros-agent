@@ -906,8 +906,19 @@
     @apply flex flex-col gap-5 leading-relaxed;
   }
 
+  /*
+   * 🔴 Body text is `text-foreground`, at FULL contrast, not a softened `/90`.
+   *
+   * A reduced alpha on body copy is a common and defensible choice on a dashboard, where text is glanced
+   * at and the softening reduces visual noise. It is the wrong trade on the one surface in this product
+   * somebody reads for an hour — and on the page where a customer reads what they are agreeing to, a
+   * deliberate contrast reduction is a choice that would have to be defended rather than inherited.
+   *
+   * `tests/craft.test.mjs` asserts the token PAIR meets WCAG AA; an alpha applied on top of it is a
+   * composite the token test cannot see, which is the second reason not to introduce one here.
+   */
   .prose-p {
-    @apply text-base leading-relaxed text-foreground/90;
+    @apply text-base leading-relaxed text-foreground;
   }
 
   .prose-heading {
@@ -975,7 +986,7 @@
   }
 
   .prose-list {
-    @apply flex list-disc flex-col gap-2 pl-6 text-base leading-relaxed text-foreground/90;
+    @apply flex list-disc flex-col gap-2 pl-6 text-base leading-relaxed text-foreground;
   }
 
   .prose-list--ordered {
@@ -999,7 +1010,7 @@
   }
 
   .prose-table td {
-    @apply border-b border-border/60 px-3 py-2 align-top text-foreground/90;
+    @apply border-b border-border/60 px-3 py-2 align-top text-foreground;
   }
 
   .prose-rule {

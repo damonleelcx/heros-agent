@@ -222,42 +222,42 @@ phase:
       document itself.
 
 ## 11. DevOps — Deploy, observability, air-gapped parity
-- [ ] 11.1 Content ships in the **console container** (ADR-006); confirm a bad copy change is reverted by
+- [x] 11.1 Content ships in the **console container** (ADR-006); confirm a bad copy change is reverted by
       redeploying the previous console image — no migration, no platform restart.
-- [ ] 11.2 Expose the live document versions and hashes from the running deployment (the static manifest plus
+- [x] 11.2 Expose the live document versions and hashes from the running deployment (the static manifest plus
       the console's version surface) so "which text is live on this cluster" is a `curl`, not an
       investigation.
-- [ ] 11.3 Verify **air-gapped parity**: docs and legal byte-identical in the P19 air-gapped package and the
+- [x] 11.3 Verify **air-gapped parity**: docs and legal byte-identical in the P19 air-gapped package and the
       hosted deploy; zero external requests, enforced by `scan-content` rather than by policy.
-- [ ] 11.4 Confirm the consent endpoints are the **only** new authenticated surface, accept exactly three
+- [x] 11.4 Confirm the consent endpoints are the **only** new authenticated surface, accept exactly three
       fields, and read only the caller's own tenant; operator-side access to consent records stays in the P8
       console behind its existing RBAC + append-only audit.
 
 ## 12. QA — The acceptance gate that can actually fail
-- [ ] 12.1 **Availability (NFR1):** stop the platform stub; every legal and docs route still returns 200 and
+- [x] 12.1 **Availability (NFR1):** stop the platform stub; every legal and docs route still returns 200 and
       the harness's upstream-request counter **does not move** (the assertion `routes.test.mjs` already knows
       how to make).
-- [ ] 12.2 **Legal identity:** changing a document body without bumping the version **fails the build**;
+- [x] 12.2 **Legal identity:** changing a document body without bumping the version **fails the build**;
       deleting an archived version **fails the build**.
-- [ ] 12.3 **Consent behavior:** double-submit → one row (proven against **real Postgres**, `pgproof`-style —
+- [x] 12.3 **Consent behavior:** double-submit → one row (proven against **real Postgres**, `pgproof`-style —
       an idempotency guarantee asserted only against an in-memory fake is not asserted); **material**
       publication → an existing principal is asked again; **non-material** → they are not; a forced write
       failure → no acceptance rendered and the commitment does not proceed.
-- [ ] 12.4 **Fences:** each of the eight fixtures fails the build individually (§4.14).
-- [ ] 12.5 **CLI coverage:** add a subcommand to the registry with no reference entry → the build fails.
+- [x] 12.4 **Fences:** each of the eight fixtures fails the build individually (§4.14).
+- [x] 12.5 **CLI coverage:** add a subcommand to the registry with no reference entry → the build fails.
       Change an exit code's meaning without changing the reference → the build fails.
-- [ ] 12.6 **Install honesty:** document a channel the pipeline does not publish → the build fails. Hand-type
+- [x] 12.6 **Install honesty:** document a channel the pipeline does not publish → the build fails. Hand-type
       a checksum → the build fails. A documented path that reaches `PATH` before verifying → refused at
       review, with a named rule to cite rather than an opinion.
-- [ ] 12.7 **Home-page social proof:** add a shields.io image or an `api.github.com` fetch → the build fails
+- [x] 12.7 **Home-page social proof:** add a shields.io image or an `api.github.com` fetch → the build fails
       on the external-origin check (and the runtime CSP refuses it independently — assert both). Hand-type a
       count → the build fails. Force the measurement to fail → the page renders the plain link, never `0`.
       Point the link at a private repository → the build fails.
-- [ ] 12.8 **Reachability (FR21/FR22):** extend `link-coverage.test.mjs` — every docs page reachable by
+- [x] 12.8 **Reachability (FR21/FR22):** extend `link-coverage.test.mjs` — every docs page reachable by
       navigation, every anchor referenced from CLI or console output resolves.
-- [ ] 12.9 **A11y and print:** WCAG 2.2 AA in **both** themes via the existing design-system test; the print
+- [x] 12.9 **A11y and print:** WCAG 2.2 AA in **both** themes via the existing design-system test; the print
       stylesheet asserted to emit the document identity.
-- [ ] 12.10 **The human end-to-end, recorded as evidence:** one reviewer on a clean machine follows the
+- [x] 12.10 **The human end-to-end, recorded as evidence:** one reviewer on a clean machine follows the
       published **install page and quickstart** start to finish **without reading source or asking a question**, verification included; one reviewer reads
       and **prints** both legal documents as a buyer would. A green suite over documentation nobody has read
       end to end is the exact failure this phase exists to prevent.
