@@ -167,47 +167,66 @@ func (a *AdminAPI) routes() {
 	m.HandleFunc("POST /admin/api/testmode/assert", a.handleTestModeAssert)
 	m.HandleFunc("GET /admin/api/me", a.session(a.handleMe))
 
-	m.HandleFunc("GET /admin/api/tenants", a.session(a.handleTenants))
-	m.HandleFunc("GET /admin/api/tenants/{id}", a.session(a.handleTenant))
-	m.HandleFunc("POST /admin/api/tenants/{id}/suspend", a.session(a.handleSuspend))
-	m.HandleFunc("POST /admin/api/tenants/{id}/reactivate", a.session(a.handleReactivate))
-	m.HandleFunc("POST /admin/api/tenants/{id}/quota", a.session(a.handleQuota))
-	m.HandleFunc("POST /admin/api/tenants/{id}/entitlement", a.session(a.handleOverride))
+	m.HandleFunc("GET /admin/api/tenants", a.session(a.mounted(a.deps.Tenants != nil, "tenant", a.handleTenants)))
+	m.HandleFunc("GET /admin/api/tenants/{id}", a.session(a.mounted(a.deps.Tenants != nil, "tenant", a.handleTenant)))
+	m.HandleFunc("POST /admin/api/tenants/{id}/suspend", a.session(a.mounted(a.deps.Tenants != nil, "tenant", a.handleSuspend)))
+	m.HandleFunc("POST /admin/api/tenants/{id}/reactivate", a.session(a.mounted(a.deps.Tenants != nil, "tenant", a.handleReactivate)))
+	m.HandleFunc("POST /admin/api/tenants/{id}/quota", a.session(a.mounted(a.deps.Tenants != nil, "tenant", a.handleQuota)))
+	m.HandleFunc("POST /admin/api/tenants/{id}/entitlement", a.session(a.mounted(a.deps.Entitlements != nil, "entitlement", a.handleOverride)))
 
-	m.HandleFunc("GET /admin/api/plans", a.session(a.handlePlans))
-	m.HandleFunc("GET /admin/api/billing/{tenant}", a.session(a.handleBilling))
-	m.HandleFunc("POST /admin/api/billing/{tenant}/credit", a.session(a.handleCredit))
-	m.HandleFunc("POST /admin/api/billing/{tenant}/refund", a.session(a.handleRefund))
+	m.HandleFunc("GET /admin/api/plans", a.session(a.mounted(a.deps.Entitlements != nil, "entitlement", a.handlePlans)))
+	m.HandleFunc("GET /admin/api/billing/{tenant}", a.session(a.mounted(a.deps.Billing != nil, "billing", a.handleBilling)))
+	m.HandleFunc("POST /admin/api/billing/{tenant}/credit", a.session(a.mounted(a.deps.Billing != nil, "billing", a.handleCredit)))
+	m.HandleFunc("POST /admin/api/billing/{tenant}/refund", a.session(a.mounted(a.deps.Billing != nil, "billing", a.handleRefund)))
 
-	m.HandleFunc("GET /admin/api/registry", a.session(a.handleRegistry))
-	m.HandleFunc("POST /admin/api/registry/models", a.session(a.handleAddModel))
-	m.HandleFunc("POST /admin/api/registry/models/{id}/deprecate", a.session(a.handleDeprecateModel))
-	m.HandleFunc("POST /admin/api/registry/models/{id}/price-ref", a.session(a.handleRepointPrice))
+	m.HandleFunc("GET /admin/api/registry", a.session(a.mounted(a.deps.Registry != nil, "model registry", a.handleRegistry)))
+	m.HandleFunc("POST /admin/api/registry/models", a.session(a.mounted(a.deps.Registry != nil, "model registry", a.handleAddModel)))
+	m.HandleFunc("POST /admin/api/registry/models/{id}/deprecate", a.session(a.mounted(a.deps.Registry != nil, "model registry", a.handleDeprecateModel)))
+	m.HandleFunc("POST /admin/api/registry/models/{id}/price-ref", a.session(a.mounted(a.deps.Registry != nil, "model registry", a.handleRepointPrice)))
 
-	m.HandleFunc("GET /admin/api/jobs", a.session(a.handleJobs))
-	m.HandleFunc("GET /admin/api/fleet", a.session(a.handleFleet))
-	m.HandleFunc("POST /admin/api/jobs/{id}/retry", a.session(a.handleJobRetry))
-	m.HandleFunc("POST /admin/api/jobs/{id}/cancel", a.session(a.handleJobCancel))
+	m.HandleFunc("GET /admin/api/jobs", a.session(a.mounted(a.deps.Jobs != nil, "jobs and fleet", a.handleJobs)))
+	m.HandleFunc("GET /admin/api/fleet", a.session(a.mounted(a.deps.Jobs != nil, "jobs and fleet", a.handleFleet)))
+	m.HandleFunc("POST /admin/api/jobs/{id}/retry", a.session(a.mounted(a.deps.Jobs != nil, "jobs and fleet", a.handleJobRetry)))
+	m.HandleFunc("POST /admin/api/jobs/{id}/cancel", a.session(a.mounted(a.deps.Jobs != nil, "jobs and fleet", a.handleJobCancel)))
 
-	m.HandleFunc("GET /admin/api/killswitch", a.session(a.handleKillSwitchState))
-	m.HandleFunc("POST /admin/api/killswitch/arm", a.session(a.handleArm))
-	m.HandleFunc("POST /admin/api/killswitch/disarm", a.session(a.handleDisarm))
+	m.HandleFunc("GET /admin/api/killswitch", a.session(a.mounted(a.deps.KillSwitch != nil, "kill switch", a.handleKillSwitchState)))
+	m.HandleFunc("POST /admin/api/killswitch/arm", a.session(a.mounted(a.deps.KillSwitch != nil, "kill switch", a.handleArm)))
+	m.HandleFunc("POST /admin/api/killswitch/disarm", a.session(a.mounted(a.deps.KillSwitch != nil, "kill switch", a.handleDisarm)))
 
-	m.HandleFunc("GET /admin/api/impersonation", a.session(a.handleImpersonations))
-	m.HandleFunc("POST /admin/api/impersonation", a.session(a.handleImpersonateStart))
-	m.HandleFunc("POST /admin/api/impersonation/{id}/elevate", a.session(a.handleImpersonateElevate))
-	m.HandleFunc("POST /admin/api/impersonation/{id}/end", a.session(a.handleImpersonateEnd))
+	m.HandleFunc("GET /admin/api/impersonation", a.session(a.mounted(a.deps.Impersonation != nil, "impersonation", a.handleImpersonations)))
+	m.HandleFunc("POST /admin/api/impersonation", a.session(a.mounted(a.deps.Impersonation != nil, "impersonation", a.handleImpersonateStart)))
+	m.HandleFunc("POST /admin/api/impersonation/{id}/elevate", a.session(a.mounted(a.deps.Impersonation != nil, "impersonation", a.handleImpersonateElevate)))
+	m.HandleFunc("POST /admin/api/impersonation/{id}/end", a.session(a.mounted(a.deps.Impersonation != nil, "impersonation", a.handleImpersonateEnd)))
 
-	m.HandleFunc("GET /admin/api/crosstenant/{aggregate}", a.session(a.handleCrossTenant))
-	m.HandleFunc("GET /admin/api/crosstenant/{aggregate}/{tenant}", a.session(a.handleDrillDown))
+	m.HandleFunc("GET /admin/api/crosstenant/{aggregate}", a.session(a.mounted(a.deps.CrossTenant != nil, "cross-tenant", a.handleCrossTenant)))
+	m.HandleFunc("GET /admin/api/crosstenant/{aggregate}/{tenant}", a.session(a.mounted(a.deps.CrossTenant != nil, "cross-tenant", a.handleDrillDown)))
 
-	m.HandleFunc("GET /admin/api/audit", a.session(a.handleAudit))
-	m.HandleFunc("GET /admin/api/audit/verify", a.session(a.handleAuditVerify))
+	m.HandleFunc("GET /admin/api/audit", a.session(a.mounted(a.deps.Audit != nil, "audit log", a.handleAudit)))
+	m.HandleFunc("GET /admin/api/audit/verify", a.session(a.mounted(a.deps.Audit != nil, "audit log", a.handleAuditVerify)))
 
-	m.HandleFunc("GET /admin/api/gdpr", a.session(a.handleGDPRList))
-	m.HandleFunc("POST /admin/api/gdpr", a.session(a.handleGDPRRecord))
-	m.HandleFunc("POST /admin/api/gdpr/execute", a.session(a.handleGDPRExecute))
-	m.HandleFunc("GET /admin/api/gdpr/{id}/verify", a.session(a.handleGDPRVerify))
+	m.HandleFunc("GET /admin/api/gdpr", a.session(a.mounted(a.deps.GDPR != nil, "GDPR", a.handleGDPRList)))
+	m.HandleFunc("POST /admin/api/gdpr", a.session(a.mounted(a.deps.GDPR != nil, "GDPR", a.handleGDPRRecord)))
+	m.HandleFunc("POST /admin/api/gdpr/execute", a.session(a.mounted(a.deps.GDPR != nil, "GDPR", a.handleGDPRExecute)))
+	m.HandleFunc("GET /admin/api/gdpr/{id}/verify", a.session(a.mounted(a.deps.GDPR != nil, "GDPR", a.handleGDPRVerify)))
+}
+
+// mounted refuses a route whose operator service this deployment does not carry, with 501 —
+// `not_mounted` on the console, which renders it as "this deployment does not carry it, nothing is
+// wrong" rather than as a fault.
+//
+// 🔴 Before this existed, an unwired service was not a graceful absence: [AdminDeps] permits every
+// operator service to be nil, but the handlers dereference them unguarded, so the first request to an
+// unwired surface PANICKED the admin API — taking down the surfaces that *were* wired, including the
+// kill switch. That turned "this deployment only serves billing oversight" from a configuration into a
+// crash. The console has carried a `not_mounted` kind all along; this is the server side of it.
+func (a *AdminAPI) mounted(ok bool, surface string, h http.HandlerFunc) http.HandlerFunc {
+	if ok {
+		return h
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		writeAdminError(w, http.StatusNotImplemented, "not_mounted",
+			"this deployment does not carry the "+surface+" surface", nil)
+	}
 }
 
 // session verifies the admin session token and installs it on the request context.

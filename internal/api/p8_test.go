@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -329,5 +330,47 @@ func TestSuspendThroughTheHTTPSurface(t *testing.T) {
 func TestAdminAPIRequiresACredential(t *testing.T) {
 	if _, err := api.NewAdminAPI(api.AdminDeps{}); err == nil {
 		t.Fatal("an admin API was built with no platform credential")
+	}
+}
+
+// TestAnUnmountedSurfaceReportsItselfInsteadOfPanicking is the guard on partial deployments.
+//
+// 🔴 [api.AdminDeps] permits every operator SERVICE to be nil — only identity, authorization and the
+// command path are required — but the handlers dereferenced them unguarded. So an admin API wired for
+// one surface did not serve that surface and politely decline the rest: the first request to any other
+// route panicked the process, taking down the surfaces that WERE wired, the kill switch among them.
+//
+// That stopped being hypothetical when `cmd/p21hermes` began serving this API for billing oversight
+// alone, over the real Stripe-backed billing service. This asserts the honest answer instead: 501,
+// which the console's error taxonomy already carried as `not_mounted` — "this deployment does not
+// carry it, nothing is wrong".
+func TestAnUnmountedSurfaceReportsItselfInsteadOfPanicking(t *testing.T) {
+	s := newAdminStack(t) // wires Tenants only; billing, fleet, audit and the rest are nil
+	token := s.login(t, adminrbac.RoleSuperadmin)
+
+	for _, tc := range []struct{ method, path string }{
+		{http.MethodGet, "/admin/api/billing/tenant-acme"},
+		{http.MethodGet, "/admin/api/fleet"},
+		{http.MethodGet, "/admin/api/audit"},
+		{http.MethodGet, "/admin/api/registry"},
+		{http.MethodGet, "/admin/api/killswitch"},
+		{http.MethodGet, "/admin/api/gdpr"},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			// A panic here fails the test rather than the process, which is the whole point.
+			rec := s.do(t, tc.method, tc.path, nil, "", token)
+			if rec.Code != http.StatusNotImplemented {
+				t.Fatalf("status %d, want 501 not_mounted: %s", rec.Code, rec.Body.String())
+			}
+			if !strings.Contains(rec.Body.String(), "not_mounted") {
+				t.Errorf("body does not name the kind the console renders: %s", rec.Body.String())
+			}
+		})
+	}
+
+	// And the surface that IS mounted still works — otherwise the guard would "pass" by refusing
+	// everything, which catches every misconfiguration and serves nothing.
+	if rec := s.do(t, http.MethodGet, "/admin/api/tenants", nil, "", token); rec.Code != http.StatusOK {
+		t.Fatalf("the MOUNTED surface returned %d: %s", rec.Code, rec.Body.String())
 	}
 }
