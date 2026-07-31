@@ -35,7 +35,8 @@
     "scan:content": "node scripts/scan-content.mjs",
     "scan:install": "node scripts/scan-install.mjs",
     "scan:repo-link": "NODE_USE_ENV_PROXY=1 node scripts/scan-repo-link.mjs",
-    "scan:docs": "npm run scan:content && npm run scan:secrets && npm run scan:docs-claims && npm run scan:cli && npm run scan:api && npm run scan:metric && npm run scan:install && npm run scan:links && npm run scan:repo-link"
+    "scan:docs": "npm run scan:content && npm run scan:secrets && npm run scan:docs-claims && npm run scan:cli && npm run scan:api && npm run scan:metric && npm run scan:install && npm run scan:legal && npm run scan:links && npm run scan:repo-link",
+    "scan:legal": "node scripts/scan-legal.mjs"
   },
   "dependencies": {
     "@tailwindcss/postcss": "4.1.12",

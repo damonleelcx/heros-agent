@@ -6,6 +6,7 @@
     {
       "route": "/docs/concepts/glossary",
       "source": "docs/en/concepts/glossary.md",
+      "content_hash": "0ed169fe123a4bc5f6595fd03865016c092114abfddb8b7998f3acc9e0ef194d",
       "anchors": [
         "workflow-ir",
         "node",
@@ -25,6 +26,7 @@
     {
       "route": "/docs/concepts/refusals",
       "source": "docs/en/concepts/refusals.md",
+      "content_hash": "8e4d0dd347e167930c0dd4a54e68408e1ceec50ca3df2cf2def83cc9151987dd",
       "anchors": [
         "why-this-design-exists",
         "the-shape-of-every-refusal",
@@ -38,6 +40,7 @@
     {
       "route": "/docs/guides/bring-your-own-keys",
       "source": "docs/en/guides/bring-your-own-keys.md",
+      "content_hash": "5380d2fde2338d515f4d8d7ab5b427abce97e96e1bd6d0582c343719c555ddb7",
       "anchors": [
         "the-short-version",
         "where-they-come-from",
@@ -51,6 +54,7 @@
     {
       "route": "/docs/guides/configure-a-variant",
       "source": "docs/en/guides/configure-a-variant.md",
+      "content_hash": "97f0567fdc4fd0eac63e39a8503551ee4ffd72dc178c0d5cddb227b29d9bf8f9",
       "anchors": [
         "the-two-ways-in",
         "preflight-a-change",
@@ -64,6 +68,7 @@
     {
       "route": "/docs/guides/run-an-eval",
       "source": "docs/en/guides/run-an-eval.md",
+      "content_hash": "03cf71561c68a8fabbb95af82438d4eac3e61dbe31542a3dcfdc2d631f2cb13e",
       "anchors": [
         "run-it",
         "why-five-seeds-and-not-one",
@@ -81,6 +86,7 @@
     {
       "route": "/docs/guides/take-delivery",
       "source": "docs/en/guides/take-delivery.md",
+      "content_hash": "f4426629113eae21136f580510663ad19c1bc079eb61467d9667ff884d2fb719",
       "anchors": [
         "the-credential-posture-first",
         "what-has-to-be-true-before-a-change-is-delivered",
@@ -94,6 +100,7 @@
     {
       "route": "/docs/guides/use-the-studio",
       "source": "docs/en/guides/use-the-studio.md",
+      "content_hash": "75ed6aecb0851be4c6434b78e10afd255380f64e7e39c81d5de5a84283c862ba",
       "anchors": [
         "where-it-is",
         "the-rule-nothing-here-is-ranked",
@@ -106,6 +113,7 @@
     {
       "route": "/docs/guides/wire-ci",
       "source": "docs/en/guides/wire-ci.md",
+      "content_hash": "64b241dbc7d030f6b995c66fb1164bc252fd7776e717f0600009dc5f6066be71",
       "anchors": [
         "the-one-rule-this-integration-is-built-around",
         "use-the-published-workflow",
@@ -121,6 +129,7 @@
     {
       "route": "/docs/reference/cli",
       "source": "docs/en/reference/cli.md",
+      "content_hash": "d9b649bc39838cc9943c298bd743e444058c7409ec25a4ec0aebd3715e58e679",
       "anchors": [
         "exit-codes",
         "configuration-and-which-source-wins",
@@ -145,6 +154,7 @@
     {
       "route": "/docs/reference/http-api",
       "source": "docs/en/reference/http-api.md",
+      "content_hash": "17ea6fe1627b6c685e2e625571d38cec9d38397347cbe07780923db707dc6362",
       "anchors": [
         "status-absent",
         "why-you-are-reading-this-instead-of-an-endpoint-list",
@@ -154,6 +164,7 @@
     {
       "route": "/docs/reference/metrics",
       "source": "docs/en/reference/metrics.md",
+      "content_hash": "1a7c65e9239bbc65330516f46ce8c72cba225c26532e2c2e7d6ab9f06f5fd057",
       "anchors": [
         "per-provider-call",
         "per-run",
@@ -163,6 +174,7 @@
     {
       "route": "/docs/reference/schemas",
       "source": "docs/en/reference/schemas.md",
+      "content_hash": "27200b98285d1f85c8bda5a39ac3f2959c7253920d45ac6a10e2bccf422f9587",
       "anchors": [
         "console-view",
         "metric-event",
@@ -173,6 +185,7 @@
     {
       "route": "/docs/start/install",
       "source": "docs/en/start/install.md",
+      "content_hash": "bff3959ee976a47f72efb240c25e6187ddc0dbdf9671d5732a6276544532250b",
       "anchors": [
         "the-one-command",
         "what-your-operating-system-will-say",
@@ -195,6 +208,7 @@
     {
       "route": "/docs/start/quickstart",
       "source": "docs/en/start/quickstart.md",
+      "content_hash": "2cf94169a887ad65fc7f6fbd8f73a69754b37bad8507905f57dfa94d354558da",
       "anchors": [
         "before-you-start",
         "build-the-graph",
@@ -209,6 +223,7 @@
     {
       "route": "/legal/privacy/v/1.0.0",
       "source": "legal/en/privacy/1.0.0.md",
+      "content_hash": "d4083974abc2c44eefbbaa469235a605d14fa846e4e20903033b80facf1e130a",
       "anchors": [
         "1-the-fact-that-shapes-everything-below",
         "2-what-we-collect-when-you-deal-with-us-directly",
@@ -227,6 +242,7 @@
     {
       "route": "/legal/terms/v/1.0.0",
       "source": "legal/en/terms/1.0.0.md",
+      "content_hash": "3d83017760dd1b4c3e505a9e0995d07f61fb4e5296c11fd18b878d07afb97b30",
       "anchors": [
         "1-what-the-service-does-and-what-it-does-not-do",
         "2-your-account-and-your-responsibilities",

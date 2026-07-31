@@ -44,11 +44,16 @@ async function main() {
     ...docs.map((page) => ({
       route: page.route,
       source: page.sourcePath,
+      content_hash: page.contentHash,
       anchors: page.headings.map((heading) => heading.slug),
     })),
+    // A legal version carries its content hash INTO the manifest, because that is what makes
+    // "the text changed and the version did not" a checkable statement rather than a review habit
+    // (scan-legal.mjs). It is the same hash a consent record stores.
     ...legal.map((document) => ({
       route: document.versionRoute,
       source: document.sourcePath,
+      content_hash: document.contentHash,
       anchors: document.parsed.headings.map((heading) => heading.slug),
     })),
   ].sort((a, b) => a.route.localeCompare(b.route));
