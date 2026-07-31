@@ -314,7 +314,15 @@ Named rather than implied.
 | O2 | **Counsel review of Terms v1.0.0.** `docs/sales/P23-terms-reconciliation.md` establishes that every commercial sentence matches a mechanism. It does not establish enforceability. | Counsel's. |
 | O3 | **A printed read of both documents on paper.** The print stylesheet is asserted to emit the identity, and the pages were read on screen. Nobody has held the printout. | Needs a printer and a person. |
 | ~~O4~~ | ~~`internal/distribution/channels.go`'s two wrong claims~~ | **CLOSED** — fixed, see §4a. |
-| O5 | **The consent endpoints have not run against a live platform deployment.** The domain and store are proved against real Postgres; the HTTP legs are covered by unit and structural tests. | No vendor-operated deployment exists to run them on (see the data inventory §0). |
+| O5 | **The consent endpoints have not run against a live platform deployment.** The domain and store are proved against real Postgres, and the two HTTP handlers are now driven through the mux by `internal/api/p23_test.go` — routing, principal derivation, status mapping and JSON shape, with the 409 and the failure copy each watched red. What remains unproven is the same code behind a real auth middleware in a deployed process. | No vendor-operated deployment exists to run them on (see the data inventory §0). |
+
+> **Found while answering "is everything done?".** `RegisterP23` had **no caller anywhere** and no test,
+> so both handlers had never been executed — the domain beneath them was covered against real Postgres,
+> and the console's structural tests read this file's *source*, but no request had ever gone through
+> them. P21 and P12 each have a `cmd/proof/*` that mounts and drives their surface; P23 had neither.
+> `internal/api/p23_test.go` closes it, and two probes confirm it bites rather than passing vacuously.
+> It is recorded here rather than quietly fixed, because "a green suite over code nobody ran" is the
+> exact failure this phase is written against — including when the code is this phase's own.
 
 ---
 
