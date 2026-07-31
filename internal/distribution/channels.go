@@ -101,22 +101,44 @@ var channels = []Channel{
 	{
 		ID: "deb", Label: ".deb package", GOOSes: []string{"linux"},
 		Publication: PublishedByPipeline, ManagerOwned: true,
-		Verification: "the package's sha256 is listed in the signed release manifest; verify it with the " +
-			"documented two steps before installing, since dpkg has no signature to check without a hosted repo",
-		Install:   "curl -fsSLO https://github.com/damonleelcx/heros-agent/releases/download/v{{version}}/heros_{{version}}_amd64.deb && sudo dpkg -i heros_{{version}}_amd64.deb",
-		Upgrade:   "sudo dpkg -i heros_<newer>_amd64.deb",
+		// 🔴 CORRECTED. This used to read "the package's sha256 is listed in the signed release manifest".
+		// It is not, and it structurally cannot be: the pipeline computes and SIGNS SHA256SUMS before nfpm
+		// builds the packages, so the manifest is sealed by the time the .deb exists. The claim was false
+		// for every release that has ever shipped, and it was the kind of false that a reader only
+		// discovers while trying to do the right thing.
+		//
+		// The honest chain is better than no chain, and it is what this now says: the .deb contains the
+		// EXACT linux binary the signed manifest covers — nfpm's `contents.src` is that asset, copied, with
+		// no postinstall script — so the check moves to the installed file.
+		Verification: "the package's own sha256 is NOT in the signed release manifest (the manifest is " +
+			"signed before packaging runs). What the manifest covers is the binary INSIDE it, byte for byte: " +
+			"verify the heros-VERSION-linux-ARCH asset against SHA256SUMS, then confirm the installed " +
+			"/usr/bin/heros matches it",
+		Install:   "curl -fsSLO " + PackageHomepage + "/releases/download/v{{version}}/{{deb}} && sudo dpkg -i {{deb}}",
+		Upgrade:   "sudo dpkg -i {{deb}}   (from the newer release)",
 		Uninstall: "sudo dpkg -r heros",
-		Pin:       "download the .deb for the exact version from that release and dpkg -i it",
+		Pin:       "download {{deb}} for the exact version from that release and dpkg -i it",
 	},
 	{
 		ID: "rpm", Label: ".rpm package", GOOSes: []string{"linux"},
 		Publication: PublishedByPipeline, ManagerOwned: true,
-		Verification: "the package's sha256 is listed in the signed release manifest; verify it with the " +
-			"documented two steps before installing, since rpm has no signature to check without a hosted repo",
-		Install:   "sudo rpm -i https://github.com/damonleelcx/heros-agent/releases/download/v{{version}}/heros-{{version}}.x86_64.rpm",
-		Upgrade:   "sudo rpm -U heros-<newer>.x86_64.rpm",
+		// 🔴 CORRECTED, twice.
+		//
+		// The verification claim was the same false one as .deb — see there.
+		//
+		// And the install command named `heros-{{version}}.x86_64.rpm`, an asset no release has ever
+		// published: nfpm's RPM naming carries a RELEASE NUMBER, so the file is
+		// `heros-0.20.0-1.x86_64.rpm`. The documented command 404'd on every release. It is now built from
+		// `RPMFileName`, the same function the naming test checks against the published assets, so the
+		// filename cannot be typed wrong again.
+		Verification: "the package's own sha256 is NOT in the signed release manifest (the manifest is " +
+			"signed before packaging runs). What the manifest covers is the binary INSIDE it, byte for byte: " +
+			"verify the heros-VERSION-linux-ARCH asset against SHA256SUMS, then confirm the installed " +
+			"/usr/bin/heros matches it",
+		Install:   "sudo rpm -i " + PackageHomepage + "/releases/download/v{{version}}/{{rpm}}",
+		Upgrade:   "sudo rpm -U {{rpm}}   (from the newer release)",
 		Uninstall: "sudo rpm -e heros",
-		Pin:       "rpm -i the exact version's package URL",
+		Pin:       "rpm -i the exact version's package URL, which ends in {{rpm}}",
 	},
 	{
 		ID: "container", Label: "container image", GOOSes: []string{"darwin", "linux", "windows"},
@@ -218,9 +240,26 @@ func ChannelsFor(goos string) []Channel {
 	return out
 }
 
-// Command renders one of the channel's idioms with the version substituted.
+// Command renders one of the channel's idioms with the version and the package filenames substituted.
+//
+// # Why the package filenames are placeholders rather than literals
+//
+// The `.rpm` channel shipped a command naming `heros-{{version}}.x86_64.rpm` — an asset no release has
+// ever published, because nfpm's RPM filename carries a release number (`heros-0.20.0-1.x86_64.rpm`).
+// Every reader who followed it got a 404, and no check could see it: the version substituted correctly
+// and the sentence read fine.
+//
+// So the filenames are now DERIVED, by the same functions the packaging naming test checks against the
+// published release. `{{deb}}` and `{{rpm}}` cannot be typed wrong because they are not typed.
+//
+// The architecture is amd64: these are the commands a documentation page prints, and a page has to pick
+// one. `Pin` and the install page both say the exact filename, so an arm64 reader can see what to change
+// — which is better than a page that prints `<arch>` and leaves them to guess the spelling RPM uses.
 func Command(template, version string) string {
-	return strings.ReplaceAll(template, "{{version}}", version)
+	out := strings.ReplaceAll(template, "{{version}}", version)
+	out = strings.ReplaceAll(out, "{{deb}}", DebFileName(version, "amd64"))
+	out = strings.ReplaceAll(out, "{{rpm}}", RPMFileName(version, "amd64"))
+	return out
 }
 
 // ManagerOwnedChannelFor guesses whether an installed binary at path is owned by a package manager, and

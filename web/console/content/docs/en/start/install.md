@@ -142,20 +142,35 @@ Linux. A package manager owns the installed file.
 # install
 curl -fsSLO https://github.com/damonleelcx/heros-agent/releases/download/v0.20.0/heros_0.20.0_amd64.deb && sudo dpkg -i heros_0.20.0_amd64.deb
 # pin an exact version
-download the .deb for the exact version from that release and dpkg -i it
+download heros_0.20.0_amd64.deb for the exact version from that release and dpkg -i it
 # upgrade
-sudo dpkg -i heros_<newer>_amd64.deb
+sudo dpkg -i heros_0.20.0_amd64.deb   (from the newer release)
 # remove
 sudo dpkg -r heros
 ```
 
-**How this channel establishes the bytes are ours:** it does not, for release v0.20.0. `heros_0.20.0_amd64.deb`, `heros_0.20.0_arm64.deb` are published by this release but are **not listed in `SHA256SUMS`**, so the signed manifest does not cover them and neither this page nor `heros verify-release` can establish provenance. Use a binary from the verified table above if that matters to you.
+**How this channel establishes the bytes are ours:** the package's own sha256 is NOT in the signed release manifest (the manifest is signed before packaging runs). What the manifest covers is the binary INSIDE it, byte for byte: verify the heros-VERSION-linux-ARCH asset against SHA256SUMS, then confirm the installed /usr/bin/heros matches it.
+
+For release v0.20.0 those uncovered files are `heros_0.20.0_amd64.deb`, `heros_0.20.0_arm64.deb`.
 
 ### .rpm package
 
 Linux. A package manager owns the installed file.
 
-**Not usable for release v0.20.0.** This channel's commands name `heros-0.20.0.x86_64.rpm`, and the release does not publish that file. The commands are withheld rather than printed: an install command that 404s is worse than an absent one, and this page will print them again as soon as the filenames agree.
+```bash
+# install
+sudo rpm -i https://github.com/damonleelcx/heros-agent/releases/download/v0.20.0/heros-0.20.0-1.x86_64.rpm
+# pin an exact version
+rpm -i the exact version's package URL, which ends in heros-0.20.0-1.x86_64.rpm
+# upgrade
+sudo rpm -U heros-0.20.0-1.x86_64.rpm   (from the newer release)
+# remove
+sudo rpm -e heros
+```
+
+**How this channel establishes the bytes are ours:** the package's own sha256 is NOT in the signed release manifest (the manifest is signed before packaging runs). What the manifest covers is the binary INSIDE it, byte for byte: verify the heros-VERSION-linux-ARCH asset against SHA256SUMS, then confirm the installed /usr/bin/heros matches it.
+
+For release v0.20.0 those uncovered files are `heros-0.20.0-1.aarch64.rpm`, `heros-0.20.0-1.x86_64.rpm`.
 
 ### container image
 

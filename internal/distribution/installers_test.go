@@ -246,3 +246,104 @@ func TestReadmeClaimsOnlyDeliveredChannels(t *testing.T) {
 		}
 	}
 }
+
+// TestChannelCommandsNameThePackagesTheReleaseActuallyPublishes is the fence for the defect P23 found by
+// running the documentation: the `.rpm` channel's install command named `heros-0.20.0.x86_64.rpm`, and no
+// release has ever published that file.
+//
+// # Why the naming was wrong, and why no existing check saw it
+//
+// nfpm's RPM filename carries a RELEASE NUMBER and a different architecture spelling —
+// `heros-0.20.0-1.x86_64.rpm`, not `heros-0.20.0.x86_64.rpm`. The version substituted correctly, the
+// sentence read fine, and every test passed. The only way to see it was to look at what the release
+// actually published.
+//
+// So the filenames are now derived by `DebFileName` / `RPMFileName`, and this test pins those functions
+// against the naming nfpm produces — which is what the pipeline builds and the Release serves.
+func TestChannelCommandsNameThePackagesTheReleaseActuallyPublishes(t *testing.T) {
+	const version = "0.20.0"
+
+	// The names published by release v0.20.0, read off the Release's own asset list. Written as literals
+	// HERE, in the test, deliberately: this is the one place a literal belongs, because the test's whole
+	// job is to compare the derivation against ground truth rather than against itself.
+	want := map[string]string{
+		"deb amd64": "heros_0.20.0_amd64.deb",
+		"deb arm64": "heros_0.20.0_arm64.deb",
+		"rpm amd64": "heros-0.20.0-1.x86_64.rpm",
+		"rpm arm64": "heros-0.20.0-1.aarch64.rpm",
+	}
+	got := map[string]string{
+		"deb amd64": DebFileName(version, "amd64"),
+		"deb arm64": DebFileName(version, "arm64"),
+		"rpm amd64": RPMFileName(version, "amd64"),
+		"rpm arm64": RPMFileName(version, "arm64"),
+	}
+	for key, expected := range want {
+		if got[key] != expected {
+			t.Errorf("%s: derived %q, release v0.20.0 published %q", key, got[key], expected)
+		}
+	}
+
+	// And the rendered channel commands must contain those names — not a version-substituted guess.
+	for _, id := range []string{"deb", "rpm"} {
+		c, ok := ChannelByID(id)
+		if !ok {
+			t.Fatalf("no %s channel", id)
+		}
+		expected := want[id+" amd64"]
+		for name, template := range map[string]string{"Install": c.Install, "Upgrade": c.Upgrade, "Pin": c.Pin} {
+			rendered := Command(template, version)
+			if !strings.Contains(rendered, expected) {
+				t.Errorf("%s %s renders %q, which does not name %q", id, name, rendered, expected)
+			}
+		}
+		// A leftover placeholder would render a literal `{{rpm}}` into a command a reader copies.
+		if strings.Contains(Command(c.Install, version), "{{") {
+			t.Errorf("%s Install has an unsubstituted placeholder: %s", id, Command(c.Install, version))
+		}
+	}
+}
+
+// TestPackageChannelsDoNotClaimManifestCoverageTheyDoNotHave is the fence for the second P23 finding.
+//
+// # The claim that was false for every release ever shipped
+//
+// Both package channels said "the package's sha256 is listed in the signed release manifest". It is not,
+// and it structurally cannot be: the pipeline computes and SIGNS `SHA256SUMS` before nfpm builds the
+// packages, so the manifest is sealed by the time a `.deb` exists. Release v0.20.0's manifest lists five
+// binaries and two install scripts and no packages at all.
+//
+// A verification claim is exactly as load-bearing as a checksum, and this one sent a reader looking for a
+// line that was never there — which teaches them that verification is unreliable, which is how a security
+// step becomes a step people skip.
+func TestPackageChannelsDoNotClaimManifestCoverageTheyDoNotHave(t *testing.T) {
+	for _, id := range []string{"deb", "rpm"} {
+		c, ok := ChannelByID(id)
+		if !ok {
+			t.Fatalf("no %s channel", id)
+		}
+		lower := strings.ToLower(c.Verification)
+
+		// The affirmative claim, in the shapes it would actually be written. A negated mention is the
+		// sentence we WANT — "the package's own sha256 is NOT in the signed release manifest" — so the
+		// check is on the assertion, not on the words appearing at all. Punishing the disclosure would
+		// make deleting it the cheapest way to green.
+		for _, claim := range []string{
+			"package's sha256 is listed in the signed release manifest",
+			"package's sha256 is in the signed release manifest",
+			"the package is listed in the signed release manifest",
+		} {
+			if strings.Contains(lower, strings.ToLower(claim)) {
+				t.Errorf("%s claims %q. The manifest is signed BEFORE packaging runs, so it never covers the "+
+					"package — say what it does cover (the binary inside) instead.", c.Label, claim)
+			}
+		}
+
+		// And it must still explain how a reader establishes provenance. Removing the false claim and
+		// leaving nothing would be honest and useless.
+		if !strings.Contains(lower, "binary") {
+			t.Errorf("%s no longer explains what a reader CAN verify — the binary inside the package is "+
+				"covered by the signed manifest, and that is the chain to state", c.Label)
+		}
+	}
+}

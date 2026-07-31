@@ -51,11 +51,21 @@ async function main() {
   let invocations = 0;
   for (const document of docs) {
     for (const line of document.lines) {
-      // Every `heros <word>` in the corpus, in prose and in code alike. A wrong command inside a code
-      // fence is the one a reader will actually paste, so fences are IN scope here — unlike in
-      // `scan-content`, where a fence is an illustration.
-      for (const match of line.text.matchAll(/\bheros\s+([a-z][a-z-]*)/g)) {
-        const name = match[1];
+      /*
+       * Every `heros <word>` in the corpus, in prose and in code alike. A wrong command inside a code
+       * fence is the one a reader will actually paste, so fences are IN scope here — unlike in
+       * `scan-content`, where a fence is an illustration.
+       *
+       * 🔴 A PATH is not an invocation. The leading guard excludes `heros` preceded by `/`, a word
+       * character, a dot or a hyphen — so `/usr/bin/heros matches it` and `./heros-0.20.0-darwin-arm64`
+       * are prose about a file, not a command named `matches`.
+       *
+       * This was a real false positive: the install page's honest verification sentence names the
+       * installed path, and the fence read the next word as a subcommand. A fence that forces prose to
+       * avoid saying where the binary lives is a fence that makes the documentation worse.
+       */
+      for (const match of line.text.matchAll(/(^|[^/\w.-])heros\s+([a-z][a-z-]*)/g)) {
+        const name = match[2];
         invocations += 1;
         if (!known.has(name)) {
           findings.push(

@@ -93,6 +93,12 @@ type facts struct {
 	// TrustClaims is the inventoried vocabulary a document may only use when the release earned it. The
 	// install fence refuses a page that claims one this release did not deliver.
 	TrustClaims []string `json:"trust_claims"`
+	// PackageFiles are the .deb / .rpm filenames as TEMPLATES, still carrying `{{version}}`.
+	//
+	// 🔴 They are here so the console's generator substitutes the same derivation the Go side does. The
+	// `.rpm` channel once shipped a command naming an asset no release published, because its filename
+	// was typed rather than derived; emitting the derivation means the two cannot diverge again.
+	PackageFiles map[string]string `json:"package_files"`
 	// APIReference records the ABSENT tier and its reason, in the artifact rather than only in prose, so
 	// `scan-api` can refuse a documented endpoint by pointing at a fact rather than at an opinion.
 	APIReference struct {
@@ -164,6 +170,13 @@ func main() {
 	}
 
 	f.TrustClaims = distribution.ClaimIDs()
+
+	// Derived with `{{version}}` standing in for the version, so the console substitutes exactly once and
+	// the filename shape comes from the same function nfpm's naming is pinned against.
+	f.PackageFiles = map[string]string{
+		"deb": distribution.DebFileName("{{version}}", "amd64"),
+		"rpm": distribution.RPMFileName("{{version}}", "amd64"),
+	}
 
 	encoded, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {

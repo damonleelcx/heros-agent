@@ -756,11 +756,11 @@
       "publication": "published",
       "delivered": true,
       "manager_owned": true,
-      "verification": "the package's sha256 is listed in the signed release manifest; verify it with the documented two steps before installing, since dpkg has no signature to check without a hosted repo",
-      "install": "curl -fsSLO https://github.com/damonleelcx/heros-agent/releases/download/v{{version}}/heros_{{version}}_amd64.deb \u0026\u0026 sudo dpkg -i heros_{{version}}_amd64.deb",
-      "upgrade": "sudo dpkg -i heros_\u003cnewer\u003e_amd64.deb",
+      "verification": "the package's own sha256 is NOT in the signed release manifest (the manifest is signed before packaging runs). What the manifest covers is the binary INSIDE it, byte for byte: verify the heros-VERSION-linux-ARCH asset against SHA256SUMS, then confirm the installed /usr/bin/heros matches it",
+      "install": "curl -fsSLO https://github.com/damonleelcx/heros-agent/releases/download/v{{version}}/{{deb}} \u0026\u0026 sudo dpkg -i {{deb}}",
+      "upgrade": "sudo dpkg -i {{deb}}   (from the newer release)",
       "uninstall": "sudo dpkg -r heros",
-      "pin": "download the .deb for the exact version from that release and dpkg -i it"
+      "pin": "download {{deb}} for the exact version from that release and dpkg -i it"
     },
     {
       "id": "rpm",
@@ -771,11 +771,11 @@
       "publication": "published",
       "delivered": true,
       "manager_owned": true,
-      "verification": "the package's sha256 is listed in the signed release manifest; verify it with the documented two steps before installing, since rpm has no signature to check without a hosted repo",
-      "install": "sudo rpm -i https://github.com/damonleelcx/heros-agent/releases/download/v{{version}}/heros-{{version}}.x86_64.rpm",
-      "upgrade": "sudo rpm -U heros-\u003cnewer\u003e.x86_64.rpm",
+      "verification": "the package's own sha256 is NOT in the signed release manifest (the manifest is signed before packaging runs). What the manifest covers is the binary INSIDE it, byte for byte: verify the heros-VERSION-linux-ARCH asset against SHA256SUMS, then confirm the installed /usr/bin/heros matches it",
+      "install": "sudo rpm -i https://github.com/damonleelcx/heros-agent/releases/download/v{{version}}/{{rpm}}",
+      "upgrade": "sudo rpm -U {{rpm}}   (from the newer release)",
       "uninstall": "sudo rpm -e heros",
-      "pin": "rpm -i the exact version's package URL"
+      "pin": "rpm -i the exact version's package URL, which ends in {{rpm}}"
     },
     {
       "id": "container",
@@ -850,6 +850,10 @@
     "signed-manifest",
     "windows-signed"
   ],
+  "package_files": {
+    "deb": "heros_{{version}}_amd64.deb",
+    "rpm": "heros-{{version}}-1.x86_64.rpm"
+  },
   "api_reference": {
     "status": "absent",
     "reason": "There is no OpenAPI document in this repository, and the HTTP API reference is generated or it is not published at all. A hand-written endpoint list is a copy of the truth that begins drifting the day it is written, and it defeats the fence — which can only check documentation against an artifact."

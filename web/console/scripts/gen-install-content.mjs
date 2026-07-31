@@ -59,12 +59,32 @@ function bytes(n) {
   return `${(n / 1_000_000).toFixed(1)} MB`;
 }
 
+/**
+ * render substitutes a channel command's placeholders.
+ *
+ * 🔴 `{{deb}}` and `{{rpm}}` are DERIVED filenames, not typed ones. The `.rpm` channel once shipped an
+ * install command naming `heros-{{version}}.x86_64.rpm` — an asset no release has ever published,
+ * because nfpm's RPM filename carries a release number. Substituting from `package_files`, which
+ * `cmd/docsfacts` derives with the same function the packaging naming test pins, means the page and the
+ * artifact cannot disagree again.
+ *
+ * The order matters: the filename templates themselves contain `{{version}}`, so they go in first.
+ */
+function render(template, version, packageFiles) {
+  let out = String(template);
+  for (const [key, filename] of Object.entries(packageFiles ?? {})) {
+    out = out.replaceAll(`{{${key}}}`, filename);
+  }
+  return out.replaceAll("{{version}}", version);
+}
+
 function osLabel(goos) {
   return { darwin: "macOS", linux: "Linux", windows: "Windows" }[goos] ?? goos;
 }
 
 async function main() {
   const { version, facts, release } = await documentedVersion();
+  const packageFiles = facts.package_files ?? {};
   const out = [];
 
   const delivered = facts.channels.filter((c) => c.delivered);
@@ -124,10 +144,10 @@ async function main() {
   if (curl && pwsh) {
     out.push(":::tabs");
     out.push('```bash label="macOS and Linux"');
-    out.push(curl.install.replaceAll("{{version}}", version));
+    out.push(render(curl.install, version, packageFiles));
     out.push("```");
     out.push('```powershell label="Windows"');
-    out.push(pwsh.install.replaceAll("{{version}}", version));
+    out.push(render(pwsh.install, version, packageFiles));
     out.push("```");
     out.push(":::");
     out.push("");
@@ -285,7 +305,7 @@ async function main() {
   function unresolvedAssets(channel, publishedNames) {
     const named = new Set();
     for (const command of [channel.install, channel.pin, channel.upgrade, channel.uninstall]) {
-      for (const match of String(command).replaceAll("{{version}}", version).matchAll(/\bheros[-_][0-9][A-Za-z0-9._-]*/g)) {
+      for (const match of render(command, version, packageFiles).matchAll(/\bheros[-_][0-9][A-Za-z0-9._-]*/g)) {
         named.add(match[0]);
       }
     }
@@ -327,13 +347,13 @@ async function main() {
 
     out.push("```bash");
     out.push(`# install`);
-    out.push(channel.install.replaceAll("{{version}}", version));
+    out.push(render(channel.install, version, packageFiles));
     out.push(`# pin an exact version`);
-    out.push(channel.pin.replaceAll("{{version}}", version));
+    out.push(render(channel.pin, version, packageFiles));
     out.push(`# upgrade`);
-    out.push(channel.upgrade.replaceAll("{{version}}", version));
+    out.push(render(channel.upgrade, version, packageFiles));
     out.push(`# remove`);
-    out.push(channel.uninstall.replaceAll("{{version}}", version));
+    out.push(render(channel.uninstall, version, packageFiles));
     out.push("```");
     out.push("");
     /*
@@ -351,7 +371,23 @@ async function main() {
     const unsigned = (release.unverifiable_assets ?? []).filter((asset) =>
       channel.goos.some(() => true) && namesChannelAsset(channel, asset.name),
     );
-    if (unsigned.length > 0 && /signed release manifest|manifest is signed/i.test(channel.verification)) {
+    /*
+     * 🔴 The override fires on an AFFIRMATIVE claim, not on the words appearing.
+     *
+     * It used to trigger on any mention of the signed manifest — which, once the channel contract was
+     * corrected to say "the package's own sha256 is NOT in the signed release manifest … verify the
+     * binary inside it", fired on the honest sentence and replaced it with a worse one. The generated
+     * override says what a reader cannot do; the corrected channel text says what they CAN.
+     *
+     * So a channel that already discloses the gap keeps its own words, and the generated fact about
+     * WHICH files are uncovered is appended to it. A channel still claiming coverage it lacks is
+     * overridden as before. Same rule as the trust claims and the install fence: never make deleting the
+     * honest sentence the cheapest way to pass.
+     */
+    const claimsCoverage =
+      /signed release manifest|manifest is signed/i.test(channel.verification) &&
+      !/\b(not|never|no)\b/i.test(channel.verification);
+    if (unsigned.length > 0 && claimsCoverage) {
       out.push(
         `**How this channel establishes the bytes are ours:** it does not, for release ${release.release}. ` +
           `${unsigned.map((a) => `\`${cell(a.name)}\``).join(", ")} ${unsigned.length === 1 ? "is" : "are"} ` +
@@ -362,6 +398,15 @@ async function main() {
       );
     } else {
       out.push(`**How this channel establishes the bytes are ours:** ${cell(channel.verification)}.`);
+      if (unsigned.length > 0) {
+        // The channel says the manifest does not cover the package; this names the files, from the
+        // release itself, so a reader can see exactly which ones.
+        out.push("");
+        out.push(
+          `For release ${release.release} those uncovered files are ` +
+            `${unsigned.map((a) => `\`${cell(a.name)}\``).join(", ")}.`,
+        );
+      }
     }
     out.push("");
   }

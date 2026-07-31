@@ -215,7 +215,7 @@ curl -fsSLO https://github.com/damonleelcx/heros-agent/releases/download/v0.20.0
 **.rpm package** — linux
 
 ```sh
-sudo rpm -i https://github.com/damonleelcx/heros-agent/releases/download/v0.20.0/heros-0.20.0.x86_64.rpm
+sudo rpm -i https://github.com/damonleelcx/heros-agent/releases/download/v0.20.0/heros-0.20.0-1.x86_64.rpm
 ```
 
 **container image** — darwin, linux, windows

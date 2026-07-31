@@ -248,8 +248,59 @@ means nobody looked:
 5. **The consent path was filed in `scope.ts`**, which the P22 ADR-008 fence pins byte-for-byte. The
    fence was right twice over: that module is tenant *scoping*, and this path carries no tenant.
 
-(2) and (3) are pre-existing in P20's channel contract. P23's fences make the documentation honest about
-them; `internal/distribution/channels.go` is still wrong and is **not** fixed here.
+(2) and (3) were pre-existing in P20's channel contract. **Both are now fixed at the source** — see §4a.
+
+---
+
+## 4a. The two P20 channel claims, fixed at the source
+
+The install page was made honest about these first; the contract itself was corrected after.
+
+### What was wrong
+
+| # | Claim | Reality |
+|---|---|---|
+| 1 | Both package channels: *"the package's sha256 is listed in the signed release manifest"* | It is not, and **structurally cannot be**: the pipeline computes and **signs** `SHA256SUMS` before nfpm builds the packages. Release v0.20.0's manifest lists five binaries and two install scripts — no packages. The claim was false for every release ever shipped. |
+| 2 | `.rpm` install: `heros-{{version}}.x86_64.rpm` | nfpm's RPM filename carries a **release number**: the published asset is `heros-0.20.0-1.x86_64.rpm`. The documented command 404'd on every release. |
+
+### What replaced them
+
+**The verification claim now states the chain that actually exists**, which is better than either the
+false version or an empty one. nfpm's `contents.src` is the exact linux binary the signed manifest
+covers, copied, with no postinstall script — so:
+
+> the package's own sha256 is NOT in the signed release manifest (the manifest is signed before packaging
+> runs). What the manifest covers is the binary INSIDE it, byte for byte: verify the
+> heros-VERSION-linux-ARCH asset against SHA256SUMS, then confirm the installed /usr/bin/heros matches it
+
+**The filenames are now derived, not typed.** `DebFileName` and `RPMFileName` in
+`internal/distribution/manifests.go` produce the names, `PackageRelease` holds the `-1`, and `rpmArch`
+maps `amd64 → x86_64`. The channel commands carry `{{deb}}` / `{{rpm}}` placeholders that `Command()`
+substitutes, and `cmd/docsfacts` exports the same derivation so the console's install-page generator
+substitutes identically. The filename cannot be typed wrong because it is not typed.
+
+### Two new fences, each watched red
+
+| Fence | Probe | Result |
+|---|---|---|
+| `TestChannelCommandsNameThePackagesTheReleaseActuallyPublishes` | restore `heros-{{version}}.x86_64.rpm` | ✅ *"rpm Install renders … which does not name `heros-0.20.0-1.x86_64.rpm`"* |
+| `TestPackageChannelsDoNotClaimManifestCoverageTheyDoNotHave` | restore the false verification sentence | ✅ *".deb package claims … The manifest is signed BEFORE packaging runs"* |
+
+The second fires on an **affirmative** claim only. The corrected sentence mentions the signed manifest in
+order to say the package is *not* in it, and punishing that would make deleting the disclosure the
+cheapest way to green — the same rule the trust-claim and install fences already follow.
+
+### Two follow-on corrections the change forced
+
+- **The install-page generator's override** was firing on the corrected text and replacing it with a
+  worse sentence (what a reader *cannot* do, instead of what they *can*). It now fires only on an
+  affirmative claim, and appends the generated fact — which files are uncovered — to an honest one.
+- **`scan-cli` had a false positive.** It read `/usr/bin/heros matches it` as an invocation of a
+  subcommand named `matches`. A path is not a command; the pattern now excludes `heros` preceded by `/`,
+  a word character, a dot or a hyphen. The fixture still fails, so the fence did not lose its teeth.
+
+The README's generated install section was regenerated (`herosdist readme --write`) and its existing
+contract test — which caught the drift the moment the channel changed — passes.
 
 ---
 
@@ -262,7 +313,7 @@ Named rather than implied.
 | O1 | **12.10's independent reviewer.** A person who did not write this, on a machine that has never had the binary, following the install page and quickstart without reading source or asking a question. | An author cannot perform it. §1 records what *was* executed; this is the part that remains. |
 | O2 | **Counsel review of Terms v1.0.0.** `docs/sales/P23-terms-reconciliation.md` establishes that every commercial sentence matches a mechanism. It does not establish enforceability. | Counsel's. |
 | O3 | **A printed read of both documents on paper.** The print stylesheet is asserted to emit the identity, and the pages were read on screen. Nobody has held the printout. | Needs a printer and a person. |
-| O4 | **`internal/distribution/channels.go`'s two wrong claims** (§4 items 2 and 3). | P20's file; out of P23's scope, reported rather than edited. |
+| ~~O4~~ | ~~`internal/distribution/channels.go`'s two wrong claims~~ | **CLOSED** — fixed, see §4a. |
 | O5 | **The consent endpoints have not run against a live platform deployment.** The domain and store are proved against real Postgres; the HTTP legs are covered by unit and structural tests. | No vendor-operated deployment exists to run them on (see the data inventory §0). |
 
 ---
