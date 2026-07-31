@@ -583,8 +583,31 @@ test("4.2 the browser's session token is opaque — not a self-vouching token", 
   // nothing — there is no claim inside it for anybody to trust.
   assert.ok(!value.includes("."), "the session token has JWT structure");
   assert.equal(Buffer.from(value, "base64url").length, 32);
+
+  /*
+   * 🔴 This assertion was FLAKY at 11.8%, and the arithmetic is worth keeping.
+   *
+   * It used to decode the 32 random bytes as UTF-8 and assert the result contained no `{`. But `{` is
+   * one byte value out of 256, so over 32 CSPRNG bytes it appears with probability
+   * 1 − (255/256)^32 = 11.8% — measured at 11.8% over 200,000 tokens. Roughly one run in eight failed
+   * for a token that was perfectly opaque.
+   *
+   * A test that fails one run in eight is worse than no test: it trains everybody to re-run, and the
+   * next real failure is re-run away too.
+   *
+   * The INTENT is right and is kept: a session token must carry no claim anybody could trust. So the
+   * check is now what the intent actually means — the token does not parse as a structured document —
+   * rather than a substring that random bytes hit by chance.
+   */
   const decoded = Buffer.from(value, "base64url").toString("utf8");
-  assert.ok(!decoded.includes("{"), "the session token carries readable structure");
+  let parsed = false;
+  try {
+    JSON.parse(decoded);
+    parsed = true;
+  } catch {
+    parsed = false;
+  }
+  assert.ok(!parsed, "the session token parses as JSON — it carries claims a reader could trust");
 });
 
 test("4.2 no code path extends a live session's expiry", async () => {

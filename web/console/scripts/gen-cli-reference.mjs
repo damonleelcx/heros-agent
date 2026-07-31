@@ -140,6 +140,17 @@ async function main() {
     out.push("");
     out.push(`**${AVAILABILITY[command.availability] ?? command.availability}**`);
     out.push("");
+    if (command.prerequisite) {
+      /*
+       * 🔴 The prerequisite is printed ABOVE the command, not below it.
+       *
+       * A reader tests the first runnable line they see. Three of these examples exited non-zero when
+       * typed cold — found by running the documentation against a real repository, not by any fence —
+       * and a prerequisite noted underneath would have been read after the failure rather than before.
+       */
+      out.push(`**Before this runs:** ${cell(command.prerequisite)}`);
+      out.push("");
+    }
     out.push("```bash");
     out.push(command.example);
     out.push("```");

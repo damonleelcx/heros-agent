@@ -67,6 +67,16 @@ type Command struct {
 	// SuccessExit is the exit code on success. Always 0; stated per command because a reference that only
 	// documents failures leaves a CI author guessing at the one they branch on most.
 	SuccessExit int `json:"success_exit"`
+	// Prerequisite states what must already exist for Example to run, or "" when nothing must.
+	//
+	// 🔴 This field exists because running the documentation against a real repository found three
+	// examples that exit non-zero when a reader types them cold — `apply` and `author` need a Variant
+	// Spec on disk, and `verify-release` needs a downloaded manifest. Each was documented as "exit code
+	// 0", which is the sentence a reader tests first.
+	//
+	// A "runnable invocation" (task 6.5) that cannot run is not one. Stating the prerequisite is the
+	// honest fix: the reader learns what to have ready instead of learning that our examples do not work.
+	Prerequisite string `json:"prerequisite,omitempty"`
 	// Unavailable is the exact outcome when this command is not in the build (network commands only).
 	// Empty for offline commands. Documenting it is task 6.3: a reader should meet this sentence in the
 	// reference rather than at their terminal.
@@ -145,10 +155,11 @@ var commands = []Command{
 	},
 	{
 		Name: "apply", Summary: "realize a Variant Spec as a reviewable diff, in an isolated worktree", Avail: AvailOffline,
-		Flags:       []string{"repo", "config", "out", "spec", "commit", "repo-url", "workflow-id"},
-		Example:     "heros apply --repo . --spec variant.json --out change.diff",
-		Success:     "a unified diff at --out. Your working tree is untouched — the change is realized in a worktree.",
-		SuccessExit: 0,
+		Flags:        []string{"repo", "config", "out", "spec", "commit", "repo-url", "workflow-id"},
+		Example:      "heros apply --repo . --spec variant.json --out change.diff",
+		Prerequisite: "a Variant Spec JSON at --spec — see the schema reference for its shape.",
+		Success:      "a unified diff at --out. Your working tree is untouched — the change is realized in a worktree.",
+		SuccessExit:  0,
 	},
 	{
 		Name: "author", Summary: "make a change yourself: preflight it, and with --apply write its diff", Avail: AvailOffline,
@@ -157,9 +168,14 @@ var commands = []Command{
 			"node", "model", "prompt", "context-policy", "skills", "tools", "apply-mode",
 			"drop-tolerance", "clear-drop-tolerance", "apply",
 		},
-		Example:     "heros author --repo . --node n_triage --model anthropic/claude-sonnet-5",
-		Success:     "one of three verdicts — admissible, refused by name, or not yet measurable. Without --apply it writes nothing.",
-		SuccessExit: 0,
+		// 🔴 The `--spec` was MISSING from this example until running the documentation against a real
+		// repository exited 3 with `missing required input "spec"`. The line could never have worked as
+		// printed, and no fence could see it: the flag is real, the command is real, and only running it
+		// tells you the invocation is incomplete.
+		Example:      "heros author --repo . --spec variant.json --node n_triage --model anthropic/claude-sonnet-5",
+		Prerequisite: "a Variant Spec JSON at --spec. `author` changes an existing spec; it does not create the first one.",
+		Success:      "one of three verdicts — admissible, refused by name, or not yet measurable. Without --apply it writes nothing.",
+		SuccessExit:  0,
 	},
 	{
 		Name: "eval", Summary: "run a scored, multi-seed evaluation with your own provider keys", Avail: AvailOffline,
@@ -183,10 +199,11 @@ var commands = []Command{
 	},
 	{
 		Name: "verify-release", Summary: "verify a downloaded release: checksums, then the signature over the manifest", Avail: AvailOffline,
-		Flags:       []string{"manifest", "sig", "asset", "config"},
-		Example:     "heros verify-release --manifest SHA256SUMS --sig SHA256SUMS.sig",
-		Success:     "one line per asset confirming its checksum, then the manifest signature verified against the release key compiled into this binary. Any failure is a hard stop.",
-		SuccessExit: 0,
+		Flags:        []string{"manifest", "sig", "asset", "config"},
+		Example:      "heros verify-release --manifest SHA256SUMS --sig SHA256SUMS.sig",
+		Prerequisite: "the release's SHA256SUMS and SHA256SUMS.sig, downloaded next to the asset — the install page gets them.",
+		Success:      "one line per asset confirming its checksum, then the manifest signature verified against the release key compiled into this binary. Any failure is a hard stop.",
+		SuccessExit:  0,
 	},
 	{
 		Name: "login", Summary: "store a platform token", Avail: AvailNetwork,

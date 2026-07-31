@@ -59,6 +59,7 @@ type commandFact struct {
 	Example      string     `json:"example"`
 	Success      string     `json:"success"`
 	SuccessExit  int        `json:"success_exit"`
+	Prerequisite string     `json:"prerequisite,omitempty"`
 	Unavailable  string     `json:"unavailable,omitempty"`
 }
 
@@ -134,6 +135,7 @@ func main() {
 			Example:      c.Example,
 			Success:      c.Success,
 			SuccessExit:  c.SuccessExit,
+			Prerequisite: c.Prerequisite,
 			Unavailable:  c.Unavailable,
 			Flags:        []flagFact{},
 		}

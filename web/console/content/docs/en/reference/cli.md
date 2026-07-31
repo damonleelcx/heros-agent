@@ -48,6 +48,8 @@ realize a Variant Spec as a reviewable diff, in an isolated worktree.
 
 **Runs offline, with no account.**
 
+**Before this runs:** a Variant Spec JSON at --spec — see the schema reference for its shape.
+
 ```bash
 heros apply --repo . --spec variant.json --out change.diff
 ```
@@ -70,8 +72,10 @@ make a change yourself: preflight it, and with --apply write its diff.
 
 **Runs offline, with no account.**
 
+**Before this runs:** a Variant Spec JSON at --spec. `author` changes an existing spec; it does not create the first one.
+
 ```bash
-heros author --repo . --node n_triage --model anthropic/claude-sonnet-5
+heros author --repo . --spec variant.json --node n_triage --model anthropic/claude-sonnet-5
 ```
 
 **On success:** one of three verdicts — admissible, refused by name, or not yet measurable. Without --apply it writes nothing. Exit code `0`.
@@ -276,6 +280,8 @@ heros upgrade
 verify a downloaded release: checksums, then the signature over the manifest.
 
 **Runs offline, with no account.**
+
+**Before this runs:** the release's SHA256SUMS and SHA256SUMS.sig, downloaded next to the asset — the install page gets them.
 
 ```bash
 heros verify-release --manifest SHA256SUMS --sig SHA256SUMS.sig

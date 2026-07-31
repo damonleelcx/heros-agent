@@ -129,7 +129,7 @@
     {
       "route": "/docs/reference/cli",
       "source": "docs/en/reference/cli.md",
-      "content_hash": "d9b649bc39838cc9943c298bd743e444058c7409ec25a4ec0aebd3715e58e679",
+      "content_hash": "9c923c05da590f21e740e9a3b1c9346bc815dfc15d0b5a7b4d61be641e8afbd7",
       "anchors": [
         "exit-codes",
         "configuration-and-which-source-wins",

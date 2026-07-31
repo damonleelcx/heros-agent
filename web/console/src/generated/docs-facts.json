@@ -71,7 +71,8 @@
       ],
       "example": "heros apply --repo . --spec variant.json --out change.diff",
       "success": "a unified diff at --out. Your working tree is untouched — the change is realized in a worktree.",
-      "success_exit": 0
+      "success_exit": 0,
+      "prerequisite": "a Variant Spec JSON at --spec — see the schema reference for its shape."
     },
     {
       "name": "author",
@@ -200,9 +201,10 @@
           "summary": "workflow id (default: module path)"
         }
       ],
-      "example": "heros author --repo . --node n_triage --model anthropic/claude-sonnet-5",
+      "example": "heros author --repo . --spec variant.json --node n_triage --model anthropic/claude-sonnet-5",
       "success": "one of three verdicts — admissible, refused by name, or not yet measurable. Without --apply it writes nothing.",
-      "success_exit": 0
+      "success_exit": 0,
+      "prerequisite": "a Variant Spec JSON at --spec. `author` changes an existing spec; it does not create the first one."
     },
     {
       "name": "coverage",
@@ -558,7 +560,8 @@
       ],
       "example": "heros verify-release --manifest SHA256SUMS --sig SHA256SUMS.sig",
       "success": "one line per asset confirming its checksum, then the manifest signature verified against the release key compiled into this binary. Any failure is a hard stop.",
-      "success_exit": 0
+      "success_exit": 0,
+      "prerequisite": "the release's SHA256SUMS and SHA256SUMS.sig, downloaded next to the asset — the install page gets them."
     },
     {
       "name": "version",

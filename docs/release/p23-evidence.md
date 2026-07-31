@@ -143,6 +143,79 @@ equal (task 11.2).
 
 ---
 
+## 3b. Running the documentation itself against hermes-agent
+
+`cmd/proof/docs` takes the invocations **out of the generated reference and the quickstart** — rather
+than retyping them, which would make the proof a second source of truth about what the pages say — and
+runs each one against the real repository.
+
+```
+$ go run ./cmd/proof/docs -repo /tmp/hermes-agent \
+    -heros ./heros-0.20.0-darwin-arm64 -release /tmp/p23run
+
+documents    platform 0.20.0 (source tree is 0.11.0-dev)
+
+  ⏭  apply            SKIPPED — prerequisite not met by this run: a Variant Spec JSON at --spec
+  ⏭  author           SKIPPED — prerequisite not met by this run: a Variant Spec JSON at --spec
+  ✔  coverage         exit 0 as documented
+  ✔  discover         exit 0 as documented        (reference)
+  ✔  discover         exit 0 as documented        (quickstart)
+  ✔  doctor           exit 0 as documented
+  ✔  eval             exit 0 as documented
+  ✔  help             exit 0 as documented
+  ✔  init             exit 0 as documented
+  ⏭  link             SKIPPED — needs the network and an account
+  ⏭  login            SKIPPED — needs the network and an account
+  ✔  status           exit 0 as documented
+  ⏭  upgrade          SKIPPED — needs the network
+  ✔  verify-release   exit 0 as documented
+  ✔  version          exit 0 as documented
+
+  15 documented invocation(s)
+  10 run · 10 matched the documented exit code · 0 did not
+  5 skipped, each with its reason above
+```
+
+### 🔴 It found two real documentation defects on its first run
+
+Neither was reachable by any fence, and that is the point of running the documentation rather than
+scanning it.
+
+1. **`heros author`'s documented example could never have worked.** The printed line omitted `--spec`,
+   which `author` requires (`internal/cli/author.go:73`). A reader typing it cold got exit 3,
+   `missing required input "spec"`, against a page that said exit 0. Every fence passed it: the command
+   is real, the flags are real, and only *running* the line reveals it is incomplete.
+2. **Three examples needed prerequisites the page never stated** — `apply` and `author` need a Variant
+   Spec on disk, `verify-release` needs a downloaded manifest and signature. Each was documented as
+   "Exit code `0`", which is the first sentence a reader tests.
+
+Both are fixed. The registry gained a `Prerequisite` field, the reference prints **Before this runs:**
+*above* the command (a prerequisite noted underneath is read after the failure), and the `author` example
+now carries its `--spec`.
+
+**`verify-release` is verified with a real prerequisite, not a manufactured one.** The proof copies the
+actual downloaded `SHA256SUMS`, its signature and the asset from §1; it does **not** fabricate a Variant
+Spec so `apply` can exit 0. A command whose prerequisite this run cannot meet honestly is counted
+separately — neither verified nor skipped-for-network — with the prerequisite quoted.
+
+---
+
+## 3c. A pre-existing flaky test, found and fixed
+
+Running the console suite repeatedly to confirm the P23 additions were stable surfaced an intermittent
+that is **not P23's**: `tests/sso-identity.test.mjs` §4.2 failed roughly one run in eight.
+
+The assertion decoded the session token's 32 CSPRNG bytes as UTF-8 and required the result to contain no
+`{`. But `{` is one byte value in 256, so over 32 random bytes it appears with probability
+1 − (255/256)³² = **11.8%** — measured at 11.8% over 200,000 tokens.
+
+A test that fails one run in eight is worse than no test: it teaches everybody to re-run, and the next
+*real* failure is re-run away with it. The intent — a session token carries no claim anybody could
+trust — is kept, and the check is now what that intent means: the token does not parse as JSON. Ten runs
+of that file and six full-suite runs, all clean.
+
+---
+
 ## 4. The §13 acceptance checklist
 
 | # | Check | Outcome |
