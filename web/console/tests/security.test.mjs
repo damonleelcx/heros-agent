@@ -86,7 +86,17 @@ test("scope is derived from the session and has no tenant parameter to override"
 test("the session cookie is HttpOnly and SameSite, in exactly one place", async () => {
   const cookies = await read("src/lib/cookies.ts");
   assert.match(cookies, /httpOnly:\s*true/);
-  assert.match(cookies, /sameSite:\s*"strict"/);
+  // 🔴 `lax`, and it was `strict` until a live Stripe checkout proved `strict` unusable here: the
+  // return from `checkout.stripe.com` is a cross-site top-level navigation, which is precisely what
+  // `strict` refuses to send a cookie on — so every customer who paid came back to a sign-in page.
+  // P21's collection design REQUIRES leaving this origin (the card is entered on Stripe's page and
+  // never on ours), so a cookie policy assuming the user never leaves cannot stand beside it.
+  //
+  // What `lax` gives up is narrow and bounded: the cookie now rides cross-site top-level navigations
+  // that use a SAFE method. It is still withheld from cross-site POST, iframes and subresources —
+  // where CSRF actually lives — and `tests/session-cookie.test.mjs` fails if any API route ever
+  // starts mutating on GET, which is the assumption that makes this safe.
+  assert.match(cookies, /sameSite:\s*"lax"/);
 
   // The invariant is about the CREDENTIAL cookie: its flags are set once, so there is one place to
   // audit and one place to get wrong. The console does set a second cookie — the theme preference —

@@ -48,7 +48,18 @@ export async function POST(request: Request) {
 
   const requested = typeof body?.return_path === "string" ? body.return_path : "/app/billing";
   const path = RETURN_PATHS.has(requested) ? requested : "/app/billing";
-  const origin = new URL(request.url).origin;
+  // 🔴 The origin the BROWSER is on, not the one this process happens to know itself by.
+  //
+  // `new URL(request.url).origin` is the server's own view, and Next resolves it to `localhost`
+  // regardless of the host the request arrived on. A customer browsing `127.0.0.1` was therefore sent
+  // back to `localhost` — a different host for cookie purposes, so no session — and behind a proxy it
+  // would be worse: the return URL would be the internal origin, which is not reachable from a browser
+  // at all. The forwarded headers are what a proxy sets and what a dev server passes through; the
+  // request URL is the last resort rather than the first choice.
+  const forwardedHost = request.headers.get("x-forwarded-host") ?? request.headers.get("host");
+  const forwardedProto =
+    request.headers.get("x-forwarded-proto") ?? new URL(request.url).protocol.replace(":", "");
+  const origin = forwardedHost ? `${forwardedProto}://${forwardedHost}` : new URL(request.url).origin;
 
   return forward<CheckoutView>(context, context.paths.checkoutSession(), {
     method: "POST",
