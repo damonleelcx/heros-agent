@@ -210,15 +210,15 @@ phase:
       timestamp). Assert the row holds no email, no name and no free text.
 
 ## 10. Frontend + Product — The gate and the account surface (last, smallest, most reversible)
-- [ ] 10.1 Acceptance history on `/app/account`: document, version, date, principal — each entry linking to
+- [x] 10.1 Acceptance history on `/app/account`: document, version, date, principal — each entry linking to
       **the exact archived text that was accepted**.
-- [ ] 10.2 The commitment gate at **first sign-in / checkout / plan change**, behind a flag, **new principals
+- [x] 10.2 The commitment gate at **first sign-in / checkout / plan change**, behind a flag, **new principals
       first**.
-- [ ] 10.3 The non-blocking notice for existing sessions: names the document and the effective date, offers
+- [x] 10.3 The non-blocking notice for existing sessions: names the document and the effective date, offers
       "Read it" and "Accept", and **the console keeps working**.
-- [ ] 10.4 Failed-write behavior: the button returns to rest with a plain sentence — *the acceptance was not
+- [x] 10.4 Failed-write behavior: the button returns to rest with a plain sentence — *the acceptance was not
       recorded; nothing has been agreed* — and a retry. **No optimistic checkmark, ever.**
-- [ ] 10.5 Assert by test that consent **never** blocks reading the console, an in-flight run, or a legal
+- [x] 10.5 Assert by test that consent **never** blocks reading the console, an in-flight run, or a legal
       document itself.
 
 ## 11. DevOps — Deploy, observability, air-gapped parity
