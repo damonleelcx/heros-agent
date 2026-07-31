@@ -50,16 +50,16 @@ type flagFact struct {
 }
 
 type commandFact struct {
-	Name        string     `json:"name"`
-	Summary     string     `json:"summary"`
-	Availability string    `json:"availability"`
-	Offline     bool       `json:"offline"`
-	NeedsAccount bool      `json:"needs_account"`
-	Flags       []flagFact `json:"flags"`
-	Example     string     `json:"example"`
-	Success     string     `json:"success"`
-	SuccessExit int        `json:"success_exit"`
-	Unavailable string     `json:"unavailable,omitempty"`
+	Name         string     `json:"name"`
+	Summary      string     `json:"summary"`
+	Availability string     `json:"availability"`
+	Offline      bool       `json:"offline"`
+	NeedsAccount bool       `json:"needs_account"`
+	Flags        []flagFact `json:"flags"`
+	Example      string     `json:"example"`
+	Success      string     `json:"success"`
+	SuccessExit  int        `json:"success_exit"`
+	Unavailable  string     `json:"unavailable,omitempty"`
 }
 
 type channelFact struct {
@@ -78,17 +78,17 @@ type channelFact struct {
 }
 
 type facts struct {
-	Schema      string                        `json:"schema"`
-	Note        string                        `json:"note"`
-	ToolVersion string                        `json:"tool_version"`
-	ContractVersion string                    `json:"contract_version"`
-	EnvPrefix   string                        `json:"env_prefix"`
-	ProjectFile string                        `json:"project_file"`
-	Precedence  []string                      `json:"config_precedence"`
-	Commands    []commandFact                 `json:"commands"`
-	ExitCodes   []cli.ExitCode                `json:"exit_codes"`
-	Metrics     []telemetry.MetricDefinition  `json:"metrics"`
-	Channels    []channelFact                 `json:"channels"`
+	Schema          string                       `json:"schema"`
+	Note            string                       `json:"note"`
+	ToolVersion     string                       `json:"tool_version"`
+	ContractVersion string                       `json:"contract_version"`
+	EnvPrefix       string                       `json:"env_prefix"`
+	ProjectFile     string                       `json:"project_file"`
+	Precedence      []string                     `json:"config_precedence"`
+	Commands        []commandFact                `json:"commands"`
+	ExitCodes       []cli.ExitCode               `json:"exit_codes"`
+	Metrics         []telemetry.MetricDefinition `json:"metrics"`
+	Channels        []channelFact                `json:"channels"`
 	// TrustClaims is the inventoried vocabulary a document may only use when the release earned it. The
 	// install fence refuses a page that claims one this release did not deliver.
 	TrustClaims []string `json:"trust_claims"`

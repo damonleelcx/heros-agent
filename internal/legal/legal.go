@@ -96,9 +96,9 @@ type Version struct {
 
 // Manifest is `/legal/manifest.json`: every kind, every version, with hashes.
 type Manifest struct {
-	Schema        string               `json:"schema"`
-	GeneratedFrom string               `json:"generated_from"`
-	Kinds         map[Kind][]Version   `json:"kinds"`
+	Schema        string             `json:"schema"`
+	GeneratedFrom string             `json:"generated_from"`
+	Kinds         map[Kind][]Version `json:"kinds"`
 }
 
 // Errors this package returns. Each names a distinct refusal, so a support engineer can answer "why was

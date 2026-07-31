@@ -263,8 +263,8 @@ phase:
       end to end is the exact failure this phase exists to prevent.
 
 ## 13. Close-out
-- [ ] 13.1 Add the P23 row to `docs/prd/README.md` and to the ownership matrix in
+- [x] 13.1 Add the P23 row to `docs/prd/README.md` and to the ownership matrix in
       `docs/implementation-timeline/roles-and-ownership.md`.
-- [ ] 13.2 Record the §13 acceptance checklist outcomes; fold these delta specs into `openspec/specs/`.
-- [ ] 13.3 File the residue: anything a fence cannot check (tone, emphasis, omission) becomes a named review
+- [x] 13.2 Record the §13 acceptance checklist outcomes; fold these delta specs into `openspec/specs/`.
+- [x] 13.3 File the residue: anything a fence cannot check (tone, emphasis, omission) becomes a named review
       responsibility in the docs contributor guide — not an implied guarantee.

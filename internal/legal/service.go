@@ -58,10 +58,10 @@ type ManifestSource interface {
 
 // Service records and reports consent.
 type Service struct {
-	store    Store
-	source   ManifestSource
-	now      func() time.Time
-	newID    func() string
+	store  Store
+	source ManifestSource
+	now    func() time.Time
+	newID  func() string
 }
 
 // NewService builds the service. `now` and `newID` are injected so a test can assert on exact values

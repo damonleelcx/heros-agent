@@ -167,7 +167,7 @@ The console's two **read, not computed** surfaces: a **legal surface** (Terms of
 served from the console to readers with **no session**, which must stay true as the system changes and must keep
 serving when the platform does not. Their characteristic failure is **drift**, not a crash, and drift is found by
 customers, auditors and regulators rather than by tests. So the phase delivers content *and* the machinery that
-keeps it honest: content-as-code inside the console's deploy unit (no CMS, no runtime fetch — [ADR-010](../adr/)),
+keeps it honest: content-as-code inside the console's deploy unit (no CMS, no runtime fetch — [ADR-011](../adr/ADR-011-legal-and-docs-content-as-code.md)),
 a document identity of `(kind, version, content_hash)` that a **consent record** points at instead of a URL, a
 commitment gate that never walls the console, generated reference (absent tiers marked absent, never hand-written),
 and eight build-time fences — each with a fixture proving it can fail — extending the `scan-claims` rule from the
@@ -181,6 +181,44 @@ posture is worth more than a number.
 | Phase | PRD | OpenSpec change | Lead role(s) |
 |-------|-----|-----------------|--------------|
 | P23 — Legal Surface & Developer Documentation *(Terms + Privacy Notice as versioned artifacts; append-only consent records; three-tier generated docs; accuracy fences)* | [P23-legal-and-developer-docs.md](P23-legal-and-developer-docs.md) | `p23-legal-and-docs` | Product Designer + Frontend + Sales Operations |
+
+**P23 is implemented.** Its nine capabilities are folded into the live spec set —
+[`legal-documents`](../../openspec/specs/legal-documents/spec.md),
+[`consent-records`](../../openspec/specs/consent-records/spec.md),
+[`developer-docs`](../../openspec/specs/developer-docs/spec.md),
+[`cli-reference`](../../openspec/specs/cli-reference/spec.md),
+[`install-documentation`](../../openspec/specs/install-documentation/spec.md),
+[`docs-accuracy-fence`](../../openspec/specs/docs-accuracy-fence/spec.md),
+[`reading-surface`](../../openspec/specs/reading-surface/spec.md),
+[`social-proof-claims`](../../openspec/specs/social-proof-claims/spec.md) and
+[`console-marketing-site`](../../openspec/specs/console-marketing-site/spec.md) — and it ships with four
+documents rather than only code: the ratified one-way doors
+([`p23-one-way-doors.md`](../decisions/p23-one-way-doors.md)), the
+[data inventory](../decisions/p23-data-inventory.md) counsel's Privacy Notice was written from, the
+[Terms reconciliation](../sales/P23-terms-reconciliation.md) against P7/P21, and the
+[acceptance evidence](../release/p23-evidence.md).
+
+**A numbering correction worth knowing.** The design document calls the content-as-code decision
+"ADR-010" and the consent migration "0016". Both numbers were taken between the design being written and
+the phase being built — by [`ADR-010-runtime-gradual-rollout`](../adr/ADR-010-runtime-gradual-rollout.md)
+and by `0016_p13_authored_change` respectively. They shipped as **ADR-011** and **0019**, and each file
+says why rather than being silently renumbered.
+
+**What "implemented" claims, and what it does not.** Twelve fence fixtures were each watched failing and
+then passing; the consent record's idempotency is proved against **real Postgres** with twelve concurrent
+inserts collapsing to one row; and the install page and quickstart were executed end to end against the
+**real published v0.20.0 release** — checksum verified, signature verified against key
+`heros-release-2026c`, Gatekeeper met exactly as the page warned, and a discovery graph produced on
+`nousresearch/hermes-agent`. What is **not** claimed: that walk was performed by the author, not by an
+independent reviewer on a clean machine, and [§12.10's independent half is recorded
+open](../release/p23-evidence.md). Counsel has not reviewed the Terms. The consent endpoints have never
+run against a vendor-operated deployment, because there is not one.
+
+Three real defects surfaced by generating documentation against artifacts rather than describing them:
+the reading pages were `force-static`, so the nonce-based CSP silently killed both client islands on a
+green build; the `.deb`/`.rpm` channels claim a signed-manifest coverage `SHA256SUMS` does not give them;
+and the `.rpm` install command names an asset the release does not publish. The last two are P20's to
+fix — P23 makes the *documentation* honest about them and does not edit the channel contract.
 
 ### Seeing the System — P24, P26
 

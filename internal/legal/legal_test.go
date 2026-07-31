@@ -187,10 +187,10 @@ func TestAKindWithNoPublishedVersionIsNotPending(t *testing.T) {
 // ── The service ───────────────────────────────────────────────────────────────
 
 type fakeStore struct {
-	rows      []Acceptance
-	insertErr error
-	deleted   int
-	erased    int
+	rows       []Acceptance
+	insertErr  error
+	deleted    int
+	erased     int
 	superseded int
 }
 
