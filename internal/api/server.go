@@ -89,6 +89,10 @@ type Server struct {
 	// MountP21Payments when available.
 	p21 PaymentsSource
 
+	// p23 is the P23 consent surface — the ONLY new authenticated surface this phase adds, mounted by
+	// RegisterP23 when available. Two endpoints, three fields, the caller's own tenant only (task 11.4).
+	p23 P23Source
+
 	// secrets is the live provider-credential source, reported by /readyz.
 	//
 	// The SOURCE, never a credential: this holds the thing that can produce secrets precisely so the

@@ -190,23 +190,23 @@ phase:
 - [x] 8.9 Assert **no** SLA, certification or sub-processor claim appears anywhere until it exists.
 
 ## 9. Backend — Consent records
-- [ ] 9.1 Migration `00NN_p23_legal_acceptance.{up,down}.sql` (next free number — `0016` at time of writing):
+- [x] 9.1 Migration `00NN_p23_legal_acceptance.{up,down}.sql` (next free number — `0016` at time of writing):
       the table in `design.md` Decision 5, **expand-only**, with `unique (tenant_id, principal_id,
       document_kind, document_version)` — **idempotency in the schema, not in application code**.
-- [ ] 9.2 `internal/legal`: the manifest reader and **server-side `content_hash` validation**. A client that
+- [x] 9.2 `internal/legal`: the manifest reader and **server-side `content_hash` validation**. A client that
       submits a hash for a version it was not shown is rejected; without this the record says whatever the
       browser said.
-- [ ] 9.3 `POST /v1/legal/acceptances` — **persist-then-acknowledge**; the 201 is written after commit, never
+- [x] 9.3 `POST /v1/legal/acceptances` — **persist-then-acknowledge**; the 201 is written after commit, never
       before. A repeat of the same triple returns success and creates no second row.
-- [ ] 9.4 `GET /v1/legal/acceptances` — the caller's **own tenant only**, plus `pending[]` (the kinds needing
+- [x] 9.4 `GET /v1/legal/acceptances` — the caller's **own tenant only**, plus `pending[]` (the kinds needing
       acceptance). No cross-tenant read exists on this path at all.
-- [ ] 9.5 Bind the record to the **ADR-008 principal**, not to an email or an IdP subject, so P22 requires no
+- [x] 9.5 Bind the record to the **ADR-008 principal**, not to an email or an IdP subject, so P22 requires no
       migration here.
-- [ ] 9.6 Supersession: publishing a **material** version sets `superseded_by` on prior acceptances; a
+- [x] 9.6 Supersession: publishing a **material** version sets `superseded_by` on prior acceptances; a
       **non-material** publication changes nothing.
-- [ ] 9.7 Retention job for the configured statutory window, **runnable dry**. A deletion job whose first
+- [x] 9.7 Retention job for the configured statutory window, **runnable dry**. A deletion job whose first
       production run is also its first run ever is a defect waiting for a quiet weekend.
-- [ ] 9.8 Erasure path: tombstone the subject, **keep the evidentiary row** (document version, hash,
+- [x] 9.8 Erasure path: tombstone the subject, **keep the evidentiary row** (document version, hash,
       timestamp). Assert the row holds no email, no name and no free text.
 
 ## 10. Frontend + Product — The gate and the account surface (last, smallest, most reversible)
