@@ -1566,26 +1566,6 @@ func parsePeriodKey(period string) (time.Time, bool) {
 // this becomes a plan-config read, and the reconciler is the test that catches it if it is not.
 func meterNameFor(string) string { return "sum" }
 
-func (p *StripeProvider) customerSubscriptions(ctx context.Context, handle string) ([]stripeSubscription, error) {
-	form := url.Values{}
-	form.Set("customer", handle)
-	form.Set("limit", "100")
-	// `all` rather than the default: a canceled subscription still carries the usage of the period it
-	// was canceled in, and a reconciliation that could not see it would report a drift that is not one.
-	form.Set("status", "all")
-	res, err := p.do(ctx, http.MethodGet, "/v1/subscriptions", form, "")
-	if err != nil {
-		return nil, err
-	}
-	var list struct {
-		Data []stripeSubscription `json:"data"`
-	}
-	if err := decode(res, &list); err != nil {
-		return nil, err
-	}
-	return list.Data, nil
-}
-
 // Compile-time proof of design Decision 1: the Stripe implementation satisfies the EXISTING interface.
 // If Stripe ever needed a method the interface does not have, this line would fail — which is the
 // conversation the decision wants to force, rather than a widened interface nobody reviewed.

@@ -204,8 +204,14 @@ func (s *Service) SubscriptionRef(customerID string) string {
 	return s.subs[customerID]
 }
 
-// recordSubscriptionRef remembers a subscription the PROVIDER created, so a later plan change can
-// repoint it instead of creating a second one.
+// recordSubscriptionRefLocked remembers a subscription the PROVIDER created, so a later plan change
+// can repoint it instead of creating a second one.
+//
+// 🔴 The CALLER HOLDS stateMu, which is why this does not take it: the only caller is applyWebhook,
+// which already holds it for the duration of the mirror update, and sync.Mutex is not reentrant — a
+// self-locking version of this deadlocks the webhook path the first time an event names a
+// subscription. The `Locked` suffix is the contract; the alternative was a bare map write at the call
+// site, which is the same thing with nothing to read.
 //
 // 🔴 This is the half that was missing, and the bug it caused is the worst kind: it charged twice.
 // Only StartSubscription used to write this map, but in the real self-serve flow the platform does not
@@ -217,12 +223,10 @@ func (s *Service) SubscriptionRef(customerID string) string {
 //
 // A real Stripe account is what surfaced it: two active subscriptions on one customer, $19.99 and
 // $29.99, both correct in isolation.
-func (s *Service) recordSubscriptionRef(customerID, ref string) {
+func (s *Service) recordSubscriptionRefLocked(customerID, ref string) {
 	if customerID == "" || ref == "" {
 		return
 	}
-	s.stateMu.Lock()
-	defer s.stateMu.Unlock()
 	s.subs[customerID] = ref
 }
 

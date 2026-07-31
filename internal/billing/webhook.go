@@ -52,7 +52,7 @@ const (
 	// `.updated`, so a platform that handled only `.updated` would mirror no status for precisely the
 	// customers who just paid: the console's provider-status chip and its past-due states would have
 	// nothing to render from until something else happened to that subscription.
-	WebhookSubscriptionCreated WebhookType = "customer.subscription.created"
+	WebhookSubscriptionCreated  WebhookType = "customer.subscription.created"
 	WebhookSubscriptionPastDue  WebhookType = "customer.subscription.past_due"
 	WebhookSubscriptionCanceled WebhookType = "customer.subscription.deleted"
 	WebhookChargeRefunded       WebhookType = "charge.refunded"
@@ -663,9 +663,7 @@ func (s *Service) applyWebhook(p WebhookPayload) (BillingState, error) {
 	// repoint — so it starts another checkout and the customer ends up paying for two subscriptions.
 	// Recorded from any delivery that names one, because the event that carries it varies with the
 	// flow: `customer.subscription.created` for a signup, `invoice.paid` for a renewal.
-	if p.SubscriptionRef != "" {
-		s.subs[p.CustomerID] = p.SubscriptionRef
-	}
+	s.recordSubscriptionRefLocked(p.CustomerID, p.SubscriptionRef)
 
 	switch p.Type {
 	case WebhookInvoicePaid:

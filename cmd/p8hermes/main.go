@@ -49,7 +49,6 @@ import (
 )
 
 const (
-	adminIssuer = "https://admin-idp.test.heros.internal"
 	// platformCredential is the BFF credential this demo prints for the console to use. In production
 	// it comes from the secrets manager and never appears on a terminal.
 	platformCredential = "p8hermes-demo-platform-credential-do-not-ship"
