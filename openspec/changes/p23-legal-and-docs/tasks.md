@@ -97,97 +97,97 @@ phase:
       `scan-claims.mjs` already uses.
 
 ## 5. Product Designer + Frontend — Documentation content (tiers 1–2)
-- [ ] 5.1 **Quickstart**: install → a discovery graph **on the reader's own repository**, with **no config
+- [x] 5.1 **Quickstart**: install → a discovery graph **on the reader's own repository**, with **no config
       file edit** (matching the P20 first-run contract). One page, one path, **no options** — choices move to
       Guides.
-- [ ] 5.2 **Guides**, task-shaped, one job each: configure a variant and read the diff; run an eval and read
+- [x] 5.2 **Guides**, task-shaped, one job each: configure a variant and read the diff; run an eval and read
       the scorecard; wire CI (P11); take delivery as a pull request (P12); use the console's Studio (P10);
       bring your own provider keys.
-- [ ] 5.3 **Glossary** for the product's own nouns — Variant Spec, `config_hash`, Dimension, verified delta,
+- [x] 5.3 **Glossary** for the product's own nouns — Variant Spec, `config_hash`, Dimension, verified delta,
       refusal-as-`BuildStatus`, unclassified region — so the vocabulary in the UI has somewhere to resolve.
-- [ ] 5.4 Document **refusals as first-class outcomes**, not as errors or omissions (AI-engineer lens): a
+- [x] 5.4 Document **refusals as first-class outcomes**, not as errors or omissions (AI-engineer lens): a
       developer who first meets a refusal in production reads it as a bug; one who met it in the quickstart
       reads it as the design.
-- [ ] 5.5 Every page carries the **platform version it documents** and the **boundary** — what the capability
+- [x] 5.5 Every page carries the **platform version it documents** and the **boundary** — what the capability
       deliberately does not do — reusing the `boundary` field the capability manifest already requires.
-- [ ] 5.6 Sample outputs are either **captured from a real run and labelled with the version that produced
+- [x] 5.6 Sample outputs are either **captured from a real run and labelled with the version that produced
       them**, or clearly marked illustrative. No model-generated example may be presented as a real run.
-- [ ] 5.7 Design the unhappy paths as pages, not defaults: docs 404 offering the section index and search; a
+- [x] 5.7 Design the unhappy paths as pages, not defaults: docs 404 offering the section index and search; a
       zero-result search that **says what it searched**.
 
 ## 6. Backend + DevOps + Product — CLI reference and installation content
-- [ ] 6.1 Generate the **CLI reference** for every subcommand in the registry — today `help`, `version`,
+- [x] 6.1 Generate the **CLI reference** for every subcommand in the registry — today `help`, `version`,
       `discover`, `apply`, `eval`, `status`, `login`, `link` — and make a registry entry with no reference
       entry **fail the build** (§4.7). Adding a subcommand is a normal Tuesday; remembering the docs is not.
-- [ ] 6.2 Document the **exit-code contract as a contract**: `0` success, `1` a gate the customer configured
+- [x] 6.2 Document the **exit-code contract as a contract**: `0` success, `1` a gate the customer configured
       failed, `2` the tool broke, `3` invalid invocation — each with its **remedy**, sourced from
       `internal/cli/exit.go` and `docs/decisions/p11-contracts.md`. The 1-vs-2 gap is load-bearing: opposite
       remedies, and a CI step that fails for an unclear reason gets disabled.
-- [ ] 6.3 State per command whether it runs **offline with no account**; for `login` and `link`, document the
+- [x] 6.3 State per command whether it runs **offline with no account**; for `login` and `link`, document the
       **"unavailable in this build"** outcome rather than leaving it to be met at the terminal.
-- [ ] 6.4 Document every flag with type, default, environment equivalent and **which wins** when both are
+- [x] 6.4 Document every flag with type, default, environment equivalent and **which wins** when both are
       set; mark deprecations with their replacement and expected removal release, **before** removal.
-- [ ] 6.5 Give each command entry a **runnable invocation**, what success looks like, and the success exit
+- [x] 6.5 Give each command entry a **runnable invocation**, what success looks like, and the success exit
       code.
-- [ ] 6.6 Author the **install page** for macOS, Linux and Windows. **The shortest path on the page is the
+- [x] 6.6 Author the **install page** for macOS, Linux and Windows. **The shortest path on the page is the
       verified path**: checksum **and** signature checked before the binary reaches `PATH`. Do not publish
       any path that installs first and verifies later (Decision 13) — that is the path everyone copies.
-- [ ] 6.7 Generate the **release-asset table** (§4.5) from the published release. **No hand-typed checksum,
+- [x] 6.7 Generate the **release-asset table** (§4.5) from the published release. **No hand-typed checksum,
       filename or version** — a routinely-wrong checksum is how readers learn to skip verification.
-- [ ] 6.8 Gate channels on existence (§4.13): document a channel **only once the pipeline publishes it**.
+- [x] 6.8 Gate channels on existence (§4.13): document a channel **only once the pipeline publishes it**.
       Until then, document what does exist — build from source, `scripts/release-cli.sh`, `SHA256SUMS`,
       `herossign`, `docs/release/cli-verification.md` — and **say packaged channels are not yet available**.
-- [ ] 6.9 State the **OS-trust posture per platform**: signed/notarized only where the pipeline does it;
+- [x] 6.9 State the **OS-trust posture per platform**: signed/notarized only where the pipeline does it;
       otherwise "unsigned", with the exact quarantine-clear command and what accepting it means. Warn the
       reader about the Gatekeeper/SmartScreen dialog **before** they meet it.
-- [ ] 6.10 Document **pinned-version install** on every channel (an unpinnable install is an unreproducible
+- [x] 6.10 Document **pinned-version install** on every channel (an unpinnable install is an unreproducible
       build image), and **upgrade + uninstall in each channel's own idiom**, including deferring to the
       package manager and naming any configuration or cache left behind.
-- [ ] 6.11 Document the **offline / air-gapped install**: transferred asset, checksum manifest, signature and
+- [x] 6.11 Document the **offline / air-gapped install**: transferred asset, checksum manifest, signature and
       public key, with verification performed on the disconnected machine and **no step needing the internet
       or an account**.
-- [ ] 6.12 End the install page by **naming the quickstart's first command**, with no config-file edit
+- [x] 6.12 End the install page by **naming the quickstart's first command**, with no config-file edit
       between installing and a first discovery graph.
 
 ## 7. Frontend + Product + Sales Ops — The GitHub link on the home page
-- [ ] 7.1 Add the **repository link** to the public header (beside "Sign in") and the footer, marked as an
+- [x] 7.1 Add the **repository link** to the public header (beside "Sign in") and the footer, marked as an
       external destination. It is an anchor: **no request until clicked** — no client component, no effect,
       no loading state (Decision 15).
-- [ ] 7.2 Fence the link target: a **private or non-existent** repository **fails the build**, under the
+- [x] 7.2 Fence the link target: a **private or non-existent** repository **fails the build**, under the
       same rule that forbids an install command that 404s. (Verified today: the repository is **public**.)
-- [ ] 7.3 If a star count is wanted, capture it **during the build** and render it as a server-side string
+- [x] 7.3 If a star count is wanted, capture it **during the build** and render it as a server-side string
       **with its measurement date**. Do **not** add a shields.io image, a GitHub buttons widget, or a
       browser-side `api.github.com` call — the CSP (`default-src 'self'`, `connect-src 'self'`,
       `img-src 'self' data:`) refuses all three, and this is not the feature that gets an exception.
-- [ ] 7.4 Make an **unavailable measurement degrade to the plain link** — never `0`, never a placeholder,
+- [x] 7.4 Make an **unavailable measurement degrade to the plain link** — never `0`, never a placeholder,
       never a broken badge. An unavailable measurement rendered as zero is a false statement, and the one a
       reader will believe.
-- [ ] 7.5 Make the count **opt-in configuration, default off**; keep the link unconditional. **Escalate the
+- [x] 7.5 Make the count **opt-in configuration, default off**; keep the link unconditional. **Escalate the
       display decision** rather than defaulting it: the repository has **0 stars** today, and "★ 0" on the
       marketing home page is worse than nothing.
-- [ ] 7.6 Assert the page's existing posture is unchanged: no cookie, no third-party request at render, and
+- [x] 7.6 Assert the page's existing posture is unchanged: no cookie, no third-party request at render, and
       the CSP untouched.
 
 ## 8. Sales Ops + Frontend — Legal content (published read-only, no gate yet)
-- [ ] 8.1 Author the **Terms of Service** with counsel; engineering supplies structure, front matter and the
+- [x] 8.1 Author the **Terms of Service** with counsel; engineering supplies structure, front matter and the
       commercial facts.
-- [ ] 8.2 Author the **Privacy Notice** from the §2 data inventory; assert **only rights with an implemented
+- [x] 8.2 Author the **Privacy Notice** from the §2 data inventory; assert **only rights with an implemented
       route**, name the route, and state the response commitment operators have actually agreed to.
-- [ ] 8.3 Front matter on both: `kind`, `version`, `effective_date`, `authoritative_language`, `supersedes`,
+- [x] 8.3 Front matter on both: `kind`, `version`, `effective_date`, `authoritative_language`, `supersedes`,
       `material` — and make the build fail when any is missing.
-- [ ] 8.4 Version-history page + permanent per-version routes `/legal/{kind}/v/{version}`; a superseded page
+- [x] 8.4 Version-history page + permanent per-version routes `/legal/{kind}/v/{version}`; a superseded page
       **says so, names the current version and links to it — without redirecting**.
-- [ ] 8.5 Static `/legal/manifest.json` (kind → versions → `{effective_date, hash, route, material}`),
+- [x] 8.5 Static `/legal/manifest.json` (kind → versions → `{effective_date, hash, route, material}`),
       resolvable with no session.
-- [ ] 8.6 Add a fence: a manifest entry whose document no longer resolves **fails the build** (the
+- [x] 8.6 Add a fence: a manifest entry whose document no longer resolves **fails the build** (the
       orphaned-consent one-way door, Decision 2).
-- [ ] 8.7 Link legal from the **public footer, sign-in, console shell, account surface and checkout** — every
+- [x] 8.7 Link legal from the **public footer, sign-in, console shell, account surface and checkout** — every
       place a commitment is made or reviewed.
-- [ ] 8.8 **Reconcile the Terms line-by-line against P7 entitlements and (when present) P21 Stripe
+- [x] 8.8 **Reconcile the Terms line-by-line against P7 entitlements and (when present) P21 Stripe
       configuration** — plans, metering basis (SUM), gainshare/verified-savings basis, cancellation, refunds,
       any SLA language. Record it in `docs/sales/P23-terms-reconciliation.md`. A refund term Stripe cannot
       execute is a promise software will break.
-- [ ] 8.9 Assert **no** SLA, certification or sub-processor claim appears anywhere until it exists.
+- [x] 8.9 Assert **no** SLA, certification or sub-processor claim appears anywhere until it exists.
 
 ## 9. Backend — Consent records
 - [ ] 9.1 Migration `00NN_p23_legal_acceptance.{up,down}.sql` (next free number — `0016` at time of writing):
