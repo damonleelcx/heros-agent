@@ -100,6 +100,21 @@ export type BillingOversight = {
   reconciliation_detail?: string;
   gainshare?: GainshareLine[];
   exceptions: number;
+  /**
+   * Every audited plan change for the tenant, newest first, across ALL periods.
+   *
+   * Not period-scoped on purpose: a plan change carries no period, so the period-filtered `invoices`
+   * list above structurally cannot contain one.
+   */
+  plan_history?: PlanChangeLine[];
+};
+
+export type PlanChangeLine = {
+  event_id: string;
+  status: string;
+  caused_by: string;
+  reason?: string;
+  created_at: string;
 };
 
 export type ModelRecord = {
