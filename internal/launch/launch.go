@@ -79,6 +79,14 @@ func StartAgentd(ctx context.Context, cfg config.Config) (*Server, error) {
 	if consoleHealth := strings.TrimSpace(os.Getenv("CONSOLE_HEALTH_URL")); consoleHealth != "" {
 		handler.SetConsoleProbe(api.NewHTTPComponentProbe("customer_console", consoleHealth))
 		log.Printf("readiness aggregates the customer_console component at %s", consoleHealth)
+
+		// The customer IDENTITY PROVIDER, read from the same endpoint and reported as its own named
+		// component (P22 task 7.1). Two components rather than one, because they fail for different
+		// reasons and an operator needs to know which: `customer_console` says the surface is down,
+		// `identity_provider` says the surface is up and nobody can sign in. Collapsing them would
+		// produce a signal that is true and useless.
+		handler.SetIdentityProbe(api.NewHTTPIdentityProbe(consoleHealth))
+		log.Printf("readiness aggregates the identity_provider component from %s", consoleHealth)
 	}
 
 	// The rest of the platform deployment (P19). Each component is aggregated into /readyz when — and

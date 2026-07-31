@@ -4,7 +4,7 @@
 > real API response**, and it must cover the matrix below. **A cell without evidence blocks acceptance**
 > — it is not assumed to pass.
 >
-> **Stack under test.** `cmd/p8hermes` (real admin API, real RBAC/audit/kill-switch machinery, test-mode
+> **Stack under test.** `cmd/proof/operatorconsole` (real admin API, real RBAC/audit/kill-switch machinery, test-mode
 > IdP) on `127.0.0.1:4311`, console BFF on `localhost:4310`. Browsers: Chrome (real profile) and the
 > in-app Chrome pane. Date: 2026-07-24.
 
@@ -72,7 +72,7 @@
 ## 5. Re-running it
 
 ```bash
-GOWORK=off go run ./cmd/p8hermes                     # admin API on :4311
+GOWORK=off go run ./cmd/proof/operatorconsole                     # admin API on :4311
 cd web/admin-console && ADMIN_API_BASE=http://127.0.0.1:4311 \
   ADMIN_PLATFORM_CREDENTIAL=<printed by p8hermes> npm run dev
 ADMIN_CONSOLE_URL=http://localhost:4310 npm test     # 35 assertions, incl. the live half

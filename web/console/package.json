@@ -17,6 +17,7 @@
     "accept": "node scripts/accept.mjs",
     "scan:markup": "node scripts/scan-markup.mjs",
     "dev:p21": "CONSOLE_TENANT_IDENTITY=configured CONSOLE_TENANT_ASSERTIONS='{\"local-dev-assertion\":\"cus_nousresearch\"}' CONSOLE_PLATFORM_CREDENTIAL=local-dev-credential-not-a-secret PLATFORM_API_BASE=http://127.0.0.1:4401 next dev --port 4327",
+    "dev:sso": "node scripts/dev-sso.mjs",
     "dev:browser": "CONSOLE_TENANT_IDENTITY=configured CONSOLE_TENANT_ASSERTIONS='{\"local-dev-assertion\":\"tenant-hermes\"}' CONSOLE_PLATFORM_CREDENTIAL=local-dev-credential-not-a-secret PLATFORM_API_BASE=http://127.0.0.1:4399 next dev --port 4320"
   },
   "dependencies": {

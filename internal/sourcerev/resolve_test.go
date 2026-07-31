@@ -99,7 +99,7 @@ func TestResolveRefusesAPinTheCheckoutIsNotAt(t *testing.T) {
 }
 
 // The other half: a pin the clone does not hold at all (the shallow-clone case, and the one that
-// actually happened to cmd/p13hermes). Its fix is different, so its message must be too.
+// actually happened to cmd/proof/promptmodel). Its fix is different, so its message must be too.
 func TestResolveRefusesAPinTheCloneDoesNotHave(t *testing.T) {
 	dir, _, _ := tinyRepo(t)
 	absent := strings.Repeat("a", 40)

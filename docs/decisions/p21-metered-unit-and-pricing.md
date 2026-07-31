@@ -91,7 +91,7 @@ multiplication. Nothing in between has to agree about arithmetic.
 
 **The resulting effect.** A period whose SUM is a whole number of dollars bills exactly. A period whose
 SUM is not is **refused, loudly**, with a message naming the remedy — and that refusal is demonstrated
-on purpose in `cmd/p21hermes`, because a constraint nobody has seen fire is a constraint nobody
+on purpose in `cmd/proof/payments`, because a constraint nobody has seen fire is a constraint nobody
 believes.
 
 **What this costs, stated plainly.** Sub-dollar precision is gone. A customer whose SUM for a period is

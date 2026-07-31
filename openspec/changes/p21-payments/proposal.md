@@ -61,6 +61,21 @@ path). Product rationale: [`../../../docs/prd/P21-stripe-payments.md`](../../../
   reversible, so paying restores the plan. A `charge.refunded` / dispute webhook authors **no** ledger row on its
   own (a webhook is a notification, not an authorization to write the ledger).
 
+- **Real-account operation, added to all three capabilities after the integration went green against a real
+  Stripe *test* account (2026-07-30).** Five behaviours only a real account produces, and one property only a
+  real account has. **(a) Mode is a property of every artefact, not a flag on one** — key, webhook endpoint,
+  signing secret, customer handle and **price id** are separate objects per mode; the preflight runs in the
+  mode the deployment is running in, and every readiness line naming Stripe names its mode. **(b) Customer
+  authentication (SCA / 3-D Secure) is a state, not a failure** — a `requires_action` subscription is mirrored
+  verbatim and rendered as its own waiting-on-your-bank state with Stripe's action link, never folded into
+  `payment_failed` and never auto-retried. **(c) A 429 is an outage, a decline is a rejection** — rate limits
+  and lock contention buffer and retry; declines stop. **(d) The webhook endpoint is registered per mode with
+  an enumerated event set**, and an event type the platform does not handle is acked as understood-and-ignored
+  rather than 5xx'd. **(e) A dispute moves money the platform did not author** — the webhook still writes no
+  ledger row, and reconciliation surfaces the movement as a **named divergence** for a human to close through
+  the audited credit path. And the property: **the live cutover is one-way for money** — the rollout flag is
+  reversible, a charge is not, so the documented rollback for money already moved is an additive correction.
+
 **No breaking changes to the P7 abstraction.** The `Provider` interface, the ledger, the correction path, the
 entitlement gate, the Secrets seam, and the plan model are **consumed, not modified**. The stub remains for tests
 and the demo. P21 slots a concrete implementation behind the interface and adds a collection surface in front and
@@ -76,7 +91,11 @@ an endpoint behind.
   (the `POST /billing/webhook` route + `secrets_source` already covers the billing secrets); the console BFF (a
   `POST /billing/checkout-session` and `POST /billing/plan`, holding the Stripe key server-side); the customer
   console (a billing page under the authenticated app area); the plan↔`price_ref` mapping as configuration; the
-  deploy runbook (the one inbound path, test/live wiring).
+  deploy runbook (the one inbound path, test/live wiring). For the real-account increment: the preflight and the
+  readiness line gain a **mode**; the transport error mapping gains the rate-limit vs. decline split; the billing
+  page gains an **authentication-required** state; the webhook route gains an enumerated event set and an
+  ack-and-ignore path; reconciliation gains a named **dispute** divergence; and the ingress runbook gains the
+  ordered live-cutover sequence with its one-way note.
 - **Dependencies:** upstream — **P7** (the abstraction P21 implements — hard dependency), **P5.5** (gainshare's
   only source, not loosened), **P9** (console), **P19** (ingress + test/live secret wiring), **ADR-002**
   (platform never in a customer path). Unblocks — **M16: real payments live** (the subscription + metered +

@@ -463,7 +463,7 @@ func TestNoPricedValueInAdminSource(t *testing.T) {
 	root := repoRoot(t)
 	out, err := exec.Command("git", "-C", root, "ls-files",
 		"internal/adminops", "internal/adminrbac", "internal/adminaudit", "internal/adminidentity",
-		"internal/api/p8.go", "cmd/p8hermes", "web/admin-console").Output()
+		"internal/api/p8.go", "cmd/proof/operatorconsole", "web/admin-console").Output()
 	if err != nil {
 		t.Skipf("git ls-files unavailable (%v) — the fence runs in CI where the index is present", err)
 	}

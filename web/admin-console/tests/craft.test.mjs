@@ -182,16 +182,59 @@ test("🔴 the operator chrome stays distinguishable from the customer console i
   // cross-tenant while believing the view is single-tenant, is its named failure. Adding a light theme
   // is exactly the kind of change that could reintroduce it by a new route, so the property is asserted
   // rather than assumed.
+  //
+  // # Why the two files are read differently, and why that was worth fixing rather than working around
+  //
+  // This assertion was committed reading `--cl-accent` / `--cd-accent` from the customer console. Those
+  // names have never existed in any commit of `tokens.customer.css` — so the test failed on the value
+  // being `undefined` and asserted nothing about hue from the day it landed. A fence that cannot read
+  // its own inputs is not a weaker fence, it is an absent one wearing a 🔴.
+  //
+  // The two consoles key their palettes differently, and the fix follows that rather than renaming
+  // anything: the OPERATOR prefixes per theme (`--ol-*` light, `--od-*` dark) in one block, while the
+  // CUSTOMER declares the same name `--accent` inside a per-theme SELECTOR block. So the operator is
+  // read by name and the customer is read by name WITHIN its block.
   const operator = await read("src/app/tokens.operator.css");
   const customer = await readFile(join(ROOT, "..", "console", "src", "app", "tokens.customer.css"), "utf8");
   const hex = (source, name) => (source.match(new RegExp(`${name}:\\s*(#[0-9a-fA-F]{6})`)) ?? [])[1];
 
-  for (const [theme, operatorAccent, customerAccent] of [
-    ["light", "--ol-accent", "--cl-accent"],
-    ["dark", "--od-accent", "--cd-accent"],
+  /**
+   * blockOf returns the declarations inside the rule whose selector line matches, up to its `}`.
+   *
+   * Deliberately naive — no CSS parser, no nesting — because the shape it reads is flat and a parser
+   * would be a dependency inside a safety fence. It fails LOUD (returns undefined, and the assertion
+   * below names the theme) rather than silently matching the wrong block, which is the failure mode
+   * this whole test just spent a release demonstrating.
+   */
+  const blockOf = (source, selector) => {
+    // Comments are stripped FIRST. `tokens.customer.css` documents its own three theme blocks in its
+    // header, so both selectors appear in prose before they appear as rules — and an `indexOf` that
+    // does not know the difference lands on the comment, walks to the next `{`, and reads the wrong
+    // palette entirely. That is how this fence read a block with no `--accent` in it and reported
+    // "could not read both accents" instead of a hue.
+    const code = source.replace(/\/\*[\s\S]*?\*\//g, "");
+    const start = code.indexOf(selector);
+    if (start < 0) return undefined;
+    const open = code.indexOf("{", start);
+    const close = code.indexOf("\n}", open);
+    return open < 0 || close < 0 ? undefined : code.slice(open, close);
+  };
+
+  // The customer's light palette is `:root, :root[data-theme="light"]`; its dark one is
+  // `:root[data-theme="dark"]`. Anchored on the data-theme selector in both cases, so the bare `:root`
+  // block above them (the public marketing surface, which is dark in BOTH themes and is not the
+  // console's chrome) cannot be picked up by accident.
+  const customerAccents = {
+    light: hex(blockOf(customer, ':root[data-theme="light"]') ?? "", "--accent"),
+    dark: hex(blockOf(customer, ':root[data-theme="dark"]') ?? "", "--accent"),
+  };
+
+  for (const [theme, operatorAccent] of [
+    ["light", "--ol-accent"],
+    ["dark", "--od-accent"],
   ]) {
     const op = hex(operator, operatorAccent);
-    const cu = hex(customer, customerAccent);
+    const cu = customerAccents[theme];
     assert.ok(op && cu, `could not read both accents in the ${theme} theme`);
     assert.notEqual(op, cu, `the two consoles share an accent in the ${theme} theme`);
     // 25° is the separation the SHIPPED pair already maintains (the dark accents measure 26° apart),

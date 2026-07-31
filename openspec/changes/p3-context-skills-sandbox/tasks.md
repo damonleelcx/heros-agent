@@ -106,7 +106,7 @@
       set (reads env/cred files, attempts egress, fork/memory bomb, writes outside working set,
       returns output violating its schema). *(`registry.TestLongConversation_EveryPolicyBoundary`;
       `sandbox.TestMaliciousRepoToolSet_Contained` + `…_WriteOutsideWorkingSet…`;
-      `p3e2e.TestSandboxOutput_GatedByContractBeforePropagation`.)*
+      `sandboxe2e.TestSandboxOutput_GatedByContractBeforePropagation`.)*
 - [x] 7.2 Context tests: per-node config swap changes assembly + `config_hash` only; determinism per
       policy; param validation fails closed. *(`registry` context_policies_test: `TestContextEntry_…`,
       determinism tests per policy, `TestParams_FailClosed`.)*
@@ -116,7 +116,7 @@
 - [x] 7.4 Sandbox adversarial tests (CI): **no ambient creds**; **egress denied** (+ denial event);
       **resource bounds** contained (isolate terminated, node fails closed, second run unaffected);
       **FS scope** violation denied; **fail-closed isolate** (no host fallback); **broker boundary**.
-      *(`sandbox.*`, `broker.*`, `sandboxaudit.*`, `p3e2e.TestBrokerBoundary_*`. OS-level egress/FS
+      *(`sandbox.*`, `broker.*`, `sandboxaudit.*`, `sandboxe2e.TestBrokerBoundary_*`. OS-level egress/FS
       denial proof runs at deploy-time via the container proof, per the sign-off condition.)*
 - [x] 7.5 Confirm the P3 exit checklist (PRD §13) is green, including security-reviewer sign-off.
       *(`exit-checklist.md` — GREEN; sign-off in `security-review.md`.)*

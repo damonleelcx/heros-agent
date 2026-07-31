@@ -5,18 +5,24 @@
 /.heros-data/
 
 # Compiled binaries (build outputs — never version these)
-/agentd
-/collectived
-/heros-mcp
-/heros-cli
-/heros
-/p2uidemo
-/p5editordemo
-/p5hermes
-/p5hermesui
-/p35graphdemo
-/p4boarddemo
-/p8hermes
+#
+# `go build ./cmd/...` drops a binary named after its directory into the REPO ROOT, so this used to be
+# one line per command — and it fell behind every time a command was added. When this was written there
+# were eight untracked Mach-O files in the root and four of them matched no rule at all.
+#
+# So the shape is ignored rather than the instances. Every one of those binaries is an EXTENSIONLESS
+# FILE AT THE ROOT, and nothing that belongs at the root is: source lives in directories, and the few
+# extensionless root files there are get named below.
+#
+# ⚠️ The trade, stated: a NEW legitimate extensionless root file would be ignored silently until
+# somebody adds it here. That surface is small and rare, and it is the price of not having to remember
+# this file every time a command is added — which is the thing that already failed.
+/*
+!/*/
+!/*.*
+!/Makefile
+!/LICENSE
+!/NOTICE
 /bin/
 *.exe
 

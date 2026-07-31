@@ -380,7 +380,7 @@ reproduces bit-for-bit. The generated artifact is **dependency-free and determin
 ## 14. Verification on a real repository
 
 - [x] 14.1 Run the axis against the real `nousresearch/hermes-agent` and report what MOVED and what did
-      not, counted by cause and by shape rather than by sample. → `cmd/p18hermes`.
+      not, counted by cause and by shape rather than by sample. → `cmd/proof/harnessstrategy`.
 
 **The finding: this axis REACHED THE SOURCE, and most of it still refuses — both counted, neither
 claimed.** On hermes-agent@`528e335` (31 Python nodes, 6 sealed entries = **186** node × strategy

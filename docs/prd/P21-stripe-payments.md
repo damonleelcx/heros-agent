@@ -6,7 +6,7 @@
 | Target window | Downstream of P7; lands as a wave alongside P9/P19 (needs the customer console and the deploy) |
 | Lead role(s) | Sales Operations + Backend (co-leads) |
 | Supporting role(s) | System Designer, Frontend, DevOps, Product Designer, QA Engineer |
-| Status | Draft |
+| Status | **V1 green against a real Stripe test account (2026-07-30)**; live-mode cutover (V2) open |
 | OpenSpec change | `p21-payments` |
 
 > **Money-in-git rule (inherited from P7, non-negotiable).** This PRD contains **no dollar amounts, no
@@ -292,6 +292,41 @@ These map 1:1 to the OpenSpec requirements under
   — a webhook is a notification, not an authorization to write the billing ledger; the money movement is
   recorded through the audited `Credit`/`Refund` path only (P7 already enforces this; P21 preserves it).
 
+**Live-account operation — what a *real account* adds beyond a *working integration*** (all three capabilities)
+
+> These six requirements exist because the integration is now green against a real Stripe **test** account
+> (§13), and everything that separates that from a real **live** account is either an artefact live mode does
+> not inherit or a behaviour a test card never produces. Each was invisible while the only Stripe in the loop
+> was one this repository wrote.
+
+- **FR19** Every Stripe artefact SHALL be treated as **mode-scoped and not inherited**: the API key, the
+  webhook endpoint and *its own* signing secret, the customer handles, the products and the **price ids** are
+  separate objects in test and in live. A test-mode `price_ref` SHALL NOT be usable in live mode, and the
+  preflight (NFR12) SHALL run **in the mode the deployment is running in** — a catalog that preflights clean
+  in test says nothing about live, and the platform SHALL NOT report it as if it did.
+- **FR20** The live cutover SHALL be an ordered, recorded sequence — live key resolvable, live endpoint
+  registered with its own signing secret, live catalog preflighted clean, one reconciled test-mode period
+  signed off — and the platform SHALL state plainly that **it is not symmetric**: flipping the mode back to
+  test stops future charges but **un-moves no money**. The reverse path for money that has already moved is
+  the additive `Credit`/`Refund` path (FR5), not the flag.
+- **FR21** **Customer authentication (SCA / 3-D Secure) SHALL be a first-class state, not a failure.** A real
+  card may require the cardholder to authenticate, so a subscription can sit `incomplete` with a
+  `requires_action` payment intent. The platform SHALL mirror that state **verbatim** and the console SHALL
+  render it as a named "your bank needs to confirm this payment" state carrying **Stripe's own** action link —
+  never a generic "payment failed", never an automatic retry loop against a card that is waiting on a human.
+- **FR22** **A rate limit is an outage, a decline is a rejection.** Stripe HTTP **429** and lock-contention
+  errors SHALL map to `ErrProviderUnavailable` so the P7 buffer holds the work and `FlushPending` drains it
+  once; a **card decline** or an invalid-request error SHALL map to a rejection that stops. Mapping a 429 to a
+  rejection loses billable usage; mapping a decline to an outage hammers a card that will never succeed.
+- **FR23** The webhook endpoint SHALL be **registered per mode with an explicit, enumerated event-type
+  subscription**, and the registered URL, its mode and its event set SHALL be recorded in the ingress runbook.
+  An event type the platform does not handle SHALL be **acked as understood-and-ignored** — a 2xx that applies
+  nothing — rather than 5xx'd, so Stripe's retry queue is never filled by events nobody asked for.
+- **FR24** A **dispute / chargeback moves money the platform did not author.** The webhook SHALL mirror the
+  state and author **no** ledger row (FR18 preserved), and the movement SHALL surface to reconciliation as a
+  **named divergence** so a human closes it through the audited credit path. Silence here is a ledger that
+  disagrees with the bank and says nothing.
+
 ## 7. Non-functional requirements
 
 - **NFR1 — Correctness of money is load-bearing, not best-effort.** Never double-charge (FR2, FR7) and never
@@ -340,6 +375,21 @@ These map 1:1 to the OpenSpec requirements under
   **integral unit**, because the platform reports a whole-unit quantity and refuses to round one
   (rounding silently changes what a customer is billed). This is configuration the platform does not own
   and therefore cannot fix; what it owes is to say precisely what is wrong and whose job it is.
+- **NFR13 — Test-mode green is a claim about the platform, not about the live account.** Every readiness and
+  verification signal that names Stripe SHALL name the **mode** it was observed in, and no signal shall let a
+  test-mode result stand in for a live one. The two accounts share code and share **nothing else** — not a
+  key, not an endpoint, not a price id, not a customer (FR19). A record that omits the mode is not a weaker
+  record; it is a misleading one, because the reader supplies the missing word themselves and supplies it
+  optimistically.
+- **NFR14 — Live cutover is one-way for money and the documentation says so.** The rollout flag is reversible;
+  a charge is not. Everything written about the cutover — runbook, PRD, console copy — SHALL state that the
+  rollback for money already moved is an additive correction (FR20), so nobody plans a release on the belief
+  that a flag protects them after the first live invoice.
+- **NFR15 — The unhappy states a real card produces are designed, not defaulted.** SCA-pending
+  (`requires_action`), an authentication the cardholder abandoned, a dispute, and a rate-limited window each
+  render as their own state with their own next action (FR21, FR22, FR24) — a customer waiting on their bank
+  and a customer whose card was declined receive **different** messages, because the action they must take is
+  different and telling them the wrong one wastes a real person's afternoon.
 
 ## 8. System design summary
 
@@ -386,7 +436,7 @@ graph TB
   WH -. reconcile .- METER
 ```
 
-Eight decisions carry the design; each is recorded in
+Twelve decisions carry the design; each is recorded in
 [`../../openspec/changes/p21-payments/design.md`](../../openspec/changes/p21-payments/design.md) with the
 alternative that lost and the arbitration level (the **八级法则**: 安全 > 稳定 > UX > 运维 > 可演进 >
 可扩展 > 维护 > 实现) at which it lost.
@@ -409,6 +459,21 @@ alternative that lost and the arbitration level (the **八级法则**: 安全 > 
   objects referenced by id; the plan-config fence extends to the payment UI.
 - **D8 — Reversibility is additive only; corrections are Stripe credit notes/refunds** (**L2**). No path deletes
   or edits a prior record; recovery is forward.
+- **D9 — The account's configuration is verified before it is charged against, not by charging against it**
+  (**L2 稳定 / L4 运维**). A read-only preflight resolves every configured `price_ref` at the provider and names
+  each failure by plan / kind / reference. Rejected: validating the reference's *shape* locally (a well-shaped
+  id for an archived price passes and still fails a charge); letting the first charge of the period find out.
+- **D10 — Mode is a property of every artefact, not a flag on one of them** (**L1 安全 / L2 稳定**). Key,
+  endpoint, signing secret, customer handle and price id are all per-mode objects; the preflight and every
+  readiness line are mode-stamped (FR19, NFR13). Rejected: treating "Stripe is configured" as a single boolean
+  — the shape under which a test price id reaches a live charge.
+- **D11 — Customer authentication is a state to render, not an error to swallow** (**L3 UX / L2 稳定**). SCA
+  `requires_action` is mirrored verbatim and rendered with Stripe's own action link (FR21). Rejected: folding it
+  into `payment_failed` (tells a customer who did nothing wrong that their card was refused); retrying
+  automatically (a card waiting on a human never becomes a card that succeeds).
+- **D12 — 429 is an outage, a decline is a rejection** (**L2 稳定**). The transport-error split P7 already
+  depends on is extended to Stripe's rate limiter (FR22). Rejected: one error class for "Stripe said no" — it
+  either discards billable usage or hammers a dead card, and which one you get is luck.
 
 **Data model (System Designer lens) — no new tables of truth; P21 fills existing ones.**
 - `account` (existing) — holds the Stripe `provider_customer_handle` and `active_plan_id`; the webhook sync
@@ -546,6 +611,40 @@ is asserted**: a live key never resolves for a test surface, and the default (te
 (NFR4). Each runs against **one** stack, so the claims are simultaneously true rather than each getting a
 favorable fixture.
 
+### 9.1 The live account, by role lens — what changes when the money stops being pretend
+
+**Sales Operations.** The commercial boundary moves from "what we may say" to "what we have signed". Two
+things become committable that were not: a customer can be charged, and a plan change takes effect against a
+real instrument. Two things become *un*committable until they are done: a rate nobody has signed off is not a
+price list (Q7), and a tax configuration that exists only in test is not a tax configuration (Q6). The
+dunning copy is now describing something that actually happens to a real card, which raises the cost of the
+gap between what the copy says and what Stripe does to zero tolerance — FR16's "mirror verbatim" is a
+commercial commitment, not a coding style.
+
+**Backend.** The two error mappings that were theoretical become load-bearing: a 429 is an outage and a
+decline is a rejection (D12, FR22), and getting them backwards is either lost revenue or a card hammered
+until the issuer blocks it. Everything else is the discipline that was already there — idempotency keyed the
+P7 way, persist-then-ack, additive corrections — and the reason it survives contact with live mode is that
+the real *test* account already broke five things and they were fixed then.
+
+**DevOps.** The unit of work is artefacts, not code (§10.2). A second key, a second endpoint with a second
+signing secret, a second catalog, each per-mode and none inherited — and a readiness surface that says which
+mode it is talking about, because "Stripe: ok" is the sentence under which a test price id reaches a live
+charge (NFR13). The one-way door is step 5 of §12, and the runbook says so where an operator will read it at
+2am rather than in a design document.
+
+**Frontend + Product Designer.** SCA is the new state and it is a *waiting* state, not a failing one (D11,
+FR21). A customer who must tap "approve" in their banking app and a customer whose card was declined get
+different words, a different action and a different link, because they must do different things. The design
+rule that makes this non-negotiable is the one already in this repo: a status with no discriminating power is
+zero information, and "payment failed" covering both is exactly that.
+
+**QA.** Three of the six live requirements are testable *before* live mode using Stripe's authentication-
+required test cards, an injected 429 and an unhandled event type — so they are tested there (§12), and the
+live checklist (§13.1) is left holding only what genuinely cannot be observed until real money moves. That
+split is the point: a live checklist full of things that could have been checked in test is a checklist
+nobody can afford to run.
+
 ## 10. Dependencies
 
 - **Requires (upstream):**
@@ -588,6 +687,33 @@ accidents:
   value — and it is also why a wrong reference is a *configuration* failure the platform must diagnose
   rather than a bug it can fix.
 
+### 10.2 Live mode inherits nothing — the artefacts the cutover needs, and the one that cannot be undone
+
+§10.1's three artefacts now exist **in test mode**, and the M16 checklist is green against them (§13). The
+temptation at this point is to read "Stripe works" and treat live mode as the same integration with a
+different flag. It is not. In Stripe, test and live are two disjoint object graphs that happen to share an
+account and an API surface: **every** artefact below is a different object with a different id, and none of
+them is created by flipping the flag.
+
+| # | Artefact live mode does **not** inherit | Owner | What goes wrong if it is assumed |
+|---|---|---|---|
+| **A′** | **Live secret key** (`sk_live_…`), in the Secrets seam under the same logical name, resolved for the live surface only | DevOps | The mode check reads the key's prefix, so a test key on a live surface is refused rather than quietly charging nothing. The failure mode worth naming is the opposite one: a **live** key reaching a non-production surface, which is why the check is a refusal in both directions and not a warning. |
+| **B′** | **A separate webhook endpoint** registered in live mode, with **its own** signing secret and its own enumerated event set (FR23) | DevOps | Sharing a signing secret across modes means a test event verifies against a live deployment. There is no such thing as "the webhook secret" — there is one per endpoint, and there is one endpoint per mode. |
+| **C′** | **Live price objects** — new ids, in the meter's integral unit (NFR12), published as a live catalog | Finance creates, DevOps publishes | Test price ids do not resolve in live. The preflight (D9) is the thing that says so, which is why it must run **in live mode against the live catalog** before the first charge, not once in test and remembered (FR19, NFR13). |
+| **D′** | **One reconciled test-mode period, signed off by Finance** | Finance | This is the second half of the Q5 gate and the only artefact on this list that is a *judgement* rather than a credential. It exists so the first live dollar follows a dry run somebody read. |
+| **E′** | **A human who has completed a real Checkout** | Anyone with a browser | Item 3 of the M16 record is green with a stated remainder: the session is minted server-side against the real account, and nobody has typed a card into Stripe's page. A card number goes into a form by a person, deliberately, or it does not go in at all. |
+
+Two properties of this list matter more than the list:
+
+- **The cutover is one-way for money** (FR20, NFR14). The rollout flag is reversible and a charge is not.
+  Flipping back to test stops the next charge; it does not un-make the last one, and the only path backwards
+  for money that has moved is the additive credit/refund path (FR5). Any plan that treats the flag as a
+  rollback is planning with a safety net that is not there.
+- **Nothing here is a code change.** A′ and B′ are credentials the repository must never contain, C′ is
+  configuration, D′ is a signature and E′ is a person. That is the intended shape — but it also means the
+  live cutover cannot be verified by a green build, and §13.1 is written as a separate checklist for exactly
+  that reason.
+
 ## 11. Risks & mitigations
 
 | # | Risk | Owner | Mitigation |
@@ -604,6 +730,10 @@ accidents:
 | R10 | Dunning/refund UI tells a softer story than Stripe is actually running. | Sales Ops / Product | Provider state mirrored **verbatim** (FR16); UI renders the real `past_due`/`payment_failed` with a restore path (FR12); refunds are additive and real (FR5). |
 | R12 | A plan's `price_ref` does not exist in the Stripe account (a placeholder was never replaced, or a price was archived), and it is discovered by a rejected charge mid-period. | DevOps / Finance | A **preflight** resolves every configured `price_ref` at the provider before anything charges and names each one that fails — plan, kind, reference (NFR12); the result is on the readiness signal and rendered as a first-class *misconfigured* state in the console, distinct from "unavailable" and from "empty". |
 | R11 | The webhook endpoint is a soft inbound attack surface. | DevOps / Backend | One documented inbound path (NFR7); signature-gated before any side effect, timestamp-bounded replay window, rate-aware (FR13); unsigned/forged/stale rejected before state moves. |
+| R13 | A test-mode artefact is carried into live — a test price id in the live catalog, one signing secret shared by both endpoints, a test customer handle assumed to resolve — because "Stripe works" was read as a single fact. | DevOps / Finance | D10/FR19/NFR13: every artefact is mode-scoped; the preflight runs **in the running mode** against the running catalog and its result is mode-stamped on the readiness signal; a key whose prefix does not match the surface is refused in both directions. |
+| R14 | A real card requires 3-D Secure, the subscription sits `incomplete`, and the customer is told "payment failed" — so they re-enter a card that was never the problem, or churn. | Product / Frontend | D11/FR21/NFR15: `requires_action` is mirrored verbatim and rendered as its own state with Stripe's own action link; it is never folded into `payment_failed` and never auto-retried. |
+| R15 | Stripe rate-limits a burst (429) and the platform treats it as a rejection, dropping billable usage — or treats a card decline as an outage and retries a card that will never clear. | Backend | D12/FR22: 429 and lock contention map to `ErrProviderUnavailable` (buffer + backoff, `FlushPending` drains once); declines and invalid-request errors map to a rejection that stops. Both directions asserted. |
+| R16 | A chargeback moves money the ledger never hears about, and the two disagree silently for a period. | Backend / Finance | FR24: the dispute webhook mirrors state and authors **no** ledger row (the P7 rule stands); reconciliation surfaces the movement as a **named divergence** so a human closes it through the audited credit path — the failure is loud rather than absent. |
 
 ## 12. Rollout & test strategy
 
@@ -639,51 +769,110 @@ accidents:
   billing page, still test mode) → `billing-webhooks` (the real endpoint + entitlement sync). Flip to **live**
   only when the M16 checklist is green and the persist-then-ack and never-double-charge tests pass. Gainshare
   charging via Stripe stays gated behind the P7 gainshare flag (P5.5 live + estimated-saving-bills-nothing green).
+- **Live-account behaviours, tested where a test card cannot reach them.** Three of the six live requirements are
+  reachable in test mode and are tested there: **SCA** with Stripe's authentication-required test cards (a
+  subscription that goes `incomplete` renders the named waiting-on-your-bank state, not `payment_failed` — FR21);
+  **429** injected on the transport, asserting `ErrProviderUnavailable` and a `FlushPending` drain that bills the
+  window once, while a decline asserts a rejection that stops (FR22); and an **unhandled event type** delivered to
+  the endpoint, asserting a 2xx that applies nothing rather than a 5xx (FR23). A **dispute** is asserted at the
+  mirror/reconciliation level — the webhook writes no ledger row and reconciliation names the divergence (FR24).
+- **The live cutover is a sequence, run in this order, recorded as it goes.** (1) Finance signs off one reconciled
+  test-mode period (Q5, artefact D′). (2) The live key resolves from the Secrets seam for the live surface only.
+  (3) A **live** webhook endpoint is registered with its own signing secret and its enumerated event set. (4) The
+  **live** catalog preflights clean **in live mode** — every reference resolving, every metered price the right
+  shape and unit. (5) Only then does the rollout flag flip. Each step is on the readiness surface or in the
+  runbook, and the record states the mode it was observed in (NFR13). Step 5 is where the asymmetry starts: from
+  the first live invoice onward, the way back is a credit, not the flag (FR20, NFR14).
 
 ## 13. Success metrics & acceptance criteria (M16 exit checklist)
 
-> **Preconditions — the checklist cannot be run, let alone green, until all three exist.** They are the
-> artefacts in §10.1: **(A)** a Stripe test secret key in the Secrets seam, **(B)** a webhook signing
-> secret for the test endpoint, and **(C)** real Stripe price objects whose ids have replaced every
-> placeholder `price_ref_*`, with metered prices denominated in the meter's integral unit.
+> **Status: green against a real Stripe TEST account (2026-07-30)** — `acct_1Ty5Ze…` ("Heros Agent
+> sandbox", US/USD, test mode), the platform talking to `https://api.stripe.com` over the wire, on a
+> customer created by that run so no object in it came from an earlier one: **20 steps, 0 failed**. The
+> three §10.1 preconditions — **(A)** a test secret key, **(B)** a webhook signing secret for the test
+> endpoint, **(C)** real price objects in the meter's integral unit — all now exist. Item by item, with
+> what each claim rests on: [`docs/decisions/p21-m16-exit-checklist.md`](../decisions/p21-m16-exit-checklist.md).
 >
-> Until then the checklist is green against an **in-process** Stripe and says so
-> ([`docs/decisions/p21-m16-exit-checklist.md`](../decisions/p21-m16-exit-checklist.md)) — which is a
-> real claim about the platform and **not** the claim this checklist makes.
+> **Two things this checklist does not claim, stated here rather than in a footnote.**
+> **(1)** Nobody has typed a test card into Stripe's own Checkout page — the session is real and minted
+> server-side, and entering a card is deliberately left to a human (§10.2 artefact E′). That is the
+> remaining half of the third box, which is marked green with that remainder attached.
+> **(2)** This is **test mode**. Live mode inherits none of these artefacts (§10.2, FR19, NFR13); its
+> checklist is §13.1 and it is **not** green.
+>
+> Reaching green found **seven defects, five of them in shipped code** — including a correction
+> idempotency key that was not customer-scoped, which could have returned one customer's credit note for
+> another customer's correction. That is the argument for the real account stated as a number: a faithful
+> in-process Stripe, written by the same people who wrote the caller, agreed with the caller about five
+> things the real one refused.
 
-- [ ] A real **`stripe.Provider` implements `billing.Provider`** without changing the interface; **every existing
+- [x] A real **`stripe.Provider` implements `billing.Provider`** without changing the interface; **every existing
       caller runs unchanged** against both the stub and Stripe (contract-parity suite green).
-- [ ] Every charge-bearing Stripe call carries the **P7 idempotency key as Stripe's `Idempotency-Key`**; a
+- [x] Every charge-bearing Stripe call carries the **P7 idempotency key as Stripe's `Idempotency-Key`**; a
       retried op and a redelivered webhook produce **one** Stripe object and **one** ledger row.
-- [ ] A customer can **attach a payment method via Stripe Checkout/Element**; the **card never touches the
-      platform**; the platform stores a **handle** only.
-- [ ] A customer can **subscribe / upgrade / downgrade by plan name** from the console; the **entitlement flips
+- [x] A customer can **attach a payment method via Stripe Checkout/Element**; the **card never touches the
+      platform**; the platform stores a **handle** only. *(Green with a stated remainder: a real
+      `checkout.stripe.com` session is minted server-side against the test account and asserted to carry no
+      key, and the console renders the mirrored method — brand and last four only. The card entry itself is
+      left to a human.)*
+- [x] A customer can **subscribe / upgrade / downgrade by plan name** from the console; the **entitlement flips
       at the plan-change event**, proration is **Stripe's**.
-- [ ] The **billing page** renders plan **by name**, SUM/usage, invoice breakdown, and payment-method status,
+- [x] The **billing page** renders plan **by name**, SUM/usage, invoice breakdown, and payment-method status,
       with **loading / empty / past-due / payment-failed** states; the console holds **no Stripe secret** and the
       bundle contains **no price value**.
-- [ ] The webhook endpoint **verifies the `Stripe-Signature`** before any side effect, processes each event
+- [x] The webhook endpoint **verifies the `Stripe-Signature`** before any side effect, processes each event
       **exactly once** on Stripe's event id, and **persists before it acks** (a persistence failure returns
       non-2xx so Stripe retries).
-- [ ] Subscription lifecycle **drives entitlement** — paid grants, canceled/failed degrades to **Free at the
+- [x] Subscription lifecycle **drives entitlement** — paid grants, canceled/failed degrades to **Free at the
       period boundary** by an **audited plan change**, and paying **restores** it (reversible, no data deleted).
-- [ ] A billing error is corrected via **credit/refund** through the additive path with a full audit; the
+- [x] A billing error is corrected via **credit/refund** through the additive path with a full audit; the
       originals are **intact** and the net is right (**no data loss**).
-- [ ] **Gainshare bills only VERIFIED, MERGED savings** — an estimated/un-merged saving raises **no** charge
+- [x] **Gainshare bills only VERIFIED, MERGED savings** — an estimated/un-merged saving raises **no** charge
       (preserved from P7).
-- [ ] The **Stripe key + signing secret** come from the Secrets seam, appear in **no** git/manifest/log/trace/
+- [x] The **Stripe key + signing secret** come from the Secrets seam, appear in **no** git/manifest/log/trace/
       bundle, and **test/live are separated** (default mode moves no real money).
-- [ ] Usage is **reconcilable against Stripe**; a seeded drift is **surfaced**, not silently accepted; **no
+- [x] Usage is **reconcilable against Stripe**; a seeded drift is **surfaced**, not silently accepted; **no
       invoice line resells provider tokens**.
-- [ ] The **webhook endpoint** is the one documented inbound path — signature-gated, timestamp-bounded,
+- [x] The **webhook endpoint** is the one documented inbound path — signature-gated, timestamp-bounded,
       rate-aware — and the platform is **never** in a customer's production request path (ADR-002).
+
+### 13.1 V2 — the live-mode exit checklist (**not green**; nothing below has been run in live mode)
+
+> This is a **second** checklist rather than more boxes on the first one, because the first one is about
+> the platform and this one is about an account. None of it is verifiable by a build, and none of it
+> inherits from §13 (§10.2, FR19). A box here is checked only when it was observed **in live mode**, and
+> the record says so (NFR13).
+
+- [ ] **Finance has signed off one reconciled test-mode period** — platform usage compared against Stripe's
+      recorded usage for a closed period, read by a person, with the rates they signed off being the rates
+      configured (artefact D′; the sandbox rates are a working default, **not** a commercial commitment — Q7).
+- [ ] A **live secret key** resolves from the Secrets seam **for the live surface only**; a test key on the
+      live surface and a live key on a test surface are each **refused**, not warned about (artefact A′, D10).
+- [ ] A **live webhook endpoint** is registered with **its own** signing secret and an **enumerated event
+      set**; the URL, the mode and the event list are in the ingress runbook; an unhandled event type returns
+      a 2xx that applies nothing (artefact B′, FR23).
+- [ ] The **live catalog preflights clean in live mode** — every `price_ref` resolves, every metered price is
+      the right shape and denominated in the meter's integral unit — and the readiness line naming that
+      result **names the mode it was observed in** (artefact C′, FR19, NFR12, NFR13).
+- [ ] A **human has completed a real Checkout** against the live account with a real instrument, and the
+      console rendered the mirrored payment method (artefact E′).
+- [ ] **SCA is exercised, not assumed**: a card requiring authentication produces a subscription state the
+      console renders as its own waiting-on-your-bank state carrying Stripe's action link — never
+      `payment_failed`, never an automatic retry (FR21, NFR15).
+- [ ] The **first live invoice reconciles**: platform usage and Stripe's recorded usage agree for the period,
+      compared read-only, and any divergence — including a **dispute** — is surfaced by name rather than
+      absorbed (FR24, NFR6).
+- [ ] The **rollout flag flips last**, after every box above, and the record states plainly that from this
+      point the rollback for money already moved is an **additive correction, not the flag** (FR20, NFR14).
 
 ## 14. Open questions
 
-- **Q1 — Checkout vs. Payment Element as the default collection surface.** Stripe Checkout (hosted, least
-  integration) or the embedded Payment Element (in-console, more control)? *Recommendation: Checkout for the
-  first delivery (least surface, card provably never touches us), Payment Element as a follow-up for the
-  in-console upgrade flow once the hosted path is proven.*
+- **Q1 — Checkout vs. Payment Element as the default collection surface — ANSWERED (2026-07-30).**
+  **Checkout** shipped, as recommended: the session is minted server-side against the real account and the
+  browser is sent to Stripe's own page, so "the card never touches the platform" is a property of where the
+  form lives rather than a claim about our code. The Payment Element remains the follow-up for an in-console
+  upgrade flow; it changes no requirement here, because both surfaces sit behind the same server-minted
+  session and neither puts a key in the browser (FR8, FR11).
 - **Q2 — Metered reporting cadence: per-period push vs. Stripe usage records at event time.** Does the platform
   report SUM/usage once at period close, or incrementally as usage accrues? *Recommendation: report at period
   close (deterministic, matches the P7 `{customer, period, metric}` upsert), with the outage buffer covering a
@@ -695,10 +884,12 @@ accidents:
 - **Q4 — Which Stripe products back metered usage — subscription items with usage records, or the newer meters
   API?** *Recommendation: decide with Finance against the current Stripe API; the `Provider` interface hides the
   choice from every caller, so it is an implementation decision behind FR4, not a spec change.*
-- **Q5 — Live-mode cutover gate.** What is the exact signal that flips the rollout flag from test to live —
-  the M16 checklist alone, or a Finance sign-off on a reconciled test-mode period? *Recommendation: both — the
-  checklist green **and** one reconciled test-mode billing period Finance has signed off, so the first live dollar
-  follows a proven, reconciled dry run.*
+- **Q5 — Live-mode cutover gate — ANSWERED (both gates), and half-satisfied.** The flag flips on the M16
+  checklist green **and** one reconciled test-mode billing period signed off by Finance. **The first gate is
+  now met** (§13, against a real test account). **The second is not**: no period has been reconciled and
+  signed off, and the rates configured in the sandbox are a working default that satisfies the unit
+  constraint, not a number anyone has committed to commercially. The ordered cutover sequence this answer
+  implies is in §12, and its boxes are §13.1. The flag stays at its zero value, which is test.
 - **Q7 — Who creates the price objects, and in what unit? — ANSWERED (2026-07-30).** The unit is **one US
   dollar of spend under management**, and one US dollar of verified merged saving for gainshare. It is
   the only unit the platform can report integrally without multiplying anything: the SUM meter's own
@@ -717,4 +908,24 @@ accidents:
 - **Q6 — Stripe Tax and multi-currency.** Does the first delivery enable Stripe Tax and multiple currencies, or
   single-currency + tax-later? *Recommendation: single presentment currency + Stripe Tax on, since tax is
   Stripe's (non-goal to reimplement); multi-currency is a Stripe-side configuration follow-up that needs no
-  platform code change.*
+  platform code change.* **Now a cutover-blocking question rather than a design one:** tax configuration is
+  per-mode like everything else in §10.2, so whatever is enabled in test must be enabled again in live, and
+  the first live invoice is the wrong place to discover it was not.
+- **Q8 — Who authors the correction after a dispute, and on what clock?** A chargeback moves money without a
+  ledger row (FR24), so the ledger and the bank disagree until a person closes the gap through the audited
+  credit path. Open: whether that person is Finance or the on-call operator, and whether the divergence has a
+  deadline before it escalates. *Recommendation: reconciliation names it, Finance authors the correction, and
+  the divergence is aged — an unclosed one older than a period is an alert, because "somebody will get to it"
+  is how two ledgers stay wrong for a quarter.*
+- **Q9 — What is an abandoned SCA authentication?** A cardholder who opens their bank's page and walks away
+  leaves a subscription `incomplete` indefinitely — neither paid nor failed. Open: whether that is dunning
+  (Stripe's schedule, mirrored) or its own state with its own reminder. *Recommendation: mirror whatever
+  Stripe does with the incomplete subscription rather than inventing a second clock (FR16 — the platform
+  never recomputes dunning), and render the wait as its own state so the customer is asked to finish
+  something rather than told they failed (FR21).*
+- **Q10 — Does live mode open to everyone at once, or to a pilot tenant first?** The cutover sequence (§12) is
+  written as one flip. Open: whether the first live dollar should come from a single design-partner tenant
+  whose invoice a human reads line by line before the flag applies broadly. *Recommendation: a pilot of one.
+  Every defect the real test account found was found by running one flow end to end and reading the result;
+  the first live period deserves the same treatment, and the mode flag is not the granularity that gives it —
+  which is itself worth deciding before the flip rather than after.*

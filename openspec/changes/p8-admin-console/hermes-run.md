@@ -4,7 +4,7 @@
 |---|---|
 | Target repository | https://github.com/nousresearch/hermes-agent |
 | Checkout | `/tmp/claude-501/hermes-agent`, upstream `46c7a40` (shallow clone, 2026-07-24) |
-| Stack | `cmd/p8hermes -repo <checkout>` (admin API, `:4311`) + `web/admin-console` BFF (`:4310`) |
+| Stack | `cmd/proof/operatorconsole -repo <checkout>` (admin API, `:4311`) + `web/admin-console` BFF (`:4310`) |
 | Console build | §15 experience layer, all tasks complete |
 | Date | 2026-07-24 |
 

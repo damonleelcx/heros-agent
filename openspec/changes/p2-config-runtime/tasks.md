@@ -404,7 +404,7 @@ Applies the source-transformation apply model per
   > indefinitely. Submit→enqueue is complete and correct; **"watch the transformed copy run" only fully
   > closes when a worker exists.** Not built — out of scope, and distinguishing "queued, no worker" from
   > "executing" needs a schema change.
-  > **!!! `launch.StartAgentd` never calls `MountP2`** — P2 is served only by `cmd/p2uidemo`.
+  > **!!! `launch.StartAgentd` never calls `MountP2`** — P2 is served only by `cmd/demo/configui`.
   > Pre-existing; wiring it needs a target-repo config decision.
   > **Was PARTIAL when first marked done; now complete.** Diff review, watch-run and per-node I/O
   > were real, but **submit did not exist**: `POST /api/p2/specs/resolve` only validated a spec's

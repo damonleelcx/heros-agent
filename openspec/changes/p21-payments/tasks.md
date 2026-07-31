@@ -125,7 +125,7 @@ instead of leaving it as a footnote on an unticked box.
 - [x] 11.3 **Backend**: implement the preflight — resolve **every** configured `price_ref` at the provider and
       name the ones that do not resolve, **before** anything charges; surface the result on the readiness
       signal. A wrong price id must fail at configuration time, not mid-period at the first charge.
-- [x] 11.4 **Backend + DevOps**: make a real-account run possible **without a code edit** — `cmd/p21hermes`
+- [x] 11.4 **Backend + DevOps**: make a real-account run possible **without a code edit** — `cmd/proof/payments`
       takes `-plans <path>` so a catalog carrying real Stripe price ids can be published from a config store,
       and the API key comes from the **environment or stdin** rather than a command-line flag (a flag puts a
       credential in shell history and in `ps` output).
@@ -136,6 +136,48 @@ instead of leaving it as a footnote on an unticked box.
       path is asserted and the flag path refuses; the ingress runbook §4 and the M16 record carry the
       preconditions.
 
+## 12. Backend + DevOps + Frontend — Real-account operation and the live cutover (what the test account revealed, and what live still needs)
+
+§11 named the three artefacts that stood between "the code is right" and V1. V1 is now green against a real
+Stripe **test** account, and the run changed what is worth writing down: the remaining distance is no longer
+missing artefacts alone, it is a set of behaviours a real account produces that an in-process one never did,
+plus one property (live mode inherits nothing) that only matters once. Tasks 12.1–12.5 are testable **in test
+mode** and belong there; 12.6–12.8 are the cutover itself.
+
+- [ ] 12.1 **Mode-scoped artefacts and a mode-stamped readiness line.** The preflight resolves the catalog in
+      the mode the deployment is running in; the readiness line and the verification record both **name the
+      mode**. A test-mode clean preflight SHALL NOT be reportable as a statement about live. *(FR19, NFR13, D10)*
+- [ ] 12.2 **429 is an outage, a decline is a rejection.** Map Stripe rate-limit and lock-contention errors to
+      `ErrProviderUnavailable` (buffer + backoff, `FlushPending` drains the window once); map declines and
+      invalid-request errors to a rejection that stops. Assert **both** directions — the mapping is only
+      correct if the wrong one is also proven wrong. *(FR22, D12)*
+- [ ] 12.3 **SCA / 3-D Secure is a state, not a failure.** Mirror `requires_action` verbatim; render it on the
+      billing page as its own waiting-on-your-bank state carrying **Stripe's** action link, distinct from
+      `payment_failed`, keyboard-reachable, with no automatic retry. Exercise it with Stripe's
+      authentication-required test cards. *(FR21, NFR15, D11)*
+- [ ] 12.4 **Enumerated event set; unknown types acked, not 5xx'd.** Register the endpoint per mode with an
+      explicit event-type subscription, record the URL / mode / event list in the ingress runbook, and return a
+      **2xx that applies nothing** for an event type the platform does not handle. *(FR23)*
+- [ ] 12.5 **A dispute is a named divergence.** The dispute webhook continues to author **no** ledger row; the
+      money movement surfaces through reconciliation with a name, so a human closes it through the audited
+      credit path rather than the two ledgers disagreeing quietly. *(FR24)*
+- [ ] 12.6 **The live artefacts.** A live secret key resolvable **for the live surface only** (refused in both
+      directions on mismatch); a **live** webhook endpoint with **its own** signing secret; a **live** catalog
+      that preflights clean **in live mode**. None of these is inherited from test. *(PRD §10.2 A′/B′/C′)*
+- [ ] 12.7 **The sign-off, and the ordered cutover.** One reconciled test-mode period signed off by Finance
+      (artefact D′, PRD Q5), then the ordered sequence — key, endpoint, catalog, flag — with each step recorded
+      and its mode stated. The runbook SHALL state that from the first live invoice the way back for money
+      already moved is an **additive correction, not the flag**. *(FR20, NFR14)*
+- [ ] 12.8 **The human step.** A person completes a real Checkout against the live account and the console
+      renders the mirrored payment method (artefact E′). A card number goes into a form because somebody
+      decided to put it there — this step is not automated, in either mode.
+- [ ] 12.9 **Docs.** PRD §10.2 (what live does not inherit), §13.1 (the live checklist) and the ingress runbook
+      §6 (the cutover sequence) say the same thing in the same order; the M16 record keeps naming the **mode**
+      of every claim it carries.
+- [ ] 12.10 **Fold in.** On deploy, fold this section's added requirements into the three live capability specs
+      (`stripe-billing-provider`, `payment-collection`, `billing-webhooks`), dropping the `## ADDED` headers, as
+      §10.2 folded the originals.
+
 ## Verification record
 
 Recorded in [`docs/decisions/p21-m16-exit-checklist.md`](../../../docs/decisions/p21-m16-exit-checklist.md),
@@ -143,7 +185,7 @@ item by item, with what each claim rests on.
 
 - [x] V1 M16 exit checklist (PRD §13) green against **one** Stripe test-mode stack (claims simultaneously true).
       **CLAIMED, 2026-07-30**, against `acct_1Ty5Ze…` ("Heros Agent sandbox", US/USD, test mode) over
-      `https://api.stripe.com`: `go run ./cmd/p21hermes -repo <hermes> -stripe-base https://api.stripe.com
+      `https://api.stripe.com`: `go run ./cmd/proof/payments -repo <hermes> -stripe-base https://api.stripe.com
       -plans <catalog> -customer <fresh>` → **20 steps, 0 failed**, on a customer created by that run so
       no object in it came from an earlier one. The three artefacts §11 named now all exist: a test key,
       a signing secret, and real price objects — the last of which needed the **Q7 unit decision**,
@@ -162,6 +204,11 @@ item by item, with what each claim rests on.
       Finance, and the rates configured in the sandbox are a working default chosen to satisfy the unit
       constraint, not a commercial decision anyone has made. The rollout flag stays at its zero value,
       which is test. The cutover sequence is in the ingress runbook §6.
+- [ ] V4 Live-mode exit checklist (PRD §13.1) green — **every box observed in live mode, with the mode named
+      in the record**. **NOT STARTED.** It is a separate checklist from V1 on purpose: V1 is a claim about the
+      platform, V4 is a claim about an account, and live mode inherits none of V1's artefacts (§12.6). The
+      three behaviours a test card *can* reach — SCA, 429-vs-decline, unhandled event type — are tasks 12.2–12.4
+      and belong in test mode, so V4 holds only what genuinely cannot be observed until real money moves.
 - [x] V3 Edition/deployment-form impact matrix attached to every P21 PR.
       Every commit in this change carries a three-row Personal / Trial / Production matrix with a reason
       on each row, including the `N` rows — an unexplained `N` is the half of the rule that gets skipped.

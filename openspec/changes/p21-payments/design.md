@@ -305,6 +305,69 @@ that resolves it.
 **Rejected — let the first charge find out.** That is the status quo this decision exists to remove. It
 converts a five-second configuration check into a billing incident.
 
+## Decision 10 — mode is a property of every artefact, not a flag on one of them
+
+**Chosen:** the API key, the webhook endpoint, its signing secret, the customer handles and the **price
+ids** are each treated as **per-mode objects that live mode does not inherit**. The preflight (Decision 9)
+runs in the mode the deployment is running in, against that mode's catalog, and every readiness or
+verification line that names the provider **names the mode it observed**.
+
+**Why (L1 安全 / L2 稳定).** In Stripe, test and live are two disjoint object graphs sharing an API
+surface. Everything about the integration invites the opposite belief: one key name in the seam, one
+catalog shape, one endpoint route, one boolean-sounding flag. So the natural sentence — *"Stripe is
+configured"* — is exactly the sentence under which a test price id ends up in a live catalog, and the
+first evidence is a rejected charge against a real customer.
+
+The mode stamp on the record is the cheap half and the load-bearing one. A reader who sees "preflight:
+8 references verified" supplies the missing word themselves, and supplies it optimistically. A reader
+who sees "test mode: 8 references verified" cannot.
+
+**Rejected — treat the mode as a single deployment flag and assume artefacts follow.** They do not
+follow; nothing propagates from test to live, and the assumption is invisible until money is real.
+
+**Rejected — warn on a mode mismatch instead of refusing.** A warning on the path that charges people is
+a warning nobody reads twice. The key-prefix check refuses in **both** directions for the same reason:
+the dangerous case is not a test key on a live surface (which charges nothing), it is a live key
+resolving somewhere it was not meant to.
+
+## Decision 11 — customer authentication is a state to render, not an error to swallow
+
+**Chosen:** a subscription sitting `incomplete` with a `requires_action` payment intent is **mirrored
+verbatim** and rendered as its own state, carrying **Stripe's own** action link. It is not folded into
+`payment_failed`, and it is never retried automatically.
+
+**Why (L3 UX / L2 稳定).** A card that needs 3-D Secure is not a card that was refused. The customer has
+done nothing wrong and their next action — approve a prompt in their banking app — has no relationship
+to the action `payment_failed` asks for, which is "use a different card". Telling them the wrong one
+costs a real person a real afternoon, and a percentage of them churn instead.
+
+The automatic retry is worse than useless: a payment waiting on a human does not become a payment that
+succeeds because it was retried. It becomes a rate-limited retry loop, and (with a real issuer at the
+other end) a fraud signal.
+
+This is the repository's own rule about discriminating power applied to money: a status that covers both
+"your bank needs to confirm this" and "your card was refused" carries **no** information, because the
+recipient cannot act differently on it.
+
+**Rejected — one `payment_failed` state with softer copy.** Softer copy does not tell the customer to go
+to their banking app. The two states need two different actions and two different links.
+
+## Decision 12 — a 429 is an outage; a decline is a rejection
+
+**Chosen:** Stripe HTTP **429** and lock-contention errors map to `ErrProviderUnavailable` — the P7
+buffer holds the work and `FlushPending` drains it exactly once. Card declines and invalid-request
+errors map to a **rejection** that stops.
+
+**Why (L2 稳定).** P7 already depends on this split; a real account is simply the first place both sides
+of it occur. Getting it backwards is expensive in both directions and the two costs are different:
+treating a 429 as a rejection **discards billable usage** (silently, and the customer is under-billed in
+a way reconciliation later surfaces as drift), while treating a decline as an outage **hammers a card
+that will never clear**, which annoys an issuer and eventually the customer.
+
+**Rejected — one error class for "Stripe said no".** It is one class only from the transport's point of
+view. From the caller's point of view they are opposite instructions: hold this and try again, versus
+stop and tell somebody.
+
 ## Interfaces sketch
 
 ```
@@ -370,6 +433,18 @@ charge.refunded / charge.dispute.created     -> mirror only; NO ledger row from 
   (preserved, not loosened); estimated/un-merged saving raises no charge.
 - **The webhook endpoint is a soft attack surface** → one documented inbound path, signature-gated before any side
   effect, timestamp-bounded replay window, rate-aware (D3, mirror of P19's egress allowlist).
+- **A test artefact is carried into live** (a test price id, a shared signing secret, a customer handle assumed to
+  resolve) → every artefact is mode-scoped and the preflight runs in the running mode; readiness lines are
+  mode-stamped (D10). "Stripe is configured" is not a fact a deployment gets to hold as one bit.
+- **A 3-D Secure prompt is reported to the customer as a declined card** → `requires_action` is its own state with
+  Stripe's own action link, mirrored verbatim, never auto-retried (D11).
+- **A rate limit discards billable usage, or a decline is retried forever** → 429 and lock contention are outages
+  that buffer; declines are rejections that stop (D12); both directions asserted.
+- **A chargeback moves money and the ledger never hears about it** → the dispute webhook still writes no ledger row
+  (the P7 rule), and reconciliation surfaces the movement as a **named divergence** a human closes through the
+  audited credit path. The requirement is that the disagreement is loud, not that it cannot happen.
+- **The live cutover is planned as if the flag were a rollback** → it is not: the flag is reversible and a charge is
+  not. Runbook, PRD and console copy all state that the way back for money already moved is an additive correction.
 
 ## Where this landed
 
@@ -381,7 +456,7 @@ charge.refunded / charge.dispute.created     -> mirror only; NO ledger row from 
 | The inbound endpoint | [`internal/api/p21.go`](../../../internal/api/p21.go) → `POST /billing/webhook` |
 | The billing page + its BFF | [`web/console/src/app/app/billing`](../../../web/console/src/app/app/billing) |
 | The in-process Stripe (tests + demo only) | [`internal/stripefake`](../../../internal/stripefake) — a fence fails the build if a shipping package reaches it |
-| Run it against a real repository | [`cmd/p21hermes`](../../../cmd/p21hermes) |
+| Run it against a real repository | [`cmd/proof/payments`](../../../cmd/proof/payments) |
 | The ingress runbook | [`docs/decisions/p21-billing-webhook-ingress.md`](../../../docs/decisions/p21-billing-webhook-ingress.md) |
 | The customer-facing copy | [`docs/sales/P21-billing-copy.md`](../../../docs/sales/P21-billing-copy.md) |
 | The M16 verification record | [`docs/decisions/p21-m16-exit-checklist.md`](../../../docs/decisions/p21-m16-exit-checklist.md) |

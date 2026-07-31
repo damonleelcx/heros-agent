@@ -5,7 +5,7 @@
 > a fixture. A fixture proves the code path and nothing about any real codebase, and this phase's
 > standing rule is that acceptance is **rendered-browser evidence, never a green build**.
 >
-> **Date:** 2026-07-24 · **Stack:** `cmd/p9hermes` on `:4321` over a shallow clone, `web/console` on
+> **Date:** 2026-07-24 · **Stack:** `cmd/proof/customerconsole` on `:4321` over a shallow clone, `web/console` on
 > `:4320`.
 
 ## What is real here, and what is not mounted — stated, not implied

@@ -44,7 +44,7 @@ new layout. The heros matrix is a **configuration surface**, not a leaderboard.
   below). No other P10 capability changes.
 - **Affected code:** `internal/registry` (a model-catalog read model, additive), `internal/api`
   (models/nodes/bind/run routes over the existing P10 store + `studio.Runner`), `web/console`
-  (the matrix grid + cell panel, replacing the deep page as the landing view), `cmd/p2uidemo` (seed
+  (the matrix grid + cell panel, replacing the deep page as the landing view), `cmd/demo/configui` (seed
   models + load a workflow IR so the matrix has real rows and columns).
 - **Dependencies:** P10 (all of it) — this is a UX layer over the shipped capabilities.
 - **Breaking:** none. Additive endpoints; the prior studio components remain available as drill-downs

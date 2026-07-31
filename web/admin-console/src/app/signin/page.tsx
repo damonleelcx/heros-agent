@@ -1,4 +1,7 @@
 import { SignInForm } from "./signInForm";
+import { FederatedSignIn } from "./federatedSignIn";
+import { isFederated } from "@/lib/idpConfig";
+import { FactorStep } from "./factorStep";
 
 /**
  * The sign-in page.
@@ -20,9 +23,9 @@ import { SignInForm } from "./signInForm";
 export default async function SignInPage({
   searchParams,
 }: {
-  searchParams: Promise<{ reason?: string }>;
+  searchParams: Promise<{ reason?: string; step?: string }>;
 }) {
-  const { reason } = await searchParams;
+  const { reason, step } = await searchParams;
   return (
     <>
       <header className="chrome">
@@ -56,7 +59,32 @@ export default async function SignInPage({
             <p className="state__body">Your session has been revoked.</p>
           </div>
         ) : null}
-        <SignInForm />
+        {reason === "idp_unreachable" ? (
+          <div className="state state--denied" role="alert">
+            <p className="state__title">The identity provider could not be reached</p>
+            <p className="state__body">
+              No session is issued when that happens, on purpose — this surface would rather sign
+              nobody in than sign the wrong person in. Nothing is wrong with your account.
+            </p>
+          </div>
+        ) : null}
+        {reason === "rejected" ? (
+          <div className="state state--denied" role="alert">
+            <p className="state__title">That sign-in was not accepted</p>
+            <p className="state__body">
+              The exchange did not verify, or no platform-verified second factor was presented. A
+              factor enrolled at your identity provider is not sufficient here — this platform
+              verifies the factor itself.
+            </p>
+          </div>
+        ) : null}
+        {/* Federated deployments get the IdP redirect; a test-mode deployment gets the fixture
+            control. Never both: two sign-in paths on one screen is two ways in, and the operator
+            surface is the last place to offer a choice of doors. */}
+        {/* Three states, one screen: present a factor (the IdP has just returned), begin a federated
+            sign-in, or use the fixture control. Never two at once — a choice of doors on the operator
+            surface is a second way in. */}
+        {step === "factor" ? <FactorStep /> : isFederated() ? <FederatedSignIn /> : <SignInForm />}
       </main>
     </>
   );

@@ -569,7 +569,7 @@ permanently, and a 200 of the wrong shape destroying the whole page. All fixed, 
 | `go test ./internal/api ./cmd/consoletypes` — readiness aggregation, type-contract drift gate | pass |
 | `schemas/validate.py` — including the generated `console-view.schema.json` | pass |
 
-**Rendered-browser acceptance (R11), against `cmd/p9hermes` over a real
+**Rendered-browser acceptance (R11), against `cmd/proof/customerconsole` over a real
 `github.com/NousResearch/hermes-agent` checkout.** Four properties were verified by looking, and three
 of them found defects a green build could not:
 
@@ -590,7 +590,7 @@ of them found defects a green build could not:
 | `Response.redirect()` is immutable, so Next could not attach the `Set-Cookie` — the browser got a redirect with no session. | The handler returned a correct-looking 303. Fixed by setting the cookie on a `NextResponse`. |
 | The redirect target was built from `request.url`, which Next normalises to `localhost` while the user is on `127.0.0.1`. Different origins, so the console's own `form-action 'self'` policy **refused its own sign-in navigation**. The button did nothing, silently. | Server-side the response was perfect. Fixed by issuing **relative** `Location` headers (`src/lib/redirect.ts`), which is same-origin by construction and removes the open-redirect surface entirely. |
 
-A fourth was found in `cmd/p9hermes` itself: leaving a subsystem unmounted leaves its route
+A fourth was found in `cmd/proof/customerconsole` itself: leaving a subsystem unmounted leaves its route
 unregistered, so the mux answers **404** and the console truthfully renders *"No such workflow"* for a
 workflow that plainly exists. Mounting the routes with a **nil source** produces the honest **503
 not-mounted**. That is the R5 distinction collapsing in the one place nobody would have looked.

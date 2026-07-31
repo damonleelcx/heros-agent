@@ -156,11 +156,20 @@ async function assertProductionBuild() {
       "  Stop `next dev`, then:  rm -rf .next && npm run build && npm test",  );
 }
 
-/** startConsole starts `next start` on a free port, wired to `platformBase`. */
+/**
+ * startConsole starts `next start` on a free port, wired to `platformBase`.
+ *
+ * `extraEnv` may be a FUNCTION of the console's own base URL. P22 needs that: a federated deployment's
+ * redirect allowlist and SAML ACS allowlist contain this console's own callback URLs, and the port is
+ * not known until this function has asked the OS for one. Passing a literal object would mean either
+ * guessing a port — the collision failure `freePort` was written to remove — or a wildcard allowlist,
+ * which is the one thing an allowlist may never be.
+ */
 export async function startConsole(platformBase, extraEnv = {}, attempt = 0) {
   requireProductionBuild();
   await assertProductionBuild();
   const port = await freePort();
+  const resolvedEnv = typeof extraEnv === "function" ? extraEnv(`http://127.0.0.1:${port}`) : extraEnv;
   const child = spawn("npx", ["next", "start", "--port", String(port)], {
     cwd: process.cwd(),
     env: {
@@ -173,7 +182,7 @@ export async function startConsole(platformBase, extraEnv = {}, attempt = 0) {
       // Short enough that the hung-upstream test does not take ten seconds, long enough that a
       // healthy stub always answers inside it.
       CONSOLE_UPSTREAM_TIMEOUT_MS: "1500",
-      ...extraEnv,
+      ...resolvedEnv,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });

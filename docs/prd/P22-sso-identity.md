@@ -6,7 +6,7 @@
 | Target window | Lands as a wave alongside P7 entitlement; unblocks enterprise/federated sign-on |
 | Lead role(s) | System Designer + Backend (co-leads) |
 | Supporting role(s) | Frontend, DevOps, Product Designer, QA Engineer, Sales Operations |
-| Status | Draft |
+| Status | **V1 + V2 green (2026-07-31)** against a signing IdP this repository runs; **real-IdP (Okta) integration — V3 — not yet run** |
 | OpenSpec change | `p22-sso` |
 
 > **Scope discipline.** P22 replaces **one function** and adds the redirect/callback routes that function
@@ -101,6 +101,18 @@ rather than a patch, and each maps to a design commitment, not a library call.
   a fourth mechanism for identity secrets would split that truth and is forbidden. Identity also introduces
   its own attack surface — CSRF on the callback, an open redirect, a replayed assertion, an implicit-flow
   token in a URL fragment — none of which the current seam has to defend because it has no redirect flow yet.
+- **🔴 Both verifiers are green, and neither has met an IdP this repository did not write.** The OIDC and SAML
+  paths pass end to end over real sockets — but against a signing IdP built here, for these tests. That is the
+  right way to prove a *refusal* (a fixture can be told to send a stale assertion, and Okta cannot), and it
+  leaves one class of failure entirely untested: the things a real provider does that a fixture author never
+  thinks to imitate. A discovery document whose `issuer` differs from the URL it was fetched from; a JWKS
+  carrying several keys and rotating them on the provider's own schedule; an `e` encoded with padding; a SAML
+  response where the *assertion* is signed and the response is not; a signing certificate replaced during a
+  rollover window. Each of those breaks a verifier that passes every fixture test, and the repository already
+  says so — [`liveidp_test.go`](../../internal/adminidentity/liveidp_test.go) exists precisely to ask a real
+  org those questions, and **it skips**, because no org has been pointed at it. **Naming a real provider is
+  also a product decision, not only a test**: "we federate with OIDC" is a standard; "we federate with Okta"
+  is something a buyer's security team can verify in an afternoon, and it is the sentence they ask for.
 
 ## 3. Goals & non-goals
 
@@ -143,6 +155,19 @@ rather than a patch, and each maps to a design commitment, not a library call.
   when the IdP (OIDC discovery / JWKS / SAML metadata) is unreachable the surface **fails closed** — no login —
   and `/readyz` reports **not ready** and **names** `identity_provider`, consistent with P19 readiness
   aggregation and never fail-open.
+- **G10 — Okta is the first *named*, *verified* real identity provider, on both domains, and it earns no
+  Okta-specific code.** A real Okta org SHALL be the reference deployment for the customer console (OIDC and
+  SAML) and for the operator console, proven by a completed sign-in rather than by a fixture — and the only
+  thing that is Okta-shaped SHALL be **configuration and a registration recipe**. If federating with Okta
+  requires a branch anywhere in a verifier, the abstraction has already failed and the next provider is a
+  second branch (八级法则 **可扩展**). Entra ID, Ping and Google Workspace stay expressible on the same
+  configuration; what P22 additionally commits to is that **one** of them has actually been run.
+- **G11 — What an IdP-side deactivation does on our side is stated as the number it is, not as a slogan.** The
+  platform revokes **its own** sessions immediately (G6). It has **no back-channel from the customer's
+  directory**, so a user deactivated at the IdP keeps a live console session until that session expires. That
+  window SHALL be stated — it is the session TTL — and every surface describing revocation SHALL distinguish
+  **platform-side revocation** (immediate, at the next request) from **IdP-side deactivation** (bounded by the
+  TTL). A claim a customer's security team can disprove in one afternoon is worse than the true, smaller one.
 
 ### Non-goals (explicitly deferred, with the owner)
 
@@ -191,8 +216,12 @@ rather than a patch, and each maps to a design commitment, not a library call.
   existing accounts and MFA and I never manage a second password store.
 - As a security admin, I want **per-tenant IdP registration and a verified-domain mapping**, so that a user
   from `@acme.com` lands in the Acme tenant and can never be resolved into another tenant.
-- As a security admin, I want a **user I disable at my IdP to lose access on your side at their next request**,
-  so that offboarding is real without a support ticket.
+- As a security admin, I want to know **exactly what happens on your side when I disable a user in Okta**, so
+  that my offboarding runbook is right rather than optimistic. *(The true answer, and the one the product must
+  give: they cannot start a new session — the next sign-in fails at the IdP — and any session they already
+  hold ends when it expires, within the console session TTL. There is no back-channel from the directory, so
+  "at their next request" would be false; G11, FR27. A push-based revocation is the SCIM / event-hook
+  follow-up, and it is not claimed.)*
 
 **Customer end user**
 - As a console user, I want to **click "sign in with my company account"** and be redirected to my IdP and
@@ -298,6 +327,57 @@ OIDC/SAML seam) and `operator-sso-mfa` (the P8 operator surface).
   SHALL be sourced from the secrets manager under reserved logical names, fail **closed** when unavailable, and
   the live admin IdP SHALL be reported on `/readyz` (`admin_idp`) — never a key, never a secret id.
 
+### Real-IdP integration — Okta first (`sso-identity` + `operator-sso-mfa`)
+
+> These eight requirements are what "we federate with Okta" means beyond "we implement OIDC and SAML". Every
+> one of them is a thing a real provider does that a fixture does not, and each is written so that satisfying
+> it for Okta satisfies it for Entra or Ping without a branch (G10).
+
+- **FR22** An issuer registration SHALL name the authorization server **exactly as the provider will assert
+  it**, and issuer comparison SHALL be **exact string equality** — never a prefix, suffix, or "contains"
+  match. Okta asserts a different `iss` for its **org** authorization server (`https://<org>.okta.com`) than
+  for a **custom** one (`https://<org>.okta.com/oauth2/<id>`, including the built-in `default`), and an Okta
+  **custom domain** changes the host again. The registration SHALL be validated at load (absolute `https`, no
+  trailing slash), and a token whose issuer is well-formed but **not registered** SHALL produce a *named
+  configuration diagnosis* for the operator — distinguishable from "an identity we do not recognise" — while
+  the end user gets the same single generic refusal.
+- **FR23** **Signing-key rollover SHALL be normal operation, not an incident.** The verifier SHALL select the
+  key by `kid` from the provider's key set, which legitimately carries several keys and rotates on the
+  provider's schedule. On an unknown `kid` the verifier MAY refresh the key set **at most once per bounded
+  interval** and SHALL then refuse; a `kid` is attacker-controlled input, so it SHALL NOT be able to trigger a
+  fetch per request. A rotation SHALL NOT invalidate sessions already issued — an assertion is verified once,
+  at sign-in.
+- **FR24** **The platform SHALL NOT spend the customer's IdP rate budget.** Discovery, key-set and metadata
+  fetches — including the `/readyz` reachability probe — SHALL be cached with a floor and bounded in
+  frequency. A provider's per-endpoint request limits are an **org-wide** resource shared with every other
+  application that customer runs on it; an unbounded probe or an unbounded refetch degrades systems that are
+  not ours, which we do not get to trade away.
+- **FR25** The **SAML shape a real IdP actually emits** SHALL be supported: a signature over the **assertion**
+  (response-level signing optional, which is Okta's default), an `AudienceRestriction` equal to our SP entity
+  id, a `Recipient`/destination on the **ACS allowlist**, and RSA with SHA-256 or stronger — SHA-1 stays out
+  of the allowlist. The registration SHALL accept **more than one currently-valid signing certificate** (or
+  resolve the set from IdP metadata), because a certificate rollover with room for exactly one certificate is
+  a scheduled outage; a certificate outside its validity window SHALL be refused.
+- **FR26** Domain-strategy mapping SHALL require the identity's email to be **asserted as verified** *in
+  addition to* the issuer being registered. The registration remains the trust anchor (FR8) — a verified-email
+  claim from an IdP we do not federate with is worth nothing — and the claim is defence in depth: an
+  unverified email SHALL NOT resolve a tenant by domain.
+- **FR27** **IdP-side deactivation SHALL be described by its true effect** (G11): a deactivated user starts
+  **no new session** (their next sign-in fails at the IdP), and any session they already hold ends when it
+  **expires**, bounded by the configurable console session TTL. No surface — UI, docs, sales copy, runbook —
+  SHALL imply a directory back-channel the platform does not have. The **operator** domain keeps its explicit
+  path: disabling the principal revokes their live sessions immediately (FR20).
+- **FR28** Operator MFA SHALL be proven against a **real** provider: an ID token minted by the live admin org
+  carrying an `amr` value that claims multi-factor authentication SHALL still yield **no** session without a
+  **platform-verified** factor. The distinction between "the IdP says it verified" and "we verified" is only
+  convincingly demonstrated when the IdP saying it is somebody else's system.
+- **FR29** A **registration recipe** SHALL exist, per mechanism and per domain, stating what the customer's
+  IdP administrator creates (application type, grant, redirect URIs / ACS and audience, the scopes and claims
+  we need, the assignment), what they hand back (issuer, client id, metadata or certificate), and what we hand
+  them (redirect URI, ACS URL, entity id). It SHALL contain **no secret**, and every value in it SHALL have an
+  owner and exactly one place it goes — a recipe that leaves the reader guessing which of Okta's several
+  issuer forms to paste is the failure FR22 exists to catch, moved one step earlier.
+
 ## 7. Non-functional requirements
 
 - **NFR1 — The seam is the only change (regression-proof).** A test asserts the session store, cookie flags,
@@ -330,6 +410,22 @@ OIDC/SAML seam) and `operator-sso-mfa` (the P8 operator surface).
 - **NFR10 — Interface floor is not lowered for internal users.** The operator sign-in and MFA enrollment
   surfaces meet WCAG 2.1 AA (keyboard, 200% zoom, focus) — an operator authenticating during an incident is the
   normal case (P8 Decision 12 corollary).
+- **NFR11 — A fixture can prove a refusal; only a real provider can prove an acceptance.** Every claim about
+  federating SHALL name the IdP it was observed against, and a result obtained against the repository's own
+  signing IdP SHALL NOT be recorded in words that let a reader take it for a real one. They are different
+  claims about different systems, and the gap between them is where the afternoon-long bugs live.
+- **NFR12 — Naming a provider SHALL NOT create a provider branch.** Supporting Okta adds **configuration and
+  documentation**; it adds no conditional in a verifier, no provider enum, no per-provider claim mapping. This
+  is checkable rather than aspirational: a provider brand name appearing in verifier *logic* — as opposed to
+  in a comment, a fixture or a document — is a review failure, because the second branch always follows the
+  first (八级法则 **可扩展**).
+- **NFR13 — Calls into somebody else's identity system are bounded, always.** Discovery, key-set, metadata and
+  readiness probes are cached with a floor and rate-bounded (FR23, FR24). The failure this prevents is not
+  ours to absorb: exhausting an org's request budget degrades every other application that customer runs on
+  it, and "we were only checking health" is not a defence their IT organisation has to accept.
+- **NFR14 — The offboarding window is a published number, not a posture.** The console session TTL is the
+  window in which a session survives an IdP-side deactivation (G11, FR27); it is configurable, its default is
+  documented, and every surface that discusses revocation states **which** of the two revocations it means.
 
 ## 8. System design summary
 
@@ -361,7 +457,7 @@ factor to an admin principal. The two domains never share an origin, a cookie ja
                     ▲ /readyz aggregates identity_provider (customer) + admin_idp (operator)
 ```
 
-Nine decisions carry the design; each is recorded in
+Thirteen decisions carry the design; each is recorded in
 [`../../openspec/changes/p22-sso/design.md`](../../openspec/changes/p22-sso/design.md) with the alternative
 that lost and the level of the **八级法则** (安全 > 稳定 > UX > 运维 > 可演进 > 可扩展 > 维护 > 实现) at which
 it lost.
@@ -394,6 +490,28 @@ it lost.
 - **D9 — Replay/CSRF/open-redirect closed first-class** (**L1 安全**). Single-use browser-bound `state`,
   `nonce`, PKCE, freshness + one-time assertion guard, redirect/ACS allowlist. Rejected: the implicit flow; a
   reflected/wildcard redirect target.
+- **D10 — Okta is the named reference provider; the mechanism stays generic** (**L6 可扩展 / commercial**).
+  One real org is run end to end on both domains, and everything Okta-shaped lives in configuration and a
+  registration recipe (G10, NFR12). Rejected: an *Okta adapter* — the first branch that makes the second
+  provider a second branch; and staying provider-neutral indefinitely — a buyer's security team cannot verify
+  a standard, only a deployment.
+- **D11 — The issuer registration is the exact `iss` string; no normalisation, no suffix matching** (**L1
+  安全**). Okta alone spells the issuer three ways (org AS, custom AS, custom domain), so the registration
+  records what the token will actually say and comparison is equality (FR22). Rejected: host- or suffix-based
+  matching, which is one `okta.com.attacker.example` away from trusting a stranger; and "helpfully" stripping
+  or adding a path segment, which makes the trusted set unreviewable.
+- **D12 — Signing material is a *set* with a rotation window, not a value; refresh is bounded** (**L2 稳定 /
+  L4 运维**). Multiple keys and certificates are the normal state, unknown-`kid` refresh is rate-bounded, and
+  probes are cached (FR23, FR24, FR25). Rejected: pinning one key or one certificate (turns a routine rotation
+  into an outage); refetching on every unknown `kid` (hands an attacker a rate-limit weapon aimed at the
+  *customer's* other applications).
+- **D13 — No directory back-channel; the deactivation window is the session TTL, and it is published**
+  (**L1 安全, decided against L3 UX**). The platform does not poll the customer's directory and does not
+  imply it does (G11, FR27, NFR14). Rejected: **polling the IdP's admin API**, which would require the
+  customer to issue us a standing, high-privilege directory credential — a larger permanent risk than the
+  window it closes, and one their security review would be right to refuse; and **implying push revocation**
+  in copy while shipping TTL-bounded behaviour, which is the same failure with none of the cost paid up
+  front. The push version is SCIM / event hooks, sold when built.
 
 ## 9. Design by role lens
 
@@ -490,11 +608,48 @@ customer's own IdP and a **verified operator MFA factor** — that is committabl
 model, and anything about the *transformed program's* identity (ADR-002 — the customer's program calls its own
 providers; our identity is console/operator only). The honest boundary a customer's security team will probe:
 we **do not** run a password database or a home-grown IdP — a differentiator, not a gap, and it survives the
-technical follow-up because it is true. Per-seat revocation is honest too: a user disabled at the customer's
-IdP loses access at their next request on our side, which is what "revocation propagates with no grace" means,
-and it is stated as a next-request effect, not an instant push. No price value and no plan gate lives on the
+technical follow-up because it is true. Per-seat revocation is where the honest claim is **smaller than the
+one the market expects, and must be made anyway**: what propagates with no grace is *our* revocation — a
+session we revoke is dead at the next request, because the store is read on every request. A user the customer
+disables **in Okta** is a different event and it reaches us differently: they can start no new session, and
+the one they hold ends when it expires (the console session TTL). There is no directory back-channel, so
+"disable in Okta, dead on our side at the next request" is a sentence this product cannot say (G11, FR27).
+Saying it anyway would be a promise a security team disproves with one browser tab, and it would cost more
+than the gap it papers over — the push-based version is the SCIM / event-hook follow-up, sold when built. No price value and no plan gate lives on the
 identity path — identity proves *who*, entitlement (P7) and payments (P21) decide *what they may spend* — so a
 sales deck never implies SSO is a paywalled feature by wiring a plan check into the seam.
+
+### 9.1 The real org, by role lens — what changes when the IdP is somebody else's
+
+**System Designer.** The architectural test of P22 was "does the mechanism stay below the seam". The
+architectural test of the Okta increment is narrower and harder: **does naming a provider create a provider
+branch** (NFR12). Everything Okta needs — three possible issuer spellings, a key set that rotates, an
+assertion-level signature, a certificate rollover window — is a *configuration* shape, and the design holds
+only if each one is expressed as configuration the next provider reuses. The one place a brand may legitimately
+appear is the registration recipe, which is documentation.
+
+**Backend.** Three behaviours move from "correct in principle" to "exercised": key selection by `kid` across a
+rotating set, bounded refresh on an unknown `kid`, and multi-certificate SAML validation. The second one is the
+security-relevant one and it is counter-intuitive — the naive implementation (refetch whenever we see a `kid`
+we do not know) is both the obvious fix and a rate-limit weapon pointed at the customer's other applications
+(D12, FR24).
+
+**DevOps.** Identity gains the same artefact discipline P21's live account has: a registered application, a
+client secret in the Secrets seam, a redirect URI and ACS that must match on both sides exactly, and a
+readiness probe that is now hitting **someone else's rate budget** and therefore must be cached with a floor.
+The reachability signal stays honest — it reads the endpoint, not a UI — but it reads it less often.
+
+**Product Designer + Sales Operations.** The whole increment turns one sentence from a standard into a
+verifiable fact: *"we federate with your Okta"*. What comes with it is the discipline of not extending that
+sentence one word further than the build — specifically the offboarding claim (G11, FR27), which is the place
+where the market's expectation and this product's behaviour differ, and where saying the expected thing costs
+a customer's trust the first time they test it.
+
+**QA.** The acceptance shape inverts. Refusals stay proven against the repository's own IdP, because that is
+the only IdP that can be *told* to misbehave — a real org will not issue a stale assertion on request.
+Acceptances move to the real org, because that is the only thing that proves a real discovery document parses
+and a real key set loads. Neither substitutes for the other, and a record that does not say which one it used
+is the failure NFR11 names.
 
 ## 10. Dependencies
 
@@ -510,6 +665,34 @@ sales deck never implies SSO is a paywalled feature by wiring a plan check into 
 - **Deliberately not depended on:** a password store or home-grown IdP (out of scope by principle); P7/P21
   entitlement/billing (identity does not read or write it).
 
+### 10.1 What a real Okta org requires — the artefacts this repository cannot produce
+
+The verifiers are built and green. What separates that from *"a customer signs in with their Okta account"* is
+a set of artefacts that live in an identity org, most of which belong to somebody who does not work here.
+Listing them is not administrative detail: two of them are credentials this repository must never contain, one
+of them is a **mutual** agreement (a URL that must match character-for-character on both sides), and one is a
+person. Conflating "the code is right" with "a customer can sign in" is how a phase reports itself finished
+while nobody outside the building can log in.
+
+| # | Artefact | Shape | Owner | Why it is not optional |
+|---|---|---|---|---|
+| **A** | An **OIDC application** in the customer's org | Web application, Authorization Code **+ PKCE**, our redirect URI registered, the users or groups **assigned** | The customer's IdP administrator | Nothing about federation is self-service from our side. An unassigned application authenticates nobody, and the resulting error is at their IdP, not ours — which is why FR29's recipe has to say so. |
+| **B** | The application's **client secret** | Into the Secrets seam under its reserved logical name, resolved at the moment of use | DevOps | Never in git, a manifest, an env-example or a bundle (FR13). It is the credential that mints identities; it is also the one people paste into a config file because it arrives in an email. |
+| **C** | The **issuer** and **client id**, registered in the tenant map | The `iss` string **exactly as the token will spell it** (org AS / custom AS / custom domain — three different answers) plus the tenant's `verified_domains` | DevOps, from what the customer's admin hands back | This is the trust anchor (FR8, FR22). Registering the wrong one of Okta's three issuer forms produces a refusal rather than a wrong tenant — fail-closed and correct, and completely opaque unless the operator gets the named diagnosis FR22 requires. |
+| **D** | For SAML: the **entity id / audience**, the **ACS URL**, and the **signing certificate(s)** | Ours to give (audience, ACS); theirs to give (certificate, or a metadata URL) | Both sides | A mutual agreement, and the one place a typo is silent on our side and loud on theirs. More than one certificate must be accepted, or the customer's next routine rotation is our outage (FR25). |
+| **E** | For the operator console: **our own** admin org application | A second, disjoint application in a different org or realm, with operators assigned | Us (DevOps) | The operator domain is deliberately not the customer domain (FR19). Sharing an application would be the cross-tenant principal on a single-tenant path that D5 exists to refuse. Platform-verified MFA remains ours regardless of what that org's policy says (FR28). |
+| **F** | **A human who has completed a sign-in** | One round trip, at a real IdP, with real credentials | A person | The read-only probe ([`liveidp_test.go`](../../internal/adminidentity/liveidp_test.go)) proves discovery parses and the key set loads without any credential. It deliberately stops there: completing a sign-in means somebody typing their own password at their own keyboard, which is the boundary this phase exists to respect, not a step to automate around. |
+
+Two properties are worth stating, because both are design outcomes rather than accidents:
+
+- **None of these is code.** A, D and E are acts in an identity console; B is a credential; C is configuration;
+  F is a person. If any of them turned out to require a code change, NFR12 has been violated and the next
+  provider will require another one.
+- **C is the one that will be got wrong**, and it is worth over-serving. Okta spells its issuer three ways
+  depending on which authorization server the application uses and whether the org has a custom domain; the
+  recipe (FR29) must say which one to paste, and the platform must name the mismatch when it happens rather
+  than answering "not provisioned" to an operator who then goes looking in the wrong place.
+
 ## 11. Risks & mitigations
 
 | # | Risk | Owner | Mitigation |
@@ -521,7 +704,12 @@ sales deck never implies SSO is a paywalled feature by wiring a plan check into 
 | R5 | The IdP goes down and the surface fails open (or a cached credential logs someone in). | Backend + DevOps | D8/FR11/NFR5: fail-closed, no cached-credential login, no silent fallback; `/readyz` names `identity_provider`; the signal measures reachability. |
 | R6 | Operator MFA is a claim the IdP might misconfigure, not an invariant the platform holds. | Backend | D5/FR18/NFR8: platform-verified WebAuthn/TOTP; valid SSO + no verified factor ⇒ no session; proven by the denial path. |
 | R7 | The operator surface becomes reachable from a customer session (domain confusion). | System Designer + Frontend | D5/FR19: disjoint origin + cookie jar + principal type; no promotion path from `auth.Principal`; a cross-origin unreachability test. |
-| R8 | Revocation/offboarding is not immediate (a disabled user/operator keeps a live session). | Backend | FR9/FR20/NFR6: store read on every request, no grace; disable revokes all sessions; asserted, not assumed. |
+| R8 | Revocation/offboarding is not immediate (a disabled user/operator keeps a live session). | Backend | FR9/FR20/NFR6: store read on every request, no grace; disable revokes all sessions; asserted, not assumed. **Scope note:** this is *platform-side* revocation. IdP-side deactivation is R12. |
+| R9 | The issuer registered is not the issuer the token asserts (Okta's org AS vs custom AS vs custom domain), and sign-in fails with a message that sends the operator looking in the wrong place. | DevOps / Backend | D11/FR22: exact-match registration validated at load, plus a **named configuration diagnosis** for the operator that is distinct from "unknown identity" — same generic refusal to the end user, different sentence in the log. FR29's recipe states which form to paste. |
+| R10 | A routine signing-key or certificate rotation at the customer's IdP breaks sign-in, and the outage is ours to explain. | Backend | D12/FR23/FR25: key selection by `kid` over a set, bounded refresh on an unknown one, and a SAML registration that accepts every currently-valid certificate (or resolves them from metadata). Pinning one of anything is the failure. |
+| R11 | An attacker sends a stream of unknown `kid`s, we refetch each time, and the customer's **other** applications hit their org's rate limit. | Backend / DevOps | D12/FR24/NFR13: refresh is rate-bounded and probes are cached with a floor. The blast radius here lands on somebody else's systems, which is why it is a security requirement rather than a performance one. |
+| R12 | A customer's security team is told a user disabled in Okta loses access on the next request, tests it, and finds the session still alive — the trust cost lands on the whole delivery. | Sales Ops / Product | G11/D13/FR27/NFR14: the true effect is stated everywhere it appears — no new session, existing one bounded by the published TTL — and the push-based version is named as the SCIM / event-hook follow-up rather than implied. |
+| R13 | Supporting Okta grows an Okta branch, and the second provider grows a second one. | System Designer | D10/NFR12: Okta contributes configuration and a recipe, not code; a provider brand in verifier *logic* is a review failure. The check is cheap and the drift it prevents is not. |
 
 ## 12. Rollout & test strategy
 
@@ -543,37 +731,146 @@ sales deck never implies SSO is a paywalled feature by wiring a plan check into 
   probes read the endpoint; a stopped IdP turns readiness red and names it. No identity secret in any
   bundle/manifest/log (build scan + apply lint); the client secret / SAML key surface is covered by the same
   scan.
+- **Against the real org, the two kinds of test do not swap places.** Refusals stay against the repository's
+  own signing IdP — it is the only one that can be *instructed* to send a stale assertion, a wrapped
+  signature, or a token signed with the wrong key, and every one of those tests must remain able to go red.
+  Acceptances move to the real org, because only a real provider proves that its discovery document parses,
+  its key set loads, and its assertion shape verifies (NFR11). A record that does not say which one produced
+  a given green is not a record.
+- **The probe first, the sign-in second, and the sign-in is a person.** The read-only probe
+  (`PROBE_ISSUER` / `PROBE_CLIENT_ID` → [`liveidp_test.go`](../../internal/adminidentity/liveidp_test.go))
+  answers the cheap questions with no credential: does discovery parse, does the key set load, is the
+  authorization URL we build the one we intended (code flow, S256, no implicit response type). It is free in
+  CI because it skips when unpointed. Completing a sign-in comes after, and it is a human at their own
+  keyboard (§10.1 artefact F) — the same boundary P21 draws around typing a card number.
+- **Rotation and rate posture are exercised, not assumed.** A key set carrying more than one key selects
+  correctly by `kid`; an unknown `kid` refreshes **once** within the bound and then refuses, asserted by
+  counting fetches rather than by reading the code; a SAML registration holding two valid certificates accepts
+  an assertion signed by either, and refuses one signed by a certificate outside its validity window.
+- **The offboarding claim is tested as stated, including the part that is a limit.** A user deactivated at the
+  IdP cannot start a new session (the failure comes from the IdP, and the console renders it as its own
+  message, not "wrong credentials"); a session already held survives until expiry, and that is asserted so the
+  published TTL (NFR14) stays the true number rather than a hopeful one.
 
 ## 13. Success metrics & acceptance criteria (M16 exit checklist)
 
-- [ ] The customer console signs in via **OIDC Authorization Code + PKCE** (state + nonce, JWKS-validated) and
+**Status: green (2026-07-31), against a signing IdP this repository runs.** Every box below names where
+it is proven. A box is checked only when a test would go red if the property stopped holding — the four
+load-bearing fences (NFR1, NFR2, NFR3, NFR9) were each deliberately broken and observed red before being
+restored.
+
+> **What this checklist claims, precisely.** The mechanisms are correct and the refusals are real, proven
+> against an IdP that can be *instructed* to misbehave — which is the only way to prove a refusal, and is
+> why this is the right shape for these boxes. It does **not** claim that a real provider has been
+> federated with: no Okta org has issued a token this platform accepted (NFR11). That is §13.1, and it is
+> not green.
+
+- [x] The customer console signs in via **OIDC Authorization Code + PKCE** (state + nonce, JWKS-validated) and
       via **SAML 2.0** (signed assertion, allowlisted ACS, audience restriction), both resolving to exactly one
       `tenantId` through the **unchanged** `verify(assertion) → { tenantId }` seam.
-- [ ] A test asserts the **session store, cookie flags, revocation, scope derivation, fail-closed middleware and
+      *(`tests/sso-identity.test.mjs`, both flows end-to-end over real sockets against a signing IdP; both also
+      driven in a real Chrome via `npm run dev:sso`.)*
+- [x] A test asserts the **session store, cookie flags, revocation, scope derivation, fail-closed middleware and
       tenant pages are unchanged** by P22 (ADR-008 Rule 3); the only changed files are the seam and the added
-      routes.
-- [ ] The **assertion is never persisted** — a grep of the session record and telemetry for ID-token / SAML
+      routes. *(Pinned sha256 of `session.ts` / `middleware.ts` / `scope.ts` / `entitlements.ts`, the session
+      cookie's own declarations by value, plus a rule that no mechanism word may appear above the seam.)*
+- [x] The **assertion is never persisted** — a grep of the session record and telemetry for ID-token / SAML
       material is empty; a **forged tenant** in path/query/body/header/`state` never widens scope.
-- [ ] The **tenant→IdP mapping is configuration** (domain / per-tenant IdP / JIT-under-allow-rule), changeable
+      *(Structural: `logIdentity` has no field that could carry an assertion and `Session` has none that could
+      store one. The NFR3 half asserts the tenant on the header the stub platform ACTUALLY received.)*
+- [x] The **tenant→IdP mapping is configuration** (domain / per-tenant IdP / JIT-under-allow-rule), changeable
       **without a deploy**; an identity matching no rule is **refused** as a security event; mapping honors only
-      a **proven** domain, and no identity resolves across a tenant boundary.
-- [ ] **No identity secret** appears in git / manifest / env-example / bundle / log / trace; client secret,
+      a **proven** domain, and no identity resolves across a tenant boundary. *(`CONSOLE_IDP_TENANT_MAP`, with
+      `verified_domains` nested under the issuer registration — the test deployment registers two issuers so
+      the cross-tenant case is one the map could express if the code let it.)*
+- [x] **No identity secret** appears in git / manifest / env-example / bundle / log / trace; client secret,
       SAML SP private key and session keys resolve through the `Secrets` seam with **no bootstrap secret**; the
-      secret scan is green.
-- [ ] The callback enforces **single-use browser-bound `state`, `nonce`, PKCE, assertion freshness + one-time
+      secret scan is green. *(`scan-bundle.mjs`, `check-no-plaintext-secrets.sh` — which also refuses a
+      **bootstrap secret for the store itself** — and two new gitleaks rules. Each new lint leg was proven able
+      to go red before being claimed.)*
+- [x] The callback enforces **single-use browser-bound `state`, `nonce`, PKCE, assertion freshness + one-time
       guard, and a redirect/ACS allowlist**; replay, CSRF, reused code, off-allowlist redirect and stale
-      assertion are each **refused**, each with a red-able test.
-- [ ] **IdP unreachable ⇒ no session** (fail-closed, no cached-credential login, no silent fallback); `/readyz`
+      assertion are each **refused**, each with a red-able test. *(Nine named tests, each mutating a genuinely
+      valid message rather than hand-writing an invalid one.)*
+- [x] **IdP unreachable ⇒ no session** (fail-closed, no cached-credential login, no silent fallback); `/readyz`
       reports **not ready** and **names** `identity_provider`, reporting `{kind, issuer, reachable}`.
-- [ ] The **operator console** authenticates through a **real, pluggable OIDC/SAML admin IdP** behind the
+      *(This test found a real defect: a five-minute metadata cache made a dead IdP look serviceable at the
+      login hop, so the user was redirected onto a dead host. Fixed with `ensureReachable`/`ensureMetadata`.)*
+- [x] The **operator console** authenticates through a **real, pluggable OIDC/SAML admin IdP** behind the
       existing `adminidentity.IdentityProvider` seam, requires **SSO + a platform-verified factor** (valid SSO
       alone ⇒ no session), stays **disjoint** from the customer domain (cross-origin unreachability asserted),
-      and **disable revokes live sessions**; `admin_idp` is on `/readyz`.
-- [ ] The **identity-form impact matrix** (customer OIDC / customer SAML / customer configured / operator) is
-      attached to every P22 PR, and every form is exercised.
-- [ ] Sign-in messages define every term, distinguish **"session ended" / "sign in" / "IdP unreachable" /
+      and **disable revokes live sessions**; `admin_idp` is on `/readyz`. *(`internal/adminidentity/p22_test.go`
+      mints an ID token claiming `amr:["mfa"]` and asserts NO session is issued — the platform's verification,
+      not the IdP's claim, is the invariant.)*
+- [x] The **identity-form impact matrix** (customer OIDC / customer SAML / customer configured / operator) is
+      attached to every P22 PR, and every form is exercised. *(Matrix in
+      [`openspec/changes/p22-sso/tasks.md`](../../openspec/changes/p22-sso/tasks.md) § Verification record; the
+      post-sign-in assertion is written once and run against each form so it cannot drift for one of them.)*
+- [x] Sign-in messages define every term, distinguish **"session ended" / "sign in" / "IdP unreachable" /
       "not provisioned for this tenant"**, leak **no internal mechanism**, and carry **no price value or plan
-      gate** on the identity path.
+      gate** on the identity path. *(`src/content/identity.ts` + `docs/sales/P22-identity-copy.md`; both the
+      mechanism-leak and the no-plan-gate fences were verified red.)*
+
+### One recommendation not followed, and why
+
+§14 Q1 recommends *"a well-audited standard library behind the seam interface"* for the OIDC/SAML
+verifiers. **The implementation uses the language standard libraries instead** — `node:crypto` and Go's
+`crypto/*` do the RSA, ECDSA and SHA-2; what is hand-written is the JWS envelope, the JWKS lookup, and
+(for SAML) an XML reader plus exclusive canonicalization.
+
+The reason is not that libraries are unavailable in principle: the console ships four runtime
+dependencies behind a build-time bundle fence, and the platform's operator authentication path is the
+highest-blast-radius boundary it has. Adding an unread dependency inside either was the larger risk.
+What that trade buys has to be paid for in evidence, and it is: the algorithm allowlists are
+asymmetric-only so `alg:none` and HMAC confusion have no landing site; signature wrapping is closed
+**structurally** (only the element whose digest verified is read); and both canonicalizers are checked
+against the W3C exclusive-c14n specification's own worked example, which this repository did not author.
+
+**This is worth revisiting.** If a well-audited OIDC/SAML library is later vendored, it drops in behind
+the same seam with no caller change — which is the property Q1 actually cares about — and the tests
+above become its conformance suite rather than being replaced.
+
+### 13.1 V3 — the real-Okta exit checklist (**not green**; nothing below has been run against a real org)
+
+> A separate checklist rather than more boxes on §13, for the same reason P21 keeps its live-mode list
+> separate: §13 is about the platform and this is about an org. Nothing here is verifiable by a build, and a
+> box is checked only when it was observed against the **real** org, with the org named in the record
+> (NFR11). The artefacts it depends on are §10.1.
+
+- [ ] The **read-only probe passes against the real org** — discovery parses, the key set loads, `Describe()`
+      reports the issuer we registered, and the authorization URL we build is Authorization Code + **S256**
+      with no implicit response type. *(`PROBE_ISSUER` / `PROBE_CLIENT_ID` → `liveidp_test.go`; no credential
+      used, no code exchanged.)*
+- [ ] A **human completes a customer-console OIDC sign-in** against the real org and the console renders as
+      the mapped tenant; the assertion appears in **no** session record, log line or trace (the NFR2 fence run
+      against a real token, not a minted one).
+- [ ] A **human completes a customer-console SAML sign-in** against the real org's SAML application:
+      assertion-level signature accepted, audience equal to our entity id, `Recipient` on the ACS allowlist,
+      SHA-256 or stronger (FR25).
+- [ ] The **issuer registered is the issuer asserted**, and the *wrong* one is diagnosed: a registration
+      naming the org authorization server while the application uses a custom one (or vice-versa) produces a
+      **named configuration error** for the operator and the same single generic refusal for the user (FR22).
+- [ ] **Key rotation is a non-event**: the real key set carrying more than one key selects correctly by `kid`;
+      an unknown `kid` triggers **at most one** refresh within the bound — asserted by counting fetches — and
+      then refuses (FR23, FR24).
+- [ ] **Certificate rollover is a non-event**: the SAML registration holds every currently-valid certificate
+      and accepts an assertion signed by either; one signed outside its validity window is refused (FR25).
+- [ ] **Domain mapping requires a verified email**: an identity from the registered issuer whose email is not
+      asserted as verified does **not** resolve a tenant by domain (FR26).
+- [ ] The **operator console signs in through the real admin org**, and an ID token **that org actually
+      issued** carrying an MFA `amr` value **still yields no session** without a platform-verified factor
+      (FR28) — the invariant demonstrated against somebody else's system.
+- [ ] **Rate posture is honest**: readiness probes and metadata fetches against the real org are cached with a
+      floor, and a burst of unknown `kid`s does not produce a burst of fetches (FR24, NFR13).
+- [ ] **Deactivation behaves exactly as documented**: a user deactivated in the org starts **no new session**
+      (rendered as its own message, not "wrong credentials"), and a session they already hold survives until
+      expiry — the published TTL being the true window (FR27, NFR14).
+- [ ] The **registration recipe is followed by somebody who did not write it**, front to back, for OIDC and
+      for SAML, on the customer domain and the operator domain — and every value it names had one owner and
+      one destination (FR29). A recipe verified only by its author is a recipe verified against its author's
+      assumptions.
+- [ ] **No provider branch was added**: the diff for this increment contains configuration, documentation and
+      tests, and **no** provider brand in verifier logic (NFR12, D10).
 
 ## 14. Open questions
 
@@ -598,3 +895,28 @@ sales deck never implies SSO is a paywalled feature by wiring a plan check into 
   back-channel logout are a larger contract. *Recommendation: local session revocation on logout for M16,
   best-effort front-channel IdP logout where supported, back-channel SLO deferred to the enterprise
   provisioning follow-up.*
+- **Q6 — Which Okta authorization server does the recipe default to — the org one, or a custom one?** They
+  assert **different issuers** (FR22), and the choice changes what the customer's admin configures: the org
+  authorization server is the smallest configuration and carries the standard claim set; a custom one (the
+  built-in `default`, or a dedicated one) is where custom claims, scopes and per-application policies live.
+  *Recommendation: the recipe **defaults to the org authorization server**, because the console needs `sub`,
+  `email` and `email_verified` and nothing else, and every extra configuration step is a step to get wrong.
+  Document the custom form beside it — customers with a claims policy will use one, and FR22 makes both
+  expressible without a code path. Neither may become required.*
+- **Q7 — Do we ask for a `groups` claim?** Tempting, because roles-within-a-tenant is the obvious next
+  question. *Recommendation: **no**, not in this increment. Identity proves who; roles are the RBAC model's
+  job, and asking a customer's IdP administrator to release group membership we do not consume is asking for
+  more access than we need — the fastest way to fail a security review is to request a claim and then not
+  use it. When roles are modelled, the ask becomes justifiable and the recipe grows one line.*
+- **Q8 — Which org backs the *operator* console?** A dedicated org, a dedicated authorization server inside
+  our corporate org, or a plain application in it? *Recommendation: at minimum a **dedicated application with
+  its own authorization server and its own assignment**, because the operator principal is cross-tenant and
+  can halt the fleet — sharing the general corporate application would make "everyone with a corporate
+  account" the population that only MFA stands between and the fleet. A fully separate org is stronger and
+  costlier; the decision belongs with whoever owns our own IT posture, and it should be made explicitly
+  rather than inherited from wherever the first application happened to be created.*
+- **Q9 — When does push-based revocation (SCIM / event hooks) get scheduled?** Deferred deliberately (D13),
+  and R12 is the cost of leaving it deferred. *Recommendation: keep it deferred and name the **trigger**
+  rather than a date — the first customer whose security policy requires directory-push revocation, or the
+  first deployment whose session TTL has to be shortened past usability to compensate. Both are observable
+  events; "next quarter" is not.*

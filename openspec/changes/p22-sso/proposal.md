@@ -53,6 +53,30 @@ per `secrets-baseline.md` §1.1) rather than inventing a fourth, and puts identi
   PKCE, assertion freshness + one-time replay guard, and a redirect/ACS **allowlist**. **Fail-closed** when the
   IdP is unreachable — no login, never fail-open, no cached-credential login — with `/readyz` reporting
   `identity_provider: {kind, issuer, reachable}` and naming it when degraded.
+- **A real identity provider — Okta first — on both domains, and it earns no provider branch.** Both verifiers
+  are green against a signing IdP *this repository runs*, which is the right way to prove a **refusal** (a
+  fixture can be told to send a stale assertion; a real org cannot) and proves nothing about **acceptance** —
+  whether a real discovery document parses, a real key set loads, a real assertion shape verifies. The
+  increment adds what a real provider actually does: **exact-match issuer registration** (Okta asserts a
+  different `iss` for its org authorization server, a custom one, and a custom domain — registering the wrong
+  one is a refusal with an opaque cause, so the operator gets a *named configuration diagnosis* distinct from
+  "unknown identity"); **rotation as normal operation** (key selection by `kid` over a set that rotates on the
+  provider's schedule, a **rate-bounded** refresh on an unknown `kid`, and a SAML registration that accepts
+  every currently-valid certificate so a rollover is not an outage); **a bounded call budget** (discovery, key
+  set, metadata and readiness probes cached with a floor — an org's request limits are shared with every other
+  application that customer runs, so an unbounded probe degrades systems that are not ours); **verified-email
+  as defence in depth** on domain mapping, with the issuer registration still the trust anchor; **operator MFA
+  proven against a real org** (an ID token *that org issued*, claiming an MFA `amr` value, still yields no
+  session without a platform-verified factor); and a **registration recipe** containing no secret, in which
+  every value has one owner and one destination. Everything Okta-shaped is **configuration and documentation**
+  — a provider brand in verifier logic is a review failure, because the second branch always follows the first.
+- **The offboarding claim is corrected to what the platform actually does.** Platform-side revocation is
+  immediate (the store is read on every request). **IdP-side deactivation is not**: there is no directory
+  back-channel, so a user disabled at the customer's IdP starts **no new session** and keeps an existing one
+  **until it expires** — bounded by the published console session TTL. Every surface states which of the two
+  revocations it means; a push-based version (SCIM / event hooks) stays a named follow-up rather than an
+  implication. Polling the customer's directory was **rejected**: it would require them to issue a standing,
+  high-privilege directory credential — a larger permanent risk than the window it closes.
 - **Non-goals (not built):** no password database or home-grown IdP; **no** entitlement/billing change (P7/P21);
   the transformed program's identity is out of scope (ADR-002); SCIM/directory provisioning and a first-class
   per-user model are deferred follow-ups.
@@ -61,12 +85,22 @@ per `secrets-baseline.md` §1.1) rather than inventing a fourth, and puts identi
 
 - **Affected capabilities:** `sso-identity` (**new** — the customer OIDC/SAML seam, tenant mapping, session/
   revocation/fail-closed, and the identity security posture); `operator-sso-mfa` (**new** — the P8 operator
-  surface made real). Both are delta specs under this change; folded into `openspec/specs/` on deploy.
+  surface made real). Both are delta specs under this change; **folded** into
+  [`openspec/specs/sso-identity`](../../specs/sso-identity/spec.md) and
+  [`openspec/specs/operator-sso-mfa`](../../specs/operator-sso-mfa/spec.md).
+- **Customer-facing wording:** [`docs/sales/P22-identity-copy.md`](../../../docs/sales/P22-identity-copy.md) —
+  what we sell, what we explicitly do not commit to, and the honesty gates that keep price and plan off the
+  identity path.
 - **Affected code/systems:** `web/console/src/lib/identity.ts` (the seam implementation) and the new
   `/auth/*` routes + BFF; `web/console` session/middleware layer **unchanged** (regression-asserted);
   `internal/adminidentity` (real provider behind the existing `IdentityProvider` seam + platform-verified MFA);
   `web/admin-console` sign-in/callback; `internal/api` `/readyz` (add `identity_provider` component; `admin_idp`
-  already present); the `providergateway.Secrets` wiring (identity secrets).
+  already present); the `providergateway.Secrets` wiring (identity secrets). For the real-provider increment:
+  `lib/idp/config.ts` + `lib/idp/federation.ts` (exact-match issuer validation at load and the named mismatch
+  diagnosis), the OIDC/SAML verifiers' key-set and certificate handling (rotating sets, bounded refresh, cached
+  probes), a **registration recipe** under `docs/` (per mechanism, per domain, no secret in it), and
+  [`docs/sales/P22-identity-copy.md`](../../../docs/sales/P22-identity-copy.md) — where the offboarding claim is
+  stated as the two separate effects it actually has.
 - **Dependencies:** **upstream** — ADR-008 (the seam + everything above it), P9 web console, P8 operator console
   + `internal/adminidentity`, the `providergateway.Secrets` seam + `secrets-baseline.md` §1.1, ADR-002
   (transformed-program-identity boundary), ADR-004 (fail-static config), ADR-006 / P19 Decision 5 (operator

@@ -113,6 +113,63 @@ export function logSession(event: {
   });
 }
 
+/**
+ * IdentityEvent is the CENTRAL enum of identity outcomes (P22 tasks 2.2 / 5.1, 🔴 logging-conventions).
+ *
+ * A union rather than a free string, for the reason that principle gives: an `event.name` typed at
+ * three call sites is three names, and a monitor alerting on "unmapped identity" then silently stops
+ * matching the day somebody writes `identity_unmapped` instead. These are the names an operator's
+ * alert rule is allowed to depend on.
+ */
+export type IdentityEvent =
+  /** A federated identity resolved to a tenant and a session was issued. */
+  | "sign_in"
+  /** A verified identity matched no mapping rule. A SECURITY EVENT, not a signup (NFR9). */
+  | "unmapped_identity"
+  /** An identity was provisioned into a tenant under an explicit JIT allow rule. */
+  | "jit_provisioned"
+  /** The assertion did not verify — signature, issuer, audience, nonce, or freshness. */
+  | "assertion_refused"
+  /** A callback failed its CSRF/replay guards: missing/forged/replayed `state`, or a spent assertion. */
+  | "replay_refused"
+  /** A redirect or ACS target was not on the allowlist. */
+  | "redirect_refused"
+  /** The IdP could not be reached or its metadata could not be validated — fail closed, no session. */
+  | "idp_unreachable"
+  /** An identity secret could not be sourced. Fail closed. */
+  | "secret_unavailable";
+
+/**
+ * logIdentity records one identity-path outcome.
+ *
+ * # What is deliberately not a parameter
+ *
+ * There is no field for the assertion, the ID token, the authorization code, the PKCE verifier, the
+ * `state`, or the email. NFR2 says the assertion is never logged, and the way that rule survives a
+ * debugging session at 2am is that the function has nowhere to put it. What IS recorded is the shape
+ * of the refusal — which guard, which issuer, which tenant — because an operator investigating "who
+ * is failing to sign in" needs exactly that and nothing more.
+ *
+ * `cause` is the SERVER-SIDE detail. The browser is told one generic reason (`federation.REFUSAL`);
+ * the cause lands here, where an operator can read it and an attacker cannot.
+ */
+export function logIdentity(event: {
+  event: IdentityEvent;
+  provider?: string;
+  issuer?: string;
+  tenantId?: string;
+  cause?: string;
+}): void {
+  emit({
+    event: "console.identity",
+    outcome: event.event,
+    provider: event.provider,
+    issuer: event.issuer,
+    tenant_id: event.tenantId,
+    cause: event.cause,
+  });
+}
+
 function emit(fields: Record<string, unknown>): void {
   const line: Record<string, unknown> = { ts: new Date().toISOString() };
   for (const [k, v] of Object.entries(fields)) {

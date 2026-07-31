@@ -257,7 +257,7 @@ teaches them the tool is broken.
 ## 10. Delivery run — the axis against a real repository
 
 - [x] 10.1 Run the shipped code paths against **github.com/nousresearch/hermes-agent** (the same target as
-      P5/P13/P14). → [`cmd/p15hermes`](../../../cmd/p15hermes/main.go); `go run ./cmd/p15hermes -repo /tmp/hermes-agent`.
+      P5/P13/P14). → [`cmd/proof/nodewiring`](../../../cmd/proof/nodewiring/main.go); `go run ./cmd/proof/nodewiring -repo /tmp/hermes-agent`.
 
 ### ⚠️ Correction, earned by re-running the survey (2026-07-28)
 
@@ -274,9 +274,9 @@ to prevent — a `config_hash` recording a rearranged graph, scored against sour
 Reporting it as *materialized* is how that failure gets read as a success. The survey now reports three
 outcomes (materialized / **inert (no diff)** / refused) and the totals agree with the prose.
 
-Two smaller defects in the sibling runners, found the same way: `cmd/p13hermes` ran its inline-refusal
+Two smaller defects in the sibling runners, found the same way: `cmd/proof/promptmodel` ran its inline-refusal
 demonstration against a **hard-coded** `/tmp/hermes-agent` rather than `-repo`, so on any other checkout
-it "passed" by failing to find the path — a vacuous gate; and `cmd/p14hermes` still closed with
+it "passed" by failing to find the path — a vacuous gate; and `cmd/proof/skillstools` still closed with
 *"hermes-agent is python -> not covered, which is why every binding above refused"*, which the coverage
 table printed immediately above it had already contradicted since the Python row landed in 14d. Blaming
 the language for a **call-site** refusal is the exact conflation the refusal ordering exists to prevent:
@@ -303,7 +303,7 @@ What the run produced at commit `528e3350374b` (40 discovered nodes, Python, **0
 | Verification decides | worse-but-cheaper merge → `fail_significance`, not recommended; better-and-cheaper → `pass` |
 
 **The control — what this repository does NOT decline.** A run whose every line says REFUSED is
-indistinguishable, to a reader, from a platform that does not work, so `cmd/p15hermes` ends by trying a
+indistinguishable, to a reader, from a platform that does not work, so `cmd/proof/nodewiring` ends by trying a
 **model** override at every discovered call site. At `fa7b0fcf5d6e`: **4 of 26 produced a real diff**,
 22 refused — 19 because the call site assembles its arguments at runtime (`**kwargs`, so adding `model=`
 could raise `TypeError` at run time while the file still parses), 3 because the site is a Bedrock SDK
@@ -447,9 +447,9 @@ failed.
 
 ## 18. Delivery — run the rewriter against the real repository (15c)
 
-- [x] 18.1 Extend `cmd/p15hermes` to survey every adjacent pair for swappability and report the outcome
+- [x] 18.1 Extend `cmd/proof/nodewiring` to survey every adjacent pair for swappability and report the outcome
       per pair, then run it against a fresh `nousresearch/hermes-agent` clone.
-      → [`cmd/p15hermes`](../../../cmd/p15hermes/main.go) `swapSurvey`.
+      → [`cmd/proof/nodewiring`](../../../cmd/proof/nodewiring/main.go) `swapSurvey`.
 
 At `fa7b0fcf5d6e` (26 nodes, fresh `git clone --depth 1`): **25 adjacent pairs surveyed, 0 materialized,
 25 refused** — and every refusal names its condition:

@@ -11,7 +11,7 @@ import (
 // fixture.go is the TEST-MODE admin identity provider (task 14.1's "admin IdP (SSO+MFA, test mode)").
 //
 // It is a non-test file because three callers need it: the package's own tests, every other P8
-// package's tests, and cmd/p8hermes — which has to log an operator in to demonstrate anything at all.
+// package's tests, and cmd/proof/operatorconsole — which has to log an operator in to demonstrate anything at all.
 // A fixture that only exists under _test.go forces the demo to grow a second, drifting login path,
 // and a second login path on this surface is exactly the thing worth not having.
 //

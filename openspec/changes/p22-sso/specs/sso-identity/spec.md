@@ -218,3 +218,91 @@ and SHALL NOT depend on the traffic it gates.
 - **THEN** `/readyz` reports `not_ready`, lists `identity_provider` in the degraded components, and reports its
   `{kind, issuer, reachable:false}`
 - **AND** the readiness verdict is read from the endpoint, never from a UI dashboard
+
+### Requirement: An issuer registration SHALL be matched exactly, and a well-formed but unregistered issuer SHALL be diagnosed by name
+
+An issuer registration SHALL record the issuer **exactly as the provider asserts it**, SHALL be validated at load
+(absolute `https`, no trailing slash), and SHALL be compared by **string equality** — never by prefix, suffix, or
+containment. A token whose issuer is well-formed but not registered SHALL produce an operator-visible diagnosis
+naming **the issuer mismatch**, distinct from an unrecognised-identity refusal, while the end user receives the
+same single generic refusal in both cases.
+
+#### Scenario: A look-alike issuer is not trusted
+- **WHEN** a token asserts an issuer that merely contains or extends a registered one
+- **THEN** it is refused
+- **AND** no comparison other than equality is applied to the issuer.
+
+#### Scenario: A mis-registered issuer tells the operator which mistake was made
+- **WHEN** a provider asserts one of its several legitimate issuer forms and a different form was registered
+- **THEN** the operator-visible record names the issuer mismatch specifically
+- **AND** the end user receives the same generic refusal used for an unmapped identity, leaking nothing about
+  which half was wrong.
+
+### Requirement: Signing material SHALL be a rotating set, and refresh on an unknown key id SHALL be bounded
+
+The verifier SHALL select the signing key by `kid` from a key set that legitimately carries several keys and
+rotates on the provider's schedule. On an unknown `kid` the verifier MAY refresh the key set **at most once per
+bounded interval** and SHALL then refuse. Discovery, key-set, metadata and readiness fetches SHALL be cached with
+a floor. A key rotation SHALL NOT invalidate sessions already issued.
+
+#### Scenario: A rotated key is picked up without an outage
+- **WHEN** the provider's key set contains more than one key and the signing key changes
+- **THEN** the verifier selects by `kid` and sign-in continues
+- **AND** no key is pinned at configuration time.
+
+#### Scenario: An unknown key id cannot become a fetch per request
+- **WHEN** a stream of tokens carries key ids that are not in the cached set
+- **THEN** at most one key-set refresh occurs per bounded interval, and the remaining tokens are refused
+- **AND** the number of fetches is asserted, not inferred.
+
+#### Scenario: Probing does not spend the provider's request budget
+- **WHEN** readiness is probed repeatedly
+- **THEN** discovery and metadata results are served from cache within the floor
+- **AND** the platform's request rate against the provider stays bounded regardless of probe frequency.
+
+### Requirement: A SAML registration SHALL accept every currently-valid signing certificate
+
+A SAML registration SHALL hold **all** currently-valid signing certificates for the IdP, or resolve them from IdP
+metadata, so a certificate rollover is not an outage. A signature over the **assertion** SHALL be sufficient
+(response-level signing MAY be absent); the audience SHALL equal the SP entity id; the recipient/destination SHALL
+be on the ACS allowlist; RSA with SHA-256 or stronger SHALL be required. A certificate outside its validity window
+SHALL be refused.
+
+#### Scenario: A rollover window verifies under either certificate
+- **WHEN** the IdP publishes two valid signing certificates during a rotation
+- **THEN** an assertion signed by either verifies
+- **AND** no reconfiguration is required at the moment the IdP switches.
+
+#### Scenario: An expired certificate does not verify
+- **WHEN** an assertion is signed by a certificate outside its validity window
+- **THEN** it is refused
+- **AND** the refusal is recorded as a signature failure, not as an unmapped identity.
+
+### Requirement: Domain-strategy mapping SHALL require the identity's email to be asserted as verified
+
+When the configured strategy maps a verified email domain to a tenant, the identity's email SHALL be asserted as
+**verified** by the registered issuer in addition to the issuer being registered. An unverified email SHALL NOT
+resolve a tenant by domain. The issuer registration remains the trust anchor.
+
+#### Scenario: An unverified email does not resolve a tenant
+- **WHEN** a registered issuer asserts an email that is not marked verified
+- **THEN** the identity does not resolve a tenant by domain
+- **AND** the refusal is a security event, as for any unmapped identity.
+
+### Requirement: IdP-side deactivation SHALL be described by its true effect, and no surface SHALL imply a directory back-channel
+
+The platform SHALL NOT poll or subscribe to the customer's directory. A user deactivated at the IdP SHALL start
+**no new session**, and any session already held SHALL end when it **expires**, bounded by the configurable
+console session TTL whose default SHALL be documented. Every surface describing revocation SHALL state whether it
+means **platform-side** revocation (effective at the next request) or **IdP-side** deactivation (bounded by the
+TTL). No UI string, document, or sales artefact SHALL imply push-based revocation.
+
+#### Scenario: A deactivated user cannot start a new session
+- **WHEN** a user deactivated at the IdP attempts to sign in
+- **THEN** the sign-in fails at the IdP and the console renders that cause as its own message
+- **AND** the message is not the wrong-credentials message.
+
+#### Scenario: An existing session ends at expiry, and the documentation says so
+- **WHEN** a user is deactivated at the IdP while holding a valid console session
+- **THEN** that session remains valid until it expires, bounded by the published session TTL
+- **AND** every surface describing revocation names which revocation it means.

@@ -643,7 +643,7 @@ boundaries** so they feel fair and legible rather than arbitrary. Three delivera
       drift), with alerts on failed charges and drift.
 
 > **Confirmed 2026-07-23.** Every line above is asserted, item by item, by
-> `TestM10ExitChecklist` in [`internal/p7e2e/exit_test.go`](../../internal/p7e2e/exit_test.go) —
+> `TestM10ExitChecklist` in [`internal/billinge2e/exit_test.go`](../../internal/billinge2e/exit_test.go) —
 > against ONE stack, so the claims have to be simultaneously true rather than each getting its own
 > favourable fixture. Wave **7a** items run first, then **7b**. The storage-layer half
 > (never-double-count, never-double-charge, append-only, no-card-data, gainshare-traces-to-evidence)

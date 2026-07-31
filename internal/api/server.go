@@ -13,11 +13,13 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/heros-foreal/agentd/internal/adminidentity"
 	"github.com/heros-foreal/agentd/internal/auth"
 	"github.com/heros-foreal/agentd/internal/config"
 	"github.com/heros-foreal/agentd/internal/providergateway"
@@ -93,6 +95,17 @@ type Server struct {
 	// endpoint can name it without anyone re-deriving it from configuration and getting a different
 	// answer than the gateway did.
 	secrets providergateway.Secrets
+
+	// identity is the CUSTOMER identity provider's reachability, reported as its own /readyz component
+	// (P22 task 7.1). Separate from `probes` because the answer is richer than up/down: an operator
+	// diagnosing "nobody can sign in" needs the KIND and the ISSUER as well as the verdict, and a
+	// component that reports only "degraded" sends them to read three dashboards to learn what this
+	// response already knew.
+	identity IdentityProbe
+
+	// adminIdentity names the live OPERATOR identity provider (P22 task 6.4). The DOOR, never anything
+	// behind it — no key, no secret id, no assertion.
+	adminIdentity AdminIdentityDescriber
 
 	// probes are the dependent components aggregated into /readyz (P9 FR25, P19 topology FR).
 	//
@@ -201,6 +214,114 @@ func (p *HTTPComponentProbe) Probe(ctx context.Context) error {
 	return nil
 }
 
+// IdentityStatus is what /readyz reports about the customer identity provider.
+//
+// Kind, issuer, reachability — and nothing else. Never a client id, never a redirect allowlist, never
+// a secret's logical name: a readiness endpoint is public by necessity (a probe behind authentication
+// cannot be probed by the thing that most needs to probe it), so everything it says is said to
+// everybody.
+type IdentityStatus struct {
+	Kind      string `json:"kind"`
+	Issuer    string `json:"issuer"`
+	Reachable bool   `json:"reachable"`
+	// Detail is why it is unreachable, when it is. Absent when it is fine.
+	Detail string `json:"detail,omitempty"`
+}
+
+// IdentityProbe reports the customer identity provider's reachability.
+//
+// # The two properties this signal must have, and why they are stated here
+//
+// It measures REACHABILITY — can the IdP's discovery/JWKS or metadata be fetched and validated — and
+// not traffic freshness. A console with no sign-ins all night is not unhealthy; a console whose IdP
+// died an hour ago is, and a signal derived from sign-in volume gets both backwards.
+//
+// And it does not depend on the traffic it gates. The probe is an HTTP GET against a health endpoint,
+// so readiness can never deadlock on the very logins it is meant to admit.
+type IdentityProbe interface {
+	Identity(ctx context.Context) IdentityStatus
+}
+
+// SetIdentityProbe wires the customer identity provider into the readiness signal (P22 task 7.1).
+func (s *Server) SetIdentityProbe(p IdentityProbe) { s.identity = p }
+
+// AdminIdentityDescriber names the live operator IdP for /readyz. Satisfied by
+// *adminidentity.Authenticator, whose Describe reports the DOOR — kind, issuer, test mode — and never
+// a key, a secret id, or an assertion.
+type AdminIdentityDescriber interface {
+	Describe() adminidentity.ProviderInfo
+}
+
+// SetAdminIdentity records the live operator IdP so /readyz can report it (P22 task 6.4).
+//
+// # Why the operator IdP appears on the PLATFORM's readiness endpoint as well as the admin surface's
+//
+// The admin surface already reports it at `/admin/api/readyz`, and that endpoint is behind the
+// operator console's own origin and its platform credential. The question "is this deployment pointed
+// at the real operator IdP, or still at the test-mode fixture" is asked by whoever is looking at the
+// deployment, not by whoever is already inside the operator console — and 🔴 health-signal-surface
+// wants that answer readable from the box in question, by a monitor, without a credential.
+func (s *Server) SetAdminIdentity(d AdminIdentityDescriber) { s.adminIdentity = d }
+
+// HTTPIdentityProbe reads the customer console's health endpoint and extracts its identity block.
+//
+// # Why the platform asks the console rather than resolving the IdP itself
+//
+// The customer identity provider is the CONSOLE's dependency — the console holds the seam, performs
+// the flow and verifies the assertion (ADR-008). A Go service that independently probed the customer's
+// IdP would be measuring a dependency it does not have, and would report healthy or degraded for
+// reasons the console does not share. Asking the component that actually depends on it keeps one
+// answer rather than two that can disagree.
+type HTTPIdentityProbe struct {
+	URL    string
+	Client *http.Client
+}
+
+// NewHTTPIdentityProbe builds a probe with a bounded client. A readiness probe that can hang is not a
+// readiness probe.
+func NewHTTPIdentityProbe(url string) *HTTPIdentityProbe {
+	return &HTTPIdentityProbe{URL: url, Client: &http.Client{Timeout: 2 * time.Second}}
+}
+
+// Identity performs one GET and reads the console's `identity_provider` block.
+func (p *HTTPIdentityProbe) Identity(ctx context.Context) IdentityStatus {
+	unreachable := func(detail string) IdentityStatus {
+		// The console being unreachable is reported as the IDENTITY provider being unreachable, and
+		// that is correct rather than sloppy: from this endpoint's point of view the question is "can a
+		// customer sign in", and the answer is no either way. The `customer_console` component names
+		// the other half, so an operator reading both learns which layer is down.
+		return IdentityStatus{Reachable: false, Detail: detail}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.URL, nil)
+	if err != nil {
+		return unreachable(err.Error())
+	}
+	client := p.Client
+	if client == nil {
+		client = &http.Client{Timeout: 2 * time.Second}
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return unreachable("unreachable: " + err.Error())
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return unreachable(fmt.Sprintf("health endpoint returned %d", resp.StatusCode))
+	}
+	var body struct {
+		Identity IdentityStatus `json:"identity_provider"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&body); err != nil {
+		return unreachable("health endpoint did not report an identity provider")
+	}
+	if body.Identity.Kind == "" {
+		// A console too old to report the block. Named as such rather than assumed healthy: an
+		// unreported signal is not a green one.
+		return unreachable("health endpoint reported no identity provider kind")
+	}
+	return body.Identity
+}
+
 // BillingRolloutDescriber reports the P7 rollout gates. A one-method interface rather than an import
 // of the billing package: /readyz needs the words, not the type.
 type BillingRolloutDescriber interface {
@@ -300,6 +421,26 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.secrets != nil {
 		body["secrets_source"] = s.secrets.Describe()
+	}
+	if s.adminIdentity != nil {
+		// The operator IdP, named on the platform's own readiness surface. Absent rather than "unknown"
+		// when this deployment ships no operator console.
+		body["admin_idp"] = s.adminIdentity.Describe()
+	}
+	if s.identity != nil {
+		// P22 task 7.1. An unreachable customer IdP makes the whole signal not-ready and NAMES itself,
+		// because "not ready" without a subject sends an operator to read three dashboards to learn
+		// what this response already knew.
+		status := s.identity.Identity(r.Context())
+		entry := map[string]any{"status": "ready", "kind": status.Kind, "issuer": status.Issuer, "reachable": status.Reachable}
+		if !status.Reachable {
+			entry["status"] = "not_ready"
+			if status.Detail != "" {
+				entry["detail"] = status.Detail
+			}
+			degraded = append(degraded, "identity_provider")
+		}
+		components["identity_provider"] = entry
 	}
 	if s.billing != nil {
 		// Absent rather than "unknown" when unset: a deployment that wired no billing rollout has none,

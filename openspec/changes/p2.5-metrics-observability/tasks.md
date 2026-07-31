@@ -109,7 +109,7 @@
       `RunStatusSource`; `nodeState` drives ok/failed/timed_out from the span reliability attrs; browser-
       verified all five states + distinct failed(red)/timed_out(amber)/ok(green) rendering.
 - [x] 8.3 Verify against a live (stubbed-provider) run before calling the view done.
-      — `cmd/p25monitordemo` (stub provider, unique run_id/cycle); verified in Chrome (screenshots).
+      — `cmd/demo/runmonitor` (stub provider, unique run_id/cycle); verified in Chrome (screenshots).
 
 ## 9. Testing & review
 - [x] 9.1 Fixture: a run (reusing P2's hardcoded graph) with **no** telemetry code; assert the full
@@ -122,7 +122,7 @@
       (live Postgres eval store) + the hermetic `TestSection2..7` suite; added to `make pg-proof`.
 - [x] 9.3 UI verification: drive the live monitor against a live run; confirm streaming metrics +
       loading/error/empty states + distinct failed/timed-out node. — verified in Chrome against
-      `cmd/p25monitordemo` (SSE streamed nodes 0→6; error/terminal/state screenshots captured).
+      `cmd/demo/runmonitor` (SSE streamed nodes 0→6; error/terminal/state screenshots captured).
 - [x] 9.4 Adversarial self-review: under-tagged event, `case_id` as a TSDB label, secret in a span,
       collector down mid-run, retry double-count, un-instrumented node. — `adversarial_test.go`
       (`TestAdversarial_*`, six checks).
