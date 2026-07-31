@@ -246,12 +246,30 @@ func publicKeyFromJWK(k jwk) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		pub := &ecdsa.PublicKey{Curve: curve, X: new(big.Int).SetBytes(xBytes), Y: new(big.Int).SetBytes(yBytes)}
-		if !curve.IsOnCurve(pub.X, pub.Y) {
+		// Validate the point through `ecdh`, then verify with `ecdsa`. See jwkECDHCurves for why the
+		// on-curve check does not go through `elliptic.Curve.IsOnCurve`.
+		//
+		// RFC 7518 §6.2.1.2 requires X and Y to be the curve's full field size, so the uncompressed
+		// SEC 1 encoding is built at exactly that width. A SHORTER coordinate is left-padded rather
+		// than refused — a leading zero byte dropped by a producer is common and harmless — but a
+		// LONGER one is refused, because it is not the number it claims to be at this width.
+		ecdhCurve, ok := jwkECDHCurves[k.Crv]
+		if !ok {
+			return nil, errors.New("adminidentity: unsupported EC curve")
+		}
+		size := (curve.Params().BitSize + 7) / 8
+		if len(xBytes) > size || len(yBytes) > size {
+			return nil, errors.New("adminidentity: EC coordinate is wider than the curve")
+		}
+		point := make([]byte, 1+2*size)
+		point[0] = 4 // uncompressed
+		copy(point[1+size-len(xBytes):1+size], xBytes)
+		copy(point[1+2*size-len(yBytes):], yBytes)
+		if _, err := ecdhCurve.NewPublicKey(point); err != nil {
 			// A point off the curve is an invalid-curve attack, not a typo.
 			return nil, errors.New("adminidentity: EC point is not on the curve")
 		}
-		return pub, nil
+		return &ecdsa.PublicKey{Curve: curve, X: new(big.Int).SetBytes(xBytes), Y: new(big.Int).SetBytes(yBytes)}, nil
 	default:
 		return nil, errors.New("adminidentity: unsupported key type")
 	}

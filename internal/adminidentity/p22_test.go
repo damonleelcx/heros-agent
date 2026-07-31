@@ -311,7 +311,7 @@ func newSAMLStub(t *testing.T, entityID string) *samlStub {
 			return
 		}
 		w.Header().Set("content-type", "application/xml")
-		fmt.Fprintf(w,
+		_, _ = fmt.Fprintf(w,
 			`<md:EntityDescriptor xmlns:md="%s" entityID="%s"><md:IDPSSODescriptor `+
 				`protocolSupportEnumeration="%s"><md:KeyDescriptor use="signing">`+
 				`<ds:KeyInfo xmlns:ds="%s"><ds:X509Data><ds:X509Certificate>%s</ds:X509Certificate>`+

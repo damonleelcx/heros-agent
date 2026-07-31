@@ -2,6 +2,7 @@ package adminidentity
 
 import (
 	"context"
+	"crypto/ecdh"
 	"crypto/elliptic"
 	"encoding/json"
 	"errors"
@@ -65,6 +66,21 @@ var jwkCurves = map[string]elliptic.Curve{
 	"P-256": elliptic.P256(),
 	"P-384": elliptic.P384(),
 	"P-521": elliptic.P521(),
+}
+
+// jwkECDHCurves is the SAME three curves as `ecdh` curves, used ONLY to validate that a JWK's point
+// lies on its curve.
+//
+// Two maps for one concept is worth explaining. The verification itself needs `crypto/ecdsa`, which
+// is keyed on `elliptic.Curve`; but `elliptic.Curve.IsOnCurve` is deprecated as a low-level unsafe
+// API, and the replacement the deprecation names — `ecdh.Curve.NewPublicKey` — is the one that does
+// the on-curve check correctly and in constant time. So the point is validated through `ecdh` and the
+// key is then handed to `ecdsa`. Rejecting an off-curve point is not cosmetic: accepting one is the
+// invalid-curve attack, which can leak the private scalar of whoever is on the other side.
+var jwkECDHCurves = map[string]ecdh.Curve{
+	"P-256": ecdh.P256(),
+	"P-384": ecdh.P384(),
+	"P-521": ecdh.P521(),
 }
 
 // ErrIdPUnreachable is the fail-closed signal: no session is issued when the IdP cannot be reached.
