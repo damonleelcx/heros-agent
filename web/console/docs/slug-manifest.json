@@ -1,0 +1,103 @@
+{
+  "schema": "heros.slug-manifest/v1",
+  "generated_from": "web/console/content/{docs,legal}/en/**",
+  "note": "Anchors are a published contract. A removed or renamed slug fails the build unless the same change adds a redirect.",
+  "pages": [
+    {
+      "route": "/docs/reference/cli",
+      "source": "docs/en/reference/cli.md",
+      "anchors": [
+        "exit-codes",
+        "configuration-and-which-source-wins",
+        "commands",
+        "apply",
+        "author",
+        "coverage",
+        "discover",
+        "doctor",
+        "eval",
+        "help",
+        "init",
+        "link",
+        "login",
+        "status",
+        "upgrade",
+        "verify-release",
+        "version",
+        "what-this-reference-does-not-cover"
+      ]
+    },
+    {
+      "route": "/docs/reference/http-api",
+      "source": "docs/en/reference/http-api.md",
+      "anchors": [
+        "status-absent",
+        "why-you-are-reading-this-instead-of-an-endpoint-list",
+        "what-to-use-instead-today"
+      ]
+    },
+    {
+      "route": "/docs/reference/metrics",
+      "source": "docs/en/reference/metrics.md",
+      "anchors": [
+        "per-provider-call",
+        "per-run",
+        "what-is-not-measured-and-why-that-is-stated"
+      ]
+    },
+    {
+      "route": "/docs/reference/schemas",
+      "source": "docs/en/reference/schemas.md",
+      "anchors": [
+        "console-view",
+        "metric-event",
+        "runtime-invocation",
+        "workflow-ir"
+      ]
+    },
+    {
+      "route": "/docs/start/install",
+      "source": "docs/en/start/install.md",
+      "anchors": [
+        "the-one-command",
+        "what-your-operating-system-will-say",
+        "macos",
+        "windows",
+        "verify-a-download-yourself",
+        "files-this-release-publishes-but-does-not-cover",
+        "channels-pinning-upgrading-and-removing",
+        "curl-sh",
+        "powershell-irm-iex",
+        "deb-package",
+        "rpm-package",
+        "container-image",
+        "what-removal-leaves-behind",
+        "channels-that-are-not-available-yet",
+        "installing-on-a-disconnected-machine",
+        "next-your-first-discovery-graph"
+      ]
+    },
+    {
+      "route": "/docs/start/quickstart",
+      "source": "docs/en/start/quickstart.md",
+      "anchors": [
+        "what-you-need",
+        "what-happens"
+      ]
+    },
+    {
+      "route": "/legal/privacy/v/1.0.0",
+      "source": "legal/en/privacy/1.0.0.md",
+      "anchors": [
+        "placeholder"
+      ]
+    },
+    {
+      "route": "/legal/terms/v/1.0.0",
+      "source": "legal/en/terms/1.0.0.md",
+      "anchors": [
+        "placeholder"
+      ]
+    }
+  ]
+}

@@ -41,6 +41,18 @@ COPY --from=build /app/.next ./.next
 COPY --from=build /app/package.json ./package.json
 COPY --from=build /app/next.config.mjs ./next.config.mjs
 
+# P23 · ADR-011 — the legal and documentation corpus ships IN THIS IMAGE.
+#
+# This is the deployment model, not a packaging convenience: content-as-code means a bad copy change is
+# reverted by redeploying the previous console image (no migration, no platform restart), and it means an
+# air-gapped P19 deployment serves byte-identical documents with no egress at all.
+#
+# The reading routes render per request (the nonce-based CSP cannot be satisfied by build-time HTML), so
+# these files are read at RUNTIME and this COPY is load-bearing. Without it every /docs and /legal route
+# 404s in the container while passing every test on a developer's machine — which is exactly the class of
+# failure `docs`/`legal` exist to prevent, so the air-gapped parity check (task 11.3) asserts it.
+COPY --from=build /app/content ./content
+
 # Non-root. The console holds the platform credential in its environment; a process that does not need
 # root must not have it, so a container escape starts from the least useful possible position.
 USER node

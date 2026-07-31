@@ -167,3 +167,17 @@ func GateClaims(violations []ClaimViolation) []GateFailure {
 	}
 	return fails
 }
+
+// ClaimIDs is the inventoried trust vocabulary, as a value.
+//
+// P23's install fence reads it: a documentation page may use one of these claims only when the release
+// earned it. Exported here rather than duplicated in the console's scripts, because a second copy of the
+// vocabulary is a second answer to "may we say notarized", and the copy is always the optimistic one.
+func ClaimIDs() []string {
+	out := make([]string, 0, len(claimVocabulary))
+	for _, c := range claimVocabulary {
+		out = append(out, c.claimID)
+	}
+	sort.Strings(out)
+	return out
+}

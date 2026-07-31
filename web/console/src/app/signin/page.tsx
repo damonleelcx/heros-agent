@@ -189,6 +189,25 @@ export default async function SignInPage({
                   The console exchanges this once for a session held on the server. Your browser
                   receives a cookie it cannot read, and never a platform key.
                 </p>
+
+                {/*
+                  P23 task 8.7 — the legal line on the sign-in page.
+                  🔴 It states what is true TODAY and nothing more. Signing in is not an acceptance: the
+                  commitment gate (task 10.2) records acceptance explicitly, against a version and a
+                  content hash, and it is the only thing that does. A sign-in page that says "by
+                  continuing you agree to our Terms" while nothing records that agreement is asserting a
+                  contract the system cannot evidence — which is precisely the failure this phase exists
+                  to remove, so the sentence below OFFERS the documents rather than claiming assent.
+                */}
+                <p className="mt-3 text-center text-xs leading-relaxed text-marketing-ink/35">
+                  <Link className="underline underline-offset-4 hover:text-marketing-ink/60" href="/legal/terms">
+                    Terms of Service
+                  </Link>
+                  {" · "}
+                  <Link className="underline underline-offset-4 hover:text-marketing-ink/60" href="/legal/privacy">
+                    Privacy Notice
+                  </Link>
+                </p>
               </>
             )}
           </div>

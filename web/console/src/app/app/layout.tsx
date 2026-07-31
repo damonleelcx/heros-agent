@@ -7,6 +7,7 @@ import {
   GitBranch,
   GitPullRequest,
   Grid3x3,
+  BookOpen,
   HardDriveDownload,
   Home,
   Layers,
@@ -81,6 +82,11 @@ const SETTINGS: Surface[] = [
   // It sits in the settings group rather than the primary rail because it is a surface a reader visits ONCE —
   // to get the binary, or to answer a security review — not a place to work.
   { href: "/install", label: "Install", icon: <HardDriveDownload /> },
+  // Documentation is the same shape as Install and linked for the same reason: it is PUBLIC (/docs), it
+  // needs no session, and a second copy of a command inside the console is the drift the whole accuracy
+  // fence set exists to prevent. A console whose only route to the documentation is a search engine is a
+  // console that ships its documentation to strangers and hides it from customers.
+  { href: "/docs", label: "Documentation", icon: <BookOpen /> },
   { href: "/app/configure", label: "Configure", icon: <Settings /> },
   { href: "/app/billing", label: "Billing", icon: <CreditCard /> },
   { href: "/app/account", label: "Account", icon: <User /> },

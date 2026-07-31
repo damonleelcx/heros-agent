@@ -1,0 +1,265 @@
+// gen-release-assets.mjs generates the install page's asset table FROM THE PUBLISHED RELEASE
+// (tasks 4.5, 6.7 · Decision 12).
+//
+// # 🔴 The rule: no hand-typed filename, version or checksum. Ever.
+//
+// Not because typing is error-prone in the abstract, but because of what a wrong checksum teaches. A
+// reader who follows the verification step, sees it fail, shrugs and installs anyway has learned that
+// verification fails routinely — and that is how a security control becomes a step people skip. One
+// stale checksum on a documentation page does more damage than no checksum at all.
+//
+// So every value in the table comes from the release's own signed `SHA256SUMS`, never from the GitHub
+// API's asset listing (which has no checksums) and never from a person.
+//
+// # Where the checksums come from, precisely
+//
+//   1. the latest non-draft, non-prerelease Release for the configured repository
+//   2. its `SHA256SUMS` asset — the manifest `herossign` signed
+//   3. `SHA256SUMS.sig` / `SHA256SUMS.sshsig` recorded as present or absent, never assumed
+//   4. its `trust.json` — the pipeline's own attestation of what it did and did not do
+//
+// (4) is why the install page can state an OS-trust posture per platform without a person deciding what
+// to claim. The attestation's flags come from the signing steps' own outputs, so a release that did not
+// sign cannot attest that it did — and the page renders "unsigned" because the artifact says so, not
+// because somebody remembered to say it.
+//
+// The checksum in the table and the checksum a reader verifies against are therefore THE SAME BYTES
+// from THE SAME FILE.
+//
+// # Offline and air-gapped builds
+//
+// A build with no network keeps the checked-in artifact and says so. It does not fail, and it does not
+// silently emit an empty table — an empty table would make the install page state that packaged channels
+// do not exist, which would be a false statement caused by a firewall. `HEROS_RELEASE_OFFLINE=1` forces
+// that path explicitly.
+//
+// # Before any release exists
+//
+// The artifact records `{"release": null}` and the install page renders the not-yet-available statement
+// instead of a table (Decision 12). It does not invent a plausible filename.
+//
+// # Proxies
+//
+// The npm script sets `NODE_USE_ENV_PROXY=1`. Node's `fetch` ignores `HTTPS_PROXY` unless told to honour
+// it, and the symptom of not telling it is this generator reporting "no published release" on a machine
+// that can reach the release perfectly well with `curl` — an offline artifact caused by a proxy, which
+// would put "packaged channels are not yet available" on the install page while they exist.
+//
+// # What this deliberately does not check
+//
+// It does not VERIFY the signature. It records which signature files the release published; whether they
+// verify is `heros verify-release`'s job, on the reader's machine, against a key compiled into their
+// binary — which is the only place that check means anything. A build-time "signature ok" printed on a
+// web page is a claim about a file the reader never saw.
+
+import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { join } from "node:path";
+import process from "node:process";
+
+const ROOT = process.cwd();
+const OUT = join(ROOT, "src", "generated", "release-assets.json");
+
+/** REPO is read from the same module the link and the fence use, so there is one repository name. */
+async function repository() {
+  const source = await readFile(join(ROOT, "src", "content", "repository.ts"), "utf8");
+  const owner = /owner:\s*"([^"]+)"/.exec(source)?.[1];
+  const name = /name:\s*"([^"]+)"/.exec(source)?.[1];
+  if (!owner || !name) throw new Error("could not read the repository from src/content/repository.ts");
+  return { owner, name };
+}
+
+/** TARGETS maps an asset filename's platform suffix to what a reader is choosing between. */
+const TARGETS = [
+  [/-darwin-arm64$/, "macOS · Apple silicon"],
+  [/-darwin-amd64$/, "macOS · Intel"],
+  [/-linux-arm64$/, "Linux · arm64"],
+  [/-linux-amd64$/, "Linux · x86-64"],
+  [/-windows-amd64\.exe$/, "Windows · x86-64"],
+  [/_arm64\.deb$/, "Debian/Ubuntu package · arm64"],
+  [/_amd64\.deb$/, "Debian/Ubuntu package · x86-64"],
+  [/\.aarch64\.rpm$/, "RPM package · aarch64"],
+  [/\.x86_64\.rpm$/, "RPM package · x86-64"],
+];
+
+function targetOf(name) {
+  for (const [pattern, label] of TARGETS) {
+    if (pattern.test(name)) return label;
+  }
+  return null;
+}
+
+async function existing() {
+  try {
+    return JSON.parse(await readFile(OUT, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+async function keep(reason) {
+  const prior = await existing();
+  if (prior) {
+    console.log(`release assets: ${reason} — keeping the checked-in artifact (release ${prior.release ?? "none"}).`);
+    return;
+  }
+  await mkdir(join(ROOT, "src", "generated"), { recursive: true });
+  await writeFile(
+    OUT,
+    `${JSON.stringify(
+      {
+        schema: "heros.release-assets/v1",
+        note: "GENERATED by scripts/gen-release-assets.mjs. Do not edit; no value here may be hand-typed.",
+        release: null,
+        absent_reason: reason,
+        assets: [],
+        signatures: [],
+      },
+      null,
+      2,
+    )}\n`,
+    "utf8",
+  );
+  console.log(`release assets: ${reason} — wrote an empty artifact; the install page will say packaged channels are not yet available.`);
+}
+
+async function main() {
+  if (process.env.HEROS_RELEASE_OFFLINE === "1") {
+    await keep("HEROS_RELEASE_OFFLINE=1");
+    return;
+  }
+
+  const { owner, name } = await repository();
+  const api = `https://api.github.com/repos/${owner}/${name}/releases/latest`;
+
+  let release;
+  try {
+    const res = await fetch(api, {
+      headers: { accept: "application/vnd.github+json", "user-agent": "heros-console-docs-generator" },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (res.status === 404) {
+      await keep("no published release for this repository yet");
+      return;
+    }
+    if (!res.ok) {
+      await keep(`the forge answered ${res.status} for the latest release`);
+      return;
+    }
+    release = await res.json();
+  } catch (error) {
+    await keep(`the release could not be read (${error.message})`);
+    return;
+  }
+
+  const manifestAsset = (release.assets ?? []).find((asset) => asset.name === "SHA256SUMS");
+  if (!manifestAsset) {
+    // A release with no manifest is a release whose assets cannot be verified. The honest artifact is an
+    // empty one: documenting downloads with no checksums would publish exactly the unverified path
+    // Decision 13 forbids.
+    await keep(`release ${release.tag_name} publishes no SHA256SUMS, so no asset here can be verified`);
+    return;
+  }
+
+  let manifest;
+  try {
+    const res = await fetch(manifestAsset.browser_download_url, {
+      headers: { "user-agent": "heros-console-docs-generator" },
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!res.ok) throw new Error(`SHA256SUMS fetch answered ${res.status}`);
+    manifest = await res.text();
+  } catch (error) {
+    await keep(`the signed manifest could not be read (${error.message})`);
+    return;
+  }
+
+  // SHA256SUMS lines are `<64 hex>  <name>` (two spaces) or `<64 hex> *<name>` (binary mode — which is
+  // what a git-bash runner writes, and which broke a previous release's merge). Both are accepted here
+  // rather than one being treated as malformed.
+  const sums = new Map();
+  for (const line of manifest.split("\n")) {
+    const match = /^([0-9a-f]{64})\s+\*?(\S+)$/.exec(line.trim());
+    if (match) sums.set(match[2], match[1]);
+  }
+  if (sums.size === 0) {
+    await keep(`release ${release.tag_name}'s SHA256SUMS parsed to zero entries`);
+    return;
+  }
+
+  const version = String(release.tag_name ?? "").replace(/^v/, "");
+  const assets = (release.assets ?? [])
+    .filter((asset) => sums.has(asset.name))
+    .map((asset) => ({
+      name: asset.name,
+      target: targetOf(asset.name),
+      size_bytes: asset.size,
+      sha256: sums.get(asset.name),
+      url: asset.browser_download_url,
+    }))
+    // Binaries first, then packages, then everything else — a reader looking for their platform should
+    // not have to scan past an installer script to find it.
+    .sort((a, b) => {
+      const rank = (asset) => (asset.target === null ? 2 : /\.(deb|rpm)$/.test(asset.name) ? 1 : 0);
+      return rank(a) - rank(b) || a.name.localeCompare(b.name);
+    });
+
+  // trust.json is the pipeline's attestation. Absent is a legitimate answer for an older release, and it
+  // is recorded as absent rather than defaulted to "unsigned" — "we do not know" and "it is not signed"
+  // are different statements, and the page must not print the second when it means the first.
+  let trust = null;
+  const trustAsset = (release.assets ?? []).find((asset) => asset.name === "trust.json");
+  if (trustAsset) {
+    try {
+      const res = await fetch(trustAsset.browser_download_url, {
+        headers: { "user-agent": "heros-console-docs-generator" },
+        signal: AbortSignal.timeout(20_000),
+      });
+      if (res.ok) trust = await res.json();
+    } catch {
+      trust = null;
+    }
+  }
+
+  const signatures = (release.assets ?? [])
+    .filter((asset) => /^SHA256SUMS\.(sig|sshsig)$/.test(asset.name))
+    .map((asset) => asset.name)
+    .sort();
+
+  await mkdir(join(ROOT, "src", "generated"), { recursive: true });
+  await writeFile(
+    OUT,
+    `${JSON.stringify(
+      {
+        schema: "heros.release-assets/v1",
+        note: "GENERATED by scripts/gen-release-assets.mjs. Do not edit; no value here may be hand-typed.",
+        release: release.tag_name,
+        version,
+        published_at: release.published_at,
+        manifest: "SHA256SUMS",
+        signatures,
+        trust,
+        // unverifiable_assets are published by the release but ABSENT from the signed manifest. They are
+        // listed separately and never mixed into `assets`, because a download whose checksum is not in the
+        // signed manifest cannot be verified — and a single table would imply it can.
+        unverifiable_assets: (release.assets ?? [])
+          .filter((asset) => !sums.has(asset.name) && !/^(SHA256SUMS|trust\.json|allowed_signers)/.test(asset.name))
+          .map((asset) => ({ name: asset.name, target: targetOf(asset.name), size_bytes: asset.size }))
+          .sort((a, b) => a.name.localeCompare(b.name)),
+        assets,
+      },
+      null,
+      2,
+    )}\n`,
+    "utf8",
+  );
+
+  console.log(
+    `release assets generated from ${release.tag_name}: ${assets.length} asset(s), ` +
+      `${signatures.length} signature file(s), every checksum read from the published SHA256SUMS.`,
+  );
+}
+
+main().catch((error) => {
+  console.error("release asset generation FAILED:", error.message);
+  process.exit(1);
+});

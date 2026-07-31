@@ -22,7 +22,7 @@ PARITY_DIR ?= .parity
 
 .PHONY: ci go build vet fmt test schema lint db-proof pg-proof verifier-proof tidy-check clean help demo-evalboard \
         deploy-lint \
-        console-types console-types-check console-test \
+        console-types console-types-check console-test docs-facts docs-facts-check \
         build-discover discovery-ci discovery-throughput \
         discovery-parity-snapshot discovery-parity-verify \
         discovery-sandbox-proof discovery-sandbox-proof-redcheck \
@@ -31,7 +31,7 @@ PARITY_DIR ?= .parity
         release-rehearse release-rehearse-redcheck readme-install packaging-proof install-smoke install-smoke-refusals
 
 ## ci: the locally-provable gate (go + schema + console-types + discovery-ci). Lint/db-proof run as their own CI jobs.
-ci: go schema console-types-check discovery-ci
+ci: go schema console-types-check docs-facts-check discovery-ci
 	@echo "== make ci: PASS =="
 
 ## go: build, vet, gofmt-check, test
@@ -66,6 +66,27 @@ console-types:
 # like legitimately absent data.
 console-types-check:
 	$(GO) run ./cmd/consoletypes -check
+
+## docs-facts: regenerate the facts P23's documentation is generated from and fenced against.
+#
+# The CLI command registry, the exit-code contract, the metric catalogue and the install-channel
+# contract all live in Go. The console's generators and fences are Node scripts. This is the one bridge,
+# for the same reason ADR-007 gives for console types: a JavaScript parser for Go source is a second
+# implementation of the truth, and it drifts silently.
+docs-facts:
+	$(GO) run ./cmd/docsfacts
+
+## docs-facts-check: fail if a command, exit code, metric or install channel changed and the checked-in
+## facts did not.
+#
+# The failure this prevents is P23 Decision 14's: adding a subcommand is a normal Tuesday, and
+# remembering the reference is not. With this gate, forgetting is a red build; without it, the product
+# accumulates commands nobody can look up.
+docs-facts-check:
+	$(GO) run ./cmd/docsfacts /tmp/heros-docs-facts.json
+	@diff -u web/console/src/generated/docs-facts.json /tmp/heros-docs-facts.json \
+	  || { echo ""; echo "docs facts are STALE. Run 'make docs-facts' and commit the result."; exit 1; }
+	@echo "docs facts are current."
 
 ## deploy-lint: P19 deploy gates — digest-pinned images, image-set parity across substrates, no
 ## committed plaintext Secret. Each fails LOUD and names the offender; run before every deploy PR.

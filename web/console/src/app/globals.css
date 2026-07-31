@@ -829,6 +829,313 @@
   .figure__table {
     @apply rounded-xl border border-border;
   }
+
+  /* ── The reading surface · P23 §3 ──────────────────────────────────────────
+   *
+   * The third composition. It follows the reader's theme (unlike the marketing poster) and it scrolls as
+   * a DOCUMENT (unlike the console shell) — see `app/(reading)/layout.tsx` for why that exemption is a
+   * decision rather than an omission.
+   *
+   * Nothing here sets `overflow` on a page-level container. That is the exemption, in CSS.
+   */
+
+  .reading {
+    @apply flex min-h-screen flex-col bg-background text-foreground;
+  }
+
+  .reading__header {
+    @apply sticky top-0 z-50 flex flex-wrap items-center justify-between gap-4 border-b border-border bg-background/90 px-6 py-4 backdrop-blur-xl md:px-10;
+  }
+
+  .reading__wordmark {
+    @apply font-display text-lg font-light uppercase tracking-[0.15em] text-foreground/90;
+  }
+
+  .reading__nav {
+    @apply flex flex-wrap items-center gap-5;
+  }
+
+  .reading__nav-link {
+    @apply text-sm text-muted-foreground transition-colors hover:text-foreground;
+  }
+
+  .reading__nav-link--strong {
+    @apply text-foreground;
+  }
+
+  .reading__main {
+    @apply flex-1 px-6 py-10 md:px-10;
+  }
+
+  .reading__footer {
+    @apply flex flex-col gap-4 border-t border-border px-6 py-8 md:px-10;
+  }
+
+  .reading__footer-note {
+    @apply max-w-3xl text-xs leading-relaxed text-muted-foreground;
+  }
+
+  .reading__footer-links {
+    @apply flex flex-wrap gap-5;
+  }
+
+  /* The two-column reading frame: document, then a sticky table of contents on a wide viewport. */
+  .reading__frame {
+    @apply mx-auto grid w-full max-w-6xl gap-10 lg:grid-cols-[minmax(0,1fr)_16rem];
+  }
+
+  .reading__aside {
+    @apply order-first lg:sticky lg:order-last lg:top-24 lg:self-start;
+  }
+
+  .reading__doc {
+    max-inline-size: var(--measure-prose);
+  }
+
+  .reading__identity {
+    @apply flex flex-wrap items-center gap-x-4 gap-y-1 border-y border-border py-3 font-mono text-xs text-muted-foreground;
+  }
+
+  .reading__hash {
+    @apply break-all;
+  }
+
+  /* ── Prose ─────────────────────────────────────────────────────────────── */
+
+  .prose {
+    @apply flex flex-col gap-5 leading-relaxed;
+  }
+
+  .prose-p {
+    @apply text-base leading-relaxed text-foreground/90;
+  }
+
+  .prose-heading {
+    @apply scroll-mt-24 font-display font-light tracking-tight text-foreground;
+  }
+
+  .prose-h2 {
+    font-size: var(--type-section);
+    @apply mt-6 border-b border-border pb-2;
+  }
+
+  .prose-h3 {
+    font-size: var(--type-node);
+    @apply mt-4;
+  }
+
+  .prose-h4,
+  .prose-h5,
+  .prose-h6 {
+    font-size: var(--type-node-sub);
+    @apply mt-3 font-sans font-medium uppercase tracking-[0.08em] text-muted-foreground;
+  }
+
+  /*
+   * The heading self-link is visible on focus and on hover, and it is ALWAYS in the accessibility tree —
+   * `opacity: 0` hides it from sight, not from a screen reader, and a keyboard reader reaches it by tab.
+   * A hover-only affordance that is also removed from the tree is an affordance half the audience does
+   * not have.
+   */
+  .prose-anchor {
+    @apply ml-2 text-muted-foreground opacity-0 transition-opacity;
+  }
+
+  .prose-heading:hover .prose-anchor,
+  .prose-anchor:focus-visible {
+    @apply opacity-100;
+  }
+
+  .prose-link {
+    @apply text-primary underline decoration-primary/40 underline-offset-4 transition-colors hover:decoration-primary;
+  }
+
+  .prose-code {
+    @apply rounded border border-border bg-muted/50 px-1.5 py-0.5 font-mono text-sm text-foreground;
+  }
+
+  .prose-code-frame {
+    @apply relative overflow-hidden rounded-xl border border-border bg-card;
+  }
+
+  .prose-code-lang {
+    @apply absolute right-0 top-0 rounded-bl-lg border-b border-l border-border bg-muted/60 px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground;
+  }
+
+  /*
+   * A code block scrolls SIDEWAYS in its own box. A long command that widened the document would make
+   * the whole page scroll horizontally on a phone, and would be clipped rather than wrapped in print.
+   */
+  .prose-pre {
+    @apply overflow-x-auto p-4 font-mono text-sm leading-relaxed text-foreground;
+  }
+
+  .prose-tabs {
+    @apply overflow-hidden rounded-xl border border-border;
+  }
+
+  .prose-list {
+    @apply flex list-disc flex-col gap-2 pl-6 text-base leading-relaxed text-foreground/90;
+  }
+
+  .prose-list--ordered {
+    @apply list-decimal;
+  }
+
+  .prose-quote {
+    @apply flex flex-col gap-3 border-l-2 border-primary/40 pl-4 text-base italic text-muted-foreground;
+  }
+
+  .prose-table-frame {
+    @apply overflow-x-auto rounded-xl border border-border;
+  }
+
+  .prose-table {
+    @apply w-full border-collapse text-sm;
+  }
+
+  .prose-table th {
+    @apply border-b border-border bg-muted/40 px-3 py-2 text-left font-medium text-foreground;
+  }
+
+  .prose-table td {
+    @apply border-b border-border/60 px-3 py-2 align-top text-foreground/90;
+  }
+
+  .prose-rule {
+    @apply border-t border-border;
+  }
+
+  /* ── Table of contents ─────────────────────────────────────────────────── */
+
+  .toc {
+    @apply flex flex-col gap-3 rounded-xl border border-border bg-card p-4;
+  }
+
+  .toc__label {
+    font-size: var(--type-label);
+    @apply font-mono uppercase tracking-[0.12em] text-muted-foreground;
+  }
+
+  .toc__list {
+    @apply flex list-none flex-col gap-1.5 p-0;
+  }
+
+  .toc__item--nested {
+    @apply pl-4;
+  }
+
+  .toc__link {
+    @apply block border-l-2 border-transparent pl-3 text-sm text-muted-foreground transition-colors hover:text-foreground;
+  }
+
+  /*
+   * 🔴 The current item is marked THREE ways and colour is only one of them: a border, a weight change,
+   * and — in the markup, not here — `aria-current="location"` plus the word "Reading". Colour alone
+   * would leave a monochrome print-out and a colour-blind reader with no answer to "where am I".
+   */
+  .toc__link--current {
+    @apply border-primary font-medium text-foreground;
+  }
+
+  /* ── Search (the second, and last, client island) ──────────────────────── */
+
+  .docsearch {
+    @apply flex flex-col gap-3;
+  }
+
+  .docsearch__input {
+    @apply w-full rounded-lg border border-border bg-input-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground;
+  }
+
+  .docsearch__results {
+    @apply flex list-none flex-col gap-2 p-0;
+  }
+
+  .docsearch__result {
+    @apply rounded-lg border border-border bg-card p-3;
+  }
+
+  .docsearch__result-title {
+    @apply text-sm font-medium text-foreground;
+  }
+
+  .docsearch__result-context {
+    @apply text-xs leading-relaxed text-muted-foreground;
+  }
+}
+
+/*
+ * ── The print stylesheet (task 3.4) ────────────────────────────────────────
+ *
+ * Counsel prints the Terms. A buyer's procurement team prints the Terms. This is not a courtesy sheet —
+ * it is one of the two ways the document is actually read, and it is the way that ends up in a file.
+ *
+ * Four jobs:
+ *
+ *   1. **Drop the chrome.** A sticky header repeated on twelve pages, a table of contents whose links
+ *      cannot be clicked on paper, and a "Sign in" affordance are all noise on a printout.
+ *   2. **Expand the measure.** On screen the measure is bounded for readability; on paper the PAGE
+ *      bounds it, and keeping the screen measure would leave a third of every sheet blank and add pages.
+ *   3. **Emit the document identity in the running footer** — kind, version, effective date and content
+ *      hash. This is the whole point. A printed agreement with no version and no hash cannot later be
+ *      matched to the consent record that references it, which is the failure Decision 2 exists to
+ *      prevent. `position: fixed` is how a browser repeats an element across printed pages; engines
+ *      differ on whether it lands on every sheet or only the first, so the assertion the test makes —
+ *      and the claim made here — is that the identity IS EMITTED, not that a particular engine repeats
+ *      it.
+ *   4. **Do not print a link's destination as a URL after every link.** The classic print stylesheet
+ *      trick turns a document with a hundred cross-references into an unreadable one.
+ */
+@media print {
+  .reading__header,
+  .reading__footer,
+  .reading__aside,
+  .toc,
+  .skip-link,
+  .prose-anchor,
+  .docsearch {
+    display: none;
+  }
+
+  .reading__doc,
+  .reading__frame {
+    max-inline-size: var(--print-measure);
+  }
+
+  .reading__main {
+    padding: 0;
+  }
+
+  .print-footer {
+    display: block;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+  }
+
+  /*
+   * A code block or a table split across a page break loses the reader. `break-inside: avoid` is a
+   * request rather than a guarantee, which is the honest thing a print stylesheet can do about it.
+   */
+  .prose-code-frame,
+  .prose-table-frame {
+    break-inside: avoid;
+  }
+
+  .prose-heading {
+    break-after: avoid;
+  }
+
+  @page {
+    margin: var(--print-margin);
+  }
+}
+
+/* The document identity block is print-only: on screen it is rendered in the page, where it belongs. */
+.print-footer {
+  display: none;
 }
 
 /*

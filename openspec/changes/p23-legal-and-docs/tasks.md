@@ -12,88 +12,88 @@ phase:
 ---
 
 ## 1. System Designer + Sales Ops — Decide the one-way doors first (blocks everything else)
-- [ ] 1.1 Ratify **Decision 2** — a legal document's identity is `(kind, version, content_hash)` and consent
+- [x] 1.1 Ratify **Decision 2** — a legal document's identity is `(kind, version, content_hash)` and consent
       points at the triple, never at a URL. This is the contract that outlives every other artifact in the
       phase; everything else here is replaceable.
-- [ ] 1.2 Ratify **Decision 1** as **ADR-010** (`docs/adr/ADR-010-legal-and-docs-content-as-code.md`):
+- [x] 1.2 Ratify **Decision 1** as **ADR-010** (`docs/adr/ADR-010-legal-and-docs-content-as-code.md`):
       content in the console image, no CMS / no runtime fetch / no external docs host — with the accepted
       cost (a deploy per copy fix) written down, not implied.
-- [ ] 1.3 Ratify **Decision 3** (materiality is a **declared** field, never a diff heuristic) and **Decision 4**
+- [x] 1.3 Ratify **Decision 3** (materiality is a **declared** field, never a diff heuristic) and **Decision 4**
       (the gate blocks commitments, never reading) — the two decisions that determine whether a legal update
       can take the console down.
-- [ ] 1.4 **Escalate, do not self-decide:** governing law / contracting entity / jurisdiction (PRD OQ1) and the
+- [x] 1.4 **Escalate, do not self-decide:** governing law / contracting entity / jurisdiction (PRD OQ1) and the
       consent-record **retention period** (OQ2, proposed 7 years). Both are business commitments; record the
       answers, and note that retention is configuration so code need not wait.
-- [ ] 1.5 Decide **OQ3** explicitly: emit the HTTP API artifact in this phase, or ship the API reference tier
+- [x] 1.5 Decide **OQ3** explicitly: emit the HTTP API artifact in this phase, or ship the API reference tier
       **absent with the reason** (Decision 6). Hand-writing it is forbidden either way.
-- [ ] 1.6 Reserve the URL shape for future versioned docs (**OQ7**) before any external link exists — cheap
+- [x] 1.6 Reserve the URL shape for future versioned docs (**OQ7**) before any external link exists — cheap
       now, a redirect table later.
 
 ## 2. Backend + System Designer — The data inventory (counsel's input, produced by engineering)
-- [ ] 2.1 Enumerate every store that holds customer-derived data — eval results and registries (Postgres),
+- [x] 2.1 Enumerate every store that holds customer-derived data — eval results and registries (Postgres),
       telemetry and spans (P2.5), delivery records (P12), session state (P9), billing objects (P7/P21) —
       with **data categories, retention, processor and transfer basis** per store.
-- [ ] 2.2 Mark each entry **checkable against `db/migrations/postgres/`** or explicitly **external**; an entry
+- [x] 2.2 Mark each entry **checkable against `db/migrations/postgres/`** or explicitly **external**; an entry
       that is neither is a gap, not a rounding error.
-- [ ] 2.3 Commit the inventory to `docs/decisions/p23-data-inventory.md` as the Privacy Notice's source of
+- [x] 2.3 Commit the inventory to `docs/decisions/p23-data-inventory.md` as the Privacy Notice's source of
       truth, and hand it to counsel as **input** (Decision 10).
 
 ## 3. Frontend — The reading surface (machinery first, with placeholder content)
-- [ ] 3.1 Add the `(reading)` route group and layout: **no session, no fetch**, theme-following, bounded
+- [x] 3.1 Add the `(reading)` route group and layout: **no session, no fetch**, theme-following, bounded
       measure, document scroll. Put the **viewport-first exemption** and its reasoning in the layout's own
       header comment, in the codebase's existing idiom — so the next reader sees a decision, not an omission.
-- [ ] 3.2 Build the Markdown render pipeline over `web/console/content/{legal,docs}/en/**`: front-matter
+- [x] 3.2 Build the Markdown render pipeline over `web/console/content/{legal,docs}/en/**`: front-matter
       parse, heading-slug emission, code-block rendering, and the `content_hash` computation over
       **normalized** source (front matter excluded; line endings and trailing whitespace normalized).
-- [ ] 3.3 TOC component as a `nav` landmark with scroll-spy: current section marked by **`aria-current` and a
+- [x] 3.3 TOC component as a `nav` landmark with scroll-spy: current section marked by **`aria-current` and a
       word**, never by colour alone (the console's existing rule, applied to a table of contents).
-- [ ] 3.4 Print stylesheet: paginated, chrome dropped, measure expanded, **kind + version + effective date +
+- [x] 3.4 Print stylesheet: paginated, chrome dropped, measure expanded, **kind + version + effective date +
       content hash in the running footer**.
-- [ ] 3.5 Multi-language code samples via the **existing `<Tabs>` component**; do not add a second one.
-- [ ] 3.6 Verify the two client islands (TOC, search) are the only client components and that the
+- [x] 3.5 Multi-language code samples via the **existing `<Tabs>` component**; do not add a second one.
+- [x] 3.6 Verify the two client islands (TOC, search) are the only client components and that the
       `scan-bundle` budget is unchanged; confirm the surface is readable with JavaScript disabled.
 
 ## 4. Frontend + QA — The fences and the generators (before any real prose lands)
-- [ ] 4.1 `scripts/gen-slug-manifest.mjs` — emit `docs/slug-manifest.json` from the **same render pass** that
+- [x] 4.1 `scripts/gen-slug-manifest.mjs` — emit `docs/slug-manifest.json` from the **same render pass** that
       produces the pages, so the manifest cannot drift from the page.
-- [ ] 4.2 `scripts/gen-cli-reference.mjs` — generate the CLI reference from the `internal/cli` command
+- [x] 4.2 `scripts/gen-cli-reference.mjs` — generate the CLI reference from the `internal/cli` command
       registry (**EXISTS**).
-- [ ] 4.3 `scripts/gen-schema-reference.mjs` — generate the schema reference from `schemas/*.json`
+- [x] 4.3 `scripts/gen-schema-reference.mjs` — generate the schema reference from `schemas/*.json`
       (**EXISTS**).
-- [ ] 4.4 `scripts/gen-search-index.mjs` — build-time static index over titles, headings and lead paragraphs;
+- [x] 4.4 `scripts/gen-search-index.mjs` — build-time static index over titles, headings and lead paragraphs;
       **state the ranking limit in the file header** (Decision 9).
-- [ ] 4.5 `scripts/gen-release-assets.mjs` — generate the install page's asset table (filenames, targets,
+- [x] 4.5 `scripts/gen-release-assets.mjs` — generate the install page's asset table (filenames, targets,
       versions, checksums) **from the published release**. Until a release exists it emits nothing and the
       install page renders the not-yet-available statement (Decision 12).
-- [ ] 4.6 `scripts/scan-docs-claims.mjs` — extend the `scan-claims` rule to `/docs/**`: no page may describe a
+- [x] 4.6 `scripts/scan-docs-claims.mjs` — extend the `scan-claims` rule to `/docs/**`: no page may describe a
       capability that is not `shipped: true` with a named owning phase in `CAPABILITIES`.
-- [ ] 4.7 `scripts/scan-cli.mjs` — **both directions**: every `heros …` invocation in content resolves to a
+- [x] 4.7 `scripts/scan-cli.mjs` — **both directions**: every `heros …` invocation in content resolves to a
       real subcommand **and real flags**; **and** every subcommand in the registry has a reference entry. Plus
       exit-code parity — a documented code whose meaning disagrees with `internal/cli` fails (Decision 14).
-- [ ] 4.8 `scripts/scan-api.mjs` — every documented endpoint, method and field resolves against the
+- [x] 4.8 `scripts/scan-api.mjs` — every documented endpoint, method and field resolves against the
       machine-readable API artifact; **refuse the page** when the artifact is absent rather than passing
       vacuously.
-- [ ] 4.9 `scripts/scan-metric.mjs` — every documented metric matches the harness on **name, unit and
+- [x] 4.9 `scripts/scan-metric.mjs` — every documented metric matches the harness on **name, unit and
       computation** and **cites where it is computed**.
-- [ ] 4.10 `scripts/scan-links.mjs` — internal links and anchors resolve; a removed/renamed slug fails unless
+- [x] 4.10 `scripts/scan-links.mjs` — internal links and anchors resolve; a removed/renamed slug fails unless
       the same change adds a redirect; external links allow-listed and visibly marked.
-- [ ] 4.11 `scripts/scan-secrets.mjs` — credential-shaped content (provider key prefixes, PEM blocks, bearer
+- [x] 4.11 `scripts/scan-secrets.mjs` — credential-shaped content (provider key prefixes, PEM blocks, bearer
       tokens) fails the build.
-- [ ] 4.12 `scripts/scan-content.mjs` — Markdown only: **no raw HTML, no inline handlers, no external
+- [x] 4.12 `scripts/scan-content.mjs` — Markdown only: **no raw HTML, no inline handlers, no external
       script/font/stylesheet reference**; and **no third-party origin in public-surface markup** (badge,
       widget, hosted font, cross-origin fetch). The runtime CSP in `middleware.ts` refuses these anyway —
       this makes the refusal visible at review rather than at deploy, and keeps air-gapped parity a machine
       check rather than a policy.
-- [ ] 4.13 `scripts/scan-install.mjs` — a hand-typed asset filename, version or **checksum** fails; a
+- [x] 4.13 `scripts/scan-install.mjs` — a hand-typed asset filename, version or **checksum** fails; a
       documented install path that reaches `PATH` **before** verification fails; a signing/notarization claim
       naming a step the pipeline does not perform fails; an install channel absent from the published release
       fails (Decisions 12 + 13).
-- [ ] 4.14 Wire all eight scans + five generators into `npm run build`, and add a **failing fixture per
+- [x] 4.14 Wire all eight scans + five generators into `npm run build`, and add a **failing fixture per
       fence** under `tests/support/` — a fake `heros frobnicate`, a registry subcommand with no reference
       entry, an unshipped claim, a dead anchor, a fake API key, a raw `<script>`, a mismatched metric unit, an
       undocumented endpoint, a hand-typed checksum, and an install path that reaches `PATH` before verifying.
       Each must fail **individually**.
-- [ ] 4.15 Give every fence a header that states **what it does not check** (NFR12), in the idiom
+- [x] 4.15 Give every fence a header that states **what it does not check** (NFR12), in the idiom
       `scan-claims.mjs` already uses.
 
 ## 5. Product Designer + Frontend — Documentation content (tiers 1–2)

@@ -1,0 +1,100 @@
+{
+  "generated_from": "web/console/content/docs/en/**",
+  "ranks_over": "page titles, section names, headings and lead paragraphs",
+  "entries": [
+    {
+      "route": "/docs/reference/cli",
+      "title": "CLI reference",
+      "section": "Reference",
+      "summary": "Every subcommand of the heros binary, its flags, its exit code, and whether it runs offline.",
+      "headings": [
+        "Exit codes",
+        "Configuration and which source wins",
+        "Commands",
+        "apply",
+        "author",
+        "coverage",
+        "discover",
+        "doctor",
+        "eval",
+        "help",
+        "init",
+        "link",
+        "login",
+        "status",
+        "upgrade",
+        "verify-release",
+        "version",
+        "What this reference does not cover"
+      ]
+    },
+    {
+      "route": "/docs/reference/http-api",
+      "title": "HTTP API reference",
+      "section": "Reference",
+      "summary": "This tier is absent, and this page says why rather than leaving you to conclude there is no API.",
+      "headings": [
+        "Status: absent",
+        "Why you are reading this instead of an endpoint list",
+        "What to use instead, today"
+      ]
+    },
+    {
+      "route": "/docs/reference/metrics",
+      "title": "Metric reference",
+      "section": "Reference",
+      "summary": "Every metric the platform emits, with its unit, its exact computation, and the code that computes it.",
+      "headings": [
+        "Per provider call",
+        "Per run",
+        "What is not measured, and why that is stated"
+      ]
+    },
+    {
+      "route": "/docs/reference/schemas",
+      "title": "Schema reference",
+      "section": "Reference",
+      "summary": "The JSON Schemas that ship with the platform, and what each one is the contract for.",
+      "headings": [
+        "console-view",
+        "metric-event",
+        "runtime-invocation",
+        "workflow-ir"
+      ]
+    },
+    {
+      "route": "/docs/start/install",
+      "title": "Install the CLI",
+      "section": "Get started",
+      "summary": "Get the heros binary onto macOS, Linux or Windows — with the checksum and the signature checked before it reaches your PATH.",
+      "headings": [
+        "The one command",
+        "What your operating system will say",
+        "macOS",
+        "Windows",
+        "Verify a download yourself",
+        "Files this release publishes but does not cover",
+        "Channels, pinning, upgrading and removing",
+        "curl \\| sh",
+        "PowerShell (irm \\| iex)",
+        ".deb package",
+        ".rpm package",
+        "container image",
+        "What removal leaves behind",
+        "Channels that are not available yet",
+        "Installing on a disconnected machine",
+        "Next: your first discovery graph"
+      ]
+    },
+    {
+      "route": "/docs/start/quickstart",
+      "title": "Quickstart",
+      "section": "Get started",
+      "summary": "Install the CLI and build a discovery graph on your own repository, without editing a config file.",
+      "headings": [
+        "What you need",
+        "What happens"
+      ]
+    }
+  ]
+}

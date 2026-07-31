@@ -87,6 +87,31 @@
   --measure-field: 26rem;
   --measure-form: 32rem;
 
+  /*
+   * The reading measure (P23 task 3.1). ~72 characters at the body size.
+   *
+   * It is a token rather than a utility because it is the SAME measure in three places that must not
+   * drift: the document body on screen, the document body in the print stylesheet, and the legal
+   * version-history page. A line length that differs between the screen and the printout is how a
+   * reviewer ends up comparing two documents that are the same document.
+   *
+   * Bounded on purpose, in a route group that is otherwise deliberately unbounded vertically: the
+   * viewport-first exemption is about SCROLL, not about line length. A 9,000-word agreement set to the
+   * full width of a 27-inch display is unreadable for a different reason than a bounded scroller is.
+   */
+  --measure-prose: 44rem;
+
+  /*
+   * Print measures (task 3.4). Physical units, because a printed page is a physical object and `rem` on
+   * paper is whatever the print engine decides a root font size means.
+   *
+   * `--print-measure: auto` is not an oversight: on paper the PAGE bounds the measure, so re-imposing a
+   * screen measure would leave a third of every sheet blank and add pages to a document somebody is
+   * paying to print.
+   */
+  --print-margin: 18mm 16mm 22mm;
+  --print-measure: auto;
+
   /* Motion budget (FR28). Every duration in the console resolves through one of these three, so
      `prefers-reduced-motion` can collapse all of them at once, below. */
   --motion-fast: 120ms;

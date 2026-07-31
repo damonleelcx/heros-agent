@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { REPOSITORY } from "@/content/repository";
 
 /**
  * PublicLayout is the shell for the one surface that has no session.
@@ -44,6 +45,35 @@ export default function PublicLayout({ children }: { children: React.ReactNode }
             Plans
           </a>
           <Link
+            className="hidden text-sm text-marketing-ink/50 transition-colors hover:text-marketing-ink/80 md:inline"
+            href="/docs"
+          >
+            Docs
+          </Link>
+          {/*
+            The repository link (P23 task 7.1). It is a plain ANCHOR and nothing else: no client
+            component, no effect, no loading state, and — decisively — NO REQUEST UNTIL IT IS CLICKED.
+
+            The three usual ways to dress this up are all refused at runtime by the CSP this console sets
+            per request: a shields.io badge by `img-src 'self' data:`, a GitHub buttons widget by
+            `default-src 'self'`, and a browser-side `api.github.com` fetch by `connect-src 'self'`. The
+            capability declines to be the exception — see `src/content/repository.ts` for why a star
+            count is opt-in, default off, and never rendered as `0`.
+
+            `scripts/scan-repo-link.mjs` fails the build if this target is private or does not exist,
+            under the same rule that forbids an install command that 404s.
+          */}
+          <a
+            className="text-sm text-marketing-ink/50 transition-colors hover:text-marketing-ink/80"
+            href={REPOSITORY.url}
+            rel="noreferrer noopener"
+            target="_blank"
+            data-external="true"
+          >
+            GitHub<span className="visually-hidden"> (opens an external site)</span>
+            <span aria-hidden="true"> ↗</span>
+          </a>
+          <Link
             className="text-sm text-marketing-ink/70 transition-colors hover:text-marketing-ink"
             href="/signin"
           >
@@ -61,14 +91,61 @@ export default function PublicLayout({ children }: { children: React.ReactNode }
       <main id="main">{children}</main>
 
       <footer className="border-t border-marketing-ink/6 px-6 py-10 md:px-12">
-        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4">
-          <span className="font-display text-base font-light uppercase tracking-[0.15em] text-marketing-ink/30">
-            Heros
-          </span>
-          <p className="font-mono text-xs text-marketing-ink/25">
-            The console renders what the platform computed. It derives no score, no ranking and no
-            confidence of its own.
-          </p>
+        <div className="mx-auto flex max-w-7xl flex-col gap-6">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <span className="font-display text-base font-light uppercase tracking-[0.15em] text-marketing-ink/30">
+              Heros
+            </span>
+            <p className="font-mono text-xs text-marketing-ink/25">
+              The console renders what the platform computed. It derives no score, no ranking and no
+              confidence of its own.
+            </p>
+          </div>
+
+          {/*
+            P23 task 8.7 — legal is linked from every place a commitment is made or reviewed, and the
+            public footer is the first of them. A Terms of Service nobody can find from the page that
+            sells the product is a document that exists for the archive rather than for the reader.
+          */}
+          <nav
+            aria-label="Documentation and legal"
+            className="flex flex-wrap gap-x-6 gap-y-2 border-t border-marketing-ink/6 pt-6"
+          >
+            <Link className="text-xs text-marketing-ink/40 transition-colors hover:text-marketing-ink/70" href="/docs">
+              Documentation
+            </Link>
+            <Link
+              className="text-xs text-marketing-ink/40 transition-colors hover:text-marketing-ink/70"
+              href="/docs/start/install"
+            >
+              Install the CLI
+            </Link>
+            <Link
+              className="text-xs text-marketing-ink/40 transition-colors hover:text-marketing-ink/70"
+              href="/legal/terms"
+            >
+              Terms of Service
+            </Link>
+            <Link
+              className="text-xs text-marketing-ink/40 transition-colors hover:text-marketing-ink/70"
+              href="/legal/privacy"
+            >
+              Privacy Notice
+            </Link>
+            <Link className="text-xs text-marketing-ink/40 transition-colors hover:text-marketing-ink/70" href="/legal">
+              Legal version history
+            </Link>
+            <a
+              className="text-xs text-marketing-ink/40 transition-colors hover:text-marketing-ink/70"
+              href={REPOSITORY.url}
+              rel="noreferrer noopener"
+              target="_blank"
+              data-external="true"
+            >
+              Repository on GitHub<span className="visually-hidden"> (opens an external site)</span>
+              <span aria-hidden="true"> ↗</span>
+            </a>
+          </nav>
         </div>
       </footer>
     </div>
