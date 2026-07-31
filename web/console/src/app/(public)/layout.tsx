@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { REPOSITORY } from "@/content/repository";
 
 /**
  * PublicLayout is the shell for the one surface that has no session.
@@ -43,17 +44,69 @@ export default function PublicLayout({ children }: { children: React.ReactNode }
           >
             Plans
           </a>
+          {/*
+            🔴 "Docs" occupies the slot a second "Sign in" used to.
+
+            The header had TWO controls pointing at `/signin` — a text link and the accent button — and
+            at mobile width, where the three `md:inline` links are hidden, they sat side by side: two
+            adjacent controls, different words, same destination. A reader tapping the quieter one to
+            find out what this is gets a sign-in form, which is the opposite of what the smaller-looking
+            affordance promised.
+
+            One destination gets one control. The button keeps the sign-in slot because it is the
+            conversion action, and the text link becomes the thing a reader who is not ready to sign in
+            actually wants: the documentation. It is NOT `md:inline` — it is the one nav link that must
+            survive on a phone, because it is the only route into the product that costs nothing.
+          */}
           <Link
-            className="text-sm text-marketing-ink/70 transition-colors hover:text-marketing-ink"
-            href="/signin"
+            className="text-sm text-marketing-ink/50 transition-colors hover:text-marketing-ink/80"
+            href="/docs"
           >
-            Sign in
+            Docs
           </Link>
+          {/*
+            The repository link (P23 task 7.1). It is a plain ANCHOR and nothing else: no client
+            component, no effect, no loading state, and — decisively — NO REQUEST UNTIL IT IS CLICKED.
+
+            The three usual ways to dress this up are all refused at runtime by the CSP this console sets
+            per request: a shields.io badge by `img-src 'self' data:`, a GitHub buttons widget by
+            `default-src 'self'`, and a browser-side `api.github.com` fetch by `connect-src 'self'`. The
+            capability declines to be the exception — see `src/content/repository.ts` for why a star
+            count is opt-in, default off, and never rendered as `0`.
+
+            `scripts/scan-repo-link.mjs` fails the build if this target is private or does not exist,
+            under the same rule that forbids an install command that 404s.
+          */}
+          <a
+            className="text-sm text-marketing-ink/50 transition-colors hover:text-marketing-ink/80"
+            href={REPOSITORY.url}
+            rel="noreferrer noopener"
+            target="_blank"
+            data-external="true"
+          >
+            GitHub<span className="visually-hidden"> (opens an external site)</span>
+            <span aria-hidden="true"> ↗</span>
+          </a>
+          {/*
+            ONE control per destination.
+
+            The header carried a plain "Sign in" link AND an "Open the console" button, both pointing at
+            `/signin`. At mobile width — where the three `md:inline` links are hidden — they ended up
+            adjacent: two controls, two different words, one destination. A reader tapping the quieter
+            one to find out what this product is gets a sign-in form.
+
+            The button keeps the slot and takes the plainer label, because the hero already carries
+            "Open the console" as its primary call to action and a header repeating it is the same
+            button twice on one screen. The freed slot went to Docs, above.
+
+            `public-surface.test.mjs` asserts no two header controls share a destination — a rule rather
+            than a tidy-up, because this duplicate reappears every time somebody adds a call to action.
+          */}
           <Link
             className="rounded-lg bg-marketing-accent px-4 py-2 text-sm font-medium text-marketing-accent-ink transition-opacity hover:opacity-90"
             href="/signin"
           >
-            Open the console
+            Sign in
           </Link>
         </div>
       </header>
@@ -61,14 +114,61 @@ export default function PublicLayout({ children }: { children: React.ReactNode }
       <main id="main">{children}</main>
 
       <footer className="border-t border-marketing-ink/6 px-6 py-10 md:px-12">
-        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4">
-          <span className="font-display text-base font-light uppercase tracking-[0.15em] text-marketing-ink/30">
-            Heros
-          </span>
-          <p className="font-mono text-xs text-marketing-ink/25">
-            The console renders what the platform computed. It derives no score, no ranking and no
-            confidence of its own.
-          </p>
+        <div className="mx-auto flex max-w-7xl flex-col gap-6">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <span className="font-display text-base font-light uppercase tracking-[0.15em] text-marketing-ink/30">
+              Heros
+            </span>
+            <p className="font-mono text-xs text-marketing-ink/25">
+              The console renders what the platform computed. It derives no score, no ranking and no
+              confidence of its own.
+            </p>
+          </div>
+
+          {/*
+            P23 task 8.7 — legal is linked from every place a commitment is made or reviewed, and the
+            public footer is the first of them. A Terms of Service nobody can find from the page that
+            sells the product is a document that exists for the archive rather than for the reader.
+          */}
+          <nav
+            aria-label="Documentation and legal"
+            className="flex flex-wrap gap-x-6 gap-y-2 border-t border-marketing-ink/6 pt-6"
+          >
+            <Link className="text-xs text-marketing-ink/40 transition-colors hover:text-marketing-ink/70" href="/docs">
+              Documentation
+            </Link>
+            <Link
+              className="text-xs text-marketing-ink/40 transition-colors hover:text-marketing-ink/70"
+              href="/docs/start/install"
+            >
+              Install the CLI
+            </Link>
+            <Link
+              className="text-xs text-marketing-ink/40 transition-colors hover:text-marketing-ink/70"
+              href="/legal/terms"
+            >
+              Terms of Service
+            </Link>
+            <Link
+              className="text-xs text-marketing-ink/40 transition-colors hover:text-marketing-ink/70"
+              href="/legal/privacy"
+            >
+              Privacy Notice
+            </Link>
+            <Link className="text-xs text-marketing-ink/40 transition-colors hover:text-marketing-ink/70" href="/legal">
+              Legal version history
+            </Link>
+            <a
+              className="text-xs text-marketing-ink/40 transition-colors hover:text-marketing-ink/70"
+              href={REPOSITORY.url}
+              rel="noreferrer noopener"
+              target="_blank"
+              data-external="true"
+            >
+              Repository on GitHub<span className="visually-hidden"> (opens an external site)</span>
+              <span aria-hidden="true"> ↗</span>
+            </a>
+          </nav>
         </div>
       </footer>
     </div>

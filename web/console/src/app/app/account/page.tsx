@@ -16,8 +16,17 @@ import {
 import { usd2, score, integer } from "@/lib/format";
 import { CAPABILITIES } from "@/lib/entitlements";
 import { LinkCoverage } from "@/components/linkCoverage";
+import { AcceptanceHistory, type AcceptanceRow, type PendingRow } from "@/components/legalAcceptance";
+import { platformFetch } from "@/lib/platformApi";
+import { legalAcceptances } from "@/lib/legalPaths";
 
 export const dynamic = "force-dynamic";
+
+type LegalAcceptanceView = {
+  accepted?: AcceptanceRow[];
+  pending?: PendingRow[];
+  pending_unknown?: boolean;
+};
 
 export default async function AccountPage() {
   const { outcome, session } = await load<BillingView>((paths) => paths.billing(), [
@@ -26,6 +35,19 @@ export default async function AccountPage() {
     "sum_unit",
     "state",
   ]);
+
+  /*
+   * The acceptance history is fetched SEPARATELY from billing, and its failure is not billing's failure
+   * (task 10.1). A tenant whose consent surface is not mounted still gets their plan and their spend —
+   * and the agreements section says it could not be read, rather than the whole page rendering a
+   * failure for a section that is not the reason they came.
+   *
+   * 🔴 The path carries no tenant. The platform reads tenant and principal from the authenticated
+   * session on its own side, so there is no parameter here that a caller could widen.
+   */
+  const consent = await platformFetch<LegalAcceptanceView>(legalAcceptances(), {
+    tenantId: session.tenantId,
+  });
   return (
     <PageFrame
       eyebrow="Account"
@@ -38,6 +60,14 @@ export default async function AccountPage() {
       ) : (
         <Body billing={outcome.data} />
       )}
+
+      <AcceptanceHistory
+        accepted={consent.ok ? (consent.data.accepted ?? []) : []}
+        pending={consent.ok ? (consent.data.pending ?? []) : []}
+        // A failed read and a manifest outage are both "we do not know what is outstanding". Neither may
+        // render as "nothing is outstanding" — that would silently clear the gate.
+        unknown={!consent.ok || Boolean(consent.data.pending_unknown)}
+      />
     </PageFrame>
   );
 }

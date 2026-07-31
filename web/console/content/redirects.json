@@ -1,0 +1,25 @@
+{
+  "note": "Anchors are a published contract (P23 Decision 8). An entry here records that a route or an anchor was published and is gone, so `scan-links` can tell a deliberate supersession from an accidental rename. Nothing is ever removed from this file.",
+  "redirects": [
+    {
+      "from": "/docs/start/quickstart#what-you-need",
+      "to": "/docs/start/quickstart#before-you-start",
+      "reason": "The quickstart's scaffolding headings were replaced by the authored page in the same phase, before any release published these anchors. Recorded rather than waved through, because the fence cannot tell a two-hour-old anchor from a two-year-old one \u2014 and the rule is worth more than the exception."
+    },
+    {
+      "from": "/docs/start/quickstart#what-happens",
+      "to": "/docs/start/quickstart#what-you-get",
+      "reason": "Same change, same reason."
+    },
+    {
+      "from": "/legal/terms/v/1.0.0#placeholder",
+      "to": "/legal/terms",
+      "reason": "The scaffolding heading in the terms placeholder was replaced by the authored document in the same phase, before v1.0.0 was ever served to a reader. Recorded rather than waved through: the fence cannot distinguish a two-hour-old anchor from a two-year-old one, and the value of the rule is that it does not try."
+    },
+    {
+      "from": "/legal/privacy/v/1.0.0#placeholder",
+      "to": "/legal/privacy",
+      "reason": "Same change, same reason."
+    }
+  ]
+}

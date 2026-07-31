@@ -1,6 +1,11 @@
 import Link from "next/link";
 import type { LineView, PaymentView } from "@/lib/types.generated";
 import { load } from "@/lib/view";
+import { platformFetch } from "@/lib/platformApi";
+import { legalAcceptances } from "@/lib/legalPaths";
+import { gateMode, shouldGate } from "@/lib/consentGate";
+import { CommitmentGate } from "@/components/commitmentGate";
+import type { AcceptanceRow, PendingRow } from "@/components/legalAcceptance";
 import { routes } from "@/lib/routes";
 import { usd2, score } from "@/lib/format";
 import { PlanActions } from "@/components/billingActions";
@@ -51,13 +56,37 @@ import {
  */
 export const dynamic = "force-dynamic";
 
+type LegalAcceptanceView = {
+  accepted?: AcceptanceRow[];
+  pending?: PendingRow[];
+  pending_unknown?: boolean;
+};
+
 export default async function BillingPage({
   searchParams,
 }: {
   searchParams: Promise<{ checkout?: string; period?: string }>;
 }) {
   const params = await searchParams;
-  const { outcome } = await load<PaymentView>((paths) => paths.payment(params.period), ["billing", "payment_method"]);
+  const { outcome, session } = await load<PaymentView>((paths) => paths.payment(params.period), ["billing", "payment_method"]);
+
+  /*
+   * 🔴 The commitment gate lives HERE — on the page where a checkout and a plan change happen — and not
+   * in a layout. A gate in a layout is a gate on the console, which is the outage this design refuses
+   * (Decision 4). Billing is a commitment surface; /app/workflows is not.
+   *
+   * Its own failure is non-fatal: a consent surface that cannot be read must not stop somebody seeing
+   * what they are being charged.
+   */
+  const consent = await platformFetch<LegalAcceptanceView>(legalAcceptances(), {
+    tenantId: session.tenantId,
+  });
+  const pending = consent.ok ? (consent.data.pending ?? []) : [];
+  const gated = shouldGate({
+    mode: gateMode(),
+    pending,
+    hasAnyAcceptance: consent.ok ? (consent.data.accepted ?? []).length > 0 : true,
+  });
 
   return (
     <PageFrame
@@ -72,6 +101,8 @@ export default async function BillingPage({
         success the page cannot yet see.
       */}
       <CheckoutReturn state={params.checkout} />
+
+      {gated ? <CommitmentGate pending={pending} method="checkout" /> : null}
 
       {!outcome.ok ? (
         <Failure kind={outcome.kind} error={outcome.error} denial={outcome.denial} subject="billing" />

@@ -79,3 +79,72 @@ test("5.3 — unknown coverage is distinguished from complete, never rendered as
   assert.match(html, /Coverage is unknown/, "absent coverage is not rendered as the distinct unknown state");
   assert.doesNotMatch(html, /all known activity/, "unknown coverage was collapsed into complete");
 });
+
+// ── P23 §12.8 · Documentation reachability (FR21/FR22) ───────────────────────
+//
+// Two properties, and the second is the one that ships inside a binary.
+//
+//   1. Every documentation page is reachable BY NAVIGATION, not only by URL. A page nobody can walk to
+//      is a page a search engine has and a customer does not.
+//   2. Every anchor referenced from CLI output or console copy RESOLVES. A renamed heading breaks a link
+//      that ships inside a binary the customer already installed, and no deploy fixes it for them.
+
+test("12.8 — every documentation page is reachable by navigation from /docs", async () => {
+  const manifest = JSON.parse(
+    await (await import("node:fs/promises")).readFile(
+      new URL("../docs/slug-manifest.json", import.meta.url),
+      "utf8",
+    ),
+  );
+  const pages = manifest.pages.map((page) => page.route).filter((route) => route.startsWith("/docs/"));
+  assert.ok(pages.length > 0, "the slug manifest lists no documentation pages");
+
+  const index = await fetch(`${console_.base}/docs`);
+  assert.equal(index.status, 200);
+  const html = await index.text();
+
+  const unreachable = pages.filter((route) => !html.includes(`href="${route}"`));
+  assert.deepEqual(
+    unreachable,
+    [],
+    `these pages exist and cannot be walked to from /docs: ${unreachable.join(", ")}. A page reachable ` +
+      `only by URL is a page a search engine has and a customer does not.`,
+  );
+});
+
+test("12.8 — every anchor the console or the CLI points at resolves", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const manifest = JSON.parse(await readFile(new URL("../docs/slug-manifest.json", import.meta.url), "utf8"));
+  const anchors = new Map(manifest.pages.map((page) => [page.route, new Set(page.anchors)]));
+
+  /*
+   * The deep links this product publishes into its own documentation. Each is a PUBLISHED CONTRACT: it
+   * appears in shipped copy, and a renamed heading breaks it for readers who cannot be reached.
+   *
+   * Listed explicitly rather than scraped, because the point is that adding one is a deliberate act that
+   * accepts the maintenance — not something that accumulates by accident.
+   */
+  const PUBLISHED_DEEP_LINKS = [
+    "/docs/reference/cli#exit-codes",
+    "/docs/reference/cli#configuration-and-which-source-wins",
+    "/docs/concepts/refusals",
+    "/docs/concepts/glossary",
+    "/docs/start/install",
+    "/docs/start/quickstart",
+  ];
+
+  for (const link of PUBLISHED_DEEP_LINKS) {
+    const [route, anchor] = link.split("#");
+    assert.ok(anchors.has(route), `${route} is referenced but does not exist`);
+    if (anchor) {
+      assert.ok(
+        anchors.get(route).has(anchor),
+        `${link} is referenced in shipped copy and the anchor does not resolve — this link ships inside a ` +
+          `binary a customer already installed, and no deploy fixes it for them`,
+      );
+    }
+    // And it must actually serve.
+    const res = await fetch(`${console_.base}${route}`);
+    assert.equal(res.status, 200, `${route} does not serve`);
+  }
+});

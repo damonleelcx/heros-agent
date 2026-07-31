@@ -146,23 +146,98 @@ test("plans are named and the page carries no price", async () => {
   assert.doesNotMatch(html, /\bper\s?seat\b|\/mo\b|\bper month\b/i, "a pricing unit is rendered on the public page");
 });
 
-// ── No third-party origin ────────────────────────────────────────────────────
+// ── No third-party REQUEST ───────────────────────────────────────────────────
 
-test("the page references no third-party origin, and the CSP would refuse one", async () => {
+/*
+ * 🔴 The rule is "no third-party REQUEST", not "no third-party string in the HTML".
+ *
+ * This test used to require that every `src`/`href` in the document be same-origin, and its own
+ * comment named what it was protecting: "a hosted font or a tag manager would also send a prospect's
+ * address to a third party before they consented to anything." Both examples are SUBRESOURCES — the
+ * browser fetches them on load, with no click and no consent. That is the harm.
+ *
+ * An `<a href>` is not that. It issues no request until the visitor chooses the destination, so it
+ * leaks nothing on load. The old assertion could not tell the two apart, and when P23 added the
+ * repository link (`social-proof-claims`: "The repository link SHALL always render", escalated and
+ * answered at task 7.5) the blunt version failed on a page that still causes zero third-party
+ * requests. The proxy had outlived the rule.
+ *
+ * Note also that the old test's title claimed "the CSP would refuse one". For a subresource that is
+ * true. For an anchor it is FALSE — `default-src` does not govern link navigation — so the title was
+ * asserting a protection that was not there. Hence the guards below, which are what actually make the
+ * click non-leaking: `Referrer-Policy: no-referrer` (set for every route in `next.config.mjs`, so the
+ * destination is never told where the visitor came from) and `rel="noreferrer noopener"` on the anchor
+ * itself. Neither was checked before.
+ *
+ * The two ways this could have gone instead, and why not:
+ *
+ *   - Proxy the link through a first-party route so the rendered href stays same-origin. Rejected on
+ *     the grounds P24 already wrote down for exactly this manoeuvre: "it would make a third-party flow
+ *     look first-party, and the CSP's whole value is that it is a readable statement of where data
+ *     goes." It also hides from the reader that the download they are about to take comes from the
+ *     project's own public forge, which is the trust anchor, not an incidental detail.
+ *   - Widen the pattern until GitHub passes. That is the "silently removes the guarantee from the
+ *     surface it was for" option, also already rejected in P24's design.
+ *
+ * This composes with, and does not overlap, P24's pending amendment to the same P9 requirement: P24
+ * widens it along the *allowlisted analytics origin* axis (subresources, gated on consent); this one
+ * distinguishes a *navigation* from a subresource. A future external subresource still fails here.
+ */
+test("no external subresource: an external origin may appear only as an anchor the visitor clicks", async () => {
   const res = await fetch(`${console_.base}/`);
   const html = await res.text();
   const csp = res.headers.get("content-security-policy") ?? "";
   assert.match(csp, /default-src 'self'/);
   assert.doesNotMatch(csp, /https?:\/\//, "the CSP names a third-party origin");
 
-  // Every src/href in the document must be same-origin or a fragment. A hosted font or a tag manager
-  // would also send a prospect's address to a third party before they consented to anything.
-  const urls = [...html.matchAll(/(?:src|href)="([^"]+)"/g)].map((m) => m[1]);
-  for (const url of urls) {
-    assert.ok(
-      url.startsWith("/") || url.startsWith("#") || url.startsWith("data:"),
-      `the public page references an external URL: ${url}`,
-    );
+  const isLocal = (url) => url.startsWith("/") || url.startsWith("#") || url.startsWith("data:");
+
+  // The same document-wide sweep as before, so the coverage is not narrowed by the change.
+  const referenced = [...html.matchAll(/(?:src|href)="([^"]+)"/g)]
+    .map((m) => m[1])
+    .filter((url) => !isLocal(url));
+
+  // Now classify by the element carrying the attribute, which is the thing the flat sweep could not do.
+  const offenders = [];
+  const externalAnchors = [];
+  for (const [, tag, attrs] of html.matchAll(/<([a-zA-Z][\w-]*)\b([^>]*)>/g)) {
+    const src = /\bsrc="([^"]+)"/.exec(attrs)?.[1];
+    const href = /\bhref="([^"]+)"/.exec(attrs)?.[1];
+    // `src` is a subresource on every element that has one. No exceptions, including <link>.
+    if (src && !isLocal(src)) offenders.push(`<${tag} src="${src}">`);
+    if (href && !isLocal(href)) {
+      if (tag.toLowerCase() === "a") {
+        externalAnchors.push({ url: href, rel: /\brel="([^"]*)"/.exec(attrs)?.[1] ?? "" });
+      } else {
+        // A <link rel="stylesheet"> or <link rel="preload"> is fetched on load exactly like a font.
+        offenders.push(`<${tag} href="${href}">`);
+      }
+    }
+  }
+  assert.deepEqual(
+    offenders,
+    [],
+    `the public page loads an external subresource: ${offenders.join(", ")}`,
+  );
+
+  // Counts, not sets: if the same URL appeared as both an <img src> and an <a href>, comparing sets of
+  // URLs would call them equal and wave the image through.
+  assert.equal(
+    referenced.length,
+    externalAnchors.length,
+    "an external reference is not accounted for as an anchor href — the element scan did not see it",
+  );
+
+  // What makes the click itself non-leaking. Without these the anchor is a referrer leak with extra
+  // steps, and the requirement would be satisfied only on paper.
+  assert.equal(
+    res.headers.get("referrer-policy"),
+    "no-referrer",
+    "an external anchor is only safe while the page refuses to name itself to the destination",
+  );
+  for (const anchor of externalAnchors) {
+    assert.match(anchor.rel, /\bnoreferrer\b/, `external anchor without rel=noreferrer: ${anchor.url}`);
+    assert.match(anchor.rel, /\bnoopener\b/, `external anchor without rel=noopener: ${anchor.url}`);
   }
 });
 
@@ -205,6 +280,45 @@ test("the public surface uses the same token set as the console", async () => {
       }
     }
   }
+});
+
+/**
+ * P23 task 7.1 — one control per destination in the public header, and Docs reachable on a phone.
+ *
+ * The header carried a plain "Sign in" link and an "Open the console" button, both pointing at
+ * `/signin`. At mobile width, where the `md:inline` links are hidden, they rendered side by side: two
+ * controls, two different words, one destination. A reader tapping the quieter one to find out what the
+ * product is got a sign-in form.
+ *
+ * This is asserted rather than fixed once, because the duplicate reappears every time somebody adds a
+ * call to action — and it is invisible on a desktop, where the other links space the two apart.
+ */
+test("the public header has one control per destination, and Docs survives at mobile width", async () => {
+  const src = await read("src/app/(public)/layout.tsx");
+  const header = src.slice(src.indexOf("<header"), src.indexOf("</header>"));
+
+  // Strip comments first: the header's own comment explains the rule and quotes the paths it is about.
+  const markup = header.replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
+
+  const hrefs = [...markup.matchAll(/href=\{?"?([^"}\s]+)"?\}?/g)].map((m) => m[1]);
+  const internal = hrefs.filter((href) => href.startsWith("/"));
+  const duplicated = internal.filter((href, i) => internal.indexOf(href) !== i);
+  assert.deepEqual(
+    duplicated,
+    [],
+    `two header controls point at the same place (${duplicated.join(", ")}). One destination, one control — ` +
+      `at mobile width the duplicates end up adjacent and the quieter one reads as something else.`,
+  );
+
+  // Docs must NOT be hidden behind a breakpoint. It is the only route into the product that costs
+  // nothing, and a phone is where a reader who has not decided yet is standing.
+  const docsLink = markup.slice(markup.indexOf('href="/docs"') - 300, markup.indexOf('href="/docs"'));
+  assert.ok(markup.includes('href="/docs"'), "the public header does not link to the documentation");
+  assert.doesNotMatch(
+    docsLink,
+    /hidden[^"]*md:inline/,
+    "the Docs link is hidden below the md breakpoint — it is the one nav link that must survive on a phone",
+  );
 });
 
 async function* walk(dir) {

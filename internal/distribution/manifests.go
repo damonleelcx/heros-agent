@@ -53,7 +53,48 @@ const (
 	PackageLicense     = "Apache-2.0"
 	PackageDescription = "Discover, optimize and evaluate the agent workflow already in your repository."
 	PackageSummary     = "The heros CLI — agent workflow discovery, optimization and evaluation."
+
+	// PackageRelease is the distro package RELEASE number — the `-1` in `heros-0.20.0-1.x86_64.rpm`.
+	//
+	// 🔴 It exists as a constant because it was WRONG in a shipped channel command. The `.rpm` install
+	// line said `heros-{{version}}.x86_64.rpm`; the release publishes `heros-0.20.0-1.x86_64.rpm`, and
+	// the difference is this number. A reader following the documented command got a 404.
+	//
+	// nfpm defaults an unset `release:` to 1, so the generated config and this constant agree today by
+	// coincidence rather than by construction. `DebFileName` and `RPMFileName` below close that: the
+	// channel commands and the packaging now derive their filenames from one function, and
+	// `TestChannelCommandsNameThePackagesTheReleaseActuallyPublishes` asserts the result.
+	PackageRelease = "1"
 )
+
+// rpmArch maps a Go architecture to the one RPM prints in a filename. They differ, and the difference is
+// exactly where a hand-typed install command goes wrong: `amd64` is `x86_64`, `arm64` is `aarch64`.
+func rpmArch(goarch string) string {
+	switch goarch {
+	case "amd64":
+		return "x86_64"
+	case "arm64":
+		return "aarch64"
+	}
+	return goarch
+}
+
+// DebFileName is the .deb nfpm produces for a version and a Go architecture.
+//
+// Derived rather than written into each channel command, so the documented filename and the built
+// artifact cannot disagree. nfpm's Debian naming is `name_version_arch.deb`.
+func DebFileName(version, goarch string) string {
+	return fmt.Sprintf("%s_%s_%s.deb", PackageName, version, goarch)
+}
+
+// RPMFileName is the .rpm nfpm produces for a version and a Go architecture.
+//
+// nfpm's RPM naming is `name-version-release.rpmarch.rpm`, and BOTH the release number and the arch
+// spelling are places a typed filename goes wrong. This is the function that was missing when the `.rpm`
+// channel shipped a command pointing at an asset that does not exist.
+func RPMFileName(version, goarch string) string {
+	return fmt.Sprintf("%s-%s-%s.%s.rpm", PackageName, version, PackageRelease, rpmArch(goarch))
+}
 
 // Generate emits channel manifests for a release.
 //

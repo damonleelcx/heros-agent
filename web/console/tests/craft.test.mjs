@@ -581,3 +581,34 @@ test("🔴 the public surface's fixed palette meets AA too", async () => {
   }
   assert.deepEqual(failures, [], `the public surface falls below AA:\n  ${failures.join("\n  ")}`);
 });
+
+// ── P23 §12.9 · The reading surface's own contrast ───────────────────────────
+
+test("🔴 P23 — the reading surface uses no alpha-reduced foreground for body text", async () => {
+  /*
+   * The token-pair test above proves `--foreground` on `--background` meets AA in both themes. An alpha
+   * applied on top of a token — `text-foreground/90` — produces a COMPOSITE colour that test cannot see,
+   * so it would pass while the rendered text sat below the floor.
+   *
+   * On a dashboard a softened body is a defensible choice. On the surface somebody reads for an hour,
+   * and on the page where a customer reads what they are agreeing to, it is not — so the rule here is
+   * simply that the reading surface's body classes carry no alpha at all, which is checkable.
+   */
+  const css = await read("src/app/globals.css");
+  const BODY_CLASSES = [".prose-p", ".prose-list", ".prose-table td"];
+
+  const offenders = [];
+  for (const cls of BODY_CLASSES) {
+    const at = css.indexOf(`${cls} {`);
+    if (at < 0) continue;
+    const block = css.slice(at, css.indexOf("}", at));
+    const alpha = /text-(foreground|muted-foreground)\/\d+/.exec(block);
+    if (alpha) offenders.push(`${cls} uses ${alpha[0]}`);
+  }
+  assert.deepEqual(
+    offenders,
+    [],
+    `the reading surface softens its body text: ${offenders.join(", ")}. A composite colour is invisible ` +
+      `to the token-pair contrast test, and this is the surface people read longest.`,
+  );
+});

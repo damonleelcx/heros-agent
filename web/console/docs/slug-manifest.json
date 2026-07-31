@@ -1,0 +1,271 @@
+{
+  "schema": "heros.slug-manifest/v1",
+  "generated_from": "web/console/content/{docs,legal}/en/**",
+  "note": "Anchors are a published contract. A removed or renamed slug fails the build unless the same change adds a redirect.",
+  "pages": [
+    {
+      "route": "/docs/concepts/glossary",
+      "source": "docs/en/concepts/glossary.md",
+      "content_hash": "0ed169fe123a4bc5f6595fd03865016c092114abfddb8b7998f3acc9e0ef194d",
+      "anchors": [
+        "workflow-ir",
+        "node",
+        "variant",
+        "variant-spec",
+        "confighash",
+        "dimension",
+        "verified-delta",
+        "refusal-as-buildstatus",
+        "unclassified-region",
+        "gate",
+        "coverage",
+        "automation-level",
+        "delivery-record"
+      ]
+    },
+    {
+      "route": "/docs/concepts/refusals",
+      "source": "docs/en/concepts/refusals.md",
+      "content_hash": "8e4d0dd347e167930c0dd4a54e68408e1ceec50ca3df2cf2def83cc9151987dd",
+      "anchors": [
+        "why-this-design-exists",
+        "the-shape-of-every-refusal",
+        "seeing-them-all-at-once",
+        "why-the-three-causes-are-kept-apart",
+        "refusals-you-will-meet-elsewhere",
+        "how-to-act-on-one",
+        "what-this-page-does-not-do"
+      ]
+    },
+    {
+      "route": "/docs/guides/bring-your-own-keys",
+      "source": "docs/en/guides/bring-your-own-keys.md",
+      "content_hash": "5380d2fde2338d515f4d8d7ab5b427abce97e96e1bd6d0582c343719c555ddb7",
+      "anchors": [
+        "the-short-version",
+        "where-they-come-from",
+        "what-sees-them-and-what-cannot",
+        "cost-is-on-your-account",
+        "running-with-no-keys-at-all",
+        "checking-what-is-configured",
+        "if-a-key-leaks-anyway"
+      ]
+    },
+    {
+      "route": "/docs/guides/configure-a-variant",
+      "source": "docs/en/guides/configure-a-variant.md",
+      "content_hash": "97f0567fdc4fd0eac63e39a8503551ee4ffd72dc178c0d5cddb227b29d9bf8f9",
+      "anchors": [
+        "the-two-ways-in",
+        "preflight-a-change",
+        "write-the-diff",
+        "reading-the-diff",
+        "turning-a-diff-into-a-variant-spec",
+        "what-has-not-happened-yet",
+        "common-surprises"
+      ]
+    },
+    {
+      "route": "/docs/guides/run-an-eval",
+      "source": "docs/en/guides/run-an-eval.md",
+      "content_hash": "03cf71561c68a8fabbb95af82438d4eac3e61dbe31542a3dcfdc2d631f2cb13e",
+      "anchors": [
+        "run-it",
+        "why-five-seeds-and-not-one",
+        "reading-the-scorecard",
+        "1-is-there-a-difference-at-all",
+        "2-did-anything-you-configured-fail",
+        "3-what-was-not-covered",
+        "4-who-judged-it",
+        "where-the-run-goes",
+        "cost-before-you-are-surprised-by-it",
+        "common-surprises",
+        "next"
+      ]
+    },
+    {
+      "route": "/docs/guides/take-delivery",
+      "source": "docs/en/guides/take-delivery.md",
+      "content_hash": "f4426629113eae21136f580510663ad19c1bc079eb61467d9667ff884d2fb719",
+      "anchors": [
+        "the-credential-posture-first",
+        "what-has-to-be-true-before-a-change-is-delivered",
+        "what-the-pull-request-contains",
+        "reviewing-one",
+        "merging",
+        "idempotency",
+        "what-this-does-not-do"
+      ]
+    },
+    {
+      "route": "/docs/guides/use-the-studio",
+      "source": "docs/en/guides/use-the-studio.md",
+      "content_hash": "75ed6aecb0851be4c6434b78e10afd255380f64e7e39c81d5de5a84283c862ba",
+      "anchors": [
+        "where-it-is",
+        "the-rule-nothing-here-is-ranked",
+        "binding-a-configuration",
+        "reading-the-matrix-honestly",
+        "from-the-studio-to-a-shipped-change",
+        "why-no-api-key-ever-reaches-your-browser"
+      ]
+    },
+    {
+      "route": "/docs/guides/wire-ci",
+      "source": "docs/en/guides/wire-ci.md",
+      "content_hash": "64b241dbc7d030f6b995c66fb1164bc252fd7776e717f0600009dc5f6066be71",
+      "anchors": [
+        "the-one-rule-this-integration-is-built-around",
+        "use-the-published-workflow",
+        "or-the-composite-action-if-you-need-the-steps",
+        "running-with-no-account-at-all",
+        "permissions",
+        "what-arrives-on-the-pull-request",
+        "choosing-gates-that-will-not-be-disabled",
+        "timing-and-cost-honestly",
+        "what-it-will-not-do"
+      ]
+    },
+    {
+      "route": "/docs/reference/cli",
+      "source": "docs/en/reference/cli.md",
+      "content_hash": "9c923c05da590f21e740e9a3b1c9346bc815dfc15d0b5a7b4d61be641e8afbd7",
+      "anchors": [
+        "exit-codes",
+        "configuration-and-which-source-wins",
+        "commands",
+        "apply",
+        "author",
+        "coverage",
+        "discover",
+        "doctor",
+        "eval",
+        "help",
+        "init",
+        "link",
+        "login",
+        "status",
+        "upgrade",
+        "verify-release",
+        "version",
+        "what-this-reference-does-not-cover"
+      ]
+    },
+    {
+      "route": "/docs/reference/http-api",
+      "source": "docs/en/reference/http-api.md",
+      "content_hash": "17ea6fe1627b6c685e2e625571d38cec9d38397347cbe07780923db707dc6362",
+      "anchors": [
+        "status-absent",
+        "why-you-are-reading-this-instead-of-an-endpoint-list",
+        "what-to-use-instead-today"
+      ]
+    },
+    {
+      "route": "/docs/reference/metrics",
+      "source": "docs/en/reference/metrics.md",
+      "content_hash": "1a7c65e9239bbc65330516f46ce8c72cba225c26532e2c2e7d6ab9f06f5fd057",
+      "anchors": [
+        "per-provider-call",
+        "per-run",
+        "what-is-not-measured-and-why-that-is-stated"
+      ]
+    },
+    {
+      "route": "/docs/reference/schemas",
+      "source": "docs/en/reference/schemas.md",
+      "content_hash": "27200b98285d1f85c8bda5a39ac3f2959c7253920d45ac6a10e2bccf422f9587",
+      "anchors": [
+        "console-view",
+        "metric-event",
+        "runtime-invocation",
+        "workflow-ir"
+      ]
+    },
+    {
+      "route": "/docs/start/install",
+      "source": "docs/en/start/install.md",
+      "content_hash": "6f4eabc1629e4464fabb5e226461b8a270d1a76341e516c708a1c2234b14dfb4",
+      "anchors": [
+        "the-one-command",
+        "what-your-operating-system-will-say",
+        "macos",
+        "windows",
+        "verify-a-download-yourself",
+        "files-this-release-publishes-but-does-not-cover",
+        "channels-pinning-upgrading-and-removing",
+        "curl-sh",
+        "powershell-irm-iex",
+        "deb-package",
+        "rpm-package",
+        "container-image",
+        "what-removal-leaves-behind",
+        "channels-that-are-not-available-yet",
+        "installing-on-a-disconnected-machine",
+        "next-your-first-discovery-graph"
+      ]
+    },
+    {
+      "route": "/docs/start/quickstart",
+      "source": "docs/en/start/quickstart.md",
+      "content_hash": "2cf94169a887ad65fc7f6fbd8f73a69754b37bad8507905f57dfa94d354558da",
+      "anchors": [
+        "before-you-start",
+        "build-the-graph",
+        "what-you-get",
+        "reading-the-result",
+        "edges-0-is-a-finding-not-a-failure",
+        "where-the-files-go",
+        "what-just-did-not-happen",
+        "next"
+      ]
+    },
+    {
+      "route": "/legal/privacy/v/1.0.0",
+      "source": "legal/en/privacy/1.0.0.md",
+      "content_hash": "d4083974abc2c44eefbbaa469235a605d14fa846e4e20903033b80facf1e130a",
+      "anchors": [
+        "1-the-fact-that-shapes-everything-below",
+        "2-what-we-collect-when-you-deal-with-us-directly",
+        "3-what-the-service-stores-about-your-work",
+        "4-retention-stated-as-it-actually-is",
+        "5-who-else-sees-data",
+        "6-records-of-your-acceptance",
+        "7-your-rights-and-the-route-that-actually-exists",
+        "what-erasure-does-precisely",
+        "8-security-described-rather-than-claimed",
+        "9-changes-to-this-notice",
+        "10-contact",
+        "11-what-this-notice-deliberately-does-not-say"
+      ]
+    },
+    {
+      "route": "/legal/terms/v/1.0.0",
+      "source": "legal/en/terms/1.0.0.md",
+      "content_hash": "3d83017760dd1b4c3e505a9e0995d07f61fb4e5296c11fd18b878d07afb97b30",
+      "anchors": [
+        "1-what-the-service-does-and-what-it-does-not-do",
+        "2-your-account-and-your-responsibilities",
+        "3-acceptable-use",
+        "4-plans-fees-and-how-the-meter-works",
+        "41-plans",
+        "42-the-metered-charge",
+        "43-gainshare",
+        "44-payment-changes-and-cancellation",
+        "45-corrections-and-refunds",
+        "46-taxes",
+        "5-your-data-your-code-and-your-keys",
+        "6-confidentiality",
+        "7-availability",
+        "8-suspension-and-termination",
+        "9-warranties-and-disclaimer",
+        "10-limitation-of-liability",
+        "11-indemnity",
+        "12-changes-to-these-terms",
+        "13-governing-law-and-disputes",
+        "14-general",
+        "15-what-these-terms-deliberately-do-not-claim"
+      ]
+    }
+  ]
+}
