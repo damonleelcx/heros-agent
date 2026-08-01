@@ -75,6 +75,16 @@ spec:
             # ping — producing a `postgres` component that could not go red while Postgres was down.
             - name: DATABASE_URL
               valueFrom: { secretKeyRef: { name: heros-platform, key: database-url } }
+            # The password, separately — libpq (and lib/pq) reads PGPASSWORD for anything the connection
+            # string omits. Optional, because either shape works here: put the password inside
+            # `database-url` in your secret store, or supply it under `postgres-password` and leave the
+            # DSN without one. The manifest carries neither, so this is about which shape your STORE
+            # holds — and the second keeps a DSN with an embedded credential from existing at all, which
+            # is the shape credential scanners match and cannot tell from an interpolation.
+            - name: PGUSER
+              valueFrom: { secretKeyRef: { name: heros-platform, key: postgres-user, optional: true } }
+            - name: PGPASSWORD
+              valueFrom: { secretKeyRef: { name: heros-platform, key: postgres-password, optional: true } }
             # The secret seam for the platform's OWN model calls. Selected here; the credentials come
             # from the external store the overlay's ExternalSecret materialises, resolved at call time.
             - { name: HEROS_SECRETS_SOURCE, value: "aws-secrets-manager" }

@@ -54,6 +54,11 @@ spec:
               env:
                 - name: DATABASE_URL
                   valueFrom: { secretKeyRef: { name: heros-platform, key: database-url } }
+                # Same pair as agentd — see the note there on why the password may live apart from the DSN.
+                - name: PGUSER
+                  valueFrom: { secretKeyRef: { name: heros-platform, key: postgres-user, optional: true } }
+                - name: PGPASSWORD
+                  valueFrom: { secretKeyRef: { name: heros-platform, key: postgres-password, optional: true } }
               resources:
                 requests: { cpu: "50m", memory: "64Mi" }
                 limits: { cpu: "500m", memory: "256Mi" }
