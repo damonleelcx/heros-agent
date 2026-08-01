@@ -154,6 +154,40 @@ const (
 	// ACT as them. Keeping "see" and "act as" on different roles is the whole reason impersonation is
 	// safer than sharing a credential.
 	CapImpersonateElevate Capability = "impersonate.elevate"
+
+	// ── P26. Three capabilities that PARTITION rather than widen (design D8) ──
+	//
+	// Each governs a new read-only oversight surface. None is folded into an existing capability, and
+	// no existing role gained anything: the roles below hold these because somebody decided they
+	// should, and `TestNoExistingRoleWidened` proves the pre-P26 capabilities' holders are unchanged.
+
+	// CapDeliveryRead is reading delivery records, their observed merge state, and the change-delivery
+	// rollout picture.
+	//
+	// GRANTED TO SUPPORT, and that grant is the point of the capability existing. "Did my change reach
+	// my repository, and if not, why not" is a support question, and today the only tool that can
+	// answer it is a reason-required impersonation session into the customer's own console. Folding
+	// this into CapCrossTenantRead would have handed Support fleet-wide spend and usage to answer a
+	// question about a pull request.
+	CapDeliveryRead Capability = "delivery.read"
+
+	// CapReleaseRead is reading published releases per install channel, artefact verification,
+	// post-publish smoke, and signing-key STATE — identifier and fingerprint, never key material.
+	//
+	// NOT granted to Support or Billing-Ops. A release engineer is a fifth persona this console does not
+	// have a role for, and until it does, the nearest holder is Platform-SRE. Signing-key state is not
+	// something a support queue needs, and the P20 leak is the reason that judgement is written down
+	// rather than assumed.
+	CapReleaseRead Capability = "release.read"
+
+	// CapAxisRead is reading per-axis adoption, refusal counts by stable typed cause, and the coverage
+	// matrix.
+	//
+	// It lets an axis owner see refusals WITHOUT seeing usage or spend, which is the partition
+	// CapCrossTenantRead could not express: that capability grants the money aggregates in the same
+	// breath, and the question "which materializer would unblock the most refused nodes" needs none of
+	// them.
+	CapAxisRead Capability = "axis.read"
 )
 
 // Capabilities is every gated capability. The matrix test iterates this, so a capability added
@@ -165,6 +199,7 @@ var Capabilities = []Capability{
 	CapTenantSuspend, CapTenantQuota,
 	CapRoleGrant, CapGDPRExecute,
 	CapCrossTenantRead, CapAuditRead, CapImpersonateElevate,
+	CapDeliveryRead, CapReleaseRead, CapAxisRead,
 }
 
 // Description is the operator-facing explanation of a capability, used by the console's
@@ -194,6 +229,9 @@ var capabilityDescriptions = map[Capability]string{
 	CapCrossTenantRead:     "Read cross-tenant aggregates",
 	CapAuditRead:           "Read the audit log",
 	CapImpersonateElevate:  "Elevate an impersonation session to write scope",
+	CapDeliveryRead:        "Read delivery records and the change-delivery rollout picture",
+	CapReleaseRead:         "Read published releases, artefact verification and signing-key state",
+	CapAxisRead:            "Read per-axis adoption, refusals and coverage",
 }
 
 // RequiresConfirmation reports whether a capability must go through the confirm + recorded reason +
@@ -215,6 +253,12 @@ var readOnly = map[Capability]bool{
 	CapBillingRead:     true,
 	CapCrossTenantRead: true,
 	CapAuditRead:       true,
+	// The three P26 oversight surfaces. Read-only by construction — no control on any of them opens,
+	// closes, retries or merges a delivery, halts a channel, unpublishes an artefact, or changes a
+	// coverage answer.
+	CapDeliveryRead: true,
+	CapReleaseRead:  true,
+	CapAxisRead:     true,
 }
 
 // Irreversible reports whether a capability is a one-way door — an action no counterpart can undo.
@@ -251,6 +295,12 @@ var permissions = map[Role]map[Capability]bool{
 		CapTenantRead:      true,
 		CapJobRead:         true,
 		CapImpersonateRead: true,
+		// 🔴 Support holds delivery.read, and that is the whole argument for the capability. The
+		// question it answers — "did this tenant's change reach their repository, and if not, why" — is
+		// today answered by opening an impersonation session, which is a data-protection cost paid for
+		// a missing aggregate. It does NOT bring spend or usage with it, which folding this into
+		// crosstenant.read would have.
+		CapDeliveryRead: true,
 	},
 	RoleBillingOps: {
 		CapTenantRead:          true,
@@ -264,6 +314,10 @@ var permissions = map[Role]map[Capability]bool{
 		CapTenantQuota:         true,
 		CapCrossTenantRead:     true,
 		CapAuditRead:           true,
+		// Delivery, because a gainshare dispute is a question about which changes actually merged.
+		// NOT release or axis: neither is a money question, and Billing-Ops is already the broadest
+		// non-superadmin role.
+		CapDeliveryRead: true,
 	},
 	RolePlatformSRE: {
 		CapTenantRead:         true,
@@ -278,6 +332,12 @@ var permissions = map[Role]map[Capability]bool{
 		CapTenantQuota:        true,
 		CapCrossTenantRead:    true,
 		CapAuditRead:          true,
+		// All three. Platform-SRE runs the machinery, and until a release-engineer role exists it is
+		// the nearest holder of signing-key state — a judgement recorded here rather than assumed,
+		// because the alternative was widening registry.admin to cover keys.
+		CapDeliveryRead: true,
+		CapReleaseRead:  true,
+		CapAxisRead:     true,
 	},
 	RoleSuperadmin: superadminGrants(),
 }

@@ -9,6 +9,7 @@ import (
 	"github.com/heros-foreal/agentd/internal/account"
 	"github.com/heros-foreal/agentd/internal/adminaudit"
 	"github.com/heros-foreal/agentd/internal/adminrbac"
+	"github.com/heros-foreal/agentd/internal/authoring"
 	"github.com/heros-foreal/agentd/internal/billing"
 	"github.com/heros-foreal/agentd/internal/metering"
 )
@@ -54,11 +55,21 @@ const (
 	// AggregateAnomalies surfaces tenants whose state warrants a look — halted loops, unsettled
 	// charges, reconciliation drift.
 	AggregateAnomalies Aggregate = "anomalies"
+	// AggregateAuthoredImprovement is the fleet's improvement, savings and quality picture from
+	// authored changes (P26 tasks 2.5, 2.6).
+	//
+	// 🔴 Every figure in it excludes `unverified` authored changes AT THE QUERY, through
+	// authoring.CountableAggregate — the one filter, so six reports cannot each get it wrong once. The
+	// count of what was excluded is reported alongside, because an invisible exclusion is
+	// indistinguishable from an oversight, and "we looked at this and did not count it" is the claim
+	// the ledger's credibility rests on.
+	AggregateAuthoredImprovement Aggregate = "authored_improvement"
 )
 
 // Aggregates is every cross-tenant read model, in the order the console presents them.
 var Aggregates = []Aggregate{
 	AggregateUsageSUM, AggregateCOGS, AggregateRevenueOps, AggregateTopConsumers, AggregateAnomalies,
+	AggregateAuthoredImprovement,
 }
 
 // Valid reports whether a is a known aggregate.
@@ -84,9 +95,23 @@ func (a Aggregate) DisplayName() string {
 		return "Top Consumers"
 	case AggregateAnomalies:
 		return "Anomalies"
+	case AggregateAuthoredImprovement:
+		return "Authored Improvement (verified only)"
 	}
 	return string(a)
 }
+
+// ImprovementFigures names the rows of AggregateAuthoredImprovement that are improvement, savings or
+// quality figures — the ones an unverified authored change must contribute exactly zero to.
+//
+// Enumerated rather than described so the assertion that proves the exclusion can iterate the real
+// list. A test that named its own three labels would keep passing on the day a fourth figure arrives
+// without the filter.
+var ImprovementFigures = []string{"improvement_changes", "savings_under_management", "quality_gate_passes"}
+
+// RowExcludedUnverified is the label of the row that STATES the exclusion. It is not an improvement
+// figure — it is the count of what was left out, and it is deliberately not in ImprovementFigures.
+const RowExcludedUnverified = "excluded_unverified_authored_changes"
 
 // DefaultMinimumCohort is how many tenants must contribute before an aggregate reports values.
 //
@@ -131,6 +156,12 @@ type ReadModel struct {
 	// PerTenant marks a single-tenant drill-down, which FR14 treats as a per-tenant view rather than
 	// as an aggregate.
 	PerTenant string `json:"per_tenant,omitempty"`
+	// Note states what the model excludes, where the figures appear.
+	//
+	// On the surface rather than in a document, and in the same view rather than behind a link: an
+	// operator reading an improvement figure has to be able to tell it apart from an unverified
+	// estimate without navigating, and a caveat one click away is a caveat nobody reads.
+	Note string `json:"note,omitempty"`
 }
 
 // CrossTenantService serves the cross-tenant read models.
@@ -140,6 +171,8 @@ type CrossTenantService struct {
 	meter     *metering.Meter
 	ledger    billing.Ledger
 	admission *Admission
+	authored  authoring.Recorder
+	deltas    metering.VerifiedDeltaLedger
 	minCohort int
 }
 
@@ -152,6 +185,12 @@ type CrossTenantConfig struct {
 	Ledger billing.Ledger
 	// Admission reports whether a tenant's loop is halted, for the anomalies model.
 	Admission *Admission
+	// Authored is the append-only authored-change record, read for the improvement aggregate. Nil
+	// yields no improvement rows rather than zeroes — "we have no record" and "nothing happened" are
+	// different answers.
+	Authored authoring.Recorder
+	// Deltas is the P5.5 verified-delta ledger, the ONLY source a savings figure draws on.
+	Deltas metering.VerifiedDeltaLedger
 	// MinimumCohort overrides DefaultMinimumCohort. It may be raised, never lowered below the default.
 	MinimumCohort int
 }
@@ -171,7 +210,7 @@ func NewCrossTenantService(exec *Executor, cfg CrossTenantConfig) (*CrossTenantS
 	}
 	return &CrossTenantService{
 		exec: exec, accounts: cfg.Accounts, meter: cfg.Meter, ledger: cfg.Ledger,
-		admission: cfg.Admission, minCohort: min,
+		admission: cfg.Admission, authored: cfg.Authored, deltas: cfg.Deltas, minCohort: min,
 	}, nil
 }
 
@@ -225,6 +264,7 @@ func (s *CrossTenantService) DrillDown(ctx context.Context, tenantID string, agg
 	// the floor would suppress the only thing the operator asked for while still having logged the
 	// look — worse for privacy AND useless.
 	m.Rows = s.rowsFor(aggregate, []account.Account{acct}, period)
+	m.Note = noteFor(aggregate)
 	return m, nil
 }
 
@@ -268,7 +308,17 @@ func (s *CrossTenantService) build(aggregate Aggregate, period metering.Period) 
 		return m
 	}
 	m.Rows = s.rowsFor(aggregate, accts, period)
+	m.Note = noteFor(aggregate)
 	return m
+}
+
+// noteFor returns the exclusion statement an aggregate carries on the surface.
+func noteFor(aggregate Aggregate) string {
+	if aggregate == AggregateAuthoredImprovement {
+		return ExclusionUnverifiedAuthoredChange + " Savings draw exclusively on the " +
+			SourceVerifiedDeltaLedger + "."
+	}
+	return ""
 }
 
 // rowsFor computes one aggregate's rows from the substrate.
@@ -284,8 +334,79 @@ func (s *CrossTenantService) rowsFor(aggregate Aggregate, accts []account.Accoun
 		return s.topConsumerRows(accts, period)
 	case AggregateAnomalies:
 		return s.anomalyRows(accts, period)
+	case AggregateAuthoredImprovement:
+		return s.improvementRows(accts, period)
 	}
 	return nil
+}
+
+// improvementRows is the fleet's improvement, savings and quality picture — with `unverified` authored
+// changes excluded AT THE QUERY.
+//
+// # Why the filter is a function call and not a comparison here
+//
+// `authoring.CountableAggregate` is the platform's one filter. Writing `if e.VerificationState !=
+// "unverified"` in this file would be a second copy of the rule, and the failure mode of a second copy
+// is not that it is wrong today — it is that the two stop agreeing on the day the state vocabulary
+// grows a third member. Every aggregate in the product asks the same question in the same place.
+//
+// # Why the exclusion is COUNTED and shown
+//
+// An invisible exclusion is indistinguishable from an oversight. The excluded count is a row of its
+// own, deliberately NOT one of ImprovementFigures, so the surface can say "we looked at these and did
+// not count them" — which is the sentence the ledger's credibility actually rests on.
+func (s *CrossTenantService) improvementRows(accts []account.Account, period metering.Period) []AggregateRow {
+	if s.authored == nil {
+		// No record wired. Returning nothing is the honest answer: a row of zeroes would claim the fleet
+		// authored nothing, which is a measurement we did not make.
+		return nil
+	}
+	ctx := context.Background()
+	var counted, excluded, qualityPasses float64
+	var savings float64
+	for _, a := range accts {
+		entries, err := s.authored.ListByTenant(ctx, a.CustomerID)
+		if err != nil {
+			continue
+		}
+		// One `submitted` row per change id, so counting submitted rows counts changes rather than
+		// lifecycle events. The state carried on each row is what the filter reads.
+		var latest = map[string]authoring.Entry{}
+		for _, e := range entries {
+			if prev, ok := latest[e.ChangeID]; !ok || e.Seq > prev.Seq {
+				latest[e.ChangeID] = e
+			}
+		}
+		flat := make([]authoring.Entry, 0, len(latest))
+		for _, e := range latest {
+			flat = append(flat, e)
+			if !e.VerificationState.Countable() {
+				excluded++
+			}
+		}
+		counted += authoring.CountableAggregate(flat, func(authoring.Entry) float64 { return 1 })
+
+		if s.deltas != nil {
+			// The savings figure draws EXCLUSIVELY on the P5.5 verified-delta ledger, and only on entries
+			// it reports as billable. An unverified authored change has no ledger entry, so it contributes
+			// zero here by construction as well as by filter — two independent reasons, which is what
+			// makes the claim survive a refactor of either one.
+			if bs, err := metering.ComputeBillableSavings(s.deltas, a.CustomerID, period); err == nil {
+				savings += bs.Savings
+				qualityPasses += float64(len(bs.VerifiedDeltaRefs))
+			}
+		}
+	}
+	return []AggregateRow{
+		{Label: ImprovementFigures[0], Value: counted, Unit: "authored_changes",
+			Detail: "verified authored changes only — " + ExclusionUnverifiedAuthoredChange},
+		{Label: ImprovementFigures[1], Value: savings, Unit: "sum",
+			Detail: "drawn exclusively on the " + SourceVerifiedDeltaLedger},
+		{Label: ImprovementFigures[2], Value: qualityPasses, Unit: "verified_deltas",
+			Detail: "P5.5 gate passes behind the billable savings above"},
+		{Label: RowExcludedUnverified, Value: excluded, Unit: "authored_changes",
+			Detail: "applied but never measured by the harness; contributes zero to every figure above"},
+	}
 }
 
 // usageRows totals the RECORDED usage per metric — what the platform metered and will bill from.

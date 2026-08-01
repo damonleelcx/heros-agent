@@ -9,6 +9,7 @@ import (
 	"github.com/heros-foreal/agentd/internal/adminaudit"
 	"github.com/heros-foreal/agentd/internal/adminrbac"
 	"github.com/heros-foreal/agentd/internal/billing"
+	"github.com/heros-foreal/agentd/internal/linkingest"
 	"github.com/heros-foreal/agentd/internal/metering"
 )
 
@@ -42,6 +43,10 @@ type InvoiceLine struct {
 	// Quantity is the metered quantity the event carries (a SUM quantity, a seat count). It is a
 	// measured quantity, not money.
 	Quantity float64 `json:"quantity"`
+	// SUMDerived marks a row whose quantity derives from SUM over LINKED runs, so the surface can say
+	// which rows the period's link coverage qualifies and which (a seat count, a plan change) it does
+	// not. Without the mark, a coverage percentage beside the table would appear to qualify every row.
+	SUMDerived bool `json:"sum_derived,omitempty"`
 	// ProviderRef is the opaque provider handle for the recorded charge, empty until settled.
 	ProviderRef string `json:"provider_ref,omitempty"`
 	// CausedBy names the platform record that justified the row, which is what makes a period
@@ -102,6 +107,22 @@ type BillingOversight struct {
 	// Exceptions counts the gainshare charges whose evidence does not hold — the number an operator
 	// triages first.
 	Exceptions int `json:"exceptions"`
+	// LinkCoverage is how much of this tenant's activity the figures below reflect (P26 task 2.2).
+	//
+	// 🔴 It is reported ALWAYS, including when it is unknown, and it is rendered in the same view as
+	// the figures rather than behind a link or in a footnote. `project.md` states the rule once —
+	// metering counts only what it observed, and link coverage is displayed wherever a derived figure
+	// is shown — and this surface, which predates run linking, was the one place that did not honour it.
+	LinkCoverage CoverageView `json:"link_coverage"`
+	// MeteredSUM is the period's SUM-derived total, paired with its coverage in the type.
+	//
+	// nil when the coverage is unknown: the figure is WITHHELD rather than shown bare, because a SUM
+	// figure whose coverage nobody can state is wrong by an unknown factor in a direction nobody can
+	// quantify, and it is exactly the figure a credit gets issued against.
+	MeteredSUM *DerivedFigure `json:"metered_sum,omitempty"`
+	// GainshareSavings is the period's billable saving, drawn EXCLUSIVELY on the P5.5 verified-delta
+	// ledger and naming that provenance where it appears (P26 task 2.4).
+	GainshareSavings *DerivedFigure `json:"gainshare_savings,omitempty"`
 	// PlanHistory is every audited plan change for this tenant, newest first, across ALL periods.
 	//
 	// 🔴 Deliberately not period-scoped, and that is the whole reason it exists. A plan change is not a
@@ -131,19 +152,27 @@ type PlanChangeLine struct {
 
 // BillingService is the operator's billing oversight and correction surface.
 type BillingService struct {
-	exec    *Executor
-	billing *billing.Service
-	deltas  metering.VerifiedDeltaLedger
+	exec     *Executor
+	billing  *billing.Service
+	deltas   metering.VerifiedDeltaLedger
+	coverage LinkCoverageSource
 }
 
 // NewBillingService wires the service. The verified-delta ledger may be nil in a deployment with no
 // gainshare; the oversight view then says so by returning no gainshare lines rather than by claiming
 // there are none.
-func NewBillingService(exec *Executor, svc *billing.Service, deltas metering.VerifiedDeltaLedger) (*BillingService, error) {
+//
+// The link-coverage source may also be nil — a deployment with no run linking. It is NOT optional in
+// the sense of "leave it out and the figures still show": with no coverage source, coverage is
+// unknown, and a figure with unknown coverage is withheld. That is the honest degradation, and it is
+// the same one the customer console already performs.
+func NewBillingService(exec *Executor, svc *billing.Service, deltas metering.VerifiedDeltaLedger,
+	coverage LinkCoverageSource) (*BillingService, error) {
+
 	if exec == nil || svc == nil {
 		return nil, errors.New("adminops: the billing oversight service needs the command path and the P7 billing service")
 	}
-	return &BillingService{exec: exec, billing: svc, deltas: deltas}, nil
+	return &BillingService{exec: exec, billing: svc, deltas: deltas, coverage: coverage}, nil
 }
 
 // collectingAlerts captures reconciliation alerts instead of paging somebody. The console shows drift
@@ -164,11 +193,29 @@ func (s *BillingService) Oversight(ctx context.Context, tenantID string, period 
 	}
 	out := BillingOversight{TenantID: tenantID, Period: period.ID}
 
+	// Coverage FIRST, before any figure is assembled, so the figures below can be withheld rather than
+	// built and then hidden. A figure that exists in the read model and is suppressed by the page is a
+	// figure one refactor away from being rendered.
+	var cov linkingest.LinkCoverage
+	wired := s.coverage != nil
+	if wired {
+		cov = s.coverage.Coverage(tenantID)
+	}
+	out.LinkCoverage = coverageView(cov, wired)
+
+	var meteredTotal float64
 	for _, ev := range s.billing.Ledger().Events(tenantID, period.ID) {
 		line := InvoiceLine{
 			EventID: ev.EventID, Period: ev.Period, Type: string(ev.Type), Kind: string(ev.Kind),
 			Status: string(ev.Status), Quantity: ev.Quantity, ProviderRef: ev.ProviderRef,
 			CausedBy: ev.CausedBy, Reason: ev.Reason, CreatedAt: ev.CreatedAt.UTC().Format("2006-01-02T15:04:05Z07:00"),
+		}
+		// A METERED charge's quantity IS the SUM derived from linked runs, so the row is marked as such
+		// and the period's total becomes a DerivedFigure — a figure that travels with its coverage —
+		// rather than a bare number in a table cell nothing qualifies.
+		if ev.Kind == billing.KindMetered {
+			line.SUMDerived = true
+			meteredTotal += ev.Quantity
 		}
 		out.Invoices = append(out.Invoices, line)
 		if ev.Status == billing.StatusPending {
@@ -181,6 +228,25 @@ func (s *BillingService) Oversight(ctx context.Context, tenantID string, period 
 	for _, g := range out.Gainshare {
 		if !g.Valid() {
 			out.Exceptions++
+		}
+	}
+
+	// The two SUM-derived figures. Each is built through the one constructor, so each carries its
+	// coverage or is withheld — there is no path that produces a bare one.
+	if metered := NewDerivedFigure(formatQuantity(meteredTotal), cov, SourceMeteredUsage,
+		"Counts LINKED runs only. Unlinked spend is never inferred, extrapolated or scaled."); metered.Renderable() {
+		out.MeteredSUM = &metered
+	}
+	if s.deltas != nil {
+		if bs, err := metering.ComputeBillableSavings(s.deltas, tenantID, period); err == nil {
+			// 🔴 Exclusively the verified-delta ledger, and the surface says so where the figure appears.
+			// ComputeBillableSavings counts only entries whose P5.5 verdict passed AND that merged, so an
+			// unverified authored change contributes nothing to it by construction rather than by filter.
+			savings := NewDerivedFigure(formatQuantity(bs.Savings), cov, SourceVerifiedDeltaLedger,
+				ExclusionUnverifiedAuthoredChange)
+			if savings.Renderable() {
+				out.GainshareSavings = &savings
+			}
 		}
 	}
 

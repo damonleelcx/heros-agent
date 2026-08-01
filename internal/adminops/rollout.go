@@ -148,4 +148,9 @@ var CapabilityWave = map[string]Wave{
 	// 8b — fleet ops + autonomous controls + cross-tenant + compliance
 	"job.retry": Wave8b, "job.cancel": Wave8b, "registry.admin": Wave8b,
 	"killswitch.operate": Wave8b, "crosstenant.read": Wave8b, "gdpr.execute": Wave8b,
+	// P26's three oversight surfaces. 8b rather than 8a, and the choice is conservative on purpose:
+	// all three are FLEET-WIDE reads, which is what 8b gates, and 8b is the wave that requires the
+	// cross-tenant aggregates to be live before anything reads across tenants. Putting them in 8a
+	// would light three cross-tenant surfaces in the wave whose checklist says nothing about them.
+	"delivery.read": Wave8b, "release.read": Wave8b, "axis.read": Wave8b,
 }

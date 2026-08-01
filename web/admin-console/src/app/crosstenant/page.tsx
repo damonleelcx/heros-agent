@@ -24,6 +24,10 @@ const AGGREGATES: Array<{ key: string; label: string }> = [
   { key: "revenue_ops", label: "Revenue & Operations" },
   { key: "top_consumers", label: "Top Consumers" },
   { key: "anomalies", label: "Anomalies" },
+  // Improvement, savings and quality — every figure in it excludes `unverified` authored changes at
+  // the query, and the count of what was excluded is shown beside them. An invisible exclusion is
+  // indistinguishable from an oversight.
+  { key: "authored_improvement", label: "Authored Improvement" },
 ];
 
 export default async function CrossTenantPage({
@@ -102,7 +106,13 @@ export default async function CrossTenantPage({
           ) : !model.rows || model.rows.length === 0 ? (
             <EmptyState what="values for this period" />
           ) : (
-            <AggregateChart caption={`${model.display_name} for ${model.period}`} rows={model.rows} />
+            <>
+              {/* The exclusion is stated WHERE THE FIGURES APPEAR, in the same view — an operator has
+                  to be able to tell a measured improvement from an unverified estimate without
+                  navigating anywhere. */}
+              {model.note ? <p className="state__body">{model.note}</p> : null}
+              <AggregateChart caption={`${model.display_name} for ${model.period}`} rows={model.rows} />
+            </>
           )}
         </Section>
       </PageFrame>

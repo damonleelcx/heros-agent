@@ -72,6 +72,13 @@ export type InvoiceLine = {
   caused_by: string;
   reason?: string;
   created_at: string;
+  /**
+   * True when this row's quantity derives from SUM over LINKED runs.
+   *
+   * The mark exists so a coverage percentage shown beside the table does not appear to qualify a seat
+   * count or a plan change, neither of which run linking has anything to say about.
+   */
+  sum_derived?: boolean;
 };
 
 export type GainshareLine = {
@@ -82,9 +89,42 @@ export type GainshareLine = {
   exception?: string;
 };
 
+/**
+ * DerivedFigure is a SUM-derived figure and the link coverage that qualifies it.
+ *
+ * 🔴 `coverage: null` means UNKNOWN, and an unknown-coverage figure is NOT RENDERED — the surface says
+ * coverage is unknown instead. The pairing is in the platform's type (`adminops.DerivedFigure`), so a
+ * figure cannot reach this file without one. `value` is a STRING because the platform formatted it;
+ * the console renders what it was sent and derives nothing.
+ */
+export type DerivedFigure = {
+  value: string;
+  coverage: number | null;
+  source: string;
+  basis?: string;
+  runs_linked: number;
+  runs_reported: number;
+};
+
+/** CoverageView is the link-coverage reading itself, stated beside the figures it qualifies. */
+export type CoverageView = {
+  known: boolean;
+  complete: boolean;
+  percent: number;
+  runs_linked: number;
+  runs_reported: number;
+  statement: string;
+};
+
 export type BillingOversight = {
   tenant_id: string;
   period: string;
+  /** How much of this tenant's activity the SUM-derived figures below reflect. Always present. */
+  link_coverage: CoverageView;
+  /** The period's SUM-derived total. Absent when coverage is unknown — withheld, never shown bare. */
+  metered_sum?: DerivedFigure;
+  /** The period's billable saving, drawn exclusively on the P5.5 verified-delta ledger. */
+  gainshare_savings?: DerivedFigure;
   invoices: InvoiceLine[];
   dunning: InvoiceLine[];
   reconciliation_matched: boolean;
@@ -187,6 +227,8 @@ export type ReadModel = {
   degraded: boolean;
   detail?: string;
   per_tenant?: string;
+  /** What the model excludes, stated where the figures appear rather than in a document. */
+  note?: string;
 };
 
 export type AuditEntry = {
@@ -204,10 +246,33 @@ export type AuditEntry = {
   created_at: string;
 };
 
+/** MergePath is one way a merge reaches a customer's repository. */
+export type MergePath = {
+  id: string;
+  name: string;
+  mechanism: string;
+  /** Where this path IS readable, when the chain does not record it. A gap with a destination. */
+  readable_at?: string;
+};
+
+/**
+ * MergePathCoverage is the honest statement of what the hash chain holds about merges.
+ *
+ * The chain mirrors P6 autonomous merges. It does not record P12 customer-CI-mediated deliveries,
+ * which merge in the customer's own CI under a credential the platform does not hold — so the absence
+ * of a delivery from this log is not evidence that it did not happen.
+ */
+export type MergePathCoverage = {
+  covered: MergePath[];
+  not_covered: MergePath[];
+  statement: string;
+};
+
 export type AuditView = {
   entries: AuditEntry[];
   verification: { intact: boolean; break_at?: number; detail?: string; checked: number };
   total: number;
+  merge_coverage: MergePathCoverage;
 };
 
 export type GDPRRequest = {
@@ -241,4 +306,303 @@ export type Receipt = {
   evidence?: Record<string, string>;
   actor_admin_id: string;
   at: string;
+};
+
+/* ══════════════════════════════════════════════════════════════════════════
+   P26 — Delivery oversight (read-only)
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * MergeState is what the platform KNOWS about a delivery's merge.
+ *
+ * 🔴 Three values, and the third is the point. A pull request that closed may have been merged,
+ * squashed, rebased, or abandoned, and only one of those is a delivery — so a merge is observed, never
+ * inferred from a pull request closing, and `unknown` is a real answer rather than a gap papered over
+ * with the most likely outcome.
+ */
+export type MergeState = "merged" | "closed_unmerged" | "unknown";
+
+export type DeliveryRow = {
+  delivery_id: string;
+  tenant_id: string;
+  config_hash: string;
+  source_revision: string;
+  target: string;
+  forge_ref?: string;
+  /** The credential path: `ci` (the platform holds none) or `app` (the opt-in hosted Git App). */
+  mode: string;
+  /** The P12 lifecycle state, verbatim. */
+  state: string;
+  merge: MergeState;
+  merge_commit?: string;
+  reason?: string;
+  /** The audit-chain target, only where the chain actually covers this delivery's merge path. */
+  audit_target?: string;
+};
+
+/** DeliveryCount is one aggregate figure and the query that reaches the records behind it. */
+export type DeliveryCount = { label: string; value: number; drill_down: string };
+
+/** RolloutCauseCount is one typed undeliverable cause. `cause` is a stable identifier, never prose. */
+export type RolloutCauseCount = {
+  cause: string;
+  /** Who can close it: "nobody", "you", "the platform". Computed by the platform, not inferred here. */
+  owner: string;
+  /** A boundary rather than unbuilt work. A permanent cause names no missing artifact, ever. */
+  permanent: boolean;
+  missing_artifact?: string;
+  label: string;
+  count: number;
+};
+
+export type RolloutStageRow = {
+  axis: string;
+  change: string;
+  route: string;
+  status: string;
+  cause?: string;
+  owner?: string;
+  permanent?: boolean;
+  missing_artifact?: string;
+  note?: string;
+};
+
+export type DeliveryView = {
+  tenant_id?: string;
+  rows: DeliveryRow[];
+  counts: DeliveryCount[];
+  rollout_stages: RolloutStageRow[];
+  /** Never a single total: the three causes are answered by three different people. */
+  undeliverable: RolloutCauseCount[];
+  undeliverable_total: number;
+  merge_coverage: MergePathCoverage;
+  degraded: boolean;
+  detail?: string;
+  /** Stated on the wire: this surface shows a problem it cannot act on, deliberately. */
+  read_only: boolean;
+  source: string;
+};
+
+/* ══════════════════════════════════════════════════════════════════════════
+   P26 — Release & trust oversight (read-only)
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/** VerifyState: *not yet checked* is neither a pass nor a failure. */
+export type VerifyState = "verified" | "failed" | "not_yet_verified";
+
+/**
+ * SmokeState is the post-publish smoke result per platform image.
+ *
+ * 🔴 `queued_until_timeout` is NOT a failure. A retired runner label queues until the workflow times
+ * out — measured in P20 with `macos-13` — and rendering that as *failed* sends an engineer to debug a
+ * build that never ran. The empty string is the ABSENCE of a run, not a fourth outcome; the sequence's
+ * stopping point says so instead.
+ */
+export type SmokeState = "passed" | "failed" | "queued_until_timeout" | "";
+
+export type PublishStep = "publish" | "verify" | "smoke" | "complete";
+
+export type ArtefactRow = {
+  version: string;
+  channel: string;
+  platform: string;
+  name: string;
+  /** False renders as *absent*; the version is not presented as complete. */
+  published: boolean;
+  /** 🔴 Identifier and fingerprint. There is no field here that could carry key material. */
+  signing_key_id: string;
+  key_fingerprint: string;
+  signed_with_retired_key: boolean;
+  key_retired_at?: string;
+  key_retired_why?: string;
+  verification: VerifyState;
+  smoke?: SmokeState;
+  smoke_detail?: string;
+};
+
+export type SequenceRow = {
+  version: string;
+  channel: string;
+  /** Where publish → verify → smoke stopped, or "complete". */
+  stopped_at: PublishStep;
+  reason: string;
+  completed?: PublishStep[];
+};
+
+export type SigningKeyRow = {
+  id: string;
+  fingerprint: string;
+  role: string;
+  note?: string;
+  retired_at?: string;
+  signed_releases?: string[];
+};
+
+export type ChannelRow = {
+  id: string;
+  label: string;
+  /** Whether a user can install from this channel TODAY. A generated manifest is not a channel. */
+  delivered: boolean;
+  blocker?: string;
+  verification: string;
+  versions?: string[];
+};
+
+export type ReleaseView = {
+  channels: ChannelRow[];
+  artefacts: ArtefactRow[];
+  sequences: SequenceRow[];
+  keys: SigningKeyRow[];
+  read_only: boolean;
+  degraded: boolean;
+  detail?: string;
+  source: string;
+};
+
+/* ══════════════════════════════════════════════════════════════════════════
+   P26 — Axis oversight (read-only)
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * CellState is how one coverage cell renders. Three, and there is no "not applicable".
+ *
+ * 🔴 *Not applicable* is deliberately absent from this union. It says "your call site cannot carry
+ * this", while the truth may be "we have not built the materializer" — a substitution that converts
+ * our backlog into the customer's problem, invisibly. `unknown` names the missing input instead.
+ */
+export type CellState = "applies" | "refused" | "unknown";
+
+export type CoverageCellRow = {
+  axis: string;
+  language: string;
+  form: string;
+  state: CellState;
+  /** The engine's STABLE cause identifier, verbatim — never prose, never re-vocabularised. */
+  cause?: string;
+  missing_input?: string;
+  note?: string;
+};
+
+export type AxisRow = {
+  axis: string;
+  /** The axis's OWN declared status. The console does not compute, adjust or reinterpret it. */
+  status: string;
+  /** null means UNKNOWN — no adoption source is wired. Not zero, and never rendered as zero. */
+  tenants: number | null;
+  nodes: number | null;
+  refusals: Record<string, number>;
+  refusals_by_language: Record<string, Record<string, number>>;
+  drill_down: string;
+};
+
+export type ArtefactRank = {
+  artefact: string;
+  /** A COUNT of refused cells, not a score. */
+  closes: number;
+  axes: string[];
+  languages: string[];
+  drill_down: string;
+};
+
+export type CauseLegend = {
+  cause: string;
+  owner: string;
+  permanent: boolean;
+  meaning: string;
+};
+
+export type RefusedNode = {
+  tenant_id: string;
+  node_id: string;
+  language: string;
+  axis: string;
+  cause: string;
+};
+
+export type AxisView = {
+  axes: AxisRow[];
+  matrix: CoverageCellRow[];
+  ranking: ArtefactRank[];
+  legend: CauseLegend[];
+  /** FALSE. Only the eval harness ranks; these are counts and must not wear a result's grammar. */
+  is_ranking: boolean;
+  /** TRUE. A coverage gap is identical on every plan; no tier unlocks a cell the engine refuses. */
+  plan_independent: boolean;
+  adoption_known: boolean;
+  coverage_source: string;
+  coverage_version: string;
+  read_only: boolean;
+};
+
+/* ══════════════════════════════════════════════════════════════════════════
+   P26 — Identity, consent and reporting health (read-only)
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/** Three values: *not configured* is a DECISION and *degraded* is a FAULT. Never a boolean. */
+export type IntegrationState = "absent" | "configured" | "degraded";
+
+export type SessionRow = {
+  session_id: string;
+  admin_id: string;
+  /** The factor NAME the platform VERIFIED — never the IdP's claim, never the factor's value. */
+  factor: string;
+  verified_at: string;
+  expires_at: string;
+  live: boolean;
+  multi_factor: boolean;
+};
+
+export type IdentityProviderView = {
+  issuer: string;
+  kind: string;
+  /** True when the IdP is the test-mode fixture. The surface says so; it claims no real IdP. */
+  test_mode: boolean;
+  note: string;
+};
+
+export type LegalRow = {
+  tenant_id: string;
+  kind?: string;
+  accepted_version?: string;
+  accepted_hash?: string;
+  /** Links the ARCHIVED text at the accepted content hash — not the current text. */
+  archive_href?: string;
+  accepted_at?: string;
+  /** Set only after a MATERIAL publication. A non-material version creates no obligation. */
+  owed_version?: string;
+  owed_since?: string;
+  owed_href?: string;
+};
+
+export type IntegrationRow = {
+  name: string;
+  state: IntegrationState;
+  /** Required when degraded: "unreachable" and "rejecting our schema" are two different places to go. */
+  failure_class?: string;
+  /** The PLATFORM's readiness surface — never a third party's dashboard. */
+  source: string;
+};
+
+export type DeploymentRow = {
+  tenant_id: string;
+  shape?: string;
+  version?: string;
+  /** True when no signal carries the version. Nothing here is inferred from a proxy signal. */
+  unknown: boolean;
+  missing_collection?: string;
+};
+
+export type NotYetReadable = { subject: string; requires: string; statement: string };
+
+export type OversightView = {
+  sessions: SessionRow[];
+  identity_provider: IdentityProviderView;
+  legal: LegalRow[];
+  legal_known: boolean;
+  integrations: IntegrationRow[];
+  integrations_known: boolean;
+  deployments: DeploymentRow[];
+  not_yet_readable: NotYetReadable[];
+  read_only: boolean;
+  source: string;
 };

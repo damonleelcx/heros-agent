@@ -81,6 +81,27 @@ export const SURFACES: Surface[] = [
     nav: true,
   },
   {
+    capability: "delivery.read",
+    href: "/delivery",
+    label: "Delivery",
+    hint: "P12 deliveries, their OBSERVED merge state, and the change-delivery rollout picture",
+    nav: true,
+  },
+  {
+    capability: "release.read",
+    href: "/releases",
+    label: "Releases",
+    hint: "Install channels, artefact verification, post-publish smoke and signing-key state",
+    nav: true,
+  },
+  {
+    capability: "axis.read",
+    href: "/axes",
+    label: "Axes",
+    hint: "Per-axis status, refusals by typed cause, and the coverage matrix from the one source",
+    nav: true,
+  },
+  {
     capability: "crosstenant.read",
     href: "/crosstenant",
     label: "Cross-Tenant",
@@ -92,6 +113,13 @@ export const SURFACES: Surface[] = [
     href: "/audit",
     label: "Audit Log",
     hint: "Append-only, hash-chained record of every action and every merge",
+    nav: true,
+  },
+  {
+    capability: "audit.read",
+    href: "/oversight",
+    label: "Oversight",
+    hint: "Operator sessions and their factor, legal acceptance, and whether reporting is working",
     nav: true,
   },
   {

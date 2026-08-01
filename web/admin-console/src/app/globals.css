@@ -28,7 +28,7 @@
  *      ground. Nothing floats except the two things that genuinely sit above the page — the command
  *      palette and the scrim behind it.
  *
- *   3. **One bright thing in the neutral state.** The teal accent marks what is interactive and
+ *   3. **One bright thing in the neutral state.** The violet accent marks what is interactive and
  *      nothing else. Everything not interactive and not hazardous is neutral, which is what leaves the
  *      hazard palette room to mean something.
  *
@@ -421,7 +421,7 @@ th {
  *
  * This was a real defect and a instructive one: `.quiet` uses `--text-muted`, which is a light grey
  * in the dark theme and a dark slate in the light one. The band is dark in BOTH themes, so the light
- * theme rendered "Sign out" as dark slate on deep teal — present in the accessibility tree, legible
+ * theme rendered "Sign out" as dark slate on the deep chrome band — present in the accessibility tree, legible
  * to nobody. Anything painted on the band resolves through the chrome tokens for exactly this
  * reason; `--chrome-muted` is contrast-checked against the band, `--text-muted` against the page.
  */
@@ -580,6 +580,69 @@ h3 {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(22rem, 1fr));
   gap: var(--space-4);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Derived — a SUM-derived figure and the link coverage that qualifies it (P26)
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* The coverage sits with the value, in the same block, at a size that is read rather than skipped.
+ * It is deliberately NOT `.hint`: a caveat set at hint scale beside a display-scale figure reads as
+ * decoration, and this one changes whether an operator issues a credit. */
+.derived-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(var(--measure-stat), 1fr));
+  gap: var(--space-3);
+}
+
+.derived {
+  background: var(--surface-2);
+  border: var(--hairline) solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--pad-cell-x);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.derived__label {
+  color: var(--text-muted);
+}
+
+.derived__value {
+  font-family: var(--font-mono);
+  font-size: var(--text-stat);
+  font-weight: var(--weight-semibold);
+  line-height: var(--line-tight);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: var(--tracking-tight);
+  overflow-wrap: anywhere;
+}
+
+.derived__coverage {
+  font-size: var(--text-sm);
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.derived__basis {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+/* A withheld figure is a RENDERING, not an absence: "this period has no SUM" and "the console failed
+ * to load" must not look the same. The dashed edge says the slot exists and is deliberately empty. */
+.derived--withheld {
+  border-style: dashed;
+}
+
+.derived__withheld {
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-tight);
+  color: var(--text-muted);
 }
 
 /* ══════════════════════════════════════════════════════════════════════════

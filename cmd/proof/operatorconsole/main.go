@@ -38,7 +38,11 @@ import (
 	"github.com/heros-foreal/agentd/internal/adminfixture"
 	"github.com/heros-foreal/agentd/internal/adminops"
 	"github.com/heros-foreal/agentd/internal/api"
+	"github.com/heros-foreal/agentd/internal/authoring"
 	"github.com/heros-foreal/agentd/internal/billing"
+	"github.com/heros-foreal/agentd/internal/deliveryrecord"
+	"github.com/heros-foreal/agentd/internal/forgedelivery"
+	"github.com/heros-foreal/agentd/internal/linkingest"
 	"github.com/heros-foreal/agentd/internal/metering"
 	"github.com/heros-foreal/agentd/internal/metricevent"
 	"github.com/heros-foreal/agentd/internal/optimizer"
@@ -243,7 +247,30 @@ func wire(repoDir string) (api.AdminDeps, error) {
 		return api.AdminDeps{}, err
 	}
 	deltas := metering.NewMemVerifiedDeltas()
-	billOversight, err := adminops.NewBillingService(exec, billSvc, deltas)
+	// The P11 link-coverage source, wired so the billing surface can state what its SUM-derived figures
+	// actually reflect. The three shapes are all present on purpose, because they are the three the
+	// surface must render differently: COMPLETE coverage, PARTIAL coverage, and UNKNOWN coverage — and
+	// the third withholds the figure rather than showing it bare.
+	links := linkingest.NewMemStore()
+	for i, tc := range tenants {
+		if tc.id == "tenant-dune" {
+			continue // no run count ever reported: coverage is UNKNOWN, and no SUM figure is shown.
+		}
+		reported := 10 + i*5
+		linked := reported
+		if tc.id == "tenant-boreal" {
+			linked = reported / 3 // partial: the coverage percentage is what changes a credit decision.
+		}
+		links.ObserveRunsReported(tc.id, reported)
+		for r := 0; r < linked; r++ {
+			if _, err := links.Record(linkingest.LinkedRun{
+				RunID: fmt.Sprintf("run-%s-%d", tc.id, r), TenantID: tc.id, LinkedAt: now(),
+			}); err != nil {
+				return api.AdminDeps{}, err
+			}
+		}
+	}
+	billOversight, err := adminops.NewBillingService(exec, billSvc, deltas, links)
 	if err != nil {
 		return api.AdminDeps{}, err
 	}
@@ -268,12 +295,114 @@ func wire(repoDir string) (api.AdminDeps, error) {
 	if err != nil {
 		return api.AdminDeps{}, err
 	}
+	// The authored-change record the improvement aggregate reads. Seeded with BOTH states, because the
+	// property the surface has to demonstrate is that only one of them moves a figure: the verified
+	// change is counted, the unverified one is counted as excluded and contributes zero.
+	authored := authoring.NewMemRecorder()
+	for i, tc := range tenants {
+		state := authoring.StateVerified
+		if i%2 == 1 {
+			state = authoring.StateUnverified
+		}
+		if err := authored.Append(context.Background(), authoring.Entry{
+			ChangeID: "chg-" + tc.id, Action: authoring.ActionSubmitted, TenantID: tc.id,
+			ActorID: "user-" + tc.id, WorkflowID: "wf-" + tc.id, ConfigHash: "cfg1",
+			Axis: "prompt", Origin: "studio", VerificationState: state, At: now(),
+		}); err != nil {
+			return api.AdminDeps{}, err
+		}
+	}
 	crossSvc, err := adminops.NewCrossTenantService(exec, adminops.CrossTenantConfig{
 		Accounts: accounts, Meter: meter, Ledger: billSvc.Ledger(), Admission: admission,
+		Authored: authored, Deltas: deltas,
 	})
 	if err != nil {
 		return api.AdminDeps{}, err
 	}
+	// ── P26 delivery oversight over the REAL P12 record ──
+	//
+	// Seeded with all three merge outcomes, because the property this surface exists to preserve is
+	// that they stay three: an open pull request is UNKNOWN, a closed one is CLOSED UNMERGED, and only
+	// an observed merge is MERGED. A demo that seeded only merges would render correctly while proving
+	// nothing about the distinction.
+	deliveries := deliveryrecord.NewMemStore()
+	for i, tc := range tenants {
+		id := forgedelivery.DeliveryID("cfg1", "rev-"+tc.id, "main")
+		if err := deliveries.Append(context.Background(), forgedelivery.Entry{
+			DeliveryID: id, TenantID: tc.id, ConfigHash: "cfg1", SourceRevision: "rev-" + tc.id,
+			Target: "main", ForgeRef: "pr-" + tc.id, Mode: forgedelivery.ModeCI,
+			State: forgedelivery.StateOpened, Actor: "customer-ci", At: now(),
+		}); err != nil {
+			return api.AdminDeps{}, err
+		}
+		switch i % 3 {
+		case 0:
+			// OBSERVED merge — the only outcome that means a change shipped.
+			if err := deliveries.Append(context.Background(), forgedelivery.Entry{
+				DeliveryID: id, TenantID: tc.id, ConfigHash: "cfg1", SourceRevision: "rev-" + tc.id,
+				Target: "main", ForgeRef: "pr-" + tc.id, Mode: forgedelivery.ModeCI,
+				State: forgedelivery.StateMerged, Actor: "customer-ci",
+				MergeCommit: "merge-" + tc.id, At: now(),
+			}); err != nil {
+				return api.AdminDeps{}, err
+			}
+		case 1:
+			// Closed WITHOUT merging. It must never render as merged.
+			if err := deliveries.Append(context.Background(), forgedelivery.Entry{
+				DeliveryID: id, TenantID: tc.id, ConfigHash: "cfg1", SourceRevision: "rev-" + tc.id,
+				Target: "main", ForgeRef: "pr-" + tc.id, Mode: forgedelivery.ModeCI,
+				State: forgedelivery.StateClosed, Actor: "customer-ci",
+				Reason: "the author closed it without merging", At: now(),
+			}); err != nil {
+				return api.AdminDeps{}, err
+			}
+		default:
+			// Still open: the merge outcome is UNKNOWN, and it is rendered as unknown.
+		}
+	}
+	deliverySvc, err := adminops.NewDeliveryService(exec, deliveries, accounts)
+	if err != nil {
+		return api.AdminDeps{}, err
+	}
+
+	// ── P26 release oversight over the REAL channel contract and the REAL compiled trust root ──
+	//
+	// The channels, the target matrix and the key set come from `internal/distribution` and
+	// `internal/release` unchanged. What this demo supplies is the per-release RECORD a publish pipeline
+	// produces — and it supplies all three smoke outcomes on purpose, because `queued until timeout` is
+	// the one this surface exists to keep from being read as a failure.
+	releaseSvc, err := adminops.NewReleaseService(exec, demoReleases{})
+	if err != nil {
+		return api.AdminDeps{}, err
+	}
+
+	// ── P26 axis oversight over the REAL coverage source ──
+	//
+	// The matrix, the causes and each axis's declared status come from `transform.AxisCoverage()`
+	// unchanged — the same read the transform's refusal, preflight, the CLI and the customer console
+	// perform. What this demo supplies is fleet ADOPTION, which is a per-deployment fact.
+	axisSvc, err := adminops.NewAxisService(exec, demoAdoption{})
+	if err != nil {
+		return api.AdminDeps{}, err
+	}
+
+	// ── P26 oversight: sessions + their verified factor, legal acceptance, reporting health ──
+	tenantIDs := make([]string, 0, len(tenants))
+	for _, tc := range tenants {
+		tenantIDs = append(tenantIDs, tc.id)
+	}
+	oversightSvc, err := adminops.NewOversightService(exec, adminops.OversightConfig{
+		Sessions: layer.Sessions,
+		Identity: layer.Authenticator.Describe(),
+		Tenants:  func() []string { return tenantIDs },
+		// No legal service and no deployment source in this demo: both absences are REPORTED rather
+		// than rendered as empty tables, which is the property wave 26e exists to hold.
+		Readiness: demoReadiness{},
+	})
+	if err != nil {
+		return api.AdminDeps{}, err
+	}
+
 	auditSvc, err := adminops.NewAuditService(exec)
 	if err != nil {
 		return api.AdminDeps{}, err
@@ -346,6 +475,10 @@ func wire(repoDir string) (api.AdminDeps, error) {
 		CrossTenant:        crossSvc,
 		Audit:              auditSvc,
 		GDPR:               gdprSvc,
+		Delivery:           deliverySvc,
+		Release:            releaseSvc,
+		Axis:               axisSvc,
+		Oversight:          oversightSvc,
 		TestModeIdP:        layer.TestModeIdP,
 		IdP:                layer.IdP,
 		Factors:            layer.Factors,
@@ -374,4 +507,109 @@ func seedJobQueue(now time.Time) *adminops.MemJobQueue {
 	q.Seed(runqueue.Job{RunID: "run-acme-opt-11", ConfigHash: "cfg-e", SourceRevision: "rev1", State: "dead",
 		Attempts: 3, DeadLetterReason: "exhausted 3 attempts without completing", EnqueuedAt: now.Add(-50 * time.Minute)})
 	return q
+}
+
+// demoReleases is the publish record this demo stands in for.
+//
+// 🔴 It is labelled as a demo record on the surface (Describe), because an operator has to be able to
+// tell a real publish outcome from a fixture without reading this file. The three smoke outcomes are
+// all present deliberately: `passed`, `failed`, and `queued_until_timeout` — the last is the P20
+// lesson (a retired runner label queues rather than failing) and the one the surface must never render
+// as a failure.
+type demoReleases struct{}
+
+func (demoReleases) Describe() string {
+	return "demo publish record (cmd/proof/operatorconsole) over the real channel contract and the real compiled trust root"
+}
+
+func (demoReleases) Releases() []adminops.ReleaseRecord {
+	return []adminops.ReleaseRecord{
+		{
+			Version: "v0.20.0", Channel: "curl-sh", PublishedAt: "2026-07-30T00:00:00Z",
+			SigningKeyID: "heros-release-2026c",
+			Artefacts: []adminops.ArtefactRecord{
+				{Platform: "linux/amd64", Name: "heros_0.20.0_linux_amd64.tar.gz", Published: true,
+					Verification: adminops.VerifyVerified, Smoke: adminops.SmokePassed},
+				{Platform: "darwin/arm64", Name: "heros_0.20.0_darwin_arm64.tar.gz", Published: true,
+					Verification: adminops.VerifyVerified, Smoke: adminops.SmokeQueuedUntilTimeout,
+					SmokeDetail: "runner label macos-13 was retired; the job queued until the workflow timed out and never started"},
+				{Platform: "windows/amd64", Name: "heros_0.20.0_windows_amd64.zip", Published: true,
+					Verification: adminops.VerifyVerified, Smoke: adminops.SmokePassed},
+			},
+		},
+		{
+			// Published, verified, and its smoke FAILED — the state that reaches a stranger's laptop.
+			Version: "v0.20.1", Channel: "curl-sh", PublishedAt: "2026-07-31T00:00:00Z",
+			SigningKeyID: "heros-release-2026c",
+			Artefacts: []adminops.ArtefactRecord{
+				{Platform: "linux/amd64", Name: "heros_0.20.1_linux_amd64.tar.gz", Published: true,
+					Verification: adminops.VerifyVerified, Smoke: adminops.SmokeFailed,
+					SmokeDetail: "the installed binary reported a version that did not match the tag"},
+				{Platform: "darwin/arm64", Name: "heros_0.20.1_darwin_arm64.tar.gz", Published: false},
+			},
+		},
+		{
+			// Signed with a RETIRED key. This is the P20 incident question, answerable from the console.
+			Version: "v0.20.0-rc.4", Channel: "curl-sh", PublishedAt: "2026-07-29T00:00:00Z",
+			SigningKeyID: "heros-release-2026b",
+			Artefacts: []adminops.ArtefactRecord{
+				{Platform: "linux/amd64", Name: "heros_0.20.0-rc.4_linux_amd64.tar.gz", Published: true,
+					Verification: adminops.VerifyNotYet},
+			},
+		},
+	}
+}
+
+// demoAdoption is the fleet adoption this demo stands in for. Coverage itself is NOT from here — it is
+// read from the engine — and that split is the point: adoption is a per-deployment fact, coverage is a
+// claim about a customer's code and has exactly one source.
+type demoAdoption struct{}
+
+func (demoAdoption) Describe() string { return "demo fleet adoption (cmd/proof/operatorconsole)" }
+
+func (demoAdoption) Adoption(axis string) (int, int) {
+	switch axis {
+	case "prompt":
+		return 4, 23
+	case "model":
+		return 3, 11
+	case "context":
+		return 2, 6
+	case "memory":
+		return 1, 2
+	}
+	return 0, 0
+}
+
+func (demoAdoption) RefusedNodes(axis string) []adminops.RefusedNode {
+	if axis != "prompt" {
+		return nil
+	}
+	return []adminops.RefusedNode{
+		{TenantID: "tenant-hermes", NodeID: "hermes/agent.py:call_model", Language: "python",
+			Axis: "prompt", Cause: "call-site-cannot-carry-it"},
+		{TenantID: "tenant-acme", NodeID: "svc/plan.rs:plan", Language: "rust",
+			Axis: "prompt", Cause: "no-materializer-for-this-language"},
+	}
+}
+
+// demoReadiness reports the observability integrations from the PLATFORM's own readiness surface.
+//
+// All three states are present because they are three different answers: `absent` is a decision,
+// `configured` is health, and `degraded` is a fault that names its failure class. A demo with only
+// `configured` rows would render correctly and prove nothing.
+type demoReadiness struct{}
+
+func (demoReadiness) Describe() string { return "platform readiness surface (/admin/api/readyz)" }
+
+func (demoReadiness) Integrations() []adminops.IntegrationRow {
+	const src = "platform readiness surface"
+	return []adminops.IntegrationRow{
+		{Name: "metric store (P2.5)", State: adminops.IntegrationConfigured, Source: src},
+		{Name: "error monitoring (P24)", State: adminops.IntegrationAbsent, Source: src},
+		{Name: "product analytics (P24)", State: adminops.IntegrationAbsent, Source: src},
+		{Name: "trace export", State: adminops.IntegrationDegraded,
+			FailureClass: "configured, and the exporter has not accepted a flush since this process started",
+			Source:       src},
+	}
 }

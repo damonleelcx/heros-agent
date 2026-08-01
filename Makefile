@@ -22,7 +22,7 @@ PARITY_DIR ?= .parity
 
 .PHONY: ci go build vet fmt test schema lint db-proof pg-proof verifier-proof tidy-check clean help demo-evalboard \
         deploy-lint \
-        console-types console-types-check console-test docs-facts docs-facts-check \
+        console-types console-types-check console-test operator-console-test operator-ledger operator-hermes docs-facts docs-facts-check \
         build-discover discovery-ci discovery-throughput \
         discovery-parity-snapshot discovery-parity-verify \
         discovery-sandbox-proof discovery-sandbox-proof-redcheck \
@@ -99,6 +99,35 @@ deploy-lint:
 ## console-test: the customer console's own suite (needs npm; see web/console/README.md)
 console-test:
 	cd web/console && npm run typecheck && npm test
+
+## operator-ledger: the P26 operator-surface fence — a capability with no recorded operator story fails.
+#
+# Its own target as well as a step of the operator console's build, for the same reason the
+# reproducible-build gate is named as its own CI step: a gate that exists only as one of many tests is
+# a gate nobody can see pass, and the day it stops running nothing goes red.
+operator-ledger:
+	cd web/admin-console && npm run scan:ledger
+
+## operator-hermes: run P26's operator surfaces against a REAL repository (nousresearch/hermes-agent).
+#
+# The read models are pointed at a real discovered IR and a real checkout, and the run exits non-zero on
+# any honesty violation — a refusal with no cause, a permanent boundary that names an artefact, an
+# observed-merge claim nobody observed, an inferred deployment version, a key fingerprint long enough to
+# be a blob. IR and checkout are overridable:
+#
+#	make operator-hermes IR=/tmp/ir.json REPO=/tmp/hermes-agent
+IR ?= /private/tmp/p23run/ir.json
+REPO ?= /private/tmp/p23run/hermes-agent
+operator-hermes:
+	GOWORK=off $(GO) run ./cmd/proof/operatorsurfaces -ir $(IR) -repo $(REPO)
+
+## operator-console-test: the OPERATOR console's suite (needs npm; see web/admin-console/).
+#
+# 🔴 Run this with NO `next dev` server running. A dev server clobbers `.next`, which makes the bundle
+# scan refuse to measure and manufactures a large number of spurious sign-in failures — a known trap in
+# this repository, and one that reads as a broken suite rather than as a broken environment.
+operator-console-test: operator-ledger
+	cd web/admin-console && npm run typecheck && npm test
 
 ## schema: JSON-schema validation gate + contract proofs (task 4.2)
 schema:

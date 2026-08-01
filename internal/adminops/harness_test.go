@@ -10,7 +10,10 @@ import (
 	"github.com/heros-foreal/agentd/internal/adminidentity"
 	"github.com/heros-foreal/agentd/internal/adminops"
 	"github.com/heros-foreal/agentd/internal/adminrbac"
+	"github.com/heros-foreal/agentd/internal/authoring"
 	"github.com/heros-foreal/agentd/internal/billing"
+	"github.com/heros-foreal/agentd/internal/deliveryrecord"
+	"github.com/heros-foreal/agentd/internal/linkingest"
 	"github.com/heros-foreal/agentd/internal/metering"
 	"github.com/heros-foreal/agentd/internal/metricevent"
 	"github.com/heros-foreal/agentd/internal/plancfg"
@@ -55,6 +58,7 @@ type harness struct {
 	admission *adminops.Admission
 	tenants   *adminops.TenantService
 	sessions  *adminidentity.SessionStore
+	authn     *adminidentity.Authenticator
 	tokens    map[adminrbac.Role]string
 	adminIDs  map[adminrbac.Role]string
 	events    []adminops.CommandEvent
@@ -80,6 +84,10 @@ type harness struct {
 	models        *adminops.ModelRegistry
 	deltas        *metering.MemVerifiedDeltas
 	savings       *metering.MemSavingsStore
+	links         *linkingest.MemStore
+	authored      *authoring.MemRecorder
+	deliveries    *deliveryrecord.MemStore
+	delivery      *adminops.DeliveryService
 	period        metering.Period
 }
 
@@ -157,6 +165,7 @@ func newHarness(t *testing.T) *harness {
 	if err != nil {
 		t.Fatalf("NewAuthenticator: %v", err)
 	}
+	h.authn = authn
 	h.tokens = map[adminrbac.Role]string{}
 	for _, r := range adminrbac.Roles {
 		subject := "sso|" + string(r)
@@ -261,8 +270,13 @@ func newHarness(t *testing.T) *harness {
 	h.billing = svc
 	h.deltas = metering.NewMemVerifiedDeltas()
 	h.savings = metering.NewMemSavingsStore()
+	// The P11 link-coverage source. Wired empty: coverage starts UNKNOWN, and a test that wants a
+	// figure rendered has to say what the platform observed — which is the property under test.
+	h.links = linkingest.NewMemStore()
+	// The append-only authored-change record the improvement aggregate reads through the ONE filter.
+	h.authored = authoring.NewMemRecorder()
 
-	bill, err := adminops.NewBillingService(exec, svc, h.deltas)
+	bill, err := adminops.NewBillingService(exec, svc, h.deltas, h.links)
 	if err != nil {
 		t.Fatalf("NewBillingService: %v", err)
 	}
@@ -301,11 +315,20 @@ func newHarness(t *testing.T) *harness {
 	// ── cross-tenant read models over the P2.5 substrate ──
 	ct, err := adminops.NewCrossTenantService(exec, adminops.CrossTenantConfig{
 		Accounts: accounts, Meter: meter, Ledger: svc.Ledger(), Admission: admission,
+		Authored: h.authored, Deltas: h.deltas,
 	})
 	if err != nil {
 		t.Fatalf("NewCrossTenantService: %v", err)
 	}
 	h.crossTenant = ct
+
+	// ── P26 delivery oversight over the REAL P12 record ──
+	h.deliveries = deliveryrecord.NewMemStore()
+	dlv, err := adminops.NewDeliveryService(exec, h.deliveries, accounts)
+	if err != nil {
+		t.Fatalf("NewDeliveryService: %v", err)
+	}
+	h.delivery = dlv
 
 	// ── compliance ──
 	h.subjects = adminops.NewMemSubjectStore()
@@ -371,3 +394,7 @@ func (h *harness) assertChainIntact() {
 		h.t.Fatalf("audit chain broken at seq %d: %s", v.BreakAt, v.Detail)
 	}
 }
+
+// identityInfo reports the fixture IdP's own description, so the oversight assertions read what the
+// real verifier says about itself rather than a literal a test invented.
+func (h *harness) identityInfo() adminidentity.ProviderInfo { return h.authn.Describe() }

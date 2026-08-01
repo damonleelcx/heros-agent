@@ -229,7 +229,7 @@ func TestGainshareChargeWithNoVerifiedEvidenceIsAnException(t *testing.T) {
 	//
 	// A ledger that has lost the entry is exactly what a mis-attributed or rolled-back saving looks
 	// like from the billing side, and the console must NOT render the charge as valid.
-	forgetful, err := adminops.NewBillingService(h.exec, h.billing, emptyDeltaLedger{})
+	forgetful, err := adminops.NewBillingService(h.exec, h.billing, emptyDeltaLedger{}, h.links)
 	if err != nil {
 		t.Fatalf("NewBillingService: %v", err)
 	}

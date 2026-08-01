@@ -73,7 +73,7 @@ export default async function AuditPage({
       <PageFrame
         eyebrow="The record"
         title="Audit log"
-        lede="Append-only and hash-chained. Every admin action and every autonomous merge is here, and no role — not even Superadmin — can alter or remove an entry without breaking the chain."
+        lede="Append-only and hash-chained. Every admin action and every AUTONOMOUS merge is here, and no role — not even Superadmin — can alter or remove an entry without breaking the chain. It does not record every merge the platform is involved in — see what this chain covers, below."
       >
         {view ? (
           view.verification.intact ? (
@@ -92,6 +92,42 @@ export default async function AuditPage({
               </p>
             </div>
           )
+        ) : null}
+
+        {/* 🔴 What the chain covers, and what it does not. Before P26 the surface implied it recorded
+            every merge; it records the ones the P6 loop performs itself. P12 deliveries merge in the
+            CUSTOMER'S CI, under a credential the platform does not hold, so their absence here is not
+            evidence that they did not happen — which is the false conclusion an auditor would
+            otherwise draw from a true page. */}
+        {view ? (
+          <Section title="What this chain covers" aside={<Pill tone="neutral">merge paths</Pill>}>
+            <p className="state__body">{view.merge_coverage.statement}</p>
+            <DataTable
+              caption="Each merge path, whether the hash chain records it, and where it is read."
+              columns={[{ label: "Merge path" }, { label: "In this chain" }, { label: "How" }, { label: "Read at" }]}
+            >
+              {view.merge_coverage.covered.map((p) => (
+                <tr key={p.id}>
+                  <th scope="row">{p.name}</th>
+                  <td>
+                    <Pill tone="ok">recorded</Pill>
+                  </td>
+                  <td>{p.mechanism}</td>
+                  <td>this log</td>
+                </tr>
+              ))}
+              {view.merge_coverage.not_covered.map((p) => (
+                <tr key={p.id}>
+                  <th scope="row">{p.name}</th>
+                  <td>
+                    <Pill tone="neutral">not recorded</Pill>
+                  </td>
+                  <td>{p.mechanism}</td>
+                  <td>{p.readable_at ? <a href={p.readable_at}>{p.readable_at}</a> : "—"}</td>
+                </tr>
+              ))}
+            </DataTable>
+          </Section>
         ) : null}
 
         <Section title="Filter">

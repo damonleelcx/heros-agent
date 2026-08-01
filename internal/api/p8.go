@@ -81,6 +81,25 @@ type AdminDeps struct {
 	Audit         *adminops.AuditService
 	GDPR          *adminops.GDPRService
 
+	// Delivery is P26's delivery oversight — P12 delivery records, their OBSERVED merge state, and the
+	// ADR-010 change-delivery picture. Read-only: the service has no writer, so no route below can open,
+	// close, retry or merge a delivery.
+	Delivery *adminops.DeliveryService
+
+	// Release is P26's release and trust oversight — published channels, artefact verification,
+	// post-publish smoke, and signing-key STATE (identifier and fingerprint, never key material).
+	// Read-only: nothing here halts a channel, unpublishes an artefact, re-signs or re-publishes.
+	Release *adminops.ReleaseService
+
+	// Axis is P26's axis oversight — per-axis declared status, fleet adoption, refusal counts by stable
+	// typed cause, and the coverage matrix read from the ONE coverage source. Read-only.
+	Axis *adminops.AxisService
+
+	// Oversight is P26's identity, consent and reporting-health surface — which factor authenticated
+	// each operator session, which legal versions each tenant owes, whether reporting is working, and
+	// the two reads that are honestly not yet possible. Read-only.
+	Oversight *adminops.OversightService
+
 	// TestModeIdP, when set, is the fixture admin IdP the sign-in page's test-mode control uses. It is
 	// present ONLY in a test-mode deployment (rollout 8a). Its assertions are signed with the real
 	// admin IdP keys and verified by the real verifier — including MFA — so it is a test-mode ISSUER,
@@ -224,6 +243,19 @@ func (a *AdminAPI) routes() {
 
 	m.HandleFunc("GET /admin/api/crosstenant/{aggregate}", a.session(a.mounted(a.deps.CrossTenant != nil, "cross-tenant", a.handleCrossTenant)))
 	m.HandleFunc("GET /admin/api/crosstenant/{aggregate}/{tenant}", a.session(a.mounted(a.deps.CrossTenant != nil, "cross-tenant", a.handleDrillDown)))
+
+	// ── P26 delivery oversight. Read routes only; each writes its audit entry on the SAME code path as
+	// the read, inside the service, rather than from a poller. ──
+	m.HandleFunc("GET /admin/api/delivery", a.session(a.mounted(a.deps.Delivery != nil, "delivery oversight", a.handleDeliveryFleet)))
+	m.HandleFunc("GET /admin/api/delivery/{tenant}", a.session(a.mounted(a.deps.Delivery != nil, "delivery oversight", a.handleDeliveryTenant)))
+	m.HandleFunc("GET /admin/api/delivery/{tenant}/{id}", a.session(a.mounted(a.deps.Delivery != nil, "delivery oversight", a.handleDeliveryHistory)))
+
+	m.HandleFunc("GET /admin/api/releases", a.session(a.mounted(a.deps.Release != nil, "release oversight", a.handleReleases)))
+
+	m.HandleFunc("GET /admin/api/axes", a.session(a.mounted(a.deps.Axis != nil, "axis oversight", a.handleAxes)))
+	m.HandleFunc("GET /admin/api/axes/{axis}/refused", a.session(a.mounted(a.deps.Axis != nil, "axis oversight", a.handleAxisRefused)))
+
+	m.HandleFunc("GET /admin/api/oversight", a.session(a.mounted(a.deps.Oversight != nil, "oversight", a.handleOversight)))
 
 	m.HandleFunc("GET /admin/api/audit", a.session(a.mounted(a.deps.Audit != nil, "audit log", a.handleAudit)))
 	m.HandleFunc("GET /admin/api/audit/verify", a.session(a.mounted(a.deps.Audit != nil, "audit log", a.handleAuditVerify)))
@@ -859,6 +891,77 @@ func (a *AdminAPI) handleDrillDown(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, model)
+}
+
+// ── Delivery (P26, read-only) ───────────────────────────────────────────────────────────────────
+
+func (a *AdminAPI) handleDeliveryFleet(w http.ResponseWriter, r *http.Request) {
+	view, err := a.deps.Delivery.Fleet(r.Context())
+	if err != nil {
+		writeCapabilityError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
+}
+
+func (a *AdminAPI) handleDeliveryTenant(w http.ResponseWriter, r *http.Request) {
+	view, err := a.deps.Delivery.Tenant(r.Context(), r.PathValue("tenant"))
+	if err != nil {
+		writeCapabilityError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
+}
+
+func (a *AdminAPI) handleDeliveryHistory(w http.ResponseWriter, r *http.Request) {
+	entries, err := a.deps.Delivery.History(r.Context(), r.PathValue("tenant"), r.PathValue("id"))
+	if err != nil {
+		writeCapabilityError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"entries": entries})
+}
+
+// ── Releases (P26, read-only) ───────────────────────────────────────────────────────────────────
+
+func (a *AdminAPI) handleReleases(w http.ResponseWriter, r *http.Request) {
+	view, err := a.deps.Release.View(r.Context())
+	if err != nil {
+		writeCapabilityError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
+}
+
+// ── Axes (P26, read-only) ───────────────────────────────────────────────────────────────────────
+
+func (a *AdminAPI) handleAxes(w http.ResponseWriter, r *http.Request) {
+	view, err := a.deps.Axis.View(r.Context())
+	if err != nil {
+		writeCapabilityError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
+}
+
+func (a *AdminAPI) handleAxisRefused(w http.ResponseWriter, r *http.Request) {
+	nodes, err := a.deps.Axis.RefusedNodes(r.Context(), r.PathValue("axis"))
+	if err != nil {
+		writeCapabilityError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"nodes": nodes})
+}
+
+// ── Oversight (P26, read-only) ──────────────────────────────────────────────────────────────────
+
+func (a *AdminAPI) handleOversight(w http.ResponseWriter, r *http.Request) {
+	view, err := a.deps.Oversight.View(r.Context())
+	if err != nil {
+		writeCapabilityError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
 }
 
 // ── Audit ───────────────────────────────────────────────────────────────────────────────────────

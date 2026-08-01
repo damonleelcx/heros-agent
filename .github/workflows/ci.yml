@@ -109,6 +109,34 @@ jobs:
           CGO_ENABLED: "1"
         run: make verifier-proof
 
+  # The operator console's own gates. Its own job — cheap, no Go toolchain — so operator-oversight
+  # drift, a design-language literal or a payload overage fails the build the same way a Go break does.
+  #
+  # 🔴 `scan:ledger` is named as its own step as well as running inside `npm run build`, for the same
+  # reason the reproducible-build gate is: a gate that exists only inside a composite command is a gate
+  # nobody can see pass, and the day it stops running nothing goes red. The whole point of this fence is
+  # that fourteen phases of operator-console drift happened with nothing failing.
+  operator-console:
+    name: operator console · surface ledger · tokens · tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web/admin-console
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/admin-console/package-lock.json
+      - run: npm ci
+      - name: operator-surface ledger fence (required)
+        run: npm run scan:ledger
+      - name: design-language fence
+        run: npm run scan:tokens
+      - run: npm run typecheck
+      - run: npm test
+
   lint:
     name: golangci-lint
     runs-on: ubuntu-latest
