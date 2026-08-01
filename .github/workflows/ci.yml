@@ -148,6 +148,23 @@ jobs:
       - name: design-language fence
         run: npm run scan:tokens
       - run: npm run typecheck
+      # 🔴 The suite now needs a BUILD, and this step is why the job grew one.
+      #
+      # Every assertion in this suite used to be about source shape, which needs no build. P24 added the
+      # first ones that read a real response header — a Content-Security-Policy is assembled in
+      # middleware, per request, on the edge runtime, and the failure it guards against is precisely a
+      # header that says something different from what the file appears to say. Those tests start
+      # `next start`, which needs `next build`.
+      #
+      # The alternative was to let them skip when `.next` is absent. That is the silent-skip failure this
+      # whole phase argues against: a fence that does not run in CI is a fence nobody knows is connected,
+      # and it would have skipped here forever while reporting green.
+      #
+      # It also closes a gap that predates P24 — `scan:bundle` (the payload ceiling, the credential scan
+      # and now the analytics/replay reachability rule) has never run in this job at all, because it only
+      # exists inside `npm run build`.
+      - name: build (runs scan:origins, scan:events, scan:bundle — and produces the .next the live tests need)
+        run: npm run build
       - run: npm test
 
   lint:
