@@ -48,9 +48,9 @@ func okServer() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
-		case "/api/p11/whoami":
+		case "/api/v1/whoami":
 			_ = json.NewEncoder(w).Encode(map[string]any{"identity": "tenantA"})
-		case "/api/p11/link":
+		case "/api/v1/run-links":
 			w.WriteHeader(http.StatusCreated)
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"accepted": true, "run_url": "https://heros-agent.space/app/runs/run-x", "contract_version": runlink.ContractVersion,
@@ -159,7 +159,7 @@ func TestLinkFailureIsNonFatalToLocalResult(t *testing.T) {
 	repo, runID := evalFixture(t)
 	// A server that 500s on link but accepts login.
 	rt := &captureRT{handler: func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/p11/whoami" {
+		if r.URL.Path == "/api/v1/whoami" {
 			_ = json.NewEncoder(w).Encode(map[string]any{"identity": "tenantA"})
 			return
 		}

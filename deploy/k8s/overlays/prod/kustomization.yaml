@@ -1,7 +1,13 @@
-# prod overlay — the production cluster. Differences from base: 3 replicas of the stateless plane (so a
+# prod overlay — the production cluster. Differences from base: 3 replicas of the STATELESS BFFs (so a
 # node loss plus a rolling update still leaves a quorum), production-sized resources, and the cloud
 # SecretStore reached by an ambient identity. The stateful stores stay single-instance (Decision 6); the
 # Patroni-HA evolution is a future overlay, the door left open, not walked through here.
+#
+# 🔴 agentd is NOT scaled here, and prod is exactly where that is tempting. Its ledger is a single SQLite
+# file on a ReadWriteOnce claim (see the base's Deployment comment): a second replica is a second
+# database answering different questions behind one Service, and on a ReadWriteOnce claim it would not
+# even schedule. Raising this number does not buy availability — it buys a split ledger and a pod stuck
+# in Pending. It goes back up when the ledger's contents move to the platform database, and not before.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -16,7 +22,6 @@ patches:
       kind: Deployment
       metadata: { name: agentd }
       spec:
-        replicas: 3
         template:
           spec:
             containers:
@@ -24,6 +29,16 @@ patches:
                 resources:
                   requests: { cpu: "500m", memory: "512Mi" }
                   limits: { cpu: "2", memory: "1Gi" }
+  # The ledger's claim is sized for production here; the base's 10Gi is a floor, not a recommendation.
+  - target: { kind: PersistentVolumeClaim, name: agentd-ledger }
+    patch: |
+      apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata: { name: agentd-ledger }
+      spec:
+        resources:
+          requests:
+            storage: 50Gi
   - target: { kind: Deployment, name: console }
     patch: |
       apiVersion: apps/v1
@@ -38,10 +53,3 @@ patches:
       metadata: { name: admin-console }
       spec:
         replicas: 3
-  # A node drain must leave a quorum, not just one pod: raise the PDB floor with the replica count.
-  - target: { kind: PodDisruptionBudget, name: agentd }
-    patch: |
-      apiVersion: policy/v1
-      kind: PodDisruptionBudget
-      metadata: { name: agentd }
-      spec: { minAvailable: 2 }

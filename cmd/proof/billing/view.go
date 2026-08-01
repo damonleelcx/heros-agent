@@ -17,7 +17,7 @@ import (
 	"github.com/heros-foreal/agentd/internal/telemetry"
 )
 
-// view.go builds the api.P7Source read model over the wired stack, and prints the headless report.
+// view.go builds the api.BillingSource read model over the wired stack, and prints the headless report.
 
 func (s *state) Periods(string) []string {
 	out := make([]string, 0, len(periods))

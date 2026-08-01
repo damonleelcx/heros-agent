@@ -12,7 +12,7 @@ import { platformFetchPublic } from "@/lib/platformApi";
  * wall in front of "here is how to install the free thing" is a contradiction the page itself refutes two
  * paragraphs later.
  *
- * That it CAN be session-less is a property of the endpoint, not a favour: `/api/p20/install` takes no tenant,
+ * That it CAN be session-less is a property of the endpoint, not a favour: `/api/v1/install` takes no tenant,
  * no plan and no role, because which platforms are built and which channels exist are facts about the RELEASE.
  * The server asserts that by signature, so this cannot quietly become tenant-varying data served without a
  * session.
@@ -23,6 +23,6 @@ import { platformFetchPublic } from "@/lib/platformApi";
  * rather than rendering a plausible install command nobody verified.
  */
 export async function fetchInstall(): Promise<InstallView | null> {
-  const outcome = await platformFetchPublic<InstallView>("/api/p20/install");
+  const outcome = await platformFetchPublic<InstallView>("/api/v1/install");
   return outcome.ok ? outcome.data : null;
 }

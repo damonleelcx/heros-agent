@@ -209,8 +209,8 @@ func main() {
 		return
 	}
 	srv := api.New(nil, config.Config{})
-	srv.MountP7(st)
-	srv.MountP21Payments(st)
+	srv.MountBilling(st)
+	srv.MountPayments(st)
 	srv.MountBillingWebhook(st.svc)
 	srv.SetBillingRollout(st.rollout)
 	srv.SetBillingCapability(st.svc)
@@ -222,7 +222,7 @@ func main() {
 	}
 
 	fmt.Printf("\nP21 on %s\n", workflowID)
-	fmt.Printf("  payment read model:  http://%s/api/p21/customers/%s/payment\n", *addr, customerID)
+	fmt.Printf("  payment read model:  http://%s/api/v1/customers/%s/payment\n", *addr, customerID)
 	fmt.Printf("  webhook endpoint:    http://%s/billing/webhook   (the ONE inbound-from-internet path)\n", *addr)
 	fmt.Printf("  readiness:           http://%s/readyz\n", *addr)
 	fmt.Printf("  provider:            %s\n", st.svc.Describe()["provider"])
@@ -294,7 +294,7 @@ func (s *state) serveAdmin(addr string) error {
 	return nil
 }
 
-// state is the wired P21 stack plus the api.P7Source and api.PaymentsSource implementations.
+// state is the wired P21 stack plus the api.BillingSource and api.PaymentsSource implementations.
 type state struct {
 	repoDir  string
 	headSHA  string

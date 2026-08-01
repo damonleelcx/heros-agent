@@ -14,8 +14,8 @@ import (
 //
 // Three routes, one read model:
 //   GET /p25/monitor?run_id=…                    the view (self-contained HTML, embedded)
-//   GET /api/p25/runs/{run_id}/monitor           one JSON snapshot (polling fallback, 404 for no run)
-//   GET /api/p25/runs/{run_id}/monitor/stream    Server-Sent Events: a snapshot every ~500 ms to close
+//   GET /api/v1/runs/{run_id}/monitor           one JSON snapshot (polling fallback, 404 for no run)
+//   GET /api/v1/runs/{run_id}/monitor/stream    Server-Sent Events: a snapshot every ~500 ms to close
 
 // MonitorSource is the read model the routes serve — telemetry.Monitor implements it. An interface so
 // the API does not depend on a concrete monitor and a test can stub it.
@@ -26,8 +26,8 @@ type MonitorSource interface {
 // MountMonitor registers the live-monitor routes. Call after New.
 func (s *Server) MountMonitor(src MonitorSource) {
 	s.monitor = src
-	s.Mux.HandleFunc("GET /api/p25/runs/{run_id}/monitor", s.handleMonitorSnapshot)
-	s.Mux.HandleFunc("GET /api/p25/runs/{run_id}/monitor/stream", s.handleMonitorStream)
+	s.Mux.HandleFunc("GET /api/v1/runs/{run_id}/monitor", s.handleMonitorSnapshot)
+	s.Mux.HandleFunc("GET /api/v1/runs/{run_id}/monitor/stream", s.handleMonitorStream)
 }
 
 func (s *Server) handleMonitorSnapshot(w http.ResponseWriter, r *http.Request) {

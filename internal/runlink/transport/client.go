@@ -119,7 +119,7 @@ func (c *Client) Link(ctx context.Context, p runlink.Payload) (LinkResult, error
 // Validate checks a token against the platform (used by `login`). It returns the identity the platform
 // attributes to the token, or an error.
 func (c *Client) Validate(ctx context.Context) (identity string, err error) {
-	url := c.base + "/api/p11/whoami"
+	url := c.base + "/api/v1/whoami"
 	if err := assertLinkTarget(c.base); err != nil {
 		return "", err
 	}

@@ -14,6 +14,21 @@ WORKDIR /src
 # so the graph cannot resolve differently between two builds of the same commit. `-mod=readonly` fails
 # the build if go.mod would change, which is how a "reproducible" build stops being one.
 COPY go.mod go.sum ./
+
+# The module source is a BUILD ARG, and the default is the public one.
+#
+# 🔴 Why this exists: the build inherits none of the host's network configuration. A host that reaches
+# modules through a regional mirror or a local HTTP proxy (127.0.0.1:… — which a container cannot reach
+# by definition) builds fine on the command line and then dies in here with
+# `dial tcp …:443: i/o timeout` against proxy.golang.org. That is not a broken Dockerfile to the person
+# hitting it; it is "the product does not build", and it is the normal case behind a corporate proxy or
+# a national firewall. deploy/scripts/up.sh passes the host's own GOPROXY through.
+#
+# This does NOT weaken reproducibility: GOPROXY changes where modules are FETCHED FROM, never what is
+# accepted — go.sum still verifies every module hash, so a hostile mirror fails the build rather than
+# poisoning it.
+ARG GOPROXY=https://proxy.golang.org,direct
+ENV GOPROXY=${GOPROXY}
 RUN go mod download
 
 COPY . .
@@ -24,6 +39,21 @@ COPY . .
 # where it is checked out. The resulting binary links glibc, which the runtime base below provides.
 ENV CGO_ENABLED=1
 RUN go build -trimpath -buildvcs=false -mod=readonly -o /out/agentd ./cmd/agentd
+# The consent-retention job ships in the SAME image, not its own. Retention is a legal obligation with a
+# clock on it (P19 FR31), so it has to be deployable — and a second image would be a second digest, a
+# second parity row and a second thing to forget to publish, to run a binary built from this same commit.
+# One image, two entrypoints; the scheduled unit overrides the command.
+RUN go build -trimpath -buildvcs=false -mod=readonly -o /out/legalretention ./cmd/legalretention
+
+# An EMPTY data directory, created here so the runtime stage can COPY it with the right ownership.
+#
+# 🔴 This is load-bearing and it looks like nothing. The runtime base is distroless — no shell, so no
+# `RUN mkdir` — and the process runs as `nonroot` on a READ-ONLY rootfs. When Docker creates a named
+# volume for a path that does not exist in the image, it creates it EMPTY AND ROOT-OWNED, and nonroot
+# then cannot create the ledger: `unable to open database file` (SQLITE_CANTOPEN), on every boot,
+# forever. Seeding the path from the image is what makes Docker apply the image's ownership to the
+# volume instead.
+RUN mkdir -p /out/datadir
 
 # ── Runtime ──────────────────────────────────────────────────────────────────
 # distroless/base (NOT static): it carries glibc, which the cgo binary needs. Still no shell and no
@@ -32,9 +62,17 @@ RUN go build -trimpath -buildvcs=false -mod=readonly -o /out/agentd ./cmd/agentd
 FROM gcr.io/distroless/base-debian12:nonroot
 WORKDIR /app
 COPY --from=build /out/agentd /app/agentd
+COPY --from=build /out/legalretention /app/legalretention
 
-# The data directory is a MOUNT POINT for a named volume — the SQLite single-binary ledger lives here;
-# in the platform deployment the durable state is Postgres and this holds only transient working state.
+# The data directory, owned by the user that has to write it. See the build stage's note: without this
+# the named volume is root-owned and the nonroot process cannot create its ledger.
+COPY --from=build --chown=nonroot:nonroot /out/datadir /var/lib/heros
+
+# The data directory is a MOUNT POINT for a named volume, and its contents are DURABLE, not scratch. The
+# SQLite ledger here holds tenant credentials, the registries, memory, the tool index and the inbox; the
+# platform database holds lineage, specs, transforms, runs, eval results and consent. Both are user
+# state under P19 FR22, and a deployment that mounts this at an emptyDir loses the first one on every
+# rollout — which is exactly what the Kubernetes base did until Decision 9.
 ENV HEROS_DATA_DIR=/var/lib/heros
 ENV HEROS_LISTEN_ADDR=0.0.0.0:4321
 USER nonroot:nonroot

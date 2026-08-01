@@ -334,7 +334,7 @@ func TestPGSubmit_PersistsTheSpecTheTransformAndTheQueuedRun(t *testing.T) {
 		t.Errorf("the submitted override is not in the stored lineage: %+v", lineage.Nodes)
 	}
 
-	// 2 · the TRANSFORM row — read back through the store the UI's GET /api/p2/transforms handler uses.
+	// 2 · the TRANSFORM row — read back through the store the UI's GET /api/v1/transforms handler uses.
 	rec, diff, err := h.trans.Get(ctx, out.ConfigHash, h.rev)
 	if err != nil {
 		t.Fatalf("the transform was not recorded: %v", err)
@@ -352,7 +352,7 @@ func TestPGSubmit_PersistsTheSpecTheTransformAndTheQueuedRun(t *testing.T) {
 		t.Errorf("the transform is not a reviewable change: %+v", rec)
 	}
 
-	// 3 · the RUN row — read back through the store the UI's GET /api/p2/runs handler uses. It must be
+	// 3 · the RUN row — read back through the store the UI's GET /api/v1/runs handler uses. It must be
 	// watchable the instant submit returns, or a successful submit looks like a broken one.
 	run, err := h.runs.Get(ctx, out.RunID)
 	if err != nil {

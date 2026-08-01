@@ -136,7 +136,7 @@ func traceIDFor(r *http.Request) string {
 // runIDFromPath returns the run id in a `/runs/{id}` path, or "".
 //
 // Written as a segment scan rather than a set of route patterns because the run-scoped routes live in
-// four files (`/api/p2/runs/…`, `/api/p25/monitor/runs/…`, and the stream variants) and a rule enforced
+// four files (`/api/v1/runs/…`, `/api/p25/monitor/runs/…`, and the stream variants) and a rule enforced
 // route by route fails the first time somebody adds a route.
 func runIDFromPath(path string) string {
 	segments := strings.Split(strings.Trim(path, "/"), "/")

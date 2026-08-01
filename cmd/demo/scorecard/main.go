@@ -62,16 +62,16 @@ func main() {
 	src.views["v-clean"] = buildEmpty(ctx)
 
 	s := api.New(nil, config.Config{})
-	s.MountP45(src)
+	s.MountScorecard(src)
 
 	fmt.Println("p4.5 scorecard:")
-	fmt.Printf("  rich (all regions) http://%s/p45/scorecard?variant=v-diag\n", *addr)
-	fmt.Printf("  empty state        http://%s/p45/scorecard?variant=v-clean\n", *addr)
+	fmt.Printf("  rich (all regions) http://%s/scorecard?variant=v-diag\n", *addr)
+	fmt.Printf("  empty state        http://%s/scorecard?variant=v-clean\n", *addr)
 
 	if *irPath != "" {
 		view, note := buildFromRealIR(ctx, *irPath, *srcRoot)
 		src.views["v-real"] = view
-		fmt.Printf("  REAL repo call sites http://%s/p45/scorecard?variant=v-real\n", *addr)
+		fmt.Printf("  REAL repo call sites http://%s/scorecard?variant=v-real\n", *addr)
 		fmt.Println()
 		fmt.Println(note)
 	}

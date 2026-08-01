@@ -166,7 +166,7 @@ choosing and the refusal the engine raises cannot drift apart.
 🔴 It lands **inside `internal/authoring`**, not in a package of its own. That is the D7 contract made
 structural: an `internal/memoryauthoring` beside it would be a second apply path, which is exactly what
 "one spine, two origins" forbids. A memory change is therefore authored through the **existing**
-`/api/p13/authoring/preflight` and `/submit` routes, carrying a `memory_ref` edit.
+`/api/v1/authoring/preflight` and `/submit` routes, carrying a `memory_ref` edit.
 
 - [x] 9.1 **Preflight refuses early.** The existing `Preflighter`'s materializer probe raises the memory
       refusal before any worktree, build, or eval spend; the memory edit is wired into `Edit`,
@@ -195,7 +195,7 @@ structural: an `internal/memoryauthoring` beside it would be a second apply path
       (Test: `TestAuthoredAndProposedIndistinguishableDownstream`).
 - [x] 9.8 Serve the surface's read model — vocabulary + boundary — from the engine, taking **no** tenant,
       plan, or role, so no entitlement can move the boundary.
-      → `internal/api/p17memory.go`, `GET /api/p17/memory`
+      → `internal/api/p17memory.go`, `GET /api/v1/memory`
       (Test: `TestMemoryReadModelStatesTheBoundaryBeforeAnyChoice`, `TestMemoryReadModelFailsClosedOnUnknownLanguage`).
 
 ## 10. Frontend — the `/app/memory` authoring surface (20c)

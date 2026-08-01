@@ -10,7 +10,7 @@
 #
 # The runtime is PINNED. A floating `node:22` tag moves, and a build that cannot be reproduced is the
 # property NFR9 exists to buy. Repin deliberately, in a commit, with the digest recorded.
-FROM node:22.12.0-bookworm-slim AS build
+FROM node:24.18.1-bookworm-slim AS build
 WORKDIR /app
 
 # Deps first, from the LOCKFILE, so an edit to the source does not re-resolve the dependency graph —
@@ -25,6 +25,16 @@ RUN npm ci --no-audit --no-fund
 COPY web/design-system ../design-system
 COPY web/console .
 
+# 🔴 The origin gate is WORKSPACE-WIDE, and this image is not. scan-origins.mjs resolves its governed
+# files relative to its OWN parent, so inside this image it looks for /console/... and /admin-console/...
+# while the app lives at /app. Copied rather than taught to skip: a scan that silently skips what it
+# cannot find reports green for the very file that went missing. See Dockerfile.admin-console, where the
+# same omission is what made that image unbuildable.
+COPY web/console/src/middleware.ts /console/src/middleware.ts
+COPY web/console/next.config.mjs /console/next.config.mjs
+COPY web/admin-console/src/middleware.ts /admin-console/src/middleware.ts
+COPY web/admin-console/next.config.mjs /admin-console/next.config.mjs
+
 # The build runs the three fences — token scan, string scan, claim scan — then compiles, then scans
 # the shipped client bundle for credential material and priced literals. A bundle that would leak
 # cannot be produced, because the scan is a build step rather than a review habit.
@@ -32,7 +42,7 @@ RUN npm run build
 
 # ── Runtime ──────────────────────────────────────────────────────────────────
 # Same pinned base, so the Node the bundle was built against is the Node that runs it.
-FROM node:22.12.0-bookworm-slim
+FROM node:24.18.1-bookworm-slim
 WORKDIR /app
 ENV NODE_ENV=production
 

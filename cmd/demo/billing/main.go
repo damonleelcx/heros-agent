@@ -105,11 +105,11 @@ func main() {
 	}
 
 	srv := api.New(nil, config.Config{})
-	srv.MountP7(st)
+	srv.MountBilling(st)
 	// The rollout state is a HEALTH SIGNAL on /readyz, not only a log line: "is this box charging real
 	// money" has to be checkable now, from the box.
 	srv.SetBillingRollout(st.rollout)
-	log.Printf("P7 billing surface: http://%s/p7/billing?customer=%s  (plan=%s over-limit=%v payment-failed=%v drift=%v)",
+	log.Printf("P7 billing surface: http://%s/billing?customer=%s  (plan=%s over-limit=%v payment-failed=%v drift=%v)",
 		*addr, customerID, *planID, *overLimit, *paymentFailed, *withDrift)
 	log.Printf("rollout: %s   (readiness: http://%s/readyz)", st.rollout, *addr)
 	for _, a := range st.alerts.Alerts() {
@@ -120,7 +120,7 @@ func main() {
 	}
 }
 
-// state is the whole wired stack plus the api.P7Source implementation.
+// state is the whole wired stack plus the api.BillingSource implementation.
 type state struct {
 	mu       sync.Mutex
 	plans    *plancfg.Resolver
@@ -355,7 +355,7 @@ func verifiedDelta(ref, period string, baseline, optimized float64, merged, esti
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// api.P7Source
+// api.BillingSource
 // ─────────────────────────────────────────────────────────────────────────────
 
 func (s *state) Periods(string) []string {
@@ -570,7 +570,7 @@ func (s *state) evidenceView(ev billing.BillingEvent) []api.EvidenceView {
 		out = append(out, api.EvidenceView{
 			Kind: "verified_delta", Ref: d.Ref,
 			Label: fmt.Sprintf("verified delta %s (held-out, significant)", d.Ref),
-			Link:  "/p55/recommendations#" + d.ProposalID,
+			Link:  "/recommendations#" + d.ProposalID,
 			Method: &api.MethodView{
 				ID: d.Baseline.ID, EvalSetHash: d.Baseline.EvalSetHash,
 				HoldoutCases: len(d.Baseline.HoldoutCaseIDs), GeneratingCases: len(d.Baseline.GeneratingCaseIDs),
@@ -582,7 +582,7 @@ func (s *state) evidenceView(ev billing.BillingEvent) []api.EvidenceView {
 	}
 	for _, m := range merges {
 		out = append(out, api.EvidenceView{Kind: "merge", Ref: m, Label: "merged as " + m,
-			Link: "/p6/monitor#" + m})
+			Link: "/optimizer#" + m})
 	}
 	return out
 }

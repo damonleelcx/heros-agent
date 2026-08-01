@@ -27,19 +27,33 @@ type LinkedRun struct {
 }
 
 // Store records linked runs and the coverage denominator.
+//
+// # Why every method returns an error, including the reads
+//
+// This interface was written against a map, and a map cannot fail — so four of its methods returned no
+// error, and that was invisible until the durable implementation arrived. A Postgres store had nowhere
+// to report a failed read TO: the honest options were to swallow it, to log it where nobody reads it, or
+// to map it onto a legitimate value and hope. All three make a database outage look like an ordinary,
+// truthful answer — an empty run list, an unknown denominator, a run that is simply not linked.
+//
+// So the signatures carry the failure. It costs every caller an `if err != nil`, and it buys the one
+// property that matters here: a tenant's link coverage can never be quietly wrong.
 type Store interface {
 	// Record marks a run linked. It returns already=true if this run was linked before — the property
 	// that makes linking idempotent (FR14).
 	Record(lr LinkedRun) (already bool, err error)
 	// ObserveRunsReported updates the coverage denominator the CLI reported for a tenant. The stored
 	// value is the MAXIMUM observed, a documented lower bound on total activity (contracts doc Q5).
-	ObserveRunsReported(tenantID string, n int)
+	ObserveRunsReported(tenantID string, n int) error
 	// Coverage returns the link coverage for a tenant.
-	Coverage(tenantID string) LinkCoverage
+	Coverage(tenantID string) (LinkCoverage, error)
 	// LinkedRunIDs returns the run ids a tenant has linked, for tests and read models.
-	LinkedRunIDs(tenantID string) []string
+	LinkedRunIDs(tenantID string) ([]string, error)
 	// Get returns one linked run's record, including its recorded scores. ok is false if not linked.
-	Get(tenantID, runID string) (LinkedRun, bool)
+	//
+	// 🔴 `ok=false` means NOT LINKED and nothing else. A read failure is the error — the two were once
+	// the same value here, which made a database outage indistinguishable from a run nobody had linked.
+	Get(tenantID, runID string) (LinkedRun, bool, error)
 }
 
 // LinkCoverage is how much of a tenant's activity the linked figure reflects (FR17). It distinguishes
@@ -82,18 +96,19 @@ func (m *MemStore) Record(lr LinkedRun) (bool, error) {
 	return false, nil
 }
 
-func (m *MemStore) ObserveRunsReported(tenantID string, n int) {
+func (m *MemStore) ObserveRunsReported(tenantID string, n int) error {
 	if n <= 0 {
-		return
+		return nil
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if n > m.reported[tenantID] {
 		m.reported[tenantID] = n
 	}
+	return nil
 }
 
-func (m *MemStore) Coverage(tenantID string) LinkCoverage {
+func (m *MemStore) Coverage(tenantID string) (LinkCoverage, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	linked := len(m.linked[tenantID])
@@ -114,22 +129,22 @@ func (m *MemStore) Coverage(tenantID string) LinkCoverage {
 		cov.RunsReported = linked
 		cov.Complete = true
 	}
-	return cov
+	return cov, nil
 }
 
-func (m *MemStore) LinkedRunIDs(tenantID string) []string {
+func (m *MemStore) LinkedRunIDs(tenantID string) ([]string, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	var out []string
 	for id := range m.linked[tenantID] {
 		out = append(out, id)
 	}
-	return out
+	return out, nil
 }
 
-func (m *MemStore) Get(tenantID, runID string) (LinkedRun, bool) {
+func (m *MemStore) Get(tenantID, runID string) (LinkedRun, bool, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	lr, ok := m.linked[tenantID][runID]
-	return lr, ok
+	return lr, ok, nil
 }

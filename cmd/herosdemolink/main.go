@@ -41,13 +41,13 @@ func main() {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
-		case "/api/p11/whoami":
+		case "/api/v1/whoami":
 			if r.Header.Get("Authorization") == "" {
 				w.WriteHeader(401)
 				return
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"identity": identity})
-		case "/api/p11/link":
+		case "/api/v1/run-links":
 			var p runlink.Payload
 			_ = json.NewDecoder(r.Body).Decode(&p)
 			res, err := ing.Ingest(identity, p) // ← the real ingest: allowlist → P2.5 substrate
@@ -110,7 +110,10 @@ func main() {
 	// Show the server-side truth: SUM from the substrate + coverage.
 	period := metering.MonthPeriod(time.Now())
 	sum, _ := metering.DeriveSUM(sub, identity, period)
-	cov := links.Coverage(identity)
+	cov, covErr := links.Coverage(identity)
+	if covErr != nil {
+		fmt.Fprintf(os.Stderr, "link coverage: UNREADABLE — %v\n", covErr)
+	}
 	fmt.Fprintln(os.Stderr, "\n── server-side result (real substrate) ────────────────")
 	fmt.Fprintf(os.Stderr, "SUM for %s this period: $%.4f (from %d distinct cost event(s))\n", identity, sum.Quantity, sum.EventCount)
 	fmt.Fprintf(os.Stderr, "link coverage: %d/%d runs · complete=%v · known=%v\n", cov.RunsLinked, cov.RunsReported, cov.Complete, cov.Known)

@@ -46,77 +46,77 @@ export function scoped(session: Session) {
     tenantId,
 
     // ── P2 · configure / diff / run ────────────────────────────────────────
-    run: (runId: string) => `/api/p2/runs/${encode(runId)}`,
+    run: (runId: string) => `/api/v1/runs/${encode(runId)}`,
     transform: (configHash: string, sourceRevision: string) =>
-      `/api/p2/transforms/${encode(configHash)}/${encode(sourceRevision)}`,
-    resolveSpec: () => `/api/p2/specs/resolve`,
-    submitSpec: () => `/api/p2/specs/submit`,
+      `/api/v1/transforms/${encode(configHash)}/${encode(sourceRevision)}`,
+    resolveSpec: () => `/api/v1/specs/resolve`,
+    submitSpec: () => `/api/v1/specs/submit`,
 
     // ── P10 · prompt & model studio ───────────────────────────────────────
     // The prompt name is a SUBJECT (like a run_id), not an authority: the platform scopes it to this
     // tenant server-side, and answers with only this tenant's prompts. `publish`, `impact` and
     // `preview` are the studio's write/compute actions; `names`, `timeline` and `diff` are reads.
-    promptNames: () => `/api/p10/prompts`,
-    promptTimeline: (name: string) => `/api/p10/prompts/${encode(name)}/timeline`,
-    promptDiff: (a: string, b: string) => `/api/p10/prompts/diff?a=${encode(a)}&b=${encode(b)}`,
-    publishPrompt: () => `/api/p10/prompts/publish`,
-    promptImpact: () => `/api/p10/prompts/impact`,
-    studioPreview: () => `/api/p10/studio/preview`,
+    promptNames: () => `/api/v1/prompts`,
+    promptTimeline: (name: string) => `/api/v1/prompts/${encode(name)}/timeline`,
+    promptDiff: (a: string, b: string) => `/api/v1/prompts/diff?a=${encode(a)}&b=${encode(b)}`,
+    publishPrompt: () => `/api/v1/prompts/publish`,
+    promptImpact: () => `/api/v1/prompts/impact`,
+    studioPreview: () => `/api/v1/studio/preview`,
     // Matrix surface: rows (models), columns (a workflow's nodes), test-run and bind a cell.
-    studioWorkflows: () => `/api/p10/workflows`,
-    studioModels: () => `/api/p10/models`,
-    studioNodes: (workflowId: string) => `/api/p10/workflows/${encode(workflowId)}/nodes`,
-    studioWorkflowBindings: (workflowId: string) => `/api/p10/workflows/${encode(workflowId)}/bindings`,
-    studioRun: () => `/api/p10/studio/run`,
-    studioBind: () => `/api/p10/studio/bind`,
+    studioWorkflows: () => `/api/v1/workflows`,
+    studioModels: () => `/api/v1/models`,
+    studioNodes: (workflowId: string) => `/api/v1/workflows/${encode(workflowId)}/nodes`,
+    studioWorkflowBindings: (workflowId: string) => `/api/v1/workflows/${encode(workflowId)}/bindings`,
+    studioRun: () => `/api/v1/studio/run`,
+    studioBind: () => `/api/v1/studio/bind`,
 
     // ── P2.5 · live run monitor ───────────────────────────────────────────
-    monitor: (runId: string) => `/api/p25/runs/${encode(runId)}/monitor`,
-    monitorStream: (runId: string) => `/api/p25/runs/${encode(runId)}/monitor/stream`,
+    monitor: (runId: string) => `/api/v1/runs/${encode(runId)}/monitor`,
+    monitorStream: (runId: string) => `/api/v1/runs/${encode(runId)}/monitor/stream`,
 
     // ── P3.5 · pattern-classified graph ───────────────────────────────────
-    graph: (workflowId: string) => `/api/p35/workflows/${encode(workflowId)}/graph`,
+    graph: (workflowId: string) => `/api/v1/workflows/${encode(workflowId)}/graph`,
 
     // ── P4 · eval board ───────────────────────────────────────────────────
     // `profile` is VIEW STATE, not identity: it selects a weight profile on a board whose subject is
     // already fixed. It is forwarded because the platform owns the profile list and the console must
     // not invent one — the board response carries `profiles` for exactly that reason.
     board: (workflowId: string, profile?: string) =>
-      `/api/p4/workflows/${encode(workflowId)}/board` + (profile ? `?profile=${encode(profile)}` : ""),
+      `/api/v1/workflows/${encode(workflowId)}/board` + (profile ? `?profile=${encode(profile)}` : ""),
 
     // ── P4.5 · attribution scorecard ──────────────────────────────────────
-    scorecard: (variantId: string) => `/api/p45/variants/${encode(variantId)}/scorecard`,
+    scorecard: (variantId: string) => `/api/v1/variants/${encode(variantId)}/scorecard`,
 
     // ── P5.5 · proposals and their verified deltas ────────────────────────
-    proposals: (workflowId: string) => `/api/p55/workflows/${encode(workflowId)}/surface`,
+    proposals: (workflowId: string) => `/api/v1/workflows/${encode(workflowId)}/surface`,
     openPR: (workflowId: string, proposalId: string) =>
-      `/api/p55/workflows/${encode(workflowId)}/proposals/${encode(proposalId)}/open-pr`,
+      `/api/v1/workflows/${encode(workflowId)}/proposals/${encode(proposalId)}/open-pr`,
 
     // ── P7 · plan, entitlements, spend ────────────────────────────────────
     // The ONLY route keyed by the tenant itself — and it takes the session's tenant, which is the
     // whole point of this module. A customer id from the client would be a scope-widening attempt.
     billing: (period?: string) =>
-      `/api/p7/customers/${encode(tenantId)}/billing` + (period ? `?period=${encode(period)}` : ""),
+      `/api/v1/customers/${encode(tenantId)}/billing` + (period ? `?period=${encode(period)}` : ""),
 
     // ── P21 · payment collection ──────────────────────────────────────────
     // Tenant-keyed, like the P7 billing read and for the same reason: these are the only routes whose
     // subject IS the tenant, and the tenant comes from the session. A customer id from the client would
     // be a scope-widening attempt, and there is no parameter here that could carry one.
     payment: (period?: string) =>
-      `/api/p21/customers/${encode(tenantId)}/payment` + (period ? `?period=${encode(period)}` : ""),
-    checkoutSession: () => `/api/p21/customers/${encode(tenantId)}/checkout-session`,
-    changePlan: () => `/api/p21/customers/${encode(tenantId)}/plan`,
+      `/api/v1/customers/${encode(tenantId)}/payment` + (period ? `?period=${encode(period)}` : ""),
+    checkoutSession: () => `/api/v1/customers/${encode(tenantId)}/checkout-session`,
+    changePlan: () => `/api/v1/customers/${encode(tenantId)}/plan`,
 
     // ── P12 · forge delivery state ────────────────────────────────────────
     // Tenant-scoped server-side from the session's credential + X-Console-Tenant header, like every
     // other read. The console never sends a customer id in the path.
-    deliveries: () => `/api/p12/deliveries`,
+    deliveries: () => `/api/v1/deliveries`,
 
     // ── P13 13e · how an accepted change reaches a running agent ──────────
     // Plan-invariant and tenant-invariant: what a route can carry is a property of the CHANGE, not of
     // what someone paid. The handler takes no tenant at all; the session still scopes the call so
     // there is one call convention rather than two.
-    deliveryRoutes: () => `/api/p13/delivery`,
+    deliveryRoutes: () => `/api/v1/change-delivery`,
   };
 }
 

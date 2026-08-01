@@ -1,8 +1,24 @@
 # agentd — the Go platform service: the control-plane + data-plane API and the aggregator of /readyz.
 #
-# Stateless hot-path component: its DURABLE state is Postgres (eval + lineage) and the object store, so
-# a second replica serves correctly with no code change and no local state that would diverge — which
-# is why it carries a replica count as a VALUE and a PodDisruptionBudget, not a StatefulSet identity.
+# 🔴 ONE REPLICA, ON A PERSISTENT CLAIM — and the reason is a correction, so it is recorded here rather
+# than in a commit message nobody reads at 3am.
+#
+# This was `replicas: 2` over a per-pod `emptyDir`, justified by a comment claiming "its DURABLE state is
+# Postgres". That claim was false: agentd's ledger is SQLite at HEROS_DATA_DIR (tenant credentials, the
+# registries, memory, the tool index, the inbox). Two replicas therefore meant TWO INDEPENDENT DATABASES
+# behind one Service, answering differently depending on which pod you reached — and `emptyDir` meant
+# every one of them was destroyed on every rollout, which `maxSurge: 1, maxUnavailable: 0` guaranteed
+# would happen on each apply. A deployment whose default upgrade path silently loses tenant credentials
+# is not a scaling trade-off; it is data loss with a scaling story attached (八级法则 L1/L3: stability is
+# never traded for implementation convenience).
+#
+# So: one replica, a PersistentVolumeClaim, and `Recreate` — because a ReadWriteOnce claim cannot be held
+# by the old and new pod at once, and a rolling update over one would deadlock waiting for a volume the
+# terminating pod still has.
+#
+# The horizontal-scaling door (FR4) is not closed, it is simply not walked through: when the ledger's
+# contents move to the platform database, agentd becomes genuinely stateless and the replica count goes
+# back to being a value. That is the same posture Decision 6 takes with Postgres HA.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -11,17 +27,14 @@ metadata:
     app.kubernetes.io/name: agentd
     heros.dev/plane: control-and-data     # the NetworkPolicy selects on this
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: agentd
   strategy:
-    type: RollingUpdate
-    rollingUpdate:
-      # Bounded surge/unavailability: a bad revision that fails its readiness probe halts the rollout
-      # with at most one pod down, instead of replacing healthy pods with broken ones.
-      maxSurge: 1
-      maxUnavailable: 0
+    # Recreate, not RollingUpdate: see the ReadWriteOnce claim above. The brief unavailability during an
+    # upgrade is stated in deploy/README.md rather than hidden behind a rollout policy that cannot run.
+    type: Recreate
   template:
     metadata:
       labels:
@@ -31,6 +44,16 @@ spec:
       securityContext:
         runAsNonRoot: true
         seccompProfile: { type: RuntimeDefault }
+        # 🔴 fsGroup, and it is load-bearing on the SAME defect Compose hit: a freshly provisioned
+        # PersistentVolume is root-owned, the container runs as nonroot on a read-only rootfs, and the
+        # process cannot create its ledger — `unable to open database file` (SQLITE_CANTOPEN), on every
+        # boot, forever. fsGroup makes the kubelet chown the volume to this GID on mount.
+        #
+        # 65532 is distroless's `nonroot`. It matches the image's own user, so this is not a number
+        # chosen to make something work — it is the same identity the Dockerfile gives the data
+        # directory, expressed in the place Kubernetes reads it.
+        fsGroup: 65532
+        fsGroupChangePolicy: OnRootMismatch
       containers:
         - name: agentd
           image: ghcr.io/heros-foreal/agentd
@@ -40,12 +63,70 @@ spec:
           env:
             - { name: HEROS_LISTEN_ADDR, value: "0.0.0.0:4321" }
             - { name: HEROS_DATA_DIR, value: "/var/lib/heros" }
-            - { name: HEROS_DATASTORE_NAME, value: "postgres" }
+            # The platform's config file, projected read-only from the `heros-platform` Secret. It carries
+            # the TENANT CREDENTIALS the two console BFFs authenticate with — the one value that cannot be
+            # an environment variable, because a credential set is a LIST, not a string. On Compose the
+            # same file comes from ./config; here it comes from the operator's external store, like every
+            # other secret.
+            - { name: HEROS_CONFIG, value: "/etc/heros/config.json" }
+            # The PLATFORM DATABASE. agentd applies db/migrations/postgres at boot through a ledger it
+            # READS (so a second apply changes no schema) and PROBES this database on /readyz under the
+            # name `postgres`. It replaced HEROS_DATASTORE_NAME, which only renamed the LOCAL ledger's
+            # ping — producing a `postgres` component that could not go red while Postgres was down.
+            - name: DATABASE_URL
+              valueFrom: { secretKeyRef: { name: heros-platform, key: database-url } }
+            # The password, separately — libpq (and lib/pq) reads PGPASSWORD for anything the connection
+            # string omits. Optional, because either shape works here: put the password inside
+            # `database-url` in your secret store, or supply it under `postgres-password` and leave the
+            # DSN without one. The manifest carries neither, so this is about which shape your STORE
+            # holds — and the second keeps a DSN with an embedded credential from existing at all, which
+            # is the shape credential scanners match and cannot tell from an interpolation.
+            - name: PGUSER
+              valueFrom: { secretKeyRef: { name: heros-platform, key: postgres-user, optional: true } }
+            - name: PGPASSWORD
+              valueFrom: { secretKeyRef: { name: heros-platform, key: postgres-password, optional: true } }
             # The secret seam for the platform's OWN model calls. Selected here; the credentials come
             # from the external store the overlay's ExternalSecret materialises, resolved at call time.
             - { name: HEROS_SECRETS_SOURCE, value: "aws-secrets-manager" }
+            # 🔴 REQUIRED whenever the source is aws-secrets-manager, and resolved AT BOOT: without
+            # either of these the process exits with "requires either HEROS_SECRETS_AWS_IDS or
+            # HEROS_SECRETS_AWS_PREFIX to locate the secrets" and the pod CrashLoopBackOffs. The prefix
+            # expands to one secret per supported provider — `heros/providers/openai`,
+            # `heros/providers/anthropic`, … — so adding a provider needs no manifest edit. The secrets
+            # need not exist yet: the map is built at boot, but a missing one surfaces only at the first
+            # model call, named and fail-closed.
+            - { name: HEROS_SECRETS_AWS_REGION, value: "us-east-1" }
+            - { name: HEROS_SECRETS_AWS_PREFIX, value: "heros/providers/" }
+            # The provider credentials for HEROS_SECRETS_SOURCE=env. Absent here, because this base
+            # resolves them from the external store at call time — but DECLARED, because the airgapped
+            # overlay sets the source to `env`, and a deployment that switches the source without these
+            # names present has no provider credentials at all and discovers it at the first model call.
+            # They were missing from this substrate entirely until check-env-parity.sh looked.
+            - name: OPENAI_API_KEY
+              valueFrom: { secretKeyRef: { name: heros-platform, key: openai-api-key, optional: true } }
+            - name: ANTHROPIC_API_KEY
+              valueFrom: { secretKeyRef: { name: heros-platform, key: anthropic-api-key, optional: true } }
+            - { name: HEROS_VERSION, value: "" }
+            # Backing-store credentials agentd reads through internal/config. Optional: absent means the
+            # capability that dials that store is not mounted on this deployment yet.
+            - name: QDRANT_API_KEY
+              valueFrom: { secretKeyRef: { name: heros-platform, key: qdrant-api-key, optional: true } }
+            - name: NEO4J_PASSWORD
+              valueFrom: { secretKeyRef: { name: heros-platform, key: neo4j-password, optional: true } }
+            - name: HEROS_INBOX_SIGNING_KEY
+              valueFrom: { secretKeyRef: { name: heros-platform, key: inbox-signing-key, optional: true } }
+            # Which build this is, on the release surface. A NAME, never a price or a plan tier. The P24
+            # reporting switches are deliberately absent from every deployment manifest (P24 task 7.4):
+            # an empty slot is one `--set` from being filled, in a file a customer edits without reading,
+            # and those integrations belong to the platform's own hosted deployment, not to a customer's.
+            - { name: HEROS_EDITION, value: "managed" }
+            # Operator identity (P22), so /readyz can report `admin_idp`.
+            - { name: ADMIN_IDENTITY_MODE, value: "configured" }
+            - { name: ADMIN_IDP_ISSUER, value: "" }
+            - { name: ADMIN_CONSOLE_ORIGIN, value: "" }
+            - { name: ADMIN_WEBAUTHN_RP_ID, value: "" }
             # Every component the deployment ships, aggregated into /readyz by health URL. Postgres is
-            # aggregated by the agentd datastore ping (HEROS_DATASTORE_NAME).
+            # NOT in this list — it is probed directly, by connection.
             - { name: CONSOLE_HEALTH_URL, value: "http://console:4320/api/health" }
             - { name: ADMIN_CONSOLE_HEALTH_URL, value: "http://admin-console:4310/api/health" }
             - { name: OBJECT_STORE_HEALTH_URL, value: "http://objectstore:9000/minio/health/ready" }
@@ -74,11 +155,40 @@ spec:
             readOnlyRootFilesystem: true
             capabilities: { drop: ["ALL"] }
           volumeMounts:
-            - { name: workdir, mountPath: /var/lib/heros }
+            - { name: ledger, mountPath: /var/lib/heros }
+            - { name: platform-config, mountPath: /etc/heros, readOnly: true }
             - { name: tmp, mountPath: /tmp }
       volumes:
-        - { name: workdir, emptyDir: {} }
+        # `optional: true` so a deployment that has not yet provisioned a credential set still starts —
+        # it comes up with agentd's built-in defaults, which is a legitimate state for a first apply.
+        # 🔴 It is NOT a silent one: /readyz and the boot log both report what is configured, and
+        # deploy/scripts/up.sh's Compose equivalent asserts after boot that auth is actually enforced.
+        # Do the same here before putting a cluster in front of users.
+        - name: platform-config
+          secret:
+            secretName: heros-platform
+            optional: true
+            items:
+              - { key: config-json, path: config.json }
+        # The ledger is USER STATE (FR22), not scratch: tenant credentials, the registries, memory, the
+        # tool index, the inbox. It was an emptyDir, which destroyed all of it on every rollout.
+        - name: ledger
+          persistentVolumeClaim: { claimName: agentd-ledger }
         - { name: tmp, emptyDir: {} }
+---
+# The ledger's claim. ReadWriteOnce, which is what forces `Recreate` above — and which is honest about
+# what this volume is: a single SQLite file one process opens, not shared storage.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: agentd-ledger
+  labels:
+    app.kubernetes.io/name: agentd
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 10Gi
 ---
 apiVersion: v1
 kind: Service
@@ -92,14 +202,23 @@ spec:
   ports:
     - { name: http, port: 4321, targetPort: http }
 ---
-# A node drain (voluntary disruption) cannot remove the last available replica of the control/data
-# plane API — kubernetes-delivery requires a PDB for every workload with replicas > 1.
+# 🔴 minAvailable: 0, and the zero is the honest value, not an oversight.
+#
+# kubernetes-delivery requires a PDB for every workload with replicas > 1. agentd now runs ONE replica on
+# a ReadWriteOnce claim, so there is no "last available replica" to protect: a `minAvailable: 1` here
+# would not make the service survive a drain, it would BLOCK the drain forever, because no second replica
+# can ever come up to satisfy it. A budget that can never be met is not availability, it is a node that
+# cannot be patched.
+#
+# The PDB is kept rather than deleted so the eviction is deliberate and visible in `kubectl get pdb`
+# alongside the others. When the ledger moves to the platform database and the replica count goes back up
+# (see the Deployment's comment), this returns to minAvailable: 1.
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
   name: agentd
 spec:
-  minAvailable: 1
+  minAvailable: 0
   selector:
     matchLabels:
       app.kubernetes.io/name: agentd

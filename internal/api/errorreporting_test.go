@@ -102,12 +102,12 @@ func TestOneTraceIdentityResolvesTheHeaderTheEventAndTheSpan(t *testing.T) {
 	// assertion is about: an error event must carry the SAME string, not a value that resembles it.
 	spanTrace := telemetry.TraceID(runID)
 
-	s.Mux.HandleFunc("GET /api/p24test/runs/{runID}", func(http.ResponseWriter, *http.Request) {
+	s.Mux.HandleFunc("GET /api/v1/errortest/runs/{runID}", func(http.ResponseWriter, *http.Request) {
 		panic("a panic whose value carries the tenant name Nous Research Ltd and prompt text")
 	})
 
 	rec := httptest.NewRecorder()
-	s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/p24test/runs/"+runID, nil))
+	s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/errortest/runs/"+runID, nil))
 
 	// 1. The response header a customer would quote back.
 	header := rec.Header().Get(telemetry.TraceHeader)
@@ -176,7 +176,7 @@ func TestAnInboundTraceIdIsCarriedRatherThanReplaced(t *testing.T) {
 
 func TestEveryResponseCarriesATraceId(t *testing.T) {
 	s, _, _ := serverWithCapture(t)
-	for _, path := range []string{"/healthz", "/readyz", "/api/p13/coverage"} {
+	for _, path := range []string{"/healthz", "/readyz", "/api/v1/coverage"} {
 		rec := httptest.NewRecorder()
 		s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
 		if rec.Header().Get(telemetry.TraceHeader) == "" {
@@ -295,11 +295,11 @@ func TestADegradedReporterDoesNotGateTraffic(t *testing.T) {
 
 func TestWithNoReporterAPanicStillReturnsATraceIdAndTransmitsNothing(t *testing.T) {
 	s := New(nil, config.Config{})
-	s.Mux.HandleFunc("GET /api/p24test/absent", func(http.ResponseWriter, *http.Request) {
+	s.Mux.HandleFunc("GET /api/v1/errortest/absent", func(http.ResponseWriter, *http.Request) {
 		panic("boom")
 	})
 	rec := httptest.NewRecorder()
-	s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/p24test/absent", nil))
+	s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/errortest/absent", nil))
 	if rec.Code != http.StatusInternalServerError {
 		t.Errorf("a panic with no reporter returned %d, want 500", rec.Code)
 	}

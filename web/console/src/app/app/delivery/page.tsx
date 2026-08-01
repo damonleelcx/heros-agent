@@ -83,7 +83,7 @@ export default async function DeliveryPage() {
  */
 async function fetchDeliveryRoutes(): Promise<ChangeDeliveryView | null> {
   const session = await requireSession();
-  const outcome = await platformFetch<ChangeDeliveryView>("/api/p13/delivery", {
+  const outcome = await platformFetch<ChangeDeliveryView>("/api/v1/change-delivery", {
     tenantId: session.tenantId,
   });
   return outcome.ok ? outcome.data : null;

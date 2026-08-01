@@ -382,7 +382,7 @@ Each sub-task below ships only when its inventory section is fully checked.
 ## 11. Frontend + Product — Diagnosis views and proposal review (9b, blocked upstream)
 
 - [x] 11.1 Port the P4.5 attribution/diagnosis read models into the console once available.
-      → P4.5 **is** mounted (`GET /api/p45/variants/{variant_id}/scorecard`), and the console renders it
+      → P4.5 **is** mounted (`GET /api/v1/variants/{variant_id}/scorecard`), and the console renders it
       at `/app/variants/{id}/scorecard`: overall metrics, per-node attribution, failure clusters, the
       analyst's diagnoses and the ablations that were actually re-run. 🔴 A **diagnosis** and an
       **ablation** are rendered in separate sections with different emphasis, because a hypothesis
@@ -391,8 +391,8 @@ Each sub-task below ships only when its inventory section is fully checked.
       approve / reject, in English — per inventory items **IDX-1 … IDX-5**. An unverified proposal is
       rendered as unverified and never in a form resembling verified evidence.
 - [x] 11.3 ✅ **Unblocked — verified 2026-07-24.** The P5.5 API exists and is mounted:
-      `GET /api/p55/workflows/{workflow_id}/surface` and
-      `POST /api/p55/workflows/{workflow_id}/proposals/{proposal_id}/open-pr`
+      `GET /api/v1/workflows/{workflow_id}/proposals` and
+      `POST /api/v1/workflows/{workflow_id}/proposals/{proposal_id}/open-pr`
       (`internal/api/p55.go:145-146`). The gate this task set has been satisfied rather than waived —
       the surface ships **because** it has a backing endpoint, which is the whole point.
 
@@ -407,8 +407,8 @@ Each sub-task below ships only when its inventory section is fully checked.
 
 > ✅ **UNBLOCKED — verified 2026-07-27.** P10 is implemented and mounted: `internal/api/p10.go`
 > (`MountP10` — publish + timeline/diff/impact) and `internal/api/p10matrix.go` (`MountP10Matrix` —
-> `GET /api/p10/models`, `/api/p10/workflows/{id}/nodes`, `/api/p10/workflows/{id}/bindings`,
-> `POST /api/p10/studio/run`, `/api/p10/studio/bind`). The gate this block set is satisfied rather than
+> `GET /api/v1/models`, `/api/v1/workflows/{id}/nodes`, `/api/v1/workflows/{id}/bindings`,
+> `POST /api/v1/studio/run`, `/api/v1/studio/bind`). The gate this block set is satisfied rather than
 > waived — the studio ships **because** it has backing endpoints, which is the whole point. The studio
 > surface itself landed under P10 (`web/console/src/app/app/studio/`), and this block is the record that
 > it satisfies **P9's** rules: single token set, `en-US` strings, render-as-received, three data states,
@@ -464,7 +464,7 @@ and browser-rendered acceptance.
 > ✅ **UNBLOCKED — verified 2026-07-27.** Both read models exist and are mounted. P11 exposes a
 > **coverage** read model — `LinkIngestSource.Coverage` (`internal/api/p11.go`), joined into the P7
 > billing view as `link_coverage` so the SUM figure carries how complete it is (FR17), not a bare
-> number. P12 exposes the **delivery-state** read model — `GET /api/p12/deliveries` returning a
+> number. P12 exposes the **delivery-state** read model — `GET /api/v1/deliveries` returning a
 > `DeliveriesView` of `DeliveryView` rows plus a `RouteConditionView` (`internal/api/p12.go`,
 > `MountP12`). The block set the right gate: 11c.1 was **not** approximated — the fraction is the
 > platform's own (`runs_linked` / `runs_reported`), and *unknown* is a distinct third state the console

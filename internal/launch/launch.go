@@ -24,13 +24,18 @@ import (
 	"github.com/heros-foreal/agentd/internal/config"
 	"github.com/heros-foreal/agentd/internal/db"
 	"github.com/heros-foreal/agentd/internal/erroreport"
+	"github.com/heros-foreal/agentd/internal/pgmigrate"
 	"github.com/heros-foreal/agentd/internal/providergateway"
 )
 
-// Server is a running agentd instance (HTTP API over the SQLite ledger).
+// Server is a running agentd instance: the HTTP API over the local ledger and, when the deployment
+// declares one, the platform database.
 type Server struct {
-	Config     config.Config
-	DB         *sql.DB
+	Config config.Config
+	// DB is the local SQLite ledger (auth, registries, memory, tools, inbox).
+	DB *sql.DB
+	// PlatformDB is the Postgres the platform schema lives in, or nil when the deployment declares none.
+	PlatformDB *sql.DB
 	HTTPServer *http.Server
 }
 
@@ -68,6 +73,54 @@ func StartAgentd(ctx context.Context, cfg config.Config) (*Server, error) {
 
 	handler := api.New(database, cfg)
 	handler.SetSecretsSource(secrets)
+
+	// The PLATFORM database (P19 Decision 9).
+	//
+	// This is the store db/migrations/postgres models — lineage, registries, variant specs, transforms,
+	// runs, eval results, billing, delivery, consent. Until now nothing in the deployed path opened it:
+	// the manifests started Postgres, set HEROS_DATASTORE_NAME=postgres, and the process pinged the local
+	// SQLite ledger under that name. The migrations were applied only by a demo binary reading files from
+	// a relative path, so "upgrade preserves user state" had no mechanism behind it at all.
+	//
+	// A deployment with no DSN declares no platform database: the DB-backed capabilities register
+	// unsourced and /readyz reports no `postgres` component, which is true. A deployment WITH a DSN that
+	// cannot be reached fails the boot, for the reason the secrets source does: a process that starts,
+	// looks healthy, and fails the first real request is a worse signal than one that does not start.
+	platformDB, err := openPlatformDB(ctx)
+	if err != nil {
+		_ = database.Close()
+		return nil, err
+	}
+	if platformDB != nil {
+		res, mErr := pgmigrate.Apply(ctx, platformDB)
+		if mErr != nil {
+			_ = platformDB.Close()
+			_ = database.Close()
+			return nil, fmt.Errorf("platform schema: %w", mErr)
+		}
+		switch {
+		case res.FreshInstall():
+			log.Printf("platform schema: applied %d migrations to an empty database", len(res.Applied))
+		case len(res.Applied) > 0:
+			log.Printf("platform schema: applied %d new migrations (%d already present)", len(res.Applied), len(res.Already))
+		default:
+			log.Printf("platform schema: already current (%d migrations)", len(res.Already))
+		}
+		// Probed, not described: the name `postgres` on /readyz now means this pool.
+		handler.AddComponentProbe(api.NewDBComponentProbe("postgres", platformDB))
+	}
+
+	// Every capability surface the platform ships is registered here — sourced where a durable store
+	// exists, nil where none does so the answer is 503 not-mounted rather than 404 (Decision 10).
+	caps, err := mountCapabilities(handler, platformDB, cfg.DataDir, strings.TrimSpace(os.Getenv("CONSOLE_HEALTH_URL")))
+	if err != nil {
+		if platformDB != nil {
+			_ = platformDB.Close()
+		}
+		_ = database.Close()
+		return nil, fmt.Errorf("capabilities: %w", err)
+	}
+	logCapabilities(caps)
 
 	// The P24 error-reporting boundary (task 2.10).
 	//
@@ -154,6 +207,9 @@ func StartAgentd(ctx context.Context, cfg config.Config) (*Server, error) {
 
 	ln, err := net.Listen("tcp", cfg.ListenAddr)
 	if err != nil {
+		if platformDB != nil {
+			_ = platformDB.Close()
+		}
 		_ = database.Close()
 		return nil, fmt.Errorf("listen %s: %w", cfg.ListenAddr, err)
 	}
@@ -165,10 +221,14 @@ func StartAgentd(ctx context.Context, cfg config.Config) (*Server, error) {
 		}
 	}()
 
-	return &Server{Config: cfg, DB: database, HTTPServer: httpServer}, nil
+	return &Server{Config: cfg, DB: database, PlatformDB: platformDB, HTTPServer: httpServer}, nil
 }
 
-// Shutdown stops the HTTP server and closes the ledger.
+// Shutdown stops the HTTP server and closes both stores.
+//
+// Both are closed even if the first fails, and the first error is the one returned: a shutdown that
+// abandoned the platform pool because the ledger's Close errored would leak connections against the
+// store every other component shares, on every restart.
 func (s *Server) Shutdown(ctx context.Context) error {
 	if s == nil {
 		return nil
@@ -178,8 +238,16 @@ func (s *Server) Shutdown(ctx context.Context) error {
 			return err
 		}
 	}
+	var firstErr error
 	if s.DB != nil {
-		return s.DB.Close()
+		if err := s.DB.Close(); err != nil {
+			firstErr = err
+		}
 	}
-	return nil
+	if s.PlatformDB != nil {
+		if err := s.PlatformDB.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }

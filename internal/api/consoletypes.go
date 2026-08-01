@@ -53,45 +53,45 @@ type ConsoleViewType struct {
 func ConsoleViewTypes() []ConsoleViewType {
 	return []ConsoleViewType{
 		// ── P2 · configure / diff / run ──────────────────────────────────────
-		{Name: "RunView", Sample: runView{}, Endpoint: "GET /api/p2/runs/{run_id}"},
-		{Name: "TransformView", Sample: transformView{}, Endpoint: "GET /api/p2/transforms/{config_hash}/{source_revision}"},
-		{Name: "SubmitResult", Sample: submitResult{}, Endpoint: "POST /api/p2/specs/submit"},
-		{Name: "SpecError", Sample: specError{}, Endpoint: "POST /api/p2/specs/{resolve,submit} (rejection)"},
+		{Name: "RunView", Sample: runView{}, Endpoint: "GET /api/v1/runs/{run_id}"},
+		{Name: "TransformView", Sample: transformView{}, Endpoint: "GET /api/v1/transforms/{config_hash}/{source_revision}"},
+		{Name: "SubmitResult", Sample: submitResult{}, Endpoint: "POST /api/v1/specs/submit"},
+		{Name: "SpecError", Sample: specError{}, Endpoint: "POST /api/v1/specs/{resolve,submit} (rejection)"},
 
 		// ── P2.5 · live run monitor ──────────────────────────────────────────
-		{Name: "RunMonitor", Sample: telemetry.RunMonitor{}, Endpoint: "GET /api/p25/runs/{run_id}/monitor"},
+		{Name: "RunMonitor", Sample: telemetry.RunMonitor{}, Endpoint: "GET /api/v1/runs/{run_id}/monitor"},
 
 		// ── P3.5 · pattern-classified graph ──────────────────────────────────
-		{Name: "GraphView", Sample: patternclassifier.GraphView{}, Endpoint: "GET /api/p35/workflows/{workflow_id}/graph"},
+		{Name: "GraphView", Sample: patternclassifier.GraphView{}, Endpoint: "GET /api/v1/workflows/{workflow_id}/pattern-graph"},
 
 		// ── P4 · eval board ──────────────────────────────────────────────────
-		{Name: "BoardView", Sample: evalboard.View{}, Endpoint: "GET /api/p4/workflows/{workflow_id}/board"},
+		{Name: "BoardView", Sample: evalboard.View{}, Endpoint: "GET /api/v1/workflows/{workflow_id}/eval-board"},
 
 		// ── P4.5 · attribution scorecard ─────────────────────────────────────
-		{Name: "ScorecardView", Sample: scorecard.View{}, Endpoint: "GET /api/p45/variants/{variant_id}/scorecard"},
+		{Name: "ScorecardView", Sample: scorecard.View{}, Endpoint: "GET /api/v1/variants/{variant_id}/scorecard"},
 
 		// ── P5.5 · proposals and their verified deltas ───────────────────────
-		{Name: "ProposalSurface", Sample: Surface{}, Endpoint: "GET /api/p55/workflows/{workflow_id}/surface"},
-		{Name: "PRResult", Sample: PRResult{}, Endpoint: "POST /api/p55/workflows/{workflow_id}/proposals/{proposal_id}/open-pr"},
+		{Name: "ProposalSurface", Sample: Surface{}, Endpoint: "GET /api/v1/workflows/{workflow_id}/proposals"},
+		{Name: "PRResult", Sample: PRResult{}, Endpoint: "POST /api/v1/workflows/{workflow_id}/proposals/{proposal_id}/open-pr"},
 
 		// ── P7 · plan, entitlements, spend ───────────────────────────────────
-		{Name: "BillingView", Sample: BillingView{}, Endpoint: "GET /api/p7/customers/{customer_id}/billing"},
+		{Name: "BillingView", Sample: BillingView{}, Endpoint: "GET /api/v1/customers/{customer_id}/billing"},
 
 		// ── P21 · payment collection (plans by name, payment method, checkout) ──
-		{Name: "PaymentView", Sample: PaymentView{}, Endpoint: "GET /api/p21/customers/{customer_id}/payment"},
-		{Name: "CheckoutView", Sample: CheckoutView{}, Endpoint: "POST /api/p21/customers/{customer_id}/checkout-session"},
-		{Name: "PlanChangeView", Sample: PlanChangeView{}, Endpoint: "POST /api/p21/customers/{customer_id}/plan"},
+		{Name: "PaymentView", Sample: PaymentView{}, Endpoint: "GET /api/v1/customers/{customer_id}/payment"},
+		{Name: "CheckoutView", Sample: CheckoutView{}, Endpoint: "POST /api/v1/customers/{customer_id}/checkout-session"},
+		{Name: "PlanChangeView", Sample: PlanChangeView{}, Endpoint: "POST /api/v1/customers/{customer_id}/plan"},
 
 		// ── P12 · forge delivery state + route condition ─────────────────────
-		{Name: "DeliveriesView", Sample: DeliveriesView{}, Endpoint: "GET /api/p12/deliveries"},
+		{Name: "DeliveriesView", Sample: DeliveriesView{}, Endpoint: "GET /api/v1/deliveries"},
 
 		// ── P13 13d · total per-axis, per-language coverage ───────────────────
-		{Name: "AxisCoverageView", Sample: coverageView{}, Endpoint: "GET /api/p13/coverage"},
+		{Name: "AxisCoverageView", Sample: coverageView{}, Endpoint: "GET /api/v1/coverage"},
 
 		// ── P13 13e · how an accepted change reaches a running agent ──────────
-		{Name: "ChangeDeliveryView", Sample: ChangeDeliveryView{}, Endpoint: "GET /api/p13/delivery"},
+		{Name: "ChangeDeliveryView", Sample: ChangeDeliveryView{}, Endpoint: "GET /api/v1/change-delivery"},
 
 		// ── P20 · how to install it, and what the release actually delivered ──
-		{Name: "InstallView", Sample: installView{}, Endpoint: "GET /api/p20/install"},
+		{Name: "InstallView", Sample: installView{}, Endpoint: "GET /api/v1/install"},
 	}
 }

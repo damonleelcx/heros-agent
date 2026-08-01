@@ -370,7 +370,7 @@ Applies the source-transformation apply model per
   ```
   copy run → view per-node I/O.
   ```
-  > **Submit is now real; it did not exist.** Previously `POST /api/p2/specs/resolve` only structurally
+  > **Submit is now real; it did not exist.** Previously `POST /api/v1/specs/resolve` only structurally
   > validated ("resolving refs needs the registries, which the API does not hold"), no endpoint
   > persisted a spec / generated a transform / enqueued a run, and the user **hand-pasted a
   > `config_hash` and a `run_id`** — the three panels were not a connected flow.
@@ -407,7 +407,7 @@ Applies the source-transformation apply model per
   > **!!! `launch.StartAgentd` never calls `MountP2`** — P2 is served only by `cmd/demo/configui`.
   > Pre-existing; wiring it needs a target-repo config decision.
   > **Was PARTIAL when first marked done; now complete.** Diff review, watch-run and per-node I/O
-  > were real, but **submit did not exist**: `POST /api/p2/specs/resolve` only validated a spec's
+  > were real, but **submit did not exist**: `POST /api/v1/specs/resolve` only validated a spec's
   > STRUCTURE, nothing persisted a spec / generated a transform / enqueued a run outside
   > `internal/e2e`'s test helper, and the user hand-pasted a `config_hash` and a `run_id` that
   > nothing would ever hand them. The three panels were three tools, not a flow.
@@ -419,7 +419,7 @@ Applies the source-transformation apply model per
   > **What closed it:** `internal/submit` is that sequence promoted to production code — the ONE
   > orchestrator (IR at `source_revision` → resolve → persist → generate → apply+build → record →
   > start run → enqueue), holding the registries so the HTTP layer does not. `POST
-  > /api/p2/specs/submit` is its front door (justification for the new endpoint surface is in the
+  > /api/v1/specs/submit` is its front door (justification for the new endpoint surface is in the
   > handler's doc comment, per careful-api-creation), and it returns the `config_hash` and `run_id`
   > the page reads straight into panels 2 and 3. Proofs: `internal/submit/submit_pgproof_test.go`
   > (live Postgres, real git, real `go build`), which asserts the spec / transform / run / queue

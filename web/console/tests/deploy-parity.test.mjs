@@ -168,7 +168,7 @@ test("11.4 — P23 adds exactly two authenticated endpoints, and no cross-tenant
   const routes = [...source.matchAll(/s\.Mux\.HandleFunc\("([A-Z]+) ([^"]+)"/g)].map((m) => `${m[1]} ${m[2]}`);
   assert.deepEqual(
     routes.sort(),
-    ["GET /v1/legal/acceptances", "POST /v1/legal/acceptances"],
+    ["GET /api/v1/legal/acceptances", "POST /api/v1/legal/acceptances"],
     "P23 mounts a surface beyond the two consent endpoints",
   );
 

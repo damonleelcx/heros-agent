@@ -260,7 +260,7 @@ function routesView(over = {}) {
 // generated types exist to prevent — so the stub is honest about there being two endpoints.
 function answeringByPath(deliveriesBody, routesBody) {
   platform.set((req, res) => {
-    const body = req.url.startsWith("/api/p13/delivery") ? routesBody : deliveriesBody;
+    const body = req.url.startsWith("/api/v1/change-delivery") ? routesBody : deliveriesBody;
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify(body));
   });
@@ -331,7 +331,7 @@ test("23.19 — a permanent boundary carries no artifact and no date; a platform
 
 test("23.18 — the ledger is unavailable rather than partial when the platform cannot be read", async () => {
   platform.set((req, res) => {
-    if (req.url.startsWith("/api/p13/delivery")) {
+    if (req.url.startsWith("/api/v1/change-delivery")) {
       res.writeHead(503, { "content-type": "application/json" });
       res.end(JSON.stringify({ error: "upstream" }));
       return;

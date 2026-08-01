@@ -92,14 +92,14 @@ func main() {
 			{TenantID: "demo", APIKey: "demo", Role: "member", KeyID: "demo"},
 		},
 	})
-	s.MountP2(api.P2Stores{
+	s.MountConfigRuntime(api.ConfigRuntimeStores{
 		Transforms: worktree.NewStore(db, blobs),
 		Runs:       executor.NewStore(db),
 		Specs:      variantspec.NewStore(db),
 	})
 	// P10 prompt-authoring write surface (publish + timeline/diff/impact) over the same registry store.
 	reg := registry.NewStore(db, blobs)
-	s.MountP10(reg)
+	s.MountPromptRegistry(reg)
 
 	// P10 studio MATRIX: seed model rows, load a workflow IR as node columns, mount the grid routes.
 	seedModels(ctx, reg)
@@ -115,7 +115,7 @@ func main() {
 	}
 	// Echo completer so test-run works without provider credentials; a real deployment injects the gateway.
 	runner := studio.NewRunner(studio.EchoCompleter{}, studio.NewSpendMeter(studio.Cap{}), studio.FlatPricer(0.5), nil)
-	s.MountP10Matrix(api.P10Matrix{Store: reg, Workflows: wfCatalog, Binds: studio.NewBindStore(), Runner: runner})
+	s.MountStudioMatrix(api.StudioMatrix{Store: reg, Workflows: wfCatalog, Binds: studio.NewBindStore(), Runner: runner})
 	// The embedded UI page this demo used to open was removed in the P9 cutover: the console is now a
 	// separate component, so a demo can serve the read models but cannot serve the screen. It prints the
 	// API it is serving and how to point the console at it — the same shape `cmd/proof/customerconsole` uses.

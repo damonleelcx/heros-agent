@@ -156,3 +156,119 @@ procedures an operator runs without the platform team.
 - **WHEN** the operator needs to diagnose, back up, or restore the system
 - **THEN** a `doctor`/preflight check and backup + restore procedures are present in the package
 - **AND** the operator runs them without contacting the platform team.
+
+### Requirement: The deployed process SHALL apply the platform schema at boot, idempotently
+
+The process the deployment actually runs SHALL apply the platform's Postgres migrations at boot and SHALL
+record each applied version in a ledger it **reads** before deciding whether to apply. A second boot against an
+already-migrated database SHALL make no schema change.
+
+#### Scenario: A second boot applies nothing
+
+- **WHEN** the platform is started twice against the same database
+- **THEN** the first boot applies the outstanding migrations and the second applies none
+- **AND** the decision comes from reading the applied-version ledger, not from the DDL's own tolerance for
+  re-running — a ledger that is written and never read cannot tell "never applied" from "applied and since
+  reverted".
+
+#### Scenario: An upgrade carries the schema forward without touching user state
+
+- **WHEN** a new version is deployed over an existing database
+- **THEN** only the migrations that have not been applied are applied
+- **AND** tenant credentials, the session secret, the admin identity map and eval/lineage data are unchanged.
+
+### Requirement: `/readyz` SHALL name a store only if it probes that store
+
+A readiness component name SHALL correspond to the dependency actually probed. Presenting one dependency's
+probe under another dependency's name is non-conformant.
+
+#### Scenario: A dead store turns readiness red under its own name
+
+- **WHEN** the Postgres the deployment declares is made unreachable
+- **THEN** `/readyz` reports not-ready and names `postgres`
+- **AND** the verdict comes from probing that database, not from renaming a different store's probe.
+
+### Requirement: Every capability surface SHALL be registered, and an unsourced one SHALL answer 503
+
+The deployed process SHALL register the routes of every capability the platform ships. A capability with no
+source on this deployment SHALL answer **503 not-mounted**; leaving its routes unregistered so the request
+falls through to a **404** is non-conformant.
+
+#### Scenario: An unsourced capability is distinguishable from a missing identifier
+
+- **WHEN** a client calls a capability this deployment has no source for
+- **THEN** the response is 503 with a not-mounted body
+- **AND** a call for an identifier that does not exist still returns 404, so the two remain distinguishable.
+
+#### Scenario: The console does not report a real workflow as missing
+
+- **WHEN** the customer console loads a page backed by an unsourced capability, for a workflow that exists
+- **THEN** it renders "this capability is not installed on this deployment"
+- **AND** it does not render "no such workflow".
+
+### Requirement: The deployment SHALL declare which capabilities a fresh install serves
+
+The deploy documentation SHALL state which capabilities are served, which are registered-but-unsourced, and
+what makes the difference, in one place an operator reads before installing.
+
+#### Scenario: The capability set is readable without calling the system
+
+- **WHEN** an operator reads the deploy runbook
+- **THEN** the served and the registered-but-unsourced capabilities are both listed
+- **AND** the list does not require the operator to probe the running system to discover it.
+
+### Requirement: The two substrates SHALL NOT diverge on the environment contract
+
+Every environment variable the deployed processes read SHALL appear in the deployment's documented contract,
+and the Compose and Kubernetes descriptions SHALL agree on it. A CI check SHALL fail on divergence.
+
+#### Scenario: A variable added to one substrate fails the gate
+
+- **WHEN** an environment variable is added to the Kubernetes base and not to the Compose file (or the reverse)
+- **THEN** the parity check fails and names the variable and the substrate that is missing it
+- **AND** the failure is a build-time gate, not a review observation.
+
+### Requirement: Each capability that landed after this change was written SHALL have a deployment contract
+
+Every capability shipped after the initial P19 artifacts — installable packages, payments, SSO/identity, legal
+and developer docs, analytics and error monitoring, and the operator surfaces — SHALL have its secret names,
+its readiness aggregation and any scheduled job it requires expressed on both substrates.
+
+#### Scenario: A capability is configurable on the deployment that ships it
+
+- **WHEN** an operator deploys a form that includes a given capability
+- **THEN** every credential and setting that capability reads is present in the documented environment contract
+- **AND** a setting whose misconfiguration can refuse the boot is documented beside the others rather than
+  discovered from a crash.
+
+#### Scenario: The platform's own reporting integrations are NOT in the contract
+
+- **WHEN** a deployment manifest or env-example is scanned for the analytics and error-reporting switches
+- **THEN** none of their variable names appears, not even set to an empty value
+- **AND** this is the deliberate exception to the requirement above: those integrations belong to the
+  platform's own hosted deployment rather than to a customer's install, an empty slot is one `--set` from
+  being filled in a file a customer edits without reading, and a customer install that reports to nobody is
+  the correct state — reported as `absent` and deliberately silent.
+
+### Requirement: The consent-record retention job SHALL ship as a scheduled unit
+
+The retention job SHALL be deployed on both substrates as a scheduled unit, SHALL default to a dry run, and
+SHALL refuse to act when no retention window is configured.
+
+#### Scenario: Retention runs without an operator remembering it
+
+- **WHEN** the platform is deployed
+- **THEN** the retention job is present and scheduled on that substrate
+- **AND** with no window configured it reports what it would remove and removes nothing.
+
+### Requirement: A started backing service SHALL be connected or labelled as provisioned ahead of use
+
+A component the deployment starts SHALL either be connected by a deployed process, or be labelled — in the
+manifest and in the runbook — as provisioned ahead of the capability that will use it. An unused component
+SHALL NOT be aggregated into `/readyz` as though the platform depended on it.
+
+#### Scenario: An operator can tell what the platform actually uses
+
+- **WHEN** an operator reads the manifests and the runbook
+- **THEN** each started backing service is either shown to be connected or labelled as provisioned ahead of use
+- **AND** readiness does not imply a dependency the platform does not have.

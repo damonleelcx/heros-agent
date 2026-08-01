@@ -24,5 +24,5 @@
  * to widen — which is a stronger guarantee than a correctly-scoped parameter.
  */
 export function legalAcceptances(): string {
-  return "/v1/legal/acceptances";
+  return "/api/v1/legal/acceptances";
 }

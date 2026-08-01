@@ -26,7 +26,7 @@ import "strings"
 const PlatformBaseURL = "https://heros-agent.space"
 
 // LinkPath is the authenticated ingest path linked runs are POSTed to, under PlatformBaseURL.
-const LinkPath = "/api/p11/link"
+const LinkPath = "/api/v1/run-links"
 
 // ContractVersion is the run-linking payload contract version. It is transmitted in the payload and
 // echoed by the platform; a mismatch is loud (PRD FR6), never a silent reinterpretation. The moment a

@@ -93,11 +93,11 @@ func main() {
 		TenantCredentials: []config.TenantCredential{{TenantID: tenant, APIKey: demoCred, Role: "member", KeyID: "p12hermes"}},
 	}
 	srv := api.New(nil, cfg)
-	srv.MountP12(svc)
+	srv.MountForgeDelivery(svc)
 
 	fmt.Printf("p12hermes: forge-delivery console API on http://%s  (scenario=%s)\n", *addr, *scenario)
-	fmt.Printf("  MOUNTED  P12 delivery   GET /api/p12/deliveries\n")
-	fmt.Printf("           CI-mediated    GET /api/p12/ci/pending   POST /api/p12/ci/report\n\n")
+	fmt.Printf("  MOUNTED  P12 delivery   GET /api/v1/deliveries\n")
+	fmt.Printf("           CI-mediated    GET /api/v1/ci/pending   POST /api/v1/ci/report\n\n")
 	fmt.Printf("console:\n")
 	fmt.Printf("  cd web/console && PLATFORM_API_BASE=http://%s \\\n", *addr)
 	fmt.Printf("    CONSOLE_PLATFORM_CREDENTIAL=%s \\\n", demoCred)

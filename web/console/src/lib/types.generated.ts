@@ -17,7 +17,7 @@
 //
 // To change anything here: change the Go view struct, then run `make console-types`.
 
-/** Response of `GET /api/p2/runs/{run_id}`. */
+/** Response of `GET /api/v1/runs/{run_id}`. */
 export interface RunView {
   run_id: string;
   config_hash: string;
@@ -40,7 +40,7 @@ export interface NodeView {
   error?: string;
 }
 
-/** Response of `GET /api/p2/transforms/{config_hash}/{source_revision}`. */
+/** Response of `GET /api/v1/transforms/{config_hash}/{source_revision}`. */
 export interface TransformView {
   config_hash: string;
   config_hash_display: string;
@@ -57,7 +57,7 @@ export interface TransformView {
   rejected_dimension?: string;
 }
 
-/** Response of `POST /api/p2/specs/submit`. */
+/** Response of `POST /api/v1/specs/submit`. */
 export interface SubmitResult {
   config_hash: string;
   config_hash_display: string;
@@ -71,7 +71,7 @@ export interface SubmitResult {
   rejected_dimension?: string;
 }
 
-/** Response of `POST /api/p2/specs/{resolve,submit} (rejection)`. */
+/** Response of `POST /api/v1/specs/{resolve,submit} (rejection)`. */
 export interface SpecError {
   error: string;
   node_id?: string;
@@ -79,7 +79,7 @@ export interface SpecError {
   ref?: string;
 }
 
-/** Response of `GET /api/p25/runs/{run_id}/monitor`. */
+/** Response of `GET /api/v1/runs/{run_id}/monitor`. */
 export interface RunMonitor {
   run_id: string;
   config_hash: string;
@@ -103,7 +103,7 @@ export interface RunMonitorHalted {
   reason: string;
 }
 
-/** Response of `GET /api/p35/workflows/{workflow_id}/graph`. */
+/** Response of `GET /api/v1/workflows/{workflow_id}/pattern-graph`. */
 export interface GraphView {
   workflow_id: string;
   ir_version: string;
@@ -161,7 +161,7 @@ export interface Diagnostic {
   reason: string;
 }
 
-/** Response of `GET /api/p4/workflows/{workflow_id}/board`. */
+/** Response of `GET /api/v1/workflows/{workflow_id}/eval-board`. */
 export interface BoardView {
   state: string;
   error?: string;
@@ -309,7 +309,7 @@ export interface UnmeasuredView {
   reason: string;
 }
 
-/** Response of `GET /api/p45/variants/{variant_id}/scorecard`. */
+/** Response of `GET /api/v1/variants/{variant_id}/scorecard`. */
 export interface ScorecardView {
   variant_id: string;
   eval_set_hash: string;
@@ -407,7 +407,7 @@ export interface EdgeView {
   confidence: number;
 }
 
-/** Response of `GET /api/p55/workflows/{workflow_id}/surface`. */
+/** Response of `GET /api/v1/workflows/{workflow_id}/proposals`. */
 export interface ProposalSurface {
   workflow_id: string;
   automation_level: string;
@@ -472,7 +472,7 @@ export interface TrendPoint {
   cluster_sizes: Record<string, number>;
 }
 
-/** Response of `POST /api/p55/workflows/{workflow_id}/proposals/{proposal_id}/open-pr`. */
+/** Response of `POST /api/v1/workflows/{workflow_id}/proposals/{proposal_id}/open-pr`. */
 export interface PRResult {
   proposal_id: string;
   branch: string;
@@ -481,7 +481,7 @@ export interface PRResult {
   rollback: string;
 }
 
-/** Response of `GET /api/p7/customers/{customer_id}/billing`. */
+/** Response of `GET /api/v1/customers/{customer_id}/billing`. */
 export interface BillingView {
   customer_id: string;
   period: string;
@@ -645,7 +645,7 @@ export interface DriftView {
   provider_quantity: number;
 }
 
-/** Response of `GET /api/p21/customers/{customer_id}/payment`. */
+/** Response of `GET /api/v1/customers/{customer_id}/payment`. */
 export interface PaymentView {
   billing: BillingView;
   plans: PlanOptionView[] | null;
@@ -684,7 +684,7 @@ export interface BillingUnavailableView {
   retryable: boolean;
 }
 
-/** Response of `POST /api/p21/customers/{customer_id}/checkout-session`. */
+/** Response of `POST /api/v1/customers/{customer_id}/checkout-session`. */
 export interface CheckoutView {
   url?: string;
   client_secret?: string;
@@ -692,7 +692,7 @@ export interface CheckoutView {
   expires_at?: string;
 }
 
-/** Response of `POST /api/p21/customers/{customer_id}/plan`. */
+/** Response of `POST /api/v1/customers/{customer_id}/plan`. */
 export interface PlanChangeView {
   plan_id: string;
   plan_name: string;
@@ -701,7 +701,7 @@ export interface PlanChangeView {
   checkout_required: boolean;
 }
 
-/** Response of `GET /api/p12/deliveries`. */
+/** Response of `GET /api/v1/deliveries`. */
 export interface DeliveriesView {
   deliveries: DeliveryView[] | null;
   route: RouteConditionView;
@@ -727,7 +727,7 @@ export interface RouteConditionView {
   targets?: string[] | null;
 }
 
-/** Response of `GET /api/p13/coverage`. */
+/** Response of `GET /api/v1/coverage`. */
 export interface AxisCoverageView {
   version: string;
   languages: string[] | null;
@@ -752,7 +752,7 @@ export interface CoverageCell {
   note?: string;
 }
 
-/** Response of `GET /api/p13/delivery`. */
+/** Response of `GET /api/v1/change-delivery`. */
 export interface ChangeDeliveryView {
   version: string;
   routes: DeliveryRouteMeta[] | null;
@@ -806,7 +806,7 @@ export interface DeliverySourceCellView {
   note?: string;
 }
 
-/** Response of `GET /api/p20/install`. */
+/** Response of `GET /api/v1/install`. */
 export interface InstallView {
   matrix_version: string;
   documented_release: string;

@@ -25,6 +25,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 
 const ROOT = new URL("..", import.meta.url).pathname;
@@ -129,11 +130,15 @@ test("X5 — values are escaped on render", async () => {
   }
 });
 
-test("X6 — legacy deep-link entry points resolve to canonical routes", async () => {
-  // Each legacy path is a real route that redirects, so a bookmarked URL keeps working.
-  for (const rel of ["src/app/p2/route.ts", "src/app/p4/board/route.ts", "src/app/p35/graph/route.ts", "src/app/p25/monitor/route.ts"]) {
-    const text = await readFile(join(ROOT, rel), "utf8");
-    assert.match(text, /redirect/i, `${rel} no longer redirects`);
+test("X6 — no phase-named entry point exists; a phase number is not a public name", async () => {
+  // These were 308 shims from the pre-P9 hand-written pages. They are deleted along with the
+  // `/api/pNN/*` platform routes: a URL is a public name, and a phase number is an internal fact about
+  // the order we built things in. Nothing was deployed under them, so no bookmark depended on them.
+  //
+  // Asserted as ABSENCE rather than by deleting the test — a deleted test proves nothing, and this
+  // fails if the shape is reintroduced.
+  for (const rel of ["src/app/p2", "src/app/p4", "src/app/p35", "src/app/p25"]) {
+    assert.equal(existsSync(join(ROOT, rel)), false, `${rel} is back — phase-named routes are retired`);
   }
 });
 

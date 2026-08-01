@@ -31,7 +31,7 @@
 //
 // # Why the registries are held HERE and not in the API
 //
-// Before this package, internal/api held no registries, so POST /api/p2/specs/resolve could only run
+// Before this package, internal/api held no registries, so POST /api/v1/specs/resolve could only run
 // the structural half of validation and had to say so. The fix is not to hand the registries to the
 // HTTP layer — an HTTP handler that resolves refs, generates codemods, and drives git is a handler
 // that owns the domain. It is to give the domain a front door and let the API call it. The API layer
@@ -259,7 +259,7 @@ func (s *Service) Submit(ctx context.Context, req Request) (*Outcome, error) {
 	// ── 2 · resolve · FAIL CLOSED ────────────────────────────────────────────────────────────────
 	//
 	// The registries are real here, so this is the WHOLE resolution — not the structural half
-	// POST /api/p2/specs/resolve can do on its own. A dangling ref stops the submission dead, with
+	// POST /api/v1/specs/resolve can do on its own. A dangling ref stops the submission dead, with
 	// the node and the dimension named (FR11, task 7.4), and — because nothing above wrote a row —
 	// with no spec, no transform and no run to clean up.
 	resolved, err := variantspec.Resolve(ctx, req.Spec, &ir, s.regs)
@@ -332,7 +332,7 @@ func (s *Service) Submit(ctx context.Context, req Request) (*Outcome, error) {
 
 	// ── 7 · record the run, then enqueue it ──────────────────────────────────────────────────────
 	//
-	// This order, not the reverse. The `run` row is what GET /api/p2/runs/{run_id} reads, so writing
+	// This order, not the reverse. The `run` row is what GET /api/v1/runs/{run_id} reads, so writing
 	// it first means the id this call returns is watchable the instant the user has it — a run that is
 	// queued but 404s would make a successful submit look like a broken one.
 	//

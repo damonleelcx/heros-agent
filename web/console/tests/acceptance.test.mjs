@@ -268,7 +268,7 @@ test("9.8 — every route renders EXACTLY ONE display-level heading", async () =
   // Each view is answered with a payload of ITS OWN shape. Feeding every route the same body makes a
   // route render its parse-failure path while the test believes it is checking a populated page.
   platform.set((req, res) => {
-    const body = req.url.includes("/p4/") ? board([]) : graph();
+    const body = req.url.includes("/eval-board") ? board([]) : graph();
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify(body));
   });

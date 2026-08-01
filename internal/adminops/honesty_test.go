@@ -32,7 +32,7 @@ func TestLinkCoverageIsDisplayedBesideEverySUMDerivedFigure(t *testing.T) {
 	h.seedMeteredCharge(tenantAcme)
 
 	// What the platform OBSERVED: ten runs reported, four linked. The figure below reflects four.
-	h.links.ObserveRunsReported(tenantAcme, 10)
+	_ = h.links.ObserveRunsReported(tenantAcme, 10)
 	for i := 0; i < 4; i++ {
 		if _, err := h.links.Record(linkingest.LinkedRun{
 			RunID: "run-acme-" + string(rune('a'+i)), TenantID: tenantAcme, LinkedAt: h.clk.now(),
@@ -128,7 +128,7 @@ func TestAFigureWithUnknownCoverageIsWithheld(t *testing.T) {
 func TestAGainshareFigureNamesTheVerifiedDeltaLedger(t *testing.T) {
 	h := newHarness(t)
 	h.seedMeteredCharge(tenantAcme)
-	h.links.ObserveRunsReported(tenantAcme, 2)
+	_ = h.links.ObserveRunsReported(tenantAcme, 2)
 	for i := 0; i < 2; i++ {
 		if _, err := h.links.Record(linkingest.LinkedRun{
 			RunID: "run-acme-g" + string(rune('a'+i)), TenantID: tenantAcme, LinkedAt: h.clk.now(),

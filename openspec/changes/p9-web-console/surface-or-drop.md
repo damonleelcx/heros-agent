@@ -95,13 +95,13 @@ endpoint for any of them** — every customer route is keyed by an identifier th
 hold:
 
 ```
-GET /api/p2/runs/{run_id}
-GET /api/p2/transforms/{config_hash}/{source_revision}
-GET /api/p35/workflows/{workflow_id}/graph
-GET /api/p4/workflows/{workflow_id}/board
-GET /api/p45/variants/{variant_id}/scorecard
-GET /api/p55/workflows/{workflow_id}/surface
-GET /api/p7/customers/{customer_id}/billing
+GET /api/v1/runs/{run_id}
+GET /api/v1/transforms/{config_hash}/{source_revision}
+GET /api/v1/workflows/{workflow_id}/pattern-graph
+GET /api/v1/workflows/{workflow_id}/eval-board
+GET /api/v1/variants/{variant_id}/scorecard
+GET /api/v1/workflows/{workflow_id}/proposals
+GET /api/v1/customers/{customer_id}/billing
 ```
 
 P9's standing constraint forbids adding a platform endpoint, and 🔴 `careful-api-creation` makes a new

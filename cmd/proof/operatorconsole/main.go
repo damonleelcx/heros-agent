@@ -261,7 +261,7 @@ func wire(repoDir string) (api.AdminDeps, error) {
 		if tc.id == "tenant-boreal" {
 			linked = reported / 3 // partial: the coverage percentage is what changes a credit decision.
 		}
-		links.ObserveRunsReported(tc.id, reported)
+		_ = links.ObserveRunsReported(tc.id, reported)
 		for r := 0; r < linked; r++ {
 			if _, err := links.Record(linkingest.LinkedRun{
 				RunID: fmt.Sprintf("run-%s-%d", tc.id, r), TenantID: tc.id, LinkedAt: now(),

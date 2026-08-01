@@ -89,27 +89,22 @@ test("the overview offers subjects and next actions, and fetches nothing", async
   assert.match(text(html), /Nothing opened yet|Opened in this session/);
 });
 
-// ── Every legacy entry point resolves to its canonical route ─────────────────
+// ── The phase-named entry points are GONE, and stay gone ─────────────────────
+//
+// `/p2`, `/p4/board`, `/p25/monitor` and `/p35/graph` were 308 shims from the pre-P9 hand-written
+// pages to the canonical `/app/...` routes. They are deleted: a URL is a public name, and a phase
+// number is an internal fact about the order we built things in — it tells a user nothing and dates
+// the product. Nothing was deployed under them, so there are no bookmarks to keep alive.
+//
+// This asserts their ABSENCE rather than simply deleting the old cases. A deleted test proves nothing;
+// this fails if anybody reintroduces the shape.
 
-const LEGACY = [
-  ["/p2?run=run-7", "/app/runs/run-7"],
-  ["/p2?cfg=abc123&rev=rev1", "/app/transforms/abc123/rev1"],
-  ["/p2", "/app/configure"],
-  ["/p25/monitor?run_id=run-7", "/app/runs/run-7/live"],
-  ["/p25/monitor", "/app/runs"],
-  ["/p35/graph?workflow_id=owner%2Frepo", "/app/workflows/owner%2Frepo/graph"],
-  ["/p35/graph", "/app/workflows"],
-  ["/p4/board?workflow=owner%2Frepo", "/app/workflows/owner%2Frepo/board"],
-  // 🔴 The one that matters most: bare, it goes to SELECTION — not to `wf-demo`.
-  ["/p4/board", "/app/workflows"],
-];
+const RETIRED = ["/p2", "/p4/board", "/p25/monitor", "/p35/graph", "/p45/scorecard", "/p55/recommendations"];
 
-for (const [legacy, canonical] of LEGACY) {
-  test(`${legacy} resolves to ${canonical}`, async () => {
-    const res = await fetch(`${console_.base}${legacy}`, { headers: { cookie }, redirect: "manual" });
-    assert.equal(res.status, 308, `${legacy} did not redirect permanently`);
-    const location = new URL(res.headers.get("location"), console_.base);
-    assert.equal(location.pathname, canonical);
+for (const retired of RETIRED) {
+  test(`${retired} is retired — a phase number is not a public name`, async () => {
+    const res = await fetch(`${console_.base}${retired}`, { headers: { cookie }, redirect: "manual" });
+    assert.equal(res.status, 404, `${retired} still resolves (${res.status}) — phase-named URLs are retired`);
   });
 }
 
@@ -151,11 +146,18 @@ test("11c.4 — pasting the CLI's exact run path opens that run, not a picker or
 test("a half-specified transform key goes to the picker, not to a not-found", async () => {
   // A config hash without a source revision does not NAME a transform. That is a different fact from
   // a transform that does not exist, and P2-12 already distinguishes them.
-  const res = await fetch(`${console_.base}/p2?cfg=abc123`, { headers: { cookie }, redirect: "manual" });
-  assert.equal(res.status, 308);
-  const location = new URL(res.headers.get("location"), console_.base);
-  assert.equal(location.pathname, "/app/transforms");
-  assert.equal(location.searchParams.get("config_hash"), "abc123");
+  //
+  // This used to reach the property through the retired `/p2?cfg=` shim. The shim is gone; the
+  // property is not, so it is asserted directly on the canonical route — which is where it always
+  // mattered. A test that dies with its entry point was testing the entry point.
+  const res = await fetch(`${console_.base}/app/transforms?config_hash=abc123`, {
+    headers: { cookie },
+    redirect: "manual",
+  });
+  assert.equal(res.status, 200, "a half-specified transform key did not render the picker");
+  const html = await res.text();
+  assert.doesNotMatch(text(html), /not found/i, "a half-specified key was reported as a missing transform");
+  assert.match(html, /abc123/, "the picker discarded the config hash the user had already supplied");
 });
 
 test("a typed identifier resolves to the canonical route, so the subject ends up in the PATH", async () => {

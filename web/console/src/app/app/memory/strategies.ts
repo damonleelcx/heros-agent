@@ -5,7 +5,7 @@
  * # Why a mirror and not a fetch
  *
  * The vocabulary is a property of the BUILD, not of a tenant — the platform serves it at
- * `GET /api/p17/memory` with no tenant, plan, or role input, precisely so no entitlement can change it.
+ * `GET /api/v1/memory` with no tenant, plan, or role input, precisely so no entitlement can change it.
  * Mirroring it here lets the surface render its full explanation without a live platform, which is what
  * the browser-checkable preview needs.
  *

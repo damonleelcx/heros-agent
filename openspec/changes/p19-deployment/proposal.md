@@ -78,6 +78,25 @@ without. Product rationale: [`../../../docs/prd/P19-deployment-delivery.md`](../
   under a `dev` identity seam (ADR-008). Its health is aggregated by the platform `/readyz` the same way the
   customer console's is.
 
+- **Extended 2026-08-01 — `deployment-topology` gains capability carriage.** The artifacts above compose the
+  platform on paper; an audit against the process they run found the composition unperformed. `internal/launch`
+  registered six routes, mounted **no** capability surface, applied **none** of the nineteen Postgres
+  migrations in [`db/migrations/postgres/`](../../../db/migrations/postgres/), and opened no Postgres
+  connection — while the manifests started Postgres and set `HEROS_DATASTORE_NAME=postgres`, which only
+  *renames* the SQLite ledger's ping, so `/readyz` reported a database it had never connected to. The customer
+  console's `/api/p2`, `/api/p10`, `/api/p12`, `/api/p21` and `/api/p25` calls all fell through to **404**,
+  which it renders as *"No such workflow"*. Meanwhile every capability that landed after these artifacts were
+  written — P20 packages, P21 payments, P22 SSO, P23 legal, P24 analytics/error monitoring, P26 operator
+  surfaces — had **no deployment contract at all**: no `STRIPE_*`, no DSN, no `HEROS_ERROR_REPORTING_DSN`
+  (which can *refuse the boot* when set and unusable), no consent-gate or content-root, and no scheduled unit
+  for the seven-year consent-retention job. The change now also: applies the schema at boot through a ledger it
+  **reads**; probes the store it names; **registers every capability surface**, DB-backed where a store exists
+  and nil-sourced where none does so the answer is **503 not-mounted** rather than 404; extends the environment
+  contract to every variable the deployed processes read and **gates the two substrates against diverging on
+  it** (the half of Decision 2 `check-image-parity.sh` never covered); ships the retention job; and corrects
+  the Kubernetes `agentd` from `replicas: 2` over a per-pod `emptyDir` — two divergent SQLite ledgers, lost on
+  every rollout — to one replica on a persistent claim. Decisions 9 and 10 in `design.md`; PRD FR25–FR32.
+
 **No breaking changes to existing artifacts.** The console unit, the sandbox/discovery one-shots, and the
 enterprise backing-services stack are unchanged; P19 adds a composing layer above them and a second
 substrate beside them.

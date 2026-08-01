@@ -33,7 +33,7 @@ import {
 export const metadata = { title: "Author a change" };
 
 // Illustrative verdicts. Each is the shape the platform returns from
-// `POST /api/p13/authoring/preflight`, rendered by the same component that renders a live one — so
+// `POST /api/v1/authoring/preflight`, rendered by the same component that renders a live one — so
 // what a reader sees here is what they will see against their own workflow, not an approximation.
 const ADMISSIBLE: PreflightResult = {
   verdict: "admissible",

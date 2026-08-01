@@ -15,8 +15,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
-	"strings"
 	"time"
 
 	"github.com/heros-foreal/agentd/internal/adminidentity"
@@ -34,34 +32,34 @@ type Server struct {
 	Mux     *http.ServeMux
 	Handler http.Handler
 
-	// p2 is the Postgres-backed P2 read surface, mounted by MountP2 when available.
-	p2 P2Stores
+	// p2 is the Postgres-backed P2 read surface, mounted by MountConfigRuntime when available.
+	configRuntime ConfigRuntimeStores
 
 	// monitor is the P2.5 live run-monitoring read model, mounted by MountMonitor when available.
 	monitor MonitorSource
 
-	// p35 is the P3.5 pattern-classifier read model, mounted by MountP35 when available.
-	p35 PatternSource
+	// p35 is the P3.5 pattern-classifier read model, mounted by MountPatternGraph when available.
+	patternGraph PatternSource
 
-	// p4 is the P4 eval-board read model, mounted by MountP4 when available.
-	p4 BoardSource
+	// p4 is the P4 eval-board read model, mounted by MountEvalBoard when available.
+	evalBoard BoardSource
 
-	// p45 is the P4.5 read-only scorecard read model, mounted by MountP45 when available.
-	p45 ScorecardSource
+	// p45 is the P4.5 read-only scorecard read model, mounted by MountScorecard when available.
+	scorecard ScorecardSource
 
-	// p5 is the P5 interactive-graph-editor read+validate model, mounted by MountP5 when available.
-	p5 P5Source
+	// p5 is the P5 interactive-graph-editor read+validate model, mounted by MountGraphEditor when available.
+	graphEditor GraphEditorSource
 
-	// p55 is the P5.5 ranked-recommendation + verification read model, mounted by MountP55.
-	p55 P55Source
+	// p55 is the P5.5 ranked-recommendation + verification read model, mounted by MountProposals.
+	proposals ProposalsSource
 
 	// p6 is the P6 autonomous-optimizer governance surface (live monitor + grant/stop/rollback),
-	// mounted by MountP6 when available.
-	p6 P6Source
+	// mounted by MountOptimizer when available.
+	optimizer OptimizerSource
 
 	// p7 is the P7 billing/usage read model (SUM, plan + entitlements, invoice breakdown, verified
-	// gainshare evidence), mounted by MountP7 when available.
-	p7 P7Source
+	// gainshare evidence), mounted by MountBilling when available.
+	billingView BillingSource
 
 	// billing describes the live P7 rollout state (billing on/off, provider mode, gainshare,
 	// auto-merge entitlement), reported by /readyz.
@@ -87,12 +85,12 @@ type Server struct {
 	billingWebhook BillingWebhookSink
 
 	// p21 is the P21 collection surface (plans by name, payment-method status, checkout), mounted by
-	// MountP21Payments when available.
-	p21 PaymentsSource
+	// MountPayments when available.
+	payments PaymentsSource
 
 	// p23 is the P23 consent surface — the ONLY new authenticated surface this phase adds, mounted by
-	// RegisterP23 when available. Two endpoints, three fields, the caller's own tenant only (task 11.4).
-	p23 P23Source
+	// RegisterConsent when available. Two endpoints, three fields, the caller's own tenant only (task 11.4).
+	consent ConsentSource
 
 	// secrets is the live provider-credential source, reported by /readyz.
 	//
@@ -129,26 +127,26 @@ type Server struct {
 	probes []ComponentProbe
 
 	// p10 is the Postgres-backed prompt-authoring write surface (publish + timeline/diff/impact read
-	// models), mounted by MountP10 when available. The platform API's first WRITE surface.
-	p10 P10Store
+	// models), mounted by MountPromptRegistry when available. The platform API's first WRITE surface.
+	promptRegistry PromptStore
 
 	// p10matrix is the P10 studio MATRIX surface (node × model grid: models/nodes/run/bind), mounted by
-	// MountP10Matrix when available.
-	p10matrix P10Matrix
+	// MountStudioMatrix when available.
+	studioMatrix StudioMatrix
 
-	// p11 is the P11 run-linking ingest surface (POST /api/p11/link + GET /api/p11/whoami), mounted by
-	// MountP11 when available. It attributes a linked run to the authenticated tenant server-side and
+	// p11 is the P11 run-linking ingest surface (POST /api/v1/run-links + GET /api/v1/whoami), mounted by
+	// MountRunLinking when available. It attributes a linked run to the authenticated tenant server-side and
 	// lands its events in the existing P2.5 substrate. The platform API's authenticated ingest surface.
-	p11 LinkIngestSource
+	runLinking LinkIngestSource
 
 	// p12 is the P12 forge-delivery surface (console delivery read model + CI-mediated fetch/report),
-	// mounted by MountP12 when available. It holds no forge credential.
-	p12 P12Source
+	// mounted by MountForgeDelivery when available. It holds no forge credential.
+	forgeDelivery ForgeDeliverySource
 
 	// p13authoring is the P13 13c user-authoring surface (preflight / submit / revert / history),
-	// mounted by MountP13Authoring when available. A deployment without it behaves exactly as it did
+	// mounted by MountAuthoring when available. A deployment without it behaves exactly as it did
 	// before 13c — which is what makes the wave independently revertible.
-	p13authoring P13AuthoringSource
+	authoring AuthoringSource
 }
 
 // ComponentProbe reports whether a dependent component is reachable.
@@ -187,6 +185,39 @@ type HTTPComponentProbe struct {
 	ComponentName string
 	URL           string
 	Client        *http.Client
+}
+
+// DBComponentProbe reports a database's reachability under its own name.
+//
+// It exists so the platform database is probed rather than described. The alternative this replaces was
+// naming the local ledger's ping "postgres" from an environment variable, which produced a component
+// that reported ready while the database it named was down — a signal structurally incapable of failing.
+// A probe is a connection or it is decoration.
+type DBComponentProbe struct {
+	ComponentName string
+	DB            *sql.DB
+}
+
+// NewDBComponentProbe builds a probe over an open pool.
+func NewDBComponentProbe(name string, db *sql.DB) *DBComponentProbe {
+	return &DBComponentProbe{ComponentName: name, DB: db}
+}
+
+// Name reports the component's name.
+func (p *DBComponentProbe) Name() string { return p.ComponentName }
+
+// Probe pings the pool. Reachability, not traffic freshness, and it does not depend on the traffic
+// /readyz gates — so readiness cannot deadlock on the very requests it admits (task 3.3).
+func (p *DBComponentProbe) Probe(ctx context.Context) error {
+	if p.DB == nil {
+		return fmt.Errorf("no connection pool")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	if err := p.DB.PingContext(ctx); err != nil {
+		return fmt.Errorf("unreachable: %w", err)
+	}
+	return nil
 }
 
 // NewHTTPComponentProbe builds a probe with a bounded client.
@@ -369,17 +400,17 @@ func New(db *sql.DB, cfg config.Config) *Server {
 	// P13 13d — the total coverage read model. Registered beside health because, like health, it is a
 	// property of this BUILD rather than of a tenant: it takes no tenant, no plan and no role, which is
 	// what makes "coverage is identical on every plan" structural instead of a policy.
-	s.Mux.HandleFunc("GET /api/p13/coverage", s.handleCoverage)
-	s.Mux.HandleFunc("GET /api/p13/delivery", s.handleDelivery)
+	s.Mux.HandleFunc("GET /api/v1/coverage", s.handleCoverage)
+	s.Mux.HandleFunc("GET /api/v1/change-delivery", s.handleDelivery)
 	// P17 20c — the memory-authoring read model, registered here for the same reason: the strategy
 	// vocabulary and the applicability boundary are properties of this BUILD, not of a tenant, so no
 	// plan or role can move them. It is a READ only; a memory change is authored through the existing
-	// /api/p13/authoring routes, because there is one spine and two origins.
-	s.Mux.HandleFunc("GET /api/p17/memory", s.handleMemory)
+	// /api/v1/authoring routes, because there is one spine and two origins.
+	s.Mux.HandleFunc("GET /api/v1/memory", s.handleMemory)
 	// P20 — the install/distribution read model, registered here for the same reason: the supported-target
 	// matrix, the install channels and the trust posture are properties of the RELEASE, not of a tenant, so no
 	// entitlement can move a row. It takes no tenant, no plan and no role.
-	s.Mux.HandleFunc("GET /api/p20/install", s.handleP20Install)
+	s.Mux.HandleFunc("GET /api/v1/install", s.handleInstall)
 
 	var h http.Handler = s.Mux
 	if cfg.AuthMode == "required" {
@@ -414,15 +445,17 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 	components := map[string]any{}
 	degraded := make([]string, 0, 1)
 
-	// The primary datastore is the first aggregated component, NAMED, not a bare "db_unavailable"
-	// status on the whole document. In the platform deployment this is Postgres (eval + lineage); the
-	// name comes from HEROS_DATASTORE_NAME so /readyz names the store the operator actually runs
-	// ("postgres") rather than a generic word, and defaults to "datastore" for the SQLite single-binary.
+	// The local ledger is the first aggregated component, NAMED, not a bare "db_unavailable" status on
+	// the whole document.
+	//
+	// 🔴 The name is FIXED, and that is the point. It used to come from HEROS_DATASTORE_NAME, which the
+	// deploy manifests set to "postgres" — so this ping of the SQLite ledger was reported as
+	// `components.postgres: ready` on a process that had never opened a Postgres connection. That signal
+	// could not go red no matter what happened to Postgres, which is the one thing a readiness signal may
+	// never be. A component's name on /readyz now always identifies the dependency actually probed
+	// (P19 Decision 9); the platform database reports separately, under `postgres`, from its own probe.
 	if s.DB != nil {
-		name := strings.TrimSpace(os.Getenv("HEROS_DATASTORE_NAME"))
-		if name == "" {
-			name = "datastore"
-		}
+		const name = "ledger"
 		if err := s.DB.PingContext(r.Context()); err != nil {
 			components[name] = map[string]any{"status": "degraded", "detail": "ping failed: " + err.Error()}
 			degraded = append(degraded, name)

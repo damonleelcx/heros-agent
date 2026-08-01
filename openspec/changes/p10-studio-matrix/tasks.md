@@ -30,9 +30,9 @@ edit is a new immutable version. "Save and inject" is `bound` mode, marked unver
 
 - [x] M3.1 Add a **model-catalog** read model (rows): list registered models with provider/id/params.
 - [x] M3.2 Add a **nodes** read surface (columns) from a loaded workflow IR — no new table.
-- [x] M3.3 Add **`POST /api/p10/studio/run`** — test-run a cell through `studio.Runner`, returning
+- [x] M3.3 Add **`POST /api/v1/studio/run`** — test-run a cell through `studio.Runner`, returning
       output + cost + latency + tokens, metered under the studio spend kind.
-- [x] M3.4 Add **`POST /api/p10/studio/bind`** — bind a node to a (model, prompt version) via bound
+- [x] M3.4 Add **`POST /api/v1/studio/bind`** — bind a node to a (model, prompt version) via bound
       mode, producing the binding-document entry marked **unverified**; enforce one bound cell per node.
 - [x] M3.5 Test — model catalog lists rows; run returns figures + meters studio spend; bind produces an
       unverified binding-document entry and replaces a prior bind for the same node.
