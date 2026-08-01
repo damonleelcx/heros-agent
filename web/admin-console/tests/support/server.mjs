@@ -53,8 +53,24 @@ export async function startAdminConsole(extraEnv = {}) {
   }
 
   const port = await freePort();
+  /*
+   * 🔴 `detached: true`, and the close below kills the process GROUP.
+   *
+   * This job hung in CI for eleven minutes with all 116 tests PASSED and the step never finishing —
+   * which is the worst way for a suite to fail, because the log says everything worked.
+   *
+   * `npx next start` is a WRAPPER. It spawns the real `next` server as a grandchild, so
+   * `child.kill()` reaps the wrapper and leaves the server running with its stdio pipes attached to
+   * this process — and Node will not exit while a pipe it is reading from is open. Locally the runner
+   * happened to exit anyway; on a CI runner it did not, and "happened to" is not a property.
+   *
+   * `detached` puts the wrapper and everything it spawns in their own process group, so one signal to
+   * `-pid` reaps all of it. The pipes are destroyed as well, because a killed process's pipe can still
+   * hold the loop open until the descriptor closes.
+   */
   const child = spawn("npx", ["next", "start", "--port", String(port)], {
     cwd: process.cwd(),
+    detached: true,
     env: {
       ...process.env,
       NODE_ENV: "production",
@@ -73,7 +89,7 @@ export async function startAdminConsole(extraEnv = {}) {
   const deadline = Date.now() + 30_000;
   for (;;) {
     if (Date.now() > deadline) {
-      child.kill("SIGKILL");
+      stop(child);
       throw new Error(`the operator console did not start within 30s:\n${logs.join("")}`);
     }
     try {
@@ -89,9 +105,38 @@ export async function startAdminConsole(extraEnv = {}) {
     base,
     logs,
     async close() {
-      child.kill("SIGTERM");
-      await new Promise((resolve) => setTimeout(resolve, 150));
-      child.kill("SIGKILL");
+      stop(child);
+      // Wait for the process to be REAPED rather than for a fixed delay. A timeout that is long enough
+      // on a developer machine is the thing that was not long enough on a CI runner.
+      await new Promise((resolve) => {
+        if (child.exitCode !== null || child.signalCode !== null) return resolve();
+        child.once("exit", resolve);
+        setTimeout(resolve, 5000);
+      });
     },
   };
+}
+
+/**
+ * stop reaps the server and everything it spawned, then closes the pipes.
+ *
+ * The process GROUP, not the process: `npx` is a wrapper around the real `next` server, and signalling
+ * only the wrapper leaves the server running with its stdio attached to this process — which is exactly
+ * how a suite whose every test passed hangs forever.
+ */
+function stop(child) {
+  try {
+    // Negative pid = the whole group. `detached: true` above is what makes the group exist.
+    process.kill(-child.pid, "SIGKILL");
+  } catch {
+    // Already gone, or the group never formed. Fall through to the direct kill.
+    try {
+      child.kill("SIGKILL");
+    } catch {
+      // nothing left to kill
+    }
+  }
+  // Node will not exit while it is still reading a pipe, even from a dead process.
+  child.stdout?.destroy();
+  child.stderr?.destroy();
 }

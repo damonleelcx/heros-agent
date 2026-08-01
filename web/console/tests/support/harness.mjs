@@ -170,8 +170,21 @@ export async function startConsole(platformBase, extraEnv = {}, attempt = 0) {
   await assertProductionBuild();
   const port = await freePort();
   const resolvedEnv = typeof extraEnv === "function" ? extraEnv(`http://127.0.0.1:${port}`) : extraEnv;
+  /*
+   * 🔴 `detached: true`, and `stop()` below kills the process GROUP.
+   *
+   * `npx next start` is a WRAPPER: it spawns the real `next` server as a grandchild, so `child.kill()`
+   * reaps the wrapper and leaves the server running with its stdio pipes attached to this process —
+   * and Node will not exit while a pipe it is reading from is open.
+   *
+   * Found on a CI runner, on the OPERATOR console's copy of this harness: 116 tests passed and the job
+   * sat there for eleven minutes with nothing left to do. This file had the same defect and had been
+   * getting away with it — `pgrep -f "next start"` after a local run showed three orphaned servers,
+   * one per suite that starts a console. It leaked; it just did not also hang.
+   */
   const child = spawn("npx", ["next", "start", "--port", String(port)], {
     cwd: process.cwd(),
+    detached: true,
     env: {
       ...process.env,
       NODE_ENV: "production",
@@ -195,14 +208,14 @@ export async function startConsole(platformBase, extraEnv = {}, attempt = 0) {
   const deadline = Date.now() + 30_000;
   for (;;) {
     if (Date.now() > deadline) {
-      child.kill("SIGKILL");
+      stop(child);
       throw new Error(`console did not start within 30s:\n${logs.join("")}`);
     }
     // A bind failure is retried ONCE on a fresh port rather than waited out: the loop would otherwise
     // spend thirty seconds polling a port this process never got, and then report a timeout that says
     // nothing about the actual cause.
     if (logs.join("").includes("EADDRINUSE")) {
-      child.kill("SIGKILL");
+      stop(child);
       if (attempt > 0) throw new Error(`console could not bind a free port:\n${logs.join("")}`);
       return startConsole(platformBase, extraEnv, attempt + 1);
     }
@@ -219,11 +232,36 @@ export async function startConsole(platformBase, extraEnv = {}, attempt = 0) {
     base,
     logs,
     async close() {
-      child.kill("SIGTERM");
-      await new Promise((resolve) => setTimeout(resolve, 150));
-      child.kill("SIGKILL");
+      stop(child);
+      // Wait for the process to be REAPED rather than for a fixed delay. A delay that is long enough on
+      // a developer machine is exactly the thing that was not long enough on a CI runner.
+      await new Promise((resolve) => {
+        if (child.exitCode !== null || child.signalCode !== null) return resolve();
+        child.once("exit", resolve);
+        setTimeout(resolve, 5000);
+      });
     },
   };
+}
+
+/**
+ * stop reaps the server and everything it spawned, then closes the pipes.
+ *
+ * The process GROUP, not the process — see the comment on `detached` above. The pipes are destroyed as
+ * well, because a killed process's pipe can still hold the event loop open until its descriptor closes.
+ */
+function stop(child) {
+  try {
+    process.kill(-child.pid, "SIGKILL");
+  } catch {
+    try {
+      child.kill("SIGKILL");
+    } catch {
+      // nothing left to kill
+    }
+  }
+  child.stdout?.destroy();
+  child.stderr?.destroy();
 }
 
 /**
