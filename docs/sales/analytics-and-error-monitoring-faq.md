@@ -100,8 +100,8 @@ runs:
 | Document | What it answers |
 |---|---|
 | `/legal/sub-processors` | Who receives what, on which surfaces, gated on what, processing where. Published and versioned; a material change re-asks for consent |
-| `docs/decisions/p24-error-event-allowlist.md` | The complete set of fields an error report can contain — **generated from the code that builds the report**, with a build gate on drift |
-| `docs/decisions/p24-operator-acceptable-use.md` | Why our own operator console has no consent banner, and what it does and does not collect |
+| `docs/decisions/error-event-allowlist.md` | The complete set of fields an error report can contain — **generated from the code that builds the report**, with a build gate on drift |
+| `docs/decisions/operator-acceptable-use.md` | Why our own operator console has no consent banner, and what it does and does not collect |
 
 The sentence that usually ends the conversation: **an error report is built from a thirteen-field list,
 not filtered down to one.** A field somebody adds to an internal error is *absent* by default — visible

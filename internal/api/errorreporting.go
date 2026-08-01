@@ -11,7 +11,7 @@ import (
 	"github.com/heros-foreal/agentd/internal/telemetry"
 )
 
-// p24_errorreporting.go wires the error-reporting boundary into the served surface (P24 tasks 2.5,
+// errorreporting.go wires the error-reporting boundary into the served surface (P24 tasks 2.5,
 // 2.6, 2.10).
 //
 // Three things, and they are separable on purpose:

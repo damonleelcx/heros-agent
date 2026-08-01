@@ -1,4 +1,4 @@
-// Command p24verify is P24's LIVE verification harness (task 2.13).
+// Command erroreportverify is P24's LIVE verification harness (task 2.13).
 //
 // # What it does, and why it is a command rather than a test
 //
@@ -19,7 +19,7 @@
 // endpoint that exists in one deployment shape and not another is a defect in this repository's terms,
 // and a panic endpoint that exists in all of them is worse.
 //
-//	HEROS_ERROR_REPORTING_DSN=… HEROS_EDITION=dev HEROS_VERSION=… go run ./cmd/p24verify
+//	HEROS_ERROR_REPORTING_DSN=… HEROS_EDITION=dev HEROS_VERSION=… go run ./cmd/erroreportverify
 //
 // With no DSN it verifies the ABSENT path instead — which is a real answer, and the one every substrate
 // except the platform's own hosted deployment should give.
@@ -55,7 +55,7 @@ func main() {
 		fmt.Printf("  [log] "+format+"\n", args...)
 	})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "p24verify: %v\n", err)
+		fmt.Fprintf(os.Stderr, "erroreportverify: %v\n", err)
 		os.Exit(1)
 	}
 	defer func() {
@@ -65,29 +65,29 @@ func main() {
 	}()
 
 	state, class := reporter.State()
-	fmt.Printf("p24verify: reporter state = %s%s\n", state, suffix(class))
+	fmt.Printf("erroreportverify: reporter state = %s%s\n", state, suffix(class))
 	if dsn == "" {
-		fmt.Printf("p24verify: %s is unset, so this run verifies the ABSENT path.\n", erroreport.EnvDSN)
+		fmt.Printf("erroreportverify: %s is unset, so this run verifies the ABSENT path.\n", erroreport.EnvDSN)
 	} else {
-		fmt.Printf("p24verify: transmitting to %s\n", redactDSN(dsn))
+		fmt.Printf("erroreportverify: transmitting to %s\n", redactDSN(dsn))
 	}
 
 	srv := api.New(nil, config.Config{})
 	srv.SetErrorReporter(reporter)
-	srv.Mux.HandleFunc("GET /api/p24verify/runs/{runID}", func(http.ResponseWriter, *http.Request) {
+	srv.Mux.HandleFunc("GET /api/erroreportverify/runs/{runID}", func(http.ResponseWriter, *http.Request) {
 		// A panic whose VALUE carries forbidden material on purpose. If any of it appears in the inbox,
 		// the boundary is broken in the one way that matters.
 		panic(fmt.Sprintf(
 			"deliberate P24 verification panic: tenant %q key %s prompt %q",
 			"Nous Research Ltd",
-			"sk-ant-api03-p24verify-not-a-real-key-0000000000",
+			"sk-ant-api03-erroreportverify-not-a-real-key-0000000000",
 			strings.Repeat("summarise the attached contract ", 40),
 		))
 	})
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "p24verify: listen: %v\n", err)
+		fmt.Fprintf(os.Stderr, "erroreportverify: listen: %v\n", err)
 		os.Exit(1)
 	}
 	httpSrv := &http.Server{Handler: srv.Handler, ReadHeaderTimeout: 5 * time.Second}
@@ -95,9 +95,9 @@ func main() {
 	defer func() { _ = httpSrv.Close() }()
 
 	base := "http://" + listener.Addr().String()
-	resp, err := http.Get(base + "/api/p24verify/runs/" + theRunID) //nolint:noctx // a local, single-shot probe
+	resp, err := http.Get(base + "/api/erroreportverify/runs/" + theRunID) //nolint:noctx // a local, single-shot probe
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "p24verify: the probe request failed: %v\n", err)
+		fmt.Fprintf(os.Stderr, "erroreportverify: the probe request failed: %v\n", err)
 		os.Exit(1)
 	}
 	body, _ := io.ReadAll(resp.Body)
@@ -121,11 +121,11 @@ func main() {
 	ok := header == spanTrace && parsed["trace_id"] == spanTrace
 	fmt.Printf("  header == span == body : %v\n", ok)
 	if !ok {
-		fmt.Fprintln(os.Stderr, "p24verify: the three identities are not one string")
+		fmt.Fprintln(os.Stderr, "erroreportverify: the three identities are not one string")
 		os.Exit(1)
 	}
 	if parsed["code"] != string(errorcode.PlatformPanic) {
-		fmt.Fprintf(os.Stderr, "p24verify: the response code is %v, want %s\n", parsed["code"], errorcode.PlatformPanic)
+		fmt.Fprintf(os.Stderr, "erroreportverify: the response code is %v, want %s\n", parsed["code"], errorcode.PlatformPanic)
 		os.Exit(1)
 	}
 
@@ -134,7 +134,7 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	if err := reporter.Close(ctx); err != nil {
-		fmt.Fprintf(os.Stderr, "p24verify: flush: %v\n", err)
+		fmt.Fprintf(os.Stderr, "erroreportverify: flush: %v\n", err)
 		os.Exit(1)
 	}
 	state, class = reporter.State()
@@ -156,7 +156,7 @@ func main() {
 		fmt.Println("  token this harness deliberately does not hold. The transmitted BYTES are asserted")
 		fmt.Println("  against the forbidden-shape fixture in internal/erroreport, off a real socket.")
 	case erroreport.StateDegraded:
-		fmt.Fprintf(os.Stderr, "p24verify: transmission failed (%s)\n", class)
+		fmt.Fprintf(os.Stderr, "erroreportverify: transmission failed (%s)\n", class)
 		os.Exit(1)
 	}
 }

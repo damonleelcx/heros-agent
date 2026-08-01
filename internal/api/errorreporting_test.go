@@ -16,7 +16,7 @@ import (
 	"github.com/heros-foreal/agentd/internal/telemetry"
 )
 
-// p24_errorreporting_test.go asserts the two properties the erroreport package cannot assert about
+// errorreporting_test.go asserts the two properties the erroreport package cannot assert about
 // itself: that the trace identity a REQUEST carries is the same string in three places, and that a
 // panic in a served handler becomes a report rather than a lost stack and a dead socket.
 //

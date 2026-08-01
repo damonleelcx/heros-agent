@@ -31,7 +31,7 @@ import (
 )
 
 // Target is the document this program owns, relative to the repository root.
-const Target = "docs/decisions/p24-error-event-allowlist.md"
+const Target = "docs/decisions/error-event-allowlist.md"
 
 func main() {
 	check := flag.Bool("check", false, "regenerate into memory and diff against the checked-in document")

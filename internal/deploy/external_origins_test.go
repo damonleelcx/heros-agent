@@ -1,4 +1,4 @@
-// p24_origins_test.go is the machine-checked half of P24 task 1.8: an installable or air-gapped
+// external_origins_test.go is the machine-checked half of P24 task 1.8: an installable or air-gapped
 // artefact references ZERO external origins, and the check runs when the package is BUILT.
 //
 // # Why the assertion lives here and not in the packaging script alone

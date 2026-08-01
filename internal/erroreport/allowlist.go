@@ -64,7 +64,7 @@ type AllowlistField struct {
 // Allowlist is the complete, ratified set of fields permitted to cross the boundary (design D5).
 //
 // It is the SINGLE SOURCE OF TRUTH: `Event.Wire` writes exactly these keys, `cmd/erroreportdoc`
-// renders `docs/decisions/p24-error-event-allowlist.md` from this list, and the boundary test asserts
+// renders `docs/decisions/error-event-allowlist.md` from this list, and the boundary test asserts
 // a transmitted payload carries no key outside it AND that no key in it goes unpopulated. Change the
 // boundary here, in one place, or not at all.
 var Allowlist = []AllowlistField{

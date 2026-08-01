@@ -175,7 +175,7 @@ test("4.4 the three optional categories have term-dictionary entries, and every 
 });
 
 test("4.4 the operator notice uses the same three terms", async () => {
-  const notice = await readFile(join(WEB, "..", "docs", "decisions", "p24-operator-acceptable-use.md"), "utf8");
+  const notice = await readFile(join(WEB, "..", "docs", "decisions", "operator-acceptable-use.md"), "utf8");
   for (const category of NON_ESSENTIAL_CATEGORIES) {
     assert.match(
       notice,
@@ -262,7 +262,7 @@ test("4.9 the operator console renders no banner, and the exception is STATED", 
   for (const src of files) {
     assert.match(src, /acceptable-use/i, "the operator console does not name the notice its exception lives in");
   }
-  const notice = await readFile(join(WEB, "..", "docs", "decisions", "p24-operator-acceptable-use.md"), "utf8");
+  const notice = await readFile(join(WEB, "..", "docs", "decisions", "operator-acceptable-use.md"), "utf8");
   assert.match(notice, /no consent banner/i, "the notice does not state the absence");
   assert.match(notice, /Refused/, "the notice does not state what is refused");
 });

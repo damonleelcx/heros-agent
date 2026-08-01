@@ -1,4 +1,4 @@
-// Command p24hermes runs P24's boundary against the REAL nousresearch/hermes-agent repository.
+// Command erroreporthermes runs P24's boundary against the REAL nousresearch/hermes-agent repository.
 //
 // # Why this exists when task 2.11 already has a fence
 //
@@ -18,13 +18,13 @@
 // thought of, because the extractor does not know what it is looking for either — it takes what is
 // there.
 //
-//	go run ./cmd/p24hermes -repo /path/to/hermes-agent
-//	go run ./cmd/p24hermes -repo /path/to/hermes-agent -out docs/release
+//	go run ./cmd/erroreporthermes -repo /path/to/hermes-agent
+//	go run ./cmd/erroreporthermes -repo /path/to/hermes-agent -out docs/release
 //
-// 🔴 The report does NOT go into a directory named after this command. `go build ./cmd/p24hermes` drops
-// an ~18MB binary called `p24hermes` at the repository root — .gitignore lists nine such names for that
-// reason — and a directory with the same name turns that ordinary build into a failure nobody expects.
-// I hit it while writing this.
+// 🔴 The report does NOT go into a directory named after this command. `go build ./cmd/erroreporthermes`
+// drops an ~18MB binary called `erroreporthermes` at the repository root — .gitignore lists nine such
+// names for that reason — and a directory with the same name turns that ordinary build into a failure
+// nobody expects. I hit it while writing this.
 //
 // It transmits to a LOCAL capture endpoint. It never contacts a real inbox, and it never needs a DSN.
 package main
@@ -60,20 +60,20 @@ type material struct {
 
 func main() {
 	repo := flag.String("repo", "/tmp/hermes-agent", "path to the hermes-agent checkout (read-only)")
-	out := flag.String("out", "", "directory to write p24-hermes-report.md into (optional)")
+	out := flag.String("out", "", "directory to write error-monitoring-hermes-report.md into (optional)")
 	flag.Parse()
 
-	fmt.Printf("p24hermes — P24's error boundary against %s\n", repoURL)
+	fmt.Printf("erroreporthermes — P24's error boundary against %s\n", repoURL)
 	fmt.Printf("  checkout: %s (read-only)\n\n", *repo)
 
 	found, err := extract(*repo)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "p24hermes: %v\n", err)
+		fmt.Fprintf(os.Stderr, "erroreporthermes: %v\n", err)
 		os.Exit(1)
 	}
 	if len(found) < 20 {
 		fmt.Fprintf(os.Stderr,
-			"p24hermes: extracted only %d pieces of material from %s.\n"+
+			"erroreporthermes: extracted only %d pieces of material from %s.\n"+
 				"  A run over almost nothing would pass and prove nothing. Point -repo at a real checkout.\n",
 			len(found), *repo)
 		os.Exit(1)
@@ -99,17 +99,17 @@ func main() {
 	srv := httptest.NewServer(http.HandlerFunc(cap.handle))
 	defer srv.Close()
 
-	dsn := strings.Replace(srv.URL, "://", "://p24hermeskey@", 1) + "/4242"
+	dsn := strings.Replace(srv.URL, "://", "://erroreporthermeskey@", 1) + "/4242"
 	reporter, err := erroreport.New(erroreport.Config{
 		DSN:      dsn,
-		Release:  "p24hermes",
+		Release:  "erroreporthermes",
 		Edition:  "dev",
 		Runtime:  "go",
 		Scrubber: telemetry.NewScrubber(),
 		Logf:     func(string, ...any) {},
 	})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "p24hermes: %v\n", err)
+		fmt.Fprintf(os.Stderr, "erroreporthermes: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -129,7 +129,7 @@ func main() {
 	flushCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if closeErr := reporter.Close(flushCtx); closeErr != nil {
-		fmt.Fprintf(os.Stderr, "p24hermes: flush: %v\n", closeErr)
+		fmt.Fprintf(os.Stderr, "erroreporthermes: flush: %v\n", closeErr)
 		os.Exit(1)
 	}
 
@@ -142,7 +142,7 @@ func main() {
 	fmt.Printf("  transmitted bytes   : %d\n\n", len(wire))
 
 	if len(bodies) == 0 {
-		fmt.Fprintln(os.Stderr, "p24hermes: nothing was transmitted, so nothing was checked. Refusing to report a pass.")
+		fmt.Fprintln(os.Stderr, "erroreporthermes: nothing was transmitted, so nothing was checked. Refusing to report a pass.")
 		os.Exit(1)
 	}
 
@@ -160,7 +160,7 @@ func main() {
 		for _, m := range leaks {
 			fmt.Printf("     - %s from %s\n", m.Kind, m.From)
 		}
-		fmt.Fprintln(os.Stderr, "\np24hermes: FAILED")
+		fmt.Fprintln(os.Stderr, "\nerroreporthermes: FAILED")
 		os.Exit(1)
 	}
 	fmt.Printf("  ✅ 0 of %d pieces of real material appear in the transmitted bytes.\n", len(found))
@@ -186,7 +186,7 @@ func main() {
 		if tags["trace_id"] != telemetry.TraceID("run-hermes-p24") {
 			unexpected = append(unexpected, fmt.Sprintf("trace_id = %v, not the run's", tags["trace_id"]))
 		}
-		if payload["release"] != "p24hermes" {
+		if payload["release"] != "erroreporthermes" {
 			unexpected = append(unexpected, fmt.Sprintf("release = %v", payload["release"]))
 		}
 	}
@@ -194,7 +194,7 @@ func main() {
 		for _, u := range unexpected {
 			fmt.Fprintf(os.Stderr, "  🔴 %s\n", u)
 		}
-		fmt.Fprintln(os.Stderr, "\np24hermes: FAILED")
+		fmt.Fprintln(os.Stderr, "\nerroreporthermes: FAILED")
 		os.Exit(1)
 	}
 	fmt.Printf("  ✅ every envelope carries the RUN's trace id (%s) and the build's release.\n",
@@ -209,10 +209,10 @@ func main() {
 
 	if *out != "" {
 		if writeErr := writeReport(*out, found, byKind, bodies); writeErr != nil {
-			fmt.Fprintf(os.Stderr, "p24hermes: writing the report: %v\n", writeErr)
+			fmt.Fprintf(os.Stderr, "erroreporthermes: writing the report: %v\n", writeErr)
 			os.Exit(1)
 		}
-		fmt.Printf("\n  report: %s/p24-hermes-report.md\n", *out)
+		fmt.Printf("\n  report: %s/error-monitoring-hermes-report.md\n", *out)
 	}
 }
 
@@ -366,5 +366,5 @@ func writeReport(dir string, found []material, byKind map[string]int, bodies []s
 	b.WriteString("The boundary drops material it has never seen. What it does NOT establish is anything\n")
 	b.WriteString("about a vendor's stored copy — the assertion is on the bytes this process transmitted,\n")
 	b.WriteString("which is the side of the boundary we control.\n")
-	return os.WriteFile(filepath.Join(dir, "p24-hermes-report.md"), []byte(b.String()), 0o644)
+	return os.WriteFile(filepath.Join(dir, "error-monitoring-hermes-report.md"), []byte(b.String()), 0o644)
 }

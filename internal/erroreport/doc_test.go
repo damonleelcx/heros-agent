@@ -43,7 +43,7 @@ func TestTheDocumentGateGoesRed(t *testing.T) {
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go toolchain not available")
 	}
-	const target = "../../docs/decisions/p24-error-event-allowlist.md"
+	const target = "../../docs/decisions/error-event-allowlist.md"
 	original, err := os.ReadFile(target)
 	if err != nil {
 		t.Fatalf("read the document: %v", err)
@@ -57,7 +57,7 @@ func TestTheDocumentGateGoesRed(t *testing.T) {
 	if edited == string(original) {
 		t.Fatal("the fixture edit changed nothing — the test would prove the gate is red for no reason")
 	}
-	if err := os.WriteFile(root+"/docs/decisions/p24-error-event-allowlist.md", []byte(edited), 0o644); err != nil {
+	if err := os.WriteFile(root+"/docs/decisions/error-event-allowlist.md", []byte(edited), 0o644); err != nil {
 		t.Fatalf("write fixture: %v", err)
 	}
 

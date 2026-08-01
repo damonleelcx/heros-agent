@@ -1,5 +1,5 @@
-// p24-exit.test.mjs is P24 task 8.2 — the FOUR AMENDED COMMITMENTS, each with a named regression test
-// that fails if a future phase re-widens it.
+// analytics-commitments.test.mjs is P24 task 8.2 — the FOUR AMENDED COMMITMENTS, each with a named
+// regression test that fails if a future phase re-widens it.
 //
 // # Why this file exists separately from the fences
 //
@@ -195,7 +195,7 @@ test("8.2 every fence in this phase has a RED demonstration that runs", async ()
     ["total ceiling", "console/tests/third-party-fence.test.mjs", /🔴 the total ceiling fails/],
     ["two-console drift", "console/tests/third-party-fence.test.mjs", /🔴 the drift check goes RED on a divergent map/],
     ["drift vacuity", "console/tests/third-party-fence.test.mjs", /🔴 the drift check refuses to pass vacuously/],
-    ["air-gapped external origin", "../internal/deploy/p24_origins_test.go", /TestOriginGateIsConnected/],
+    ["air-gapped external origin", "../internal/deploy/external_origins_test.go", /TestOriginGateIsConnected/],
     ["allowlist doc drift", "../internal/erroreport/doc_test.go", /TestTheDocumentGateGoesRed/],
     ["forbidden shape on the wire", "../internal/erroreport/boundary_test.go", /TestTransmittedBytesCarryNoForbiddenShape/],
     ["unexplained transmitted value", "../internal/erroreport/boundary_test.go", /TestEveryTransmittedValueIsExplained/],

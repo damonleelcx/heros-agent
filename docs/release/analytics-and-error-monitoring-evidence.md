@@ -150,7 +150,7 @@ packager passes **no** `--allow`; the P20 installable package passes exactly two
 `githubusercontent.com`), because its installer must reach the public forge the customer downloads from
 and proxying that through our own origin is the manoeuvre P24's design rejects by name.
 
-Asserted in `internal/deploy/p24_origins_test.go` (runs in `make go`): the gate is connected, the staged
+Asserted in `internal/deploy/external_origins_test.go` (runs in `make go`): the gate is connected, the staged
 set is zero, **both** package builds still invoke it, and no third allowance has appeared.
 
 > ⚠️ **Open, and stated rather than implied.** The full `package-airgapped.sh` run was NOT executed
@@ -223,7 +223,7 @@ and it is the eighth-priority item; the guarantee it buys is the first.
 | Task | Where | Assertion that runs |
 |---|---|---|
 | 2.1 | `internal/erroreport` — `Allowlist` (13 fields, category + one-line justification each), `Event`, `Wire`, `Payload`, `Envelope` | `TestAllowlistIsWellFormed`, `TestTransmittedKeySetIsASubsetOfTheAllowlist` |
-| 2.2 | `cmd/erroreportdoc` → `docs/decisions/p24-error-event-allowlist.md`, with `-check` | `TestTheReviewDocumentIsGeneratedFromTheAllowlist`, **red**: `TestTheDocumentGateGoesRed` |
+| 2.2 | `cmd/erroreportdoc` → `docs/decisions/error-event-allowlist.md`, with `-check` | `TestTheReviewDocumentIsGeneratedFromTheAllowlist`, **red**: `TestTheDocumentGateGoesRed` |
 | 2.3 | `Scrub` chains `telemetry.Scrubber` over the constructed event, flattened so nested frame strings are seen | `TestTheScrubberCatchesWhatConstructionMissed`, `TestScrubbingRunsOverNestedFrameStringsToo`, `TestAReporterWithoutAScrubberIsRefused` |
 | 2.4 | `errorcode` central enum (24 codes); a non-member is replaced by `UNKNOWN`, never passed through | `TestAMessageShapedValueThatIsNotAnEnumValueDoesNotReachTheWire` |
 | 2.5 | `telemetry.ContextWithTraceID` / `TraceIDFromContext`; `traceIDFor` derives a run-scoped request's trace from `telemetry.TraceID(run_id)` | `TestOneTraceIdentityResolvesTheHeaderTheEventAndTheSpan` |
@@ -271,7 +271,7 @@ test so the next person does not "fix" it back.
 
 ### 2.13 — live verification
 
-`cmd/p24verify` starts the **real** `internal/api` server with the real reporter, registers one route
+`cmd/erroreportverify` starts the **real** `internal/api` server with the real reporter, registers one route
 that panics, and calls it over a real socket. (A panic endpoint is deliberately *not* in `internal/api`:
 a diagnostic endpoint that exists in one deployment shape and not another is a defect in this
 repository's terms, and one that exists in all of them is worse.)
@@ -279,7 +279,7 @@ repository's terms, and one that exists in all of them is worse.)
 **Absent path**, no DSN:
 
 ```
-p24verify: reporter state = absent
+erroreportverify: reporter state = absent
   status            : 500
   X-Trace-Id        : 0d880d3ea8747c8c7a2eb4db2db26fa9
   body.code         : PLATFORM_PANIC
@@ -290,8 +290,8 @@ p24verify: reporter state = absent
 **Live path**, against the real Sentry project supplied for this phase:
 
 ```
-p24verify: reporter state = configured
-p24verify: transmitting to https://***@o4511833794019328.ingest.us.sentry.io/4511833799196672
+erroreportverify: reporter state = configured
+erroreportverify: transmitting to https://***@o4511833794019328.ingest.us.sentry.io/4511833799196672
   telemetry.TraceID("run-p24-live-verification") = 0d880d3ea8747c8c7a2eb4db2db26fa9
   header == span == body : true
   reporter state    : configured        (after flush — the ingest endpoint accepted the envelope)
@@ -437,7 +437,7 @@ person, as a working integration that is broken.
 | 4.3 | `src/components/consentBanner.tsx` — a `<form>` and a `<details>`, no JavaScript at all |
 | 4.4 | `web/design-system/consent-terms.ts` — "Usage analytics", "Session recording", "Error diagnostics", read by the banner and by the operator notice |
 | 4.5–4.8 | `POST /api/consent`, following `POST /api/theme`'s shape exactly |
-| 4.9 | `docs/decisions/p24-operator-acceptable-use.md` |
+| 4.9 | `docs/decisions/operator-acceptable-use.md` |
 | 4.10 | inside `npm run accept` |
 
 ### 4.3 — the decision that carries this wave
@@ -742,7 +742,7 @@ documents. A missing row is a red build, which is the only form of "we checked a
 
 ### 7.6 · The sales FAQ, with the fourth answer intact
 
-`docs/sales/P24-analytics-and-error-monitoring-faq.md`. The test asserts the fourth question is answered
+`docs/sales/analytics-and-error-monitoring-faq.md`. The test asserts the fourth question is answered
 **"No."** and that the page contains no `coming soon`, `on the roadmap` or `planned for` — because a
 roadmap answer to a capability that does not exist is the claim a customer holds us to.
 
@@ -762,20 +762,20 @@ roadmap answer to a capability that does not exist is the claim a customer holds
 
 | # | Checklist item | Evidence |
 |---|---|---|
-| 1 | No ids, no DSN: zero third-party requests, zero warnings, readiness `absent` on both consoles and every service | `npm run accept` (default): `0 third-party bytes with consent DECLINED`, `NOT EXERCISED` naming the unconfigured origins · `TestAbsentIsSilentAndTransmitsNothing` (0 log lines) · `TestReadinessReportsErrorReportingAbsentWhenNothingIsConfigured` · `TestTheAdminAPIReportsErrorReportingOnItsOwnReadiness` · `go run ./cmd/p24verify` with no DSN |
-| 2 | `/app/**` and every operator route: `default-src 'self'`, no third-party origin except the reporting one under `connect-src`, **asserted per prefix** | `third-party-fence.test.mjs` 1.4 × 4 (both consoles, live `next start`) · `p24-exit.test.mjs` COMMITMENT 2 |
+| 1 | No ids, no DSN: zero third-party requests, zero warnings, readiness `absent` on both consoles and every service | `npm run accept` (default): `0 third-party bytes with consent DECLINED`, `NOT EXERCISED` naming the unconfigured origins · `TestAbsentIsSilentAndTransmitsNothing` (0 log lines) · `TestReadinessReportsErrorReportingAbsentWhenNothingIsConfigured` · `TestTheAdminAPIReportsErrorReportingOnItsOwnReadiness` · `go run ./cmd/erroreportverify` with no DSN |
+| 2 | `/app/**` and every operator route: `default-src 'self'`, no third-party origin except the reporting one under `connect-src`, **asserted per prefix** | `third-party-fence.test.mjs` 1.4 × 4 (both consoles, live `next start`) · `analytics-commitments.test.mjs` COMMITMENT 2 |
 | 3 | A rendered browser on a tenant route: every request targets the console's own origin | `npm run accept` → `tenant: 4 signed-in /app route(s) walked with EVERY category granted; no third-party origin contacted except the error-reporting one` |
 | 4 | Public surface, declined: zero third-party requests, no non-essential cookie or storage, full function, no re-prompt across three navigations | `npm run accept` (three lines: 0 bytes declined; no non-essential storage; 0 requests on a deliberate error) · `consent.test.mjs` 4.5 (three navigations + a new session, live) · 4.7 (destinations, headings and controls compared) |
 | 5 | Public surface, granted per category: exactly the allowlisted origins, each within budget | `npm run accept` with real ids — 4 origins, 194,556 B, every one inside budget, total under 300 KB |
 | 6 | Withdrawal stops collection on the next navigation with no sign-out | `consent.test.mjs` 4.6 (live: the policy names the origin while granted and does not on the next navigation) |
-| 7 | A deliberate server panic **and** a deliberate browser throw each produce an issue carrying `trace_id`, `release`, `surface`, `error.code` and frames; transmitted bytes carry no forbidden shape | server: `cmd/p24verify` against the real Sentry project, accepted · browser: `npm run accept`'s on-event probe, body inspected · bytes: `TestTransmittedBytesCarryNoForbiddenShape` (8 shapes × 4 attachment routes, real socket) |
+| 7 | A deliberate server panic **and** a deliberate browser throw each produce an issue carrying `trace_id`, `release`, `surface`, `error.code` and frames; transmitted bytes carry no forbidden shape | server: `cmd/erroreportverify` against the real Sentry project, accepted · browser: `npm run accept`'s on-event probe, body inspected · bytes: `TestTransmittedBytesCarryNoForbiddenShape` (8 shapes × 4 attachment routes, real socket) |
 | 8 | Transmitted key set ⊆ allowlist, and every entry populated (both directions) | `TestTransmittedKeySetIsASubsetOfTheAllowlist` · `TestEveryAllowlistEntryIsPopulated` · `TestEveryTransmittedValueIsExplained` (the strong form) |
 | 9 | A Clarity or GA4 runtime in a tenant-reachable chunk fails the build, naming the chunk | fixture-manifest reds in both consoles · **and a real `next build`** with an injected Clarity string → 11 tenant chunks named |
 | 10 | A hard-coded origin in either `middleware.ts` fails the build | `scan-origins.mjs` wired into both builds; red demonstrated against a copy, naming file and line |
 | 11 | The air-gapped package build asserts zero external origins | `check-external-origins.sh` in `package-airgapped.sh` **before** the checksum manifest · `internal/deploy` asserts wiring, zero, and red |
 | 12 | A DSN at an unreachable host: readiness `degraded`, one log line per interval, no request-path latency change, no failed request | `TestAnUnreachableTargetNeverFailsACaller` (768 events → ≤2 log lines, degraded, named class) · `TestADegradedReporterDoesNotGateTraffic` |
 | 13 | P0 golden `config_hash` vectors reproduce byte-identically | `console-analytics.test.mjs` 6.6 runs the **real** vectors |
-| 14 | Every fence in §6 demonstrated red by a deliberate violation | `p24-exit.test.mjs` — a 34-row register, each naming the assertion that makes it go red |
+| 14 | Every fence in §6 demonstrated red by a deliberate violation | `analytics-commitments.test.mjs` — a 34-row register, each naming the assertion that makes it go red |
 | 15 | The sub-processor document is published, versioned and named on the legal surface; the claims fence passes | `legal scan passed: 4 document(s)` · `claim scan passed: 15 claim(s) … 171 shipped file(s) carry no banned phrase` |
 
 > ⚠️ **Item 12, one half not measured.** "No request-path latency change" is asserted structurally — the
@@ -786,7 +786,7 @@ roadmap answer to a capability that does not exist is the claim a customer holds
 
 ### 8.2 · The four amended commitments, each with a named regression test
 
-`web/console/tests/p24-exit.test.mjs`. Each test states what was amended and what was not, so a future
+`web/console/tests/analytics-commitments.test.mjs`. Each test states what was amended and what was not, so a future
 phase that generalises "the public surface may name allowlisted origins" one prefix at a time fails at
 the first step rather than at the last.
 
@@ -802,7 +802,7 @@ the first step rather than at the last.
 ### 8.3 · Audit of the task list against reality
 
 Every `[x]` above resolves to a named assertion that exists and runs. The mechanism is deliberately not
-a promise: `p24-exit.test.mjs`'s register reads **34 files** and requires each named assertion to be
+a promise: `analytics-commitments.test.mjs`'s register reads **34 files** and requires each named assertion to be
 present by pattern, so a `[x]` whose test was deleted is a red build rather than a stale checkbox.
 
 **What the audit found, stated because a clean audit is the suspicious result:**
@@ -854,7 +854,7 @@ present by pattern, so a `[x]` whose test was deleted is a red build rather than
 
 ## The hermes-agent run
 
-`cmd/p24hermes`, against a fresh clone of **https://github.com/nousresearch/hermes-agent**.
+`cmd/erroreporthermes`, against a fresh clone of **https://github.com/nousresearch/hermes-agent**.
 
 ### Why this run exists when task 2.11 already has a fence
 
@@ -876,20 +876,20 @@ through ten members so the per-issue rate limiter cannot silence the material in
 ### The run
 
 ```
-p24hermes — P24's error boundary against https://github.com/nousresearch/hermes-agent
+erroreporthermes — P24's error boundary against https://github.com/nousresearch/hermes-agent
 
 ── material taken from the real repository ──────────────────────
-  docstring / prompt     142
+  docstring / prompt     141
   model reference          9
   prompt text              2
-  source path             57
+  source path             58
   symbol                 191
   TOTAL                  401
 
 ── the boundary ────────────────────────────────────────────────
   errors reported      : 401
   envelopes transmitted:  50   (the rest were rate-limited, which is the design)
-  transmitted bytes    : 38234
+  transmitted bytes    : 38584
 
 ── what reached the wire ───────────────────────────────────────
   ✅ 0 of 401 pieces of real material appear in the transmitted bytes.
@@ -900,10 +900,10 @@ p24hermes — P24's error boundary against https://github.com/nousresearch/herme
 A transmitted envelope, verbatim — this is the complete set of bytes for one hermes-agent failure:
 
 ```
-{"event_id":"0172278e677acc9527650f8b58c39620","sent_at":"2026-08-01T07:31:04.081871Z"}
-{"content_type":"application/json","length":611,"type":"event"}
+{"event_id":"ee85f7f948366eea1ac2f34932b5cd60","sent_at":"2026-08-01T08:17:18.974437Z"}
+{"content_type":"application/json","length":618,"type":"event"}
 {"event_id":"…","exception":{"values":[{"stacktrace":{"frames":[…]},"type":"*main.carrier","value":"PROVIDER_ERROR"}]},
- "level":"error","platform":"go","release":"p24hermes",
+ "level":"error","platform":"go","release":"erroreporthermes",
  "tags":{"edition":"dev","error.code":"PROVIDER_ERROR","runtime":"go","surface":"platform.api",
          "trace_id":"c0b2592a7583f888583e0c8d25c5ab4f"}}
 ```
@@ -932,4 +932,4 @@ rather than strings written beside the code that filters them.
 > transmitted, which is the side of the boundary we control and the side the design puts the guarantee
 > on.
 
-Report: [`docs/release/p24-hermes-report.md`](p24-hermes-report.md).
+Report: [`docs/release/error-monitoring-hermes-report.md`](error-monitoring-hermes-report.md).

@@ -52,7 +52,7 @@ collection at all — console output, click-target text, local variables, enviro
 prompt or diff text, hostnames, IP addresses, email addresses, or tenant names.
 
 The complete, generated list is
-[`p24-error-event-allowlist.md`](p24-error-event-allowlist.md), rendered from the code by
+[`error-event-allowlist.md`](error-event-allowlist.md), rendered from the code by
 `cmd/erroreportdoc` so it cannot drift from what is actually transmitted.
 
 **No operator is identified in an error event.** There is no principal id, no session id, no name and no

@@ -268,14 +268,14 @@ test("7.5 🔴 all seven propagation layers carry the change", async () => {
     ["4a customer scan-bundle", "console/scripts/scan-bundle.mjs", /OBSERVABILITY RUNTIME/],
     ["4b operator scan-bundle", "admin-console/scripts/scan-bundle.mjs", /OBSERVABILITY RUNTIME/],
     ["5 Go initialisation", "../internal/launch/launch.go", /erroreport\.FromEnv/],
-    ["6a deployment manifests", "../internal/deploy/p24_origins_test.go", /TestDeploymentManifestsCarryNoReportingIdentity/],
+    ["6a deployment manifests", "../internal/deploy/external_origins_test.go", /TestDeploymentManifestsCarryNoReportingIdentity/],
     ["6b air-gapped packager", "../deploy/scripts/package-airgapped.sh", /check-external-origins\.sh/],
     ["7a release pipeline", "../scripts/release-cli.sh", /check-external-origins\.sh/],
     ["7b source-map upload", "console/scripts/upload-sourcemaps.mjs", /HEROS_SOURCEMAP_UPLOAD_TOKEN/],
     ["8a legal — sub-processors", "console/content/legal/en/sub-processors/1.0.0.md", /material: true/],
     ["8b legal — privacy", "console/content/legal/en/privacy/1.1.0.md", /sub-processors/],
-    ["8c operator notice", "../docs/decisions/p24-operator-acceptable-use.md", /no consent banner/i],
-    ["8d sales FAQ", "../docs/sales/P24-analytics-and-error-monitoring-faq.md", /self-hosted collector/],
+    ["8c operator notice", "../docs/decisions/operator-acceptable-use.md", /no consent banner/i],
+    ["8d sales FAQ", "../docs/sales/analytics-and-error-monitoring-faq.md", /self-hosted collector/],
   ];
   for (const [layer, rel, expected] of layers) {
     const src = await readFile(join(WEB, rel), "utf8").catch(() => "");
@@ -287,7 +287,7 @@ test("7.5 🔴 all seven propagation layers carry the change", async () => {
 // ── 7.6 · The sales answers say what shipped ─────────────────────────────────
 
 test("7.6 the FAQ answers all four questions, and the fourth answers 'no'", async () => {
-  const faq = await readFile(join(WEB, "..", "docs", "sales", "P24-analytics-and-error-monitoring-faq.md"), "utf8");
+  const faq = await readFile(join(WEB, "..", "docs", "sales", "analytics-and-error-monitoring-faq.md"), "utf8");
   for (const question of [
     /Do you record my screen/i,
     /Can I turn it off/i,
