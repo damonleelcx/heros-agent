@@ -105,7 +105,7 @@ func main() {
 	}
 
 	srv := api.New(nil, config.Config{})
-	srv.MountP7(st)
+	srv.MountBilling(st)
 	// The rollout state is a HEALTH SIGNAL on /readyz, not only a log line: "is this box charging real
 	// money" has to be checkable now, from the box.
 	srv.SetBillingRollout(st.rollout)
@@ -120,7 +120,7 @@ func main() {
 	}
 }
 
-// state is the whole wired stack plus the api.P7Source implementation.
+// state is the whole wired stack plus the api.BillingSource implementation.
 type state struct {
 	mu       sync.Mutex
 	plans    *plancfg.Resolver
@@ -355,7 +355,7 @@ func verifiedDelta(ref, period string, baseline, optimized float64, merged, esti
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// api.P7Source
+// api.BillingSource
 // ─────────────────────────────────────────────────────────────────────────────
 
 func (s *state) Periods(string) []string {

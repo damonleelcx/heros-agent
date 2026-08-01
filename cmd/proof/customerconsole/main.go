@@ -112,7 +112,7 @@ func main() {
 		}},
 	}
 	srv := api.New(nil, cfg)
-	srv.MountP35(&graphSource{views: map[string]patternclassifier.GraphView{workflowID: view}})
+	srv.MountPatternGraph(&graphSource{views: map[string]patternclassifier.GraphView{workflowID: view}})
 
 	// P10 Prompt & Model Studio MATRIX (P9 §11b) — mounted with the REAL discovered nodes as the
 	// matrix COLUMNS, so the studio shows a model-per-node grid over the actual hermes call sites, not
@@ -124,7 +124,7 @@ func main() {
 	// not mounted here; the matrix — the surface 11b is about — is.
 	studioCat := studio.NewWorkflowCatalog()
 	studioCat.Load(workflowID, labelled)
-	srv.MountP10Matrix(api.P10Matrix{
+	srv.MountStudioMatrix(api.StudioMatrix{
 		Store:     demoModels{},
 		Workflows: studioCat,
 		Binds:     studio.NewBindStore(),
@@ -142,12 +142,12 @@ func main() {
 	// body**, which is the truth.
 	//
 	// Found by opening the board in a browser and reading a 404 that should have been a 503.
-	srv.MountP2(api.P2Stores{})
+	srv.MountConfigRuntime(api.ConfigRuntimeStores{})
 	srv.MountMonitor(nil)
-	srv.MountP4(nil)
-	srv.MountP45(nil)
-	srv.MountP55(nil)
-	srv.MountP7(nil)
+	srv.MountEvalBoard(nil)
+	srv.MountScorecard(nil)
+	srv.MountProposals(nil)
+	srv.MountBilling(nil)
 
 	fmt.Print(account)
 	fmt.Printf("\nplatform API on http://%s\n", *addr)
@@ -253,7 +253,7 @@ func (g *graphSource) GraphView(id string) (patternclassifier.GraphView, bool) {
 	return view, ok
 }
 
-// demoModels is a minimal MatrixStore for the studio MATRIX (P9 §11b): it serves the model CATALOG —
+// demoModels is a minimal StudioModelStore for the studio MATRIX (P9 §11b): it serves the model CATALOG —
 // the matrix rows — which is a provider list, not customer data, so a static set is honest here. The
 // figures a run would produce are never fabricated: `ResolveModel`/`StudioRender` are reached only by
 // the test-run path, which this demo gates off (nil Runner answers 503 first), so they return the

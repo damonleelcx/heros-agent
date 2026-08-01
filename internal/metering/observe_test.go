@@ -17,7 +17,7 @@ import (
 // TestAlertConfigCoversTheWholeRevenueTaxonomy asserts every emitted revenue metric appears in the
 // shipped alert/recording rules, and that nothing in the rules references a metric nobody emits.
 func TestAlertConfigCoversTheWholeRevenueTaxonomy(t *testing.T) {
-	path := filepath.Join("..", "..", "deploy", "p7-revenue-alerts.yml")
+	path := filepath.Join("..", "..", "deploy", "revenue-alerts.yml")
 	b, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)

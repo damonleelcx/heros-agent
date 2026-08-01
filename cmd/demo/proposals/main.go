@@ -235,7 +235,7 @@ func constSeries(val float64, req verification.RunRequest) evalstats.Series {
 	return s
 }
 
-// source is the P55Source: it runs the real gate over the fixtures once and serves the assembled surface.
+// source is the ProposalsSource: it runs the real gate over the fixtures once and serves the assembled surface.
 type source struct {
 	surface api.Surface
 }
@@ -307,7 +307,7 @@ func main() {
 	flag.Parse()
 
 	s := api.New(nil, config.Config{})
-	s.MountP55(build(verification.AutomationLevel(*level)))
+	s.MountProposals(build(verification.AutomationLevel(*level)))
 
 	fmt.Printf("P5.5 recommendations:  http://%s/recommendations?workflow=demo-workflow\n", *addr)
 	fmt.Printf("surface JSON:          http://%s/api/v1/workflows/demo-workflow/proposals\n", *addr)

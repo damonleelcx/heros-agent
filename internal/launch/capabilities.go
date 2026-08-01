@@ -71,20 +71,20 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 		blobs := registry.NewCatalogingBlobStore(pg, fsBlobs, "application/json")
 
 		reg := registry.NewStore(pg, blobs)
-		h.MountP10(reg)
+		h.MountPromptRegistry(reg)
 		served("p10_prompt_registry")
 
 		// The studio matrix's model catalog and render are the registry's; the workflow catalog, the
 		// binding store and the test-runner are not mounted — the first two are in-memory and nothing in
 		// the deployed path loads them, and the runner needs a provider fan-out. Each answers 503 on its
-		// own, which is why P10Matrix is a struct of independently-nillable parts rather than one source.
-		h.MountP10Matrix(api.P10Matrix{Store: reg})
+		// own, which is why StudioMatrix is a struct of independently-nillable parts rather than one source.
+		h.MountStudioMatrix(api.StudioMatrix{Store: reg})
 		served("p10_studio_matrix (models + render; workflows/bindings/run not mounted)")
 
 		// P2 read views over the lineage schema. Submit stays nil: it is the write path into a target
 		// repository, and this type's own comment already rules that a deployment with no repository to
 		// transform mounts the read views and no submit.
-		h.MountP2(api.P2Stores{
+		h.MountConfigRuntime(api.ConfigRuntimeStores{
 			Transforms: worktree.NewStore(pg, blobs),
 			Runs:       executor.NewStore(pg),
 			Specs:      variantspec.NewStore(pg),
@@ -102,7 +102,7 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 		// names, so a linked run's URL and the console we health-check can never disagree.
 		linkStore := linkingest.NewPGStore(pg)
 		consoleOrigin := originOf(consoleHealthURL)
-		h.MountP11(linkingest.New(nil, linkStore, func(_, runID string) string {
+		h.MountRunLinking(linkingest.New(nil, linkStore, func(_, runID string) string {
 			if consoleOrigin == "" {
 				return ""
 			}
@@ -119,7 +119,7 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 		// URL already names exactly, so the origin is DERIVED from it rather than configured twice. Two
 		// variables for one origin is two things to keep in step, and they would not stay in step.
 		if origin := originOf(consoleHealthURL); origin != "" {
-			h.RegisterP23(legal.NewService(
+			h.RegisterConsent(legal.NewService(
 				legal.NewPGStore(pg),
 				legal.NewHTTPManifestSource(origin),
 				time.Now,
@@ -127,15 +127,15 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 			))
 			served("p23_consent")
 		} else {
-			h.RegisterP23(nil)
+			h.RegisterConsent(nil)
 			absent("p23_consent", "no customer console on this deployment, so no published legal manifest to record against")
 		}
 	} else {
-		h.MountP10(nil)
-		h.MountP10Matrix(api.P10Matrix{})
-		h.MountP2(api.P2Stores{})
-		h.MountP11(nil)
-		h.RegisterP23(nil)
+		h.MountPromptRegistry(nil)
+		h.MountStudioMatrix(api.StudioMatrix{})
+		h.MountConfigRuntime(api.ConfigRuntimeStores{})
+		h.MountRunLinking(nil)
+		h.RegisterConsent(nil)
 		const noDB = "this deployment declares no platform database (DATABASE_URL is unset)"
 		absent("p10_prompt_registry", noDB)
 		absent("p10_studio_matrix", noDB)
@@ -152,28 +152,28 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 	const noAdapter = "no persistent adapter exists outside a demo binary (PRD Q6)"
 	const noDurableStore = "its only store implementation is in-memory, so mounting it would record and then forget"
 
-	h.MountP4(nil)
+	h.MountEvalBoard(nil)
 	absent("p4_eval_board", noAdapter)
-	h.MountP45(nil)
+	h.MountScorecard(nil)
 	absent("p45_scorecard", noAdapter)
-	h.MountP5(nil)
+	h.MountGraphEditor(nil)
 	absent("p5_graph_editor", noAdapter)
-	h.MountP55(nil)
+	h.MountProposals(nil)
 	absent("p55_proposals", noAdapter)
-	h.MountP6(nil)
+	h.MountOptimizer(nil)
 	absent("p6_optimizer", noAdapter)
-	h.MountP35(nil)
+	h.MountPatternGraph(nil)
 	absent("p35_pattern_graph", noAdapter)
 	h.MountMonitor(nil)
 	absent("p25_run_monitor", noAdapter)
 
-	h.MountP7(nil)
+	h.MountBilling(nil)
 	absent("p7_billing", noDurableStore)
-	h.MountP21Payments(nil)
+	h.MountPayments(nil)
 	absent("p21_payments", noDurableStore)
-	h.MountP13Authoring(nil)
+	h.MountAuthoring(nil)
 	absent("p13_authoring", noDurableStore)
-	h.MountP12(nil)
+	h.MountForgeDelivery(nil)
 	absent("p12_forge_delivery", "its gate and pending providers read verification state that has no store yet")
 
 	// The Stripe webhook is the ONE surface deliberately NOT registered when it has no source, and the

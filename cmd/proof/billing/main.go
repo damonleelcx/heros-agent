@@ -167,7 +167,7 @@ func main() {
 	}
 
 	srv := api.New(nil, config.Config{})
-	srv.MountP7(st)
+	srv.MountBilling(st)
 	srv.SetBillingRollout(st.rollout)
 	fmt.Printf("P7 on %s\n", workflowID)
 	fmt.Printf("  billing surface:  http://%s/billing?customer=%s\n", *addr, customerID)
@@ -177,7 +177,7 @@ func main() {
 	log.Fatal(http.ListenAndServe(*addr, srv.Handler))
 }
 
-// state is the wired P7 stack plus the api.P7Source implementation.
+// state is the wired P7 stack plus the api.BillingSource implementation.
 type state struct {
 	mu       sync.Mutex
 	repoDir  string

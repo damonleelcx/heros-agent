@@ -82,7 +82,7 @@ func (s slowVerifier) Verify(ctx context.Context, req optimizer.VerifyRequest) (
 	return s.inner.Verify(ctx, req)
 }
 
-// source implements api.P6Source over a real controller loop.
+// source implements api.OptimizerSource over a real controller loop.
 type source struct {
 	mu         sync.Mutex
 	dir        string
@@ -306,7 +306,7 @@ func main() {
 		rolledBack: map[string]string{}, level: "autonomous"}
 
 	s := api.New(nil, config.Config{})
-	s.MountP6(src)
+	s.MountOptimizer(src)
 
 	fmt.Printf("P6 monitor:  http://%s/optimizer?run=demo-run\n", *addr)
 	fmt.Printf("demo repo:   %s\n", dir)

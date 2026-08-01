@@ -62,7 +62,7 @@ func main() {
 	src.views["v-clean"] = buildEmpty(ctx)
 
 	s := api.New(nil, config.Config{})
-	s.MountP45(src)
+	s.MountScorecard(src)
 
 	fmt.Println("p4.5 scorecard:")
 	fmt.Printf("  rich (all regions) http://%s/scorecard?variant=v-diag\n", *addr)

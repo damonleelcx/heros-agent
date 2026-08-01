@@ -44,7 +44,7 @@ func main() {
 	}
 
 	s := api.New(nil, config.Config{})
-	s.MountP35(src)
+	s.MountPatternGraph(src)
 	fmt.Printf("p3.5 graph:\n")
 	for _, w := range workflows() {
 		fmt.Printf("  %-22s /app/workflows/%s/graph\n     %s\n", w.id, url.PathEscape(w.id), w.what)

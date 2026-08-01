@@ -199,7 +199,7 @@ func main() {
 		}},
 	}
 	s := api.New(nil, cfg)
-	s.MountP55(src)
+	s.MountProposals(src)
 	fmt.Printf("P5.5 on hermes-agent:  http://%s/recommendations?workflow=hermes\n", *addr)
 	fmt.Printf("surface JSON:          http://%s/api/v1/workflows/hermes/proposals\n", *addr)
 	log.Fatal(http.ListenAndServe(*addr, s.Handler))

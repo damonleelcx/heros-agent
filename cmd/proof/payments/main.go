@@ -209,8 +209,8 @@ func main() {
 		return
 	}
 	srv := api.New(nil, config.Config{})
-	srv.MountP7(st)
-	srv.MountP21Payments(st)
+	srv.MountBilling(st)
+	srv.MountPayments(st)
 	srv.MountBillingWebhook(st.svc)
 	srv.SetBillingRollout(st.rollout)
 	srv.SetBillingCapability(st.svc)
@@ -294,7 +294,7 @@ func (s *state) serveAdmin(addr string) error {
 	return nil
 }
 
-// state is the wired P21 stack plus the api.P7Source and api.PaymentsSource implementations.
+// state is the wired P21 stack plus the api.BillingSource and api.PaymentsSource implementations.
 type state struct {
 	repoDir  string
 	headSHA  string

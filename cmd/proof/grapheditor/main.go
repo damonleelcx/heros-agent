@@ -59,7 +59,7 @@ func main() {
 	refineContracts(ir)
 
 	s := api.New(nil, config.Config{})
-	s.MountP5(src{ir: ir})
+	s.MountGraphEditor(src{ir: ir})
 	fmt.Printf("\np5 editor (hermes-agent, recovered topology):\n  http://%s/editor?workflow_id=hermes\n", *addr)
 	fmt.Printf("  reorder a later call ahead of its producer → REJECTED on real hermes nodes.\n")
 	log.Fatal(http.ListenAndServe(*addr, s.Handler))

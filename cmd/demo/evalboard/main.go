@@ -201,7 +201,7 @@ func main() {
 	}
 
 	srv := api.New(nil, config.Config{})
-	srv.MountP4(src)
+	srv.MountEvalBoard(src)
 	// The embedded UI page this demo used to open was removed in the P9 cutover: the console is now a
 	// separate component, so a demo can serve the read models but cannot serve the screen. It prints the
 	// API it is serving and how to point the console at it — the same shape `cmd/proof/customerconsole` uses.
