@@ -81,7 +81,13 @@ for p in "$AGENTD_PORT" "$CONSOLE_PORT" "$ADMIN_CONSOLE_PORT"; do
   if command -v lsof >/dev/null 2>&1 && lsof -nP -iTCP:"$p" -sTCP:LISTEN >/dev/null 2>&1; then
     # Our OWN previous deployment holding the port is not a conflict — `up -d` is idempotent and will
     # reuse or replace those containers. Anything else is.
-    if ! docker compose --project-directory "$deploy" -f "$deploy/docker-compose.platform.yml" ps -q 2>/dev/null | grep -q .; then
+    #
+    # 🔴 Asked via the container LABEL, not via `docker compose ps`. The obvious version of this check
+    # called compose without the --env-file arguments, so the compose file's `${VAR:?}` interpolation
+    # failed, `ps` printed nothing, and the guard concluded no stack was running — making this script
+    # refuse to re-run against its OWN deployment. That is the idempotency it advertises, broken by the
+    # check meant to protect it, and it only shows up on the second run.
+    if [ -z "$(docker ps -q --filter "label=com.docker.compose.project=$(basename "$deploy")" 2>/dev/null)" ]; then
       fail "10_preflight" "port $p is already in use by another process" \
         "a previous non-compose run, or another service on that port" \
         "stop it, or re-run with a different port: AGENTD_PORT/CONSOLE_PORT/ADMIN_CONSOLE_PORT" \
@@ -245,7 +251,18 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
   body="$(curl -sS --noproxy '*' --max-time 5 "http://127.0.0.1:$AGENTD_PORT/readyz" 2>/dev/null || true)"
   if [ -n "$body" ] && [ "$body" != "$last" ]; then
     last="$body"
-    printf '   waiting: %s\n' "$(printf '%s' "$body" | sed 's/.*"degraded_components":\[\([^]]*\)\].*/degraded \1/;t;s/.*/starting/')"
+    # python3, not sed: the `t` branch this used is a GNU extension, and BSD sed (macOS) rejects it
+    # with `undefined label` — printing an error into a progress line on the platform this script is
+    # most often run from. A bring-up script that emits sed diagnostics while it waits reads as broken.
+    printf '   waiting: %s\n' "$(printf '%s' "$body" | python3 -c '
+import json,sys
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    print("starting"); raise SystemExit
+bad = d.get("degraded_components") or [k for k,v in (d.get("components") or {}).items()
+                                       if isinstance(v,dict) and v.get("status") not in (None,"ready")]
+print("degraded: " + ", ".join(bad) if bad else "starting")' 2>/dev/null || echo starting)"
   fi
   sleep 3
 done

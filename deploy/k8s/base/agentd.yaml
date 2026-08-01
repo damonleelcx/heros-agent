@@ -44,6 +44,16 @@ spec:
       securityContext:
         runAsNonRoot: true
         seccompProfile: { type: RuntimeDefault }
+        # 🔴 fsGroup, and it is load-bearing on the SAME defect Compose hit: a freshly provisioned
+        # PersistentVolume is root-owned, the container runs as nonroot on a read-only rootfs, and the
+        # process cannot create its ledger — `unable to open database file` (SQLITE_CANTOPEN), on every
+        # boot, forever. fsGroup makes the kubelet chown the volume to this GID on mount.
+        #
+        # 65532 is distroless's `nonroot`. It matches the image's own user, so this is not a number
+        # chosen to make something work — it is the same identity the Dockerfile gives the data
+        # directory, expressed in the place Kubernetes reads it.
+        fsGroup: 65532
+        fsGroupChangePolicy: OnRootMismatch
       containers:
         - name: agentd
           image: ghcr.io/heros-foreal/agentd
