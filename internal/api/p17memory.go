@@ -10,12 +10,12 @@ import (
 	"github.com/heros-foreal/agentd/internal/variantspec"
 )
 
-// GET /api/p17/memory — the read model for the memory-authoring surface (P17 20c, FR17/FR20).
+// GET /api/v1/memory — the read model for the memory-authoring surface (P17 20c, FR17/FR20).
 //
 // # What this endpoint is NOT
 //
 // 🚫 It is not an apply path. A memory change is authored through the EXISTING authoring routes
-// (`POST /api/p13/authoring/preflight`, `.../submit`) with a `memory_ref` edit, because there is one
+// (`POST /api/v1/authoring/preflight`, `.../submit`) with a `memory_ref` edit, because there is one
 // spine and two origins (P13 `authored-change`, P17 decisions.md D7). A second apply path here would be
 // a second place for every gate to be wrong, and the gate that matters most on this axis is the refusal.
 //

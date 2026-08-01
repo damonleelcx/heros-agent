@@ -199,7 +199,13 @@ func (s *BillingService) Oversight(ctx context.Context, tenantID string, period 
 	var cov linkingest.LinkCoverage
 	wired := s.coverage != nil
 	if wired {
-		cov = s.coverage.Coverage(tenantID)
+		var err error
+		// A read failure is treated exactly as "not wired": coverage UNKNOWN, and the figures below are
+		// withheld rather than built. Reporting a coverage we could not read as though we had read it is
+		// the one outcome this whole block exists to prevent.
+		if cov, err = s.coverage.Coverage(tenantID); err != nil {
+			cov, wired = linkingest.LinkCoverage{}, false
+		}
 	}
 	out.LinkCoverage = coverageView(cov, wired)
 

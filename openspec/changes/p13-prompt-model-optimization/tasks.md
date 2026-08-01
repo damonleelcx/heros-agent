@@ -373,7 +373,7 @@ every language. Coverage is **identical on every plan**.
       (Test: `coverage.test.mjs` — "the boundary component states which boundary it is, and never renders
       an empty picker").
 - [x] 20.3 Surface the per-axis coverage table as a read model rendered as received — no client-side
-      derivation of what a language supports. → `internal/api/coverage.go` (`GET /api/p13/coverage`,
+      derivation of what a language supports. → `internal/api/coverage.go` (`GET /api/v1/coverage`,
       takes no tenant/plan/role), `web/console/src/app/app/coverage/`
       (Test: `coverage.test.mjs` — "the page renders the platform's verdict rather than computing one").
 - [x] 20.4 New page/menu wiring is complete (route + navigation entry + permission gate); design-system

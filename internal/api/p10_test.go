@@ -59,7 +59,7 @@ func serveP10(t *testing.T, store P10Store, tenant, method, target, body string)
 func TestPublishPrompt_ScopesByAuthenticatedTenantNotBody(t *testing.T) {
 	f := &fakeP10{}
 	// The body carries a bogus tenant field; it must be ignored. Scope comes from the principal.
-	rec := serveP10(t, f, "tenant-A", "POST", "/api/p10/prompts/publish",
+	rec := serveP10(t, f, "tenant-A", "POST", "/api/v1/prompts/publish",
 		`{"name":"triage","body":"Hi {{x}}","tenant_id":"tenant-EVIL"}`)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
@@ -71,7 +71,7 @@ func TestPublishPrompt_ScopesByAuthenticatedTenantNotBody(t *testing.T) {
 
 func TestPublishPrompt_UnauthenticatedIsRefused(t *testing.T) {
 	f := &fakeP10{}
-	rec := serveP10(t, f, "", "POST", "/api/p10/prompts/publish", `{"name":"triage","body":"hi"}`)
+	rec := serveP10(t, f, "", "POST", "/api/v1/prompts/publish", `{"name":"triage","body":"hi"}`)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", rec.Code)
 	}
@@ -84,7 +84,7 @@ func TestPublishPrompt_MalformedTemplateIs400(t *testing.T) {
 	// RegisterPrompt returns an ErrInvalidEntry for a body that does not parse; the handler surfaces it
 	// as a 400 (author's mistake), not a 500 (ours).
 	f := &fakeP10{registerErr: registry.ErrInvalidEntry}
-	rec := serveP10(t, f, "tenant-A", "POST", "/api/p10/prompts/publish", `{"name":"triage","body":"broken {{"}`)
+	rec := serveP10(t, f, "tenant-A", "POST", "/api/v1/prompts/publish", `{"name":"triage","body":"broken {{"}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400 for a malformed template", rec.Code)
 	}
@@ -92,7 +92,7 @@ func TestPublishPrompt_MalformedTemplateIs400(t *testing.T) {
 
 func TestPromptTimeline_ScopesLookupByTenantAndStripsPrefix(t *testing.T) {
 	f := &fakeP10{timeline: []registry.PromptTimelineEntry{{VersionID: "v1", Name: "t:tenant-A/triage", Slots: []string{"x"}}}}
-	rec := serveP10(t, f, "tenant-A", "GET", "/api/p10/prompts/triage/timeline", "")
+	rec := serveP10(t, f, "tenant-A", "GET", "/api/v1/prompts/triage/timeline", "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
@@ -111,7 +111,7 @@ func TestPromptTimeline_ScopesLookupByTenantAndStripsPrefix(t *testing.T) {
 }
 
 func TestPromptDiff_RequiresBothIds(t *testing.T) {
-	rec := serveP10(t, &fakeP10{}, "tenant-A", "GET", "/api/p10/prompts/diff?a=x", "")
+	rec := serveP10(t, &fakeP10{}, "tenant-A", "GET", "/api/v1/prompts/diff?a=x", "")
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400 when b is missing", rec.Code)
 	}
@@ -119,7 +119,7 @@ func TestPromptDiff_RequiresBothIds(t *testing.T) {
 
 func TestPromptImpact_ReportsBlockedNode(t *testing.T) {
 	body := `{"proposed_body":"Triage {{ticket}} for {{tier}}","nodes":[{"NodeID":"n","CallSiteExprs":["ticket"],"Analyzable":true}]}`
-	rec := serveP10(t, &fakeP10{}, "tenant-A", "POST", "/api/p10/prompts/impact", body)
+	rec := serveP10(t, &fakeP10{}, "tenant-A", "POST", "/api/v1/prompts/impact", body)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
@@ -135,7 +135,7 @@ func TestPromptImpact_ReportsBlockedNode(t *testing.T) {
 func TestMountP10_NotMountedIs503(t *testing.T) {
 	s := &Server{Mux: http.NewServeMux()}
 	s.MountP10(nil)
-	req := httptest.NewRequest("POST", "/api/p10/prompts/publish",
+	req := httptest.NewRequest("POST", "/api/v1/prompts/publish",
 		strings.NewReader(`{"name":"x","body":"y"}`))
 	req = req.WithContext(auth.WithPrincipal(req.Context(), auth.Principal{TenantID: "t"}))
 	rec := httptest.NewRecorder()

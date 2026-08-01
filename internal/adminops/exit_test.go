@@ -90,15 +90,30 @@ func TestNoExistingRoleWidened(t *testing.T) {
 // Creating a table is a one-way door, and "build it now for future use" is refused. Where a read was not
 // derivable this phase recorded `not-yet-readable` with the missing collection named — which is an
 // honest gap with a cause, and directly actionable by the next phase.
+//
+// # Why this is an allowlist rather than a ceiling
+//
+// It used to assert that NO migration numbered above 19 existed, on the reasoning that 19 was the
+// highest at P26's exit so anything above it had to be P26's. That proxy holds exactly until the next
+// phase adds a migration for its own reasons — and then the fence fails for a change it was never aimed
+// at, and the tempting fix is to raise the number, which retires the fence silently.
+//
+// So later migrations are allowed, one at a time, each named with WHOSE it is. A genuinely new P26 table
+// still fails, because nobody would be able to add it here without writing down that P26 owns it.
 func TestNoNewTableWasCreated(t *testing.T) {
 	dir := filepath.Join("..", "..", "db", "migrations", "postgres")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatalf("read migrations: %v", err)
 	}
-	// The highest migration BEFORE P26. A P26 migration would be 0020 or above.
-	const highestBeforeP26 = 19
-	numbered := regexp.MustCompile(`^(\d{4})_`)
+	// The highest migration at P26's exit. Anything above it must be listed below with its owner.
+	const highestAtP26Exit = 19
+	// Migrations added AFTER P26, and the phase each belongs to. P26 owns none of them, which is the
+	// claim this test exists to keep true.
+	postP26 := map[string]string{
+		"0020_p11_run_links": "P11 run linking — the durable Store that let the capability mount (P19 §11)",
+	}
+	numbered := regexp.MustCompile(`^(\d{4})_([a-z0-9_]+)\.(up|down)\.sql$`)
 	for _, e := range entries {
 		m := numbered.FindStringSubmatch(e.Name())
 		if m == nil {
@@ -108,10 +123,15 @@ func TestNoNewTableWasCreated(t *testing.T) {
 		for _, r := range m[1] {
 			n = n*10 + int(r-'0')
 		}
-		if n > highestBeforeP26 {
-			t.Fatalf("migration %s exists. P26 creates NO new table: every read derives from an existing "+
-				"store, and where one does not the ledger records `not-yet-readable` naming the collection "+
-				"that would make it readable (design D7).", e.Name())
+		if n <= highestAtP26Exit {
+			continue
+		}
+		if _, known := postP26[m[1]+"_"+m[2]]; !known {
+			t.Fatalf("migration %s creates a table and names no owner. P26 creates NO new table: every "+
+				"read derives from an existing store, and where one does not the ledger records "+
+				"`not-yet-readable` naming the collection that would make it readable (design D7). If this "+
+				"migration belongs to another phase, add it to postP26 with that phase — if it is P26's, "+
+				"it must not exist.", e.Name())
 		}
 	}
 }

@@ -96,7 +96,7 @@ func TestPG_TransformView_TellsTheReviewerWhatTheGateProved(t *testing.T) {
 
 			rec := httptest.NewRecorder()
 			s.Handler.ServeHTTP(rec, httptest.NewRequest("GET",
-				"/api/p2/transforms/"+tc.hash+"/rev1", nil))
+				"/api/v1/transforms/"+tc.hash+"/rev1", nil))
 			if rec.Code != 200 {
 				t.Fatalf("GET transform: %d %s", rec.Code, rec.Body)
 			}

@@ -308,7 +308,7 @@ func main() {
 	s := api.New(nil, config.Config{})
 	s.MountP6(src)
 
-	fmt.Printf("P6 monitor:  http://%s/p6/monitor?run=demo-run\n", *addr)
+	fmt.Printf("P6 monitor:  http://%s/optimizer?run=demo-run\n", *addr)
 	fmt.Printf("demo repo:   %s\n", dir)
 	log.Fatal(http.ListenAndServe(*addr, s.Handler))
 }

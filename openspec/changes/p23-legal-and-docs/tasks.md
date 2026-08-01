@@ -196,9 +196,9 @@ phase:
 - [x] 9.2 `internal/legal`: the manifest reader and **server-side `content_hash` validation**. A client that
       submits a hash for a version it was not shown is rejected; without this the record says whatever the
       browser said.
-- [x] 9.3 `POST /v1/legal/acceptances` — **persist-then-acknowledge**; the 201 is written after commit, never
+- [x] 9.3 `POST /api/v1/legal/acceptances` — **persist-then-acknowledge**; the 201 is written after commit, never
       before. A repeat of the same triple returns success and creates no second row.
-- [x] 9.4 `GET /v1/legal/acceptances` — the caller's **own tenant only**, plus `pending[]` (the kinds needing
+- [x] 9.4 `GET /api/v1/legal/acceptances` — the caller's **own tenant only**, plus `pending[]` (the kinds needing
       acceptance). No cross-tenant read exists on this path at all.
 - [x] 9.5 Bind the record to the **ADR-008 principal**, not to an email or an IdP subject, so P22 requires no
       migration here.

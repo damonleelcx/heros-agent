@@ -48,7 +48,7 @@ func TestP12Deliveries_RendersConditionAndStates(t *testing.T) {
 		cond: fd.RouteCondition{Kind: fd.RouteAbsent, Detail: "no route", NextAction: "configure a route"},
 	}
 	s := p12Server(src)
-	req := httptest.NewRequest(http.MethodGet, "/api/p12/deliveries", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/deliveries", nil)
 	req.Header.Set("X-API-Key", "k1")
 	rec := httptest.NewRecorder()
 	s.Handler.ServeHTTP(rec, req)
@@ -76,7 +76,7 @@ func TestP12Deliveries_RendersConditionAndStates(t *testing.T) {
 // served another tenant's deliveries.
 func TestP12Deliveries_RequiresAuth(t *testing.T) {
 	s := p12Server(&fakeP12{})
-	req := httptest.NewRequest(http.MethodGet, "/api/p12/deliveries", nil) // no key
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/deliveries", nil) // no key
 	rec := httptest.NewRecorder()
 	s.Handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized {
@@ -89,7 +89,7 @@ func TestP12Deliveries_RequiresAuth(t *testing.T) {
 func TestP12CIReport_RejectsInconsistentIdentity(t *testing.T) {
 	s := p12Server(&fakeP12{})
 	body := `{"delivery_id":"deadbeef","config_hash":"c1","source_revision":"r1","target":"o/r","mode":"ci","forge_ref":"o/r#1","created":true}`
-	req := httptest.NewRequest(http.MethodPost, "/api/p12/ci/report", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ci/report", strings.NewReader(body))
 	req.Header.Set("X-API-Key", "k1")
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()

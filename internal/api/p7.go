@@ -287,9 +287,9 @@ type DriftView struct {
 // MountP7 registers the billing/usage UI, its read endpoint, and the consent actions.
 func (s *Server) MountP7(src P7Source) {
 	s.p7 = src
-	s.Mux.HandleFunc("GET /p7/billing", s.handleP7UI)
-	s.Mux.HandleFunc("GET /api/p7/customers/{customer_id}/billing", s.handleP7Billing)
-	s.Mux.HandleFunc("POST /api/p7/customers/{customer_id}/gainshare-consent", s.handleP7Consent)
+	s.Mux.HandleFunc("GET /billing", s.handleP7UI)
+	s.Mux.HandleFunc("GET /api/v1/customers/{customer_id}/billing", s.handleP7Billing)
+	s.Mux.HandleFunc("POST /api/v1/customers/{customer_id}/gainshare-consent", s.handleP7Consent)
 }
 
 func (s *Server) handleP7UI(w http.ResponseWriter, _ *http.Request) {

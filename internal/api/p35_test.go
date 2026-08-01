@@ -35,7 +35,7 @@ func TestP35GraphServesTheReadModel(t *testing.T) {
 	}
 	s := p35Server(map[string]patternclassifier.GraphView{"wf": want})
 	rec := httptest.NewRecorder()
-	s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/p35/workflows/wf/graph", nil))
+	s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/workflows/wf/pattern-graph", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body)
 	}
@@ -61,13 +61,13 @@ func TestP35DistinguishesMissingWorkflowFromUnclassifiedOne(t *testing.T) {
 	s := p35Server(map[string]patternclassifier.GraphView{"wf": unclassified})
 
 	rec := httptest.NewRecorder()
-	s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/p35/workflows/nope/graph", nil))
+	s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/workflows/nope/pattern-graph", nil))
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("a missing workflow must 404, got %d", rec.Code)
 	}
 
 	rec = httptest.NewRecorder()
-	s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/p35/workflows/wf/graph", nil))
+	s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/workflows/wf/pattern-graph", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("an unclassified workflow exists and must 200, got %d", rec.Code)
 	}
@@ -80,9 +80,9 @@ func TestP35DistinguishesMissingWorkflowFromUnclassifiedOne(t *testing.T) {
 
 func TestP35NotMountedIsNotAnEmptyResult(t *testing.T) {
 	s := New(nil, config.Config{})
-	s.Mux.HandleFunc("GET /api/p35/workflows/{workflow_id}/graph", s.handleP35Graph)
+	s.Mux.HandleFunc("GET /api/v1/workflows/{workflow_id}/pattern-graph", s.handleP35Graph)
 	rec := httptest.NewRecorder()
-	s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/p35/workflows/wf/graph", nil))
+	s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/workflows/wf/pattern-graph", nil))
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Errorf("an unmounted classifier must be 503, not an empty 200: got %d", rec.Code)
 	}

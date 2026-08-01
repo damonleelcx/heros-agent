@@ -59,10 +59,10 @@ type P2Stores struct {
 // MountP2 registers the P2 UI's routes. Call after New.
 func (s *Server) MountP2(st P2Stores) {
 	s.p2 = st
-	s.Mux.HandleFunc("GET /api/p2/runs/{run_id}", s.handleGetRun)
-	s.Mux.HandleFunc("GET /api/p2/transforms/{config_hash}/{source_revision}", s.handleGetTransform)
-	s.Mux.HandleFunc("POST /api/p2/specs/resolve", s.handleResolveSpec)
-	s.Mux.HandleFunc("POST /api/p2/specs/submit", s.handleSubmitSpec)
+	s.Mux.HandleFunc("GET /api/v1/runs/{run_id}", s.handleGetRun)
+	s.Mux.HandleFunc("GET /api/v1/transforms/{config_hash}/{source_revision}", s.handleGetTransform)
+	s.Mux.HandleFunc("POST /api/v1/specs/resolve", s.handleResolveSpec)
+	s.Mux.HandleFunc("POST /api/v1/specs/submit", s.handleSubmitSpec)
 }
 
 // runView is a run plus its per-node I/O — everything the inspect view renders.
@@ -325,7 +325,7 @@ type submitResult struct {
 // ─────────────────────────────────────────────────────────────────────────────────────────────────
 //
 //  1. Can an existing endpoint carry this with an optional field?
-//     The candidate is POST /api/p2/specs/resolve + {"apply": true}. NO — and the reason is safety,
+//     The candidate is POST /api/v1/specs/resolve + {"apply": true}. NO — and the reason is safety,
 //     not tidiness. resolve is a pure, side-effect-free validator the page calls on every Validate
 //     click. This writes four tables, checks out git, runs a compiler, and enqueues billable work.
 //     Hanging that on a boolean means one wrong default, one client bug, or one replayed request
@@ -355,7 +355,7 @@ type submitResult struct {
 //     registries — its own doc comment says so — and resolving refs is the first thing submit must do.
 //
 // Alternatives, and why they lost:
-//   - POST /api/p2/specs/resolve + {"apply":true} — question 1. Rejected on safety.
+//   - POST /api/v1/specs/resolve + {"apply":true} — question 1. Rejected on safety.
 //   - PUT /api/p2/variants/{variant_id}/configs (resource-shaped) — models the durable artifact, but
 //     a submission's most important outputs (the build verdict, the run_id) are not that resource's
 //     state, so every caller would have to follow up with two more reads. It also invents a variant

@@ -55,7 +55,7 @@ func serveMatrix(t *testing.T, s *Server, method, target, body string) *httptest
 }
 
 func TestMatrix_ModelCatalogListsRows(t *testing.T) {
-	rec := serveMatrix(t, matrixServer(t), "GET", "/api/p10/models", "")
+	rec := serveMatrix(t, matrixServer(t), "GET", "/api/v1/models", "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -69,7 +69,7 @@ func TestMatrix_ModelCatalogListsRows(t *testing.T) {
 }
 
 func TestMatrix_WorkflowNodesAreColumns(t *testing.T) {
-	rec := serveMatrix(t, matrixServer(t), "GET", "/api/p10/workflows/wf1/nodes", "")
+	rec := serveMatrix(t, matrixServer(t), "GET", "/api/v1/workflows/wf1/nodes", "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d", rec.Code)
 	}
@@ -83,7 +83,7 @@ func TestMatrix_WorkflowNodesAreColumns(t *testing.T) {
 }
 
 func TestMatrix_MissingWorkflowIs404(t *testing.T) {
-	rec := serveMatrix(t, matrixServer(t), "GET", "/api/p10/workflows/nope/nodes", "")
+	rec := serveMatrix(t, matrixServer(t), "GET", "/api/v1/workflows/nope/nodes", "")
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status %d, want 404", rec.Code)
 	}
@@ -91,7 +91,7 @@ func TestMatrix_MissingWorkflowIs404(t *testing.T) {
 
 func TestMatrix_RunReturnsFigures(t *testing.T) {
 	body := `{"model_version_id":"m1","prompt_version_id":"p1","bindings":{"ticket":"T-1"}}`
-	rec := serveMatrix(t, matrixServer(t), "POST", "/api/p10/studio/run", body)
+	rec := serveMatrix(t, matrixServer(t), "POST", "/api/v1/studio/run", body)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -104,7 +104,7 @@ func TestMatrix_RunReturnsFigures(t *testing.T) {
 
 func TestMatrix_RunUnknownModelIs400(t *testing.T) {
 	body := `{"model_version_id":"nope","prompt_version_id":"p1","bindings":{"ticket":"T"}}`
-	rec := serveMatrix(t, matrixServer(t), "POST", "/api/p10/studio/run", body)
+	rec := serveMatrix(t, matrixServer(t), "POST", "/api/v1/studio/run", body)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status %d, want 400", rec.Code)
 	}
@@ -113,7 +113,7 @@ func TestMatrix_RunUnknownModelIs400(t *testing.T) {
 func TestMatrix_BindIsUnverifiedAndReplacesPrior(t *testing.T) {
 	s := matrixServer(t)
 	b1 := `{"workflow_id":"wf1","node_id":"n_triage","model_version_id":"m1","model_id":"anthropic/claude-sonnet-5","prompt_name":"node/n_triage","prompt_version_id":"p1"}`
-	rec := serveMatrix(t, s, "POST", "/api/p10/studio/bind", b1)
+	rec := serveMatrix(t, s, "POST", "/api/v1/studio/bind", b1)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -130,8 +130,8 @@ func TestMatrix_BindIsUnverifiedAndReplacesPrior(t *testing.T) {
 	}
 	// Bind a second cell for the same node — replaces the first.
 	b2 := `{"workflow_id":"wf1","node_id":"n_triage","model_version_id":"m2","model_id":"openai/gpt-5","prompt_name":"node/n_triage","prompt_version_id":"p2"}`
-	serveMatrix(t, s, "POST", "/api/p10/studio/bind", b2)
-	rec = serveMatrix(t, s, "GET", "/api/p10/workflows/wf1/bindings", "")
+	serveMatrix(t, s, "POST", "/api/v1/studio/bind", b2)
+	rec = serveMatrix(t, s, "GET", "/api/v1/workflows/wf1/bindings", "")
 	var bindings struct {
 		Bindings map[string]studio.Binding `json:"bindings"`
 	}
@@ -146,7 +146,7 @@ func TestMatrix_BindIsUnverifiedAndReplacesPrior(t *testing.T) {
 
 func TestMatrix_UnauthenticatedRunRefused(t *testing.T) {
 	s := matrixServer(t)
-	req := httptest.NewRequest("POST", "/api/p10/studio/run", strings.NewReader(`{}`))
+	req := httptest.NewRequest("POST", "/api/v1/studio/run", strings.NewReader(`{}`))
 	rec := httptest.NewRecorder()
 	s.Mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized {

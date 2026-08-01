@@ -6,7 +6,7 @@ import (
 	"github.com/heros-foreal/agentd/internal/distribution"
 )
 
-// p20.go is the install/distribution read model: GET /api/p20/install.
+// p20.go is the install/distribution read model: GET /api/v1/install.
 //
 // # Why the console needs a surface for this at all
 //

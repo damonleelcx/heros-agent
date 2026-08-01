@@ -28,7 +28,7 @@ type BoardSource interface {
 // MountP4 registers the P4 board UI and its JSON endpoint.
 func (s *Server) MountP4(src BoardSource) {
 	s.p4 = src
-	s.Mux.HandleFunc("GET /api/p4/workflows/{workflow_id}/board", s.handleP4Board)
+	s.Mux.HandleFunc("GET /api/v1/workflows/{workflow_id}/eval-board", s.handleP4Board)
 }
 
 func (s *Server) handleP4Board(w http.ResponseWriter, r *http.Request) {

@@ -35,6 +35,13 @@ services:
       # The identity mode (ADR-008). `configured` accepts only the deployment's real IdP; `dev` accepts
       # fixture SSO subjects and REFUSES to start under NODE_ENV=production, by design.
       ADMIN_IDENTITY_MODE: ${ADMIN_IDENTITY_MODE:-configured}
+      # The operator IdP's callback. An absolute URL on the OPERATOR origin — pointing it at the customer
+      # origin would land an operator's assertion in the customer console's cookie jar.
+      ADMIN_IDP_CALLBACK_URL: ${ADMIN_IDP_CALLBACK_URL:-}
+      # Build identity for the release surface. The P24 reporting switches are deliberately NOT here
+      # (P24 task 7.4) — a manifest has no reason to name an integration switch even to leave it empty.
+      HEROS_VERSION: ${HEROS_VERSION:-}
+      HEROS_EDITION: ${HEROS_EDITION:-open-core}
       NODE_ENV: production
     ports:
       # 4310, the operator origin — DISTINCT from the customer console's 4320.

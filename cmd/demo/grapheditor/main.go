@@ -31,7 +31,7 @@ func main() {
 	s := api.New(nil, config.Config{})
 	s.MountP5(src{})
 	fmt.Printf("p5 editor:\n")
-	fmt.Printf("  %-14s http://%s/p5/editor?workflow_id=%s\n", "demo", *addr, "wf")
+	fmt.Printf("  %-14s http://%s/editor?workflow_id=%s\n", "demo", *addr, "wf")
 	fmt.Printf("     A→B is a rename mismatch (answer→response): adapter-inserted state with a previewed diff.\n")
 	fmt.Printf("     Move C above B (Alt+↑) to force a rejected, edge-anchored state.\n")
 	log.Fatal(http.ListenAndServe(*addr, s.Handler))

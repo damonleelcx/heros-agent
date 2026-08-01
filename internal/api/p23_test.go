@@ -92,7 +92,7 @@ func TestP23Record_A201IsWrittenOnlyAfterTheRowExists(t *testing.T) {
 	src := &consentStub{stored: acceptance(), created: true}
 	s := consentServer(t, src)
 
-	rec := as(s, auth.Principal{TenantID: "cus_acme"}, http.MethodPost, "/v1/legal/acceptances",
+	rec := as(s, auth.Principal{TenantID: "cus_acme"}, http.MethodPost, "/api/v1/legal/acceptances",
 		`{"document_kind":"terms","document_version":"1.0.0","content_hash":"`+strings.Repeat("a", 64)+`","method":"signin"}`)
 
 	if rec.Code != http.StatusCreated {
@@ -117,7 +117,7 @@ func TestP23Record_ARepeatIs200AndSaysItCreatedNothing(t *testing.T) {
 	src := &consentStub{stored: acceptance(), created: false}
 	s := consentServer(t, src)
 
-	rec := as(s, auth.Principal{TenantID: "cus_acme"}, http.MethodPost, "/v1/legal/acceptances",
+	rec := as(s, auth.Principal{TenantID: "cus_acme"}, http.MethodPost, "/api/v1/legal/acceptances",
 		`{"document_kind":"terms","document_version":"1.0.0","content_hash":"`+strings.Repeat("a", 64)+`","method":"signin"}`)
 
 	if rec.Code != http.StatusOK {
@@ -138,7 +138,7 @@ func TestP23Record_TheTenantAndPrincipalComeFromTheSessionNotTheBody(t *testing.
 	s := consentServer(t, src)
 
 	// An unknown field is refused rather than ignored.
-	rec := as(s, auth.Principal{TenantID: "cus_acme"}, http.MethodPost, "/v1/legal/acceptances",
+	rec := as(s, auth.Principal{TenantID: "cus_acme"}, http.MethodPost, "/api/v1/legal/acceptances",
 		`{"document_kind":"terms","document_version":"1.0.0","content_hash":"`+strings.Repeat("a", 64)+`","method":"signin","tenant_id":"cus_victim"}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("a body carrying tenant_id was accepted (status %d): %s", rec.Code, rec.Body.String())
@@ -147,7 +147,7 @@ func TestP23Record_TheTenantAndPrincipalComeFromTheSessionNotTheBody(t *testing.
 	// And a well-formed request uses the session's tenant.
 	src2 := &consentStub{stored: acceptance(), created: true}
 	s2 := consentServer(t, src2)
-	as(s2, auth.Principal{TenantID: "cus_acme", APIKeyID: "key-7"}, http.MethodPost, "/v1/legal/acceptances",
+	as(s2, auth.Principal{TenantID: "cus_acme", APIKeyID: "key-7"}, http.MethodPost, "/api/v1/legal/acceptances",
 		`{"document_kind":"terms","document_version":"1.0.0","content_hash":"`+strings.Repeat("a", 64)+`","method":"signin"}`)
 	if src2.seenTenant != "cus_acme" {
 		t.Errorf("the service received tenant %q, want the session's", src2.seenTenant)
@@ -160,7 +160,7 @@ func TestP23Record_TheTenantAndPrincipalComeFromTheSessionNotTheBody(t *testing.
 
 func TestP23Record_NoSessionIsRefused(t *testing.T) {
 	s := consentServer(t, &consentStub{})
-	req := httptest.NewRequest(http.MethodPost, "/v1/legal/acceptances", strings.NewReader("{}"))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/legal/acceptances", strings.NewReader("{}"))
 	rec := httptest.NewRecorder()
 	s.Mux.ServeHTTP(rec, req) // deliberately no principal in the context
 	if rec.Code != http.StatusUnauthorized {
@@ -187,7 +187,7 @@ func TestP23Record_EachRefusalGetsItsOwnStatus(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := consentServer(t, &consentStub{recordErr: tc.err})
-			rec := as(s, auth.Principal{TenantID: "cus_acme"}, http.MethodPost, "/v1/legal/acceptances",
+			rec := as(s, auth.Principal{TenantID: "cus_acme"}, http.MethodPost, "/api/v1/legal/acceptances",
 				`{"document_kind":"terms","document_version":"1.0.0","content_hash":"`+strings.Repeat("a", 64)+`","method":"signin"}`)
 
 			if rec.Code != tc.status {
@@ -223,7 +223,7 @@ func TestP23Read_ReturnsTheCallersOwnHistoryAndWhatIsPending(t *testing.T) {
 	}}
 	s := consentServer(t, src)
 
-	rec := as(s, auth.Principal{TenantID: "cus_acme"}, http.MethodGet, "/v1/legal/acceptances", "")
+	rec := as(s, auth.Principal{TenantID: "cus_acme"}, http.MethodGet, "/api/v1/legal/acceptances", "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -254,7 +254,7 @@ func TestP23Read_AManifestOutageIsFailOpenAndSaysPendingIsUnknown(t *testing.T) 
 	}
 	s := consentServer(t, src)
 
-	rec := as(s, auth.Principal{TenantID: "cus_acme"}, http.MethodGet, "/v1/legal/acceptances", "")
+	rec := as(s, auth.Principal{TenantID: "cus_acme"}, http.MethodGet, "/api/v1/legal/acceptances", "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("a manifest outage hid the history (status %d)", rec.Code)
 	}
@@ -272,7 +272,7 @@ func TestP23Read_AStoreFailureIsNotFailOpen(t *testing.T) {
 	// A manifest outage is fail-open; a STORE failure is not. Returning an empty history as though it
 	// were the customer's real one would be the read-path version of an optimistic checkmark.
 	s := consentServer(t, &consentStub{readErr: errors.New("connection reset")})
-	rec := as(s, auth.Principal{TenantID: "cus_acme"}, http.MethodGet, "/v1/legal/acceptances", "")
+	rec := as(s, auth.Principal{TenantID: "cus_acme"}, http.MethodGet, "/api/v1/legal/acceptances", "")
 	if rec.Code != http.StatusBadGateway {
 		t.Fatalf("status %d, want 502 — an empty history must not be served as a real one", rec.Code)
 	}
@@ -284,11 +284,11 @@ func TestP23_AnUnmountedDeploymentSaysSoRatherThanPanicking(t *testing.T) {
 	// A deployment that never called RegisterP23 has no consent surface. It must answer, not crash — and
 	// it must say WHICH thing is absent, because "503" alone sends an operator to the wrong system.
 	s := New(nil, config.Config{})
-	s.Mux.HandleFunc("POST /v1/legal/acceptances", s.handleP23Record)
-	s.Mux.HandleFunc("GET /v1/legal/acceptances", s.handleP23Read)
+	s.Mux.HandleFunc("POST /api/v1/legal/acceptances", s.handleP23Record)
+	s.Mux.HandleFunc("GET /api/v1/legal/acceptances", s.handleP23Read)
 
 	for _, method := range []string{http.MethodGet, http.MethodPost} {
-		rec := as(s, auth.Principal{TenantID: "cus_acme"}, method, "/v1/legal/acceptances", "{}")
+		rec := as(s, auth.Principal{TenantID: "cus_acme"}, method, "/api/v1/legal/acceptances", "{}")
 		if rec.Code != http.StatusServiceUnavailable {
 			t.Errorf("%s on an unmounted surface got %d, want 503", method, rec.Code)
 		}

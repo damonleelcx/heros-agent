@@ -12,7 +12,7 @@ import (
 //
 // Two routes, one read model:
 //   GET /p35/graph?workflow_id=…                the view (self-contained HTML, embedded)
-//   GET /api/p35/workflows/{workflow_id}/graph  the JSON read model (404 for no such workflow)
+//   GET /api/v1/workflows/{workflow_id}/pattern-graph  the JSON read model (404 for no such workflow)
 //
 // READ-ONLY. The classifier writes labels into the IR; this surface only shows what is there.
 
@@ -25,7 +25,7 @@ type PatternSource interface {
 // MountP35 registers the pattern-classifier routes. Call after New.
 func (s *Server) MountP35(src PatternSource) {
 	s.p35 = src
-	s.Mux.HandleFunc("GET /api/p35/workflows/{workflow_id}/graph", s.handleP35Graph)
+	s.Mux.HandleFunc("GET /api/v1/workflows/{workflow_id}/pattern-graph", s.handleP35Graph)
 }
 
 func (s *Server) handleP35Graph(w http.ResponseWriter, r *http.Request) {

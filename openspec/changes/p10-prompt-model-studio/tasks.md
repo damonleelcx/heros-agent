@@ -34,7 +34,7 @@ evidence per P9, never on a green build.
 - [x] 2.1 Add the authenticated **publish** route over the existing `registry.RegisterPrompt`.
       Idempotent on identical content; tenant-scoped **server-side** — a client-supplied tenant
       identifier must not widen scope. This is the platform API's first **write** surface.
-      → `POST /api/p10/prompts/publish` ([internal/api/p10.go](../../../internal/api/p10.go)); tenant from principal, name namespaced `t:<tenant>/<name>`.
+      → `POST /api/v1/prompts/publish` ([internal/api/p10.go](../../../internal/api/p10.go)); tenant from principal, name namespaced `t:<tenant>/<name>`.
 - [x] 2.2 Keep the interface surface free of mutation: **no `Update`, no `Delete`, no soft-delete.** The
       DB trigger remains the last line of defence, not the first. → `TestStore_ExposesNoPromptMutationMethod` (reflection guard).
 - [x] 2.3 Reject a malformed template **at publish**, naming the offending position (templates already

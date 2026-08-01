@@ -170,7 +170,7 @@ func main() {
 	srv.MountP7(st)
 	srv.SetBillingRollout(st.rollout)
 	fmt.Printf("P7 on %s\n", workflowID)
-	fmt.Printf("  billing surface:  http://%s/p7/billing?customer=%s\n", *addr, customerID)
+	fmt.Printf("  billing surface:  http://%s/billing?customer=%s\n", *addr, customerID)
 	fmt.Printf("  readiness:        http://%s/readyz\n", *addr)
 	fmt.Printf("  target checkout:  %s\n", *repoFlag)
 	fmt.Printf("  rollout:          %s\n", st.rollout)

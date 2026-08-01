@@ -179,6 +179,59 @@ not close it. This is the "留好接口，客户要接自己包 exporter" postur
 **Rejected — hard-wiring Prometheus/Grafana into `base`.** Forces an operational burden and prematurely closes
 OQ1.
 
+## Decision 9 — The deployed process owns the schema, and `/readyz` probes what it names
+
+**Chosen:** `internal/launch` opens the Postgres the deployment declares, applies `db/migrations/postgres/`
+at boot through a ledger it **reads**, and `/readyz` probes that database under the name `postgres`. The
+SQLite ledger keeps its own honest name.
+
+**Why (L2 稳定 / L1 安全).** The artifacts written first assumed a composition that the boot path never
+performed: the manifests started Postgres, set `HEROS_DATASTORE_NAME=postgres`, and the process opened
+SQLite and pinged *that* — so `/readyz` reported `components.postgres: ready` for a database it had never
+connected to, and would have kept reporting it while that database was down. That is not a documentation
+defect; it is a health signal that is structurally incapable of failing, which is the one thing
+`health-signal-surface` forbids outright. The same gap left the platform's nineteen migrations applied by
+nothing except a demo binary reading files from a relative path with no ledger, so "upgrade preserves user
+state" (D7) had no mechanism behind it at all.
+
+The migration ledger is **read**, not merely written, because a write-only ledger cannot distinguish "never
+applied" from "applied and since reverted" — it re-runs either way, and the DDL here is bare `CREATE TABLE`
+with no `IF NOT EXISTS`, so a re-run is an error rather than a no-op. Idempotence therefore has to come from
+the ledger; it cannot be borrowed from the DDL's tolerance.
+
+**Rejected — keeping `HEROS_DATASTORE_NAME` as a display name.** It is cheaper (L8) and it is exactly the
+inversion L3 forbids: it buys tidy output by making the readiness signal lie.
+
+**Rejected — teaching `/readyz` to probe Postgres without connecting the stores to it.** That fixes the
+signal and leaves the platform unwired. The probe should be true *because* the dependency is real.
+
+## Decision 10 — Every capability is registered; an unsourced one answers 503, never 404
+
+**Chosen:** `internal/launch` registers every capability surface the platform ships. Where a DB-backed store
+exists it is constructed and mounted for real; where none exists the surface is registered with a **nil
+source**, so it answers 503 with a not-mounted body.
+
+**Why (L3 UX / L2 稳定).** An unregistered route is not a neutral absence — it is a **404**, and 404 already
+means something else. The customer console calls `/api/p2`, `/api/p10`, `/api/p12`, `/api/p21` and
+`/api/p25`; on a fresh install every one of them fell through to 404, which the console renders as *"No such
+workflow"* for a workflow that plainly exists. The operator's next action for "this capability is not
+installed on this deployment" (deploy the capability, or accept the boundary) and for "that identifier does
+not resolve" (check the id) are completely different, and collapsing them sends every operator down the
+wrong one. `cmd/proof/customerconsole` had already discovered this and mounted its unsourced subsystems with
+nil for exactly this reason — the deployment simply never inherited the lesson.
+
+This decision does **not** claim the unsourced capabilities work. Six read surfaces (P4 board, P4.5
+scorecard, P5 IR, P5.5 proposals, P6 optimizer monitor, P3.5 pattern graph) have no persistent adapter
+anywhere outside a demo binary; P19 registers them honestly and records them as PRD Q6 rather than inventing
+a store for them, because inventing one would be a product decision wearing a deployment label.
+
+**Rejected — mounting only what has a source and leaving the rest unregistered.** Cheapest (L8), and it is
+the state that produced the misleading 404.
+
+**Rejected — a capability-list flag that half-enables an endpoint.** `MountBillingWebhook`'s own comment
+already rules this out: a deployment that does not expose a path simply does not mount it; there is no flag
+that half-enables one.
+
 ## Interfaces sketch
 
 ```

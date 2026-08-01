@@ -17,9 +17,9 @@ import "server-only";
  *
  * # Why identifiers are redacted out of the path
  *
- * A path like `/api/p2/runs/run-8f3c/…` carries a subject id. On its own that is not content, but a
+ * A path like `/api/v1/runs/run-8f3c/…` carries a subject id. On its own that is not content, but a
  * log aggregator holding every path a tenant ever opened is a behavioural record nobody asked for and
- * nobody owns. Paths are reduced to their TEMPLATE — `/api/p2/runs/{id}` — which is what a latency or
+ * nobody owns. Paths are reduced to their TEMPLATE — `/api/v1/runs/{id}` — which is what a latency or
  * error-rate question actually needs.
  */
 
@@ -44,20 +44,20 @@ const PATH_TEMPLATES: Array<[RegExp, string]> = [
   // P20 — the install/distribution contract, read by the PUBLIC install surface. Listed so its upstream
   // calls are searchable; an unlisted route logs as /unknown, which this file's own comment calls visibly
   // wrong, and the first real load of the install page produced exactly that.
-  [/^\/api\/p20\/install$/, "/api/p20/install"],
-  [/^\/api\/p2\/runs\/[^/]+$/, "/api/p2/runs/{run_id}"],
-  [/^\/api\/p2\/transforms\/[^/]+\/[^/]+$/, "/api/p2/transforms/{config_hash}/{source_revision}"],
-  [/^\/api\/p2\/specs\/resolve$/, "/api/p2/specs/resolve"],
-  [/^\/api\/p2\/specs\/submit$/, "/api/p2/specs/submit"],
-  [/^\/api\/p25\/runs\/[^/]+\/monitor$/, "/api/p25/runs/{run_id}/monitor"],
-  [/^\/api\/p25\/runs\/[^/]+\/monitor\/stream$/, "/api/p25/runs/{run_id}/monitor/stream"],
-  [/^\/api\/p35\/workflows\/[^/]+\/graph$/, "/api/p35/workflows/{workflow_id}/graph"],
-  [/^\/api\/p4\/workflows\/[^/]+\/board/, "/api/p4/workflows/{workflow_id}/board"],
-  [/^\/api\/p45\/variants\/[^/]+\/scorecard$/, "/api/p45/variants/{variant_id}/scorecard"],
-  [/^\/api\/p55\/workflows\/[^/]+\/surface$/, "/api/p55/workflows/{workflow_id}/surface"],
-  [/^\/api\/p55\/workflows\/[^/]+\/proposals\/[^/]+\/open-pr$/, "/api/p55/workflows/{workflow_id}/proposals/{proposal_id}/open-pr"],
-  [/^\/api\/p7\/customers\/[^/]+\/billing/, "/api/p7/customers/{customer_id}/billing"],
-  [/^\/api\/p13\/coverage$/, "/api/p13/coverage"],
+  [/^\/api\/p20\/install$/, "/api/v1/install"],
+  [/^\/api\/p2\/runs\/[^/]+$/, "/api/v1/runs/{run_id}"],
+  [/^\/api\/p2\/transforms\/[^/]+\/[^/]+$/, "/api/v1/transforms/{config_hash}/{source_revision}"],
+  [/^\/api\/p2\/specs\/resolve$/, "/api/v1/specs/resolve"],
+  [/^\/api\/p2\/specs\/submit$/, "/api/v1/specs/submit"],
+  [/^\/api\/p25\/runs\/[^/]+\/monitor$/, "/api/v1/runs/{run_id}/monitor"],
+  [/^\/api\/p25\/runs\/[^/]+\/monitor\/stream$/, "/api/v1/runs/{run_id}/monitor/stream"],
+  [/^\/api\/p35\/workflows\/[^/]+\/graph$/, "/api/v1/workflows/{workflow_id}/pattern-graph"],
+  [/^\/api\/p4\/workflows\/[^/]+\/board/, "/api/v1/workflows/{workflow_id}/eval-board"],
+  [/^\/api\/p45\/variants\/[^/]+\/scorecard$/, "/api/v1/variants/{variant_id}/scorecard"],
+  [/^\/api\/p55\/workflows\/[^/]+\/surface$/, "/api/v1/workflows/{workflow_id}/proposals"],
+  [/^\/api\/p55\/workflows\/[^/]+\/proposals\/[^/]+\/open-pr$/, "/api/v1/workflows/{workflow_id}/proposals/{proposal_id}/open-pr"],
+  [/^\/api\/p7\/customers\/[^/]+\/billing/, "/api/v1/customers/{customer_id}/billing"],
+  [/^\/api\/p13\/coverage$/, "/api/v1/coverage"],
   [/^\/healthz$/, "/healthz"],
   [/^\/readyz$/, "/readyz"],
 ];

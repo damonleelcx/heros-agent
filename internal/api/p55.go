@@ -223,9 +223,9 @@ func nonNil(s []string) []string {
 // MountP55 registers the P5.5 UI, its surface JSON endpoint, and the Assisted open-PR action.
 func (s *Server) MountP55(src P55Source) {
 	s.p55 = src
-	s.Mux.HandleFunc("GET /p55/recommendations", s.handleP55UI)
-	s.Mux.HandleFunc("GET /api/p55/workflows/{workflow_id}/surface", s.handleP55Surface)
-	s.Mux.HandleFunc("POST /api/p55/workflows/{workflow_id}/proposals/{proposal_id}/open-pr", s.handleP55OpenPR)
+	s.Mux.HandleFunc("GET /recommendations", s.handleP55UI)
+	s.Mux.HandleFunc("GET /api/v1/workflows/{workflow_id}/proposals", s.handleP55Surface)
+	s.Mux.HandleFunc("POST /api/v1/workflows/{workflow_id}/proposals/{proposal_id}/open-pr", s.handleP55OpenPR)
 }
 
 func (s *Server) handleP55UI(w http.ResponseWriter, _ *http.Request) {

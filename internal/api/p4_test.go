@@ -37,7 +37,7 @@ func TestP4MountedWithNoSourceIs503(t *testing.T) {
 	s := New(nil, config.Config{})
 	s.MountP4(nil)
 	rec := httptest.NewRecorder()
-	s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/p4/workflows/wf/board", nil))
+	s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/workflows/wf/eval-board", nil))
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("want 503 when mounted without a source, got %d", rec.Code)
 	}
@@ -46,7 +46,7 @@ func TestP4MountedWithNoSourceIs503(t *testing.T) {
 func TestP4NotMountedAtAllIsRouteAbsent(t *testing.T) {
 	s := New(nil, config.Config{})
 	rec := httptest.NewRecorder()
-	s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/p4/workflows/wf/board", nil))
+	s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/workflows/wf/eval-board", nil))
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("an unregistered route is a 404 from the mux, got %d", rec.Code)
 	}
@@ -56,7 +56,7 @@ func TestP4UnknownWorkflowIs404(t *testing.T) {
 	s := New(nil, config.Config{})
 	s.MountP4(&stubBoard{ok: false})
 	rec := httptest.NewRecorder()
-	s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/p4/workflows/nope/board", nil))
+	s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/workflows/nope/eval-board", nil))
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("want 404 for an unknown workflow, got %d", rec.Code)
 	}
@@ -76,7 +76,7 @@ func TestP4ProfileIsAReadParameter(t *testing.T) {
 
 	for _, profile := range []string{"", "cost-optimized", "quality-first"} {
 		rec := httptest.NewRecorder()
-		url := "/api/p4/workflows/wf/board"
+		url := "/api/v1/workflows/wf/eval-board"
 		if profile != "" {
 			url += "?profile=" + profile
 		}
@@ -102,7 +102,7 @@ func TestP4BoardHasNoWriteVerb(t *testing.T) {
 	s := New(nil, config.Config{})
 	s.MountP4(&stubBoard{ok: true})
 	rec := httptest.NewRecorder()
-	s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/p4/workflows/wf/board", nil))
+	s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/workflows/wf/eval-board", nil))
 	if rec.Code == http.StatusOK {
 		t.Fatal("the board endpoint must not accept POST")
 	}

@@ -319,7 +319,7 @@ func main() {
 
 	s := api.New(nil, config.Config{})
 	s.MountP6(src)
-	fmt.Printf("P6 on hermes-agent:  http://%s/p6/monitor?run=hermes&workflow=nousresearch/hermes-agent\n", *addr)
+	fmt.Printf("P6 on hermes-agent:  http://%s/optimizer?run=hermes&workflow=nousresearch/hermes-agent\n", *addr)
 	fmt.Printf("target checkout:     %s\n", *repo)
 	log.Fatal(http.ListenAndServe(*addr, s.Handler))
 }

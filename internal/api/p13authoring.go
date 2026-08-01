@@ -85,10 +85,10 @@ type AuthoringChangeView struct {
 // MountP13Authoring registers the authoring routes. Optional, like every other mount.
 func (s *Server) MountP13Authoring(src P13AuthoringSource) {
 	s.p13authoring = src
-	s.Mux.HandleFunc("POST /api/p13/authoring/preflight", s.handleAuthoringPreflight)
-	s.Mux.HandleFunc("POST /api/p13/authoring/submit", s.handleAuthoringSubmit)
-	s.Mux.HandleFunc("POST /api/p13/authoring/revert", s.handleAuthoringRevert)
-	s.Mux.HandleFunc("GET /api/p13/authoring/history", s.handleAuthoringHistory)
+	s.Mux.HandleFunc("POST /api/v1/authoring/preflight", s.handleAuthoringPreflight)
+	s.Mux.HandleFunc("POST /api/v1/authoring/submit", s.handleAuthoringSubmit)
+	s.Mux.HandleFunc("POST /api/v1/authoring/revert", s.handleAuthoringRevert)
+	s.Mux.HandleFunc("GET /api/v1/authoring/history", s.handleAuthoringHistory)
 }
 
 // authoringActor resolves the acting identity SERVER-SIDE. Request scope never comes from a

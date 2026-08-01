@@ -11,7 +11,7 @@
 #     credential cannot be produced — a build gate, not a review habit;
 #   • non-root, read_only rootfs at runtime, no-new-privileges — a container escape starts from the
 #     least useful position possible for a surface that can suspend tenants and read cross-tenant data.
-FROM node:22.12.0-bookworm-slim AS build
+FROM node:24.18.1-bookworm-slim AS build
 WORKDIR /app
 
 COPY web/admin-console/package.json web/admin-console/package-lock.json ./
@@ -22,10 +22,34 @@ RUN npm ci --no-audit --no-fund
 COPY web/design-system ../design-system
 COPY web/admin-console .
 
+# 🔴 The origin gate is WORKSPACE-WIDE, and this image is not.
+#
+# `npm run scan:origins` runs web/design-system/scan-origins.mjs, which resolves its governed files
+# relative to its OWN parent — so inside this image it looks for /console/... and /admin-console/...
+# while the app itself lives at /app. Without these four files the build died with
+# `ENOENT: /console/src/middleware.ts`, which is why this image had never been built successfully.
+#
+# They are copied rather than the gate being taught to skip a missing file, and that is the whole point:
+# a scan that silently skips what it cannot find reports green for the file that went missing. Four
+# small files keep the gate at FULL strength — it really does check both consoles' headers here.
+COPY web/console/src/middleware.ts /console/src/middleware.ts
+COPY web/console/next.config.mjs /console/next.config.mjs
+COPY web/admin-console/src/middleware.ts /admin-console/src/middleware.ts
+COPY web/admin-console/next.config.mjs /admin-console/next.config.mjs
+
+# `npm run scan:ledger` (P26) checks every operator surface BOTH WAYS against the ledger that declares
+# it, the deployed specs, and the P26 change's specs — all of which live outside web/ entirely. Same
+# reasoning as the four files above: carried into the image so the gate runs, rather than made skippable
+# so the gate passes. It is ~4MB of markdown in a build stage that is discarded, and it buys a build in
+# which an operator surface cannot diverge from its declaration.
+COPY openspec/operator-surface-ledger.md /openspec/operator-surface-ledger.md
+COPY openspec/specs /openspec/specs
+COPY openspec/changes/p26-operator-console-refresh/specs /openspec/changes/p26-operator-console-refresh/specs
+
 RUN npm run build
 
 # ── Runtime ──────────────────────────────────────────────────────────────────
-FROM node:22.12.0-bookworm-slim
+FROM node:24.18.1-bookworm-slim
 WORKDIR /app
 ENV NODE_ENV=production
 

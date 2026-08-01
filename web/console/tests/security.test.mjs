@@ -215,7 +215,7 @@ test("a signed-in request reaches the platform scoped to the session's tenant", 
   const res = await fetch(`${console_.base}/api/console/runs/run-1`, { headers: { cookie } });
   assert.equal(res.status, 200);
   const upstream = platform.requests[before];
-  assert.equal(upstream.url, "/api/p2/runs/run-1");
+  assert.equal(upstream.url, "/api/v1/runs/run-1");
   assert.equal(upstream.headers["x-console-tenant"], TENANT);
 });
 

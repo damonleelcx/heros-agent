@@ -36,12 +36,12 @@ type P10Matrix struct {
 // MountP10Matrix registers the matrix routes. Call after MountP10.
 func (s *Server) MountP10Matrix(m P10Matrix) {
 	s.p10matrix = m
-	s.Mux.HandleFunc("GET /api/p10/workflows", s.handleWorkflows)
-	s.Mux.HandleFunc("GET /api/p10/models", s.handleModelCatalog)
-	s.Mux.HandleFunc("GET /api/p10/workflows/{id}/nodes", s.handleWorkflowNodes)
-	s.Mux.HandleFunc("GET /api/p10/workflows/{id}/bindings", s.handleWorkflowBindings)
-	s.Mux.HandleFunc("POST /api/p10/studio/run", s.handleStudioRun)
-	s.Mux.HandleFunc("POST /api/p10/studio/bind", s.handleStudioBind)
+	s.Mux.HandleFunc("GET /api/v1/workflows", s.handleWorkflows)
+	s.Mux.HandleFunc("GET /api/v1/models", s.handleModelCatalog)
+	s.Mux.HandleFunc("GET /api/v1/workflows/{id}/nodes", s.handleWorkflowNodes)
+	s.Mux.HandleFunc("GET /api/v1/workflows/{id}/bindings", s.handleWorkflowBindings)
+	s.Mux.HandleFunc("POST /api/v1/studio/run", s.handleStudioRun)
+	s.Mux.HandleFunc("POST /api/v1/studio/bind", s.handleStudioBind)
 }
 
 func (s *Server) matrixReady(w http.ResponseWriter) (auth.Principal, bool) {

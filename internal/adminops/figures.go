@@ -105,7 +105,7 @@ type CoverageView struct {
 // Narrow on purpose: the operator billing surface needs the coverage reading and nothing else from run
 // linking, and a wider dependency would let a later change reach for the linked runs themselves.
 type LinkCoverageSource interface {
-	Coverage(tenantID string) linkingest.LinkCoverage
+	Coverage(tenantID string) (linkingest.LinkCoverage, error)
 }
 
 // coverageView renders a coverage reading for the surface.

@@ -52,7 +52,7 @@ func TestResolveSpec_RejectionNamesTheNodeAndDimension(t *testing.T) {
 	// whose error must point somewhere.
 	body := `{"workflow_id":"wf","source_revision":"rev1","order":["n_a"],
 	          "nodes":{"n_ghost":{"model_ref":"m1"}},"edges":[]}`
-	w := do(t, s, "POST", "/api/p2/specs/resolve", body)
+	w := do(t, s, "POST", "/api/v1/specs/resolve", body)
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400. body: %s", w.Code, w.Body)
@@ -74,7 +74,7 @@ func TestResolveSpec_DimensionIsSurfacedWhenTheFaultIsOnOne(t *testing.T) {
 	s := newTestServer(t)
 	body := `{"workflow_id":"wf","source_revision":"rev1","order":["n_a"],
 	          "nodes":{"n_a":{"skill_refs":["s1","s1"]}},"edges":[]}`
-	w := do(t, s, "POST", "/api/p2/specs/resolve", body)
+	w := do(t, s, "POST", "/api/v1/specs/resolve", body)
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", w.Code)
@@ -93,7 +93,7 @@ func TestResolveSpec_ValidSpecReportsItsRefs(t *testing.T) {
 	body := `{"workflow_id":"wf","source_revision":"rev1","order":["n_a","n_b"],
 	          "nodes":{"n_a":{"model_ref":"m1","prompt_ref":"p1"}},
 	          "edges":[{"from_node_id":"n_a","to_node_id":"n_b","kind":"data"}]}`
-	w := do(t, s, "POST", "/api/p2/specs/resolve", body)
+	w := do(t, s, "POST", "/api/v1/specs/resolve", body)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200. body: %s", w.Code, w.Body)
@@ -120,7 +120,7 @@ func TestResolveSpec_ValidSpecReportsItsRefs(t *testing.T) {
 // message and "400".
 func TestResolveSpec_MalformedJSONSaysWhatIsWrong(t *testing.T) {
 	s := newTestServer(t)
-	w := do(t, s, "POST", "/api/p2/specs/resolve", `{"order":`)
+	w := do(t, s, "POST", "/api/v1/specs/resolve", `{"order":`)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", w.Code)
 	}
@@ -135,7 +135,7 @@ func TestResolveSpec_InlinedDefinitionIsRejected(t *testing.T) {
 	s := newTestServer(t)
 	body := `{"workflow_id":"wf","source_revision":"rev1","order":["n_a"],
 	          "nodes":{"n_a":{"model_ref":{"provider":"openai","model_id":"gpt-5"}}},"edges":[]}`
-	w := do(t, s, "POST", "/api/p2/specs/resolve", body)
+	w := do(t, s, "POST", "/api/v1/specs/resolve", body)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("a spec inlining a model definition was accepted (status %d)", w.Code)
 	}
@@ -145,7 +145,7 @@ func TestResolveSpec_InlinedDefinitionIsRejected(t *testing.T) {
 // not exist" send an operator to completely different places.
 func TestP2_UnmountedStoreIsServiceUnavailableNotNotFound(t *testing.T) {
 	s := newTestServer(t)
-	for _, path := range []string{"/api/p2/runs/r1", "/api/p2/transforms/abc/rev1"} {
+	for _, path := range []string{"/api/v1/runs/r1", "/api/v1/transforms/abc/rev1"} {
 		w := do(t, s, "GET", path, "")
 		if w.Code != http.StatusServiceUnavailable {
 			t.Errorf("GET %s = %d, want 503 when the store is not mounted", path, w.Code)
@@ -154,9 +154,9 @@ func TestP2_UnmountedStoreIsServiceUnavailableNotNotFound(t *testing.T) {
 	// Submit is mounted the same way and answers the same way. 503 and not 404: the route exists, the
 	// deployment simply has no transform target — and an operator who sees 404 goes looking for a
 	// routing bug that is not there.
-	w := do(t, s, "POST", "/api/p2/specs/submit", `{"variant_id":"v","spec":{}}`)
+	w := do(t, s, "POST", "/api/v1/specs/submit", `{"variant_id":"v","spec":{}}`)
 	if w.Code != http.StatusServiceUnavailable {
-		t.Errorf("POST /api/p2/specs/submit = %d, want 503 when no submit path is mounted", w.Code)
+		t.Errorf("POST /api/v1/specs/submit = %d, want 503 when no submit path is mounted", w.Code)
 	}
 }
 
@@ -168,7 +168,7 @@ func TestP2_UnmountedStoreIsServiceUnavailableNotNotFound(t *testing.T) {
 // the check belongs to the request's shape, not to the transform.
 func TestSubmitSpec_VariantIDIsRequiredAndNotDefaulted(t *testing.T) {
 	s := newTestServerWith(t, P2Stores{Submit: &submit.Service{}}) // non-nil: get past the mounted check
-	w := do(t, s, "POST", "/api/p2/specs/submit",
+	w := do(t, s, "POST", "/api/v1/specs/submit",
 		`{"spec":{"workflow_id":"wf","source_revision":"rev1","order":["n_a"],"nodes":{},"edges":[]}}`)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400 for a submission with no variant_id", w.Code)
@@ -182,7 +182,7 @@ func TestSubmitSpec_VariantIDIsRequiredAndNotDefaulted(t *testing.T) {
 // fixable message and "400".
 func TestSubmitSpec_MalformedJSONSaysWhatIsWrong(t *testing.T) {
 	s := newTestServerWith(t, P2Stores{Submit: &submit.Service{}}) // non-nil: get past the mounted check
-	w := do(t, s, "POST", "/api/p2/specs/submit", `{"spec":`)
+	w := do(t, s, "POST", "/api/v1/specs/submit", `{"spec":`)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", w.Code)
 	}

@@ -44,12 +44,12 @@ type P10Store interface {
 // a deployment without a prompt registry simply does not mount it and the routes answer 503.
 func (s *Server) MountP10(store P10Store) {
 	s.p10 = store
-	s.Mux.HandleFunc("POST /api/p10/prompts/publish", s.handlePublishPrompt)
-	s.Mux.HandleFunc("GET /api/p10/prompts", s.handlePromptNames)
-	s.Mux.HandleFunc("GET /api/p10/prompts/{name}/timeline", s.handlePromptTimeline)
-	s.Mux.HandleFunc("GET /api/p10/prompts/diff", s.handlePromptDiff)
-	s.Mux.HandleFunc("POST /api/p10/prompts/impact", s.handlePromptImpact)
-	s.Mux.HandleFunc("POST /api/p10/studio/preview", s.handleStudioPreview)
+	s.Mux.HandleFunc("POST /api/v1/prompts/publish", s.handlePublishPrompt)
+	s.Mux.HandleFunc("GET /api/v1/prompts", s.handlePromptNames)
+	s.Mux.HandleFunc("GET /api/v1/prompts/{name}/timeline", s.handlePromptTimeline)
+	s.Mux.HandleFunc("GET /api/v1/prompts/diff", s.handlePromptDiff)
+	s.Mux.HandleFunc("POST /api/v1/prompts/impact", s.handlePromptImpact)
+	s.Mux.HandleFunc("POST /api/v1/studio/preview", s.handleStudioPreview)
 }
 
 // scopedName namespaces a user-facing prompt name under a tenant. Stripping is by known prefix length,

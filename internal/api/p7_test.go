@@ -143,8 +143,8 @@ func TestP7UnmountedReturns503(t *testing.T) {
 	s := New(nil, config.Config{})
 	s.MountP7(nil) // routes registered, source absent — the deployment-without-billing shape
 	for _, req := range []*http.Request{
-		httptest.NewRequest("GET", "/api/p7/customers/cus_a/billing", nil),
-		httptest.NewRequest("POST", "/api/p7/customers/cus_a/gainshare-consent", strings.NewReader(`{"consented":true}`)),
+		httptest.NewRequest("GET", "/api/v1/customers/cus_a/billing", nil),
+		httptest.NewRequest("POST", "/api/v1/customers/cus_a/gainshare-consent", strings.NewReader(`{"consented":true}`)),
 	} {
 		w := httptest.NewRecorder()
 		s.Handler.ServeHTTP(w, req)
@@ -162,7 +162,7 @@ func TestP7BillingRoundTrip(t *testing.T) {
 	s := newP7Server(src)
 
 	w := httptest.NewRecorder()
-	s.Handler.ServeHTTP(w, httptest.NewRequest("GET", "/api/p7/customers/cus_a/billing?period=2026-06", nil))
+	s.Handler.ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/customers/cus_a/billing?period=2026-06", nil))
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d", w.Code)
 	}
@@ -183,7 +183,7 @@ func TestP7BillingRoundTrip(t *testing.T) {
 	// An unknown customer is a 404 with a reason, never an empty 200 that renders as "no usage".
 	src.found = false
 	w = httptest.NewRecorder()
-	s.Handler.ServeHTTP(w, httptest.NewRequest("GET", "/api/p7/customers/nobody/billing", nil))
+	s.Handler.ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/customers/nobody/billing", nil))
 	if w.Code != http.StatusNotFound {
 		t.Errorf("unknown customer = %d, want 404", w.Code)
 	}
@@ -197,7 +197,7 @@ func TestP7ConsentRoundTrip(t *testing.T) {
 	s := newP7Server(src)
 
 	w := httptest.NewRecorder()
-	s.Handler.ServeHTTP(w, httptest.NewRequest("POST", "/api/p7/customers/cus_a/gainshare-consent",
+	s.Handler.ServeHTTP(w, httptest.NewRequest("POST", "/api/v1/customers/cus_a/gainshare-consent",
 		strings.NewReader(`{"consented":true}`)))
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
@@ -215,7 +215,7 @@ func TestP7ConsentRoundTrip(t *testing.T) {
 
 	// Revocation is the same route with the opposite value — a revocable contract, not a one-way door.
 	w = httptest.NewRecorder()
-	s.Handler.ServeHTTP(w, httptest.NewRequest("POST", "/api/p7/customers/cus_a/gainshare-consent",
+	s.Handler.ServeHTTP(w, httptest.NewRequest("POST", "/api/v1/customers/cus_a/gainshare-consent",
 		strings.NewReader(`{"consented":false}`)))
 	if w.Code != http.StatusOK || src.consent {
 		t.Errorf("revocation: status %d, consent %v", w.Code, src.consent)
@@ -223,14 +223,14 @@ func TestP7ConsentRoundTrip(t *testing.T) {
 
 	// A malformed payload is a 400, and a rejected consent change is a 409 that names why.
 	w = httptest.NewRecorder()
-	s.Handler.ServeHTTP(w, httptest.NewRequest("POST", "/api/p7/customers/cus_a/gainshare-consent",
+	s.Handler.ServeHTTP(w, httptest.NewRequest("POST", "/api/v1/customers/cus_a/gainshare-consent",
 		strings.NewReader(`not json`)))
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("malformed payload = %d, want 400", w.Code)
 	}
 	src.consentErr = errors.New("account is closed")
 	w = httptest.NewRecorder()
-	s.Handler.ServeHTTP(w, httptest.NewRequest("POST", "/api/p7/customers/cus_a/gainshare-consent",
+	s.Handler.ServeHTTP(w, httptest.NewRequest("POST", "/api/v1/customers/cus_a/gainshare-consent",
 		strings.NewReader(`{"consented":true}`)))
 	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "account is closed") {
 		t.Errorf("rejected consent = %d %s", w.Code, w.Body.String())
@@ -240,7 +240,7 @@ func TestP7ConsentRoundTrip(t *testing.T) {
 func TestP7PageIsServed(t *testing.T) {
 	s := newP7Server(&fakeP7{found: true})
 	w := httptest.NewRecorder()
-	s.Handler.ServeHTTP(w, httptest.NewRequest("GET", "/p7/billing", nil))
+	s.Handler.ServeHTTP(w, httptest.NewRequest("GET", "/billing", nil))
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d", w.Code)
 	}

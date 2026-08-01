@@ -86,7 +86,15 @@ func (i *Ingester) Ingest(tenantID string, p runlink.Payload) (Result, error) {
 	}
 
 	// Always record the coverage denominator the CLI reported (§4 / task 1.7), even on a re-link.
-	i.links.ObserveRunsReported(tenantID, p.RunsReported)
+	//
+	// A failure here fails the whole ingest rather than being tolerated: the denominator is what makes
+	// the coverage figure a RATIO, and accepting a link while silently dropping it would leave the
+	// tenant with a numerator, a stale denominator, and a coverage number that reads as better than it
+	// is. Refusing the link is recoverable — the CLI retries — and a wrong coverage figure is not,
+	// because nobody knows to go back and check it.
+	if err := i.links.ObserveRunsReported(tenantID, p.RunsReported); err != nil {
+		return Result{}, err
+	}
 
 	// Idempotency (FR14): a run already linked contributes exactly once. We do NOT re-emit its events.
 	already, err := i.links.Record(LinkedRun{
@@ -156,7 +164,7 @@ func (i *Ingester) Ingest(tenantID string, p runlink.Payload) (Result, error) {
 
 // Coverage returns the link coverage for a tenant — the read model the console shows wherever a
 // linked-derived spend figure appears (FR17).
-func (i *Ingester) Coverage(tenantID string) LinkCoverage { return i.links.Coverage(tenantID) }
+func (i *Ingester) Coverage(tenantID string) (LinkCoverage, error) { return i.links.Coverage(tenantID) }
 
 func (i *Ingester) route(tenantID, runID string) string {
 	if i.consoleURL != nil {

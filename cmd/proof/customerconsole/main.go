@@ -151,8 +151,8 @@ func main() {
 
 	fmt.Print(account)
 	fmt.Printf("\nplatform API on http://%s\n", *addr)
-	fmt.Printf("  MOUNTED     P3.5 pattern graph   GET /api/p35/workflows/%s/graph\n", workflowID)
-	fmt.Printf("  MOUNTED     P10 studio matrix    GET /api/p10/workflows/%s/nodes  (real nodes; test-run 503)\n", workflowID)
+	fmt.Printf("  MOUNTED     P3.5 pattern graph   GET /api/v1/workflows/%s/pattern-graph\n", workflowID)
+	fmt.Printf("  MOUNTED     P10 studio matrix    GET /api/v1/workflows/%s/nodes  (real nodes; test-run 503)\n", workflowID)
 	fmt.Printf("  NOT MOUNTED P2, P2.5, P4, P4.5, P5.5, P7 — each answers 503 with a not-mounted body,\n")
 	fmt.Printf("              which the console renders as a subsystem that is absent on this deployment,\n")
 	fmt.Printf("              distinct from a 404 and from a transport failure.\n\n")

@@ -78,9 +78,35 @@ const CLIENT_ID = "console-client";
  */
 const ABOVE_THE_SEAM = {
   "src/lib/session.ts": "221d2afc1cf462ea68fe8f1d7e2a7b547ea41fb31b59a85b125e6a2fa32fcb33",
-  "src/lib/scope.ts": "26b7005156ffcad02422e73df8063761793eed543537a21dfbf552db30791ea9",
   "src/lib/entitlements.ts": "71676c25bae578c82b65b1ed255c068e45d4ddaaf5f76b0864fcfa1d1592a608",
 };
+
+/**
+ * SCOPE_DERIVATION is the half of `scope.ts` ADR-008 Rule 3 actually governs, pinned the way
+ * `middleware.ts` already is — and narrowed for the same reason, a second time.
+ *
+ * The whole file used to be pinned. Renaming the platform's routes from phase names (`/api/p2/runs/…`)
+ * to `/api/v1/…` changed every path literal in it and NOTHING else: the capture of `tenantId` from the
+ * session, the absence of any tenant parameter, the closed set of builders. Verified rather than
+ * asserted — every changed line in that rename was a path literal.
+ *
+ * Bumping the digest would have been the wrong correction for the reason recorded above for
+ * `middleware.ts`: it discards the fence for a change it was never aimed at, and it teaches the next
+ * person that a failing pin is a one-line hash edit. Paths will be renamed again; the derivation must
+ * not change. So the pin follows the RULE, not the file.
+ *
+ * What is still covered: that `scoped()` takes a `Session` and captures `session.tenantId` into a
+ * closure no caller can influence. What is deliberately not: the URL strings, which are asserted by
+ * behaviour in `tests/routes.test.mjs` and by the platform's own route table.
+ */
+const SCOPE_DERIVATION_DIGEST = "606f31842ea7eb6093b727c6e38c8c1b13d5c93d53ac11d8298c60d472e87cdb";
+
+function scopeDerivation(source) {
+  const start = source.indexOf("export function scoped(session: Session) {");
+  const end = source.indexOf("// \u2500\u2500 P2 \u00b7");
+  if (start < 0 || end < 0 || end <= start) return null;
+  return source.slice(start, end);
+}
 
 /**
  * MIDDLEWARE_FAIL_CLOSED is the half of `middleware.ts` ADR-008 Rule 3 actually governs, pinned by
@@ -110,6 +136,16 @@ test("8.1/4.1 the layer above the seam is byte-for-byte unchanged (NFR1, ADR-008
         `If this change is genuinely required, that is an ADR-008 conversation, not a hash update.`,
     );
   }
+
+  const derivation = scopeDerivation(await read("src/lib/scope.ts"));
+  assert.ok(derivation, "the derivation half of scope.ts could not be located — the fence found nothing to pin");
+  assert.equal(
+    createHash("sha256").update(derivation).digest("hex"),
+    SCOPE_DERIVATION_DIGEST,
+    "scope.ts's DERIVATION changed — the tenant capture, not a path literal. That is an ADR-008 " +
+      "conversation, not a hash update. Renaming a route does not reach this region; if this failed " +
+      "for a rename, the rename touched something it should not have.",
+  );
 
   const half = failClosedHalf(await read("src/middleware.ts"));
   assert.ok(half, "the fail-closed half of middleware.ts could not be located — the fence found nothing to pin");

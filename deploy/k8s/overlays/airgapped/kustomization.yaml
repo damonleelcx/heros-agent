@@ -24,7 +24,6 @@ patches:
       kind: Deployment
       metadata: { name: agentd }
       spec:
-        replicas: 2
         template:
           spec:
             containers:
@@ -37,6 +36,24 @@ patches:
                   # When this is unreachable, /readyz reports secrets_source degraded and the model-
                   # dependent stages read that as degraded-not-available — fail static, not a crash.
                   - { name: HEROS_SECRETS_HEALTH_URL, value: "http://onprem-llm-gateway.heros.svc:8080/healthz" }
+
+  # 1b) The console's release surface goes OFFLINE. Without this the download page points at GitHub from
+  #     a network with no egress, and an operator sees a dead link with no reason beside it — the
+  #     failure is indistinguishable from a broken page, and it is the one an air-gapped install hits
+  #     first. This is an addresses-and-modes change, not a secret.
+  - target: { kind: Deployment, name: console }
+    patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata: { name: console }
+      spec:
+        template:
+          spec:
+            containers:
+              - name: console
+                env:
+                  - { name: HEROS_RELEASE_OFFLINE, value: "1" }
+                  - { name: HEROS_EDITION, value: "enterprise" }
 
   # 2) Replace agentd's egress: the stores stay; the PUBLIC 0.0.0.0/0 rule is gone, replaced by the
   #    on-prem gateway CIDR only. A NetworkPolicy egress list has no merge key, so this strategic-merge

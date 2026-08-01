@@ -6,7 +6,7 @@ import (
 	"github.com/heros-foreal/agentd/internal/transform"
 )
 
-// GET /api/p13/coverage — the total per-axis, per-language coverage read model.
+// GET /api/v1/coverage — the total per-axis, per-language coverage read model.
 //
 // # Why the console gets a read model rather than a list of what works
 //

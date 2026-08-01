@@ -15,8 +15,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
-	"strings"
 	"time"
 
 	"github.com/heros-foreal/agentd/internal/adminidentity"
@@ -136,7 +134,7 @@ type Server struct {
 	// MountP10Matrix when available.
 	p10matrix P10Matrix
 
-	// p11 is the P11 run-linking ingest surface (POST /api/p11/link + GET /api/p11/whoami), mounted by
+	// p11 is the P11 run-linking ingest surface (POST /api/v1/run-links + GET /api/v1/whoami), mounted by
 	// MountP11 when available. It attributes a linked run to the authenticated tenant server-side and
 	// lands its events in the existing P2.5 substrate. The platform API's authenticated ingest surface.
 	p11 LinkIngestSource
@@ -187,6 +185,39 @@ type HTTPComponentProbe struct {
 	ComponentName string
 	URL           string
 	Client        *http.Client
+}
+
+// DBComponentProbe reports a database's reachability under its own name.
+//
+// It exists so the platform database is probed rather than described. The alternative this replaces was
+// naming the local ledger's ping "postgres" from an environment variable, which produced a component
+// that reported ready while the database it named was down — a signal structurally incapable of failing.
+// A probe is a connection or it is decoration.
+type DBComponentProbe struct {
+	ComponentName string
+	DB            *sql.DB
+}
+
+// NewDBComponentProbe builds a probe over an open pool.
+func NewDBComponentProbe(name string, db *sql.DB) *DBComponentProbe {
+	return &DBComponentProbe{ComponentName: name, DB: db}
+}
+
+// Name reports the component's name.
+func (p *DBComponentProbe) Name() string { return p.ComponentName }
+
+// Probe pings the pool. Reachability, not traffic freshness, and it does not depend on the traffic
+// /readyz gates — so readiness cannot deadlock on the very requests it admits (task 3.3).
+func (p *DBComponentProbe) Probe(ctx context.Context) error {
+	if p.DB == nil {
+		return fmt.Errorf("no connection pool")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	if err := p.DB.PingContext(ctx); err != nil {
+		return fmt.Errorf("unreachable: %w", err)
+	}
+	return nil
 }
 
 // NewHTTPComponentProbe builds a probe with a bounded client.
@@ -369,17 +400,17 @@ func New(db *sql.DB, cfg config.Config) *Server {
 	// P13 13d — the total coverage read model. Registered beside health because, like health, it is a
 	// property of this BUILD rather than of a tenant: it takes no tenant, no plan and no role, which is
 	// what makes "coverage is identical on every plan" structural instead of a policy.
-	s.Mux.HandleFunc("GET /api/p13/coverage", s.handleCoverage)
-	s.Mux.HandleFunc("GET /api/p13/delivery", s.handleDelivery)
+	s.Mux.HandleFunc("GET /api/v1/coverage", s.handleCoverage)
+	s.Mux.HandleFunc("GET /api/v1/change-delivery", s.handleDelivery)
 	// P17 20c — the memory-authoring read model, registered here for the same reason: the strategy
 	// vocabulary and the applicability boundary are properties of this BUILD, not of a tenant, so no
 	// plan or role can move them. It is a READ only; a memory change is authored through the existing
-	// /api/p13/authoring routes, because there is one spine and two origins.
-	s.Mux.HandleFunc("GET /api/p17/memory", s.handleMemory)
+	// /api/v1/authoring routes, because there is one spine and two origins.
+	s.Mux.HandleFunc("GET /api/v1/memory", s.handleMemory)
 	// P20 — the install/distribution read model, registered here for the same reason: the supported-target
 	// matrix, the install channels and the trust posture are properties of the RELEASE, not of a tenant, so no
 	// entitlement can move a row. It takes no tenant, no plan and no role.
-	s.Mux.HandleFunc("GET /api/p20/install", s.handleP20Install)
+	s.Mux.HandleFunc("GET /api/v1/install", s.handleP20Install)
 
 	var h http.Handler = s.Mux
 	if cfg.AuthMode == "required" {
@@ -414,15 +445,17 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 	components := map[string]any{}
 	degraded := make([]string, 0, 1)
 
-	// The primary datastore is the first aggregated component, NAMED, not a bare "db_unavailable"
-	// status on the whole document. In the platform deployment this is Postgres (eval + lineage); the
-	// name comes from HEROS_DATASTORE_NAME so /readyz names the store the operator actually runs
-	// ("postgres") rather than a generic word, and defaults to "datastore" for the SQLite single-binary.
+	// The local ledger is the first aggregated component, NAMED, not a bare "db_unavailable" status on
+	// the whole document.
+	//
+	// 🔴 The name is FIXED, and that is the point. It used to come from HEROS_DATASTORE_NAME, which the
+	// deploy manifests set to "postgres" — so this ping of the SQLite ledger was reported as
+	// `components.postgres: ready` on a process that had never opened a Postgres connection. That signal
+	// could not go red no matter what happened to Postgres, which is the one thing a readiness signal may
+	// never be. A component's name on /readyz now always identifies the dependency actually probed
+	// (P19 Decision 9); the platform database reports separately, under `postgres`, from its own probe.
 	if s.DB != nil {
-		name := strings.TrimSpace(os.Getenv("HEROS_DATASTORE_NAME"))
-		if name == "" {
-			name = "datastore"
-		}
+		const name = "ledger"
 		if err := s.DB.PingContext(r.Context()); err != nil {
 			components[name] = map[string]any{"status": "degraded", "detail": "ping failed: " + err.Error()}
 			degraded = append(degraded, name)

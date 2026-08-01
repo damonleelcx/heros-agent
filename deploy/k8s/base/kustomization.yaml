@@ -24,6 +24,7 @@ resources:
   - graphstore.yaml
   - console.yaml
   - admin-console.yaml
+  - legal-retention.yaml
   - networkpolicy.yaml
   - externalsecrets.yaml
 

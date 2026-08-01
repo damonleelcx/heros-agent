@@ -42,6 +42,13 @@ spec:
             # The operator BFF's OWN credential — a DIFFERENT external-store key than the customer BFF's.
             - name: ADMIN_PLATFORM_CREDENTIAL
               valueFrom: { secretKeyRef: { name: heros-admin-console, key: platform-credential } }
+            # The operator IdP's callback URL. An absolute URL on the OPERATOR origin — pointing it at
+            # the customer origin would land an operator's assertion in the customer console's jar.
+            - { name: ADMIN_IDP_CALLBACK_URL, value: "" }
+            # Build identity for the release surface. The P24 reporting switches are deliberately NOT
+            # here (P24 task 7.4) — see the note in agentd.yaml.
+            - { name: HEROS_VERSION, value: "" }
+            - { name: HEROS_EDITION, value: "managed" }
           livenessProbe:
             httpGet: { path: /api/health, port: http }
             initialDelaySeconds: 15

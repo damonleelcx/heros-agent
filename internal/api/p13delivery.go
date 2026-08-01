@@ -7,7 +7,7 @@ import (
 	"github.com/heros-foreal/agentd/internal/transform"
 )
 
-// GET /api/p13/delivery — the total delivery read model (P13 §23.18, FR57/FR58/FR66).
+// GET /api/v1/change-delivery — the total delivery read model (P13 §23.18, FR57/FR58/FR66).
 //
 // # Why the console gets a table rather than a status word
 //

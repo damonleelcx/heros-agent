@@ -829,9 +829,9 @@ produces this PRD.
 7. **🔴 Subject enumeration has no read model, and FR10 needs one.** FR10 requires the user to
    **select** a workflow, run, variant, board or transform from platform-provided data — and the
    platform exposes **no enumeration endpoint for any of them**. Every customer route is keyed by an
-   identifier the caller must already hold (`/api/p2/runs/{run_id}`,
-   `/api/p35/workflows/{workflow_id}/graph`, `/api/p4/workflows/{workflow_id}/board`,
-   `/api/p45/variants/{variant_id}/scorecard`, `/api/p55/workflows/{workflow_id}/surface`). P9's
+   identifier the caller must already hold (`/api/v1/runs/{run_id}`,
+   `/api/v1/workflows/{workflow_id}/pattern-graph`, `/api/v1/workflows/{workflow_id}/eval-board`,
+   `/api/v1/variants/{variant_id}/scorecard`, `/api/v1/workflows/{workflow_id}/proposals`). P9's
    standing constraint forbids adding a platform endpoint, and 🔴 `careful-api-creation` makes a new
    endpoint a one-way door that belongs to the owning phase, so P9 **files this as a read-model
    request** rather than growing one. Until it lands, the console's selection surface is built from
@@ -845,7 +845,7 @@ produces this PRD.
 8. **The proposal-review surface's decision verbs.** FR16's queue → rationale → verified delta → diff
    → **approve/reject** was written against the orphaned legacy page's shape. The P5.5 API that has
    since landed exposes **open-PR** rather than approve/reject —
-   `POST /api/p55/workflows/{id}/proposals/{id}/open-pr`, gated on a passing verdict and Assisted
+   `POST /api/v1/workflows/{id}/proposals/{id}/open-pr`, gated on a passing verdict and Assisted
    automation — because P5.5 decided that a human merges a reviewable PR and the platform never
    merges for them. P9 renders the verb the platform actually implements; whether an in-console
    approve/reject should also exist is a P5.5 product question, not a console styling choice.

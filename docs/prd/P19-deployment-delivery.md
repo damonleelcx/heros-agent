@@ -298,6 +298,57 @@ These map 1:1 to OpenSpec requirements in `p19-deployment` across four capabilit
   operator runs without us, and the backup procedure SHALL fail loud on an empty/failed dump rather than
   writing a zero-byte file that poisons the rollback chain.
 
+### Capability carriage (`deployment-topology`) — added 2026-08-01
+
+FR1–FR24 were written before P20–P26 landed, and they describe a deployment that *composes* the platform.
+An audit of the artifacts against the code they run found that the composition is the part that was never
+finished: the deployed process (`cmd/agentd` → `internal/launch`) registered six routes, mounted no
+capability surface, applied none of the platform's nineteen Postgres migrations, and opened no Postgres
+connection at all — while the manifests started Postgres and named the SQLite ledger's ping after it. The
+requirements below close that, and they are written as requirements rather than as a bug list because each
+one is a property the deployment has to keep having.
+
+- **FR25** The deployed process SHALL apply the platform's Postgres schema at boot, **idempotently**: a boot
+  against an already-migrated database is a no-op, and the applied-version ledger SHALL be **read** before
+  each migration is considered, not merely written after it. A ledger that is written and never read cannot
+  distinguish "never applied" from "applied and since reverted", and re-runs the migration either way.
+- **FR26** `/readyz` SHALL name a store only if it **probes that store**. Naming one component's probe after
+  a different component is non-conformant — it produces a signal that stays green while the named store is
+  dead, which is the precise failure `health-signal-surface` exists to forbid.
+- **FR27** Every capability surface the platform ships SHALL be **registered** by the deployed process. A
+  capability that has no source on this deployment SHALL answer **503 not-mounted**; leaving its routes
+  unregistered so the mux answers **404** is non-conformant. "This capability is not installed on this
+  deployment" and "that identifier does not resolve" are two different facts with two different next
+  actions, and a console that receives the second when the first is true tells its user their workflow does
+  not exist.
+- **FR28** The deploy documentation SHALL state, in one readable place, which capabilities a fresh install
+  **actually serves**, which are registered-but-unsourced, and what makes the difference. A deployment whose
+  capability set can only be discovered by calling it is not self-describing.
+- **FR29** The **environment contract** SHALL cover every variable the deployed processes read, and the two
+  substrates SHALL NOT diverge on it. A CI check SHALL fail on divergence. (FR1 and Decision 2 already
+  promised "the same digest set **and the same env-var contract**"; only the digest half was ever gated,
+  and the two substrates had already drifted apart on `ADMIN_CONSOLE_HEALTH_URL` by the time this was
+  written.)
+- **FR30** Each capability that landed after FR1–FR24 were written — P20 installable packages, P21 payments,
+  P22 SSO/identity, P23 legal & docs, P26 operator surfaces — SHALL have its deployment contract expressed:
+  the names of the secrets it reads, its aggregation into `/readyz`, and any scheduled job it requires. A
+  capability that is implemented, tested, and unreachable on every deployment form is not shipped.
+  **Exception, and it is a real one: P24's analytics and error-reporting switches
+  (`HEROS_ERROR_REPORTING_DSN`, `HEROS_GA4_*`, `HEROS_CLARITY_PROJECT_ID`, `HEROS_SOURCEMAP_UPLOAD_TOKEN`)
+  SHALL NOT appear in any deployment manifest or `.env` example, even empty.** P24 task 7.4 already decided
+  this and gates it (`internal/deploy`): an empty slot is one `--set` from being filled in a file a customer
+  edits without reading, and a default nobody chose takes effect the day somebody's shell exports the
+  variable. Those integrations belong to the platform's own hosted deployment, configured from its own
+  environment. FR30 is about capabilities a *customer* deploys; P24's reporting is not one, and a customer
+  install that reports to nobody is the correct state — `/readyz` says `absent` and stays silent about it.
+- **FR31** The consent-record **retention job** SHALL ship as a scheduled unit on both substrates, defaulting
+  to a dry run and refusing to act with no retention window configured. Retention is a legal obligation with
+  a clock on it; a job that exists only as a binary an operator has never been told to run does not satisfy it.
+- **FR32** A backing service the deployment **starts** SHALL either be connected by a deployed process, or be
+  labelled in both the manifest and the runbook as provisioned ahead of the capability that will use it.
+  Aggregating an unused component into `/readyz` implies the platform depends on it, and an operator who
+  reads that will keep it alive for a reason that does not exist.
+
 ## 7. Non-functional requirements
 
 - **NFR1 — Reproducibility.** Every image is digest-pinned; the same package + overlay applied twice yields
@@ -565,6 +616,12 @@ environment**, never a point value implying a production guarantee (virtualizati
 - [ ] Deploy docs define every term, give capacity as **ranges with configuration**, label lab baselines as
       baselines, carry **no price value**, and leak **no internal mechanism**; the open/paid boundary is stated
       by name.
+- [ ] The deployed process **applies the Postgres schema at boot** and a second boot is a no-op; `/readyz`
+      probes the Postgres it names (FR25, FR26).
+- [ ] **Every capability surface is registered** by the deployed process, an unsourced one answers 503 rather
+      than 404, and the runbook lists which capabilities a fresh install serves (FR27, FR28).
+- [ ] The **env-contract parity gate** is green, and every post-P19 capability (P20–P26) has its secret names,
+      readiness aggregation and scheduled jobs expressed on both substrates (FR29, FR30, FR31).
 
 ## 14. Open questions
 
@@ -589,3 +646,12 @@ environment**, never a point value implying a production guarantee (virtualizati
   gateway; a customer with *no* model access wants the model-dependent stages (diagnosis/optimizer) to degrade
   gracefully rather than fail. *Recommendation: those stages report degraded-not-available on `/readyz` and the
   rest of the platform (discovery/apply/run/eval-without-judge) stays fully functional — the fail-static rule.*
+- **Q6 — Six read surfaces have no persistent source, and P19 cannot invent one.** The eval board (P4), the
+  scorecard (P4.5), the graph editor's IR (P5), the proposals surface (P5.5), the optimizer monitor (P6) and
+  the pattern graph (P3.5) are each satisfied today only by an adapter inside a `cmd/demo` or `cmd/proof`
+  binary holding one workflow in memory. Their domain packages are real and their Postgres tables exist
+  (0008–0012); what is missing is the adapter that resolves a `workflow_id` to stored artifacts. Under FR27
+  these are now **registered with a nil source**, so they answer 503 not-mounted rather than 404 — which is
+  the honest state, not the finished one. *Recommendation: each adapter belongs to its own phase's owner, not
+  to P19; P19's obligation is that the deployment says so instead of implying the capability is broken. This
+  is the one place where the deployment is deliberately still incomplete, and it is listed in the runbook.*

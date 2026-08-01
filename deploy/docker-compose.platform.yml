@@ -26,16 +26,83 @@ services:
     environment:
       HEROS_LISTEN_ADDR: 0.0.0.0:4321
       HEROS_DATA_DIR: /var/lib/heros
-      HEROS_DATASTORE_NAME: postgres
+      # The platform's own config file, mounted read-only from ./config. It carries the TENANT
+      # CREDENTIALS the two console BFFs authenticate with — the one thing that cannot come from an
+      # environment variable, because a credential set is a list, not a string. `up.sh` writes it on a
+      # first install and never rewrites it; see "first install determines credentials" in README.md.
+      HEROS_CONFIG: /etc/heros/config.json
+      # ── The PLATFORM DATABASE (P19 Decision 9) ──────────────────────────────────────────────────
+      #
+      # agentd applies db/migrations/postgres at boot through a ledger it READS, so a second `up -d` is a
+      # no-op, and it PROBES this database on /readyz under the name `postgres`. This replaced
+      # HEROS_DATASTORE_NAME, which only renamed the local SQLite ledger's ping: /readyz reported
+      # `components.postgres: ready` on a process that had never opened a Postgres connection, and it
+      # could not go red no matter what happened to the database it named.
+      #
+      # Unset it and the Postgres-backed capabilities register unsourced and report 503 not-mounted —
+      # a supported single-binary form, not a misconfiguration.
+      #
+      # 🔴 The password is NOT in the DSN, and that is deliberate on two counts.
+      #
+      # It travels as PGPASSWORD, which libpq — and lib/pq, verified against a live server — reads for
+      # any value the connection string omits. That is the shape the `postgres-backup` service below has
+      # always used, so this file now has ONE way of handing Postgres a credential rather than two.
+      #
+      # The other count: a DSN that embeds the credential between the user and the host is the exact
+      # shape credential scanners match, and they cannot tell a `${VAR}` interpolation from a literal.
+      # GitGuardian flagged these two lines on the PR that added them. Nothing had leaked — but a scanner
+      # that fires on correct code every time this file is touched teaches people to click past it, which
+      # is how the real one gets missed. (This comment avoids writing the shape out, for that reason.)
+      # No userinfo in the DSN AT ALL — host, port and database only. PGUSER/PGPASSWORD carry the
+      # credential, exactly as the `postgres-backup` service below has always done.
+      #
+      # `${POSTGRES_USER:-heros}@` was not good enough: a URL parser splits that on the colon of its own
+      # default-value syntax and reads it as `user:password`, so the string still looks like an embedded
+      # credential to a scanner. Removing the userinfo removes the ambiguity rather than arguing with it.
+      DATABASE_URL: postgres://postgres:5432/${POSTGRES_DB:-heros}?sslmode=disable
+      PGUSER: ${POSTGRES_USER:-heros}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?}
       # The secret seam for the platform's OWN model calls (platform-llm-access). No provider key is in
       # this file; the seam resolves them at call time from the source named here.
       HEROS_SECRETS_SOURCE: ${HEROS_SECRETS_SOURCE:-env}
+      # Only read when the source is `aws-secrets-manager`, and then REQUIRED — the boot fails without
+      # one of them. Blank here because the single-host default source is `env`.
+      HEROS_SECRETS_AWS_REGION: ${HEROS_SECRETS_AWS_REGION:-}
+      HEROS_SECRETS_AWS_PREFIX: ${HEROS_SECRETS_AWS_PREFIX:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # Credentials for the backing stores agentd reads through internal/config. Blank is a legitimate
+      # value: the capability that dials that store is not mounted on this deployment yet (see the
+      # `provisioned ahead of use` note on those services below).
+      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-}
+      # The inbox's signature-verification key (change-delivery). Unset ⇒ no inbox on this deployment.
+      HEROS_INBOX_SIGNING_KEY: ${HEROS_INBOX_SIGNING_KEY:-}
+      # ── Error reporting (P24) ────────────────────────────────────────────────────────────────────
+      #
+      # 🔴 This one can REFUSE THE BOOT, which is why it is documented here beside the others rather than
+      # discovered from a crash. Unset ⇒ the ABSENT reporter: no transmit, no warning, `/readyz` reports
+      # `absent`, and that is the correct state on a customer install and on an air-gapped network. SET
+      # AND UNUSABLE ⇒ a hard boot failure, deliberately: that is a deployment somebody meant to configure
+      # and got wrong, and the alternative is a process that looks healthy and reports nothing for a month.
+      HEROS_EDITION: ${HEROS_EDITION:-open-core}
+      HEROS_VERSION: ${HEROS_VERSION:-}
+      # ── Operator identity (P22) ──────────────────────────────────────────────────────────────────
+      # Present so `/readyz` can report `admin_idp` on a deployment that ships the operator console.
+      ADMIN_IDENTITY_MODE: ${ADMIN_IDENTITY_MODE:-configured}
+      ADMIN_IDP_ISSUER: ${ADMIN_IDP_ISSUER:-}
+      ADMIN_CONSOLE_ORIGIN: ${ADMIN_CONSOLE_ORIGIN:-}
+      ADMIN_WEBAUTHN_RP_ID: ${ADMIN_WEBAUTHN_RP_ID:-}
       # Every component the deployment ships, aggregated into /readyz by health URL. A component with no
       # URL is honestly absent; a component WITH a URL that is unreachable turns /readyz not-ready and
-      # NAMES itself. Postgres is aggregated by the agentd datastore ping (HEROS_DATASTORE_NAME).
+      # NAMES itself. Postgres is NOT in this list — it is probed directly, by connection.
+      #
+      # ADMIN_CONSOLE_HEALTH_URL is set here because the operator console unit shares this network when
+      # it is stood up alongside (docker-compose.admin-console.yml). Only the Kubernetes base set it
+      # before, so Compose /readyz silently never aggregated the operator console at all — the exact
+      # substrate divergence scripts/deploy/check-env-parity.sh now fails the build on.
       CONSOLE_HEALTH_URL: http://console:4320/api/health
+      ADMIN_CONSOLE_HEALTH_URL: ${ADMIN_CONSOLE_HEALTH_URL:-}
       OBJECT_STORE_HEALTH_URL: http://objectstore:9000/minio/health/ready
       QUEUE_HEALTH_URL: http://queue:8222/healthz
       VECTOR_STORE_HEALTH_URL: http://vectorstore:6333/readyz
@@ -57,6 +124,11 @@ services:
     tmpfs: [/tmp]
     volumes:
       - agentd-data:/var/lib/heros
+      # Read-only: the platform never writes its own credential file. An empty ./config is a legitimate
+      # state — agentd falls back to its built-in defaults — but `up.sh` asserts after boot that auth is
+      # actually being enforced, because "the config did not load" and "the config said auth off" look
+      # identical from outside and only one of them is intended.
+      - ./config:/etc/heros:ro
     security_opt: [no-new-privileges:true]
 
   # ── Stateful store: Postgres (single-writer SPOF — see deploy/README.md; backup ships below) ──────
@@ -97,7 +169,47 @@ services:
       - postgres-backups:/var/backups/heros
     security_opt: [no-new-privileges:true]
 
+  # ── Consent-record retention (P23 task 9.7, P19 FR31) ─────────────────────────────────────────────
+  #
+  # Retention is a legal obligation with a clock on it, so it ships as a scheduled unit rather than as a
+  # binary an operator has never been told to run. Two deliberate refusals, both from the job itself:
+  #
+  #   • it DRY RUNS unless RETENTION_APPLY=1 — a deletion job whose first production run is also its
+  #     first run ever is a defect waiting for a quiet weekend;
+  #   • with no window it deletes NOTHING and says so. The retention period is a LEGAL answer (seven
+  #     years per docs/decisions/p23-one-way-doors.md §1.4), not an engineering default, and a job that
+  #     invented one would delete the wrong things confidently.
+  #
+  # Same image as agentd, second entrypoint: one image set (Decision 2), one digest, one parity row.
+  legal-retention:
+    image: ${AGENTD_IMAGE:?set AGENTD_IMAGE from deploy/images.env}
+    entrypoint: ["/app/legalretention"]
+    # `0` is the safe default and the documented refusal: the job prints what it will not do and exits 0.
+    # `-apply` is deliberately NOT here — an operator types it, once, on purpose.
+    command: ["-window", "${LEGAL_RETENTION_WINDOW:-0}"]
+    environment:
+      # Password via PGPASSWORD, never inline in the DSN — see the note on agentd above.
+      # Host/port/database only; PGUSER/PGPASSWORD carry the credential — see the note on agentd above.
+      DATABASE_URL: postgres://postgres:5432/${POSTGRES_DB:-heros}?sslmode=disable
+      PGUSER: ${POSTGRES_USER:-heros}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?}
+    depends_on:
+      postgres: { condition: service_healthy }
+    # `no` — this is a one-shot job, not a service. Compose has no scheduler; an operator runs it from
+    # cron or a timer with `docker compose run --rm legal-retention`, and deploy/README.md gives the
+    # line. On Kubernetes it is a real CronJob (deploy/k8s/base/legal-retention.yaml).
+    restart: "no"
+    profiles: ["jobs"]
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+
   # ── Object store: MinIO (content store for artifacts/diffs) ───────────────────────────────────────
+  #
+  # ⚠️ PROVISIONED AHEAD OF USE (P19 FR32). agentd does not dial this yet — the capability that will
+  # (P2's blob fan-out beyond the filesystem store) is not mounted. It is started so the storage exists
+  # and is backed up before the data does, and it is listed here rather than left for an operator to
+  # infer from a quiet log. The same note applies to the queue, vector and graph stores below.
   objectstore:
     image: ${OBJECT_STORE_IMAGE:?set OBJECT_STORE_IMAGE from deploy/images.env}
     command: ["server", "/data", "--console-address", ":9001"]
@@ -168,10 +280,29 @@ services:
       CONSOLE_SAML_IDP_METADATA_URL: ${CONSOLE_SAML_IDP_METADATA_URL:-}
       CONSOLE_SAML_ACS_ALLOWLIST: ${CONSOLE_SAML_ACS_ALLOWLIST:-}
       CONSOLE_SAML_SP_PRIVATE_KEY: ${CONSOLE_SAML_SP_PRIVATE_KEY:-}
+      CONSOLE_IDP_SECRET_MAP: ${CONSOLE_IDP_SECRET_MAP:-}
+      CONSOLE_IDP_TIMEOUT_MS: ${CONSOLE_IDP_TIMEOUT_MS:-5000}
       HEROS_SECRETS_SOURCE: ${HEROS_SECRETS_SOURCE:-env}
       HEROS_SECRETS_DIR: ${HEROS_SECRETS_DIR:-/var/run/secrets/heros}
       CONSOLE_SESSION_TTL_SECONDS: ${CONSOLE_SESSION_TTL_SECONDS:-28800}
       CONSOLE_UPSTREAM_TIMEOUT_MS: ${CONSOLE_UPSTREAM_TIMEOUT_MS:-10000}
+      # ── Legal & developer docs (P23) ────────────────────────────────────────────────────────────
+      # The consent gate, and the root the published legal/docs corpus is served from. agentd derives
+      # the manifest origin from CONSOLE_HEALTH_URL rather than taking a second variable for the same
+      # origin — two names for one origin is two things to keep in step.
+      CONSOLE_CONSENT_GATE: ${CONSOLE_CONSENT_GATE:-}
+      HEROS_CONTENT_ROOT: ${HEROS_CONTENT_ROOT:-}
+      # ── Analytics & error monitoring (P24) ──────────────────────────────────────────────────────
+      # All four are OPTIONAL and all four default to absent. An open-core or air-gapped deployment that
+      # reports to nobody is the expected state, not a degraded one, and it stays silent about it.
+      # ── Release surface (P20) ───────────────────────────────────────────────────────────────────
+      # HEROS_RELEASE_OFFLINE matters most where it is easiest to forget: an air-gapped install whose
+      # download page points at GitHub from a network with no egress shows an operator a dead link and
+      # no reason. Set it there.
+      HEROS_VERSION: ${HEROS_VERSION:-}
+      HEROS_EDITION: ${HEROS_EDITION:-open-core}
+      HEROS_SLUG_MANIFEST: ${HEROS_SLUG_MANIFEST:-}
+      HEROS_RELEASE_OFFLINE: ${HEROS_RELEASE_OFFLINE:-}
       NODE_ENV: production
     ports:
       - "${CONSOLE_PORT:-4320}:4320"

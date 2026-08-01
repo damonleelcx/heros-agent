@@ -44,7 +44,7 @@ func p11Payload(runID string) []byte {
 
 func postLink(t *testing.T, s *Server, tenant string, body []byte) *httptest.ResponseRecorder {
 	t.Helper()
-	req := httptest.NewRequest("POST", "/api/p11/link", bytes.NewReader(body))
+	req := httptest.NewRequest("POST", "/api/v1/run-links", bytes.NewReader(body))
 	req = req.WithContext(auth.WithPrincipal(req.Context(), auth.Principal{TenantID: tenant, Role: "member", APIKeyID: "k"}))
 	rec := httptest.NewRecorder()
 	s.Mux.ServeHTTP(rec, req)
@@ -88,7 +88,7 @@ func TestP11IngestIdempotent(t *testing.T) {
 
 func TestP11WhoAmI(t *testing.T) {
 	s, _, _ := p11Server(t)
-	req := httptest.NewRequest("GET", "/api/p11/whoami", nil)
+	req := httptest.NewRequest("GET", "/api/v1/whoami", nil)
 	req = req.WithContext(auth.WithPrincipal(req.Context(), auth.Principal{TenantID: "tenantA", Role: "member", APIKeyID: "k"}))
 	rec := httptest.NewRecorder()
 	s.Mux.ServeHTTP(rec, req)

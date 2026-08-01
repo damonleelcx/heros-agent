@@ -69,9 +69,9 @@ type DeliveriesView struct {
 // MountP12 registers the delivery routes. Optional, like every other mount.
 func (s *Server) MountP12(src P12Source) {
 	s.p12 = src
-	s.Mux.HandleFunc("GET /api/p12/deliveries", s.handleP12Deliveries)
-	s.Mux.HandleFunc("GET /api/p12/ci/pending", s.handleP12CIPending)
-	s.Mux.HandleFunc("POST /api/p12/ci/report", s.handleP12CIReport)
+	s.Mux.HandleFunc("GET /api/v1/deliveries", s.handleP12Deliveries)
+	s.Mux.HandleFunc("GET /api/v1/ci/pending", s.handleP12CIPending)
+	s.Mux.HandleFunc("POST /api/v1/ci/report", s.handleP12CIReport)
 }
 
 func (s *Server) p12Tenant(w http.ResponseWriter, r *http.Request) (string, bool) {

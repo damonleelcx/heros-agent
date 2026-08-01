@@ -170,9 +170,9 @@ type PlanChangeView struct {
 // MountP21Payments registers the collection surface — P21 tasks 6.1 and 6.2.
 func (s *Server) MountP21Payments(src PaymentsSource) {
 	s.p21 = src
-	s.Mux.HandleFunc("GET /api/p21/customers/{customer_id}/payment", s.handleP21Payment)
-	s.Mux.HandleFunc("POST /api/p21/customers/{customer_id}/checkout-session", s.handleP21Checkout)
-	s.Mux.HandleFunc("POST /api/p21/customers/{customer_id}/plan", s.handleP21Plan)
+	s.Mux.HandleFunc("GET /api/v1/customers/{customer_id}/payment", s.handleP21Payment)
+	s.Mux.HandleFunc("POST /api/v1/customers/{customer_id}/checkout-session", s.handleP21Checkout)
+	s.Mux.HandleFunc("POST /api/v1/customers/{customer_id}/plan", s.handleP21Plan)
 }
 
 func (s *Server) handleP21Payment(w http.ResponseWriter, r *http.Request) {

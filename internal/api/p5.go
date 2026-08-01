@@ -21,9 +21,9 @@ import (
 // plain language and never committed.
 //
 // Three routes, one read model:
-//   GET  /p5/editor?workflow_id=…                     the editor page (self-contained HTML, embedded)
-//   GET  /api/p5/workflows/{workflow_id}/ir           the IR read model (nodes + edges + io_contracts)
-//   POST /api/p5/workflows/{workflow_id}/validate     validate a candidate ordering → verdict + preview
+//   GET  /editor?workflow_id=…                     the editor page (self-contained HTML, embedded)
+//   GET  /api/v1/workflows/{workflow_id}/ir           the IR read model (nodes + edges + io_contracts)
+//   POST /api/v1/workflows/{workflow_id}/validate     validate a candidate ordering → verdict + preview
 //
 // The validate route is PURE: it never persists. It is the "validate before commit" gate the editor
 // calls on every edit.
@@ -40,12 +40,12 @@ type P5Source interface {
 // MountP5 registers the editor routes. Call after New.
 func (s *Server) MountP5(src P5Source) {
 	s.p5 = src
-	s.Mux.HandleFunc("GET /p5/editor", s.handleP5UI)
-	s.Mux.HandleFunc("GET /api/p5/workflows/{workflow_id}/ir", s.handleP5IR)
-	s.Mux.HandleFunc("POST /api/p5/workflows/{workflow_id}/validate", s.handleP5Validate)
-	s.Mux.HandleFunc("POST /api/p5/workflows/{workflow_id}/commit", s.handleP5Commit)
-	s.Mux.HandleFunc("POST /api/p5/workflows/{workflow_id}/orderings", s.handleP5Orderings)
-	s.Mux.HandleFunc("POST /api/p5/workflows/{workflow_id}/orderings/stream", s.handleP5OrderingsStream)
+	s.Mux.HandleFunc("GET /editor", s.handleP5UI)
+	s.Mux.HandleFunc("GET /api/v1/workflows/{workflow_id}/ir", s.handleP5IR)
+	s.Mux.HandleFunc("POST /api/v1/workflows/{workflow_id}/validate", s.handleP5Validate)
+	s.Mux.HandleFunc("POST /api/v1/workflows/{workflow_id}/commit", s.handleP5Commit)
+	s.Mux.HandleFunc("POST /api/v1/workflows/{workflow_id}/orderings", s.handleP5Orderings)
+	s.Mux.HandleFunc("POST /api/v1/workflows/{workflow_id}/orderings/stream", s.handleP5OrderingsStream)
 }
 
 func (s *Server) handleP5UI(w http.ResponseWriter, _ *http.Request) {

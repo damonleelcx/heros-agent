@@ -114,7 +114,7 @@ func TestPartialCoverageSpendIsExact(t *testing.T) {
 	if sum.Quantity != 1.00 {
 		t.Errorf("SUM = %v, want exactly 1.00 (2 linked runs × 0.50, no estimate)", sum.Quantity)
 	}
-	cov := links.Coverage("tenantA")
+	cov, _ := links.Coverage("tenantA")
 	if cov.RunsLinked != 2 || cov.RunsReported != 4 || cov.Complete {
 		t.Errorf("coverage = %+v, want 2/4 incomplete", cov)
 	}
@@ -127,14 +127,14 @@ func TestPartialCoverageSpendIsExact(t *testing.T) {
 func TestUnknownVsCompleteCoverage(t *testing.T) {
 	// Complete: report 1, link 1.
 	_, _, links := newHarness()
-	links.ObserveRunsReported("t", 1)
+	_ = links.ObserveRunsReported("t", 1)
 	_, _ = links.Record(LinkedRun{RunID: "r1", TenantID: "t", LinkedAt: time.Now()})
-	if c := links.Coverage("t"); !c.Complete || !c.Known {
+	if c, _ := links.Coverage("t"); !c.Complete || !c.Known {
 		t.Errorf("complete coverage misreported: %+v", c)
 	}
 	// Unknown: no runs, no denominator.
 	empty := NewMemStore()
-	if c := empty.Coverage("t"); c.Known || c.Complete {
+	if c, _ := empty.Coverage("t"); c.Known || c.Complete {
 		t.Errorf("empty coverage should be unknown, got %+v", c)
 	}
 }
@@ -147,7 +147,7 @@ func TestScoresRecordedAsComputed(t *testing.T) {
 	if _, err := ing.Ingest("tenantA", p); err != nil {
 		t.Fatal(err)
 	}
-	lr, ok := links.Get("tenantA", "run-1")
+	lr, ok, _ := links.Get("tenantA", "run-1")
 	if !ok || len(lr.Scores) != 1 {
 		t.Fatalf("scores not recorded: %+v", lr)
 	}
@@ -171,7 +171,7 @@ func TestNoExtrapolationPath(t *testing.T) {
 	if sum.Quantity != 0.50 {
 		t.Errorf("SUM = %v, want exactly 0.50 — an estimate was added for unlinked runs", sum.Quantity)
 	}
-	if c := links.Coverage("tenantA"); c.RunsLinked != 1 || c.RunsReported != 100 || c.Complete {
+	if c, _ := links.Coverage("tenantA"); c.RunsLinked != 1 || c.RunsReported != 100 || c.Complete {
 		t.Errorf("coverage should show 1/100 incomplete, got %+v", c)
 	}
 }

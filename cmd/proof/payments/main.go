@@ -222,7 +222,7 @@ func main() {
 	}
 
 	fmt.Printf("\nP21 on %s\n", workflowID)
-	fmt.Printf("  payment read model:  http://%s/api/p21/customers/%s/payment\n", *addr, customerID)
+	fmt.Printf("  payment read model:  http://%s/api/v1/customers/%s/payment\n", *addr, customerID)
 	fmt.Printf("  webhook endpoint:    http://%s/billing/webhook   (the ONE inbound-from-internet path)\n", *addr)
 	fmt.Printf("  readiness:           http://%s/readyz\n", *addr)
 	fmt.Printf("  provider:            %s\n", st.svc.Describe()["provider"])

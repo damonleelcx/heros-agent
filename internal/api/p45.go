@@ -27,8 +27,8 @@ type ScorecardSource interface {
 // MountP45 registers the scorecard UI and its JSON endpoint.
 func (s *Server) MountP45(src ScorecardSource) {
 	s.p45 = src
-	s.Mux.HandleFunc("GET /p45/scorecard", s.handleP45UI)
-	s.Mux.HandleFunc("GET /api/p45/variants/{variant_id}/scorecard", s.handleP45Scorecard)
+	s.Mux.HandleFunc("GET /scorecard", s.handleP45UI)
+	s.Mux.HandleFunc("GET /api/v1/variants/{variant_id}/scorecard", s.handleP45Scorecard)
 }
 
 func (s *Server) handleP45UI(w http.ResponseWriter, _ *http.Request) {

@@ -63,7 +63,7 @@ func TestLinkTargetPin(t *testing.T) {
 	good := []string{
 		"https://heros-agent.space",
 		"https://heros-agent.space/",
-		"https://heros-agent.space/api/p11/link",
+		"https://heros-agent.space/api/v1/run-links",
 	}
 	for _, u := range good {
 		if !IsLinkTarget(u) {

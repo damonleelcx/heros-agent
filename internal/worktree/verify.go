@@ -82,7 +82,7 @@ func (s Strength) Valid() bool { return s == StrengthTypeChecked || s == Strengt
 // caller would be 建了等未来用. The rule therefore lands in the two places the decision is actually
 // made today:
 //
-//   - The REVIEW surface. GET /api/p2/transforms/{config_hash}/{source_revision} returns
+//   - The REVIEW surface. GET /api/v1/transforms/{config_hash}/{source_revision} returns
 //     `verification_strength` and `requires_human_review`, and the diff-review UI renders the weaker
 //     gate as its own visible state. ADR-003 decision 3: "a reviewer looking at a diff must be able to
 //     see, without asking, whether a compiler stood behind it".

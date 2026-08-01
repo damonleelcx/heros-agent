@@ -70,7 +70,7 @@ func TestP6_GrantThenMonitor(t *testing.T) {
 
 	// Before grant, the run does not exist → 404 (the UI shows the grant panel).
 	w := httptest.NewRecorder()
-	s.Handler.ServeHTTP(w, httptest.NewRequest("GET", "/api/p6/runs/demo/monitor", nil))
+	s.Handler.ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/runs/demo/optimizer", nil))
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("pre-grant monitor should 404, got %d", w.Code)
 	}
@@ -79,14 +79,14 @@ func TestP6_GrantThenMonitor(t *testing.T) {
 	body, _ := json.Marshal(GrantRequest{RunID: "demo", WorkflowID: "wf", Actor: "damon",
 		BudgetCeilingUSD: 0.5, ProviderAllowlist: []string{"anthropic"}, MinImprovement: 0.03, MaxIterations: 8})
 	w = httptest.NewRecorder()
-	s.Handler.ServeHTTP(w, httptest.NewRequest("POST", "/api/p6/grant", bytes.NewReader(body)))
+	s.Handler.ServeHTTP(w, httptest.NewRequest("POST", "/api/v1/optimizer/grants", bytes.NewReader(body)))
 	if w.Code != http.StatusOK || !f.granted {
 		t.Fatalf("grant should succeed, got %d granted=%v", w.Code, f.granted)
 	}
 
 	// Monitor now returns the live view.
 	w = httptest.NewRecorder()
-	s.Handler.ServeHTTP(w, httptest.NewRequest("GET", "/api/p6/runs/demo/monitor", nil))
+	s.Handler.ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/runs/demo/optimizer", nil))
 	if w.Code != http.StatusOK {
 		t.Fatalf("post-grant monitor should 200, got %d", w.Code)
 	}
@@ -103,21 +103,21 @@ func TestP6_StopRearmRollback(t *testing.T) {
 
 	// Stop fires the kill switch.
 	w := httptest.NewRecorder()
-	s.Handler.ServeHTTP(w, httptest.NewRequest("POST", "/api/p6/runs/demo/stop", bytes.NewReader([]byte(`{"actor":"u"}`))))
+	s.Handler.ServeHTTP(w, httptest.NewRequest("POST", "/api/v1/runs/demo/optimizer/stop", bytes.NewReader([]byte(`{"actor":"u"}`))))
 	if w.Code != http.StatusOK || !f.stopped {
 		t.Fatalf("stop should fire, got %d stopped=%v", w.Code, f.stopped)
 	}
 
 	// Re-arm after a halt.
 	w = httptest.NewRecorder()
-	s.Handler.ServeHTTP(w, httptest.NewRequest("POST", "/api/p6/runs/demo/rearm", bytes.NewReader([]byte(`{"actor":"op"}`))))
+	s.Handler.ServeHTTP(w, httptest.NewRequest("POST", "/api/v1/runs/demo/optimizer/rearm", bytes.NewReader([]byte(`{"actor":"op"}`))))
 	if w.Code != http.StatusOK || !f.rearmed {
 		t.Fatalf("rearm should succeed, got %d rearmed=%v", w.Code, f.rearmed)
 	}
 
 	// Rollback a merged change via git revert.
 	w = httptest.NewRecorder()
-	s.Handler.ServeHTTP(w, httptest.NewRequest("POST", "/api/p6/runs/demo/rollback",
+	s.Handler.ServeHTTP(w, httptest.NewRequest("POST", "/api/v1/runs/demo/optimizer/rollback",
 		bytes.NewReader([]byte(`{"merge_commit":"merge001","actor":"op"}`))))
 	if w.Code != http.StatusOK || f.rolledBack != "merge001" {
 		t.Fatalf("rollback should target merge001, got %d rolledBack=%q", w.Code, f.rolledBack)

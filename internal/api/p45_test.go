@@ -27,7 +27,7 @@ func TestP45MountedWithNoSourceIs503(t *testing.T) {
 	s := New(nil, config.Config{})
 	s.MountP45(nil)
 	rec := httptest.NewRecorder()
-	s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/p45/variants/v/scorecard", nil))
+	s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/variants/v/scorecard", nil))
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("want 503 when mounted without a source, got %d", rec.Code)
 	}
@@ -36,7 +36,7 @@ func TestP45MountedWithNoSourceIs503(t *testing.T) {
 func TestP45NotMountedIsRouteAbsent(t *testing.T) {
 	s := New(nil, config.Config{})
 	rec := httptest.NewRecorder()
-	s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/p45/variants/v/scorecard", nil))
+	s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/variants/v/scorecard", nil))
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("unregistered route should 404, got %d", rec.Code)
 	}
@@ -46,7 +46,7 @@ func TestP45UnknownVariantIs404(t *testing.T) {
 	s := New(nil, config.Config{})
 	s.MountP45(&stubScorecard{ok: false})
 	rec := httptest.NewRecorder()
-	s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/p45/variants/nope/scorecard", nil))
+	s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/variants/nope/scorecard", nil))
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("unknown variant should 404, got %d", rec.Code)
 	}
@@ -56,7 +56,7 @@ func TestP45ServesScorecardJSON(t *testing.T) {
 	s := New(nil, config.Config{})
 	s.MountP45(&stubScorecard{ok: true, view: scorecard.View{State: scorecard.StateReady, ReadOnly: true}})
 	rec := httptest.NewRecorder()
-	s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/p45/variants/v-sc/scorecard", nil))
+	s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/variants/v-sc/scorecard", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("want 200, got %d", rec.Code)
 	}
@@ -75,7 +75,7 @@ func TestP45UIHasNoApplyAffordance(t *testing.T) {
 	s := New(nil, config.Config{})
 	s.MountP45(&stubScorecard{ok: true})
 	rec := httptest.NewRecorder()
-	s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/p45/scorecard", nil))
+	s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/scorecard", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("want 200 for UI, got %d", rec.Code)
 	}

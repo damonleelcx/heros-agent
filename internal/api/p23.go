@@ -13,8 +13,8 @@ import (
 
 // p23.go is the consent surface: two endpoints, and no more (task 11.4).
 //
-//	POST /v1/legal/acceptances   record an acceptance — persist-then-acknowledge
-//	GET  /v1/legal/acceptances   the CALLER'S OWN tenant history, plus what is pending
+//	POST /api/v1/legal/acceptances   record an acceptance — persist-then-acknowledge
+//	GET  /api/v1/legal/acceptances   the CALLER'S OWN tenant history, plus what is pending
 //
 // # 🔴 What this surface deliberately does not have
 //
@@ -111,8 +111,8 @@ type acceptanceRequest struct {
 // RegisterP23 mounts the consent surface.
 func (s *Server) RegisterP23(src P23Source) {
 	s.p23 = src
-	s.Mux.HandleFunc("POST /v1/legal/acceptances", s.handleP23Record)
-	s.Mux.HandleFunc("GET /v1/legal/acceptances", s.handleP23Read)
+	s.Mux.HandleFunc("POST /api/v1/legal/acceptances", s.handleP23Record)
+	s.Mux.HandleFunc("GET /api/v1/legal/acceptances", s.handleP23Read)
 }
 
 func archivedRoute(kind, version string) string {

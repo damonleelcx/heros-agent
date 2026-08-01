@@ -45,7 +45,7 @@ func surfaceWith(recs, withheld []Card) Surface {
 func TestP55UIIsSelfContained(t *testing.T) {
 	s := p55Server(&fakeP55{})
 	rec := httptest.NewRecorder()
-	s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/p55/recommendations", nil))
+	s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/recommendations", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d", rec.Code)
 	}
@@ -71,7 +71,7 @@ func TestP55UIIsSelfContained(t *testing.T) {
 func TestP55Unmounted503(t *testing.T) {
 	s := New(nil, config.Config{})
 	s.MountP55(nil) // routes registered, source nil → 503 (distinct from an unregistered 404)
-	for _, path := range []string{"/api/p55/workflows/wf1/surface"} {
+	for _, path := range []string{"/api/v1/workflows/wf1/proposals"} {
 		rec := httptest.NewRecorder()
 		s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
 		if rec.Code != http.StatusServiceUnavailable {
@@ -87,7 +87,7 @@ func TestP55SurfaceJSON(t *testing.T) {
 	s := p55Server(&fakeP55{surface: surfaceWith(recs, withheld)})
 
 	rec := httptest.NewRecorder()
-	s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/p55/workflows/wf1/surface", nil))
+	s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/workflows/wf1/proposals", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d", rec.Code)
 	}
@@ -113,7 +113,7 @@ func TestP55OpenPR_GatedAtBoundary(t *testing.T) {
 
 	// A verified, openable proposal → 200 and OpenPR invoked.
 	rec := httptest.NewRecorder()
-	s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/p55/workflows/wf1/proposals/ok/open-pr", nil))
+	s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/workflows/wf1/proposals/ok/open-pr", nil))
 	if rec.Code != http.StatusOK || !fake.prCalled {
 		t.Fatalf("a gate-passing proposal must open a PR, got status %d prCalled=%v", rec.Code, fake.prCalled)
 	}
@@ -121,7 +121,7 @@ func TestP55OpenPR_GatedAtBoundary(t *testing.T) {
 	// A gate-failed proposal → 409, OpenPR never invoked.
 	fake.prCalled = false
 	rec = httptest.NewRecorder()
-	s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/p55/workflows/wf1/proposals/bad/open-pr", nil))
+	s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/workflows/wf1/proposals/bad/open-pr", nil))
 	if rec.Code != http.StatusConflict {
 		t.Errorf("a gate-failed proposal must be refused (409), got %d", rec.Code)
 	}

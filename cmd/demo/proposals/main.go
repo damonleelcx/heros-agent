@@ -309,7 +309,7 @@ func main() {
 	s := api.New(nil, config.Config{})
 	s.MountP55(build(verification.AutomationLevel(*level)))
 
-	fmt.Printf("P5.5 recommendations:  http://%s/p55/recommendations?workflow=demo-workflow\n", *addr)
-	fmt.Printf("surface JSON:          http://%s/api/p55/workflows/demo-workflow/surface\n", *addr)
+	fmt.Printf("P5.5 recommendations:  http://%s/recommendations?workflow=demo-workflow\n", *addr)
+	fmt.Printf("surface JSON:          http://%s/api/v1/workflows/demo-workflow/proposals\n", *addr)
 	log.Fatal(http.ListenAndServe(*addr, s.Handler))
 }

@@ -256,8 +256,8 @@ authoring (Decision 7)               internal/authoring — the EXISTING spine, 
   Edit.MemoryRef *string              set / CLEAR ("" removes the key → prior config_hash, byte-exact)
   Preflighter.Materializer.Probe      the transform's OWN cause, raised before any spend
   MemoryBoundaryFor(coverage, lang)   READ from transform.CoverageFor("memory") — never restated prose
-  GET /api/p17/memory                 vocabulary + boundary; no tenant, no plan, no role
-  POST /api/p13/authoring/{preflight,submit}   ← the SAME routes an operator candidate uses
+  GET /api/v1/memory                 vocabulary + boundary; no tenant, no plan, no role
+  POST /api/v1/authoring/{preflight,submit}   ← the SAME routes an operator candidate uses
   origin                              Origin=user + actor + ParentVariantID — recorded, never hashed
   🚫 no second apply path             a memory edit rides the shared routes or it does not ship
   🚫 no apply, no delivery, no score  `refused` renders as its own state (≠ failed, ≠ pending)

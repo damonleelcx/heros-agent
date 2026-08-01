@@ -17,6 +17,6 @@ import { platformFetch } from "@/lib/platformApi";
  * (`handleCoverage` takes no plan, role, or tenant).
  */
 export async function fetchCoverage(tenantId: string): Promise<AxisCoverageView | null> {
-  const outcome = await platformFetch<AxisCoverageView>("/api/p13/coverage", { tenantId });
+  const outcome = await platformFetch<AxisCoverageView>("/api/v1/coverage", { tenantId });
   return outcome.ok ? outcome.data : null;
 }

@@ -72,7 +72,7 @@ func post(t *testing.T, s *Server, path, body string) (*httptest.ResponseRecorde
 
 func TestP5IR_ServesReadModel(t *testing.T) {
 	s := newP5Server(t)
-	req := httptest.NewRequest(http.MethodGet, "/api/p5/workflows/wf/ir", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workflows/wf/ir", nil)
 	rec := httptest.NewRecorder()
 	s.Mux.ServeHTTP(rec, req)
 	if rec.Code != 200 {
@@ -89,7 +89,7 @@ func TestP5IR_ServesReadModel(t *testing.T) {
 
 func TestP5IR_UnknownWorkflow404(t *testing.T) {
 	s := newP5Server(t)
-	req := httptest.NewRequest(http.MethodGet, "/api/p5/workflows/nope/ir", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workflows/nope/ir", nil)
 	rec := httptest.NewRecorder()
 	s.Mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusNotFound {
@@ -100,7 +100,7 @@ func TestP5IR_UnknownWorkflow404(t *testing.T) {
 // The happy path: the discovered order is coherent.
 func TestP5Validate_Coherent(t *testing.T) {
 	s := newP5Server(t)
-	_, v := post(t, s, "/api/p5/workflows/wf/validate",
+	_, v := post(t, s, "/api/v1/workflows/wf/validate",
 		`{"order":["A","B","C"],"edges":[{"from_node_id":"A","to_node_id":"B","kind":"data"},{"from_node_id":"B","to_node_id":"C","kind":"data"}]}`)
 	if v.Kind != "adapted" {
 		// A→B is answer vs response → adapter; B→C is summary→summary coherent. So the whole is adapted.
@@ -119,7 +119,7 @@ func TestP5Validate_Coherent(t *testing.T) {
 func TestP5Validate_RejectedEdgeAnchored(t *testing.T) {
 	s := newP5Server(t)
 	// Put C before B: C requires `summary` produced by B → missing producer.
-	_, v := post(t, s, "/api/p5/workflows/wf/validate",
+	_, v := post(t, s, "/api/v1/workflows/wf/validate",
 		`{"order":["A","C","B"],"edges":[{"from_node_id":"B","to_node_id":"C","kind":"data"}]}`)
 	if v.Kind != "rejected" {
 		t.Fatalf("want rejected, got %q (%+v)", v.Kind, v)
@@ -145,7 +145,7 @@ func TestP5Validate_RejectedEdgeAnchored(t *testing.T) {
 // TASK 3.6: a committed coherent/adapted edit produces a lineage-tracked spec + a reviewable diff.
 func TestP5Commit_AdaptedProducesLineageAndDiff(t *testing.T) {
 	s := newP5Server(t)
-	req := httptest.NewRequest(http.MethodPost, "/api/p5/workflows/wf/commit",
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workflows/wf/commit",
 		strings.NewReader(`{"parent_variant_id":"wf:root","order":["A","B","C"],"edges":[{"from_node_id":"A","to_node_id":"B","kind":"data"},{"from_node_id":"B","to_node_id":"C","kind":"data"}]}`))
 	rec := httptest.NewRecorder()
 	s.Mux.ServeHTTP(rec, req)
@@ -168,7 +168,7 @@ func TestP5Commit_AdaptedProducesLineageAndDiff(t *testing.T) {
 // TASK 3.2: a rejected edit produces NO source diff.
 func TestP5Commit_RejectedGeneratesNoDiff(t *testing.T) {
 	s := newP5Server(t)
-	req := httptest.NewRequest(http.MethodPost, "/api/p5/workflows/wf/commit",
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workflows/wf/commit",
 		strings.NewReader(`{"parent_variant_id":"wf:root","order":["A","C","B"],"edges":[{"from_node_id":"B","to_node_id":"C","kind":"data"}]}`))
 	rec := httptest.NewRecorder()
 	s.Mux.ServeHTTP(rec, req)
@@ -225,7 +225,7 @@ func TestP5Validate_LargeIRResponsive(t *testing.T) {
 
 	body := fmt.Sprintf(`{"order":["%s"],"edges":[%s]}`, strings.Join(order, `","`), strings.Join(edges, ","))
 	start := time.Now()
-	req := httptest.NewRequest(http.MethodPost, "/api/p5/workflows/big/validate", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workflows/big/validate", strings.NewReader(body))
 	rec := httptest.NewRecorder()
 	s.Mux.ServeHTTP(rec, req)
 	elapsed := time.Since(start)
@@ -244,7 +244,7 @@ func TestP5Validate_LargeIRResponsive(t *testing.T) {
 func TestP5Orderings_RankedApprovedFirst(t *testing.T) {
 	s := newP5Server(t)
 	// A→B→C: A produces answer (B needs response → adapter), B produces summary (C needs summary).
-	req := httptest.NewRequest(http.MethodPost, "/api/p5/workflows/wf/orderings",
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workflows/wf/orderings",
 		strings.NewReader(`{"order":["A","B","C"],"edges":[{"from_node_id":"A","to_node_id":"B","kind":"data"},{"from_node_id":"B","to_node_id":"C","kind":"data"}]}`))
 	rec := httptest.NewRecorder()
 	s.Mux.ServeHTTP(rec, req)
@@ -295,7 +295,7 @@ func TestP5Orderings_RankedApprovedFirst(t *testing.T) {
 // then a done line with the final summary.
 func TestP5OrderingsStream_NDJSON(t *testing.T) {
 	s := newP5Server(t)
-	req := httptest.NewRequest(http.MethodPost, "/api/p5/workflows/wf/orderings/stream",
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workflows/wf/orderings/stream",
 		strings.NewReader(`{"order":["A","B","C"],"edges":[{"from_node_id":"A","to_node_id":"B","kind":"data"},{"from_node_id":"B","to_node_id":"C","kind":"data"}]}`))
 	rec := httptest.NewRecorder()
 	s.Mux.ServeHTTP(rec, req)
@@ -362,7 +362,7 @@ func TestP5Commit_WiringOutcomes(t *testing.T) {
 	s := newP5Server(t)
 	commit := func(body string) commitResponse {
 		t.Helper()
-		req := httptest.NewRequest(http.MethodPost, "/api/p5/workflows/wf/commit", strings.NewReader(body))
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/workflows/wf/commit", strings.NewReader(body))
 		rec := httptest.NewRecorder()
 		s.Mux.ServeHTTP(rec, req)
 		var c commitResponse

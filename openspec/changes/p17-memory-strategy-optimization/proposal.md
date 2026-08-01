@@ -112,7 +112,7 @@ So P17 ships the modeling and a **first-class refusal**, not a codemod, and clai
   (IR field + frontend), `internal/transform` (a `refuseMemory` in both engines), `internal/proposal`
   (operator kind, catalog, priors), `internal/authoring` (the memory edit plus the boundary read — **no**
   new package; a second one would be the second apply path the contract forbids), `internal/api`
-  (`GET /api/p17/memory`), `web/console` (the `/app/memory` authoring surface). One new table; everything
+  (`GET /api/v1/memory`), `web/console` (the `/app/memory` authoring surface). One new table; everything
   else is an additive field.
 - **Dependencies:** requires **P1** (IR), **P2** (resolution, `config_hash`, transform dispatch),
   **P4** (axis-agnostic harness — ready but not exercised for memory at M20), **P4.5** (taxonomy, catalog,

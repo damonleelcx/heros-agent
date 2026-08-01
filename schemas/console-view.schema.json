@@ -67,7 +67,7 @@
       "type": "object"
     },
     "AxisCoverageView": {
-      "description": "Response of GET /api/p13/coverage",
+      "description": "Response of GET /api/v1/coverage",
       "properties": {
         "axes": {
           "anyOf": [
@@ -174,7 +174,7 @@
       "type": "object"
     },
     "BillingView": {
-      "description": "Response of GET /api/p7/customers/{customer_id}/billing",
+      "description": "Response of GET /api/v1/customers/{customer_id}/billing",
       "properties": {
         "available_periods": {
           "anyOf": [
@@ -313,7 +313,7 @@
       "type": "object"
     },
     "BoardView": {
-      "description": "Response of GET /api/p4/workflows/{workflow_id}/board",
+      "description": "Response of GET /api/v1/workflows/{workflow_id}/eval-board",
       "properties": {
         "all_tie": {
           "type": "boolean"
@@ -642,7 +642,7 @@
       "type": "object"
     },
     "ChangeDeliveryView": {
-      "description": "Response of GET /api/p13/delivery",
+      "description": "Response of GET /api/v1/change-delivery",
       "properties": {
         "causes": {
           "anyOf": [
@@ -802,7 +802,7 @@
       "type": "object"
     },
     "CheckoutView": {
-      "description": "Response of POST /api/p21/customers/{customer_id}/checkout-session",
+      "description": "Response of POST /api/v1/customers/{customer_id}/checkout-session",
       "properties": {
         "client_secret": {
           "type": "string"
@@ -1111,7 +1111,7 @@
       "type": "object"
     },
     "DeliveriesView": {
-      "description": "Response of GET /api/p12/deliveries",
+      "description": "Response of GET /api/v1/deliveries",
       "properties": {
         "deliveries": {
           "anyOf": [
@@ -1691,7 +1691,7 @@
       "type": "object"
     },
     "GraphView": {
-      "description": "Response of GET /api/p35/workflows/{workflow_id}/graph",
+      "description": "Response of GET /api/v1/workflows/{workflow_id}/pattern-graph",
       "properties": {
         "diagnostics": {
           "anyOf": [
@@ -1784,7 +1784,7 @@
       "type": "object"
     },
     "InstallView": {
-      "description": "Response of GET /api/p20/install",
+      "description": "Response of GET /api/v1/install",
       "properties": {
         "channels": {
           "anyOf": [
@@ -2170,7 +2170,7 @@
       "type": "object"
     },
     "PRResult": {
-      "description": "Response of POST /api/p55/workflows/{workflow_id}/proposals/{proposal_id}/open-pr",
+      "description": "Response of POST /api/v1/workflows/{workflow_id}/proposals/{proposal_id}/open-pr",
       "properties": {
         "branch": {
           "type": "string"
@@ -2259,7 +2259,7 @@
       "type": "object"
     },
     "PaymentView": {
-      "description": "Response of GET /api/p21/customers/{customer_id}/payment",
+      "description": "Response of GET /api/v1/customers/{customer_id}/payment",
       "properties": {
         "billing": {
           "$ref": "#/$defs/BillingView"
@@ -2351,7 +2351,7 @@
       "type": "object"
     },
     "PlanChangeView": {
-      "description": "Response of POST /api/p21/customers/{customer_id}/plan",
+      "description": "Response of POST /api/v1/customers/{customer_id}/plan",
       "properties": {
         "changed": {
           "type": "boolean"
@@ -2456,7 +2456,7 @@
       "type": "object"
     },
     "ProposalSurface": {
-      "description": "Response of GET /api/p55/workflows/{workflow_id}/surface",
+      "description": "Response of GET /api/v1/workflows/{workflow_id}/proposals",
       "properties": {
         "automation_level": {
           "type": "string"
@@ -2706,7 +2706,7 @@
       "type": "object"
     },
     "RunMonitor": {
-      "description": "Response of GET /api/p25/runs/{run_id}/monitor",
+      "description": "Response of GET /api/v1/runs/{run_id}/monitor",
       "properties": {
         "config_hash": {
           "type": "string"
@@ -2800,7 +2800,7 @@
       "type": "object"
     },
     "RunView": {
-      "description": "Response of GET /api/p2/runs/{run_id}",
+      "description": "Response of GET /api/v1/runs/{run_id}",
       "properties": {
         "config_hash": {
           "type": "string"
@@ -2953,7 +2953,7 @@
       "type": "object"
     },
     "ScorecardView": {
-      "description": "Response of GET /api/p45/variants/{variant_id}/scorecard",
+      "description": "Response of GET /api/v1/variants/{variant_id}/scorecard",
       "properties": {
         "ablations": {
           "anyOf": [
@@ -3076,7 +3076,7 @@
       "type": "object"
     },
     "SpecError": {
-      "description": "Response of POST /api/p2/specs/{resolve,submit} (rejection)",
+      "description": "Response of POST /api/v1/specs/{resolve,submit} (rejection)",
       "properties": {
         "dimension": {
           "type": "string"
@@ -3143,7 +3143,7 @@
       "type": "object"
     },
     "SubmitResult": {
-      "description": "Response of POST /api/p2/specs/submit",
+      "description": "Response of POST /api/v1/specs/submit",
       "properties": {
         "config_hash": {
           "type": "string"
@@ -3282,7 +3282,7 @@
       "type": "object"
     },
     "TransformView": {
-      "description": "Response of GET /api/p2/transforms/{config_hash}/{source_revision}",
+      "description": "Response of GET /api/v1/transforms/{config_hash}/{source_revision}",
       "properties": {
         "build_log": {
           "type": "string"

@@ -26,7 +26,7 @@ import (
 // LinkIngestSource is the P11 ingest dependency: it ingests a payload for a tenant and answers coverage.
 type LinkIngestSource interface {
 	Ingest(tenantID string, p runlink.Payload) (linkingest.Result, error)
-	Coverage(tenantID string) linkingest.LinkCoverage
+	Coverage(tenantID string) (linkingest.LinkCoverage, error)
 }
 
 // linkCoverageFor maps the ingest store's coverage into the billing view shape. It is how the P7 billing
@@ -36,7 +36,14 @@ func (s *Server) linkCoverageFor(tenantID string) *LinkCoverageView {
 	if s.p11 == nil {
 		return nil // coverage UNKNOWN — the console renders that distinctly, never as complete
 	}
-	c := s.p11.Coverage(tenantID)
+	c, err := s.p11.Coverage(tenantID)
+	if err != nil {
+		// 🔴 nil is UNKNOWN coverage, and that is the correct answer to a read failure — the same answer
+		// an unmounted source gives. It is emphatically NOT zero and NOT complete: the console renders
+		// unknown distinctly, and a spend figure at 100%% and one whose denominator could not be read
+		// look identical as a number and mean opposite things.
+		return nil
+	}
 	return &LinkCoverageView{
 		RunsLinked: c.RunsLinked, RunsReported: c.RunsReported, Known: c.Known, Complete: c.Complete,
 	}
@@ -45,8 +52,8 @@ func (s *Server) linkCoverageFor(tenantID string) *LinkCoverageView {
 // MountP11 registers the run-linking ingest routes. Call after New. Optional, like every other mount.
 func (s *Server) MountP11(src LinkIngestSource) {
 	s.p11 = src
-	s.Mux.HandleFunc("POST /api/p11/link", s.handleP11Link)
-	s.Mux.HandleFunc("GET /api/p11/whoami", s.handleP11WhoAmI)
+	s.Mux.HandleFunc("POST /api/v1/run-links", s.handleP11Link)
+	s.Mux.HandleFunc("GET /api/v1/whoami", s.handleP11WhoAmI)
 }
 
 // handleP11WhoAmI answers `login`'s token validation: it returns the identity the authenticated token

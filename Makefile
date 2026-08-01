@@ -21,7 +21,7 @@ PARITY_DIR ?= .parity
 .DEFAULT_GOAL := ci
 
 .PHONY: ci go build vet fmt test schema lint db-proof pg-proof verifier-proof tidy-check clean help demo-evalboard \
-        deploy-lint \
+        deploy-lint deploy-up deploy-down deploy-down-hard \
         console-types console-types-check console-test operator-console-test operator-ledger operator-hermes docs-facts docs-facts-check \
         build-discover discovery-ci discovery-throughput \
         discovery-parity-snapshot discovery-parity-verify \
@@ -88,11 +88,39 @@ docs-facts-check:
 	  || { echo ""; echo "docs facts are STALE. Run 'make docs-facts' and commit the result."; exit 1; }
 	@echo "docs facts are current."
 
-## deploy-lint: P19 deploy gates — digest-pinned images, image-set parity across substrates, no
-## committed plaintext Secret. Each fails LOUD and names the offender; run before every deploy PR.
+## deploy-up: ONE command — build all three images from this checkout and bring up the backend, the
+## customer console and the operator console on this host, then WAIT for the aggregated /readyz and
+## prove auth is enforced. Generates credentials once (deploy/.env.local, 0600, git-ignored) and never
+## rewrites them. Idempotent: re-run it to apply changes. Needs only Docker.
+deploy-up:
+	bash deploy/scripts/up.sh
+
+## deploy-down: stop the stack, KEEPING data (named volumes and credentials survive).
+deploy-down:
+	docker compose --project-directory deploy \
+	  --env-file deploy/.env.images.local --env-file deploy/.env.local \
+	  -f deploy/docker-compose.platform.yml \
+	  -f deploy/docker-compose.platform.build.yml \
+	  -f deploy/docker-compose.admin-console.yml down
+
+## deploy-down-hard: stop the stack and DELETE every named volume — Postgres, the ledger, the object
+## store, everything. Not an upgrade path and not a rollback: it is the "start over" button, and the
+## data it removes is not recoverable from anything this target leaves behind.
+deploy-down-hard:
+	docker compose --project-directory deploy \
+	  --env-file deploy/.env.images.local --env-file deploy/.env.local \
+	  -f deploy/docker-compose.platform.yml \
+	  -f deploy/docker-compose.platform.build.yml \
+	  -f deploy/docker-compose.admin-console.yml down -v
+
+## deploy-lint: P19 deploy gates — digest-pinned images, image-set parity across substrates, ENV-CONTRACT
+## parity across substrates, no committed plaintext Secret. Each fails LOUD and names the offender; run
+## before every deploy PR. Decision 2 asked for image AND env parity; only images were gated until the
+## two substrates had already drifted apart on ADMIN_CONSOLE_HEALTH_URL and seven identity variables.
 deploy-lint:
 	bash scripts/deploy/check-digest-pins.sh
 	bash scripts/deploy/check-image-parity.sh
+	bash scripts/deploy/check-env-parity.sh
 	bash scripts/deploy/check-no-plaintext-secrets.sh
 	@echo "== make deploy-lint: PASS =="
 

@@ -92,7 +92,7 @@ func TestFailureClassesDistinguishable(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			s := authoringServer(t, &fakeAuthoring{err: tc.err})
-			rec := authoringRequest(t, s, "POST", "/api/p13/authoring/submit", draftBody, &member)
+			rec := authoringRequest(t, s, "POST", "/api/v1/authoring/submit", draftBody, &member)
 			if rec.Code != tc.wantCode {
 				t.Fatalf("status = %d, want %d", rec.Code, tc.wantCode)
 			}
@@ -114,10 +114,10 @@ func TestFailureClassesDistinguishable(t *testing.T) {
 		// A missing subsystem and a missing resource are different facts. Mapping the first onto 404
 		// tells an operator their data is gone when the truth is the component was never wired.
 		s := authoringServer(t, nil)
-		s.Mux.HandleFunc("POST /api/p13/authoring/submit", func(w http.ResponseWriter, r *http.Request) {
+		s.Mux.HandleFunc("POST /api/v1/authoring/submit", func(w http.ResponseWriter, r *http.Request) {
 			s.handleAuthoringSubmit(w, r)
 		})
-		rec := authoringRequest(t, s, "POST", "/api/p13/authoring/submit", draftBody, &member)
+		rec := authoringRequest(t, s, "POST", "/api/v1/authoring/submit", draftBody, &member)
 		if rec.Code != http.StatusServiceUnavailable {
 			t.Errorf("status = %d, want 503", rec.Code)
 		}
@@ -125,7 +125,7 @@ func TestFailureClassesDistinguishable(t *testing.T) {
 
 	t.Run("no principal is 401", func(t *testing.T) {
 		s := authoringServer(t, &fakeAuthoring{})
-		rec := authoringRequest(t, s, "POST", "/api/p13/authoring/submit", draftBody, nil)
+		rec := authoringRequest(t, s, "POST", "/api/v1/authoring/submit", draftBody, nil)
 		if rec.Code != http.StatusUnauthorized {
 			t.Errorf("status = %d, want 401", rec.Code)
 		}
@@ -144,7 +144,7 @@ func TestRefusalIsAVerdictNotAnError(t *testing.T) {
 			NodeID: "n1", Field: "provider_params"},
 	}}
 	s := authoringServer(t, src)
-	rec := authoringRequest(t, s, "POST", "/api/p13/authoring/preflight", draftBody, &member)
+	rec := authoringRequest(t, s, "POST", "/api/v1/authoring/preflight", draftBody, &member)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200 — a refusal is a verdict the user asked for", rec.Code)
@@ -177,7 +177,7 @@ func TestPreflightThreeVerdictsSurviveTheWire(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := authoringServer(t, &fakeAuthoring{result: tc.res})
-			rec := authoringRequest(t, s, "POST", "/api/p13/authoring/preflight", draftBody, &member)
+			rec := authoringRequest(t, s, "POST", "/api/v1/authoring/preflight", draftBody, &member)
 			var view AuthoringPreflightView
 			if err := json.Unmarshal(rec.Body.Bytes(), &view); err != nil {
 				t.Fatalf("decode: %v", err)
@@ -199,7 +199,7 @@ func TestAuthoringActorComesFromTheSession(t *testing.T) {
 	// The body tries to claim another tenant and another actor. Both must be ignored.
 	body := `{"workflow_id":"wf1","parent_variant_id":"p1","tenant_id":"other-tenant",
 		"actor":{"id":"someone-else","tenant_id":"other-tenant"},"edits":{"n1":{"model_ref":"m"}}}`
-	authoringRequest(t, s, "POST", "/api/p13/authoring/preflight", body, &member)
+	authoringRequest(t, s, "POST", "/api/v1/authoring/preflight", body, &member)
 
 	if src.gotDraft.Actor.TenantID != "t1" {
 		t.Errorf("tenant = %q, want t1 — request scope must never come from the body", src.gotDraft.Actor.TenantID)
@@ -217,7 +217,7 @@ func TestSubmitViewCarriesUnverified(t *testing.T) {
 			Origin: string(authoring.OriginUser), Axis: "model", DiffRef: "d1", ActorID: "key-7"},
 	}}
 	s := authoringServer(t, src)
-	rec := authoringRequest(t, s, "POST", "/api/p13/authoring/submit", draftBody, &member)
+	rec := authoringRequest(t, s, "POST", "/api/v1/authoring/submit", draftBody, &member)
 
 	var view AuthoringChangeView
 	if err := json.Unmarshal(rec.Body.Bytes(), &view); err != nil {
@@ -237,7 +237,7 @@ func TestSubmitViewCarriesUnverified(t *testing.T) {
 func TestMalformedDraftIsBadRequestNotServerError(t *testing.T) {
 	s := authoringServer(t, &fakeAuthoring{})
 	for _, body := range []string{`{`, `{"workflow_id":""}`, `{"parent_variant_id":"p1"}`} {
-		rec := authoringRequest(t, s, "POST", "/api/p13/authoring/preflight", body, &member)
+		rec := authoringRequest(t, s, "POST", "/api/v1/authoring/preflight", body, &member)
 		if rec.Code != http.StatusBadRequest {
 			t.Errorf("body %q → status %d, want 400", body, rec.Code)
 		}
@@ -247,7 +247,7 @@ func TestMalformedDraftIsBadRequestNotServerError(t *testing.T) {
 // TestRevertNotFoundIsNotAServerError: undoing something that is not there is a 404 with a remedy.
 func TestRevertNotFoundIsNotAServerError(t *testing.T) {
 	s := authoringServer(t, &fakeAuthoring{err: authoring.ErrNothingToRevert})
-	rec := authoringRequest(t, s, "POST", "/api/p13/authoring/revert", `{"change_id":"ac_missing"}`, &member)
+	rec := authoringRequest(t, s, "POST", "/api/v1/authoring/revert", `{"change_id":"ac_missing"}`, &member)
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", rec.Code)
 	}

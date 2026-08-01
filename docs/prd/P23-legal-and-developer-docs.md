@@ -371,7 +371,7 @@ flowchart LR
     M["/legal/manifest.json<br/>(static)"]
   end
   subgraph platform["agentd (platform)"]
-    A["POST /v1/legal/acceptances<br/>GET /v1/legal/acceptances"]
+    A["POST /api/v1/legal/acceptances<br/>GET /api/v1/legal/acceptances"]
     DB[("legal_acceptance<br/>append-only")]
   end
   C1 --> F --> R
@@ -526,8 +526,8 @@ the text under the same version number is detectable rather than invisible.
 | `GET /legal/terms`, `/legal/privacy`, `/legal/{kind}/v/{version}`, `/legal/history` | console | Static render, no session, no fetch |
 | `GET /legal/manifest.json` | console | Static: kinds → versions → `{effective_date, hash, route, material}` |
 | `GET /docs`, `/docs/**` | console | Static render; `/docs/search-index.json` build-time artifact |
-| `POST /v1/legal/acceptances` | platform | `{document_kind, document_version, content_hash}` → 201 / 200 on repeat; **persist-then-ack** |
-| `GET /v1/legal/acceptances` | platform | The calling tenant's own history, plus `pending[]` — the kinds needing acceptance |
+| `POST /api/v1/legal/acceptances` | platform | `{document_kind, document_version, content_hash}` → 201 / 200 on repeat; **persist-then-ack** |
+| `GET /api/v1/legal/acceptances` | platform | The calling tenant's own history, plus `pending[]` — the kinds needing acceptance |
 
 The console's BFF is the only caller of the platform endpoints, preserving the P9 credential boundary
 (ADR-006 Decision 1); the browser never holds a platform credential.

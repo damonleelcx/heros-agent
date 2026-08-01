@@ -107,12 +107,12 @@ type AuditView struct {
 // MountP6 registers the P6 governance UI, its monitor JSON endpoint, and the four audited actions.
 func (s *Server) MountP6(src P6Source) {
 	s.p6 = src
-	s.Mux.HandleFunc("GET /p6/monitor", s.handleP6UI)
-	s.Mux.HandleFunc("GET /api/p6/runs/{run_id}/monitor", s.handleP6Monitor)
-	s.Mux.HandleFunc("POST /api/p6/grant", s.handleP6Grant)
-	s.Mux.HandleFunc("POST /api/p6/runs/{run_id}/stop", s.handleP6Stop)
-	s.Mux.HandleFunc("POST /api/p6/runs/{run_id}/rearm", s.handleP6Rearm)
-	s.Mux.HandleFunc("POST /api/p6/runs/{run_id}/rollback", s.handleP6Rollback)
+	s.Mux.HandleFunc("GET /optimizer", s.handleP6UI)
+	s.Mux.HandleFunc("GET /api/v1/runs/{run_id}/optimizer", s.handleP6Monitor)
+	s.Mux.HandleFunc("POST /api/v1/optimizer/grants", s.handleP6Grant)
+	s.Mux.HandleFunc("POST /api/v1/runs/{run_id}/optimizer/stop", s.handleP6Stop)
+	s.Mux.HandleFunc("POST /api/v1/runs/{run_id}/optimizer/rearm", s.handleP6Rearm)
+	s.Mux.HandleFunc("POST /api/v1/runs/{run_id}/optimizer/rollback", s.handleP6Rollback)
 }
 
 func (s *Server) handleP6UI(w http.ResponseWriter, _ *http.Request) {

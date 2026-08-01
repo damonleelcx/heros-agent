@@ -55,11 +55,51 @@ spec:
               valueFrom: { secretKeyRef: { name: heros-console, key: saml-sp-private-key, optional: true } }
             - name: CONSOLE_IDP_TENANT_MAP
               valueFrom: { secretKeyRef: { name: heros-console, key: idp-tenant-map, optional: true } }
+            # The non-secret half of the federation contract: issuer, client id and the callback/ACS
+            # allowlists. These are ADDRESSES, not credentials, and they were declared on Compose and
+            # missing from this substrate entirely — so a Kubernetes deployment that set
+            # CONSOLE_TENANT_IDENTITY=oidc in an overlay had nowhere to put the issuer. An overlay fills
+            # them; empty here keeps the open-core base (which federates with nobody) working unchanged.
+            #
+            # 🔴 A wildcard in either allowlist is REFUSED at load. An allowlist with a wildcard is not
+            # an allowlist.
+            - { name: CONSOLE_IDP_ISSUER, value: "" }
+            - { name: CONSOLE_IDP_CLIENT_ID, value: "" }
+            - { name: CONSOLE_IDP_REDIRECT_ALLOWLIST, value: "" }
+            - { name: CONSOLE_SAML_IDP_ENTITY_ID, value: "" }
+            - { name: CONSOLE_SAML_SP_ENTITY_ID, value: "" }
+            - { name: CONSOLE_SAML_IDP_METADATA_URL, value: "" }
+            - { name: CONSOLE_SAML_ACS_ALLOWLIST, value: "" }
+            # Session lifetime and the bounded upstream call. An unbounded BFF→API call turns a slow
+            # platform into a hung browser tab with no error to read.
+            - { name: CONSOLE_SESSION_TTL_SECONDS, value: "28800" }
+            - { name: CONSOLE_UPSTREAM_TIMEOUT_MS, value: "10000" }
+            # Where `file`-sourced identity credentials are read from, at the MOMENT OF USE, so a rotated
+            # file lands on the next sign-in with no restart. The airgapped overlay sets the source.
+            - { name: HEROS_SECRETS_DIR, value: "/var/run/secrets/heros" }
             # Which SOURCE identity credentials resolve from, reported on /api/health so the claim is
             # checkable from the running system rather than from this file. `env` here because the
             # External Secrets Operator has already materialised the values into this pod's environment
             # with no bootstrap secret; an air-gapped overlay sets `file` and mounts them instead.
             - { name: HEROS_SECRETS_SOURCE, value: "env" }
+            - name: CONSOLE_IDP_SECRET_MAP
+              valueFrom: { secretKeyRef: { name: heros-console, key: idp-secret-map, optional: true } }
+            - { name: CONSOLE_IDP_TIMEOUT_MS, value: "5000" }
+            # ── Legal & developer docs (P23) ──────────────────────────────────────────────────────
+            - { name: CONSOLE_CONSENT_GATE, value: "" }
+            - { name: HEROS_CONTENT_ROOT, value: "" }
+            # ── Analytics & error monitoring (P24) ────────────────────────────────────────────────
+            #
+            # All four OPTIONAL, all four absent by default. A deployment that reports to nobody is the
+            # expected state, not a degraded one — a warning that fires on every correct install teaches
+            # an operator to ignore warnings.
+            # ── Release surface (P20) ─────────────────────────────────────────────────────────────
+            # The air-gapped overlay sets HEROS_RELEASE_OFFLINE — a download page pointing at GitHub
+            # from a network with no egress shows an operator a dead link and no reason.
+            - { name: HEROS_VERSION, value: "" }
+            - { name: HEROS_EDITION, value: "managed" }
+            - { name: HEROS_SLUG_MANIFEST, value: "" }
+            - { name: HEROS_RELEASE_OFFLINE, value: "" }
           # Probes read the console's OWN health endpoint (never a rendered page).
           livenessProbe:
             httpGet: { path: /api/health, port: http }
