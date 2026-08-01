@@ -56,9 +56,17 @@ import { parseMarkdown, type Heading, type ParsedMarkdown } from "./markdown.ts"
 export const CONTENT_ROOT = process.env.HEROS_CONTENT_ROOT ?? join(process.cwd(), "content");
 export const LOCALE = "en";
 
-/** LegalKind is the closed set of legal document kinds. A new kind is a decision, not a new file. */
-export type LegalKind = "terms" | "privacy";
-export const LEGAL_KINDS: LegalKind[] = ["terms", "privacy"];
+/**
+ * LegalKind is the closed set of legal document kinds. A new kind is a decision, not a new file.
+ *
+ * `sub-processors` is P24 task 7.1. It is a separate KIND rather than a section of the privacy notice,
+ * and the reason is versioning: the set of processors changes on a different clock from the privacy
+ * notice's prose, and a material change to WHO RECEIVES DATA has to be able to invalidate a consent
+ * grant without dragging every unrelated paragraph through a re-acceptance. One document, one subject,
+ * one version line.
+ */
+export type LegalKind = "terms" | "privacy" | "sub-processors";
+export const LEGAL_KINDS: LegalKind[] = ["terms", "privacy", "sub-processors"];
 
 /**
  * LegalFrontMatter is the machine-readable header every legal document must carry.

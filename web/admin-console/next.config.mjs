@@ -11,6 +11,22 @@
 const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
+  /*
+   * Browser source maps are OFF, stated rather than omitted (P24 task 3.6).
+   *
+   * `false` is also Next's default, and that is exactly why it is written here. "We did not turn maps
+   * on" and "maps are off" read identically in a green build and differ completely in a review: the
+   * first is a property of what nobody happened to write, and the next person adding a build option has
+   * no reason to think it was a decision.
+   *
+   * The decision: a source map is a readable copy of our own source, and serving one from a
+   * customer-facing origin publishes the application to anybody who opens dev tools. Frames in an error
+   * report are made readable by uploading maps to the reporting service for the platform's OWN hosted
+   * deployment — out of band, from CI, with a release-scoped token, and never as a served asset. A
+   * customer-installable package carries none, and `scripts/scan-bundle.mjs` fails the build if one
+   * appears in the shipped tree.
+   */
+  productionBrowserSourceMaps: false,
   // The console renders operator data. Nothing it serves may be cached by an intermediary, and every
   // response carries the headers that keep an embedded or sniffed page from becoming an attack path.
   async headers() {

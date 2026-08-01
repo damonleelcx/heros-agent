@@ -79,6 +79,7 @@ export async function loadLegalCorpus(asOf = today()): Promise<LegalCorpus> {
 export const KIND_LABEL: Record<LegalKind, string> = {
   terms: "Terms of Service",
   privacy: "Privacy Notice",
+  "sub-processors": "Sub-processors",
 };
 
 /**

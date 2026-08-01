@@ -5,7 +5,7 @@
   "description": "P8 operator console \u2014 a separate Next.js application on its own origin with its own BFF.",
   "scripts": {
     "dev": "next dev --port 4310",
-    "build": "npm run scan:tokens && npm run scan:ledger && next build && npm run scan:bundle",
+    "build": "npm run scan:origins && npm run scan:events && npm run scan:tokens && npm run scan:ledger && next build && npm run scan:bundle",
     "start": "next start --port 4310",
     "scan:bundle": "node scripts/scan-bundle.mjs",
     "scan:ledger": "node scripts/scan-ledger.mjs",
@@ -13,7 +13,9 @@
     "typecheck": "tsc --noEmit",
     "test": "node --test tests/*.test.mjs",
     "baseline": "node scripts/visual-baseline.mjs",
-    "baseline:update": "node scripts/visual-baseline.mjs --update"
+    "baseline:update": "node scripts/visual-baseline.mjs --update",
+    "scan:origins": "node ../design-system/scan-origins.mjs",
+    "scan:events": "node ../design-system/scan-events.mjs"
   },
   "dependencies": {
     "next": "15.5.4",

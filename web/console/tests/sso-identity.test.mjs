@@ -56,13 +56,48 @@ const CLIENT_ID = "console-client";
  * it adds it HERE because `tests/security.test.mjs` requires credential cookie flags to live in exactly
  * one place. So the fence is on the SESSION cookie's own two declarations, which is what NFR1 is
  * actually about — the file grew, the session cookie did not move.
+ *
+ * 🔴 `middleware.ts` is now in the same position, for the same reason, and the reasoning is recorded
+ * here rather than resolved with a new hash.
+ *
+ * That file does TWO jobs, and its own doc comment has always said so: it fails closed by route prefix,
+ * and it sets a per-request Content-Security-Policy. ADR-008 Rule 3 is about the FIRST one — the
+ * session store, the cookie, revocation, scope derivation and the fail-closed check are what P22 was
+ * forbidden to touch, and a whole-file digest was a cheap and adequate way to say so while nothing else
+ * in the file was moving.
+ *
+ * P24 changes the SECOND one. The header stops being a literal in this file and is constructed from
+ * `web/design-system/third-party-policy.ts`, so both consoles read one table and a hard-coded origin in
+ * either middleware fails the build. Nothing about the fail-closed half changes.
+ *
+ * Bumping the digest would have been the wrong correction twice over: it discards the fence for a
+ * change it was never aimed at, and it makes the next such change a one-line hash edit — which is
+ * precisely the "review conversation" this pin exists to force. So the fence is NARROWED to the half
+ * ADR-008 is about, exactly as `cookies.ts` already is, and the CSP half is asserted by behaviour in
+ * `tests/third-party-fence.test.mjs` (byte-identical output on every prefix) rather than by shape.
  */
 const ABOVE_THE_SEAM = {
   "src/lib/session.ts": "221d2afc1cf462ea68fe8f1d7e2a7b547ea41fb31b59a85b125e6a2fa32fcb33",
-  "src/middleware.ts": "31886c223c71b00c5a415df768b641604afe737944392978126e7f352781ad10",
   "src/lib/scope.ts": "26b7005156ffcad02422e73df8063761793eed543537a21dfbf552db30791ea9",
   "src/lib/entitlements.ts": "71676c25bae578c82b65b1ed255c068e45d4ddaaf5f76b0864fcfa1d1592a608",
 };
+
+/**
+ * MIDDLEWARE_FAIL_CLOSED is the half of `middleware.ts` ADR-008 Rule 3 actually governs, pinned by
+ * digest the way the whole file used to be.
+ *
+ * It is extracted by source markers rather than by line number, so a comment added above it does not
+ * read as a change to it — and the extraction itself is asserted to have found something, because a
+ * digest of an empty string is a fence that passes forever.
+ */
+const MIDDLEWARE_FAIL_CLOSED_DIGEST = "c9c0647bb31e73ad76320417a7208c3f80b06cfc0be13d8ba749ce9bd182be9e";
+
+function failClosedHalf(source) {
+  const start = source.indexOf("const GATED =");
+  const end = source.indexOf("const nonce =");
+  if (start < 0 || end < 0 || end <= start) return null;
+  return source.slice(start, end);
+}
 
 test("8.1/4.1 the layer above the seam is byte-for-byte unchanged (NFR1, ADR-008 Rule 3)", async () => {
   for (const [file, digest] of Object.entries(ABOVE_THE_SEAM)) {
@@ -75,6 +110,18 @@ test("8.1/4.1 the layer above the seam is byte-for-byte unchanged (NFR1, ADR-008
         `If this change is genuinely required, that is an ADR-008 conversation, not a hash update.`,
     );
   }
+
+  const half = failClosedHalf(await read("src/middleware.ts"));
+  assert.ok(half, "the fail-closed half of middleware.ts could not be located — the fence found nothing to pin");
+  assert.match(half, /GATED = \["\/app", "\/api\/console", "\/api\/stream"\]/, "the gated prefix set moved");
+  assert.match(half, /SESSION_COOKIE/, "the fail-closed check no longer reads the session cookie");
+  assert.equal(
+    createHash("sha256").update(half).digest("hex"),
+    MIDDLEWARE_FAIL_CLOSED_DIGEST,
+    "the fail-closed half of middleware.ts changed. P24 may rebuild the Content-Security-Policy in that " +
+      "file; it may not touch the prefix gate, the session-cookie check or the redirect/refuse split. " +
+      "If this change is genuinely required, that is an ADR-008 conversation, not a hash update.",
+  );
 });
 
 test("8.1/4.1 the session cookie's own declarations did not move", async () => {

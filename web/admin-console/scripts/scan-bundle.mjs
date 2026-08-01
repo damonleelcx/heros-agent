@@ -28,8 +28,21 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import process from "node:process";
+import { OBSERVABILITY_RUNTIMES } from "../../design-system/third-party-policy.ts";
+import { guardedChunks } from "../../design-system/reachability.mjs";
 
-const CLIENT_DIR = join(process.cwd(), ".next", "static");
+/**
+ * ROOT is the application directory whose build is measured. It defaults to the working directory —
+ * the only value a build ever uses — and is overridable with `--root <dir>` for ONE purpose: making
+ * this fence go red against a fixture build, without a probe file ever being written into a real
+ * console. A fence nobody has seen fail is a fence nobody knows is connected, and the alternative
+ * (injecting an import into a shipped layout and rebuilding) leaves a session recorder wired into the
+ * root layout if the run crashes between injecting and reverting.
+ */
+const rootFlag = process.argv.indexOf("--root");
+const ROOT = rootFlag >= 0 ? process.argv[rootFlag + 1] : process.cwd();
+
+const CLIENT_DIR = join(ROOT, ".next", "static");
 
 // The ceiling, in bytes of shipped JavaScript. Raising it is a decision with an argument attached.
 const PAYLOAD_CEILING_BYTES = 1_400_000;
@@ -43,6 +56,20 @@ const DECORATIVE_RUNTIMES = [
   { name: "Lottie", needle: "lottie-web" },
 ];
 
+/*
+ * # The INVERSE runtime scan (P24 task 1.5, design D9)
+ *
+ * The decorative list asks "did a 3D library ship". This one asks "did a recorder ship where a
+ * recorder is refused" — and on THIS console the answer is every route. An operator screen renders
+ * cross-tenant aggregates, tenant names, active impersonation state and audit rows; a session
+ * recording of it is a copy of the material the whole platform exists to keep inside a boundary, and
+ * an analytics tag would put an operator's navigation into a third party's logs.
+ *
+ * So the guarded partition here is the whole application, and the customer console's public exemption
+ * has no counterpart. The needles come from the shared artefact rather than from a copy, so a runtime
+ * added to that table is caught in both consoles rather than in whichever one somebody remembered.
+ */
+
 /** shippedFiles returns the chunks the BUILD says the browser downloads. */
 async function shippedFiles() {
   const files = new Set();
@@ -50,7 +77,7 @@ async function shippedFiles() {
   for (const name of ["build-manifest.json", "app-build-manifest.json"]) {
     let manifest;
     try {
-      manifest = JSON.parse(await readFile(join(process.cwd(), ".next", name), "utf8"));
+      manifest = JSON.parse(await readFile(join(ROOT, ".next", name), "utf8"));
     } catch {
       continue;
     }
@@ -74,10 +101,24 @@ function collect(node, out) {
   }
 }
 
+/**
+ * appManifest returns the route -> chunks map, or null if this build did not produce one.
+ *
+ * Separate from `shippedFiles` because the two ask different questions of the same data: that one asks
+ * "is this chunk shipped", this one asks "which routes load it".
+ */
+async function appManifest() {
+  try {
+    return JSON.parse(await readFile(join(ROOT, ".next", "app-build-manifest.json"), "utf8"));
+  } catch {
+    return null;
+  }
+}
+
 /** contaminated reports whether `next dev` has written into this `.next` tree. */
 async function contaminated() {
   try {
-    await readFile(join(process.cwd(), ".next", "static", "development", "_buildManifest.js"), "utf8");
+    await readFile(join(ROOT, ".next", "static", "development", "_buildManifest.js"), "utf8");
     return true;
   } catch {
     return false;
@@ -115,7 +156,9 @@ async function* walk(dir) {
     const full = join(dir, entry.name);
     if (entry.isDirectory()) {
       yield* walk(full);
-    } else if (entry.name.endsWith(".js")) {
+    } else if (entry.name.endsWith(".js") || entry.name.endsWith(".map")) {
+      // `.map` as well as `.js`: a source map is not a chunk, and the P24 rule is that one must not be
+      // in the shipped tree at all — a walk that only looked at `.js` could never see it.
       yield full;
     }
   }
@@ -148,9 +191,32 @@ async function main() {
 
   const manifest = await shippedFiles();
 
+  // A missing app manifest is REFUSED rather than treated as "nothing is guarded". Passing by default
+  // would mean a session recorder could reach an operator route with a green build, which is the exact
+  // outcome this scan exists to make impossible.
+  const routes = await appManifest();
+  if (!routes) {
+    console.error(
+      "bundle scan: no .next/app-build-manifest.json, so which chunks an operator route loads is\n" +
+        "unknown. The observability-runtime rule cannot be evaluated and is not passed by default.\n" +
+        "Run `next build` and re-run this scan.",
+    );
+    process.exit(2);
+  }
+  const guarded = guardedChunks(routes, "operator");
+
   for await (const file of walk(CLIENT_DIR)) {
-    scanned += 1;
     const content = await readFile(file, "utf8");
+    if (file.endsWith(".map")) {
+      // Counted as a FINDING, never as payload: a map is not something the browser is meant to
+      // download, so adding its bytes to the ceiling would be measuring the wrong thing twice.
+      findings.push(
+        `SOURCE MAP: ${file} is in the shipped tree — a source map is a readable copy of our own source ` +
+          `and is never served from a customer-facing origin`,
+      );
+      continue;
+    }
+    scanned += 1;
     const relative = file.slice(file.indexOf(join(".next", "static")) + ".next/".length);
     const shipped = manifest ? manifest.has(relative) : true;
     if (shipped) bytes += Buffer.byteLength(content);
@@ -159,6 +225,31 @@ async function main() {
       if (shipped && content.includes(needle)) {
         findings.push(`PAYLOAD: ${name} is present in shipped bundle ${file}`);
       }
+    }
+
+    // 🔴 SOURCE MAPS (P24 task 3.6). A `.map` beside a shipped chunk is a readable copy of our own
+    // source, served from a customer-facing origin to anybody who opens dev tools. Frames are made
+    // readable for the platform's own hosted deployment by uploading maps out of band, from CI, with a
+    // release-scoped token — never by shipping them. The `sourceMappingURL` check is the half that
+    // matters most: a map file can be deleted after the build and the POINTER left behind, which turns
+    // every page load into a 404 and tells a reader exactly what to go looking for.
+    const pointer = /\/\/#\s*sourceMappingURL=(\S+)/.exec(content);
+    if (shipped && pointer && !pointer[1].startsWith("data:")) {
+      findings.push(
+        `SOURCE MAP: ${relative} points at ${pointer[1]} — the pointer ships even when the map does not, ` +
+          `which names the file an attacker should ask for`,
+      );
+    }
+
+    for (const runtime of OBSERVABILITY_RUNTIMES) {
+      if (!runtime.tenantForbidden) continue;
+      if (!guarded.has(relative)) continue;
+      if (!content.includes(runtime.needle)) continue;
+      findings.push(
+        `OBSERVABILITY RUNTIME: ${runtime.name} (${runtime.kind}) is in ${relative}, which a browser ` +
+          `downloads on an operator route. Every route of this console is an operator route; a ` +
+          `${runtime.kind} runtime is refused here structurally, not configured off.`,
+      );
     }
 
     for (const { name, value } of needles) {
@@ -200,6 +291,10 @@ async function main() {
     `bundle scan passed: ${scanned} client chunk(s) scanned, ${bytes} shipped bytes ` +
       `(${PAYLOAD_CEILING_BYTES - bytes} under the ${PAYLOAD_CEILING_BYTES}-byte ceiling), ` +
       `no credential material, priced literal, or decorative runtime.`,
+  );
+  console.log(
+    `  reachability: ${guarded.size} chunk(s) reachable from an operator route (every route is one); ` +
+      `no analytics or session-replay runtime among them.`,
   );
 }
 

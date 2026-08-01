@@ -16,6 +16,23 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { startStubPlatform, startConsole } from "./support/harness.mjs";
 
+/**
+ * originOf reduces a CSP source expression to its origin.
+ *
+ * Written as a parse rather than as `replace(/\/.*$/, "")`, which was the first version and was
+ * WRONG in the direction that matters: it cut at the first slash, turning
+ * `https://ingest.example` into `https:` — so a legitimately allowlisted origin was reported as
+ * unlisted. An assertion that fails on correct input gets loosened, and the loosening is what
+ * actually costs the guarantee.
+ */
+function originOf(source) {
+  try {
+    return new URL(source).origin;
+  } catch {
+    return source;
+  }
+}
+
 const exec = promisify(execFile);
 const ROOT = new URL("..", import.meta.url).pathname;
 const read = (rel) => readFile(join(ROOT, rel), "utf8");
@@ -188,7 +205,17 @@ test("no external subresource: an external origin may appear only as an anchor t
   const html = await res.text();
   const csp = res.headers.get("content-security-policy") ?? "";
   assert.match(csp, /default-src 'self'/);
-  assert.doesNotMatch(csp, /https?:\/\//, "the CSP names a third-party origin");
+  // 🔴 Bounded by the ALLOWLIST rather than by zero (P24 task 1.4). The global "no https origin"
+  // version of this line was true and would have had to be deleted the day the public surface gained
+  // its first legitimate origin — taking with it the only thing asserting that the tenant prefix has
+  // none. The allowlist is read here, so this line keeps meaning the same thing after wave 24e: every
+  // origin this page's policy names is one somebody put in a checked-in table, with the integration
+  // that needs it, the consent category that gates it and its transfer budget written beside it.
+  const { ALLOWED_ORIGINS } = await import("../../design-system/third-party-policy.ts");
+  const permitted = new Set(ALLOWED_ORIGINS.map((o) => o.origin));
+  for (const named of [...csp.matchAll(/https?:\/\/[^\s;]+/g)].map((m) => originOf(m[0]))) {
+    assert.ok(permitted.has(named), `the public CSP names ${named}, which the allowlist does not carry`);
+  }
 
   const isLocal = (url) => url.startsWith("/") || url.startsWith("#") || url.startsWith("data:");
 

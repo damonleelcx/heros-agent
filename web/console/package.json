@@ -5,7 +5,7 @@
   "description": "P9 customer console \u2014 the tenant-facing dashboard and its BFF, plus the public home page.",
   "scripts": {
     "dev": "next dev --port 4320",
-    "build": "npm run gen && npm run scan:tokens && npm run scan:strings && npm run scan:markup && npm run scan:claims && npm run scan:docs && next build && npm run scan:bundle",
+    "build": "npm run gen && npm run scan:origins && npm run scan:events && npm run scan:tokens && npm run scan:strings && npm run scan:markup && npm run scan:claims && npm run scan:docs && next build && npm run release:sourcemaps && npm run scan:bundle",
     "start": "next start --port 4320",
     "scan:bundle": "node scripts/scan-bundle.mjs",
     "scan:tokens": "node scripts/scan-tokens.mjs",
@@ -36,7 +36,10 @@
     "scan:install": "node scripts/scan-install.mjs",
     "scan:repo-link": "NODE_USE_ENV_PROXY=1 node scripts/scan-repo-link.mjs",
     "scan:docs": "npm run scan:content && npm run scan:secrets && npm run scan:docs-claims && npm run scan:cli && npm run scan:api && npm run scan:metric && npm run scan:install && npm run scan:legal && npm run scan:links && npm run scan:repo-link",
-    "scan:legal": "node scripts/scan-legal.mjs"
+    "scan:legal": "node scripts/scan-legal.mjs",
+    "scan:origins": "node ../design-system/scan-origins.mjs",
+    "release:sourcemaps": "node scripts/upload-sourcemaps.mjs",
+    "scan:events": "node ../design-system/scan-events.mjs"
   },
   "dependencies": {
     "@tailwindcss/postcss": "4.1.12",
@@ -50,7 +53,8 @@
     "@types/node": "22.10.2",
     "@types/react": "19.0.2",
     "@types/react-dom": "19.0.2",
-    "typescript": "5.7.2"
+    "typescript": "5.7.2",
+    "puppeteer-core": "25.3.0"
   },
   "engines": {
     "node": ">=22.0.0"

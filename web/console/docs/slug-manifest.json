@@ -240,6 +240,37 @@
       ]
     },
     {
+      "route": "/legal/privacy/v/1.1.0",
+      "source": "legal/en/privacy/1.1.0.md",
+      "content_hash": "6194702b89e210aa741e74268b6421b23de95eccf0b1c33b5db21b11c3111fe7",
+      "anchors": [
+        "1-the-fact-that-shapes-everything-below",
+        "2-what-we-collect-when-you-deal-with-us-directly",
+        "3-what-the-service-stores-about-your-work",
+        "4-retention-stated-as-it-actually-is",
+        "5-who-else-sees-data",
+        "6-records-of-your-acceptance",
+        "7-your-rights-and-the-route-that-actually-exists",
+        "what-erasure-does-precisely",
+        "8-security-described-rather-than-claimed",
+        "9-changes-to-this-notice",
+        "10-contact",
+        "11-what-this-notice-deliberately-does-not-say"
+      ]
+    },
+    {
+      "route": "/legal/sub-processors/v/1.0.0",
+      "source": "legal/en/sub-processors/1.0.0.md",
+      "content_hash": "50d6398b855a598904eb428cd3bbfd7ac5cd1ef8e5224f9c9cb4fba599a1b90f",
+      "anchors": [
+        "0-the-fact-that-shapes-the-rest",
+        "1-the-processors",
+        "2-what-none-of-them-receives",
+        "3-your-choices",
+        "4-if-you-run-this-service-yourself"
+      ]
+    },
+    {
       "route": "/legal/terms/v/1.0.0",
       "source": "legal/en/terms/1.0.0.md",
       "content_hash": "3d83017760dd1b4c3e505a9e0995d07f61fb4e5296c11fd18b878d07afb97b30",

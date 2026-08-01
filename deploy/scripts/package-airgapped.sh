@@ -172,6 +172,21 @@ else
   log "note: $DEPLOY_DIR/k8s absent — packaging compose substrate only"
 fi
 
+# ── 2b) 🔴 ZERO EXTERNAL ORIGINS (P24 task 1.8, design D1). ───────────────────────────────────────────
+# P24 installs an analytics tag, a session recorder and an error reporter — all three configured for the
+# platform's own hosted deployment ONLY. On this substrate they are absent, and absence is silent.
+#
+# The claim "this package references no external origin" is precisely the one an air-gapped customer
+# cannot check for themselves: they have no egress with which to observe something trying to leave, and
+# by the time anything is visible the tarball is already inside their machine room. So the claim is
+# produced by the run that produces the artifact, not by a README. The gate is deliberately NOT copied
+# into the package: it is a build-host check, and it carries example hostnames in its own self-test that
+# would trip a scan of the package it just cleared.
+ORIGIN_GATE="$SCRIPT_DIR/check-external-origins.sh"
+[ -f "$ORIGIN_GATE" ] || die "missing $ORIGIN_GATE — the zero-external-origin gate is part of the package build, not optional"
+log "checking the staged package references no external origin"
+sh "$ORIGIN_GATE" "$STAGE" || die "the staged package references an external origin or a reporting identity (see above) — refusing to cut an air-gapped package that can phone home"
+
 # ── 3) A VERSION marker (no secrets): records the identity install/rollback compare against, and the
 #    exact pinned image set, so an operator can read what they hold without trusting a filename. ────────
 {

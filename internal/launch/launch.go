@@ -23,6 +23,7 @@ import (
 	"github.com/heros-foreal/agentd/internal/auth"
 	"github.com/heros-foreal/agentd/internal/config"
 	"github.com/heros-foreal/agentd/internal/db"
+	"github.com/heros-foreal/agentd/internal/erroreport"
 	"github.com/heros-foreal/agentd/internal/providergateway"
 )
 
@@ -67,6 +68,27 @@ func StartAgentd(ctx context.Context, cfg config.Config) (*Server, error) {
 
 	handler := api.New(database, cfg)
 	handler.SetSecretsSource(secrets)
+
+	// The P24 error-reporting boundary (task 2.10).
+	//
+	// 🔴 With no DSN this returns the ABSENT reporter: no transmit, no warning, and `/readyz` reports
+	// `absent`. That is the expected and correct state on a customer's Compose or Kubernetes install and
+	// on an air-gapped network, and it is deliberately SILENT — a deployment that was never meant to
+	// report is not degraded, and a warning that fires on every correct install teaches an operator to
+	// ignore warnings.
+	//
+	// A DSN that is SET and unusable is a hard boot failure, for the opposite reason: that is a
+	// deployment somebody meant to configure and got wrong, and the alternative is a process that starts,
+	// looks healthy, and silently reports nothing for a month.
+	reporter, err := erroreport.FromEnv(log.Printf)
+	if err != nil {
+		_ = database.Close()
+		return nil, fmt.Errorf("error reporting: %w", err)
+	}
+	handler.SetErrorReporter(reporter)
+	if state, _ := reporter.State(); state != erroreport.StateAbsent {
+		log.Printf("error reporting: %s", state)
+	}
 
 	// The P9 customer console, aggregated into /readyz when this deployment ships one (FR25).
 	//

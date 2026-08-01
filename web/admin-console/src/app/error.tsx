@@ -1,5 +1,8 @@
 "use client";
 
+import { useEffect } from "react";
+import { reportHandledFailure } from "../../../design-system/error-report.ts";
+
 /**
  * error.tsx is the console's DEGRADED rendering for a failure that reaches the route boundary (FR26).
  *
@@ -19,6 +22,17 @@
  * passing type check are both perfectly compatible with this page never having existed.
  */
 export default function ConsoleError({ error, reset }: { error: Error; reset: () => void }) {
+  // P24 task 3.5. A failure that reaches this boundary is REPORTED as well as rendered.
+  //
+  // The failures that matter most here are the ones that do not crash: a chunk that failed to load, a
+  // hydration mismatch, a script the policy refused. React catches those and renders this page, and
+  // before P24 the only signal was an operator choosing to mention it. Reported in an effect rather
+  // than during render, because a boundary can re-render and a render-time report transmits the same
+  // failure once per render.
+  useEffect(() => {
+    reportHandledFailure(error);
+  }, [error]);
+
   return (
     <>
       <header className="chrome">

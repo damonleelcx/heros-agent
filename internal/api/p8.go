@@ -16,6 +16,7 @@ import (
 	"github.com/heros-foreal/agentd/internal/adminidentity"
 	"github.com/heros-foreal/agentd/internal/adminops"
 	"github.com/heros-foreal/agentd/internal/adminrbac"
+	"github.com/heros-foreal/agentd/internal/erroreport"
 	"github.com/heros-foreal/agentd/internal/metering"
 	"github.com/heros-foreal/agentd/internal/plancfg"
 	"github.com/heros-foreal/agentd/internal/providergateway"
@@ -100,6 +101,12 @@ type AdminDeps struct {
 	// the two reads that are honestly not yet possible. Read-only.
 	Oversight *adminops.OversightService
 
+	// ErrorReporter is the P24 error-reporting boundary. Nil means absent, which is the default and the
+	// correct state on every substrate except the platform's own hosted deployment. A panic inside an
+	// operator command is exactly the failure that has nowhere to go otherwise: this handler runs behind
+	// a credential, so nothing about it appears in a customer-visible log.
+	ErrorReporter erroreport.Reporter
+
 	// TestModeIdP, when set, is the fixture admin IdP the sign-in page's test-mode control uses. It is
 	// present ONLY in a test-mode deployment (rollout 8a). Its assertions are signed with the real
 	// admin IdP keys and verified by the real verifier — including MFA — so it is a test-mode ISSUER,
@@ -158,7 +165,13 @@ func NewAdminAPI(deps AdminDeps) (*AdminAPI, error) {
 	}
 	a := &AdminAPI{deps: deps, mux: http.NewServeMux()}
 	a.routes()
-	a.Handler = a.requirePlatformCredential(a.mux)
+	// OUTERMOST, outside the credential check, so a panic in the credential check itself is reported and
+	// every response — including a refusal — carries the trace id an operator can quote.
+	a.Handler = traceAndReport(
+		func() erroreport.Reporter { return a.deps.ErrorReporter },
+		"admin.api",
+		a.requirePlatformCredential(a.mux),
+	)
 	return a, nil
 }
 
@@ -179,6 +192,10 @@ func (a *AdminAPI) requirePlatformCredential(next http.Handler) http.Handler {
 			// a load balancer can probe it.
 			body := map[string]any{"status": "ready", "surface": "p8-admin-console"}
 			body["admin_idp"] = a.deps.Authenticator.Describe()
+			// The P24 three-state entry, on the operator surface too. An operator asking "is reporting
+			// working" must get the answer from the console they are already looking at, not from a
+			// second dashboard — and `absent` here is a decision, not a degradation.
+			body["error_reporting"] = reporterState(a.deps.ErrorReporter)
 			if a.deps.Rollout != nil {
 				body["rollout"] = a.deps.Rollout.Describe()
 			}

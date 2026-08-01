@@ -97,10 +97,52 @@ test("12.7 — the runtime CSP refuses all three independently of the build chec
    * "we have a fence" is not the same claim as "the browser would refuse it". Both are stated in the
    * design; both are checked here.
    */
-  const middleware = await read("src/middleware.ts");
-  assert.match(middleware, /default-src 'self'/, "the CSP would permit a widget or an iframe");
-  assert.match(middleware, /connect-src 'self'/, "the CSP would permit a browser-side api.github.com fetch");
-  assert.match(middleware, /img-src 'self' data:/, "the CSP would permit a shields.io badge");
+  /*
+   * 🔴 This used to read three literals out of `src/middleware.ts`. P24 moved the header out of that
+   * file — it is now CONSTRUCTED from `web/design-system/third-party-policy.ts`, so both consoles read
+   * one table and a hard-coded origin in either middleware fails the build.
+   *
+   * The right correction was NOT to point the same three `assert.match` calls at the new file. That
+   * would still be asserting that a source file contains a string, which is a proxy for the claim; the
+   * claim is "the browser would refuse it". So this now builds the policy the public surface actually
+   * serves — the prefix a badge or a browser-side fetch would live on — and checks the DIRECTIVES.
+   * The test got closer to its own sentence as a result of the refactor rather than further from it.
+   */
+  const { buildContentSecurityPolicy } = await import("../../design-system/csp.ts");
+  const { ALLOWED_ORIGINS } = await import("../../design-system/third-party-policy.ts");
+  const csp = buildContentSecurityPolicy({ consoleId: "customer", pathname: "/", nonce: "N", dev: false });
+  assert.match(csp, /default-src 'self'/, "the CSP would permit a widget or an iframe");
+  assert.match(csp, /connect-src 'self'(;|$)/, "the CSP would permit a browser-side api.github.com fetch");
+  assert.match(csp, /img-src 'self' data:(;|$)/, "the CSP would permit a shields.io badge");
+
+  // And the tenant prefix, which the original could not distinguish at all.
+  //
+  // 🔴 The assertion here is NOT "no origin". P24 wave 24c permits exactly one — the error-reporting
+  // ingest host, under `connect-src`, on every prefix — because the event that reaches it is
+  // constructed from an allowlist and carries no content by construction. Writing this as "no https
+  // origin" would have been the easy version and it would have had to be deleted the day that landed,
+  // taking with it the thing it was really for: that a WIDGET, an IFRAME, a BADGE or a browser-side
+  // fetch to a forge cannot appear on a tenant page, no matter what anybody consented to.
+  const tenant = buildContentSecurityPolicy({
+    consoleId: "customer",
+    pathname: "/app",
+    nonce: "N",
+    dev: false,
+    granted: ["product_analytics", "session_replay", "error_diagnostics"],
+  });
+  const permitted = new Set(
+    ALLOWED_ORIGINS.filter((o) => o.category === "error_diagnostics").map((o) => o.origin),
+  );
+  for (const named of [...tenant.matchAll(/https?:\/\/[^\s;]+/g)].map((m) => m[0])) {
+    assert.ok(
+      permitted.has(named),
+      `a granted consent category put ${named} on a tenant prefix — only the error-reporting origin is permitted there`,
+    );
+  }
+  assert.doesNotMatch(tenant, /img-src[^;]*https?:\/\//, "a badge origin reached a tenant prefix");
+  assert.doesNotMatch(tenant, /script-src[^;]*https?:\/\//, "a script host reached a tenant prefix");
+  assert.doesNotMatch(tenant, /clarity|googletagmanager|google-analytics|shields\.io|api\.github\.com/i,
+    "an analytics, replay or forge origin reached a tenant prefix");
 });
 
 test("12.7 — the count is never hand-typed: the module holds no number", async () => {
