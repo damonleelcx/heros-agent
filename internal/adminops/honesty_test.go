@@ -50,7 +50,7 @@ func TestLinkCoverageIsDisplayedBesideEverySUMDerivedFigure(t *testing.T) {
 		t.Fatal("link coverage is not known — the surface would show a SUM figure it cannot qualify")
 	}
 	if got := view.LinkCoverage.Percent; got < 39 || got > 41 {
-		t.Fatalf("link coverage = %.1f%%, want 40%% (4 of 10 runs linked)", got)
+		t.Fatalf("link coverage = %.1f%%, want 40 percent — 4 of 10 runs linked", got)
 	}
 	if view.MeteredSUM == nil {
 		t.Fatal("no SUM-derived figure was produced with known coverage")
