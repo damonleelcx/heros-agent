@@ -51,7 +51,7 @@ export async function readDensity(): Promise<Density> {
  *
  * FR23 requires this console to be distinguishable from the customer console **at a glance**, and that
  * is a safety requirement — an operator with both open, acting cross-tenant while believing the view is
- * single-tenant, is the named failure. So the light theme is not a free addition: the teal operator
+ * single-tenant, is the named failure. So the light theme is not a free addition: the violet operator
  * chrome and its dark horizon band must stay unmistakable in light as well as dark, which is why the
  * chrome band is darker than the page in **both** themes rather than inverting with them.
  */

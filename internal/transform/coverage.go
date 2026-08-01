@@ -602,3 +602,49 @@ func CoverageLanguagesFor(axis string) []string {
 	sort.Strings(out)
 	return out
 }
+
+// ── The axis's own declared status ──────────────────────────────────────────────────────────────
+
+// AxisStatus is what an axis declares about itself across every registered language.
+//
+// 🔴 It lives HERE, beside the coverage table it is derived from, and not in the console. A console
+// that computed this would be a second opinion about coverage, and coverage is a claim about a
+// customer's code — the one thing the reading surface must never form its own view of. Every consumer
+// reads this function, so a doc, a CLI listing and an operator page cannot disagree.
+type AxisStatus string
+
+const (
+	// StatusExists — every registered language materializes at least one form on this axis.
+	StatusExists AxisStatus = "EXISTS"
+	// StatusPartial — some languages materialize and some refuse. The commonest honest answer, and the
+	// one a single boolean would have to round in one direction or the other.
+	StatusPartial AxisStatus = "PARTIAL"
+	// StatusAbsent — no language materializes anything on this axis. 🔴 It is NOT "not applicable": the
+	// axis exists and the engine applies none of it, which is a fact about the PLATFORM.
+	StatusAbsent AxisStatus = "ABSENT"
+)
+
+// StatusFor returns an axis's declared status, derived from the one coverage table.
+//
+// Derived rather than hand-declared on purpose: a hand-maintained status is the optimistic copy this
+// file exists to end, and it would go stale the first time a materializer landed.
+func StatusFor(axis string) AxisStatus {
+	var materializes, refuses int
+	byLanguage := map[string]bool{}
+	for _, c := range CoverageFor(axis) {
+		if c.Status == CoverageMaterializes {
+			materializes++
+			byLanguage[c.Language] = true
+		} else {
+			refuses++
+		}
+	}
+	switch {
+	case materializes == 0:
+		return StatusAbsent
+	case refuses == 0 && len(byLanguage) == len(RegisteredLanguages()):
+		return StatusExists
+	default:
+		return StatusPartial
+	}
+}

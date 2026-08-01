@@ -4,6 +4,7 @@ import { OperatorShell } from "@/components/shell";
 import { DegradedState, DeniedState, EmptyState, Pill } from "@/components/states";
 import { DataTable, Drawer, Num, PageFrame, Section } from "@/components/primitives";
 import { ActionForm } from "@/components/actionForm";
+import { CoverageStatement, Derived } from "@/components/derived";
 import { quantity, timestamp } from "@/lib/format";
 import { issueCredit, issueRefund } from "@/lib/actions";
 import type { BillingOversight } from "@/lib/types";
@@ -89,6 +90,38 @@ export default async function BillingPage({
           <DegradedState what="the billing service" />
         ) : (
           <>
+            {/* 🔴 Link coverage FIRST, and beside the figures it qualifies — not in a footnote and not
+                behind a link. A figure whose coverage is unknown is not rendered at all; the surface
+                says coverage is unknown in its place. See components/derived.tsx. */}
+            <Section
+              title="What these figures count"
+              aside={
+                view.link_coverage.known ? (
+                  view.link_coverage.complete ? (
+                    <Pill tone="ok">complete coverage</Pill>
+                  ) : (
+                    <Pill tone="neutral">partial coverage</Pill>
+                  )
+                ) : (
+                  <Pill tone="warn">coverage unknown</Pill>
+                )
+              }
+            >
+              <CoverageStatement coverage={view.link_coverage} />
+              <div className="derived-row">
+                <Derived
+                  label="Metered spend under management"
+                  figure={view.metered_sum}
+                  coverage={view.link_coverage}
+                />
+                <Derived
+                  label="Verified savings (gainshare basis)"
+                  figure={view.gainshare_savings}
+                  coverage={view.link_coverage}
+                />
+              </div>
+            </Section>
+
             <Section
               title="Reconciliation"
               aside={
@@ -225,6 +258,7 @@ export default async function BillingPage({
                     { label: "Type" },
                     { label: "Status" },
                     { label: "Quantity", numeric: true },
+                    { label: "Counts" },
                     { label: "When" },
                     ...(canCorrect ? [{ label: "Correct" }] : []),
                   ]}
@@ -245,11 +279,24 @@ export default async function BillingPage({
                       <td className="num">
                         <Num value={line.quantity} kind="quantity" />
                       </td>
+                      <td>
+                        {line.sum_derived ? (
+                          <Pill tone="neutral">SUM · linked runs</Pill>
+                        ) : (
+                          <span className="hint">not SUM-derived</span>
+                        )}
+                      </td>
                       <td>{timestamp(line.created_at)}</td>
                       {canCorrect ? (
                         <td>
-                          {line.type === "subscription" ||
-                          line.type === "metered" ||
+                          {/* 🔴 The KIND says what a charge is for; the TYPE says what kind of ledger
+                              row it is. This condition read `type` against two KIND values —
+                              "subscription" and "metered" — which no `type` ever takes, so the
+                              credit/refund drawer never appeared against an ordinary charge and the
+                              console's one money-correcting control was unreachable for the rows it
+                              exists for. Found while adding link coverage to this table (P26). */}
+                          {line.kind === "subscription" ||
+                          line.kind === "metered" ||
                           line.type === "gainshare_charge" ? (
                             <Drawer summary="Credit / refund">
                               <ActionForm

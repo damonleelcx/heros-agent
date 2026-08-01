@@ -2,6 +2,7 @@ package release
 
 import (
 	"crypto/ed25519"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -189,4 +190,91 @@ func publicKeyBytes(hexKey string) (ed25519.PublicKey, error) {
 		return nil, errors.New("release: invalid public key")
 	}
 	return ed25519.PublicKey(raw), nil
+}
+
+// ── Retired keys ────────────────────────────────────────────────────────────────────────────────
+
+// RetiredKey is a key that has been withdrawn from the trust root: it signs nothing and verifies
+// nothing, and it is recorded here so "which key was active when, and why did it stop" is answerable
+// from code rather than from a commit message (P26 task 4.3).
+//
+// 🔴 It carries NO KEY MATERIAL — an identifier and a FINGERPRINT, which is a hash of the public half.
+// Not because a public key is secret (it is not), but because a surface that renders one kind of key
+// blob is a surface one copy-paste away from rendering the other. A signing key has already leaked
+// once in this project by being emitted into a session transcript, and the cheapest way to keep that
+// from recurring is for no key-shaped string to reach a screen at all.
+//
+// 🔴 RetiredKeys is deliberately NOT part of `trustRoot`. Adding a retired key to the verify set is
+// exactly the mistake this record exists to make unnecessary: an operator who needs the ROTATION
+// HISTORY must not be served it by widening the set of keys a running binary will accept.
+type RetiredKey struct {
+	// ID is the same stable label the key held while it was live.
+	ID string
+	// Fingerprint identifies the key without being it.
+	//
+	// 🔴 For a retired key it is the PUBLIC-KEY PREFIX the rotation record preserved, not a SHA-256
+	// fingerprint — and that difference is recorded rather than smoothed over. Retiring a key deletes
+	// its entry from `trustRoot`, which deletes the material a fingerprint would be computed from, so
+	// the only identifier that survives is the one a human wrote down at the time. Computing a
+	// plausible-looking hash here instead would be inventing evidence.
+	Fingerprint string
+	// RetiredAt is the date the key left the trust root, YYYY-MM-DD.
+	RetiredAt string
+	// Reason is why. Required: a key that left the trust root with no recorded reason is
+	// indistinguishable from one somebody deleted by accident.
+	Reason string
+	// SignedReleases names the published releases signed with this key, so an operator asking "which
+	// artefacts in the field carry a retired key's signature" gets an answer rather than a shrug. EMPTY
+	// is a real answer and the common one for a key withdrawn before it ever signed a published release.
+	SignedReleases []string
+}
+
+// retiredKeys is the rotation record. Every entry corresponds to a key that once appeared in
+// `trustRoot` and no longer does; the reasons are the ones recorded in this file's history.
+var retiredKeys = []RetiredKey{
+	{
+		ID:          "heros-release-2026b",
+		Fingerprint: "4d5d06df",
+		RetiredAt:   "2026-07-30",
+		Reason: "compromised: the private half was recovered from a plaintext CLI transcript — " +
+			"`herossign keygen` printed both halves to stdout and that output was captured to a log file. " +
+			"Removed in the same commit that added its replacement rather than demoted to accepted, " +
+			"because keeping a key of known-doubtful confidentiality in the verify set buys compatibility " +
+			"with a release nobody could install.",
+		// It signed the v0.20.0-rc.4 rehearsal only, and `publish` produced a DRAFT whose assets are
+		// reachable only through the authenticated API. No published artefact carries its signature.
+		SignedReleases: nil,
+	},
+	{
+		ID:          "heros-release-2026a",
+		Fingerprint: "1f117664",
+		RetiredAt:   "2026-07-30",
+		Reason: "replaced, not rotated: no private half was ever configured as a CI secret and the " +
+			"repository had no v* tag, so no release was ever signed with it and no installed binary has " +
+			"ever verified anything against it. Keeping it as an accepted key would have widened the " +
+			"trust root in exchange for compatibility with a release that does not exist.",
+		SignedReleases: nil,
+	},
+}
+
+// RetiredKeys returns the rotation record. The slice is a copy: a caller cannot edit history, and — more
+// to the point — cannot append to it in a way that a later reader would mistake for a real rotation.
+func RetiredKeys() []RetiredKey {
+	out := make([]RetiredKey, len(retiredKeys))
+	copy(out, retiredKeys)
+	return out
+}
+
+// Fingerprint returns the surface-safe identifier for a live trust key: SHA-256 over the public key's
+// raw bytes, hex, first 16 characters.
+//
+// It exists so a surface never has a reason to render `TrustKey.Hex`. The full public key is not a
+// secret; a surface habit of printing key-shaped blobs is.
+func (k TrustKey) Fingerprint() string {
+	raw, err := hex.DecodeString(k.Hex)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])[:16]
 }

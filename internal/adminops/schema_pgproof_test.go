@@ -27,7 +27,16 @@ var testDB *sql.DB
 // chain is the ordered migration chain P8 needs: the lineage bookkeeping table (0001) then P8 (0014).
 // 0014 depends only on schema_migrations, which 0001 creates — P8 owns its own tables and reaches
 // everything else through the subsystem that owns it, so it does not need the P2–P7 chain.
-var chain = []string{"0001_p0_lineage.up.sql", "0014_p8_admin_console.up.sql"}
+// 🔴 P26 added the P12 delivery chain (0002–0004 then 0015). The operator delivery read model reads
+// the REAL `delivery` table, so its contract test has to run against the real migration chain rather
+// than an inlined CREATE TABLE — a test that builds its own approximation of the production schema
+// proves only that the approximation behaves, which is exactly how a missing constraint reaches a
+// customer with CI green.
+var chain = []string{
+	"0001_p0_lineage.up.sql", "0014_p8_admin_console.up.sql",
+	"0002_p2_registries.up.sql", "0003_p2_variant_spec.up.sql", "0004_p2_transform.up.sql",
+	"0015_p12_delivery.up.sql",
+}
 
 func TestMain(m *testing.M) {
 	db, err := pgtest.Open("proof_p8_admin")

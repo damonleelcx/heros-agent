@@ -201,9 +201,18 @@ func TestEveryCapabilityHasAHolder(t *testing.T) {
 
 // TestSupportHoldsOnlyReadAndReadImpersonation pins the least-privilege shape itself, so widening
 // Support is a deliberate edit to this list rather than a quiet one to the map.
+//
+// 🔴 P26 made exactly one such edit, and this comment is the record of it. Support gained
+// `delivery.read`. The argument is not convenience: "did this tenant's change reach their repository,
+// and if not why" was answerable only by opening a reason-required, audited impersonation session
+// into the customer's own console, so the console's most privileged read had become the routine tool
+// for a question a read-only aggregate answers. `delivery.read` is read-only, opens/closes/retries/
+// merges nothing, and — unlike folding the same view into `crosstenant.read` — brings no spend and no
+// usage with it. The destructive-set assertion below is unchanged and still passes.
 func TestSupportHoldsOnlyReadAndReadImpersonation(t *testing.T) {
 	want := map[adminrbac.Capability]bool{
 		adminrbac.CapTenantRead: true, adminrbac.CapJobRead: true, adminrbac.CapImpersonateRead: true,
+		adminrbac.CapDeliveryRead: true,
 	}
 	got := adminrbac.Grants(adminrbac.RoleSupport)
 	if len(got) != len(want) {

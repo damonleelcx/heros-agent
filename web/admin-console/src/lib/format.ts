@@ -39,6 +39,22 @@ export function count(value: number): string {
   return integerFormatter.format(value);
 }
 
+const percentFormatter = new Intl.NumberFormat(LOCALE, {
+  style: "percent",
+  maximumFractionDigits: 1,
+});
+
+/**
+ * percent formats a link-coverage reading the platform computed.
+ *
+ * It takes 0–100 and divides by 100 for `Intl`'s percent style — a unit conversion, not a derivation.
+ * The platform decided the value; this decides how it looks, which is the line this file exists to
+ * keep on one side of.
+ */
+export function percent(value: number): string {
+  return percentFormatter.format(value / 100);
+}
+
 /** timestamp formats an RFC 3339 instant in UTC, so two operators read the same string. */
 export function timestamp(iso: string | undefined | null): string {
   if (!iso) return "—";

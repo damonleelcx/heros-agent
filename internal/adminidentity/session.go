@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -349,4 +350,30 @@ func verifyToken(key []byte, token string) (string, bool) {
 		return "", false
 	}
 	return id, true
+}
+
+// Sessions returns every session the store holds, newest first.
+//
+// It exists for the operator oversight surface (P26 task 6.1): "which factor authenticated this
+// session, and when" is a question a reviewer must be able to answer without inferring it from a login
+// event, and inferring it is what a reviewer does when the surface does not say.
+//
+// 🔴 It returns [Session] values, which carry no token and no factor VALUE — the factor NAME only.
+// The bearer token is never stored: `Issue` returns it once and the store keeps the session id. So
+// there is no shape of this method that could leak a credential, which is why it is a plain listing
+// rather than a redacting projection somebody has to remember to keep correct.
+func (s *SessionStore) Sessions() []Session {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]Session, 0, len(s.sessions))
+	for _, sess := range s.sessions {
+		out = append(out, sess)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].IssuedAt.Equal(out[j].IssuedAt) {
+			return out[i].SessionID < out[j].SessionID
+		}
+		return out[i].IssuedAt.After(out[j].IssuedAt)
+	})
+	return out
 }

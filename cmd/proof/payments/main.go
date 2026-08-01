@@ -260,7 +260,10 @@ func (s *state) serveAdmin(addr string) error {
 	}
 	// The SAME billing.Service the customer surface uses — the whole point. A second service here
 	// would mean two ledgers, and an oversight page reading the one nobody was charged against.
-	billOversight, err := adminops.NewBillingService(layer.Executor, s.svc, metering.NewMemVerifiedDeltas())
+	// No link-coverage source: this process is the P21 billing stack, not a fleet with linked runs. The
+	// oversight surface therefore states that link coverage is UNKNOWN and shows no SUM-derived figure,
+	// which is the honest answer here rather than a degradation to work around.
+	billOversight, err := adminops.NewBillingService(layer.Executor, s.svc, metering.NewMemVerifiedDeltas(), nil)
 	if err != nil {
 		return err
 	}

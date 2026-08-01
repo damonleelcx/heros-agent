@@ -950,39 +950,76 @@ failures. Known trap in this repository; stated here so it is not rediscovered.
 
 ## 13. Success metrics & acceptance criteria
 
-**Exit checklist**
+**Exit checklist** — walked end to end at exit; evidence per item.
 
-- [ ] Every capability in `openspec/specs/` resolves in the ledger to a surface, a reasoned
+- [x] Every capability in `openspec/specs/` resolves in the ledger to a surface, a reasoned
       `no-operator-surface`, or `not-yet-readable` with its missing collection named. No capability is
-      unresolved.
-- [ ] The ledger fence has been demonstrated red three ways: an unresolved capability, a row pointing at
-      a non-existent surface, and a `surfaces.ts` destination no row names.
-- [ ] Every SUM-derived figure on the operator console displays link coverage in the same view; a figure
-      with unknown coverage is not rendered.
-- [ ] A seeded `unverified` authored change contributes zero to every aggregate improvement, savings and
-      quality figure, proven by test.
-- [ ] The audit surface states which merge paths the chain covers and which it does not.
-- [ ] Delivery: records per tenant and cross-tenant; merged / closed-unmerged / unknown rendered as three
-      states; rollout stage shown; undeliverable count with typed causes.
-- [ ] Releases: channels and published versions; active and retired signing keys with rotation dates and
+      unresolved. — `npm run scan:ledger`: *56 row(s), 18 destination(s), every capability resolved and
+      both directions asserted.*
+- [x] The ledger fence has been demonstrated red three ways: an unresolved capability, a row pointing at
+      a non-existent surface, and a `surfaces.ts` destination no row names. — **Four** ways, in
+      `tests/surface-ledger.test.mjs`, each committing the real violation and requiring exit 1 that names
+      the thing: an unresolved capability, a row naming a missing destination, an unjustified
+      destination, and a `not-yet-readable` row with no collection named. Plus a fourth state, an
+      unattributable absence, a reasonless absence, and a ledger with no scope statement.
+- [x] Every SUM-derived figure on the operator console displays link coverage in the same view; a figure
+      with unknown coverage is not rendered. — `TestLinkCoverageIsDisplayedBesideEverySUMDerivedFigure`,
+      `TestAFigureWithUnknownCoverageIsWithheld`, and the console fence *🔴 2.2*, itself demonstrated red.
+      Browser-verified at 30% coverage and at unknown coverage.
+- [x] A seeded `unverified` authored change contributes zero to every aggregate improvement, savings and
+      quality figure, proven by test. — `TestASeededUnverifiedAuthoredChangeContributesExactlyZero`,
+      which reads the figures rather than the query, and includes the control half.
+- [x] The audit surface states which merge paths the chain covers and which it does not. —
+      `TestTheAuditSurfaceStatesWhichMergePathsTheChainCovers`; browser-verified.
+- [x] Delivery: records per tenant and cross-tenant; merged / closed-unmerged / unknown rendered as three
+      states; rollout stage shown; undeliverable count with typed causes. —
+      `TestAClosedPullRequestIsNeverReadAsAMerge`, `TestTheThreeMergeStatesStayThree`,
+      `TestUndeliverableCausesStayTypedAndSeparate`; browser-verified (5 deliveries: 2 / 2 / 1).
+- [x] Releases: channels and published versions; active and retired signing keys with rotation dates and
       reasons; artefacts signed with a retired key identified; verification as three states; smoke as
-      three states including *queued until timeout*.
-- [ ] No key material appears on any surface, asserted.
-- [ ] Axes: per-axis status and adoption; refusal counts by stable typed cause and language; the
-      closing-artefact ranking; the coverage matrix read from the one source.
-- [ ] Coverage parity asserted in both directions against the real engine; an absent row renders as
-      *unknown* naming what is missing, never as *not applicable*.
-- [ ] No coverage gap is presented as a plan boundary anywhere on the console.
-- [ ] Oversight: session authentication factor; consent and legal state per tenant with archived-text
-      links; the three P24 integration states; deployment version or an explicit *unknown*.
-- [ ] Every new cross-tenant read writes its audit entry on the same code path as the read.
-- [ ] No new destructive control shipped. No existing role gained a capability.
-- [ ] No new table created.
-- [ ] Four new pages pass the interface floor: tokens, English/`en-US`, keyboard with visible focus, AA in
-      both themes, viewport floor, payload ceiling.
-- [ ] Browser acceptance recorded for all four pages, in both themes, with a granting and a non-granting
-      role.
-- [ ] Every `[x]` in the task list names an assertion that exists and runs.
+      three states including *queued until timeout*. — `TestArtefactsSignedWithARetiredKeyAreIdentifiable`,
+      `TestArtefactVerificationHasThreeStates`, `TestAQueuedSmokeRunIsNotRenderedAsAFailure`;
+      browser-verified.
+- [x] No key material appears on any surface, asserted. —
+      `TestNoKeyMaterialReachesTheReleaseSurface`, which scans the SERIALISED read model for any live
+      public key, any 32-character prefix of one, any 40+ character hex run, and any PEM/OpenSSH marker.
+- [x] Axes: per-axis status and adoption; refusal counts by stable typed cause and language; the
+      closing-artefact ranking; the coverage matrix read from the one source. —
+      `TestTheAxisSurfaceRendersTheAxisStatusAsDeclared`, `TestTheThreeCausesStayDistinguishable`,
+      `TestTheRankingIsCountsAndNamesOnlyClosableArtefacts`; browser-verified.
+- [x] Coverage parity asserted in both directions against the real engine; an absent row renders as
+      *unknown* naming what is missing, never as *not applicable*. —
+      `TestTheAxisSurfaceIsAtParityWithTheRealEngine` over `transform.AxisCoverage()`, and
+      `TestNoCellRendersAsNotApplicable`. The parity fence is itself demonstrated red by
+      `TestTheParityFenceGoesRedOnADeliberateViolation`, in both directions.
+- [x] No coverage gap is presented as a plan boundary anywhere on the console. —
+      `TestACoverageGapIsNotPresentedAsAPlanBoundary` and the console's *🔴 5.8*.
+- [x] Oversight: session authentication factor; consent and legal state per tenant with archived-text
+      links; the three P24 integration states; deployment version or an explicit *unknown*. —
+      `TestAnOperatorSessionShowsTheFactorThatAuthenticatedIt`,
+      `TestAnObservabilityIntegrationHasThreeStatesAndNamesItsFailure`,
+      `TestAnUnknownDeployedVersionIsStatedAndNamesTheMissingCollection`; browser-verified.
+- [x] Every new cross-tenant read writes its audit entry on the same code path as the read. —
+      `TestEveryCrossTenantDeliveryReadIsAuditedOnTheReadPath`; the release, axis and oversight reads use
+      the same in-service write, and `TestTheAxisReadIsNotCached` proves two reads produce two entries.
+- [x] No new destructive control shipped. No existing role gained a capability. —
+      `TestTheDeliverySurfaceIsReadOnly`, `TestTheReleaseSurfaceOffersNoOperationThatProducesKeyMaterial`,
+      `TestTheAxisSurfaceIsReadOnlyAndDrillsDown`, `TestTheOversightSurfaceIsReadOnly` (each enumerates
+      its service's methods by reflection), and `TestNoExistingRoleWidened` against a hand-written record
+      of the pre-P26 holder sets.
+      ⚠️ **One deliberate exception, argued rather than hidden:** Support gained the NEW `delivery.read`.
+      No pre-existing capability changed hands. See §14 Q3.
+- [x] No new table created. — `TestNoNewTableWasCreated`: no migration above `0019` exists.
+- [x] Four new pages pass the interface floor: tokens, English/`en-US`, keyboard with visible focus, AA in
+      both themes, viewport floor, payload ceiling. — `tests/p26-floor.test.mjs`; token scan green;
+      bundle scan *833055 shipped bytes, 566945 under the ceiling*; contrast measured in-browser across
+      2275 text elements over four pages × two themes with **0 failures**.
+- [x] Browser acceptance recorded for all four pages, in both themes, with a granting and a non-granting
+      role. — Recorded in `openspec/changes/p26-operator-console-refresh/tasks.md` §7.9. It caught a real
+      defect: a `nil` Go slice marshalling to `null` crashed `/oversight`.
+- [x] Every `[x]` in the task list names an assertion that exists and runs. — Audited mechanically at
+      exit: **32 cited Go assertions, 32 exist, 32 pass, 0 skipped, 0 phantom**; 9 cited console
+      assertions, all present.
 
 **Metrics that would tell us this phase worked**
 - **Headline:** impersonation sessions whose recorded reason is a routine lookup an aggregate now answers
@@ -1002,34 +1039,56 @@ failures. Known trap in this repository; stated here so it is not rediscovered.
 
 ---
 
-## 14. Open questions
+## 14. Open questions — RESOLVED AT EXIT
 
-1. **Should the console be able to halt an install channel?** The strongest candidate write control in
-   this phase, and it is deferred rather than refused.
-   *Path A — build it:* a typed-target confirmation with a reason, audited, on the model of the kill
-   switch. Short-term cost: one control plus its confirmation, its audit shape, and a capability. Benefit:
-   a bad release stops reaching strangers in minutes instead of via a pipeline run. Long-term cost: a new
-   destructive control on the highest-blast-radius surface, and a second mechanism (alongside the
-   pipeline) that can change what customers receive.
-   *Path B — leave it in the pipeline:* zero new surface area; the halt requires a pipeline run and the
-   people who can do it. Cost: slower during an incident, and the console shows a problem it cannot act
-   on.
-   **Recommendation: Path B for this phase, Path A as its own change** — a control that stops software
-   reaching customers deserves its own design conversation, not a paragraph in a refresh. Needs a
-   decision.
-2. **Is per-tenant deployed version derivable today?** If no signal carries the release identifier from a
-   customer deployment, the ledger records `not-yet-readable` and names a deployment heartbeat as the
-   missing collection. Confirm, because it changes what wave 26e can render.
-3. **Does the axis surface need a new capability, or does `crosstenant.read` cover it?** Refusal
-   distributions are fleet-wide aggregates, which is what that capability governs. A separate
-   `axis.read` would let an axis owner see refusals without seeing usage or spend — a genuine
-   partitioning. Leaning toward a separate capability, since partitioning is the console's existing
-   principle.
-4. **Does release oversight need a new capability?** A release engineer is arguably a fifth operator
-   persona, and none of the four existing roles is a natural home for signing-key state.
-5. **How far back should the delivery surface reach?** Delivery records are append-only and will grow
-   without bound. A default window plus a search, or full history with pagination? The Audit Log's
-   existing answer should probably be reused rather than re-decided.
-6. **Should the ledger also cover the customer console?** The same drift argument applies to P9, and the
-   same fence would work. Out of scope here deliberately — but if the answer is yes, the ledger's shape
-   should anticipate it now rather than being retrofitted.
+All six were decided during implementation. Each records what was decided, by what argument, and — where
+it matters — what was deliberately NOT done.
+
+1. **Should the console be able to halt an install channel?**
+   **RESOLVED: Path B — the halt stays in the pipeline for this phase.** The recommendation stood
+   unchanged after building the release surface: a control that stops software reaching customers
+   deserves its own design conversation, not a paragraph in a refresh, and a refresh is where a new
+   destructive control gets the least scrutiny because it arrives inside a page whose purpose is a
+   table. The consequence is accepted and stated on the surface itself: `/releases` shows a problem it
+   cannot act on. `TestTheReleaseSurfaceOffersNoOperationThatProducesKeyMaterial` and the console's
+   *🔴 4.9* keep it that way. **Path A remains open as its own change.**
+
+2. **Is per-tenant deployed version derivable today?**
+   **RESOLVED: no.** No signal carries a customer deployment's release identifier. `/oversight` renders
+   *unknown* per tenant and names the missing collection — `a deployment heartbeat carrying the release
+   identifier` — and the ledger carries the row. Nothing is inferred from an API contract version, a
+   feature probe or any other proxy: `TestAnUnknownDeployedVersionIsStatedAndNamesTheMissingCollection`
+   fails if a row reports a version and an unknown at the same time.
+
+3. **Does the axis surface need a new capability, or does `crosstenant.read` cover it?**
+   **RESOLVED: a separate `axis.read`**, granted to Platform-SRE and Superadmin. `crosstenant.read`
+   grants the money aggregates in the same breath, and the question *which materializer would unblock
+   the most refused nodes* needs none of them. The same argument produced `delivery.read`.
+   🔴 **`delivery.read` is granted to Support, and that is the one place an existing role gained
+   anything.** It is a NEW capability, not a widening of an old one — no pre-existing capability changed
+   hands, which is what `TestNoExistingRoleWidened` enforces — and it is the grant that makes D6's
+   headline metric possible: Support is the role that was opening impersonation sessions to answer
+   delivery questions. `TestSupportHoldsOnlyReadAndReadImpersonation` was edited deliberately and
+   carries the reasoning, so the change is a visible edit rather than a quiet one.
+
+4. **Does release oversight need a new capability?**
+   **RESOLVED: yes — `release.read`,** granted to Platform-SRE and Superadmin only. A release engineer
+   is arguably a fifth operator persona and this console has no role for one; until it does, Platform-SRE
+   is the nearest holder. NOT granted to Support or Billing-Ops: signing-key state is not something a
+   support queue needs, and the alternative — widening `registry.admin` to cover keys — would have
+   widened a role that already administers the model registry.
+
+5. **How far back should the delivery surface reach?**
+   **RESOLVED: reuse the Audit Log's existing answer** rather than re-decide it. The delivery read model
+   reads the record's own per-tenant listing and the fleet view iterates tenants; the surface filters by
+   merge outcome through the URL, so a narrowed view is a link. No window and no pagination were
+   invented for this phase. 🔴 **This is the item most likely to need revisiting**: delivery records are
+   append-only and will grow without bound, and the fleet read currently walks every tenant. It is
+   recorded here rather than closed silently.
+
+6. **Should the ledger also cover the customer console?**
+   **RESOLVED: no, and the ledger says so in its own first paragraph.** Its scope statement is asserted
+   by the fence — a ledger with no stated scope fails — precisely so a `no-operator-surface` row cannot
+   be misread as a claim that no surface of any kind exists. The shape anticipates the extension: the
+   fence already reads three independent sources against three sections, and a customer-console section
+   would be a fourth of the same form.

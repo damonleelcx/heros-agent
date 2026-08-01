@@ -20,14 +20,14 @@
  * who needs "is anything halted" answered before they have finished sitting down. So the surface is a
  * near-black ground with hairline rules rather than cards on paper; figures are set in a monospace at
  * display size so a column of them can be scanned for magnitude; labels are condensed, tracked-out
- * micro-type that recedes; and the ONE bright thing in the neutral state is the teal that marks
+ * micro-type that recedes; and the ONE bright thing in the neutral state is the violet that marks
  * something interactive.
  *
  * Nothing here is texture for its own sake. Every value below is either a legibility decision or a
  * salience decision, and the salience budget is the point: a surface where everything is emphatic has
  * no way left to say "this control halts the fleet".
  *
- * # Why the accent is teal, and why that is a safety fix
+ * # Why the accent is violet, and why that is a safety fix
  *
  * The console's identity was once amber — the same hue as `--warn`. That made the hazard palette
  * ordinary: chrome, links, primary buttons and bar charts were all painted in the colour reserved for
@@ -35,9 +35,22 @@
  * signal had been spent. FR31 exists to prevent that, and FR24's friction depends on it — "halt this
  * tenant" can only look different from "halt the fleet" if red and amber still mean something here.
  *
- * The operator identity is therefore a cool teal-cyan: nowhere near the hazard hues, reads as
- * instrumentation rather than alarm, and unmistakable beside the customer console's indigo (FR23)
- * without borrowing a colour that has a job.
+ * The operator identity is therefore a VIOLET, with a slate-lilac secondary carrying the supporting
+ * roles — the ink on the chrome band, and the accent border. Violet is the furthest thing on the wheel
+ * from a colour that already has a job here: 87–90° from the customer console's green-teal, and
+ * 105–142° from BOTH hazard hues. It reads as instrumentation rather than alarm, and it cannot be
+ * mistaken for either console's status vocabulary.
+ *
+ * 🔴 It was a teal-cyan until P26, and the move was a FENCE FAILURE, not a preference. FR23
+ * requires the two consoles to be distinguishable at a glance, and `tests/craft.test.mjs` measures
+ * that as hue separation. The customer console's accents drifted over several phases until the two
+ * light accents sat 17° apart and the two dark accents 8° — below the separation the fence requires,
+ * and below the separation the fence's own comment believed was shipping. The light assertion failed
+ * first, which is why the dark one had never been seen to fail at all. Violet restores 87–90° in
+ * both themes — comfortably past the fence rather than just over it, which is the margin a hue this
+ * load-bearing should carry. The operator console moved rather than the customer one because this is
+ * the console FR23 protects, and because moving a customer-facing identity to fix an operator-facing
+ * safety property is the larger blast radius of the two.
  *
  * # Why literals are legal here
  *
@@ -106,10 +119,10 @@
    with an unstyled control in light mode only, and `tests/craft.test.mjs` asserts the two mapping
    blocks name the same set.
 
-   🔴 Note what does NOT invert. The chrome band is a deep, near-black teal in BOTH themes. That is
+   🔴 Note what does NOT invert. The chrome band is a deep, near-black violet in BOTH themes. That is
    deliberate and it is FR23: an operator with both consoles open, acting cross-tenant while believing
    the view is single-tenant, is the named failure. A light theme whose chrome went pale would have
-   introduced that failure by a new route, so the light band is a dark teal rather than a tint. */
+   introduced that failure by a new route, so the light band is a dark violet rather than a tint. */
 
 :root {
   /* ── Dark: the instrument ───────────────────────────────────────────────
@@ -156,20 +169,20 @@
    *   accent-surface   a tint for quiet emphasis
    *   accent-border    a hairline that survives on both tints
    */
-  --od-accent: #14d9c4;
-  --od-accent-strong: #5cf0dd;
-  --od-accent-surface: #06302c;
-  --od-accent-border: #0e9b8c;
-  --od-accent-contrast: #04231f;
-  --od-chrome-bg: #050b0e;
-  --od-chrome-text: #d8f2f8;
-  --od-chrome-muted: #8ba7b1;
-  --od-chrome-border: #14323a;
+  --od-accent: #a78bfa;
+  --od-accent-strong: #c9b6ff;
+  --od-accent-surface: #1b1435;
+  --od-accent-border: #6b4bb0;
+  --od-accent-contrast: #17102b;
+  --od-chrome-bg: #0a0715;
+  --od-chrome-text: #e6e0f5;
+  --od-chrome-muted: #9c93b5;
+  --od-chrome-border: #241b3d;
   /* The accent AS IT APPEARS ON THE BAND. It is its own token because the band is dark in both
    * themes while the page is not: `--accent` is ink for the page, and in the light theme it is a
-   * deep teal that would vanish against the chrome. Anything painted on the band — the wordmark, the
+   * deep violet that would vanish against the chrome. Anything painted on the band — the wordmark, the
    * clock's live dot, the current-section rule — uses this instead. */
-  --od-chrome-accent: #14d9c4;
+  --od-chrome-accent: #c0a9f5;
 
   /* ── Light: the same instrument in daylight ─────────────────────────────
    * Not the dark theme inverted. The dark surface stack reads by lightness; the light one reads by
@@ -210,17 +223,17 @@
 
   /* Operator identity, light. The accent darkens to hold AA as ink on white; the hue does not move,
    * so the console is the same colour in both themes rather than two different products. */
-  --ol-accent: #0a6d78;
-  --ol-accent-strong: #074f58;
-  --ol-accent-surface: #dcedf0;
-  --ol-accent-border: #2a8d9b;
+  --ol-accent: #5b3fa8;
+  --ol-accent-strong: #40297d;
+  --ol-accent-surface: #e6e0f5;
+  --ol-accent-border: #6b4bb0;
   --ol-accent-contrast: #ffffff;
-  --ol-chrome-bg: #08323a;
-  --ol-chrome-text: #dff2f5;
-  --ol-chrome-muted: #93b9c1;
-  --ol-chrome-border: #12707f;
+  --ol-chrome-bg: #221a3a;
+  --ol-chrome-text: #ece7f7;
+  --ol-chrome-muted: #a89cc4;
+  --ol-chrome-border: #3f2f6b;
   /* Brighter than `--ol-accent`, because the band it sits on is dark in the light theme too. */
-  --ol-chrome-accent: #4fd9c8;
+  --ol-chrome-accent: #c0a9f5;
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
