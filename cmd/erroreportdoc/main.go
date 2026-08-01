@@ -93,9 +93,9 @@ func render() []byte {
 	b.WriteString("---\n\n## The error-event allowlist\n\n")
 	b.WriteString("| Field | Category | Why it is structure, not content |\n|---|---|---|\n")
 	for _, f := range erroreport.Allowlist {
-		b.WriteString(fmt.Sprintf("| `%s` | %s | %s |\n", f.Name, f.Category, f.Why))
+		fmt.Fprintf(&b, "| `%s` | %s | %s |\n", f.Name, f.Category, f.Why)
 	}
-	b.WriteString(fmt.Sprintf("\n%d field(s), in the order the code declares them.\n\n", len(erroreport.Allowlist)))
+	fmt.Fprintf(&b, "\n%d field(s), in the order the code declares them.\n\n", len(erroreport.Allowlist))
 
 	b.WriteString("### By category\n\n")
 	byCategory := map[string][]string{}
@@ -108,13 +108,13 @@ func render() []byte {
 	}
 	sort.Strings(categories)
 	for _, c := range categories {
-		b.WriteString(fmt.Sprintf("- **%s** — `%s`\n", c, strings.Join(byCategory[c], "`, `")))
+		fmt.Fprintf(&b, "- **%s** — `%s`\n", c, strings.Join(byCategory[c], "`, `"))
 	}
 
 	b.WriteString("\n---\n\n## Never permitted, and not expressible as a field\n\n")
 	b.WriteString("Each of these is absent because there is no field for it, not because a filter removes it.\n\n")
 	for _, item := range neverPermitted {
-		b.WriteString(fmt.Sprintf("- %s\n", item))
+		fmt.Fprintf(&b, "- %s\n", item)
 	}
 
 	b.WriteString("\n---\n\n## `error.code` — the only message-shaped field\n\n")
@@ -123,25 +123,25 @@ func render() []byte {
 	b.WriteString("through — so a literal typed at a call site is absent from the wire instead of quietly present\n")
 	b.WriteString("on it. The complete set:\n\n")
 	for _, c := range errorcode.All {
-		b.WriteString(fmt.Sprintf("- `%s`\n", c))
+		fmt.Fprintf(&b, "- `%s`\n", c)
 	}
-	b.WriteString(fmt.Sprintf("\n%d code(s).\n", len(errorcode.All)))
+	fmt.Fprintf(&b, "\n%d code(s).\n", len(errorcode.All))
 
 	b.WriteString("\n---\n\n## The stated numbers\n\n")
 	b.WriteString("| Setting | Value | Basis |\n|---|---|---|\n")
-	b.WriteString(fmt.Sprintf("| Sample rate | `%v` | A defect **inbox**, not a rate source. Every frequency question is answered from the telemetry substrate, where events are complete. The first occurrence of a new defect is the one that matters, and a sampled inbox drops it with the same probability as the thousandth. |\n", erroreport.SampleRate))
-	b.WriteString(fmt.Sprintf("| Per-issue rate limit | `%d` per `%s` | Beyond the first few, each copy of the same failure tells an operator nothing and costs budget a rarer defect needs. |\n", erroreport.PerIssueRateLimit, erroreport.RateInterval))
-	b.WriteString(fmt.Sprintf("| Transmit budget | `%d` per `%s` | A bound that holds even when the per-issue limiter is defeated by a failure that varies its type or frame each time. |\n", erroreport.TransmitBudget, erroreport.RateInterval))
-	b.WriteString(fmt.Sprintf("| Queue depth | `%d`, overflow **drops** | Blocking would put an incident inbox in the request path; growing would turn a transmit outage into a memory leak. |\n", erroreport.QueueDepth))
-	b.WriteString(fmt.Sprintf("| Performance tracing | `%v` | Latency is already measured by the substrate, per call, joined to runs, unsampled. |\n", erroreport.TracingEnabled))
-	b.WriteString(fmt.Sprintf("| Profiling | `%v` | A profile carries function-level timing of code paths operating on customer content — structure this boundary has no way to bound. |\n", erroreport.ProfilingEnabled))
+	fmt.Fprintf(&b, "| Sample rate | `%v` | A defect **inbox**, not a rate source. Every frequency question is answered from the telemetry substrate, where events are complete. The first occurrence of a new defect is the one that matters, and a sampled inbox drops it with the same probability as the thousandth. |\n", erroreport.SampleRate)
+	fmt.Fprintf(&b, "| Per-issue rate limit | `%d` per `%s` | Beyond the first few, each copy of the same failure tells an operator nothing and costs budget a rarer defect needs. |\n", erroreport.PerIssueRateLimit, erroreport.RateInterval)
+	fmt.Fprintf(&b, "| Transmit budget | `%d` per `%s` | A bound that holds even when the per-issue limiter is defeated by a failure that varies its type or frame each time. |\n", erroreport.TransmitBudget, erroreport.RateInterval)
+	fmt.Fprintf(&b, "| Queue depth | `%d`, overflow **drops** | Blocking would put an incident inbox in the request path; growing would turn a transmit outage into a memory leak. |\n", erroreport.QueueDepth)
+	fmt.Fprintf(&b, "| Performance tracing | `%v` | Latency is already measured by the substrate, per call, joined to runs, unsampled. |\n", erroreport.TracingEnabled)
+	fmt.Fprintf(&b, "| Profiling | `%v` | A profile carries function-level timing of code paths operating on customer content — structure this boundary has no way to bound. |\n", erroreport.ProfilingEnabled)
 
 	b.WriteString("\n---\n\n## Deployment posture\n\n")
-	b.WriteString(fmt.Sprintf("Configured by exactly one variable, `%s`. There is no fallback, no file and no discovered\n", erroreport.EnvDSN))
+	fmt.Fprintf(&b, "Configured by exactly one variable, `%s`. There is no fallback, no file and no discovered\n", erroreport.EnvDSN)
 	b.WriteString("default. Empty means **absent**: no transmit, no warning, readiness reports `absent`. That is the\n")
 	b.WriteString("expected state on a customer's Compose or Kubernetes install and on an air-gapped network.\n\n")
-	b.WriteString(fmt.Sprintf("`%s` is a label from a closed set — `%s` — and an unrecognised value is reported as\n",
-		erroreport.EnvEdition, strings.Join(erroreport.Editions, "`, `")))
+	fmt.Fprintf(&b, "`%s` is a label from a closed set — `%s` — and an unrecognised value is reported as\n",
+		erroreport.EnvEdition, strings.Join(erroreport.Editions, "`, `"))
 	b.WriteString("`unknown` with a WARN rather than transmitted.\n")
 
 	return []byte(b.String())

@@ -344,9 +344,9 @@ func writeReport(dir string, found []material, byKind map[string]int, bodies []s
 	b.WriteString("# P24 against nousresearch/hermes-agent\n\n")
 	b.WriteString("The P24 error boundary, exercised with a fixture taken from a REAL repository rather than\n")
 	b.WriteString("from strings written beside the code that filters them.\n\n")
-	b.WriteString(fmt.Sprintf("- Repository: %s\n", repoURL))
-	b.WriteString(fmt.Sprintf("- Material extracted: **%d** pieces\n", len(found)))
-	b.WriteString(fmt.Sprintf("- Envelopes transmitted: **%d** (the rest rate-limited by design)\n", len(bodies)))
+	fmt.Fprintf(&b, "- Repository: %s\n", repoURL)
+	fmt.Fprintf(&b, "- Material extracted: **%d** pieces\n", len(found))
+	fmt.Fprintf(&b, "- Envelopes transmitted: **%d** (the rest rate-limited by design)\n", len(bodies))
 	b.WriteString("- Pieces of that material found in the transmitted bytes: **0**\n\n")
 	b.WriteString("## What was taken\n\n| Kind | Count |\n|---|---|\n")
 	kinds := make([]string, 0, len(byKind))
@@ -355,7 +355,7 @@ func writeReport(dir string, found []material, byKind map[string]int, bodies []s
 	}
 	sort.Strings(kinds)
 	for _, k := range kinds {
-		b.WriteString(fmt.Sprintf("| %s | %d |\n", k, byKind[k]))
+		fmt.Fprintf(&b, "| %s | %d |\n", k, byKind[k])
 	}
 	b.WriteString("\n## A transmitted envelope, verbatim\n\n```\n")
 	if len(bodies) > 0 {

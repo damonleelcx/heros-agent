@@ -85,7 +85,12 @@ func (e *carrierError) Unwrap() error { return e.inner }
 type contextKey struct{}
 
 // buildContaminatedError attaches every forbidden shape by every route available to a caller.
-func buildContaminatedError(t *testing.T) (error, context.Context) {
+//
+// The context comes back FIRST and the error LAST, which is the Go convention and which staticcheck
+// enforces (ST1008). It reads slightly oddly here — the error is the subject and the context is the
+// carrier — and that is not a reason to invert it: a helper that returns its error anywhere but last is
+// a helper somebody eventually assigns in the wrong order.
+func buildContaminatedError(t *testing.T) (context.Context, error) {
 	t.Helper()
 	shapes := forbiddenShapes()
 	byName := map[string]string{}
@@ -110,7 +115,7 @@ func buildContaminatedError(t *testing.T) (error, context.Context) {
 		"url":  byName["a tenant-scoped URL"],
 	})
 	ctx = telemetry.ContextWithTraceID(ctx, "9f2c1ab47e6d40518c33a7b1e0d4f6a2")
-	return carrier, ctx
+	return ctx, carrier
 }
 
 // ── The capture endpoint ─────────────────────────────────────────────────────
@@ -195,7 +200,7 @@ func TestTransmittedBytesCarryNoForbiddenShape(t *testing.T) {
 	}
 
 	cap, r := startCapture(t)
-	err, ctx := buildContaminatedError(t)
+	ctx, err := buildContaminatedError(t)
 
 	ev := FromError(err, errorcode.ProviderError, 0)
 	ev.Surface = "platform.api"
@@ -232,7 +237,7 @@ func TestTransmittedBytesCarryNoForbiddenShape(t *testing.T) {
 }
 
 func TestTransmittedKeySetIsASubsetOfTheAllowlist(t *testing.T) {
-	err, ctx := buildContaminatedError(t)
+	ctx, err := buildContaminatedError(t)
 	ev := FromError(err, errorcode.ProviderError, 0)
 	ev.Surface = "platform.api"
 	ev.TraceID = telemetry.TraceIDFromContext(ctx)
@@ -257,7 +262,7 @@ func TestTransmittedKeySetIsASubsetOfTheAllowlist(t *testing.T) {
 // default somebody wired in — is a failure by construction rather than by pattern.
 func TestEveryTransmittedValueIsExplained(t *testing.T) {
 	cap, r := startCapture(t)
-	err, ctx := buildContaminatedError(t)
+	ctx, err := buildContaminatedError(t)
 	ev := FromError(err, errorcode.ProviderError, 0)
 	ev.Surface = "platform.api"
 	r.Report(ctx, ev)

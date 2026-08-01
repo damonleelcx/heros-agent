@@ -236,3 +236,48 @@ test("1.4 🔴 a real operator response names no analytics and no session-replay
     assert.match(scriptSrc, /'strict-dynamic'/);
   }
 });
+
+// ── The regression guard for the failure that got here ──────────────────────
+
+test("🔴 the CI job that runs this suite is on a Node that can load the shared artefact", async () => {
+  /*
+   * This test exists because CI went red and the local run did not.
+   *
+   * Both consoles' middleware constructs its Content-Security-Policy from ONE checked-in TypeScript
+   * artefact, and these tests import that artefact DIRECTLY so they assert against the shipped policy
+   * rather than against a copy of it. Node cannot load a `.ts` file without type stripping — 22.6
+   * behind a flag, 22.18 by default — so on Node 20 the whole suite dies with
+   * ERR_UNKNOWN_FILE_EXTENSION before a single assertion runs.
+   *
+   * The failure mode is the dangerous one: not a wrong answer, but NO answer, reported as a test-file
+   * error that reads like a broken import. Every fence in this file is silent at once.
+   *
+   * So the workflow's pinned version is checked against the floor `package.json` declares. Setting
+   * `node-version` back is now a red build rather than a mystery in the CI log.
+   */
+  const { readFile } = await import("node:fs/promises");
+  const workflow = await readFile(join(ROOT, "..", "..", ".github", "workflows", "ci.yml"), "utf8");
+  const pkg = JSON.parse(await readFile(join(ROOT, "package.json"), "utf8"));
+
+  const floor = Number(/>=\s*(\d+)/.exec(pkg.engines?.node ?? "")?.[1]);
+  assert.ok(floor >= 22, `package.json declares no Node floor that can strip types (${pkg.engines?.node})`);
+
+  // The job that runs THIS suite, found by its working-directory rather than by its position.
+  const job = workflow.slice(workflow.indexOf("  operator-console:"));
+  const pinned = Number(/node-version:\s*"?(\d+)/.exec(job)?.[1]);
+  assert.ok(Number.isFinite(pinned), "the operator-console job pins no Node version");
+  assert.ok(
+    pinned >= floor,
+    `CI runs this suite on Node ${pinned}, below the ${floor} floor package.json declares. Node cannot ` +
+      `load web/design-system/*.ts below 22.18, so every assertion in this file would be skipped — ` +
+      `silently, as a file-level error rather than as a failure.`,
+  );
+
+  // And the runtime actually executing right now, so a developer sees the same sentence CI would.
+  const running = Number(process.versions.node.split(".")[0]);
+  assert.ok(
+    running >= floor,
+    `this run is on Node ${process.versions.node}, below the ${floor} floor. Upgrade rather than ` +
+      `reading the ERR_UNKNOWN_FILE_EXTENSION that follows.`,
+  );
+});
