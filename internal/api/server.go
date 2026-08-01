@@ -22,6 +22,7 @@ import (
 	"github.com/heros-foreal/agentd/internal/adminidentity"
 	"github.com/heros-foreal/agentd/internal/auth"
 	"github.com/heros-foreal/agentd/internal/config"
+	"github.com/heros-foreal/agentd/internal/erroreport"
 	"github.com/heros-foreal/agentd/internal/providergateway"
 )
 
@@ -111,6 +112,9 @@ type Server struct {
 	// behind it — no key, no secret id, no assertion.
 	adminIdentity AdminIdentityDescriber
 
+	// errorReporter is the P24 error-reporting boundary. Nil means absent, which is the default and the
+	// correct state on every substrate except the platform's own hosted deployment.
+	errorReporter erroreport.Reporter
 	// probes are the dependent components aggregated into /readyz (P9 FR25, P19 topology FR).
 	//
 	// The moment a second process sits in the request path, readiness has to cover it or it is
@@ -382,6 +386,9 @@ func New(db *sql.DB, cfg config.Config) *Server {
 		reg := auth.NewRegistry(cfg)
 		h = auth.Compose(reg, h) // gates /api/*; health paths stay open
 	}
+	// OUTERMOST, so a panic in the auth layer is reported too and every response — including a refusal
+	// — carries the trace id a customer can quote back.
+	h = s.traceAndReport(h)
 	s.Handler = h
 	return s
 }
@@ -451,6 +458,10 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 		// and saying so by omission beats inventing a status for it.
 		body["billing_rollout"] = s.billing.Describe()
 	}
+	// The error-reporting integration's three-state entry. Reported at the top level beside
+	// `secrets_source` rather than inside `components`, because it is deliberately NOT a gate — see
+	// errorReporterState.
+	body["error_reporting"] = s.errorReporterState()
 	if s.billingCapability != nil {
 		// Which processor, and where its credentials come from. Absent rather than "unknown" when
 		// unset, exactly like the two signals above.

@@ -16,6 +16,23 @@ import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { startStubPlatform, startConsole, signIn, TENANT } from "./support/harness.mjs";
 
+/**
+ * originOf reduces a CSP source expression to its origin.
+ *
+ * Written as a parse rather than as `replace(/\/.*$/, "")`, which was the first version and was
+ * WRONG in the direction that matters: it cut at the first slash, turning
+ * `https://ingest.example` into `https:` — so a legitimately allowlisted origin was reported as
+ * unlisted. An assertion that fails on correct input gets loosened, and the loosening is what
+ * actually costs the guarantee.
+ */
+function originOf(source) {
+  try {
+    return new URL(source).origin;
+  } catch {
+    return source;
+  }
+}
+
 const ROOT = new URL("..", import.meta.url).pathname;
 const read = (rel) => readFile(join(ROOT, rel), "utf8");
 
@@ -287,13 +304,56 @@ test("a revoked session is denied on a page route too, and no shell is rendered"
   assert.match(res.headers.get("location") ?? "", /reason=session_ended/);
 });
 
-test("the shipped CSP has no unsafe-eval and no third-party origin", async () => {
-  const res = await fetch(`${console_.base}/signin`);
-  const csp = res.headers.get("content-security-policy") ?? "";
-  assert.match(csp, /default-src 'self'/);
-  assert.match(csp, /'strict-dynamic'/);
-  assert.doesNotMatch(csp, /'unsafe-eval'/, "the shipped CSP allows eval");
-  assert.doesNotMatch(csp, /https?:\/\//, "the shipped CSP names a third-party origin");
+/*
+ * 🔴 This assertion used to end with a global `doesNotMatch(/https?:\/\//)` on one public route.
+ *
+ * That was true, and it was the WRONG SHAPE, in a way that would have cost the guarantee it was for.
+ * The rule it stood for is not one rule: `/app/**` and `/api/**` must name no third-party origin
+ * because they render prompt text, diffs, run output and tenant identifiers, and the public surface
+ * must name only origins somebody put on a checked-in allowlist for a stated reason. A single global
+ * regex conflates them — so the day the public surface legitimately gains one origin (P24 wave 24e),
+ * the only honest way to keep the suite green is to widen or delete the check, and the tenant
+ * guarantee leaves with it. That is "silently removes the guarantee from the surface it was for",
+ * which P24's design rejects by name.
+ *
+ * So the check is now per prefix and each half names the requirement it defends. The public-prefix
+ * half is bounded by the allowlist rather than by zero. The full set — every prefix, script-src gaining
+ * no host, and the operator console's own version — lives in `tests/third-party-fence.test.mjs`; what
+ * stays here is the part that belongs to the §3.11 security assertions.
+ */
+test("the shipped CSP has no unsafe-eval, and no third-party origin on a tenant prefix", async () => {
+  const cookie = await signIn(console_.base);
+  const tenant = await fetch(`${console_.base}/app`, { headers: { cookie } });
+  assert.equal(tenant.status, 200, "the tenant route did not render — the assertion would prove nothing");
+  const tenantCsp = tenant.headers.get("content-security-policy") ?? "";
+  assert.match(tenantCsp, /default-src 'self'/);
+  assert.match(tenantCsp, /'strict-dynamic'/);
+  assert.doesNotMatch(tenantCsp, /'unsafe-eval'/, "the shipped CSP allows eval");
+  assert.doesNotMatch(
+    tenantCsp,
+    /https?:\/\//,
+    "a tenant prefix names a third-party origin — /app renders prompt text, diffs and run output",
+  );
+
+  const data = await fetch(`${console_.base}/api/health`);
+  const dataCsp = data.headers.get("content-security-policy") ?? "";
+  assert.doesNotMatch(
+    dataCsp,
+    /https?:\/\//,
+    "the BFF data prefix names a third-party origin — a tenant's URLs must not reach a third party's logs",
+  );
+
+  // The public prefix is bounded by the ALLOWLIST, not by zero. Reading the allowlist here rather than
+  // hard-coding zero is what lets this assertion survive wave 24e without being weakened for it.
+  const { ALLOWED_ORIGINS } = await import("../../design-system/third-party-policy.ts");
+  const permitted = new Set(ALLOWED_ORIGINS.map((o) => o.origin));
+  const publicRes = await fetch(`${console_.base}/signin`);
+  const publicCsp = publicRes.headers.get("content-security-policy") ?? "";
+  assert.match(publicCsp, /default-src 'self'/);
+  assert.doesNotMatch(publicCsp, /'unsafe-eval'/, "the shipped CSP allows eval");
+  for (const named of [...publicCsp.matchAll(/https?:\/\/[^\s;]+/g)].map((m) => originOf(m[0]))) {
+    assert.ok(permitted.has(named), `the public prefix names ${named}, which the allowlist does not carry`);
+  }
 });
 
 test("the health endpoint reports the console without probing the platform", async () => {

@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { REPOSITORY } from "@/content/repository";
+import { PublicAnalytics } from "@/components/publicAnalytics";
+import { publicAnalyticsConfig } from "@/lib/publicAnalyticsConfig";
 
 /**
  * PublicLayout is the shell for the one surface that has no session.
@@ -17,9 +19,20 @@ import { REPOSITORY } from "@/content/repository";
  * (`--marketing-*`), so the page cannot half-invert into a state nobody designed — which is what a
  * light rendering of a composition built on glow, grid and glass would be.
  */
-export default function PublicLayout({ children }: { children: React.ReactNode }) {
+export default async function PublicLayout({ children }: { children: React.ReactNode }) {
+  /*
+   * The two public-surface tags, mounted HERE and nowhere else (P24 wave 24e).
+   *
+   * This layout governs the public prefix only. `/app` composes a different shell, and the operator
+   * console is a different application — so there is no route through which this component reaches a
+   * surface where analytics or session replay is refused. Two further mechanisms back it up: the module
+   * refuses a surface id that is not `public.*`, and the policy those prefixes serve names neither
+   * origin. Three independent guards, because one is a checklist.
+   */
+  const analytics = await publicAnalyticsConfig();
   return (
     <div className="min-h-screen bg-marketing-canvas text-marketing-ink">
+      <PublicAnalytics {...analytics} />
       <a className="skip-link" href="#main">
         Skip to content
       </a>

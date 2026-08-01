@@ -124,9 +124,22 @@ jobs:
         working-directory: web/admin-console
     steps:
       - uses: actions/checkout@v4
+      # 🔴 24, not 20, and the reason is a hard requirement rather than a preference.
+      #
+      # Both consoles' middleware constructs its Content-Security-Policy from ONE checked-in TypeScript
+      # artefact (web/design-system/third-party-policy.ts), and the tests import that artefact directly
+      # so they assert against the shipped policy rather than a copy of it. Node cannot load a `.ts`
+      # file without type stripping, which arrived in 22.6 behind a flag and is on by default from
+      # 22.18 — on 20 the suite dies with ERR_UNKNOWN_FILE_EXTENSION before a single assertion runs.
+      #
+      # The alternative was to make the artefact `.mjs` with types in a separate declaration file. That
+      # trades a type-checked security artefact — the thing that stops an origin being added with the
+      # wrong directive or the wrong consent category — for compatibility with a runtime GitHub is
+      # deprecating on its own runners. `engines` in package.json states the floor so a developer on 20
+      # gets a sentence from npm rather than a stack trace about a file extension.
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
           cache: npm
           cache-dependency-path: web/admin-console/package-lock.json
       - run: npm ci
@@ -135,6 +148,23 @@ jobs:
       - name: design-language fence
         run: npm run scan:tokens
       - run: npm run typecheck
+      # 🔴 The suite now needs a BUILD, and this step is why the job grew one.
+      #
+      # Every assertion in this suite used to be about source shape, which needs no build. P24 added the
+      # first ones that read a real response header — a Content-Security-Policy is assembled in
+      # middleware, per request, on the edge runtime, and the failure it guards against is precisely a
+      # header that says something different from what the file appears to say. Those tests start
+      # `next start`, which needs `next build`.
+      #
+      # The alternative was to let them skip when `.next` is absent. That is the silent-skip failure this
+      # whole phase argues against: a fence that does not run in CI is a fence nobody knows is connected,
+      # and it would have skipped here forever while reporting green.
+      #
+      # It also closes a gap that predates P24 — `scan:bundle` (the payload ceiling, the credential scan
+      # and now the analytics/replay reachability rule) has never run in this job at all, because it only
+      # exists inside `npm run build`.
+      - name: build (runs scan:origins, scan:events, scan:bundle — and produces the .next the live tests need)
+        run: npm run build
       - run: npm test
 
   lint:

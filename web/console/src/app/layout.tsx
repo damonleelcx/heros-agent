@@ -2,6 +2,10 @@ import type { Metadata } from "next";
 import { JetBrains_Mono, Newsreader, Plus_Jakarta_Sans } from "next/font/google";
 import "./globals.css";
 import { readTheme } from "@/lib/theme";
+import { reportingConfig } from "@/lib/reporting";
+import { recordSurfaceViewed } from "@/lib/consoleAnalytics";
+import { ErrorReporting } from "@/components/errorReporting";
+import { ConsentBanner } from "@/components/consentBanner";
 
 /**
  * The root layout.
@@ -65,13 +69,31 @@ export const metadata: Metadata = {
  */
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const theme = await readTheme();
+  // P24 wave 24c. Renders nothing; attaches two listeners when `error_diagnostics` is granted and a DSN
+  // is configured, and attaches NOTHING otherwise. It sits in the root layout because the failure it is
+  // for — a chunk that did not load, a hydration mismatch, a script the policy refused — happens
+  // BEFORE any page-level component mounts.
+  const reporting = await reportingConfig();
+  // P24 wave 24f. Emitted from the SERVER, with the surface resolved to an id from the closed enum —
+  // never from the browser, and never as a URL. Fire and forget: no render path awaits it.
+  recordSurfaceViewed();
   return (
     <html
       lang="en"
       data-theme={theme}
       className={`${jakarta.variable} ${newsreader.variable} ${jetbrains.variable}`}
     >
-      <body className="min-h-screen bg-background font-sans text-foreground">{children}</body>
+      <body className="min-h-screen bg-background font-sans text-foreground">
+        <ErrorReporting {...reporting} />
+        {children}
+        {/*
+         * Rendered in the ROOT layout so that "withdrawal is reachable from every page carrying a
+         * gated integration" is true by construction rather than page by page — including under
+         * `/app`, which carries error reporting. Renders the full form until every optional category
+         * has a decision, then a single quiet control that re-opens it.
+         */}
+        <ConsentBanner />
+      </body>
     </html>
   );
 }

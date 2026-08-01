@@ -1,5 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE } from "@/lib/cookies";
+import { buildContentSecurityPolicy } from "../../design-system/csp.ts";
+import { CONSENT_COOKIE, decode, grantedCategories } from "../../design-system/consent.ts";
 
 /**
  * middleware.ts does two jobs, and both are prefix-level on purpose.
@@ -30,6 +32,14 @@ import { SESSION_COOKIE } from "@/lib/cookies";
  * `default-src 'self'` is also what makes the public home page's no-third-party-origin rule (FR35)
  * enforceable rather than aspirational: a hosted font or an analytics tag does not render, it is
  * REFUSED, and the refusal is visible in the console's own error log.
+ *
+ * P24 amended that rule NARROWLY and by prefix rather than widening a regex. `/app/**` and `/api/**`
+ * keep `default-src 'self'` and no third-party origin, and they now gain a per-prefix assertion that
+ * says so; the public prefix may name origins from a checked-in allowlist, each gated on its own
+ * consent category. The header is no longer a literal in this file — it is CONSTRUCTED from
+ * `web/design-system/third-party-policy.ts`, which both consoles read, and a `https://` literal here
+ * fails the build. An origin is therefore added by editing one table that states which integration
+ * needs it and what gates it, never by editing a security header.
  *
  * Development adds `'unsafe-eval'` only, because Next's React Refresh evaluates a string to install
  * the hot-reload runtime. Under the production CSP that throws, the bootstrap dies before hydration,
@@ -69,21 +79,22 @@ export function middleware(request: NextRequest) {
   }
 
   const nonce = Buffer.from(crypto.randomUUID()).toString("base64");
-  const scriptSrc = [`'self'`, `'nonce-${nonce}'`, `'strict-dynamic'`, DEV ? `'unsafe-eval'` : ""]
-    .filter(Boolean)
-    .join(" ");
-  const csp = [
-    `default-src 'self'`,
-    `script-src ${scriptSrc}`,
-    `style-src 'self' 'unsafe-inline'`,
-    `img-src 'self' data:`,
-    `connect-src 'self'`,
-    `font-src 'self'`,
-    `object-src 'none'`,
-    `base-uri 'self'`,
-    `form-action 'self'`,
-    `frame-ancestors 'none'`,
-  ].join("; ");
+  const csp = buildContentSecurityPolicy({
+    consoleId: "customer",
+    pathname,
+    nonce,
+    dev: DEV,
+    /*
+     * The header is narrowed by CONSENT as well as by prefix, and that ordering is the point: an origin
+     * whose category has not been granted is ABSENT FROM THE POLICY, so the browser refuses it. That is
+     * a stronger guarantee than "our loader does not request it" — a declined category is enforced by
+     * the same mechanism that enforces every other origin rule, rather than by our own good behaviour.
+     *
+     * Default-denied comes for free: a request with no consent cookie decodes to `not-asked` for every
+     * non-essential category, `not-asked` is not `granted`, and the header names nothing.
+     */
+    granted: grantedCategories(decode(request.cookies.get(CONSENT_COOKIE)?.value)),
+  });
 
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set("x-nonce", nonce);

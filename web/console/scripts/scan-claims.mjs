@@ -55,6 +55,29 @@ const BANNED_PHRASES = [
   { phrase: "risk is controllable", say: "risk is observable" },
   { phrase: "guaranteed not to be charged", say: "state the idempotency guarantee: a retry produces one charge" },
   { phrase: "your data will be deleted", say: "nothing is deleted — a plan change is audited and reversible" },
+  /*
+   * P24 task 7.3. These four were TRUE when they were written and the configuration now contradicts
+   * them, which is the most dangerous kind of shipped claim: nobody edits a sentence that used to be
+   * right, and a customer holds us to it.
+   *
+   * The vendor's own hosted surfaces run three third-party products. What is still true, and is what
+   * these `say` clauses point at, is much more specific — and being specific is the whole difference
+   * between a claim and a disclosure.
+   */
+  { phrase: "we run no third-party code", say: "name the three, the surfaces they run on and the consent that gates them — see /legal/sub-processors" },
+  { phrase: "no third-party code runs", say: "say WHERE none runs: no analytics tag and no session recorder on a signed-in page or on the operator console" },
+  { phrase: "we use no analytics", say: "usage analytics runs on the public site only, off until a visitor turns it on" },
+  /*
+   * 🔴 NOT the bare phrase "no third-party origin".
+   *
+   * That was the first version and it fired immediately — on `src/middleware.ts`'s own doc comment,
+   * which DESCRIBES the rule it enforces. A fence that punishes the explanation makes the explanation
+   * the thing people delete, and the repository has already learned that twice. So the banned form is
+   * the one a READER could be handed as a promise: a product-level claim, not a description of a prefix
+   * rule. The prefix rule itself is asserted by tests, which is where it belongs.
+   */
+  { phrase: "this product names no third-party origin", say: "state the PREFIX: a tenant prefix names none except the error-reporting one" },
+  { phrase: "the console names no third-party origin", say: "state the prefix — the public prefix names allowlisted origins" },
 ];
 
 /** SCAN_ALL_DIRS is every shipped source file, because a banned phrase is banned everywhere. */

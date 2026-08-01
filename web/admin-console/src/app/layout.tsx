@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { readDensity, readTheme } from "@/lib/prefs";
+import { reportingConfig } from "@/lib/reporting";
+import { recordSurfaceViewed } from "@/lib/consoleAnalytics";
+import { ErrorReporting } from "@/components/errorReporting";
 
 /**
  * layout.tsx is the console's shell.
@@ -24,9 +27,17 @@ export const metadata: Metadata = {
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const density = await readDensity();
   const theme = await readTheme();
+  // P24 wave 24c. Renders nothing. Error reporting is the ONE third-party integration this console
+  // takes: an analytics tag and a session recorder are refused structurally, because this screen renders
+  // cross-tenant aggregates, tenant names, active impersonation state and audit rows.
+  const reporting = await reportingConfig();
+  // P24 wave 24f. Emitted from the SERVER, with the surface resolved to an id from the closed enum —
+  // never from the browser, and never as a URL. Fire and forget: no render path awaits it.
+  recordSurfaceViewed();
   return (
     <html lang="en-US" data-density={density} data-theme={theme}>
       <body>
+        <ErrorReporting {...reporting} />
         <a className="skip-link" href="#main">
           Skip to main content
         </a>

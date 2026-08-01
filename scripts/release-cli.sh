@@ -62,6 +62,38 @@ if [ "${GOOS_T}" = "darwin" ]; then
   echo "release-cli: verified macOS floor: minos ${minos}"
 fi
 
+# 🔴 ZERO REPORTING ORIGINS IN AN INSTALLABLE PACKAGE (P24 task 1.8, design D1).
+#
+# P24 installs an analytics tag, a session recorder and an error reporter — all three configured for the
+# platform's own hosted deployment ONLY. Nothing reaches the CLI, and this is where that is checked at
+# the moment the artefact is cut rather than asserted in a document.
+#
+# TWO fences, because they catch different mistakes. The BINARY's offline guarantee is structural and is
+# asserted in Go (`internal/cli.TestCLIPackageLinksNoNetworkStack` bans `net/http` across the whole
+# transitive graph, which no error-reporting SDK can live without). What this step covers is the rest of
+# the delivery: the installer scripts and everything else that travels beside the binary, where a
+# reporting host would be one plausible-looking line.
+#
+# `--allow` names the ONE thing an installer legitimately reaches: the public forge the customer is
+# downloading from. Proxying that through our own origin to keep the check quiet is refused for the
+# reason P24's design states about the same manoeuvre elsewhere — it would make a third-party flow look
+# first-party, and the value of a stated destination is that it is readable.
+ORIGIN_GATE="$(dirname "$0")/../deploy/scripts/check-external-origins.sh"
+if [ -f "${ORIGIN_GATE}" ]; then
+  # The two installers, named explicitly: those are what travel beside the binary. Scanning the whole
+  # scripts/ tree would pull in development and smoke-test tooling that never reaches a customer, and a
+  # gate that reports findings nobody can act on is a gate somebody switches off.
+  sh "${ORIGIN_GATE}" --allow github.com --allow githubusercontent.com \
+      "$(dirname "$0")/install.sh" "$(dirname "$0")/install.ps1" || {
+    echo "release-cli: FATAL: an installable-package artefact references an external origin that is not" >&2
+    echo "release-cli: the public forge it downloads from. A reporting host does not ship to a customer." >&2
+    exit 1
+  }
+else
+  echo "release-cli: FATAL: ${ORIGIN_GATE} is missing — the zero-reporting-origin gate is not optional" >&2
+  exit 1
+fi
+
 # The checksum manifest, sorted so it is itself reproducible.
 ( cd "${OUT}" && shasum -a 256 heros-* 2>/dev/null | sort -k2 > SHA256SUMS || sha256sum heros-* | sort -k2 > SHA256SUMS )
 echo "release-cli: wrote ${OUT}/SHA256SUMS"

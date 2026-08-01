@@ -127,3 +127,61 @@ forgot it (`ui-redesign-feature-and-visual-consistency`).
   change (FR29), and the same rule now governs every layout change made under this ledger: 🚫 a
   section may not be dropped, collapsed by default, or moved behind a disclosure because it "makes the
   page cleaner."
+
+---
+
+## P24 — third-party runtimes on the surface (2026-08-01)
+
+> **Why this is in the trend ledger and not only in an OpenSpec change.** Trend #13, *sustainable web
+> design*, was adopted here with a stated content: "lean payload, **no third-party origin**, keyboard
+> reach, screen-reader support, high-contrast", and it became R18 — a build failure above a byte
+> ceiling. P24 installs three third-party products. A phase that changes what an adopted verdict means
+> has to say so in the place the verdict was recorded, or the ledger becomes a record of what we used
+> to think.
+
+### What was accepted
+
+| # | Runtime | Where | Gated on | Budget (transferred bytes, gzip on the wire) |
+|---|---|---|---|---|
+| A1 | **Product analytics (GA4)** | Public prefix only | `product_analytics`, default **denied** | ≤ 120 KB |
+| A2 | **Session replay (Clarity)** | Public prefix only | `session_replay`, default **denied** | ≤ 80 KB |
+| A3 | **Error reporting (Sentry, browser)** | Public, tenant AND operator | `error_diagnostics`, default **denied** | ≤ 100 KB |
+| — | **Total third-party** | Public prefix | — | ≤ 300 KB |
+
+The first-party ceiling is **unchanged at 1,400,000 bytes**. The budgets above are per origin rather
+than a single total, because a total lets one integration grow into another's headroom silently — a
+decision made by nobody and discovered by nobody.
+
+### What was refused
+
+| # | Refusal | Why, in one line |
+|---|---|---|
+| R1 | **Session replay on `/app/**`** | The tenant screen renders prompt text, generated diffs, node identifiers, model configuration and run output. A replay of `/app/studio` is a legible copy of most of the never-permitted list in `internal/runlink/allowlist.go`; maintaining that allowlist while filming the same content is not a trade-off, it is a contradiction. |
+| R2 | **Session replay on every operator route** | Cross-tenant aggregates, tenant names, active impersonation state and audit rows — R1's argument with a strictly larger blast radius. |
+| R3 | **Any browser analytics tag on a tenant or operator page** | A URL under `/app` carries variant, run, node and tenant identifiers. Console usage is emitted server-side from the BFF with a surface id from a **closed enum**, which is auditable in a way a redacted URL never is. |
+| R4 | **Tunnelling any third-party call through the BFF** | It would make a third-party flow look first-party, and the CSP's whole value is that it is a readable statement of where data goes. It would also make the component holding the platform credential accept arbitrary client-supplied error material on a new unauthenticated path. |
+| R5 | **`'unsafe-inline'` for scripts, and `'unsafe-eval'` in a production build** | Unchanged on every prefix. An integration that cannot run without either is refused, not accommodated — there is no argument to pass and no branch to reach in `csp.ts`. |
+| R6 | **Aggressive masking as a substitute for R1** | A selector denylist over a surface that gains pages every phase fails silently the first time somebody adds a page. |
+
+### What the ledger's own rules gain
+
+- **R18 is extended, not relaxed.** `scan-bundle.mjs` measures `.next/static` — the JavaScript our
+  build produces. A script from a third-party host is not there, so on its own the ceiling would stop a
+  small 3D library and not notice three trackers, and after this phase it would mean *less* than
+  before. Two additions keep it meaning more: a **per-origin transfer budget** measured in a real
+  browser during acceptance (`scripts/accept.mjs`), and the **inverse** of the decorative-runtime scan
+  — an analytics or replay runtime in a client chunk reachable from a tenant or operator route fails
+  the build, naming the runtime and the chunk.
+- **The rejected trends stay rejected on the same mechanism.** #1 (3D), #3 (dopamine palettes), #7
+  (gamification) and #14 (chatbots) are all held out by a ceiling that now covers third-party weight as
+  well as our own.
+
+### Where the decision lives
+
+`web/design-system/third-party-policy.ts` — one checked-in table naming each origin, the integration
+that requires it, the consent category that gates it, the policy directive it appears under and its
+transfer budget. Both consoles' `middleware.ts` construct their Content-Security-Policy from it; a
+hard-coded `https://` origin in either middleware or either `next.config.mjs` fails the build
+(`web/design-system/scan-origins.mjs`). The allowlist is asserted in **both** directions: a surface may
+not load an origin it does not carry, and it may not carry an origin no surface loads — a stale entry
+is a permission nobody asked for.
