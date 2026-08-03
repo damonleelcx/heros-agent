@@ -47,6 +47,14 @@ type PendingProvider interface {
 // or revoked. A missing route is not an error — it is the RouteAbsent condition.
 type RouteRegistry interface {
 	// RouteFor returns the configured route for a tenant+target, or nil if none is configured.
+	//
+	// 🔴 AN EMPTY TARGET IS THE "HAS ANY ROUTE" PROBE. anyRoute below calls RouteFor(ctx, tenant, "")
+	// and reads a non-nil result as "this tenant has at least one route". That contract used to live
+	// only in anyRoute's own comment, where no implementer would look: a store that treated "" as a
+	// literal target would find nothing (a route's target always names an owner and a repo), return
+	// nil, and make RouteConditionFor report `no_route` to every tenant who HAS routes — telling them
+	// to configure something they already configured, on the surface whose one job is to say what to
+	// do next. It is stated here so an implementation is written against it rather than around it.
 	RouteFor(ctx context.Context, tenantID, target string) (*Route, error)
 	// Capability reports a lost-capability condition (degraded/revoked) for a tenant, or Kind=="" when
 	// capability is intact. A read error is returned, never swallowed.

@@ -201,8 +201,16 @@ func TestZZDownMigrationRemovesEverything(t *testing.T) {
 	}
 	for _, tbl := range []string{"account", "usage_record", "billable_savings", "billing_event", "webhook_delivery"} {
 		var n int
+		// current_schema(): pgtest gives each proof its own schema in ONE database, and
+		// information_schema is database-wide. Without the filter this asks "does any schema anywhere
+		// still have an `account`" — and internal/billing, internal/launch and internal/proposalstore all
+		// create one. It was a race rather than a constant failure: `go test` runs packages concurrently,
+		// so this passed when metering happened to reach the down migration before its neighbours applied
+		// theirs, and failed when it did not. Adding a seventh package to the proof list was enough to
+		// flip it. (telemetry and worktree carry the same filter, for the same reason.)
 		if err := testDB.QueryRow(
-			`SELECT count(*) FROM information_schema.tables WHERE table_name = $1`, tbl).Scan(&n); err != nil {
+			`SELECT count(*) FROM information_schema.tables
+			  WHERE table_schema = current_schema() AND table_name = $1`, tbl).Scan(&n); err != nil {
 			t.Fatalf("information_schema: %v", err)
 		}
 		if n != 0 {

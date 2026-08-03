@@ -161,9 +161,13 @@ func TestTheSchemaCarriesWhatTheStoresQuery(t *testing.T) {
 		},
 		// 0025's scope columns. Their ABSENCE is what made api.ProposalsSource.Surface(workflowID)
 		// unanswerable: 0012 built these tables single-tenant and workflow-implicit.
-		"proposal":                {"proposal_id", "diagnosis_id", "operator", "base_variant_id", "candidate_config_hash", "status", "tenant_id", "workflow_id"},
-		"verdict":                 {"proposal_id", "metric", "delta", "ci_low", "ci_high", "gate_result"},
-		"delivery_route":          {"tenant_id", "target", "forge", "mode", "capability_kind", "capability_detail"},
+		"proposal": {"proposal_id", "diagnosis_id", "operator", "base_variant_id", "candidate_config_hash", "status", "tenant_id", "workflow_id"},
+		"verdict":  {"proposal_id", "metric", "delta", "ci_low", "ci_high", "gate_result"},
+		// `base_ref` is here twice over: the store names it, AND it is the column 0026 dropped and 0027
+		// restored. A column list alone would not have caught that — the store written against the same
+		// misreading would have named the same wrong set — which is why the real fence for it is the
+		// round trip in internal/deliveryroute. This row is the cheap half.
+		"delivery_route":          {"tenant_id", "target", "base_ref", "forge", "mode", "capability_kind", "capability_detail"},
 		"workflow_ir":             {"tenant_id", "workflow_id", "source_revision", "ir_version", "received_at", "nodes_json", "edges_json"},
 		"source_bundle":           {"tenant_id", "workflow_id", "source_revision", "content_hash", "size_bytes", "received_at"},
 		"platform_workflow_graph": {"tenant_id", "workflow_id", "source_revision", "ir_version", "taxonomy_version", "discovered_at", "llm_calls", "view_json"},

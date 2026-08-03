@@ -28,13 +28,40 @@ ALTER TABLE delivery_route ADD COLUMN IF NOT EXISTS mode TEXT NOT NULL DEFAULT '
 
 -- The default exists only so the column can be added to a table that may already carry rows. New rows
 -- are written explicitly by the store; the CHECK is what keeps the value meaningful either way.
+--
+-- 🔴 THE GUARDS ARE SCOPED TO THIS SCHEMA'S TABLE. `pg_constraint` is a DATABASE-WIDE catalog and
+-- constraint names are unique per table, not per database — so a bare `WHERE conname = '…'` is true as
+-- soon as ANY schema in the database has a constraint by that name. The proof harness (internal/pgtest)
+-- gives every test package its own schema in one shared database precisely so the packages cannot see
+-- each other; this predicate reached straight through that. Whichever package applied 0026 first got the
+-- constraints, every other schema silently skipped them, and `go test` runs packages concurrently — so
+-- which one won changed run to run. A CHECK asserted under those conditions is a coin flip, and it came
+-- up tails: internal/deliveryroute's proof that the table refuses a misspelled forge failed only when
+-- run alongside internal/pgmigrate, and passed alone.
+--
+-- The lesson is not about Postgres. An idempotency guard has to ask about the object it is guarding —
+-- this one asked a question whose answer another test's schema could change.
 DO $$
 BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'delivery_route_mode_known') THEN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint c
+          JOIN pg_class     t ON t.oid = c.conrelid
+          JOIN pg_namespace n ON n.oid = t.relnamespace
+         WHERE c.conname = 'delivery_route_mode_known'
+           AND t.relname = 'delivery_route'
+           AND n.nspname = current_schema()
+    ) THEN
         ALTER TABLE delivery_route ADD CONSTRAINT delivery_route_mode_known
             CHECK (mode IN ('ci', 'app'));
     END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'delivery_route_forge_known') THEN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint c
+          JOIN pg_class     t ON t.oid = c.conrelid
+          JOIN pg_namespace n ON n.oid = t.relnamespace
+         WHERE c.conname = 'delivery_route_forge_known'
+           AND t.relname = 'delivery_route'
+           AND n.nspname = current_schema()
+    ) THEN
         -- The forges Route.ForgeKind can name. gitlab and bitbucket are DECLARED but not implemented in
         -- P12; storing one is legitimate (a customer can configure it) and delivering to it is refused
         -- in Go, where the reason can be stated. The constraint's job is to keep a typo out, not to
