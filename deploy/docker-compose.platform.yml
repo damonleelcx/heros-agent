@@ -291,7 +291,8 @@ services:
       # the manifest origin from CONSOLE_HEALTH_URL rather than taking a second variable for the same
       # origin — two names for one origin is two things to keep in step.
       CONSOLE_CONSENT_GATE: ${CONSOLE_CONSENT_GATE:-}
-      HEROS_CONTENT_ROOT: ${HEROS_CONTENT_ROOT:-}
+      # HEROS_CONTENT_ROOT: intentionally absent — a fixture-only seam, and an empty value here
+      # blanks the in-image corpus rather than defaulting to it. See console.yaml.
       # ── Analytics & error monitoring (P24) ──────────────────────────────────────────────────────
       # All four are OPTIONAL and all four default to absent. An open-core or air-gapped deployment that
       # reports to nobody is the expected state, not a degraded one, and it stays silent about it.

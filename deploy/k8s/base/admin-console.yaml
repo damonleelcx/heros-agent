@@ -28,6 +28,13 @@ spec:
     spec:
       securityContext:
         runAsNonRoot: true
+        # 🔴 runAsUser is REQUIRED, not hardening. Without it the kubelet cannot verify the image's
+        # string user is non-root and refuses to start the container:
+        #   Error: container has runAsNonRoot and image has non-numeric user
+        # The pod then sits in CreateContainerConfigError forever, on every substrate.
+        # 1000 is the node image's `node` user.
+        runAsUser: 1000
+        runAsGroup: 1000
         seccompProfile: { type: RuntimeDefault }
       containers:
         - name: admin-console

@@ -23,6 +23,13 @@ spec:
     spec:
       securityContext:
         runAsNonRoot: true
+        # 🔴 runAsUser is REQUIRED, not hardening. Without it the kubelet cannot verify the image's
+        # string user is non-root and refuses to start the container:
+        #   Error: container has runAsNonRoot and image has non-numeric user
+        # The pod then sits in CreateContainerConfigError forever, on every substrate.
+        # 999 is the postgres image's `postgres` user, matching the fsGroup below.
+        runAsUser: 999
+        runAsGroup: 999
         fsGroup: 999
         seccompProfile: { type: RuntimeDefault }
       containers:
@@ -100,6 +107,15 @@ spec:
           restartPolicy: Never
           securityContext:
             runAsNonRoot: true
+            # 🔴 Same defect the Deployments had, and it is WORSE on a CronJob because it is
+            # invisible: the schedule fires, the pod cannot start, and it retries silently
+            # forever. This one failed 6,000+ times over 22 hours while `kubectl get cronjob`
+            # showed a healthy schedule. A job that never runs and a job that found nothing to
+            # do look identical from outside — which is exactly what the base's own
+            # NetworkPolicy comment warns about for this same workload.
+            # 999 is the postgres image's `postgres` user, matching the backup volume's fsGroup.
+            runAsUser: 999
+            runAsGroup: 999
             seccompProfile: { type: RuntimeDefault }
           containers:
             - name: pg-backup
@@ -108,6 +124,27 @@ spec:
               args:
                 - |
                   set -eu
+                  # 🔴 WAIT FOR THE DATABASE TO BE REACHABLE BEFORE DUMPING. This is not belt-and-braces;
+                  # without it the backup fails on essentially every run, and does so silently.
+                  #
+                  # A CNI programs a NEW pod's NetworkPolicy rules ASYNCHRONOUSLY. A CronJob pod that
+                  # opens a connection in its first instants can therefore be rejected by a policy that
+                  # permits it — measured here as: connect immediately => "connection refused" and a
+                  # 0-byte dump; sleep 15 first => a 174KB dump, same pod spec, same labels, same policy.
+                  # Long-lived Deployments never notice because they are minutes old before they matter.
+                  #
+                  # A backup is exactly the workload where this is worst: `kubectl get cronjob` shows a
+                  # healthy schedule, the Job objects churn, and nobody looks until a restore is needed.
+                  # This also covers the ordinary case of Postgres restarting during the backup window.
+                  i=0
+                  until pg_isready -q; do
+                    i=$((i+1))
+                    if [ "$i" -ge 60 ]; then
+                      echo "backup: database not reachable after 120s; FAILING rather than writing a partial dump" >&2
+                      exit 1
+                    fi
+                    sleep 2
+                  done
                   ts="$(date -u +%Y%m%dT%H%M%SZ)"
                   out="/backups/heros-${ts}.dump"; tmp="${out}.partial"
                   if ! pg_dump --format=custom --file="$tmp"; then

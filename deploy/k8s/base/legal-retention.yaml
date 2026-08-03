@@ -45,6 +45,15 @@ spec:
           restartPolicy: Never
           securityContext:
             runAsNonRoot: true
+            # 🔴 Same defect the Deployments had, and it is WORSE on a CronJob because it is
+            # invisible: the schedule fires, the pod cannot start, and it retries silently
+            # forever. This one failed 6,000+ times over 22 hours while `kubectl get cronjob`
+            # showed a healthy schedule. A job that never runs and a job that found nothing to
+            # do look identical from outside — which is exactly what the base's own
+            # NetworkPolicy comment warns about for this same workload.
+            # 65532 is the agentd image's distroless `nonroot`, the same uid agentd itself runs as.
+            runAsUser: 65532
+            runAsGroup: 65532
             seccompProfile: { type: RuntimeDefault }
           containers:
             - name: legal-retention
