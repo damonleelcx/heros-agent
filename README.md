@@ -197,39 +197,39 @@ The egress allowlist, output format, and exit codes are referenceable contracts 
 **curl | sh** — darwin, linux
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/damonleelcx/heros-agent/v0.20.0/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/damonleelcx/heros-agent/v0.21.0/scripts/install.sh | sh
 ```
 
 **PowerShell (irm | iex)** — windows
 
 ```sh
-irm https://raw.githubusercontent.com/damonleelcx/heros-agent/v0.20.0/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/damonleelcx/heros-agent/v0.21.0/scripts/install.ps1 | iex
 ```
 
 **.deb package** — linux
 
 ```sh
-curl -fsSLO https://github.com/damonleelcx/heros-agent/releases/download/v0.20.0/heros_0.20.0_amd64.deb && sudo dpkg -i heros_0.20.0_amd64.deb
+curl -fsSLO https://github.com/damonleelcx/heros-agent/releases/download/v0.21.0/heros_0.21.0_amd64.deb && sudo dpkg -i heros_0.21.0_amd64.deb
 ```
 
 **.rpm package** — linux
 
 ```sh
-sudo rpm -i https://github.com/damonleelcx/heros-agent/releases/download/v0.20.0/heros-0.20.0-1.x86_64.rpm
+sudo rpm -i https://github.com/damonleelcx/heros-agent/releases/download/v0.21.0/heros-0.21.0-1.x86_64.rpm
 ```
 
 **container image** — darwin, linux, windows
 
 ```sh
-docker run --rm -v "$PWD:/repo" ghcr.io/damonleelcx/heros:0.20.0 discover --repo /repo
+docker run --rm -v "$PWD:/repo" ghcr.io/damonleelcx/heros:0.21.0 discover --repo /repo
 ```
 
 #### Auditing the install script before you pipe it
 
-The URL above is pinned to the `v0.20.0` tag, so it cannot change under you, and the script is covered by the same signed manifest as the binaries. To read it before running it:
+The URL above is pinned to the `v0.21.0` tag, so it cannot change under you, and the script is covered by the same signed manifest as the binaries. To read it before running it:
 
 ```sh
-curl -fsSLO https://raw.githubusercontent.com/damonleelcx/heros-agent/v0.20.0/scripts/install.sh
+curl -fsSLO https://raw.githubusercontent.com/damonleelcx/heros-agent/v0.21.0/scripts/install.sh
 # then compare its sha256 against the install.sh line in that release's SHA256SUMS
 less install.sh && sh install.sh
 ```

@@ -220,8 +220,16 @@ func TestReadmeClaimsOnlyDeliveredChannels(t *testing.T) {
 		t.Fatal("the install section does not disclose what is unsupported")
 	}
 	available := section[:cut]
+	// The version comes from DocumentedRelease, never from a literal. A literal here is a SECOND copy of the
+	// documented version, and it drifts in the direction that hurts: the release after it was written, this
+	// fence starts asserting the README shows last release's commands — so a correct README fails and the
+	// obvious repair is to un-bump the README.
+	documented, err := ParseTag(DocumentedRelease)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, c := range Channels() {
-		installCmd := Command(c.Install, "0.20.0")
+		installCmd := Command(c.Install, documented.Version)
 		if c.Delivered() {
 			if !strings.Contains(available, installCmd) {
 				t.Errorf("%s is delivered but the README does not show its install command", c.Label)
