@@ -88,7 +88,7 @@ func main() {
 
 type memSource struct{ views map[string]scorecard.View }
 
-func (m *memSource) Scorecard(variantID string) (scorecard.View, bool) {
+func (m *memSource) Scorecard(_, variantID string) (scorecard.View, bool) {
 	v, ok := m.views[variantID]
 	return v, ok
 }

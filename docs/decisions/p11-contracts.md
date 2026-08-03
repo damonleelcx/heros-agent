@@ -43,6 +43,23 @@ rule (PRD FR11, design Decision 3). The list is ratified here as a security-revi
 | `run_metadata.seed` | run_metadata | a reproducibility number |
 | `run_metadata.tool_version` | run_metadata | the CLI version, for the support window (NFR9) |
 | `runs_reported` | run_metadata | the **coverage denominator** (see §7) — a count, never the runs it counts |
+| `metrics.per_node` | metrics | the same cost/latency/token quantities **attributed to a node id**. Both halves already cross; this is the join, and it is what the scorecard exists to show |
+| `eval.case_count` | eval | how many eval cases a score is computed over — the board's denominator. A count, **never the cases** |
+| `eval.seed_count` | eval | how many seeds ran. The seed *list* already crosses under `run_metadata.seed`; this is its length |
+| `eval.gate_outcome` | eval | `pass` / `fail` / `not-configured` — the verdict your own CLI already printed on your terminal |
+| `eval.gate_failures` | eval | which **metric names** failed the gate. Names only; metric names already cross under `scores.metric` |
+| `eval.single_seed` | eval | the provisional caveat, travelling with the number it qualifies |
+
+> **The `eval` group is a deliberate widening, added when the eval board and scorecard were built.**
+> Those two surfaces render the *evidence that qualifies* a score — how many cases it is over, whether
+> your gate passed, which node the cost came from. The platform previously held the claim and none of
+> the evidence, so the only ways to mount them were to **invent** a gate outcome or to leave them
+> unmounted. They were left unmounted. This group is the other fix: send the evidence, on purpose,
+> named, each field with its justification above.
+>
+> **Your gate THRESHOLDS do not cross.** The verdict does; the policy that produced it is yours. Nor do
+> the eval cases, expected answers, judge prompts, or model outputs — a case *count* says how much
+> evidence there was and carries none of it.
 
 **Never permitted, and not expressible as a field at all:** prompt text · source code · file contents ·
 generated diffs · environment-variable values · provider credentials. These are *content*; the

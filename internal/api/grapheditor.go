@@ -7,6 +7,7 @@ import (
 	"sort"
 
 	"github.com/heros-foreal/agentd/internal/arrangements"
+	"github.com/heros-foreal/agentd/internal/auth"
 	"github.com/heros-foreal/agentd/internal/discovery"
 	"github.com/heros-foreal/agentd/internal/transform"
 	"github.com/heros-foreal/agentd/internal/typedcontract"
@@ -34,7 +35,41 @@ var p5EditorHTML []byte
 // GraphEditorSource is the read model the editor serves: the Workflow IR whose ordering the user re-arranges.
 // An interface so the API depends on no concrete store and a test can stub it.
 type GraphEditorSource interface {
-	IR(workflowID string) (*discovery.IR, bool)
+	// IR returns a workflow's IR for ONE tenant.
+	//
+	// 🔴 tenantID is not decoration, and this interface learned it the same way PatternSource did — by
+	// having it added before a real store was mounted rather than after. It took only a workflow id,
+	// which is harmless while the only implementation is a demo stub and is a cross-tenant read the
+	// moment anything durable sits behind it: workflow ids are chosen by customers, they collide, and
+	// the caller supplies one straight out of a URL. The IR is strictly MORE sensitive than the pattern
+	// graph — it carries prompt text — so serving tenant A's to tenant B is the worse version of the
+	// same bug. The scope travels with the question.
+	IR(tenantID, workflowID string) (*discovery.IR, bool)
+}
+
+// editorIR resolves the IR for a request, applying the tenant scope from the authenticated principal.
+//
+// Returns false having ALREADY written the response, so each handler's early return stays one line. The
+// three outcomes are deliberately distinct: not mounted is 503, unauthenticated is 401, and a workflow
+// this tenant does not have is 404 — collapsing the last two would tell an unauthenticated caller that a
+// workflow exists.
+func (s *Server) editorIR(w http.ResponseWriter, r *http.Request) (*discovery.IR, string, bool) {
+	if s.graphEditor == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "the P5 editor is not mounted"})
+		return nil, "", false
+	}
+	principal, ok := auth.PrincipalFrom(r.Context())
+	if !ok || principal.TenantID == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "the editor requires an authenticated tenant"})
+		return nil, "", false
+	}
+	workflowID := r.PathValue("workflow_id")
+	ir, found := s.graphEditor.IR(principal.TenantID, workflowID)
+	if !found {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "no such workflow"})
+		return nil, "", false
+	}
+	return ir, workflowID, true
 }
 
 // MountGraphEditor registers the editor routes. Call after New.
@@ -85,16 +120,11 @@ type edgeView struct {
 }
 
 func (s *Server) handleGraphIR(w http.ResponseWriter, r *http.Request) {
-	if s.graphEditor == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "the P5 editor is not mounted"})
-		return
-	}
-	ir, ok := s.graphEditor.IR(r.PathValue("workflow_id"))
+	ir, workflowID, ok := s.editorIR(w, r)
 	if !ok {
-		writeJSON(w, http.StatusNotFound, map[string]any{"error": "no such workflow"})
 		return
 	}
-	writeJSON(w, http.StatusOK, irToView(r.PathValue("workflow_id"), ir))
+	writeJSON(w, http.StatusOK, irToView(workflowID, ir))
 }
 
 func irToView(workflowID string, ir *discovery.IR) irView {
@@ -155,13 +185,8 @@ type validateResponse struct {
 }
 
 func (s *Server) handleGraphValidate(w http.ResponseWriter, r *http.Request) {
-	if s.graphEditor == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "the P5 editor is not mounted"})
-		return
-	}
-	ir, ok := s.graphEditor.IR(r.PathValue("workflow_id"))
+	ir, _, ok := s.editorIR(w, r)
 	if !ok {
-		writeJSON(w, http.StatusNotFound, map[string]any{"error": "no such workflow"})
 		return
 	}
 	var req validateRequest
@@ -203,13 +228,8 @@ type commitRequest struct {
 }
 
 func (s *Server) handleGraphCommit(w http.ResponseWriter, r *http.Request) {
-	if s.graphEditor == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "the P5 editor is not mounted"})
-		return
-	}
-	ir, ok := s.graphEditor.IR(r.PathValue("workflow_id"))
+	ir, _, ok := s.editorIR(w, r)
 	if !ok {
-		writeJSON(w, http.StatusNotFound, map[string]any{"error": "no such workflow"})
 		return
 	}
 	var req commitRequest
@@ -273,13 +293,8 @@ func (s *Server) handleGraphCommit(w http.ResponseWriter, r *http.Request) {
 // returns them ranked: approved (coherent / adapter-augmented) first, rejected below, each group by
 // score. Enumeration is bounded and the truncation is surfaced (no silent cap). It never persists.
 func (s *Server) handleGraphOrderings(w http.ResponseWriter, r *http.Request) {
-	if s.graphEditor == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "the P5 editor is not mounted"})
-		return
-	}
-	ir, ok := s.graphEditor.IR(r.PathValue("workflow_id"))
+	ir, _, ok := s.editorIR(w, r)
 	if !ok {
-		writeJSON(w, http.StatusNotFound, map[string]any{"error": "no such workflow"})
 		return
 	}
 	var req validateRequest
@@ -301,13 +316,8 @@ func (s *Server) handleGraphOrderings(w http.ResponseWriter, r *http.Request) {
 // arrival), then a "done" line with the final summary. The client inserts each arrangement into its
 // ranked position on arrival, so the ranked list builds up live. It never persists.
 func (s *Server) handleGraphOrderingsStream(w http.ResponseWriter, r *http.Request) {
-	if s.graphEditor == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "the P5 editor is not mounted"})
-		return
-	}
-	ir, ok := s.graphEditor.IR(r.PathValue("workflow_id"))
+	ir, _, ok := s.editorIR(w, r)
 	if !ok {
-		writeJSON(w, http.StatusNotFound, map[string]any{"error": "no such workflow"})
 		return
 	}
 	var req validateRequest

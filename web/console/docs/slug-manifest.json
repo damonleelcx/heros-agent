@@ -174,7 +174,7 @@
     {
       "route": "/docs/reference/schemas",
       "source": "docs/en/reference/schemas.md",
-      "content_hash": "27200b98285d1f85c8bda5a39ac3f2959c7253920d45ac6a10e2bccf422f9587",
+      "content_hash": "51b216236067e56cc74c49adfe6bc016cd7e9bf4c33b28e0e12431e328838d65",
       "anchors": [
         "console-view",
         "metric-event",

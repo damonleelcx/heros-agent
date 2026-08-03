@@ -11,10 +11,14 @@ import (
 
 	"github.com/heros-foreal/agentd/internal/api"
 	"github.com/heros-foreal/agentd/internal/executor"
+	"github.com/heros-foreal/agentd/internal/hostdiscovery"
+	"github.com/heros-foreal/agentd/internal/hostedboard"
+	"github.com/heros-foreal/agentd/internal/hostedscorecard"
 	"github.com/heros-foreal/agentd/internal/legal"
 	"github.com/heros-foreal/agentd/internal/linkingest"
 	"github.com/heros-foreal/agentd/internal/metering"
 	"github.com/heros-foreal/agentd/internal/registry"
+	"github.com/heros-foreal/agentd/internal/sourceingest"
 	"github.com/heros-foreal/agentd/internal/variantspec"
 	"github.com/heros-foreal/agentd/internal/worktree"
 )
@@ -62,6 +66,10 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 	// These need the platform database. A deployment that declares no DSN gets them registered and
 	// unsourced, exactly like the ones below — "no database configured" is a deployment fact the
 	// operator can act on, and a 503 says so where a 404 would not.
+	mountedPatternGraph := false
+	mountedGraphEditor := false
+	mountedEvalBoard := false
+	mountedScorecard := false
 	if pg != nil {
 		fsBlobs, err := registry.NewFSBlobStore(filepath.Join(dataDir, "blobs"))
 		if err != nil {
@@ -126,6 +134,89 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 		// when a durable metering substrate exists; internal/metering has only MemCostEvents today.
 		h.MountRunLinking(linkingest.New(metering.NewMemCostEvents(), linkStore, nil))
 		served("p11_run_linking (links durable; metering series in-memory until a durable substrate exists)")
+
+		// P4 and P4.5, mounted for the first time — over LINKED RUNS, which is what they were always
+		// going to be about on a platform that does not execute the customer's workflow.
+		//
+		// Their reason for being unsourced was "no persistent adapter exists outside a demo binary", and
+		// as with the pattern graph the smaller half was the adapter: the platform held scores and none
+		// of the EVIDENCE that qualifies them. A board needs the case count and the gate verdict; a
+		// scorecard needs per-node attribution. All three were computed by the CLI and thrown away.
+		// Migration 0023 and the `eval` section of internal/runlink/allowlist.go are the deliberate,
+		// reviewed widening that brings them across; these two adapters are what render them.
+		//
+		// Both are careful about what they still CANNOT say — the board reports
+		// `tie_analysis: unavailable` because bootstrap replicates do not cross, and the scorecard
+		// reports `failure_attribution: unavailable` because per-node correctness does not. Those are
+		// stated as data rather than left to look like findings of "no ties" and "no node at fault".
+		h.MountEvalBoard(hostedboard.NewSource(linkStore))
+		served("p4_eval_board (assembled from linked runs; no tie detection — replicates do not cross)")
+		mountedEvalBoard = true
+		h.MountScorecard(hostedscorecard.NewSource(linkStore))
+		served("p45_scorecard (cost/latency attribution from linked runs; failure attribution stays local)")
+		mountedScorecard = true
+
+		// The OPT-IN workflow structure (`heros link --with-ir`), durable since migration 0021, and the
+		// pattern graph drawn from it.
+		//
+		// 🔴 The graph was registered-but-unmounted with the reason "no persistent adapter exists outside
+		// a demo binary". True, and the smaller half: there was also no DATA. Nothing ever sent this
+		// platform a workflow's shape, so an adapter would have had a store, a route, and nothing to put
+		// in either. Both halves are answered here — a customer who opts in gets their graph, and one who
+		// does not still gets 404 from a mounted route, which reads as "you have not sent this" rather
+		// than as a broken deployment.
+		irStore := linkingest.NewPGWorkflowIRStore(pg)
+		h.MountWorkflowIR(irStore)
+		served("p11_workflow_ir (opt-in structure: `heros link --with-ir`)")
+
+		// Platform-side discovery (migration 0022) — the source the platform never had, and the
+		// LABELLED graph that follows from it.
+		//
+		// The line above used to end "no labels — the classifier's inputs do not cross the boundary",
+		// and that was true of the only input the platform was ever given. It is no longer the only
+		// one: a customer can push a source snapshot, and discovery then runs HERE, so prompt text and
+		// tool names are read on this side of the boundary instead of being transmitted. The wire
+		// contract in internal/runlink is untouched.
+		//
+		// Both sources stay mounted. A tenant who pushes source gets a classified graph; a tenant who
+		// only sends the opt-in structure gets exactly the view they got before. See platformgraph.go
+		// for why the two are preferred rather than merged.
+		graphStore := hostdiscovery.NewPGGraphStore(pg)
+		h.MountPatternGraph(newPlatformGraphSource(graphStore, newWorkflowGraphSource(irStore)))
+		served("p35_pattern_graph (labelled when source is pushed; opt-in structure otherwise)")
+		mountedPatternGraph = true
+
+		// The source-snapshot ingest and the discovery runner behind it.
+		//
+		// Mounted together here because this deployment has what both need, but kept independently
+		// nillable in the API: accepting a snapshot needs a database and a blob store, running discovery
+		// over it additionally needs the skill registry. A deployment that will not hold customer source
+		// removes this block and the routes answer 503, which is a policy answer rather than a fault.
+		bundleStore, err := sourceingest.NewPGBundleStore(pg, blobs)
+		if err != nil {
+			return nil, fmt.Errorf("source bundle store: %w", err)
+		}
+		bundleSource, err := sourceingest.NewBundleSource(bundleStore, filepath.Join(dataDir, "source-scratch"))
+		if err != nil {
+			return nil, fmt.Errorf("source scratch: %w", err)
+		}
+		// reg is the SAME registry.Store mounted as the prompt registry above. Deliberately shared: the
+		// classifier must resolve tool bindings against the registry this deployment actually serves,
+		// and a second store pointed at the same tables would be a second answer to one question.
+		runner, err := hostdiscovery.NewRunner(bundleSource, hostdiscovery.RegistrySkills(reg), graphStore)
+		if err != nil {
+			return nil, fmt.Errorf("discovery runner: %w", err)
+		}
+		h.MountSourcePush(bundleStore, newDiscoveryAdapter(runner))
+		served("p1_source_discovery (customer-pushed snapshots; discovery and classification run here)")
+
+		// P5's editor, mounted for the first time. Its reason for being unsourced was the same as the
+		// pattern graph's and had the same second half: no adapter, and nothing to adapt. It needs the
+		// FULL IR — io_contracts and all — which is more than the platform stores on purpose, so the
+		// source re-derives it per request from the retained snapshot. See editorIRSource.
+		h.MountGraphEditor(newEditorIRSource(graphStore, runner))
+		served("p5_graph_editor (IR re-derived from the pushed snapshot; needs source, not just a graph)")
+		mountedGraphEditor = true
 		// No separate readiness probe for this store, deliberately. An earlier draft added one, because
 		// linkingest.Store's reads returned no error and a failure had nowhere else to go. The interface
 		// now returns errors on every method, so a failed read fails its CALLER — and the `postgres`
@@ -169,18 +260,26 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 	const noAdapter = "no persistent adapter exists outside a demo binary (PRD Q6)"
 	const noDurableStore = "its only store implementation is in-memory, so mounting it would record and then forget"
 
-	h.MountEvalBoard(nil)
-	absent("p4_eval_board", noAdapter)
-	h.MountScorecard(nil)
-	absent("p45_scorecard", noAdapter)
-	h.MountGraphEditor(nil)
-	absent("p5_graph_editor", noAdapter)
+	if !mountedEvalBoard {
+		h.MountEvalBoard(nil)
+		absent("p4_eval_board", noAdapter)
+	}
+	if !mountedScorecard {
+		h.MountScorecard(nil)
+		absent("p45_scorecard", noAdapter)
+	}
+	if !mountedGraphEditor {
+		h.MountGraphEditor(nil)
+		absent("p5_graph_editor", noAdapter)
+	}
 	h.MountProposals(nil)
 	absent("p55_proposals", noAdapter)
 	h.MountOptimizer(nil)
 	absent("p6_optimizer", noAdapter)
-	h.MountPatternGraph(nil)
-	absent("p35_pattern_graph", noAdapter)
+	if !mountedPatternGraph {
+		h.MountPatternGraph(nil)
+		absent("p35_pattern_graph", noAdapter)
+	}
 	h.MountMonitor(nil)
 	absent("p25_run_monitor", noAdapter)
 

@@ -1,6 +1,7 @@
 package linkingest
 
 import (
+	"sort"
 	"sync"
 	"time"
 
@@ -24,7 +25,27 @@ type LinkedRun struct {
 	// a linked run's scorecard in the console is the same numbers the developer saw locally — parity is a
 	// stored fact, not a re-derivation that could drift.
 	Scores []runlink.Score
+
+	// Eval is the EVIDENCE behind those scores — case count, the customer's own gate verdict, and the
+	// provisional flag. Recorded for the same reason Scores are: the eval board ranks variants, and a
+	// ranking has to say what qualifies each number. Without it the board could only be mounted by
+	// inventing a verdict, which is why it was mounted nil instead.
+	//
+	// Zero-valued on a run linked before the evidence crossed. GateOutcome is "" there, which is
+	// deliberately NOT one of the three verdicts — see EvalEvidencePresent.
+	Eval runlink.EvalSummary
+	// PerNode attributes cost/latency/tokens to node ids. The scorecard's entire subject: an aggregate
+	// cannot say WHICH node is expensive.
+	PerNode map[string]runlink.NodeMetric
 }
+
+// EvalEvidencePresent reports whether this run carries the eval evidence at all.
+//
+// 🔴 The distinction it protects: a run linked before migration 0023 has no case count and no verdict,
+// and that is NOT "zero cases, gate failed". A board that rendered those older runs as failures would be
+// accusing a customer's workflow of a regression that no measurement found. Readers branch on this and
+// show "linked before this was recorded" rather than a number.
+func (lr LinkedRun) EvalEvidencePresent() bool { return lr.Eval.GateOutcome != "" }
 
 // Store records linked runs and the coverage denominator.
 //
@@ -54,6 +75,12 @@ type Store interface {
 	// 🔴 `ok=false` means NOT LINKED and nothing else. A read failure is the error — the two were once
 	// the same value here, which made a database outage indistinguishable from a run nobody had linked.
 	Get(tenantID, runID string) (LinkedRun, bool, error)
+	// ForWorkflow returns every run a tenant has linked for one workflow, newest first.
+	//
+	// This is what the eval board reads. It returns RUNS, not variants: grouping runs by config_hash
+	// into variants is a decision with a rule behind it (see internal/hostedboard), and putting that
+	// rule in SQL would hide it where nobody looks for it and make it untestable without a database.
+	ForWorkflow(tenantID, workflowID string) ([]LinkedRun, error)
 }
 
 // LinkCoverage is how much of a tenant's activity the linked figure reflects (FR17). It distinguishes
@@ -147,4 +174,27 @@ func (m *MemStore) Get(tenantID, runID string) (LinkedRun, bool, error) {
 	defer m.mu.RUnlock()
 	lr, ok := m.linked[tenantID][runID]
 	return lr, ok, nil
+}
+
+// ForWorkflow returns a tenant's runs for one workflow, newest first.
+//
+// Sorted with the run id as the tiebreak, not left to map order: two runs linked in the same instant
+// would otherwise swap places between reloads, and the board built from them would reorder its rows for
+// no reason a user could explain.
+func (m *MemStore) ForWorkflow(tenantID, workflowID string) ([]LinkedRun, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var out []LinkedRun
+	for _, lr := range m.linked[tenantID] {
+		if lr.WorkflowID == workflowID {
+			out = append(out, lr)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].LinkedAt.Equal(out[j].LinkedAt) {
+			return out[i].LinkedAt.After(out[j].LinkedAt)
+		}
+		return out[i].RunID < out[j].RunID
+	})
+	return out, nil
 }

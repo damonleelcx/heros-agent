@@ -45,6 +45,28 @@
 /docs/business/pricing-plan.md
 .parity/
 
+# ── install-smoke staging (scripts/install_smoke.py) ────────────────────────────────────────────────
+#
+# 🔴 THIS RULE WAS MISSING, AND TWO PLACES IN THE CODEBASE ALREADY ASSUMED IT WAS HERE.
+#
+#   scripts/install_smoke.py:642        "Staging inside the repository (gitignored) keeps every mount
+#                                        on a path Docker actually shares."
+#   internal/distribution/handwritten.go  "The skipped directories are the ones whose contents are NOT
+#                                        committed: … the install-smoke staging area."
+#
+# Both sentences were false. `.smoke/` was tracked, and because the script stages each run in a FRESH
+# `run-<random>` directory (tempfile.mkdtemp), every invocation added a new copy of the release
+# binaries it builds. Ten run directories reached HEAD carrying 169 files and 672 MiB — 97% of the
+# repository by size, against roughly 19 MiB of actual source.
+#
+# It went unnoticed because nothing reads these paths back: CI regenerates the staging area from
+# scratch on every run (.github/workflows/install-smoke.yml), and the P20 evidence doc quotes a
+# `.smoke/...` path only inside a pasted terminal transcript, which is the evidence itself.
+#
+# The cost was invisible until `heros push-source` archived the tracked tree and printed its size.
+# A repository does not complain about being large.
+.smoke/
+
 # macOS
 .DS_Store
 

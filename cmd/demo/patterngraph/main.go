@@ -57,7 +57,7 @@ type memSource struct {
 	views map[string]patternclassifier.GraphView
 }
 
-func (m *memSource) GraphView(id string) (patternclassifier.GraphView, bool) {
+func (m *memSource) GraphView(_, id string) (patternclassifier.GraphView, bool) {
 	v, ok := m.views[id]
 	return v, ok
 }

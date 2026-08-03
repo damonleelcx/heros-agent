@@ -40,24 +40,47 @@ type UpstreamEvent = {
  * is added and does not match here, it is logged as `/unknown` — visibly wrong, which is the failure
  * mode to prefer over silently logging an identifier.
  */
+// 🔴 These patterns match what `scope.ts` EMITS, which is `/api/v1/…`. Every entry here once matched
+// `/api/pNN/…`, and when the paths moved to `/api/v1` this map was left behind — so every matcher was
+// dead and every upstream call logged as `/unknown`, the outcome the comment above calls visibly
+// wrong. It was invisible precisely because `/unknown` is a valid value that never throws. Adding an
+// upstream route means adding a line here; `platform-routes.test.mjs` fails when one is missing.
 const PATH_TEMPLATES: Array<[RegExp, string]> = [
   // P20 — the install/distribution contract, read by the PUBLIC install surface. Listed so its upstream
   // calls are searchable; an unlisted route logs as /unknown, which this file's own comment calls visibly
   // wrong, and the first real load of the install page produced exactly that.
-  [/^\/api\/p20\/install$/, "/api/v1/install"],
-  [/^\/api\/p2\/runs\/[^/]+$/, "/api/v1/runs/{run_id}"],
-  [/^\/api\/p2\/transforms\/[^/]+\/[^/]+$/, "/api/v1/transforms/{config_hash}/{source_revision}"],
-  [/^\/api\/p2\/specs\/resolve$/, "/api/v1/specs/resolve"],
-  [/^\/api\/p2\/specs\/submit$/, "/api/v1/specs/submit"],
-  [/^\/api\/p25\/runs\/[^/]+\/monitor$/, "/api/v1/runs/{run_id}/monitor"],
-  [/^\/api\/p25\/runs\/[^/]+\/monitor\/stream$/, "/api/v1/runs/{run_id}/monitor/stream"],
-  [/^\/api\/p35\/workflows\/[^/]+\/graph$/, "/api/v1/workflows/{workflow_id}/pattern-graph"],
-  [/^\/api\/p4\/workflows\/[^/]+\/board/, "/api/v1/workflows/{workflow_id}/eval-board"],
-  [/^\/api\/p45\/variants\/[^/]+\/scorecard$/, "/api/v1/variants/{variant_id}/scorecard"],
-  [/^\/api\/p55\/workflows\/[^/]+\/surface$/, "/api/v1/workflows/{workflow_id}/proposals"],
-  [/^\/api\/p55\/workflows\/[^/]+\/proposals\/[^/]+\/open-pr$/, "/api/v1/workflows/{workflow_id}/proposals/{proposal_id}/open-pr"],
-  [/^\/api\/p7\/customers\/[^/]+\/billing/, "/api/v1/customers/{customer_id}/billing"],
-  [/^\/api\/p13\/coverage$/, "/api/v1/coverage"],
+  [/^\/api\/v1\/install$/, "/api/v1/install"],
+  [/^\/api\/v1\/runs\/[^/]+$/, "/api/v1/runs/{run_id}"],
+  [/^\/api\/v1\/runs\/[^/]+\/link$/, "/api/v1/runs/{run_id}/link"],
+  [/^\/api\/v1\/transforms\/[^/]+\/[^/]+$/, "/api/v1/transforms/{config_hash}/{source_revision}"],
+  [/^\/api\/v1\/specs\/resolve$/, "/api/v1/specs/resolve"],
+  [/^\/api\/v1\/specs\/submit$/, "/api/v1/specs/submit"],
+  [/^\/api\/v1\/runs\/[^/]+\/monitor$/, "/api/v1/runs/{run_id}/monitor"],
+  [/^\/api\/v1\/runs\/[^/]+\/monitor\/stream$/, "/api/v1/runs/{run_id}/monitor/stream"],
+  [/^\/api\/v1\/workflows\/[^/]+\/pattern-graph$/, "/api/v1/workflows/{workflow_id}/pattern-graph"],
+  [/^\/api\/v1\/workflows\/[^/]+\/eval-board/, "/api/v1/workflows/{workflow_id}/eval-board"],
+  [/^\/api\/v1\/variants\/[^/]+\/scorecard$/, "/api/v1/variants/{variant_id}/scorecard"],
+  // Ordered before the open-PR pattern below only for readability; the two cannot both match, because
+  // this one is anchored and that one has two more segments.
+  [/^\/api\/v1\/workflows\/[^/]+\/proposals$/, "/api/v1/workflows/{workflow_id}/proposals"],
+  [/^\/api\/v1\/workflows\/[^/]+\/proposals\/[^/]+\/open-pr$/, "/api/v1/workflows/{workflow_id}/proposals/{proposal_id}/open-pr"],
+  [/^\/api\/v1\/workflows\/[^/]+\/nodes$/, "/api/v1/workflows/{workflow_id}/nodes"],
+  [/^\/api\/v1\/workflows\/[^/]+\/bindings$/, "/api/v1/workflows/{workflow_id}/bindings"],
+  [/^\/api\/v1\/workflows$/, "/api/v1/workflows"],
+  [/^\/api\/v1\/models$/, "/api/v1/models"],
+  [/^\/api\/v1\/prompts$/, "/api/v1/prompts"],
+  [/^\/api\/v1\/prompts\/diff/, "/api/v1/prompts/diff"],
+  [/^\/api\/v1\/prompts\/impact$/, "/api/v1/prompts/impact"],
+  [/^\/api\/v1\/prompts\/publish$/, "/api/v1/prompts/publish"],
+  [/^\/api\/v1\/prompts\/[^/]+\/timeline$/, "/api/v1/prompts/{name}/timeline"],
+  [/^\/api\/v1\/studio\/(preview|run|bind)$/, "/api/v1/studio/{action}"],
+  [/^\/api\/v1\/customers\/[^/]+\/billing/, "/api/v1/customers/{customer_id}/billing"],
+  [/^\/api\/v1\/customers\/[^/]+\/payment$/, "/api/v1/customers/{customer_id}/payment"],
+  [/^\/api\/v1\/customers\/[^/]+\/plan$/, "/api/v1/customers/{customer_id}/plan"],
+  [/^\/api\/v1\/customers\/[^/]+\/checkout-session$/, "/api/v1/customers/{customer_id}/checkout-session"],
+  [/^\/api\/v1\/coverage$/, "/api/v1/coverage"],
+  [/^\/api\/v1\/change-delivery$/, "/api/v1/change-delivery"],
+  [/^\/api\/v1\/deliveries$/, "/api/v1/deliveries"],
   [/^\/healthz$/, "/healthz"],
   [/^\/readyz$/, "/readyz"],
 ];

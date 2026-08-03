@@ -7,7 +7,14 @@ import "testing"
 
 func TestAllowlistIsWellFormed(t *testing.T) {
 	seen := map[string]bool{}
-	validCats := map[string]bool{"metrics": true, "ir_structure": true, "provenance": true, "scores": true, "run_metadata": true}
+	// "eval" is the category added when the board and scorecard needed the EVIDENCE behind a score —
+	// case count, gate verdict, provisional flag. It is listed here rather than accepted by a laxer
+	// check because an unrecognised category is exactly how a field slips onto the boundary without a
+	// reviewer noticing which group it joined.
+	validCats := map[string]bool{
+		"metrics": true, "ir_structure": true, "provenance": true, "scores": true,
+		"run_metadata": true, "eval": true,
+	}
 	for _, f := range Allowlist {
 		if f.Name == "" {
 			t.Fatalf("allowlist field with empty name")

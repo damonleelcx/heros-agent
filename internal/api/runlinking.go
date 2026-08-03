@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
+	"time"
 
 	"github.com/heros-foreal/agentd/internal/auth"
 	"github.com/heros-foreal/agentd/internal/linkingest"
@@ -23,10 +25,18 @@ import (
 // It never reads a provider credential — the allowlist has no such field — so there is nothing here to
 // leak into a log or a response.
 
-// LinkIngestSource is the P11 ingest dependency: it ingests a payload for a tenant and answers coverage.
+// LinkIngestSource is the P11 ingest dependency: it ingests a payload for a tenant, answers coverage,
+// and reads back a single linked run.
+//
+// 🔴 `LinkedRun` is the READ side, and it was missing for as long as linking existed. A run the CLI
+// transmitted was accepted, stored durably, and counted — and then the only surface that could see it
+// again was a coverage COUNT on the billing page. Asked for the run itself, the console answered
+// **"no such run"**, because `/api/v1/runs/{run_id}` reads the EXECUTOR's `run` table and a linked run
+// lands in `run_link`. Two different tables, one identifier, and nothing joining them.
 type LinkIngestSource interface {
 	Ingest(tenantID string, p runlink.Payload) (linkingest.Result, error)
 	Coverage(tenantID string) (linkingest.LinkCoverage, error)
+	LinkedRun(tenantID, runID string) (linkingest.LinkedRun, bool, error)
 }
 
 // linkCoverageFor maps the ingest store's coverage into the billing view shape. It is how the P7 billing
@@ -53,7 +63,92 @@ func (s *Server) linkCoverageFor(tenantID string) *LinkCoverageView {
 func (s *Server) MountRunLinking(src LinkIngestSource) {
 	s.runLinking = src
 	s.Mux.HandleFunc("POST /api/v1/run-links", s.handleRunLink)
+	s.Mux.HandleFunc("GET /api/v1/runs/{run_id}/link", s.handleLinkedRun)
 	s.Mux.HandleFunc("GET /api/v1/whoami", s.handleWhoAmI)
+}
+
+// LinkedRunView is one linked run, as the console renders it.
+//
+// It is deliberately NOT `RunView`. A `RunView` is an EXECUTOR run: attempt groups, per-node input and
+// output blobs, a terminal status. A linked run has none of that and never will — the CLI transmits an
+// allowlisted summary, so there is no input, no output, and no per-node status to show. Rendering one
+// as the other would mean filling those columns with something, and the only somethings available are
+// invented. What a linked run does carry is what the developer actually saw: the scores, with their
+// intervals, computed by their own harness on their own machine.
+type LinkedRunView struct {
+	RunID          string `json:"run_id"`
+	WorkflowID     string `json:"workflow_id"`
+	ConfigHash     string `json:"config_hash"`
+	ConfigHash12   string `json:"config_hash_display"`
+	SourceRevision string `json:"source_revision"`
+	// ToolVersion is the CLI build that produced the measurement. It is shown because a score is only
+	// comparable to another score from the same harness, and this is the only place that fact is recorded.
+	ToolVersion string `json:"tool_version"`
+	LinkedAt    string `json:"linked_at"`
+	// Scores are stored verbatim from the link, NOT recomputed here (FR: parity is a stored fact). The
+	// number in the console is the number the developer read in their terminal, or it is a bug.
+	Scores []LinkedScoreView `json:"scores"`
+}
+
+// LinkedScoreView is one metric with the interval that qualifies it. The interval is not optional
+// decoration: a value without one is a claim this platform does not make.
+type LinkedScoreView struct {
+	Metric string  `json:"metric"`
+	Value  float64 `json:"value"`
+	CILow  float64 `json:"ci_low"`
+	CIHigh float64 `json:"ci_high"`
+}
+
+// handleLinkedRun answers with a linked run, or says precisely which of the three things is true:
+// the capability is absent (503), the caller is not authenticated (401), or that run is not linked (404).
+func (s *Server) handleLinkedRun(w http.ResponseWriter, r *http.Request) {
+	if s.runLinking == nil {
+		writeJSON(w, http.StatusServiceUnavailable, specError{Error: "run-linking ingest is not mounted"})
+		return
+	}
+	principal, ok := auth.PrincipalFrom(r.Context())
+	if !ok || principal.TenantID == "" {
+		writeJSON(w, http.StatusUnauthorized, specError{Error: "reading a linked run requires an authenticated tenant"})
+		return
+	}
+	runID := r.PathValue("run_id")
+
+	// Scoped to the AUTHENTICATED tenant, exactly as ingest is. A run id is guessable, so scoping it
+	// anywhere else would make this a cross-tenant read of somebody's cost figures.
+	lr, found, err := s.runLinking.LinkedRun(principal.TenantID, runID)
+	if err != nil {
+		// A read failure is NOT "not linked". Reporting it as 404 would tell a user their run was never
+		// transmitted, on a day the database was merely unreachable.
+		writeJSON(w, http.StatusBadGateway, specError{Error: "could not read the linked run: " + err.Error()})
+		return
+	}
+	if !found {
+		writeJSON(w, http.StatusNotFound, specError{Error: "no such linked run"})
+		return
+	}
+
+	view := LinkedRunView{
+		RunID: lr.RunID, WorkflowID: lr.WorkflowID,
+		ConfigHash: lr.ConfigHash, ConfigHash12: shortHash12(lr.ConfigHash),
+		SourceRevision: lr.SourceRevision, ToolVersion: lr.ToolVersion,
+		LinkedAt: lr.LinkedAt.UTC().Format(time.RFC3339),
+		Scores:   make([]LinkedScoreView, 0, len(lr.Scores)),
+	}
+	for _, sc := range lr.Scores {
+		view.Scores = append(view.Scores, LinkedScoreView{
+			Metric: sc.Metric, Value: sc.Value, CILow: sc.CILow, CIHigh: sc.CIHigh,
+		})
+	}
+	writeJSON(w, http.StatusOK, view)
+}
+
+// shortHash12 is the display form of a config hash — the same twelve characters the rest of the console
+// shows, so one configuration reads identically on every surface.
+func shortHash12(h string) string {
+	if len(h) <= 12 {
+		return h
+	}
+	return h[:12]
 }
 
 // handleWhoAmI answers `login`'s token validation: it returns the identity the authenticated token
@@ -118,5 +213,84 @@ func (s *Server) handleRunLink(w http.ResponseWriter, r *http.Request) {
 		"already_linked":   res.AlreadyLinked,
 		"run_url":          res.RunURL,
 		"contract_version": res.ContractVersion,
+	})
+}
+
+// ── the OPT-IN workflow structure ────────────────────────────────────────────────────────────────
+
+// WorkflowIRSource stores and reads the opt-in structure. Separate from LinkIngestSource because a
+// deployment can accept runs and refuse structure — accepting more than a customer's policy allows is
+// exactly the kind of thing that should require a second, explicit mount.
+type WorkflowIRSource interface {
+	Put(ir linkingest.WorkflowIR) error
+	Latest(tenantID, workflowID string) (linkingest.WorkflowIR, bool, error)
+}
+
+// MountWorkflowIR registers the opt-in structure ingest. Call after New. Optional, like every mount:
+// unmounted, the route answers 503 and `heros link --with-ir` reports that this deployment does not
+// accept structure — which is a policy answer, not a failure.
+func (s *Server) MountWorkflowIR(src WorkflowIRSource) {
+	s.workflowIR = src
+	s.Mux.HandleFunc("POST /api/v1/workflows/{workflow_id}/ir", s.handleWorkflowIRIngest)
+}
+
+func (s *Server) handleWorkflowIRIngest(w http.ResponseWriter, r *http.Request) {
+	if s.workflowIR == nil {
+		writeJSON(w, http.StatusServiceUnavailable, specError{Error: "this deployment does not accept workflow structure"})
+		return
+	}
+	principal, ok := auth.PrincipalFrom(r.Context())
+	if !ok || principal.TenantID == "" {
+		writeJSON(w, http.StatusUnauthorized, specError{Error: "transmitting workflow structure requires an authenticated tenant"})
+		return
+	}
+
+	var payload runlink.WorkflowIRPayload
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<20))
+	// 🔴 As with the run link: a field outside the wire contract is REJECTED, not ignored. On this
+	// endpoint that is a privacy control, not a hygiene one — silently accepting an unknown key is how a
+	// future CLI starts sending prompt text to a platform that never agreed to hold it.
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&payload); err != nil {
+		writeJSON(w, http.StatusBadRequest, specError{Error: "the workflow structure is not valid: " + err.Error()})
+		return
+	}
+	if payload.ContractVersion != runlink.WorkflowIRContractVersion {
+		writeJSON(w, http.StatusUpgradeRequired, map[string]any{
+			"error":            "workflow-structure contract mismatch",
+			"contract_version": runlink.WorkflowIRContractVersion,
+		})
+		return
+	}
+	// The path names the workflow and so does the body. They must agree: a mismatch means one of them
+	// is describing something else, and guessing which would attach a structure to the wrong subject.
+	if id := r.PathValue("workflow_id"); id != payload.WorkflowID {
+		writeJSON(w, http.StatusBadRequest, specError{
+			Error: "the workflow id in the path and in the payload disagree — refusing rather than choosing one",
+		})
+		return
+	}
+	if payload.WorkflowID == "" || payload.SourceRevision == "" {
+		writeJSON(w, http.StatusBadRequest, specError{Error: "a workflow structure needs both a workflow id and a source revision"})
+		return
+	}
+
+	// Scope is the AUTHENTICATED tenant, never anything in the body — the payload has no tenant field
+	// at all, which is the strongest form of "this cannot widen scope".
+	if err := s.workflowIR.Put(linkingest.WorkflowIR{
+		TenantID: principal.TenantID, WorkflowID: payload.WorkflowID,
+		SourceRevision: payload.SourceRevision, IRVersion: payload.IRVersion,
+		ReceivedAt: time.Now().UTC(), Nodes: payload.Nodes, Edges: payload.Edges,
+	}); err != nil {
+		writeJSON(w, http.StatusBadGateway, specError{Error: "could not store the workflow structure: " + err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"accepted":    true,
+		"workflow_id": payload.WorkflowID,
+		"nodes":       len(payload.Nodes),
+		"edges":       len(payload.Edges),
+		"graph_url":   runlink.PlatformBaseURL + "/app/workflows/" + url.PathEscape(payload.WorkflowID) + "/graph",
 	})
 }

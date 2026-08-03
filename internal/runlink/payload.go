@@ -23,12 +23,34 @@ type Payload struct {
 	Scores          []WireScore     `json:"scores"`
 	RunMetadata     WireRunMetadata `json:"run_metadata"`
 	RunsReported    int             `json:"runs_reported"`
+	Eval            WireEval        `json:"eval"`
 }
 
 type WireMetrics struct {
-	Cost    float64    `json:"cost"`
-	Latency float64    `json:"latency"`
-	Tokens  WireTokens `json:"tokens"`
+	Cost    float64 `json:"cost"`
+	Latency float64 `json:"latency"`
+	// PerNode attributes the same quantities to a node id. omitempty: a run that recorded no per-node
+	// breakdown transmits no key, rather than an empty object the platform would have to tell apart
+	// from "every node cost zero".
+	PerNode map[string]WireNodeMetric `json:"per_node,omitempty"`
+	Tokens  WireTokens                `json:"tokens"`
+}
+
+// WireNodeMetric is one node's share of a run's cost, latency and tokens.
+type WireNodeMetric struct {
+	Cost      float64 `json:"cost"`
+	Latency   float64 `json:"latency"`
+	TokensIn  int64   `json:"tokens_in"`
+	TokensOut int64   `json:"tokens_out"`
+}
+
+// WireEval is the evidence behind the scores: how much of it there was, and the customer's own verdict.
+type WireEval struct {
+	CaseCount    int      `json:"case_count"`
+	SeedCount    int      `json:"seed_count"`
+	GateOutcome  string   `json:"gate_outcome"`
+	GateFailures []string `json:"gate_failures,omitempty"`
+	SingleSeed   bool     `json:"single_seed"`
 }
 
 type WireTokens struct {
@@ -68,6 +90,7 @@ func BuildPayload(r RunRecord) Payload {
 		Metrics: WireMetrics{
 			Cost:    r.Metrics.CostUSD,
 			Latency: r.Metrics.LatencyMS,
+			PerNode: copyNodeMetrics(r.Metrics.PerNode),
 			Tokens:  WireTokens{In: r.Metrics.TokensIn, Out: r.Metrics.TokensOut},
 		},
 		IRStructure: WireIRStructure{
@@ -86,13 +109,48 @@ func BuildPayload(r RunRecord) Payload {
 			ToolVersion: r.ToolVersion,
 		},
 		RunsReported: r.RunsReported,
+		Eval: WireEval{
+			CaseCount: r.Eval.CaseCount,
+			SeedCount: r.Eval.SeedCount,
+			// The zero value of GateOutcome is "", and "" is not one of the three verdicts. A record
+			// written before this field existed would otherwise transmit an empty string that the
+			// platform has to interpret — and the interpretation it would reach for is "fine". Mapping
+			// it to not-configured makes the absence say what it means.
+			GateOutcome:  string(gateOutcomeOr(r.Eval.GateOutcome, GateNotConfigured)),
+			GateFailures: append([]string(nil), r.Eval.GateFailures...),
+			SingleSeed:   r.Eval.SingleSeed,
+		},
 	}
 	for _, s := range r.Scores {
 		p.Scores = append(p.Scores, WireScore(s)) // Score and WireScore are the same shape
 	}
-	// Deliberately NOT copied: per-node metrics carry no content, but they are aggregate-derivable and
-	// omitting them keeps the wire surface minimal. Everything sent is above; nothing below.
+	// Everything sent is above; nothing below. Per-node metrics ARE now copied — see the eval section
+	// of Allowlist for why that widening was made and what it is still refused.
 	return p
+}
+
+// gateOutcomeOr substitutes a default for an unset verdict.
+func gateOutcomeOr(got, def GateOutcome) GateOutcome {
+	if got == "" {
+		return def
+	}
+	return got
+}
+
+// copyNodeMetrics projects per-node metrics onto the wire shape, field by named field — the same
+// discipline BuildPayload itself follows, for the same reason: a field added to NodeMetric must not
+// reach the wire because a struct grew.
+func copyNodeMetrics(m map[string]NodeMetric) map[string]WireNodeMetric {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make(map[string]WireNodeMetric, len(m))
+	for k, v := range m {
+		out[k] = WireNodeMetric{
+			Cost: v.CostUSD, Latency: v.LatencyMS, TokensIn: v.TokensIn, TokensOut: v.TokensOut,
+		}
+	}
+	return out
 }
 
 func copyStrMap(m map[string]string) map[string]string {

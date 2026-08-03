@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/heros-foreal/agentd/internal/runlink"
@@ -164,3 +165,66 @@ func assertLinkTarget(url string) error {
 	}
 	return nil
 }
+
+// WorkflowIRResult is the platform's response to an opt-in structure upload.
+type WorkflowIRResult struct {
+	Accepted   bool   `json:"accepted"`
+	WorkflowID string `json:"workflow_id"`
+	Nodes      int    `json:"nodes"`
+	Edges      int    `json:"edges"`
+	GraphURL   string `json:"graph_url"`
+}
+
+// SendWorkflowIR transmits the OPT-IN workflow structure.
+//
+// A separate method from Link, on purpose. They carry different contracts, are versioned separately, and
+// one of them happens only when a developer asks for it by name — collapsing them into a single call
+// with a flag is how "opt-in" becomes "opt-in unless you forget", and how a reviewer loses the ability
+// to point at the one function that sends structure.
+//
+// The destination is re-asserted here exactly as it is for a link: the pin is per-request, so a new
+// transmit path cannot inherit an unchecked base.
+func (c *Client) SendWorkflowIR(ctx context.Context, p runlink.WorkflowIRPayload) (WorkflowIRResult, error) {
+	url := c.base + runlink.WorkflowIRPath + urlPathEscape(p.WorkflowID) + "/ir"
+	if err := assertLinkTarget(url); err != nil {
+		return WorkflowIRResult{}, err
+	}
+	body, err := json.Marshal(p)
+	if err != nil {
+		return WorkflowIRResult{}, fmt.Errorf("link: marshal workflow structure: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return WorkflowIRResult{}, fmt.Errorf("link: build request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("X-Heros-Contract", runlink.WorkflowIRContractVersion)
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return WorkflowIRResult{}, fmt.Errorf("link: transport: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+
+	switch resp.StatusCode {
+	case http.StatusOK, http.StatusCreated:
+		var r WorkflowIRResult
+		if err := json.Unmarshal(raw, &r); err != nil {
+			return WorkflowIRResult{}, fmt.Errorf("link: decode response: %w", err)
+		}
+		return r, nil
+	case http.StatusUnauthorized:
+		return WorkflowIRResult{}, fmt.Errorf("link: authentication rejected — run `heros login`")
+	case http.StatusServiceUnavailable:
+		// A deployment that does not accept structure is a legible answer, not a failure of the upload.
+		return WorkflowIRResult{}, fmt.Errorf("link: this deployment does not accept workflow structure: %s", string(raw))
+	default:
+		return WorkflowIRResult{}, fmt.Errorf("link: platform returned %d: %s", resp.StatusCode, string(raw))
+	}
+}
+
+// urlPathEscape escapes a workflow id for use as one path segment. Workflow ids contain "/" (they are
+// owner/repo), and an unescaped one would silently address a different route.
+func urlPathEscape(s string) string { return url.PathEscape(s) }

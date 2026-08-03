@@ -243,7 +243,7 @@ type boardSource struct {
 
 // Board re-ranks from the CACHE. Switching profiles enqueues nothing — the source holds no queue and
 // no executor, so that is structural rather than a promise.
-func (s *boardSource) Board(workflowID, profile string) (evalboard.View, bool) {
+func (s *boardSource) Board(_, workflowID, profile string) (evalboard.View, bool) {
 	// An unknown workflow is NOT this workflow's board with a different title. Returning the board
 	// anyway would make the 404 path unreachable and untested, and would show a user someone else's
 	// numbers under their own workflow id.

@@ -6,23 +6,42 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/heros-foreal/agentd/internal/auth"
 	"github.com/heros-foreal/agentd/internal/config"
 	"github.com/heros-foreal/agentd/internal/patternclassifier"
 )
 
 type stubPatterns struct {
+	// keyed tenant\x00workflow, so this stub can express the cross-tenant case the interface now has to
+	// survive. A stub that ignored the tenant would make the scoping test pass by construction.
 	views map[string]patternclassifier.GraphView
+	// tenant is the owner of every view in `views`, for the common single-tenant fixtures.
+	tenant string
 }
 
-func (s stubPatterns) GraphView(id string) (patternclassifier.GraphView, bool) {
+func (s stubPatterns) GraphView(tenantID, id string) (patternclassifier.GraphView, bool) {
+	if s.tenant != "" && tenantID != s.tenant {
+		return patternclassifier.GraphView{}, false
+	}
 	v, ok := s.views[id]
 	return v, ok
 }
 
 func p35Server(views map[string]patternclassifier.GraphView) *Server {
 	s := New(nil, config.Config{})
-	s.MountPatternGraph(stubPatterns{views: views})
+	s.MountPatternGraph(stubPatterns{views: views, tenant: "acme"})
 	return s
+}
+
+// p35Get issues an AUTHENTICATED graph request. The endpoint is tenant-scoped now, so every fixture
+// below has to carry a principal — an unauthenticated read is its own test, at the bottom.
+func p35Get(s *Server, tenant, workflowID string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workflows/"+workflowID+"/pattern-graph", nil)
+	req = req.WithContext(auth.WithPrincipal(req.Context(),
+		auth.Principal{TenantID: tenant, Role: "member", APIKeyID: "k"}))
+	rec := httptest.NewRecorder()
+	s.Handler.ServeHTTP(rec, req)
+	return rec
 }
 
 func TestP35GraphServesTheReadModel(t *testing.T) {
@@ -34,8 +53,7 @@ func TestP35GraphServesTheReadModel(t *testing.T) {
 		}},
 	}
 	s := p35Server(map[string]patternclassifier.GraphView{"wf": want})
-	rec := httptest.NewRecorder()
-	s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/workflows/wf/pattern-graph", nil))
+	rec := p35Get(s, "acme", "wf")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body)
 	}
@@ -60,14 +78,12 @@ func TestP35DistinguishesMissingWorkflowFromUnclassifiedOne(t *testing.T) {
 	}
 	s := p35Server(map[string]patternclassifier.GraphView{"wf": unclassified})
 
-	rec := httptest.NewRecorder()
-	s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/workflows/nope/pattern-graph", nil))
+	rec := p35Get(s, "acme", "nope")
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("a missing workflow must 404, got %d", rec.Code)
 	}
 
-	rec = httptest.NewRecorder()
-	s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/workflows/wf/pattern-graph", nil))
+	rec = p35Get(s, "acme", "wf")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("an unclassified workflow exists and must 200, got %d", rec.Code)
 	}
@@ -85,5 +101,30 @@ func TestP35NotMountedIsNotAnEmptyResult(t *testing.T) {
 	s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/workflows/wf/pattern-graph", nil))
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Errorf("an unmounted classifier must be 503, not an empty 200: got %d", rec.Code)
+	}
+}
+
+// 🔴 The reason the interface changed. Workflow ids are chosen by customers, they collide across
+// tenants, and the caller supplies one straight from a URL — so a source keyed on the workflow alone
+// serves tenant A's graph to tenant B, with nothing in the code looking wrong. This test is what makes
+// the scope a property rather than a convention.
+func TestP35DoesNotServeOneTenantsGraphToAnother(t *testing.T) {
+	s := p35Server(map[string]patternclassifier.GraphView{"wf": {WorkflowID: "wf"}})
+
+	if rec := p35Get(s, "acme", "wf"); rec.Code != http.StatusOK {
+		t.Fatalf("the owning tenant must be served: %d", rec.Code)
+	}
+	if rec := p35Get(s, "other-corp", "wf"); rec.Code != http.StatusNotFound {
+		t.Fatalf("another tenant asked for the SAME workflow id and got %d — a cross-tenant read of a "+
+			"customer's workflow shape", rec.Code)
+	}
+}
+
+func TestP35RefusesAnUnauthenticatedRead(t *testing.T) {
+	s := p35Server(map[string]patternclassifier.GraphView{"wf": {WorkflowID: "wf"}})
+	rec := httptest.NewRecorder()
+	s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/workflows/wf/pattern-graph", nil))
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("want 401 with no principal, got %d", rec.Code)
 	}
 }

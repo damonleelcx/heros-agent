@@ -62,17 +62,41 @@ import (
 
 // workflowID is the identifier the console addresses this workflow by. It is the repository, because
 // that is what the customer calls it.
-const workflowID = "nousresearch/hermes-agent"
+//
+// 🔴 A var with a default, not a const, and the default is only a default. This command's whole
+// premise is "point it at an actual checkout", and it was pinned to one repository's name — so
+// serving a DIFFERENT repository's IR mounted the graph under `nousresearch/hermes-agent` while the
+// IR called itself something else. The console would then open the id the IR carries and be told
+// **no such workflow**, for a workflow that had just been discovered, classified and mounted. That is
+// the same false "the identifier does not resolve" this phase is careful about everywhere else.
+//
+// Resolution order: an explicit `-workflow-id` wins; otherwise a pre-discovered IR's own
+// `workflow.id` wins, because for a file already on disk the file is authoritative; otherwise this.
+var workflowID = "nousresearch/hermes-agent"
 
 func main() {
 	addr := flag.String("addr", "127.0.0.1:4321", "listen address for the platform API")
 	repo := flag.String("repo", "", "path to a hermes-agent checkout; discovery runs over it")
 	irPath := flag.String("ir", "", "path to an IR already emitted by cmd/discover (skips discovery)")
+	wantID := flag.String("workflow-id", "", "identifier the console addresses this workflow by "+
+		"(default: the IR's own workflow.id, else nousresearch/hermes-agent)")
 	flag.Parse()
 
 	if *repo == "" && *irPath == "" {
 		fmt.Fprintln(os.Stderr, "p9hermes: give -repo <checkout> or -ir <ir.json>")
 		os.Exit(2)
+	}
+
+	// Resolved BEFORE anything mounts or discovers: discoverInto passes it to `cmd/discover
+	// -workflow-id`, so deciding it later would key the mount and the IR differently.
+	if *wantID != "" {
+		workflowID = *wantID
+	} else if *irPath != "" {
+		if id, err := workflowIDIn(*irPath); err != nil {
+			log.Fatalf("read %s: %v", *irPath, err)
+		} else if id != "" {
+			workflowID = id
+		}
 	}
 
 	path := *irPath
@@ -166,6 +190,26 @@ func main() {
 	log.Fatal(http.ListenAndServe(*addr, srv.Handler))
 }
 
+// workflowIDIn reads just `workflow.id` out of an IR document.
+//
+// Separate from loadAndClassify because it has to answer before the mount key is chosen, and because
+// a malformed IR should fail here — naming the file — rather than three steps later as an empty graph.
+func workflowIDIn(path string) (string, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	var doc struct {
+		Workflow struct {
+			ID string `json:"id"`
+		} `json:"workflow"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return "", fmt.Errorf("parse IR: %w", err)
+	}
+	return doc.Workflow.ID, nil
+}
+
 // discoverInto runs P1 discovery over the checkout and returns the IR path.
 //
 // It shells out to cmd/discover rather than calling the package directly, so what this command serves
@@ -248,7 +292,7 @@ type graphSource struct {
 // Returning this workflow's graph under a different id would make the 404 path unreachable — and
 // would show a user someone else's graph under their own workflow id, which is the `wf-demo` defect
 // in a different costume.
-func (g *graphSource) GraphView(id string) (patternclassifier.GraphView, bool) {
+func (g *graphSource) GraphView(_, id string) (patternclassifier.GraphView, bool) {
 	view, ok := g.views[id]
 	return view, ok
 }

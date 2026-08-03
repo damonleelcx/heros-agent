@@ -111,7 +111,10 @@ func TestNoNewTableWasCreated(t *testing.T) {
 	// Migrations added AFTER P26, and the phase each belongs to. P26 owns none of them, which is the
 	// claim this test exists to keep true.
 	postP26 := map[string]string{
-		"0020_p11_run_links": "P11 run linking — the durable Store that let the capability mount (P19 §11)",
+		"0020_p11_run_links":          "P11 run linking — the durable Store that let the capability mount (P19 §11)",
+		"0021_p11_workflow_ir":        "P11 opt-in workflow structure — the store behind `heros link --with-ir`, and the data the pattern graph is finally drawn from",
+		"0022_platform_discovery":     "P1 platform-side discovery — the pushed source snapshot and the classified graph discovered from it, which is what lets the pattern graph carry LABELS rather than unclassified dots",
+		"0023_run_link_eval_evidence": "P4/P4.5 — the EVIDENCE behind a linked run's scores (case and seed counts, the customer's own gate verdict, per-node cost/latency). Columns on run_link, not a new table; it is what makes the eval board and the scorecard mountable without the platform inventing a gate outcome",
 	}
 	numbered := regexp.MustCompile(`^(\d{4})_([a-z0-9_]+)\.(up|down)\.sql$`)
 	for _, e := range entries {

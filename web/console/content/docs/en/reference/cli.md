@@ -64,7 +64,7 @@ heros apply --repo . --spec variant.json --out change.diff
 | `--repo` | path | `.` | `HEROS_REPO` | the target repository |
 | `--repo-url` | string | *unset* | `HEROS_REPO_URL` | workflow repo url (default: derived from .git) |
 | `--spec` | path | *unset* | `HEROS_SPEC` | path to a Variant Spec JSON |
-| `--workflow-id` | string | *unset* | `HEROS_WORKFLOW_ID` | workflow id (default: module path) |
+| `--workflow-id` | string | *unset* | `HEROS_WORKFLOW_ID` | workflow id (discover/apply default to the module path; push-source REQUIRES it, because guessing would file a snapshot under the wrong workflow) |
 
 ### author
 
@@ -98,7 +98,7 @@ heros author --repo . --spec variant.json --node n_triage --model anthropic/clau
 | `--skills` | string | *unset* | `HEROS_SKILLS` | bound skills, comma-separated, in order |
 | `--spec` | path | *unset* | `HEROS_SPEC` | path to a Variant Spec JSON |
 | `--tools` | string | *unset* | `HEROS_TOOLS` | keep only these discovered tools, comma-separated |
-| `--workflow-id` | string | *unset* | `HEROS_WORKFLOW_ID` | workflow id (default: module path) |
+| `--workflow-id` | string | *unset* | `HEROS_WORKFLOW_ID` | workflow id (discover/apply default to the module path; push-source REQUIRES it, because guessing would file a snapshot under the wrong workflow) |
 
 ### coverage
 
@@ -132,7 +132,7 @@ heros discover --repo . --out ir.json --report discovery.json
 | `--repo` | path | `.` | `HEROS_REPO` | the target repository |
 | `--repo-url` | string | *unset* | `HEROS_REPO_URL` | workflow repo url (default: derived from .git) |
 | `--report` | path | *unset* | `HEROS_REPORT` | discovery report output path |
-| `--workflow-id` | string | *unset* | `HEROS_WORKFLOW_ID` | workflow id (default: module path) |
+| `--workflow-id` | string | *unset* | `HEROS_WORKFLOW_ID` | workflow id (discover/apply default to the module path; push-source REQUIRES it, because guessing would file a snapshot under the wrong workflow) |
 
 ### doctor
 
@@ -174,7 +174,7 @@ heros eval --repo . --seeds 5 --cases 8
 | `--repo` | path | `.` | `HEROS_REPO` | the target repository |
 | `--repo-url` | string | *unset* | `HEROS_REPO_URL` | workflow repo url (default: derived from .git) |
 | `--seeds` | int | `5` | `HEROS_SEEDS` | evaluation seeds |
-| `--workflow-id` | string | *unset* | `HEROS_WORKFLOW_ID` | workflow id (default: module path) |
+| `--workflow-id` | string | *unset* | `HEROS_WORKFLOW_ID` | workflow id (discover/apply default to the module path; push-source REQUIRES it, because guessing would file a snapshot under the wrong workflow) |
 
 ### help
 
@@ -223,9 +223,10 @@ heros link --run run-7 --dry-run
 | Flag | Type | Default | Environment | Meaning |
 |---|---|---|---|---|
 | `--config` | path | *unset* | `HEROS_CONFIG` | path to llm-eval.yaml |
-| `--dry-run` | bool | `false` | `HEROS_DRY_RUN` | render the exact link payload without transmitting it |
+| `--dry-run` | bool | `false` | `HEROS_DRY_RUN` | show exactly what would be transmitted, and transmit nothing (link: the payload itself; push-source: the snapshot's revision, file count and size) |
 | `--repo` | path | `.` | `HEROS_REPO` | the target repository |
 | `--run` | string | *unset* | `HEROS_RUN` | run id to link |
+| `--with-ir` | path | *unset* | `HEROS_WITH_IR` | ALSO transmit this workflow's structure (symbols, files, line spans, models, tool counts) as a second, opt-in payload — never prompt text or source (link) |
 
 ### login
 
@@ -244,6 +245,30 @@ heros login --token <your platform token>
 | Flag | Type | Default | Environment | Meaning |
 |---|---|---|---|---|
 | `--token` | string | *unset* | `HEROS_TOKEN` | platform token (login) |
+
+### push-source
+
+send a source snapshot so the platform can discover and classify this workflow itself.
+
+**Needs the network and a platform account.**
+
+**Before this runs:** a git repository with at least one commit — the snapshot is `git archive` of a revision, never the working directory
+
+```bash
+heros push-source --repo . --dry-run
+```
+
+**On success:** with --dry-run, what the snapshot contains and its size, and nothing transmitted. Without it, the snapshot pushed and the classified graph the platform discovered from it. Exit code `0`.
+
+**When this build does not include it:** the command exits `2` and prints `push-source is a platform command and is unavailable in this build`. That is an operational outcome, not a malformed invocation — you have not typed anything wrong.
+
+| Flag | Type | Default | Environment | Meaning |
+|---|---|---|---|---|
+| `--commit` | string | *unset* | `HEROS_COMMIT` | source revision (default: derived from .git) |
+| `--dry-run` | bool | `false` | `HEROS_DRY_RUN` | show exactly what would be transmitted, and transmit nothing (link: the payload itself; push-source: the snapshot's revision, file count and size) |
+| `--forget` | bool | `false` | `HEROS_FORGET` | DELETE a previously pushed source snapshot from the platform instead of sending one (push-source) |
+| `--repo` | path | `.` | `HEROS_REPO` | the target repository |
+| `--workflow-id` | string | *unset* | `HEROS_WORKFLOW_ID` | workflow id (discover/apply default to the module path; push-source REQUIRES it, because guessing would file a snapshot under the wrong workflow) |
 
 ### status
 

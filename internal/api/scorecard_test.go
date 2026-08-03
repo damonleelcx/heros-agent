@@ -1,7 +1,10 @@
 package api
 
 import (
+	"io"
+
 	"encoding/json"
+	"github.com/heros-foreal/agentd/internal/auth"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -16,7 +19,7 @@ type stubScorecard struct {
 	ok   bool
 }
 
-func (s *stubScorecard) Scorecard(variantID string) (scorecard.View, bool) {
+func (s *stubScorecard) Scorecard(_, variantID string) (scorecard.View, bool) {
 	v := s.view
 	v.VariantID = variantID
 	return v, s.ok
@@ -27,7 +30,7 @@ func TestP45MountedWithNoSourceIs503(t *testing.T) {
 	s := New(nil, config.Config{})
 	s.MountScorecard(nil)
 	rec := httptest.NewRecorder()
-	s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/variants/v/scorecard", nil))
+	s.Handler.ServeHTTP(rec, authedCardReq(http.MethodGet, "/api/v1/variants/v/scorecard", nil))
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("want 503 when mounted without a source, got %d", rec.Code)
 	}
@@ -36,7 +39,7 @@ func TestP45MountedWithNoSourceIs503(t *testing.T) {
 func TestP45NotMountedIsRouteAbsent(t *testing.T) {
 	s := New(nil, config.Config{})
 	rec := httptest.NewRecorder()
-	s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/variants/v/scorecard", nil))
+	s.Handler.ServeHTTP(rec, authedCardReq(http.MethodGet, "/api/v1/variants/v/scorecard", nil))
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("unregistered route should 404, got %d", rec.Code)
 	}
@@ -46,7 +49,7 @@ func TestP45UnknownVariantIs404(t *testing.T) {
 	s := New(nil, config.Config{})
 	s.MountScorecard(&stubScorecard{ok: false})
 	rec := httptest.NewRecorder()
-	s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/variants/nope/scorecard", nil))
+	s.Handler.ServeHTTP(rec, authedCardReq(http.MethodGet, "/api/v1/variants/nope/scorecard", nil))
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("unknown variant should 404, got %d", rec.Code)
 	}
@@ -56,7 +59,7 @@ func TestP45ServesScorecardJSON(t *testing.T) {
 	s := New(nil, config.Config{})
 	s.MountScorecard(&stubScorecard{ok: true, view: scorecard.View{State: scorecard.StateReady, ReadOnly: true}})
 	rec := httptest.NewRecorder()
-	s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/variants/v-sc/scorecard", nil))
+	s.Handler.ServeHTTP(rec, authedCardReq(http.MethodGet, "/api/v1/variants/v-sc/scorecard", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("want 200, got %d", rec.Code)
 	}
@@ -75,7 +78,7 @@ func TestP45UIHasNoApplyAffordance(t *testing.T) {
 	s := New(nil, config.Config{})
 	s.MountScorecard(&stubScorecard{ok: true})
 	rec := httptest.NewRecorder()
-	s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/scorecard", nil))
+	s.Handler.ServeHTTP(rec, authedCardReq(http.MethodGet, "/scorecard", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("want 200 for UI, got %d", rec.Code)
 	}
@@ -91,3 +94,13 @@ func TestP45UIHasNoApplyAffordance(t *testing.T) {
 		t.Error("scorecard UI should declare it is read-only")
 	}
 }
+
+// authedCardReq builds a request carrying an authenticated tenant. The board and the scorecard are tenant-scoped
+// reads — a variant id is a CONFIG HASH, identical across tenants running the same configuration — so
+// every request in these tests carries a principal, exactly as a real one does after auth middleware.
+func authedCardReq(method, target string, body io.Reader) *http.Request {
+	req := httptest.NewRequest(method, target, body)
+	return req.WithContext(auth.WithPrincipal(req.Context(), cardTenant))
+}
+
+var cardTenant = auth.Principal{TenantID: "t1", Role: "member", APIKeyID: "key-1"}

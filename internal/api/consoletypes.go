@@ -82,6 +82,9 @@ func ConsoleViewTypes() []ConsoleViewType {
 		{Name: "CheckoutView", Sample: CheckoutView{}, Endpoint: "POST /api/v1/customers/{customer_id}/checkout-session"},
 		{Name: "PlanChangeView", Sample: PlanChangeView{}, Endpoint: "POST /api/v1/customers/{customer_id}/plan"},
 
+		// ── P11 · a run the CLI transmitted, read back ───────────────────────
+		{Name: "LinkedRunView", Sample: LinkedRunView{}, Endpoint: "GET /api/v1/runs/{run_id}/link"},
+
 		// ── P12 · forge delivery state + route condition ─────────────────────
 		{Name: "DeliveriesView", Sample: DeliveriesView{}, Endpoint: "GET /api/v1/deliveries"},
 

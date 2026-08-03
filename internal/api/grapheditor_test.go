@@ -9,14 +9,20 @@ import (
 	"testing"
 	"time"
 
+	"github.com/heros-foreal/agentd/internal/auth"
 	"github.com/heros-foreal/agentd/internal/config"
 	"github.com/heros-foreal/agentd/internal/discovery"
 )
 
+// editorTenant is the authenticated principal the editor tests act as. The editor is tenant-scoped —
+// GraphEditorSource.IR takes a tenant id — so every request here carries one, exactly as a real request
+// does after auth middleware runs.
+var editorTenant = auth.Principal{TenantID: "t1", Role: "member", APIKeyID: "key-editor"}
+
 // stubP5 serves one fixed IR: A produces `answer`, B requires `response`, C requires `summary`.
 type stubP5 struct{ ir *discovery.IR }
 
-func (s stubP5) IR(id string) (*discovery.IR, bool) {
+func (s stubP5) IR(_, id string) (*discovery.IR, bool) {
 	if id != "wf" {
 		return nil, false
 	}
@@ -63,6 +69,7 @@ func newP5Server(t *testing.T) *Server {
 func post(t *testing.T, s *Server, path, body string) (*httptest.ResponseRecorder, validateResponse) {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+	req = req.WithContext(auth.WithPrincipal(req.Context(), editorTenant))
 	rec := httptest.NewRecorder()
 	s.Mux.ServeHTTP(rec, req)
 	var v validateResponse
@@ -73,6 +80,7 @@ func post(t *testing.T, s *Server, path, body string) (*httptest.ResponseRecorde
 func TestP5IR_ServesReadModel(t *testing.T) {
 	s := newP5Server(t)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/workflows/wf/ir", nil)
+	req = req.WithContext(auth.WithPrincipal(req.Context(), editorTenant))
 	rec := httptest.NewRecorder()
 	s.Mux.ServeHTTP(rec, req)
 	if rec.Code != 200 {
@@ -90,6 +98,7 @@ func TestP5IR_ServesReadModel(t *testing.T) {
 func TestP5IR_UnknownWorkflow404(t *testing.T) {
 	s := newP5Server(t)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/workflows/nope/ir", nil)
+	req = req.WithContext(auth.WithPrincipal(req.Context(), editorTenant))
 	rec := httptest.NewRecorder()
 	s.Mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusNotFound {
@@ -147,6 +156,7 @@ func TestP5Commit_AdaptedProducesLineageAndDiff(t *testing.T) {
 	s := newP5Server(t)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/workflows/wf/commit",
 		strings.NewReader(`{"parent_variant_id":"wf:root","order":["A","B","C"],"edges":[{"from_node_id":"A","to_node_id":"B","kind":"data"},{"from_node_id":"B","to_node_id":"C","kind":"data"}]}`))
+	req = req.WithContext(auth.WithPrincipal(req.Context(), editorTenant))
 	rec := httptest.NewRecorder()
 	s.Mux.ServeHTTP(rec, req)
 	var c commitResponse
@@ -170,6 +180,7 @@ func TestP5Commit_RejectedGeneratesNoDiff(t *testing.T) {
 	s := newP5Server(t)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/workflows/wf/commit",
 		strings.NewReader(`{"parent_variant_id":"wf:root","order":["A","C","B"],"edges":[{"from_node_id":"B","to_node_id":"C","kind":"data"}]}`))
+	req = req.WithContext(auth.WithPrincipal(req.Context(), editorTenant))
 	rec := httptest.NewRecorder()
 	s.Mux.ServeHTTP(rec, req)
 	var c commitResponse
@@ -226,6 +237,7 @@ func TestP5Validate_LargeIRResponsive(t *testing.T) {
 	body := fmt.Sprintf(`{"order":["%s"],"edges":[%s]}`, strings.Join(order, `","`), strings.Join(edges, ","))
 	start := time.Now()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/workflows/big/validate", strings.NewReader(body))
+	req = req.WithContext(auth.WithPrincipal(req.Context(), editorTenant))
 	rec := httptest.NewRecorder()
 	s.Mux.ServeHTTP(rec, req)
 	elapsed := time.Since(start)
@@ -246,6 +258,7 @@ func TestP5Orderings_RankedApprovedFirst(t *testing.T) {
 	// A→B→C: A produces answer (B needs response → adapter), B produces summary (C needs summary).
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/workflows/wf/orderings",
 		strings.NewReader(`{"order":["A","B","C"],"edges":[{"from_node_id":"A","to_node_id":"B","kind":"data"},{"from_node_id":"B","to_node_id":"C","kind":"data"}]}`))
+	req = req.WithContext(auth.WithPrincipal(req.Context(), editorTenant))
 	rec := httptest.NewRecorder()
 	s.Mux.ServeHTTP(rec, req)
 	if rec.Code != 200 {
@@ -297,6 +310,7 @@ func TestP5OrderingsStream_NDJSON(t *testing.T) {
 	s := newP5Server(t)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/workflows/wf/orderings/stream",
 		strings.NewReader(`{"order":["A","B","C"],"edges":[{"from_node_id":"A","to_node_id":"B","kind":"data"},{"from_node_id":"B","to_node_id":"C","kind":"data"}]}`))
+	req = req.WithContext(auth.WithPrincipal(req.Context(), editorTenant))
 	rec := httptest.NewRecorder()
 	s.Mux.ServeHTTP(rec, req)
 	if rec.Code != 200 {
@@ -340,7 +354,7 @@ func TestP5OrderingsStream_NDJSON(t *testing.T) {
 
 type bigSource struct{ ir *discovery.IR }
 
-func (b bigSource) IR(id string) (*discovery.IR, bool) {
+func (b bigSource) IR(_, id string) (*discovery.IR, bool) {
 	if id != "big" {
 		return nil, false
 	}
@@ -363,6 +377,7 @@ func TestP5Commit_WiringOutcomes(t *testing.T) {
 	commit := func(body string) commitResponse {
 		t.Helper()
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/workflows/wf/commit", strings.NewReader(body))
+		req = req.WithContext(auth.WithPrincipal(req.Context(), editorTenant))
 		rec := httptest.NewRecorder()
 		s.Mux.ServeHTTP(rec, req)
 		var c commitResponse
@@ -387,5 +402,67 @@ func TestP5Commit_WiringOutcomes(t *testing.T) {
 	}
 	if c.Diff != "" || c.DiffHash != "" {
 		t.Fatalf("a refused commit must produce no diff, got %q", c.Diff)
+	}
+}
+
+// tenantRecordingSource records which tenant the editor asked about.
+type tenantRecordingSource struct {
+	ir       *discovery.IR
+	askedFor []string
+}
+
+func (t *tenantRecordingSource) IR(tenantID, _ string) (*discovery.IR, bool) {
+	t.askedFor = append(t.askedFor, tenantID)
+	return t.ir, true
+}
+
+// TestEditorRequiresAuthentication and TestEditorScopesToThePrincipalsTenant are the fence under the
+// signature change that added tenantID to GraphEditorSource.
+//
+// 🔴 The IR is MORE sensitive than the pattern graph — it carries prompt text and io_contracts — so an
+// editor route that took a workflow id straight from the URL and no tenant would serve one customer's
+// prompts to another the moment a durable source was mounted behind it. It had no durable source until
+// now, which is exactly why the flaw was invisible: the only implementation was a stub that returned the
+// same fixture to everyone.
+func TestEditorRequiresAuthentication(t *testing.T) {
+	s := New(nil, config.Config{})
+	s.MountGraphEditor(&tenantRecordingSource{ir: fixtureIR()})
+
+	for _, path := range []string{
+		"/api/v1/workflows/wf/ir",
+		"/api/v1/workflows/wf/validate",
+		"/api/v1/workflows/wf/commit",
+		"/api/v1/workflows/wf/orderings",
+	} {
+		method := http.MethodPost
+		if strings.HasSuffix(path, "/ir") {
+			method = http.MethodGet
+		}
+		req := httptest.NewRequest(method, path, strings.NewReader(`{"order":["A"],"edges":[]}`))
+		rec := httptest.NewRecorder()
+		s.Mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("%s %s = %d, want 401 — an unauthenticated caller must not reach a workflow's IR",
+				method, path, rec.Code)
+		}
+	}
+}
+
+func TestEditorScopesToThePrincipalsTenant(t *testing.T) {
+	src := &tenantRecordingSource{ir: fixtureIR()}
+	s := New(nil, config.Config{})
+	s.MountGraphEditor(src)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workflows/wf/ir", nil)
+	req = req.WithContext(auth.WithPrincipal(req.Context(), auth.Principal{TenantID: "tenant-b", Role: "member"}))
+	rec := httptest.NewRecorder()
+	s.Mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if len(src.askedFor) != 1 || src.askedFor[0] != "tenant-b" {
+		t.Fatalf("the source was asked for tenant(s) %v, want exactly [tenant-b] — the scope must come "+
+			"from the authenticated principal, never from the URL", src.askedFor)
 	}
 }

@@ -118,6 +118,11 @@ func (i *Ingester) Ingest(tenantID string, p runlink.Payload) (Result, error) {
 		ToolVersion: p.RunMetadata.ToolVersion, LinkedAt: i.now().UTC(),
 		// Scores are recorded AS COMPUTED (task 4.3): the console shows the developer's own numbers.
 		Scores: scoresFrom(p.Scores),
+		// The evidence behind those scores, recorded for the same reason and with the same rule: AS
+		// REPORTED, never re-derived. The eval board's denominator and the gate verdict are facts about
+		// what ran on the developer's machine, and the platform is not in a position to recompute either.
+		Eval:    evalFrom(p.Eval),
+		PerNode: perNodeFrom(p.Metrics.PerNode),
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("linkingest: record linked run: %w", err)
@@ -181,6 +186,23 @@ func (i *Ingester) Ingest(tenantID string, p runlink.Payload) (Result, error) {
 // linked-derived spend figure appears (FR17).
 func (i *Ingester) Coverage(tenantID string) (LinkCoverage, error) { return i.links.Coverage(tenantID) }
 
+// LinkedRun returns one linked run for a tenant, or ok=false when that run is not linked.
+//
+// # Why the read side needed a door at all
+//
+// The store has had `Get` since it was durable, and nothing called it. Everything a linked run knows —
+// the scores the developer saw locally, the config hash, the revision — went in and could not come back
+// out, so the console's run page reported **no such run** for a run the platform had accepted, stored,
+// and answered `409 already_linked` for on a re-link. The failure was invisible from either end alone:
+// ingest returned 200, the store held the row, and the only reader was a link-coverage COUNT.
+//
+// ok=false is NOT LINKED and nothing else; a read failure is the error. That distinction is the store's
+// and it is preserved rather than flattened here, because "we could not read" and "you never linked it"
+// send a user to different places.
+func (i *Ingester) LinkedRun(tenantID, runID string) (LinkedRun, bool, error) {
+	return i.links.Get(tenantID, runID)
+}
+
 func (i *Ingester) route(tenantID, runID string) string {
 	if i.consoleURL != nil {
 		return i.consoleURL(tenantID, runID)
@@ -239,4 +261,45 @@ type ClosedPeriod struct {
 
 func (e *ClosedPeriod) Error() string {
 	return fmt.Sprintf("run %s falls in a closed period (%s) and cannot be linked", e.RunID, e.Timestamp.Format("2006-01"))
+}
+
+// evalFrom projects the transmitted eval summary onto the stored one.
+//
+// 🔴 An unrecognised gate outcome becomes the ZERO VALUE, not a passed gate. The wire carries a string
+// and a future or malformed client could send anything; mapping the unknown onto GatePass would let a
+// bad client's run rank on the board as if it had cleared the customer's threshold. The zero value makes
+// EvalEvidencePresent report false, and the console then says "no verdict recorded" — which is exactly
+// what is true about a value we cannot read.
+func evalFrom(w runlink.WireEval) runlink.EvalSummary {
+	var outcome runlink.GateOutcome
+	switch runlink.GateOutcome(w.GateOutcome) {
+	case runlink.GatePass:
+		outcome = runlink.GatePass
+	case runlink.GateFail:
+		outcome = runlink.GateFail
+	case runlink.GateNotConfigured:
+		outcome = runlink.GateNotConfigured
+	}
+	return runlink.EvalSummary{
+		CaseCount:    w.CaseCount,
+		SeedCount:    w.SeedCount,
+		GateOutcome:  outcome,
+		GateFailures: append([]string(nil), w.GateFailures...),
+		SingleSeed:   w.SingleSeed,
+	}
+}
+
+// perNodeFrom projects transmitted per-node metrics onto the stored shape, field by named field —
+// the same discipline BuildPayload applies on the way out, applied on the way in.
+func perNodeFrom(w map[string]runlink.WireNodeMetric) map[string]runlink.NodeMetric {
+	if len(w) == 0 {
+		return nil
+	}
+	out := make(map[string]runlink.NodeMetric, len(w))
+	for id, m := range w {
+		out[id] = runlink.NodeMetric{
+			CostUSD: m.Cost, LatencyMS: m.Latency, TokensIn: m.TokensIn, TokensOut: m.TokensOut,
+		}
+	}
+	return out
 }

@@ -410,6 +410,9 @@
         "state": {
           "type": "string"
         },
+        "tie_analysis": {
+          "type": "string"
+        },
         "unmeasured": {
           "anyOf": [
             {
@@ -441,6 +444,7 @@
         "runs_enqueued",
         "spend",
         "state",
+        "tie_analysis",
         "workflow_id"
       ],
       "type": "object"
@@ -1983,6 +1987,79 @@
       ],
       "type": "object"
     },
+    "LinkedRunView": {
+      "description": "Response of GET /api/v1/runs/{run_id}/link",
+      "properties": {
+        "config_hash": {
+          "type": "string"
+        },
+        "config_hash_display": {
+          "type": "string"
+        },
+        "linked_at": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "scores": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/LinkedScoreView"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_revision": {
+          "type": "string"
+        },
+        "tool_version": {
+          "type": "string"
+        },
+        "workflow_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "config_hash",
+        "config_hash_display",
+        "linked_at",
+        "run_id",
+        "scores",
+        "source_revision",
+        "tool_version",
+        "workflow_id"
+      ],
+      "type": "object"
+    },
+    "LinkedScoreView": {
+      "properties": {
+        "ci_high": {
+          "type": "number"
+        },
+        "ci_low": {
+          "type": "number"
+        },
+        "metric": {
+          "type": "string"
+        },
+        "value": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "ci_high",
+        "ci_low",
+        "metric",
+        "value"
+      ],
+      "type": "object"
+    },
     "MeterView": {
       "properties": {
         "allowed": {
@@ -3009,6 +3086,9 @@
         "eval_set_hash": {
           "type": "string"
         },
+        "failure_attribution": {
+          "type": "string"
+        },
         "has_inconclusive": {
           "type": "boolean"
         },
@@ -3062,6 +3142,7 @@
         "config_hash",
         "diagnoses",
         "eval_set_hash",
+        "failure_attribution",
         "has_inconclusive",
         "nodes",
         "overall",
@@ -3619,6 +3700,9 @@
     },
     "InstallView": {
       "$ref": "#/$defs/InstallView"
+    },
+    "LinkedRunView": {
+      "$ref": "#/$defs/LinkedRunView"
     },
     "PRResult": {
       "$ref": "#/$defs/PRResult"

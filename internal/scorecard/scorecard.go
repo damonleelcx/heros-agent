@@ -164,9 +164,35 @@ type View struct {
 	ClassifiedNodeCount   int `json:"classified_node_count"`
 	UnclassifiedNodeCount int `json:"unclassified_node_count"`
 
+	// FailureAttribution says whether the per-node FAILURE columns mean anything on this card.
+	//
+	// 🔴 A NodeRow with FailureShare 0 is a claim — "this node caused none of the failures" — and a
+	// scorecard that never computed failure attribution would be making it on every row. Attribution
+	// needs per-node correctness per case, which is produced where the eval runs and does not cross the
+	// egress boundary; a card assembled from linked runs therefore has real COST and LATENCY shares and
+	// no failure shares at all. Those are different situations and the reader must be able to tell:
+	// "this node is not to blame" and "we did not work out who is to blame" lead to opposite next steps.
+	//
+	// Same doctrine as evalboard.TieAnalysis: the state is DATA the UI is handed, never something it
+	// infers from a column of zeroes.
+	FailureAttribution FailureAttribution `json:"failure_attribution"`
+
 	// ReadOnly is always true; the scorecard exposes no apply/change control.
 	ReadOnly bool `json:"read_only"`
 }
+
+// FailureAttribution reports whether per-node failure attribution was computed for this card.
+type FailureAttribution string
+
+const (
+	// FailureComputed: the attribution engine ran. FailureShare and FirstDivergenceCount are meaningful,
+	// and so are Clusters, Diagnoses and Ablations.
+	FailureComputed FailureAttribution = "computed"
+	// FailureUnavailable: the card was assembled from linked runs, which carry per-node COST and LATENCY
+	// but no per-node correctness. Failure shares are zero because nothing was attributed, not because
+	// nothing failed — and the clusters, diagnoses and ablations are absent for the same reason.
+	FailureUnavailable FailureAttribution = "unavailable"
+)
 
 // Input is everything Build needs — the engine outputs, already computed and (in production) read
 // back from the persisted reports.
@@ -200,7 +226,11 @@ func Build(in Input) View {
 		ConfigHash:  in.Variant.ConfigHash,
 		WorkflowID:  in.Variant.WorkflowID,
 		Overall:     in.Overall,
-		ReadOnly:    true,
+		// Build runs the attribution engine over real per-node contributions, so this path is
+		// unconditionally `computed`. The other value exists for assemblers that cannot
+		// (internal/hostedscorecard).
+		FailureAttribution: FailureComputed,
+		ReadOnly:           true,
 	}
 
 	// Bottleneck flags, grouped by node so the per-node row can carry them.

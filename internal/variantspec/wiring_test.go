@@ -54,7 +54,13 @@ var wiringWords = []string{"wiring", "order", "edge", "graph", "topolog", "rewir
 // and evidence is exactly what the wiring axis is scored against. The distinction this guard protects
 // is "no second place where a spec's DESIRED wiring lives", so an observation table is not a violation
 // of it and is named here rather than silently matched away by a laxer regex.
-var observationTables = map[string]bool{"recon_edge": true}
+//
+// `platform_workflow_graph` (migration 0022) is the second, and it is the same kind of thing one step
+// further out: the classifier's view of a workflow the platform DISCOVERED from pushed source. It
+// records what a workflow was found to be, not what any spec wants it to become — nothing reads it to
+// decide how to wire a variant, and no transform is driven from it. It contains "graph" because it is
+// literally a graph view, which is the case this list exists to distinguish from a config side-table.
+var observationTables = map[string]bool{"recon_edge": true, "platform_workflow_graph": true}
 
 func mentionsWiring(s string) string {
 	low := strings.ToLower(s)

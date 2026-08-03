@@ -54,16 +54,41 @@ func (p *PGStore) Record(lr LinkedRun) (bool, error) {
 	if len(lr.Scores) == 0 {
 		scores = []byte("[]")
 	}
+	gateFailures, err := json.Marshal(lr.Eval.GateFailures)
+	if err != nil {
+		return false, fmt.Errorf("linkingest: encode gate failures for run %s: %w", lr.RunID, err)
+	}
+	if len(lr.Eval.GateFailures) == 0 {
+		gateFailures = []byte("[]")
+	}
+	perNode, err := json.Marshal(lr.PerNode)
+	if err != nil {
+		return false, fmt.Errorf("linkingest: encode per-node metrics for run %s: %w", lr.RunID, err)
+	}
+	if len(lr.PerNode) == 0 {
+		perNode = []byte("{}")
+	}
+	// NULL, not zero, when the evidence is absent. A run linked by a CLI that predates it has no case
+	// count and no verdict — writing 0 and \'not-configured\' would make "we were never told" and "there
+	// were no cases, no gate was set" the same row, and only one of those is a fact about the run.
+	var caseCount, seedCount, gateOutcome any
+	if lr.EvalEvidencePresent() {
+		caseCount = lr.Eval.CaseCount
+		seedCount = lr.Eval.SeedCount
+		gateOutcome = string(lr.Eval.GateOutcome)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	res, err := p.db.ExecContext(ctx,
 		`INSERT INTO run_link
-		   (tenant_id, run_id, workflow_id, config_hash, source_revision, tool_version, linked_at, scores_json)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+		   (tenant_id, run_id, workflow_id, config_hash, source_revision, tool_version, linked_at, scores_json,
+		    eval_case_count, eval_seed_count, eval_gate_outcome, eval_gate_failures, eval_single_seed, per_node_json)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
 		 ON CONFLICT (tenant_id, run_id) DO NOTHING`,
 		lr.TenantID, lr.RunID, lr.WorkflowID, lr.ConfigHash, lr.SourceRevision, lr.ToolVersion,
-		lr.LinkedAt, scores)
+		lr.LinkedAt, scores, caseCount, seedCount, gateOutcome, gateFailures, lr.Eval.SingleSeed, perNode)
 	if err != nil {
 		return false, fmt.Errorf("linkingest: record run %s: %w", lr.RunID, err)
 	}
@@ -164,29 +189,100 @@ func (p *PGStore) LinkedRunIDs(tenantID string) ([]string, error) {
 //
 // ok=false now means exactly that, and nothing else: a read failure is the error. Those were the same
 // value before the interface widened, which made a database outage look like a run nobody had linked.
+// runLinkColumns is the SELECT list both readers use.
+//
+// Shared deliberately: Get and ForWorkflow return the same type, and two hand-maintained column lists
+// for one struct drift — the usual way being that a column added for one reader silently reads as its
+// zero value in the other, which for `eval_gate_outcome` would mean a board quietly treating a measured
+// run as unmeasured.
+const runLinkColumns = `run_id, tenant_id, workflow_id, config_hash, source_revision, tool_version,
+	linked_at, scores_json, eval_case_count, eval_seed_count, eval_gate_outcome, eval_gate_failures, eval_single_seed,
+	per_node_json`
+
+// scanRunLink reads one row in runLinkColumns order.
+func scanRunLink(sc interface{ Scan(...any) error }) (LinkedRun, error) {
+	var lr LinkedRun
+	var scores, gateFailures, perNode []byte
+	// Nullable: a run linked before migration 0023 carries neither. sql.Null* rather than a zero value,
+	// because "absent" and "zero cases / no gate" must stay distinguishable all the way to the console.
+	var caseCount, seedCount sql.NullInt64
+	var gateOutcome sql.NullString
+
+	if err := sc.Scan(&lr.RunID, &lr.TenantID, &lr.WorkflowID, &lr.ConfigHash, &lr.SourceRevision,
+		&lr.ToolVersion, &lr.LinkedAt, &scores, &caseCount, &seedCount, &gateOutcome, &gateFailures,
+		&lr.Eval.SingleSeed, &perNode); err != nil {
+		return LinkedRun{}, err
+	}
+	if len(scores) > 0 {
+		if err := json.Unmarshal(scores, &lr.Scores); err != nil {
+			return LinkedRun{}, fmt.Errorf("decode scores for run %s: %w", lr.RunID, err)
+		}
+	}
+	if caseCount.Valid {
+		lr.Eval.CaseCount = int(caseCount.Int64)
+	}
+	if seedCount.Valid {
+		lr.Eval.SeedCount = int(seedCount.Int64)
+	}
+	if gateOutcome.Valid {
+		lr.Eval.GateOutcome = runlink.GateOutcome(gateOutcome.String)
+	}
+	if len(gateFailures) > 0 {
+		if err := json.Unmarshal(gateFailures, &lr.Eval.GateFailures); err != nil {
+			return LinkedRun{}, fmt.Errorf("decode gate failures for run %s: %w", lr.RunID, err)
+		}
+	}
+	if len(perNode) > 0 {
+		if err := json.Unmarshal(perNode, &lr.PerNode); err != nil {
+			return LinkedRun{}, fmt.Errorf("decode per-node metrics for run %s: %w", lr.RunID, err)
+		}
+	}
+	return lr, nil
+}
+
 func (p *PGStore) Get(tenantID, runID string) (LinkedRun, bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	var lr LinkedRun
-	var scores []byte
-	err := p.db.QueryRowContext(ctx,
-		`SELECT run_id, tenant_id, workflow_id, config_hash, source_revision, tool_version, linked_at, scores_json
-		   FROM run_link WHERE tenant_id = $1 AND run_id = $2`, tenantID, runID).
-		Scan(&lr.RunID, &lr.TenantID, &lr.WorkflowID, &lr.ConfigHash, &lr.SourceRevision,
-			&lr.ToolVersion, &lr.LinkedAt, &scores)
+	row := p.db.QueryRowContext(ctx,
+		`SELECT `+runLinkColumns+` FROM run_link WHERE tenant_id = $1 AND run_id = $2`, tenantID, runID)
+	lr, err := scanRunLink(row)
 	switch {
 	case err == sql.ErrNoRows:
 		return LinkedRun{}, false, nil
 	case err != nil:
 		return LinkedRun{}, false, fmt.Errorf("linkingest: get run %s: %w", runID, err)
 	}
-	if len(scores) > 0 {
-		var sc []runlink.Score
-		if err := json.Unmarshal(scores, &sc); err != nil {
-			return LinkedRun{}, false, fmt.Errorf("linkingest: decode scores for run %s: %w", runID, err)
-		}
-		lr.Scores = sc
-	}
 	return lr, true, nil
+}
+
+// ForWorkflow returns a tenant's runs for one workflow, newest first.
+//
+// Ordered in SQL with run_id as the tiebreak so two runs linked in the same instant keep a stable
+// position — a board whose rows reshuffle between reloads is one a user cannot trust to compare.
+func (p *PGStore) ForWorkflow(tenantID, workflowID string) ([]LinkedRun, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	rows, err := p.db.QueryContext(ctx,
+		`SELECT `+runLinkColumns+` FROM run_link
+		  WHERE tenant_id = $1 AND workflow_id = $2
+		  ORDER BY linked_at DESC, run_id ASC`, tenantID, workflowID)
+	if err != nil {
+		return nil, fmt.Errorf("linkingest: runs for workflow %s: %w", workflowID, err)
+	}
+	defer rows.Close()
+
+	var out []LinkedRun
+	for rows.Next() {
+		lr, err := scanRunLink(rows)
+		if err != nil {
+			return nil, fmt.Errorf("linkingest: runs for workflow %s: %w", workflowID, err)
+		}
+		out = append(out, lr)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("linkingest: runs for workflow %s: %w", workflowID, err)
+	}
+	return out, nil
 }

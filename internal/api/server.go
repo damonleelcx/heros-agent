@@ -138,6 +138,18 @@ type Server struct {
 	// MountRunLinking when available. It attributes a linked run to the authenticated tenant server-side and
 	// lands its events in the existing P2.5 substrate. The platform API's authenticated ingest surface.
 	runLinking LinkIngestSource
+	// workflowIR is the OPT-IN structure store, mounted by MountWorkflowIR when a deployment accepts it.
+	// Separate from runLinking on purpose: accepting a run and accepting a workflow's shape are two
+	// different policy decisions, and one mount must not imply the other.
+	workflowIR WorkflowIRSource
+	// sourcePush is the customer-pushed SOURCE snapshot store, mounted by MountSourcePush. A third
+	// separate policy decision, and the largest one: accepting a run's numbers, accepting a workflow's
+	// allowlisted shape, and accepting the customer's source are three different things to agree to, so
+	// no mount implies another. A deployment that will not hold customer source leaves this nil.
+	sourcePush SourcePushStore
+	// sourceDiscovery runs discovery over a pushed snapshot. Independently nillable from sourcePush:
+	// they need different collaborators and fail for different reasons.
+	sourceDiscovery SourceDiscovery
 
 	// p12 is the P12 forge-delivery surface (console delivery read model + CI-mediated fetch/report),
 	// mounted by MountForgeDelivery when available. It holds no forge credential.

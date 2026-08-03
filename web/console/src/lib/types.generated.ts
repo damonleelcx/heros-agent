@@ -177,6 +177,7 @@ export interface BoardView {
   coverage: CoverageView;
   spend: SpendReport;
   all_tie: boolean;
+  tie_analysis: string;
   notes?: string[] | null;
   unmeasured?: UnmeasuredView[] | null;
   runs_enqueued: number;
@@ -329,6 +330,7 @@ export interface ScorecardView {
   analyst_uncalibrated: boolean;
   classified_node_count: number;
   unclassified_node_count: number;
+  failure_attribution: string;
   read_only: boolean;
 }
 
@@ -699,6 +701,25 @@ export interface PlanChangeView {
   status?: string;
   changed: boolean;
   checkout_required: boolean;
+}
+
+/** Response of `GET /api/v1/runs/{run_id}/link`. */
+export interface LinkedRunView {
+  run_id: string;
+  workflow_id: string;
+  config_hash: string;
+  config_hash_display: string;
+  source_revision: string;
+  tool_version: string;
+  linked_at: string;
+  scores: LinkedScoreView[] | null;
+}
+
+export interface LinkedScoreView {
+  metric: string;
+  value: number;
+  ci_low: number;
+  ci_high: number;
 }
 
 /** Response of `GET /api/v1/deliveries`. */
