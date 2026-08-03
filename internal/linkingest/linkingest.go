@@ -44,7 +44,22 @@ type Ingester struct {
 }
 
 // New builds an ingester over a substrate and a link store.
+//
+// 🔴 A NIL SINK IS REFUSED AT CONSTRUCTION, and that is deliberate. Ingest calls sink.Attribute and
+// sink.Put on the FIRST link of a run only — the already-linked path returns before reaching them. So a
+// nil sink produces a defect with a uniquely bad shape: every re-link of an existing run answers 409
+// correctly, only a first link panics, and the panic is recovered into an opaque
+// `{"code":"PLATFORM_PANIC","trace_id":...}` with nothing in the log. It reads as an intermittent
+// server fault rather than a wiring mistake, and the boot log meanwhile says `served p11_run_linking`.
+//
+// Failing here turns that into an immediate, legible boot failure that names the missing dependency.
+// A capability cannot be truthfully "served" without the substrate its ingest path requires.
 func New(sink CostSink, links Store, consoleURL func(tenantID, runID string) string) *Ingester {
+	if sink == nil {
+		panic("linkingest.New: nil CostSink — the ingest path writes cost, latency and token events on " +
+			"every first link, so a nil sink is not a degraded mode, it is a panic on the first real " +
+			"request. Pass metering.NewMemCostEvents() or a durable substrate.")
+	}
 	return &Ingester{
 		sink: sink, links: links,
 		now:        time.Now,

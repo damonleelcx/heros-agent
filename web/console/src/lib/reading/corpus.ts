@@ -53,7 +53,27 @@ import { parseMarkdown, type Heading, type ParsedMarkdown } from "./markdown.ts"
  * must prove each scan goes red by pointing it at a deliberately broken corpus. A fixture that had to
  * write into the real content tree to prove a fence works is a fixture that can leave the tree broken.
  */
-export const CONTENT_ROOT = process.env.HEROS_CONTENT_ROOT ?? join(process.cwd(), "content");
+/**
+ * 🔴 An EMPTY override is treated as ABSENT, and this was a real production defect rather than
+ * defensiveness.
+ *
+ * `??` falls back only on null/undefined, so `HEROS_CONTENT_ROOT=""` — which is exactly what the
+ * Kubernetes base and the Compose file declared, meaning "unset, use the in-image default" — won the
+ * coalesce and made CONTENT_ROOT the empty string. Every corpus read then resolved against nothing.
+ *
+ * The failure is silent and, worse, it is CONFIDENT: /documentation rendered its four sections with
+ * "No pages in this section yet", and /legal rendered "Not published yet. Nothing is asserted here
+ * until the document exists" — while 14 documentation pages and 4 legal documents, including a
+ * published Terms of Service, sat in the image the whole time. A deployment that misreports its own
+ * legal documents as unpublished is not a cosmetic bug; /legal/terms answered 404 on a document that
+ * exists, and P23 consent reads this same corpus.
+ *
+ * `.trim()` because a whitespace-only value is the same mistake with a space in it.
+ */
+const contentRootOverride = process.env.HEROS_CONTENT_ROOT?.trim();
+export const CONTENT_ROOT = contentRootOverride
+  ? contentRootOverride
+  : join(process.cwd(), "content");
 export const LOCALE = "en";
 
 /**

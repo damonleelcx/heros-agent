@@ -13,6 +13,7 @@ import (
 	"github.com/heros-foreal/agentd/internal/executor"
 	"github.com/heros-foreal/agentd/internal/legal"
 	"github.com/heros-foreal/agentd/internal/linkingest"
+	"github.com/heros-foreal/agentd/internal/metering"
 	"github.com/heros-foreal/agentd/internal/registry"
 	"github.com/heros-foreal/agentd/internal/variantspec"
 	"github.com/heros-foreal/agentd/internal/worktree"
@@ -98,17 +99,33 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 		// would have accepted a developer's linked run, answered 200, and forgotten it on the next
 		// restart. A durable store is what changes that, not a decision to be less careful.
 		//
-		// The console URL the ingester prints back is built from the SAME origin the readiness probe
-		// names, so a linked run's URL and the console we health-check can never disagree.
+		// 🔴 THE RUN URL IS THE PUBLIC ONE, NOT THE HEALTH-CHECK ORIGIN.
+		//
+		// This used to build the URL from originOf(consoleHealthURL), reasoning that "a linked run's URL
+		// and the console we health-check can never disagree". They must disagree: CONSOLE_HEALTH_URL is
+		// the IN-CLUSTER address a pod probes (http://console:4320/api/health), and the run URL is handed
+		// back to a developer's terminal. `heros link` printed
+		// `http://console:4320/app/runs/run-…` — a Service DNS name that resolves on no machine the user
+		// has. It looks like a URL, so nobody reads it as a bug until they click it.
+		//
+		// runlink.PlatformBaseURL is the right origin and needs no new variable: the CLI's own allowlist
+		// refuses to transmit anywhere else (internal/runlink/allowlist.go), so for any client that can
+		// reach this handler at all, that constant IS the public origin by construction. Passing nil
+		// selects exactly that in Ingester.route.
 		linkStore := linkingest.NewPGStore(pg)
-		consoleOrigin := originOf(consoleHealthURL)
-		h.MountRunLinking(linkingest.New(nil, linkStore, func(_, runID string) string {
-			if consoleOrigin == "" {
-				return ""
-			}
-			return consoleOrigin + "/app/runs/" + url.PathEscape(runID)
-		}))
-		served("p11_run_linking")
+		// 🔴 The sink was `nil` here, and it panicked on the first link of any run — found by actually
+		// running `heros link` against a deployed platform. Ingest writes cost/latency/token events on
+		// first link only, so re-linking an existing run answered 409 correctly and only the first one
+		// failed, as an opaque PLATFORM_PANIC with nothing in the log. linkingest.New now refuses a nil
+		// sink outright so this cannot come back quietly.
+		//
+		// ⚠️ MemCostEvents is IN-MEMORY, and that limit is real but bounded: the LINKED RUN itself is
+		// durable (Postgres, migration 0020) — what does not survive a restart is the derived metering
+		// series the console's spend figure reads. That is a smaller loss than refusing to mount, which
+		// would leave `heros link` answering 503 on a platform whose store is durable. It becomes moot
+		// when a durable metering substrate exists; internal/metering has only MemCostEvents today.
+		h.MountRunLinking(linkingest.New(metering.NewMemCostEvents(), linkStore, nil))
+		served("p11_run_linking (links durable; metering series in-memory until a durable substrate exists)")
 		// No separate readiness probe for this store, deliberately. An earlier draft added one, because
 		// linkingest.Store's reads returned no error and a failure had nowhere else to go. The interface
 		// now returns errors on every method, so a failed read fails its CALLER — and the `postgres`
