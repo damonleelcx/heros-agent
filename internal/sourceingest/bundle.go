@@ -104,7 +104,7 @@ func (b *BundleSource) Materialize(ctx context.Context, ref Ref) (Materialized, 
 	if err != nil {
 		return Materialized{}, err // ErrNoSource passes through unwrapped by the store's contract
 	}
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 
 	dir, err := os.MkdirTemp(b.scratch, "src-")
 	if err != nil {
@@ -125,7 +125,7 @@ func extractTarGz(ctx context.Context, r io.Reader, dest string) error {
 	if err != nil {
 		return fmt.Errorf("gzip: %w", err)
 	}
-	defer zr.Close()
+	defer func() { _ = zr.Close() }()
 
 	// The extraction root, resolved. Compared against every destination path so that a rule can be
 	// stated in terms of the real filesystem rather than in terms of string prefixes.
@@ -230,13 +230,22 @@ func writeFile(path string, r io.Reader, size int64) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer f.Close()
 	n, err := io.CopyN(f, r, size)
 	if err != nil && err != io.EOF {
+		_ = f.Close()
 		return n, err
 	}
 	if n != size {
+		_ = f.Close()
 		return n, fmt.Errorf("short read: header declared %d bytes, got %d", size, n)
+	}
+	// 🔴 Close is CHECKED, not deferred-and-ignored. On a buffered or network-backed filesystem the
+	// write errors surface here and nowhere else, so a discarded Close error means this function
+	// reports "exactly size bytes landed" about a file that is short or absent — and discovery then
+	// analyses a truncated tree as though it were the customer's workflow. errcheck flagged this as a
+	// style issue; it is a correctness one.
+	if err := f.Close(); err != nil {
+		return n, fmt.Errorf("close after writing %d bytes: %w", n, err)
 	}
 	return n, nil
 }

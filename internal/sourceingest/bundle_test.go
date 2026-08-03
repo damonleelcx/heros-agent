@@ -133,13 +133,21 @@ func rawTarGz(t *testing.T, name string, declaredSize int64, body string) []byte
 
 	var buf bytes.Buffer
 	zw := gzip.NewWriter(&buf)
-	zw.Write(hdr[:])
-	zw.Write([]byte(body))
+	// Checked, not ignored: a short write here would produce a MALFORMED archive, and the extractor
+	// would then refuse it for the wrong reason — the test would still pass, while proving nothing
+	// about the rule it names.
+	write := func(b []byte) {
+		if _, err := zw.Write(b); err != nil {
+			t.Fatalf("write archive: %v", err)
+		}
+	}
+	write(hdr[:])
+	write([]byte(body))
 	// Pad the body to a 512-byte boundary, then the two empty blocks that end an archive.
 	if pad := (512 - len(body)%512) % 512; pad > 0 {
-		zw.Write(make([]byte, pad))
+		write(make([]byte, pad))
 	}
-	zw.Write(make([]byte, 1024))
+	write(make([]byte, 1024))
 	if err := zw.Close(); err != nil {
 		t.Fatalf("close gzip: %v", err)
 	}

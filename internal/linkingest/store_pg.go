@@ -271,7 +271,7 @@ func (p *PGStore) ForWorkflow(tenantID, workflowID string) ([]LinkedRun, error) 
 	if err != nil {
 		return nil, fmt.Errorf("linkingest: runs for workflow %s: %w", workflowID, err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var out []LinkedRun
 	for rows.Next() {
