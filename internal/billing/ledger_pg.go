@@ -11,7 +11,13 @@ import (
 	"time"
 )
 
-// ledger_pg.go is the durable Ledger, backed by migration 0024.
+// ledger_pg.go is the durable Ledger, over the `billing_event` table migration 0013 created when P7
+// landed.
+//
+// 🔴 The table was there the whole time. This file's first draft shipped a migration that CREATED it,
+// which would have failed with 42P07 at boot on every real deployment — caught only by reading 0013,
+// because no CI job applies migrations that far. What was missing was never the schema; it was Go code
+// that used it.
 //
 // # Why this is the thing that unblocks a whole capability
 //
@@ -20,6 +26,19 @@ import (
 // failure is not a blank page: a charge appended to a map, acknowledged to a payment provider, and lost
 // on the next pod restart is a customer billed with no record on our side that it happened. Serving 503
 // was the honest choice. This removes the reason for it.
+//
+// # 0013's constraints are stricter than this code would have been
+//
+// The table carries CHECKs this file must respect rather than re-invent:
+//
+//   - `billing_event_settled_has_refs`: (status = 'recorded') = (provider_ref IS NOT NULL AND
+//     settled_at IS NOT NULL). So a PENDING row must write provider_ref as NULL, not "". Writing the
+//     empty string satisfies IS NOT NULL and the insert is refused — which is the constraint doing
+//     exactly its job.
+//   - `gainshare_charge_traces_to_evidence`: a gainshare charge with an empty evidence array is
+//     refused. A billed saving that cannot name its evidence is the confident guessing P7 forbids.
+//   - `billing_event_correction_has_reason`, and a FOREIGN KEY to account(customer_id) — a billing
+//     event for a customer that does not exist cannot be written.
 //
 // # The invariant that moved into the database
 //
@@ -105,11 +124,12 @@ func (p *PGLedger) Append(ev BillingEvent) (BillingEvent, error) {
 	res, err := p.db.ExecContext(ctx,
 		`INSERT INTO billing_event
 		   (event_id, customer_id, period, type, kind, idempotency_key, provider_ref, amount_ref,
-		    caused_by, reason, quantity, status, evidence, created_at, settled_at)
+		    caused_by, reason, quantity, status, evidence_json, created_at, settled_at)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
 		 ON CONFLICT (idempotency_key) DO NOTHING`,
-		ev.EventID, ev.CustomerID, ev.Period, string(ev.Type), string(ev.Kind), ev.IdempotencyKey,
-		ev.ProviderRef, ev.AmountRef, ev.CausedBy, ev.Reason, ev.Quantity, string(ev.Status),
+		ev.EventID, ev.CustomerID, nullStr(ev.Period), string(ev.Type), nullStr(string(ev.Kind)),
+		ev.IdempotencyKey, nullStr(ev.ProviderRef), nullStr(ev.AmountRef), ev.CausedBy,
+		nullStr(ev.Reason), ev.Quantity, string(ev.Status),
 		evidence, ev.CreatedAt.UTC(), nullTime(ev.SettledAt))
 	if err != nil {
 		return BillingEvent{}, fmt.Errorf("billing: append %s: %w", ev.IdempotencyKey, err)
@@ -162,7 +182,7 @@ func (p *PGLedger) Settle(key, providerRef, amountRef string, at time.Time) (Bil
 		`UPDATE billing_event
 		    SET provider_ref = $2, amount_ref = $3, status = $4, settled_at = $5
 		  WHERE idempotency_key = $1 AND status <> $4`,
-		key, providerRef, amountRef, string(StatusRecorded), at.UTC())
+		key, nullStr(providerRef), nullStr(amountRef), string(StatusRecorded), at.UTC())
 	if err != nil {
 		return BillingEvent{}, fmt.Errorf("billing: settle %s: %w", key, err)
 	}
@@ -218,22 +238,29 @@ func (p *PGLedger) Pending() ([]BillingEvent, error) {
 
 // billingEventColumns is the SELECT list every reader shares, so a column added for one cannot read as
 // its zero value in another.
+// 0013 names the evidence column `evidence_json`, and leaves period/kind/provider_ref/amount_ref/reason
+// NULLABLE. The reads below coalesce them to Go's zero values; the writes send NULL for empty, because
+// billing_event_settled_has_refs distinguishes NULL from "".
 const billingEventColumns = `event_id, customer_id, period, type, kind, idempotency_key, provider_ref,
-	amount_ref, caused_by, reason, quantity, status, evidence, created_at, settled_at`
+	amount_ref, caused_by, reason, quantity, status, evidence_json, created_at, settled_at`
 
 type scanner interface{ Scan(...any) error }
 
 func scanBillingEvent(sc scanner) (BillingEvent, error) {
 	var ev BillingEvent
-	var typ, kind, status string
+	var typ, status string
+	var period, kind, providerRef, amountRef, reason sql.NullString
 	var evidence []byte
 	var settled sql.NullTime
-	if err := sc.Scan(&ev.EventID, &ev.CustomerID, &ev.Period, &typ, &kind, &ev.IdempotencyKey,
-		&ev.ProviderRef, &ev.AmountRef, &ev.CausedBy, &ev.Reason, &ev.Quantity, &status,
+	if err := sc.Scan(&ev.EventID, &ev.CustomerID, &period, &typ, &kind, &ev.IdempotencyKey,
+		&providerRef, &amountRef, &ev.CausedBy, &reason, &ev.Quantity, &status,
 		&evidence, &ev.CreatedAt, &settled); err != nil {
 		return BillingEvent{}, err
 	}
-	ev.Type, ev.Kind, ev.Status = EventType(typ), ChargeKind(kind), Status(status)
+	// NULL coalesces to Go's zero value. The distinction NULL carries in the schema is about which
+	// CHECK applies, not about a state the domain model can hold — BillingEvent has no "unset period".
+	ev.Period, ev.ProviderRef, ev.AmountRef, ev.Reason = period.String, providerRef.String, amountRef.String, reason.String
+	ev.Type, ev.Kind, ev.Status = EventType(typ), ChargeKind(kind.String), Status(status)
 	if len(evidence) > 0 {
 		if err := json.Unmarshal(evidence, &ev.Evidence); err != nil {
 			return BillingEvent{}, fmt.Errorf("decode evidence for %s: %w", ev.EventID, err)
@@ -259,6 +286,16 @@ func scanBillingEvents(rows *sql.Rows, what string) ([]BillingEvent, error) {
 		return nil, fmt.Errorf("billing: %s: %w", what, err)
 	}
 	return out, nil
+}
+
+// nullStr sends NULL for an empty string. Load-bearing rather than tidy: billing_event_settled_has_refs
+// reads `provider_ref IS NOT NULL`, and "" satisfies that — so an empty provider ref written as "" makes
+// a PENDING row look settled to the constraint and the insert is refused.
+func nullStr(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
 }
 
 // nullTime renders an optional timestamp for the driver. NULL rather than the zero time: "not yet

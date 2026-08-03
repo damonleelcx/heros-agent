@@ -11,7 +11,19 @@ import (
 	"time"
 )
 
-// store_pg.go is the durable account Store, backed by migration 0024.
+// store_pg.go is the durable account Store, over the `account` table migration 0013 created when P7
+// landed — plus the four columns migration 0024 adds.
+//
+// 🔴 The table was already there; only Go code that used it was missing. What genuinely did NOT exist
+// were P8's operator fields: `account.Account` grew Status, SuspensionReason, SuspendedAt and
+// QuotaOverrides for the operator console, and 0013's schema has none of them. The in-memory store held
+// them, so nothing noticed. A durable store that silently dropped them would let an operator suspend a
+// tenant, see it applied, and find the account active again after the next restart.
+//
+// 0013's CHECKs are stricter than this code would have written, and are respected rather than
+// re-invented: `active_plan_id <> ''`, `plan_config_version <> ''`, a handle that cannot look like a
+// card number, and `account_consent_timestamped` (gainshare_consent = (consented_at IS NOT NULL)) —
+// which is why SetGainshareConsent sends NULL on revocation instead of leaving a stale timestamp.
 //
 // Billing was unmounted because its only Ledger and its only account Store were in-memory. This is the
 // second half: the plan an account is on, and the gainshare consent that authorises charging it, must
@@ -74,7 +86,7 @@ func (p *PGStore) Create(a Account) (Account, error) {
 	// ON CONFLICT DO NOTHING plus a zero row count, rather than a prior SELECT: the existence check and
 	// the insert must be one operation or two concurrent signups for one customer both succeed.
 	res, err := p.db.ExecContext(ctx,
-		`INSERT INTO billing_account (`+accountColumns+`)
+		`INSERT INTO account (`+accountColumns+`)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
 		 ON CONFLICT (customer_id) DO NOTHING`,
 		a.CustomerID, a.ProviderCustomerHandle, a.ActivePlanID, a.PlanConfigVersion,
@@ -98,7 +110,7 @@ func (p *PGStore) Get(customerID string) (Account, error) {
 	ctx, cancel := p.ctx()
 	defer cancel()
 
-	row := p.db.QueryRowContext(ctx, `SELECT `+accountColumns+` FROM billing_account WHERE customer_id = $1`, customerID)
+	row := p.db.QueryRowContext(ctx, `SELECT `+accountColumns+` FROM account WHERE customer_id = $1`, customerID)
 	a, err := scanAccount(row)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
@@ -116,7 +128,7 @@ func (p *PGStore) update(customerID, set string, args ...any) (Account, error) {
 
 	full := append([]any{customerID}, args...)
 	row := p.db.QueryRowContext(ctx,
-		`UPDATE billing_account SET `+set+` WHERE customer_id = $1 RETURNING `+accountColumns, full...)
+		`UPDATE account SET `+set+` WHERE customer_id = $1 RETURNING `+accountColumns, full...)
 	a, err := scanAccount(row)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
@@ -187,7 +199,7 @@ func (p *PGStore) List() ([]Account, error) {
 	ctx, cancel := p.ctx()
 	defer cancel()
 
-	rows, err := p.db.QueryContext(ctx, `SELECT `+accountColumns+` FROM billing_account ORDER BY customer_id ASC`)
+	rows, err := p.db.QueryContext(ctx, `SELECT `+accountColumns+` FROM account ORDER BY customer_id ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("account: list: %w", err)
 	}
