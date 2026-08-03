@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/heros-foreal/agentd/internal/auth"
 	"github.com/heros-foreal/agentd/internal/proposal"
 	"github.com/heros-foreal/agentd/internal/verification"
 )
@@ -25,8 +26,19 @@ var p55HTML []byte
 // and the Assisted apply action (open a PR carrying a verified proposal's diff). OpenPR NEVER merges
 // and never mutates the working tree — it opens a reviewable PR for the human (design Decision 9).
 type ProposalsSource interface {
-	Surface(workflowID string) (Surface, bool)
-	OpenPR(workflowID, proposalID string) (PRResult, error)
+	// Surface returns one TENANT's recommendation surface for a workflow.
+	//
+	// 🔴 tenantID is the FIFTH interface in this package to need it, after PatternSource,
+	// GraphEditorSource, BoardSource and ScorecardSource. Every one was written against a demo stub that
+	// returned a single fixture to every caller, so the missing scope was invisible until something
+	// durable sat behind it. Workflow ids are chosen by customers and collide; the caller reads one
+	// straight out of a URL.
+	//
+	// It matters more here than on a read-only board: OpenPR acts on what Surface returned. An
+	// unscoped Surface would let one tenant enumerate another's proposals AND open a pull request
+	// carrying their diff into a repository — a write, into someone else's code.
+	Surface(tenantID, workflowID string) (Surface, bool)
+	OpenPR(tenantID, workflowID, proposalID string) (PRResult, error)
 }
 
 // Surface is the whole P5.5 read model for one workflow.
@@ -239,7 +251,12 @@ func (s *Server) handleProposals(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "the p5.5 surface is not mounted on this server"})
 		return
 	}
-	view, ok := s.proposals.Surface(r.PathValue("workflow_id"))
+	principal, authed := auth.PrincipalFrom(r.Context())
+	if !authed || principal.TenantID == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "the recommendation surface requires an authenticated tenant"})
+		return
+	}
+	view, ok := s.proposals.Surface(principal.TenantID, r.PathValue("workflow_id"))
 	if !ok {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no surface for workflow " + r.PathValue("workflow_id")})
 		return
@@ -256,10 +273,15 @@ func (s *Server) handleOpenPR(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "the p5.5 surface is not mounted on this server"})
 		return
 	}
+	principal, authed := auth.PrincipalFrom(r.Context())
+	if !authed || principal.TenantID == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "opening a pull request requires an authenticated tenant"})
+		return
+	}
 	wf := r.PathValue("workflow_id")
 	pid := r.PathValue("proposal_id")
 
-	view, ok := s.proposals.Surface(wf)
+	view, ok := s.proposals.Surface(principal.TenantID, wf)
 	if !ok {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no surface for workflow " + wf})
 		return
@@ -276,7 +298,7 @@ func (s *Server) handleOpenPR(w http.ResponseWriter, r *http.Request) {
 			"error": "proposal " + pid + " is not a gate-passing, one-click-openable recommendation"})
 		return
 	}
-	res, err := s.proposals.OpenPR(wf, pid)
+	res, err := s.proposals.OpenPR(principal.TenantID, wf, pid)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
