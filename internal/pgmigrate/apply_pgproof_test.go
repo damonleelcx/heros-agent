@@ -24,15 +24,17 @@
 //   - IDEMPOTENCE. A second Apply must be a no-op reporting zero applied. The DDL is bare `CREATE
 //     TABLE`, so idempotence comes entirely from the ledger being READ — a runner that re-applied
 //     everything would fail the second boot of every deployment.
+//
 //   - LEDGER COMPLETENESS. Every embedded migration's id must be present in `schema_migrations`
 //     afterwards. A file that applies but forgets to record itself is re-applied on the next boot and
 //     fails there — turning an authoring slip into an outage on somebody else's upgrade.
+//
 //   - FRESH-INSTALL PARITY. A fresh database must end at the same ledger as an incremental one. This
 //     is what makes "upgrade preserves user state" checkable rather than asserted: the two paths a
 //     deployment can take must converge.
 //
-//	make pg-proof
-//	HEROS_TEST_POSTGRES_URL=… go test -tags pgproof ./internal/pgmigrate/
+//     make pg-proof
+//     HEROS_TEST_POSTGRES_URL=… go test -tags pgproof ./internal/pgmigrate/
 package pgmigrate
 
 import (
@@ -157,6 +159,11 @@ func TestTheSchemaCarriesWhatTheStoresQuery(t *testing.T) {
 			"eval_case_count", "eval_seed_count", "eval_gate_outcome", "eval_gate_failures",
 			"eval_single_seed", "per_node_json",
 		},
+		// 0025's scope columns. Their ABSENCE is what made api.ProposalsSource.Surface(workflowID)
+		// unanswerable: 0012 built these tables single-tenant and workflow-implicit.
+		"proposal":                {"proposal_id", "diagnosis_id", "operator", "base_variant_id", "candidate_config_hash", "status", "tenant_id", "workflow_id"},
+		"verdict":                 {"proposal_id", "metric", "delta", "ci_low", "ci_high", "gate_result"},
+		"delivery_route":          {"tenant_id", "target", "forge", "base_ref", "capability_kind", "capability_detail"},
 		"workflow_ir":             {"tenant_id", "workflow_id", "source_revision", "ir_version", "received_at", "nodes_json", "edges_json"},
 		"source_bundle":           {"tenant_id", "workflow_id", "source_revision", "content_hash", "size_bytes", "received_at"},
 		"platform_workflow_graph": {"tenant_id", "workflow_id", "source_revision", "ir_version", "taxonomy_version", "discovered_at", "llm_calls", "view_json"},
