@@ -24,6 +24,13 @@ spec:
     spec:
       securityContext:
         runAsNonRoot: true
+        # 🔴 runAsUser is REQUIRED, not hardening. Without it the kubelet cannot verify the image's
+        # string user is non-root and refuses to start the container:
+        #   Error: container has runAsNonRoot and image has non-numeric user
+        # The pod then sits in CreateContainerConfigError forever, on every substrate.
+        # 1000 is the node image's `node` user.
+        runAsUser: 1000
+        runAsGroup: 1000
         seccompProfile: { type: RuntimeDefault }
       containers:
         - name: console
@@ -87,7 +94,12 @@ spec:
             - { name: CONSOLE_IDP_TIMEOUT_MS, value: "5000" }
             # ── Legal & developer docs (P23) ──────────────────────────────────────────────────────
             - { name: CONSOLE_CONSENT_GATE, value: "" }
-            - { name: HEROS_CONTENT_ROOT, value: "" }
+            # HEROS_CONTENT_ROOT is deliberately NOT declared. Its own definition
+            # (web/console/src/lib/reading/corpus.ts) says it exists for ONE caller — the fence fixtures
+            # that must point a scan at a deliberately broken corpus. Declaring it here as "" did not
+            # mean "use the in-image default": it made the corpus root the EMPTY STRING, and the console
+            # reported 14 documentation pages and 4 legal documents as unpublished while serving them
+            # from its own image. The corpus ships in the image (ADR-011); absence is the correct config.
             # ── Analytics & error monitoring (P24) ────────────────────────────────────────────────
             #
             # All four OPTIONAL, all four absent by default. A deployment that reports to nobody is the

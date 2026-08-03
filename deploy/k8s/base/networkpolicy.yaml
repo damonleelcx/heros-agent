@@ -59,6 +59,27 @@ spec:
       ports:
         - { protocol: TCP, port: 4321 }
   egress:
+    # 🔴 THE TWO CONSOLES' HEALTH ENDPOINTS. This rule's absence was not a tightening — it made agentd
+    # permanently NotReady on any cluster that actually enforces NetworkPolicy, and therefore took the
+    # whole platform down.
+    #
+    # agentd is configured BY THIS SAME BASE to aggregate both consoles into /readyz
+    # (CONSOLE_HEALTH_URL, ADMIN_CONSOLE_HEALTH_URL in agentd.yaml). Its readiness probe reads /readyz.
+    # So the manifest told agentd to make two calls and then forbade both: /readyz reported
+    # `customer_console: unreachable`, the probe failed, and the kubelet pulled agentd out of its
+    # Service endpoints — at which point the consoles' own BFF→API calls got connection-refused too.
+    # Nothing in the cluster is up, and the first symptom is a health endpoint honestly reporting it.
+    #
+    # ⚠️ It is worth knowing WHY this survived: on EKS the VPC CNI ignores NetworkPolicy unless
+    # enableNetworkPolicy is turned on (AWS.md §0 gap 4). Unenforced, the contradiction is invisible and
+    # everything works. Turning enforcement on — which §3 instructs you to do — is what breaks it. A
+    # policy bug that only appears once the policy starts working is the worst shape this can take.
+    - to:
+        - podSelector: { matchLabels: { app.kubernetes.io/name: console } }
+      ports: [{ protocol: TCP, port: 4320 }]
+    - to:
+        - podSelector: { matchLabels: { app.kubernetes.io/name: admin-console } }
+      ports: [{ protocol: TCP, port: 4310 }]
     # To the data-plane stores — the permitted control/data seam.
     - to:
         - podSelector: { matchLabels: { app.kubernetes.io/name: postgres } }

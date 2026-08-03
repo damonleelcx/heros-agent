@@ -43,6 +43,22 @@ spec:
     spec:
       securityContext:
         runAsNonRoot: true
+        # 🔴 runAsUser IS REQUIRED HERE, and its absence was not a hardening gap — it stopped the pod
+        # from starting at all, on every substrate:
+        #
+        #   Error: container has runAsNonRoot and image has non-numeric user (nonroot),
+        #          cannot verify user is non-root
+        #
+        # `runAsNonRoot: true` obliges the KUBELET to prove the container is not uid 0 before it starts.
+        # The Dockerfile says `USER nonroot:nonroot` — a NAME — and the kubelet cannot resolve a name to
+        # a uid without reading the image's /etc/passwd, which it will not do. So it refuses, and the
+        # pod sits in CreateContainerConfigError forever. Naming the uid is what makes the assertion
+        # checkable rather than merely stated.
+        #
+        # 65532 is distroless's `nonroot`, the same value fsGroup uses below and the same identity the
+        # Dockerfile gives the data directory. All three must move together if the base image changes.
+        runAsUser: 65532
+        runAsGroup: 65532
         seccompProfile: { type: RuntimeDefault }
         # 🔴 fsGroup, and it is load-bearing on the SAME defect Compose hit: a freshly provisioned
         # PersistentVolume is root-owned, the container runs as nonroot on a read-only rootfs, and the

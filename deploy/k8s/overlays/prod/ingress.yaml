@@ -1,0 +1,106 @@
+# ingress.yaml — the two public surfaces (P19 §7), for k3s on a single VM.
+#
+# Until this file existed, `kubectl apply -k` succeeded, every pod went healthy, and NOTHING was
+# reachable from a browser: every Service in the base is ClusterIP and no Ingress existed anywhere in the
+# tree. That is the one failure mode in this deploy that looks like success, which is why the manifest
+# lives here rather than in a runbook step.
+#
+# ── Two origins, one node ────────────────────────────────────────────────────────────────────────────
+#
+# 🔴 TWO INGRESSES, TWO HOSTNAMES, and that is what Decision 5 actually rests on: the isolation is the
+# BROWSER'S ORIGIN BOUNDARY and a disjoint cookie jar, not a route inside one app. Serving both from one
+# Traefik instance on one node does NOT weaken that — a cookie set on admin.heros-agent.space is not sent
+# to heros-agent.space no matter what terminates the TLS.
+#
+# ⚠️ What IS weaker than the EKS topology, stated rather than glossed: on EKS these were two separate
+# ALBs, so a WAF association, an access-log stream and a listener-rule change touched one surface only.
+# Here they share a reverse proxy, so a Traefik misconfiguration is a change that can reach both. That is
+# the cost of the single-VM budget, and it is a real one. Never merge them further — do not add a path
+# rule that serves the operator console under the customer hostname.
+#
+# ✏️ Change `heros-agent.space` in BOTH if you are not deploying to that domain. Concrete hostnames, not
+# blanks, on purpose: an Ingress rule with an empty host matches EVERY host that reaches the proxy, which
+# would serve the operator console from the customer hostname. A wrong hostname is inert; a blank one is
+# a boundary failure.
+#
+# TLS is issued by cert-manager over HTTP-01 (see the `letsencrypt-prod` ClusterIssuer). Traefik on k3s
+# ships no ACME resolver of its own, so a `tls:` block with no issuer would serve Traefik's self-signed
+# default certificate — a browser warning, not an error, which is exactly the kind of failure that gets
+# clicked through in testing and shipped.
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: console
+  labels:
+    app.kubernetes.io/name: console
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts: [heros-agent.space]
+      secretName: console-tls
+  rules:
+    - host: heros-agent.space
+      http:
+        paths:
+          # 🔴 THE CLI PATHS COME FIRST. Traefik ranks rules by path-length specificity so an Exact match
+          # outranks the `/` prefix regardless of order, but the order is kept meaningful for the reader
+          # and for any controller that does evaluate in sequence.
+          #
+          # `heros login` and `heros link` transmit to a compiled-in constant
+          # (internal/runlink/allowlist.go): GET /api/v1/whoami to validate the bearer token, then POST
+          # /api/v1/run-links. Those are platform routes on agentd:4321 served under the CUSTOMER
+          # hostname — the console BFF serves nothing under /api/v1 — so without these two rules the CLI
+          # reaches Next.js and gets a 404 that reads as a networking problem and is not one.
+          #
+          # ⚠️ `Exact`, never `Prefix`, and never a blanket /api/v1/* rule. The rest of 4321 is a
+          # console-only surface reached with the BFF's own credential; these two are a bearer-token
+          # surface built for machines. The NetworkPolicy cannot help here — it matches L3/L4, so
+          # admitting the proxy to 4321 admits it to ALL of 4321. This path list is the entire
+          # restriction. Treat any future /api/v1 rule on the public hostname as a security review.
+          - path: /api/v1/whoami
+            pathType: Exact
+            backend: { service: { name: agentd, port: { number: 4321 } } }
+          - path: /api/v1/run-links
+            pathType: Exact
+            backend: { service: { name: agentd, port: { number: 4321 } } }
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: console, port: { number: 4320 } } }
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: admin-console
+  labels:
+    app.kubernetes.io/name: admin-console
+  annotations:
+    # 🔴 INTERNET-FACING, and this is the highest-blast-radius surface in the system: it reads across
+    # tenants and can suspend them. What makes that defensible is NOT the network boundary — it is that
+    # the operator console refuses to serve anyone who has not completed operator SSO **and** MFA (P22),
+    # and refuses to start at all under a `dev` identity seam in production (ADR-008). Verify BOTH in the
+    # running pod BEFORE admin.heros-agent.space resolves publicly — AWS.md §7.3 has the two commands.
+    #
+    # There is no WAF here and no ALB inbound-cidrs. On a single VM the equivalent lever is the EC2
+    # security group, which is coarser: it cannot distinguish the two hostnames, because both arrive on
+    # the same 443. So restricting operator access by source IP means restricting BOTH consoles. If you
+    # need operator-only IP restriction, do it in Traefik middleware, not the security group.
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts: [admin.heros-agent.space]
+      secretName: admin-console-tls
+  rules:
+    # No /api/v1 rules here, deliberately. The CLI transmits to the customer origin only, and the
+    # operator hostname has no machine-token surface at all.
+    - host: admin.heros-agent.space
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: admin-console, port: { number: 4310 } } }
