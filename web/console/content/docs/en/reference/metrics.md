@@ -2,7 +2,7 @@
 title: Metric reference
 tier: reference
 summary: Every metric the platform emits, with its unit, its exact computation, and the code that computes it.
-platform_version: 0.20.0
+platform_version: 0.21.0
 boundary: It states what each number measures and where it is computed. It does not tell you what a good value is — that depends on your workflow, and a benchmark stated here would be a number about somebody else's system.
 generated: true
 order: 3
