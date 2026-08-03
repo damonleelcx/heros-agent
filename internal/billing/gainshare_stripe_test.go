@@ -215,7 +215,7 @@ func TestGainshareOverStripeStaysBehindTheRolloutFlag(t *testing.T) {
 	if n := f.ItemCount(); n != 0 {
 		t.Errorf("%d Stripe object(s) were created with the gainshare flag off", n)
 	}
-	if rows := svc.Ledger().Events("cus_acme", july.ID); len(rows) != 0 {
+	if rows := testEvents(svc.Ledger(), "cus_acme", july.ID); len(rows) != 0 {
 		t.Errorf("%d ledger row(s) were written with the gainshare flag off — a later flip would settle them into real charges", len(rows))
 	}
 

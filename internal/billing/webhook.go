@@ -539,7 +539,16 @@ func (s *Service) decodeWebhook(body []byte) (WebhookPayload, error) {
 	// handle. The metadata the platform stamped wins where it exists; otherwise the account store is
 	// asked which of its accounts holds that handle. Guessing — or keying the mirror by Stripe's handle
 	// instead — would give the console a state it cannot look up.
-	p.CustomerID = firstNonEmpty(obj.Metadata[metaCustomerID], subMeta[metaCustomerID], s.customerForHandle(obj.Customer))
+	// The handle lookup runs only when the stamped metadata did not answer, so a store outage cannot
+	// fail a delivery the platform could already attribute on its own.
+	p.CustomerID = firstNonEmpty(obj.Metadata[metaCustomerID], subMeta[metaCustomerID])
+	if p.CustomerID == "" {
+		byHandle, err := s.customerForHandle(obj.Customer)
+		if err != nil {
+			return p, err
+		}
+		p.CustomerID = byHandle
+	}
 	return p, nil
 }
 
@@ -571,16 +580,25 @@ func periodOf(o stripeEventObject) string {
 }
 
 // customerForHandle resolves a provider customer handle back to the platform customer id.
-func (s *Service) customerForHandle(handle string) string {
+//
+// 🔴 A FAILED READ IS NOT "NO SUCH CUSTOMER". It returns an error so the caller can refuse the delivery
+// and let the provider retry, because the alternative is silently attributing a real charge to nobody —
+// and a webhook that answers 200 to an event it could not attribute is one the provider never sends
+// again.
+func (s *Service) customerForHandle(handle string) (string, error) {
 	if handle == "" || s.accounts == nil {
-		return ""
+		return "", nil
 	}
-	for _, a := range s.accounts.List() {
+	accts, err := s.accounts.List()
+	if err != nil {
+		return "", fmt.Errorf("billing: resolving provider handle to a customer: %w", err)
+	}
+	for _, a := range accts {
 		if a.ProviderCustomerHandle == handle {
-			return a.CustomerID
+			return a.CustomerID, nil
 		}
 	}
-	return ""
+	return "", nil
 }
 
 // StripeSignatureHeader is the header Stripe signs its deliveries with.

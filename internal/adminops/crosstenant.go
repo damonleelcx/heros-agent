@@ -232,7 +232,7 @@ func (s *CrossTenantService) View(ctx context.Context, aggregate Aggregate, peri
 	if err := s.logView(sess.AdminID, string(aggregate), TargetGlobal, period.ID); err != nil {
 		return ReadModel{}, err
 	}
-	return s.build(aggregate, period), nil
+	return s.build(aggregate, period)
 }
 
 // DrillDown returns one tenant's slice of an aggregate.
@@ -263,7 +263,11 @@ func (s *CrossTenantService) DrillDown(ctx context.Context, tenantID string, agg
 	// No cohort floor here: this is explicitly a single-tenant view, gated and logged as one. Applying
 	// the floor would suppress the only thing the operator asked for while still having logged the
 	// look — worse for privacy AND useless.
-	m.Rows = s.rowsFor(aggregate, []account.Account{acct}, period)
+	rows, err := s.rowsFor(aggregate, []account.Account{acct}, period)
+	if err != nil {
+		return ReadModel{}, err
+	}
+	m.Rows = rows
 	m.Note = noteFor(aggregate)
 	return m, nil
 }
@@ -294,8 +298,13 @@ func (s *CrossTenantService) source() string {
 }
 
 // build assembles one aggregate, applying the minimum-cohort floor.
-func (s *CrossTenantService) build(aggregate Aggregate, period metering.Period) ReadModel {
-	accts := s.accounts.List()
+func (s *CrossTenantService) build(aggregate Aggregate, period metering.Period) (ReadModel, error) {
+	accts, err := s.accounts.List()
+	if err != nil {
+		// The cohort floor would otherwise turn a failed read into "suppressed: 0 tenants contributed",
+		// which reads as a privacy decision rather than an outage.
+		return ReadModel{}, fmt.Errorf("adminops: listing tenants for the aggregate: %w", err)
+	}
 	m := ReadModel{
 		Aggregate: aggregate, DisplayName: aggregate.DisplayName(), Period: period.ID,
 		Cohort: len(accts), Source: s.source(),
@@ -305,11 +314,18 @@ func (s *CrossTenantService) build(aggregate Aggregate, period metering.Period) 
 		m.SuppressionReason = fmt.Sprintf(
 			"suppressed: %d tenants contributed, below the minimum cohort of %d — an aggregate over fewer "+
 				"tenants would re-identify them", len(accts), s.minCohort)
-		return m
+		return m, nil
 	}
-	m.Rows = s.rowsFor(aggregate, accts, period)
+	rows, err := s.rowsFor(aggregate, accts, period)
+	if err != nil {
+		// The whole aggregate fails rather than rendering the rows that happened to read cleanly. A
+		// cross-tenant revenue total assembled from the subset of tenants whose ledger responded is a
+		// number with no meaning, and it looks exactly like a real one.
+		return ReadModel{}, err
+	}
+	m.Rows = rows
 	m.Note = noteFor(aggregate)
-	return m
+	return m, nil
 }
 
 // noteFor returns the exclusion statement an aggregate carries on the surface.
@@ -322,22 +338,27 @@ func noteFor(aggregate Aggregate) string {
 }
 
 // rowsFor computes one aggregate's rows from the substrate.
-func (s *CrossTenantService) rowsFor(aggregate Aggregate, accts []account.Account, period metering.Period) []AggregateRow {
+// rowsFor dispatches to the aggregate's builder.
+//
+// Only the two that read the BILLING LEDGER return an error; the rest cannot fail. That asymmetry is
+// deliberate rather than tidied away into "everything returns an error" — it says, at the dispatch
+// point, exactly which aggregates depend on a store that can be down.
+func (s *CrossTenantService) rowsFor(aggregate Aggregate, accts []account.Account, period metering.Period) ([]AggregateRow, error) {
 	switch aggregate {
 	case AggregateUsageSUM:
-		return s.usageRows(accts, period)
+		return s.usageRows(accts, period), nil
 	case AggregateCOGS:
-		return s.cogsRows(accts, period)
+		return s.cogsRows(accts, period), nil
 	case AggregateRevenueOps:
 		return s.revenueOpsRows(accts, period)
 	case AggregateTopConsumers:
-		return s.topConsumerRows(accts, period)
+		return s.topConsumerRows(accts, period), nil
 	case AggregateAnomalies:
 		return s.anomalyRows(accts, period)
 	case AggregateAuthoredImprovement:
-		return s.improvementRows(accts, period)
+		return s.improvementRows(accts, period), nil
 	}
-	return nil
+	return nil, nil
 }
 
 // improvementRows is the fleet's improvement, savings and quality picture — with `unverified` authored
@@ -457,14 +478,20 @@ func (s *CrossTenantService) cogsRows(accts []account.Account, period metering.P
 
 // revenueOpsRows reports the SHAPE of the billing ledger — counts by event type and status. Counts,
 // never amounts.
-func (s *CrossTenantService) revenueOpsRows(accts []account.Account, period metering.Period) []AggregateRow {
+func (s *CrossTenantService) revenueOpsRows(accts []account.Account, period metering.Period) ([]AggregateRow, error) {
 	if s.ledger == nil {
-		return nil
+		return nil, nil
 	}
 	byType := map[string]float64{}
 	var pending float64
 	for _, a := range accts {
-		for _, ev := range s.ledger.Events(a.CustomerID, period.ID) {
+		evs, err := s.ledger.Events(a.CustomerID, period.ID)
+		if err != nil {
+			// One unreadable tenant fails the AGGREGATE. A revenue total silently missing one tenant's
+			// rows is indistinguishable from a real total, and it is the number an operator acts on.
+			return nil, fmt.Errorf("adminops: revenue aggregate: reading %s's ledger: %w", a.CustomerID, err)
+		}
+		for _, ev := range evs {
 			byType[string(ev.Type)]++
 			if ev.Status == billing.StatusPending {
 				pending++
@@ -482,7 +509,7 @@ func (s *CrossTenantService) revenueOpsRows(accts []account.Account, period mete
 	}
 	rows = append(rows, AggregateRow{Label: "unsettled", Value: pending, Unit: "billing_events",
 		Detail: "events still awaiting provider confirmation"})
-	return rows
+	return rows, nil
 }
 
 // topConsumerRows ranks tenants by metered SUM.
@@ -509,7 +536,7 @@ func (s *CrossTenantService) topConsumerRows(accts []account.Account, period met
 
 // anomalyRows surfaces tenants whose state warrants a look. Each row names the tenant AND the cause,
 // because an anomaly with no cause is a number nobody can act on.
-func (s *CrossTenantService) anomalyRows(accts []account.Account, period metering.Period) []AggregateRow {
+func (s *CrossTenantService) anomalyRows(accts []account.Account, period metering.Period) ([]AggregateRow, error) {
 	var rows []AggregateRow
 	for _, a := range accts {
 		if a.Status.Suspended() {
@@ -528,7 +555,14 @@ func (s *CrossTenantService) anomalyRows(accts []account.Account, period meterin
 			}
 		}
 		if s.ledger != nil {
-			for _, ev := range s.ledger.Events(a.CustomerID, period.ID) {
+			evs, err := s.ledger.Events(a.CustomerID, period.ID)
+			if err != nil {
+				// An ANOMALY list that silently drops a tenant is the worst place to swallow a read
+				// failure: its whole job is to surface the thing nobody was looking for, and a short
+				// list reads as "nothing wrong here".
+				return nil, fmt.Errorf("adminops: anomaly scan: reading %s's ledger: %w", a.CustomerID, err)
+			}
+			for _, ev := range evs {
 				if ev.Status == billing.StatusPending {
 					rows = append(rows, AggregateRow{Label: a.CustomerID, Value: 1, Unit: "anomaly",
 						Detail: "billing event " + ev.EventID + " is unsettled"})
@@ -537,5 +571,5 @@ func (s *CrossTenantService) anomalyRows(accts []account.Account, period meterin
 		}
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].Label+rows[i].Detail < rows[j].Label+rows[j].Detail })
-	return rows
+	return rows, nil
 }

@@ -41,7 +41,7 @@ func newSyncHarness(t *testing.T) *syncHarness {
 // planChanges returns the customer's TypePlanChange ledger rows, oldest first.
 func (s *syncHarness) planChanges(customerID string) []BillingEvent {
 	var out []BillingEvent
-	for _, ev := range s.svc.Ledger().Events(customerID, "") {
+	for _, ev := range testEvents(s.svc.Ledger(), customerID, "") {
 		if ev.Type == TypePlanChange {
 			out = append(out, ev)
 		}
@@ -185,7 +185,7 @@ func TestCanceledSubscriptionDegradesToFreeAndDeletesNothing(t *testing.T) {
 		t.Fatalf("%+v", ack)
 	}
 	acctBefore, _ := s.h.accounts.Get("cus_acme")
-	ledgerBefore := len(s.svc.Ledger().Events("cus_acme", ""))
+	ledgerBefore := len(testEvents(s.svc.Ledger(), "cus_acme", ""))
 
 	body, sig = s.stripeDelivery("evt_canceled", WebhookSubscriptionCanceled, "cus_acme", nil)
 	ack := s.svc.HandleStripeWebhook(ctx, body, sig)
@@ -207,7 +207,7 @@ func TestCanceledSubscriptionDegradesToFreeAndDeletesNothing(t *testing.T) {
 	if acctAfter.ProviderCustomerHandle != acctBefore.ProviderCustomerHandle {
 		t.Error("the provider customer handle was dropped — the billing history would be split")
 	}
-	if after := len(s.svc.Ledger().Events("cus_acme", "")); after <= ledgerBefore {
+	if after := len(testEvents(s.svc.Ledger(), "cus_acme", "")); after <= ledgerBefore {
 		t.Errorf("the ledger did not grow (%d -> %d) — the degradation was not audited", ledgerBefore, after)
 	}
 

@@ -131,10 +131,20 @@ type Ledger interface {
 	Settle(idempotencyKey, providerRef, amountRef string, at time.Time) (BillingEvent, error)
 	// Events returns every row for a customer-period in append order. An empty period returns all of
 	// the customer's rows.
-	Events(customerID, period string) []BillingEvent
+	//
+	// 🔴 IT RETURNS AN ERROR, and that was not always true. This interface was written against a map,
+	// which cannot fail, so the read methods returned only a slice — and a durable store then had
+	// nowhere to report a failed read TO. The honest options were to swallow it, log it where nobody
+	// reads it, or return nil. Returning nil is what a Postgres store would naturally do, and
+	// adminops/billing.go sums `meteredTotal` straight from this call: a database outage would have
+	// rendered a customer's invoice total as ZERO. An outage must never be indistinguishable from a
+	// customer who owes nothing. (linkingest.Store learned the same lesson for the same reason.)
+	Events(customerID, period string) ([]BillingEvent, error)
 	// Pending returns every row still awaiting provider confirmation — the buffer a provider outage
-	// fills and recovery drains.
-	Pending() []BillingEvent
+	// fills and recovery drains. Returns an error for the reason Events does — and more sharply: a
+	// failed read here reports an EMPTY recovery queue, so the sweep that drains the buffer would
+	// quietly do nothing while charges sit unsettled.
+	Pending() ([]BillingEvent, error)
 }
 
 // MemLedger is the in-memory append-only Ledger. The `byKey` map IS the UNIQUE constraint, so this has
@@ -256,7 +266,7 @@ func (l *MemLedger) Settle(key, providerRef, amountRef string, at time.Time) (Bi
 }
 
 // Events returns a customer's rows in append order.
-func (l *MemLedger) Events(customerID, period string) []BillingEvent {
+func (l *MemLedger) Events(customerID, period string) ([]BillingEvent, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	var out []BillingEvent
@@ -269,11 +279,13 @@ func (l *MemLedger) Events(customerID, period string) []BillingEvent {
 		}
 		out = append(out, r)
 	}
-	return out
+	// nil error always: a map cannot fail. The signature exists for the durable store, and MemLedger
+	// satisfying it is what keeps the two interchangeable.
+	return out, nil
 }
 
 // Pending returns every unsettled row, oldest first — the outage buffer.
-func (l *MemLedger) Pending() []BillingEvent {
+func (l *MemLedger) Pending() ([]BillingEvent, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	var out []BillingEvent
@@ -283,7 +295,7 @@ func (l *MemLedger) Pending() []BillingEvent {
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
-	return out
+	return out, nil
 }
 
 // The idempotency keys are DERIVED, never typed at a call site: the key IS the identity of the

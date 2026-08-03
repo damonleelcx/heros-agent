@@ -120,7 +120,7 @@ func TestUnsignedWebhookIsRejectedBeforeAnySideEffect(t *testing.T) {
 			if st := h.svc.BillingState("cus_acme"); st.PaymentFailed || st.InvoiceStatus != "" {
 				t.Errorf("a rejected webhook moved state: %+v", st)
 			}
-			if len(h.ledger.Events("cus_acme", "")) != 0 {
+			if len(testEvents(h.ledger, "cus_acme", "")) != 0 {
 				t.Errorf("a rejected webhook wrote to the billing ledger")
 			}
 		})
@@ -171,7 +171,7 @@ func TestWebhookNeverWritesTheBillingLedger(t *testing.T) {
 			t.Fatalf("%s: %v", typ, err)
 		}
 	}
-	if got := len(h.ledger.Events("cus_acme", "")); got != 0 {
+	if got := len(testEvents(h.ledger, "cus_acme", "")); got != 0 {
 		t.Errorf("webhooks wrote %d billing-ledger rows; a notification must not author a charge", got)
 	}
 
@@ -282,7 +282,7 @@ func TestWrongChargeIsCorrectedByCreditWithNoDataLoss(t *testing.T) {
 
 	// (3) The net is right: the period holds exactly one charge and one offsetting credit for the same
 	// quantity, and the ledger replays to that.
-	rows := h.ledger.Events("cus_acme", july.ID)
+	rows := testEvents(h.ledger, "cus_acme", july.ID)
 	var charges, credits int
 	for _, r := range rows {
 		switch r.Type {
@@ -353,7 +353,7 @@ func TestTheAuditTrailReconstructsThePeriod(t *testing.T) {
 		t.Fatalf("refund: %v", err)
 	}
 
-	rows := h.ledger.Events("cus_acme", july.ID)
+	rows := testEvents(h.ledger, "cus_acme", july.ID)
 	if len(rows) != 3 {
 		t.Fatalf("period rows = %d, want 3 (subscription charge, metered charge, refund)", len(rows))
 	}

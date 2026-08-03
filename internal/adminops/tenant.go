@@ -73,7 +73,10 @@ func (s *TenantService) List(ctx context.Context) ([]TenantView, error) {
 	if _, _, err := s.exec.Authorize(ctx, adminrbac.CapTenantRead, TargetGlobal); err != nil {
 		return nil, err
 	}
-	accts := s.accounts.List()
+	accts, err := s.accounts.List()
+	if err != nil {
+		return nil, fmt.Errorf("adminops: listing tenants: %w", err)
+	}
 	out := make([]TenantView, 0, len(accts))
 	for _, a := range accts {
 		out = append(out, s.view(a))

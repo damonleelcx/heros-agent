@@ -154,7 +154,14 @@ type Store interface {
 	// SetQuota sets or clears one per-tenant allowance override (P8 FR7). A NaN value clears the
 	// override, so "back to the plan's allowance" is expressible without a second method.
 	SetQuota(customerID, limit string, value float64) (Account, error)
-	List() []Account
+	// List returns every account.
+	//
+	// 🔴 It returns an error for the reason billing.Ledger.Events does: written against a map, which
+	// cannot fail, so a durable store had nowhere to report a failed read. Returning nil is what one
+	// would naturally do — and billing/webhook.go scans this list to match a provider event to a
+	// customer, so an empty read means the webhook silently matches nothing and the charge is never
+	// attributed. An outage must not be spellable as "this platform has no customers".
+	List() ([]Account, error)
 }
 
 // MemStore is an in-memory Store for the default path, the demo, and hermetic tests.
@@ -292,7 +299,7 @@ func (s *MemStore) SetQuota(customerID, limit string, value float64) (Account, e
 }
 
 // List returns every account in customer-id order.
-func (s *MemStore) List() []Account {
+func (s *MemStore) List() ([]Account, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	out := make([]Account, 0, len(s.by))
@@ -300,5 +307,7 @@ func (s *MemStore) List() []Account {
 		out = append(out, a)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CustomerID < out[j].CustomerID })
-	return out
+	// nil error always: a map cannot fail. The signature exists for the durable store, and MemStore
+	// satisfying it is what keeps the two interchangeable.
+	return out, nil
 }

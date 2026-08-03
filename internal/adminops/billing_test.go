@@ -142,13 +142,13 @@ func TestBillingOpsCreditIsAdditiveAndAuditedAndSupportCannot(t *testing.T) {
 
 	// ── Billing-Ops can, and the correction is ADDITIVE ──
 	ctx := h.ctx(adminrbac.RoleBillingOps)
-	before := len(h.billing.Ledger().Events(tenantAcme, h.period.ID))
+	before := len(testEvents(h.billing.Ledger(), tenantAcme, h.period.ID))
 	receipt, err := h.bills.IssueCredit(ctx, tenantAcme, chargeID,
 		"ticket BIL-311: metered usage double-reported during the provider incident", adminops.Confirm())
 	if err != nil {
 		t.Fatalf("IssueCredit: %v", err)
 	}
-	events := h.billing.Ledger().Events(tenantAcme, h.period.ID)
+	events := testEvents(h.billing.Ledger(), tenantAcme, h.period.ID)
 	if len(events) != before+1 {
 		t.Fatalf("a credit produced %d new ledger rows, want exactly 1 (additive)", len(events)-before)
 	}

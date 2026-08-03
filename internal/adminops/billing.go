@@ -210,7 +210,14 @@ func (s *BillingService) Oversight(ctx context.Context, tenantID string, period 
 	out.LinkCoverage = coverageView(cov, wired)
 
 	var meteredTotal float64
-	for _, ev := range s.billing.Ledger().Events(tenantID, period.ID) {
+	// 🔴 The read is CHECKED. It used to be `for _, ev := range …Events(…)`, and with a durable ledger
+	// behind it a failed read would return no rows — leaving meteredTotal at zero and rendering an
+	// invoice that says this customer owes nothing. An outage must not be spellable as a bill.
+	periodEvents, err := s.billing.Ledger().Events(tenantID, period.ID)
+	if err != nil {
+		return BillingOversight{}, fmt.Errorf("adminops: reading %s's ledger for %s: %w", tenantID, period.ID, err)
+	}
+	for _, ev := range periodEvents {
 		line := InvoiceLine{
 			EventID: ev.EventID, Period: ev.Period, Type: string(ev.Type), Kind: string(ev.Kind),
 			Status: string(ev.Status), Quantity: ev.Quantity, ProviderRef: ev.ProviderRef,
@@ -259,7 +266,11 @@ func (s *BillingService) Oversight(ctx context.Context, tenantID string, period 
 	// The plan trail, read with an EMPTY period so the ledger's period filter does not drop it. Newest
 	// first: an operator opening this page is answering a question about now, and reads downwards into
 	// history.
-	for _, ev := range s.billing.Ledger().Events(tenantID, "") {
+	planTrail, err := s.billing.Ledger().Events(tenantID, "")
+	if err != nil {
+		return BillingOversight{}, fmt.Errorf("adminops: reading %s's plan history: %w", tenantID, err)
+	}
+	for _, ev := range planTrail {
 		if ev.Type != billing.TypePlanChange {
 			continue
 		}
