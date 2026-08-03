@@ -272,7 +272,12 @@ func (g *Generator) record(tenantID, workflowID string, run linkingest.LinkedRun
 		// No DiagID: this candidate came from a signal, and Candidate.DiagID's own doc says a
 		// signal-driven operator leaves it empty. An invented one would tie a cost observation to a
 		// diagnosis nobody made.
-		Operator:            string(c.Operator),
+		Operator: string(c.Operator),
+		// The three fields the card renders (migration 0030). Without them the surface shows an operator
+		// name and a hash and asks a reviewer to open a pull request on faith.
+		NodeID:              c.NodeID,
+		Pattern:             string(c.Pattern),
+		Rationale:           c.Rationale,
 		BaseVariantID:       run.ConfigHash,
 		CandidateConfigHash: candidateHash(c),
 		SourceRevision:      run.SourceRevision,

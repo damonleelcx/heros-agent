@@ -193,3 +193,47 @@ func TestIsReportedConditionAgreesWithTheClassifier(t *testing.T) {
 		t.Error("nil is not a condition")
 	}
 }
+
+// A proposal with no compiled diff is refused BEFORE the gate, and reported by name.
+//
+// 🔴 Without ErrNoDiff, Prepare rendered a Prepared with an empty DiffPatch and the CI runner opened a
+// pull request containing no changes — in a customer's repository, titled as an optimization, with a
+// body citing a verdict. Every proposal a hosted deployment generates is `unbuilt`, so this is not an
+// edge case there; it is the normal path.
+func TestAProposalWithNoDiffIsRefusedAndNamed(t *testing.T) {
+	p := pendingProposal("p1")
+	p.DiffPatch = "" // as the platform-side generator records it: proposed, not compiled
+	svc := service(t, githubRoute(), passingGate(), &fakeEnts{deliver: true}, okHalt(), p)
+
+	prepared, withheld, err := svc.Pending(context.Background(), "t1", githubRoute().Target)
+	if err != nil {
+		t.Fatalf("Pending: %v", err)
+	}
+	if len(prepared) != 0 {
+		t.Fatalf("a proposal with no diff was prepared for delivery: %+v — the runner would open a "+
+			"pull request with no changes in it", prepared)
+	}
+	if len(withheld) != 1 || withheld[0].Kind != fd.WithheldNoDiff {
+		t.Fatalf("withheld = %+v, want one entry of kind %q", withheld, fd.WithheldNoDiff)
+	}
+	// And it is NOT reported as a verdict about the change: this proposal passed its gate.
+	if withheld[0].Kind == fd.WithheldNotVerified {
+		t.Error("a verified change with no diff was reported as unverified")
+	}
+}
+
+// Whitespace is not a diff. A patch of blanks would pass a `!= ""` check and produce the same empty
+// pull request.
+func TestAWhitespaceDiffIsNotADiff(t *testing.T) {
+	p := pendingProposal("p1")
+	p.DiffPatch = "  \n\t\n "
+	svc := service(t, githubRoute(), passingGate(), &fakeEnts{deliver: true}, okHalt(), p)
+
+	prepared, withheld, err := svc.Pending(context.Background(), "t1", githubRoute().Target)
+	if err != nil {
+		t.Fatalf("Pending: %v", err)
+	}
+	if len(prepared) != 0 || len(withheld) != 1 || withheld[0].Kind != fd.WithheldNoDiff {
+		t.Fatalf("prepared=%+v withheld=%+v", prepared, withheld)
+	}
+}

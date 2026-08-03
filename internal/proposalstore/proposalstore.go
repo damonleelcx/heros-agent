@@ -67,8 +67,14 @@ type Record struct {
 	TenantID   string
 	WorkflowID string
 
-	DiagnosisID         string
-	Operator            string
+	DiagnosisID string
+	Operator    string
+	// NodeID, Pattern and Rationale are what the CARD renders (migration 0030). 0012 stored none of the
+	// three, and a card with no node id asks a reviewer to open a pull request on faith: the whole claim
+	// a proposal makes is "change THIS call site".
+	NodeID              string
+	Pattern             string
+	Rationale           string
 	BaseVariantID       string
 	CandidateConfigHash string
 	SourceRevision      string
@@ -162,16 +168,19 @@ func (p *PGStore) Put(parent context.Context, r Record) error {
 		`INSERT INTO proposal
 		   (proposal_id, tenant_id, workflow_id, diagnosis_id, operator, base_variant_id,
 		    candidate_config_hash, source_revision, source_diff_blob_hash, grounding_blob_hash,
-		    build_status, status, created_at)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+		    build_status, status, created_at, node_id, pattern, rationale)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
 		 ON CONFLICT (proposal_id) DO UPDATE
 		   SET build_status = EXCLUDED.build_status,
 		       status       = EXCLUDED.status,
 		       source_diff_blob_hash = EXCLUDED.source_diff_blob_hash,
-		       grounding_blob_hash   = EXCLUDED.grounding_blob_hash`,
+		       grounding_blob_hash   = EXCLUDED.grounding_blob_hash,
+		       node_id   = EXCLUDED.node_id,
+		       pattern   = EXCLUDED.pattern,
+		       rationale = EXCLUDED.rationale`,
 		r.ProposalID, r.TenantID, r.WorkflowID, r.DiagnosisID, r.Operator, r.BaseVariantID,
 		r.CandidateConfigHash, r.SourceRevision, nullStr(r.SourceDiffBlobHash), nullStr(r.GroundingBlobHash),
-		r.BuildStatus, r.Status, r.CreatedAt.UTC()); err != nil {
+		r.BuildStatus, r.Status, r.CreatedAt.UTC(), r.NodeID, r.Pattern, r.Rationale); err != nil {
 		return fmt.Errorf("proposalstore: put %s: %w", r.ProposalID, err)
 	}
 
@@ -196,7 +205,8 @@ func (p *PGStore) Put(parent context.Context, r Record) error {
 
 const proposalColumns = `p.proposal_id, p.tenant_id, p.workflow_id, p.diagnosis_id, p.operator,
 	p.base_variant_id, p.candidate_config_hash, p.source_revision, p.source_diff_blob_hash,
-	p.grounding_blob_hash, p.build_status, p.status, p.created_at`
+	p.grounding_blob_hash, p.build_status, p.status, p.created_at,
+	p.node_id, p.pattern, p.rationale`
 
 // ForWorkflow returns a tenant's proposals for a workflow, newest first, each with its verdict.
 func (p *PGStore) ForWorkflow(parent context.Context, tenantID, workflowID string) ([]Scored, error) {
@@ -258,6 +268,94 @@ func (p *PGStore) attachEvidence(ctx context.Context, in []Scored) ([]Scored, er
 		}
 	}
 	return in, nil
+}
+
+// VerdictFor is the P12 GATE ORACLE's read: the authoritative verdict for a (tenant, config hash,
+// source revision), or ok=false when none has been recorded.
+//
+// 🔴 It is keyed by the CHANGE, not by the proposal id, and scoped to the tenant. Deliverer.Prepare
+// calls this rather than trusting the verdict attached to the proposal it was handed — the whole point
+// of the enforcement funnel is that the gate is re-read from the authority at delivery time, so a
+// proposal object carrying a stale or forged verdict cannot open a pull request.
+//
+// Ordering: the newest recorded verdict wins. A change can be re-verified (CI re-runs, a flake is
+// re-measured), and the last measurement is the current answer.
+func (p *PGStore) VerdictFor(parent context.Context, tenantID, configHash, sourceRevision string) (verification.Verdict, bool, error) {
+	if tenantID == "" {
+		return verification.Verdict{}, false, ErrUnscoped
+	}
+	ctx, cancel := p.ctx(parent)
+	defer cancel()
+
+	row := p.db.QueryRowContext(ctx,
+		`SELECT `+proposalColumns+`,
+		        v.metric, v.delta, v.ci_low, v.ci_high, v.significant, v.held_out,
+		        v.cost_delta, v.latency_delta, v.regression_pass, v.cases_fixed_json,
+		        v.cases_broken_json, v.gate_result, v.cases_fixed_count, v.cases_broken_count
+		   FROM proposal p
+		   JOIN verdict v ON v.proposal_id = p.proposal_id
+		  WHERE p.tenant_id = $1 AND p.candidate_config_hash = $2 AND p.source_revision = $3
+		  ORDER BY p.created_at DESC, p.proposal_id ASC
+		  LIMIT 1`, tenantID, configHash, sourceRevision)
+
+	// An INNER join here, unlike ForWorkflow's LEFT join, and the difference is the contract: this
+	// answers "has this change been measured", so a proposal with no verdict row must be ok=false rather
+	// than a zero Verdict. A zero GateResult is not `pass`, so the fail-closed direction holds either
+	// way — but "not measured" and "measured and rejected" are different sentences downstream.
+	sc, err := scanScored(row)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return verification.Verdict{}, false, nil
+	case err != nil:
+		return verification.Verdict{}, false, fmt.Errorf("proposalstore: verdict for %s@%s: %w",
+			configHash, sourceRevision, err)
+	}
+	if sc.Verdict == nil {
+		return verification.Verdict{}, false, nil
+	}
+	return *sc.Verdict, true, nil
+}
+
+// PendingVerified returns a tenant's proposals whose recorded verdict PASSED — the P12 delivery
+// candidates.
+//
+// It reads `gate_result = 'pass'` from the verdict table rather than `status = 'verified'` on the
+// proposal. The two are written in the same transaction and cannot disagree today, but only one of them
+// is the measurement: status is a projection of the verdict, and a projection is the thing that goes
+// stale. Delivery opens a pull request into a customer's repository, so it reads the authority.
+func (p *PGStore) PendingVerified(parent context.Context, tenantID string) ([]Scored, error) {
+	if tenantID == "" {
+		return nil, ErrUnscoped
+	}
+	ctx, cancel := p.ctx(parent)
+	defer cancel()
+
+	rows, err := p.db.QueryContext(ctx,
+		`SELECT `+proposalColumns+`,
+		        v.metric, v.delta, v.ci_low, v.ci_high, v.significant, v.held_out,
+		        v.cost_delta, v.latency_delta, v.regression_pass, v.cases_fixed_json,
+		        v.cases_broken_json, v.gate_result, v.cases_fixed_count, v.cases_broken_count
+		   FROM proposal p
+		   JOIN verdict v ON v.proposal_id = p.proposal_id
+		  WHERE p.tenant_id = $1 AND v.gate_result = 'pass'
+		  ORDER BY p.created_at DESC, p.proposal_id ASC`, tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("proposalstore: pending verified for %s: %w", tenantID, err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []Scored
+	for rows.Next() {
+		sc, err := scanScored(rows)
+		if err != nil {
+			return nil, fmt.Errorf("proposalstore: pending verified for %s: %w", tenantID, err)
+		}
+		out = append(out, sc)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("proposalstore: pending verified for %s: %w", tenantID, err)
+	}
+	return out, nil
 }
 
 // PutVerdict records a verdict CI reported.
@@ -364,6 +462,7 @@ func scanScored(sc scanner) (Scored, error) {
 	if err := sc.Scan(&s.ProposalID, &s.TenantID, &s.WorkflowID, &s.DiagnosisID, &s.Operator,
 		&s.BaseVariantID, &s.CandidateConfigHash, &s.SourceRevision, &diffHash, &groundHash,
 		&s.BuildStatus, &s.Status, &s.CreatedAt,
+		&s.NodeID, &s.Pattern, &s.Rationale,
 		&metric, &delta, &ciLow, &ciHigh, &significant, &heldOut,
 		&costDelta, &latDelta, &regressionPass, &fixed, &broken, &gateResult,
 		&fixedCount, &brokenCount); err != nil {

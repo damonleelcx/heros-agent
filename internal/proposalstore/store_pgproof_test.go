@@ -52,6 +52,7 @@ func rec(tenant, workflow, id string) Record {
 	return Record{
 		ProposalID: id, TenantID: tenant, WorkflowID: workflow,
 		DiagnosisID: "diag-1", Operator: "model_swap", BaseVariantID: "v-base",
+		NodeID: "n_router", Pattern: "Routing", Rationale: "cost bottleneck → cheaper model",
 		CandidateConfigHash: hash64, SourceRevision: "abc123",
 		Evidence: []Evidence{
 			{CaseID: "case-1", Role: "generating"},
@@ -306,4 +307,117 @@ func TestAVerdictMayNotListMoreIdsThanItCounts(t *testing.T) {
 		t.Errorf("the table refused a REPORTED verdict (counts, no ids), which is the shape every "+
 			"hosted deployment stores: %v", err)
 	}
+}
+
+// The two P12 reads, against real rows.
+//
+// VerdictFor is what Deliverer.Prepare consults for EVERY proposal it considers, and it is the reason a
+// proposal carrying a forged or stale verdict cannot open a pull request: the gate is re-read from the
+// authority. Both properties below need real SQL — a fake would agree with whatever it was told.
+func TestTheGateReadIsScopedAndKeyedByTheChange(t *testing.T) {
+	s, _ := store(t, "proposalstore_gateread")
+	ctx := t.Context()
+
+	mine := rec("tenant-g1", "wf-1", "prop-mine")
+	if err := s.Put(ctx, mine); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+	theirs := rec("tenant-g2", "wf-1", "prop-theirs")
+	if err := s.Put(ctx, theirs); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+	v := verification.Verdict{
+		ProposalID: "prop-theirs", Metric: "quality",
+		Delta:       evalstats.Interval{Mean: 0.09, Low: 0.03, High: 0.15},
+		Significant: true, HeldOut: true, RegressionPass: true,
+		GateResult: verification.GatePass, CasesFixedCount: 2,
+	}
+	if err := s.PutVerdict(ctx, "tenant-g2", v); err != nil {
+		t.Fatalf("put verdict: %v", err)
+	}
+
+	// tenant-g1 shares the config hash and revision (rec() uses the same fixture) but has no verdict.
+	got, ok, err := s.VerdictFor(ctx, "tenant-g1", mine.CandidateConfigHash, mine.SourceRevision)
+	if err != nil {
+		t.Fatalf("verdict for: %v", err)
+	}
+	if ok || got.Passed() {
+		t.Fatalf("tenant-g1 read tenant-g2's PASSING verdict for the same change (%+v) — the gate would "+
+			"open a pull request into their repository on somebody else's measurement", got)
+	}
+
+	// ...and the owner does see it.
+	got, ok, err = s.VerdictFor(ctx, "tenant-g2", theirs.CandidateConfigHash, theirs.SourceRevision)
+	if err != nil || !ok || !got.Passed() {
+		t.Fatalf("the owning tenant could not read its own verdict: %+v ok=%v err=%v", got, ok, err)
+	}
+
+	// A change nobody measured is ok=false, not a zero verdict — "not measured" and "measured and
+	// rejected" are different sentences downstream.
+	if _, ok, err := s.VerdictFor(ctx, "tenant-g2", hash64, "some-other-rev"); err != nil || ok {
+		t.Errorf("an unmeasured change reported ok=%v (err %v)", ok, err)
+	}
+}
+
+// PendingVerified reads `gate_result = 'pass'` from the VERDICT, not `status` on the proposal. The two
+// are written in one transaction and cannot disagree today; only one of them is the measurement.
+func TestPendingVerifiedReadsTheVerdictNotTheProjection(t *testing.T) {
+	s, db := store(t, "proposalstore_pendingverified")
+	ctx := t.Context()
+
+	for _, id := range []string{"p-pass", "p-fail", "p-unmeasured"} {
+		if err := s.Put(ctx, rec("tenant-p", "wf-1", id)); err != nil {
+			t.Fatalf("put %s: %v", id, err)
+		}
+	}
+	pass := verification.Verdict{
+		ProposalID: "p-pass", Metric: "quality",
+		Delta:       evalstats.Interval{Mean: 0.07, Low: 0.02, High: 0.12},
+		Significant: true, HeldOut: true, RegressionPass: true,
+		GateResult: verification.GatePass, CasesFixedCount: 3,
+	}
+	if err := s.PutVerdict(ctx, "tenant-p", pass); err != nil {
+		t.Fatalf("put verdict: %v", err)
+	}
+	fail := pass
+	fail.ProposalID, fail.GateResult, fail.Significant = "p-fail", verification.GateFailSig, false
+	if err := s.PutVerdict(ctx, "tenant-p", fail); err != nil {
+		t.Fatalf("put verdict: %v", err)
+	}
+
+	got, err := s.PendingVerified(ctx, "tenant-p")
+	if err != nil {
+		t.Fatalf("pending verified: %v", err)
+	}
+	if len(got) != 1 || got[0].ProposalID != "p-pass" {
+		t.Fatalf("pending = %+v, want only p-pass", ids(got))
+	}
+
+	// 🔴 Now make the PROJECTION lie: set the failing proposal's status to `verified` behind the store's
+	// back, exactly as a stale or hand-patched row would be. The read must not follow it.
+	if _, err := db.ExecContext(ctx,
+		`UPDATE proposal SET status = 'verified' WHERE proposal_id = 'p-fail'`); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	got, err = s.PendingVerified(ctx, "tenant-p")
+	if err != nil {
+		t.Fatalf("pending verified: %v", err)
+	}
+	if len(got) != 1 || got[0].ProposalID != "p-pass" {
+		t.Errorf("pending = %+v — a proposal whose STATUS says verified and whose VERDICT says otherwise "+
+			"became deliverable; delivery must read the measurement", ids(got))
+	}
+
+	// And the presentation columns survive the read, since the delivery title is built from them.
+	if got[0].NodeID == "" {
+		t.Error("the node id did not survive PendingVerified; the pull request title is built from it")
+	}
+}
+
+func ids(in []Scored) []string {
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		out = append(out, s.ProposalID)
+	}
+	return out
 }

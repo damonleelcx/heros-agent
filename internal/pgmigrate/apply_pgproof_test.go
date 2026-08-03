@@ -161,7 +161,11 @@ func TestTheSchemaCarriesWhatTheStoresQuery(t *testing.T) {
 		},
 		// 0025's scope columns. Their ABSENCE is what made api.ProposalsSource.Surface(workflowID)
 		// unanswerable: 0012 built these tables single-tenant and workflow-implicit.
-		"proposal": {"proposal_id", "diagnosis_id", "operator", "base_variant_id", "candidate_config_hash", "status", "tenant_id", "workflow_id"},
+		// 0030's three presentation columns join 0025's scope columns. A card with no node id asks a
+		// reviewer to open a pull request on faith — the whole claim a proposal makes is "change THIS
+		// call site".
+		"proposal": {"proposal_id", "diagnosis_id", "operator", "base_variant_id", "candidate_config_hash",
+			"status", "tenant_id", "workflow_id", "node_id", "pattern", "rationale"},
 		// The two count columns 0029 adds. Their absence is what would make a reported verdict — which
 		// carries counts and no case ids — read as having fixed nothing.
 		"verdict": {"proposal_id", "metric", "delta", "ci_low", "ci_high", "gate_result",

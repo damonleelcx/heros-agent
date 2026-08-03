@@ -16,10 +16,14 @@ import (
 	"github.com/heros-foreal/agentd/internal/api"
 	"github.com/heros-foreal/agentd/internal/billing"
 	"github.com/heros-foreal/agentd/internal/billingview"
+	"github.com/heros-foreal/agentd/internal/deliveryrecord"
+	"github.com/heros-foreal/agentd/internal/deliveryroute"
 	"github.com/heros-foreal/agentd/internal/entitlement"
 	"github.com/heros-foreal/agentd/internal/executor"
+	"github.com/heros-foreal/agentd/internal/forgedelivery"
 	"github.com/heros-foreal/agentd/internal/hostdiscovery"
 	"github.com/heros-foreal/agentd/internal/hostedboard"
+	"github.com/heros-foreal/agentd/internal/hostedproposals"
 	"github.com/heros-foreal/agentd/internal/hostedscorecard"
 	"github.com/heros-foreal/agentd/internal/legal"
 	"github.com/heros-foreal/agentd/internal/linkingest"
@@ -84,8 +88,14 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 	mountedScorecard := false
 	mountedVerdictIngest := false
 	mountedProposalGen := false
+	mountedProposals := false
+	mountedForgeDelivery := false
 	// Assembled inside the database block below; nil when this deployment cannot serve billing.
 	var billingView *billingview.Source
+	// The server-side entitlement gate, assembled with billing because both need the plan catalog. P12
+	// delivery reads it too — nil means this deployment cannot decide whether a tenant may have a pull
+	// request opened for them, which is a reason not to mount delivery rather than a reason to guess.
+	var entGate *entitlement.Gate
 	if pg != nil {
 		fsBlobs, err := registry.NewFSBlobStore(filepath.Join(dataDir, "blobs"))
 		if err != nil {
@@ -201,8 +211,11 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 			if err != nil {
 				return nil, fmt.Errorf("billing service: %w", err)
 			}
-			gate := entitlement.NewGate(acctStore, plans, usageStore)
-			if billingView, err = billingview.New(acctStore, plans, usageStore, deltas, gate, svc); err != nil {
+			// ONE gate, shared with P12 delivery below. Two gates over the same plans and the same usage
+			// would be two answers to "may this tenant do this", and the one the billing page shows is not
+			// the one that decides whether a pull request is opened.
+			entGate = entitlement.NewGate(acctStore, plans, usageStore)
+			if billingView, err = billingview.New(acctStore, plans, usageStore, deltas, entGate, svc); err != nil {
 				return nil, fmt.Errorf("billing view: %w", err)
 			}
 		}
@@ -232,6 +245,60 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 		h.MountVerdictIngest(verdictStore)
 		served("p55_verdict_ingest (CI reports what it measured; the platform never authors a verdict)")
 		mountedVerdictIngest = true
+
+		// ── P5.5 and P12, mounted ──────────────────────────────────────────────────────────────────────
+		//
+		// Both were registered-and-unsourced with "no persistent adapter exists outside a demo binary".
+		// That was true, and as with the pattern graph it was the smaller half: there was also no DATA.
+		// Nothing generated a proposal, nothing recorded a verdict, and no table held a delivery route.
+		// Migrations 0025 / 0029 / 0030, the verdict ingest, internal/proposalgen and
+		// internal/deliveryroute are the other half; these two adapters are what render them.
+		//
+		// 🔴 They mount with a STATED LIMIT rather than in full, and the limit is the same fact for both:
+		// this platform generates a candidate Variant Spec and never COMPILES it, so no proposal has a
+		// diff. P5.5 therefore serves cards with no diff and an Open-PR action that refuses by name; P12
+		// serves route conditions and delivery history, and reports every proposal as withheld with
+		// `no_diff`. That is worth mounting — a customer can see what was proposed, verify it in their own
+		// CI, and read exactly why it stops there — and it is emphatically better than the 503 it
+		// replaces, which said the capability was not installed when the truth is that it is installed
+		// and bounded.
+		h.MountProposals(hostedproposals.NewSource(verdictStore))
+		served("p55_proposals (recommendation surface over reported verdicts; no diff, so open-PR refuses)")
+		mountedProposals = true
+
+		// P12 delivery. Mounted only when an entitlement gate exists, which means only when a plan
+		// catalog is published — the same condition billing carries, for a sharper reason: delivery opens
+		// a pull request into a customer's repository, and `may this tenant have that done` is a question
+		// with no safe default. Denying every delivery would tell a customer to upgrade a plan the
+		// deployment cannot read; allowing them would open pull requests for tenants who are not entitled
+		// to any. Neither is an answer, so the capability reports that it is not configured.
+		//
+		// Every other collaborator here is durable except the halt reader, and that one is
+		// correct as it is: this deployment configures no kill switch, so NOTHING halts delivery, and
+		// reporting `false` is the true answer rather than a stub. It is NOT the fail-closed direction by
+		// accident — HaltReader's contract is that an ERROR means indeterminate, and a reader that cannot
+		// fail cannot be indeterminate. A deployment that adds a kill switch wires adminops here.
+		if entGate != nil {
+			deliverer := forgedelivery.NewDeliverer(
+				hostedproposals.NewGate(verdictStore),
+				entGate,
+				forgedelivery.HaltReaderFunc(func(string) (bool, string, error) { return false, "", nil }),
+				deliveryrecord.NewPGStore(pg),
+				forgedelivery.DefaultOpenPRBound,
+			)
+			routeStore, err := deliveryroute.NewPGStore(pg)
+			if err != nil {
+				return nil, fmt.Errorf("delivery route store: %w", err)
+			}
+			h.MountForgeDelivery(forgedelivery.NewService(
+				deliverer, routeStore,
+				hostedproposals.NewPending(verdictStore, originOf(consoleHealthURL)),
+				originOf(consoleHealthURL),
+			))
+			served("p12_forge_delivery (routes, conditions and history; deliveries withheld as `no_diff` " +
+				"until proposals are compiled)")
+			mountedForgeDelivery = true
+		}
 
 		// The OPT-IN workflow structure (`heros link --with-ir`), durable since migration 0021, and the
 		// pattern graph drawn from it.
@@ -380,8 +447,11 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 		h.MountGraphEditor(nil)
 		absent("p5_graph_editor", noAdapter)
 	}
-	h.MountProposals(nil)
-	absent("p55_proposals", noAdapter)
+	if !mountedProposals {
+		h.MountProposals(nil)
+		absent("p55_proposals", "this deployment declares no platform database (DATABASE_URL is unset), "+
+			"so there are no stored proposals to render")
+	}
 	if !mountedProposalGen {
 		h.MountProposalGeneration(nil)
 		absent("p55_proposal_generation", proposalGenAbsentReason(pg))
@@ -428,8 +498,10 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 		"exists, but checkout and plan changes need a provider to call")
 	h.MountAuthoring(nil)
 	absent("p13_authoring", noDurableStore)
-	h.MountForgeDelivery(nil)
-	absent("p12_forge_delivery", "its gate and pending providers read verification state that has no store yet")
+	if !mountedForgeDelivery {
+		h.MountForgeDelivery(nil)
+		absent("p12_forge_delivery", deliveryAbsentReason(pg, planCatalogPath()))
+	}
 
 	// The Stripe webhook is the ONE surface deliberately NOT registered when it has no source, and the
 	// exception is the author's, not a lapse: internal/api/p21.go states that the path is the single
@@ -520,4 +592,20 @@ func proposalGenAbsentReason(pg *sql.DB) string {
 		"cheaper model would do the job needs a capability tier and a cost estimate per model, and the " +
 		"model registry records neither — so without a published catalog nothing can be proposed, and " +
 		"an empty proposal list would read as 'we found nothing wrong'"
+}
+
+// deliveryAbsentReason names the ONE next action for an operator whose delivery surface is not served.
+// The same split billingAbsentReason makes, for the same reason: no database is deployment-wide, and no
+// plan catalog is one file away.
+func deliveryAbsentReason(pg *sql.DB, catalog string) string {
+	if pg == nil {
+		return "this deployment declares no platform database (DATABASE_URL is unset), so there is no " +
+			"verification state to gate a delivery on and no route registry to deliver through"
+	}
+	if catalog == "" {
+		return "no plan catalog is published (PLAN_CATALOG_PATH is unset), so this deployment cannot " +
+			"decide whether a tenant is entitled to have a pull request opened for them — and delivery " +
+			"writes into a customer's repository, which is not a question to answer by default"
+	}
+	return "the plan catalog could not be loaded"
 }

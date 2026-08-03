@@ -44,6 +44,10 @@ const (
 	// WithheldNotVerified: the change did not pass the P5.5 gate. The one DESIGNED withholding here —
 	// nothing unverified is ever delivered — and the only one that is not a problem to fix.
 	WithheldNotVerified WithheldKind = "not_verified"
+	// WithheldNoDiff: the proposal has no compiled diff. On a deployment that generates proposals but
+	// does not compile them, this is the reason EVERY proposal is withheld — and saying so is the
+	// difference between a product with a stated limit and one that silently delivers nothing.
+	WithheldNoDiff WithheldKind = "no_diff"
 	// WithheldNotEntitled: the tenant's plan does not include this delivery level.
 	WithheldNotEntitled WithheldKind = "not_entitled"
 	// WithheldHalted: an operator has halted delivery for this tenant.
@@ -103,6 +107,13 @@ func classifyWithheld(proposalID string, err error) Withheld {
 	var notEnt *NotEntitledError
 
 	switch {
+	case errors.Is(err, ErrNoDiff):
+		w.Kind = WithheldNoDiff
+		w.Detail = "This proposal has no compiled diff, so there is nothing to open a pull request with. " +
+			"The change was generated but not compiled: the codemod needs your source at a revision and a " +
+			"build check."
+		w.NextAction = "No action is available yet; this deployment does not compile proposals into diffs."
+
 	case errors.Is(err, ErrNotVerified):
 		w.Kind = WithheldNotVerified
 		w.Detail = "This change has not passed the verification gate, so it is not delivered. " +

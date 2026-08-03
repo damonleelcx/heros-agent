@@ -119,6 +119,17 @@ func TestGeneratesAgainstTheCostBottleneck(t *testing.T) {
 		if r.BaseVariantID != strings.Repeat("a", 64) || r.SourceRevision != "rev1" {
 			t.Errorf("the proposal does not name the run it came from: %+v", r)
 		}
+		// The card's three fields. A proposal that cannot say WHICH call site it changes is not a
+		// degraded card; it is a pull request opened on faith.
+		if r.NodeID != "n_router" {
+			t.Errorf("the proposal does not name the node it changes: %+v", r)
+		}
+		if r.Pattern != "Routing" {
+			t.Errorf("the node's pattern label was lost: %q", r.Pattern)
+		}
+		if r.Rationale == "" {
+			t.Error("the proposal carries no rationale — the card would show a change with no reason")
+		}
 	}
 	// The dominant node is the one proposed against.
 	if len(res.Bottlenecks) == 0 {
