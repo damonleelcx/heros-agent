@@ -26,8 +26,11 @@ type ForgeDeliverySource interface {
 	ListDeliveries(ctx context.Context, tenantID string) ([]forgedelivery.DeliveryHead, error)
 	// RouteConditionFor reports the tenant's delivery-route condition (configured/no_route/degraded/revoked).
 	RouteConditionFor(ctx context.Context, tenantID string) (forgedelivery.RouteCondition, error)
-	// Pending serves the CI fetch: verified, deliverable Prepared proposals for a target, scoped to the tenant.
-	Pending(ctx context.Context, tenantID string, target forgedelivery.Target) ([]forgedelivery.Prepared, error)
+	// Pending serves the CI fetch: the deliverable Prepared proposals for a target, scoped to the tenant,
+	// AND the ones it withheld with a named reason. The second list is not diagnostics — it is the answer
+	// for a customer whose route names an unimplemented forge, or whose plan does not include delivery,
+	// both of which used to arrive as an empty array indistinguishable from "nothing to deliver".
+	Pending(ctx context.Context, tenantID string, target forgedelivery.Target) ([]forgedelivery.Prepared, []forgedelivery.Withheld, error)
 	// RecordReport records a CI-opened delivery.
 	RecordReport(ctx context.Context, tenantID string, prep forgedelivery.Prepared, r forgedelivery.Report) (forgedelivery.Result, error)
 }
@@ -138,17 +141,26 @@ func (s *Server) handleCIPending(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, specError{Error: err.Error()})
 		return
 	}
-	prepared, err := s.forgeDelivery.Pending(r.Context(), tenant, target)
+	prepared, withheld, err := s.forgeDelivery.Pending(r.Context(), tenant, target)
 	if err != nil {
 		if errors.Is(err, forgedelivery.ErrNoRoute) {
 			// A reported condition, not a fault — the CI action distinguishes it from "nothing to deliver".
-			writeJSON(w, http.StatusOK, map[string]any{"prepared": []any{}, "route": "no_route"})
+			writeJSON(w, http.StatusOK, map[string]any{"prepared": []any{}, "withheld": []any{}, "route": "no_route"})
 			return
 		}
 		writeJSON(w, http.StatusBadGateway, specError{Error: "preparing deliveries: " + err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"prepared": prepared})
+	// Both lists are always present, and `withheld` is emitted even when empty. An absent key would make
+	// a CI runner that has not been taught about it read a withheld proposal as one that does not exist —
+	// which is the silence this field was added to end.
+	if prepared == nil {
+		prepared = []forgedelivery.Prepared{}
+	}
+	if withheld == nil {
+		withheld = []forgedelivery.Withheld{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"prepared": prepared, "withheld": withheld})
 }
 
 // ciReportBody is what the CI runner POSTs after opening a pull request. It echoes the identity from the

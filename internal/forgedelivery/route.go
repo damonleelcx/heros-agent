@@ -1,6 +1,7 @@
 package forgedelivery
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -58,16 +59,37 @@ type Route struct {
 	ForgeKind ForgeKind
 }
 
+// The two ways a route can be undeliverable. They are SENTINELS rather than message shapes because a
+// caller has to tell them apart to say anything useful:
+//
+//   - ErrForgeNotImplemented is a product boundary. The route is well-formed and names a forge P12
+//     declares but has not built; the answer is "gitlab is not implemented", and configuring it was
+//     legitimate — migration 0026's CHECK admits gitlab and bitbucket on purpose.
+//   - ErrRouteInvalid is a broken row. The answer is "this route cannot be used", and the next action
+//     is an operator's, not the customer's.
+//
+// Before these existed, Route.Validate returned bare formatted errors and every caller could do nothing
+// with them but drop the proposal. See Service.Pending.
+var (
+	ErrForgeNotImplemented = errors.New("forgedelivery: this forge is declared but not implemented in P12")
+	ErrRouteInvalid        = errors.New("forgedelivery: the delivery route is not usable")
+)
+
 // Validate checks a route is deliverable: a known mode, a valid target, a supported forge.
 func (r Route) Validate() error {
 	if !r.Mode.Valid() {
-		return fmt.Errorf("forgedelivery: %q is not a delivery mode (ci, app)", r.Mode)
+		return fmt.Errorf("%w: %q is not a delivery mode (ci, app)", ErrRouteInvalid, r.Mode)
 	}
 	if err := r.Target.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %s", ErrRouteInvalid, err)
 	}
 	if !r.ForgeKind.Supported() {
-		return fmt.Errorf("forgedelivery: %s", r.ForgeKind.unsupportedReason())
+		// A DECLARED forge and an unknown one are different failures. Declared-but-unimplemented is a
+		// roadmap fact the customer can be told; an unknown string is a corrupt row.
+		if r.ForgeKind == ForgeGitLab || r.ForgeKind == ForgeBitbucket {
+			return fmt.Errorf("%w: %s", ErrForgeNotImplemented, r.ForgeKind.unsupportedReason())
+		}
+		return fmt.Errorf("%w: %s", ErrRouteInvalid, r.ForgeKind.unsupportedReason())
 	}
 	return nil
 }

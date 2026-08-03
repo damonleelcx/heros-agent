@@ -1,9 +1,6 @@
 package forgedelivery
 
-import (
-	"context"
-	"errors"
-)
+import "context"
 
 // HaltReaderFunc adapts a function to HaltReader, so a caller can wire adminops.KillSwitchService's
 // HaltsMerge (a global + per-tenant, fail-closed reader) into delivery without this package importing
@@ -49,24 +46,4 @@ func (d *Deliverer) DeliverBatch(ctx context.Context, jobs []Job) []BatchResult 
 		out = append(out, BatchResult{Job: j, Result: res, Err: err})
 	}
 	return out
-}
-
-// IsReportedCondition reports whether an error from Deliver is a legible terminal state the console
-// renders as a condition-with-next-action, rather than a server fault. It lets a caller separate
-// "nothing to render as broken" from "something failed".
-func IsReportedCondition(err error) bool {
-	if err == nil {
-		return false
-	}
-	var halted *HaltedError
-	var notEnt *NotEntitledError
-	switch {
-	case errors.Is(err, ErrNoRoute),
-		errors.Is(err, ErrNotVerified),
-		errors.Is(err, ErrBoundReached),
-		errors.As(err, &halted),
-		errors.As(err, &notEnt):
-		return true
-	}
-	return false
 }
