@@ -273,12 +273,16 @@ db-proof:
 	bash db/migrations/postgres/run_pg_proof.sh prove_constraints.py
 	bash db/migrations/postgres/run_pg_proof.sh prove_slices.py
 
-## pg-proof: live-Postgres proof of the four registries — schema guards + store (P2 tasks 1.1/1.6/1.7).
+## pg-proof: live-Postgres proofs. internal/pgmigrate goes FIRST and is the one that applies the whole
+##           EMBEDDED SET, in order, exactly as a booting deployment does — every other proof here
+##           hand-lists the few migrations its own tables need, which is why nothing applied anything
+##           past ~0009 and why a `CREATE TABLE` on an already-existing table reached a green build.
+##           Also: live-Postgres proof of the four registries — schema guards + store (P2 1.1/1.6/1.7).
 ##           Boots an ephemeral Postgres in Docker, so it needs only Docker (no local PG install).
 ##           These tests are behind the `pgproof` build tag, so `make go` does not compile them; with
 ##           no database they FAIL rather than skip.
 pg-proof:
-	bash db/migrations/postgres/run_pg_docker.sh $(GO) test -tags pgproof -count=1 ./internal/registry/ ./internal/variantspec/ ./internal/worktree/ ./internal/executor/ ./internal/runqueue/ ./internal/submit/ ./internal/e2e/ ./internal/telemetry/ ./internal/evalrun/ ./internal/metering/ ./internal/legal/
+	bash db/migrations/postgres/run_pg_docker.sh $(GO) test -tags pgproof -count=1 ./internal/pgmigrate/ ./internal/registry/ ./internal/variantspec/ ./internal/worktree/ ./internal/executor/ ./internal/runqueue/ ./internal/submit/ ./internal/e2e/ ./internal/telemetry/ ./internal/evalrun/ ./internal/metering/ ./internal/legal/
 
 ## demo-evalboard: stand up the P4 eval board against a live fan-out with a stubbed provider.
 ##                Everything between the queue and the pixel is the shipped path: the eval set comes
