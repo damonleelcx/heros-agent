@@ -24,11 +24,20 @@ env_pairs="$(
     | sort
 )"
 
-# "name digest" from the kustomization images: block (name:/digest: pairs, in order).
+# "name digest" from the kustomization images: block (name:/newName:/digest: entries, in order).
+#
+# 🔴 `newName:` OVERRIDES `name:`, and reading only `name:` was a blind spot rather than a simplification.
+# In a kustomize `images:` entry, `name` is the SELECTOR — the string matched against the image written in
+# the manifests — and `newName` is what actually gets applied. A base that retargets every platform image
+# to a different registry (which is exactly what deploying from ECR instead of GHCR looks like) therefore
+# ran the whole platform from a registry this check never inspected, and reported OK while doing it. The
+# gate exists to make "compose and the cluster reference the same image" true; that has to mean the
+# EFFECTIVE reference, not the pre-rewrite one.
 k8s_pairs="$(
   awk '
-    /- name:/ { sub(/.*- name:[[:space:]]*/,""); sub(/[[:space:]]*$/,""); n=$0 }
-    /digest:/ { sub(/.*digest:[[:space:]]*/,""); sub(/[[:space:]]*$/,""); if (n!="") { print n" "$0; n="" } }
+    /- name:/  { sub(/.*- name:[[:space:]]*/,"");  sub(/[[:space:]]*$/,""); n=$0 }
+    /newName:/ { sub(/.*newName:[[:space:]]*/,""); sub(/[[:space:]]*$/,""); n=$0 }
+    /digest:/  { sub(/.*digest:[[:space:]]*/,"");  sub(/[[:space:]]*$/,""); if (n!="") { print n" "$0; n="" } }
   ' "$kustom" | sort
 )"
 

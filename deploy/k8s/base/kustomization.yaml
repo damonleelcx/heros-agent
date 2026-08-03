@@ -33,12 +33,18 @@ resources:
 # images.env, and scripts/deploy/check-digest-pins.sh fails if any of these is a floating tag. The
 # `newTag`-less `digest:` form is what makes an apply reproducible: the same digest is the same image.
 images:
+  # The platform's own three, built from commit eb27a50 for linux/arm64 and pushed to this account's
+  # ECR. `newName` retargets the registry; the digest is the artifact. Both must match deploy/images.env
+  # exactly or check-image-parity.sh fails the build.
   - name: ghcr.io/heros-foreal/agentd
-    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+    newName: 373468206837.dkr.ecr.us-east-1.amazonaws.com/agentd
+    digest: sha256:e17e596a5042a6458c5e0180172a11d76e64b75fe611ee92f57144790ff91e61
   - name: ghcr.io/heros-foreal/heros-console
-    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+    newName: 373468206837.dkr.ecr.us-east-1.amazonaws.com/heros-console
+    digest: sha256:56083facd8fbdac437dab7854adeecd01834ad6a5edb0be50b34d5367baae091
   - name: ghcr.io/heros-foreal/heros-admin-console
-    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+    newName: 373468206837.dkr.ecr.us-east-1.amazonaws.com/heros-admin-console
+    digest: sha256:07e7c27be0fabf3aef96a299c1d6bac7ee60d6f49ba93b7e150db824406583d3
   - name: postgres
     digest: sha256:6efd0df010dc3cb40d5e33e3ef84acecc5e73161bd3df06029ee8698e5e12c60
   - name: minio/minio

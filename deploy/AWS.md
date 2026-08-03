@@ -17,13 +17,14 @@ These are not warnings about difficulty. Each one will stop the deploy, and thre
 | # | Gap | What happens if you skip it |
 |---|---|---|
 | 1 | **No published images.** [`images.env`](images.env) pins `sha256:0000…` placeholders for `agentd`, `heros-console` and `heros-admin-console` — the release pipeline that replaces them is out of P19's scope. | `ImagePullBackOff` on every platform pod. §2 builds and pushes them to ECR. |
-| 2 | **No Ingress or LoadBalancer manifest exists anywhere in `deploy/k8s/`.** Every Service is `ClusterIP`. | The apply *succeeds*, every pod is healthy, and **nothing is reachable from a browser**. §7 gives you the manifests. |
+| 2 | **The AWS Load Balancer Controller needs an IAM role of its own**, and installing the chart does not create one. The two Ingresses now ship in `overlays/prod/ingress.yaml` — *(this used to read "no Ingress manifest exists anywhere"; that gap is closed)* — but a controller with no permissions reconciles them to nothing. | Same silent shape as before: the apply *succeeds*, every pod is healthy, `kubectl get ingress` shows **no ADDRESS**, and nothing is reachable from a browser. §7.2. |
 | 3 | **The `heros-secrets` ServiceAccount is referenced but never defined.** `overlays/prod/secretstore.yaml` authenticates as it; no manifest creates it. | Every `ExternalSecret` fails, every pod stays `CreateContainerConfigError` waiting for a Secret that never materialises. §5. |
 | 4 | 🔴 **EKS does not enforce NetworkPolicy by default.** The VPC CNI ignores `NetworkPolicy` objects unless network-policy support is explicitly enabled. | The apply succeeds and the policies are *inert*. Default-deny, the control/data-plane seam and the **model-call egress allowlist** — Decisions 3 and 4, the security posture this deploy is largely built around — all silently do nothing. §3. |
 | 5 | **The AWS secrets source is selected but never located.** The base sets `HEROS_SECRETS_SOURCE=aws-secrets-manager`; until this change nothing set `HEROS_SECRETS_AWS_PREFIX` (or `_IDS`) or a region, and that is resolved **at boot**. | `agentd` exits immediately — *"requires either HEROS_SECRETS_AWS_IDS or HEROS_SECRETS_AWS_PREFIX to locate the secrets"* — and CrashLoopBackOffs. **Fixed in the base now**; listed so you recognise it if you carry an older overlay. |
 
-Gap 4 is the one to take seriously — it is the only one that leaves you with a deploy that looks
-correct. Everything else fails loudly.
+Gaps 2 and 4 are the ones to take seriously — they are the two that leave you with a deploy that looks
+correct. Both have a one-command check (§7.2, §3) and neither is visible without it. Everything else
+fails loudly.
 
 ---
 
@@ -35,10 +36,24 @@ precondition (Decision 6).
 
 On AWS, **RDS is usually the better call** and the deploy already accommodates it: `agentd` reads one
 `DATABASE_URL` and applies its schema at boot through a ledger it reads, so it does not care where the
-database lives. If you use RDS, delete `postgres.yaml` from the base's resource list in your overlay —
-and understand that you have also deleted the backup `CronJob`, so **RDS automated backups become the
-thing standing between you and data loss**. Accepting the SPOF without shipping backup is exactly what
-Decision 6 forbids; moving to RDS moves the obligation, it does not remove it.
+database lives. If you use RDS, delete `postgres.yaml`'s objects in your overlay — and understand that
+you have also deleted the backup `CronJob`, so **RDS automated backups become the thing standing between
+you and data loss**. Accepting the SPOF without shipping backup is exactly what Decision 6 forbids;
+moving to RDS moves the obligation, it does not remove it.
+
+🔴 **Deleting the workload is only half of it — you must also repoint the egress, and nothing tells you
+that you forgot.** The base's `agentd` NetworkPolicy permits 5432 to a **pod selector**, and its only
+other egress rule is 443 to public IPs with `10.0.0.0/8`, `172.16.0.0/12` and `192.168.0.0/16`
+*explicitly excepted*, so that rule cannot become a backdoor to an in-cluster service. An RDS instance is
+a **private VPC address on 5432**: matched by the exception, permitted by nothing. Under default-deny,
+`agentd` therefore cannot reach its database at all — and because an unreachable `DATABASE_URL` is a
+deliberate hard boot failure, what you see is `CrashLoopBackOff` with a connection timeout, several
+layers away from the resource list you edited to choose RDS. The consent-retention `CronJob` has the same
+problem for the same reason, and *its* failure is silent.
+
+Both patches ship in [`overlays/prod/kustomization.yaml`](k8s/overlays/prod/kustomization.yaml). Narrow
+the CIDR to your DB subnets once the instance exists — the whole VPC on 5432 is wider than the one host
+`agentd` needs.
 
 **(b) Do you need the object store, queue, vector store and graph store yet?** They are labelled
 *provisioned ahead of use* in the README: **no deployed process dials them today**. On a laptop that
@@ -243,15 +258,60 @@ what makes it true that neither console can act with the other's credential.
 
 Now the IAM role and the **ServiceAccount the tree references but never defines** (gap 3):
 
+The policy document goes in a file rather than inline. Two reasons, and the second is the one that bites:
+a heredoc is auditable and diffable, and a policy substituted inline into `--attach-policy-arn` is created
+by the **same command that attaches it**, so the step cannot be run twice — see below.
+
+```bash
+: "${ACCOUNT:?run the ACCOUNT/AWS_REGION exports from §2 first}" "${AWS_REGION:?}"
+
+cat > /tmp/heros-secrets-read.json <<EOF
+{ "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"],
+    "Resource": "arn:aws:secretsmanager:$AWS_REGION:$ACCOUNT:secret:heros/*"
+  }] }
+EOF
+```
+
+🔴 **Look the policy up before creating it.** `create-policy` fails `EntityAlreadyExists` on the second
+run — and in the shape this step used to have, that failure took the ARN substitution down with it, so
+`eksctl` received an empty `--attach-policy-arn` and the whole step had to be unpicked by hand. Any
+re-run reaches this: a cluster you recreated, an `eksctl` failure halfway, a second region:
+
+```bash
+SECRETS_POLICY_ARN=$(aws iam list-policies --scope Local \
+  --query "Policies[?PolicyName=='HerosSecretsRead'].Arn" --output text)
+
+[ -n "$SECRETS_POLICY_ARN" ] || SECRETS_POLICY_ARN=$(aws iam create-policy \
+  --policy-name HerosSecretsRead \
+  --policy-document file:///tmp/heros-secrets-read.json \
+  --query Policy.Arn --output text)
+
+echo "$SECRETS_POLICY_ARN"
+```
+
+⚠️ If it already existed, you are **reusing whatever it grants today**, which is not necessarily what the
+file above says — a policy created against a different account or region has an ARN scope that silently
+matches nothing. Confirm rather than assume, on any re-run:
+
+```bash
+aws iam get-policy-version --policy-arn "$SECRETS_POLICY_ARN" \
+  --version-id "$(aws iam get-policy --policy-arn "$SECRETS_POLICY_ARN" \
+      --query Policy.DefaultVersionId --output text)" \
+  --query 'PolicyVersion.Document.Statement[0].Resource'
+#   EXPECTED: arn:aws:secretsmanager:<your region>:<your account>:secret:heros/*
+#   A different account or region here is why every ExternalSecret is stuck on AccessDenied.
+```
+
+Then the ServiceAccount:
+
 ```bash
 eksctl create iamserviceaccount \
   --cluster heros-prod --region "$AWS_REGION" \
   --namespace heros --name heros-secrets \
-  --attach-policy-arn "$(aws iam create-policy --policy-name HerosSecretsRead \
-      --policy-document "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",
-        \"Action\":[\"secretsmanager:GetSecretValue\",\"secretsmanager:DescribeSecret\"],
-        \"Resource\":\"arn:aws:secretsmanager:$AWS_REGION:$ACCOUNT:secret:heros/*\"}]}" \
-      --query Policy.Arn --output text)" \
+  --attach-policy-arn "$SECRETS_POLICY_ARN" \
   --approve
 ```
 
@@ -273,6 +333,11 @@ kubectl apply -k deploy/k8s/overlays/prod
 kubectl -n heros get externalsecret        # every one must reach SecretSynced
 kubectl -n heros rollout status deploy/agentd
 kubectl -n heros get pods
+
+# The Ingresses apply with this too (§7). An empty ADDRESS column is the controller telling you it
+# could not provision an ALB — almost always the IAM role (§7.2) or the certificate ARN (§7.1).
+kubectl -n heros get ingress
+kubectl -n heros describe ingress console | tail -20   # the reason, when ADDRESS is empty
 ```
 
 Applying twice is a no-op — that is the whole upgrade story. **Upgrade = push new images, update the
@@ -283,9 +348,13 @@ Now run §3's enforcement probe.
 
 ---
 
-## 7. Expose the two consoles (gap 2 — you must add this)
+## 7. Expose the two consoles
 
-Nothing in the tree exposes anything. The target origins are:
+The manifests ship in **[`deploy/k8s/overlays/prod/ingress.yaml`](k8s/overlays/prod/ingress.yaml)** and are
+already in the prod overlay's `resources:`, along with the two patches they depend on (§7.4). What is
+*not* automatic is the controller that reconciles them and its IAM role — §7.2 — and two values you must
+edit before applying: the **certificate ARN** and, if you are not deploying to `heros-agent.space`, the
+**hostnames**. The target origins are:
 
 | Surface | Origin |
 |---|---|
@@ -321,83 +390,113 @@ heros-agent.space          A     ALIAS -> <customer ALB dns name>
 admin.heros-agent.space    A     ALIAS -> <operator ALB dns name>
 ```
 
-### 7.2 The load balancer controller and the two Ingresses
+### 7.2 The load balancer controller — and the IAM role it cannot work without
+
+🔴 **The controller needs its own IAM role, and the Helm chart does not create one.** It calls
+`elasticloadbalancing`, `ec2` and `acm` on your behalf; with no permissions it starts, goes `Running`,
+logs `AccessDenied` where nobody is looking, and creates no ALB. `kubectl get ingress` shows an empty
+`ADDRESS` column and that is the only outward sign. This is gap 2 in §0 and it is silent.
+
+The policy document is published per controller release and **must match the chart you install** — a
+newer chart calls actions an older policy does not grant. Derive the version instead of pinning one by
+hand:
 
 ```bash
 helm repo add eks https://aws.github.io/eks-charts && helm repo update
+
+LBC_VERSION=$(helm show chart eks/aws-load-balancer-controller | awk '/^appVersion:/{print $2}')
+echo "controller $LBC_VERSION"
+
+curl -fsSL -o /tmp/lbc-iam-policy.json \
+  "https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/${LBC_VERSION}/docs/install/iam_policy.json"
+```
+
+Create the policy — **idempotently**, because the second run of a `create-policy` fails
+`EntityAlreadyExists` and takes the ARN substitution down with it:
+
+```bash
+LBC_POLICY_ARN=$(aws iam list-policies --scope Local \
+  --query "Policies[?PolicyName=='AWSLoadBalancerControllerIAMPolicy'].Arn" --output text)
+
+[ -n "$LBC_POLICY_ARN" ] || LBC_POLICY_ARN=$(aws iam create-policy \
+  --policy-name AWSLoadBalancerControllerIAMPolicy \
+  --policy-document file:///tmp/lbc-iam-policy.json \
+  --query Policy.Arn --output text)
+
+echo "$LBC_POLICY_ARN"
+```
+
+Bind it to a ServiceAccount in `kube-system` — the same IRSA mechanism as §5, so again **no access key
+anywhere**:
+
+```bash
+eksctl create iamserviceaccount \
+  --cluster heros-prod --region "$AWS_REGION" \
+  --namespace kube-system --name aws-load-balancer-controller \
+  --role-name AmazonEKSLoadBalancerControllerRole \
+  --attach-policy-arn "$LBC_POLICY_ARN" \
+  --approve
+```
+
+Then install the chart **against that ServiceAccount** — `serviceAccount.create=false` is the load-bearing
+flag. Leave it at its default and Helm makes a second, unannotated ServiceAccount of the same name, the
+pod authenticates as the node role instead, and you are back to `AccessDenied` with a role that looks
+correctly configured in the console:
+
+```bash
 helm install aws-load-balancer-controller eks/aws-load-balancer-controller \
-  -n kube-system --set clusterName=heros-prod --wait
+  -n kube-system \
+  --set clusterName=heros-prod \
+  --set serviceAccount.create=false \
+  --set serviceAccount.name=aws-load-balancer-controller \
+  --set region="$AWS_REGION" \
+  --set vpcId="$(aws eks describe-cluster --name heros-prod --region "$AWS_REGION" \
+      --query 'cluster.resourcesVpcConfig.vpcId' --output text)" \
+  --wait
+```
+
+`region` and `vpcId` are passed explicitly rather than left to IMDS discovery: on a restricted-IMDS or
+Fargate node the auto-detection fails at reconcile time, not at install time, which puts the error a long
+way from the change that caused it.
+
+**Verify the role is actually attached before you trust an empty `ADDRESS`** — a missing annotation and a
+missing policy produce the same symptom:
+
+```bash
+kubectl -n kube-system get sa aws-load-balancer-controller \
+  -o jsonpath='{.metadata.annotations.eks\.amazonaws\.com/role-arn}{"\n"}'
+#   EXPECTED: the AmazonEKSLoadBalancerControllerRole ARN. Empty means the chart created its own
+#   ServiceAccount over yours — uninstall, re-run eksctl, reinstall with serviceAccount.create=false.
+```
+
+### 7.2.1 The two Ingresses
+
+They ship in [`overlays/prod/ingress.yaml`](k8s/overlays/prod/ingress.yaml), already listed in the prod
+overlay's `resources:`. Read the file — its comments carry the reasoning that used to live here. What you
+must change in it, and nothing else:
+
+| Edit | Why it cannot be defaulted |
+|---|---|
+| `certificate-arn` ×2 → `$CERT_ARN` from §7.1 | The committed placeholder is a **valid-looking ARN that does not exist**, so the controller refuses and the Ingress never gets an address. Deliberate: a missing certificate must fail in `kubectl describe ingress`, not quietly serve plain HTTP. |
+| `host` ×2, if not `heros-agent.space` | Concrete hostnames, not empty ones — **an Ingress rule with a blank host matches every host that reaches the ALB**, which would serve the operator console from the customer hostname. A wrong hostname is inert; a blank one is a boundary failure. |
+| `ipBlock.cidr` in the `agentd` NetworkPolicy patch (in `kustomization.yaml`) | §7.4 — it is your VPC's CIDR, and `10.0.0.0/16` is only eksctl's default. |
+
+Render before you apply; the whole point of kustomize here is that what you read is what applies:
+
+```bash
+kustomize build deploy/k8s/overlays/prod | grep -A3 'certificate-arn'
 ```
 
 🔴 **Two Ingresses, and therefore two ALBs — not one ALB with two host rules.** The
-`alb.ingress.kubernetes.io/group.name` annotation would merge them onto shared infrastructure; leaving
-it off keeps them separate. That is deliberate: a shared ALB means one WAF association, one access-log
+`alb.ingress.kubernetes.io/group.name` annotation would merge them onto shared infrastructure; it is
+absent from both files and should stay absent. A shared ALB means one WAF association, one access-log
 stream and one set of listener rules for both the customer surface and the cross-tenant operator
 surface, and every future change to either is a change that can reach the other.
 
-```yaml
-# ingress.yaml — add to your overlay's resources. $CERT_ARN covers both names (§7.1).
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: console
-  namespace: heros
-  annotations:
-    alb.ingress.kubernetes.io/scheme: internet-facing
-    alb.ingress.kubernetes.io/target-type: ip
-    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
-    alb.ingress.kubernetes.io/ssl-redirect: "443"
-    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:us-east-1:ACCOUNT:certificate/…
-    alb.ingress.kubernetes.io/ssl-policy: ELBSecurityPolicy-TLS13-1-2-2021-06
-    alb.ingress.kubernetes.io/healthcheck-path: /api/health
-spec:
-  ingressClassName: alb
-  rules:
-    - host: heros-agent.space
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend: { service: { name: console, port: { number: 4320 } } }
----
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: admin-console
-  namespace: heros
-  annotations:
-    # 🔴 INTERNET-FACING, on admin.heros-agent.space — a deliberate choice, and the highest-blast-radius
-    # surface in this system: it reads across tenants and can suspend them. What makes it defensible is
-    # NOT the network boundary; it is that the operator console refuses to serve anyone who has not
-    # completed operator SSO **and** MFA (P22), and refuses to start at all under a `dev` identity seam
-    # in production (ADR-008). Verify BOTH before this hostname resolves — see §7.3.
-    #
-    # Defence in depth, because "the app authenticates properly" is one bug away from being false:
-    # associate a WAF and consider an IP allowlist. Neither replaces §7.3; both buy time if it fails.
-    alb.ingress.kubernetes.io/scheme: internet-facing
-    alb.ingress.kubernetes.io/target-type: ip
-    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
-    alb.ingress.kubernetes.io/ssl-redirect: "443"
-    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:us-east-1:ACCOUNT:certificate/…
-    alb.ingress.kubernetes.io/ssl-policy: ELBSecurityPolicy-TLS13-1-2-2021-06
-    alb.ingress.kubernetes.io/healthcheck-path: /api/health
-    # alb.ingress.kubernetes.io/wafv2-acl-arn: arn:aws:wafv2:…
-    # alb.ingress.kubernetes.io/inbound-cidrs: 203.0.113.0/24
-spec:
-  ingressClassName: alb
-  rules:
-    - host: admin.heros-agent.space
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend: { service: { name: admin-console, port: { number: 4310 } } }
-```
-
 ⚠️ The base `NetworkPolicy` allows ingress to the consoles on their ports from anywhere in the cluster,
 which covers ALB targets. The platform API (`agentd`, 4321) accepts ingress **only from the two consoles**
-and is deliberately not exposed — **do not add a blanket Ingress for it.** The one path that is a real
-question is `/api/p11/*`; see §7.4 before you decide.
+and is deliberately not exposed — **do not add a blanket Ingress for it.** The two paths that are the real
+question are the CLI's; see §7.4.
 
 ### 7.3 The hostname-derived configuration
 
@@ -448,7 +547,7 @@ curl -s http://127.0.0.1:4321/readyz | jq '.admin_idp'
 
 ---
 
-### 7.4 The CLI link path — one Ingress rule you must add
+### 7.4 The CLI link path — two Ingress rules and the two patches they need
 
 The `heros` CLI (`login` and `link`) transmits to a **hardcoded, allowlist-enforced constant**:
 
@@ -467,38 +566,49 @@ BFF serves `consent`, `console/*`, `health`, `session`, `stream` and `theme` —
 So without the rule below, `heros login` reaches Next.js and gets a **404 that looks like a networking
 problem and is not one**.
 
-Add exactly two paths to the customer Ingress — **not** a blanket rule for `/api/v1/*`. The rest of 4321
+Exactly two paths are on the customer Ingress — **not** a blanket rule for `/api/v1/*`. The rest of 4321
 is a console-only surface reached with the BFF's credential; these two are a bearer-token surface built
-for machines, and they are the only ones a developer's laptop should be able to reach:
+for machines, and they are the only ones a developer's laptop should be able to reach. They are listed
+**before** the catch-all `/` rule, because the controller emits listener rules in the order they appear
+and a `Prefix` rule on `/` above them would swallow both.
+
+Two patches in `overlays/prod/kustomization.yaml` make them work. Both are already there; both are the
+kind of thing whose absence produces a 503 with no explanation.
+
+**(a) Let the load balancer reach `agentd` at all.** The base `NetworkPolicy` admits 4321 only from the
+two consoles, and with `target-type: ip` the ALB is not a pod — it arrives from the VPC:
 
 ```yaml
-# in the `console` Ingress, BEFORE the catch-all `/` rule — ALB evaluates rules in order
-          - path: /api/v1/whoami
-            pathType: Exact
-            backend: { service: { name: agentd, port: { number: 4321 } } }
-          - path: /api/v1/run-links
-            pathType: Exact
-            backend: { service: { name: agentd, port: { number: 4321 } } }
-```
-
-Then let the load balancer reach `agentd`. The base `NetworkPolicy` admits 4321 only from the two
-consoles, and with `target-type: ip` the ALB is not a pod — it comes from the VPC:
-
-```yaml
-# overlay patch — 🔴 replace with YOUR VPC CIDR, not 0.0.0.0/0
   - target: { kind: NetworkPolicy, name: agentd }
     patch: |
-      apiVersion: networking.k8s.io/v1
-      kind: NetworkPolicy
-      metadata: { name: agentd }
-      spec:
-        ingress:
-          - from:
-              - podSelector: { matchLabels: { app.kubernetes.io/name: console } }
-              - podSelector: { matchLabels: { app.kubernetes.io/name: admin-console } }
-              - ipBlock: { cidr: 10.0.0.0/16 }
-            ports: [{ protocol: TCP, port: 4321 }]
+      # …ingress from the two consoles, plus:
+              - ipBlock: { cidr: 10.0.0.0/16 }   # 🔴 YOUR VPC CIDR, not 0.0.0.0/0
 ```
+
+```bash
+aws ec2 describe-vpcs --filters Name=tag:Name,Values='eksctl-heros-prod-cluster/VPC' \
+  --query 'Vpcs[0].CidrBlock' --output text
+```
+
+**(b) Give `agentd`'s target group its own health check.** 🔴 The Ingress-level
+`healthcheck-path: /api/health` is right for the console and **wrong for `agentd`, which serves
+`/healthz` and `/readyz` and nothing at `/api/health`.** Without an override the two rules above route
+correctly, the target deregisters as unhealthy, and the CLI gets a 503 whose cause is nowhere near the
+rule that looks responsible. The controller reads health-check annotations from the **Service** when
+they need to differ per target group:
+
+```yaml
+  - target: { kind: Service, name: agentd }
+    patch: |
+      metadata:
+        annotations:
+          alb.ingress.kubernetes.io/healthcheck-path: /healthz
+```
+
+`/healthz` and not `/readyz`, deliberately: `/readyz` goes non-200 when *any* aggregated component is
+degraded, so pointing a load balancer at it would deregister the only `agentd` pod — and break the CLI
+link path — because, say, the vector store is unreachable. Liveness for the load balancer, readiness for
+the kubelet.
 
 ⚠️ **Be honest with yourself about what that policy does.** A NetworkPolicy matches L3/L4 — addresses and
 ports, never paths. Admitting the ALB to 4321 admits it to **all** of 4321; the restriction to those two
