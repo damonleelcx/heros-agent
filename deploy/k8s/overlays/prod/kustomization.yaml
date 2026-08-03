@@ -1,19 +1,66 @@
-# prod overlay — the production cluster. Differences from base: 3 replicas of the STATELESS BFFs (so a
-# node loss plus a rolling update still leaves a quorum), production-sized resources, and the cloud
-# SecretStore reached by an ambient identity. The stateful stores stay single-instance (Decision 6); the
-# Patroni-HA evolution is a future overlay, the door left open, not walked through here.
+# prod overlay — the production deployment: **k3s on a single EC2 VM**, not EKS.
 #
-# 🔴 agentd is NOT scaled here, and prod is exactly where that is tempting. Its ledger is a single SQLite
-# file on a ReadWriteOnce claim (see the base's Deployment comment): a second replica is a second
-# database answering different questions behind one Service, and on a ReadWriteOnce claim it would not
-# even schedule. Raising this number does not buy availability — it buys a split ledger and a pod stuck
-# in Pending. It goes back up when the ledger's contents move to the platform database, and not before.
+# ── Why not EKS, recorded here because the manifests look like they want it ──────────────────────────
+#
+# The EKS floor is $73/mo for the control plane plus ~$33/mo for the two ALBs Decision 5 requires — about
+# $106 before a single node, byte or database. The budget for this deployment is $100/mo all-in, so EKS
+# is not a sizing problem that a smaller nodegroup solves; it is excluded by its fixed costs. k3s was
+# chosen over Docker Compose at the same price because **Compose has no network segmentation at all**
+# (docker-compose.platform.yml declares no `networks:`; every container can reach every other one), which
+# would silently discard Decisions 3 and 4 — default-deny, the control/data-plane seam and the model-call
+# egress allowlist. k3s enforces NetworkPolicy out of the box via its embedded kube-router, so every
+# policy in the base is a runtime boundary here exactly as it is on EKS.
+#
+# AWS.md remains the EKS runbook and is still correct for that substrate. What differs here: Traefik +
+# cert-manager instead of two ALBs, no IRSA, and one node.
+#
+# ── What this overlay encodes ────────────────────────────────────────────────────────────────────────
+#
+# (a) POSTGRES IS IN-CLUSTER, as the base ships it — a single replica on its own volume, WITH the backup
+#     CronJob. That pairing is the point: Decision 6 permits the single point of failure only because the
+#     backup ships alongside it. (An earlier revision of this overlay used RDS; at $14–26/mo it did not
+#     survive the budget, and moving to RDS would have moved the backup obligation onto an RDS setting
+#     rather than onto something in this deploy.)
+#
+# (b) THE FOUR PROVISIONED-AHEAD-OF-USE STORES ARE GONE — object store, queue, vector store, graph store.
+#     No deployed process dials them on this release (README capability table, AWS.md §10). Their
+#     *_HEALTH_URL variables are removed from agentd with them, so /readyz stops aggregating components
+#     this deployment deliberately does not run: a component with no URL is honestly ABSENT, whereas one
+#     with a URL that nothing answers turns /readyz not-ready and names itself forever.
+#
+# 🔴 CONSOLE REPLICAS ARE 1, NOT 3, and on ONE node that is not a sizing detail — it is the honest shape
+# of a single-VM deploy. Every workload here dies with the instance. A rolling update of a console takes
+# that surface down briefly, and the PodDisruptionBudget's `minAvailable: 1` will block a voluntary drain
+# of the only node. Put these back to 3 when there is more than one node to put them on.
+#
+# 🔴 agentd is NOT scaled, and this is exactly where that is tempting. Its ledger is a single SQLite file
+# on a ReadWriteOnce claim (see the base's Deployment comment): a second replica is a second database
+# answering different questions behind one Service, and on a ReadWriteOnce claim it would not even
+# schedule. Raising this number does not buy availability — it buys a split ledger and a pod stuck in
+# Pending. It goes back up when the ledger's contents move to the platform database, and not before.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
+
+# 🔴 namespace, and its absence was a real defect rather than a tidiness issue. The BASE sets
+# `namespace: heros`, but a kustomize namespace transformer only applies to the resources of the
+# kustomization that declares it — an overlay's own sibling files (secretstore.yaml here, plus
+# ingress.yaml under prod) inherit nothing. They therefore landed in `default`, where the SecretStore is
+# invisible to the ExternalSecrets in `heros` ("SecretStore heros-store not found") and an Ingress points
+# at Services that do not exist beside it. Both apply cleanly and neither says why.
+namespace: heros
 
 resources:
   - ../../base
   - secretstore.yaml
+  # The two public surfaces. Traefik + cert-manager specific, which is why they are here and not in the
+  # substrate-agnostic base — see the header of ingress.yaml.
+  - ingress.yaml
+  # And the policy that lets cert-manager's ephemeral solver pods be reached at all. Without it the
+  # default-deny in the base swallows them and no certificate is ever issued — see the file's header.
+  - acme-solver-policy.yaml
+  # Plain HTTP redirects to HTTPS instead of 404ing — see the file's header for why it is a
+  # separate Ingress rather than a middleware on the existing one.
+  - http-redirect.yaml
 
 patches:
   - target: { kind: Deployment, name: agentd }
@@ -29,7 +76,8 @@ patches:
                 resources:
                   requests: { cpu: "500m", memory: "512Mi" }
                   limits: { cpu: "2", memory: "1Gi" }
-  # The ledger's claim is sized for production here; the base's 10Gi is a floor, not a recommendation.
+  # The ledger's claim. 20Gi, not the base's 10Gi floor and not the 50Gi an EKS nodegroup could spare:
+  # on a single VM every PVC comes out of the same EBS volume the OS, the images and Postgres share.
   - target: { kind: PersistentVolumeClaim, name: agentd-ledger }
     patch: |
       apiVersion: v1
@@ -38,18 +86,164 @@ patches:
       spec:
         resources:
           requests:
-            storage: 50Gi
+            storage: 20Gi
+  # 🔴 1, not 3 — see the header.
   - target: { kind: Deployment, name: console }
     patch: |
       apiVersion: apps/v1
       kind: Deployment
       metadata: { name: console }
       spec:
-        replicas: 3
+        replicas: 1
   - target: { kind: Deployment, name: admin-console }
     patch: |
       apiVersion: apps/v1
       kind: Deployment
       metadata: { name: admin-console }
       spec:
-        replicas: 3
+        replicas: 1
+
+  # ── The one patch ingress.yaml depends on ────────────────────────────────────────────────────────
+  #
+  # Let the ingress controller reach agentd at all. The base admits 4321 ONLY from the two console pods
+  # (the BFF→API seam), which is right — but the CLI's two /api/v1 paths are routed by Traefik straight
+  # to agentd, and Traefik is neither console. Under default-deny every CLI request is dropped before it
+  # is anything, and the symptom is a timeout on `heros login` that looks like DNS.
+  #
+  # This is a POD SELECTOR, not a CIDR. On EKS the ALB arrived as a VPC address and had to be admitted by
+  # ipBlock; here the proxy is a pod in kube-system, so it can be named precisely — which is strictly
+  # better, because an ipBlock would also admit anything else sharing that range.
+  #
+  # ⚠️ Admitting Traefik to 4321 admits it to ALL of 4321 — a NetworkPolicy matches addresses and ports,
+  # never paths. The restriction to /api/v1/whoami and /api/v1/run-links is enforced by the Ingress rules
+  # and by nothing else. Keep those `pathType: Exact`.
+  - target: { kind: NetworkPolicy, name: agentd }
+    patch: |
+      apiVersion: networking.k8s.io/v1
+      kind: NetworkPolicy
+      metadata: { name: agentd }
+      spec:
+        ingress:
+          - from:
+              - podSelector: { matchLabels: { app.kubernetes.io/name: console } }
+              - podSelector: { matchLabels: { app.kubernetes.io/name: admin-console } }
+              - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: kube-system } }
+                podSelector: { matchLabels: { app.kubernetes.io/name: traefik } }
+            ports: [{ protocol: TCP, port: 4321 }]
+
+  # ── Operator identity: the ONE hostname-derived value that can live in this tree ─────────────────
+  #
+  # 🔴 ADMIN_WEBAUTHN_RP_ID must be set BEFORE any operator enrols a security key. A WebAuthn credential
+  # is bound to the Relying Party ID at registration, so changing it later invalidates every key already
+  # registered — this is not a value to fix up after the fact.
+  #
+  # It must be the OPERATOR subdomain, never the apex. An RP ID may be the origin's domain *or any
+  # registrable suffix of it*, so `heros-agent.space` here would make operator security keys valid on
+  # EVERY *.heros-agent.space origin, including the customer console. Origin-binding is the one thing
+  # WebAuthn gives over TOTP, and a loose RP ID gives it straight back.
+  #
+  # ⚠️ Its two companions, ADMIN_CONSOLE_ORIGIN and ADMIN_IDP_ISSUER, are deliberately NOT set here.
+  # ADMIN_CONSOLE_ORIGIN is a full `https://…` URL, and deploy/scripts/check-external-origins.sh scans
+  # this whole directory asserting an air-gapped package names ZERO external origins — so writing the
+  # platform's own public origin into a shipped manifest turns that fence red. That tension is real and
+  # unresolved: this tree ships both to this deployment and to customers who must be able to prove it
+  # phones nowhere. Until it is resolved, set that one out of band on this deployment only.
+  - target: { kind: Deployment, name: agentd }
+    patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata: { name: agentd }
+      spec:
+        template:
+          spec:
+            containers:
+              - name: agentd
+                env:
+                  - { name: ADMIN_WEBAUTHN_RP_ID, value: "admin.heros-agent.space" }
+
+  # ── Drop the four unused stores' health URLs from agentd ─────────────────────────────────────────
+  #
+  # `$patch: delete` on a list entry, keyed by `name` — the strategic-merge key for a container's env.
+  # Removing the VARIABLE is what makes the component absent; setting it empty would leave a component
+  # with an unreachable URL, which is the state that turns /readyz permanently not-ready.
+  - target: { kind: Deployment, name: agentd }
+    patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata: { name: agentd }
+      spec:
+        template:
+          spec:
+            containers:
+              - name: agentd
+                env:
+                  - { name: OBJECT_STORE_HEALTH_URL, $patch: delete }
+                  - { name: QUEUE_HEALTH_URL,        $patch: delete }
+                  - { name: VECTOR_STORE_HEALTH_URL, $patch: delete }
+                  - { name: GRAPH_STORE_HEALTH_URL,  $patch: delete }
+
+  # agentd's egress list, restated in full. A NetworkPolicy rule list has no merge key, so a strategic
+  # merge REPLACES it — which is what we want: what is written below is the entire set of destinations
+  # agentd may reach, and the four dropped stores are absent from it by construction rather than by
+  # having been edited out of a longer list.
+  - target: { kind: NetworkPolicy, name: agentd }
+    patch: |
+      apiVersion: networking.k8s.io/v1
+      kind: NetworkPolicy
+      metadata: { name: agentd }
+      spec:
+        egress:
+          # 🔴 The two consoles, because this list REPLACES the base's and agentd aggregates both into
+          # /readyz. Omitting them here reintroduces the exact defect the base now documents: agentd
+          # goes permanently NotReady, leaves its own Service endpoints, and the platform is down.
+          - to: [{ podSelector: { matchLabels: { app.kubernetes.io/name: console } } }]
+            ports: [{ protocol: TCP, port: 4320 }]
+          - to: [{ podSelector: { matchLabels: { app.kubernetes.io/name: admin-console } } }]
+            ports: [{ protocol: TCP, port: 4310 }]
+          - to: [{ podSelector: { matchLabels: { app.kubernetes.io/name: postgres } } }]
+            ports: [{ protocol: TCP, port: 5432 }]
+          # External model providers — still the ONLY workload with an external-egress rule. Private
+          # ranges stay excepted so this cannot become a backdoor to an in-cluster service.
+          - to:
+              - ipBlock:
+                  cidr: 0.0.0.0/0
+                  except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16]
+            ports: [{ protocol: TCP, port: 443 }]
+
+  # ── The deletions ────────────────────────────────────────────────────────────────────────────────
+  #
+  # Kustomize has no "remove a resource inherited from a base", so each object is deleted explicitly.
+  # `target.name` is a REGEX, which is what keeps this to one entry per kind. The verbosity is the point:
+  # every object that does not ship is named here, in the overlay, rather than being absent because a
+  # line was quietly dropped from a list.
+  #
+  # 🔴 `postgres` is NOT in these lists. It ships, with its backup CronJob and its ExternalSecret.
+  - target: { kind: StatefulSet, name: "^(objectstore|queue|vectorstore|graphstore)$" }
+    patch: |
+      apiVersion: apps/v1
+      kind: StatefulSet
+      metadata: { name: unused }
+      $patch: delete
+  - target: { kind: Service, name: "^(objectstore|queue|vectorstore|graphstore)$" }
+    patch: |
+      apiVersion: v1
+      kind: Service
+      metadata: { name: unused }
+      $patch: delete
+  # Their secrets go too. Each is referenced ONLY by a workload deleted above; `heros-platform` and
+  # `heros-postgres` stay. An ExternalSecret left behind would sit un-synced forever, reporting a fault
+  # for a pod that does not exist.
+  - target: { kind: ExternalSecret, name: "^(heros-objectstore|heros-graphstore)$" }
+    patch: |
+      apiVersion: external-secrets.io/v1
+      kind: ExternalSecret
+      metadata: { name: unused }
+      $patch: delete
+  # And their NetworkPolicies, which would otherwise select pods that no longer exist — inert, but a
+  # policy that appears to guard something absent is a lie an auditor has to disprove.
+  - target: { kind: NetworkPolicy, name: "^(objectstore|queue|vectorstore|graphstore)$" }
+    patch: |
+      apiVersion: networking.k8s.io/v1
+      kind: NetworkPolicy
+      metadata: { name: unused }
+      $patch: delete

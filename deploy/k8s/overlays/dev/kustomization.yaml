@@ -5,6 +5,14 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
+# 🔴 namespace, and its absence was a real defect rather than a tidiness issue. The BASE sets
+# `namespace: heros`, but a kustomize namespace transformer only applies to the resources of the
+# kustomization that declares it — an overlay's own sibling files (secretstore.yaml here, plus
+# ingress.yaml under prod) inherit nothing. They therefore landed in `default`, where the SecretStore is
+# invisible to the ExternalSecrets in `heros` ("SecretStore heros-store not found") and an Ingress points
+# at Services that do not exist beside it. Both apply cleanly and neither says why.
+namespace: heros
+
 resources:
   - ../../base
   - secretstore.yaml
