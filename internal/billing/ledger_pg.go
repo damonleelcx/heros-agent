@@ -32,9 +32,18 @@ import (
 // The table carries CHECKs this file must respect rather than re-invent:
 //
 //   - `billing_event_settled_has_refs`: (status = 'recorded') = (provider_ref IS NOT NULL AND
-//     settled_at IS NOT NULL). So a PENDING row must write provider_ref as NULL, not "". Writing the
-//     empty string satisfies IS NOT NULL and the insert is refused — which is the constraint doing
-//     exactly its job.
+//     settled_at IS NOT NULL).
+//
+//     ⚠️ An earlier version of this comment claimed writing provider_ref as "" instead of NULL would
+//     make the constraint refuse every pending Append. That is WRONG, and the pgproof test disproved
+//     it: for a pending row the right-hand side is `TRUE AND FALSE` either way, because settled_at is
+//     NULL. The AND is what makes it pass.
+//
+//     NULL is still what this code writes, for the smaller and real reason: the empty string WEAKENS
+//     the sibling constraint on usage_record (`NOT reported_to_provider OR provider_usage_ref IS NOT
+//     NULL`), where a row claiming to be reported with a "" ref would satisfy a check that exists to
+//     catch exactly that. Matching the schema's NULL-until-confirmed intent keeps every such check
+//     able to do its job.
 //   - `gainshare_charge_traces_to_evidence`: a gainshare charge with an empty evidence array is
 //     refused. A billed saving that cannot name its evidence is the confident guessing P7 forbids.
 //   - `billing_event_correction_has_reason`, and a FOREIGN KEY to account(customer_id) — a billing
