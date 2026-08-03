@@ -14,23 +14,30 @@ Priya has a Python agent repository and a colleague who mentioned `heros`. She w
 she commits to reading anything.
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/damonleelcx/heros-agent/v0.20.0/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/damonleelcx/heros-agent/v0.21.0/scripts/install.sh | sh
 ```
 
-What she sees:
+What she sees — captured verbatim from this command on darwin/arm64, 2026-08-03, against the published
+v0.21.0 release, and not edited afterwards:
 
 ```
 heros install: target darwin/arm64
-heros install: latest version is 0.20.0
-heros install: downloading heros-0.20.0-darwin-arm64
+heros install: latest version is 0.21.0
+heros install: downloading heros-0.21.0-darwin-arm64
 heros install: ✓ checksum matches the release manifest
 heros install: ✓ signature verified against the pinned heros release key (ssh-keygen)
-heros install: ✓ installed /usr/local/bin/heros
+heros install: ✓ installed /Users/damon/.local/bin/heros
 
 heros install: next: cd into a repository and run
     heros doctor      # check this machine is ready
     heros discover    # find the agent workflow in your code
 ```
+
+That last path is worth reading rather than skipping. The installer places the binary in the first
+**writable** entry of `/usr/local/bin`, then `~/.local/bin` — and on the machine this was captured on,
+`/usr/local/bin` is `root:wheel` and not writable, so it chose the home directory and said so. It did not
+ask for `sudo` and it did not fail. If `~/.local/bin` is not on your PATH, that line is the one that tells
+you, which is why it prints the absolute path it used instead of a reassuring "installed successfully".
 
 Two things happened that she did not ask for. The download was checked against the release's checksum manifest,
 and that manifest was checked against a public key **pinned inside the script she just piped**. She did not run
@@ -74,7 +81,7 @@ Sam does not install things because a script said it verified them. He wants to 
 
 ```sh
 mkdir heros-review && cd heros-review
-gh release download v0.20.0            # or download the assets by hand
+gh release download v0.21.0            # or download the assets by hand
 
 # 1. the downloads are intact
 sha256sum -c SHA256SUMS                # or: shasum -a 256 -c SHA256SUMS
@@ -99,8 +106,20 @@ If Sam already has a `heros` he trusts, one command does both checks with the ro
 
 ```sh
 heros verify-release --manifest SHA256SUMS
-# → heros verify-release: ✅ verified 5 of 5 listed artifacts (…) — manifest signed by release key heros-release-2026c
+# → heros verify-release: ✅ verified 7 of 7 listed artifacts (heros-0.21.0-darwin-amd64,
+#   heros-0.21.0-darwin-arm64, heros-0.21.0-linux-amd64, heros-0.21.0-linux-arm64,
+#   heros-0.21.0-windows-amd64.exe, install.ps1, install.sh) — manifest signed by release
+#   key heros-release-2026c
 ```
+
+Seven, not five: the manifest covers the two install scripts as well as the five binaries, which is what
+makes the `curl … | sh` line auditable against the same signature as the thing it downloads. This line
+previously read "5 of 5" — an example written from the shape of the release rather than from a run of it.
+The `ssh-keygen` path above was executed against the same download and answers
+`Good "file" signature for heros-release with ED25519 key SHA256:…`. The fingerprint it prints is not
+reproduced here on purpose: it is public, but it is high-entropy base64, and pasting it into a document
+is how a `generic-api-key` finding gets allowlisted — after which the allowlist is what hides the next
+real one. Compare it against your own `ssh-keygen -lf` of [`heros-release.pub`](heros-release.pub).
 
 He can go further and rebuild it: see
 [Step 3 — reproduce it yourself](cli-verification.md#step-3--reproduce-it-yourself-optional-strongest). Builds
