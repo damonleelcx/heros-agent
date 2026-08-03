@@ -1,6 +1,7 @@
 package launch
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
@@ -23,7 +24,10 @@ import (
 	"github.com/heros-foreal/agentd/internal/legal"
 	"github.com/heros-foreal/agentd/internal/linkingest"
 	"github.com/heros-foreal/agentd/internal/metering"
+	"github.com/heros-foreal/agentd/internal/modelcatalog"
 	"github.com/heros-foreal/agentd/internal/plancfg"
+	"github.com/heros-foreal/agentd/internal/proposal"
+	"github.com/heros-foreal/agentd/internal/proposalgen"
 	"github.com/heros-foreal/agentd/internal/proposalstore"
 	"github.com/heros-foreal/agentd/internal/registry"
 	"github.com/heros-foreal/agentd/internal/sourceingest"
@@ -79,6 +83,7 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 	mountedEvalBoard := false
 	mountedScorecard := false
 	mountedVerdictIngest := false
+	mountedProposalGen := false
 	// Assembled inside the database block below; nil when this deployment cannot serve billing.
 	var billingView *billingview.Source
 	if pg != nil {
@@ -289,6 +294,37 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 		h.MountGraphEditor(newEditorIRSource(graphStore, runner))
 		served("p5_graph_editor (IR re-derived from the pushed snapshot; needs source, not just a graph)")
 		mountedGraphEditor = true
+
+		// The platform-side proposal GENERATOR.
+		//
+		// It is mounted only when a model catalog is published, and that gate is the whole story of what
+		// this deployment can and cannot do. `proposal.Menu.cheaperModels(tier)` is the entire input to
+		// the model-downgrade operator — the one operator that fires on a cost bottleneck with no
+		// diagnosis, and therefore the only one a hosted platform can drive. It selects on Tier and
+		// CostPerRun, and the REGISTRY RECORDS NEITHER: registry.ModelCatalogEntry is
+		// {VersionID, Name, Provider, ModelID, Params}. Every proposal.Menu in this repository is
+		// hand-written inside a cmd/proof binary.
+		//
+		// A tier is a judgement about capability and a cost-per-run is a price. Neither is derivable from
+		// a model entry, and inventing either would mean proposing changes to a customer's code on the
+		// strength of numbers the platform made up. So they are published beside the plan catalog, on the
+		// same terms: a path, never git-tracked, absent by default.
+		//
+		// Without one this answers 503 and the console says "no model catalog is published", which names
+		// an action. Mounting it over an empty menu would answer 200 with an empty proposal list, which
+		// reads as "we looked at your workflow and found nothing wrong".
+		if mcSrc, ok := modelcatalog.FileSourceFromEnv(); ok {
+			gen := &proposalgen.Generator{
+				Runs:   linkStore,
+				Graphs: graphStore,
+				Menus:  menuSource{src: mcSrc, reg: reg},
+				Sink:   verdictStore,
+			}
+			h.MountProposalGeneration(gen)
+			served("p55_proposal_generation (cost-bottleneck operators only; a diagnosis needs the eval " +
+				"cases, which stay with the customer)")
+			mountedProposalGen = true
+		}
 		// No separate readiness probe for this store, deliberately. An earlier draft added one, because
 		// linkingest.Store's reads returned no error and a failure had nowhere else to go. The interface
 		// now returns errors on every method, so a failed read fails its CALLER — and the `postgres`
@@ -346,6 +382,10 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 	}
 	h.MountProposals(nil)
 	absent("p55_proposals", noAdapter)
+	if !mountedProposalGen {
+		h.MountProposalGeneration(nil)
+		absent("p55_proposal_generation", proposalGenAbsentReason(pg))
+	}
 	if !mountedVerdictIngest {
 		h.MountVerdictIngest(nil)
 		absent("p55_verdict_ingest", "this deployment declares no platform database (DATABASE_URL is unset), "+
@@ -448,4 +488,36 @@ func billingAbsentReason(pg *sql.DB, catalog string) string {
 			"plan a customer is on, and a billing page that cannot name the plan cannot price anything"
 	}
 	return "the plan catalog could not be loaded"
+}
+
+// menuSource joins the published model catalog onto the registry's entries. It is here rather than in
+// internal/modelcatalog because it is a WIRING decision: which registry this deployment resolves refs
+// against is a property of the deployment, and modelcatalog takes the lister as an argument precisely so
+// it does not have to know.
+type menuSource struct {
+	src modelcatalog.Source
+	reg modelcatalog.ModelLister
+}
+
+func (m menuSource) Menu(ctx context.Context) (proposal.Menu, string, error) {
+	menu, rep, err := modelcatalog.Menu(ctx, m.src, m.reg)
+	if err != nil {
+		return proposal.Menu{}, "", err
+	}
+	// The report is returned as the DETAIL the generator quotes when the menu is empty. "3 models are
+	// registered and none has a published tier" is an action; "no candidates" is not.
+	return menu, fmt.Sprintf("%d model(s) registered, %d published, %d usable; unjudged: %v",
+		rep.Registered, rep.Published, rep.Usable, rep.Unjudged), nil
+}
+
+// proposalGenAbsentReason names the ONE next action for an operator whose generator is not served.
+// Two different gaps, two different remedies — the same split billingAbsentReason makes.
+func proposalGenAbsentReason(pg *sql.DB) string {
+	if pg == nil {
+		return "this deployment declares no platform database (DATABASE_URL is unset)"
+	}
+	return "no model catalog is published (" + modelcatalog.PathEnv + " is unset). A proposal that a " +
+		"cheaper model would do the job needs a capability tier and a cost estimate per model, and the " +
+		"model registry records neither — so without a published catalog nothing can be proposed, and " +
+		"an empty proposal list would read as 'we found nothing wrong'"
 }

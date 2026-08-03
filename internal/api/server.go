@@ -146,6 +146,10 @@ type Server struct {
 	// this one accepts a MEASUREMENT that decides whether a change may be recommended and delivered, so
 	// a deployment that serves the recommendation surface read-only leaves it nil and answers 503.
 	verdicts VerdictSink
+	// proposalGen is the platform-side generator, mounted by MountProposalGeneration. Separate from
+	// MountProposals for the reason every other pair here is separate: reading a recommendation surface
+	// and running a pass that WRITES proposals are different things to enable.
+	proposalGen ProposalGenerator
 	// sourcePush is the customer-pushed SOURCE snapshot store, mounted by MountSourcePush. A third
 	// separate policy decision, and the largest one: accepting a run's numbers, accepting a workflow's
 	// allowlisted shape, and accepting the customer's source are three different things to agree to, so
