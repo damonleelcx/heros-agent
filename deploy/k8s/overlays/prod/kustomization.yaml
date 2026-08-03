@@ -88,7 +88,7 @@ patches:
             containers:
               - name: agentd
                 env:
-                  - { name: HEROS_VERSION, value: "a71256a" }
+                  - { name: HEROS_VERSION, value: "2eafe12" }
   - target: { kind: Deployment, name: console }
     patch: |
       apiVersion: apps/v1
@@ -100,7 +100,7 @@ patches:
             containers:
               - name: console
                 env:
-                  - { name: HEROS_VERSION, value: "a71256a" }
+                  - { name: HEROS_VERSION, value: "2eafe12" }
   - target: { kind: Deployment, name: admin-console }
     patch: |
       apiVersion: apps/v1
@@ -112,7 +112,7 @@ patches:
             containers:
               - name: admin-console
                 env:
-                  - { name: HEROS_VERSION, value: "a71256a" }
+                  - { name: HEROS_VERSION, value: "2eafe12" }
 
   - target: { kind: Deployment, name: agentd }
     patch: |
