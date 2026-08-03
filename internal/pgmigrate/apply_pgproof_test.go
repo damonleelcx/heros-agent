@@ -163,7 +163,7 @@ func TestTheSchemaCarriesWhatTheStoresQuery(t *testing.T) {
 		// unanswerable: 0012 built these tables single-tenant and workflow-implicit.
 		"proposal":                {"proposal_id", "diagnosis_id", "operator", "base_variant_id", "candidate_config_hash", "status", "tenant_id", "workflow_id"},
 		"verdict":                 {"proposal_id", "metric", "delta", "ci_low", "ci_high", "gate_result"},
-		"delivery_route":          {"tenant_id", "target", "forge", "base_ref", "capability_kind", "capability_detail"},
+		"delivery_route":          {"tenant_id", "target", "forge", "mode", "capability_kind", "capability_detail"},
 		"workflow_ir":             {"tenant_id", "workflow_id", "source_revision", "ir_version", "received_at", "nodes_json", "edges_json"},
 		"source_bundle":           {"tenant_id", "workflow_id", "source_revision", "content_hash", "size_bytes", "received_at"},
 		"platform_workflow_graph": {"tenant_id", "workflow_id", "source_revision", "ir_version", "taxonomy_version", "discovered_at", "llm_calls", "view_json"},
