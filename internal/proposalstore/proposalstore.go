@@ -210,7 +210,7 @@ func (p *PGStore) ForWorkflow(parent context.Context, tenantID, workflowID strin
 		`SELECT `+proposalColumns+`,
 		        v.metric, v.delta, v.ci_low, v.ci_high, v.significant, v.held_out,
 		        v.cost_delta, v.latency_delta, v.regression_pass, v.cases_fixed_json,
-		        v.cases_broken_json, v.gate_result
+		        v.cases_broken_json, v.gate_result, v.cases_fixed_count, v.cases_broken_count
 		   FROM proposal p
 		   LEFT JOIN verdict v ON v.proposal_id = p.proposal_id
 		  WHERE p.tenant_id = $1 AND p.workflow_id = $2
@@ -312,8 +312,9 @@ func (p *PGStore) PutVerdict(parent context.Context, tenantID string, v verifica
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO verdict
 		   (proposal_id, metric, delta, ci_low, ci_high, significant, held_out,
-		    cost_delta, latency_delta, regression_pass, cases_fixed_json, cases_broken_json, gate_result)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+		    cost_delta, latency_delta, regression_pass, cases_fixed_json, cases_broken_json, gate_result,
+		    cases_fixed_count, cases_broken_count)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
 		 ON CONFLICT (proposal_id) DO UPDATE
 		   SET metric = EXCLUDED.metric, delta = EXCLUDED.delta,
 		       ci_low = EXCLUDED.ci_low, ci_high = EXCLUDED.ci_high,
@@ -322,9 +323,12 @@ func (p *PGStore) PutVerdict(parent context.Context, tenantID string, v verifica
 		       regression_pass = EXCLUDED.regression_pass,
 		       cases_fixed_json = EXCLUDED.cases_fixed_json,
 		       cases_broken_json = EXCLUDED.cases_broken_json,
-		       gate_result = EXCLUDED.gate_result`,
+		       gate_result = EXCLUDED.gate_result,
+		       cases_fixed_count = EXCLUDED.cases_fixed_count,
+		       cases_broken_count = EXCLUDED.cases_broken_count`,
 		v.ProposalID, v.Metric, v.Delta.Mean, v.Delta.Low, v.Delta.High, v.Significant, v.HeldOut,
-		v.CostDelta, v.LatencyDelta, v.RegressionPass, fixed, broken, string(v.GateResult)); err != nil {
+		v.CostDelta, v.LatencyDelta, v.RegressionPass, fixed, broken, string(v.GateResult),
+		v.CasesFixedCount, v.CasesBrokenCount); err != nil {
 		return fmt.Errorf("proposalstore: put verdict %s: %w", v.ProposalID, err)
 	}
 
@@ -355,12 +359,14 @@ func scanScored(sc scanner) (Scored, error) {
 	var delta, ciLow, ciHigh, costDelta, latDelta sql.NullFloat64
 	var significant, heldOut, regressionPass sql.NullBool
 	var fixed, broken []byte
+	var fixedCount, brokenCount sql.NullInt64
 
 	if err := sc.Scan(&s.ProposalID, &s.TenantID, &s.WorkflowID, &s.DiagnosisID, &s.Operator,
 		&s.BaseVariantID, &s.CandidateConfigHash, &s.SourceRevision, &diffHash, &groundHash,
 		&s.BuildStatus, &s.Status, &s.CreatedAt,
 		&metric, &delta, &ciLow, &ciHigh, &significant, &heldOut,
-		&costDelta, &latDelta, &regressionPass, &fixed, &broken, &gateResult); err != nil {
+		&costDelta, &latDelta, &regressionPass, &fixed, &broken, &gateResult,
+		&fixedCount, &brokenCount); err != nil {
 		return Scored{}, err
 	}
 	s.SourceDiffBlobHash, s.GroundingBlobHash = diffHash.String, groundHash.String
@@ -378,6 +384,9 @@ func scanScored(sc scanner) (Scored, error) {
 		GateResult:     verification.GateResult(gateResult.String),
 	}
 	v.Delta.Mean, v.Delta.Low, v.Delta.High = delta.Float64, ciLow.Float64, ciHigh.Float64
+	// The counts come from their OWN columns, never from len() of the arrays below. A verdict reported
+	// by a customer's CI has a count and no ids, and deriving it would report that it fixed nothing.
+	v.CasesFixedCount, v.CasesBrokenCount = int(fixedCount.Int64), int(brokenCount.Int64)
 	if len(fixed) > 0 {
 		if err := json.Unmarshal(fixed, &v.CasesFixed); err != nil {
 			return Scored{}, fmt.Errorf("decode cases_fixed for %s: %w", s.ProposalID, err)

@@ -266,13 +266,15 @@ func (g *demoGate) Verdict(_ context.Context, _, ch, rev string) (verification.V
 	if !g.allowed[ch+"|"+rev] {
 		return verification.Verdict{}, false, nil
 	}
-	return verification.Verdict{
+	v := verification.Verdict{
 		ConfigHash: ch, Metric: "quality",
 		Delta:       evalstats.Interval{Mean: 0.11, Low: 0.03, High: 0.19, Confidence: 0.95},
 		Significant: true, HeldOut: true, RegressionPass: true,
-		GateResult: verification.GatePass, CasesFixed: []string{"c1", "c2", "c3"},
-		CostDelta: -0.0009, LatencyDelta: -33,
-	}, true, nil
+		GateResult: verification.GatePass,
+		CostDelta:  -0.0009, LatencyDelta: -33,
+	}
+	v.SetCases([]string{"c1", "c2", "c3"}, nil)
+	return v, true, nil
 }
 
 // demoEnts allows delivery (Team) and, when enterprise is set, auto-merge.

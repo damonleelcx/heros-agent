@@ -24,6 +24,7 @@ import (
 	"github.com/heros-foreal/agentd/internal/linkingest"
 	"github.com/heros-foreal/agentd/internal/metering"
 	"github.com/heros-foreal/agentd/internal/plancfg"
+	"github.com/heros-foreal/agentd/internal/proposalstore"
 	"github.com/heros-foreal/agentd/internal/registry"
 	"github.com/heros-foreal/agentd/internal/sourceingest"
 	"github.com/heros-foreal/agentd/internal/variantspec"
@@ -77,6 +78,7 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 	mountedGraphEditor := false
 	mountedEvalBoard := false
 	mountedScorecard := false
+	mountedVerdictIngest := false
 	// Assembled inside the database block below; nil when this deployment cannot serve billing.
 	var billingView *billingview.Source
 	if pg != nil {
@@ -207,6 +209,25 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 		served("p45_scorecard (cost/latency attribution from linked runs; failure attribution stays local)")
 		mountedScorecard = true
 
+		// P5.5's verdict ingest — the endpoint `heros report-verdict` transmits to.
+		//
+		// Mounted for real, over a durable store (migrations 0012, 0025 and 0029). It is the ONLY way a
+		// stored verdict can say `pass`: the verification gate needs the customer's eval cases, traces
+		// and provider, so this platform can GENERATE a proposal and can never MEASURE one. Without this
+		// route, every proposal the generator writes stays `candidate` forever and the recommendation
+		// surface is permanently empty — which would look exactly like a product that finds nothing.
+		//
+		// The store is passed straight through as the sink: proposalstore.PGStore.PutVerdict already has
+		// api.VerdictSink's signature, and an adapter here would be a place for the tenant argument to be
+		// rewritten on its way to the WHERE clause that scopes it.
+		verdictStore, err := proposalstore.NewPGStore(pg)
+		if err != nil {
+			return nil, fmt.Errorf("proposal store: %w", err)
+		}
+		h.MountVerdictIngest(verdictStore)
+		served("p55_verdict_ingest (CI reports what it measured; the platform never authors a verdict)")
+		mountedVerdictIngest = true
+
 		// The OPT-IN workflow structure (`heros link --with-ir`), durable since migration 0021, and the
 		// pattern graph drawn from it.
 		//
@@ -325,6 +346,11 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 	}
 	h.MountProposals(nil)
 	absent("p55_proposals", noAdapter)
+	if !mountedVerdictIngest {
+		h.MountVerdictIngest(nil)
+		absent("p55_verdict_ingest", "this deployment declares no platform database (DATABASE_URL is unset), "+
+			"so there is no proposal for a reported verdict to attach to")
+	}
 	h.MountOptimizer(nil)
 	absent("p6_optimizer", noAdapter)
 	if !mountedPatternGraph {

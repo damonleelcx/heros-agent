@@ -142,6 +142,10 @@ type Server struct {
 	// Separate from runLinking on purpose: accepting a run and accepting a workflow's shape are two
 	// different policy decisions, and one mount must not imply the other.
 	workflowIR WorkflowIRSource
+	// verdicts is the P5.5 verdict ingest, mounted by MountVerdictIngest. A fourth separate decision:
+	// this one accepts a MEASUREMENT that decides whether a change may be recommended and delivered, so
+	// a deployment that serves the recommendation surface read-only leaves it nil and answers 503.
+	verdicts VerdictSink
 	// sourcePush is the customer-pushed SOURCE snapshot store, mounted by MountSourcePush. A third
 	// separate policy decision, and the largest one: accepting a run's numbers, accepting a workflow's
 	// allowlisted shape, and accepting the customer's source are three different things to agree to, so

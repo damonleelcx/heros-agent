@@ -104,6 +104,9 @@ var flags = map[string]Flag{
 	"dry-run":              {Name: "dry-run", Type: "bool", Default: "false", Env: EnvPrefix + "DRY_RUN", Summary: "show exactly what would be transmitted, and transmit nothing (link: the payload itself; push-source: the snapshot's revision, file count and size)"},
 	"with-ir":              {Name: "with-ir", Type: "path", Default: "", Env: EnvPrefix + "WITH_IR", Summary: "ALSO transmit this workflow's structure (symbols, files, line spans, models, tool counts) as a second, opt-in payload — never prompt text or source (link)"},
 	"force":                {Name: "force", Type: "bool", Default: "false", Env: EnvPrefix + "FORCE", Summary: "overwrite an existing config"},
+	"proposal":             {Name: "proposal", Type: "string", Default: "", Env: EnvPrefix + "PROPOSAL", Summary: "the platform-issued proposal id a verdict measures (report-verdict). Taken from the flag, never from the verdict file: where the two disagree the command refuses rather than attaching a measurement to the wrong change"},
+	"from":                 {Name: "from", Type: "string", Default: "", Env: EnvPrefix + "FROM", Summary: "path to the verdict your verification run produced, or `-` for stdin (report-verdict). Its case ids and free-text reason are NOT transmitted"},
+	"revision":             {Name: "revision", Type: "string", Default: "", Env: EnvPrefix + "REVISION", Summary: "the commit the verification ran at (report-verdict) — a revision id, never the code at it"},
 	"forget":               {Name: "forget", Type: "bool", Default: "false", Env: EnvPrefix + "FORGET", Summary: "DELETE a previously pushed source snapshot from the platform instead of sending one (push-source)"},
 	"manifest":             {Name: "manifest", Type: "path", Default: "", Env: EnvPrefix + "MANIFEST", Summary: "path to a downloaded SHA256SUMS"},
 	"sig":                  {Name: "sig", Type: "path", Default: "", Env: EnvPrefix + "SIG", Summary: "detached signature; defaults to the manifest path with .sig appended"},
@@ -236,6 +239,18 @@ var commands = []Command{
 		SuccessExit:  0,
 		Prerequisite: "a git repository with at least one commit — the snapshot is `git archive` of a revision, never the working directory",
 		Unavailable:  "push-source is a platform command and is unavailable in this build",
+	},
+	{
+		Name: "report-verdict", Summary: "report a verification verdict your CI measured for a proposal the platform issued", Avail: AvailNetwork,
+		Flags:   []string{"proposal", "from", "revision", "dry-run"},
+		Example: "heros report-verdict --proposal prop-abc --from verdict.json --dry-run",
+		// The success line names what was WITHHELD as well as what was sent. The whole point of the
+		// command is that it transmits less than the file it reads, and a summary that only reported the
+		// transmission would let a reader assume the file went across.
+		Success:      "with --dry-run, the exact payload and the account of what stayed local, and nothing transmitted. Without it, the verdict recorded and the gate result the platform stored.",
+		SuccessExit:  0,
+		Prerequisite: "a verdict file from your own verification run, and a proposal id the platform issued for your tenant",
+		Unavailable:  "report-verdict is a platform command and is unavailable in this build",
 	},
 	{
 		Name: "upgrade", Summary: "fetch the latest release, verify it, and replace this binary in place", Avail: AvailNetworkNoAccount,

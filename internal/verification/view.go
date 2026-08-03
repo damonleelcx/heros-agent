@@ -50,6 +50,22 @@ func HeldOutLabel(v Verdict) string {
 	return "not held-out"
 }
 
+// because renders the verdict's reason as a trailing clause, or says the reason is absent.
+//
+// 🔴 It exists because `Reason` is free text and therefore does NOT cross the P11 boundary
+// (internal/runlink/verdict.go). Every withheld branch used to end `+ v.Reason`, which on a reported
+// verdict produced a sentence that stopped mid-thought — "Withheld: the held-out gain is not
+// statistically significant (a tie). " — and read as a truncated bug rather than as a fact about where
+// the measurement was taken. Naming the absence is the difference between the two.
+func because(v Verdict) string {
+	if v.Reason == "" {
+		return " The reason was not reported: this verdict was measured in the customer's environment, " +
+			"and the free-text explanation does not cross the boundary. The numbers above are the whole " +
+			"of what was reported."
+	}
+	return " " + v.Reason
+}
+
 // Narrate produces the human-readable synthesis for a verdict. It is strictly NARRATION OVER THE
 // STRUCTURED VERDICT (§6.7): every clause is read off the verdict fields, so the summary can never
 // contradict or replace the source of truth. It never invents a number the verdict does not carry.
@@ -60,22 +76,24 @@ func Narrate(v Verdict) string {
 		if !v.HeldOut {
 			s += ", not held-out"
 		}
-		s += fmt.Sprintf("; %d case(s) fixed", len(v.CasesFixed))
-		if len(v.CasesBroken) > 0 {
-			s += fmt.Sprintf(", %d broken", len(v.CasesBroken))
+		// The COUNTS, not len() of the lists. A reported verdict carries no lists, and len(nil) reads as
+		// "fixed nothing" — which narrates a claim the verdict never made.
+		s += fmt.Sprintf("; %d case(s) fixed", v.CasesFixedCount)
+		if v.CasesBrokenCount > 0 {
+			s += fmt.Sprintf(", %d broken", v.CasesBrokenCount)
 		}
 		s += fmt.Sprintf(". Cost impact %+.4f $/run, latency %+.0f ms/run.", v.CostDelta, v.LatencyDelta)
 		return s
 	case GateFailSig:
-		return "Withheld: the held-out gain is not statistically significant (a tie). " + v.Reason
+		return "Withheld: the held-out gain is not statistically significant (a tie)." + because(v)
 	case GateFailRegress:
-		s := "Withheld: passed its target but failed the regression check. " + v.Reason
-		if len(v.CasesBroken) > 0 {
-			s += fmt.Sprintf(" (%d case(s) broken)", len(v.CasesBroken))
+		s := "Withheld: passed its target but failed the regression check." + because(v)
+		if v.CasesBrokenCount > 0 {
+			s += fmt.Sprintf(" (%d case(s) broken)", v.CasesBrokenCount)
 		}
 		return s
 	case GateFailConstrain:
-		return "Withheld: violates a hard constraint. " + v.Reason
+		return "Withheld: violates a hard constraint." + because(v)
 	default:
 		return "Not yet verified."
 	}

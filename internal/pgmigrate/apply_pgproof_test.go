@@ -162,7 +162,10 @@ func TestTheSchemaCarriesWhatTheStoresQuery(t *testing.T) {
 		// 0025's scope columns. Their ABSENCE is what made api.ProposalsSource.Surface(workflowID)
 		// unanswerable: 0012 built these tables single-tenant and workflow-implicit.
 		"proposal": {"proposal_id", "diagnosis_id", "operator", "base_variant_id", "candidate_config_hash", "status", "tenant_id", "workflow_id"},
-		"verdict":  {"proposal_id", "metric", "delta", "ci_low", "ci_high", "gate_result"},
+		// The two count columns 0029 adds. Their absence is what would make a reported verdict — which
+		// carries counts and no case ids — read as having fixed nothing.
+		"verdict": {"proposal_id", "metric", "delta", "ci_low", "ci_high", "gate_result",
+			"cases_fixed_count", "cases_broken_count"},
 		// `base_ref` is here twice over: the store names it, AND it is the column 0026 dropped and 0027
 		// restored. A column list alone would not have caught that — the store written against the same
 		// misreading would have named the same wrong set — which is why the real fence for it is the

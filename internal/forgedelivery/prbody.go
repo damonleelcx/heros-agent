@@ -84,8 +84,11 @@ func RenderPRBody(e Evidence) string {
 
 	// ── Eval evidence ────────────────────────────────────────────────────────
 	b.WriteString("## Eval evidence\n\n")
-	fmt.Fprintf(&b, "- Cases fixed: **%d**\n", len(v.CasesFixed))
-	fmt.Fprintf(&b, "- Cases broken: **%d**\n", len(v.CasesBroken))
+	// The COUNTS, not len() of the id lists: a verdict reported by the customer's CI carries no ids
+	// (they do not cross the P11 boundary), and len(nil) would print "Cases fixed: 0" in a pull request
+	// body under a change that fixed four.
+	fmt.Fprintf(&b, "- Cases fixed: **%d**\n", v.CasesFixedCount)
+	fmt.Fprintf(&b, "- Cases broken: **%d**\n", v.CasesBrokenCount)
 	fmt.Fprintf(&b, "- Cost impact: **%+.4f $/run**\n", v.CostDelta)
 	fmt.Fprintf(&b, "- Latency impact: **%+.0f ms/run**\n", v.LatencyDelta)
 	if e.DiffStat != "" {

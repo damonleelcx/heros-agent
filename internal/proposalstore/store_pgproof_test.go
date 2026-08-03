@@ -117,8 +117,12 @@ func TestVerdictPromotesTheProposal(t *testing.T) {
 		ProposalID: "p1", Metric: "quality",
 		Delta:       evalstats.Interval{Mean: 0.08, Low: 0.02, High: 0.14},
 		Significant: true, HeldOut: true, RegressionPass: true,
-		CasesFixed: []string{"case-1"}, GateResult: verification.GatePass,
+		GateResult: verification.GatePass,
 	}
+	// SetCases, not `CasesFixed:` in the literal. Assigning the list alone leaves the count at zero, and
+	// 0029's constraint refuses the row — which is the constraint doing its job on a fixture that would
+	// otherwise have stored a change reported as fixing nothing.
+	v.SetCases([]string{"case-1"}, nil)
 	if err := s.PutVerdict(ctx, "t1", v); err != nil {
 		t.Fatalf("put verdict: %v", err)
 	}
@@ -227,5 +231,79 @@ func TestAnInlinePayloadWhereAHashBelongsIsRefused(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "put p1") {
 		t.Errorf("err = %v, want it to name the proposal", err)
+	}
+}
+
+// A verdict REPORTED by a customer's CI: counts, no case ids, no reason.
+//
+// 🔴 This is the shape every hosted deployment stores, and it is the one a fake would get wrong. The
+// counts live in their own columns (migration 0029) precisely because `cases_fixed_json` is `[]` here —
+// a store that derived the count from the array would record a change that fixed four cases as having
+// fixed none, in the console and in the body of the pull request P12 opens.
+func TestAReportedVerdictKeepsItsCountsWithoutIds(t *testing.T) {
+	s, _ := store(t, "proposalstore_reported")
+	ctx := t.Context()
+
+	if err := s.Put(ctx, rec("tenant-r", "wf-1", "prop-r")); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+
+	reported := verification.Verdict{
+		ProposalID: "prop-r", Metric: "quality",
+		Delta:       evalstats.Interval{Mean: 0.06, Low: 0.02, High: 0.10},
+		Significant: true, HeldOut: true, RegressionPass: true,
+		GateResult: verification.GatePass,
+		// What the ingest builds: counts, and deliberately nothing else about the cases.
+		CasesFixedCount: 4, CasesBrokenCount: 0,
+	}
+	if err := s.PutVerdict(ctx, "tenant-r", reported); err != nil {
+		t.Fatalf("put verdict: %v", err)
+	}
+
+	got, err := s.ForWorkflow(ctx, "tenant-r", "wf-1")
+	if err != nil || len(got) != 1 || got[0].Verdict == nil {
+		t.Fatalf("read back: %+v %v", got, err)
+	}
+	v := *got[0].Verdict
+	if v.CasesFixedCount != 4 {
+		t.Errorf("cases_fixed_count = %d, want 4 — a reported verdict's only record of how many is the "+
+			"count column, and this is the number the console and the PR body print", v.CasesFixedCount)
+	}
+	if v.CasesBrokenCount != 0 || len(v.CasesFixed) != 0 {
+		t.Errorf("unexpected case detail survived: %+v", v)
+	}
+	if !v.Passed() {
+		t.Errorf("gate result did not survive: %q", v.GateResult)
+	}
+}
+
+// The constraint 0029 adds: a verdict may carry fewer ids than it counts (that IS the reported shape),
+// but never more — a count that understates its own evidence is corrupt, not conservative.
+func TestAVerdictMayNotListMoreIdsThanItCounts(t *testing.T) {
+	s, db := store(t, "proposalstore_countfence")
+	ctx := t.Context()
+
+	if err := s.Put(ctx, rec("tenant-c", "wf-1", "prop-c")); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO verdict (proposal_id, metric, delta, ci_low, ci_high, significant, held_out,
+		    cost_delta, latency_delta, regression_pass, cases_fixed_json, cases_broken_json, gate_result,
+		    cases_fixed_count, cases_broken_count)
+		 VALUES ('prop-c','quality',0.05,0.01,0.09,true,true,0,0,true,
+		         '["c1","c2","c3"]'::jsonb, '[]'::jsonb, 'pass', 1, 0)`); err == nil {
+		t.Error("the table accepted three case ids under a count of one — the count is what every " +
+			"reader prints, so a row like this understates the change it describes")
+	}
+
+	// ...and the reported shape (counts, no ids) is explicitly allowed.
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO verdict (proposal_id, metric, delta, ci_low, ci_high, significant, held_out,
+		    cost_delta, latency_delta, regression_pass, cases_fixed_json, cases_broken_json, gate_result,
+		    cases_fixed_count, cases_broken_count)
+		 VALUES ('prop-c','quality',0.05,0.01,0.09,true,true,0,0,true,
+		         '[]'::jsonb, '[]'::jsonb, 'pass', 4, 0)`); err != nil {
+		t.Errorf("the table refused a REPORTED verdict (counts, no ids), which is the shape every "+
+			"hosted deployment stores: %v", err)
 	}
 }
