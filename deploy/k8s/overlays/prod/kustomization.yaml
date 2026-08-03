@@ -63,6 +63,57 @@ resources:
   - http-redirect.yaml
 
 patches:
+  # ── Build identity ───────────────────────────────────────────────────────────────────────────────
+  #
+  # 🔴 HEROS_VERSION was EMPTY on this deployment, so the platform reported no build identity at all —
+  # on /readyz, on reports and on the release surface. Combined with image tags that named a commit
+  # predating the code inside them (the images were first built from a dirty working tree), there was no
+  # way to answer "what is running?" from the deployment itself. The bytes were right; the label was not.
+  #
+  # This is the MERGE COMMIT the images are built from, so tag, digest and version all name one tree.
+  # A bare SHA rather than a URL, which also keeps it clear of the zero-external-origin gate.
+  #
+  # ⚠️ THREE PATCHES, ONE PER WORKLOAD, each naming its own container. A single patch targeting all three
+  # by regex does NOT work: a strategic merge keys `containers` by `name`, so a placeholder name does not
+  # match — it APPENDS a second, imageless container to every pod. That renders cleanly and fails only
+  # once applied, which is the same shape as most of the defects this deployment already surfaced.
+  - target: { kind: Deployment, name: agentd }
+    patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata: { name: agentd }
+      spec:
+        template:
+          spec:
+            containers:
+              - name: agentd
+                env:
+                  - { name: HEROS_VERSION, value: "a71256a" }
+  - target: { kind: Deployment, name: console }
+    patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata: { name: console }
+      spec:
+        template:
+          spec:
+            containers:
+              - name: console
+                env:
+                  - { name: HEROS_VERSION, value: "a71256a" }
+  - target: { kind: Deployment, name: admin-console }
+    patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata: { name: admin-console }
+      spec:
+        template:
+          spec:
+            containers:
+              - name: admin-console
+                env:
+                  - { name: HEROS_VERSION, value: "a71256a" }
+
   - target: { kind: Deployment, name: agentd }
     patch: |
       apiVersion: apps/v1

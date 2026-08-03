@@ -41,7 +41,7 @@ images:
     digest: sha256:e17e596a5042a6458c5e0180172a11d76e64b75fe611ee92f57144790ff91e61
   - name: ghcr.io/heros-foreal/heros-console
     newName: 373468206837.dkr.ecr.us-east-1.amazonaws.com/heros-console
-    digest: sha256:56083facd8fbdac437dab7854adeecd01834ad6a5edb0be50b34d5367baae091
+    digest: sha256:383b95e7c2edca392768703493b116c0e79029a85b0571471fe34e322669bbca
   - name: ghcr.io/heros-foreal/heros-admin-console
     newName: 373468206837.dkr.ecr.us-east-1.amazonaws.com/heros-admin-console
     digest: sha256:07e7c27be0fabf3aef96a299c1d6bac7ee60d6f49ba93b7e150db824406583d3
