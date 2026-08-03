@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 
+	"github.com/heros-foreal/agentd/internal/auth"
 	"github.com/heros-foreal/agentd/internal/evalboard"
 )
 
@@ -22,7 +23,15 @@ import (
 // re-ranks from the cached normalized values and enqueues zero runs. Modelling it as a GET with a
 // query parameter is what makes that structural rather than a promise — a GET cannot enqueue work.
 type BoardSource interface {
-	Board(workflowID, profile string) (evalboard.View, bool)
+	// Board returns one TENANT's board for a workflow.
+	//
+	// 🔴 tenantID is not decoration. This is the third interface in this package to learn it — after
+	// PatternSource and GraphEditorSource — and all three learned it the same way: the signature was
+	// written against a demo stub that returned one fixture to every caller, so the missing scope was
+	// invisible until something durable was mounted behind it. Workflow ids are chosen by customers,
+	// they collide, and the caller reads one straight out of a URL. A board carries scores, spend and
+	// gate verdicts; serving them across tenants is a data breach with no line of code looking wrong.
+	Board(tenantID, workflowID, profile string) (evalboard.View, bool)
 }
 
 // MountEvalBoard registers the P4 board UI and its JSON endpoint.
@@ -38,9 +47,16 @@ func (s *Server) handleEvalBoard(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	principal, authed := auth.PrincipalFrom(r.Context())
+	if !authed || principal.TenantID == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{
+			"error": "the eval board requires an authenticated tenant",
+		})
+		return
+	}
 	workflowID := r.PathValue("workflow_id")
 	profile := r.URL.Query().Get("profile")
-	view, ok := s.evalBoard.Board(workflowID, profile)
+	view, ok := s.evalBoard.Board(principal.TenantID, workflowID, profile)
 	if !ok {
 		writeJSON(w, http.StatusNotFound, map[string]string{
 			"error": "no board for workflow " + workflowID,

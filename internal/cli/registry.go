@@ -86,20 +86,25 @@ type Command struct {
 // flags is the flag catalogue, keyed by name. Declared once so two commands that share a flag cannot
 // describe it differently — which is how a reference ends up with two defaults for `--repo`.
 var flags = map[string]Flag{
-	"repo":                 {Name: "repo", Type: "path", Default: ".", Env: EnvPrefix + "REPO", Summary: "the target repository"},
-	"config":               {Name: "config", Type: "path", Default: "", Env: EnvPrefix + "CONFIG", Summary: "path to llm-eval.yaml"},
-	"out":                  {Name: "out", Type: "path", Default: "", Env: EnvPrefix + "OUT", Summary: "output path (IR for discover, diff for apply)"},
-	"report":               {Name: "report", Type: "path", Default: "", Env: EnvPrefix + "REPORT", Summary: "discovery report output path"},
-	"spec":                 {Name: "spec", Type: "path", Default: "", Env: EnvPrefix + "SPEC", Summary: "path to a Variant Spec JSON"},
-	"commit":               {Name: "commit", Type: "string", Default: "", Env: EnvPrefix + "COMMIT", Summary: "source revision (default: derived from .git)"},
-	"repo-url":             {Name: "repo-url", Type: "string", Default: "", Env: EnvPrefix + "REPO_URL", Summary: "workflow repo url (default: derived from .git)"},
-	"workflow-id":          {Name: "workflow-id", Type: "string", Default: "", Env: EnvPrefix + "WORKFLOW_ID", Summary: "workflow id (default: module path)"},
-	"seeds":                {Name: "seeds", Type: "int", Default: "5", Env: EnvPrefix + "SEEDS", Summary: "evaluation seeds"},
-	"cases":                {Name: "cases", Type: "int", Default: "8", Env: EnvPrefix + "CASES", Summary: "evaluation cases"},
-	"run":                  {Name: "run", Type: "string", Default: "", Env: EnvPrefix + "RUN", Summary: "run id to link"},
-	"token":                {Name: "token", Type: "string", Default: "", Env: EnvPrefix + "TOKEN", Summary: "platform token (login)"},
-	"dry-run":              {Name: "dry-run", Type: "bool", Default: "false", Env: EnvPrefix + "DRY_RUN", Summary: "render the exact link payload without transmitting it"},
+	"repo":        {Name: "repo", Type: "path", Default: ".", Env: EnvPrefix + "REPO", Summary: "the target repository"},
+	"config":      {Name: "config", Type: "path", Default: "", Env: EnvPrefix + "CONFIG", Summary: "path to llm-eval.yaml"},
+	"out":         {Name: "out", Type: "path", Default: "", Env: EnvPrefix + "OUT", Summary: "output path (IR for discover, diff for apply)"},
+	"report":      {Name: "report", Type: "path", Default: "", Env: EnvPrefix + "REPORT", Summary: "discovery report output path"},
+	"spec":        {Name: "spec", Type: "path", Default: "", Env: EnvPrefix + "SPEC", Summary: "path to a Variant Spec JSON"},
+	"commit":      {Name: "commit", Type: "string", Default: "", Env: EnvPrefix + "COMMIT", Summary: "source revision (default: derived from .git)"},
+	"repo-url":    {Name: "repo-url", Type: "string", Default: "", Env: EnvPrefix + "REPO_URL", Summary: "workflow repo url (default: derived from .git)"},
+	"workflow-id": {Name: "workflow-id", Type: "string", Default: "", Env: EnvPrefix + "WORKFLOW_ID", Summary: "workflow id (discover/apply default to the module path; push-source REQUIRES it, because guessing would file a snapshot under the wrong workflow)"},
+	"seeds":       {Name: "seeds", Type: "int", Default: "5", Env: EnvPrefix + "SEEDS", Summary: "evaluation seeds"},
+	"cases":       {Name: "cases", Type: "int", Default: "8", Env: EnvPrefix + "CASES", Summary: "evaluation cases"},
+	"run":         {Name: "run", Type: "string", Default: "", Env: EnvPrefix + "RUN", Summary: "run id to link"},
+	"token":       {Name: "token", Type: "string", Default: "", Env: EnvPrefix + "TOKEN", Summary: "platform token (login)"},
+	// One catalogue entry, two commands, so the wording must be true of both: `link` prints the exact
+	// payload, `push-source` prints what the snapshot contains (it is far too large to print). Saying
+	// "the exact link payload" here documented a behaviour push-source does not have.
+	"dry-run":              {Name: "dry-run", Type: "bool", Default: "false", Env: EnvPrefix + "DRY_RUN", Summary: "show exactly what would be transmitted, and transmit nothing (link: the payload itself; push-source: the snapshot's revision, file count and size)"},
+	"with-ir":              {Name: "with-ir", Type: "path", Default: "", Env: EnvPrefix + "WITH_IR", Summary: "ALSO transmit this workflow's structure (symbols, files, line spans, models, tool counts) as a second, opt-in payload — never prompt text or source (link)"},
 	"force":                {Name: "force", Type: "bool", Default: "false", Env: EnvPrefix + "FORCE", Summary: "overwrite an existing config"},
+	"forget":               {Name: "forget", Type: "bool", Default: "false", Env: EnvPrefix + "FORGET", Summary: "DELETE a previously pushed source snapshot from the platform instead of sending one (push-source)"},
 	"manifest":             {Name: "manifest", Type: "path", Default: "", Env: EnvPrefix + "MANIFEST", Summary: "path to a downloaded SHA256SUMS"},
 	"sig":                  {Name: "sig", Type: "path", Default: "", Env: EnvPrefix + "SIG", Summary: "detached signature; defaults to the manifest path with .sig appended"},
 	"asset":                {Name: "asset", Type: "string", Default: "", Env: EnvPrefix + "ASSET", Summary: "comma-separated asset names to check"},
@@ -215,11 +220,22 @@ var commands = []Command{
 	},
 	{
 		Name: "link", Summary: "transmit a run's allowlisted metrics and structure to the platform", Avail: AvailNetwork,
-		Flags:       []string{"run", "dry-run", "repo", "config"},
+		Flags:       []string{"run", "dry-run", "with-ir", "repo", "config"},
 		Example:     "heros link --run run-7 --dry-run",
 		Success:     "with --dry-run, the exact payload printed and nothing transmitted. Without it, the run URL the platform stored.",
 		SuccessExit: 0,
 		Unavailable: "link is a platform command and is unavailable in this build",
+	},
+	{
+		Name: "push-source", Summary: "send a source snapshot so the platform can discover and classify this workflow itself", Avail: AvailNetwork,
+		Flags:   []string{"repo", "commit", "workflow-id", "dry-run", "forget"},
+		Example: "heros push-source --repo . --dry-run",
+		// The success line names what was TRANSMITTED and what came back, in that order. A summary that
+		// only reported the graph would let a reader forget that the input was their source.
+		Success:      "with --dry-run, what the snapshot contains and its size, and nothing transmitted. Without it, the snapshot pushed and the classified graph the platform discovered from it.",
+		SuccessExit:  0,
+		Prerequisite: "a git repository with at least one commit — the snapshot is `git archive` of a revision, never the working directory",
+		Unavailable:  "push-source is a platform command and is unavailable in this build",
 	},
 	{
 		Name: "upgrade", Summary: "fetch the latest release, verify it, and replace this binary in place", Avail: AvailNetworkNoAccount,

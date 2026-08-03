@@ -160,6 +160,21 @@ func Eval(cfg Config, s Streams, rt NodeRuntime, gates Gates) error {
 		return operational("eval statistics", err)
 	}
 
+	// The gate is evaluated BEFORE the record is built, not after.
+	//
+	// It used to run after `store.Put`, which was fine while the verdict was only printed — and wrong the
+	// moment the record had to carry it. A run record that omits the gate outcome forces the platform to
+	// either invent one or leave the eval board unmountable, and inventing it is how a board grows a
+	// `gate_pass` boolean that nothing computed.
+	aggregate := runlink.Metrics{
+		CostUSD:   mean(totCost, nRuns),
+		LatencyMS: mean(totLat, nRuns),
+		TokensIn:  totIn / int64(max1(nRuns)),
+		TokensOut: totOut / int64(max1(nRuns)),
+		PerNode:   perNodeMetrics(perNode, nRuns),
+	}
+	gate := evalGate(scores, aggregate, gates)
+
 	// Aggregate metrics are per-run means (so "cost" is the cost of ONE run, comparable across variants).
 	record := runlink.RunRecord{
 		RunID:          runID(ir.Workflow.ID, configHash, sha),
@@ -169,16 +184,17 @@ func Eval(cfg Config, s Streams, rt NodeRuntime, gates Gates) error {
 		Timestamp:      nowRFC3339(),
 		Seeds:          seeds,
 		ToolVersion:    ToolVersion,
-		Metrics: runlink.Metrics{
-			CostUSD:   mean(totCost, nRuns),
-			LatencyMS: mean(totLat, nRuns),
-			TokensIn:  totIn / int64(max1(nRuns)),
-			TokensOut: totOut / int64(max1(nRuns)),
-			PerNode:   perNodeMetrics(perNode, nRuns),
+		Metrics:        aggregate,
+		IR:             irStructure(ir),
+		Scores:         scores,
+		RunsReported:   1,
+		Eval: runlink.EvalSummary{
+			CaseCount:    len(cases),
+			SeedCount:    len(seeds),
+			GateOutcome:  gateOutcome(gate),
+			GateFailures: gateFailures(gate),
+			SingleSeed:   singleSeed,
 		},
-		IR:           irStructure(ir),
-		Scores:       scores,
-		RunsReported: 1,
 	}
 
 	store := OpenRunStore(repo)
@@ -186,7 +202,6 @@ func Eval(cfg Config, s Streams, rt NodeRuntime, gates Gates) error {
 		return operational("write run record", err)
 	}
 
-	gate := evalGate(scores, record.Metrics, gates)
 	data := EvalData{
 		RunID: record.RunID, WorkflowID: record.WorkflowID, ConfigHash: configHash,
 		Runtime: rt.Name(), Seeds: seeds, Cases: len(cases), Scores: scores,
@@ -250,6 +265,31 @@ func evalGate(scores []runlink.Score, m runlink.Metrics, g Gates) *GateResult {
 		return &GateResult{Name: "configured-gates", Passed: true}
 	}
 	return nil
+}
+
+// gateOutcome maps the CLI's local gate result onto the transmitted verdict.
+//
+// The nil case is the one that matters: no gate configured is NOT a pass. Returning GatePass for it
+// would let an unmeasured run render on the eval board exactly like one that cleared a threshold, which
+// is the single most misleading thing this field could do.
+func gateOutcome(g *GateResult) runlink.GateOutcome {
+	switch {
+	case g == nil:
+		return runlink.GateNotConfigured
+	case g.Passed:
+		return runlink.GatePass
+	default:
+		return runlink.GateFail
+	}
+}
+
+// gateFailures names the metrics that failed. Empty on a pass and on not-configured — those two stay
+// distinguishable through GateOutcome, never through this being empty.
+func gateFailures(g *GateResult) []string {
+	if g == nil || g.Passed || g.Metric == "" {
+		return nil
+	}
+	return []string{g.Metric}
 }
 
 // emitErr writes a failure envelope and returns any write error, so the gate-failed path still produces

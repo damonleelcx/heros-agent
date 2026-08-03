@@ -235,7 +235,15 @@ func (s *DeliveryService) Fleet(ctx context.Context) (DeliveryView, error) {
 		view.Degraded, view.Detail = true, "this deployment carries no delivery record"
 		return view, nil
 	}
-	for _, acct := range s.accounts.List() {
+	accts, err := s.accounts.List()
+	if err != nil {
+		// The same treatment this function already gives one unreadable tenant, applied to the list
+		// itself: a fleet view assembled from no tenants is not an empty fleet.
+		view.Degraded = true
+		view.Detail = "the account list could not be read: " + err.Error()
+		return view, nil
+	}
+	for _, acct := range accts {
 		heads, err := s.records.ListForTenant(ctx, acct.CustomerID)
 		if err != nil {
 			// One tenant's record being unreadable makes the AGGREGATE incomplete, and an incomplete

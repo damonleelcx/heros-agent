@@ -152,7 +152,8 @@ func (s *state) invoiceView(ctx context.Context, customer string, p metering.Per
 		out.InvoiceRef, out.Status = inv.InvoiceRef, inv.Status
 	}
 	byKind := map[string]*api.TotalView{}
-	for _, ev := range s.svc.Ledger().Events(customer, p.ID) {
+	evs, _ := s.svc.Ledger().Events(customer, p.ID) // MemLedger cannot fail; a durable one can
+	for _, ev := range evs {
 		if !ev.Type.ChargeBearing() {
 			continue
 		}

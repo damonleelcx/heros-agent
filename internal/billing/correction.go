@@ -108,7 +108,13 @@ func (s *Service) correct(ctx context.Context, customerID, againstEventID, reaso
 
 // findEvent locates one of a customer's ledger rows by event id.
 func (s *Service) findEvent(customerID, eventID string) (BillingEvent, error) {
-	for _, ev := range s.ledger.Events(customerID, "") {
+	rows, err := s.ledger.Events(customerID, "")
+	if err != nil {
+		// NOT flattened into ErrEventNotFound. "We could not read the ledger" and "there is no such
+		// event" lead to opposite actions: retry the correction, or stop looking for it.
+		return BillingEvent{}, fmt.Errorf("billing: reading %s's ledger to find %s: %w", customerID, eventID, err)
+	}
+	for _, ev := range rows {
 		if ev.EventID == eventID {
 			return ev, nil
 		}

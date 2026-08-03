@@ -39,7 +39,7 @@ func main() {
 
 type src struct{}
 
-func (src) IR(id string) (*discovery.IR, bool) {
+func (src) IR(_, id string) (*discovery.IR, bool) {
 	if id != "wf" {
 		return nil, false
 	}

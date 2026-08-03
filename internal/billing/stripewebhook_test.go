@@ -318,7 +318,7 @@ func TestSubscriptionLifecycleIsMirroredVerbatim(t *testing.T) {
 func TestRefundAndDisputeWebhooksAuthorNoLedgerRow(t *testing.T) {
 	h := newWebhookHarness(t)
 	ctx := context.Background()
-	before := len(h.svc.Ledger().Events("cus_acme", ""))
+	before := len(testEvents(h.svc.Ledger(), "cus_acme", ""))
 
 	for _, typ := range []WebhookType{WebhookChargeRefunded, WebhookChargeDisputeCreated} {
 		body, sig := h.stripeDelivery("evt_"+string(typ), typ, "cus_acme", map[string]string{"charge_ref": "ch_1"})
@@ -327,7 +327,7 @@ func TestRefundAndDisputeWebhooksAuthorNoLedgerRow(t *testing.T) {
 		}
 	}
 
-	if after := len(h.svc.Ledger().Events("cus_acme", "")); after != before {
+	if after := len(testEvents(h.svc.Ledger(), "cus_acme", "")); after != before {
 		t.Errorf("a refund/dispute webhook authored %d ledger row(s) — a webhook may notify, never write "+
 			"the billing ledger", after-before)
 	}

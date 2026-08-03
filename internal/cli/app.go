@@ -40,6 +40,10 @@ import (
 type NetCommands interface {
 	Login(cfg Config, s Streams) error
 	Link(cfg Config, s Streams) error
+	// PushSource transmits a SOURCE SNAPSHOT so the platform can run discovery itself. A separate method
+	// from Link, not a flag on it: sending a run's numbers and sending the repository are different
+	// things to agree to, and a reviewer must be able to point at the one entry point that sends source.
+	PushSource(cfg Config, s Streams) error
 	// Upgrade is here rather than in this package for the same reason: it is the ONE command that must
 	// reach the network, and keeping it out is what makes "no update check on the hot path" (P20 task 5.6)
 	// structural instead of a promise — the code that runs discover/apply/eval does not link a network stack.
@@ -102,6 +106,11 @@ func Main(args []string, s Streams, env func(string) (string, bool), net NetComm
 			return report(operational("link is a platform command and is unavailable in this build", nil), s, cmd)
 		}
 		return codeOf(net.Link(cfg, s), s, cmd)
+	case "push-source":
+		if net == nil {
+			return report(operational("push-source is a platform command and is unavailable in this build", nil), s, cmd)
+		}
+		return codeOf(net.PushSource(cfg, s), s, cmd)
 	case "upgrade":
 		if net == nil {
 			return report(operational("upgrade needs the network and is unavailable in this build; "+
@@ -134,6 +143,7 @@ func parse(cmd string, args []string, env func(string) (string, bool), s Streams
 	cases := fs.Int("cases", 8, "eval cases")
 	run := fs.String("run", "", "run id to link")
 	token := fs.String("token", "", "platform token (login)")
+	withIR := fs.String("with-ir", "", "ALSO transmit this workflow's structure as a second, opt-in payload (link)")
 	dryRun := fs.Bool("dry-run", false, "render the exact link payload without transmitting it")
 
 	// Onboarding + release-verification flags (P20 section 5).
@@ -220,6 +230,7 @@ func parse(cmd string, args []string, env func(string) (string, bool), s Streams
 	put("run", *run)
 	put("token", *token)
 	put("dry-run", strconv.FormatBool(*dryRun))
+	put("with-ir", *withIR)
 	put("force", strconv.FormatBool(*force))
 	put("manifest", *manifest)
 	put("sig", *sig)
@@ -321,6 +332,11 @@ Platform commands (explicit, authenticated; transmit only to https://heros-agent
   login      store a platform token
   link       transmit a run's allowlisted metrics + structure to the platform
              (use --dry-run to print the exact payload without sending it)
+  push-source  send a SOURCE SNAPSHOT (git archive of a revision) so the platform can run
+             discovery and pattern classification itself — this is what makes the hosted
+             graph carry real labels rather than unclassified dots. The largest thing this
+             CLI ever sends; --dry-run reports exactly what it contains and sends nothing,
+             and --forget deletes a snapshot the platform is holding.
 
 Exit codes: 0 ok · 1 configured-gate-failed · 2 operational-error · 3 invalid-config
 `, "\n"))

@@ -1,7 +1,10 @@
 package api
 
 import (
+	"io"
+
 	"encoding/json"
+	"github.com/heros-foreal/agentd/internal/auth"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -17,7 +20,7 @@ type stubBoard struct {
 	profiles []string
 }
 
-func (s *stubBoard) Board(workflowID, profile string) (evalboard.View, bool) {
+func (s *stubBoard) Board(_, workflowID, profile string) (evalboard.View, bool) {
 	s.profiles = append(s.profiles, profile)
 	v := s.view
 	v.WorkflowID = workflowID
@@ -37,7 +40,7 @@ func TestP4MountedWithNoSourceIs503(t *testing.T) {
 	s := New(nil, config.Config{})
 	s.MountEvalBoard(nil)
 	rec := httptest.NewRecorder()
-	s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/workflows/wf/eval-board", nil))
+	s.Handler.ServeHTTP(rec, authedBoardReq(http.MethodGet, "/api/v1/workflows/wf/eval-board", nil))
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("want 503 when mounted without a source, got %d", rec.Code)
 	}
@@ -46,7 +49,7 @@ func TestP4MountedWithNoSourceIs503(t *testing.T) {
 func TestP4NotMountedAtAllIsRouteAbsent(t *testing.T) {
 	s := New(nil, config.Config{})
 	rec := httptest.NewRecorder()
-	s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/workflows/wf/eval-board", nil))
+	s.Handler.ServeHTTP(rec, authedBoardReq(http.MethodGet, "/api/v1/workflows/wf/eval-board", nil))
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("an unregistered route is a 404 from the mux, got %d", rec.Code)
 	}
@@ -56,7 +59,7 @@ func TestP4UnknownWorkflowIs404(t *testing.T) {
 	s := New(nil, config.Config{})
 	s.MountEvalBoard(&stubBoard{ok: false})
 	rec := httptest.NewRecorder()
-	s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/workflows/nope/eval-board", nil))
+	s.Handler.ServeHTTP(rec, authedBoardReq(http.MethodGet, "/api/v1/workflows/nope/eval-board", nil))
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("want 404 for an unknown workflow, got %d", rec.Code)
 	}
@@ -80,7 +83,7 @@ func TestP4ProfileIsAReadParameter(t *testing.T) {
 		if profile != "" {
 			url += "?profile=" + profile
 		}
-		s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, url, nil))
+		s.Handler.ServeHTTP(rec, authedBoardReq(http.MethodGet, url, nil))
 		if rec.Code != http.StatusOK {
 			t.Fatalf("profile %q: want 200, got %d", profile, rec.Code)
 		}
@@ -102,8 +105,18 @@ func TestP4BoardHasNoWriteVerb(t *testing.T) {
 	s := New(nil, config.Config{})
 	s.MountEvalBoard(&stubBoard{ok: true})
 	rec := httptest.NewRecorder()
-	s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/workflows/wf/eval-board", nil))
+	s.Handler.ServeHTTP(rec, authedBoardReq(http.MethodPost, "/api/v1/workflows/wf/eval-board", nil))
 	if rec.Code == http.StatusOK {
 		t.Fatal("the board endpoint must not accept POST")
 	}
 }
+
+// authedBoardReq builds a request carrying an authenticated tenant. The board and the scorecard are tenant-scoped
+// reads — a variant id is a CONFIG HASH, identical across tenants running the same configuration — so
+// every request in these tests carries a principal, exactly as a real one does after auth middleware.
+func authedBoardReq(method, target string, body io.Reader) *http.Request {
+	req := httptest.NewRequest(method, target, body)
+	return req.WithContext(auth.WithPrincipal(req.Context(), boardTenant))
+}
+
+var boardTenant = auth.Principal{TenantID: "t1", Role: "member", APIKeyID: "key-1"}

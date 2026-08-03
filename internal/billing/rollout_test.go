@@ -271,7 +271,7 @@ func TestRolloutGatesEveryCharge(t *testing.T) {
 	if h.provider.ChargeCount() != 0 {
 		t.Error("a charge reached the provider while billing was dark")
 	}
-	if len(h.ledger.Pending()) != 0 {
+	if len(testPending(h.ledger)) != 0 {
 		t.Error("a dark deployment left a pending ledger row that a later flip would settle into a real charge")
 	}
 

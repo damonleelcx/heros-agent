@@ -166,7 +166,7 @@ func TestContractParity(t *testing.T) {
 			}
 
 			// The change is AUDITED even though it moves no money yet.
-			if rows := s.svc.Ledger().Events("cus_acme", ""); len(rows) != 1 || rows[0].Type != TypeSubscriptionChange {
+			if rows := testEvents(s.svc.Ledger(), "cus_acme", ""); len(rows) != 1 || rows[0].Type != TypeSubscriptionChange {
 				t.Fatalf("expected one subscription_change row, got %+v", rows)
 			}
 
@@ -276,7 +276,7 @@ func TestContractParity(t *testing.T) {
 }
 
 func findRow(svc *Service, eventID string) (BillingEvent, bool) {
-	for _, ev := range svc.Ledger().Events("cus_acme", "") {
+	for _, ev := range testEvents(svc.Ledger(), "cus_acme", "") {
 		if ev.EventID == eventID {
 			return ev, true
 		}
@@ -325,7 +325,7 @@ func TestNeverDoubleChargeAcrossBothLayers(t *testing.T) {
 		t.Errorf("stripe holds %d charge objects after a recorded-then-lost failure and ten retries, want 1", n)
 	}
 	rows := 0
-	for _, ev := range s.svc.Ledger().Events("cus_acme", july.ID) {
+	for _, ev := range testEvents(s.svc.Ledger(), "cus_acme", july.ID) {
 		if ev.IdempotencyKey == key {
 			rows++
 		}
@@ -372,7 +372,7 @@ func TestReversibilityOverStripe(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Charge: %v", err)
 	}
-	before := len(s.svc.Ledger().Events("cus_acme", ""))
+	before := len(testEvents(s.svc.Ledger(), "cus_acme", ""))
 
 	issuePeriodInvoice(t, s.svc.Provider(), "cus_acme", july.ID)
 	credit, err := s.svc.Credit(ctx, "cus_acme", wrong.EventID, "billed against the wrong period")
@@ -381,7 +381,7 @@ func TestReversibilityOverStripe(t *testing.T) {
 	}
 
 	// 1. The ledger GREW. A correction is a new row.
-	after := s.svc.Ledger().Events("cus_acme", "")
+	after := testEvents(s.svc.Ledger(), "cus_acme", "")
 	if len(after) != before+1 {
 		t.Fatalf("the ledger went from %d to %d rows — a correction adds exactly one", before, len(after))
 	}
@@ -508,7 +508,7 @@ func TestCollectionFlowOverStripe(t *testing.T) {
 
 	// Two audited rows, nothing deleted.
 	changes := 0
-	for _, ev := range s.svc.Ledger().Events("cus_acme", "") {
+	for _, ev := range testEvents(s.svc.Ledger(), "cus_acme", "") {
 		if ev.Type == TypePlanChange {
 			changes++
 		}

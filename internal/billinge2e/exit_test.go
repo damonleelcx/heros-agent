@@ -348,7 +348,7 @@ func TestM10ExitChecklist(t *testing.T) {
 		}
 
 		// Unsigned: rejected BEFORE any side effect.
-		ledgerBefore := len(s.ledger.Events(ent, ""))
+		ledgerBefore := len(testEvents(s.ledger, ent, ""))
 		unsigned := billing.SignedWebhook{Body: body, Timestamp: stamp}
 		if _, err := s.svc.HandleWebhook(ctx, unsigned); !errors.Is(err, billing.ErrNoSignature) {
 			t.Errorf("an unsigned webhook was not rejected: %v", err)
@@ -357,7 +357,7 @@ func TestM10ExitChecklist(t *testing.T) {
 		if _, err := s.svc.HandleWebhook(ctx, forged); !errors.Is(err, billing.ErrBadSignature) {
 			t.Errorf("a forged webhook was not rejected: %v", err)
 		}
-		if len(s.ledger.Events(ent, "")) != ledgerBefore || s.deliver.Count() != before+1 {
+		if len(testEvents(s.ledger, ent, "")) != ledgerBefore || s.deliver.Count() != before+1 {
 			t.Error("a rejected webhook produced a side effect")
 		}
 	})
@@ -403,7 +403,7 @@ func TestM10ExitChecklist(t *testing.T) {
 		if credit.Quantity != wrong.Quantity {
 			t.Errorf("the credit (%v) does not offset the charge (%v)", credit.Quantity, wrong.Quantity)
 		}
-		for _, ev := range s.ledger.Events(ent, july.ID) {
+		for _, ev := range testEvents(s.ledger, ent, july.ID) {
 			if ev.CausedBy == "" {
 				t.Errorf("row %s names no cause — the period cannot be reconstructed", ev.EventID)
 			}
@@ -561,7 +561,7 @@ func TestM10ExitChecklist(t *testing.T) {
 			blob.Write(b)
 		}
 		for _, plan := range planIDs {
-			for _, ev := range s.ledger.Events(s.customerOf[plan], "") {
+			for _, ev := range testEvents(s.ledger, s.customerOf[plan], "") {
 				b, err := json.Marshal(ev)
 				if err != nil {
 					t.Fatalf("marshal: %v", err)

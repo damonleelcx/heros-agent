@@ -864,7 +864,8 @@ func (s *state) demonstrateFractionalRefusal(ctx context.Context) {
 }
 
 func (s *state) findEvent(eventID string) (billing.BillingEvent, bool) {
-	for _, ev := range s.svc.Ledger().Events(customerID, "") {
+	evs, _ := s.svc.Ledger().Events(customerID, "") // MemLedger cannot fail; a durable one can
+	for _, ev := range evs {
 		if ev.EventID == eventID {
 			return ev, true
 		}
@@ -909,7 +910,8 @@ func (s *state) report() {
 	}
 
 	fmt.Println("\n  Ledger (append-only, no amounts — the platform holds handles):")
-	for _, ev := range s.svc.Ledger().Events(customerID, "") {
+	evs, _ := s.svc.Ledger().Events(customerID, "") // MemLedger cannot fail; a durable one can
+	for _, ev := range evs {
 		fmt.Printf("    %-16s %-18s %-10s %s\n", ev.EventID, ev.Type, ev.Status, ev.Reason)
 	}
 

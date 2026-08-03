@@ -138,7 +138,7 @@ func TestUnverifiedSavingBillsNothing(t *testing.T) {
 			if h.provider.ChargeCount() != 0 {
 				t.Errorf("a provider charge was raised for an unverified saving")
 			}
-			for _, ev := range h.ledger.Events("cus_acme", "") {
+			for _, ev := range testEvents(h.ledger, "cus_acme", "") {
 				if ev.Type == TypeGainshareCharge {
 					t.Errorf("a gainshare billing event was created: %+v", ev)
 				}

@@ -64,6 +64,15 @@ type View struct {
 	// computed FACT on the board, not something the UI counts up itself, because the all-tie board
 	// is exactly where a well-meaning UI does the most damage by rendering rank 1 as a victory.
 	AllTie bool `json:"all_tie"`
+	// TieAnalysis says whether AllTie/TiedWith MEAN anything on this board.
+	//
+	// 🔴 `AllTie: false` is a claim — "these variants are distinguishable" — and a board that cannot
+	// perform the overlap test would be making it by default. That test needs the bootstrap REPLICATES,
+	// which exist only where the eval ran; a board assembled from linked runs receives intervals and no
+	// replicates, so it cannot compute ties and must not imply it did. Hence a field rather than a
+	// convention: this package's opening comment says the states are DATA, never inferences from a
+	// missing key, and "we did not test for ties" is a state.
+	TieAnalysis TieAnalysis `json:"tie_analysis"`
 	// Notes are board-level caveats: refused gates, low-confidence eval set. They change what the
 	// WHOLE board means, which is why they are not per-row badges.
 	Notes []string `json:"notes,omitempty"`
@@ -74,6 +83,17 @@ type View struct {
 	// of the score cache. The field exists so the UI (and a test) can assert it rather than assume.
 	RunsEnqueued int `json:"runs_enqueued"`
 }
+
+// TieAnalysis reports whether statistical tie detection was performed for this board.
+type TieAnalysis string
+
+const (
+	// TieComputed: the overlap test ran over bootstrap replicates. AllTie and TiedWith are meaningful.
+	TieComputed TieAnalysis = "computed"
+	// TieUnavailable: the board was assembled from reported intervals with no replicates behind them.
+	// AllTie is false and TiedWith is empty because nothing was TESTED, not because nothing tied.
+	TieUnavailable TieAnalysis = "unavailable"
+)
 
 // UnmeasuredView is one variant excluded from the ranking, with the reason.
 type UnmeasuredView struct {
@@ -259,6 +279,11 @@ func Build(in Input) View {
 	}
 
 	// AllTie: every gate-passer overlaps every other. Computed here so the UI never has to.
+	//
+	// Build always has replicates — it works from a scoring.Cache, which is built by bootstrapping the
+	// raw series — so this path is unconditionally `computed`. The other value exists for assemblers
+	// that do not (internal/hostedboard).
+	v.TieAnalysis = TieComputed
 	if len(v.Ranked) > 1 {
 		v.AllTie = true
 		for _, r := range v.Ranked {

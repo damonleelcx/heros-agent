@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"net/http"
 
+	"github.com/heros-foreal/agentd/internal/auth"
 	"github.com/heros-foreal/agentd/internal/scorecard"
 )
 
@@ -21,7 +22,14 @@ var p45ScorecardHTML []byte
 // ScorecardSource is the one question the API asks: give me the read-only scorecard for this
 // variant's run. Keyed by variant id, because a scorecard is per-run — one variant × one eval set.
 type ScorecardSource interface {
-	Scorecard(variantID string) (scorecard.View, bool)
+	// Scorecard returns one TENANT's scorecard for a variant.
+	//
+	// 🔴 tenantID is not decoration — the same lesson PatternSource, GraphEditorSource and BoardSource
+	// each had to learn, and the sharpest instance of it: a variant id is a CONFIG HASH, so two tenants
+	// running the same configuration produce the SAME id. Not a collision that needs bad luck — a
+	// guaranteed one, and without a tenant scope it hands one customer another's per-node cost
+	// attribution for free.
+	Scorecard(tenantID, variantID string) (scorecard.View, bool)
 }
 
 // MountScorecard registers the scorecard UI and its JSON endpoint.
@@ -44,7 +52,14 @@ func (s *Server) handleScorecard(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	view, ok := s.scorecard.Scorecard(r.PathValue("variant_id"))
+	principal, authed := auth.PrincipalFrom(r.Context())
+	if !authed || principal.TenantID == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{
+			"error": "the scorecard requires an authenticated tenant",
+		})
+		return
+	}
+	view, ok := s.scorecard.Scorecard(principal.TenantID, r.PathValue("variant_id"))
 	if !ok {
 		writeJSON(w, http.StatusNotFound, map[string]string{
 			"error": "no scorecard for variant " + r.PathValue("variant_id"),

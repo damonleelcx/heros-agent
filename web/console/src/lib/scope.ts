@@ -70,25 +70,40 @@ export function scoped(session: Session) {
     studioRun: () => `/api/v1/studio/run`,
     studioBind: () => `/api/v1/studio/bind`,
 
+    // ── P11 · a run the CLI transmitted, read back ────────────────────────
+    // Distinct from `run` above on purpose. That one reads the EXECUTOR's record — attempt groups and
+    // per-node I/O from a sandboxed run. A LINKED run is an allowlisted summary the developer's own
+    // machine produced and transmitted; it has no per-node I/O and never will. Two subjects that share
+    // an identifier, so two routes, and the page says which one it is showing.
+    linkedRun: (runId: string) => `/api/v1/runs/${encode(runId)}/link`,
+
     // ── P2.5 · live run monitor ───────────────────────────────────────────
     monitor: (runId: string) => `/api/v1/runs/${encode(runId)}/monitor`,
     monitorStream: (runId: string) => `/api/v1/runs/${encode(runId)}/monitor/stream`,
 
     // ── P3.5 · pattern-classified graph ───────────────────────────────────
-    graph: (workflowId: string) => `/api/v1/workflows/${encode(workflowId)}/graph`,
+    //
+    // 🔴 The leaf is `pattern-graph`, not `graph`. When these moved from `/api/p35/…` to `/api/v1/…`
+    // the prefix was rewritten and the leaf was carried over, but the platform had renamed the leaf
+    // after what the route DOES. The result was a 404, and a 404 classifies as `not-found`, so the
+    // graph view of a workflow that exists rendered "No such workflow — the identifier does not
+    // resolve". That is the one sentence this console must not print when the real cause is a
+    // subsystem that is absent (which answers 503 and reads as "not mounted on this deployment").
+    // `platform-routes.test.mjs` now fails on any path here that the Go mux does not register.
+    graph: (workflowId: string) => `/api/v1/workflows/${encode(workflowId)}/pattern-graph`,
 
     // ── P4 · eval board ───────────────────────────────────────────────────
     // `profile` is VIEW STATE, not identity: it selects a weight profile on a board whose subject is
     // already fixed. It is forwarded because the platform owns the profile list and the console must
     // not invent one — the board response carries `profiles` for exactly that reason.
     board: (workflowId: string, profile?: string) =>
-      `/api/v1/workflows/${encode(workflowId)}/board` + (profile ? `?profile=${encode(profile)}` : ""),
+      `/api/v1/workflows/${encode(workflowId)}/eval-board` + (profile ? `?profile=${encode(profile)}` : ""),
 
     // ── P4.5 · attribution scorecard ──────────────────────────────────────
     scorecard: (variantId: string) => `/api/v1/variants/${encode(variantId)}/scorecard`,
 
     // ── P5.5 · proposals and their verified deltas ────────────────────────
-    proposals: (workflowId: string) => `/api/v1/workflows/${encode(workflowId)}/surface`,
+    proposals: (workflowId: string) => `/api/v1/workflows/${encode(workflowId)}/proposals`,
     openPR: (workflowId: string, proposalId: string) =>
       `/api/v1/workflows/${encode(workflowId)}/proposals/${encode(proposalId)}/open-pr`,
 

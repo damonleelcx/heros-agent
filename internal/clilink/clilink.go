@@ -87,6 +87,21 @@ type LinkData struct {
 	Accepted bool            `json:"accepted,omitempty"`
 	RunURL   string          `json:"run_url,omitempty"`
 	Already  bool            `json:"already_linked,omitempty"`
+	// WorkflowIR is present only when --with-ir was given. Its absence in the envelope is the machine
+	// -readable form of "structure was not transmitted", which a CI job can assert on.
+	WorkflowIR *WorkflowIRData `json:"workflow_ir,omitempty"`
+}
+
+// WorkflowIRData reports the OPT-IN structure upload.
+type WorkflowIRData struct {
+	Sent     bool   `json:"sent"`
+	Path     string `json:"path"`
+	Nodes    int    `json:"nodes"`
+	Edges    int    `json:"edges"`
+	GraphURL string `json:"graph_url,omitempty"`
+	// Payload is rendered under --dry-run so the EXACT second transmission is reviewable before it is
+	// ever made. Opting in to sending more is only meaningful if you can read what "more" is.
+	Payload *runlink.WorkflowIRPayload `json:"payload,omitempty"`
 }
 
 // Link transmits a run's allowlisted payload to the platform, or (with --dry-run) renders it without
@@ -116,10 +131,31 @@ func (c Commands) Link(cfg cli.Config, s cli.Streams) error {
 			Msg: "link: REFUSING to transmit — payload carries non-allowlisted keys: " + strings.Join(offenders, ", ")}
 	}
 
+	// --with-ir is the OPT-IN second payload. It is resolved before any transmission so a mismatched or
+	// unreadable IR fails the command outright rather than after the run has already been linked —
+	// half a transmission is the one outcome neither the developer nor the platform can reason about.
+	irPath := cfg.Get("with-ir")
+	var irPayload *runlink.WorkflowIRPayload
+	if irPath != "" {
+		ir, ierr := cli.LoadIRForLink(irPath, record.WorkflowID, record.SourceRevision)
+		if ierr != nil {
+			return ierr
+		}
+		built := cli.BuildWorkflowIR(ir)
+		irPayload = &built
+		s.Narratef("link: --with-ir — %d node(s) and %d edge(s) of STRUCTURE will be transmitted as a "+
+			"second payload: symbols, files, line spans, models, context policies and tool COUNTS. "+
+			"No prompt text, no source, no keys.", len(built.Nodes), len(built.Edges))
+	}
+
 	dryRun := cfg.Get("dry-run") == "true"
 	if dryRun {
 		s.Narratef("link: dry-run — rendering the exact payload for %s; nothing is transmitted", runID)
-		return s.EmitJSON("link", cli.ExitOK, LinkData{RunID: runID, DryRun: true, Endpoint: runlink.PlatformBaseURL, Payload: payload}, nil, nil)
+		d := LinkData{RunID: runID, DryRun: true, Endpoint: runlink.PlatformBaseURL, Payload: payload}
+		if irPayload != nil {
+			d.WorkflowIR = &WorkflowIRData{Path: irPath, Nodes: len(irPayload.Nodes), Edges: len(irPayload.Edges), Payload: irPayload}
+		}
+		return s.EmitJSON("link", cli.ExitOK, d, nil, nil)
 	}
 
 	// Real link requires an authenticated identity (FR9).
@@ -140,6 +176,22 @@ func (c Commands) Link(cfg cli.Config, s cli.Streams) error {
 	}
 
 	data := LinkData{RunID: runID, Endpoint: runlink.PlatformBaseURL, Payload: payload, Accepted: res.Accepted, RunURL: res.RunURL, Already: res.AlreadyLinked}
+
+	// The structure goes SECOND, and only after the run itself landed. If it fails, the run is still
+	// linked and stays linked: the optional half of an opt-in must never be able to undo the half the
+	// developer did not opt into.
+	if irPayload != nil {
+		ires, ierr := cl.SendWorkflowIR(context.Background(), *irPayload)
+		if ierr != nil {
+			s.Narratef("link: the run linked, but the structure did NOT (%v). Nothing about the run is "+
+				"affected; re-run with --with-ir to try the structure again.", ierr)
+			data.WorkflowIR = &WorkflowIRData{Sent: false, Path: irPath, Nodes: len(irPayload.Nodes), Edges: len(irPayload.Edges)}
+		} else {
+			s.Narratef("link: structure transmitted — %d node(s), %d edge(s) · graph at %s", ires.Nodes, ires.Edges, ires.GraphURL)
+			data.WorkflowIR = &WorkflowIRData{Sent: true, Path: irPath, Nodes: ires.Nodes, Edges: ires.Edges, GraphURL: ires.GraphURL}
+		}
+	}
+
 	if res.AlreadyLinked {
 		s.Narratef("link: %s was already linked — counted once, not again (idempotent)", runID)
 	} else {

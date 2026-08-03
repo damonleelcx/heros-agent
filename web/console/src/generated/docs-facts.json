@@ -66,7 +66,7 @@
           "type": "string",
           "default": "",
           "env": "HEROS_WORKFLOW_ID",
-          "summary": "workflow id (default: module path)"
+          "summary": "workflow id (discover/apply default to the module path; push-source REQUIRES it, because guessing would file a snapshot under the wrong workflow)"
         }
       ],
       "example": "heros apply --repo . --spec variant.json --out change.diff",
@@ -198,7 +198,7 @@
           "type": "string",
           "default": "",
           "env": "HEROS_WORKFLOW_ID",
-          "summary": "workflow id (default: module path)"
+          "summary": "workflow id (discover/apply default to the module path; push-source REQUIRES it, because guessing would file a snapshot under the wrong workflow)"
         }
       ],
       "example": "heros author --repo . --spec variant.json --node n_triage --model anthropic/claude-sonnet-5",
@@ -271,7 +271,7 @@
           "type": "string",
           "default": "",
           "env": "HEROS_WORKFLOW_ID",
-          "summary": "workflow id (default: module path)"
+          "summary": "workflow id (discover/apply default to the module path; push-source REQUIRES it, because guessing would file a snapshot under the wrong workflow)"
         }
       ],
       "example": "heros discover --repo . --out ir.json --report discovery.json",
@@ -379,7 +379,7 @@
           "type": "string",
           "default": "",
           "env": "HEROS_WORKFLOW_ID",
-          "summary": "workflow id (default: module path)"
+          "summary": "workflow id (discover/apply default to the module path; push-source REQUIRES it, because guessing would file a snapshot under the wrong workflow)"
         }
       ],
       "example": "heros eval --repo . --seeds 5 --cases 8",
@@ -449,7 +449,7 @@
           "type": "bool",
           "default": "false",
           "env": "HEROS_DRY_RUN",
-          "summary": "render the exact link payload without transmitting it"
+          "summary": "show exactly what would be transmitted, and transmit nothing (link: the payload itself; push-source: the snapshot's revision, file count and size)"
         },
         {
           "name": "repo",
@@ -464,6 +464,13 @@
           "default": "",
           "env": "HEROS_RUN",
           "summary": "run id to link"
+        },
+        {
+          "name": "with-ir",
+          "type": "path",
+          "default": "",
+          "env": "HEROS_WITH_IR",
+          "summary": "ALSO transmit this workflow's structure (symbols, files, line spans, models, tool counts) as a second, opt-in payload — never prompt text or source (link)"
         }
       ],
       "example": "heros link --run run-7 --dry-run",
@@ -490,6 +497,55 @@
       "success": "the token stored, and the non-secret identity it resolves to echoed back. The token value is never printed.",
       "success_exit": 0,
       "unavailable": "login is a platform command and is unavailable in this build"
+    },
+    {
+      "name": "push-source",
+      "summary": "send a source snapshot so the platform can discover and classify this workflow itself",
+      "availability": "network",
+      "offline": false,
+      "needs_account": true,
+      "flags": [
+        {
+          "name": "commit",
+          "type": "string",
+          "default": "",
+          "env": "HEROS_COMMIT",
+          "summary": "source revision (default: derived from .git)"
+        },
+        {
+          "name": "dry-run",
+          "type": "bool",
+          "default": "false",
+          "env": "HEROS_DRY_RUN",
+          "summary": "show exactly what would be transmitted, and transmit nothing (link: the payload itself; push-source: the snapshot's revision, file count and size)"
+        },
+        {
+          "name": "forget",
+          "type": "bool",
+          "default": "false",
+          "env": "HEROS_FORGET",
+          "summary": "DELETE a previously pushed source snapshot from the platform instead of sending one (push-source)"
+        },
+        {
+          "name": "repo",
+          "type": "path",
+          "default": ".",
+          "env": "HEROS_REPO",
+          "summary": "the target repository"
+        },
+        {
+          "name": "workflow-id",
+          "type": "string",
+          "default": "",
+          "env": "HEROS_WORKFLOW_ID",
+          "summary": "workflow id (discover/apply default to the module path; push-source REQUIRES it, because guessing would file a snapshot under the wrong workflow)"
+        }
+      ],
+      "example": "heros push-source --repo . --dry-run",
+      "success": "with --dry-run, what the snapshot contains and its size, and nothing transmitted. Without it, the snapshot pushed and the classified graph the platform discovered from it.",
+      "success_exit": 0,
+      "prerequisite": "a git repository with at least one commit — the snapshot is `git archive` of a revision, never the working directory",
+      "unavailable": "push-source is a platform command and is unavailable in this build"
     },
     {
       "name": "status",

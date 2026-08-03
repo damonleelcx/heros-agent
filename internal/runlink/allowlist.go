@@ -83,6 +83,44 @@ var Allowlist = []AllowlistField{
 	// is a single non-negative integer — a count, never a list of the runs it counts, which would be a
 	// second egress surface needing its own scrutiny.
 	{"runs_reported", "run_metadata", "How many runs the CLI observed this session — the coverage denominator; a count, never the runs."},
+
+	// ── eval summary + per-node attribution ──────────────────────────────────────
+	//
+	// 🔴 THIS IS A DELIBERATE WIDENING OF THE BOUNDARY. Read this before adding to it.
+	//
+	// The eval board and the scorecard render evidence that QUALIFIES a claim: how many cases a score is
+	// over, whether the gate passed, and which node the cost came from. The platform was sent the claim
+	// (a score, a total) and none of the evidence, so those surfaces could only be mounted by GUESSING —
+	// a `gate_pass` boolean the platform invented, a scorecard with per-node columns and no per-node
+	// data. Refusing to guess is why they were mounted nil. This is the other way to fix it: send the
+	// evidence, on purpose, named.
+	//
+	// Every field below is a COUNT, a VERDICT, or a QUANTITY ALREADY PERMITTED IN AGGREGATE:
+	//
+	//   - case_count is how many cases ran. Not the cases. The eval set itself never crosses, and there
+	//     is no field here it could occupy.
+	//   - gate_outcome is the verdict the CLI already printed to the developer's own terminal, and
+	//     gate_failures names the METRICS that failed — metric names are already permitted under
+	//     `scores.metric`. The thresholds are the customer's policy and do NOT cross.
+	//   - single_seed is the provisional flag. It travels WITH the score for the reason ci_low/ci_high
+	//     do (design Decision 8): a number whose caveat was left behind reads as a stronger claim than
+	//     it is, and the platform would render a one-seed run identically to a fifty-seed one.
+	//   - metrics.per_node is cost/latency/tokens attributed to a node id. Both halves are already on
+	//     this list — the quantities under `metrics.*`, the ids under `ir_structure.node_ids`. What is
+	//     new is the JOIN, which is exactly what "which node is expensive" needs and is the scorecard's
+	//     entire purpose. It was computed, carried in RunRecord, and dropped at BuildPayload with the
+	//     note "aggregate-derivable"; that was wrong in one direction that matters — an aggregate does
+	//     not tell you WHICH node.
+	//
+	// Still not permitted, and still not expressible: prompt text, case inputs or outputs, expected
+	// answers, judge prompts, gate THRESHOLDS, blob contents. A case count says how much evidence there
+	// was; it does not carry any of it.
+	{"eval.case_count", "eval", "How many eval cases the score is computed over — the board's denominator. A count, never the cases."},
+	{"eval.seed_count", "eval", "How many seeds ran. The seed list itself already crosses under run_metadata.seed; this is its length, so the board can say n= without the reader counting."},
+	{"eval.gate_outcome", "eval", "The gate verdict the CLI already printed locally: pass | fail | not-configured. A verdict, not the policy behind it."},
+	{"eval.gate_failures", "eval", "Which METRICS failed the gate (names only, already permitted under scores.metric). The thresholds are the customer's policy and do not cross."},
+	{"eval.single_seed", "eval", "Whether this was a single-seed run — the provisional caveat, travelling with the number it qualifies (design Decision 8)."},
+	{"metrics.per_node", "metrics", "Cost/latency/tokens attributed to a node id. Both halves already cross; this is the JOIN, and it is what the scorecard exists to show. No content."},
 }
 
 // allowlistKeys is the flattened set of permitted wire keys, computed once from Allowlist.

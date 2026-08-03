@@ -225,7 +225,7 @@ func TestRetriedMeteredReportYieldsOneProviderCharge(t *testing.T) {
 	if got := h.provider.ChargeCount(); got != 1 {
 		t.Errorf("the provider recorded %d charges, want exactly 1", got)
 	}
-	rows := h.ledger.Events("cus_acme", july.ID)
+	rows := testEvents(h.ledger, "cus_acme", july.ID)
 	charges := 0
 	for _, r := range rows {
 		if r.Type == TypeCharge {
@@ -290,7 +290,7 @@ func TestProviderOutageBuffersAndBillsOnce(t *testing.T) {
 	if _, err := h.svc.Charge(ctx, "cus_acme", july, KindMetered, key); !errors.Is(err, ErrProviderUnavailable) {
 		t.Fatalf("second attempt during the outage: %v", err)
 	}
-	pending := h.ledger.Pending()
+	pending := testPending(h.ledger)
 	if len(pending) != 1 {
 		t.Fatalf("buffered rows = %d, want exactly 1 (the usage is safe, the charge is deferred)", len(pending))
 	}
@@ -468,7 +468,7 @@ func describeBlob(t *testing.T, h *harness) string {
 	for k, v := range h.svc.Describe() {
 		sb.WriteString(k + "=" + v + "\n")
 	}
-	for _, ev := range h.ledger.Events("cus_acme", "") {
+	for _, ev := range testEvents(h.ledger, "cus_acme", "") {
 		sb.WriteString(ev.EventID + "|" + ev.IdempotencyKey + "|" + ev.ProviderRef + "|" +
 			ev.AmountRef + "|" + ev.CausedBy + "|" + ev.Reason + "|" + strings.Join(ev.Evidence, ",") + "\n")
 	}
@@ -496,7 +496,7 @@ func TestLedgerRefusesUnsoundRows(t *testing.T) {
 			t.Errorf("%s was accepted", name)
 		}
 	}
-	if got := len(l.Events("c", "")); got != 0 {
+	if got := len(testEvents(l, "c", "")); got != 0 {
 		t.Errorf("a rejected row was stored anyway (%d rows)", got)
 	}
 }

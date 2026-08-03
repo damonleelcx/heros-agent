@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 
+	"github.com/heros-foreal/agentd/internal/auth"
 	"github.com/heros-foreal/agentd/internal/patternclassifier"
 )
 
@@ -19,7 +20,14 @@ import (
 // PatternSource is the read model the routes serve: a classified workflow graph. An interface so the
 // API depends on no concrete store and a test can stub it.
 type PatternSource interface {
-	GraphView(workflowID string) (patternclassifier.GraphView, bool)
+	// GraphView returns a workflow's classified graph for ONE tenant.
+	//
+	// 🔴 tenantID is not decoration. This interface took only a workflow id, which is safe for a
+	// single-tenant demo and a cross-tenant read the moment a real store sits behind it: workflow ids
+	// are chosen by customers, they collide, and the caller supplies one from a URL. Mounting a
+	// database-backed source behind the old signature would have served tenant A's graph to tenant B
+	// with no code looking wrong anywhere. The scope now travels with the question.
+	GraphView(tenantID, workflowID string) (patternclassifier.GraphView, bool)
 }
 
 // MountPatternGraph registers the pattern-classifier routes. Call after New.
@@ -33,7 +41,12 @@ func (s *Server) handlePatternGraph(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "the pattern classifier is not mounted"})
 		return
 	}
-	view, ok := s.patternGraph.GraphView(r.PathValue("workflow_id"))
+	principal, ok := auth.PrincipalFrom(r.Context())
+	if !ok || principal.TenantID == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "reading a workflow graph requires an authenticated tenant"})
+		return
+	}
+	view, ok := s.patternGraph.GraphView(principal.TenantID, r.PathValue("workflow_id"))
 	if !ok {
 		// 404 is DISTINCT from a workflow that exists but carries no labels. The view's empty state
 		// depends on telling "no such workflow" apart from "workflow exists, nothing classified yet" —

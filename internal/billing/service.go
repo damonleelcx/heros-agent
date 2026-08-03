@@ -413,7 +413,14 @@ func (s *Service) charge(ctx context.Context, spec chargeSpec) (BillingEvent, er
 // It returns the rows it settled and the rows still pending. Both matter — "how much is still buffered"
 // is a health signal, and reporting only successes would let a permanently stuck row hide forever.
 func (s *Service) FlushPending(ctx context.Context) (settled []BillingEvent, stillPending []BillingEvent, err error) {
-	for _, row := range s.ledger.Pending() {
+	pending, perr := s.ledger.Pending()
+	if perr != nil {
+		// A failed read here is NOT an empty queue. Continuing would report "nothing to flush" and the
+		// buffered charges would sit unsettled with a green sweep behind them — the exact shape of a
+		// bug nobody notices until a period closes short.
+		return nil, nil, fmt.Errorf("billing: reading the pending buffer: %w", perr)
+	}
+	for _, row := range pending {
 		if !row.Type.ChargeBearing() {
 			continue
 		}
