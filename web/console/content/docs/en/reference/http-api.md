@@ -2,7 +2,7 @@
 title: HTTP API reference
 tier: reference
 summary: This tier is absent, and this page says why rather than leaving you to conclude there is no API.
-platform_version: 0.20.0
+platform_version: 0.21.0
 boundary: There is no HTTP API reference. This page documents that absence and its reason; it is not a partial reference and it does not list endpoints.
 generated: true
 order: 4

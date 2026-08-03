@@ -2,7 +2,7 @@
 title: Schema reference
 tier: reference
 summary: The JSON Schemas that ship with the platform, and what each one is the contract for.
-platform_version: 0.20.0
+platform_version: 0.21.0
 boundary: These are the schemas in the repository. A document that validates against one is well-formed; whether it is CORRECT for your workflow is not something a schema can say.
 generated: true
 order: 2

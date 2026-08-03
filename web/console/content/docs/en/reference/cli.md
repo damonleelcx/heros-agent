@@ -2,7 +2,7 @@
 title: CLI reference
 tier: reference
 summary: Every subcommand of the heros binary, its flags, its exit code, and whether it runs offline.
-platform_version: 0.20.0
+platform_version: 0.21.0
 boundary: This reference is generated from the command registry. It describes what the binary accepts; it does not describe what the platform does with a linked run.
 generated: true
 order: 1
