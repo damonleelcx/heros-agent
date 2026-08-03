@@ -58,9 +58,12 @@ repo ─▶ Discovery ─▶ Workflow IR ─▶ Config Layer ─▶ Variant Spec
 **Core principle:** *diagnosis proposes, verification decides.* No unverified LLM opinion drives an
 automated change, and multi-seed statistics guard against ranking noise.
 
-## Delivery surfaces (planned)
+## Delivery surfaces
 
-Not a desktop app — a cloud service reached through three thin surfaces:
+Not a desktop app — a cloud service reached through three thin surfaces. All three are built: the CLI
+ships as a [signed release](https://github.com/damonleelcx/heros-agent/releases/latest)
+(`internal/cli`), forge delivery is `internal/forgedelivery`, and the web console is `web/console`,
+running at **[heros-agent.space](https://heros-agent.space)**.
 
 | Surface | Role |
 |---|---|
@@ -294,7 +297,7 @@ To see it against a real repository with no provider account, point it at the he
 go run ./cmd/proof/customerconsole -repo /path/to/hermes-agent      # serves the platform API on :4321
 ```
 
-The console's own checks run with `npm test` (214 cases) and `npm run build`, which runs the token,
+The console's own checks run with `npm test` (559 cases) and `npm run build`, which runs the token,
 string, markup, claim and bundle scans around `next build`.
 
 ## Deploying (P19)
@@ -322,8 +325,18 @@ plaintext secret or unpinned image slips in. The full runbook — capacity range
 data-plane split, and the single point of failure named beside its backup precondition — is
 [`deploy/README.md`](deploy/README.md). A **live end-to-end proof** of the pipeline run against the
 real `nousresearch/hermes-agent` repo — 40 discovered nodes, honest codemod refusals, gate-enforced
-eval, both consoles — is captured under `docs/release/p19-e2e-hermes/`, which lands with the
-E2E-proof PR.
+eval, both consoles — is captured under `docs/release/p19-e2e-hermes/` on
+[PR #31](https://github.com/damonleelcx/heros-agent/pull/31), which is **still open**: that directory
+is not on `main`, so clone the branch to read it rather than looking for the path here.
+
+### It is deployed
+
+The platform runs at **[heros-agent.space](https://heros-agent.space)** — the reading surface is
+[`/docs`](https://heros-agent.space/docs), whose install page is generated from the published release,
+so the version, commands and checksums on it are the ones the release key signed. The substrate is the
+`prod` overlay above: k3s on a single VM, every workload from the digest-pinned set in
+[`deploy/images.env`](deploy/images.env), each reporting the commit it was built from as
+`HEROS_VERSION`.
 
 ## Contributing
 
