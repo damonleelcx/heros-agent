@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/heros-foreal/agentd/internal/adminlaunch"
 	"github.com/heros-foreal/agentd/internal/api"
 	"github.com/heros-foreal/agentd/internal/auth"
 	"github.com/heros-foreal/agentd/internal/config"
@@ -37,6 +38,10 @@ type Server struct {
 	// PlatformDB is the Postgres the platform schema lives in, or nil when the deployment declares none.
 	PlatformDB *sql.DB
 	HTTPServer *http.Server
+	// AdminServer is the OPERATOR admin API, on its own listener, or nil when this deployment declares no
+	// federated operator console. Separate from HTTPServer because it is a separate origin's server —
+	// P8 Decision 11, and see internal/adminlaunch for why that has to hold on the server side too.
+	AdminServer *http.Server
 }
 
 // StartAgentd opens the ledger and serves the HTTP API in a background
@@ -200,6 +205,50 @@ func StartAgentd(ctx context.Context, cfg config.Config) (*Server, error) {
 		handler.AddComponentProbe(api.NewHTTPComponentProbe("secrets_source", secretsHealth))
 		log.Printf("readiness aggregates the secrets_source reachability at %s", secretsHealth)
 	}
+	// The OPERATOR console's admin API (P8/P22).
+	//
+	// Built only when this deployment declares a federated operator IdP, and served on its OWN listener
+	// — never as a route group on the handler above. That is P8 Decision 11: the isolation between a
+	// tenant session and a cross-tenant capability is enforced by the browser ORIGIN boundary, which
+	// only holds if the server side is separate too.
+	//
+	// Until this call existed, `api.NewAdminAPI` had no caller outside `cmd/proof/*`, so agentd served no
+	// `/admin/api/*` at all while every shipped manifest pointed the operator BFF at it, and `/readyz`
+	// reported `admin_idp` absent no matter how the deployment was configured. Both were silent.
+	//
+	// A federated deployment that cannot assemble this FAILS THE BOOT rather than starting without it:
+	// the alternative is an operator console that renders its sign-in page correctly and refuses
+	// everybody, which is the one outcome that reads as "my account is broken" instead of "this
+	// deployment is misconfigured".
+	var adminServer *http.Server
+	if adminlaunch.Federated() {
+		assembly, aErr := adminlaunch.Build(ctx, secrets, platformDB, reporter)
+		if aErr != nil {
+			if platformDB != nil {
+				_ = platformDB.Close()
+			}
+			_ = database.Close()
+			return nil, fmt.Errorf("operator console: %w", aErr)
+		}
+		// This is what makes `/readyz` able to report `admin_idp` at all. It names the DOOR — kind,
+		// issuer, test mode — and never a key, a secret id or an assertion.
+		handler.SetAdminIdentity(assembly.Identity)
+		srv, sErr := assembly.Serve()
+		if sErr != nil {
+			if platformDB != nil {
+				_ = platformDB.Close()
+			}
+			_ = database.Close()
+			return nil, fmt.Errorf("operator console: %w", sErr)
+		}
+		adminServer = srv
+	} else {
+		// Silent by design on a deployment that ships no operator console: `admin_idp` is then absent on
+		// /readyz, which is TRUE rather than degraded, and a warning on every correct install teaches an
+		// operator to ignore warnings.
+		log.Printf("operator console: no federated admin IdP declared (ADMIN_IDENTITY_MODE), so no admin API is served")
+	}
+
 	httpServer := &http.Server{
 		Handler:           handler.Handler,
 		ReadHeaderTimeout: 10 * time.Second,
@@ -221,7 +270,7 @@ func StartAgentd(ctx context.Context, cfg config.Config) (*Server, error) {
 		}
 	}()
 
-	return &Server{Config: cfg, DB: database, PlatformDB: platformDB, HTTPServer: httpServer}, nil
+	return &Server{Config: cfg, DB: database, PlatformDB: platformDB, HTTPServer: httpServer, AdminServer: adminServer}, nil
 }
 
 // Shutdown stops the HTTP server and closes both stores.
@@ -235,6 +284,14 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	}
 	if s.HTTPServer != nil {
 		if err := s.HTTPServer.Shutdown(ctx); err != nil {
+			return err
+		}
+	}
+	// Shut the operator surface down too, and do it even if the customer surface errored above — the
+	// early return there is pre-existing, but an admin listener left running after a failed shutdown is a
+	// cross-tenant capability still answering on a process everything else has abandoned.
+	if s.AdminServer != nil {
+		if err := s.AdminServer.Shutdown(ctx); err != nil {
 			return err
 		}
 	}

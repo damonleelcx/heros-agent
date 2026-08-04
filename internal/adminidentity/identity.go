@@ -92,6 +92,9 @@ type PrincipalStore struct {
 	// by admin_id on every request.
 	byID      map[string]Principal
 	bySubject map[string]string
+	// writer is the optional durable backing (durable.go). Nil means this directory lives only as long
+	// as the process — correct for a test or a demo, refused by `adminlaunch` for a federated one.
+	writer PrincipalWriter
 }
 
 // NewPrincipalStore builds an empty directory.
@@ -115,6 +118,13 @@ func (s *PrincipalStore) Put(p Principal) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Durable first: if it did not persist, it did not happen. The other order produces a principal who
+	// exists until the next restart, which is the failure a durable directory exists to remove.
+	if s.writer != nil {
+		if err := s.writer.PutPrincipal(p); err != nil {
+			return fmt.Errorf("adminidentity: persist admin principal %s: %w", p.AdminID, err)
+		}
+	}
 	if prior, ok := s.byID[p.AdminID]; ok && prior.SSOSubject != p.SSOSubject {
 		delete(s.bySubject, prior.SSOSubject)
 	}
@@ -156,6 +166,13 @@ func (s *PrincipalStore) Disable(adminID string) error {
 	p, ok := s.byID[adminID]
 	if !ok {
 		return ErrUnknownPrincipal
+	}
+	// Durable first, for the direction that matters most on this method: an offboarding that persisted
+	// nowhere is an operator who is disabled until the pod restarts and then quietly is not.
+	if s.writer != nil {
+		if err := s.writer.DisablePrincipal(adminID); err != nil {
+			return fmt.Errorf("adminidentity: persist disable of admin principal %s: %w", adminID, err)
+		}
 	}
 	p.Status = StatusDisabled
 	s.byID[adminID] = p

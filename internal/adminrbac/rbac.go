@@ -446,6 +446,9 @@ type GrantStore struct {
 	rows []RoleGrant
 	now  func() time.Time
 	seq  int
+	// writer is the optional durable backing (durable.go). Nil means the log lives only as long as the
+	// process, which on a folded log means every operator holds no role after a restart.
+	writer GrantWriter
 }
 
 // NewGrantStore builds an empty log.
@@ -466,7 +469,7 @@ func (s *GrantStore) Seed(adminID string, role Role, reason string) (RoleGrant, 
 	if !role.Valid() {
 		return RoleGrant{}, fmt.Errorf("%w: %q", ErrUnknownRole, role)
 	}
-	return s.append(adminID, role, GrantActionGrant, "bootstrap", reason, ""), nil
+	return s.append(adminID, role, GrantActionGrant, "bootstrap", reason, "")
 }
 
 // Live returns the roles an admin holds right now, folded from the append-only log.
@@ -498,7 +501,7 @@ func (s *GrantStore) Rows() []RoleGrant {
 	return out
 }
 
-func (s *GrantStore) append(adminID string, role Role, action GrantAction, by, reason, revokes string) RoleGrant {
+func (s *GrantStore) append(adminID string, role Role, action GrantAction, by, reason, revokes string) (RoleGrant, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.seq++
@@ -511,8 +514,19 @@ func (s *GrantStore) append(adminID string, role Role, action GrantAction, by, r
 	} else {
 		row.GrantedAt = s.now()
 	}
+	// Durable first: a revoke that persisted nowhere is an operator whose authority comes back at the
+	// next restart, and nobody re-reads a revoke they already performed.
+	//
+	// The counter is NOT rolled back on failure. Reusing a burnt id would let a later row take the id an
+	// earlier failed attempt may already have written, and the log is append-only precisely so no id ever
+	// means two things. A gap in the sequence costs nothing; a reused id costs the audit trail.
+	if s.writer != nil {
+		if err := s.writer.AppendGrant(row); err != nil {
+			return RoleGrant{}, fmt.Errorf("adminrbac: persist %s of %s to %s: %w", action, role, adminID, err)
+		}
+	}
 	s.rows = append(s.rows, row)
-	return row
+	return row, nil
 }
 
 // liveGrantID finds the grant row a revoke withdraws, so the pair is linked rather than inferred.
@@ -707,5 +721,9 @@ func (g *Gate) mutateRole(actorAdminID, subjectAdminID string, role Role, reason
 	if action == GrantActionRevoke {
 		revokes = g.grants.liveGrantID(subjectAdminID, role)
 	}
-	return g.grants.append(subjectAdminID, role, action, actorAdminID, reason, revokes), nil
+	// The audit entry above is already committed, so a failure here leaves a recorded role change that
+	// did not take effect. That is the correct direction and matches Decision 3's write-ahead: the log
+	// over-reports an attempt rather than under-reporting an applied change, and the caller is told the
+	// change did not apply. The opposite order would let a role change take effect unrecorded.
+	return g.grants.append(subjectAdminID, role, action, actorAdminID, reason, revokes)
 }

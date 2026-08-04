@@ -76,6 +76,10 @@ spec:
           args: []
           ports:
             - { name: http, containerPort: 4321 }
+            # The OPERATOR admin API, when this deployment federates one. Named `admin-api` rather than
+            # folded into `http` because they are different origins with different callers, and only one
+            # of them may ever appear behind an Ingress.
+            - { name: admin-api, containerPort: 4311 }
           env:
             - { name: HEROS_LISTEN_ADDR, value: "0.0.0.0:4321" }
             - { name: HEROS_DATA_DIR, value: "/var/lib/heros" }
@@ -152,11 +156,31 @@ spec:
             # an empty slot is one `--set` from being filled, in a file a customer edits without reading,
             # and those integrations belong to the platform's own hosted deployment, not to a customer's.
             - { name: HEROS_EDITION, value: "managed" }
-            # Operator identity (P22), so /readyz can report `admin_idp`.
-            - { name: ADMIN_IDENTITY_MODE, value: "configured" }
+            # ── Operator identity (P8/P22) ────────────────────────────────────────────────────────
+            #
+            # 🔴 `configured` is NOT a value this side accepts, and used to be the default here. It is the
+            # CONSOLE's vocabulary (web/admin-console/src/lib/identity.ts); the platform's selector is
+            # `adminidentity.ProviderFromEnv`, whose values are test | oidc | saml. The two selectors
+            # shared a name and had disjoint value sets, so a manifest could look configured on both sides
+            # and federate on neither — and nothing failed, because nothing in agentd read this at all
+            # until internal/adminlaunch. Empty here: a cluster that federates states so in its overlay,
+            # and one that does not serves no admin API, which /readyz reports as `admin_idp` absent.
+            - { name: ADMIN_IDENTITY_MODE, value: "" }
             - { name: ADMIN_IDP_ISSUER, value: "" }
+            - { name: ADMIN_IDP_CLIENT_ID, value: "" }
+            # A JSON array of the EXACT callback URIs, matched character for character. Three values must
+            # agree or sign-in fails at a different step each time: this one, the console's
+            # ADMIN_IDP_CALLBACK_URL, and the app's registered redirect URI at the IdP.
+            - { name: ADMIN_IDP_REDIRECTS, value: "" }
+            # Both are REQUIRED once federated, and adminlaunch refuses the boot without them. Left empty
+            # they do not disable WebAuthn — TOTP keeps working, so sign-in looks fine, while the origin
+            # allowlist holds one empty string that matches nothing and every security key silently fails.
             - { name: ADMIN_CONSOLE_ORIGIN, value: "" }
             - { name: ADMIN_WEBAUTHN_RP_ID, value: "" }
+            # The admin API's OWN listener (P8 Decision 11): a separate origin needs a separate server,
+            # not a route group on the customer mux. 🔴 This port is deliberately absent from every
+            # Ingress — its only caller is the admin BFF, inside the cluster, holding the credential.
+            - { name: ADMIN_API_LISTEN_ADDR, value: "0.0.0.0:4311" }
             # Every component the deployment ships, aggregated into /readyz by health URL. Postgres is
             # NOT in this list — it is probed directly, by connection.
             # ── The two PUBLISHED CATALOGS ────────────────────────────────────────────────────────
@@ -272,6 +296,10 @@ spec:
     app.kubernetes.io/name: agentd
   ports:
     - { name: http, port: 4321, targetPort: http }
+    # The operator admin API. In-cluster only: no Ingress references this port, and the credential gate
+    # in internal/api/adminconsole.go refuses anything that did not come through the admin BFF anyway —
+    # two independent reasons, because "we did not add an Ingress rule" is one edit away from being false.
+    - { name: admin-api, port: 4311, targetPort: admin-api }
 ---
 # 🔴 minAvailable: 0, and the zero is the honest value, not an oversight.
 #

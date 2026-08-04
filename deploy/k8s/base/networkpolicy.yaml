@@ -58,6 +58,16 @@ spec:
         - podSelector: { matchLabels: { app.kubernetes.io/name: admin-console } }
       ports:
         - { protocol: TCP, port: 4321 }
+    # The OPERATOR admin API (4311), reachable ONLY from the admin BFF.
+    #
+    # 🔴 A SEPARATE rule, not another port on the one above. Every `from` in a rule applies to every
+    # port in it, so appending 4311 there would also admit the CUSTOMER console to the cross-tenant
+    # operator surface — the exact isolation P8 Decision 11 gives the operator console its own origin
+    # to enforce, undone by a one-line convenience.
+    - from:
+        - podSelector: { matchLabels: { app.kubernetes.io/name: admin-console } }
+      ports:
+        - { protocol: TCP, port: 4311 }
   egress:
     # 🔴 THE TWO CONSOLES' HEALTH ENDPOINTS. This rule's absence was not a tightening — it made agentd
     # permanently NotReady on any cluster that actually enforces NetworkPolicy, and therefore took the
@@ -139,9 +149,12 @@ spec:
   ingress:
     - ports: [{ protocol: TCP, port: 4310 }]
   egress:
+    # 🔴 4311, the operator admin API — NOT 4321. This said 4321, which is the customer API and serves
+    # no `/admin/api/*` route at all, so even once the admin surface existed the BFF could not reach it:
+    # the policy permitted exactly the port that 404s and denied the one that answers.
     - to:
         - podSelector: { matchLabels: { app.kubernetes.io/name: agentd } }
-      ports: [{ protocol: TCP, port: 4321 }]
+      ports: [{ protocol: TCP, port: 4311 }]
 ---
 # 6) Stores: ingress ONLY from agentd (and, for postgres, from the backup job). No egress rule beyond
 #    the shared DNS — a store has no business reaching out. The data plane thus keeps serving

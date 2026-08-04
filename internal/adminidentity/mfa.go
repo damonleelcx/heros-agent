@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -128,6 +129,10 @@ type FactorStore struct {
 	mu sync.RWMutex
 	// byAdmin holds every factor a principal has enrolled, newest last.
 	byAdmin map[string][]EnrolledFactor
+	// writer is the optional durable backing (durable.go). Nil means enrolments last only as long as the
+	// process — which on a federated deployment locks the operator out permanently at the first restart,
+	// so `adminlaunch` refuses that combination rather than allowing it to be discovered.
+	writer FactorWriter
 }
 
 // NewFactorStore builds an empty enrollment directory.
@@ -155,6 +160,13 @@ func (s *FactorStore) Enroll(f EnrolledFactor) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Durable first: an enrolment that persisted nowhere is a factor that works until the pod restarts
+	// and then locks its owner out of the surface that can halt the fleet, with nothing logged.
+	if s.writer != nil {
+		if err := s.writer.EnrollFactor(f); err != nil {
+			return fmt.Errorf("adminidentity: persist enrolled factor for %s: %w", f.AdminID, err)
+		}
+	}
 	s.byAdmin[f.AdminID] = append(s.byAdmin[f.AdminID], f)
 	return nil
 }
@@ -175,6 +187,22 @@ func (s *FactorStore) recordSignCount(adminID string, credentialID []byte, count
 	for i, f := range s.byAdmin[adminID] {
 		if f.Kind == FactorWebAuthn && subtle.ConstantTimeCompare(f.CredentialID, credentialID) == 1 {
 			s.byAdmin[adminID][i].SignCount = count
+			// Persisted, but a failure does NOT undo the in-memory advance and does not fail the login.
+			//
+			// This is the one place in this file where memory wins, and the asymmetry is deliberate. The
+			// counter is clone-detection EVIDENCE, recorded after an assertion has already verified; the
+			// two other write paths decide whether someone may sign in at all. Refusing a verified login
+			// because the counter would not persist would turn a database blip into a lockout of the
+			// surface an operator reaches for during a database blip. A counter that fails to persist
+			// degrades clone detection back to what it was before this table existed, which is the
+			// correct amount of damage for the failure that occurred.
+			if s.writer != nil {
+				if err := s.writer.RecordSignCount(adminID, credentialID, count); err != nil {
+					log.Printf("adminidentity: WARNING: the WebAuthn clone-detection counter for %s did not "+
+						"persist (%v) — the login is unaffected and detection is degraded until the next "+
+						"successful write", adminID, err)
+				}
+			}
 			return
 		}
 	}

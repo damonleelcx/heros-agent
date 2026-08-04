@@ -206,12 +206,20 @@ func TestReservedSecretNamesCoverBilling(t *testing.T) {
 				"credential fails at the first charge rather than at boot", name)
 		}
 	}
-	// And the reverse: a reserved name nothing consumes is a secret an operator was told to provision
-	// for no reason.
+	// And the reverse: a reserved name nothing consumes is a secret an operator was told to provision for
+	// no reason.
+	//
+	// Scoped to the `billing_` NAMESPACE rather than the whole reserved list. It used to check the whole
+	// list, which was correct only while billing was the sole consumer — P22's operator-identity
+	// credentials are reserved for the same reason and consumed by `internal/adminidentity`, and a fence
+	// that failed on them would be asserting that billing owns every platform secret. Each namespace's
+	// own package fences its own names (adminidentity has the matching test); that no reserved name falls
+	// OUTSIDE every namespace is fenced in providergateway, which is the only package that can see the
+	// whole list.
 	consumed := map[string]bool{SecretBillingAPIKey: true, SecretBillingWebhookSigning: true}
 	for n := range reserved {
-		if !consumed[n] {
-			t.Errorf("providergateway reserves %q but no billing constant resolves it", n)
+		if strings.HasPrefix(n, "billing_") && !consumed[n] {
+			t.Errorf("providergateway reserves %q in billing's namespace but no billing constant resolves it", n)
 		}
 	}
 }

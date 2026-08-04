@@ -108,10 +108,26 @@ services:
       HEROS_VERSION: ${HEROS_VERSION:-}
       # ── Operator identity (P22) ──────────────────────────────────────────────────────────────────
       # Present so `/readyz` can report `admin_idp` on a deployment that ships the operator console.
-      ADMIN_IDENTITY_MODE: ${ADMIN_IDENTITY_MODE:-configured}
+      # 🔴 `test` | `oidc` | `saml` — NOT `configured`, which used to be the default here and is not a
+      # value this side accepts. `configured` is the CONSOLE's vocabulary; the platform's selector is
+      # adminidentity.ProviderFromEnv. The two shared a name with disjoint value sets, so a deployment
+      # could look configured on both sides and federate on neither. Empty ⇒ no admin API is served,
+      # which /readyz reports honestly as `admin_idp` absent.
+      ADMIN_IDENTITY_MODE: ${ADMIN_IDENTITY_MODE:-}
       ADMIN_IDP_ISSUER: ${ADMIN_IDP_ISSUER:-}
+      ADMIN_IDP_CLIENT_ID: ${ADMIN_IDP_CLIENT_ID:-}
+      # A JSON array of the EXACT callback URIs. Must agree character for character with the console's
+      # ADMIN_IDP_CALLBACK_URL and with the redirect URI registered at the IdP.
+      ADMIN_IDP_REDIRECTS: ${ADMIN_IDP_REDIRECTS:-}
+      # Both REQUIRED once federated — adminlaunch refuses the boot without them. Left empty they do not
+      # disable WebAuthn: TOTP keeps working, so sign-in looks fine, while the origin allowlist holds one
+      # empty string that matches nothing and every security key silently fails.
       ADMIN_CONSOLE_ORIGIN: ${ADMIN_CONSOLE_ORIGIN:-}
       ADMIN_WEBAUTHN_RP_ID: ${ADMIN_WEBAUTHN_RP_ID:-}
+      # The operator admin API's OWN listener (P8 Decision 11) — a separate origin needs a separate
+      # server, not a route group on the customer mux. 🔴 Not published in `ports:` below: its only
+      # caller is the admin BFF on this compose network.
+      ADMIN_API_LISTEN_ADDR: ${ADMIN_API_LISTEN_ADDR:-0.0.0.0:4311}
       # Every component the deployment ships, aggregated into /readyz by health URL. A component with no
       # URL is honestly absent; a component WITH a URL that is unreachable turns /readyz not-ready and
       # NAMES itself. Postgres is NOT in this list — it is probed directly, by connection.
