@@ -129,7 +129,7 @@ spec:
             # The air-gapped overlay sets HEROS_RELEASE_OFFLINE — a download page pointing at GitHub
             # from a network with no egress shows an operator a dead link and no reason.
             - { name: HEROS_VERSION, value: "" }
-            - { name: HEROS_EDITION, value: "managed" }
+            - { name: HEROS_EDITION, value: "kubernetes" }
             - { name: HEROS_SLUG_MANIFEST, value: "" }
             - { name: HEROS_RELEASE_OFFLINE, value: "" }
           # Probes read the console's OWN health endpoint (never a rendered page).

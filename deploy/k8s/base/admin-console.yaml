@@ -63,7 +63,7 @@ spec:
             # Build identity for the release surface. The P24 reporting switches are deliberately NOT
             # here (P24 task 7.4) — see the note in agentd.yaml.
             - { name: HEROS_VERSION, value: "" }
-            - { name: HEROS_EDITION, value: "managed" }
+            - { name: HEROS_EDITION, value: "kubernetes" }
           livenessProbe:
             httpGet: { path: /api/health, port: http }
             initialDelaySeconds: 15

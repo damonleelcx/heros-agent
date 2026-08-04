@@ -516,10 +516,13 @@ test("the allowlist carries exactly what has been installed, and the classes tha
   }
   assert.deepEqual(
     byCategory,
-    { error_diagnostics: 1, product_analytics: 1, session_replay: 2 },
+    { error_diagnostics: 1, product_analytics: 2, session_replay: 3 },
     `the allowlist carries ${JSON.stringify(byCategory)}. Waves 24c and 24e installed one error-reporting ` +
-      `origin, one analytics TAG host, and Clarity's tag host plus its wildcard ingest. A fifth entry ` +
-      `means an origin arrived without a wave and without a measurement behind it.`,
+      `origin, one analytics TAG host, and Clarity's tag host plus its wildcard ingest; the live-wiring ` +
+      `fix of 2026-08-04 added the two EGRESS rows those waves were missing — GA4's measurement ` +
+      `endpoint and Clarity's img-src beacon, each of which was being refused while the integration ` +
+      `above it looked installed. A seventh entry means an origin arrived without a measurement ` +
+      `behind it.`,
   );
   assert.equal(SURFACE_CLASS_RULES.tenant.thirdPartyOrigins, "none");
   assert.equal(SURFACE_CLASS_RULES.operator.thirdPartyOrigins, "none");

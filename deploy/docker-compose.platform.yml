@@ -104,7 +104,7 @@ services:
       # `absent`, and that is the correct state on a customer install and on an air-gapped network. SET
       # AND UNUSABLE ⇒ a hard boot failure, deliberately: that is a deployment somebody meant to configure
       # and got wrong, and the alternative is a process that looks healthy and reports nothing for a month.
-      HEROS_EDITION: ${HEROS_EDITION:-open-core}
+      HEROS_EDITION: ${HEROS_EDITION:-compose}
       HEROS_VERSION: ${HEROS_VERSION:-}
       # ── Operator identity (P22) ──────────────────────────────────────────────────────────────────
       # Present so `/readyz` can report `admin_idp` on a deployment that ships the operator console.
@@ -358,7 +358,7 @@ services:
       # download page points at GitHub from a network with no egress shows an operator a dead link and
       # no reason. Set it there.
       HEROS_VERSION: ${HEROS_VERSION:-}
-      HEROS_EDITION: ${HEROS_EDITION:-open-core}
+      HEROS_EDITION: ${HEROS_EDITION:-compose}
       HEROS_SLUG_MANIFEST: ${HEROS_SLUG_MANIFEST:-}
       HEROS_RELEASE_OFFLINE: ${HEROS_RELEASE_OFFLINE:-}
       NODE_ENV: production

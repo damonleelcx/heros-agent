@@ -894,7 +894,7 @@ are ☁️ **AWS's**, from your own account.
 | `OPENAI_API_KEY` | 🌐 🔐 optional | `heros-platform/openai-api-key` | Read **only** when the source is `env` (the airgapped overlay). Declared here so switching the source is a one-line change, not a debugging session. |
 | `ANTHROPIC_API_KEY` | 🌐 🔐 optional | `heros-platform/anthropic-api-key` | As above. |
 | `HEROS_VERSION` | literal | ✏️ your release tag | Build identity on reports and the release surface. |
-| `HEROS_EDITION` | literal | `managed` | `open-core` \| `managed` \| `enterprise`. A **name**, never a price or a plan tier. |
+| `HEROS_EDITION` | literal | `kubernetes` | 🔴 A **deployment SHAPE**, not a commercial tier. Closed set, enforced in `internal/erroreport`: `hosted` \| `compose` \| `kubernetes` \| `airgapped` \| `dev`. Anything else — including the `open-core`/`managed`/`enterprise` names this table used to carry — logs `error_reporting.edition.unrecognised` and reports as `unknown`, which makes the one dimension you group errors by useless. `kubernetes` is right for this runbook; `hosted` is reserved for the platform's own deployment, which is configured out of band (§A.4). |
 | `QDRANT_API_KEY` | 🔑 🔐 optional | `heros-platform/qdrant-api-key` | Unused today — the vector store is *provisioned ahead of use* (§1b). |
 | `NEO4J_PASSWORD` | 🔑 🔐 optional | `heros-platform/neo4j-password` | Unused today — graph store, same. |
 | `HEROS_INBOX_SIGNING_KEY` | 🔑 🔐 optional | `heros-platform/inbox-signing-key` | Inbox signature verification. Unset ⇒ no inbox on this deployment. |
@@ -944,7 +944,7 @@ report degraded-not-available when it is down.
 | `CONSOLE_CONSENT_GATE` | literal | ✏️ per your legal posture | P23 consent gating. |
 | `HEROS_CONTENT_ROOT` | literal | *(empty — in-image default)* | The published legal/docs corpus root. The corpus ships **in the image** (ADR-011). |
 | `HEROS_VERSION` | literal | ✏️ your release tag | |
-| `HEROS_EDITION` | literal | `managed` | |
+| `HEROS_EDITION` | literal | `kubernetes` | Deployment shape, closed set — see §A.2. |
 | `HEROS_SLUG_MANIFEST` | literal | *(empty)* | P20 install/download surface. |
 | `HEROS_RELEASE_OFFLINE` | literal | *(empty on AWS)* | Set only in the airgapped overlay — a download page pointing at GitHub from a network with no egress shows a dead link and no reason. |
 
@@ -958,7 +958,7 @@ report degraded-not-available when it is down.
 | `ADMIN_PLATFORM_CREDENTIAL` | 🔑 🔐 required | `heros-admin-console/platform-credential` | **Distinct** from the customer BFF's, and must appear in `config-json` with role `admin`. Neither console can act with the other's credential. |
 | `ADMIN_IDP_CALLBACK_URL` | literal | ✏️ `https://admin.heros-agent.space/auth/callback` | Must be on the **operator** origin. Pointing it at the customer origin lands an operator's assertion in the customer console's cookie jar. |
 | `HEROS_VERSION` | literal | ✏️ your release tag | |
-| `HEROS_EDITION` | literal | `managed` | |
+| `HEROS_EDITION` | literal | `kubernetes` | Deployment shape, closed set — see §A.2. |
 
 ### A.4 Deliberately absent, and why
 
