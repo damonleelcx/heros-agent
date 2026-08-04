@@ -203,20 +203,21 @@ func buildSources(pg *sql.DB, secretsSrc providergateway.Secrets, now func() tim
 	// is recorded in capabilities.go for the customer side; the same call is required here for the same
 	// reason.
 	catalog := strings.TrimSpace(os.Getenv("PLAN_CATALOG_PATH"))
-	switch {
-	case catalog == "":
+	//
+	// Three distinct reasons, never collapsed into "no catalog": unset is a deployment-wide fact, an
+	// unreadable file is a mount or permission problem, and one that does not parse is a content bug.
+	// They send an operator to three different places, and `CatalogWhy` is what the boot log quotes.
+	if catalog == "" {
 		src.CatalogWhy = "PLAN_CATALOG_PATH is unset on this deployment, so no plan configuration is published"
-	default:
-		if _, statErr := os.Stat(catalog); statErr != nil {
-			src.CatalogWhy = fmt.Sprintf("the published plan catalog %s cannot be read (%v)", catalog, statErr)
-			break
-		}
+	} else if _, statErr := os.Stat(catalog); statErr != nil {
+		src.CatalogWhy = fmt.Sprintf("the published plan catalog %s cannot be read (%v)", catalog, statErr)
+	} else {
 		plans := plancfg.NewResolver(plancfg.NewFileSource(catalog), nil)
 		if _, rerr := plans.Reload("adminlaunch"); rerr != nil {
 			src.CatalogWhy = fmt.Sprintf("the published plan catalog %s does not parse (%v)", catalog, rerr)
-			break
+		} else {
+			src.Plans = plans
 		}
-		src.Plans = plans
 	}
 
 	// The billing SERVICE, for the oversight read model.
