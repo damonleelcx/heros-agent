@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/heros-foreal/agentd/internal/account"
 )
 
 // entitlementsync.go is P21 section 5: what a customer can do follows what they pay for — in BOTH
@@ -117,6 +119,27 @@ func (s *Service) syncEntitlement(p WebhookPayload) (planSyncOutcome, error) {
 		// not an error: Stripe sends events for objects the platform did not create, and guessing which
 		// account they belong to would be worse than doing nothing.
 		return planSyncOutcome{}, nil
+	}
+	// 🔴 …and NEITHER IS A CUSTOMER ID THAT NAMES NO ACCOUNT HERE. The check above only caught the case
+	// where nothing named a customer at all; an id that IS present and resolves to no account is the
+	// same situation — "the platform could not attribute this event to one of its accounts" — and it
+	// arrived by a different route: `platform_customer_id` in the provider's metadata, which
+	// decodeWebhook trusts ahead of the handle lookup precisely because the platform stamped it.
+	//
+	// It happens for real: an account provisioned on a DIFFERENT deployment sharing one Stripe account,
+	// an object created by hand in the dashboard, a tenant deleted here but not there. Every one of them
+	// used to end the same way — `applyPlanChange` calls `accounts.Get`, gets ErrNotFound, the whole
+	// delivery fails, the claim is released, and Stripe retries an event that can NEVER succeed. For
+	// days, on an endpoint an operator reads as an outage.
+	//
+	// ⚠️ ONLY ErrNotFound. A store that is DOWN must still fail the delivery so the provider retries —
+	// that retry is the recovery. Collapsing the two would silently drop entitlement changes for real
+	// paying customers during a database blip, which is the opposite failure and a far worse one.
+	if _, err := s.accounts.Get(p.CustomerID); err != nil {
+		if errors.Is(err, account.ErrNotFound) {
+			return planSyncOutcome{}, nil
+		}
+		return planSyncOutcome{}, fmt.Errorf("billing: entitlement sync cannot read account %q: %w", p.CustomerID, err)
 	}
 
 	switch p.Type {
