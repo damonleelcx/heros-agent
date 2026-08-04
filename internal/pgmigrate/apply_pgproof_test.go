@@ -165,7 +165,11 @@ func TestTheSchemaCarriesWhatTheStoresQuery(t *testing.T) {
 		// reviewer to open a pull request on faith — the whole claim a proposal makes is "change THIS
 		// call site".
 		"proposal": {"proposal_id", "diagnosis_id", "operator", "base_variant_id", "candidate_config_hash",
-			"status", "tenant_id", "workflow_id", "node_id", "pattern", "rationale"},
+			"status", "tenant_id", "workflow_id", "node_id", "pattern", "rationale",
+			// 0031's spec (a proposal IS a candidate Variant Spec — without it the codemod has nothing
+			// to apply) and 0032's refusal, which is what tells a DECLINED change apart from one nobody
+			// has compiled yet: both read `unbuilt` in build_status.
+			"spec_blob_hash", "refusal_reason", "refusal_dimension"},
 		// The two count columns 0029 adds. Their absence is what would make a reported verdict — which
 		// carries counts and no case ids — read as having fixed nothing.
 		"verdict": {"proposal_id", "metric", "delta", "ci_low", "ci_high", "gate_result",

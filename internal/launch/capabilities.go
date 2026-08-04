@@ -23,6 +23,7 @@ import (
 	"github.com/heros-foreal/agentd/internal/forgedelivery"
 	"github.com/heros-foreal/agentd/internal/hostdiscovery"
 	"github.com/heros-foreal/agentd/internal/hostedboard"
+	"github.com/heros-foreal/agentd/internal/hostedcompile"
 	"github.com/heros-foreal/agentd/internal/hostedproposals"
 	"github.com/heros-foreal/agentd/internal/hostedscorecard"
 	"github.com/heros-foreal/agentd/internal/legal"
@@ -90,6 +91,7 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 	mountedProposalGen := false
 	mountedProposals := false
 	mountedForgeDelivery := false
+	mountedProposalCompile := false
 	// Assembled inside the database block below; nil when this deployment cannot serve billing.
 	var billingView *billingview.Source
 	// The server-side entitlement gate, assembled with billing because both need the plan catalog. P12
@@ -262,7 +264,7 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 		// CI, and read exactly why it stops there — and it is emphatically better than the 503 it
 		// replaces, which said the capability was not installed when the truth is that it is installed
 		// and bounded.
-		h.MountProposals(hostedproposals.NewSource(verdictStore))
+		h.MountProposals(hostedproposals.NewSource(verdictStore, blobs))
 		served("p55_proposals (recommendation surface over reported verdicts; no diff, so open-PR refuses)")
 		mountedProposals = true
 
@@ -292,7 +294,7 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 			}
 			h.MountForgeDelivery(forgedelivery.NewService(
 				deliverer, routeStore,
-				hostedproposals.NewPending(verdictStore, originOf(consoleHealthURL)),
+				hostedproposals.NewPending(verdictStore, blobs, originOf(consoleHealthURL)),
 				originOf(consoleHealthURL),
 			))
 			served("p12_forge_delivery (routes, conditions and history; deliveries withheld as `no_diff` " +
@@ -362,6 +364,25 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 		served("p5_graph_editor (IR re-derived from the pushed snapshot; needs source, not just a graph)")
 		mountedGraphEditor = true
 
+		// The CODEMOD. It turns a stored proposal into the reviewable diff ADR-001 makes the product's
+		// output, using the retained snapshot, the re-derived IR and the same registries every other
+		// resolve goes through.
+		//
+		// ⚠️ It compiles and does NOT build: this image is distroless with no toolchain, so
+		// hostedcompile's gate parses Go in-process and reports everything else — and every non-Go
+		// language — as unbuilt with the reason. That keeps delivery gated where ADR-001 puts it. Giving
+		// a deployment a real build gate means running the customer's build, which belongs inside
+		// internal/sandbox in an image that carries the toolchain; it is not a line to change here.
+		h.MountProposalCompile(&hostedcompile.Compiler{
+			Runner:     runner,
+			Store:      verdictStore,
+			Blobs:      blobs,
+			Registries: reg,
+		})
+		served("p55_proposal_compile (AST codemod over the pushed snapshot; parsed, not built — no " +
+			"toolchain in this image)")
+		mountedProposalCompile = true
+
 		// The platform-side proposal GENERATOR.
 		//
 		// It is mounted only when a model catalog is published, and that gate is the whole story of what
@@ -386,6 +407,9 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 				Graphs: graphStore,
 				Menus:  menuSource{src: mcSrc, reg: reg},
 				Sink:   verdictStore,
+				// The candidate spec goes to the SAME blob store the diff and the prompt registry use.
+				// A proposal recorded without it can never be compiled (migration 0031).
+				Blobs: blobs,
 			}
 			h.MountProposalGeneration(gen)
 			served("p55_proposal_generation (cost-bottleneck operators only; a diagnosis needs the eval " +
@@ -451,6 +475,11 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 		h.MountProposals(nil)
 		absent("p55_proposals", "this deployment declares no platform database (DATABASE_URL is unset), "+
 			"so there are no stored proposals to render")
+	}
+	if !mountedProposalCompile {
+		h.MountProposalCompile(nil)
+		absent("p55_proposal_compile", "this deployment declares no platform database (DATABASE_URL is "+
+			"unset), so there are no stored proposals to compile and no snapshot to compile them against")
 	}
 	if !mountedProposalGen {
 		h.MountProposalGeneration(nil)

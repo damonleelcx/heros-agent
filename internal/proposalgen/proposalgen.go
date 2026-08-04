@@ -72,6 +72,9 @@ const (
 	// StateNoCandidates: a bottleneck was found and every operator declined it (e.g. the node already
 	// runs the cheapest published model). Also a real answer, with the refusals attached.
 	StateNoCandidates State = "no_admissible_candidate"
+	// StateRevisionMismatch: the newest linked run and the discovered graph are at DIFFERENT revisions,
+	// so the per-node metrics and the workflow's shape describe different code.
+	StateRevisionMismatch State = "revision_mismatch"
 )
 
 // Result is one generation pass.
@@ -111,12 +114,25 @@ type Sink interface {
 	Put(ctx context.Context, r proposalstore.Record) error
 }
 
+// BlobStore holds the candidate Variant Spec (migration 0031). The row stores a content hash; the
+// bytes live in the object store, the same discipline the diff and the grounding bundle follow.
+type BlobStore interface {
+	Put(ctx context.Context, data []byte) (string, error)
+}
+
 // Generator turns a tenant's linked runs into candidate proposals.
 type Generator struct {
 	Runs   RunSource
 	Graphs GraphSource
 	Menus  MenuSource
 	Sink   Sink
+	// Blobs persists each candidate's Variant Spec.
+	//
+	// 🔴 REQUIRED, not optional. "A proposal IS a candidate Variant Spec" (P5.5 design Decision 1), and a
+	// proposal recorded without one describes a change nobody can reconstruct: the codemod has nothing
+	// to apply, and re-deriving the spec later would compile a DIFFERENT change under an id a customer
+	// may already be verifying. Generating without it produces rows that can never become diffs.
+	Blobs BlobStore
 	// Coverage is the Pareto coverage a bottleneck must reach. Zero selects attribution's default (the
 	// majority), which is the same threshold the scorecard flags with — two thresholds for one word
 	// would let the console call a node a bottleneck that the generator does not.
@@ -170,6 +186,25 @@ func (g *Generator) Generate(ctx context.Context, tenantID, workflowID string) (
 		return res.with(StateNoGraph,
 			"No source snapshot has been pushed for this workflow, so no node carries a pattern label "+
 				"and no operator can judge whether a change is admissible. Run `heros push-source`."), nil
+	}
+
+	// 🔴 THE RUN AND THE GRAPH MUST BE THE SAME TREE, and nothing checked it.
+	//
+	// The per-node cost comes from the linked run; the node ids, the pattern labels and the spec's node
+	// ORDER come from the discovered graph. Node ids are derived from call sites, so at two different
+	// revisions they are two different id spaces — the bottleneck lookup silently matches nothing, and
+	// the spec's order lists nodes the compile-time IR does not have. The transform then refuses the
+	// proposal as "a wiring change" (it sees nodes dropped from the order), which is a confusing verdict
+	// about a change nobody proposed.
+	//
+	// Found by compiling a proposal end to end. Before that, generation never resolved a spec against an
+	// IR, so the two id spaces were never compared and the mismatch had nowhere to surface.
+	if graph.SourceRevision != latest.SourceRevision {
+		return res.with(StateRevisionMismatch, fmt.Sprintf(
+			"The newest linked run is at %s and the discovered graph is at %s. Cost is attributed to node "+
+				"ids from the run and the workflow's shape comes from the graph, so at two revisions they "+
+				"describe different code. Push source for %s, or link a run measured at %s.",
+			latest.SourceRevision, graph.SourceRevision, latest.SourceRevision, graph.SourceRevision)), nil
 	}
 
 	menu, menuDetail, err := g.Menus.Menu(ctx)
@@ -245,9 +280,18 @@ func (g *Generator) Generate(ctx context.Context, tenantID, workflowID string) (
 				"already runs the cheapest model with a published tier."), nil
 	}
 
+	if g.Blobs == nil {
+		return res, fmt.Errorf("proposalgen: a blob store is required — a proposal recorded without its " +
+			"Variant Spec can never be compiled into a diff")
+	}
 	proposal.SortCandidates(em.Candidates)
 	for _, c := range em.Candidates {
 		rec := g.record(tenantID, workflowID, latest, c)
+		specHash, err := g.putSpec(ctx, c)
+		if err != nil {
+			return res, err
+		}
+		rec.SpecBlobHash = specHash
 		if err := g.Sink.Put(ctx, rec); err != nil {
 			return res, fmt.Errorf("proposalgen: record %s: %w", rec.ProposalID, err)
 		}
@@ -280,13 +324,37 @@ func (g *Generator) record(tenantID, workflowID string, run linkingest.LinkedRun
 		Rationale:           c.Rationale,
 		BaseVariantID:       run.ConfigHash,
 		CandidateConfigHash: candidateHash(c),
-		SourceRevision:      run.SourceRevision,
-		BuildStatus:         proposalstore.BuildUnbuilt,
-		Status:              proposalstore.StatusCandidate,
-		CreatedAt:           g.now(),
+		// The revision the run and the graph agree on — Generate refuses to proceed when they differ, so
+		// by here there is only one. It is what hostedcompile materializes to compile the diff against.
+		SourceRevision: run.SourceRevision,
+		BuildStatus:    proposalstore.BuildUnbuilt,
+		Status:         proposalstore.StatusCandidate,
+		CreatedAt:      g.now(),
 		// No Evidence: evidence is failing CASE ids, and this deployment holds none. An empty list here
 		// is the truth, and the card renders it as "no case evidence" rather than as zero cases.
 	}
+}
+
+// putSpec persists the candidate's Variant Spec and returns its content hash.
+//
+// The SAME canonical JSON candidateHash reads, so the hash the row carries and the bytes the compiler
+// later unmarshals are the same serialization — two encoders for one value is two ways to disagree
+// about what the proposal was.
+func (g *Generator) putSpec(ctx context.Context, c proposal.Candidate) (string, error) {
+	if c.Spec == nil {
+		// An operator that emitted no spec emitted no change. Refused rather than recorded: a proposal
+		// with nothing to apply is a card that can never become a diff.
+		return "", fmt.Errorf("proposalgen: %s emitted a candidate with no Variant Spec", c.Operator)
+	}
+	b, err := json.Marshal(c.Spec)
+	if err != nil {
+		return "", fmt.Errorf("proposalgen: encode the spec for %s: %w", c.NodeID, err)
+	}
+	hash, err := g.Blobs.Put(ctx, b)
+	if err != nil {
+		return "", fmt.Errorf("proposalgen: store the spec for %s: %w", c.NodeID, err)
+	}
+	return hash, nil
 }
 
 // proposalID is deterministic in (tenant, workflow, node, operator, candidate). Re-running a pass over
@@ -349,6 +417,18 @@ func baseSpec(workflowID, sourceRevision string, view patternclassifier.GraphVie
 		WorkflowID:     workflowID,
 		SourceRevision: sourceRevision,
 		Nodes:          map[string]variantspec.NodeOverride{},
+		// 🔴 ORDER IS DELIBERATELY EMPTY, and that is a claim rather than an omission: this proposal says
+		// NOTHING about the workflow's ordering. internal/hostedcompile fills it from the IR at compile
+		// time, and only when it is empty, so a proposal that does propose a reordering keeps its own.
+		//
+		// Filling it here is not possible and two attempts proved it. variantspec.Resolve requires an
+		// order, so the first attempt supplied the graph's LAYOUT order (ViewNode's Layer/Order) — and
+		// the transform reads a spec whose order differs from the SOURCE's as a wiring change, refusing
+		// the whole proposal as control-flow surgery nobody proposed. The layout is a rendering, not the
+		// order the statements run in, and the generator holds no IR to learn the difference from.
+		//
+		// Both mistakes were invisible until a proposal was compiled end to end, because generation
+		// never resolved a spec against an IR.
 	}
 	for _, n := range view.Nodes {
 		if ref, ok := byKey[n.Model]; ok {

@@ -150,6 +150,10 @@ type Server struct {
 	// MountProposals for the reason every other pair here is separate: reading a recommendation surface
 	// and running a pass that WRITES proposals are different things to enable.
 	proposalGen ProposalGenerator
+	// proposalCompile is the codemod, mounted by MountProposalCompile. Separate from proposalGen: one
+	// reads metrics and a graph, the other extracts a source snapshot and re-parses a repository, and a
+	// caller who only wants to see what was found should not pay for the second.
+	proposalCompile ProposalCompiler
 	// sourcePush is the customer-pushed SOURCE snapshot store, mounted by MountSourcePush. A third
 	// separate policy decision, and the largest one: accepting a run's numbers, accepting a workflow's
 	// allowlisted shape, and accepting the customer's source are three different things to agree to, so

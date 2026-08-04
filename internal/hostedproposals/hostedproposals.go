@@ -39,10 +39,15 @@ type ProposalReader interface {
 }
 
 // Source implements api.ProposalsSource over the durable store.
-type Source struct{ store ProposalReader }
+type Source struct {
+	store ProposalReader
+	diffs DiffReader
+}
 
-// NewSource returns the hosted recommendation surface.
-func NewSource(store ProposalReader) *Source { return &Source{store: store} }
+// NewSource returns the hosted recommendation surface. diffs may be nil.
+func NewSource(store ProposalReader, diffs DiffReader) *Source {
+	return &Source{store: store, diffs: diffs}
+}
 
 // Surface returns one tenant's recommendation surface for a workflow.
 //
@@ -81,7 +86,7 @@ func (s *Source) Surface(tenantID, workflowID string) (api.Surface, bool) {
 	}
 
 	for _, sc := range scored {
-		card := cardFor(sc)
+		card := s.cardFor(sc)
 		if sc.Verdict != nil && sc.Verdict.Passed() && sc.BuildStatus == proposalstore.BuildBuilt {
 			out.Recommendations = append(out.Recommendations, card)
 			continue
@@ -112,7 +117,7 @@ func (s *Source) Surface(tenantID, workflowID string) (api.Surface, bool) {
 // It routes through api.CardFor, which is the ONE place a build status decides which card a candidate
 // becomes — including the fail-closed default that treats an unrecognised status as refused rather than
 // as built. Every proposal this platform generates is `unbuilt`, which lands in that default.
-func cardFor(sc proposalstore.Scored) api.Card {
+func (s *Source) cardFor(sc proposalstore.Scored) api.Card {
 	pres := proposal.Presentation{
 		Operator:   proposal.OperatorKind(sc.Operator),
 		NodeID:     sc.NodeID,
@@ -120,16 +125,30 @@ func cardFor(sc proposalstore.Scored) api.Card {
 		ConfigHash: sc.CandidateConfigHash,
 		Rationale:  sc.Rationale,
 		DiagID:     sc.DiagnosisID,
-		// No SourceDiff and no SpecDiff: this platform compiled neither. Left empty rather than
-		// reconstructed — a diff assembled for display is a diff nobody built or verified.
+		// The compiled diff, when one exists. A proposal that has not been compiled has none, and the
+		// field stays empty rather than being reconstructed — a diff assembled for display is a diff
+		// nobody generated. No SpecDiff: the platform does not store the per-dimension summary.
+		SourceDiff:      s.diffFor(sc),
 		EvidenceCaseIDs: caseIDs(sc.Evidence),
+	}
+
+	// 🔴 A REFUSAL is marked by its reason, not by build_status: 0012's column has no `refused` value,
+	// so a refused proposal and one nobody has compiled both read `unbuilt`. Reading the reason is what
+	// tells them apart — and getting it wrong renders "the transform declined this change" over a
+	// proposal whose diff was generated, or hides a named refusal behind "not compiled yet".
+	status := proposal.BuildStatus(sc.BuildStatus)
+	if sc.RefusalReason != "" {
+		status = proposal.BuildRefused
+		pres.Refusal = &proposal.ChangeRefusal{
+			NodeID: sc.NodeID, Dimension: sc.RefusalDimension, Reason: sc.RefusalReason,
+		}
 	}
 
 	v := verification.Verdict{}
 	if sc.Verdict != nil {
 		v = *sc.Verdict
 	}
-	card := api.CardFor(pres, proposal.BuildStatus(sc.BuildStatus), "", v, verification.Advisory)
+	card := api.CardFor(pres, status, "", v, verification.Advisory)
 
 	// 🔴 The proposal id is the STORE's, not the config hash. api.BuildCard takes it from the verdict
 	// (which carries one) and the refused/build-failed cards fall back to the config hash — neither is
@@ -146,28 +165,54 @@ func cardFor(sc proposalstore.Scored) api.Card {
 			"the gate runs your eval harness, on your machine, so the verdict arrives when your " +
 			"verification job reports it."
 	}
+	// The PR gate is decided in api.CardFor — the one place a build status becomes a card — including
+	// the two distinct unbuilt reasons (not compiled yet / compiled but not built). Computing a reason
+	// here as well would be a second answer to the question that function just answered. This only
+	// catches a card that arrived without one, which would otherwise disable the action in silence.
 	if card.PRDisabledReason == "" {
 		card.CanOpenPR = false
-		card.PRDisabledReason = noDiffReason
+		card.PRDisabledReason = notCompiledReason
 	}
 	return card
 }
 
-// noDiffReason is the one sentence this deployment repeats wherever a diff would be. Stated once so the
-// card, the PR gate and OpenPR cannot describe the same limit three different ways.
-const noDiffReason = "This deployment generates the change but does not compile it: the codemod needs " +
-	"your source at a revision and a build check, so there is no reviewable diff to open a pull request with."
+// diffFor fetches the compiled diff, or returns "" when there is none to fetch.
+//
+// A read FAILURE also returns "": the card then renders as though the proposal is not compiled, which
+// understates what exists. That is the safe direction — the alternative is rendering a partial or
+// error string where a reviewer expects a diff — and the surface never claims a diff it did not read.
+func (s *Source) diffFor(sc proposalstore.Scored) string {
+	if s.diffs == nil || sc.SourceDiffBlobHash == "" {
+		return ""
+	}
+	b, err := s.diffs.Get(context.Background(), sc.SourceDiffBlobHash)
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
+// The two reasons a pull request is unavailable, stated once each so the card, the PR gate and OpenPR
+// cannot describe the same limit three different ways.
+const (
+	notCompiledReason = "This proposal has not been compiled yet, so there is no diff to open a pull " +
+		"request with. Compile it to generate the reviewable diff."
+	notBuiltReason = "This proposal has a reviewable diff, and it has not been proved to BUILD: this " +
+		"deployment carries no toolchain, so the diff was parsed rather than compiled. Delivery requires " +
+		"a build, so the change is reviewable here and not deliverable from here."
+)
 
 // OpenPR refuses, by name.
 //
-// 🔴 It refuses for EVERY proposal, including a gate-passing one, and that is the honest answer rather
-// than a missing feature: OpenPR's contract is to open a reviewable pull request carrying the
-// proposal's diff, and this platform holds no diff. The alternatives are worse in the direction that
-// matters — opening an empty pull request in a customer's repository, or returning a success the
-// console renders as "opened" with nothing behind it.
+// 🔴 It refuses for EVERY proposal, including a gate-passing one with a compiled diff, and that is the
+// honest answer rather than a missing feature. OpenPR's contract is to open a reviewable pull request
+// carrying the proposal's diff — and ADR-001's rule is that nothing reaches a repository except as a
+// diff that BUILDS. This deployment can produce the diff and cannot establish that it builds. The
+// alternatives are worse in the direction that matters: opening a pull request whose contents nobody
+// compiled, or returning a success the console renders as "opened" with nothing behind it.
 func (s *Source) OpenPR(tenantID, workflowID, proposalID string) (api.PRResult, error) {
-	return api.PRResult{}, fmt.Errorf("%s Proposal %s is recorded and can be verified by your CI; "+
-		"delivery of a compiled diff is not available on this deployment", noDiffReason, proposalID)
+	return api.PRResult{}, fmt.Errorf("%s Proposal %s can be reviewed here and verified by your CI; "+
+		"opening the pull request is the CI-mediated delivery step", notBuiltReason, proposalID)
 }
 
 func caseIDs(ev []proposalstore.Evidence) []string {

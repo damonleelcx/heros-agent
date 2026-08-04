@@ -2,6 +2,9 @@ package proposalgen
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -12,6 +15,7 @@ import (
 	"github.com/heros-foreal/agentd/internal/proposal"
 	"github.com/heros-foreal/agentd/internal/proposalstore"
 	"github.com/heros-foreal/agentd/internal/runlink"
+	"github.com/heros-foreal/agentd/internal/variantspec"
 )
 
 type fakeRuns struct {
@@ -39,6 +43,25 @@ type fakeMenu struct {
 
 func (f fakeMenu) Menu(context.Context) (proposal.Menu, string, error) {
 	return f.menu, f.detail, f.err
+}
+
+// memBlobs is a content-addressed store, matching registry.BlobStore's contract: identical bytes yield
+// one hash and no second copy.
+type memBlobs struct {
+	data map[string][]byte
+	err  error
+}
+
+func newBlobs() *memBlobs { return &memBlobs{data: map[string][]byte{}} }
+
+func (m *memBlobs) Put(_ context.Context, b []byte) (string, error) {
+	if m.err != nil {
+		return "", m.err
+	}
+	sum := sha256.Sum256(b)
+	h := hex.EncodeToString(sum[:])
+	m.data[h] = b
+	return h, nil
 }
 
 type fakeSink struct {
@@ -70,7 +93,9 @@ func generator(t *testing.T, sink *fakeSink) *Generator {
 			"n_router":  {CostUSD: 0.90, LatencyMS: 400},
 			"n_cleanup": {CostUSD: 0.02, LatencyMS: 20},
 		})}},
-		Graphs: fakeGraphs{found: true, g: hostdiscovery.Graph{View: patternclassifier.GraphView{
+		// The graph's revision MATCHES the linked run's. Generate refuses when they differ: the node ids
+		// the cost is attributed to and the ids the graph names would be two different id spaces.
+		Graphs: fakeGraphs{found: true, g: hostdiscovery.Graph{SourceRevision: "rev1", View: patternclassifier.GraphView{
 			Nodes: []patternclassifier.ViewNode{
 				// Model is `provider/model`, as the classifier records it. It is what lets the baseline
 				// resolve to a registry ref, and therefore what stops the engine proposing a downgrade to
@@ -84,8 +109,9 @@ func generator(t *testing.T, sink *fakeSink) *Generator {
 			{Ref: strings.Repeat("1", 64), Provider: "anthropic", ModelID: "big", Tier: 3, CostPerRun: 0.05},
 			{Ref: strings.Repeat("2", 64), Provider: "anthropic", ModelID: "small", Tier: 1, CostPerRun: 0.004},
 		}}},
-		Sink: sink,
-		Now:  func() time.Time { return time.Date(2026, 8, 3, 0, 0, 0, 0, time.UTC) },
+		Sink:  sink,
+		Blobs: newBlobs(),
+		Now:   func() time.Time { return time.Date(2026, 8, 3, 0, 0, 0, 0, time.UTC) },
 	}
 }
 
@@ -372,5 +398,93 @@ func TestNoCandidateProposesTheModelTheNodeAlreadyRuns(t *testing.T) {
 	if len(sink.put) != 1 {
 		t.Errorf("expected exactly one downgrade candidate (only `small` is below `big`), got %d — a "+
 			"second one is the engine proposing the incumbent against itself", len(sink.put))
+	}
+}
+
+// 🔴 Every recorded proposal carries its Variant Spec. "A proposal IS a candidate Variant Spec", and a
+// row without one describes a change nobody can reconstruct — the codemod has nothing to apply, and
+// re-deriving it later would compile a DIFFERENT change under an id a customer may already be verifying.
+func TestEveryProposalRecordsItsVariantSpec(t *testing.T) {
+	sink := &fakeSink{}
+	g := generator(t, sink)
+	blobs := newBlobs()
+	g.Blobs = blobs
+
+	if _, err := g.Generate(context.Background(), "t1", "wf"); err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	if len(sink.put) == 0 {
+		t.Fatal("nothing generated")
+	}
+	for _, r := range sink.put {
+		if r.SpecBlobHash == "" {
+			t.Fatalf("proposal %s records no Variant Spec — it can never become a diff", r.ProposalID)
+		}
+		raw, ok := blobs.data[r.SpecBlobHash]
+		if !ok {
+			t.Fatalf("proposal %s names a spec hash the blob store does not hold", r.ProposalID)
+		}
+		var spec variantspec.VariantSpec
+		if err := json.Unmarshal(raw, &spec); err != nil {
+			t.Fatalf("the stored spec for %s does not decode: %v", r.ProposalID, err)
+		}
+		// The spec must actually carry the change: a model ref on the node being proposed against.
+		if spec.Nodes[r.NodeID].ModelRef == "" {
+			t.Errorf("the stored spec for %s changes nothing at %s: %+v", r.ProposalID, r.NodeID, spec.Nodes)
+		}
+		// 🔴 And it must carry NO ORDER. That is a claim, not an omission: this proposal says nothing
+		// about the workflow's ordering, and hostedcompile fills the field from the IR at compile time.
+		// A generator-supplied order is necessarily the graph's LAYOUT order — a rendering, not the order
+		// the statements run in — and the transform reads any order that differs from the source's as a
+		// wiring change, refusing the whole proposal as control-flow surgery nobody proposed.
+		if len(spec.Order) != 0 {
+			t.Errorf("the stored spec for %s carries a node order (%v). The generator holds no IR and can "+
+				"only guess it from the graph's layout; the transform refuses a guessed order as a "+
+				"rewiring.", r.ProposalID, spec.Order)
+		}
+	}
+}
+
+// A generator with no blob store REFUSES rather than recording rows that can never become diffs.
+func TestGeneratingWithoutABlobStoreIsRefused(t *testing.T) {
+	sink := &fakeSink{}
+	g := generator(t, sink)
+	g.Blobs = nil
+	if _, err := g.Generate(context.Background(), "t1", "wf"); err == nil {
+		t.Fatal("proposals were recorded with no way to store their specs")
+	}
+	if len(sink.put) != 0 {
+		t.Errorf("rows were written anyway: %+v", sink.put)
+	}
+}
+
+// 🔴 A run and a graph at different revisions describe different code, and the node ids do not
+// correspond. Generating anyway produces a spec whose order names nodes the compile-time IR does not
+// have — which the transform refuses as a "wiring change" nobody proposed.
+func TestARunAndGraphAtDifferentRevisionsIsRefused(t *testing.T) {
+	sink := &fakeSink{}
+	g := generator(t, sink)
+	g.Graphs = fakeGraphs{found: true, g: hostdiscovery.Graph{
+		SourceRevision: "a-different-revision",
+		View: patternclassifier.GraphView{Nodes: []patternclassifier.ViewNode{
+			{NodeID: "n_router", Model: "anthropic/big"},
+		}},
+	}}
+
+	res, err := g.Generate(context.Background(), "t1", "wf")
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	if res.State != StateRevisionMismatch {
+		t.Fatalf("state = %q (%s)", res.State, res.Detail)
+	}
+	if len(sink.put) != 0 {
+		t.Errorf("proposals were generated across two revisions: %+v", sink.put)
+	}
+	// The sentence must name BOTH revisions; an operator cannot act on "they disagree".
+	for _, want := range []string{"rev1", "a-different-revision"} {
+		if !strings.Contains(res.Detail, want) {
+			t.Errorf("the detail must name %q, got %q", want, res.Detail)
+		}
 	}
 }

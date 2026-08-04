@@ -165,10 +165,46 @@ func CardFor(pres proposal.Presentation, status proposal.BuildStatus, buildLog s
 		return BuildCard(pres, string(status), v, level)
 	case proposal.BuildFailed:
 		return BuildFailedCard(pres, buildLog)
+	case proposal.BuildUnbuilt:
+		return UnbuiltCard(pres, v, buildLog)
 	default:
-		// BuildRefused, BuildUnbuilt, and anything a later phase adds.
+		// BuildRefused, and anything a later phase adds.
 		return RefusedCard(pres)
 	}
+}
+
+// UnbuiltCard renders a candidate that has NOT been through a build gate.
+//
+// 🔴 BuildUnbuilt used to fall through to RefusedCard, and that was right while `unbuilt` could only
+// mean "never compiled" — a candidate with nothing to show is indistinguishable from one the transform
+// declined. It stopped being right when a deployment started COMPILING proposals without being able to
+// build them: the platform now produces a real reviewable diff and cannot establish that it compiles,
+// and RefusedCard drops the diff on purpose ("a refusal that shipped a partial diff is exactly the
+// 'looks complete' failure D-14.3 refuses"). So the diff the codemod generated was thrown away by the
+// surface, under a narration saying the transform refused a change it had in fact made.
+//
+// The card SHOWS the diff and is never recommendable. `buildLog` is the gate's own account of what it
+// did and did not prove, rendered rather than summarised — a reviewer deciding whether to trust an
+// unbuilt change needs to know a parser ran and a compiler did not.
+func UnbuiltCard(pres proposal.Presentation, v verification.Verdict, buildLog string) Card {
+	c := BuildCard(pres, string(proposal.BuildUnbuilt), v, verification.Advisory)
+	// Never one-click-openable, whatever the verdict says: ADR-001's rule is that nothing reaches a
+	// repository except as a diff that BUILDS, and this one has not been built.
+	//
+	// The two reasons are distinct because the next actions are: an uncompiled proposal needs a compile
+	// pass, and a compiled one needs a build gate. Decided HERE, from whether the presentation carries a
+	// diff, rather than by each caller — this function is the one place a build status becomes a card,
+	// and a caller computing its own reason is a second answer to the question it just asked.
+	c.CanOpenPR = false
+	if pres.SourceDiff == "" {
+		c.PRDisabledReason = "this change has not been compiled into a diff yet"
+	} else {
+		c.PRDisabledReason = "this change has a reviewable diff and has not been proved to build"
+	}
+	if buildLog != "" {
+		c.Narration = strings.TrimRight(c.Narration, " ") + " " + buildLog
+	}
+	return c
 }
 
 // Recommendable reports whether a compiled candidate may appear in the RECOMMENDATIONS list rather

@@ -421,3 +421,83 @@ func ids(in []Scored) []string {
 	}
 	return out
 }
+
+// The three states `build_status` alone cannot tell apart, against real constraints.
+//
+// 0012's CHECK admits unbuilt | built | build_failed, and the transform's REFUSAL is a fourth thing.
+// Recording it as `unbuilt` makes a declined change indistinguishable from one nobody has compiled —
+// so 0032's reason column is the marker, and the constraints below are what keep the pair coherent.
+func TestARefusalIsDistinguishableFromAnUncompiledProposal(t *testing.T) {
+	s, db := store(t, "proposalstore_refusal")
+	ctx := t.Context()
+
+	uncompiled := rec("tenant-r", "wf-1", "p-uncompiled")
+	refused := rec("tenant-r", "wf-1", "p-refused")
+	refused.RefusalReason = "the tool selection names a tool this node does not offer"
+	refused.RefusalDimension = "tools"
+	for _, r := range []Record{uncompiled, refused} {
+		if err := s.Put(ctx, r); err != nil {
+			t.Fatalf("put %s: %v", r.ProposalID, err)
+		}
+	}
+
+	got, err := s.ForWorkflow(ctx, "tenant-r", "wf-1")
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	byID := map[string]Scored{}
+	for _, sc := range got {
+		byID[sc.ProposalID] = sc
+	}
+	if byID["p-uncompiled"].RefusalReason != "" {
+		t.Errorf("an uncompiled proposal came back marked refused: %q", byID["p-uncompiled"].RefusalReason)
+	}
+	if byID["p-refused"].RefusalReason == "" || byID["p-refused"].RefusalDimension != "tools" {
+		t.Errorf("the refusal did not survive: %+v", byID["p-refused"])
+	}
+	// Both read `unbuilt`, which is exactly why the reason has to be the marker.
+	if byID["p-uncompiled"].BuildStatus != byID["p-refused"].BuildStatus {
+		t.Errorf("the two states differ in build_status (%q vs %q) — if that ever becomes true, the "+
+			"reason column is no longer load-bearing and this test's premise is stale",
+			byID["p-uncompiled"].BuildStatus, byID["p-refused"].BuildStatus)
+	}
+
+	// 🔴 A refusal that shipped a diff is the "looks complete" failure D-14.3 refuses: the surface would
+	// render a change beside a sentence saying we declined to make it. The database refuses the pair.
+	if _, err := db.ExecContext(ctx,
+		`UPDATE proposal SET source_diff_blob_hash = $1 WHERE proposal_id = 'p-refused'`,
+		hash64); err == nil {
+		t.Error("the table accepted a refused proposal carrying a diff")
+	}
+	// ...and a dimension with no reason names where without saying what.
+	if _, err := db.ExecContext(ctx,
+		`UPDATE proposal SET refusal_dimension = 'skills' WHERE proposal_id = 'p-uncompiled'`); err == nil {
+		t.Error("the table accepted a refusal dimension with no reason")
+	}
+}
+
+// The candidate spec round-trips, and the column refuses anything that is not a content hash — the
+// same rule the diff and grounding columns carry, so an inline spec cannot land in the row.
+func TestTheSpecHashRoundTripsAndRefusesInlineContent(t *testing.T) {
+	s, db := store(t, "proposalstore_spec")
+	ctx := t.Context()
+
+	r := rec("tenant-s", "wf-1", "p1")
+	r.SpecBlobHash = hash64
+	if err := s.Put(ctx, r); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+	got, err := s.ForWorkflow(ctx, "tenant-s", "wf-1")
+	if err != nil || len(got) != 1 {
+		t.Fatalf("read: %+v %v", got, err)
+	}
+	if got[0].SpecBlobHash != hash64 {
+		t.Errorf("spec hash = %q", got[0].SpecBlobHash)
+	}
+
+	if _, err := db.ExecContext(ctx,
+		`UPDATE proposal SET spec_blob_hash = '{"nodes":{}}' WHERE proposal_id = 'p1'`); err == nil {
+		t.Error("the table accepted an inline spec where a content hash belongs — the same constraint " +
+			"0012 puts on the diff and grounding columns")
+	}
+}

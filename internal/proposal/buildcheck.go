@@ -34,6 +34,16 @@ const (
 type BuildResult struct {
 	Builds bool
 	Log    string
+	// Unavailable names why NO build gate could run — an absent toolchain, a language with no verifier
+	// in this image. Empty means a gate DID run and `Builds` is its verdict.
+	//
+	// 🔴 A third outcome, because two are not enough and the missing one is dangerous in both
+	// directions. Reporting "no compiler here" as Builds=false marks the candidate `build_failed` — a
+	// verdict that the code we wrote does not compile, which we did not establish and which retires the
+	// proposal permanently. Reporting it as Builds=true marks it `built`, which is the claim ADR-001
+	// hangs delivery on, asserted by nobody. The honest answer is `unbuilt` with the reason attached,
+	// and that is what Compile maps this onto.
+	Unavailable string
 }
 
 // BuildChecker applies a candidate's source diff to an ISOLATED worktree/branch — never the user's

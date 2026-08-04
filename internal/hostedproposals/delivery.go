@@ -44,27 +44,27 @@ type PendingReader interface {
 // Pending implements forgedelivery.PendingProvider over the durable proposals.
 type Pending struct {
 	store PendingReader
+	diffs DiffReader
 	// consoleBase is the origin the PR body's evidence reference points at. Empty is legitimate — a
 	// headless deployment renders relative refs — and is passed through rather than guessed.
 	consoleBase string
 }
 
-// NewPending returns the P12 pending provider.
-func NewPending(store PendingReader, consoleBase string) *Pending {
-	return &Pending{store: store, consoleBase: consoleBase}
+// NewPending returns the P12 pending provider. diffs may be nil, in which case no candidate carries a
+// patch and every one is withheld as `no_diff`.
+func NewPending(store PendingReader, diffs DiffReader, consoleBase string) *Pending {
+	return &Pending{store: store, diffs: diffs, consoleBase: consoleBase}
 }
 
-// PendingVerified returns the tenant's gate-passing proposals as delivery candidates.
+// PendingVerified returns the tenant's gate-passing proposals as delivery candidates, each carrying its
+// COMPILED diff when one exists.
 //
-// 🔴 DiffPatch is left EMPTY, and that is deliberate rather than unfinished. This platform records a
-// candidate Variant Spec and never compiles it, so there is no diff — and Deliverer.Prepare now refuses
-// a proposal with none (ErrNoDiff), which Service.Pending reports as the `no_diff` withholding. So the
-// CI fetch answers "here is why nothing is deliverable" instead of serving a pull request with no
-// changes in it. Synthesising a placeholder patch here to make the pipeline "work" is precisely the
-// failure that refusal exists to prevent.
-//
-// DiffStat is empty for the same reason: a files/lines summary of a diff that does not exist would
-// appear in a pull-request body as a claim about content nobody generated.
+// 🔴 A proposal with no compiled diff is served with an EMPTY DiffPatch, and that is deliberate rather
+// than unfinished. Deliverer.Prepare refuses it (ErrNoDiff) and Service.Pending reports the `no_diff`
+// withholding, so the CI fetch answers "here is why this one is not deliverable" instead of serving a
+// pull request with no changes in it. Synthesising a placeholder patch to make the pipeline "work" is
+// precisely the failure that refusal exists to prevent — and a read failure on the diff takes the same
+// path, because a partially-read patch applied to a customer's repository is worse than a refusal.
 func (p *Pending) PendingVerified(ctx context.Context, tenantID string) ([]forgedelivery.Proposal, error) {
 	scored, err := p.store.PendingVerified(ctx, tenantID)
 	if err != nil {
@@ -83,6 +83,9 @@ func (p *Pending) PendingVerified(ctx context.Context, tenantID string) ([]forge
 			// Prepare checks the auto-merge entitlement for an autonomous proposal that can never exist.
 			Level:      entitlement.LevelAdvisory,
 			ConsoleRef: consoleRef(p.consoleBase, sc),
+			DiffPatch:  p.diffFor(ctx, sc),
+			// DiffStat stays empty: the platform does not record a files/lines summary, and computing one
+			// here for the PR body would be a second, independently-derived claim about the same diff.
 		})
 	}
 	return out, nil
@@ -107,4 +110,30 @@ func consoleRef(base string, sc proposalstore.Scored) string {
 		return path
 	}
 	return base + path
+}
+
+// DiffReader fetches a compiled diff from the object store. Shared by the surface and the delivery
+// provider: both render the SAME bytes, and two readers would be two ways to disagree about what a
+// reviewer saw and what a pull request carries.
+//
+// Optional in both: a deployment that compiles no proposals passes nil, every card renders without a
+// diff and says so, and every delivery candidate is withheld as `no_diff`.
+type DiffReader interface {
+	Get(ctx context.Context, contentHash string) ([]byte, error)
+}
+
+// diffFor fetches the compiled diff, or "" when there is none.
+//
+// A read failure returns "" as well, which makes the proposal undeliverable rather than deliverable
+// with a truncated patch. That is the fail-closed direction on a path whose output is applied to a
+// customer's repository.
+func (p *Pending) diffFor(ctx context.Context, sc proposalstore.Scored) string {
+	if p.diffs == nil || sc.SourceDiffBlobHash == "" {
+		return ""
+	}
+	b, err := p.diffs.Get(ctx, sc.SourceDiffBlobHash)
+	if err != nil {
+		return ""
+	}
+	return string(b)
 }

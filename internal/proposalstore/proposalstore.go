@@ -83,10 +83,21 @@ type Record struct {
 	// accepts NULL or 64-hex, so "" would be refused, which is the constraint catching an inline payload.
 	SourceDiffBlobHash string
 	GroundingBlobHash  string
+	// SpecBlobHash addresses the candidate Variant Spec (migration 0031). "A proposal IS a candidate
+	// Variant Spec" — without this the row describes a change and does not record what the change is,
+	// and the codemod has nothing to apply.
+	SpecBlobHash string
 
 	BuildStatus string
 	Status      string
 	CreatedAt   time.Time
+
+	// RefusalReason and RefusalDimension record the transform DECLINING this change (migration 0032).
+	// A non-empty reason is what marks a proposal refused: 0012's build_status CHECK has no `refused`
+	// value, and recording one as `unbuilt` makes it indistinguishable from a proposal nobody has
+	// compiled yet — which is the disappearance BuildRefused was made a status to prevent.
+	RefusalReason    string
+	RefusalDimension string
 
 	// Evidence is the failing cases attached to this proposal, by split role.
 	Evidence []Evidence
@@ -168,8 +179,9 @@ func (p *PGStore) Put(parent context.Context, r Record) error {
 		`INSERT INTO proposal
 		   (proposal_id, tenant_id, workflow_id, diagnosis_id, operator, base_variant_id,
 		    candidate_config_hash, source_revision, source_diff_blob_hash, grounding_blob_hash,
-		    build_status, status, created_at, node_id, pattern, rationale)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+		    build_status, status, created_at, node_id, pattern, rationale, spec_blob_hash,
+		    refusal_reason, refusal_dimension)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
 		 ON CONFLICT (proposal_id) DO UPDATE
 		   SET build_status = EXCLUDED.build_status,
 		       status       = EXCLUDED.status,
@@ -177,10 +189,14 @@ func (p *PGStore) Put(parent context.Context, r Record) error {
 		       grounding_blob_hash   = EXCLUDED.grounding_blob_hash,
 		       node_id   = EXCLUDED.node_id,
 		       pattern   = EXCLUDED.pattern,
-		       rationale = EXCLUDED.rationale`,
+		       rationale = EXCLUDED.rationale,
+		       spec_blob_hash = EXCLUDED.spec_blob_hash,
+		       refusal_reason = EXCLUDED.refusal_reason,
+		       refusal_dimension = EXCLUDED.refusal_dimension`,
 		r.ProposalID, r.TenantID, r.WorkflowID, r.DiagnosisID, r.Operator, r.BaseVariantID,
 		r.CandidateConfigHash, r.SourceRevision, nullStr(r.SourceDiffBlobHash), nullStr(r.GroundingBlobHash),
-		r.BuildStatus, r.Status, r.CreatedAt.UTC(), r.NodeID, r.Pattern, r.Rationale); err != nil {
+		r.BuildStatus, r.Status, r.CreatedAt.UTC(), r.NodeID, r.Pattern, r.Rationale,
+		nullStr(r.SpecBlobHash), r.RefusalReason, r.RefusalDimension); err != nil {
 		return fmt.Errorf("proposalstore: put %s: %w", r.ProposalID, err)
 	}
 
@@ -206,7 +222,7 @@ func (p *PGStore) Put(parent context.Context, r Record) error {
 const proposalColumns = `p.proposal_id, p.tenant_id, p.workflow_id, p.diagnosis_id, p.operator,
 	p.base_variant_id, p.candidate_config_hash, p.source_revision, p.source_diff_blob_hash,
 	p.grounding_blob_hash, p.build_status, p.status, p.created_at,
-	p.node_id, p.pattern, p.rationale`
+	p.node_id, p.pattern, p.rationale, p.spec_blob_hash, p.refusal_reason, p.refusal_dimension`
 
 // ForWorkflow returns a tenant's proposals for a workflow, newest first, each with its verdict.
 func (p *PGStore) ForWorkflow(parent context.Context, tenantID, workflowID string) ([]Scored, error) {
@@ -451,7 +467,7 @@ type scanner interface{ Scan(...any) error }
 
 func scanScored(sc scanner) (Scored, error) {
 	var s Scored
-	var diffHash, groundHash sql.NullString
+	var diffHash, groundHash, specHash sql.NullString
 	// Every verdict column is nullable in the result because of the LEFT JOIN.
 	var metric, gateResult sql.NullString
 	var delta, ciLow, ciHigh, costDelta, latDelta sql.NullFloat64
@@ -462,13 +478,14 @@ func scanScored(sc scanner) (Scored, error) {
 	if err := sc.Scan(&s.ProposalID, &s.TenantID, &s.WorkflowID, &s.DiagnosisID, &s.Operator,
 		&s.BaseVariantID, &s.CandidateConfigHash, &s.SourceRevision, &diffHash, &groundHash,
 		&s.BuildStatus, &s.Status, &s.CreatedAt,
-		&s.NodeID, &s.Pattern, &s.Rationale,
+		&s.NodeID, &s.Pattern, &s.Rationale, &specHash, &s.RefusalReason, &s.RefusalDimension,
 		&metric, &delta, &ciLow, &ciHigh, &significant, &heldOut,
 		&costDelta, &latDelta, &regressionPass, &fixed, &broken, &gateResult,
 		&fixedCount, &brokenCount); err != nil {
 		return Scored{}, err
 	}
 	s.SourceDiffBlobHash, s.GroundingBlobHash = diffHash.String, groundHash.String
+	s.SpecBlobHash = specHash.String
 
 	// No verdict row: leave Verdict nil. NOT a zero Verdict — a zero GateResult would read as a
 	// specific failure, and "not yet measured" is a different state from "measured and rejected".

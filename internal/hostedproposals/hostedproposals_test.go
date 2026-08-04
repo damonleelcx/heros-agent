@@ -51,7 +51,7 @@ func TestNoCardOffersAPullRequestThereIsNoDiffFor(t *testing.T) {
 	s := NewSource(fakeStore{scored: []proposalstore.Scored{
 		rec("prop-1", passing(0.06), proposalstore.BuildUnbuilt),
 		rec("prop-2", nil, proposalstore.BuildUnbuilt),
-	}})
+	}}, nil)
 	surface, ok := s.Surface("t1", "wf")
 	if !ok {
 		t.Fatal("the surface did not resolve")
@@ -82,7 +82,7 @@ func TestTheCardCarriesTheStoresProposalID(t *testing.T) {
 	s := NewSource(fakeStore{scored: []proposalstore.Scored{
 		rec("prop-1", passing(0.06), proposalstore.BuildUnbuilt),
 		rec("prop-2", nil, proposalstore.BuildUnbuilt),
-	}})
+	}}, nil)
 	surface, _ := s.Surface("t1", "wf")
 	seen := map[string]bool{}
 	for _, c := range append(surface.Recommendations, surface.Withheld...) {
@@ -98,7 +98,7 @@ func TestTheCardCarriesTheStoresProposalID(t *testing.T) {
 
 // An unmeasured proposal is "awaiting verification", never "gate failed". They are opposite claims.
 func TestAnUnmeasuredProposalIsNotReportedAsRejected(t *testing.T) {
-	s := NewSource(fakeStore{scored: []proposalstore.Scored{rec("prop-1", nil, proposalstore.BuildUnbuilt)}})
+	s := NewSource(fakeStore{scored: []proposalstore.Scored{rec("prop-1", nil, proposalstore.BuildUnbuilt)}}, nil)
 	surface, _ := s.Surface("t1", "wf")
 	if len(surface.Withheld) != 1 {
 		t.Fatalf("withheld = %+v", surface.Withheld)
@@ -130,7 +130,7 @@ func TestEachSurfaceStateIsDistinct(t *testing.T) {
 		"the store is unreadable":  {fakeStore{err: errors.New("connection refused")}, "error"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			surface, ok := NewSource(tc.store).Surface("t1", "wf")
+			surface, ok := NewSource(tc.store, nil).Surface("t1", "wf")
 			if !ok {
 				t.Fatal("the surface must resolve: `no such workflow` and `nothing proposed` send a " +
 					"reader to two different places")
@@ -147,7 +147,7 @@ func TestEachSurfaceStateIsDistinct(t *testing.T) {
 
 // A read failure must not leak the driver's words to a tenant, and must not read as a verdict.
 func TestAReadFailureDoesNotLeakOrLookLikeAFinding(t *testing.T) {
-	surface, _ := NewSource(fakeStore{err: errors.New("dial tcp 10.0.0.5:5432: connection refused")}).Surface("t1", "wf")
+	surface, _ := NewSource(fakeStore{err: errors.New("dial tcp 10.0.0.5:5432: connection refused")}, nil).Surface("t1", "wf")
 	if strings.Contains(surface.Error, "10.0.0.5") || strings.Contains(surface.Error, "dial tcp") {
 		t.Errorf("the read error leaked into the surface: %q", surface.Error)
 	}
@@ -158,7 +158,7 @@ func TestAReadFailureDoesNotLeakOrLookLikeAFinding(t *testing.T) {
 
 // OpenPR refuses for every proposal, including a gate-passing one, and names the limit.
 func TestOpenPRRefusesAndSaysWhy(t *testing.T) {
-	s := NewSource(fakeStore{scored: []proposalstore.Scored{rec("prop-1", passing(0.06), proposalstore.BuildUnbuilt)}})
+	s := NewSource(fakeStore{scored: []proposalstore.Scored{rec("prop-1", passing(0.06), proposalstore.BuildUnbuilt)}}, nil)
 	_, err := s.OpenPR("t1", "wf", "prop-1")
 	if err == nil {
 		t.Fatal("OpenPR returned success with no diff behind it")
@@ -178,7 +178,7 @@ func TestTheTrendIsBuiltFromMeasurementsOnly(t *testing.T) {
 		rec("p1", nil, proposalstore.BuildUnbuilt),
 		rec("p2", nil, proposalstore.BuildUnbuilt),
 		rec("p3", nil, proposalstore.BuildUnbuilt),
-	}})
+	}}, nil)
 	surface, _ := s.Surface("t1", "wf")
 	if len(surface.Trend.Points) != 0 {
 		t.Fatalf("unverified proposals became trend points: %+v", surface.Trend.Points)
@@ -192,7 +192,7 @@ func TestTheTrendIsBuiltFromMeasurementsOnly(t *testing.T) {
 func TestRecommendationsRankByVerifiedDelta(t *testing.T) {
 	small := rec("p-small", passing(0.02), proposalstore.BuildBuilt)
 	big := rec("p-big", passing(0.09), proposalstore.BuildBuilt)
-	s := NewSource(fakeStore{scored: []proposalstore.Scored{small, big}})
+	s := NewSource(fakeStore{scored: []proposalstore.Scored{small, big}}, nil)
 	surface, _ := s.Surface("t1", "wf")
 	if len(surface.Recommendations) != 2 {
 		t.Fatalf("recommendations = %+v", surface.Recommendations)
@@ -205,7 +205,7 @@ func TestRecommendationsRankByVerifiedDelta(t *testing.T) {
 // A gate-passing proposal that never BUILT is withheld, not recommended. Both halves are required —
 // api.Recommendable says so, and this deployment only ever produces the unbuilt half.
 func TestAPassingButUnbuiltProposalIsWithheld(t *testing.T) {
-	s := NewSource(fakeStore{scored: []proposalstore.Scored{rec("p1", passing(0.09), proposalstore.BuildUnbuilt)}})
+	s := NewSource(fakeStore{scored: []proposalstore.Scored{rec("p1", passing(0.09), proposalstore.BuildUnbuilt)}}, nil)
 	surface, _ := s.Surface("t1", "wf")
 	if len(surface.Recommendations) != 0 {
 		t.Errorf("an unbuilt proposal was recommended: %+v", surface.Recommendations)
@@ -218,7 +218,7 @@ func TestAPassingButUnbuiltProposalIsWithheld(t *testing.T) {
 // Advisory, not assisted: assisted is the level at which the platform opens the pull request, and it
 // cannot. Declaring it would light the Open-PR affordance on every card.
 func TestTheSurfaceDeclaresAdvisory(t *testing.T) {
-	surface, _ := NewSource(fakeStore{}).Surface("t1", "wf")
+	surface, _ := NewSource(fakeStore{}, nil).Surface("t1", "wf")
 	if surface.AutomationLevel != string(verification.Advisory) {
 		t.Errorf("automation level = %q, want %q", surface.AutomationLevel, verification.Advisory)
 	}
@@ -249,7 +249,7 @@ func (f fakePending) PendingVerified(context.Context, string) ([]proposalstore.S
 func TestADeliveryCandidateCarriesNoInventedDiff(t *testing.T) {
 	p := NewPending(fakePending{scored: []proposalstore.Scored{
 		rec("prop-1", passing(0.06), proposalstore.BuildUnbuilt),
-	}}, "https://console.example")
+	}}, nil, "https://console.example")
 
 	got, err := p.PendingVerified(context.Background(), "t1")
 	if err != nil {
@@ -281,7 +281,7 @@ func TestADeliveryCandidateCarriesNoInventedDiff(t *testing.T) {
 func TestAHeadlessDeploymentGetsARelativeConsoleRef(t *testing.T) {
 	p := NewPending(fakePending{scored: []proposalstore.Scored{
 		rec("prop-1", passing(0.06), proposalstore.BuildUnbuilt),
-	}}, "")
+	}}, nil, "")
 	got, _ := p.PendingVerified(context.Background(), "t1")
 	if len(got) != 1 || !strings.HasPrefix(got[0].ConsoleRef, "/app/") {
 		t.Errorf("console ref = %+v, want a relative path", got)
@@ -293,7 +293,7 @@ func TestAHeadlessDeploymentGetsARelativeConsoleRef(t *testing.T) {
 func TestAProposalWithNoNodeIDIsTitledHonestly(t *testing.T) {
 	r := rec("prop-1", passing(0.06), proposalstore.BuildUnbuilt)
 	r.NodeID = ""
-	p := NewPending(fakePending{scored: []proposalstore.Scored{r}}, "")
+	p := NewPending(fakePending{scored: []proposalstore.Scored{r}}, nil, "")
 	got, _ := p.PendingVerified(context.Background(), "t1")
 	if len(got) != 1 {
 		t.Fatal("no candidate")
@@ -335,5 +335,117 @@ func TestTheGateReportsUnmeasuredDistinctly(t *testing.T) {
 	}
 	if store.calls != 1 {
 		t.Errorf("the gate consulted the store %d times", store.calls)
+	}
+}
+
+// ── the compiled diff ───────────────────────────────────────────────────────────────────────────────
+
+type memDiffs struct {
+	data map[string][]byte
+	err  error
+}
+
+func (m memDiffs) Get(_ context.Context, h string) ([]byte, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	b, ok := m.data[h]
+	if !ok {
+		return nil, errors.New("no such blob")
+	}
+	return b, nil
+}
+
+const sampleDiff = "--- a/agent.go\n+++ b/agent.go\n@@\n-  Model: \"big\"\n+  Model: \"small\"\n"
+
+func compiled(id string, v *verification.Verdict) proposalstore.Scored {
+	sc := rec(id, v, proposalstore.BuildUnbuilt)
+	sc.SourceDiffBlobHash = strings.Repeat("d", 64)
+	return sc
+}
+
+// 🔴 The card renders the COMPILED diff. This is the product's actual output — a recommendation
+// without it asks a reviewer to trust a config hash.
+func TestACompiledProposalRendersItsDiff(t *testing.T) {
+	diffs := memDiffs{data: map[string][]byte{strings.Repeat("d", 64): []byte(sampleDiff)}}
+	s := NewSource(fakeStore{scored: []proposalstore.Scored{compiled("prop-1", passing(0.06))}}, diffs)
+
+	surface, _ := s.Surface("t1", "wf")
+	cards := append(surface.Recommendations, surface.Withheld...)
+	if len(cards) != 1 {
+		t.Fatalf("cards = %+v", cards)
+	}
+	if cards[0].SourceDiff != sampleDiff {
+		t.Fatalf("the compiled diff did not reach the card: %q", cards[0].SourceDiff)
+	}
+	// It is reviewable and still NOT deliverable: the diff was parsed, not built.
+	if cards[0].CanOpenPR {
+		t.Error("a parsed-but-unbuilt diff was offered as deliverable; ADR-001 requires a build")
+	}
+	if !strings.Contains(cards[0].PRDisabledReason, "build") {
+		t.Errorf("the reason must now name the BUILD, not a missing diff: %q", cards[0].PRDisabledReason)
+	}
+}
+
+// The two reasons are distinct. "Not compiled yet" and "compiled but not built" have different next
+// actions — one is a compile pass, the other is a toolchain.
+func TestTheTwoPRReasonsAreDistinct(t *testing.T) {
+	diffs := memDiffs{data: map[string][]byte{strings.Repeat("d", 64): []byte(sampleDiff)}}
+	s := NewSource(fakeStore{scored: []proposalstore.Scored{
+		compiled("has-diff", passing(0.06)),
+		rec("no-diff", passing(0.04), proposalstore.BuildUnbuilt),
+	}}, diffs)
+
+	surface, _ := s.Surface("t1", "wf")
+	byID := map[string]string{}
+	for _, c := range append(surface.Recommendations, surface.Withheld...) {
+		byID[c.ProposalID] = c.PRDisabledReason
+	}
+	if byID["has-diff"] == byID["no-diff"] {
+		t.Fatalf("both reasons are %q — a reviewer cannot tell whether to compile or to wait for a "+
+			"toolchain", byID["has-diff"])
+	}
+	if !strings.Contains(byID["no-diff"], "compiled") {
+		t.Errorf("an uncompiled proposal must say so: %q", byID["no-diff"])
+	}
+}
+
+// A diff the object store cannot return renders as ABSENT, never as a partial or an error string.
+func TestAnUnreadableDiffRendersAsAbsent(t *testing.T) {
+	s := NewSource(fakeStore{scored: []proposalstore.Scored{compiled("prop-1", passing(0.06))}},
+		memDiffs{err: errors.New("dial tcp 10.0.0.5:9000: connection refused")})
+	surface, _ := s.Surface("t1", "wf")
+	cards := append(surface.Recommendations, surface.Withheld...)
+	if cards[0].SourceDiff != "" {
+		t.Errorf("an unreadable diff rendered as %q", cards[0].SourceDiff)
+	}
+}
+
+// The delivery candidate carries the SAME bytes the reviewer saw.
+func TestTheDeliveryCandidateCarriesTheCompiledDiff(t *testing.T) {
+	diffs := memDiffs{data: map[string][]byte{strings.Repeat("d", 64): []byte(sampleDiff)}}
+	p := NewPending(fakePending{scored: []proposalstore.Scored{compiled("prop-1", passing(0.06))}},
+		diffs, "https://console.example")
+
+	got, err := p.PendingVerified(context.Background(), "t1")
+	if err != nil {
+		t.Fatalf("PendingVerified: %v", err)
+	}
+	if len(got) != 1 || got[0].DiffPatch != sampleDiff {
+		t.Fatalf("the compiled diff did not reach delivery: %+v", got)
+	}
+}
+
+// 🔴 A diff the store cannot return makes the proposal UNDELIVERABLE, not deliverable with a truncated
+// patch. This path's output is applied to a customer's repository.
+func TestAnUnreadableDiffIsNotDelivered(t *testing.T) {
+	p := NewPending(fakePending{scored: []proposalstore.Scored{compiled("prop-1", passing(0.06))}},
+		memDiffs{err: errors.New("connection refused")}, "")
+	got, err := p.PendingVerified(context.Background(), "t1")
+	if err != nil {
+		t.Fatalf("PendingVerified: %v", err)
+	}
+	if len(got) != 1 || got[0].DiffPatch != "" {
+		t.Fatalf("a partially-read patch was served for delivery: %+v", got)
 	}
 }
