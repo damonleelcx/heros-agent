@@ -167,27 +167,48 @@ export const ALLOWED_ORIGINS: readonly AllowedOrigin[] = [
       "tenant or operator prefix may name, permitted because the event is constructed from an " +
       "allowlist rather than filtered, and reached under connect-src only - script-src gains no host.",
   },
-  /*
-   * 🔴 `www.google-analytics.com` and `region1.google-analytics.com` are NOT here, and their absence is
-   * a measurement rather than an omission.
-   *
-   * Both were on this list, declared from GA4's documented ingest hosts. The acceptance run — a real
-   * Chrome, five public routes, every category granted, 4.5 s per route — observed the tag host transfer
-   * 167 KB, observed GA4 write its `_ga` cookies, and observed **zero bytes to either measurement
-   * endpoint**. So the allowlist carried two permissions nothing exercised, which is precisely the
-   * "stale entry is a permission nobody asked for" case the both-directions check exists to find. It
-   * found them.
-   *
-   * They are removed rather than retained, because the alternative is to keep an entry the run cannot
-   * confirm — and once one such entry is tolerated the check stops meaning anything for the others.
-   *
-   * ⚠️ **The risk this accepts, stated rather than buried.** If GA4 does send a hit to one of those
-   * hosts in a configuration this run did not reproduce, the policy will refuse it and the funnel will
-   * under-count. That failure is not silent: the browser logs a policy refusal, and the next acceptance
-   * run with a measurement id reports it as `UNLISTED ORIGIN` naming the host and the bytes. The entry
-   * then comes back with a measurement behind it, which is the only basis on which it should have been
-   * there in the first place.
-   */
+  {
+    /*
+     * 🔴 The GA4 MEASUREMENT endpoint. This entry was removed once and is back, and the reason it was
+     * removed is worth keeping because it is the more instructive half.
+     *
+     * It was struck from this list on the strength of an acceptance run that "observed the tag host
+     * transfer 167 KB, observed GA4 write its `_ga` cookies, and observed **zero bytes to either
+     * measurement endpoint**" — read as proof that the allowlist carried a permission nothing
+     * exercised, and removed under the rule that a stale entry is a permission nobody asked for.
+     *
+     * The reading was backwards. The run measured zero bytes to the measurement endpoint **because
+     * this policy was already refusing them**. `connect-src` never named the host, so gtag.js loaded,
+     * initialised, wrote its cookies — all of which the run saw — and then had every hit blocked by
+     * the browser. Removing the entry did not record an absence of traffic; it made the absence
+     * permanent, and left GA4 loading 167 KB on every public page while reporting nothing at all.
+     *
+     * Confirmed on the live deployment (2026-08-04, heros-agent.space, consent granted) by reading the
+     * violation rather than inferring it:
+     *
+     *     securitypolicyviolation: connect-src <- https://www.google-analytics.com/g/collect?v=2&tid=…
+     *
+     * The lesson this row now carries: **a both-directions check cannot distinguish "nobody asked for
+     * this" from "we refused it"** — an origin absent from the header produces zero bytes either way.
+     * An unexercised entry may only be removed on evidence gathered with the header PERMITTING it.
+     *
+     * ⚠️ `region1.google-analytics.com` is deliberately still absent. GA4 routes some regions to a
+     * numbered host, and this deployment has not been observed using one. It is left off on the rule
+     * this comment exists to state — added on a measurement, not on a vendor document — and its
+     * refusal is visible as a console violation naming the host, not as silent under-counting.
+     */
+    origin: "https://www.google-analytics.com",
+    integration: "Google Analytics 4",
+    category: "product_analytics",
+    directive: "connect-src",
+    // Hits are small and frequent. The ceiling bounds a page's worth of them, not one.
+    budgetBytes: 20 * 1024,
+    surfaces: ["public"],
+    contactedOn: "page-load",
+    why:
+      "The GA4 measurement endpoint every hit is POSTed to. Without it the tag loads, writes cookies " +
+      "and reports zero events - which is exactly what this deployment did until 2026-08-04.",
+  },
   {
     // The GA4 TAG HOST. Declared with `directive: "strict-dynamic"`, so it appears in no directive and
     // is still budgeted and reviewable — see the CspDirective comment for why that third option exists.
@@ -241,6 +262,41 @@ export const ALLOWED_ORIGINS: readonly AllowedOrigin[] = [
       "Wave 24e. Session-replay ingest for the public surface, with masking on by default. A replay of " +
       "/app/studio would be a legible copy of most of the never-permitted list in " +
       "internal/runlink/allowlist.go, which is why this surface list is one entry long.",
+  },
+  {
+    /*
+     * 🔴 Clarity's `c.gif` beacon, and the reason it needs a row of its own.
+     *
+     * `https://*.clarity.ms` above covers the recorder's uploads, but it is a `connect-src` entry and
+     * `c.gif` is fetched as an **IMAGE**. `img-src` on the public surface is `'self' data:`, so the
+     * beacon was refused while everything around it worked — the tag loaded, `scripts.clarity.ms`
+     * loaded, and the one request the vendor uses to confirm the session was blocked. Observed on the
+     * live deployment (2026-08-04):
+     *
+     *     securitypolicyviolation: img-src <- https://c.clarity.ms/c.gif
+     *
+     * It is an EXACT origin and not a wildcard, which is what makes it expressible here at all: the
+     * wildcard bound asserted in `tests/third-party-fence.test.mjs` permits `*` under `connect-src`
+     * only, so an `img-src` row has no choice but to name its host — and `c.clarity.ms` is a single
+     * global host rather than one of the regional ingest names, so naming it costs nothing.
+     *
+     * This is the same class of defect as the GA4 row above, found in the same session and by the same
+     * method: the integration looked installed, and the one directive it needed was the one nobody
+     * checked. A vendor's CSP guidance names the hosts it connects to; it does not always name the
+     * directives, and a beacon is not always a connection.
+     */
+    origin: "https://c.clarity.ms",
+    integration: "Microsoft Clarity",
+    category: "session_replay",
+    directive: "img-src",
+    // A 1x1 gif and its query string. The ceiling is generous for what it is, and deliberately small
+    // enough that anything else arriving on this host would breach it.
+    budgetBytes: 8 * 1024,
+    surfaces: ["public"],
+    contactedOn: "page-load",
+    why:
+      "Clarity's session beacon, fetched as an image rather than a connection - so the wildcard " +
+      "connect-src entry above does not cover it and did not, until 2026-08-04.",
   },
 ];
 
