@@ -37,6 +37,8 @@ type Server struct {
 
 	// monitor is the P2.5 live run-monitoring read model, mounted by MountMonitor when available.
 	monitor MonitorSource
+	// monitorAbsent is why this deployment serves no live monitor. See MountMonitorAbsent.
+	monitorAbsent string
 
 	// p35 is the P3.5 pattern-classifier read model, mounted by MountPatternGraph when available.
 	patternGraph PatternSource
@@ -142,6 +144,18 @@ type Server struct {
 	// Separate from runLinking on purpose: accepting a run and accepting a workflow's shape are two
 	// different policy decisions, and one mount must not imply the other.
 	workflowIR WorkflowIRSource
+	// verdicts is the P5.5 verdict ingest, mounted by MountVerdictIngest. A fourth separate decision:
+	// this one accepts a MEASUREMENT that decides whether a change may be recommended and delivered, so
+	// a deployment that serves the recommendation surface read-only leaves it nil and answers 503.
+	verdicts VerdictSink
+	// proposalGen is the platform-side generator, mounted by MountProposalGeneration. Separate from
+	// MountProposals for the reason every other pair here is separate: reading a recommendation surface
+	// and running a pass that WRITES proposals are different things to enable.
+	proposalGen ProposalGenerator
+	// proposalCompile is the codemod, mounted by MountProposalCompile. Separate from proposalGen: one
+	// reads metrics and a graph, the other extracts a source snapshot and re-parses a repository, and a
+	// caller who only wants to see what was found should not pay for the second.
+	proposalCompile ProposalCompiler
 	// sourcePush is the customer-pushed SOURCE snapshot store, mounted by MountSourcePush. A third
 	// separate policy decision, and the largest one: accepting a run's numbers, accepting a workflow's
 	// allowlisted shape, and accepting the customer's source are three different things to agree to, so

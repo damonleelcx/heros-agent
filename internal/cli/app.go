@@ -44,6 +44,11 @@ type NetCommands interface {
 	// from Link, not a flag on it: sending a run's numbers and sending the repository are different
 	// things to agree to, and a reviewer must be able to point at the one entry point that sends source.
 	PushSource(cfg Config, s Streams) error
+	// ReportVerdict transmits a verification VERDICT the CI measured for one platform-issued proposal.
+	// Its own method for the same reason PushSource is: a run link, a source snapshot and a measurement
+	// that decides whether a change may be delivered are three different things to agree to, and a
+	// reviewer must be able to point at the one entry point that sends each.
+	ReportVerdict(cfg Config, s Streams) error
 	// Upgrade is here rather than in this package for the same reason: it is the ONE command that must
 	// reach the network, and keeping it out is what makes "no update check on the hot path" (P20 task 5.6)
 	// structural instead of a promise — the code that runs discover/apply/eval does not link a network stack.
@@ -111,6 +116,11 @@ func Main(args []string, s Streams, env func(string) (string, bool), net NetComm
 			return report(operational("push-source is a platform command and is unavailable in this build", nil), s, cmd)
 		}
 		return codeOf(net.PushSource(cfg, s), s, cmd)
+	case "report-verdict":
+		if net == nil {
+			return report(operational("report-verdict is a platform command and is unavailable in this build", nil), s, cmd)
+		}
+		return codeOf(net.ReportVerdict(cfg, s), s, cmd)
 	case "upgrade":
 		if net == nil {
 			return report(operational("upgrade needs the network and is unavailable in this build; "+
@@ -337,6 +347,12 @@ Platform commands (explicit, authenticated; transmit only to https://heros-agent
              graph carry real labels rather than unclassified dots. The largest thing this
              CLI ever sends; --dry-run reports exactly what it contains and sends nothing,
              and --forget deletes a snapshot the platform is holding.
+  report-verdict  report a verification verdict your CI measured, for a proposal the platform
+             issued. The platform cannot measure one itself — the gate needs your eval cases,
+             your traces and your provider, and none of them leaves your environment. It
+             transmits LESS than the file it reads: the case ids and the free-text reason stay
+             on your machine and the counts cross instead. --dry-run prints the exact payload
+             and the account of what was withheld, and sends nothing.
 
 Exit codes: 0 ok · 1 configured-gate-failed · 2 operational-error · 3 invalid-config
 `, "\n"))

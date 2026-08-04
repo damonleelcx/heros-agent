@@ -1,7 +1,10 @@
 package api
 
 import (
+	"io"
+
 	"encoding/json"
+	"github.com/heros-foreal/agentd/internal/auth"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -24,8 +27,8 @@ type fakeP55 struct {
 	prCalled bool
 }
 
-func (f *fakeP55) Surface(string) (Surface, bool) { return f.surface, true }
-func (f *fakeP55) OpenPR(_, pid string) (PRResult, error) {
+func (f *fakeP55) Surface(_, _ string) (Surface, bool) { return f.surface, true }
+func (f *fakeP55) OpenPR(_, _, pid string) (PRResult, error) {
 	f.prCalled = true
 	return PRResult{ProposalID: pid, Branch: "optimizer/" + pid, URL: "local", Rollback: "git revert x"}, nil
 }
@@ -45,7 +48,7 @@ func surfaceWith(recs, withheld []Card) Surface {
 func TestP55UIIsSelfContained(t *testing.T) {
 	s := p55Server(&fakeP55{})
 	rec := httptest.NewRecorder()
-	s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/recommendations", nil))
+	s.Handler.ServeHTTP(rec, p55Req(http.MethodGet, "/recommendations", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d", rec.Code)
 	}
@@ -73,7 +76,7 @@ func TestP55Unmounted503(t *testing.T) {
 	s.MountProposals(nil) // routes registered, source nil → 503 (distinct from an unregistered 404)
 	for _, path := range []string{"/api/v1/workflows/wf1/proposals"} {
 		rec := httptest.NewRecorder()
-		s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		s.Handler.ServeHTTP(rec, p55Req(http.MethodGet, path, nil))
 		if rec.Code != http.StatusServiceUnavailable {
 			t.Errorf("%s: want 503 unmounted, got %d", path, rec.Code)
 		}
@@ -87,7 +90,7 @@ func TestP55SurfaceJSON(t *testing.T) {
 	s := p55Server(&fakeP55{surface: surfaceWith(recs, withheld)})
 
 	rec := httptest.NewRecorder()
-	s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/workflows/wf1/proposals", nil))
+	s.Handler.ServeHTTP(rec, p55Req(http.MethodGet, "/api/v1/workflows/wf1/proposals", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d", rec.Code)
 	}
@@ -113,7 +116,7 @@ func TestP55OpenPR_GatedAtBoundary(t *testing.T) {
 
 	// A verified, openable proposal → 200 and OpenPR invoked.
 	rec := httptest.NewRecorder()
-	s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/workflows/wf1/proposals/ok/open-pr", nil))
+	s.Handler.ServeHTTP(rec, p55Req(http.MethodPost, "/api/v1/workflows/wf1/proposals/ok/open-pr", nil))
 	if rec.Code != http.StatusOK || !fake.prCalled {
 		t.Fatalf("a gate-passing proposal must open a PR, got status %d prCalled=%v", rec.Code, fake.prCalled)
 	}
@@ -121,7 +124,7 @@ func TestP55OpenPR_GatedAtBoundary(t *testing.T) {
 	// A gate-failed proposal → 409, OpenPR never invoked.
 	fake.prCalled = false
 	rec = httptest.NewRecorder()
-	s.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/workflows/wf1/proposals/bad/open-pr", nil))
+	s.Handler.ServeHTTP(rec, p55Req(http.MethodPost, "/api/v1/workflows/wf1/proposals/bad/open-pr", nil))
 	if rec.Code != http.StatusConflict {
 		t.Errorf("a gate-failed proposal must be refused (409), got %d", rec.Code)
 	}
@@ -206,5 +209,75 @@ func TestCardForRoutesEveryBuildStatus(t *testing.T) {
 	}
 	if !Recommendable(proposal.BuildBuilt, pass) {
 		t.Error("a built, passing candidate must be recommendable, or nothing ever surfaces")
+	}
+}
+
+// p55Tenant is the authenticated principal these tests act as. The recommendation surface is
+// tenant-scoped: an unscoped Surface would let one tenant enumerate another's proposals AND open a pull
+// request carrying their diff — a write, into someone else's repository.
+var p55Tenant = auth.Principal{TenantID: "t1", Role: "member", APIKeyID: "key-p55"}
+
+func p55Req(method, target string, body io.Reader) *http.Request {
+	req := httptest.NewRequest(method, target, body)
+	return req.WithContext(auth.WithPrincipal(req.Context(), p55Tenant))
+}
+
+// tenantRecordingP55 records which tenant the surface was asked about.
+type tenantRecordingP55 struct {
+	surface  Surface
+	askedFor []string
+	openedAs []string
+}
+
+func (f *tenantRecordingP55) Surface(tenantID, _ string) (Surface, bool) {
+	f.askedFor = append(f.askedFor, tenantID)
+	return f.surface, true
+}
+
+func (f *tenantRecordingP55) OpenPR(tenantID, _, _ string) (PRResult, error) {
+	f.openedAs = append(f.openedAs, tenantID)
+	return PRResult{}, nil
+}
+
+// TestProposalsRequireAnAuthenticatedTenant is the fence under the fifth instance of the missing-tenant
+// flaw — after PatternSource, GraphEditorSource, BoardSource and ScorecardSource.
+//
+// 🔴 It matters more here than on a read-only board. OpenPR acts on what Surface returned, so an
+// unscoped surface would let one tenant enumerate another's proposals AND open a pull request carrying
+// their diff into a repository. That is a WRITE, into someone else's code.
+func TestProposalsRequireAnAuthenticatedTenant(t *testing.T) {
+	s := p55Server(&tenantRecordingP55{})
+	for _, tc := range []struct{ method, path string }{
+		{http.MethodGet, "/api/v1/workflows/wf1/proposals"},
+		{http.MethodPost, "/api/v1/workflows/wf1/proposals/p1/open-pr"},
+	} {
+		rec := httptest.NewRecorder()
+		// Deliberately httptest.NewRequest, NOT p55Req: no principal attached.
+		s.Handler.ServeHTTP(rec, httptest.NewRequest(tc.method, tc.path, nil))
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("%s %s = %d, want 401 for an unauthenticated caller", tc.method, tc.path, rec.Code)
+		}
+	}
+}
+
+func TestProposalsScopeToThePrincipalsTenant(t *testing.T) {
+	src := &tenantRecordingP55{surface: Surface{
+		WorkflowID: "wf1", State: "ready",
+		Recommendations: []Card{{ProposalID: "p1", CanOpenPR: true}},
+	}}
+	s := p55Server(src)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workflows/wf1/proposals/p1/open-pr", nil)
+	req = req.WithContext(auth.WithPrincipal(req.Context(), auth.Principal{TenantID: "tenant-b", Role: "member"}))
+	rec := httptest.NewRecorder()
+	s.Handler.ServeHTTP(rec, req)
+
+	if len(src.askedFor) == 0 || src.askedFor[0] != "tenant-b" {
+		t.Fatalf("surface asked for tenant(s) %v, want [tenant-b] — the scope must come from the "+
+			"authenticated principal, never from the URL", src.askedFor)
+	}
+	if len(src.openedAs) == 0 || src.openedAs[0] != "tenant-b" {
+		t.Fatalf("OpenPR called as tenant(s) %v, want [tenant-b] — a PR is a write into a repository, "+
+			"and it must be the caller's own", src.openedAs)
 	}
 }

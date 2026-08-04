@@ -122,6 +122,22 @@ spec:
               valueFrom: { secretKeyRef: { name: heros-platform, key: openai-api-key, optional: true } }
             - name: ANTHROPIC_API_KEY
               valueFrom: { secretKeyRef: { name: heros-platform, key: anthropic-api-key, optional: true } }
+            # ── P21 COLLECTION ────────────────────────────────────────────────────────────────────
+            #
+            # 🔴 BILLING_MODE's PRESENCE mounts checkout, plan changes and the provider webhook; unset
+            # mounts none of them and leaves P7 billing fully served. `live` MOVES REAL MONEY and is
+            # therefore declared, never inferred — and a value that is neither `test` nor `live` is
+            # refused rather than defaulted, because both defaults are wrong in a way only a customer
+            # discovers. Set it in the OVERLAY, not here: the base must not decide that a cluster
+            # charges people.
+            - { name: BILLING_MODE, value: "" }
+            # The two credentials, under the same reserved logical names the aws-secrets-manager source
+            # resolves (`billing_provider`, `billing_webhook`). Optional, so a cluster that declares no
+            # mode needs neither key present in its store.
+            - name: BILLING_PROVIDER_API_KEY
+              valueFrom: { secretKeyRef: { name: heros-platform, key: billing-provider-api-key, optional: true } }
+            - name: BILLING_WEBHOOK_SECRET
+              valueFrom: { secretKeyRef: { name: heros-platform, key: billing-webhook-secret, optional: true } }
             - { name: HEROS_VERSION, value: "" }
             # Backing-store credentials agentd reads through internal/config. Optional: absent means the
             # capability that dials that store is not mounted on this deployment yet.
@@ -143,6 +159,23 @@ spec:
             - { name: ADMIN_WEBAUTHN_RP_ID, value: "" }
             # Every component the deployment ships, aggregated into /readyz by health URL. Postgres is
             # NOT in this list — it is probed directly, by connection.
+            # ── The two PUBLISHED CATALOGS ────────────────────────────────────────────────────────
+            #
+            # These declare WHERE each file goes, not that one is there. Both carry PRICES and neither is
+            # ever git-tracked (internal/plancfg and internal/modelcatalog each fence the whole git index
+            # against a committed catalog), so the deployment names the path and the operator supplies
+            # the file — as two more keys (`plans.json`, `models.json`) in the `heros-platform` Secret
+            # this pod already projects read-only at /etc/heros. A Secret key cannot contain a slash, so
+            # they sit beside config.json rather than under a catalogs/ subdirectory.
+            #
+            # A path with no file behind it reads as NOT PUBLISHED (launch stats it at boot), so a fresh
+            # install with neither file gets the same clean "not configured, here is the path" it got
+            # when the variables were unset — not a mounted billing page that fails on its first read.
+            #
+            # plans.json gates billing AND P12 delivery (entitlement); models.json gates the proposal
+            # generator, because the registry records no capability tier or cost per run.
+            - { name: PLAN_CATALOG_PATH, value: "/etc/heros/plans.json" }
+            - { name: MODEL_CATALOG_PATH, value: "/etc/heros/models.json" }
             - { name: CONSOLE_HEALTH_URL, value: "http://console:4320/api/health" }
             - { name: ADMIN_CONSOLE_HEALTH_URL, value: "http://admin-console:4310/api/health" }
             - { name: OBJECT_STORE_HEALTH_URL, value: "http://objectstore:9000/minio/health/ready" }

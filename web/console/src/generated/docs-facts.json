@@ -548,6 +548,48 @@
       "unavailable": "push-source is a platform command and is unavailable in this build"
     },
     {
+      "name": "report-verdict",
+      "summary": "report a verification verdict your CI measured for a proposal the platform issued",
+      "availability": "network",
+      "offline": false,
+      "needs_account": true,
+      "flags": [
+        {
+          "name": "dry-run",
+          "type": "bool",
+          "default": "false",
+          "env": "HEROS_DRY_RUN",
+          "summary": "show exactly what would be transmitted, and transmit nothing (link: the payload itself; push-source: the snapshot's revision, file count and size)"
+        },
+        {
+          "name": "from",
+          "type": "string",
+          "default": "",
+          "env": "HEROS_FROM",
+          "summary": "path to the verdict your verification run produced, or `-` for stdin (report-verdict). Its case ids and free-text reason are NOT transmitted"
+        },
+        {
+          "name": "proposal",
+          "type": "string",
+          "default": "",
+          "env": "HEROS_PROPOSAL",
+          "summary": "the platform-issued proposal id a verdict measures (report-verdict). Taken from the flag, never from the verdict file: where the two disagree the command refuses rather than attaching a measurement to the wrong change"
+        },
+        {
+          "name": "revision",
+          "type": "string",
+          "default": "",
+          "env": "HEROS_REVISION",
+          "summary": "the commit the verification ran at (report-verdict) — a revision id, never the code at it"
+        }
+      ],
+      "example": "heros report-verdict --proposal prop-abc --from verdict.json --dry-run",
+      "success": "with --dry-run, the exact payload and the account of what stayed local, and nothing transmitted. Without it, the verdict recorded and the gate result the platform stored.",
+      "success_exit": 0,
+      "prerequisite": "a verdict file from your own verification run, and a proposal id the platform issued for your tenant",
+      "unavailable": "report-verdict is a platform command and is unavailable in this build"
+    },
+    {
       "name": "status",
       "summary": "show effective config with provenance, and the fixed contract facts",
       "availability": "offline",

@@ -390,8 +390,8 @@ func (c cannedRunner) Run(_ context.Context, req verification.RunRequest) (verif
 
 type hermesSource struct{ surface api.Surface }
 
-func (h hermesSource) Surface(string) (api.Surface, bool) { return h.surface, true }
-func (h hermesSource) OpenPR(_, pid string) (api.PRResult, error) {
+func (h hermesSource) Surface(_, _ string) (api.Surface, bool) { return h.surface, true }
+func (h hermesSource) OpenPR(_, _, pid string) (api.PRResult, error) {
 	return api.PRResult{ProposalID: pid, Branch: "optimizer/" + pid,
 		URL:      "https://github.com/nousresearch/hermes-agent/compare/optimizer/" + pid,
 		Rollback: "git revert <merge-commit>"}, nil

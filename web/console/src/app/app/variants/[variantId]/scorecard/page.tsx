@@ -51,6 +51,10 @@ export default async function ScorecardPage({ params }: { params: Promise<{ vari
 
 function Body({ view }: { view: ScorecardView }) {
   const nodes = view.nodes ?? [];
+  // Whether the failure columns hold a measurement at all. Read from the server's own verdict rather
+  // than inferred from the numbers: every share being 0 is indistinguishable from a variant in which
+  // nothing failed, and those are opposite findings. See NodeRowView.
+  const attributed = view.failure_attribution !== "unavailable";
   const clusters = view.clusters ?? [];
   const diagnoses = view.diagnoses ?? [];
   const ablations = view.ablations ?? [];
@@ -139,7 +143,11 @@ function Body({ view }: { view: ScorecardView }) {
           <Empty title="No per-node attribution was produced for this variant." />
         ) : (
           <DataTable
-            caption="Each node's share of failure, and of cost and latency"
+            caption={
+              attributed
+                ? "Each node's share of failure, and of cost and latency"
+                : "Each node's share of cost and latency. Failure is not attributed on this deployment."
+            }
             columns={[
               { key: "node", label: "Node" },
               { key: "share", label: "Share of failure", numeric: true },
@@ -150,7 +158,7 @@ function Body({ view }: { view: ScorecardView }) {
           >
             <tbody>
               {nodes.map((node) => (
-                <NodeRowView key={node.node_id} node={node} />
+                <NodeRowView key={node.node_id} node={node} attributed={attributed} />
               ))}
             </tbody>
           </DataTable>
@@ -248,8 +256,30 @@ function Body({ view }: { view: ScorecardView }) {
   );
 }
 
-function NodeRowView({ node }: { node: NodeRow }) {
-  const flags = node.classified ? [] : ["low-confidence"];
+/**
+ * NodeRowView renders one node's attribution.
+ *
+ * 🔴 THE FAILURE COLUMNS ARE NOT RENDERED AS NUMBERS WHEN THE SERVER SAYS THEY WERE NEVER COMPUTED.
+ *
+ * `failure_share` and `first_divergence_count` are derived from per-node CORRECTNESS, which is eval
+ * data: it stays on the machine that ran the eval and has no field on the link allowlist. When a card
+ * is assembled from a linked run the server sets `failure_attribution: "unavailable"` and leaves those
+ * two at their zero values — `internal/hostedscorecard` says in its own header that emitting rows with
+ * FailureShare 0 "would say 'no node caused any failures' on a variant that may be failing badly".
+ *
+ * This function used to print `percent(0)` for every node regardless, which is that exact sentence,
+ * rendered. Twenty-seven rows of `0%` under a column headed "Share of failure" is a finding — and the
+ * finding was never made. "Not to blame" and "not investigated" are opposite conclusions and they were
+ * being drawn with the same glyph.
+ *
+ * ⚠️ The old caveat made it worse rather than better. The chip came from `node.classified` — whether
+ * the node carries a PATTERN LABEL — and read "the eval set cannot support a claim this strong", which
+ * is a statement about statistical power. So an unclassified node was told its failure number was weak
+ * when the truth is that there is no failure number, and the page's own preamble already says the
+ * opposite ("Attribution for an unclassified node is still measured"). Classification is reported where
+ * it belongs: the pattern chip on the node, and the count above the table.
+ */
+function NodeRowView({ node, attributed }: { node: NodeRow; attributed: boolean }) {
   return (
     <tr>
       <td>
@@ -263,12 +293,20 @@ function NodeRowView({ node }: { node: NodeRow }) {
           <p className="caption mt-1">bottleneck: {(node.bottleneck_dimensions ?? []).join(", ")}</p>
         ) : null}
       </td>
-      <td className="num">
-        <Value flags={flags}>
-          <span className="mono">{percent(node.failure_share)}</span>
-        </Value>
-      </td>
-      <td className="num mono">{integer(node.first_divergence_count)}</td>
+      {attributed ? (
+        <>
+          <td className="num mono">{percent(node.failure_share)}</td>
+          <td className="num mono">{integer(node.first_divergence_count)}</td>
+        </>
+      ) : (
+        <td className="num" colSpan={2}>
+          <Value flags={["not-attributed"]}>
+            <span className="mono" aria-label="not measured on this deployment">
+              —
+            </span>
+          </Value>
+        </td>
+      )}
       <td className="num mono">{percent(node.mean_cost_share)}</td>
       <td className="num mono">{percent(node.mean_latency_share)}</td>
     </tr>

@@ -72,6 +72,52 @@ The guarantee is enforced by a test that **adds a sensitive field to the source 
 absent from a transmitted payload** ([`internal/runlink/egress_test.go`](../../internal/runlink/egress_test.go)).
 If that test cannot be made to fail, the guarantee is decoration (design Risk table).
 
+## 1b. The reported-verdict allowlist (P5.5)
+
+A **third** payload, versioned and ratified separately: what your CI reports back after it verifies a
+proposal. It exists because the verification gate needs your eval cases, your traces and your provider —
+all three stay on your side — so a hosted platform can *generate* a proposal and can never *measure*
+one. This is the only path by which a stored verdict can say `pass`.
+
+Contract version `p55.verdict.v1`, POSTed to `/api/v1/proposals/{proposal_id}/verdict`. Source of truth:
+[`internal/runlink/verdict.go`](../../internal/runlink/verdict.go).
+
+| Wire key | Category | Why it may cross |
+|---|---|---|
+| `proposal_id` | identity | which proposal was measured — **we** issued it, so it goes back the way it came; the ingest refuses one your tenant does not own |
+| `config_hash` | provenance | the candidate configuration that was built and run; already crosses on the run link |
+| `diff_hash` | provenance | the **content address** of the diff that was applied — a hash, never the diff |
+| `source_revision` | provenance | the commit the measurement ran at, not the code at it |
+| `metric` | scores | which metric the delta is in. A name, already permitted under `scores.metric` |
+| `delta` | scores | the measured change — a number, not the eval set behind it |
+| `ci_low` / `ci_high` | scores | the interval, travelling with the number it qualifies |
+| `significant` | scores | whether it cleared the significance bar. A boolean about the number, not the policy |
+| `held_out` | scores | whether it was measured on cases the proposal was *not* generated from. Without it, a generalising result and an overfit one render identically |
+| `cost_delta` | metrics | change in provider spend — the quantity `metrics.cost` already carries, as a difference |
+| `latency_delta` | metrics | change in wall time |
+| `regression_pass` | scores | whether the regression check passed. A verdict, not the budget that decided it |
+| `gate_result` | scores | `pass` / `fail_significance` / `fail_regression` / `fail_constraint` / `unrun` |
+| `cases_fixed_count` | eval | **how many** cases the change fixed |
+| `cases_broken_count` | eval | how many it broke — transmitted even when zero, because an absent count renders as "broke nothing", which is a claim rather than a silence |
+
+> **Two fields of the local verdict are deliberately left behind.**
+>
+> **The case IDs.** `verification.Verdict` carries `cases_fixed` and `cases_broken` as lists of case
+> ids, and the proposal card renders them. They do **not** cross; the counts do. A case id is text you
+> wrote — `case_ceo_comp_2025` is an ordinary thing to name a case — so the list is a channel for
+> exactly the content `eval.case_count` exists to keep out. The counterexample worth answering is
+> `nodes.symbol` on the opt-in structure payload, which *is* your text and *is* permitted: there the
+> label is the entire reason the payload exists, because a graph without it is unlabelled dots. Here it
+> is not — "this change fixed 4 cases and broke 0" is the whole claim the surface makes.
+>
+> **The reason.** `Verdict.Reason` is free text. Free text is a hole with a label on it: the field is
+> not wrong today, and nothing in a type stops the next author putting a failing case's output in it,
+> because "explain why the gate failed" invites precisely that. The console narrates from the
+> structured fields instead, and says so where a reader sees it rather than trailing off.
+
+**Also never permitted here:** the eval cases, their inputs, expected answers or outputs · the gate
+thresholds that produced the result · the source diff or any part of it · the transformed working copy.
+
 ## 2. Machine output format and its version (task 1.2)
 
 Every command writes **one** JSON document to **stdout**; every word a human reads goes to **stderr**.

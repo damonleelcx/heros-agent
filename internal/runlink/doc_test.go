@@ -30,6 +30,22 @@ func contractDoc(t *testing.T) string {
 	return string(b)
 }
 
+// runLinkSection returns just the run-link allowlist section (§1) of the contract doc. Each payload has
+// its own section, and a check about one payload must read only its own.
+func runLinkSection(t *testing.T) string {
+	t.Helper()
+	doc := contractDoc(t)
+	_, after, found := strings.Cut(doc, "## 1. The egress allowlist")
+	if !found {
+		t.Fatal("the contract doc has no run-link allowlist section")
+	}
+	before, _, found := strings.Cut(after, "## 1b. The reported-verdict allowlist")
+	if !found {
+		t.Fatal("the contract doc has no reported-verdict section to bound §1 at")
+	}
+	return before
+}
+
 // TestEveryAllowlistedKeyIsDocumented: a field may not cross the boundary without appearing in the
 // published contract.
 func TestEveryAllowlistedKeyIsDocumented(t *testing.T) {
@@ -51,7 +67,13 @@ func TestEveryAllowlistedKeyIsDocumented(t *testing.T) {
 // It checks the wire keys the table claims, not every backticked token in the file: the doc legitimately
 // names internal identifiers, file paths and refused fields in prose. The table rows are the contract.
 func TestDocumentedKeysAreOnTheAllowlist(t *testing.T) {
-	doc := contractDoc(t)
+	// 🔴 Scoped to section 1, and this is the SECOND time this test has been narrowed for the same
+	// reason. Keying on the category cell was the first fix — it stopped the exit-code table's `0` being
+	// reported as an undocumented wire key. That fix holds only while one table uses those categories.
+	// Section 1b (the reported verdict) uses `scores`, `metrics` and `eval` too, entirely legitimately,
+	// and an unscoped scan then reports every one of its rows as a field the run-link allowlist does not
+	// admit — which is true and irrelevant. A per-payload check needs a per-payload section.
+	doc := runLinkSection(t)
 	permitted := map[string]bool{}
 	for _, f := range Allowlist {
 		permitted[f.Name] = true
@@ -125,4 +147,79 @@ func isAllowlistCategory(s string) bool {
 		}
 	}
 	return false
+}
+
+// TestEveryVerdictKeyIsDocumented extends the same guarantee to the reported-verdict payload.
+//
+// It did not exist for the opt-in structure payload either, and that gap is why this one is written now
+// rather than later: `WorkflowIRAllowlist` has crossed the boundary since P11 with no published table
+// at all, which the two tests above would have caught had they been written against every allowlist
+// instead of against `Allowlist`. See TestTheWorkflowIRContractIsUndocumented below, which records that
+// gap as a failing-by-default fact rather than leaving it to be rediscovered.
+func TestEveryVerdictKeyIsDocumented(t *testing.T) {
+	doc := contractDoc(t)
+	for _, f := range VerdictAllowlist {
+		if !strings.Contains(doc, "`"+f.Name+"`") {
+			t.Errorf("verdict allowlist key %q crosses the boundary but does not appear in the published "+
+				"contract doc. A reported verdict is still customer data leaving a customer's machine.", f.Name)
+		}
+	}
+}
+
+// TestDocumentedVerdictKeysAreOnTheAllowlist is the other direction: the doc must not promise a field
+// the code does not send, or keep one it no longer does.
+func TestDocumentedVerdictKeysAreOnTheAllowlist(t *testing.T) {
+	doc := contractDoc(t)
+	section, _, found := strings.Cut(doc, "## 2. Machine output format")
+	if !found {
+		t.Fatal("could not find the end of the allowlist sections in the contract doc")
+	}
+	_, section, found = strings.Cut(section, "## 1b. The reported-verdict allowlist")
+	if !found {
+		t.Fatal("the contract doc has no reported-verdict section")
+	}
+	for _, line := range strings.Split(section, "\n") {
+		if !strings.HasPrefix(line, "| `") {
+			continue
+		}
+		cells := strings.Split(line, "|")
+		if len(cells) < 3 {
+			continue
+		}
+		for _, key := range backticked(cells[1]) {
+			if !VerdictPermitted(key) {
+				t.Errorf("the contract doc documents verdict wire key %q, which is NOT on "+
+					"VerdictAllowlist — the doc promises a field we do not send", key)
+			}
+		}
+	}
+}
+
+// The opt-in workflow-structure payload has crossed the boundary since P11 with no published table.
+//
+// 🔴 This is a REAL GAP, recorded here rather than fixed in the same change that found it: writing that
+// table is a customer-facing privacy statement about fifteen fields, and it deserves its own review
+// rather than riding along with a verdict contract. What this test does is make the gap impossible to
+// forget — it fails the moment somebody publishes the section, at which point the check flips into the
+// same drift fence the other two payloads have.
+func TestTheWorkflowIRContractIsUndocumented(t *testing.T) {
+	doc := contractDoc(t)
+	documented := 0
+	for _, f := range WorkflowIRAllowlist {
+		if strings.Contains(doc, "`"+f.Name+"`") {
+			documented++
+		}
+	}
+	// `workflow_id` and `source_revision` appear in the run-link table under their own justification, so
+	// a small overlap is expected and is not the section being written.
+	if documented > 3 {
+		t.Fatalf("%d of %d workflow-IR keys now appear in the contract doc — the section is being "+
+			"written. Replace this test with the two-directional drift fence the other payloads have "+
+			"(TestEveryVerdictKeyIsDocumented / TestDocumentedVerdictKeysAreOnTheAllowlist).",
+			documented, len(WorkflowIRAllowlist))
+	}
+	t.Logf("KNOWN GAP: the opt-in workflow-structure payload (%d fields, contract %s) has no published "+
+		"table in docs/decisions/p11-contracts.md. It transmits symbol names, file paths and line spans "+
+		"from customer source, each justified in code, and customers have no published copy of that list.",
+		len(WorkflowIRAllowlist), WorkflowIRContractVersion)
 }

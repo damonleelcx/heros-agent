@@ -36,7 +36,41 @@ export default async function TransformPage({
       wide
     >
       {!outcome.ok ? (
-        <Failure kind={outcome.kind} error={outcome.error} denial={outcome.denial} subject="transform" />
+        <>
+          <Failure kind={outcome.kind} error={outcome.error} denial={outcome.denial} subject="transform" />
+          {/*
+            🔴 "No such transform" is TRUE and, on its own, useless — which is the whole complaint.
+            The reader arrived by following a link from a run, so the identifier plainly resolves
+            somewhere; being told it does not resolve here reads as a broken product.
+
+            The reason it does not is structural rather than accidental. A transform is a change the
+            PLATFORM produced and holds — a spec submitted here, applied here, with a diff and a build
+            gate behind it. A LINKED run is the opposite direction: it measured a configuration on the
+            customer's own machine and sent back the result. Its config hash names a configuration that
+            was never submitted to this deployment, so there is nothing here to show and never was.
+
+            This says that, only on the not-found path, and does not soften the Failure above it: the
+            identifier really did not resolve, and the panel that says so stays exactly as it is.
+          */}
+          {outcome.kind === "not-found" ? (
+            <Banner tone="info" title="A run you linked will not have one">
+              <p>
+                A transform is a change this platform produced and holds: a Variant Spec submitted here,
+                applied to a pushed source revision, with the diff and the build gate&apos;s verdict
+                attached. It is written when you submit a spec — not when you link a run.
+              </p>
+              <p>
+                A linked run travels the other way. It measured a configuration on your machine and sent
+                back the scores, so its config hash names a configuration this deployment has never been
+                asked to build. Nothing is missing or lost; there is no transform to hold.
+              </p>
+              <p className="hint">
+                What a linked run does carry is on its own page — the scores with their intervals, and
+                per-node cost and latency on the variant&apos;s scorecard.
+              </p>
+            </Banner>
+          ) : null}
+        </>
       ) : (
         <TransformBody transform={outcome.data} />
       )}

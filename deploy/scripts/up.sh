@@ -31,6 +31,34 @@ configdir="$deploy/config"
 logdir="${TMPDIR:-/tmp}/heros-deploy-up"
 
 READY_TIMEOUT="${READY_TIMEOUT:-300}"
+
+# ── The published ports, resolved the way COMPOSE resolves them ─────────────────────────────────────
+#
+# 🔴 THIS SCRIPT MUST NOT GUESS A PORT IT THEN VERIFIES AGAINST. These three values are written into
+# .env.local on first install and passed to every later `compose` call with --env-file, so THEY are what
+# the containers publish. But the defaults below are the script's own, from its shell — and a second run
+# in a shell with no overrides took the defaults while compose took the file. On a deployment installed
+# with CONSOLE_PORT=14320 that meant:
+#
+#   - step 50 curled :4320, found nothing, and reported "the customer console is not healthy on :4320"
+#     about a console that was healthy on :14320. A false failure, and the mild half.
+#   - the /readyz wait and the auth-enforcement assertion curled :4321 — where an UNRELATED process on
+#     the host happened to be listening. It answered `{"status":"ready"}`, and this script printed
+#     "/readyz: ready" having never contacted the deployment at all. A readiness gate that any host
+#     process can satisfy is not a gate, and rule 2 above is the thing it broke.
+#
+# Precedence is compose's, exactly: the shell environment wins over --env-file, which wins over the
+# `${VAR:-default}` in the compose file. Anything else and the script and the stack disagree again, just
+# in the other direction.
+persisted_env() {
+  [ -f "$envfile" ] || return 0
+  grep "^$1=" "$envfile" 2>/dev/null | tail -1 | cut -d= -f2- || true
+}
+AGENTD_PORT="${AGENTD_PORT:-$(persisted_env AGENTD_PORT)}"
+CONSOLE_PORT="${CONSOLE_PORT:-$(persisted_env CONSOLE_PORT)}"
+ADMIN_CONSOLE_PORT="${ADMIN_CONSOLE_PORT:-$(persisted_env ADMIN_CONSOLE_PORT)}"
+# Second pass for the first install (and for an .env.local predating these keys), where the file has
+# nothing to say. These defaults must stay in step with the compose files' own.
 AGENTD_PORT="${AGENTD_PORT:-4321}"
 CONSOLE_PORT="${CONSOLE_PORT:-4320}"
 ADMIN_CONSOLE_PORT="${ADMIN_CONSOLE_PORT:-4310}"

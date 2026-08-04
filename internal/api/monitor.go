@@ -24,15 +24,44 @@ type MonitorSource interface {
 }
 
 // MountMonitor registers the live-monitor routes. Call after New.
+//
+// A nil src registers them anyway, so an absent capability answers 503 rather than 404 — see
+// mountCapabilities. Pair it with MountMonitorAbsent to say WHY.
 func (s *Server) MountMonitor(src MonitorSource) {
 	s.monitor = src
 	s.Mux.HandleFunc("GET /api/v1/runs/{run_id}/monitor", s.handleMonitorSnapshot)
 	s.Mux.HandleFunc("GET /api/v1/runs/{run_id}/monitor/stream", s.handleMonitorStream)
 }
 
+// MountMonitorAbsent records the reason this deployment serves no live monitor, for the 503 body.
+//
+// 🔴 The reason is passed IN rather than written here, because only the deployment knows it — and
+// because the two audiences were getting different answers to the same question. `internal/launch`
+// composes a full explanation for the boot log (the platform never executes the run, so there is
+// nothing live to stream; per-node state is eval data; here is what IS served for a linked run), and
+// the user reading /app/runs/{id}/live got the five-word stub this file used to hard-code. The operator
+// learned the next action from a log they will never open; the customer was told only that something is
+// missing. Same fact, and the person who can act on it saw the worse half.
+//
+// An empty reason leaves the stub, so a caller that has nothing to add is not forced to invent one.
+func (s *Server) MountMonitorAbsent(reason string) { s.monitorAbsent = reason }
+
+// monitorNotMounted writes the 503 both monitor routes answer when no source is mounted.
+func (s *Server) monitorNotMounted(w http.ResponseWriter) {
+	body := map[string]any{"error": "the live monitor is not mounted"}
+	if s.monitorAbsent != "" {
+		// `detail` beside `error`, not instead of it: `platformApi.classify` recognises not-mounted by
+		// matching /not mounted/i on the error, and a reason that replaced it would be classified as a
+		// generic upstream failure — turning "this capability is not installed" back into "something
+		// went wrong", which is the distinction the 503 exists to make.
+		body["detail"] = s.monitorAbsent
+	}
+	writeJSON(w, http.StatusServiceUnavailable, body)
+}
+
 func (s *Server) handleMonitorSnapshot(w http.ResponseWriter, r *http.Request) {
 	if s.monitor == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "the live monitor is not mounted"})
+		s.monitorNotMounted(w)
 		return
 	}
 	snap, ok := s.monitor.Snapshot(r.PathValue("run_id"))
@@ -49,7 +78,7 @@ func (s *Server) handleMonitorSnapshot(w http.ResponseWriter, r *http.Request) {
 // or a safety cap elapses). This is the "as they arrive" half of task 8.1.
 func (s *Server) handleMonitorStream(w http.ResponseWriter, r *http.Request) {
 	if s.monitor == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "the live monitor is not mounted"})
+		s.monitorNotMounted(w)
 		return
 	}
 	flusher, ok := w.(http.Flusher)

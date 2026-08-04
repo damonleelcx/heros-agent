@@ -203,6 +203,40 @@ func (r *Runner) IR(ctx context.Context, ref sourceingest.Ref) (*discovery.IR, e
 	return r.discover(ctx, mat.Dir, ref)
 }
 
+// WithSource materializes the snapshot, derives its IR, and hands BOTH to fn for the lifetime of the
+// extracted tree.
+//
+// 🔴 IR above cannot serve a caller that needs the FILES as well as the shape: it releases the
+// materialized directory before returning, so the path it parsed is gone by the time the caller has the
+// IR. The codemod needs exactly that pair — an IR to resolve the change against, and the tree to
+// rewrite — and the alternative shapes are both worse. Returning the directory would hand its lifetime
+// to a caller who has no idea it is a temp extraction; materializing twice would parse the repository
+// twice and, worse, could get two DIFFERENT trees if a push landed in between, so the diff would be
+// generated against a tree the IR does not describe.
+//
+// The tree is read-only as far as this contract is concerned: fn must not write into dir. transform
+// .Generate reads it and returns the rewritten bytes rather than mutating, which is what makes that
+// safe.
+func (r *Runner) WithSource(ctx context.Context, ref sourceingest.Ref, fn func(dir string, ir *discovery.IR) error) error {
+	if err := ref.Validate(); err != nil {
+		return err
+	}
+	mat, err := r.source.Materialize(ctx, ref)
+	if err != nil {
+		if errors.Is(err, sourceingest.ErrNoSource) {
+			return err
+		}
+		return fmt.Errorf("hostdiscovery: materialize %s: %w", ref, err)
+	}
+	defer mat.Release()
+
+	ir, err := r.discover(ctx, mat.Dir, ref)
+	if err != nil {
+		return err
+	}
+	return fn(mat.Dir, ir)
+}
+
 // discover runs the discovery pipeline over an extracted tree.
 func (r *Runner) discover(ctx context.Context, dir string, ref sourceingest.Ref) (*discovery.IR, error) {
 	// Discovery is CPU-bound and does not take a context; check for cancellation before starting rather

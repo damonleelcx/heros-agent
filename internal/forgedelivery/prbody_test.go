@@ -10,14 +10,15 @@ import (
 )
 
 func improvementVerdict() verification.Verdict {
-	return verification.Verdict{
+	v := verification.Verdict{
 		Metric:     "quality",
 		Delta:      evalstats.Interval{Mean: 0.12, Low: 0.04, High: 0.20, Confidence: 0.95},
 		HeldOut:    true,
 		GateResult: verification.GatePass,
-		CasesFixed: []string{"c1", "c2", "c3"},
 		CostDelta:  -0.0012, LatencyDelta: -40,
 	}
+	v.SetCases([]string{"c1", "c2", "c3"}, nil)
+	return v
 }
 
 func tieVerdict() verification.Verdict {

@@ -57,6 +57,20 @@ func Bottleneck(v Variant, cases []FailingCase, cfg BottleneckConfig) []Bottlene
 			latByNode[nc.NodeID] += nc.LatencyMS
 		}
 	}
+	return BottleneckFromTotals(v, costByNode, latByNode, cfg)
+}
+
+// BottleneckFromTotals is Bottleneck's second half: the Pareto, over per-node totals the caller already
+// holds. Bottleneck derives those totals from TRACES; a hosted platform never sees a trace and is given
+// the totals directly — `metrics.per_node` is on the P11 allowlist precisely because "which node is
+// expensive" is answerable from quantities alone.
+//
+// 🔴 Exported so internal/proposalgen reuses THIS Pareto rather than writing a second one. Cost
+// dominance decides which node gets a change proposed against it and which node the scorecard flags to
+// the reader; two implementations of that rule are two answers to one question, and the one nobody
+// reads is the one that drifts.
+func BottleneckFromTotals(v Variant, costByNode, latencyByNode map[string]float64, cfg BottleneckConfig) []BottleneckFlag {
+	costByNode, latByNode := costByNode, latencyByNode
 	var flags []BottleneckFlag
 	flags = append(flags, paretoFlags(v, DimCost, costByNode, cfg.coverage())...)
 	flags = append(flags, paretoFlags(v, DimLatency, latByNode, cfg.coverage())...)

@@ -240,9 +240,9 @@ type source struct {
 	surface api.Surface
 }
 
-func (s source) Surface(string) (api.Surface, bool) { return s.surface, true }
+func (s source) Surface(_, _ string) (api.Surface, bool) { return s.surface, true }
 
-func (s source) OpenPR(_, proposalID string) (api.PRResult, error) {
+func (s source) OpenPR(_, _, proposalID string) (api.PRResult, error) {
 	return api.PRResult{ProposalID: proposalID, Branch: "optimizer/" + proposalID,
 		URL: "(local) git show optimizer/" + proposalID, Draft: false,
 		Rollback: "git revert <merge-commit>"}, nil

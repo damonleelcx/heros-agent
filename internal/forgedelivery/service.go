@@ -47,6 +47,14 @@ type PendingProvider interface {
 // or revoked. A missing route is not an error — it is the RouteAbsent condition.
 type RouteRegistry interface {
 	// RouteFor returns the configured route for a tenant+target, or nil if none is configured.
+	//
+	// 🔴 AN EMPTY TARGET IS THE "HAS ANY ROUTE" PROBE. anyRoute below calls RouteFor(ctx, tenant, "")
+	// and reads a non-nil result as "this tenant has at least one route". That contract used to live
+	// only in anyRoute's own comment, where no implementer would look: a store that treated "" as a
+	// literal target would find nothing (a route's target always names an owner and a repo), return
+	// nil, and make RouteConditionFor report `no_route` to every tenant who HAS routes — telling them
+	// to configure something they already configured, on the surface whose one job is to say what to
+	// do next. It is stated here so an implementation is written against it rather than around it.
 	RouteFor(ctx context.Context, tenantID, target string) (*Route, error)
 	// Capability reports a lost-capability condition (degraded/revoked) for a tenant, or Kind=="" when
 	// capability is intact. A read error is returned, never swallowed.
@@ -118,30 +126,51 @@ func (s *Service) anyRoute(ctx context.Context, tenantID string) bool {
 }
 
 // Pending serves the authenticated CI fetch (task 5.3): for a tenant+target it Prepares every verified
-// proposal, enforcing the gate/entitlement/halt/route/bound SERVER-SIDE. Only deliverable proposals are
-// returned; an undeliverable one is simply absent, never leaked.
-func (s *Service) Pending(ctx context.Context, tenantID string, target Target) ([]Prepared, error) {
+// proposal, enforcing the gate/entitlement/halt/route/bound SERVER-SIDE.
+//
+// It returns the deliverable proposals AND a typed account of the ones it withheld, mirroring how
+// api.Surface separates Recommendations from Withheld.
+//
+// 🔴 The second return value is the whole point of this function's current shape. It used to drop every
+// refusal with a bare `continue`, which turned five different causes into one empty array — including
+// "your route names gitlab, which P12 does not deliver to", a product boundary the customer had no way
+// to learn about. An empty list is indistinguishable from a healthy quiet week, and that confusion lands
+// hardest during evaluation (design Decision 6). The package already said so about a missing ROUTE and
+// said nothing about anything the route let through.
+//
+// The withheld entries carry a NAMED CONDITION, never a raw error: see withheld.go for what is
+// deliberately not carried (an operator's halt note, and any description of an internal failure).
+//
+// A proposal is in exactly one of the two lists. Nothing is silently absent from both.
+func (s *Service) Pending(ctx context.Context, tenantID string, target Target) ([]Prepared, []Withheld, error) {
 	proposals, err := s.pending.PendingVerified(ctx, tenantID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	route, err := s.routes.RouteFor(ctx, tenantID, target.Key())
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if route == nil {
-		return nil, ErrNoRoute
+		// Still an ERROR rather than a per-proposal withholding, deliberately: with no route there is no
+		// target to have withheld anything FOR, and the caller already renders ErrNoRoute as the
+		// RouteAbsent condition with its next action. Turning it into N identical withheld entries would
+		// repeat one fact once per proposal.
+		return nil, nil, ErrNoRoute
 	}
+
 	var out []Prepared
+	var withheld []Withheld
 	for _, p := range proposals {
 		p.TenantID = tenantID // scope is the authenticated tenant, never the request body
 		prep, err := s.del.Prepare(ctx, p, route)
 		if err != nil {
-			continue // undeliverable → not served (gate/entitlement/halt/bound decided it)
+			withheld = append(withheld, classifyWithheld(p.ProposalID, err))
+			continue
 		}
 		out = append(out, prep)
 	}
-	return out, nil
+	return out, withheld, nil
 }
 
 // RecordReport records a CI-opened delivery (task 5.1 report leg). It re-derives Prepared from the

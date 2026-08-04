@@ -135,9 +135,20 @@ func (c Compiler) Compile(ctx context.Context, cand Candidate) (Compiled, error)
 	if err != nil {
 		return Compiled{}, fmt.Errorf("proposal: build check: %w", err)
 	}
+	// Three outcomes, not two. `Unavailable` means no gate ran, which is neither "it builds" nor "it
+	// does not" — see BuildResult.Unavailable for why collapsing it into either is worse than leaving
+	// the candidate unbuilt. The DIFF is still returned: a reviewable diff nobody could build is the
+	// product's output minus one guarantee, and hiding it would be hiding the work as well as the gap.
 	status := BuildFailed
-	if res.Builds {
+	switch {
+	case res.Unavailable != "":
+		status = BuildUnbuilt
+	case res.Builds:
 		status = BuildBuilt
+	}
+	log := res.Log
+	if res.Unavailable != "" {
+		log = res.Unavailable
 	}
 	return Compiled{
 		Candidate:   cand,
@@ -145,7 +156,7 @@ func (c Compiler) Compile(ctx context.Context, cand Candidate) (Compiled, error)
 		Patch:       patch,
 		DiffHash:    patch.DiffHash,
 		BuildStatus: status,
-		BuildLog:    res.Log,
+		BuildLog:    log,
 		IR:          c.IR,
 	}, nil
 }

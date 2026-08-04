@@ -298,6 +298,11 @@ func (s *Server) handleBillingUI(w http.ResponseWriter, _ *http.Request) {
 	_, _ = w.Write(p7HTML)
 }
 
+// ReasonCollectionNotConfigured marks the 404 a deployment with no payment provider returns for every
+// billing account. It is a CONFIGURED STATE, not a missing record: the console renders it as such, and
+// the operator has nothing to fix.
+const ReasonCollectionNotConfigured = "collection_not_configured"
+
 func (s *Server) handleBilling(w http.ResponseWriter, r *http.Request) {
 	if s.billingView == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "the p7 billing surface is not mounted on this server"})
@@ -306,6 +311,31 @@ func (s *Server) handleBilling(w http.ResponseWriter, r *http.Request) {
 	customerID := r.PathValue("customer_id")
 	v, ok := s.billingView.Billing(customerID, r.URL.Query().Get("period"))
 	if !ok {
+		// 🔴 "No such account" is the wrong sentence on a deployment that cannot create one.
+		//
+		// An account comes into existence exactly one way: checkout, which is P21. A deployment with no
+		// payment provider mounts no P21, so it will NEVER have a billing account for anyone — and
+		// answering "no billing account for local" invites its operator to go looking for the record, or
+		// for the button that would create it. Neither exists, and the console renders that 404 as "the
+		// identifier does not resolve", which is true of a typo and true of this, and only actionable
+		// for the first.
+		//
+		// So the two are told apart HERE rather than in each console page. The distinction is a property
+		// of the deployment, the server is the only party that knows it, and the alternative was two
+		// pages probing the payment route to infer what this method already has in hand.
+		if s.payments == nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{
+				// A CODE beside the sentence, so the console can render this as a configured state
+				// rather than as a lookup that failed. Branching on the prose would put the same
+				// decision in two places and let a copy edit silently change behaviour.
+				"reason_code": ReasonCollectionNotConfigured,
+				"error": "this deployment collects no payments, so no billing account is ever created " +
+					"for " + customerID + " — that is the configured state of an install with no payment " +
+					"provider, not a missing record. Everything else, including entitlements and metering, " +
+					"is unaffected",
+			})
+			return
+		}
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no billing account for " + customerID})
 		return
 	}

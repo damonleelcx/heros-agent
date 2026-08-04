@@ -104,6 +104,17 @@ export type PlatformOutcome<T> =
       error: string;
       /** denial is present on a `gated` outcome, carrying the platform's own words about the boundary. */
       denial?: Denial;
+      /**
+       * reasonCode is the platform's machine-readable name for a failure that is a CONFIGURED STATE
+       * rather than a fault — today only `collection_not_configured`, the 404 every billing account
+       * returns on a deployment with no payment provider.
+       *
+       * Carried for every kind, unlike `denial`, because the distinction it makes is not about
+       * entitlement: a page has to be able to say "this install collects no payments" instead of "that
+       * identifier does not resolve", and both arrive as 404. Branching on the error PROSE would put
+       * the decision in two places and let a copy edit change behaviour.
+       */
+      reasonCode?: string;
       traceId?: string;
     };
 
@@ -184,12 +195,29 @@ export async function platformFetch<T>(path: string, options: FetchOptions): Pro
   const parsed = text ? safeParse(text) : null;
 
   if (!response.ok) {
-    const body = (parsed ?? {}) as { error?: string; detail?: string; trace_id?: string } & Denial;
+    const body = (parsed ?? {}) as {
+      error?: string;
+      detail?: string;
+      trace_id?: string;
+      reason_code?: string;
+    } & Denial;
     // The platform's own words, not ours. `p35graph.html`'s error copy — "no such workflow (distinct
     // from a workflow that exists but is unclassified)" — is the product; inventing a generic message
     // here would destroy it before any component could render it.
     const error = body.error ?? body.detail ?? `the platform API returned ${response.status}`;
+    // 🔴 CLASSIFY ON `error`, RENDER `detail`. The two fields do different jobs and reading one for
+    // both loses whichever job it was not doing.
+    //
+    // `classify` recognises not-mounted by matching /not mounted/i, so the short phrase has to be what
+    // it sees. But the short phrase is also all the user got: /app/runs/{id}/live said "the live
+    // monitor is not mounted" while the platform had a full explanation for the same fact — why it
+    // cannot be live, and which surfaces DO carry the parts of that run it can show. The operator read
+    // that in the boot log; the person looking at the empty page did not.
+    //
+    // So a body carrying both keeps the classification from `error` and shows `detail` to the reader.
+    // A body with only one is unchanged in either direction.
     const kind = classify(response.status, error);
+    const message = body.error && body.detail ? body.detail : error;
     logUpstream({ method, path, status: response.status, kind, ms: Date.now() - started, traceId });
     // The denial detail is carried only where it MEANS something. Attaching it to every failure would
     // invite a component to read `upgrade_plan_name` off a 404 and offer an upgrade for a typo.
@@ -204,7 +232,15 @@ export async function platformFetch<T>(path: string, options: FetchOptions): Pro
             upgrade_plan_name: body.upgrade_plan_name,
           }
         : undefined;
-    return { ok: false, kind, status: response.status, error, denial, traceId: traceId ?? body.trace_id };
+    return {
+      ok: false,
+      kind,
+      status: response.status,
+      error: message,
+      denial,
+      reasonCode: body.reason_code,
+      traceId: traceId ?? body.trace_id,
+    };
   }
 
   logUpstream({ method, path, status: response.status, kind: "ok", ms: Date.now() - started, traceId });

@@ -116,3 +116,16 @@
 # rules above take.
 /deploy/.env.local
 /deploy/config/config.json
+
+# ── The two PUBLISHED CATALOGS the operator supplies (deploy/config/README.md) ───────────────────────
+#
+# Not credentials — PRICES. plans.json carries provider price references and per-plan allowances,
+# models.json carries a cost_per_run per model, and internal/plancfg and internal/modelcatalog each ship
+# a fence that enumerates the whole git index and fails the build if either is ever committed.
+#
+# ⚠️ Those fences are why these two lines are worth having, not why they are unnecessary. A fence over
+# the INDEX fires after `git add -A` has already staged the prices — it reports the mistake as a broken
+# build, at which point the operator has to unstage rather than never having staged. Ignoring them makes
+# the fence the second line of defence instead of the only one.
+/deploy/config/plans.json
+/deploy/config/models.json

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/heros-foreal/agentd/internal/auth"
 	"github.com/heros-foreal/agentd/internal/proposal"
 	"github.com/heros-foreal/agentd/internal/verification"
 )
@@ -25,8 +26,19 @@ var p55HTML []byte
 // and the Assisted apply action (open a PR carrying a verified proposal's diff). OpenPR NEVER merges
 // and never mutates the working tree — it opens a reviewable PR for the human (design Decision 9).
 type ProposalsSource interface {
-	Surface(workflowID string) (Surface, bool)
-	OpenPR(workflowID, proposalID string) (PRResult, error)
+	// Surface returns one TENANT's recommendation surface for a workflow.
+	//
+	// 🔴 tenantID is the FIFTH interface in this package to need it, after PatternSource,
+	// GraphEditorSource, BoardSource and ScorecardSource. Every one was written against a demo stub that
+	// returned a single fixture to every caller, so the missing scope was invisible until something
+	// durable sat behind it. Workflow ids are chosen by customers and collide; the caller reads one
+	// straight out of a URL.
+	//
+	// It matters more here than on a read-only board: OpenPR acts on what Surface returned. An
+	// unscoped Surface would let one tenant enumerate another's proposals AND open a pull request
+	// carrying their diff into a repository — a write, into someone else's code.
+	Surface(tenantID, workflowID string) (Surface, bool)
+	OpenPR(tenantID, workflowID, proposalID string) (PRResult, error)
 }
 
 // Surface is the whole P5.5 read model for one workflow.
@@ -153,10 +165,46 @@ func CardFor(pres proposal.Presentation, status proposal.BuildStatus, buildLog s
 		return BuildCard(pres, string(status), v, level)
 	case proposal.BuildFailed:
 		return BuildFailedCard(pres, buildLog)
+	case proposal.BuildUnbuilt:
+		return UnbuiltCard(pres, v, buildLog)
 	default:
-		// BuildRefused, BuildUnbuilt, and anything a later phase adds.
+		// BuildRefused, and anything a later phase adds.
 		return RefusedCard(pres)
 	}
+}
+
+// UnbuiltCard renders a candidate that has NOT been through a build gate.
+//
+// 🔴 BuildUnbuilt used to fall through to RefusedCard, and that was right while `unbuilt` could only
+// mean "never compiled" — a candidate with nothing to show is indistinguishable from one the transform
+// declined. It stopped being right when a deployment started COMPILING proposals without being able to
+// build them: the platform now produces a real reviewable diff and cannot establish that it compiles,
+// and RefusedCard drops the diff on purpose ("a refusal that shipped a partial diff is exactly the
+// 'looks complete' failure D-14.3 refuses"). So the diff the codemod generated was thrown away by the
+// surface, under a narration saying the transform refused a change it had in fact made.
+//
+// The card SHOWS the diff and is never recommendable. `buildLog` is the gate's own account of what it
+// did and did not prove, rendered rather than summarised — a reviewer deciding whether to trust an
+// unbuilt change needs to know a parser ran and a compiler did not.
+func UnbuiltCard(pres proposal.Presentation, v verification.Verdict, buildLog string) Card {
+	c := BuildCard(pres, string(proposal.BuildUnbuilt), v, verification.Advisory)
+	// Never one-click-openable, whatever the verdict says: ADR-001's rule is that nothing reaches a
+	// repository except as a diff that BUILDS, and this one has not been built.
+	//
+	// The two reasons are distinct because the next actions are: an uncompiled proposal needs a compile
+	// pass, and a compiled one needs a build gate. Decided HERE, from whether the presentation carries a
+	// diff, rather than by each caller — this function is the one place a build status becomes a card,
+	// and a caller computing its own reason is a second answer to the question it just asked.
+	c.CanOpenPR = false
+	if pres.SourceDiff == "" {
+		c.PRDisabledReason = "this change has not been compiled into a diff yet"
+	} else {
+		c.PRDisabledReason = "this change has a reviewable diff and has not been proved to build"
+	}
+	if buildLog != "" {
+		c.Narration = strings.TrimRight(c.Narration, " ") + " " + buildLog
+	}
+	return c
 }
 
 // Recommendable reports whether a compiled candidate may appear in the RECOMMENDATIONS list rather
@@ -239,7 +287,12 @@ func (s *Server) handleProposals(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "the p5.5 surface is not mounted on this server"})
 		return
 	}
-	view, ok := s.proposals.Surface(r.PathValue("workflow_id"))
+	principal, authed := auth.PrincipalFrom(r.Context())
+	if !authed || principal.TenantID == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "the recommendation surface requires an authenticated tenant"})
+		return
+	}
+	view, ok := s.proposals.Surface(principal.TenantID, r.PathValue("workflow_id"))
 	if !ok {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no surface for workflow " + r.PathValue("workflow_id")})
 		return
@@ -256,10 +309,15 @@ func (s *Server) handleOpenPR(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "the p5.5 surface is not mounted on this server"})
 		return
 	}
+	principal, authed := auth.PrincipalFrom(r.Context())
+	if !authed || principal.TenantID == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "opening a pull request requires an authenticated tenant"})
+		return
+	}
 	wf := r.PathValue("workflow_id")
 	pid := r.PathValue("proposal_id")
 
-	view, ok := s.proposals.Surface(wf)
+	view, ok := s.proposals.Surface(principal.TenantID, wf)
 	if !ok {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no surface for workflow " + wf})
 		return
@@ -276,7 +334,7 @@ func (s *Server) handleOpenPR(w http.ResponseWriter, r *http.Request) {
 			"error": "proposal " + pid + " is not a gate-passing, one-click-openable recommendation"})
 		return
 	}
-	res, err := s.proposals.OpenPR(wf, pid)
+	res, err := s.proposals.OpenPR(principal.TenantID, wf, pid)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return

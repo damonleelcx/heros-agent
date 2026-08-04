@@ -43,8 +43,9 @@ func TestState_FromVerdict(t *testing.T) {
 // never contradicts a withheld result.
 func TestNarrate_IsOverTheVerdict(t *testing.T) {
 	pass := Verdict{GateResult: GatePass, Metric: "task_success", HeldOut: true,
-		Delta: evalstats.Interval{Mean: 0.22, Low: 0.10, High: 0.34}, CasesFixed: []string{"h1", "h2"},
+		Delta:     evalstats.Interval{Mean: 0.22, Low: 0.10, High: 0.34},
 		CostDelta: 0.002, LatencyDelta: 20}
+	pass.SetCases([]string{"h1", "h2"}, nil)
 	s := Narrate(pass)
 	if !strings.Contains(s, "0.22") || !strings.Contains(s, "2 case(s) fixed") {
 		t.Errorf("narration must reflect the verdict's delta and cases fixed: %q", s)

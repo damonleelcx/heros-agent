@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/heros-foreal/agentd/internal/entitlement"
@@ -128,6 +129,15 @@ var (
 	// ErrNoRoute: the repository has verified proposals and no configured delivery route. A REPORTED
 	// state (design Decision 6 / task 6.1), never silence.
 	ErrNoRoute = errors.New("forgedelivery: no delivery route configured for this repository")
+	// ErrNoDiff: the proposal carries no diff to apply.
+	//
+	// 🔴 A precondition that was MISSING, and its absence is the worst kind: Prepare validated the route,
+	// the gate, entitlement, the halt and the bound, and then rendered a Prepared with an empty
+	// DiffPatch. The CI runner would open a pull request containing NO CHANGES — in a customer's
+	// repository, under a title claiming an optimization, with a body citing a verdict. It became
+	// reachable when the platform started generating proposals it does not compile (every one is
+	// `unbuilt`), but nothing in this funnel ever required a diff.
+	ErrNoDiff = errors.New("forgedelivery: this proposal has no compiled diff to deliver")
 	// ErrNotVerified: the change did not pass the P5.5 gate. Undeliverable (task 2.2).
 	ErrNotVerified = errors.New("forgedelivery: only a change that passed the verification gate can be delivered")
 	// ErrHaltUnreadable: the halt state could not be read. Delivery fails closed (task 2.7).
@@ -207,7 +217,15 @@ func (d *Deliverer) Prepare(ctx context.Context, p Proposal, route *Route) (Prep
 		return Prepared{}, err
 	}
 
-	// 2. the change passed the P5.5 gate (authoritative — not trusted from the proposal)
+	// 2. there is something to deliver. Checked before the gate on purpose: a proposal with no diff is
+	// undeliverable whatever its verdict says, and asking the gate first would spend a database read to
+	// arrive at the same answer — and would report "not verified" for a change that is verified and
+	// simply has no bytes.
+	if strings.TrimSpace(p.DiffPatch) == "" {
+		return Prepared{}, ErrNoDiff
+	}
+
+	// 3. the change passed the P5.5 gate (authoritative — not trusted from the proposal)
 	verdict, ok, err := d.gate.Verdict(ctx, p.TenantID, p.ConfigHash, p.SourceRevision)
 	if err != nil {
 		return Prepared{}, fmt.Errorf("forgedelivery: reading the verification gate: %w", err)
@@ -216,7 +234,7 @@ func (d *Deliverer) Prepare(ctx context.Context, p Proposal, route *Route) (Prep
 		return Prepared{}, ErrNotVerified
 	}
 
-	// 3. entitlement, server-side
+	// 4. entitlement, server-side
 	if dec, err := d.ents.CheckEntitlement(p.TenantID, plancfg.FeatureAssistedPR, entitlement.LevelAssisted); err != nil {
 		return Prepared{}, fmt.Errorf("forgedelivery: checking delivery entitlement: %w", err)
 	} else if !dec.Allowed {
@@ -232,7 +250,7 @@ func (d *Deliverer) Prepare(ctx context.Context, p Proposal, route *Route) (Prep
 		allowMerge = true
 	}
 
-	// 4. halt readable AND not armed (fail closed)
+	// 5. halt readable AND not armed (fail closed)
 	halted, reason, err := d.halt.HaltsDelivery(p.TenantID)
 	if err != nil {
 		return Prepared{}, fmt.Errorf("%w: %v", ErrHaltUnreadable, err)
@@ -241,7 +259,7 @@ func (d *Deliverer) Prepare(ctx context.Context, p Proposal, route *Route) (Prep
 		return Prepared{}, &HaltedError{Reason: reason}
 	}
 
-	// 5. the per-repository open-PR bound (an update of an existing delivery is allowed at the bound)
+	// 6. the per-repository open-PR bound (an update of an existing delivery is allowed at the bound)
 	deliveryID := DeliveryID(p.ConfigHash, p.SourceRevision, route.Target.Key())
 	existing, hasExisting, err := d.rec.Head(ctx, deliveryID)
 	if err != nil {

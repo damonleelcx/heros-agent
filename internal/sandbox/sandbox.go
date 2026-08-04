@@ -84,19 +84,47 @@ type AuditSink interface {
 // ResourceBounds are the per-isolate limits. None may be zero-as-unbounded: DefaultBounds fills any
 // unset field, and Validate rejects a non-positive bound rather than treating it as "no limit".
 type ResourceBounds struct {
-	CPU       time.Duration // CPU time (RLIMIT_CPU where supported)
-	Memory    int64         // address-space bytes (RLIMIT_AS where supported)
+	CPU time.Duration // CPU time (RLIMIT_CPU where supported)
+	// Memory is ADDRESS SPACE, not resident memory: `ulimit -v` / RLIMIT_AS. The distinction is the
+	// whole reason MinRuntimeAddressSpace exists — a 64-bit language runtime reserves far more virtual
+	// address space at startup than it will ever make resident, so a bound chosen as though it meant
+	// "RAM" refuses to let the process start at all.
+	Memory int64
+
 	Wallclock time.Duration // hard wall-clock deadline (always enforced by the host)
 	MaxPIDs   int           // process/thread count (RLIMIT_NPROC where supported)
 	MaxOutput int64         // captured-output bytes (always enforced by the host reader)
 }
 
-// DefaultBounds are the design defaults (1 vCPU-second-ish budget expressed as wall CPU / 512 MB /
-// 60 s / 128 PIDs / 8 MB). Configurable per node, never unbounded.
+// MinRuntimeAddressSpace is the floor below which a 64-bit language runtime cannot START.
+//
+// 🔴 MEASURED, not guessed. On linux/amd64 (golang:1.24-alpine, `ulimit -v` then `go build`):
+//
+//	512 MiB  → fatal error: failed to reserve page summary memory
+//	  1 GiB  → fatal error: failed to reserve page summary memory
+//	  2 GiB  → builds
+//	  4 GiB  → builds
+//
+// The failure is inside runtime.mallocinit, before main: the runtime reserves its page-summary arena
+// against the ADDRESS SPACE limit, and RLIMIT_AS counts every reservation whether or not a byte is
+// ever touched. Go is not special here — a JVM, Node and CPython with large mmaps all die the same way.
+//
+// ⚠️ AND IT ONLY BITES ON LINUX. macOS `sh` rejects `ulimit -v` outright, and shimArgv's `|| true`
+// swallows the rejection, so no cap is applied and every one of these builds fine on a developer's
+// Mac. The default below was 512 MiB, which meant the P5.5 build gate — a capability whose entire job
+// is to run a compiler inside the isolate — could not compile anything on the only platform the
+// product is deployed to. It passed locally, every time, for exactly that reason.
+const MinRuntimeAddressSpace = 2 << 30
+
+// DefaultBounds are the design defaults (wall CPU / address space / 60 s / 128 PIDs / 8 MB).
+// Configurable per node, never unbounded.
 func DefaultBounds() ResourceBounds {
 	return ResourceBounds{
-		CPU:       30 * time.Second,
-		Memory:    512 << 20,
+		CPU: 30 * time.Second,
+		// 4 GiB: twice the measured floor, so a toolchain that grows a little between releases does not
+		// silently become unrunnable, while a genuinely runaway allocator still hits a wall. It bounds
+		// ADDRESS SPACE — see the field comment — so this is not "4 GiB of RAM per isolate".
+		Memory:    4 << 30,
 		Wallclock: 60 * time.Second,
 		MaxPIDs:   128,
 		MaxOutput: 8 << 20,

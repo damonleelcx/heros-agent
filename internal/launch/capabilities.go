@@ -1,6 +1,7 @@
 package launch
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
@@ -15,16 +16,28 @@ import (
 	"github.com/heros-foreal/agentd/internal/api"
 	"github.com/heros-foreal/agentd/internal/billing"
 	"github.com/heros-foreal/agentd/internal/billingview"
+	"github.com/heros-foreal/agentd/internal/deliveryrecord"
+	"github.com/heros-foreal/agentd/internal/deliveryroute"
 	"github.com/heros-foreal/agentd/internal/entitlement"
 	"github.com/heros-foreal/agentd/internal/executor"
+	"github.com/heros-foreal/agentd/internal/forgedelivery"
 	"github.com/heros-foreal/agentd/internal/hostdiscovery"
 	"github.com/heros-foreal/agentd/internal/hostedboard"
+	"github.com/heros-foreal/agentd/internal/hostedcompile"
+	"github.com/heros-foreal/agentd/internal/hostedproposals"
 	"github.com/heros-foreal/agentd/internal/hostedscorecard"
 	"github.com/heros-foreal/agentd/internal/legal"
 	"github.com/heros-foreal/agentd/internal/linkingest"
 	"github.com/heros-foreal/agentd/internal/metering"
+	"github.com/heros-foreal/agentd/internal/modelcatalog"
+	"github.com/heros-foreal/agentd/internal/paymentsview"
 	"github.com/heros-foreal/agentd/internal/plancfg"
+	"github.com/heros-foreal/agentd/internal/proposal"
+	"github.com/heros-foreal/agentd/internal/proposalgen"
+	"github.com/heros-foreal/agentd/internal/proposalstore"
+	"github.com/heros-foreal/agentd/internal/providergateway"
 	"github.com/heros-foreal/agentd/internal/registry"
+	"github.com/heros-foreal/agentd/internal/sandbox"
 	"github.com/heros-foreal/agentd/internal/sourceingest"
 	"github.com/heros-foreal/agentd/internal/variantspec"
 	"github.com/heros-foreal/agentd/internal/worktree"
@@ -63,7 +76,7 @@ type Capability struct {
 // providers read verification state that has no store yet. Mounting those over memory would turn "not
 // installed" into "installed and quietly lossy", which is a worse lie than the 404 this replaces. They
 // are PRD Q6, and deploy/README.md lists them.
-func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL string) ([]Capability, error) {
+func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL string, secrets providergateway.Secrets) ([]Capability, error) {
 	caps := make([]Capability, 0, 16)
 	served := func(name string) { caps = append(caps, Capability{Name: name, Served: true}) }
 	absent := func(name, why string) { caps = append(caps, Capability{Name: name, Why: why}) }
@@ -77,8 +90,25 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 	mountedGraphEditor := false
 	mountedEvalBoard := false
 	mountedScorecard := false
+	mountedVerdictIngest := false
+	mountedProposalGen := false
+	mountedProposals := false
+	mountedForgeDelivery := false
+	mountedProposalCompile := false
+	mountedPayments := false
+	// collectionWhy is the served() line when collection IS mounted; why is the absent() reason.
+	collectionWhy := ""
 	// Assembled inside the database block below; nil when this deployment cannot serve billing.
 	var billingView *billingview.Source
+	// The server-side entitlement gate, assembled with billing because both need the plan catalog. P12
+	// delivery reads it too — nil means this deployment cannot decide whether a tenant may have a pull
+	// request opened for them, which is a reason not to mount delivery rather than a reason to guess.
+	var entGate *entitlement.Gate
+	// Set when a published catalog exists but could not be parsed — billing, delivery and the
+	// entitlement gate all refuse together, because they all resolve against it.
+	var catalogUnloadable error
+	// Set when this deployment declares no payment provider; read by the p21 capability line below.
+	collectionAbsentWhy := "no payment provider is configured on this deployment; the durable ledger exists, but checkout and plan changes need a provider to call"
 	if pg != nil {
 		fsBlobs, err := registry.NewFSBlobStore(filepath.Join(dataDir, "blobs"))
 		if err != nil {
@@ -173,30 +203,89 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 		//     absent rather than being quietly served by a stub.
 		if catalog := planCatalogPath(); catalog != "" {
 			plans := plancfg.NewResolver(plancfg.NewFileSource(catalog), nil)
-			acctStore, err := account.NewPGStore(pg)
-			if err != nil {
-				return nil, fmt.Errorf("account store: %w", err)
+			// 🔴 LOAD IT. A Resolver does not read its source on construction — `loaded` stays false and
+			// every ResolvePlan returns ErrNoConfig until somebody calls Reload. Nothing in the deployed
+			// path ever did: Reload appears only in four cmd/ binaries, so on a real install the catalog
+			// was PUBLISHED (the boot stat found the file, and that is what mounted billing, delivery and
+			// the entitlement gate) and then never read.
+			//
+			// The symptom is not an error anywhere. `Plans()` returns empty, so checkout answers "no plan
+			// with that name in the published configuration" for every plan the file plainly contains,
+			// and every entitlement decision resolves against nothing. That is precisely the outcome the
+			// boot-time stat was added to prevent — a mounted surface that fails on its first read —
+			// displaced one step: the file's EXISTENCE was proven and its CONTENTS never were.
+			//
+			// Failing here rather than per-request is the same posture launch takes for the secrets
+			// source: a deployment whose catalog does not parse must not serve a billing page that
+			// discovers it one customer at a time. billingAbsentReason and deliveryAbsentReason already
+			// had a branch for this state; until now nothing could reach it.
+			_, rerr := plans.Reload("launch")
+			if rerr != nil {
+				catalogUnloadable = rerr
 			}
-			usageStore, err := metering.NewPGUsageStore(pg)
-			if err != nil {
-				return nil, fmt.Errorf("usage store: %w", err)
-			}
-			ledger, err := billing.NewPGLedger(pg)
-			if err != nil {
-				return nil, fmt.Errorf("billing ledger: %w", err)
-			}
-			deltas := metering.NewMemVerifiedDeltas()
-			meter := metering.NewMeter(metering.NewMemCostEvents(), usageStore)
-			svc, err := // nil Secrets: no provider credential is resolved, and none is needed — the read model makes no
-				// provider call. A deployment that later configures a real provider wires it here, and P21's
-				// checkout routes become mountable at the same time.
-				billing.NewService(billing.NewStubProvider(), ledger, acctStore, plans, meter, nil)
-			if err != nil {
-				return nil, fmt.Errorf("billing service: %w", err)
-			}
-			gate := entitlement.NewGate(acctStore, plans, usageStore)
-			if billingView, err = billingview.New(acctStore, plans, usageStore, deltas, gate, svc); err != nil {
-				return nil, fmt.Errorf("billing view: %w", err)
+			if rerr == nil {
+				acctStore, err := account.NewPGStore(pg)
+				if err != nil {
+					return nil, fmt.Errorf("account store: %w", err)
+				}
+				usageStore, err := metering.NewPGUsageStore(pg)
+				if err != nil {
+					return nil, fmt.Errorf("usage store: %w", err)
+				}
+				ledger, err := billing.NewPGLedger(pg)
+				if err != nil {
+					return nil, fmt.Errorf("billing ledger: %w", err)
+				}
+				deltas := metering.NewMemVerifiedDeltas()
+				meter := metering.NewMeter(metering.NewMemCostEvents(), usageStore)
+
+				// ── The payment provider, if this deployment declares one ──────────────────────────────
+				//
+				// Without a declaration the service keeps the stub: the P7 read model makes no provider
+				// call, so billing stays fully served and only COLLECTION is absent.
+				//
+				// 🔴 THE CREDENTIAL DOES NOT PASS THROUGH HERE, and cannot. NewStripeProvider takes a
+				// Secrets SEAM and resolves the key at the moment of use — its own contract says a billing
+				// credential is "never read from code, config, or the environment" — so there is no field
+				// on this path holding one that a log, a formatter or a panic dump could reach. What the
+				// deployment declares is the MODE; what it supplies is a secret, through the same source
+				// every other credential comes from.
+				var mode billing.Mode
+				var provider collectionDeps
+				provider, mode, collectionAbsentWhy = collectionProvider(secrets)
+				svc, err := billing.NewService(provider.provider, ledger, acctStore, plans, meter, provider.secrets)
+				if err != nil {
+					return nil, fmt.Errorf("billing service: %w", err)
+				}
+				// ONE gate, shared with P12 delivery below. Two gates over the same plans and the same usage
+				// would be two answers to "may this tenant do this", and the one the billing page shows is not
+				// the one that decides whether a pull request is opened.
+				entGate = entitlement.NewGate(acctStore, plans, usageStore)
+				if billingView, err = billingview.New(acctStore, plans, usageStore, deltas, entGate, svc); err != nil {
+					return nil, fmt.Errorf("billing view: %w", err)
+				}
+
+				// P21 collection, mounted only where a provider was DECLARED.
+				//
+				// The read model is internal/paymentsview, extracted for this: it existed only inside
+				// cmd/proof/payments, so before it there was nothing to mount even with a provider in hand
+				// — which is why p21's absent reason named only the provider and was incomplete.
+				//
+				// ⚠️ The webhook is mounted WITH checkout, never apart from it. It is the only route on
+				// this platform that accepts unsolicited internet traffic, so publishing it on a
+				// deployment that collects nothing would be an inbound door onto a surface with no reason
+				// to exist; and mounting checkout without it would take a customer's card and never learn
+				// that the subscription became active.
+				if mode != "" {
+					pv, perr := paymentsview.New(billingView, svc)
+					if perr != nil {
+						return nil, fmt.Errorf("payments view: %w", perr)
+					}
+					h.MountPayments(pv)
+					h.MountBillingWebhook(svc)
+					mountedPayments = true
+					collectionWhy = "p21_payments (checkout, plan changes and the provider webhook; mode " + string(mode) + ")"
+				}
 			}
 		}
 
@@ -206,6 +295,79 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 		h.MountScorecard(hostedscorecard.NewSource(linkStore))
 		served("p45_scorecard (cost/latency attribution from linked runs; failure attribution stays local)")
 		mountedScorecard = true
+
+		// P5.5's verdict ingest — the endpoint `heros report-verdict` transmits to.
+		//
+		// Mounted for real, over a durable store (migrations 0012, 0025 and 0029). It is the ONLY way a
+		// stored verdict can say `pass`: the verification gate needs the customer's eval cases, traces
+		// and provider, so this platform can GENERATE a proposal and can never MEASURE one. Without this
+		// route, every proposal the generator writes stays `candidate` forever and the recommendation
+		// surface is permanently empty — which would look exactly like a product that finds nothing.
+		//
+		// The store is passed straight through as the sink: proposalstore.PGStore.PutVerdict already has
+		// api.VerdictSink's signature, and an adapter here would be a place for the tenant argument to be
+		// rewritten on its way to the WHERE clause that scopes it.
+		verdictStore, err := proposalstore.NewPGStore(pg)
+		if err != nil {
+			return nil, fmt.Errorf("proposal store: %w", err)
+		}
+		h.MountVerdictIngest(verdictStore)
+		served("p55_verdict_ingest (CI reports what it measured; the platform never authors a verdict)")
+		mountedVerdictIngest = true
+
+		// ── P5.5 and P12, mounted ──────────────────────────────────────────────────────────────────────
+		//
+		// Both were registered-and-unsourced with "no persistent adapter exists outside a demo binary".
+		// That was true, and as with the pattern graph it was the smaller half: there was also no DATA.
+		// Nothing generated a proposal, nothing recorded a verdict, and no table held a delivery route.
+		// Migrations 0025 / 0029 / 0030, the verdict ingest, internal/proposalgen and
+		// internal/deliveryroute are the other half; these two adapters are what render them.
+		//
+		// 🔴 They mount with a STATED LIMIT rather than in full, and the limit is the same fact for both:
+		// this platform generates a candidate Variant Spec and never COMPILES it, so no proposal has a
+		// diff. P5.5 therefore serves cards with no diff and an Open-PR action that refuses by name; P12
+		// serves route conditions and delivery history, and reports every proposal as withheld with
+		// `no_diff`. That is worth mounting — a customer can see what was proposed, verify it in their own
+		// CI, and read exactly why it stops there — and it is emphatically better than the 503 it
+		// replaces, which said the capability was not installed when the truth is that it is installed
+		// and bounded.
+		h.MountProposals(hostedproposals.NewSource(verdictStore, blobs))
+		served("p55_proposals (recommendation surface over reported verdicts; no diff, so open-PR refuses)")
+		mountedProposals = true
+
+		// P12 delivery. Mounted only when an entitlement gate exists, which means only when a plan
+		// catalog is published — the same condition billing carries, for a sharper reason: delivery opens
+		// a pull request into a customer's repository, and `may this tenant have that done` is a question
+		// with no safe default. Denying every delivery would tell a customer to upgrade a plan the
+		// deployment cannot read; allowing them would open pull requests for tenants who are not entitled
+		// to any. Neither is an answer, so the capability reports that it is not configured.
+		//
+		// Every other collaborator here is durable except the halt reader, and that one is
+		// correct as it is: this deployment configures no kill switch, so NOTHING halts delivery, and
+		// reporting `false` is the true answer rather than a stub. It is NOT the fail-closed direction by
+		// accident — HaltReader's contract is that an ERROR means indeterminate, and a reader that cannot
+		// fail cannot be indeterminate. A deployment that adds a kill switch wires adminops here.
+		if entGate != nil {
+			deliverer := forgedelivery.NewDeliverer(
+				hostedproposals.NewGate(verdictStore),
+				entGate,
+				forgedelivery.HaltReaderFunc(func(string) (bool, string, error) { return false, "", nil }),
+				deliveryrecord.NewPGStore(pg),
+				forgedelivery.DefaultOpenPRBound,
+			)
+			routeStore, err := deliveryroute.NewPGStore(pg)
+			if err != nil {
+				return nil, fmt.Errorf("delivery route store: %w", err)
+			}
+			h.MountForgeDelivery(forgedelivery.NewService(
+				deliverer, routeStore,
+				hostedproposals.NewPending(verdictStore, blobs, originOf(consoleHealthURL)),
+				originOf(consoleHealthURL),
+			))
+			served("p12_forge_delivery (routes, conditions and history; deliveries withheld as `no_diff` " +
+				"until proposals are compiled)")
+			mountedForgeDelivery = true
+		}
 
 		// The OPT-IN workflow structure (`heros link --with-ir`), durable since migration 0021, and the
 		// pattern graph drawn from it.
@@ -268,6 +430,61 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 		h.MountGraphEditor(newEditorIRSource(graphStore, runner))
 		served("p5_graph_editor (IR re-derived from the pushed snapshot; needs source, not just a graph)")
 		mountedGraphEditor = true
+
+		// The CODEMOD. It turns a stored proposal into the reviewable diff ADR-001 makes the product's
+		// output, using the retained snapshot, the re-derived IR and the same registries every other
+		// resolve goes through.
+		//
+		// ⚠️ It compiles and does NOT build: this image is distroless with no toolchain, so
+		// hostedcompile's gate parses Go in-process and reports everything else — and every non-Go
+		// language — as unbuilt with the reason. That keeps delivery gated where ADR-001 puts it. Giving
+		// a deployment a real build gate means running the customer's build, which belongs inside
+		// internal/sandbox in an image that carries the toolchain; it is not a line to change here.
+		buildSandbox, gateWhy := compileSandbox()
+		h.MountProposalCompile(&hostedcompile.Compiler{
+			Runner:     runner,
+			Store:      verdictStore,
+			Blobs:      blobs,
+			Registries: reg,
+			Sandbox:    buildSandbox,
+			GoBin:      os.Getenv("HEROS_GO_TOOLCHAIN"),
+		})
+		served("p55_proposal_compile (AST codemod over the pushed snapshot; " + gateWhy + ")")
+		mountedProposalCompile = true
+
+		// The platform-side proposal GENERATOR.
+		//
+		// It is mounted only when a model catalog is published, and that gate is the whole story of what
+		// this deployment can and cannot do. `proposal.Menu.cheaperModels(tier)` is the entire input to
+		// the model-downgrade operator — the one operator that fires on a cost bottleneck with no
+		// diagnosis, and therefore the only one a hosted platform can drive. It selects on Tier and
+		// CostPerRun, and the REGISTRY RECORDS NEITHER: registry.ModelCatalogEntry is
+		// {VersionID, Name, Provider, ModelID, Params}. Every proposal.Menu in this repository is
+		// hand-written inside a cmd/proof binary.
+		//
+		// A tier is a judgement about capability and a cost-per-run is a price. Neither is derivable from
+		// a model entry, and inventing either would mean proposing changes to a customer's code on the
+		// strength of numbers the platform made up. So they are published beside the plan catalog, on the
+		// same terms: a path, never git-tracked, absent by default.
+		//
+		// Without one this answers 503 and the console says "no model catalog is published", which names
+		// an action. Mounting it over an empty menu would answer 200 with an empty proposal list, which
+		// reads as "we looked at your workflow and found nothing wrong".
+		if mcSrc, ok := modelcatalog.FileSourceFromEnv(); ok {
+			gen := &proposalgen.Generator{
+				Runs:   linkStore,
+				Graphs: graphStore,
+				Menus:  menuSource{src: mcSrc, reg: reg},
+				Sink:   verdictStore,
+				// The candidate spec goes to the SAME blob store the diff and the prompt registry use.
+				// A proposal recorded without it can never be compiled (migration 0031).
+				Blobs: blobs,
+			}
+			h.MountProposalGeneration(gen)
+			served("p55_proposal_generation (cost-bottleneck operators only; a diagnosis needs the eval " +
+				"cases, which stay with the customer)")
+			mountedProposalGen = true
+		}
 		// No separate readiness probe for this store, deliberately. An earlier draft added one, because
 		// linkingest.Store's reads returned no error and a failure had nowhere else to go. The interface
 		// now returns errors on every method, so a failed read fails its CALLER — and the `postgres`
@@ -323,8 +540,25 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 		h.MountGraphEditor(nil)
 		absent("p5_graph_editor", noAdapter)
 	}
-	h.MountProposals(nil)
-	absent("p55_proposals", noAdapter)
+	if !mountedProposals {
+		h.MountProposals(nil)
+		absent("p55_proposals", "this deployment declares no platform database (DATABASE_URL is unset), "+
+			"so there are no stored proposals to render")
+	}
+	if !mountedProposalCompile {
+		h.MountProposalCompile(nil)
+		absent("p55_proposal_compile", "this deployment declares no platform database (DATABASE_URL is "+
+			"unset), so there are no stored proposals to compile and no snapshot to compile them against")
+	}
+	if !mountedProposalGen {
+		h.MountProposalGeneration(nil)
+		absent("p55_proposal_generation", proposalGenAbsentReason(pg))
+	}
+	if !mountedVerdictIngest {
+		h.MountVerdictIngest(nil)
+		absent("p55_verdict_ingest", "this deployment declares no platform database (DATABASE_URL is unset), "+
+			"so there is no proposal for a reported verdict to attach to")
+	}
 	h.MountOptimizer(nil)
 	absent("p6_optimizer", noAdapter)
 	if !mountedPatternGraph {
@@ -332,7 +566,10 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 		absent("p35_pattern_graph", noAdapter)
 	}
 	h.MountMonitor(nil)
-	absent("p25_run_monitor", noAdapter)
+	// The SAME sentence the boot log prints. It was composed for an operator and the customer got a
+	// five-word stub; one reason, both audiences.
+	h.MountMonitorAbsent(runMonitorAbsentReason)
+	absent("p25_run_monitor", runMonitorAbsentReason)
 
 	// ── P7 billing ─────────────────────────────────────────────────────────────────────────────────
 	//
@@ -348,7 +585,7 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 		served("p7_billing (durable ledger, accounts and meters; read model + consent)")
 	} else {
 		h.MountBilling(nil)
-		absent("p7_billing", billingAbsentReason(pg, planCatalogPath()))
+		absent("p7_billing", billingAbsentReason(pg, planCatalogPath(), catalogUnloadable))
 	}
 	// P21 payments stays unmounted, and NOT for the old reason. The ledger is durable now; what
 	// checkout and plan-change need is a real payment PROVIDER, and this deployment configures none.
@@ -357,13 +594,18 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 	// The Stripe webhook stays unregistered with it — internal/api/p21.go's posture is that the single
 	// inbound-from-internet route must not be published on every deployment, including air-gapped ones,
 	// merely to answer 503. A durable ledger was necessary for that route, not sufficient.
-	h.MountPayments(nil)
-	absent("p21_payments", "no payment provider is configured on this deployment; the durable ledger "+
-		"exists, but checkout and plan changes need a provider to call")
+	if mountedPayments {
+		served(collectionWhy)
+	} else {
+		h.MountPayments(nil)
+		absent("p21_payments", collectionAbsentWhy)
+	}
 	h.MountAuthoring(nil)
 	absent("p13_authoring", noDurableStore)
-	h.MountForgeDelivery(nil)
-	absent("p12_forge_delivery", "its gate and pending providers read verification state that has no store yet")
+	if !mountedForgeDelivery {
+		h.MountForgeDelivery(nil)
+		absent("p12_forge_delivery", deliveryAbsentReason(pg, planCatalogPath(), catalogUnloadable))
+	}
 
 	// The Stripe webhook is the ONE surface deliberately NOT registered when it has no source, and the
 	// exception is the author's, not a lapse: internal/api/p21.go states that the path is the single
@@ -401,25 +643,263 @@ func newConsentID() string {
 	return "acc_" + hex.EncodeToString(b[:])
 }
 
+// publishedCatalog returns path when it names a file that EXISTS, and "" otherwise.
+//
+// 🔴 A path that names nothing is NOT a published catalog, and the difference decides which of two very
+// different things a customer sees. plancfg.NewResolver does not read the file — nothing does until the
+// billing page asks — so a deployment that declares the variable and supplies no file would MOUNT
+// billing and then fail on the first read, turning a clean "not configured, here is the variable" into
+// a runtime error on a customer's invoice page.
+//
+// That matters now because the deploy manifests declare these paths: the variable is where the file
+// GOES, and its presence is a convention, not a claim that somebody put one there.
+//
+// ⚠️ It is a check at BOOT, so a catalog published later needs a restart to be picked up. That is the
+// same reload boundary plancfg already has (Resolver.Reload is an explicit operator action, not a
+// watcher), and a capability that flickers between mounted and absent as a file appears would be worse.
+func publishedCatalog(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	if fi, err := os.Stat(path); err != nil || fi.IsDir() {
+		return ""
+	}
+	return path
+}
+
+// planCatalogPathEnv is the environment variable naming the published plan catalog, beside
+// modelcatalog.PathEnv. Named once because it was spelled as a literal in three places — the getter and
+// both absent-reasons — and a variable spelled two ways is a gate that silently never fires.
+//
+// ⚠️ NOT plancfg.PlanConfigPathEnv (HEROS_PLAN_CONFIG_PATH). That one is plancfg's own
+// FileSourceFromEnv convenience, which nothing in the deployed path calls: launch resolves the path
+// itself so it can tell "unset" from "names a file that is not there", and hands plancfg a
+// NewFileSource. Wiring the other variable here would read a catalog no manifest publishes.
+const planCatalogPathEnv = "PLAN_CATALOG_PATH"
+
 // planCatalogPath is the published plan catalog this deployment resolves plans from.
 //
 // Read from the environment beside CONSOLE_HEALTH_URL rather than added to config.Config, matching how
 // launch already passes deployment facts that only one capability needs. It is a FILE and never a
 // git-tracked one — plancfg.Source says so in its own contract, because the catalog carries prices.
-func planCatalogPath() string { return strings.TrimSpace(os.Getenv("PLAN_CATALOG_PATH")) }
+func planCatalogPath() string { return publishedCatalog(os.Getenv(planCatalogPathEnv)) }
 
 // billingAbsentReason names the ONE next action for an operator whose billing surface is not served.
 //
 // Two different gaps, two different remedies: no database is a deployment-wide fact, and no catalog is a
 // single file away. Collapsing them into "billing is unavailable" would send an operator to read the
 // wrong runbook.
-func billingAbsentReason(pg *sql.DB, catalog string) string {
+func billingAbsentReason(pg *sql.DB, catalog string, loadErr error) string {
 	if pg == nil {
 		return "this deployment declares no platform database (DATABASE_URL is unset)"
 	}
 	if catalog == "" {
-		return "no plan catalog is published (PLAN_CATALOG_PATH is unset) — billing cannot resolve which " +
-			"plan a customer is on, and a billing page that cannot name the plan cannot price anything"
+		return "no plan catalog is published (" + catalogHint(planCatalogPathEnv) + ") — billing cannot " +
+			"resolve which plan a customer is on, and a billing page that cannot name the plan cannot " +
+			"price anything"
+	}
+	if loadErr != nil {
+		// Reachable at last. This branch existed from the start and nothing could produce it, because
+		// nothing loaded the catalog — so the one state it described was the one state that could not
+		// occur. It names the parse error, which is the only actionable thing here.
+		return "the published plan catalog at " + catalog + " could not be loaded: " + loadErr.Error()
 	}
 	return "the plan catalog could not be loaded"
+}
+
+// menuSource joins the published model catalog onto the registry's entries. It is here rather than in
+// internal/modelcatalog because it is a WIRING decision: which registry this deployment resolves refs
+// against is a property of the deployment, and modelcatalog takes the lister as an argument precisely so
+// it does not have to know.
+type menuSource struct {
+	src modelcatalog.Source
+	reg modelcatalog.ModelLister
+}
+
+func (m menuSource) Menu(ctx context.Context) (proposal.Menu, string, error) {
+	menu, rep, err := modelcatalog.Menu(ctx, m.src, m.reg)
+	if err != nil {
+		return proposal.Menu{}, "", err
+	}
+	// The report is returned as the DETAIL the generator quotes when the menu is empty. "3 models are
+	// registered and none has a published tier" is an action; "no candidates" is not.
+	return menu, fmt.Sprintf("%d model(s) registered, %d published, %d usable; unjudged: %v",
+		rep.Registered, rep.Published, rep.Usable, rep.Unjudged), nil
+}
+
+// proposalGenAbsentReason names the ONE next action for an operator whose generator is not served.
+// Two different gaps, two different remedies — the same split billingAbsentReason makes.
+//
+// ⚠️ It reports the catalog through catalogHint for the same reason the plan catalog does, and the
+// reason is sharper here than it looks: this sentence used to say "MODEL_CATALOG_PATH is unset"
+// unconditionally, which was true only while nothing set the variable. The deploy manifests now DO set
+// it, so the common state on a fresh install is "set, and no file behind it" — and the old sentence
+// told that operator to set a variable that was already set, which reads as a broken deployment rather
+// than as one file away.
+func proposalGenAbsentReason(pg *sql.DB) string {
+	if pg == nil {
+		return "this deployment declares no platform database (DATABASE_URL is unset)"
+	}
+	return "no model catalog is published (" + catalogHint(modelcatalog.PathEnv) + "). A proposal that a " +
+		"cheaper model would do the job needs a capability tier and a cost estimate per model, and the " +
+		"model registry records neither — so without a published catalog nothing can be proposed, and " +
+		"an empty proposal list would read as 'we found nothing wrong'"
+}
+
+// deliveryAbsentReason names the ONE next action for an operator whose delivery surface is not served.
+// The same split billingAbsentReason makes, for the same reason: no database is deployment-wide, and no
+// plan catalog is one file away.
+func deliveryAbsentReason(pg *sql.DB, catalog string, loadErr error) string {
+	if pg == nil {
+		return "this deployment declares no platform database (DATABASE_URL is unset), so there is no " +
+			"verification state to gate a delivery on and no route registry to deliver through"
+	}
+	if catalog == "" {
+		return "no plan catalog is published (" + catalogHint(planCatalogPathEnv) + "), so this " +
+			"deployment cannot decide whether a tenant is entitled to have a pull request opened for " +
+			"them — and delivery writes into a customer's repository, which is not a question to answer " +
+			"by default"
+	}
+	if loadErr != nil {
+		return "the published plan catalog at " + catalog + " could not be loaded, so no entitlement can " +
+			"be decided: " + loadErr.Error()
+	}
+	return "the plan catalog could not be loaded"
+}
+
+// SandboxContainedEnv is the operator's DECLARATION that this process runs inside a container which
+// denies network egress and mounts only a read-only working set.
+const SandboxContainedEnv = "HEROS_SANDBOX_CONTAINED"
+
+// compileSandbox returns the isolate the build gate runs the customer's compiler inside, and the phrase
+// the capability line reports.
+//
+// 🔴 IT NEVER ASSUMES CONTAINMENT. sandbox.NewContainedEnforcer ADVERTISES network denial and filesystem
+// scope as in force — it does not provide them; the outer container does. Its own doc says using it on
+// a bare host "would claim containment that is not there — the one thing the fail-closed design exists
+// to prevent". So it is selected only when an operator has declared the posture, and the declaration is
+// an environment variable rather than a guess, because nothing this process can observe distinguishes
+// "no egress" from "egress that happens to be idle".
+//
+// ⚠️ THE DECLARATION IS A REAL CLAIM, and a deployment that sets it wrongly gets a build gate that runs
+// a customer's compiler with network access and a writable host. It belongs on a container that has no
+// route out — which is NOT the API server, because the API server needs the database. That is a
+// deployment topology (a separate compile worker), and until one exists this variable stays unset and
+// the gate falls back to parsing, which is the honest state rather than a broken one.
+func compileSandbox() (*sandbox.Sandbox, string) {
+	if strings.TrimSpace(os.Getenv(SandboxContainedEnv)) != "1" {
+		return nil, "diff is parsed, not built — " + SandboxContainedEnv + " is unset, so no isolate can " +
+			"hold a customer's compiler"
+	}
+	// The enforcer still checks what it can guarantee on its own (env scrub, resource bounds) and the
+	// gate still fails closed on top of that: declaring the posture does not skip the gate, it satisfies
+	// the two capabilities only the runtime can provide.
+	return sandbox.New(sandbox.NewContainedEnforcer()), "diff is compiled inside a declared isolate"
+}
+
+// catalogHint names the ONE next action for an unpublished catalog, and the two cases are different
+// actions: an unset variable is a deployment that has not declared where the file goes, and a set one
+// pointing at nothing is a deployment that has and nobody put the file there. The manifests declare
+// these paths, so the second is now the common case and telling them apart is what makes the message
+// useful rather than a restatement.
+func catalogHint(env string) string {
+	if p := strings.TrimSpace(os.Getenv(env)); p != "" {
+		return env + " names " + p + ", and no file is there"
+	}
+	return env + " is unset"
+}
+
+// runMonitorAbsentReason is why the LIVE run monitor is the one read surface this deployment cannot
+// serve — stated in full because the generic "no adapter exists outside a demo binary" was the same
+// stale sentence P5.5 and P12 carried, and it is wrong here for a different and more interesting
+// reason: an adapter would not help.
+//
+// Two independent blockers, and neither is a wiring gap:
+//
+//   - IT IS NOT LIVE, AND CANNOT BE. The platform learns of a run when the CLI LINKS it, which happens
+//     after the run finished. `/monitor/stream` is SSE that streams snapshots "until the run is
+//     terminal"; over a linked run it would emit one frame of a finished run and close, every time. A
+//     live endpoint that is never live is a worse answer than 503 — the 503 says "not installed", and
+//     the stream would say "this is what watching your run looks like".
+//
+//   - PER-NODE STATE IS EVAL DATA. RunMonitorNode.State is ok | failed | timed_out, driven by the
+//     reliability signal on a span. The boundary carries cost, latency and tokens per node — that is
+//     what the scorecard renders — and carries no per-node correctness at all, which is why
+//     hostedscorecard reports `failure_attribution: unavailable` in so many words. Filling State with
+//     "ok" for every node would invent the one field the view exists to show.
+//
+// What the platform CAN show of a linked run is already mounted: the linked-run record (its scores with
+// intervals) and the scorecard (cost and latency attributed per node). This capability is the part that
+// needs the platform to have RUN the workflow, and it does not.
+const runMonitorAbsentReason = "this platform does not execute customer workflows: it learns of a run " +
+	"only when the CLI links it, which is after the run has finished, so there is nothing live to " +
+	"stream — and per-node state (ok/failed/timed_out) is derived from per-node correctness, which is " +
+	"eval data that stays on the machine that ran the eval. The parts of a linked run this deployment " +
+	"CAN show are mounted: the run's scores (p11_run_linking) and its per-node cost and latency " +
+	"(p45_scorecard)"
+
+// ── P21 collection: the declaration, the provider, and why it is a declaration ───────────────────────
+
+// BillingModeEnv names the mode this deployment collects payments in: `test` or `live`.
+//
+// 🔴 ITS PRESENCE IS THE DECLARATION. Unset means this deployment collects nothing, which is the
+// default and the state every open-core install stays in — see deploy/README.md. Set, it mounts
+// checkout, plan changes and the provider webhook.
+//
+// ⚠️ `live` MOVES REAL MONEY. It is spelled out rather than inferred from anything — not from a key
+// prefix, not from the hostname, not from NODE_ENV — for the same reason HEROS_SANDBOX_CONTAINED is a
+// declaration: nothing this process can observe distinguishes "the operator meant live" from "the
+// operator pasted the wrong key", and guessing wrong charges a customer. billing.NewStripeProvider
+// normalizes an empty mode to test on its own, so every path that forgets this variable charges
+// nothing real; this one refuses to mount at all instead, because a checkout button that silently
+// runs in test mode is worse than no button.
+const BillingModeEnv = "BILLING_MODE"
+
+// collectionDeps is what a declared provider contributes to the billing service: the provider itself
+// and the secrets seam the SERVICE also needs for webhook signature verification.
+type collectionDeps struct {
+	provider billing.Provider
+	secrets  billing.Secrets
+}
+
+// collectionProvider resolves this deployment's payment provider from its declaration.
+//
+// It returns the stub and a REASON when nothing is declared or the declaration cannot be honoured. A
+// refusal here is never fatal: P7 billing stays mounted and fully served either way, because reading
+// what a customer owes does not require the ability to charge them.
+func collectionProvider(secrets providergateway.Secrets) (collectionDeps, billing.Mode, string) {
+	stub := collectionDeps{provider: billing.NewStubProvider()}
+	const notDeclared = "no payment provider is configured on this deployment (" + BillingModeEnv +
+		" is unset); the durable ledger exists, but checkout and plan changes need a provider to call"
+
+	declared := strings.TrimSpace(os.Getenv(BillingModeEnv))
+	if declared == "" {
+		return stub, "", notDeclared
+	}
+	mode := billing.Mode(strings.ToLower(declared))
+	if mode != billing.ModeTest && mode != billing.ModeLive {
+		// Refused rather than defaulted. Defaulting a typo to test would mount a checkout button that
+		// takes no real money on a deployment whose operator believes it does; defaulting it to live is
+		// unthinkable. Neither guess is safe, so neither is made.
+		return stub, "", BillingModeEnv + "=" + declared + " is not a billing mode (test|live), so no " +
+			"payment provider was configured — this is refused rather than defaulted, because both " +
+			"defaults are wrong in a way that is only discovered by a customer"
+	}
+	if secrets == nil {
+		return stub, "", "a billing mode is declared (" + BillingModeEnv + "=" + declared + ") but this " +
+			"deployment resolved no secrets source, and a billing credential is never read from code, " +
+			"config or the environment"
+	}
+	ms, err := billing.NewManagedSecrets(secrets)
+	if err != nil {
+		return stub, "", "a billing mode is declared (" + BillingModeEnv + "=" + declared + ") but the " +
+			"secrets source could not be adapted for billing: " + err.Error()
+	}
+	p, err := billing.NewStripeProvider(ms, mode, time.Now)
+	if err != nil {
+		return stub, "", "a billing mode is declared (" + BillingModeEnv + "=" + declared + ") but the " +
+			"payment provider could not be built: " + err.Error()
+	}
+	return collectionDeps{provider: p, secrets: ms}, mode, ""
 }

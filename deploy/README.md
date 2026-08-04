@@ -121,17 +121,45 @@ not exist. `agentd` prints the whole table at boot; `docker compose logs agentd 
 
 | Capability | State on a fresh install | Why |
 |---|---|---|
-| `/healthz`, `/readyz` | **served** | always |
-| P13 coverage & delivery, P17 memory, P20 install | **served** | no external store needed |
-| P10 prompt registry | **served** with a platform database | `registry` is Postgres-backed |
-| P10 studio matrix — models, render | **served** with a platform database | same store; the workflow catalog, bindings and test-run are separate parts and each reports its own 503 |
-| P2 config/runtime — transforms, runs, specs | **served** with a platform database | Postgres-backed read views. The **submit** write path stays unmounted: it needs a target repository to transform |
-| P23 consent | **served** with a platform database *and* a customer console | the manifest is read from the console's origin |
-| P4 eval board, P4.5 scorecard, P5 graph editor, P5.5 proposals, P6 optimizer, P3.5 pattern graph, P2.5 run monitor | **registered, not mounted** | their Postgres tables exist, but the adapter from a `workflow_id` to stored artifacts lives only inside a demo binary today |
-| P11 run linking (`/api/v1/whoami`, `/api/v1/run-links`) | **served** with a platform database | the `heros` CLI's `login`/`link` surface. Postgres-backed since migration 0020. A store read that fails fails its caller, so a coverage figure can never be quietly wrong |
-| P7 billing, P21 payments, P13 authoring | **registered, not mounted** | each has exactly one store implementation and it is in-memory — mounting it would record your data and forget it on restart |
-| P12 forge delivery | **registered, not mounted** | its gate and pending providers read verification state that has no store yet |
+| `/healthz`, `/readyz` | **served** | always. Registered by `api.New` before any capability is mounted, and left outside the auth gate, so a probe works on a deployment that is otherwise entirely unconfigured |
+| `/api/v1/coverage`, `/api/v1/change-delivery`, `/api/v1/memory`, `/api/v1/install` | **served** | always, and for one reason: each is a property of this BUILD rather than of a tenant. They take no tenant, no plan and no role — which is what makes "coverage is identical on every plan" structural instead of a policy somebody has to keep. Registered by `api.New` beside health, so they need no database and no catalog |
+| `p10_prompt_registry` | **served** with a platform database | `registry` is Postgres-backed |
+| `p10_studio_matrix` | **served** with a platform database | models and render only. The workflow catalog, bindings and test-run are separate parts and each reports its own 503 |
+| `p2_config_runtime` | **served** with a platform database | Postgres-backed read views. The **submit** write path stays unmounted: it needs a target repository to transform |
+| `p11_run_linking` | **served** with a platform database | the `heros` CLI's `login`/`link` surface (migration 0020). The derived metering series is still in-memory, so a restart loses the spend figure, not the links |
+| `p11_workflow_ir` | **served** with a platform database | opt-in structure, transmitted only by `heros link --with-ir` |
+| `p1_source_discovery` | **served** with a platform database | customer-pushed snapshots; discovery and pattern classification run here |
+| `p35_pattern_graph` | **served** with a platform database | labelled when source has been pushed, drawn from opt-in structure otherwise |
+| `p4_eval_board` | **served** with a platform database | assembled from LINKED runs. No statistical tie detection: the bootstrap replicates stay on the machine that computed them, and the board says so rather than implying none were tied |
+| `p45_scorecard` | **served** with a platform database | per-node cost and latency from a linked run. Failure attribution is reported `unavailable` — it needs per-node correctness, which is eval data and does not cross |
+| `p5_graph_editor` | **served** with a platform database | the IR is re-derived from the pushed snapshot, so this needs SOURCE and not just a graph |
+| `p55_verdict_ingest` | **served** with a platform database | the endpoint `heros report-verdict` transmits to. The only way a stored verdict can say `pass`: this platform can generate a proposal and can never measure one |
+| `p55_proposals` | **served** with a platform database | the recommendation surface over reported verdicts. Nothing here has a diff, so the open-PR action refuses by name |
+| `p55_proposal_compile` | **served** with a platform database | AST codemod over the pushed snapshot. With `HEROS_SANDBOX_CONTAINED` unset the diff is parsed, not built — no isolate can hold a customer's compiler |
+| `p55_proposal_generation` | **served** with a database *and* a published `models.json` | cost-bottleneck operators only. A diagnosis needs the eval cases, which stay with the customer |
+| `p12_forge_delivery` | **served** with a database *and* a published `plans.json` | routes, conditions and history. Every delivery is withheld as `no_diff` until proposals carry one. The catalog is the gate because delivery opens a pull request in your repository |
+| `p7_billing` | **served** with a database *and* a published `plans.json` | durable ledger, accounts and meters — read model plus consent. See the note below on what it shows with no payment provider |
+| `p23_consent` | **served** with a database *and* a customer console | the manifest is read from the console's origin |
+| `p6_optimizer` | **registered, not mounted** | no persistent adapter outside a demo binary (PRD Q6) |
+| `p25_run_monitor` | **registered, not mounted** | and it cannot be. This platform never executes your workflow — it learns of a run when the CLI links it, which is after the run finished, so there is nothing live to stream. Per-node state is derived from per-node correctness, which is eval data. What a linked run CAN show is served: its scores (`p11_run_linking`) and its per-node cost and latency (`p45_scorecard`) |
+| `p21_payments` | **registered, not mounted** *until `BILLING_MODE` is set* | its presence mounts checkout, plan changes and the provider webhook; `test` or `live`, declared and never inferred. Anything else is refused rather than defaulted. The two credentials resolve through the same secrets seam as the model-provider keys, under `billing_provider` and `billing_webhook`. ⚠️ `live` moves real money |
+| `p13_authoring` | **registered, not mounted** | its only store implementation is in-memory, so mounting it would record and then forget |
 | `POST /billing/webhook` | **not registered** | the single inbound-from-internet path is mounted only where a deployment collects payments; it is not published to answer 503 |
+
+> **An install with no payment provider has no billing account, and that is the intended state — not a
+> gap.** A billing account is created by exactly one thing: checkout, which is P21. With no provider
+> configured there is no checkout, so `/app/billing` and `/app/account` will never show one, for any
+> tenant, ever. The platform says so in its own words (`reason_code: collection_not_configured`) and both
+> pages render it as a configured state rather than as a lookup that failed — because "no such account"
+> reads as a missing record and sends an operator looking for a button that does not exist.
+>
+> **Everything billing is for still works without it.** Entitlements resolve from `plans.json`, usage is
+> metered against the plan's allowances, and the ledger records what was used. The absent part is
+> COLLECTION. A deployment that wants accounts configures a payment provider; there is no second path
+> that mints one, deliberately — an account carries a provider customer handle
+> (`account.NewHandle` refuses an empty one, so that "this customer cannot be billed" is discovered at
+> provisioning rather than at the first charge), and inventing a placeholder handle would be a provider
+> reference that references no provider.
 
 Without `DATABASE_URL` the four Postgres-backed rows join the unmounted set and say so. That is a
 supported single-binary form, not a misconfiguration.
@@ -144,6 +172,40 @@ are labelled here and in the manifests rather than left for you to infer from a 
 size or tune them for a load that is not arriving yet.
 
 ---
+
+## The build gate, and why it is off by default
+
+P5.5 compiles proposals into reviewable diffs on every deployment with a database and a pushed source
+snapshot. Whether it also **builds** them is a separate switch, and it is off unless you turn it on.
+
+The gate compiles a **customer's repository**, so it runs inside `internal/sandbox`'s isolate: a scrubbed
+environment, no ambient credentials, a filesystem scoped to the working set, bounded CPU/memory/wall
+clock, and denied egress. If those cannot be established the gate **fails closed** — it reports
+`unbuilt` with the reason and never falls back to compiling on the host.
+
+Two things have to be true, and neither is something the process can detect for itself:
+
+| | |
+|---|---|
+| `HEROS_GO_TOOLCHAIN` | the pinned `go` binary. `deploy/Dockerfile.compile` sets it; the API image (distroless) has no toolchain, and the gate reports that rather than guessing |
+| `HEROS_SANDBOX_CONTAINED=1` | your **declaration** that this container denies network egress and mounts a read-only working set |
+
+> **The declaration is a claim, and setting it wrongly is the failure the whole design exists to
+> prevent.** `sandbox.NewContainedEnforcer` *advertises* egress denial and filesystem scope as in force —
+> it does not provide them; your runtime does. Set it on a container that has no route out, never on the
+> API server, which needs the database.
+>
+> ⚠️ **This is not fully closed today, and here is the exact gap.** A compile worker must reach Postgres
+> to read proposals and write diffs, so its container cannot be `network_mode: none`. Closing it properly
+> means the isolate denying egress **per child** — a network namespace on the compiler process itself —
+> which `internal/sandbox` does not implement: `SubprocessEnforcer` reports `NetworkDeny=false` and there
+> is no platform enforcer above it. So on the supported posture the filesystem scope, the credential
+> scrub and the resource bounds are the isolate's; the egress denial is the **container's network
+> policy**, and it is only as tight as you write it. Permit the database and nothing else.
+
+Without both, the gate reports what it did and did not prove, the proposal stays `unbuilt`, and P12
+delivery stays withheld — which is the honest state, not a broken one. The diff is still generated and
+still reviewable.
 
 ## Kubernetes (Kustomize)
 
@@ -178,6 +240,15 @@ plaintext `Secret`, and CI fails if one is ever committed.
   means a few seconds of unavailability on each apply. **Do not raise `spec.replicas`**: it buys no
   availability and costs you a split ledger. When the ledger's contents move to the platform database
   the count goes back to being a value you set, exactly as FR4 intends.
+- **The customer console runs ONE replica too, and for a different reason than `agentd`.** Its sessions
+  are a `Map` in process memory (`web/console/src/lib/session.ts`), so two replicas are two disjoint
+  session stores behind one Service: a user signs in on one pod and roughly half their later requests
+  reach the other, find no session, and are redirected to `/signin?reason=session_ended`. It logs
+  nothing — from the server's side, answering "no such session" is correct — so it presents only as *the
+  console keeps logging me out*. **Do not raise `spec.replicas`** until sessions move to a shared store.
+  Note that one replica does not make sessions durable either: a rollout replaces the pod and everyone is
+  signed out. The **operator** console does not share this — its sessions are rows in `admin_session`,
+  which is why that Deployment runs two.
 - **Consent retention** runs as a weekly `CronJob` that is a **dry run with no window set** until you
   configure both — see [Retention](#retention-a-legal-clock-you-have-to-set).
 - **Inbound is one door.** The only route that accepts unsolicited internet traffic is Stripe's
@@ -198,13 +269,20 @@ point to size from, **not a throughput guarantee** for your workload.
 
 | Component | Scales by | Lab baseline (label, not a promise) |
 |---|---|---|
-| `agentd` (stateless) | replica count (a *value*, no code change) | dev 1 · staging 2 · prod 3 |
-| customer / operator console (stateless) | replica count | dev 1 · staging 2 · prod 3 |
+| `agentd` | **fixed at 1** — vertical only (see the bullet above: a second replica is a second ledger) | 1 everywhere |
+| customer console | **fixed at 1** — vertical only, until sessions move to a shared store | 1 everywhere |
+| operator console (stateless) | replica count | dev 1 · staging 2 · prod 3 |
 | Postgres (stateful) | vertical only — **single writer** | 1 (see SPOF below) |
 | object / queue / vector / graph stores | vertical; capacity by attached volume size | 1 each |
 
 Raising a stateless component's throughput is raising its `replicas` in the overlay. The stateful
 stores do not scale out here; size their volumes for retention.
+
+⚠️ **Two of the three rows above used to say `dev 1 · staging 2 · prod 3`, and both were wrong** — they
+described the shape these services are meant to reach, in a table an operator reads as what to set
+today. `agentd` has run one replica since its ledger was found to be per-pod SQLite; the customer
+console now does too, for a different per-process store (sessions). Only the operator console is
+genuinely stateless, because its sessions are rows in `admin_session`.
 
 ---
 

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import type { LineView, PaymentView } from "@/lib/types.generated";
+import type { BillingView, LineView, PaymentView } from "@/lib/types.generated";
 import { load } from "@/lib/view";
 import { platformFetch } from "@/lib/platformApi";
 import { legalAcceptances } from "@/lib/legalPaths";
@@ -11,6 +11,7 @@ import { usd2, score } from "@/lib/format";
 import { PlanActions } from "@/components/billingActions";
 import { SUMTrend, UsageAgainstAllowance } from "@/components/billingCharts";
 import { LinkCoverage } from "@/components/linkCoverage";
+import { NoCollection } from "@/components/noCollection";
 import {
   PageFrame,
   Section,
@@ -68,7 +69,49 @@ export default async function BillingPage({
   searchParams: Promise<{ checkout?: string; period?: string }>;
 }) {
   const params = await searchParams;
-  const { outcome, session } = await load<PaymentView>((paths) => paths.payment(params.period), ["billing", "payment_method"]);
+  const { outcome: paid, session, paths } = await load<PaymentView>(
+    (p) => p.payment(params.period),
+    ["billing", "payment_method"],
+  );
+
+  /*
+   * 🔴 P21 ABSENT MUST NOT BLANK P7.
+   *
+   * This page read only `/customers/{id}/payment` — the P21 collection surface — and rendered whatever
+   * that returned. On a deployment with no payment provider that route answers 503 not-mounted, so the
+   * whole page became "this subsystem is not mounted on this deployment" while `p7_billing` was mounted
+   * and serving a durable ledger, accounts and meters. Everything this page's own lede promises except
+   * the card — "your plan by name, this period's usage, every invoice line with the record that
+   * justified it" — was available the entire time and shown to nobody.
+   *
+   * `PaymentView` is `BillingView` plus three collection fields, so the fallback is not a second page:
+   * it reads P7 directly and fills the collection half with what is actually true of this deployment —
+   * no plans offered, no payment method, `collection_available: false`. That is a state this page
+   * already models, because a tenant who has simply not attached a card reaches it too.
+   *
+   * ⚠️ It is deliberately narrow. Only `not-mounted` falls back: an upstream error, a denial or a
+   * transport failure still renders as itself, because "the payment provider is unreachable" and "this
+   * deployment collects no payments" are different facts with different next actions, and quietly
+   * showing the reduced page for the first would hide an outage.
+   */
+  const collectionAbsent = !paid.ok && paid.kind === "not-mounted";
+  const billingOnly = collectionAbsent
+    ? await platformFetch<BillingView>(paths.billing(params.period), { tenantId: session.tenantId })
+    : null;
+  const outcome: typeof paid = billingOnly
+    ? billingOnly.ok
+      ? {
+          ok: true,
+          status: billingOnly.status,
+          data: {
+            billing: billingOnly.data,
+            plans: null,
+            payment_method: { present: false },
+            collection_available: false,
+          },
+        }
+      : billingOnly
+    : paid;
 
   /*
    * 🔴 The commitment gate lives HERE — on the page where a checkout and a plan change happen — and not
@@ -105,7 +148,11 @@ export default async function BillingPage({
       {gated ? <CommitmentGate pending={pending} method="checkout" /> : null}
 
       {!outcome.ok ? (
-        <Failure kind={outcome.kind} error={outcome.error} denial={outcome.denial} subject="billing" />
+        outcome.reasonCode === "collection_not_configured" ? (
+          <NoCollection tenantId={session.tenantId} />
+        ) : (
+          <Failure kind={outcome.kind} error={outcome.error} denial={outcome.denial} subject="billing" />
+        )
       ) : (
         <Body view={outcome.data} />
       )}

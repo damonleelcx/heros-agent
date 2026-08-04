@@ -105,8 +105,9 @@ func Verify(ctx context.Context, runner EvalRunner, p Proposal, evalSetCaseIDs [
 	v.CostDelta = cand.Cost.Mean() - base.Cost.Mean()
 	v.LatencyDelta = cand.Latency.Mean() - base.Latency.Mean()
 	fixed, broken := fixedAndBroken(base.Quality, cand.Quality)
-	v.CasesFixed = fixed
-	v.CasesBroken = broken
+	// SetCases, not two assignments: the counts are what every consumer reads, and a verdict carrying
+	// ids with a zero count reports that the change fixed nothing.
+	v.SetCases(fixed, broken)
 
 	// 4. Gate precedence: constraint → significance → regression → pass.
 	if cfg.ConstraintViolated != "" {
@@ -125,7 +126,7 @@ func Verify(ctx context.Context, runner EvalRunner, p Proposal, evalSetCaseIDs [
 	// 5. Regression check: hard cost/latency budget + other-cluster re-scoring.
 	reg := regressionCheck(ctx, runner, p, cand, cfg)
 	v.RegressionPass = reg.pass
-	v.CasesBroken = mergeSorted(v.CasesBroken, reg.brokenCases)
+	v.SetCases(v.CasesFixed, mergeSorted(v.CasesBroken, reg.brokenCases))
 	if !reg.pass {
 		v.GateResult, v.Reason = GateFailRegress, reg.reason
 		return v, nil
