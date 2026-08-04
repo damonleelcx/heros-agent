@@ -37,6 +37,8 @@ type Server struct {
 
 	// monitor is the P2.5 live run-monitoring read model, mounted by MountMonitor when available.
 	monitor MonitorSource
+	// monitorAbsent is why this deployment serves no live monitor. See MountMonitorAbsent.
+	monitorAbsent string
 
 	// p35 is the P3.5 pattern-classifier read model, mounted by MountPatternGraph when available.
 	patternGraph PatternSource

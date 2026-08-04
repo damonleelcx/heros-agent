@@ -74,6 +74,10 @@ func Build(workflowID string, runs []linkingest.LinkedRun) evalboard.View {
 
 	var rows []evalboard.Row
 	var missingEvidence int
+	// Counted here, where the customer's own verdict is still in hand, because the board-level note has
+	// to tell "failed a threshold you set" apart from "was never held to one" — and evalboard.Row keeps
+	// only the derived GatePass, in which both are false. See notesFor.
+	var ungated int
 	for _, lr := range latest {
 		row, ok := rowFor(lr)
 		if !ok {
@@ -87,6 +91,9 @@ func Build(workflowID string, runs []linkingest.LinkedRun) evalboard.View {
 				Reason:    "linked by a CLI that did not report eval evidence — re-run `heros eval` and link it again",
 			})
 			continue
+		}
+		if lr.Eval.GateOutcome == runlink.GateNotConfigured {
+			ungated++
 		}
 		rows = append(rows, row)
 	}
@@ -113,7 +120,7 @@ func Build(workflowID string, runs []linkingest.LinkedRun) evalboard.View {
 	}
 
 	v.Pareto = paretoOf(v.Ranked)
-	v.Notes = notesFor(v, superseded, missingEvidence)
+	v.Notes = notesFor(v, superseded, missingEvidence, ungated)
 	if missingEvidence > 0 {
 		v.State = evalboard.StatePartial
 	}
@@ -197,7 +204,7 @@ func flagsFor(lr linkingest.LinkedRun) []string {
 
 // notesFor builds the board-level caveats. These change what the WHOLE board means, which is why they
 // are notes rather than per-row badges.
-func notesFor(v evalboard.View, superseded, missingEvidence int) []string {
+func notesFor(v evalboard.View, superseded, missingEvidence, ungated int) []string {
 	var notes []string
 	notes = append(notes,
 		"This board is assembled from LINKED runs — evaluations that ran on your machines with your own "+
@@ -214,8 +221,28 @@ func notesFor(v evalboard.View, superseded, missingEvidence int) []string {
 			"%d configuration(s) could not be ranked because they were linked before eval evidence was "+
 				"recorded. They are listed below rather than dropped.", missingEvidence))
 	}
+	// 🔴 "Disqualified" covers two different facts and this note used to assert the harsher one for both.
+	//
+	// A run is disqualified when GatePass is false, and that is false for `fail` AND for
+	// `not-configured` — deliberately, because a run nobody held to a threshold must not be ranked as
+	// though it cleared one. But the note said "Every measured configuration failed its configured
+	// gate", which on a workflow with no gates is simply untrue: it reads as "your quality gates are
+	// failing" to a reader who never set one, while the row three lines above says `no gate configured`.
+	// One page, two contradictory statements, and the false one is the summary.
 	if len(v.Ranked) == 0 && len(v.Disqualified) > 0 {
-		notes = append(notes, "Every measured configuration failed its configured gate — there is no ranked winner.")
+		switch {
+		case ungated == len(v.Disqualified):
+			notes = append(notes, "No configuration here has a gate. Nothing failed — a run that was never "+
+				"held to a threshold is not ranked as though it cleared one, so there is no ranked winner "+
+				"until you configure gates and link a run that reports them.")
+		case ungated > 0:
+			notes = append(notes, fmt.Sprintf(
+				"There is no ranked winner: of %d measured configuration(s), %d failed a gate you set and "+
+					"%d were never held to one. Both are excluded from the order, for different reasons.",
+				len(v.Disqualified), len(v.Disqualified)-ungated, ungated))
+		default:
+			notes = append(notes, "Every measured configuration failed its configured gate — there is no ranked winner.")
+		}
 	}
 	return notes
 }

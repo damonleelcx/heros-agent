@@ -1,6 +1,7 @@
 package billing
 
 import (
+	"github.com/heros-foreal/agentd/internal/providergateway"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -163,4 +164,21 @@ func gitRoot(t *testing.T) string {
 		t.Fatalf("git rev-parse failed — this fence must run inside the repository: %v", err)
 	}
 	return strings.TrimSpace(string(out))
+}
+
+// TestReservedNamesMatchTheSecretsSource pins the two logical names against the env source's cases.
+//
+// The names live here and the cases live in providergateway, which cannot import this package (it is
+// the other way round), so nothing but this assertion holds them together. A rename on either side
+// without the other produces the quietest possible failure: the credential resolves from a place
+// nobody provisioned, checkout mounts, and the first customer meets "credential unavailable".
+func TestReservedNamesMatchTheSecretsSource(t *testing.T) {
+	if SecretBillingAPIKey != providergateway.ProviderBillingAPIKey {
+		t.Errorf("the API-key name drifted: billing says %q, the secrets source answers to %q",
+			SecretBillingAPIKey, providergateway.ProviderBillingAPIKey)
+	}
+	if SecretBillingWebhookSigning != providergateway.ProviderBillingWebhook {
+		t.Errorf("the webhook-secret name drifted: billing says %q, the secrets source answers to %q",
+			SecretBillingWebhookSigning, providergateway.ProviderBillingWebhook)
+	}
 }

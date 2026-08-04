@@ -20,7 +20,7 @@ import (
 
 func TestBillingAbsentReasonNamesTheONENextAction(t *testing.T) {
 	// No database: a deployment-wide fact. The catalog is irrelevant and must not be mentioned.
-	noDB := billingAbsentReason(nil, "/etc/heros/plans.json")
+	noDB := billingAbsentReason(nil, "/etc/heros/plans.json", nil)
 	if !strings.Contains(noDB, "DATABASE_URL") {
 		t.Errorf("with no database the reason must name DATABASE_URL, got %q", noDB)
 	}
@@ -29,7 +29,7 @@ func TestBillingAbsentReasonNamesTheONENextAction(t *testing.T) {
 	}
 
 	// A database but no catalog: one file away, and the reason must say which variable.
-	noCatalog := billingAbsentReason(&sql.DB{}, "")
+	noCatalog := billingAbsentReason(&sql.DB{}, "", nil)
 	if !strings.Contains(noCatalog, "PLAN_CATALOG_PATH") {
 		t.Errorf("with no catalog the reason must name PLAN_CATALOG_PATH, got %q", noCatalog)
 	}
@@ -39,7 +39,7 @@ func TestBillingAbsentReasonNamesTheONENextAction(t *testing.T) {
 
 	// 🔴 The stale sentence. Billing's stores are durable now; a reason still claiming they are
 	// in-memory would send an operator to wait for a phase that already shipped.
-	for _, r := range []string{noDB, noCatalog, billingAbsentReason(&sql.DB{}, "/x")} {
+	for _, r := range []string{noDB, noCatalog, billingAbsentReason(&sql.DB{}, "/x", nil)} {
 		if strings.Contains(strings.ToLower(r), "in-memory") {
 			t.Errorf("the absent reason still claims billing's stores are in-memory — they are durable "+
 				"as of the PGLedger/PGStore/PGUsageStore work: %q", r)
@@ -77,7 +77,7 @@ func TestBillingIsRegisteredEvenWhenUnserved(t *testing.T) {
 // reason recorded for each unserved capability.
 func capabilityReasons(t *testing.T) map[string]string {
 	t.Helper()
-	caps, err := mountCapabilities(api.New(nil, config.Config{}), nil, t.TempDir(), "")
+	caps, err := mountCapabilities(api.New(nil, config.Config{}), nil, t.TempDir(), "", nil)
 	if err != nil {
 		t.Fatalf("mountCapabilities: %v", err)
 	}

@@ -112,7 +112,7 @@ func StartAgentd(ctx context.Context, cfg config.Config) (*Server, error) {
 
 	// Every capability surface the platform ships is registered here — sourced where a durable store
 	// exists, nil where none does so the answer is 503 not-mounted rather than 404 (Decision 10).
-	caps, err := mountCapabilities(handler, platformDB, cfg.DataDir, strings.TrimSpace(os.Getenv("CONSOLE_HEALTH_URL")))
+	caps, err := mountCapabilities(handler, platformDB, cfg.DataDir, strings.TrimSpace(os.Getenv("CONSOLE_HEALTH_URL")), secrets)
 	if err != nil {
 		if platformDB != nil {
 			_ = platformDB.Close()

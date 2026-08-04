@@ -120,12 +120,38 @@ func (EnvSecrets) Describe() SourceInfo {
 	}
 }
 
+// The billing capability's reserved logical names, duplicated here rather than imported.
+//
+// `internal/billing` imports THIS package, so importing it back would be a cycle. billing owns the
+// names (billing.SecretBillingAPIKey / SecretBillingWebhookSigning) and a fence over there asserts
+// these two match — a name spelled two ways is a credential fetched from a place nobody provisioned.
+const (
+	ProviderBillingAPIKey  = "billing_provider"
+	ProviderBillingWebhook = "billing_webhook"
+)
+
 func (EnvSecrets) Credential(_ context.Context, provider string) (Credential, error) {
 	switch provider {
 	case ProviderOpenAI:
 		return envKey("OPENAI_API_KEY", provider)
 	case ProviderAnthropic:
 		return envKey("ANTHROPIC_API_KEY", provider)
+	// ── The billing capability's two credentials ────────────────────────────────────────────────
+	//
+	// 🔴 THESE CASES ARE WHAT MAKE A DECLARED BILLING MODE WORK ON COMPOSE. billing.ManagedSecrets
+	// asks this source for `billing_provider` and `billing_webhook`; without a case they fell to the
+	// `default` below and returned ErrNoCredential — so a deployment that set BILLING_MODE mounted
+	// checkout and then failed on the FIRST customer's first click, with "credential unavailable".
+	// The aws-secrets-manager source resolves them by logical name and never had this gap; the env
+	// source, which is the only one an open-core install has, did.
+	//
+	// They are ordinary entries under reserved names, exactly as billing/secrets.go intends — billing
+	// gains this source's caching, fail-closed behaviour and /readyz signal rather than inventing a
+	// second mechanism whose health endpoint would be confidently wrong about one of the two.
+	case ProviderBillingAPIKey:
+		return envKey("BILLING_PROVIDER_API_KEY", provider)
+	case ProviderBillingWebhook:
+		return envKey("BILLING_WEBHOOK_SECRET", provider)
 	case ProviderBedrock:
 		id, secret := os.Getenv("AWS_ACCESS_KEY_ID"), os.Getenv("AWS_SECRET_ACCESS_KEY")
 		region := os.Getenv("AWS_REGION")

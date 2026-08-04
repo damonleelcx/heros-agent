@@ -17,7 +17,7 @@ import (
 // missing thing is one environment variable.
 
 func TestDeliveryAbsentReasonNamesTheONENextAction(t *testing.T) {
-	noDB := deliveryAbsentReason(nil, "/etc/heros/plans.json")
+	noDB := deliveryAbsentReason(nil, "/etc/heros/plans.json", nil)
 	if !strings.Contains(noDB, "DATABASE_URL") {
 		t.Errorf("with no database the reason must name DATABASE_URL, got %q", noDB)
 	}
@@ -29,7 +29,7 @@ func TestDeliveryAbsentReasonNamesTheONENextAction(t *testing.T) {
 	// deployment cannot decide whether a tenant may have a pull request opened for them. The reason must
 	// name the variable AND say why the question has no safe default — an operator who reads only
 	// "not entitled" will go looking at the customer's plan.
-	noCatalog := deliveryAbsentReason(&sql.DB{}, "")
+	noCatalog := deliveryAbsentReason(&sql.DB{}, "", nil)
 	if !strings.Contains(noCatalog, "PLAN_CATALOG_PATH") {
 		t.Errorf("with no catalog the reason must name PLAN_CATALOG_PATH, got %q", noCatalog)
 	}
@@ -41,7 +41,7 @@ func TestDeliveryAbsentReasonNamesTheONENextAction(t *testing.T) {
 	}
 
 	// The stale sentences. Both would send an operator to wait for work that has shipped.
-	for _, r := range []string{noDB, noCatalog, deliveryAbsentReason(&sql.DB{}, "/x")} {
+	for _, r := range []string{noDB, noCatalog, deliveryAbsentReason(&sql.DB{}, "/x", nil)} {
 		low := strings.ToLower(r)
 		if strings.Contains(low, "demo binary") {
 			t.Errorf("the absent reason still claims no adapter exists outside a demo binary — "+
