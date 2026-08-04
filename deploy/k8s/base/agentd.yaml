@@ -143,6 +143,23 @@ spec:
             - { name: ADMIN_WEBAUTHN_RP_ID, value: "" }
             # Every component the deployment ships, aggregated into /readyz by health URL. Postgres is
             # NOT in this list — it is probed directly, by connection.
+            # ── The two PUBLISHED CATALOGS ────────────────────────────────────────────────────────
+            #
+            # These declare WHERE each file goes, not that one is there. Both carry PRICES and neither is
+            # ever git-tracked (internal/plancfg and internal/modelcatalog each fence the whole git index
+            # against a committed catalog), so the deployment names the path and the operator supplies
+            # the file — as two more keys (`plans.json`, `models.json`) in the `heros-platform` Secret
+            # this pod already projects read-only at /etc/heros. A Secret key cannot contain a slash, so
+            # they sit beside config.json rather than under a catalogs/ subdirectory.
+            #
+            # A path with no file behind it reads as NOT PUBLISHED (launch stats it at boot), so a fresh
+            # install with neither file gets the same clean "not configured, here is the path" it got
+            # when the variables were unset — not a mounted billing page that fails on its first read.
+            #
+            # plans.json gates billing AND P12 delivery (entitlement); models.json gates the proposal
+            # generator, because the registry records no capability tier or cost per run.
+            - { name: PLAN_CATALOG_PATH, value: "/etc/heros/plans.json" }
+            - { name: MODEL_CATALOG_PATH, value: "/etc/heros/models.json" }
             - { name: CONSOLE_HEALTH_URL, value: "http://console:4320/api/health" }
             - { name: ADMIN_CONSOLE_HEALTH_URL, value: "http://admin-console:4310/api/health" }
             - { name: OBJECT_STORE_HEALTH_URL, value: "http://objectstore:9000/minio/health/ready" }

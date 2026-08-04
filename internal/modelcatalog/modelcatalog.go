@@ -28,6 +28,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/heros-foreal/agentd/internal/proposal"
 	"github.com/heros-foreal/agentd/internal/registry"
@@ -78,8 +79,16 @@ func NewFileSource(path string) *FileSource { return &FileSource{Path: path} }
 // (nil, false) rather than defaulting to a path nobody set: a guessed path that happens not to exist
 // and a path deliberately left unset are the same failure with different remedies.
 func FileSourceFromEnv() (*FileSource, bool) {
-	p := os.Getenv(PathEnv)
+	p := strings.TrimSpace(os.Getenv(PathEnv))
 	if p == "" {
+		return nil, false
+	}
+	// 🔴 A path that names nothing is NOT a published catalog. The deploy manifests declare this
+	// variable — it is where the file GOES — so a set path is a convention, not a claim that somebody
+	// put one there. Reporting the two apart is what keeps "this deployment publishes no model catalog"
+	// (a clean state with a next action) from becoming "read /etc/heros/models.json: no such file"
+	// surfacing as a generator failure.
+	if fi, err := os.Stat(p); err != nil || fi.IsDir() {
 		return nil, false
 	}
 	return NewFileSource(p), true

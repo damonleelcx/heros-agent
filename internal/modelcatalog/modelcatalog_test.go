@@ -137,8 +137,23 @@ func TestFileSourceFromEnvReportsWhenUnset(t *testing.T) {
 	if _, ok := FileSourceFromEnv(); ok {
 		t.Error("an unset variable produced a source pointing at a guessed path")
 	}
-	t.Setenv(PathEnv, "/etc/heros/models.json")
-	if s, ok := FileSourceFromEnv(); !ok || s.Path != "/etc/heros/models.json" {
+
+	// 🔴 A DECLARED path with no file behind it is not a published catalog. The deploy manifests set
+	// this variable to say where the file goes; treating that as "published" would turn a clean
+	// unconfigured state into a read error surfacing out of a generation pass.
+	t.Setenv(PathEnv, filepath.Join(t.TempDir(), "absent.json"))
+	if _, ok := FileSourceFromEnv(); ok {
+		t.Error("a path naming no file was reported as a published catalog")
+	}
+	// ...and a directory is not a catalog either.
+	t.Setenv(PathEnv, t.TempDir())
+	if _, ok := FileSourceFromEnv(); ok {
+		t.Error("a directory was reported as a published catalog")
+	}
+
+	published := write(t, twoModels)
+	t.Setenv(PathEnv, published)
+	if s, ok := FileSourceFromEnv(); !ok || s.Path != published {
 		t.Errorf("FileSourceFromEnv = %+v, %v", s, ok)
 	}
 }

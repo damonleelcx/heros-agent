@@ -70,3 +70,30 @@ func TestProposalsAbsentReasonNamesTheDatabaseNotAMissingAdapter(t *testing.T) {
 		t.Errorf("the reason must name what is missing, got %q", reason)
 	}
 }
+
+// The live monitor is the one read surface this deployment genuinely cannot serve, and its reason has
+// to say WHY rather than inheriting the generic "no adapter" sentence — which was stale for P5.5 and
+// P12 and is wrong here for a different reason: an adapter would not help.
+func TestTheRunMonitorReasonNamesTheRealBlockers(t *testing.T) {
+	caps := capabilityReasons(t)
+	reason, ok := caps["p25_run_monitor"]
+	if !ok {
+		t.Fatal("the run monitor is served on this fixture; if that is now true, this test's premise is " +
+			"stale and the capability needs a different guard")
+	}
+	if strings.Contains(strings.ToLower(reason), "demo binary") {
+		t.Errorf("the run monitor is unmounted for a reason that names a missing ADAPTER (%q). An adapter "+
+			"would not help: the platform hears of a run only after it finished, and per-node state is "+
+			"eval data that never crosses the boundary.", reason)
+	}
+	// Both blockers must be named. Either one alone reads as a gap somebody could close by wiring.
+	for _, want := range []string{"link", "eval data"} {
+		if !strings.Contains(strings.ToLower(reason), want) {
+			t.Errorf("the reason must name %q, got %q", want, reason)
+		}
+	}
+	// And it must point at what IS served, so the sentence is not purely a refusal.
+	if !strings.Contains(reason, "p45_scorecard") {
+		t.Errorf("the reason should name the surfaces that DO render a linked run, got %q", reason)
+	}
+}

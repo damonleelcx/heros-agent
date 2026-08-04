@@ -500,7 +500,7 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 		absent("p35_pattern_graph", noAdapter)
 	}
 	h.MountMonitor(nil)
-	absent("p25_run_monitor", noAdapter)
+	absent("p25_run_monitor", runMonitorAbsentReason)
 
 	// ── P7 billing ─────────────────────────────────────────────────────────────────────────────────
 	//
@@ -571,12 +571,37 @@ func newConsentID() string {
 	return "acc_" + hex.EncodeToString(b[:])
 }
 
+// publishedCatalog returns path when it names a file that EXISTS, and "" otherwise.
+//
+// 🔴 A path that names nothing is NOT a published catalog, and the difference decides which of two very
+// different things a customer sees. plancfg.NewResolver does not read the file — nothing does until the
+// billing page asks — so a deployment that declares the variable and supplies no file would MOUNT
+// billing and then fail on the first read, turning a clean "not configured, here is the variable" into
+// a runtime error on a customer's invoice page.
+//
+// That matters now because the deploy manifests declare these paths: the variable is where the file
+// GOES, and its presence is a convention, not a claim that somebody put one there.
+//
+// ⚠️ It is a check at BOOT, so a catalog published later needs a restart to be picked up. That is the
+// same reload boundary plancfg already has (Resolver.Reload is an explicit operator action, not a
+// watcher), and a capability that flickers between mounted and absent as a file appears would be worse.
+func publishedCatalog(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	if fi, err := os.Stat(path); err != nil || fi.IsDir() {
+		return ""
+	}
+	return path
+}
+
 // planCatalogPath is the published plan catalog this deployment resolves plans from.
 //
 // Read from the environment beside CONSOLE_HEALTH_URL rather than added to config.Config, matching how
 // launch already passes deployment facts that only one capability needs. It is a FILE and never a
 // git-tracked one — plancfg.Source says so in its own contract, because the catalog carries prices.
-func planCatalogPath() string { return strings.TrimSpace(os.Getenv("PLAN_CATALOG_PATH")) }
+func planCatalogPath() string { return publishedCatalog(os.Getenv("PLAN_CATALOG_PATH")) }
 
 // billingAbsentReason names the ONE next action for an operator whose billing surface is not served.
 //
@@ -588,8 +613,9 @@ func billingAbsentReason(pg *sql.DB, catalog string) string {
 		return "this deployment declares no platform database (DATABASE_URL is unset)"
 	}
 	if catalog == "" {
-		return "no plan catalog is published (PLAN_CATALOG_PATH is unset) — billing cannot resolve which " +
-			"plan a customer is on, and a billing page that cannot name the plan cannot price anything"
+		return "no plan catalog is published (" + catalogHint("PLAN_CATALOG_PATH") + ") — billing cannot " +
+			"resolve which plan a customer is on, and a billing page that cannot name the plan cannot " +
+			"price anything"
 	}
 	return "the plan catalog could not be loaded"
 }
@@ -635,9 +661,10 @@ func deliveryAbsentReason(pg *sql.DB, catalog string) string {
 			"verification state to gate a delivery on and no route registry to deliver through"
 	}
 	if catalog == "" {
-		return "no plan catalog is published (PLAN_CATALOG_PATH is unset), so this deployment cannot " +
-			"decide whether a tenant is entitled to have a pull request opened for them — and delivery " +
-			"writes into a customer's repository, which is not a question to answer by default"
+		return "no plan catalog is published (" + catalogHint("PLAN_CATALOG_PATH") + "), so this " +
+			"deployment cannot decide whether a tenant is entitled to have a pull request opened for " +
+			"them — and delivery writes into a customer's repository, which is not a question to answer " +
+			"by default"
 	}
 	return "the plan catalog could not be loaded"
 }
@@ -671,3 +698,44 @@ func compileSandbox() (*sandbox.Sandbox, string) {
 	// the two capabilities only the runtime can provide.
 	return sandbox.New(sandbox.NewContainedEnforcer()), "diff is compiled inside a declared isolate"
 }
+
+// catalogHint names the ONE next action for an unpublished catalog, and the two cases are different
+// actions: an unset variable is a deployment that has not declared where the file goes, and a set one
+// pointing at nothing is a deployment that has and nobody put the file there. The manifests declare
+// these paths, so the second is now the common case and telling them apart is what makes the message
+// useful rather than a restatement.
+func catalogHint(env string) string {
+	if p := strings.TrimSpace(os.Getenv(env)); p != "" {
+		return env + " names " + p + ", and no file is there"
+	}
+	return env + " is unset"
+}
+
+// runMonitorAbsentReason is why the LIVE run monitor is the one read surface this deployment cannot
+// serve — stated in full because the generic "no adapter exists outside a demo binary" was the same
+// stale sentence P5.5 and P12 carried, and it is wrong here for a different and more interesting
+// reason: an adapter would not help.
+//
+// Two independent blockers, and neither is a wiring gap:
+//
+//   - IT IS NOT LIVE, AND CANNOT BE. The platform learns of a run when the CLI LINKS it, which happens
+//     after the run finished. `/monitor/stream` is SSE that streams snapshots "until the run is
+//     terminal"; over a linked run it would emit one frame of a finished run and close, every time. A
+//     live endpoint that is never live is a worse answer than 503 — the 503 says "not installed", and
+//     the stream would say "this is what watching your run looks like".
+//
+//   - PER-NODE STATE IS EVAL DATA. RunMonitorNode.State is ok | failed | timed_out, driven by the
+//     reliability signal on a span. The boundary carries cost, latency and tokens per node — that is
+//     what the scorecard renders — and carries no per-node correctness at all, which is why
+//     hostedscorecard reports `failure_attribution: unavailable` in so many words. Filling State with
+//     "ok" for every node would invent the one field the view exists to show.
+//
+// What the platform CAN show of a linked run is already mounted: the linked-run record (its scores with
+// intervals) and the scorecard (cost and latency attributed per node). This capability is the part that
+// needs the platform to have RUN the workflow, and it does not.
+const runMonitorAbsentReason = "this platform does not execute customer workflows: it learns of a run " +
+	"only when the CLI links it, which is after the run has finished, so there is nothing live to " +
+	"stream — and per-node state (ok/failed/timed_out) is derived from per-node correctness, which is " +
+	"eval data that stays on the machine that ran the eval. The parts of a linked run this deployment " +
+	"CAN show are mounted: the run's scores (p11_run_linking) and its per-node cost and latency " +
+	"(p45_scorecard)"

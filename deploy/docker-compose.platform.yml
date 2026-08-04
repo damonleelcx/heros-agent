@@ -101,6 +101,28 @@ services:
       # it is stood up alongside (docker-compose.admin-console.yml). Only the Kubernetes base set it
       # before, so Compose /readyz silently never aggregated the operator console at all — the exact
       # substrate divergence scripts/deploy/check-env-parity.sh now fails the build on.
+      # ── The two PUBLISHED CATALOGS ────────────────────────────────────────────────────────────────
+      #
+      # These declare WHERE each file goes, not that one is there. Both carry PRICES and neither is ever
+      # git-tracked (internal/plancfg and internal/modelcatalog each ship an auto-discovering fence over
+      # the whole git index that fails the build on a committed catalog), so the deployment names the
+      # path and the operator supplies the file.
+      #
+      # A path with no file behind it reads as NOT PUBLISHED — launch stats it at boot — so a fresh
+      # install with neither file gets the same clean "not configured, here is the path" it got when the
+      # variables were unset, rather than a mounted billing page that fails on its first read.
+      #
+      #   plans.json   what a plan costs and what it includes. Without it billing cannot say which plan
+      #                a customer is on, and P12 delivery cannot decide whether a tenant is entitled to
+      #                have a pull request opened for them — which is why BOTH are gated on it.
+      #   models.json  each model's capability tier and cost per run. The registry records neither, and
+      #                without them "cheaper" is not expressible, so the proposal generator has nothing
+      #                to propose.
+      #
+      # They live in the `./config` bind this service already mounts read-only at /etc/heros — no new
+      # volume, and the same directory an operator already populates for config.json.
+      PLAN_CATALOG_PATH: /etc/heros/plans.json
+      MODEL_CATALOG_PATH: /etc/heros/models.json
       CONSOLE_HEALTH_URL: http://console:4320/api/health
       ADMIN_CONSOLE_HEALTH_URL: ${ADMIN_CONSOLE_HEALTH_URL:-}
       OBJECT_STORE_HEALTH_URL: http://objectstore:9000/minio/health/ready
