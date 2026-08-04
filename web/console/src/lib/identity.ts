@@ -3,6 +3,8 @@ import { CONFIG, type IdentityProviderKind } from "./idp/config";
 import { REFUSAL, resolveTenant, type FederatedClaims } from "./idp/federation";
 import { spendAssertion } from "./idp/flow";
 import { verifyIdToken, reachable as oidcReachable, IdpUnreachableError } from "./idp/oidc";
+import { verifyPlatformToken, reachable as platformReachable } from "./idp/platformToken";
+import { platformApiBase } from "./platformApi";
 import { verifySamlResponse, reachableMetadata } from "./idp/saml";
 import { SecretUnavailableError, describeSecrets } from "./idp/secrets";
 import { logIdentity } from "./telemetry";
@@ -158,6 +160,18 @@ export async function verifyTenantAssertion(assertion: string, binding?: Asserti
       return { ok: true, principal: { tenantId } };
     }
 
+    case "platform": {
+      // The credential IS the platform token, so the platform is asked whose it is rather than a second
+      // map being consulted. This is the seam that makes `heros login` and console sign-in one act
+      // instead of two secrets — see idp/platformToken.ts for why it is not an escalation.
+      const outcome = await verifyPlatformToken(value);
+      if (!outcome.ok) {
+        logIdentity({ event: "assertion_refused", provider: PROVIDER, cause: outcome.cause });
+        return refuse("credential");
+      }
+      return { ok: true, principal: { tenantId: outcome.tenantId } };
+    }
+
     case "oidc": {
       // A federated deployment has no credential form. An assertion arriving without a binding did not
       // come through `/auth/callback`, and honouring it would be a second, unbound sign-in path.
@@ -292,6 +306,12 @@ export async function identityHealth(): Promise<IdentityHealth> {
   if (PROVIDER === "saml") {
     const probe = await reachableMetadata();
     return { kind: PROVIDER, issuer: CONFIG.issuer, ...probe };
+  }
+  if (PROVIDER === "platform") {
+    // The platform is this seam's authority, so its reachability is this seam's health. Reporting a
+    // hard-coded `true` here would be a component that cannot fail — see platformToken.reachable.
+    const probe = await platformReachable();
+    return { kind: PROVIDER, issuer: platformApiBase(), ...probe };
   }
   return { kind: PROVIDER, issuer: "", reachable: true };
 }

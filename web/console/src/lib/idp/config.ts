@@ -20,10 +20,17 @@ import { parseTenantMap, type TenantMap } from "./federation";
  * was skipped".
  */
 
-/** IdentityProviderKind is the seam's implementation in force. */
-export type IdentityProviderKind = "oidc" | "saml" | "configured" | "dev";
+/**
+ * IdentityProviderKind is the seam's implementation in force.
+ *
+ * `platform` verifies the presented credential against the platform's own `/api/v1/whoami` — the same
+ * token `heros login` authenticates and `heros link` transmits with. It exists because the console
+ * previously demanded a SECOND secret that no CLI command could produce, which made the dashboard URL
+ * `heros link` prints unopenable by the person who ran it. See `idp/platformToken.ts`.
+ */
+export type IdentityProviderKind = "oidc" | "saml" | "configured" | "platform" | "dev";
 
-const KINDS: readonly IdentityProviderKind[] = ["oidc", "saml", "configured", "dev"];
+const KINDS: readonly IdentityProviderKind[] = ["oidc", "saml", "configured", "platform", "dev"];
 
 function requireEnv(name: string, kind: IdentityProviderKind): string {
   const value = (process.env[name] ?? "").trim();
@@ -107,7 +114,10 @@ function load(): IdentityConfig {
     acsAllowlist: [],
     metadataUrl: "",
   };
-  if (kind === "configured" || kind === "dev") return base;
+  // `platform` needs no tenant map and no allowlist: the platform IS the map, and there is no redirect
+  // flow to protect. Its one dependency (PLATFORM_API_BASE) is the BFF's own, already required for the
+  // console to render anything at all — so there is nothing here that could be half-configured.
+  if (kind === "configured" || kind === "platform" || kind === "dev") return base;
 
   // A federated deployment MUST carry a tenant map: without one there is no rule that resolves a
   // claim to a tenant, and the only honest behaviours are "refuse to boot" and "authenticate nobody".
