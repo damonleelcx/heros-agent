@@ -210,9 +210,16 @@ func (iso *subprocessIsolate) Destroy() {
 }
 
 // shimArgv wraps the tool in a POSIX-shell `ulimit` preamble that sets child resource limits before
-// exec'ing it. CPU seconds (-t) and file size (-f) are portable and per-tree; virtual memory (-v) is
-// set where the shell supports it (Linux). The tool's own argv is passed positionally so no
-// shell-quoting of the tool's arguments is required.
+// exec'ing it. CPU seconds (-t) and file size (-f) are portable and per-tree; address space (-v) is
+// set where the shell supports it. The tool's own argv is passed positionally so no shell-quoting of
+// the tool's arguments is required.
+//
+// 🔴 `-v` IS THE DANGEROUS ONE, and its danger is that it is silently a no-op on the machine you are
+// developing on. macOS `sh` rejects `ulimit -v` and the `|| true` swallows the rejection; Linux
+// applies it. So this line does nothing locally and everything in production, which is the worst
+// possible split for a limit that can stop a process from starting at all. It bounds ADDRESS SPACE,
+// not resident memory — see sandbox.MinRuntimeAddressSpace for the measurements and for the defect
+// this caused.
 //
 // Note on PID/process-count containment: RLIMIT_NPROC (`ulimit -u`) is enforced against the REAL USER's
 // total process count, not this tool's subtree — setting it low on a shared host makes every fork fail
