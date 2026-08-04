@@ -219,6 +219,28 @@ spec:
             optional: true
             items:
               - { key: config-json, path: config.json }
+              # 🔴 THE PUBLISHED PLAN CATALOG. The env block above names where this file goes and says
+              # the operator supplies it "as two more keys in the heros-platform Secret this pod already
+              # projects" — and until this line existed that described a mechanism that did not exist. An
+              # `items:` list is exhaustive: a key not named here is NOT projected, so a store holding a
+              # perfectly good plans.json still produced an /etc/heros with only config.json in it,
+              # billing reported "no plan catalog is published", and the sentence explaining how to
+              # publish one was describing the thing that was broken.
+              #
+              # ⚠️ A key named here and ABSENT from the Secret stops the pod from starting: `optional`
+              # above covers a missing SECRET, not a missing key, and a secret volume has no per-item
+              # optional. So this key must be synced by the ExternalSecret on every cluster that applies
+              # this base — see externalsecrets.yaml, where it is not marked optional for that reason.
+              #
+              # ⚠️ Nor may it be empty. `launch.publishedCatalog` only STATS the path, so a zero-byte
+              # file counts as published and then fails to parse — which is reported (billing goes absent
+              # naming the parse error) but is a worse state than having no catalog at all. A cluster
+              # that sells nothing should carry no plans-json key and not apply this line.
+              #
+              # models.json is deliberately NOT projected here. It gates the proposal generator, not
+              # billing, and this deployment publishes no model catalog — leaving it absent keeps that
+              # capability honestly unmounted rather than mounted over an empty file.
+              - { key: plans-json, path: plans.json }
         # The ledger is USER STATE (FR22), not scratch: tenant credentials, the registries, memory, the
         # tool index, the inbox. It was an emptyDir, which destroyed all of it on every rollout.
         - name: ledger

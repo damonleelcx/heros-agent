@@ -125,7 +125,35 @@ func awsSecretIDs() (map[string]string, error) {
 	for _, p := range SupportedProviders() {
 		ids[p] = prefix + p
 	}
+	// 🔴 …AND every RESERVED logical name, which this branch used to omit.
+	//
+	// The explicit-IDs form above maps whatever it is given, so a billing credential worked there. This
+	// one derived its whole key set from `SupportedProviders()` — the LLM adapters — so `billing_provider`
+	// and `billing_webhook` were simply absent from the map, and Credential returned "no secret ID is
+	// mapped for provider". That contradicted internal/billing/secrets.go, whose entire argument for
+	// reusing this seam is that billing secrets are "ordinary entries in the same source, under reserved
+	// logical names" — true of one of the two configuration forms.
+	//
+	// The failure is quiet in the worst way. Nothing refuses at boot: the source constructs, /readyz
+	// reports it healthy and NAMES the providers it serves, and billing mounts. The credential is
+	// resolved at the moment of use, so the deployment looks correct until the first checkout — or,
+	// with the pricing preflight wired, until the boot log reports all references unresolved.
+	for _, n := range ReservedSecretNames() {
+		ids[n] = prefix + n
+	}
 	return ids, nil
+}
+
+// ReservedSecretNames are the logical names the PLATFORM resolves from this source that are not gateway
+// providers. They live here rather than beside their consumers because this package owns the source's
+// namespace: it is what decides which names a prefix expands to, and a name it does not know is a
+// credential nobody can fetch.
+//
+// The values are duplicated as constants in internal/billing (which imports this package, so the
+// dependency cannot run the other way). TestReservedSecretNamesCoverBilling in that package fails if
+// the two ever drift — a name spelled two ways is a credential fetched from a place nobody provisioned.
+func ReservedSecretNames() []string {
+	return []string{"billing_provider", "billing_webhook"}
 }
 
 // SupportedProviders lists the providers the gateway has adapters for, sorted.

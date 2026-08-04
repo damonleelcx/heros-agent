@@ -111,11 +111,29 @@ func TestSecretsFromEnv_PrefixCoversExactlyTheGatewaysProviders(t *testing.T) {
 		got = append(got, p)
 	}
 	slices.Sort(got)
-	if want := SupportedProviders(); !slices.Equal(got, want) {
-		t.Errorf("prefix mapped %v, but the gateway dispatches to %v — a provider is uncredentialable", got, want)
+
+	// Every gateway provider is mapped — the original claim, and the one that keeps a provider from
+	// dispatching and then failing at the last step with "no credential".
+	for _, want := range SupportedProviders() {
+		if sm.ids[want] == "" {
+			t.Errorf("prefix mapped %v — provider %q is uncredentialable", got, want)
+		}
+	}
+	// And the only names beyond them are the RESERVED ones. This is an equality, not a floor: an
+	// unexpected key means the prefix expands to a secret nobody provisioned, and the operator finds out
+	// when the fetch 404s. Reserved names were missing entirely until a live deployment resolved zero
+	// billing credentials through this exact branch.
+	want := append(SupportedProviders(), ReservedSecretNames()...)
+	slices.Sort(want)
+	if !slices.Equal(got, want) {
+		t.Errorf("prefix mapped %v, want the gateway's providers plus the reserved names %v", got, want)
 	}
 	if sm.ids[ProviderBedrock] != "heros/prod/bedrock" {
 		t.Errorf("bedrock -> %q, want prefix+provider", sm.ids[ProviderBedrock])
+	}
+	// The reserved names expand the same way — prefix + name, no special case.
+	if sm.ids["billing_provider"] != "heros/prod/billing_provider" {
+		t.Errorf("billing_provider -> %q, want prefix+name", sm.ids["billing_provider"])
 	}
 }
 
