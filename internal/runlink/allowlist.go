@@ -14,7 +14,11 @@
 // payload struct whose JSON is the exact bytes on the wire (see payload.go, BuildPayload).
 package runlink
 
-import "strings"
+import (
+	"net/url"
+	"path"
+	"strings"
+)
 
 // PlatformBaseURL is the ONE endpoint run linking is allowed to transmit to.
 //
@@ -156,9 +160,59 @@ func CategoryOf(key string) string {
 	return ""
 }
 
-// IsLinkTarget reports whether rawURL is the one permitted linking origin. A trailing slash or the
-// exact ingest path is tolerated; any other scheme, host, or port is refused.
+// PlatformPaths are every path this package is allowed to address under PlatformBaseURL. It is a
+// declared list, not a pattern, so a reviewer reads the complete set of things the CLI can reach.
+//
+// 🔴 Each entry must be a path some transport actually uses. The previous version of IsLinkTarget
+// compared the WHOLE URL against PlatformBaseURL+LinkPath, which made `push-source`, the workflow-IR
+// upload, platform-side discovery and `report-verdict` refuse their own requests — every one of them
+// addresses a path that was never in the comparison. The test that was supposed to catch it enumerated
+// the paths the PIN allowed rather than the paths the PRODUCT uses, so both agreed with each other and
+// neither agreed with the shipped commands. TestEveryPlatformPathIsALinkTarget now drives this list
+// from the transports themselves.
+var PlatformPaths = []string{
+	"/api/v1/whoami", // login token validation
+	LinkPath,         // run linking
+	WorkflowIRPath,   // workflow IR, source snapshots, platform-side discovery (prefix)
+	VerdictPath,      // CI-measured verification verdicts (prefix)
+}
+
+// IsLinkTarget reports whether rawURL is on the one permitted linking origin and addresses a declared
+// platform path. The ORIGIN is the pin — scheme, host and port must equal PlatformBaseURL's, so a wrong
+// scheme, a different host, a suffix attack, a subdomain or a stray port is refused. Credentials in the
+// URL, a query string and a fragment are refused too: nothing on this boundary needs them, and each is a
+// way to carry bytes into a destination that is supposed to be fully readable from the constant above.
 func IsLinkTarget(rawURL string) bool {
-	u := strings.TrimRight(strings.TrimSpace(rawURL), "/")
-	return u == PlatformBaseURL || u == PlatformBaseURL+LinkPath
+	u, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return false
+	}
+	base, err := url.Parse(PlatformBaseURL)
+	if err != nil {
+		return false
+	}
+	if u.Scheme != base.Scheme || u.Host != base.Host {
+		return false
+	}
+	if u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return false
+	}
+	p := path.Clean("/" + strings.TrimPrefix(u.EscapedPath(), "/"))
+	if p == "/" {
+		// The base URL itself — what Validate re-checks before building the whoami request.
+		return true
+	}
+	for _, allowed := range PlatformPaths {
+		if strings.HasSuffix(allowed, "/") {
+			// A prefix entry: the id and revision segments below it are caller-supplied.
+			if strings.HasPrefix(p+"/", allowed) {
+				return true
+			}
+			continue
+		}
+		if p == allowed {
+			return true
+		}
+	}
+	return false
 }
