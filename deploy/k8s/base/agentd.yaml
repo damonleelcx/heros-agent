@@ -122,6 +122,22 @@ spec:
               valueFrom: { secretKeyRef: { name: heros-platform, key: openai-api-key, optional: true } }
             - name: ANTHROPIC_API_KEY
               valueFrom: { secretKeyRef: { name: heros-platform, key: anthropic-api-key, optional: true } }
+            # ── P21 COLLECTION ────────────────────────────────────────────────────────────────────
+            #
+            # 🔴 BILLING_MODE's PRESENCE mounts checkout, plan changes and the provider webhook; unset
+            # mounts none of them and leaves P7 billing fully served. `live` MOVES REAL MONEY and is
+            # therefore declared, never inferred — and a value that is neither `test` nor `live` is
+            # refused rather than defaulted, because both defaults are wrong in a way only a customer
+            # discovers. Set it in the OVERLAY, not here: the base must not decide that a cluster
+            # charges people.
+            - { name: BILLING_MODE, value: "" }
+            # The two credentials, under the same reserved logical names the aws-secrets-manager source
+            # resolves (`billing_provider`, `billing_webhook`). Optional, so a cluster that declares no
+            # mode needs neither key present in its store.
+            - name: BILLING_PROVIDER_API_KEY
+              valueFrom: { secretKeyRef: { name: heros-platform, key: billing-provider-api-key, optional: true } }
+            - name: BILLING_WEBHOOK_SECRET
+              valueFrom: { secretKeyRef: { name: heros-platform, key: billing-webhook-secret, optional: true } }
             - { name: HEROS_VERSION, value: "" }
             # Backing-store credentials agentd reads through internal/config. Optional: absent means the
             # capability that dials that store is not mounted on this deployment yet.

@@ -71,6 +71,25 @@ services:
       HEROS_SECRETS_AWS_PREFIX: ${HEROS_SECRETS_AWS_PREFIX:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # ── P21 COLLECTION: the declaration, then the two credentials ─────────────────────────────────
+      #
+      # 🔴 BILLING_MODE's PRESENCE is what mounts checkout, plan changes and the provider webhook.
+      # Unset — the default, and where every open-core install stays — mounts none of them, and P7
+      # billing is unaffected: reading what a customer owes never required the ability to charge them.
+      #
+      # ⚠️ `live` MOVES REAL MONEY. It is spelled out rather than inferred from a key prefix, the
+      # hostname or NODE_ENV, because nothing this process can observe tells "the operator meant live"
+      # apart from "the operator pasted the wrong key" — and guessing wrong charges a customer. A value
+      # that is neither `test` nor `live` is REFUSED rather than defaulted: defaulting a typo to test
+      # gives an operator a checkout button they believe takes money and does not, discovered by a
+      # customer at the worst possible moment.
+      BILLING_MODE: ${BILLING_MODE:-}
+      # The two credentials, resolved through the SAME secrets seam as the model-provider keys above,
+      # under the reserved logical names `billing_provider` and `billing_webhook`. Empty by default so
+      # a deployment that declares no mode needs neither. Both are read at the MOMENT OF USE, never
+      # held in a field — see internal/billing/secrets.go.
+      BILLING_PROVIDER_API_KEY: ${BILLING_PROVIDER_API_KEY:-}
+      BILLING_WEBHOOK_SECRET: ${BILLING_WEBHOOK_SECRET:-}
       # Credentials for the backing stores agentd reads through internal/config. Blank is a legitimate
       # value: the capability that dials that store is not mounted on this deployment yet (see the
       # `provisioned ahead of use` note on those services below).

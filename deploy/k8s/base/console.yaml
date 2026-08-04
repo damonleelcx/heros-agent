@@ -1,6 +1,26 @@
-# Customer console (P9) — stateless BFF, replicas 2 + PDB. Its own origin (Service `console`), distinct
-# from the operator console's. The platform credential is server-side only; the browser gets an
-# HttpOnly session cookie and never the key.
+# Customer console (P9) — its own origin (Service `console`), distinct from the operator console's. The
+# platform credential is server-side only; the browser gets an HttpOnly session cookie and never the key.
+#
+# 🔴 ONE REPLICA, AND THE WORD "STATELESS" IS GONE — this is a correction, so it is recorded here.
+#
+# This said "stateless BFF, replicas 2 + PDB". The BFF is not stateless: `web/console/src/lib/session.ts`
+# holds sessions in a Map hung off `globalThis`, which is ONE STORE PER PROCESS, and that file's own
+# header says so ("a restart ends every session, and a horizontally-scaled console needs a shared
+# store"). Two replicas are therefore two disjoint session stores behind one Service: a user signs in on
+# pod A, the next request load-balances to pod B, `getSession` finds no record, and they are bounced to
+# `/signin?reason=session_ended`. Roughly half of all requests after sign-in, intermittently, with no
+# error anywhere — it presents as "the console keeps logging me out", which is nobody's search term.
+#
+# It is the same defect agentd carried (`replicas: 2` over per-pod state, justified by a comment claiming
+# the state lived elsewhere) and the same resolution: run one, and say why. The horizontal-scaling door
+# is not closed — when sessions move to the platform database, as the OPERATOR console's already have
+# (they are rows in `admin_session`, which is why that Deployment can and does run two), this goes back
+# to being a value and the PDB below returns to minAvailable: 1.
+#
+# ⚠️ ONE REPLICA DOES NOT MAKE SESSIONS DURABLE. A rollout replaces the pod and the new one starts with
+# an empty Map, so every user is signed out on each apply — `maxSurge: 1, maxUnavailable: 0` keeps the
+# SERVICE up across that, not the sessions. Only a shared store fixes it; this fixes the half where a
+# session dies while nothing restarted at all.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -9,7 +29,7 @@ metadata:
     app.kubernetes.io/name: console
     heros.dev/plane: control
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: console
@@ -147,12 +167,21 @@ spec:
   ports:
     - { name: http, port: 4320, targetPort: http }
 ---
+# 🔴 minAvailable: 0, and the zero is the honest value — the same correction agentd's PDB carries.
+#
+# A `minAvailable: 1` budget over a ONE-replica Deployment does not protect availability, it BLOCKS every
+# node drain forever: the single pod's eviction is denied because it would drop availability to zero, and
+# no replacement can start until it terminates. A budget that can never be met is not availability, it is
+# a node nobody can patch.
+#
+# Kept rather than deleted so the eviction posture is deliberate and visible in `kubectl get pdb` beside
+# the others. It returns to minAvailable: 1 with the replica count, when sessions move to a shared store.
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
   name: console
 spec:
-  minAvailable: 1
+  minAvailable: 0
   selector:
     matchLabels:
       app.kubernetes.io/name: console

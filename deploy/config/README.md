@@ -15,7 +15,9 @@ Rotating deliberately: stop the stack, delete this file *and* `deploy/.env.local
 
 `agentd` reads two more files from this directory, and neither is in git — both carry **prices**, and
 `internal/plancfg` and `internal/modelcatalog` each ship a fence that enumerates the whole git index and
-fails the build if a catalog is ever committed.
+fails the build if a catalog is ever committed. Both are also **git-ignored** by exact path, beside
+`config.json`: the fences read the *index*, so they fire after a `git add -A` has already staged the
+prices, and the ignore is what keeps that from happening in the first place.
 
 | File | Gates | Without it |
 |---|---|---|
