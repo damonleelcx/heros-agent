@@ -270,6 +270,29 @@ heros push-source --repo . --dry-run
 | `--repo` | path | `.` | `HEROS_REPO` | the target repository |
 | `--workflow-id` | string | *unset* | `HEROS_WORKFLOW_ID` | workflow id (discover/apply default to the module path; push-source REQUIRES it, because guessing would file a snapshot under the wrong workflow) |
 
+### report-verdict
+
+report a verification verdict your CI measured for a proposal the platform issued.
+
+**Needs the network and a platform account.**
+
+**Before this runs:** a verdict file from your own verification run, and a proposal id the platform issued for your tenant
+
+```bash
+heros report-verdict --proposal prop-abc --from verdict.json --dry-run
+```
+
+**On success:** with --dry-run, the exact payload and the account of what stayed local, and nothing transmitted. Without it, the verdict recorded and the gate result the platform stored. Exit code `0`.
+
+**When this build does not include it:** the command exits `2` and prints `report-verdict is a platform command and is unavailable in this build`. That is an operational outcome, not a malformed invocation — you have not typed anything wrong.
+
+| Flag | Type | Default | Environment | Meaning |
+|---|---|---|---|---|
+| `--dry-run` | bool | `false` | `HEROS_DRY_RUN` | show exactly what would be transmitted, and transmit nothing (link: the payload itself; push-source: the snapshot's revision, file count and size) |
+| `--from` | string | *unset* | `HEROS_FROM` | path to the verdict your verification run produced, or `-` for stdin (report-verdict). Its case ids and free-text reason are NOT transmitted |
+| `--proposal` | string | *unset* | `HEROS_PROPOSAL` | the platform-issued proposal id a verdict measures (report-verdict). Taken from the flag, never from the verdict file: where the two disagree the command refuses rather than attaching a measurement to the wrong change |
+| `--revision` | string | *unset* | `HEROS_REVISION` | the commit the verification ran at (report-verdict) — a revision id, never the code at it |
+
 ### status
 
 show effective config with provenance, and the fixed contract facts.
