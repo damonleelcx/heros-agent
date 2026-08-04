@@ -182,3 +182,36 @@ func TestReservedNamesMatchTheSecretsSource(t *testing.T) {
 			SecretBillingWebhookSigning, providergateway.ProviderBillingWebhook)
 	}
 }
+
+// TestReservedSecretNamesCoverBilling is the drift fence over the two-place spelling of these names.
+//
+// 🔴 The bug it exists to prevent already happened, in production. `providergateway`'s PREFIX form built
+// its key set from `SupportedProviders()` — the LLM adapters — so neither billing name was in the map
+// and every billing credential resolved to "no secret ID is mapped for provider". The explicit-IDs form
+// had no such problem, which is why it was invisible: the seam worked in one configuration and not the
+// other, and nothing at boot could tell the difference.
+//
+// Nothing else can catch this. The names are strings on both sides, the dependency only runs one way
+// (billing imports providergateway, never the reverse), and the failure surfaces at the moment of use —
+// which for a payment credential means at a customer's checkout.
+func TestReservedSecretNamesCoverBilling(t *testing.T) {
+	reserved := map[string]bool{}
+	for _, n := range providergateway.ReservedSecretNames() {
+		reserved[n] = true
+	}
+	for _, name := range []string{SecretBillingAPIKey, SecretBillingWebhookSigning} {
+		if !reserved[name] {
+			t.Errorf("billing resolves %q, but providergateway.ReservedSecretNames() does not list it — "+
+				"under HEROS_SECRETS_AWS_PREFIX that name expands to no secret ID at all, and the "+
+				"credential fails at the first charge rather than at boot", name)
+		}
+	}
+	// And the reverse: a reserved name nothing consumes is a secret an operator was told to provision
+	// for no reason.
+	consumed := map[string]bool{SecretBillingAPIKey: true, SecretBillingWebhookSigning: true}
+	for n := range reserved {
+		if !consumed[n] {
+			t.Errorf("providergateway reserves %q but no billing constant resolves it", n)
+		}
+	}
+}

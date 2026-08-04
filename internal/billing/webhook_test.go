@@ -156,6 +156,39 @@ func TestWebhooksWithoutADeliveryStoreAreRefused(t *testing.T) {
 	}
 }
 
+// TestAnUnattributableDeliveryIsAcknowledgedAndMirrorsNothing.
+//
+// A delivery whose Stripe handle belongs to no account here is ACKED and mirrors nothing. This is not a
+// hypothetical: it happens whenever an object is created in the Stripe dashboard by hand, or when a
+// second deployment shares the Stripe account.
+//
+// 🔴 The test asserts BOTH halves, because each failed separately in a real run. A 2xx alone was already
+// true when the mirror was a map — and the map cheerfully keyed the row on the EMPTY STRING, giving
+// every unattributable event one shared row no console can look up. Making the store refuse an empty id
+// exposed that, and then over-corrected into a non-2xx, which sends the provider into a retry loop over
+// an event that is not wrong and can never resolve.
+func TestAnUnattributableDeliveryIsAcknowledgedAndMirrorsNothing(t *testing.T) {
+	h, deliveries := withWebhooks(t)
+
+	in := signed(t, WebhookPayload{ProviderEventID: "evt_unknown_customer", Type: WebhookInvoicePaid,
+		CustomerID: "", Period: july.ID, InvoiceRef: "prov_inv_9"}, clockNow)
+
+	res, err := h.svc.HandleWebhook(context.Background(), in)
+	if err != nil {
+		t.Fatalf("an unattributable delivery was FAILED (%v) — the provider would retry it forever", err)
+	}
+	if res.Duplicate {
+		t.Error("the first delivery reported itself a duplicate")
+	}
+	// It was claimed, so a redelivery is still deduped rather than reconsidered every time.
+	if deliveries.Count() != 1 {
+		t.Errorf("deliveries recorded = %d, want 1 — an acked delivery must still be deduped", deliveries.Count())
+	}
+	if got := h.svc.BillingState(""); got != (BillingState{}) {
+		t.Errorf("a mirror row was written under the empty customer id: %+v", got)
+	}
+}
+
 // TestWebhookNeverWritesTheBillingLedger: a webhook is a NOTIFICATION, not an authorization to write a
 // charge. A refund webhook mirrors provider state; the money movement is recorded through the audited
 // Credit/Refund path only.

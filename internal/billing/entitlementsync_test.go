@@ -364,3 +364,42 @@ func TestAnEventThePlatformCannotAttributeChangesNoEntitlement(t *testing.T) {
 		t.Errorf("an unattributable event moved a plan to %q", got)
 	}
 }
+
+// TestACancellationForAnUnknownAccountIsAcknowledged is the retry-loop fence.
+//
+// 🔴 Found on the LIVE deployment, by a $0.00 subscription created solely to prove Stripe could deliver.
+// Its `customer.subscription.deleted` carried `platform_customer_id` for an account that does not exist
+// here — which decodeWebhook trusts ahead of the handle lookup, precisely because the platform stamps
+// that field itself. `applyPlanChange` then called `accounts.Get`, got ErrNotFound, and failed the whole
+// delivery; the claim was released and Stripe retried an event that could never succeed. The mirror had
+// already been written, so the visible state was worse than either outcome alone: the effect applied,
+// no delivery row, and an endpoint retrying forever.
+//
+// The empty-customer guard above it did not help — the id was PRESENT. "Cannot attribute this to one of
+// our accounts" has two shapes and only one was covered.
+func TestACancellationForAnUnknownAccountIsAcknowledged(t *testing.T) {
+	h, deliveries := withWebhooks(t)
+
+	in := signed(t, WebhookPayload{
+		ProviderEventID: "evt_cancel_unknown_account",
+		Type:            WebhookSubscriptionCanceled,
+		CustomerID:      "cus_not_an_account_here",
+		Status:          "canceled",
+	}, clockNow)
+
+	res, err := h.svc.HandleWebhook(context.Background(), in)
+	if err != nil {
+		t.Fatalf("a cancellation for an unknown account FAILED the delivery (%v) — Stripe would retry "+
+			"an event that can never succeed", err)
+	}
+	if res.PlanChanged {
+		t.Error("an account that does not exist had its plan changed")
+	}
+	// The claim must STICK. A released claim is what turns this into an infinite retry.
+	if deliveries.Count() != 1 {
+		t.Errorf("deliveries recorded = %d, want 1 — the claim was released, so the provider retries", deliveries.Count())
+	}
+	if !deliveries.Seen("evt_cancel_unknown_account") {
+		t.Error("the delivery was not recorded, so a redelivery would be reprocessed")
+	}
+}

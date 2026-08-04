@@ -67,6 +67,21 @@ spec:
           - path: /api/v1/run-links
             pathType: Exact
             backend: { service: { name: agentd, port: { number: 4321 } } }
+          # 🔴 The payment provider's callback — the third and last agentd path on the public hostname,
+          # and the only one that accepts UNSOLICITED internet traffic (internal/api/p21.go).
+          #
+          # It is mounted only where BILLING_MODE is declared, and without this rule a deployment that
+          # declares one has a webhook endpoint nothing can reach: checkout completes, the customer's
+          # card is charged, and the platform never learns the subscription became active. Neither
+          # console shows an error, because from this side nothing happened at all.
+          #
+          # Safe to publish for one specific reason, and only that one: the handler verifies the
+          # provider's signature over the RAW BODY before any side effect, and refuses a delivery it
+          # cannot dedupe. It is not authenticated by anything else — so keep it `Exact`. A `/billing`
+          # prefix would expose the tenant-scoped billing surface beside it.
+          - path: /billing/webhook
+            pathType: Exact
+            backend: { service: { name: agentd, port: { number: 4321 } } }
           - path: /
             pathType: Prefix
             backend: { service: { name: console, port: { number: 4320 } } }

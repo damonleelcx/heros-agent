@@ -34,6 +34,28 @@ mkdir -p "$STATE_DIR" deploy/caddy
 log() { printf '\n\033[1;36m▸ %s\033[0m\n' "$*"; }
 gen()  { openssl rand -hex 24; }
 
+# ensure_env_key NAME VALUE — append NAME=VALUE to $ENV_PLATFORM when NAME is ABSENT from it. Never
+# overwrites a value that is already there.
+#
+# 🔴 This exists because of a specific trap in this script's own idempotency. Section 3 writes the whole
+# env file ONLY when it does not exist, so on an already-deployed box every variable added to that
+# heredoc later is written to a file nobody re-reads: the deploy "succeeds", the operator sees the new
+# feature documented, and the running container never receives the variable. That failure mode is silent
+# on both ends — the script prints nothing missing and the platform reports the capability absent for a
+# reason ("no mode declared") that is true and completely unhelpful.
+#
+# Appending only when absent keeps both properties that matter: a first run gets the value, and a re-run
+# never rotates a credential under a live deployment.
+ensure_env_key() {
+  local name="$1" value="$2"
+  [ -n "$value" ] || return 0
+  if grep -q "^${name}=" "$ENV_PLATFORM" 2>/dev/null; then
+    return 0
+  fi
+  printf '%s=%s\n' "$name" "$value" >> "$ENV_PLATFORM"
+  log "Added $name to $ENV_PLATFORM (it was absent)"
+}
+
 # ── 1. Docker ───────────────────────────────────────────────────────────────────────────────────
 if ! command -v docker >/dev/null 2>&1; then
   log "Installing Docker Engine + Compose plugin"
@@ -90,11 +112,65 @@ else
   log "Reusing existing secrets in $ENV_PLATFORM (already present)"
 fi
 
+# ── 3b. P21 COLLECTION — taking money, declared rather than inferred ─────────────────────────────
+#
+# Three variables, supplied from the invoking environment and then persisted, so the SECOND run of this
+# script does not need them again:
+#
+#   BILLING_MODE=test|live          its PRESENCE is what mounts checkout, plan changes and the webhook
+#   BILLING_PROVIDER_API_KEY        the processor's server-side key
+#   BILLING_WEBHOOK_SECRET          the signing secret inbound webhooks are verified against
+#
+# ⚠️ `live` MOVES REAL MONEY. Nothing here infers it — not from the key's prefix, not from the hostname.
+# The platform refuses a live key under a test mode and a test key under a live one (ErrStripeKeyMode),
+# so a mismatch is a refusal at the first call rather than a customer charged from the wrong account.
+#
+# Unset ⇒ collection is not mounted at all, which is the correct state for every open-core install: the
+# platform still bills (P7 reads what a customer owes); it just cannot COLLECT.
+#
+# 🔴 A live mode with no plan catalog is a checkout button over an empty price list. The catalog is a
+# FILE the operator publishes at deploy/config/plans.json (git-ignored — it carries prices), mounted
+# read-only into the container at /etc/heros/plans.json. Checked here rather than discovered by the
+# first customer to click Upgrade.
+if [ -n "${BILLING_MODE:-}" ]; then
+  case "$BILLING_MODE" in
+    test|live) : ;;
+    *) echo "BILLING_MODE must be 'test' or 'live' (got '$BILLING_MODE') — a typo defaulted to test is a checkout button that takes no money" >&2; exit 1 ;;
+  esac
+  ensure_env_key BILLING_MODE "$BILLING_MODE"
+  ensure_env_key BILLING_PROVIDER_API_KEY "${BILLING_PROVIDER_API_KEY:-}"
+  ensure_env_key BILLING_WEBHOOK_SECRET "${BILLING_WEBHOOK_SECRET:-}"
+  if [ ! -f deploy/config/plans.json ]; then
+    echo "BILLING_MODE=$BILLING_MODE was declared but deploy/config/plans.json does not exist." >&2
+    echo "Publish the plan catalog first — without it billing cannot resolve which plan a customer is on," >&2
+    echo "and neither the billing page nor checkout is mounted. See deploy/config/README.md." >&2
+    exit 1
+  fi
+fi
+
 # ── 4. Caddyfile (HTTPS for the domain) ──────────────────────────────────────────────────────────
+#
+# 🔴 TWO handles, and the first one is the whole reason collection can work at all. Every path but one
+# goes to the customer console; `/billing/webhook` goes to the PLATFORM API, because that is the single
+# route on this platform that accepts unsolicited internet traffic (internal/api/p21.go). Proxying
+# everything to the console — which is what this file did until now — leaves the processor's webhook
+# answering 404 forever: checkout completes, the customer is charged, and the platform never learns the
+# subscription became active. Nothing about that failure is visible from either console.
+#
+# ⚠️ This publishes exactly ONE path of agentd, and it is safe to publish precisely because the handler
+# verifies the processor's signature over the raw body before any side effect. Do not widen this to a
+# prefix: `/billing/*` or a bare `reverse_proxy agentd:4321` would put the whole platform API — every
+# tenant-scoped route behind it — on the public internet.
 log "Writing deploy/caddy/Caddyfile for $DOMAIN"
 cat > deploy/caddy/Caddyfile <<EOF
 $DOMAIN {
-    reverse_proxy console:4320
+    @billing_webhook path /billing/webhook
+    handle @billing_webhook {
+        reverse_proxy agentd:4321
+    }
+    handle {
+        reverse_proxy console:4320
+    }
 }
 EOF
 
