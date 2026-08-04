@@ -967,9 +967,17 @@ func startPricingPreflight(svc *billing.Service, mode billing.Mode) {
 		switch {
 		case err != nil:
 			// Loud, and it names the mode: an unresolved reference under `live` is an operator's next
-			// action, not a line to scroll past. The error already carries the first offending plan,
-			// kind and reference — the three things needed to fix it.
+			// action, not a line to scroll past.
 			log.Printf("billing pricing preflight (mode %s): %s", mode, err)
+			// 🔴 Then EVERY reference, each with the provider's own words. The wrapped error names only
+			// the FIRST one, which is enough to know something is wrong and never enough to know what:
+			// "7 of 7 unresolved" has completely different causes depending on whether the reason is a
+			// missing credential, a mode mismatch, an unreachable provider or seven genuinely wrong ids
+			// — and the first three are one fix, not seven. The report already carries all of it; only
+			// the log was throwing it away.
+			for _, u := range rep.Unresolved {
+				log.Printf("  pricing: plan %s / %s / %q — %s", u.PlanID, u.Kind, u.PriceRef, u.Reason)
+			}
 		case !rep.Verified:
 			log.Printf("billing pricing preflight (mode %s): NOT CHECKED — %s", mode, rep.Detail)
 		default:
