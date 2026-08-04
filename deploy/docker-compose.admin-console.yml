@@ -48,7 +48,7 @@ services:
       # Build identity for the release surface. The P24 reporting switches are deliberately NOT here
       # (P24 task 7.4) — a manifest has no reason to name an integration switch even to leave it empty.
       HEROS_VERSION: ${HEROS_VERSION:-}
-      HEROS_EDITION: ${HEROS_EDITION:-open-core}
+      HEROS_EDITION: ${HEROS_EDITION:-compose}
       NODE_ENV: production
     ports:
       # 4310, the operator origin — DISTINCT from the customer console's 4320.

@@ -61,7 +61,7 @@ patches:
               - name: console
                 env:
                   - { name: HEROS_RELEASE_OFFLINE, value: "1" }
-                  - { name: HEROS_EDITION, value: "enterprise" }
+                  - { name: HEROS_EDITION, value: "airgapped" }
 
   # 2) Replace agentd's egress: the stores stay; the PUBLIC 0.0.0.0/0 rule is gone, replaced by the
   #    on-prem gateway CIDR only. A NetworkPolicy egress list has no merge key, so this strategic-merge

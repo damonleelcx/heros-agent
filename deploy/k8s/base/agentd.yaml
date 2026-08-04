@@ -155,7 +155,7 @@ spec:
             # reporting switches are deliberately absent from every deployment manifest (P24 task 7.4):
             # an empty slot is one `--set` from being filled, in a file a customer edits without reading,
             # and those integrations belong to the platform's own hosted deployment, not to a customer's.
-            - { name: HEROS_EDITION, value: "managed" }
+            - { name: HEROS_EDITION, value: "kubernetes" }
             # ── Operator identity (P8/P22) ────────────────────────────────────────────────────────
             #
             # 🔴 `configured` is NOT a value this side accepts, and used to be the default here. It is the
