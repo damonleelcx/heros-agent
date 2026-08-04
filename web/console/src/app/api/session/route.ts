@@ -26,9 +26,17 @@ import { logSession } from "@/lib/telemetry";
  *
  * The assertion arrives once, in a POST body, over the console's own origin. It is verified, exchanged
  * for a session, and **dropped** — never stored in the session record, never written to a cookie,
- * never logged, never carried upstream. The browser keeps an opaque token in an `HttpOnly`,
- * `SameSite=Strict` cookie it cannot read. The platform credential is not involved in this exchange at
- * all: it is the BFF's own, and it is used only for upstream calls.
+ * never logged, never carried upstream. The browser keeps an opaque token in an `HttpOnly` cookie it
+ * cannot read. The platform credential is not involved in this exchange at all: it is the BFF's own,
+ * and it is used only for upstream calls.
+ *
+ * ⚠️ This said `SameSite=Strict`, and the cookie is `SameSite=Lax` — it has been since `strict` was
+ * found to break the return from Stripe Checkout (the customer's card was charged and the product
+ * answered with a sign-in page). `lib/cookies.ts` carries that whole argument beside the flag. The
+ * sentence is corrected rather than deleted because a security-critical docstring overstating a flag is
+ * worse than one that omits it: an auditor reading `Strict` here concludes a CSRF property this app
+ * does not have, and stops looking for the thing that actually provides it — which is that no mutating
+ * route in this app is a GET, enforced by `tests/session-cookie.test.mjs`.
  */
 export const dynamic = "force-dynamic";
 

@@ -41,6 +41,16 @@
  *   candidate       `ViewLabel.candidate` — structure suggests the pattern; runtime traces have not confirmed it
  *   unverified      P5.5 — no verified delta exists yet
  *   gated           P7 entitlement — the tenant's plan does not include this; not broken, not available
+ *   not-attributed  P4.5 `View.failure_attribution === "unavailable"` — the quantity was never computed
+ *                   on this side of the boundary, so there is no number to qualify
+ *
+ * 🔴 `not-attributed` is a different KIND of statement from the nine above it, and the distinction is
+ * the reason it exists. The others qualify a number that was measured: it is weak, it is tied, it is
+ * provisional. This one says there is no number. Collapsing the two is how the scorecard came to print
+ * `0%` share-of-failure on every node beside the caption "the eval set cannot support a claim this
+ * strong" — which reads as "we looked and found nothing", on a variant nobody looked at.
+ * `internal/hostedscorecard` refuses to invent that number for exactly this reason; the console must
+ * not re-invent it one layer up.
  */
 export const QUALIFIERS = [
   "tie",
@@ -53,6 +63,7 @@ export const QUALIFIERS = [
   "candidate",
   "unverified",
   "gated",
+  "not-attributed",
 ] as const;
 
 export type Qualifier = (typeof QUALIFIERS)[number];
@@ -105,6 +116,7 @@ export const QUALIFIER_LABEL: Record<Qualifier, string> = {
   candidate: "candidate",
   unverified: "unverified",
   gated: "gated",
+  "not-attributed": "not measured here",
 };
 
 export const QUALIFIER_COPY: Record<Qualifier, string> = {
@@ -118,4 +130,6 @@ export const QUALIFIER_COPY: Record<Qualifier, string> = {
   candidate: "candidate — structure shows the shape; runtime traces have not confirmed it",
   unverified: "unverified — no verified delta exists for this yet",
   gated: "not included in this plan",
+  "not-attributed":
+    "not measured here — per-node correctness is eval data and stays on the machine that ran the eval",
 };

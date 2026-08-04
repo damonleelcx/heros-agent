@@ -218,6 +218,7 @@ function BoardBody({ workflowId, board }: { workflowId: string; board: BoardView
 
 function BoardBanners({ board }: { board: BoardView }) {
   const progress = board.progress;
+  const unmeasured = board.unmeasured ?? [];
   return (
     <>
       {/* 🔴 P4-4. The all-tie banner. This is the board where a well-meaning UI does the most damage,
@@ -239,15 +240,47 @@ function BoardBanners({ board }: { board: BoardView }) {
       {/* P4-5: the partial banner, with the seed floor NAMED. The legacy board marks rows
           "provisional — below the seed floor" without ever saying what the floor is, so the reader
           cannot tell how far below. Surfaced per the surface-or-drop decision. */}
+      {/* 🔴 A board assembled from LINKED runs has no plan and no seed floor, because this platform
+          planned nothing and ran nothing — the eval happened on the customer's machine and only its
+          result crossed. Every field of `progress` is 0 there, and this banner rendered them anyway:
+          "0 of 0 units complete" and "intervals computed from fewer than 0 seeds — the seed floor".
+          The second is not merely empty, it is unreadable: no interval is computed from fewer than
+          zero seeds, so the sentence describes a set that cannot exist. Such a board is `partial` for
+          an entirely different reason — some configurations could not be measured — and that reason
+          has its own section below, which this now points at instead of inventing a progress bar. */}
       {board.state === "partial" ? (
-        <Banner tone="warn" title="This board is still filling in">
-          <p>
-            {integer(progress.units_completed)} of {integer(progress.units_planned)} units complete. The
-            rows are readable, and intervals computed from fewer than{" "}
-            <strong>{integer(progress.seed_floor)} seeds</strong> — the seed floor — are marked
-            provisional.
-          </p>
-        </Banner>
+        progress.units_planned > 0 || progress.seed_floor > 0 ? (
+          <Banner tone="warn" title="This board is still filling in">
+            <p>
+              {integer(progress.units_completed)} of {integer(progress.units_planned)} units complete. The
+              rows are readable, and intervals computed from fewer than{" "}
+              <strong>{integer(progress.seed_floor)} seeds</strong> — the seed floor — are marked
+              provisional.
+            </p>
+          </Banner>
+        ) : (
+          <Banner tone="warn" title="This board is incomplete">
+            <p>
+              {unmeasured.length > 0 ? (
+                <>
+                  {integer(unmeasured.length)}{" "}
+                  {plural(unmeasured.length, "configuration is", "configurations are")} not on it. The rows
+                  shown are readable; what is missing is listed under <strong>Not measured</strong> below,
+                  with the reason for each.
+                </>
+              ) : (
+                <>
+                  Some of what this board would compare is missing. The rows shown are readable; nothing
+                  here is estimated to fill a gap.
+                </>
+              )}
+            </p>
+            <p className="hint">
+              This board was assembled from runs you linked, so it has no progress of its own to report —
+              the evaluation ran on your machines and only its result crossed.
+            </p>
+          </Banner>
+        )
       ) : null}
 
       {board.state === "complete" ? (

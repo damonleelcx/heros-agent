@@ -1,4 +1,5 @@
 import type { BillingView } from "@/lib/types.generated";
+import { NoCollection } from "@/components/noCollection";
 import { load } from "@/lib/view";
 import {
   PageFrame,
@@ -56,7 +57,11 @@ export default async function AccountPage() {
       wide
     >
       {!outcome.ok ? (
-        <Failure kind={outcome.kind} error={outcome.error} denial={outcome.denial} subject="account" />
+        outcome.reasonCode === "collection_not_configured" ? (
+          <NoCollection tenantId={session.tenantId} />
+        ) : (
+          <Failure kind={outcome.kind} error={outcome.error} denial={outcome.denial} subject="account" />
+        )
       ) : (
         <Body billing={outcome.data} />
       )}
