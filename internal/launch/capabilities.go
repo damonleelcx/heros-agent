@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"fmt"
+	"log"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -257,6 +258,28 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 				if err != nil {
 					return nil, fmt.Errorf("billing service: %w", err)
 				}
+				// ── The webhook's two DURABLE stores ───────────────────────────────────────────────────
+				//
+				// 🔴 Without the delivery store the webhook endpoint is mounted, publicly reachable, and
+				// refuses EVERY delivery: HandleWebhook's own rule is that a webhook which cannot be
+				// deduped must not be processed. Nothing here attached one, so on a real deployment
+				// checkout completed, the customer's card was charged, and the platform never learned the
+				// subscription became active — with no error on either console, because from this side
+				// nothing happened at all.
+				//
+				// They are wired HERE rather than beside the provider because they belong to the durable
+				// billing stack: both need `pg`, and both are as necessary in `test` mode as in `live`.
+				// Attaching the in-memory pair instead would be worse than either — a redelivery after a
+				// restart re-applies an effect that was already applied, and Stripe redelivers for days.
+				deliveries, derr := billing.NewPGDeliveries(pg)
+				if derr != nil {
+					return nil, fmt.Errorf("billing webhook deliveries: %w", derr)
+				}
+				states, serr := billing.NewPGStates(pg)
+				if serr != nil {
+					return nil, fmt.Errorf("billing state mirror: %w", serr)
+				}
+				svc.WithDeliveries(deliveries).WithStates(states)
 				// ONE gate, shared with P12 delivery below. Two gates over the same plans and the same usage
 				// would be two answers to "may this tenant do this", and the one the billing page shows is not
 				// the one that decides whether a pull request is opened.
@@ -285,6 +308,7 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 					h.MountBillingWebhook(svc)
 					mountedPayments = true
 					collectionWhy = "p21_payments (checkout, plan changes and the provider webhook; mode " + string(mode) + ")"
+					startPricingPreflight(svc, mode)
 				}
 			}
 		}
@@ -902,4 +926,54 @@ func collectionProvider(secrets providergateway.Secrets) (collectionDeps, billin
 			"payment provider could not be built: " + err.Error()
 	}
 	return collectionDeps{provider: p, secrets: ms}, mode, ""
+}
+
+// preflightTimeout bounds the boot-time pricing check. Generous enough for four to ten sequential
+// provider reads on a cold connection, short enough that a hung provider cannot leave the report
+// permanently in "never ran".
+const preflightTimeout = 45 * time.Second
+
+// startPricingPreflight runs the configured price references against the provider ONCE, in the
+// background, as soon as collection is mounted.
+//
+// ## Why this call has to exist here
+//
+// billing.PreflightPricing and the two readers of its cache (Service.PricingStatus, which the payments
+// view renders as a pricing issue, and Service.UnpurchasablePlans, which stops a customer being sent to
+// a checkout that cannot complete) were all reachable ONLY from cmd/proof/payments. Nothing in the
+// deployed binary ever produced the report they read, so on every real deployment PricingStatus reported
+// "never ran" forever and UnpurchasablePlans returned nothing — not "nothing is wrong", but "nothing has
+// looked". The whole preflight decision was shipped and then not wired, and the shape of that gap is
+// specific: the first code to discover a price reference that does not resolve was RaiseCharge, at the
+// first charge of the period, against a customer who had already accrued it.
+//
+// Under BILLING_MODE=live that gap costs real money in both directions — a customer sent to a checkout
+// that fails, or a period that cannot be closed.
+//
+// ## Three properties, matching what preflight.go promises about itself
+//
+//  1. BACKGROUND, never blocking the boot. The platform must come up with the provider unreachable; a
+//     readiness that waited on an outside network would make somebody else's outage look like ours.
+//  2. IT DOES NOT GATE ANYTHING. The report is stored and read by surfaces that already know how to say
+//     "not checked". A failed preflight must not refuse a charge the provider would have accepted.
+//  3. RUN ONCE, not polled. The result is a fact about the CONFIGURATION, and the configuration changes
+//     when an operator publishes a catalog — which already requires a restart (publishedCatalog stats at
+//     boot). A poll would add provider load to answer a question whose input cannot change underneath it.
+func startPricingPreflight(svc *billing.Service, mode billing.Mode) {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), preflightTimeout)
+		defer cancel()
+		rep, err := svc.PreflightPricing(ctx)
+		switch {
+		case err != nil:
+			// Loud, and it names the mode: an unresolved reference under `live` is an operator's next
+			// action, not a line to scroll past. The error already carries the first offending plan,
+			// kind and reference — the three things needed to fix it.
+			log.Printf("billing pricing preflight (mode %s): %s", mode, err)
+		case !rep.Verified:
+			log.Printf("billing pricing preflight (mode %s): NOT CHECKED — %s", mode, rep.Detail)
+		default:
+			log.Printf("billing pricing preflight (mode %s): %s", mode, rep.Summary())
+		}
+	}()
 }

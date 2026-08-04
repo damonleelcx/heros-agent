@@ -672,6 +672,30 @@ func (s *Service) checkSkew(stamp string) error {
 func (s *Service) applyWebhook(p WebhookPayload) (BillingState, error) {
 	s.stateMu.Lock()
 	defer s.stateMu.Unlock()
+
+	// 🔴 A delivery this platform cannot attribute to one of ITS customers mirrors NOTHING, and is
+	// acknowledged rather than failed.
+	//
+	// The mirror is keyed by the platform's customer id. An empty one here does not mean "we could not
+	// look it up" — decodeWebhook already separates those: a store outage returns an error and never
+	// reaches this function, so an empty id means the lookup ran and the Stripe handle belongs to no
+	// account here. That happens for real (an account provisioned on another deployment against the
+	// same Stripe account; an object created in the Stripe dashboard by hand), and no amount of retrying
+	// will change the answer.
+	//
+	// Both alternatives are worse, and each was shipped at some point:
+	//
+	//   - Writing the row anyway keys the mirror on the EMPTY STRING — one shared row that every
+	//     unattributable event overwrites and that no console can ever look up. That is what the
+	//     in-memory store did, silently, because a map accepts any key.
+	//   - Failing the delivery returns a non-2xx for an event that is not wrong, so the provider retries
+	//     it for days and an operator reads a permanently failing endpoint as an outage.
+	//
+	// Acknowledging is what says the true thing: received, understood, nothing here to update.
+	if p.CustomerID == "" {
+		return BillingState{}, nil
+	}
+
 	st := s.states.Get(p.CustomerID)
 	st.CustomerID = p.CustomerID
 	st.UpdatedAt = s.now().UTC()
