@@ -318,6 +318,9 @@
         "all_tie": {
           "type": "boolean"
         },
+        "cost_latency": {
+          "type": "string"
+        },
         "coverage": {
           "$ref": "#/$defs/CoverageView"
         },
@@ -432,6 +435,7 @@
       },
       "required": [
         "all_tie",
+        "cost_latency",
         "coverage",
         "disqualified",
         "eval_set_hash",

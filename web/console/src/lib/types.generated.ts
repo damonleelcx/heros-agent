@@ -178,6 +178,7 @@ export interface BoardView {
   spend: SpendReport;
   all_tie: boolean;
   tie_analysis: string;
+  cost_latency: string;
   notes?: string[] | null;
   unmeasured?: UnmeasuredView[] | null;
   runs_enqueued: number;
