@@ -34,12 +34,12 @@ resources:
 # `newTag`-less `digest:` form is what makes an apply reproducible: the same digest is the same image.
 images:
   # The platform's own three, built for linux/arm64 and pushed to this account's ECR. agentd is at
-  # 5e425fd (P21 collection made reachable and durable); the two consoles are still at 2eafe12.
+  # e3bd68a (P21 collection made reachable and durable); the two consoles are still at 2eafe12.
   # `newName` retargets the registry; the digest is the artifact. Both must match deploy/images.env
   # exactly or check-image-parity.sh fails the build.
   - name: ghcr.io/heros-foreal/agentd
     newName: 373468206837.dkr.ecr.us-east-1.amazonaws.com/agentd
-    digest: sha256:c0200697088fd94a28622895cf6c78454da6c5381e3a79415e9fd9a599d78e9f
+    digest: sha256:212177e24a00099c11b01cac2aab6661bfdeeb3b14ab0b724d8897f66810eba0
   - name: ghcr.io/heros-foreal/heros-console
     newName: 373468206837.dkr.ecr.us-east-1.amazonaws.com/heros-console
     digest: sha256:793416a4b6573398a86df04a606d447ac0774262c3f0d0b798e4d0df9416dff7

@@ -268,13 +268,38 @@ patches:
             ports: [{ protocol: TCP, port: 4310 }]
           - to: [{ podSelector: { matchLabels: { app.kubernetes.io/name: postgres } } }]
             ports: [{ protocol: TCP, port: 5432 }]
-          # External model providers — still the ONLY workload with an external-egress rule. Private
-          # ranges stay excepted so this cannot become a backdoor to an in-cluster service.
+          # External model providers and the payment processor — still the ONLY workload with an
+          # external-egress rule. Private ranges stay excepted so this cannot become a backdoor to an
+          # in-cluster service.
           - to:
               - ipBlock:
                   cidr: 0.0.0.0/0
-                  except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16]
+                  except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.169.254/32]
             ports: [{ protocol: TCP, port: 443 }]
+          # 🔴 THE INSTANCE METADATA SERVICE, on port 80 — without which this deployment's declared
+          # secrets source cannot authenticate at all.
+          #
+          # `HEROS_SECRETS_SOURCE=aws-secrets-manager` (base/agentd.yaml) means every credential is
+          # fetched from Secrets Manager at the moment of use, and the AWS SDK gets its identity from
+          # the instance role via IMDS at 169.254.169.254:80. The rule above allows 443 only, so that
+          # call was refused and EVERY credential resolved to "no EC2 IMDS role found" — the LLM
+          # provider keys as much as the billing ones. Nothing said so at boot: the source constructs
+          # without authenticating, /readyz reports it healthy and names the providers it serves, and
+          # the failure waits for the first call that needs a key.
+          #
+          # external-secrets reaches IMDS on the same node and worked throughout, which is what made
+          # this invisible — its namespace carries no NetworkPolicy, so the platform's own Secret synced
+          # perfectly while the workload beside it could not authenticate at all.
+          #
+          # ⚠️ WHAT THIS GRANTS, stated rather than implied: any process in this pod can assume the
+          # NODE's IAM role. That role is `heros-vm` — secretsmanager:GetSecretValue on `heros/*`, ECR
+          # pull, SSM. It is the identity this deployment was designed around, not a widening, and the
+          # /32 keeps the rule to exactly the metadata endpoint. The IMDS hop limit is 2, which is what
+          # lets a pod reach it at all; dropping it to 1 breaks this rule silently.
+          #
+          # It is excepted from the 443 rule above so this endpoint is described in exactly one place.
+          - to: [{ ipBlock: { cidr: 169.254.169.254/32 } }]
+            ports: [{ protocol: TCP, port: 80 }]
 
   # ── The deletions ────────────────────────────────────────────────────────────────────────────────
   #
