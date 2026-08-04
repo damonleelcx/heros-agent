@@ -172,6 +172,38 @@ func (c Config) Require(key string) (string, error) {
 		key, key, EnvPrefix, strings.ToUpper(key), ProjectFile))
 }
 
+// resolveRepo returns the repository path to analyze, defaulting to ".", and REFUSES a path that is not
+// a readable directory.
+//
+// 🔴 Without this check the whole tool reports success over nothing. `discovery.Run` walks a tree; a path
+// that is not there yields no files, no error, and an empty IR — so `heros discover --repo /typo` printed
+// `ok: true`, `0 nodes`, exit 0, and wrote an EMPTY ir.json over whatever ir.json was already in the
+// working directory. "This repository has no LLM call sites" and "I could not find this repository" are
+// opposite conclusions with opposite remedies, and the tool was answering the first for both. Worse, the
+// answer is the reassuring one: a CI step that fails to check out the repo passes discovery.
+//
+// It is ExitInvalidCfg, not ExitOperational: the invocation names a path that is not a repository, and
+// the remedy is to fix the invocation (see the exit-code contract in exit.go). Every command that
+// discovers goes through here so `eval`, `apply` and `author` cannot each answer this differently —
+// which they did, because each read cfg.Get("repo") directly.
+func (c Config) resolveRepo() (string, error) {
+	repo := c.Get("repo")
+	if repo == "" {
+		repo = "."
+	}
+	info, err := os.Stat(repo)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", invalidConfig(fmt.Sprintf("--repo %q does not exist — this is not a repository with no LLM call sites, it is a path that is not there", repo))
+		}
+		return "", invalidConfig(fmt.Sprintf("--repo %q cannot be read: %v", repo, err))
+	}
+	if !info.IsDir() {
+		return "", invalidConfig(fmt.Sprintf("--repo %q is a file, not a directory", repo))
+	}
+	return repo, nil
+}
+
 // Effective returns every resolved setting, sorted by key, for `status`.
 func (c Config) Effective() []Resolved {
 	out := make([]Resolved, 0, len(c.values))
