@@ -35,6 +35,7 @@ import (
 	"github.com/heros-foreal/agentd/internal/proposalgen"
 	"github.com/heros-foreal/agentd/internal/proposalstore"
 	"github.com/heros-foreal/agentd/internal/registry"
+	"github.com/heros-foreal/agentd/internal/sandbox"
 	"github.com/heros-foreal/agentd/internal/sourceingest"
 	"github.com/heros-foreal/agentd/internal/variantspec"
 	"github.com/heros-foreal/agentd/internal/worktree"
@@ -373,14 +374,16 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 		// language — as unbuilt with the reason. That keeps delivery gated where ADR-001 puts it. Giving
 		// a deployment a real build gate means running the customer's build, which belongs inside
 		// internal/sandbox in an image that carries the toolchain; it is not a line to change here.
+		buildSandbox, gateWhy := compileSandbox()
 		h.MountProposalCompile(&hostedcompile.Compiler{
 			Runner:     runner,
 			Store:      verdictStore,
 			Blobs:      blobs,
 			Registries: reg,
+			Sandbox:    buildSandbox,
+			GoBin:      os.Getenv("HEROS_GO_TOOLCHAIN"),
 		})
-		served("p55_proposal_compile (AST codemod over the pushed snapshot; parsed, not built — no " +
-			"toolchain in this image)")
+		served("p55_proposal_compile (AST codemod over the pushed snapshot; " + gateWhy + ")")
 		mountedProposalCompile = true
 
 		// The platform-side proposal GENERATOR.
@@ -637,4 +640,34 @@ func deliveryAbsentReason(pg *sql.DB, catalog string) string {
 			"writes into a customer's repository, which is not a question to answer by default"
 	}
 	return "the plan catalog could not be loaded"
+}
+
+// SandboxContainedEnv is the operator's DECLARATION that this process runs inside a container which
+// denies network egress and mounts only a read-only working set.
+const SandboxContainedEnv = "HEROS_SANDBOX_CONTAINED"
+
+// compileSandbox returns the isolate the build gate runs the customer's compiler inside, and the phrase
+// the capability line reports.
+//
+// 🔴 IT NEVER ASSUMES CONTAINMENT. sandbox.NewContainedEnforcer ADVERTISES network denial and filesystem
+// scope as in force — it does not provide them; the outer container does. Its own doc says using it on
+// a bare host "would claim containment that is not there — the one thing the fail-closed design exists
+// to prevent". So it is selected only when an operator has declared the posture, and the declaration is
+// an environment variable rather than a guess, because nothing this process can observe distinguishes
+// "no egress" from "egress that happens to be idle".
+//
+// ⚠️ THE DECLARATION IS A REAL CLAIM, and a deployment that sets it wrongly gets a build gate that runs
+// a customer's compiler with network access and a writable host. It belongs on a container that has no
+// route out — which is NOT the API server, because the API server needs the database. That is a
+// deployment topology (a separate compile worker), and until one exists this variable stays unset and
+// the gate falls back to parsing, which is the honest state rather than a broken one.
+func compileSandbox() (*sandbox.Sandbox, string) {
+	if strings.TrimSpace(os.Getenv(SandboxContainedEnv)) != "1" {
+		return nil, "diff is parsed, not built — " + SandboxContainedEnv + " is unset, so no isolate can " +
+			"hold a customer's compiler"
+	}
+	// The enforcer still checks what it can guarantee on its own (env scrub, resource bounds) and the
+	// gate still fails closed on top of that: declaring the posture does not skip the gate, it satisfies
+	// the two capabilities only the runtime can provide.
+	return sandbox.New(sandbox.NewContainedEnforcer()), "diff is compiled inside a declared isolate"
 }

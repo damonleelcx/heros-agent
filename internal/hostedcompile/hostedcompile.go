@@ -41,6 +41,7 @@ import (
 	"github.com/heros-foreal/agentd/internal/patternclassifier"
 	"github.com/heros-foreal/agentd/internal/proposal"
 	"github.com/heros-foreal/agentd/internal/proposalstore"
+	"github.com/heros-foreal/agentd/internal/sandbox"
 	"github.com/heros-foreal/agentd/internal/sourceingest"
 	"github.com/heros-foreal/agentd/internal/variantspec"
 )
@@ -70,8 +71,36 @@ type Compiler struct {
 	Store      Store
 	Blobs      BlobStore
 	Registries variantspec.Registries
+	// Sandbox is the isolate the customer's build runs inside. Nil means this deployment has no isolate,
+	// and the build gate then reports unavailable — it does NOT build on the host.
+	Sandbox *sandbox.Sandbox
+	// GoBin is the pinned toolchain. Empty selects `go` from PATH, which the gate reports as unavailable
+	// when it is not there.
+	GoBin string
+	// Bounds caps what a customer's build may consume inside the isolate. Zero takes sandbox's defaults.
+	Bounds sandbox.ResourceBounds
 	// Now is injectable so a pass is deterministic under test.
 	Now func() time.Time
+}
+
+// gateFor selects the strongest gate this deployment can actually run.
+//
+// 🔴 STRONGEST AVAILABLE, and the ladder is the point rather than a convenience. A compile is the claim
+// ADR-001 hangs delivery on and it needs a toolchain and an isolate; a parse needs neither and proves
+// strictly less. Choosing between them by what is present — instead of assuming one — is what stops a
+// deployment silently reporting `built` from a gate that only parsed, which is the single failure this
+// whole area is written against.
+//
+// Both gates report UNAVAILABLE rather than a verdict when they cannot run, so falling from one to the
+// other never converts "we could not judge this" into "it does not compile".
+func (c *Compiler) gateFor(language, root string) proposal.BuildChecker {
+	if c.Sandbox != nil {
+		return SandboxGate{
+			Language: language, Root: root, Sandbox: c.Sandbox,
+			GoBin: c.GoBin, Bounds: c.Bounds,
+		}
+	}
+	return ParseGate{Language: language}
 }
 
 // Outcome is what compiling one proposal produced.
@@ -156,7 +185,7 @@ func (c *Compiler) Compile(ctx context.Context, tenantID, workflowID string) (Re
 		compiler := proposal.Compiler{
 			Resolver: &irResolver{ctx: ctx, ir: ir, regs: c.Registries},
 			Root:     dir,
-			Build:    ParseGate{Language: languageOf(ir)},
+			Build:    c.gateFor(languageOf(ir), dir),
 			IR:       ir,
 		}
 		for _, sc := range todo {

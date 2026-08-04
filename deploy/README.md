@@ -145,6 +145,40 @@ size or tune them for a load that is not arriving yet.
 
 ---
 
+## The build gate, and why it is off by default
+
+P5.5 compiles proposals into reviewable diffs on every deployment with a database and a pushed source
+snapshot. Whether it also **builds** them is a separate switch, and it is off unless you turn it on.
+
+The gate compiles a **customer's repository**, so it runs inside `internal/sandbox`'s isolate: a scrubbed
+environment, no ambient credentials, a filesystem scoped to the working set, bounded CPU/memory/wall
+clock, and denied egress. If those cannot be established the gate **fails closed** — it reports
+`unbuilt` with the reason and never falls back to compiling on the host.
+
+Two things have to be true, and neither is something the process can detect for itself:
+
+| | |
+|---|---|
+| `HEROS_GO_TOOLCHAIN` | the pinned `go` binary. `deploy/Dockerfile.compile` sets it; the API image (distroless) has no toolchain, and the gate reports that rather than guessing |
+| `HEROS_SANDBOX_CONTAINED=1` | your **declaration** that this container denies network egress and mounts a read-only working set |
+
+> **The declaration is a claim, and setting it wrongly is the failure the whole design exists to
+> prevent.** `sandbox.NewContainedEnforcer` *advertises* egress denial and filesystem scope as in force —
+> it does not provide them; your runtime does. Set it on a container that has no route out, never on the
+> API server, which needs the database.
+>
+> ⚠️ **This is not fully closed today, and here is the exact gap.** A compile worker must reach Postgres
+> to read proposals and write diffs, so its container cannot be `network_mode: none`. Closing it properly
+> means the isolate denying egress **per child** — a network namespace on the compiler process itself —
+> which `internal/sandbox` does not implement: `SubprocessEnforcer` reports `NetworkDeny=false` and there
+> is no platform enforcer above it. So on the supported posture the filesystem scope, the credential
+> scrub and the resource bounds are the isolate's; the egress denial is the **container's network
+> policy**, and it is only as tight as you write it. Permit the database and nothing else.
+
+Without both, the gate reports what it did and did not prove, the proposal stays `unbuilt`, and P12
+delivery stays withheld — which is the honest state, not a broken one. The diff is still generated and
+still reviewable.
+
 ## Kubernetes (Kustomize)
 
 > **Deploying on AWS?** [`AWS.md`](AWS.md) is the end-to-end EKS runbook — ECR, IRSA, Secrets Manager,
