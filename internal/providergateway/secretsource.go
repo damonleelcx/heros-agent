@@ -58,6 +58,10 @@ func NewSecretsFromEnv(ctx context.Context) (Secrets, error) {
 		if err != nil {
 			return nil, err
 		}
+		// Carried through so a logical name that CANNOT be enumerated at compile time — a per-principal
+		// `admin_totp_seed/<admin_id>` — still resolves under the naming-convention form. Empty under the
+		// explicit-IDs form, where an unmapped name stays an error on purpose.
+		prefix := strings.TrimSpace(os.Getenv(EnvSecretsAWSPrefix))
 		var opts []func(*awsconfig.LoadOptions) error
 		if r := strings.TrimSpace(os.Getenv(EnvSecretsAWSRegion)); r != "" {
 			opts = append(opts, awsconfig.WithRegion(r))
@@ -75,7 +79,7 @@ func NewSecretsFromEnv(ctx context.Context) (Secrets, error) {
 			return nil, fmt.Errorf("providergateway: %s=%s but no region is set; set %s or AWS_REGION "+
 				"(secrets manager endpoints are per-region)", EnvSecretsSource, src, EnvSecretsAWSRegion)
 		}
-		return NewAWSSecretsManager(cfg, ids)
+		return NewAWSSecretsManager(cfg, ids, WithSecretPrefix(prefix))
 
 	default:
 		return nil, fmt.Errorf("providergateway: %s=%q is not a known secrets source (want %q or %q)",
@@ -153,7 +157,18 @@ func awsSecretIDs() (map[string]string, error) {
 // dependency cannot run the other way). TestReservedSecretNamesCoverBilling in that package fails if
 // the two ever drift — a name spelled two ways is a credential fetched from a place nobody provisioned.
 func ReservedSecretNames() []string {
-	return []string{"billing_provider", "billing_webhook"}
+	return []string{
+		"billing_provider", "billing_webhook",
+		// The operator-identity credentials (P22). Same argument as billing, and the same bug: they are
+		// documented in internal/adminidentity/secrets.go as "ordinary entries in the same source under
+		// reserved logical names", which was true of the explicit-IDs form and false of the prefix form,
+		// where they were simply absent from the map. Their per-principal sibling
+		// `admin_totp_seed/<admin_id>` is deliberately NOT here — it cannot be enumerated before the
+		// principals exist, and the prefix fallback in AWSSecretsManager.Credential is what serves it.
+		"admin_sso_signing", "admin_mfa_signing", "admin_session_signing", "admin_oidc_client_secret",
+		// The admin BFF's own credential, which the platform side must compare against.
+		"admin_platform_credential",
+	}
 }
 
 // SupportedProviders lists the providers the gateway has adapters for, sorted.

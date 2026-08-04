@@ -74,6 +74,10 @@ type ModelRegistry struct {
 	order  []string
 	rev    int
 	now    func() time.Time
+	// writer is the optional durable backing (registrydurable.go). Nil means the registry lives only as
+	// long as the process — which on a WRITE surface whose contents decide what a run cost is silent
+	// data loss, so `adminlaunch` refuses to mount it without one.
+	writer ModelWriter
 }
 
 // NewModelRegistry builds an empty registry.
@@ -99,8 +103,29 @@ func (r *ModelRegistry) Add(modelID, provider, priceRef string) (ModelRecord, er
 	}
 	r.rev++
 	rec := ModelRecord{ModelID: modelID, Provider: provider, PriceRef: priceRef, UpdatedAt: r.now(), Revision: r.rev}
+	// Durable first: if it did not persist, it did not happen. A model that exists until the next restart
+	// changes what SUM derives to, with nothing logged at the moment it disappears.
+	if err := r.persist(rec); err != nil {
+		return ModelRecord{}, err
+	}
 	r.models[modelID] = rec
 	return rec, nil
+}
+
+// persist write-throughs one record. The caller holds the lock.
+//
+// The revision counter is NOT rolled back on failure, for the reason adminrbac's grant sequence is not:
+// a burnt revision costs nothing, while reusing one lets two different states of a model claim the same
+// revision — and the revision is exactly what an operator compares to tell a stale read from a current
+// one.
+func (r *ModelRegistry) persist(rec ModelRecord) error {
+	if r.writer == nil {
+		return nil
+	}
+	if err := r.writer.PutModel(rec); err != nil {
+		return fmt.Errorf("adminops: persist model %s: %w", rec.ModelID, err)
+	}
+	return nil
 }
 
 // Repoint changes a model's price reference. It affects the OPEN period and everything after it;
@@ -117,6 +142,9 @@ func (r *ModelRegistry) Repoint(modelID, priceRef string) (ModelRecord, error) {
 	}
 	r.rev++
 	rec.PriceRef, rec.UpdatedAt, rec.Revision = priceRef, r.now(), r.rev
+	if err := r.persist(rec); err != nil {
+		return ModelRecord{}, err
+	}
 	r.models[modelID] = rec
 	return rec, nil
 }
@@ -131,6 +159,9 @@ func (r *ModelRegistry) Deprecate(modelID string) (ModelRecord, error) {
 	}
 	r.rev++
 	rec.Deprecated, rec.DeprecatedAt, rec.Revision = true, r.now(), r.rev
+	if err := r.persist(rec); err != nil {
+		return ModelRecord{}, err
+	}
 	r.models[modelID] = rec
 	return rec, nil
 }
@@ -151,6 +182,15 @@ func (r *ModelRegistry) ClosePeriod(periodID string) error {
 	snap := make(map[string]string, len(r.models))
 	for id, rec := range r.models {
 		snap[id] = rec.PriceRef
+	}
+	// 🔴 Durable first, and this is the write that matters most in the whole file. Non-retroactivity is
+	// the promise that a closed period keeps the price references it closed with; a snapshot that lives
+	// only in this process expires with it, and every closed period then silently re-resolves against
+	// today's references.
+	if r.writer != nil {
+		if err := r.writer.ClosePeriod(periodID, snap); err != nil {
+			return fmt.Errorf("adminops: persist closed period %s: %w", periodID, err)
+		}
 	}
 	r.closed[periodID] = snap
 	r.order = append(r.order, periodID)
@@ -214,7 +254,12 @@ func (r *ModelRegistry) List() []ModelRecord {
 }
 
 // Describe names the store for the readiness surface — never its contents.
-func (r *ModelRegistry) Describe() string { return "config-store:model-registry(in-process)" }
+func (r *ModelRegistry) Describe() string {
+	if r.Durable() {
+		return "postgres admin_model + admin_model_closed_price (survives a restart)"
+	}
+	return "config-store:model-registry(in-process)"
+}
 
 // ── The command surface ─────────────────────────────────────────────────────────────────────────
 

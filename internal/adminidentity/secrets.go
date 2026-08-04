@@ -40,6 +40,15 @@ const (
 	SecretAdminMFASigning = "admin_mfa_signing"
 	// SecretAdminSessionSigning signs admin session tokens.
 	SecretAdminSessionSigning = "admin_session_signing"
+	// SecretAdminPlatformCredential is the credential the admin BFF presents on every admin request, and
+	// which the platform side compares against.
+	//
+	// It is here rather than read from an environment variable on the platform side for the reason this
+	// file's header gives: a deployment whose LLM, billing and session-signing keys come from a manager
+	// while the credential guarding the entire operator surface comes from an env var is a deployment
+	// /readyz describes incorrectly. The CONSOLE still takes it from its environment — a Next.js process
+	// has no secrets seam — which is why it is injected there from the same secret.
+	SecretAdminPlatformCredential = "admin_platform_credential"
 )
 
 // TOTPSeedName is the reserved logical name a principal's TOTP seed is held under (P22 task 6.4).
@@ -53,7 +62,7 @@ func TOTPSeedName(adminID string) string { return "admin_totp_seed/" + adminID }
 // SecretNames is every logical name this package reads. Enumerated so a deployment checklist and the
 // tests iterate the REAL set rather than a hand-copied list that stops covering a secret added later.
 var SecretNames = []string{
-	SecretAdminSSOSigning, SecretAdminMFASigning, SecretAdminSessionSigning,
+	SecretAdminSSOSigning, SecretAdminMFASigning, SecretAdminSessionSigning, SecretAdminPlatformCredential,
 	// P22 adds the real IdP's client secret. A per-principal TOTP seed is NOT here: it is provisioned
 	// at enrollment rather than at deploy, so a deployment checklist that listed it would be asking an
 	// operator to provision a secret for a principal that does not exist yet.

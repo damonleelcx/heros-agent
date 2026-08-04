@@ -42,9 +42,17 @@ spec:
           ports:
             - { name: http, containerPort: 4310 }
           env:
-            - { name: ADMIN_API_BASE, value: "http://agentd:4321" }
-            # `configured` only — the dev fixture identity mode refuses to start under NODE_ENV=production.
-            - { name: ADMIN_IDENTITY_MODE, value: "configured" }
+            # 🔴 4311, not 4321. The customer API on 4321 serves no `/admin/api/*` route and never did —
+            # the admin surface is a separate handler on a separate listener (P8 Decision 11), so this
+            # pointed at a port that 404'd every admin call. Nothing reported it: the BFF turns an
+            # upstream failure into one sign-in message, so it read as a rejected sign-in.
+            - { name: ADMIN_API_BASE, value: "http://agentd:4311" }
+            # 🔴 `oidc`, not `configured`. `isFederated()` (src/lib/idpConfig.ts) accepts only `oidc` and
+            # `saml`; with `configured` here, GET /auth/login 303s straight to /signin?reason=not_federated
+            # and the operator can never leave the sign-in page. Two readers disagreed about this one
+            # variable — identity.ts only ever refused `dev` — so the value satisfied one and broke the
+            # other. It is set in the OVERLAY, because whether a cluster federates is the cluster's fact.
+            - { name: ADMIN_IDENTITY_MODE, value: "" }
             - { name: NODE_ENV, value: "production" }
             # The operator BFF's OWN credential — a DIFFERENT external-store key than the customer BFF's.
             - name: ADMIN_PLATFORM_CREDENTIAL

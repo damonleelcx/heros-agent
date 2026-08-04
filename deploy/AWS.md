@@ -511,7 +511,7 @@ overlay:
 - { name: ADMIN_IDENTITY_MODE,   value: "configured" }
 
 # On the operator console
-- { name: ADMIN_IDP_CALLBACK_URL, value: "https://admin.heros-agent.space/signin/callback" }
+- { name: ADMIN_IDP_CALLBACK_URL, value: "https://admin.heros-agent.space/auth/callback" }
 
 # On the customer console — `oidc` is the primary mechanism; leave it `configured` to federate with
 # nobody, or set `saml` and fill the SAML pair instead.
@@ -537,12 +537,22 @@ Register both callback URLs with your IdP before cutting DNS over. Then, **befor
 resolves publicly**, confirm the two things that make an internet-facing operator console defensible:
 
 ```bash
-kubectl -n heros logs deploy/admin-console | grep -i 'identity mode'
-#   EXPECTED: configured.  `dev` must refuse to start under NODE_ENV=production — if you see it
-#   running in dev mode, stop and fix that before the DNS record exists.
+curl -s http://127.0.0.1:4310/api/health | jq -r .identity_mode
+#   EXPECTED: oidc.  `dev` must refuse to start under NODE_ENV=production — if you see it running in
+#   dev mode, stop and fix that before the DNS record exists.
+#   🔴 `configured` here is ALSO a failure, and a quiet one: isFederated() accepts only
+#   oidc/saml, so /auth/login 303s to /signin?reason=not_federated and no operator can ever get past
+#   the sign-in page. It looks like a working console right up until somebody tries to use it.
 
 curl -s http://127.0.0.1:4321/readyz | jq '.admin_idp'
-#   EXPECTED: the real operator IdP. `null` means agentd is not reporting an operator identity at all.
+#   EXPECTED: the real operator IdP — {"kind":"oidc","issuer":"https://<org>.okta.com/oauth2/default"}.
+#   `null` means agentd is not serving an operator identity at all. Check ADMIN_IDENTITY_MODE on the
+#   AGENTD pod: it must be `oidc`, not `configured`, and empty means no admin API was built.
+
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:4311/admin/api/healthz
+#   EXPECTED: 200. This is the operator admin API on its own listener. A connection refused means
+#   ADMIN_IDENTITY_MODE was not federated at boot, so nothing was mounted — which the console reports
+#   only as a rejected sign-in.
 ```
 
 ---
@@ -774,7 +784,7 @@ You give **them** these, in return:
 
 - customer redirect URI — `https://heros-agent.space/auth/callback`
 - customer SAML ACS URL — `https://heros-agent.space/auth/saml/acs` *(SAML only)*
-- operator callback URI — `https://admin.heros-agent.space/signin/callback`
+- operator callback URI — `https://admin.heros-agent.space/auth/callback`
 
 ⚠️ The redirect allowlist is normalised to **origin + pathname** and compared by **string equality** at
 the callback. A trailing slash, `http` instead of `https`, or a query string makes it a different URL and
@@ -795,12 +805,57 @@ fixing one reveals the next):
 `CONSOLE_SAML_IDP_METADATA_URL`. You supply *them* your `CONSOLE_SAML_SP_ENTITY_ID` (a name you choose)
 and the SP certificate derived from `CONSOLE_SAML_SP_PRIVATE_KEY` (🔑 you generate that key).
 
-**2 · From your operators — MFA enrolment**
+**2 · From your operators — the IdP subject, and MFA enrolment**
 
-Not a variable, but it gates the operator console and there is no way to configure around it: operator
-MFA is an **invariant**, not a setting. Each operator enrols a factor. With WebAuthn, `ADMIN_WEBAUTHN_RP_ID`
-must be `admin.heros-agent.space` **before** anyone enrols — credentials are bound to the RP ID, so
-changing it later invalidates every key already registered.
+Not variables, but they gate the operator console and there is no way to configure around either.
+
+You need each operator's **`sub` claim** — the IdP's own opaque user id, which Okta issues as `00u…`.
+Not their email: the subject is stable and an email is a mutable attribute, so binding an operator to an
+address means a rename at the IdP silently moves or destroys their access. The bootstrap command refuses
+a value containing `@` for that reason.
+
+Operator MFA is an **invariant**, not a setting. With WebAuthn, `ADMIN_WEBAUTHN_RP_ID` must be
+`admin.heros-agent.space` **before** anyone enrols — credentials are bound to the RP ID, so changing it
+later invalidates every key already registered.
+
+**2a · Creating the first operator — the bootstrap, and why it is two passes**
+
+🔴 **A fresh deployment has nobody who can sign in, and the console cannot fix that itself.** The platform
+will not issue a session without a platform-verified second factor; enrolling a factor requires a session;
+at install time nobody has either. That deadlock is deliberate — `internal/api/identityflow.go` calls it a
+two-person operation by design — and `agentd -admin-bootstrap-subject` is the other person's tool. It runs
+as its own process (a Job, a one-off `docker run`), against the platform database, and does not need
+`agentd` to be running.
+
+```bash
+agentd -admin-bootstrap-subject=00u15tilol4I6bR3n698 -admin-bootstrap-role=superadmin
+```
+
+Run it **twice**, and the split is the check rather than an inconvenience:
+
+- **Pass 1** — the TOTP seed is not in the secrets manager yet. The command generates a candidate, prints
+  the `otpauth://` URI to add to the operator's own phone and the logical name to store it under, and
+  **writes nothing**. A half-done bootstrap leaves no directory row behind.
+- **Pass 2** — the seed resolves. The command reads it back **through the same secrets seam a sign-in
+  uses**, checks it decodes the way the verifier will decode it, and only then writes the principal, the
+  role grant and the factor index.
+
+That read is the point. It converts "the secret was stored under the wrong name, in the wrong region, or
+under a policy this role cannot read" from a sign-in that fails at the factor step with a message about
+the factor, into a bootstrap that fails while the person who can fix it is looking at the terminal.
+
+The seed is stored the way every credential in this source is stored: as the JSON object
+`{"api_key": "<seed>"}`, not as a bare string — a bare string is rejected as malformed, and pass 2 is
+what catches that before an operator ever sees it. The seed itself is **never** written to the platform
+database — `admin_factor` stores only the logical name it is held under. It is also never written to the process log: it is printed once, to the terminal,
+because a log is shipped, indexed and retained, and a seed in it is a second factor anybody with log
+access holds.
+
+⚠️ **Restart `agentd` after pass 2.** The directory is read at start-up, so a process that was already
+running does not yet know the operator exists.
+
+⚠️ The command is safe to re-run: it reconciles rather than duplicating. It **refuses** to rebind an
+existing `admin_id` to a different subject, because with a wrong subject that is an account takeover.
 
 **3 · From your model provider(s) — and NOT YET**
 
@@ -843,8 +898,11 @@ are ☁️ **AWS's**, from your own account.
 | `QDRANT_API_KEY` | 🔑 🔐 optional | `heros-platform/qdrant-api-key` | Unused today — the vector store is *provisioned ahead of use* (§1b). |
 | `NEO4J_PASSWORD` | 🔑 🔐 optional | `heros-platform/neo4j-password` | Unused today — graph store, same. |
 | `HEROS_INBOX_SIGNING_KEY` | 🔑 🔐 optional | `heros-platform/inbox-signing-key` | Inbox signature verification. Unset ⇒ no inbox on this deployment. |
-| `ADMIN_IDENTITY_MODE` | literal | `configured` | `dev` accepts fixture SSO subjects and **refuses to start** under `NODE_ENV=production`. `configured` is the only production value. |
-| `ADMIN_IDP_ISSUER` | 🌐 literal | ✏️ your operator IdP issuer | Lets `/readyz` report `admin_idp`. Empty ⇒ that field is absent. |
+| `ADMIN_IDENTITY_MODE` | literal | ✏️ `oidc` | 🔴 **`test` \| `oidc` \| `saml` — NOT `configured`.** This is the *platform's* selector (`adminidentity.ProviderFromEnv`); `configured` belongs to the console and is refused here. Empty ⇒ no admin API is served at all. |
+| `ADMIN_IDP_ISSUER` | 🌐 literal | ✏️ your operator IdP issuer | The OIDC issuer, e.g. `https://<org>.okta.com/oauth2/default`. Required once federated. |
+| `ADMIN_IDP_CLIENT_ID` | 🌐 literal | ✏️ your operator app's client id | Required once federated. |
+| `ADMIN_IDP_REDIRECTS` | 🌐 literal | ✏️ `["https://admin.heros-agent.space/auth/callback"]` | JSON array of **exact** callback URIs. Must match `ADMIN_IDP_CALLBACK_URL` and the IdP's registered redirect URI character for character. A wildcard is refused at load. |
+| `ADMIN_API_LISTEN_ADDR` | literal | `0.0.0.0:4311` | The operator admin API's **own** listener (P8 Decision 11). 🔴 Never publish it through an Ingress — its only caller is the admin BFF, in-cluster. |
 | `ADMIN_CONSOLE_ORIGIN` | literal | ✏️ `https://admin.heros-agent.space` | **Exact-match** WebAuthn origin allowlist — full scheme + host, no trailing slash, not a suffix rule. |
 | `ADMIN_WEBAUTHN_RP_ID` | literal | ✏️ `admin.heros-agent.space` | 🔴 The Relying Party ID. Setting it to the apex makes operator keys valid on **every** `*.heros-agent.space` origin — see §7.3. |
 | `CONSOLE_HEALTH_URL` | literal | `http://console:4320/api/health` | Aggregates the customer console **and** the customer IdP into `/readyz` as two separately-named components. Also the origin `agentd` derives the legal-manifest URL from. |
@@ -894,11 +952,11 @@ report degraded-not-available when it is down.
 
 | Variable | Source | Value on AWS | What it does / what goes wrong |
 |---|---|---|---|
-| `ADMIN_API_BASE` | literal | `http://agentd:4321` | In-cluster only. |
+| `ADMIN_API_BASE` | literal | `http://agentd:4311` | In-cluster only. 🔴 **4311, not 4321.** The customer API on 4321 serves no `/admin/api/*` route — the admin surface is a separate handler on a separate listener. Pointed at 4321 every admin call 404s, and the BFF turns that into one generic "that sign-in was not accepted". |
 | `NODE_ENV` | literal | `production` | What makes `ADMIN_IDENTITY_MODE=dev` refuse to start. |
-| `ADMIN_IDENTITY_MODE` | literal | `configured` | 🔴 Verify this in the running pod **before** the public DNS record exists (§7.3). |
+| `ADMIN_IDENTITY_MODE` | literal | ✏️ `oidc` | 🔴 **Not `configured`.** `isFederated()` accepts only `oidc`/`saml`; with `configured`, `GET /auth/login` 303s to `/signin?reason=not_federated` and the operator can never leave the sign-in page. Verify it in the running pod **before** the public DNS record exists (§7.3). |
 | `ADMIN_PLATFORM_CREDENTIAL` | 🔑 🔐 required | `heros-admin-console/platform-credential` | **Distinct** from the customer BFF's, and must appear in `config-json` with role `admin`. Neither console can act with the other's credential. |
-| `ADMIN_IDP_CALLBACK_URL` | literal | ✏️ `https://admin.heros-agent.space/signin/callback` | Must be on the **operator** origin. Pointing it at the customer origin lands an operator's assertion in the customer console's cookie jar. |
+| `ADMIN_IDP_CALLBACK_URL` | literal | ✏️ `https://admin.heros-agent.space/auth/callback` | Must be on the **operator** origin. Pointing it at the customer origin lands an operator's assertion in the customer console's cookie jar. |
 | `HEROS_VERSION` | literal | ✏️ your release tag | |
 | `HEROS_EDITION` | literal | `managed` | |
 

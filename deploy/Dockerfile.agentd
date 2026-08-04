@@ -77,6 +77,13 @@ ENV HEROS_DATA_DIR=/var/lib/heros
 ENV HEROS_LISTEN_ADDR=0.0.0.0:4321
 USER nonroot:nonroot
 EXPOSE 4321
+# The OPERATOR admin API's own listener, when the deployment declares a federated operator console
+# (ADMIN_API_LISTEN_ADDR, default 0.0.0.0:4311). Declared here because EXPOSE is what a reader consults
+# to learn what this image serves, and one of these two ports must never be published.
+#
+# 🔴 Documentation only — EXPOSE publishes nothing. What keeps 4311 off the internet is that no Ingress
+# names it and the NetworkPolicy admits only the admin BFF to it. Two mechanisms, neither of them this.
+EXPOSE 4311
 
 # The health endpoint the orchestrator probes and the same one every layer above reads. /healthz is
 # liveness (the process serves); /readyz is readiness (dependencies reachable + the aggregated

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -51,7 +52,11 @@ type AWSSecretsManager struct {
 	client *secretsmanager.Client
 	// ids maps a provider to its secret ID (name or full ARN). A provider with no entry has no
 	// credential HERE — see Credential, which fails closed rather than reaching for a fallback.
-	ids    map[string]string
+	ids map[string]string
+	// prefix is set ONLY when the deployment configured this source by naming convention
+	// (HEROS_SECRETS_AWS_PREFIX) rather than by explicit IDs. It lets a logical name that cannot be
+	// enumerated in advance still resolve — see Credential.
+	prefix string
 	ttl    time.Duration
 	region string
 
@@ -95,6 +100,30 @@ func WithSecretTTL(d time.Duration) AWSOption {
 // own credential cache is doing something that needs a different door.
 func withSecretClock(now func() time.Time) AWSOption {
 	return func(s *AWSSecretsManager) { s.now = now }
+}
+
+// WithSecretPrefix declares that this source was configured by NAMING CONVENTION, and that a logical
+// name absent from the id map resolves to `prefix + name`.
+//
+// # Why an unenumerable name needs this
+//
+// `awsSecretIDs` builds the map from two finite lists — the gateway's adapters and
+// `ReservedSecretNames()`. That covers every credential the platform knows about at compile time. It
+// cannot cover a PER-PRINCIPAL secret: `adminidentity.TOTPSeedName` derives
+// `admin_totp_seed/<admin_id>`, and the set of admin ids is not known until operators exist. Under the
+// prefix form those names were unmapped, so every TOTP verification failed with "no secret ID is
+// mapped" — the operator sees "that sign-in was not accepted" and there is nothing in the message
+// connecting it to a secrets-source naming rule.
+//
+// # Why this does not weaken the fail-closed property
+//
+// It changes which ID is looked up, never whether a missing secret is tolerated. A name resolved
+// through the prefix still has to exist in the manager and still has to parse; if it does not, the same
+// fail-closed error is returned, now naming the ID it tried. And it applies ONLY to the prefix form:
+// under the explicit-IDs form an unmapped name stays an error, because a deployment that enumerated its
+// secrets meant the enumeration to be exhaustive.
+func WithSecretPrefix(prefix string) AWSOption {
+	return func(s *AWSSecretsManager) { s.prefix = strings.TrimSpace(prefix) }
 }
 
 // NewAWSSecretsManager builds a Secrets source over a real AWS Secrets Manager client.
@@ -145,10 +174,15 @@ func (s *AWSSecretsManager) Describe() SourceInfo {
 		names = append(names, p)
 	}
 	slices.Sort(names) // stable output: /readyz is diffed and alerted on, so it must not shuffle
-	return SourceInfo{
-		Kind:   SourceKindAWSSecretsManager,
-		Detail: fmt.Sprintf("region %s; providers %v; ttl %s", s.region, names, s.ttl),
+	// The naming convention is stated when one is in use, because it changes what "providers %v" means:
+	// with a prefix that list is what was mapped ahead of time, not the exhaustive set this source can
+	// serve. Reporting only the list would make /readyz claim a boundary the source does not have. The
+	// prefix is configuration, not a secret — it is a path segment, and it names no account.
+	detail := fmt.Sprintf("region %s; providers %v; ttl %s", s.region, names, s.ttl)
+	if s.prefix != "" {
+		detail += fmt.Sprintf("; naming convention %s<name>", s.prefix)
 	}
+	return SourceInfo{Kind: SourceKindAWSSecretsManager, Detail: detail}
 }
 
 // Credential fetches (or reuses) the provider's credential.
@@ -162,7 +196,13 @@ func (s *AWSSecretsManager) Describe() SourceInfo {
 func (s *AWSSecretsManager) Credential(ctx context.Context, provider string) (Credential, error) {
 	id, ok := s.ids[provider]
 	if !ok {
-		return Credential{}, fmt.Errorf("%w: no secret ID is mapped for provider %q", ErrNoCredential, provider)
+		// A name this source was not configured with, under the naming-convention form: resolve it by the
+		// convention. See WithSecretPrefix for why an unenumerable per-principal name needs this and why
+		// it does not weaken the fail-closed posture.
+		if s.prefix == "" {
+			return Credential{}, fmt.Errorf("%w: no secret ID is mapped for provider %q", ErrNoCredential, provider)
+		}
+		id = s.prefix + provider
 	}
 
 	if c, ok := s.cached(provider); ok {

@@ -171,3 +171,31 @@ func TestDescribe_EverySourceNamesItselfUsefully(t *testing.T) {
 		}
 	}
 }
+
+// TestEveryReservedNameBelongsToANamespace is the outer half of the two-place drift fence.
+//
+// Each consuming package fences its OWN namespace — `internal/billing` the `billing_` names,
+// `internal/adminidentity` the `admin_` ones — because only that package knows which of its constants
+// resolve. What no consumer can see is a reserved name belonging to NO namespace: a typo, or a name
+// added here for a consumer that was never written. Under the prefix form that name expands to a secret
+// ID an operator is told to provision and nothing ever fetches.
+//
+// This package cannot import its consumers (the dependency runs one way), so it checks the property it
+// can: every reserved name is in a namespace that has a fence.
+func TestEveryReservedNameBelongsToANamespace(t *testing.T) {
+	// Each prefix here has a matching per-namespace fence in the package that consumes it.
+	fenced := []string{"billing_", "admin_"}
+	for _, n := range ReservedSecretNames() {
+		ok := false
+		for _, p := range fenced {
+			if strings.HasPrefix(n, p) {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			t.Errorf("reserved name %q is in no fenced namespace %v — no package's drift fence covers it, "+
+				"so an operator would be told to provision a secret nothing resolves", n, fenced)
+		}
+	}
+}

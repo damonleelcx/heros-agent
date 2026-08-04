@@ -181,6 +181,19 @@ patches:
               - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: kube-system } }
                 podSelector: { matchLabels: { app.kubernetes.io/name: traefik } }
             ports: [{ protocol: TCP, port: 4321 }]
+          # The OPERATOR admin API (4311), reachable ONLY from the admin BFF.
+          #
+          # 🔴 A SEPARATE rule, not another port on the one above, and that is the whole point. Adding
+          # 4311 to the existing rule would admit Traefik to it as well — a NetworkPolicy matches
+          # addresses and ports, and every `from` in one rule applies to every port in it. Traefik is
+          # what terminates the public ingress, so that one-line convenience would put the cross-tenant
+          # operator surface behind a public load balancer, gated only by the platform credential.
+          #
+          # The customer console is excluded for the same reason it has its own origin: it has no
+          # business reaching the admin API at all, and saying so here means a bug in it cannot.
+          - from:
+              - podSelector: { matchLabels: { app.kubernetes.io/name: admin-console } }
+            ports: [{ protocol: TCP, port: 4311 }]
 
   # ── Operator identity: the ONE hostname-derived value that can live in this tree ─────────────────
   #
