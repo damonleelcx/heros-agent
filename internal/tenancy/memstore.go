@@ -278,10 +278,13 @@ func (s *MemStore) PreviewRemoval(userID, tenantID string) (RemovalPreview, erro
 		if c.TenantID != tenantID || c.Revoked() {
 			continue
 		}
-		switch {
-		case c.UserID == userID:
+		// The two states a removal preview must distinguish, and there is deliberately no default: a
+		// credential belonging to a DIFFERENT person in this organization is neither revoked by this
+		// removal nor left running by it, so it belongs on neither list.
+		switch c.UserID {
+		case userID:
 			p.PersonalCredentials = append(p.PersonalCredentials, c)
-		case c.UserID == "":
+		case "":
 			p.MachineCredentials = append(p.MachineCredentials, c)
 		}
 	}
@@ -322,11 +325,14 @@ func (s *MemStore) RemoveMember(userID, tenantID string, at time.Time) (RemovalR
 		if c.TenantID != tenantID || c.Revoked() {
 			continue
 		}
-		if c.UserID == userID {
+		switch c.UserID {
+		case userID:
 			c.RevokedAt = &ts
 			s.creds[id] = c
 			res.CredentialsRevoked++
-		} else if c.UserID == "" {
+		case "":
+			// Counted, never revoked. An offboarding screen that hid the CI key it leaves running would
+			// have the person confirming it sign an attestation that is wrong.
 			res.MachineCredsUnknown++
 		}
 	}

@@ -3,6 +3,7 @@ package evalboard
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"math"
 	"math/rand"
 	"os"
@@ -42,6 +43,40 @@ import (
 // when a test goes red, and this is the one test where making it green that way is the bug.
 
 const preBoardFixture = "testdata/p27-pre-board.json"
+
+// boardTolerance is the RELATIVE agreement two runs of the same computation must reach.
+//
+// 🔴 It is not slack. The first version of this file compared bytes, and CI caught what a single machine
+// could not: the recording was made on arm64 and the runner is amd64, and the intervals differed by
+// exactly ONE ULP — 1.11e-16 on a value of 0.86. Go permits fusing a multiply-add, arm64 emits `FMADD`
+// and amd64 does not, so the bootstrap's arithmetic rounds one bit differently. A byte-exact recording
+// is therefore a recording of an ARCHITECTURE, and a fence that is green on the author's laptop and red
+// on CI is worse than no fence: it teaches the next person that this file is flaky.
+//
+// 1e-9 sits seven orders of magnitude above that drift and seven below a real one. Every perturbation
+// this file was watched failing under moves the numbers by ~1e-3 relative — dropping the confidence
+// level from 0.95 to 0.90 moves the interval by 9.4e-4 — so nothing that was caught before is missed
+// now, and that was re-checked rather than assumed.
+const boardTolerance = 1e-9
+
+// sameNumber reports whether two measurements agree to within boardTolerance, relatively.
+//
+// Relative rather than absolute, because the board carries numbers spanning six orders of magnitude: a
+// quality near 1, a cost near 0.002, a latency near 900. One absolute epsilon cannot be both meaningful
+// for the cost and permissive for the latency.
+func sameNumber(a, b float64) bool {
+	if a == b {
+		return true
+	}
+	if math.IsNaN(a) || math.IsNaN(b) || math.IsInf(a, 0) || math.IsInf(b, 0) {
+		return false
+	}
+	scale := math.Max(math.Abs(a), math.Abs(b))
+	if scale == 0 {
+		return true
+	}
+	return math.Abs(a-b)/scale <= boardTolerance
+}
 
 // recordingBoard is the fixture the reference was recorded from. It is deliberately not a happy board:
 // it carries a statistical TIE (the thing 9.2 names that is easiest to break silently), a variant
@@ -156,13 +191,13 @@ func TestPreP27BoardIsReproducedExactly(t *testing.T) {
 				w.Rank, w.VariantID, g.VariantID, g.Rank)
 			continue
 		}
-		if g.Score != w.Score {
+		if !sameNumber(g.Score, w.Score) {
 			t.Errorf("%s composite score: %.17g before P27, %.17g now", w.VariantID, w.Score, g.Score)
 		}
 		// ── confidence intervals ─────────────────────────────────────────────────────────────
 		// Both bounds and the counts behind them. An interval that kept its bounds while n changed
 		// is a different claim made with the same numbers.
-		if g.CILow != w.CILow || g.CIHigh != w.CIHigh {
+		if !sameNumber(g.CILow, w.CILow) || !sameNumber(g.CIHigh, w.CIHigh) {
 			t.Errorf("%s interval: [%.17g, %.17g] before P27, [%.17g, %.17g] now",
 				w.VariantID, w.CILow, w.CIHigh, g.CILow, g.CIHigh)
 		}
@@ -206,7 +241,8 @@ func TestPreP27BoardIsReproducedExactly(t *testing.T) {
 			t.Errorf("%s dominance: non_dominated=%v before P27, %v now — the frontier changed shape",
 				w.VariantID, w.NonDominated, g.NonDominated)
 		}
-		if g.Quality != w.Quality || g.CostUSD != w.CostUSD || g.LatencyMS != w.LatencyMS || g.Composite != w.Composite {
+		if !sameNumber(g.Quality, w.Quality) || !sameNumber(g.CostUSD, w.CostUSD) ||
+			!sameNumber(g.LatencyMS, w.LatencyMS) || !sameNumber(g.Composite, w.Composite) {
 			t.Errorf("%s frontier coordinates moved: (q=%.17g c=%.17g l=%.17g comp=%.17g) before P27, (q=%.17g c=%.17g l=%.17g comp=%.17g) now",
 				w.VariantID, w.Quality, w.CostUSD, w.LatencyMS, w.Composite,
 				g.Quality, g.CostUSD, g.LatencyMS, g.Composite)
@@ -217,12 +253,77 @@ func TestPreP27BoardIsReproducedExactly(t *testing.T) {
 	// Everything above names a field. This names none, which is the point: a board field that did not
 	// exist when the assertions above were written is exactly the kind of thing P27 could have added,
 	// and a per-field test cannot notice a field nobody thought to check.
-	gotJSON := mustMarshal(t, got)
-	wantJSON := mustMarshal(t, want)
-	if string(gotJSON) != string(wantJSON) {
-		t.Errorf("the board differs from the pre-P27 recording in a field the assertions above do not cover.\n"+
-			"first difference at byte %d:\n  before P27: %s\n  now:        %s",
-			firstDiff(wantJSON, gotJSON), excerpt(wantJSON, firstDiff(wantJSON, gotJSON)), excerpt(gotJSON, firstDiff(wantJSON, gotJSON)))
+	//
+	// It walks the two documents STRUCTURALLY rather than comparing bytes, so numbers go through
+	// sameNumber and everything else — every string, every boolean, every key, every array length —
+	// must still match exactly. See boardTolerance for why bytes were the wrong unit.
+	for _, d := range compareDocs(t, want, got) {
+		t.Errorf("the board differs from the pre-P27 recording at %s: before P27 %v, now %v", d.path, d.want, d.got)
+	}
+}
+
+// docDiff is one structural disagreement, with the path that reaches it.
+type docDiff struct {
+	path      string
+	want, got any
+}
+
+// compareDocs walks two boards as decoded JSON and reports every disagreement.
+func compareDocs(t *testing.T, want, got View) []docDiff {
+	t.Helper()
+	var w, g any
+	if err := json.Unmarshal(mustMarshal(t, want), &w); err != nil {
+		t.Fatalf("decode the recording for comparison: %v", err)
+	}
+	if err := json.Unmarshal(mustMarshal(t, got), &g); err != nil {
+		t.Fatalf("decode this board for comparison: %v", err)
+	}
+	var out []docDiff
+	walkDocs("", w, g, &out)
+	return out
+}
+
+func walkDocs(path string, want, got any, out *[]docDiff) {
+	switch w := want.(type) {
+	case float64:
+		g, ok := got.(float64)
+		if !ok || !sameNumber(w, g) {
+			*out = append(*out, docDiff{path, want, got})
+		}
+	case map[string]any:
+		g, ok := got.(map[string]any)
+		if !ok {
+			*out = append(*out, docDiff{path, "an object", got})
+			return
+		}
+		// Both directions: a key that DISAPPEARED is as much a change as one that arrived.
+		for k, wv := range w {
+			gv, present := g[k]
+			if !present {
+				*out = append(*out, docDiff{path + "." + k, wv, "absent"})
+				continue
+			}
+			walkDocs(path+"."+k, wv, gv, out)
+		}
+		for k := range g {
+			if _, present := w[k]; !present {
+				*out = append(*out, docDiff{path + "." + k, "absent", g[k]})
+			}
+		}
+	case []any:
+		g, ok := got.([]any)
+		if !ok || len(g) != len(w) {
+			*out = append(*out, docDiff{path, fmt.Sprintf("%d element(s)", len(w)), got})
+			return
+		}
+		for i := range w {
+			walkDocs(fmt.Sprintf("%s[%d]", path, i), w[i], g[i], out)
+		}
+	default:
+		// Strings, booleans, null — exact, always.
+		if want != got {
+			*out = append(*out, docDiff{path, want, got})
+		}
 	}
 }
 
@@ -355,26 +456,4 @@ func sameStrings(a, b []string) bool {
 		}
 	}
 	return true
-}
-
-func firstDiff(a, b []byte) int {
-	n := int(math.Min(float64(len(a)), float64(len(b))))
-	for i := 0; i < n; i++ {
-		if a[i] != b[i] {
-			return i
-		}
-	}
-	return n
-}
-
-func excerpt(b []byte, at int) string {
-	lo := at - 60
-	if lo < 0 {
-		lo = 0
-	}
-	hi := at + 60
-	if hi > len(b) {
-		hi = len(b)
-	}
-	return string(b[lo:hi])
 }

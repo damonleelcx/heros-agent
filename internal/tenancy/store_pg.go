@@ -337,10 +337,11 @@ func (p *PGStore) PreviewRemoval(userID, tenantID string) (RemovalPreview, error
 		if c.Revoked() {
 			continue
 		}
-		switch {
-		case c.UserID == userID:
+		// Same two states, same deliberate absence of a default, as MemStore.PreviewRemoval.
+		switch c.UserID {
+		case userID:
 			p2.PersonalCredentials = append(p2.PersonalCredentials, c)
-		case c.UserID == "":
+		case "":
 			p2.MachineCredentials = append(p2.MachineCredentials, c)
 		}
 	}
