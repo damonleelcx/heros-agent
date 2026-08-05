@@ -922,7 +922,7 @@ report degraded-not-available when it is down.
 |---|---|---|---|
 | `PLATFORM_API_BASE` | literal | `http://agentd:4321` | In-cluster only. The browser never reaches the platform API. |
 | `NODE_ENV` | literal | `production` | Also what makes a `dev` identity seam refuse to start. |
-| `CONSOLE_TENANT_IDENTITY` | literal | ✏️ `oidc` | `configured` (federates with nobody) \| `oidc` \| `saml` \| `dev`. Base ships `configured` so open-core is not the exception. |
+| `CONSOLE_TENANT_IDENTITY` | literal | ✏️ `oidc` | `configured` (federates with nobody) \| `platform` (the `heros login` token signs in — §A.4) \| `oidc` \| `saml` \| `dev`. Base ships `configured` so open-core is not the exception. |
 | `CONSOLE_PLATFORM_CREDENTIAL` | 🔑 🔐 required | `heros-console/platform-credential` | The BFF's **own** key. Must appear in `config-json` with role `member`. Never reaches the browser. |
 | `CONSOLE_TENANT_ASSERTIONS` | 🔑 🔐 required | `heros-console/tenant-assertions` | JSON assertion→tenant map for the `configured` seam. |
 | `CONSOLE_IDP_ISSUER` | 🌐 literal | ✏️ your IdP issuer | |
@@ -1030,15 +1030,29 @@ called "signing in".
 | | **`heros login`** (CLI) | **Browser sign-in** (console) |
 |---|---|---|
 | Who is authenticating | a **machine** — a developer's shell, or CI | a **person**, in a browser |
-| Credential | a platform **bearer token** | an IdP assertion, or a configured assertion |
-| Where it comes from | `--token`, `$HEROS_PLATFORM_TOKEN`, or piped on stdin — **never a prompt**, so it cannot land in shell history or `ps` | your IdP (§A.0), or the `CONSOLE_TENANT_ASSERTIONS` map |
-| What it hits | `GET /api/v1/whoami` on the platform | `/auth/login` → `/auth/callback` on the console |
+| Credential | a platform **bearer token** | an IdP assertion, a configured assertion, or — on `platform` — **the same bearer token** |
+| Where it comes from | `--token`, `$HEROS_PLATFORM_TOKEN`, or piped on stdin — **never a prompt**, so it cannot land in shell history or `ps` | your IdP (§A.0), the `CONSOLE_TENANT_ASSERTIONS` map, or the token the user already has |
+| What it hits | `GET /api/v1/whoami` on the platform | `/auth/login` → `/auth/callback` on the console; on `platform`, `GET /api/v1/whoami` — **the same endpoint** |
 | What it produces | a credential file at `0600` | an `HttpOnly` session cookie bound server-side to a tenant |
 | Configured by | nothing in this appendix — the endpoint is a compiled-in constant | `CONSOLE_TENANT_IDENTITY` + the `CONSOLE_IDP_*` set |
 
-**There is no bridge between them**, and that is current design rather than an omission: the P11 PRD
-records that a **device-code flow — the thing that would let `heros login` open a browser and reuse
-SSO — was explicitly deferred**. So SSO does not issue CLI tokens, and a CLI token cannot open a
-console session. How a user obtains their platform token is, today, out of band.
+**`CONSOLE_TENANT_IDENTITY=platform` is the bridge**, and it is a narrow one. The console verifies the
+presented credential by calling the platform's own `/api/v1/whoami` with it — so `heros login` and
+console sign-in ask one question of one authority, and the URL `heros link` prints is openable by the
+person who ran it.
+
+It is not a privilege escalation: that token **already** authorizes the whole tenant API surface, and a
+console session is strictly less power (server-side, revocable, TTL-bounded, read surfaces only). The
+mode removes a secret rather than adding a door.
+
+**It is still not a device-code flow.** The P11 PRD defers that, and it stays deferred: SSO does not
+issue CLI tokens, and `heros login` does not open a browser. On `oidc`/`saml` the two paths remain
+separate by design — a deployment that federates its console does **not** want an API bearer token to
+be a console login, and `platform` must not be set there. How a user obtains their platform token in
+the first place is still out of band.
+
+⚠️ Choosing between them: use `platform` when console access and API access are the same grant (the
+hosted product), `configured` when they must be different grants, and `oidc`/`saml` when a customer
+brings their own IdP.
 
 See §7.4 for why the CLI path additionally does not resolve on this deployment topology.

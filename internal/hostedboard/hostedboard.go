@@ -61,6 +61,10 @@ func Build(workflowID string, runs []linkingest.LinkedRun) evalboard.View {
 		WorkflowID: workflowID,
 		// Ties are not testable from linked runs. Stated as data — see this file's header.
 		TieAnalysis: evalboard.TieUnavailable,
+		// Set here so no early return can leave it "" — an empty string is not one of the two states,
+		// and a UI switching on it would fall through to whichever branch it wrote first. paretoOf
+		// overwrites this with what it actually found.
+		CostLatency: evalboard.CostLatencyUnavailable,
 		// Ranking is a pure function of what was already linked; assembling a board enqueues nothing.
 		RunsEnqueued: 0,
 		Profiles:     nil,
@@ -119,7 +123,7 @@ func Build(workflowID string, runs []linkingest.LinkedRun) evalboard.View {
 		}
 	}
 
-	v.Pareto = paretoOf(v.Ranked)
+	v.Pareto, v.CostLatency = paretoOf(v.Ranked, costLatencyByVariant(latest))
 	v.Notes = notesFor(v, superseded, missingEvidence, ungated)
 	if missingEvidence > 0 {
 		v.State = evalboard.StatePartial
@@ -210,6 +214,18 @@ func notesFor(v evalboard.View, superseded, missingEvidence, ungated int) []stri
 		"This board is assembled from LINKED runs — evaluations that ran on your machines with your own "+
 			"keys. Rows are ordered by reported quality; statistical tie detection did not run, because "+
 			"the bootstrap replicates it needs stay on the machine that computed them.")
+	// 🔴 The note the old code CLAIMED to emit. paretoOf's comment ended "...and the note says the board
+	// is quality-ordered", and no such note was ever appended — the only conditional note in this file
+	// was the weight-profile one. So the degenerate frontier shipped with no caveat at all, under an
+	// axis labelled in dollars. A mitigation that exists only in the comment describing it is worth
+	// less than no mitigation, because it stops the next reader looking.
+	if v.CostLatency == evalboard.CostLatencyUnavailable && len(v.Pareto) > 0 {
+		notes = append(notes,
+			"Cost and latency were not reported for every variant here, so no cost/quality frontier was "+
+				"computed. The highlighted points are simply the highest reported quality — not "+
+				"\"nothing beats them on both\". Link a run from a CLI that reports cost_usd and latency_ms "+
+				"to get the real frontier.")
+	}
 	if superseded > 0 {
 		notes = append(notes, fmt.Sprintf(
 			"%d older run(s) were superseded: where a configuration was linked more than once, the newest "+
@@ -252,31 +268,94 @@ func notesFor(v evalboard.View, superseded, missingEvidence, ungated int) []stri
 // Dominance is computed on the reported MEANS, which is honest: it is a statement about the numbers the
 // customer reported, and it needs no replicates. A variant is dominated when another is at least as good
 // on all three and strictly better on one.
-func paretoOf(rows []evalboard.Row) []evalboard.ParetoPoint {
+// costLatency is one variant's reported spend and wall time, and whether both were reported at all.
+type costLatency struct {
+	cost, latency float64
+	present       bool
+}
+
+// costLatencyByVariant reads cost_usd and latency_ms off the linked runs, keyed by the variant id
+// rowFor uses (the config hash).
+//
+// 🔴 These scores were on the wire the whole time. `metrics.cost` and `metrics.latency` are allowlisted
+// (internal/runlink/allowlist.go), `heros eval` reports `cost_usd` and `latency_ms` beside `quality` in
+// the same Scores slice, and spendOf twenty lines below has always read `cost_usd` off this very record
+// to total the board's spend. The frontier was not missing data; it was not asked for it.
+func costLatencyByVariant(runs []linkingest.LinkedRun) map[string]costLatency {
+	out := make(map[string]costLatency, len(runs))
+	for _, lr := range runs {
+		c, okC := scoreOf(lr.Scores, "cost_usd")
+		l, okL := scoreOf(lr.Scores, "latency_ms")
+		// BOTH or neither. A point with a cost and no latency cannot be compared on latency, and
+		// filling the gap with 0 is the defect this whole change exists to remove.
+		out[lr.ConfigHash] = costLatency{cost: c.Value, latency: l.Value, present: okC && okL}
+	}
+	return out
+}
+
+// paretoOf marks the non-dominated configurations, and reports whether cost and latency were measured.
+//
+// When every plotted variant reported both, dominance is the real multi-objective test on the reported
+// MEANS: a variant is dominated when another is at least as good on quality, cost and latency and
+// strictly better on one. When any variant reported neither, the comparison is undefined for that point,
+// so the frontier reduces to the maximum-quality set — and says so through the returned state rather
+// than through zeros the view would render as measurements.
+func paretoOf(rows []evalboard.Row, cl map[string]costLatency) ([]evalboard.ParetoPoint, evalboard.CostLatencyAnalysis) {
 	if len(rows) == 0 {
-		return nil
+		// No points to plot. There is nothing whose cost could have been measured, and claiming
+		// "measured" over an empty set would make the UI draw axes for no data.
+		return nil, evalboard.CostLatencyUnavailable
 	}
-	pts := make([]evalboard.ParetoPoint, 0, len(rows))
+
+	measured := true
 	for _, r := range rows {
-		pts = append(pts, evalboard.ParetoPoint{
-			VariantID: r.VariantID, Label: r.Label, Quality: r.Score, NonDominated: true,
-		})
-	}
-	// Cost and latency are not on the row (the board's Row carries them via Components, which this
-	// assembler deliberately omits), so dominance here reduces to quality alone — which makes every
-	// point except the maximum dominated. Rather than emit a degenerate frontier that looks like an
-	// analysis, the frontier is only the maximum-quality set, and the note says the board is
-	// quality-ordered.
-	best := pts[0].Quality
-	for _, p := range pts {
-		if p.Quality > best {
-			best = p.Quality
+		if !cl[r.VariantID].present {
+			measured = false
+			break
 		}
 	}
-	for i := range pts {
-		pts[i].NonDominated = pts[i].Quality == best
+
+	pts := make([]evalboard.ParetoPoint, 0, len(rows))
+	for _, r := range rows {
+		p := evalboard.ParetoPoint{VariantID: r.VariantID, Label: r.Label, Quality: r.Score, NonDominated: true}
+		if measured {
+			p.CostUSD = cl[r.VariantID].cost
+			p.LatencyMS = cl[r.VariantID].latency
+		}
+		pts = append(pts, p)
 	}
-	return pts
+
+	if !measured {
+		// Quality-only, exactly as before — but now the caller carries a state that stops the console
+		// drawing a cost axis over the zeros this leaves behind.
+		best := pts[0].Quality
+		for _, p := range pts {
+			if p.Quality > best {
+				best = p.Quality
+			}
+		}
+		for i := range pts {
+			pts[i].NonDominated = pts[i].Quality == best
+		}
+		return pts, evalboard.CostLatencyUnavailable
+	}
+
+	// Real dominance. Higher quality is better; lower cost and lower latency are better.
+	for i := range pts {
+		for j := range pts {
+			if i == j {
+				continue
+			}
+			a, b := pts[j], pts[i] // does a dominate b?
+			atLeastAsGood := a.Quality >= b.Quality && a.CostUSD <= b.CostUSD && a.LatencyMS <= b.LatencyMS
+			strictlyBetter := a.Quality > b.Quality || a.CostUSD < b.CostUSD || a.LatencyMS < b.LatencyMS
+			if atLeastAsGood && strictlyBetter {
+				pts[i].NonDominated = false
+				break
+			}
+		}
+	}
+	return pts, evalboard.CostLatencyMeasured
 }
 
 func scoreOf(scores []runlink.Score, metric string) (runlink.Score, bool) {

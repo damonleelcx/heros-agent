@@ -36,9 +36,9 @@ func Apply(cfg Config, s Streams) error {
 	if err != nil {
 		return err
 	}
-	repo := cfg.Get("repo")
-	if repo == "" {
-		repo = "."
+	repo, err := cfg.resolveRepo()
+	if err != nil {
+		return err
 	}
 	outPath := cfg.Get("out")
 	if outPath == "" {

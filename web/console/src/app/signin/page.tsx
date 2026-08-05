@@ -186,8 +186,27 @@ export default async function SignInPage({
                 </form>
 
                 <p className="mt-5 text-center text-xs leading-relaxed text-marketing-ink/40" id="assertion-hint">
-                  The console exchanges this once for a session held on the server. Your browser
-                  receives a cookie it cannot read, and never a platform key.
+                  {/*
+                    🔴 In `platform` mode this field takes the SAME token `heros login` uses, and saying
+                    so is the point of the mode. The console used to demand a second secret that no CLI
+                    command could produce, so `heros link` ended by printing a dashboard URL that refused
+                    the credential the user had just authenticated with. A field labelled only "tenant
+                    credential" is what let that gap sit unnoticed: it is true for every mode and
+                    therefore tells the reader nothing about which credential they hold.
+                  */}
+                  {identityProvider() === "platform" ? (
+                    <>
+                      This is your <span className="font-mono">heros</span> platform token — the same one{" "}
+                      <span className="font-mono">heros login</span> stores. The console exchanges it once
+                      for a session held on the server; your browser receives a cookie it cannot read, and
+                      never the token itself.
+                    </>
+                  ) : (
+                    <>
+                      The console exchanges this once for a session held on the server. Your browser
+                      receives a cookie it cannot read, and never a platform key.
+                    </>
+                  )}
                 </p>
 
                 {/*

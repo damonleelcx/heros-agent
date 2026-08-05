@@ -78,9 +78,9 @@ func Author(cfg Config, s Streams) error {
 	if err != nil {
 		return err
 	}
-	repo := cfg.Get("repo")
-	if repo == "" {
-		repo = "."
+	repo, err := cfg.resolveRepo()
+	if err != nil {
+		return err
 	}
 
 	base, err := loadSpec(specPath)

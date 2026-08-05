@@ -163,7 +163,7 @@ test("11.3 — the air-gapped package carries the console image, so it carries t
 // ── 11.4 · The consent endpoints are the only new authenticated surface ──────
 
 test("11.4 — P23 adds exactly two authenticated endpoints, and no cross-tenant read", async () => {
-  const source = await readFile(join(REPO, "internal", "api", "p23.go"), "utf8");
+  const source = await readFile(join(REPO, "internal", "api", "consent.go"), "utf8");
 
   const routes = [...source.matchAll(/s\.Mux\.HandleFunc\("([A-Z]+) ([^"]+)"/g)].map((m) => `${m[1]} ${m[2]}`);
   assert.deepEqual(
@@ -225,7 +225,7 @@ test("11.4 — P23 adds exactly two authenticated endpoints, and no cross-tenant
 });
 
 test("11.4 — the acceptance request accepts exactly three fields plus the method", async () => {
-  const source = await readFile(join(REPO, "internal", "api", "p23.go"), "utf8");
+  const source = await readFile(join(REPO, "internal", "api", "consent.go"), "utf8");
   const shape = source.slice(source.indexOf("type acceptanceRequest struct"), source.indexOf("// RegisterP23"));
   const fields = [...shape.matchAll(/json:"([a-z_]+)"/g)].map((m) => m[1]).sort();
   assert.deepEqual(

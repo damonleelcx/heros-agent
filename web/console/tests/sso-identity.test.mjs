@@ -916,13 +916,19 @@ test("8.7 every identity form reaches the SAME capability — a form-specific ca
   //
   // The operator form is the fourth, and it is deliberately NOT here: it is a different process in a
   // different language on a different origin, and pretending otherwise is exactly the domain blurring
-  // the two-domain split exists to prevent. It is exercised by `internal/adminidentity/p22_test.go`
-  // and `internal/api/p22_crossorigin_test.go`, and named in the matrix below so the coverage claim
-  // stays checkable rather than implied.
+  // the two-domain split exists to prevent. It is exercised by `internal/adminidentity/test.go`
+  // and `internal/api/identity_crossorigin_test.go`, and named in the matrix below so the coverage
+  // claim stays checkable rather than implied.
+  //
+  // 🔴 These three paths went stale in `eb27a50` ("name API files and symbols after what they do, not
+  // the phase that added them"), which renamed every `p22_*` file and did not update this list. The
+  // test has been RED since — which is the right failure, and it is the reason the list is read from
+  // disk rather than written in a comment: a coverage claim that names files is only checkable if
+  // something opens them. A prose-only version of this list would still read as true today.
   const OPERATOR_FORM_EVIDENCE = [
-    "internal/adminidentity/p22_test.go",
-    "internal/api/p22_crossorigin_test.go",
-    "internal/api/p22_readyz_test.go",
+    "internal/adminidentity/test.go",
+    "internal/api/identity_crossorigin_test.go",
+    "internal/api/identity_readyz_test.go",
   ];
   for (const file of OPERATOR_FORM_EVIDENCE) {
     await readFile(join(ROOT, "..", "..", file), "utf8");

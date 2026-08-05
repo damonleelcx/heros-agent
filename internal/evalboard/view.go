@@ -73,6 +73,20 @@ type View struct {
 	// convention: this package's opening comment says the states are DATA, never inferences from a
 	// missing key, and "we did not test for ties" is a state.
 	TieAnalysis TieAnalysis `json:"tie_analysis"`
+	// CostLatency says whether ParetoPoint.CostUSD and LatencyMS on this board are MEASUREMENTS.
+	//
+	// 🔴 The same argument as TieAnalysis, learned the same way twice. A hosted board that had no cost
+	// or latency left both fields at their zero value, and the console rendered them: a table column
+	// reading `$0.00` and `0 ms` beside a real quality, a marker whose size encoded a latency nobody
+	// reported, an axis labelled "Cost (USD) — lower is better" spanning $-1.00 to $1.00 because a
+	// zero-width domain pads outward, and a legend calling the single point "on the frontier: nothing
+	// beats it on both quality and cost" — a two-dimensional claim about a one-dimensional ordering.
+	// The assembler had deliberately declined to compute that frontier. Declining produced zeros, and
+	// zeros are indistinguishable from a free, instant variant.
+	//
+	// So the refusal is a STATE the view must render, not an absence the view can fill in. `0` is a
+	// number somebody measured; "we do not have this" is this field.
+	CostLatency CostLatencyAnalysis `json:"cost_latency"`
 	// Notes are board-level caveats: refused gates, low-confidence eval set. They change what the
 	// WHOLE board means, which is why they are not per-row badges.
 	Notes []string `json:"notes,omitempty"`
@@ -93,6 +107,23 @@ const (
 	// TieUnavailable: the board was assembled from reported intervals with no replicates behind them.
 	// AllTie is false and TiedWith is empty because nothing was TESTED, not because nothing tied.
 	TieUnavailable TieAnalysis = "unavailable"
+)
+
+// CostLatencyAnalysis reports whether the cost and latency on this board's frontier are measurements.
+type CostLatencyAnalysis string
+
+const (
+	// CostLatencyMeasured: every plotted variant reported a cost and a latency, so the frontier is a
+	// real multi-objective dominance result and the axes mean what they say.
+	CostLatencyMeasured CostLatencyAnalysis = "measured"
+	// CostLatencyUnavailable: at least one plotted variant reported no cost or no latency. Dominance
+	// over a dimension some points lack is not defined, so it was NOT computed — NonDominated marks the
+	// maximum-quality set only, and CostUSD/LatencyMS are zero because nothing filled them.
+	//
+	// A partially-populated frontier is deliberately not a third state. Ranking points that have cost
+	// against points that do not is the failure this field exists to prevent, so one missing value
+	// makes the whole analysis unavailable rather than making most of it quietly wrong.
+	CostLatencyUnavailable CostLatencyAnalysis = "unavailable"
 )
 
 // UnmeasuredView is one variant excluded from the ranking, with the reason.

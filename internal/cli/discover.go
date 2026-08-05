@@ -23,9 +23,9 @@ type DiscoverData struct {
 
 // Discover runs discovery and writes the IR and report. It contacts no network and requires no account.
 func Discover(cfg Config, s Streams) error {
-	repo := cfg.Get("repo")
-	if repo == "" {
-		repo = "."
+	repo, err := cfg.resolveRepo()
+	if err != nil {
+		return err
 	}
 	outPath := cfg.Get("out")
 	if outPath == "" {

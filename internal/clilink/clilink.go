@@ -196,6 +196,15 @@ func (c Commands) Link(cfg cli.Config, s cli.Streams) error {
 		s.Narratef("link: %s was already linked — counted once, not again (idempotent)", runID)
 	} else {
 		s.Narratef("link: %s linked · view it at %s", runID, res.RunURL)
+		// 🔴 Naming the credential is part of the success message, not a nicety.
+		//
+		// This line printed a dashboard URL and stopped. The console then asked for a "tenant
+		// credential" — and on a deployment using the older `configured` seam that is a DIFFERENT
+		// secret, which no command here mints, prints or derives. So the final line of a successful
+		// link pointed at a door the person who ran it had no key to, and nothing said so. A console
+		// on the `platform` seam takes the token this command just authenticated with; saying which
+		// one it is costs a sentence and is the difference between a link and a dead end.
+		s.Narratef("link: sign in there with the same token `heros login` stored — no second credential.")
 	}
 	return s.EmitJSON("link", cli.ExitOK, data, nil, nil)
 }

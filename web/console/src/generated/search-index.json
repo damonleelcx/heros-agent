@@ -152,6 +152,8 @@
         "init",
         "link",
         "login",
+        "push-source",
+        "report-verdict",
         "status",
         "upgrade",
         "verify-release",

@@ -72,9 +72,9 @@ func Eval(cfg Config, s Streams, rt NodeRuntime, gates Gates) error {
 	if rt == nil {
 		rt = ReferenceRuntime{}
 	}
-	repo := cfg.Get("repo")
-	if repo == "" {
-		repo = "."
+	repo, err := cfg.resolveRepo()
+	if err != nil {
+		return err
 	}
 	url, sha := repoIdentity(repo, cfg.Get("repo-url"), cfg.Get("commit"), s)
 

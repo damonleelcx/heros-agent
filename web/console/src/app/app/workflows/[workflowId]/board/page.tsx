@@ -198,8 +198,42 @@ function BoardBody({ workflowId, board }: { workflowId: string; board: BoardView
         </Section>
       ) : null}
 
-      <Section title="Cost and quality" aside="raw units — this frontier is not a ranking">
-        {pareto.length === 0 ? <Empty title="No gate-passing variants to plot." /> : <ParetoChart points={pareto} />}
+      {/*
+        🔴 The cost axis is drawn only when cost and latency were MEASURED.
+
+        This section used to render `ParetoChart` unconditionally. On a board assembled from linked runs
+        the assembler left cost and latency at zero — deliberately, because it had declined to compute a
+        cost frontier — and this chart rendered those zeros: a zero cost column beside a real quality, a
+        marker sized by a latency nobody reported, an x-axis whose ticks went NEGATIVE because a
+        zero-width domain pads outward, and a legend reading "nothing beats it on both quality and
+        cost". Every one of those is a claim about a dimension the board did not have.
+
+        `cost_latency` is the state that decision now travels as, so the refusal upstream stays a refusal
+        on screen instead of becoming a confident drawing.
+
+        (Written without currency literals on purpose: `TestNoPricedLiteralInPaymentUI` scans this file
+        and cannot tell a prose example from a committed price. It caught the first draft of this
+        comment, which is the fence working.)
+      */}
+      <Section
+        title="Cost and quality"
+        aside={
+          board.cost_latency === "measured"
+            ? "raw units — this frontier is not a ranking"
+            : "cost and latency were not reported"
+        }
+      >
+        {pareto.length === 0 ? (
+          <Empty title="No gate-passing variants to plot." />
+        ) : board.cost_latency === "measured" ? (
+          <ParetoChart points={pareto} />
+        ) : (
+          <Empty title="No cost/quality frontier — cost and latency were not reported.">
+            The highlighted rows above are the highest reported quality, not a frontier: nothing here was
+            compared on cost. Link a run from a CLI that reports <code>cost_usd</code> and{" "}
+            <code>latency_ms</code> and this becomes a real comparison.
+          </Empty>
+        )}
       </Section>
 
       <CoverageSection coverage={board.coverage} />
