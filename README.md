@@ -28,9 +28,9 @@ touches production behavior without evidence.
 
 ## Demo — the `heros` CLI against a real 30,500-file repo
 
-<video src="https://heros-agent-assets.s3.us-east-1.amazonaws.com/demo/heros-cli-openclaw.mp4" poster="https://heros-agent-assets.s3.us-east-1.amazonaws.com/demo/heros-cli-openclaw-poster.jpg" controls muted playsinline width="880">
-  <a href="https://heros-agent-assets.s3.us-east-1.amazonaws.com/demo/heros-cli-openclaw.mp4">Watch the demo — 1:06, MP4</a>
-</video>
+[![The heros CLI running against openclaw/openclaw — 11 steps, offline](https://heros-agent-assets.s3.us-east-1.amazonaws.com/demo/heros-cli-openclaw.gif)](https://heros-agent-assets.s3.us-east-1.amazonaws.com/demo/heros-cli-openclaw.mp4)
+
+*Plays here at 2.4× · **[watch the full 1:06 at native resolution](https://heros-agent-assets.s3.us-east-1.amazonaws.com/demo/heros-cli-openclaw.mp4)***
 
 A real terminal session (1:06, no audio) running the full CLI path against
 [`openclaw/openclaw`](https://github.com/openclaw/openclaw) — a real TypeScript monorepo, not a
