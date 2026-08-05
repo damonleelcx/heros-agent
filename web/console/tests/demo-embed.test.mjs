@@ -47,10 +47,16 @@ test("the home page embeds the recording, same-origin, with a poster", async () 
   assert.ok(video, "the home page renders no <video> element");
   assert.match(video, new RegExp(`src="${MP4}"`), "the recording is not served from this origin");
   assert.match(video, new RegExp(`poster="${POSTER}"`), "the embed carries no poster");
-  assert.match(video, /\bcontrols\b/, "a video the visitor cannot pause is not a demo, it is a banner");
-  // preload="none" is the reason the poster is the only thing this section costs a visitor who never
-  // presses play. Without it the browser pulls 1.7 MB on every load of the landing page.
-  assert.match(video, /preload="none"/, "the embed preloads the video instead of the poster alone");
+  // The embed is an ambient loop with no chrome: the control bar covered the terminal output, which
+  // is the only thing the panel exists to show. `muted` and `playsInline` are not decoration — a
+  // browser refuses to autoplay without them, so dropping either turns the panel into a still frame.
+  assert.doesNotMatch(video, /\bcontrols\b/, "the control bar is back, and it covers the terminal output");
+  for (const attr of [/\bautoPlay\b|\bautoplay\b/, /\bloop\b/, /\bmuted\b/, /\bplaysInline\b|\bplaysinline\b/]) {
+    assert.match(video, attr, `the embed lost ${attr} — without all four it does not play unattended`);
+  }
+  // The poster still has to be there. It covers the first paint, and it is the whole of what a
+  // visitor sees if autoplay is refused (a data-saver mode, or a browser that has decided not to).
+  assert.match(video, new RegExp(`poster="${POSTER}"`), "no poster — a refused autoplay shows an empty box");
 });
 
 test("both referenced assets are actually served, with the right content types", async () => {

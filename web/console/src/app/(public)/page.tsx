@@ -599,16 +599,27 @@ export default function HomePage() {
                 by the browser, and `tests/public-surface.test.mjs` fails any element carrying an
                 external `src` before it ever got that far. The file ships in `public/`.
 
-                `preload="none"` keeps the landing page's weight to the poster until a visitor asks
-                for the video. The page still makes no upstream call (FR32, NFR13): this is a static
-                asset on the console's own origin, not a request to the platform.
+                No `controls`: the chrome sat on top of the terminal output, which is the only thing
+                the panel is for. So it plays as an ambient loop instead — `muted` and `playsInline`
+                are what let a browser autoplay at all, and the poster still covers the first paint so
+                nothing pops in.
+
+                ⚠️ Two things this costs, stated rather than discovered later. Every visitor now
+                fetches 1.7 MB on load, where `preload="none"` used to cost only the poster. And a
+                looping video does not honour `prefers-reduced-motion` the way the motion budget in
+                `tokens.customer.css` makes every CSS duration honour it (FR28) — this is the one
+                moving thing on the page outside that budget. Fixing it properly means a client
+                component, and the public surface deliberately ships none.
+
+                The page still makes no upstream call (FR32, NFR13): a static asset on the console's
+                own origin is not a request to the platform.
               */}
               <video
                 className="w-full rounded-2xl border border-marketing-ink/10 bg-marketing-ink/5 shadow-2xl"
-                controls
+                autoPlay
+                loop
                 muted
                 playsInline
-                preload="none"
                 poster="/demo/heros-cli-openclaw-poster.jpg"
                 src="/demo/heros-cli-openclaw.mp4"
                 width={1280}
