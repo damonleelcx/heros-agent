@@ -10,12 +10,19 @@ import { cx } from "@/lib/cx";
  *
  * # What is new here, and what is unchanged
  *
- * The composition is the design system's: a hero with a worked example beside it, four difference
- * cards, the loop as four steps, the last-mile pair (how a change is delivered and where the platform
- * runs), the claims, the plans, a close. What did NOT change is the thing the page is for — every
- * capability sentence still renders through `<Claim>`, so it resolves against the manifest in
- * `src/content/capabilities.ts` or the build fails (FR33, R15). A prettier page that could describe the
- * roadmap in the present tense would be a worse page.
+ * The composition is the design system's: a hero with a worked example beside it, the demo recording,
+ * four difference cards, the loop as four steps, the last-mile pair (how a change is delivered and
+ * where the platform runs), the claims, the plans, a close. What did NOT change is the thing the page
+ * is for — every capability sentence still renders through `<Claim>`, so it resolves against the
+ * manifest in `src/content/capabilities.ts` or the build fails (FR33, R15). A prettier page that could
+ * describe the roadmap in the present tense would be a worse page.
+ *
+ * The demo section is the one panel on the page that is NOT drawn, and it is labelled with the same
+ * care for the opposite reason: a real recording earns nothing if a reader cannot tell it from the
+ * illustrations around it. Its caption states how it was captured and the one way it was processed
+ * (idle gaps capped at 3.2s), and its three cards quote strings the tool printed rather than making
+ * capability claims the manifest has not been asked to carry. It is served from this origin, because
+ * the CSP has no `media-src` and the public-surface test fails any external `src`.
  *
  * The last-mile section (delivery, P12; deployment, P19) follows the same rule: its two panels are
  * labelled illustrations, exactly like the hero's DemoBoard, and the hard claims underneath them —
@@ -94,6 +101,45 @@ const STEPS = [
     tag: "Human merges",
     title: "Decide",
     body: "A verified change arrives as a pull request. A person reads it and merges it — the platform does not, unless you have explicitly granted and budgeted for that.",
+  },
+];
+
+// ── The recording · what to watch for in it ──────────────────────────────────
+
+/**
+ * DEMO_MOMENTS are three things the recording SHOWS, quoted from it.
+ *
+ * They are deliberately not written as capability sentences. A capability claim on this surface goes
+ * through `<Claim>` and resolves against the manifest or the build fails (FR33, R15) — and the right
+ * way to earn a new entry there is to ship the capability, not to describe a video. What these three
+ * cards do instead is point at moments in a recording anybody can scrub to and check, with the strings
+ * the tool actually printed. The distinction matters: the claims grid says what the platform does; this
+ * says what this session did, and a reader can settle it themselves in sixty-six seconds.
+ */
+const DEMO_MOMENTS = [
+  {
+    step: "6 / 11",
+    title: "A refusal, by name",
+    body:
+      "A model change is authored against a node the offline build has no registry entry for. It is not " +
+      "silently skipped and not half-applied: the tool declines, names the node, the dimension and the " +
+      "ref it could not resolve, and reports that nothing was written — on any plan or role.",
+  },
+  {
+    step: "10 / 11",
+    title: "A failed gate is an exit code",
+    body:
+      "The same eval is run under a minimum quality of 0.99. It scores 0.7456, and the gate failure is " +
+      "the process exit status — 1 — not a warning in a log. The run also labels itself provisional " +
+      "rather than reporting a single-seed number as a graded result.",
+  },
+  {
+    step: "11 / 11",
+    title: "The payload, before it is sent",
+    body:
+      "link --dry-run prints the exact bytes an opt-in upload would carry and transmits none of them: " +
+      "metrics, IR structure, scores, and a commit sha. Grepped live on screen for file paths, prompt " +
+      "text and provider keys — three times NO.",
   },
 ];
 
@@ -524,6 +570,83 @@ export default function HomePage() {
               Illustration — a pattern-classified graph, 6 call sites, 7 edges
             </figcaption>
           </figure>
+        </div>
+      </section>
+
+      {/* ── The demo ──────────────────────────────────────────────────────── */}
+      <section className="border-t border-marketing-ink/5 px-6 py-24 md:px-12" id="demo">
+        <div className="mx-auto max-w-7xl">
+          <p className="mb-3 font-mono text-[10px] uppercase tracking-[0.2em] text-marketing-accent">
+            The demo
+          </p>
+          <h2 className="mb-4 max-w-xl font-display text-4xl font-light text-marketing-ink">
+            Not an illustration. A recording.
+          </h2>
+          <p className="mb-12 max-w-2xl text-sm leading-relaxed text-marketing-ink/55">
+            The panels elsewhere on this page are drawn, and each one says so. This is the tool itself,
+            run against{" "}
+            <span className="font-mono text-marketing-ink/75">openclaw/openclaw</span> — a public
+            TypeScript monorepo of some 30,500 files, chosen because it is somebody else&rsquo;s code and
+            not a fixture.
+          </p>
+
+          <div className="grid gap-10 lg:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)] lg:items-start">
+            <figure className="m-0">
+              {/*
+                Same-origin, and that is a constraint rather than a convenience.
+                `default-src 'self'` governs media — the policy in third-party-policy.ts has no
+                `media-src` and cannot express one — so a video served from a bucket would be REFUSED
+                by the browser, and `tests/public-surface.test.mjs` fails any element carrying an
+                external `src` before it ever got that far. The file ships in `public/`.
+
+                `preload="none"` keeps the landing page's weight to the poster until a visitor asks
+                for the video. The page still makes no upstream call (FR32, NFR13): this is a static
+                asset on the console's own origin, not a request to the platform.
+              */}
+              <video
+                className="w-full rounded-2xl border border-marketing-ink/10 bg-marketing-ink/5 shadow-2xl"
+                controls
+                muted
+                playsInline
+                preload="none"
+                poster="/demo/heros-cli-openclaw-poster.jpg"
+                src="/demo/heros-cli-openclaw.mp4"
+                width={1280}
+                height={720}
+                aria-label="Terminal recording of the heros CLI run against the openclaw/openclaw repository"
+              >
+                <a href="/demo/heros-cli-openclaw.mp4">Download the recording — MP4, 1 minute 6 seconds</a>
+              </video>
+              <figcaption className="mt-4 text-xs leading-relaxed text-marketing-ink/35">
+                A real session, captured under a PTY and replayed into a terminal — no output retyped
+                and none re-simulated. Idle gaps between commands are capped at 3.2 seconds, so 565
+                seconds of real work plays in 63; nothing else about the timing or the content is
+                altered. No audio.
+              </figcaption>
+            </figure>
+
+            <div>
+              <p className="mb-5 font-mono text-[10px] uppercase tracking-[0.2em] text-marketing-ink/30">
+                Three moments
+              </p>
+              <ol className="m-0 list-none space-y-4 p-0">
+                {DEMO_MOMENTS.map((moment) => (
+                  <li
+                    key={moment.step}
+                    className="rounded-xl border border-marketing-ink/8 bg-marketing-ink/3 p-5"
+                  >
+                    <span className="mb-2 block font-mono text-[10px] tracking-widest text-marketing-ink/25">
+                      step {moment.step}
+                    </span>
+                    <h3 className="mb-2 font-display text-lg font-normal text-marketing-ink">
+                      {moment.title}
+                    </h3>
+                    <p className="text-xs leading-relaxed text-marketing-ink/50">{moment.body}</p>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          </div>
         </div>
       </section>
 
