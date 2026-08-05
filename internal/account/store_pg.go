@@ -56,7 +56,8 @@ func (p *PGStore) ctx() (context.Context, context.CancelFunc) {
 }
 
 const accountColumns = `customer_id, provider_customer_handle, active_plan_id, plan_config_version,
-	gainshare_consent, consented_at, created_at, status, suspension_reason, suspended_at, quota_overrides`
+	gainshare_consent, consented_at, created_at, status, suspension_reason, suspended_at, quota_overrides,
+	plan_charges`
 
 // Create records a new account. The provider handle is validated first, exactly as MemStore does — the
 // rule belongs to the type, not to one implementation.
@@ -64,7 +65,7 @@ func (p *PGStore) Create(a Account) (Account, error) {
 	if strings.TrimSpace(a.CustomerID) == "" {
 		return Account{}, ErrEmptyCustomer
 	}
-	h, err := NewHandle(a.ProviderCustomerHandle)
+	h, err := ValidateHandle(a.ProviderCustomerHandle, a.PlanCharges)
 	if err != nil {
 		return Account{}, err
 	}
@@ -87,11 +88,11 @@ func (p *PGStore) Create(a Account) (Account, error) {
 	// the insert must be one operation or two concurrent signups for one customer both succeed.
 	res, err := p.db.ExecContext(ctx,
 		`INSERT INTO account (`+accountColumns+`)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
 		 ON CONFLICT (customer_id) DO NOTHING`,
 		a.CustomerID, a.ProviderCustomerHandle, a.ActivePlanID, a.PlanConfigVersion,
 		a.GainshareConsent, nullTime(a.ConsentedAt), a.CreatedAt.UTC(), string(a.Status),
-		a.SuspensionReason, nullTime(a.SuspendedAt), overrides)
+		a.SuspensionReason, nullTime(a.SuspendedAt), overrides, a.PlanCharges)
 	if err != nil {
 		return Account{}, fmt.Errorf("account: create %s: %w", a.CustomerID, err)
 	}
@@ -139,13 +140,40 @@ func (p *PGStore) update(customerID, set string, args ...any) (Account, error) {
 	return a, nil
 }
 
-// SetPlan repoints the plan and pins the config version it resolved under. Both columns move in one
-// statement: a plan id without its version cannot explain a closed period.
-func (p *PGStore) SetPlan(customerID, planID, planConfigVersion string) (Account, error) {
+// SetPlan repoints the plan, pins the config version it resolved under, and records whether the plan
+// charges. All three columns move in one statement: a plan id without its version cannot explain a
+// closed period, and a plan without its charging flag would let the account sit on a paid plan with no
+// billing customer — which `account_handle_required_when_plan_charges` refuses.
+//
+// The named error comes first so a caller sees `ErrHandleRequired` rather than a 23514 they have to
+// decode. The constraint is still the last line and is not being trusted to a Go check.
+func (p *PGStore) SetPlan(customerID, planID, planConfigVersion string, charges bool) (Account, error) {
 	if planConfigVersion == "" {
 		return Account{}, errors.New("account: a plan change must pin the plan_config_version it resolved under")
 	}
-	return p.update(customerID, `active_plan_id = $2, plan_config_version = $3`, planID, planConfigVersion)
+	if charges {
+		current, err := p.Get(customerID)
+		if err != nil {
+			return Account{}, err
+		}
+		if strings.TrimSpace(current.ProviderCustomerHandle) == "" {
+			return Account{}, ErrHandleRequired
+		}
+	}
+	return p.update(customerID, `active_plan_id = $2, plan_config_version = $3, plan_charges = $4`,
+		planID, planConfigVersion, charges)
+}
+
+// SetProviderHandle records the billing-provider customer minted at first checkout.
+//
+// Separate from SetPlan because the two happen at different moments and in that order: the handle is
+// created BEFORE the plan moves, so a failed provider call never leaves a plan change to undo.
+func (p *PGStore) SetProviderHandle(customerID, handle string) (Account, error) {
+	h, err := NewHandle(handle)
+	if err != nil {
+		return Account{}, err
+	}
+	return p.update(customerID, `provider_customer_handle = $2`, h)
 }
 
 // SetGainshareConsent records consent or its revocation. Revocation clears consented_at, which the
@@ -226,9 +254,13 @@ func scanAccount(sc scanner) (Account, error) {
 	var status string
 	var overrides []byte
 	var consented, suspended sql.NullTime
+	// 🔴 A plain `string`, deliberately, and it is the same type the PRIOR image scans into. The column
+	// is NOT NULL and an absent handle is `''`, so there is nothing here a `sql.NullString` would carry
+	// that this does not — and keeping the two readers identical is the whole of task 10.1: it is what
+	// makes rolling this image back a redeploy rather than an outage.
 	if err := sc.Scan(&a.CustomerID, &a.ProviderCustomerHandle, &a.ActivePlanID, &a.PlanConfigVersion,
 		&a.GainshareConsent, &consented, &a.CreatedAt, &status, &a.SuspensionReason, &suspended,
-		&overrides); err != nil {
+		&overrides, &a.PlanCharges); err != nil {
 		return Account{}, err
 	}
 	a.Status = Status(status)
@@ -253,6 +285,14 @@ func scanAccount(sc scanner) (Account, error) {
 	return a, nil
 }
 
+// The handle's ABSENT value is the EMPTY STRING, not NULL, and there is no nullHandle helper any more.
+//
+// 🔴 Task 10.1 removed it. NULL made this column unreadable by the PRIOR image — `scanAccount` there
+// reads it into a Go `string`, and `List()` scans every row, so one free account broke the operator
+// console and the billing webhook for every customer the moment a rollback happened. `''` scans on both
+// sides. The invariant is unchanged and still lives in the database: `account_handle_required_when_plan_charges`
+// now reads `provider_customer_handle <> '' OR plan_charges = FALSE`.
+
 // nullTime renders an optional timestamp for the driver. NULL rather than the zero time: "never
 // consented" and "consented at year zero" must not be the same value on a consent record.
 func nullTime(t *time.Time) any {
@@ -260,4 +300,61 @@ func nullTime(t *time.Time) any {
 		return nil
 	}
 	return t.UTC()
+}
+
+// Execer is the slice of a caller's transaction this package needs to write inside it.
+//
+// It exists for exactly one caller — P27's sign-up, which must write the tenant, the person, their
+// owner membership and this account together or write none of them. The identity domain owns that
+// transaction and lends it here rather than importing this package, because a compile-time dependency
+// from identity to billing means an identity migration cannot run without a billing outage.
+type Execer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+// CreateWithin records a new account inside a transaction the caller owns.
+//
+// It is a package-level function rather than a method because the transaction is not this store's: the
+// `account` TABLE still belongs to this package (nobody else writes its SQL), and the atomicity belongs
+// to whoever opened the transaction. Splitting it that way is what keeps sign-up atomic without either
+// domain importing the other.
+//
+// The same validation as `Create` runs first — the rule belongs to the type, not to one path in.
+func CreateWithin(ctx context.Context, ex Execer, a Account) (Account, error) {
+	if strings.TrimSpace(a.CustomerID) == "" {
+		return Account{}, ErrEmptyCustomer
+	}
+	h, err := ValidateHandle(a.ProviderCustomerHandle, a.PlanCharges)
+	if err != nil {
+		return Account{}, err
+	}
+	a.ProviderCustomerHandle = h
+	if a.CreatedAt.IsZero() {
+		a.CreatedAt = time.Unix(0, 0).UTC()
+	}
+	overrides := []byte("{}")
+	if len(a.QuotaOverrides) > 0 {
+		if overrides, err = json.Marshal(a.QuotaOverrides); err != nil {
+			return Account{}, fmt.Errorf("account: encode quota overrides for %s: %w", a.CustomerID, err)
+		}
+	}
+	res, err := ex.ExecContext(ctx,
+		`INSERT INTO account (`+accountColumns+`)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+		 ON CONFLICT (customer_id) DO NOTHING`,
+		a.CustomerID, a.ProviderCustomerHandle, a.ActivePlanID, a.PlanConfigVersion,
+		a.GainshareConsent, nullTime(a.ConsentedAt), a.CreatedAt.UTC(), string(a.Status),
+		a.SuspensionReason, nullTime(a.SuspendedAt), overrides, a.PlanCharges)
+	if err != nil {
+		return Account{}, fmt.Errorf("account: create %s: %w", a.CustomerID, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return Account{}, fmt.Errorf("account: create %s: %w", a.CustomerID, err)
+	}
+	if n == 0 {
+		return Account{}, fmt.Errorf("%w: %s", ErrExists, a.CustomerID)
+	}
+	return a, nil
 }

@@ -66,7 +66,7 @@ export async function POST(request: Request) {
   });
   if (!outcome.ok) return refuse(outcome.refusal, flow.next);
 
-  const { token } = issueSession(outcome.principal);
+  const { token } = await issueSession(outcome.principal);
   const response = redirectTo(samePath(flow.next));
   response.cookies.set(SESSION_COOKIE, token, { ...SESSION_COOKIE_OPTIONS, maxAge: sessionTtlSeconds() });
   response.cookies.set(SIGNIN_FLOW_COOKIE, "", { ...SIGNIN_FLOW_COOKIE_OPTIONS, maxAge: 0 });

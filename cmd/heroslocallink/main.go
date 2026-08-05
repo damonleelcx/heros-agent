@@ -25,23 +25,25 @@
 // linked without them gets `state: empty` and the message "This run was linked without per-node
 // metrics" — correct, and not something the platform can fix from its side.
 //
-//	go run ./cmd/heroslocallink -repo ../hermes-agent -addr 127.0.0.1:14321 -token "$KEY"
+//	go run ./cmd/heroslocallink -repo ../hermes-agent -addr 127.0.0.1:14321 -token "$KEY" \
+//	    -login -with-ir
 package main
 
 import (
-	"context"
 	"flag"
 	"fmt"
 	"log"
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/heros-foreal/agentd/internal/cli"
+	"github.com/heros-foreal/agentd/internal/clilink"
 	"github.com/heros-foreal/agentd/internal/runlink"
-	"github.com/heros-foreal/agentd/internal/runlink/transport"
 )
 
 // localDial carries a request addressed to the pinned platform host to a local listener.
@@ -77,11 +79,29 @@ func main() {
 	run := flag.String("run", "", "run id to link; defaults to the newest record in the store")
 	addr := flag.String("addr", "127.0.0.1:14321", "host:port of the self-hosted agentd")
 	token := flag.String("token", os.Getenv("HEROS_PLATFORM_TOKEN"), "platform token (or $HEROS_PLATFORM_TOKEN)")
+	login := flag.Bool("login", false, "authenticate and STORE the token first, exactly as `heros login` does")
+	device := flag.Bool("device", false, "run the DEVICE authorization instead: print a code, wait for somebody to approve it in the console, and store the personal credential it issues (P27 §13). Implies -login and needs no -token")
+	withIR := flag.Bool("with-ir", false, "ALSO transmit the workflow STRUCTURE, as `heros link --with-ir` does")
+	irPath := flag.String("ir", "", "path to the IR to transmit with -with-ir (default <repo>/ir.json)")
 	flag.Parse()
 
+	// 🔴 The device flow is the PERSON path and deliberately has no token: that is the whole point of it.
+	// `heros login` with no --token does exactly this, and this binary carries it for the same reason it
+	// carries `login` — so the local deployment can be driven through the SHIPPED command path rather
+	// than through a hand-rolled transport call.
+	if *device {
+		cmds := clilink.Commands{RT: localDial{addr: *addr}, Timeout: 30 * time.Second}
+		r := cli.NewResolver(map[string]string{"repo": ".", "run": "", "token": "", "dry-run": "false"})
+		if err := cmds.Login(r.Resolve(), cli.Streams{Out: os.Stdout, Err: os.Stderr}); err != nil {
+			log.Fatalf("heroslocallink: device login: %v", err)
+		}
+		return
+	}
+
 	if strings.TrimSpace(*token) == "" {
-		log.Fatal("heroslocallink: no token — pass -token or set HEROS_PLATFORM_TOKEN. The deployment's " +
-			"tenant credentials are in deploy/config/config.json.")
+		log.Fatal("heroslocallink: no token — pass -token or set HEROS_PLATFORM_TOKEN, or use -device to " +
+			"sign in as a PERSON through the console. The deployment's tenant credentials are in " +
+			"deploy/config/config.json.")
 	}
 
 	store := cli.OpenRunStore(*repo)
@@ -117,10 +137,45 @@ func main() {
 	log.Printf("link: %s (%s) — %d node(s) attributed, %d eval case(s), gate %s",
 		runID, record.WorkflowID, len(payload.Metrics.PerNode), payload.Eval.CaseCount, payload.Eval.GateOutcome)
 
-	client := transport.NewClient(*token, transport.WithRoundTripper(localDial{addr: *addr}))
-	res, err := client.Link(context.Background(), payload)
-	if err != nil {
-		log.Fatalf("heroslocallink: %v", err)
+	// ── The two SHIPPED commands, over the redirected dial ──────────────────────────────────────────
+	//
+	// `login` and `link` are run through clilink.Commands — the same value cmd/heros injects as
+	// cli.NetCommands — rather than by calling the transport directly. The difference is not cosmetic:
+	// the command path is where the credential is validated and stored 0600, where the payload
+	// self-check runs, and where "link: <run> linked · view it at …" is printed. A hand-rolled
+	// transport call skips all of it and then proves only that a POST works.
+	//
+	// 🔴 `login` here validates against the SAME /api/v1/whoami the console's `platform` identity seam
+	// asks (see web/console/src/lib/idp/platformToken.ts). That is the point of doing it at all: "the
+	// CLI accepted this token" and "the console accepts this token" must stay one question, and the
+	// only way to observe that they are is to authenticate the CLI and then sign the console in with
+	// the same string.
+	cmds := clilink.Commands{RT: localDial{addr: *addr}, Timeout: 30 * time.Second}
+	streams := cli.Streams{Out: os.Stdout, Err: os.Stderr}
+	cfg := func(kv map[string]string) cli.Config {
+		r := cli.NewResolver(map[string]string{"repo": ".", "run": "", "token": "", "dry-run": "false", "with-ir": ""})
+		r.SetFlag("repo", *repo)
+		for k, v := range kv {
+			r.SetFlag(k, v)
+		}
+		return r.Resolve()
 	}
-	log.Printf("accepted=%v already_linked=%v run_url=%s", res.Accepted, res.AlreadyLinked, res.RunURL)
+
+	if *login {
+		if err := cmds.Login(cfg(map[string]string{"token": *token}), streams); err != nil {
+			log.Fatalf("heroslocallink: login: %v", err)
+		}
+	}
+
+	linkFlags := map[string]string{"run": runID}
+	if *withIR {
+		p := *irPath
+		if p == "" {
+			p = filepath.Join(*repo, "ir.json")
+		}
+		linkFlags["with-ir"] = p
+	}
+	if err := cmds.Link(cfg(linkFlags), streams); err != nil {
+		log.Fatalf("heroslocallink: link: %v", err)
+	}
 }

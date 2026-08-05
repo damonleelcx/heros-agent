@@ -18,10 +18,26 @@ import (
 // and stored alongside so a stale credential can be recognized if the pin ever changes.
 
 // Credential is the stored platform identity.
+//
+// 🔴 The three P27 fields are ADDITIVE and every one is `omitempty` (task 13.6). A credential written by
+// an older binary has none of them and still loads — `Identity`, `Token` and `Endpoint` keep their names,
+// meanings and values, which is the same discipline the `whoami` response follows for the same reason:
+// somebody has this file on disk already and an upgrade must not log them out.
 type Credential struct {
 	Identity string `json:"identity"`
 	Token    string `json:"token"`
 	Endpoint string `json:"endpoint"`
+
+	// OrganizationName is what the customer calls their organization. A DISPLAY value: `status` shows it
+	// so a person with two of them can tell which terminal is which, and nothing routes on it.
+	OrganizationName string `json:"organization_name,omitempty"`
+	// UserID is the acting person. ABSENT for a machine credential, never a placeholder — a placeholder
+	// in an attribution field reads as a person whose id we failed to record.
+	UserID string `json:"user_id,omitempty"`
+	// Kind is "personal" or "machine". Stated rather than inferred from UserID being empty, because the
+	// difference decides whether removing somebody ends this login and a reader must not have to derive
+	// it from a blank field.
+	Kind string `json:"credential_kind,omitempty"`
 }
 
 // credentialPath returns the on-disk credential location, honoring $HEROS_CONFIG_DIR for tests.

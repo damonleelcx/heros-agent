@@ -53,8 +53,31 @@ func TestAccountHoldsProviderHandleNotCardData(t *testing.T) {
 		}
 	}
 
-	if _, err := s.Create(Account{CustomerID: "cus_x"}); !errors.Is(err, ErrEmptyHandle) {
-		t.Errorf("an account with no provider handle must be refused, got %v", err)
+	// 🔴 P27 changed this rule, and changed it precisely.
+	//
+	// A missing handle is refused when the plan CHARGES — the original guarantee, that a customer who
+	// cannot be billed must not look billable — and permitted when it does not, because a Free account
+	// has no billing-provider customer yet and making one at sign-up would register a customer object at
+	// a payment provider for everybody who ever tried the free tier.
+	if _, err := s.Create(Account{CustomerID: "cus_paid_nohandle", PlanCharges: true}); !errors.Is(err, ErrHandleRequired) {
+		t.Errorf("an account on a CHARGING plan with no provider handle must be refused, got %v", err)
+	}
+	free, err := s.Create(Account{CustomerID: "cus_free", ActivePlanID: "free", PlanConfigVersion: "cfg-a"})
+	if err != nil {
+		t.Fatalf("a Free account with no provider handle must be storable — sign-up creates one: %v", err)
+	}
+	if free.ProviderCustomerHandle != "" {
+		t.Errorf("a Free account should hold no handle, got %q", free.ProviderCustomerHandle)
+	}
+	// And it cannot be moved onto a charging plan until the handle exists.
+	if _, err := s.SetPlan("cus_free", "team", "cfg-a", true); !errors.Is(err, ErrHandleRequired) {
+		t.Errorf("moving a handle-less account onto a charging plan must be refused, got %v", err)
+	}
+	if _, err := s.SetProviderHandle("cus_free", "prov_cus_minted"); err != nil {
+		t.Fatalf("minting the handle at first checkout: %v", err)
+	}
+	if _, err := s.SetPlan("cus_free", "team", "cfg-a", true); err != nil {
+		t.Errorf("with a handle in place the plan must move: %v", err)
 	}
 	if _, err := s.Create(Account{ProviderCustomerHandle: "h"}); !errors.Is(err, ErrEmptyCustomer) {
 		t.Errorf("an account with no customer id must be refused, got %v", err)
@@ -69,12 +92,12 @@ func TestPlanAndConfigVersionMoveTogether(t *testing.T) {
 		t.Fatalf("precondition: %+v", a)
 	}
 
-	if _, err := s.SetPlan("cus_acme", "enterprise", ""); err == nil {
+	if _, err := s.SetPlan("cus_acme", "enterprise", "", true); err == nil {
 		t.Error("a plan change with no plan_config_version must be refused — the pair is what makes a " +
 			"closed period explainable")
 	}
 
-	got, err := s.SetPlan("cus_acme", "enterprise", "cfg-b")
+	got, err := s.SetPlan("cus_acme", "enterprise", "cfg-b", true)
 	if err != nil {
 		t.Fatalf("set plan: %v", err)
 	}
@@ -133,7 +156,7 @@ func TestStoreErrorsAreDistinguishable(t *testing.T) {
 	if _, err := s.Create(Account{CustomerID: "cus_acme", ProviderCustomerHandle: "h2"}); !errors.Is(err, ErrExists) {
 		t.Errorf("want ErrExists, got %v", err)
 	}
-	if _, err := s.SetPlan("nobody", "team", "cfg-a"); !errors.Is(err, ErrNotFound) {
+	if _, err := s.SetPlan("nobody", "team", "cfg-a", true); !errors.Is(err, ErrNotFound) {
 		t.Errorf("want ErrNotFound, got %v", err)
 	}
 	if _, err := s.SetGainshareConsent("nobody", true, at); !errors.Is(err, ErrNotFound) {

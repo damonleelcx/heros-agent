@@ -1,6 +1,7 @@
 package entitlement
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -266,16 +267,33 @@ func TestOverLimitIsDeniedWithANamedReasonAndUpgradePath(t *testing.T) {
 	}
 }
 
+// fakeSeats is a seat count read from wherever seats actually live. In production that is membership;
+// here it is a number, because what this test drives is the GATE, not the counting.
+type fakeSeats struct {
+	held map[string]int
+	err  error
+}
+
+func (f fakeSeats) SeatsHeld(tenantID string) (int, error) {
+	if f.err != nil {
+		return 0, f.err
+	}
+	return f.held[tenantID], nil
+}
+
 // TestCheckLimitDeniesBeforeTheAllowanceIsConsumed: a seat request that would be the 6th on a 5-seat
 // plan must be denied BEFORE the seat is taken, not after the meter notices.
+//
+// 🔴 P27 changed how this test SUPPLIES the current count, and the change is the point.
+//
+// It used to seed a `seats` usage record. That passed, and it proved the wrong thing: no code path in
+// this platform has ever written such a record, so the gate was reading a value that is zero on every
+// real deployment — which is why a 5-seat plan admitted five hundred. The count now comes from a seat
+// counter, which in production reads membership, and `TestTheSeatGateNeverReadsTheUsageStore` below
+// asserts the usage store is not consulted for it at all.
 func TestCheckLimitDeniesBeforeTheAllowanceIsConsumed(t *testing.T) {
-	g, _, usage, _ := newGate(t)
-	if _, _, err := usage.Upsert(metering.UsageRecord{
-		CustomerID: "cus_team", Period: july.ID, Metric: metering.MetricSeats,
-		Quantity: 5, SourceDigest: "d", UpdatedAt: julyStart,
-	}); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
+	g, _, _, _ := newGate(t)
+	g.WithSeatCounter(fakeSeats{held: map[string]int{"cus_team": 5}})
 
 	// At exactly the allowance: still inside.
 	ok, err := g.CheckLimit("cus_team", plancfg.LimitSeats, metering.MetricSeats, 0)
@@ -508,3 +526,66 @@ func TestTheFloorHoldsForAnOverBandCustomer(t *testing.T) {
 		}
 	}
 }
+
+// TestTheSeatGateNeverReadsTheUsageStore is 6.1, asserted rather than intended.
+//
+// A `seats` usage record is planted with a wildly wrong value. If the gate consults the usage store for
+// seats — the behaviour that made `LimitSeats` decorative for the whole of P7 — this test sees the
+// planted number instead of the real one and fails.
+func TestTheSeatGateNeverReadsTheUsageStore(t *testing.T) {
+	g, _, usage, _ := newGate(t)
+	// A number nobody could reach, so a wrong read is unmistakable.
+	if _, _, err := usage.Upsert(metering.UsageRecord{
+		CustomerID: "cus_team", Period: july.ID, Metric: metering.MetricSeats,
+		Quantity: 999, SourceDigest: "planted", UpdatedAt: julyStart,
+	}); err != nil {
+		t.Fatalf("plant: %v", err)
+	}
+	g.WithSeatCounter(fakeSeats{held: map[string]int{"cus_team": 1}})
+
+	d, err := g.CheckLimit("cus_team", plancfg.LimitSeats, metering.MetricSeats, 1)
+	if err != nil {
+		t.Fatalf("check: %v", err)
+	}
+	if !d.Allowed {
+		t.Fatalf("a 2nd seat on a 5-seat plan with ONE member held was denied — the gate read the "+
+			"planted usage record (%v) instead of the seat counter: %+v", 999, d)
+	}
+}
+
+// TestAnUnmeasurableSeatLimitIsSkippedRatherThanTreatedAsZero.
+//
+// 🔴 This is the honest half of the P7 correction. With no counter wired, the allowance cannot be
+// evaluated — and comparing it against zero is precisely what made the check pass while enforcing
+// nothing. A skipped limit is stated; a zero-compared one looks enforced.
+func TestAnUnmeasurableSeatLimitIsSkippedRatherThanTreatedAsZero(t *testing.T) {
+	g, _, _, _ := newGate(t)
+	if g.SeatsEnforced() {
+		t.Fatal("a gate with no seat counter reported that it enforces seats")
+	}
+
+	d, err := g.CheckLimit("cus_team", plancfg.LimitSeats, metering.MetricSeats, 500)
+	if err != nil {
+		t.Fatalf("check: %v", err)
+	}
+	if !d.Allowed {
+		t.Fatal("an unmeasurable limit denied; skipping is the choice, because a metering gap must not " +
+			"lock a customer out")
+	}
+	if d.Reason == "" {
+		t.Error("the gate allowed without saying it could not measure — that is indistinguishable from " +
+			"having measured and found room, which is the P7 failure exactly")
+	}
+
+	// A counter that ERRORS is also unmeasurable, not zero.
+	g.WithSeatCounter(fakeSeats{err: errSeatStoreDown})
+	d, err = g.CheckLimit("cus_team", plancfg.LimitSeats, metering.MetricSeats, 500)
+	if err != nil {
+		t.Fatalf("check: %v", err)
+	}
+	if !d.Allowed || d.Reason == "" {
+		t.Errorf("a failing seat read was not treated as unmeasurable: %+v", d)
+	}
+}
+
+var errSeatStoreDown = errors.New("the membership store is unreachable")

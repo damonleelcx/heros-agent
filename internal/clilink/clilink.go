@@ -13,10 +13,12 @@ package clilink
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"runtime"
 	"strings"
 	"time"
 
@@ -57,23 +59,47 @@ func (c Commands) Login(cfg cli.Config, s cli.Streams) error {
 		token = strings.TrimSpace(string(b))
 	}
 	if token == "" {
-		return &cli.ExitError{Code: cli.ExitInvalidCfg,
-			Msg: "login: no token — supply --token, $HEROS_PLATFORM_TOKEN, or pipe it on stdin"}
+		// 🔴 No token is no longer an error — it is the PERSON path (task 13.2). `--token` remains
+		// untouched below and is still the machine path: a credential with no user reference, reported as
+		// machine, and NOT revoked by removing anybody (task 13.4).
+		//
+		// This is what makes § 4.5's promise true in a terminal. A person pasting an organization key gets
+		// a credential that names nobody: it survives their offboarding, attributes nothing, and "remove a
+		// member and their access ends" is simply false in a shell.
+		return c.deviceLogin(cfg, s)
 	}
 
 	s.Narratef("login: validating token against %s…", runlink.PlatformBaseURL)
 	cl := c.client(token)
 	ctx := context.Background()
-	identity, err := cl.Validate(ctx)
+	// 🔴 The MACHINE path, unchanged in what it does (task 13.4): the same token, the same validation, the
+	// same stored credential. What is added is what the platform now SAYS about it — the organization and
+	// the credential kind — recorded so `status` can name them without a network call.
+	//
+	// `WhoAmI` reads the same endpoint `Validate` does. It is a second reader rather than a change to
+	// `Validate`, because two callers depend on that function returning exactly an identity string.
+	who, err := cl.WhoAmI(ctx)
 	if err != nil {
 		return &cli.ExitError{Code: cli.ExitOperational, Msg: err.Error(), Err: err}
 	}
-	if err := cli.SaveCredential(cli.Credential{Identity: identity, Token: token, Endpoint: runlink.PlatformBaseURL}); err != nil {
+	identity := who.Identity
+	kind := who.CredentialKind
+	if kind == "" {
+		// A platform that predates P27 says nothing about the kind. A token supplied on the command line
+		// is the machine path by construction, so that is the honest default rather than an empty field.
+		kind = "machine"
+	}
+	if err := cli.SaveCredential(cli.Credential{
+		Identity: identity, Token: token, Endpoint: runlink.PlatformBaseURL,
+		OrganizationName: who.OrganizationName, UserID: who.UserID, Kind: kind,
+	}); err != nil {
 		return err
 	}
 	s.Narratef("login: authenticated as %s (credential stored 0600)", identity)
 	return s.EmitJSON("login", cli.ExitOK, map[string]any{
 		"authenticated": true, "identity": identity, "endpoint": runlink.PlatformBaseURL,
+		"organization_id": who.OrganizationID, "organization_name": who.OrganizationName,
+		"credential_kind": kind,
 	}, nil, nil)
 }
 
@@ -216,4 +242,85 @@ func allowlistCheck(p runlink.Payload) (offenders []string, err error) {
 		return nil, err
 	}
 	return runlink.AssertAllowlisted(b)
+}
+
+// deviceLogin runs the device authorization: ask for a code, show it, wait, store what comes back.
+//
+// # What it prints, and what it never prints
+//
+// The USER code and the URL — the two things a person needs to act. Never the device code (the CLI's own
+// polling secret) and never the issued credential: a token in a terminal is a token in a scrollback
+// buffer, a screen recording and a support paste.
+func (c Commands) deviceLogin(cfg cli.Config, s cli.Streams) error {
+	cl := c.client("")
+	ctx := context.Background()
+
+	auth, err := cl.RequestDeviceAuth(ctx, deviceLabel())
+	if err != nil {
+		return &cli.ExitError{Code: cli.ExitOperational, Msg: err.Error(), Err: err}
+	}
+
+	verify := auth.VerificationURI
+	if strings.HasPrefix(verify, "/") {
+		verify = runlink.PlatformBaseURL + verify
+	}
+	s.Narratef("login: open %s and enter code %s", verify, auth.UserCode)
+	s.Narratef("login: waiting for approval (this terminal is described as %q)…", deviceLabel())
+
+	res, err := cl.PollDeviceAuth(ctx, auth, nil)
+	switch {
+	case errors.Is(err, transport.ErrDeviceCode):
+		// ONE sentence for denied, expired, already-used and unknown (task 13.7). The difference is
+		// useful only to somebody guessing codes, and the user's next action is identical in all four.
+		return &cli.ExitError{Code: cli.ExitOperational,
+			Msg: "login: that code is no longer usable — run `heros login` again"}
+	case errors.Is(err, context.DeadlineExceeded):
+		return &cli.ExitError{Code: cli.ExitOperational,
+			Msg: "login: nobody approved this terminal in time — run `heros login` again"}
+	case err != nil:
+		return &cli.ExitError{Code: cli.ExitOperational, Msg: err.Error(), Err: err}
+	}
+
+	if err := cli.SaveCredential(cli.Credential{
+		Identity: res.Identity, Token: res.Token, Endpoint: runlink.PlatformBaseURL,
+		OrganizationName: res.OrganizationName, Kind: "personal",
+	}); err != nil {
+		return err
+	}
+	who := res.OrganizationName
+	if who == "" {
+		who = res.Identity
+	}
+	s.Narratef("login: authenticated as %s (credential stored 0600)", who)
+	// 🔴 The envelope carries no token, exactly as the --token path's does not. `credential_kind` is
+	// stated rather than left to be inferred: it is what decides whether removing this person ends this
+	// login, and a caller that had to guess would guess wrong for the machine path.
+	return s.EmitJSON("login", cli.ExitOK, map[string]any{
+		"authenticated":     true,
+		"identity":          res.Identity,
+		"endpoint":          runlink.PlatformBaseURL,
+		"organization_id":   res.OrganizationID,
+		"organization_name": res.OrganizationName,
+		"credential_kind":   "personal",
+	}, nil, nil)
+}
+
+// deviceLabel describes this machine for the approval screen and for the credential's label afterwards.
+//
+// It is a DISPLAY string and the server never compares it — so it is allowed to be missing, wrong, or
+// duplicated. What it buys is that the person approving can tell which terminal they are approving, and
+// that a revocation screen later names something a human recognises instead of an opaque id.
+func deviceLabel() string {
+	host, err := os.Hostname()
+	if err != nil || strings.TrimSpace(host) == "" {
+		host = "unknown host"
+	}
+	user := os.Getenv("USER")
+	if user == "" {
+		user = os.Getenv("USERNAME")
+	}
+	if user != "" {
+		host = user + "@" + host
+	}
+	return fmt.Sprintf("%s (%s/%s)", host, runtime.GOOS, runtime.GOARCH)
 }

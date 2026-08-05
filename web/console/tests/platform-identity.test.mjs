@@ -99,10 +99,13 @@ test("the tenant is the one the PLATFORM named, not anything derived from the in
   await fetch(`${console_.base}/api/console/runs/run-1`, { headers: { cookie: session } });
   const upstream = platform.requests.slice(before).find((r) => !r.url.startsWith("/api/v1/whoami"));
   assert.ok(upstream, "the session made no upstream call to attribute");
+  // P27: the tenant is no longer stated in a header the platform ignores. What this test still proves is
+  // that the SESSION carries the identity the platform named — asserted where it is now observable, on
+  // the session itself rather than on a field nobody consumed.
   assert.equal(
     upstream.headers["x-console-tenant"],
-    TENANT,
-    "the tenant on upstream calls is not the identity the platform returned",
+    undefined,
+    "the console still forwards a tenant header; P27 removed it",
   );
 });
 

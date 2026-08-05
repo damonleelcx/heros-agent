@@ -282,7 +282,7 @@ db-proof:
 ##           These tests are behind the `pgproof` build tag, so `make go` does not compile them; with
 ##           no database they FAIL rather than skip.
 pg-proof:
-	bash db/migrations/postgres/run_pg_docker.sh $(GO) test -tags pgproof -count=1 ./internal/pgmigrate/ ./internal/launch/ ./internal/billing/ ./internal/proposalstore/ ./internal/registry/ ./internal/variantspec/ ./internal/worktree/ ./internal/executor/ ./internal/runqueue/ ./internal/submit/ ./internal/e2e/ ./internal/telemetry/ ./internal/evalrun/ ./internal/metering/ ./internal/legal/
+	bash db/migrations/postgres/run_pg_docker.sh $(GO) test -tags pgproof -count=1 ./internal/pgmigrate/ ./internal/launch/ ./internal/billing/ ./internal/proposalstore/ ./internal/registry/ ./internal/variantspec/ ./internal/worktree/ ./internal/executor/ ./internal/runqueue/ ./internal/submit/ ./internal/e2e/ ./internal/telemetry/ ./internal/evalrun/ ./internal/metering/ ./internal/legal/ ./internal/api/ ./internal/tenancy/ ./internal/signup/
 
 ## demo-evalboard: stand up the P4 eval board against a live fan-out with a stubbed provider.
 ##                Everything between the queue and the pixel is the shipped path: the eval set comes

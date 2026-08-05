@@ -1,0 +1,16 @@
+// DELIBERATELY BROKEN. A credential written with its plaintext in the stored column.
+//
+// `Credential` has a Hash and no secret field precisely so this cannot happen by accident — but the
+// field takes any string, and a caller holding the plaintext is one assignment away from storing it.
+// The stored value is then a bearer token at rest: anyone who can read the row can authenticate.
+package broken
+
+type Credential struct {
+	CredentialID string
+	TenantID     string
+	Hash         string
+}
+
+func mint(tenantID, secret string) Credential {
+	return Credential{CredentialID: "cred_x", TenantID: tenantID, Hash: secret}
+}

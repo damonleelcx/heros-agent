@@ -22,10 +22,16 @@ import (
 	"github.com/heros-foreal/agentd/internal/config"
 	"github.com/heros-foreal/agentd/internal/erroreport"
 	"github.com/heros-foreal/agentd/internal/providergateway"
+	"github.com/heros-foreal/agentd/internal/tenancy"
 )
 
 // Server is the agentd HTTP API.
 type Server struct {
+	// deviceSecrets holds an issued credential's plaintext between the approval that minted it and the
+	// poll that collects it — in memory, on this process, and nowhere else. See internal/api/deviceauth.go
+	// for why it is not a column.
+	deviceSecrets deviceSecrets
+
 	// DB is the SQLite dev ledger (auth keys, memory). NOT P2's store — see p2.go.
 	DB      *sql.DB
 	Cfg     config.Config
@@ -111,6 +117,21 @@ type Server struct {
 	// adminIdentity names the live OPERATOR identity provider (P22 task 6.4). The DOOR, never anything
 	// behind it — no key, no secret id, no assertion.
 	adminIdentity AdminIdentityDescriber
+
+	// accounts is P27's identity surface: organizations, members, invitations and credentials. Nil means
+	// this deployment does not mount the account system, and the routes are not registered at all — a
+	// deployment answers 404 for a route it does not have rather than 503 for one it does.
+	accounts AccountSurface
+
+	// authRegistry is the ONE registry every authenticated request resolves against. Exposed so the boot
+	// path can point it at the durable identity store after the schema is up.
+	authRegistry *auth.Registry
+
+	// accountSystem is the P27 posture: which identity store is live, whether self-serve sign-up is on,
+	// and what the boot seed did. Reported as a VALUE beside `secrets_source` rather than as a gate,
+	// because a deployment with self-serve off is configured, not degraded. Nil means this deployment
+	// mounts no account system, which is stated by omission rather than by inventing a status for it.
+	accountSystem *tenancy.Posture
 
 	// errorReporter is the P24 error-reporting boundary. Nil means absent, which is the default and the
 	// correct state on every substrate except the platform's own hosted deployment.
@@ -328,6 +349,16 @@ type AdminIdentityDescriber interface {
 // wants that answer readable from the box in question, by a monitor, without a credential.
 func (s *Server) SetAdminIdentity(d AdminIdentityDescriber) { s.adminIdentity = d }
 
+// SetAccountSystem records the P27 posture for /readyz (task 3.5).
+//
+// The seed result is passed in rather than recomputed: the endpoint must report what the seed ACTUALLY
+// did on this boot, and a second run to find out would both lie and write.
+func (s *Server) SetAccountSystem(p tenancy.Posture) { s.accountSystem = &p }
+
+// AuthRegistry returns the registry this server authenticates against, so the boot path can point it at
+// the durable identity store. It is never nil.
+func (s *Server) AuthRegistry() *auth.Registry { return s.authRegistry }
+
 // HTTPIdentityProbe reads the customer console's health endpoint and extracts its identity block.
 //
 // # Why the platform asks the console rather than resolving the IdP itself
@@ -439,9 +470,14 @@ func New(db *sql.DB, cfg config.Config) *Server {
 	s.Mux.HandleFunc("GET /api/v1/install", s.handleInstall)
 
 	var h http.Handler = s.Mux
+	// The registry is KEPT, not just used. P27's boot path points it at the durable identity store with
+	// `AuthRegistry().WithSource(...)` — which mutates this same object, so the composed handler needs no
+	// rebuilding and there is exactly one registry a request can be resolved against. Two registries is
+	// how a deployment ends up authenticating against the configuration file on one path and the
+	// database on another.
+	s.authRegistry = auth.NewRegistry(cfg)
 	if cfg.AuthMode == "required" {
-		reg := auth.NewRegistry(cfg)
-		h = auth.Compose(reg, h) // gates /api/*; health paths stay open
+		h = auth.Compose(s.authRegistry, h) // gates /api/*; health paths stay open
 	}
 	// OUTERMOST, so a panic in the auth layer is reported too and every response — including a refusal
 	// — carries the trace id a customer can quote back.
@@ -516,6 +552,12 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 		// Absent rather than "unknown" when unset: a deployment that wired no billing rollout has none,
 		// and saying so by omission beats inventing a status for it.
 		body["billing_rollout"] = s.billing.Describe()
+	}
+	if s.accountSystem != nil {
+		// P27 task 3.5. Which identity store is live, whether self-serve sign-up is on, and what the
+		// boot seed did — as values, so nobody has to read the process environment during an incident
+		// to learn whether this deployment can create an organization.
+		body["account_system"] = s.accountSystem.Describe()
 	}
 	// The error-reporting integration's three-state entry. Reported at the top level beside
 	// `secrets_source` rather than inside `components`, because it is deliberately NOT a gate — see

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/heros-foreal/agentd/internal/pgmigrate"
 	"github.com/heros-foreal/agentd/internal/pgtest"
 	"github.com/heros-foreal/agentd/internal/registry"
 	"github.com/lib/pq"
@@ -29,18 +30,15 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	testDB = db
-	for _, f := range []string{"0001_p0_lineage.up.sql", "0002_p2_registries.up.sql",
-		"0003_p2_variant_spec.up.sql", "0004_p2_transform.up.sql",
-		"0007_p2_verification_strength.up.sql", "0005_p2_run.up.sql"} {
-		b, err := os.ReadFile(filepath.Join("..", "..", "db", "migrations", "postgres", f))
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "read %s: %v\n", f, err)
-			os.Exit(1)
-		}
-		if _, err := db.Exec(string(b)); err != nil {
-			fmt.Fprintf(os.Stderr, "apply %s: %v\n", f, err)
-			os.Exit(1)
-		}
+	// 🔴 The FULL embedded set, exactly as a booting deployment applies it.
+	//
+	// This used to hand-list six migration files. That is the pattern `internal/pgmigrate`'s own header
+	// names as the reason nothing in CI applied anything past ~0009 — a proof that applies its own subset
+	// is a proof against a schema no deployment has, and it goes red the first time another phase adds a
+	// column to a table this package writes. P27 adding `run.tenant_id` was that first time.
+	if _, err := pgmigrate.Apply(context.Background(), db); err != nil {
+		fmt.Fprintf(os.Stderr, "apply migrations: %v\n", err)
+		os.Exit(1)
 	}
 	os.Exit(m.Run())
 }
@@ -80,7 +78,7 @@ func TestPG_StartFinishAndGetRoundTripARun(t *testing.T) {
 	seedLineage(t)
 	s := NewStore(testDB)
 
-	if err := s.Start(ctx, "run_ok", cfgHash, "rev1", 42); err != nil {
+	if err := s.Start(ctx, "run_ok", cfgHash, "rev1", 42, "acme"); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	if err := s.RecordNode(ctx, "run_ok", NodeResult{
@@ -114,7 +112,7 @@ func TestPG_DoubleWriteOfOneNodeExecutionIsCaught(t *testing.T) {
 	ctx := context.Background()
 	seedLineage(t)
 	s := NewStore(testDB)
-	if err := s.Start(ctx, "run_dup", cfgHash, "rev1", 1); err != nil {
+	if err := s.Start(ctx, "run_dup", cfgHash, "rev1", 1, "acme"); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	n := NodeResult{NodeID: "n_a", AttemptGroup: 0, Status: StatusSucceeded,
@@ -162,7 +160,7 @@ func TestPG_RetryAndNewInvocationAreDistinguishable(t *testing.T) {
 	ctx := context.Background()
 	seedLineage(t)
 	s := NewStore(testDB)
-	if err := s.Start(ctx, "run_groups", cfgHash, "rev1", 1); err != nil {
+	if err := s.Start(ctx, "run_groups", cfgHash, "rev1", 1, "acme"); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	for _, g := range []int{0, 1} {
@@ -190,7 +188,7 @@ func TestPG_HaltIsRecordedWithTheNodeThatCausedIt(t *testing.T) {
 	ctx := context.Background()
 	seedLineage(t)
 	s := NewStore(testDB)
-	if err := s.Start(ctx, "run_halt", cfgHash, "rev1", 1); err != nil {
+	if err := s.Start(ctx, "run_halt", cfgHash, "rev1", 1, "acme"); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	if err := s.Finish(ctx, &Run{RunID: "run_halt", Status: StatusHalted,
@@ -248,7 +246,7 @@ func TestPG_Finish_CannotOverwriteATerminalVerdict(t *testing.T) {
 	ctx := context.Background()
 	seedLineage(t)
 	s := NewStore(testDB)
-	if err := s.Start(ctx, "run_twice", cfgHash, "rev1", 1); err != nil {
+	if err := s.Start(ctx, "run_twice", cfgHash, "rev1", 1, "acme"); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	if err := s.Finish(ctx, &Run{RunID: "run_twice", Status: StatusHalted, HaltedNodeID: "n_a", HaltedReason: "boom"}); err != nil {
@@ -301,7 +299,7 @@ func TestPG_NodeExecution_IsImmutable(t *testing.T) {
 	ctx := context.Background()
 	seedLineage(t)
 	s := NewStore(testDB)
-	if err := s.Start(ctx, "run_immut", cfgHash, "rev1", 1); err != nil {
+	if err := s.Start(ctx, "run_immut", cfgHash, "rev1", 1, "acme"); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	if err := s.RecordNode(ctx, "run_immut", NodeResult{NodeID: "n_a", Status: StatusSucceeded,
@@ -350,7 +348,7 @@ func TestPG_RecordNodeWithRealBlobReferencesSatisfiesTheFK(t *testing.T) {
 		t.Fatalf("put output: %v", err)
 	}
 
-	if err := s.Start(ctx, "run_blobs", cfgHash, "rev1", 1); err != nil {
+	if err := s.Start(ctx, "run_blobs", cfgHash, "rev1", 1, "acme"); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	if err := s.RecordNode(ctx, "run_blobs", NodeResult{
@@ -387,7 +385,7 @@ func TestPG_RecordNodeWithAnUncataloguedBlobIsRejected(t *testing.T) {
 		t.Fatalf("put: %v", err)
 	}
 
-	if err := s.Start(ctx, "run_orphan", cfgHash, "rev1", 1); err != nil {
+	if err := s.Start(ctx, "run_orphan", cfgHash, "rev1", 1, "acme"); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	err = s.RecordNode(ctx, "run_orphan", NodeResult{

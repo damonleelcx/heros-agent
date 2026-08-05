@@ -90,7 +90,7 @@ export async function GET(request: Request) {
   const outcome = await verifyTenantAssertion(idToken, { kind: "oidc", nonce: flow.nonce });
   if (!outcome.ok) return refuse(outcome.refusal, flow.next);
 
-  const { token } = issueSession(outcome.principal);
+  const { token } = await issueSession(outcome.principal);
   // Relative destination, cookie set ON the response. Both are the lessons `lib/redirect.ts` and
   // `api/session/route.ts` already record — an immutable redirect cannot carry a `Set-Cookie`, and an
   // absolute URL built from `request.url` leaves this origin and is refused by our own CSP.

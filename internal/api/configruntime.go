@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
+	"github.com/heros-foreal/agentd/internal/auth"
 	"github.com/heros-foreal/agentd/internal/executor"
 	"github.com/heros-foreal/agentd/internal/submit"
 	"github.com/heros-foreal/agentd/internal/transform"
@@ -60,6 +63,10 @@ type ConfigRuntimeStores struct {
 func (s *Server) MountConfigRuntime(st ConfigRuntimeStores) {
 	s.configRuntime = st
 	s.Mux.HandleFunc("GET /api/v1/runs/{run_id}", s.handleGetRun)
+	// P27 FR15: the collection. It existed nowhere before, which is why "what did I run last week?" was
+	// not a question this API could be asked. It takes NO organization parameter in any position — the
+	// scope is the verified principal's, and there is nothing to get wrong.
+	s.Mux.HandleFunc("GET /api/v1/runs", s.handleListRuns)
 	s.Mux.HandleFunc("GET /api/v1/transforms/{config_hash}/{source_revision}", s.handleGetTransform)
 	s.Mux.HandleFunc("POST /api/v1/specs/resolve", s.handleResolveSpec)
 	s.Mux.HandleFunc("POST /api/v1/specs/submit", s.handleSubmitSpec)
@@ -101,6 +108,14 @@ func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
 	if errors.Is(err, executor.ErrRunNotFound) {
 		// 404 and nothing else. A run that does not exist and a run that is still starting are
 		// different, and the UI's empty state depends on being able to tell them apart.
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "no such run"})
+		return
+	}
+	if err == nil && !visibleToPrincipal(r, rec.TenantID) {
+		// 🔴 P27 FR18. A run belonging to ANOTHER organization answers exactly what a run that does not
+		// exist answers — same status, same body — so the endpoint is not an existence oracle. The
+		// caller may name any subject it likes; the platform decides whether this organization may see
+		// it, and declining to confirm that it exists is the correct answer to give a stranger.
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "no such run"})
 		return
 	}
@@ -395,8 +410,15 @@ func (s *Server) handleSubmitSpec(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 🔴 The owning organization comes from the VERIFIED principal, and there is no field on
+	// `submitRequest` a caller could put one in. That is FR14 and FR16 in the same line: the owner is
+	// recorded at write time, and it is not something the request gets to say about itself.
+	owner := ""
+	if p, ok := auth.PrincipalFrom(r.Context()); ok {
+		owner = p.TenantID
+	}
 	out, err := s.configRuntime.Submit.Submit(r.Context(), submit.Request{
-		Spec: &req.Spec, VariantID: req.VariantID, Label: req.Label, Seed: req.Seed,
+		Spec: &req.Spec, VariantID: req.VariantID, Label: req.Label, Seed: req.Seed, TenantID: owner,
 	})
 	if err != nil {
 		if isSpecRejection(err) {
@@ -420,3 +442,91 @@ func (s *Server) handleSubmitSpec(w http.ResponseWriter, r *http.Request) {
 }
 
 var _ = sql.ErrNoRows
+
+// visibleToPrincipal reports whether the caller's organization may see a subject owned by `owner`.
+//
+// # The three cases, and why the third is not a security hole
+//
+//   - The owner matches the verified principal's organization. Visible.
+//   - The owner is a DIFFERENT organization. Not visible, and the caller is told the subject does not
+//     exist rather than that it is forbidden (P27 FR18).
+//   - The owner is EMPTY — a pre-ownership row, created before P27, whose owner was never written and is
+//     not recoverable. Visible to any authenticated principal, and that is the honest answer: the
+//     information needed to scope it does not exist, and inventing one would produce a *confident wrong*
+//     owner on a row that is billed usage. These rows are excluded from every LISTING (see
+//     `Store.ListForTenant`), so nobody discovers somebody else's history by browsing; they are reachable
+//     only by an id somebody already had, which is the state the product was in before this phase.
+//
+// A request with no principal at all sees nothing: the middleware refuses before this is reached, and
+// this returns false rather than trusting that.
+func visibleToPrincipal(r *http.Request, owner string) bool {
+	p, ok := auth.PrincipalFrom(r.Context())
+	if !ok || p.TenantID == "" {
+		return false
+	}
+	if strings.TrimSpace(owner) == "" {
+		return true
+	}
+	return owner == p.TenantID
+}
+
+// handleListRuns answers "what did I run?" — the question this API could not be asked before P27.
+func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
+	if s.configRuntime.Runs == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "the P2 store is not mounted"})
+		return
+	}
+	p, ok := auth.PrincipalFrom(r.Context())
+	if !ok || p.TenantID == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "authentication required"})
+		return
+	}
+
+	limit := 50
+	if v := strings.TrimSpace(r.URL.Query().Get("limit")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	// The cursor is a timestamp, not an offset. An offset page shifts under a concurrent write and
+	// silently skips or repeats a row; a timestamp cursor is stable against inserts.
+	var before time.Time
+	if v := strings.TrimSpace(r.URL.Query().Get("before")); v != "" {
+		t, err := time.Parse(time.RFC3339Nano, v)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "`before` must be an RFC3339 timestamp"})
+			return
+		}
+		before = t
+	}
+
+	runs, err := s.configRuntime.Runs.ListForTenant(r.Context(), p.TenantID, limit, before)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	// 🔴 THREE states, not one. "You have no runs yet", "runs exist that predate ownership recording",
+	// and "the platform did not answer" are three different facts with three different next actions, and
+	// collapsing any pair of them into an empty list is what makes a release read as data loss to
+	// somebody who used the product last week.
+	body := map[string]any{"runs": runs}
+	// 🔴 Reported ALWAYS, not only when the page is empty.
+	//
+	// The first version returned this count only for a tenant with no rows, which made the "runs exist
+	// that predate ownership" banner unreachable for the tenant who most needs it: somebody with both
+	// new runs and old ones sees a list that is silently partial. The count is a property of the
+	// platform rather than of a tenant — a pre-ownership row belongs to nobody, which is the whole
+	// meaning of the NULL — so it is the same answer either way and there is no reason to hide it
+	// behind an empty list.
+	if n, cerr := s.configRuntime.Runs.PreOwnedCount(r.Context()); cerr == nil && n > 0 {
+		body["pre_ownership_runs"] = n
+		body["pre_ownership_note"] = "runs created before this platform recorded which organization " +
+			"owns them are not listed; they remain reachable by id"
+	}
+	if len(runs) == limit {
+		// The cursor for the next page is the LAST row's timestamp, handed back rather than derived by
+		// the client — the client does not know the ordering column and must not have to guess it.
+		body["next_before"] = runs[len(runs)-1].StartedAt.Format(time.RFC3339Nano)
+	}
+	writeJSON(w, http.StatusOK, body)
+}

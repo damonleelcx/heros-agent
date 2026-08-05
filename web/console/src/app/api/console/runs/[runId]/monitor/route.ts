@@ -10,7 +10,7 @@ import { withSession, isResponse, forward } from "@/lib/bff";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request, { params }: { params: Promise<{ runId: string }> }) {
-  const context = withSession(request);
+  const context = await withSession(request);
   if (isResponse(context)) return context;
   const { runId } = await params;
   return forward(context, context.paths.monitor(runId));

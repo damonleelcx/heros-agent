@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/heros-foreal/agentd/internal/executor"
+	"github.com/heros-foreal/agentd/internal/pgmigrate"
 	"github.com/heros-foreal/agentd/internal/pgtest"
 	"github.com/lib/pq"
 )
@@ -36,19 +37,16 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	testDB = db
-	for _, f := range []string{"0001_p0_lineage.up.sql", "0002_p2_registries.up.sql",
-		"0003_p2_variant_spec.up.sql", "0004_p2_transform.up.sql",
-		"0007_p2_verification_strength.up.sql", "0005_p2_run.up.sql",
-		"0006_p2_run_queue.up.sql"} {
-		b, err := os.ReadFile(filepath.Join("..", "..", "db", "migrations", "postgres", f))
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "read %s: %v\n", f, err)
-			os.Exit(1)
-		}
-		if _, err := db.Exec(string(b)); err != nil {
-			fmt.Fprintf(os.Stderr, "apply %s: %v\n", f, err)
-			os.Exit(1)
-		}
+	// 🔴 The FULL embedded set, exactly as a booting deployment applies it.
+	//
+	// This used to hand-list the handful of migrations this package's own tables need. That is the
+	// pattern `internal/pgmigrate`'s header names as the reason nothing in CI applied anything past
+	// ~0009: a proof against its own subset is a proof against a schema no deployment has, and it goes
+	// red the first time another phase adds a column to a table this package writes. P27 adding
+	// `run.tenant_id` was that first time.
+	if _, err := pgmigrate.Apply(context.Background(), db); err != nil {
+		fmt.Fprintf(os.Stderr, "apply migrations: %v\n", err)
+		os.Exit(1)
 	}
 	os.Exit(m.Run())
 }
@@ -310,7 +308,7 @@ func TestPG_RedeliveryDoesNotDoubleWriteOrDoubleCharge(t *testing.T) {
 			t.Fatalf("Dequeue(%s): %v", worker, err)
 		}
 		// Start is idempotent-by-conflict: the redelivery's Start hits the existing run row.
-		_ = es.Start(ctx, it.RunID, it.ConfigHash, it.SourceRevision, it.Seed)
+		_ = es.Start(ctx, it.RunID, it.ConfigHash, it.SourceRevision, it.Seed, "acme")
 		if err := es.RecordNode(ctx, it.RunID, executor.NodeResult{
 			NodeID: "n_a", AttemptGroup: 0, Status: executor.StatusSucceeded,
 			IdempotencyKey: executor.IdempotencyKey(it.RunID, "n_a", 0),

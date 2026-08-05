@@ -55,7 +55,7 @@ export async function POST(request: Request) {
     return redirectTo(back);
   }
 
-  const { token } = issueSession(outcome.principal);
+  const { token } = await issueSession(outcome.principal);
   // Two things this line gets right that the obvious version does not, both found by clicking the
   // button in a real browser rather than by any check that passes on a build (R11):
   //
@@ -81,7 +81,7 @@ export async function POST(request: Request) {
  */
 export async function DELETE() {
   const token = await readSessionToken();
-  revokeSession(token);
+  await revokeSession(token);
   const response = NextResponse.json({ ok: true }, { headers: { "cache-control": "no-store" } });
   response.cookies.set(SESSION_COOKIE, "", { ...SESSION_COOKIE_OPTIONS, maxAge: 0 });
   return response;

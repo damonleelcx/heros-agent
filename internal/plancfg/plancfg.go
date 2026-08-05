@@ -91,6 +91,17 @@ type PlanConfig struct {
 	Version string `json:"version"`
 }
 
+// Charges reports whether this plan costs the customer money.
+//
+// The definition is CONFIGURED rather than named: a plan charges when it carries at least one price
+// reference. Special-casing the id `free` would be a second place the answer lives, and it would be
+// wrong for the deployment that calls its free tier something else.
+//
+// It is what P27 writes into `account.plan_charges`, which is how the database can hold *a provider
+// handle may be absent only while the plan charges nothing* — the database cannot read this
+// configuration, so the answer has to be carried to it by whoever moves the plan.
+func (p PlanConfig) Charges() bool { return len(p.PriceRefs) > 0 }
+
 // Entitles reports whether the plan's config lists f.
 func (p PlanConfig) Entitles(f Feature) bool { return p.Features[f] }
 

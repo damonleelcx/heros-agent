@@ -40,6 +40,11 @@ export const routes = {
   harness: () => "/app/harness",
   coverage: () => "/app/coverage",
   account: () => "/app/account",
+  members: () => "/app/settings/members",
+  // Where a person approves a terminal login. The path is also compiled into the platform's device
+  // response (`deviceVerificationPath`), because the CLI prints it before any browser is open — the two
+  // are asserted equal by `tests/routes.test.mjs` rather than kept in step by memory.
+  device: () => "/app/device",
   billing: () => "/app/billing",
   delivery: () => "/app/delivery",
   // Public: no session. The people who need it do not have an account yet — see src/app/install/page.tsx.

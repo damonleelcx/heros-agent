@@ -44,6 +44,16 @@ patches:
                   # When this is unreachable, /readyz reports secrets_source degraded and the model-
                   # dependent stages read that as degraded-not-available — fail static, not a crash.
                   - { name: HEROS_SECRETS_HEALTH_URL, value: "http://onprem-llm-gateway.heros.svc:8080/healthz" }
+                  # 🔴 Self-serve sign-up OFF, declared rather than left to the default (P27 task 10.4).
+                  #
+                  # An air-gapped install has ONE customer by construction, and its identity provider is
+                  # that customer's own — so everybody it admits is already inside the perimeter, and
+                  # self-serve would let any of them mint an organization on a platform with no egress to
+                  # alert over it. `launch.SelfServeEnabled` already treats unset as off; this line exists
+                  # so the posture is READABLE. `deploy/scripts/check-self-serve-off.sh` refuses to cut a
+                  # package that turns it on AND one that never says, because an operator can diff "0"
+                  # becoming "1" and cannot diff a line that was always missing.
+                  - { name: HEROS_SELF_SERVE_SIGNUP, value: "0" }
 
   # 1b) The console's release surface goes OFFLINE. Without this the download page points at GitHub from
   #     a network with no egress, and an operator sees a dead link with no reason beside it — the

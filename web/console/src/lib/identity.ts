@@ -4,7 +4,7 @@ import { REFUSAL, resolveTenant, type FederatedClaims } from "./idp/federation";
 import { spendAssertion } from "./idp/flow";
 import { verifyIdToken, reachable as oidcReachable, IdpUnreachableError } from "./idp/oidc";
 import { verifyPlatformToken, reachable as platformReachable } from "./idp/platformToken";
-import { platformApiBase } from "./platformApi";
+import { platformApiBase, platformFetch } from "./platformApi";
 import { verifySamlResponse, reachableMetadata } from "./idp/saml";
 import { SecretUnavailableError, describeSecrets } from "./idp/secrets";
 import { logIdentity } from "./telemetry";
@@ -46,7 +46,18 @@ import { logIdentity } from "./telemetry";
  * is visible above this file.
  */
 
-export type TenantPrincipal = { tenantId: string };
+export type TenantPrincipal = {
+  tenantId: string;
+  /**
+   * userId is the PERSON, where the platform can name one.
+   *
+   * 🔴 ADR-008 recorded that the session holds a tenant and not a user "because the platform cannot
+   * currently prove one". P22 made that false — a verified assertion yields `sub@issuer` — and P27 is
+   * where the field appears. It is optional because the `configured` and `dev` seams resolve an
+   * organization and no person, and inventing one for them would be worse than the gap.
+   */
+  userId?: string;
+};
 
 /**
  * RefusalClass is the COARSE reason a sign-in did not happen. Exactly three values, and the split is
@@ -157,7 +168,8 @@ export async function verifyTenantAssertion(assertion: string, binding?: Asserti
         logIdentity({ event: "assertion_refused", provider: PROVIDER, cause: "assertion is not in the configured map" });
         return refuse("credential");
       }
-      return { ok: true, principal: { tenantId } };
+      const userId = await resolveSeamPerson("configured", value, tenantId);
+      return { ok: true, principal: userId ? { tenantId, userId } : { tenantId } };
     }
 
     case "platform": {
@@ -169,7 +181,15 @@ export async function verifyTenantAssertion(assertion: string, binding?: Asserti
         logIdentity({ event: "assertion_refused", provider: PROVIDER, cause: outcome.cause });
         return refuse("credential");
       }
-      return { ok: true, principal: { tenantId: outcome.tenantId } };
+      // 🔴 The platform ALREADY knows who this token belongs to — a personal credential names a person
+      // and a machine credential names none — so this seam asks rather than inventing. That is also what
+      // makes `heros login`'s token carry a person into the console.
+      return {
+        ok: true,
+        principal: outcome.userId
+          ? { tenantId: outcome.tenantId, userId: outcome.userId }
+          : { tenantId: outcome.tenantId },
+      };
     }
 
     case "oidc": {
@@ -185,7 +205,7 @@ export async function verifyTenantAssertion(assertion: string, binding?: Asserti
           logIdentity({ event: "assertion_refused", provider: PROVIDER, issuer: CONFIG.issuer, cause: verified.cause });
           return refuse("credential");
         }
-        return mapToTenant(verified.claims);
+        return await mapToTenant(verified.claims);
       } catch (err) {
         return failClosed(err);
       }
@@ -205,7 +225,7 @@ export async function verifyTenantAssertion(assertion: string, binding?: Asserti
           logIdentity({ event: "assertion_refused", provider: PROVIDER, issuer: CONFIG.issuer, cause: verified.cause });
           return refuse("credential");
         }
-        return mapToTenant(verified.claims);
+        return await mapToTenant(verified.claims);
       } catch (err) {
         return failClosed(err);
       }
@@ -220,7 +240,7 @@ export async function verifyTenantAssertion(assertion: string, binding?: Asserti
  * fails mapping still cannot be retried, and two concurrent replays cannot both win a race to the
  * mapping step.
  */
-function mapToTenant(claims: FederatedClaims): VerifyOutcome {
+async function mapToTenant(claims: FederatedClaims): Promise<VerifyOutcome> {
   if (!CONFIG.tenantMap) {
     // Unreachable in a federated deployment — `config.ts` refuses to boot without a map — and a
     // refusal rather than a throw so a future kind cannot turn a missing map into an exception page.
@@ -242,7 +262,79 @@ function mapToTenant(claims: FederatedClaims): VerifyOutcome {
     logIdentity({ event: "jit_provisioned", provider: PROVIDER, issuer: claims.issuer, tenantId: resolved.tenantId });
   }
   logIdentity({ event: "sign_in", provider: PROVIDER, issuer: claims.issuer, tenantId: resolved.tenantId });
-  return { ok: true, principal: { tenantId: resolved.tenantId } };
+
+  /*
+   * 🔴 The PERSON, resolved last and never allowed to fail the sign-in.
+   *
+   * ADR-008 recorded that the session holds a tenant and not a user "because the platform cannot
+   * currently prove one". P22 made that false. This is where the proof becomes an id: the platform
+   * upserts the person against the verified `(issuer, subject)` pair and ensures they are a member of
+   * the organization the mapping above already placed them in.
+   *
+   * It does not gate the sign-in. A platform that cannot answer leaves `userId` ABSENT — which is
+   * exactly what a machine principal looks like, and exactly what this console did for every session
+   * before P27 — rather than turning an identity outage into a refused sign-in for somebody whose
+   * assertion verified. The consequence is stated rather than hidden: per-user attribution is missing
+   * for that session, and the surfaces that need a member refuse with a reason.
+   */
+  const userId = await resolvePerson(claims, resolved.tenantId);
+  return { ok: true, principal: userId ? { tenantId: resolved.tenantId, userId } : { tenantId: resolved.tenantId } };
+}
+
+/**
+ * resolveSeamPerson resolves a person for the seams that prove an ORGANIZATION rather than an individual.
+ *
+ * `dev` and `configured` map an assertion to an organization and know no name behind it. That is honest,
+ * and it left every member-scoped surface refusing their readers with "you are not a member" — which is
+ * true and useless. So the assertion itself becomes the subject: one stable person per assertion, which
+ * is precisely what those seams model.
+ *
+ * It never fails a sign-in. An unreachable platform leaves `userId` absent, which is the same state a
+ * machine principal is in and the state every session was in before P27.
+ */
+async function resolveSeamPerson(seam: string, assertion: string, tenantId: string): Promise<string | undefined> {
+  try {
+    const outcome = await platformFetch<{ user_id?: string }>("/api/v1/users/resolve", {
+      tenantId,
+      method: "POST",
+      body: {
+        // The ISSUER is the seam, not a URL: there is no identity provider here, and pretending there
+        // is one would put a fabricated issuer on a person's permanent identity.
+        issuer: `console:${seam}`,
+        subject: assertion,
+        email: "",
+        tenant_id: tenantId,
+      },
+    });
+    return outcome.ok ? outcome.data.user_id : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * resolvePerson asks the platform for the internal id of a verified identity, and for a membership in
+ * the organization the mapping resolved.
+ *
+ * Returns undefined on any failure, deliberately — see the call site.
+ */
+async function resolvePerson(claims: FederatedClaims, tenantId: string): Promise<string | undefined> {
+  try {
+    const outcome = await platformFetch<{ user_id?: string; member?: boolean }>("/api/v1/users/resolve", {
+      tenantId,
+      method: "POST",
+      body: {
+        issuer: claims.issuer,
+        subject: claims.subject,
+        email: claims.email ?? "",
+        tenant_id: tenantId,
+      },
+    });
+    if (!outcome.ok || !outcome.data.user_id) return undefined;
+    return outcome.data.user_id;
+  } catch {
+    return undefined;
+  }
 }
 
 /**

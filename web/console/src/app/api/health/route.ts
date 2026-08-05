@@ -1,6 +1,7 @@
 import { identityHealth, identitySecretsSource } from "@/lib/identity";
 import { platformApiBase, upstreamTimeoutMs } from "@/lib/platformApi";
 import { loadLegalCorpus } from "@/lib/reading/legal";
+import { describeSessionStore } from "@/lib/sessionStore";
 
 /**
  * The console component's machine-readable health (FR25, 🔴 `health-signal-surface`).
@@ -92,6 +93,23 @@ export async function GET() {
       // system rather than from a manifest (secrets-baseline.md §1.1). The source, never a secret.
       identity_secrets_source: identitySecretsSource(),
       credential_configured: Boolean(process.env.CONSOLE_PLATFORM_CREDENTIAL),
+      /*
+       * Which session store is live (P27 task 10.2).
+       *
+       * 🔴 It belongs HERE and not on the platform's /readyz, and the distinction is not cosmetic. The
+       * platform reports `account_system.store` — which identity store IT opened — and that is a
+       * different fact: the console selects its own backing with CONSOLE_SESSION_STORE, so a deployment
+       * can run a Postgres identity store and a per-process console session map at the same time. A
+       * reader who took the platform's answer for this one would conclude sessions were durable on a
+       * console that signs everybody out at every rollout.
+       *
+       * The value it reports is the CONSEQUENCE, not the setting: `durable` answers "does a session
+       * survive this pod", which is the question an operator is actually asking when the report is
+       * "the console keeps logging me out". `internal/deploy`'s replica fence reads the manifest and
+       * refuses two replicas over a per-process store; this reports what the RUNNING process chose,
+       * which is the half a manifest cannot prove.
+       */
+      session_store: describeSessionStore(),
       upstream_timeout_ms: upstreamTimeoutMs(),
       // Which legal text is live on THIS deployment. The full manifest, with every historical version,
       // is at /legal/manifest.json.

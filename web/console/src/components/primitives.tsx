@@ -411,13 +411,31 @@ export function Failure({
   children?: ReactNode;
 }) {
   if (kind === "gated") {
-    const capability = denial?.feature_label ?? subject ?? "This capability";
+    const capability = denial?.feature_label ?? subject ?? "this capability";
     const plan = denial?.upgrade_plan_name;
+    /*
+     * 🔴 The PLAN is the subject of both sentences, never the capability.
+     *
+     * This read `{capability} is not included in this plan`, which put a caller-supplied noun in front of
+     * a hard-coded singular verb — so `/app/settings/members` rendered "invitations is not included in
+     * this plan" and "API keys is not included in this plan". Found by opening the page.
+     *
+     * The fix is not to relabel the callers. A template whose grammar depends on data it does not control
+     * will keep breaking, one caller at a time, and the next person to add a plural surface has no reason
+     * to suspect it: `subject="invitations"` is correct everywhere else it is used (`No such invitations`
+     * is the one place it would read wrong, and that branch already guards it). Making the plan the
+     * subject makes the sentence number-agnostic — the capability becomes an object, where singular and
+     * plural read identically.
+     *
+     * The upgrade form is phrased as an inclusion rather than an exclusion for the reason the sales copy
+     * gives: the paywall is meant to be an invitation, and "the Team plan includes X" is one where
+     * "X is on the Team plan" is a verdict.
+     */
     return (
       <div className="state state--gated" role="note">
         <p className="state__title text-gated">
           <Lock className="size-4 shrink-0" aria-hidden="true" />
-          {capability} {plan ? `is on the ${plan} plan` : "is not included in this plan"}
+          {plan ? `The ${plan} plan includes ${capability}` : `This plan does not include ${capability}`}
         </p>
         <div className="state__body">
           {/* The platform's own reason, where it gave one. Nothing is invented and nothing is softened. */}

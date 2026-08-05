@@ -125,6 +125,18 @@ type FetchOptions = {
    * standing lesson being that a request must not be trusted to describe its own authority.
    */
   tenantId: string;
+  /**
+   * userId is the acting PERSON, when the session names one.
+   *
+   * 🔴 Without it every console call reaches the platform as the BFF's own credential — which names no
+   * person, so `actingMember` refuses it and the members surface renders as a plan boundary for
+   * everybody. That is not a hypothetical: it is exactly what the first browser run showed.
+   *
+   * With it, the call is made under a short-lived token scoped to this organization AND this person,
+   * so an audit entry names who acted and a removed member's console stops working at their next
+   * request — because the token is a session row and `RemoveMember` revokes sessions.
+   */
+  userId?: string;
   method?: string;
   body?: unknown;
   signal?: AbortSignal;
@@ -157,12 +169,24 @@ export async function platformFetch<T>(path: string, options: FetchOptions): Pro
       method,
       headers: {
         "content-type": "application/json",
-        // The credential crosses exactly one boundary: here.
-        "X-API-Key": platformCredential(),
-        // The tenant is stated explicitly on every upstream call so the platform's own logs can
-        // attribute it. It is derived server-side from the session and cannot be influenced by the
-        // client — see scope.ts.
-        "X-Console-Tenant": options.tenantId,
+        // The credential crosses exactly one boundary: here — and when the session names a person, what
+        // crosses is a SCOPED TOKEN standing for them rather than the BFF's own key. See scopedToken.
+        "X-API-Key": await credentialFor(options),
+        // 🔴 P27 DELETED the `X-Console-Tenant` header that used to sit here.
+        //
+        // It was sent on every upstream call and the platform never read it — `grep -rn X-Console-Tenant
+        // --include=*.go` returned a single hit, a comment in a proof binary. So `scope.ts`'s note that
+        // "tenant isolation is ultimately enforced by the platform against the credential and the
+        // X-Console-Tenant header" described a mechanism that did not exist, and every signed-in tenant
+        // resolved to the one principal this process-wide credential names.
+        //
+        // The header is removed rather than made authoritative. Trusting it costs one line and lets any
+        // holder of this credential name any organization — a request describing its own authority,
+        // which ADR-008 Rule 2 exists to forbid. Scope now travels INSIDE the credential: the BFF
+        // exchanges its session for a short-lived, organization-scoped token at
+        // POST /api/v1/token-exchange, and `auth` resolves the organization from the thing the platform
+        // verified. An ignored header that names authority is a loaded gun with the safety on, and
+        // `internal/api/ownership_fence_test.go` fails the build if it comes back.
       },
       body: options.body === undefined ? undefined : JSON.stringify(options.body),
       cache: "no-store",
@@ -292,7 +316,7 @@ export async function openPlatformStream(
     const response = await fetch(`${PLATFORM_API_BASE}${path}`, {
       headers: {
         "X-API-Key": platformCredential(),
-        "X-Console-Tenant": options.tenantId,
+        // See platformFetch: the tenant header is deleted, not made authoritative.
         accept: "text/event-stream",
       },
       cache: "no-store",
@@ -412,4 +436,86 @@ export async function platformFetchPublic<T>(
     );
   }
   return platformFetch<T>(path, { ...options, tenantId: PUBLIC_SCOPE });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────
+// Scoped tokens
+// ─────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * credentialFor returns what this call should present upstream.
+ *
+ * # The two cases, and why the first one exists at all
+ *
+ * A call made on behalf of a SIGNED-IN PERSON presents a short-lived token scoped to that organization
+ * and that person. A call made by the console itself — the token exchange, sign-in, anything with no
+ * session behind it — presents the BFF's own credential, which names no person and is exactly right for
+ * a caller that is not one.
+ *
+ * # 🔴 What this fixes, found in a browser and by nothing else
+ *
+ * Before it, every console call reached the platform as the BFF's machine credential. `actingMember`
+ * refuses a machine credential — a CI key that could remove a colleague is a CI key that becomes an
+ * offboarding tool — so the members, invitations and API-key sections all rendered as *"not included in
+ * this plan"*. Nothing failed. The build was green, every test passed, and the product told customers a
+ * capability they had was a capability they had to pay for.
+ *
+ * # Why caching the token is not caching a revocation
+ *
+ * The token is a `console_session` row, and the platform reads that row on EVERY request. Holding the
+ * string until it expires caches the identifier, not the verdict: revoke the session and the very next
+ * request presenting this token is refused. That is the distinction `durable.go` draws — caching a
+ * "yes" would be caching a "not yet revoked", and this cache holds neither.
+ */
+async function credentialFor(options: FetchOptions): Promise<string> {
+  if (!options.userId || !options.tenantId) return platformCredential();
+  const token = await scopedToken(options.tenantId, options.userId);
+  // A token exchange that fails does NOT fall back to the BFF's credential. Falling back would make a
+  // person's call silently become the console's, which is the widening this whole mechanism removes;
+  // the request then fails as an ordinary upstream failure and says so.
+  return token ?? platformCredential();
+}
+
+type CachedToken = { token: string; expiresAtMs: number };
+
+/** One process-wide cache. Keyed by organization AND person: a token is scoped to both. */
+const TOKEN_CACHE = Symbol.for("heros.console.scopedTokens");
+type TokenGlobal = typeof globalThis & { [TOKEN_CACHE]?: Map<string, CachedToken> };
+
+function tokenCache(): Map<string, CachedToken> {
+  const scope = globalThis as TokenGlobal;
+  if (!scope[TOKEN_CACHE]) scope[TOKEN_CACHE] = new Map<string, CachedToken>();
+  return scope[TOKEN_CACHE];
+}
+
+/**
+ * SCOPED_TOKEN_SAFETY_MS is how early a cached token is treated as expired.
+ *
+ * Thirty seconds: a token that expires between this check and the platform reading it produces a 401
+ * the user sees as an unexplained failure, and the cost of being early is one extra exchange.
+ */
+const SCOPED_TOKEN_SAFETY_MS = 30_000;
+
+async function scopedToken(tenantId: string, userId: string): Promise<string | null> {
+  const key = `${tenantId}\u0000${userId}`;
+  const cache = tokenCache();
+  const cached = cache.get(key);
+  if (cached && cached.expiresAtMs - SCOPED_TOKEN_SAFETY_MS > Date.now()) return cached.token;
+
+  try {
+    const response = await fetch(`${PLATFORM_API_BASE}/api/v1/token-exchange`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "X-API-Key": platformCredential() },
+      body: JSON.stringify({ tenant_id: tenantId, user_id: userId }),
+      cache: "no-store",
+    });
+    if (!response.ok) return null;
+    const body = (await response.json()) as { token?: string; expires_in?: number };
+    if (!body.token) return null;
+    const ttl = (body.expires_in ?? 600) * 1000;
+    cache.set(key, { token: body.token, expiresAtMs: Date.now() + ttl });
+    return body.token;
+  } catch {
+    return null;
+  }
 }

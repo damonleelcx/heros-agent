@@ -80,6 +80,20 @@ const PATH_TEMPLATES: Array<[RegExp, string]> = [
   [/^\/api\/v1\/customers\/[^/]+\/checkout-session$/, "/api/v1/customers/{customer_id}/checkout-session"],
   [/^\/api\/v1\/coverage$/, "/api/v1/coverage"],
   [/^\/api\/v1\/change-delivery$/, "/api/v1/change-delivery"],
+  // P27 — the organization, its people, and the work it owns. Every one of these is a fixed path with
+  // no subject in it, which is why they are exact matches rather than patterns: the scope comes from the
+  // credential, so there is no id to wildcard.
+  [/^\/api\/v1\/runs$/, "/api/v1/runs"],
+  [/^\/api\/v1\/organization$/, "/api/v1/organization"],
+  [/^\/api\/v1\/organization\/members$/, "/api/v1/organization/members"],
+  [/^\/api\/v1\/organization\/members\/[^/]+\/removal-preview$/, "/api/v1/organization/members/{user_id}/removal-preview"],
+  [/^\/api\/v1\/organization\/members\/[^/]+\/role$/, "/api/v1/organization/members/{user_id}/role"],
+  [/^\/api\/v1\/organization\/members\/[^/]+$/, "/api/v1/organization/members/{user_id}"],
+  [/^\/api\/v1\/organization\/invitations\/[^/]+$/, "/api/v1/organization/invitations/{invitation_id}"],
+  [/^\/api\/v1\/organization\/invitations$/, "/api/v1/organization/invitations"],
+  [/^\/api\/v1\/organization\/credentials\/[^/]+$/, "/api/v1/organization/credentials/{credential_id}"],
+  [/^\/api\/v1\/organization\/credentials$/, "/api/v1/organization/credentials"],
+  [/^\/api\/v1\/organization\/close$/, "/api/v1/organization/close"],
   [/^\/api\/v1\/deliveries$/, "/api/v1/deliveries"],
   [/^\/healthz$/, "/healthz"],
   [/^\/readyz$/, "/readyz"],

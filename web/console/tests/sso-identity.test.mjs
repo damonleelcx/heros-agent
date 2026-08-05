@@ -77,9 +77,44 @@ const CLIENT_ID = "console-client";
  * `tests/third-party-fence.test.mjs` (byte-identical output on every prefix) rather than by shape.
  */
 const ABOVE_THE_SEAM = {
-  "src/lib/session.ts": "221d2afc1cf462ea68fe8f1d7e2a7b547ea41fb31b59a85b125e6a2fa32fcb33",
   "src/lib/entitlements.ts": "71676c25bae578c82b65b1ed255c068e45d4ddaaf5f76b0864fcfa1d1592a608",
 };
+
+/**
+ * `src/lib/session.ts` used to be pinned WHOLE, and P27 is the third time that shape was the wrong one.
+ *
+ * The file's own precedents say what to do. `middleware.ts` is pinned by its fail-closed HALF because
+ * P24 legitimately rebuilds the CSP in the same file; `scope.ts` is pinned by its DERIVATION because a
+ * route rename changed every path literal and nothing else. Both notes end the same way: bumping the
+ * digest discards the fence for a change it was never aimed at, and teaches the next person that a
+ * failing pin is a one-line hash edit. **The pin follows the RULE, not the file.**
+ *
+ * P27 changes two things in this file for reasons ADR-008 anticipated and one it did not:
+ *
+ *   1. The STORE moves out, behind a seam with an in-memory and a durable implementation. ADR-008's own
+ *      text names this: sessions "live in a process-local map … a horizontally-scaled console needs a
+ *      shared store", recorded rather than discovered. P19 then declared `replicas: 2`.
+ *   2. `Session` gains `userId?`. ADR-008 said the session holds no user "because the platform cannot
+ *      currently prove one" — and P22 made that false. A deferral whose precondition has been met is
+ *      not a decision.
+ *
+ * What must NOT move is what NFR1 was always about, and it is pinned below by behaviour and by a digest
+ * over the resolve/revoke region: the TTL, revocation effective at the next request with no grace
+ * period, no cached "was valid a moment ago" path, and the fail-closed redirect.
+ */
+const SESSION_RULE_DIGEST = "70fd9f9f54697de001cd31e6b6e9cf75ecdacae87177f004bc8805cc488a4c61";
+
+/**
+ * sessionRule extracts the region of session.ts that carries the revocation rule — `resolveSession` and
+ * `revokeSession`, nothing else. A store swap does not reach it; a grace period could not be added
+ * without changing it.
+ */
+function sessionRule(source) {
+  const resolve = source.match(/export async function resolveSession\([\s\S]*?\n\}/);
+  const revoke = source.match(/export async function revokeSession\([\s\S]*?\n\}/);
+  if (!resolve || !revoke) return null;
+  return `${resolve[0]}\n${revoke[0]}`;
+}
 
 /**
  * SCOPE_DERIVATION is the half of `scope.ts` ADR-008 Rule 3 actually governs, pinned the way
@@ -136,6 +171,27 @@ test("8.1/4.1 the layer above the seam is byte-for-byte unchanged (NFR1, ADR-008
         `If this change is genuinely required, that is an ADR-008 conversation, not a hash update.`,
     );
   }
+
+  // The session RULE, pinned where the whole file used to be. See SESSION_RULE_DIGEST.
+  const session = await read("src/lib/session.ts");
+  const rule = sessionRule(session);
+  assert.ok(rule, "the revocation rule in session.ts could not be located — the fence found nothing to pin");
+  assert.match(rule, /session\.revokedAt !== undefined/, "the revocation check moved");
+  assert.match(rule, /Date\.now\(\) >= session\.expiresAt/, "the expiry check moved");
+  assert.doesNotMatch(rule, /cache|grace|ttlCache/i,
+    "a cache or a grace period appeared in the revocation path — a cached accept IS a cached " +
+      "non-revocation, and \"denied at the next request\" quietly becomes \"denied within a window\"");
+  assert.match(session, /const SESSION_TTL_SECONDS = Number\(process\.env\.CONSOLE_SESSION_TTL_SECONDS \?\? 8 \* 60 \* 60\);/,
+    "the session TTL moved");
+  assert.match(session, /redirect\(token \? "\/signin\?reason=session_ended" : "\/signin\?reason=no_session"\)/,
+    "the fail-closed redirect moved");
+  assert.equal(
+    createHash("sha256").update(rule).digest("hex"),
+    SESSION_RULE_DIGEST,
+    "session.ts's revocation RULE changed — not the store, the rule. Moving the store is what P27 did " +
+      "and is fenced by behaviour above; changing what makes a session live is an ADR-008 conversation, " +
+      "not a hash update.",
+  );
 
   const derivation = scopeDerivation(await read("src/lib/scope.ts"));
   assert.ok(derivation, "the derivation half of scope.ts could not be located — the fence found nothing to pin");
@@ -261,6 +317,8 @@ test("8.3 nothing on the identity path can log or store an assertion (NFR2)", as
   const session = await code("src/lib/session.ts");
   assert.match(session, /export type Session = \{[\s\S]*?\n\};/);
   const shape = session.match(/export type Session = \{[\s\S]*?\n\};/)[0];
+  // P27 added `userId?`. It is a person's INTERNAL id — not an address, not a subject, not an
+  // assertion — and the list below still refuses every field an assertion could hide in.
   // `subject` is deliberately absent from this list: the session's `visited?: Subject[]` is a
   // console-local record of which RUNS and WORKFLOWS this tab opened, and shares only a word with an
   // identity subject. Fencing on the word rather than the meaning would fail on the product's own
@@ -275,7 +333,22 @@ test("8.3 the seam never returns the assertion to its caller", async () => {
   // The only successful shape the seam can return is a tenant principal. Asserted structurally rather
   // than by reading: a `VerifyOutcome` with no field for an assertion cannot leak one upstream.
   assert.match(identity, /\{ ok: true; principal: TenantPrincipal \}/);
-  assert.match(identity, /export type TenantPrincipal = \{ tenantId: string \};/);
+  // The PRINCIPAL's shape, asserted by what it may not contain rather than by a literal.
+  //
+  // 🔴 The literal `{ tenantId: string }` was the assertion here, and P27 legitimately adds `userId?` —
+  // the person ADR-008 said the platform could not prove and P22 proved. A literal pin would have made
+  // that a hash edit; what NFR2 is actually about is that no assertion can ride out on this type, and
+  // that is what is fenced.
+  const principal = identity.match(/export type TenantPrincipal = \{[\s\S]*?\n\};/);
+  assert.ok(principal, "TenantPrincipal is missing");
+  assert.match(principal[0], /tenantId: string;/);
+  for (const forbidden of ["assertion", "idToken", "id_token", "claims", "email", "token", "nonce", "state"]) {
+    assert.doesNotMatch(
+      principal[0],
+      new RegExp(`\\b${forbidden}\\b`, "i"),
+      `TenantPrincipal has a ${forbidden} field — the seam would return the proof to its caller`,
+    );
+  }
 });
 
 // ── Runtime config, not build artefact (task 3.4) ───────────────────────────────────────────────
@@ -558,11 +631,21 @@ test("8.3 NFR3 · a forged tenant in EVERY client-controlled position never wide
   const forwarded = platform.requests.slice(before);
   assert.ok(forwarded.length > 0, "the request did not reach the platform at all");
   for (const r of forwarded) {
+    // 🔴 P27 turned this from a value assertion into an ABSENCE, and strengthened it in the process.
+    //
+    // It used to check that the forwarded header carried the SESSION's tenant rather than the client's.
+    // True, and measuring the wrong thing: the platform never read the header, so the assertion proved
+    // the console filled in a field nobody consumed. The header is deleted; scope travels inside a
+    // short-lived organization-scoped token. What remains asserted is what always mattered — nothing a
+    // client supplied reaches the platform in any position.
     assert.equal(
       r.headers["x-console-tenant"],
-      TENANT,
-      "a client-supplied tenant reached the platform — the console's scope is not session-derived",
+      undefined,
+      "the console still forwards a tenant header; P27 removed it, because an ignored header that " +
+        "names authority is read by the next person as the mechanism",
     );
+    assert.equal(r.headers["x-tenant-id"], undefined, "a client-supplied tenant header was forwarded");
+    assert.doesNotMatch(r.url, /cus_victim/, "a client-supplied tenant reached the upstream path");
   }
 });
 
@@ -1001,4 +1084,44 @@ test("the fixture signer produces a document this repository's parser accepts", 
   assert.ok(xml.includes("<!--SIGNATURE-->"));
   assert.equal(typeof samlResponse, "function");
   assert.doesNotThrow(() => parseXml(xml.replace("<!--SIGNATURE-->", "")));
+});
+
+/**
+ * P27 · every sign-in seam tells the reader WHERE their credential comes from.
+ *
+ * The generic hint — "the console exchanges this once for a session" — describes what we do with the
+ * value and never where the reader gets it. The page's own comment already says why that is not enough:
+ * it "is true for every mode and therefore tells the reader nothing about which credential they hold."
+ * That reasoning was applied to `platform` and left unapplied to `configured`, which is the mode where
+ * it matters most: single-customer and air-gapped installs add people by CONFIGURATION, so somebody who
+ * does not already hold the value has nobody obvious to ask.
+ *
+ * Asked by a reader looking at the screen — "how do my users know what to use?" — which is the question
+ * this asserts an answer to.
+ */
+test("🔴 the credential-entry seams say where the credential comes from", async () => {
+  const src = await readFile(
+    join(import.meta.dirname, "..", "src", "app", "signin", "page.tsx"),
+    "utf8",
+  );
+
+  // `platform`: the token `heros login` already stored.
+  assert.match(src, /heros login<\/span> stores/, "the platform-mode hint no longer names the CLI token");
+
+  // `configured`: whoever runs the install.
+  assert.match(
+    src,
+    /whoever runs it gives you this value/,
+    "the configured-mode hint no longer says where the credential comes from. It is the mode with no " +
+      "identity provider behind it, so a reader who does not already hold the value has no way to work " +
+      "out who to ask.",
+  );
+
+  // And the FEDERATED seams must never render a credential field at all — they redirect.
+  assert.match(
+    src,
+    /Continue with your organization/,
+    "the federated seams no longer offer the redirect. An oidc/saml deployment must not ask anybody to " +
+      "paste anything: they go to their own identity provider and come back.",
+  );
 });

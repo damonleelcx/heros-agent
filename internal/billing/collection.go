@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/heros-foreal/agentd/internal/account"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -201,8 +203,23 @@ func (s *Service) StartCheckout(ctx context.Context, customerID, planName, succe
 	}
 	handle := acct.ProviderCustomerHandle
 	if handle == "" {
+		// 🔴 P27: mint the provider customer AND PERSIST IT.
+		//
+		// `EnsureCustomer` was already called here and its answer was thrown away. That was invisible
+		// before P27 because every account was hand-created with a handle already in it; now a Free
+		// account starts with none, so this is the FIRST place one exists. Not persisting it means the
+		// next checkout mints again, the platform never learns which provider customer is theirs, and
+		// `SetPlan(…, charges: true)` fails the invariant the database now holds — a paid plan with no
+		// billing customer.
+		//
+		// The handle is stored BEFORE the session is created, so a failure between the two leaves an
+		// account that knows its provider customer rather than one that has an orphan at the provider.
 		if handle, err = s.provider.EnsureCustomer(ctx, customerID); err != nil {
 			return CheckoutSession{}, err
+		}
+		if _, err := s.accounts.SetProviderHandle(customerID, handle); err != nil {
+			return CheckoutSession{}, fmt.Errorf("billing: the provider customer was created but could "+
+				"not be recorded, so a retry would create a second one: %w", err)
 		}
 	}
 
@@ -261,6 +278,17 @@ func (s *Service) ChangePlan(ctx context.Context, customerID, planName string) (
 		return res, nil
 	}
 
+	// 🔴 A downgrade below the seats currently held is refused, and the refusal names BOTH numbers.
+	//
+	// The alternative — accept it and let the seat gate start denying — puts the organization in a state
+	// it did not choose and cannot see: members it already has, over an allowance it just bought, with
+	// the first symptom being an unrelated action failing. Refusing here, with removal named as the
+	// remedy, is the same shape the invitation limit uses, deliberately: two ways to hit the same wall
+	// should read the same way.
+	if err := s.refuseSeatDowngrade(customerID, acct, plan); err != nil {
+		return PlanChangeResult{}, err
+	}
+
 	subRef := s.SubscriptionRef(customerID)
 	priceRef := plan.PriceRefs["subscription"]
 
@@ -302,4 +330,48 @@ func (s *Service) ChangePlan(ctx context.Context, customerID, planName string) (
 	res.Changed = changed
 	s.RecordSubscriptionPlan(customerID, plan.PlanID)
 	return res, nil
+}
+
+// SeatCounter reports the seats an organization holds NOW. Optional: a deployment with no identity store
+// wired cannot count seats, and the downgrade check is then skipped rather than evaluated against a zero
+// that would let every downgrade through while looking checked.
+type SeatCounter interface {
+	SeatsHeld(tenantID string) (int, error)
+}
+
+// WithSeatCounter points the service at the live seat count, so a downgrade can be refused before it
+// leaves the organization over its new allowance.
+func (s *Service) WithSeatCounter(c SeatCounter) *Service { s.seats = c; return s }
+
+// ErrSeatsExceedPlan is the named refusal a downgrade below the held seat count produces. Named, because
+// the console shows a different screen for it than for any other plan-change failure: this one has a
+// remedy the customer can act on.
+var ErrSeatsExceedPlan = errors.New("billing: that plan includes fewer seats than this organization holds")
+
+// refuseSeatDowngrade returns ErrSeatsExceedPlan, with both numbers in the message, when moving to
+// `plan` would leave the organization over its allowance.
+func (s *Service) refuseSeatDowngrade(customerID string, acct account.Account, plan plancfg.PlanConfig) error {
+	if s.seats == nil {
+		return nil
+	}
+	allowed, set := plan.Limit(plancfg.LimitSeats)
+	// An operator's per-tenant override REPLACES the plan's allowance for this one limit, unchanged from
+	// P7 — so a downgrade an operator has already made room for is not refused.
+	if v, ok := acct.QuotaOverride(string(plancfg.LimitSeats)); ok {
+		allowed, set = v, true
+	}
+	if !set {
+		return nil // unset == unlimited
+	}
+	held, err := s.seats.SeatsHeld(customerID)
+	if err != nil {
+		// Unmeasurable is not zero, and it is not a refusal either: a membership-store outage must not
+		// block a plan change the customer is entitled to make.
+		return nil
+	}
+	if float64(held) <= allowed {
+		return nil
+	}
+	return fmt.Errorf("%w: %s includes %s seats and this organization holds %d — remove a member first",
+		ErrSeatsExceedPlan, plan.DisplayName, strconv.FormatFloat(allowed, 'f', -1, 64), held)
 }

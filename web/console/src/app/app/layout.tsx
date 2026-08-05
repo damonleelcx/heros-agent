@@ -18,6 +18,7 @@ import {
   Share2,
   SlidersHorizontal,
   User,
+  Users,
 } from "lucide-react";
 import { requireSession } from "@/lib/session";
 import { visitedSubjects, routes, SUBJECT_LABELS } from "@/lib/subjects";
@@ -90,6 +91,9 @@ const SETTINGS: Surface[] = [
   { href: "/app/configure", label: "Configure", icon: <Settings /> },
   { href: "/app/billing", label: "Billing", icon: <CreditCard /> },
   { href: "/app/account", label: "Account", icon: <User /> },
+  // P27. It sits beside Account and Billing because it answers the same class of question — who and
+  // what this organization is — rather than being a subject you open.
+  { href: "/app/settings/members", label: "Members", icon: <Users /> },
 ];
 
 export default async function ConsoleLayout({ children }: { children: React.ReactNode }) {
@@ -116,6 +120,7 @@ export default async function ConsoleLayout({ children }: { children: React.Reac
     { id: "s:install", group: "Surface", label: "Install the CLI — channels, platforms, trust", href: "/install" },
     { id: "s:account", group: "Surface", label: "Plan and spend", href: routes.account() },
     { id: "s:billing", group: "Surface", label: "Billing and payment method", href: routes.billing() },
+    { id: "s:members", group: "Surface", label: "Members, invitations and API keys", href: "/app/settings/members" },
     ...visited.map((subject) => ({
       id: `v:${subject.kind}:${subject.id}`,
       group: SUBJECT_LABELS[subject.kind],

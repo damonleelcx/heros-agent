@@ -43,7 +43,7 @@ func TestPG_NoSecretReachesTheStores(t *testing.T) {
 	// A run whose node I/O and error text plausibly could carry a credential: the provider echoed the
 	// key back in an error, which is the realistic leak path (a well-behaved gateway still has to
 	// scrub it — see internal/providergateway's TestComplete_SecretsNeverAppearInAnyError).
-	if err := s.Start(ctx, "run_sweep", cfgHash, "rev1", 1); err != nil {
+	if err := s.Start(ctx, "run_sweep", cfgHash, "rev1", 1, "acme"); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	// The error a scrubbing gateway produces. If scrubbing regressed, this is the string that would
@@ -270,7 +270,7 @@ func TestPG_NoSecretFromTheSecretsManagerReachesTheStores(t *testing.T) {
 		providergateway.WithMaxRetries(0))
 
 	s := NewStore(testDB)
-	if err := s.Start(ctx, "run_sm_sweep", cfgHash, "rev1", 1); err != nil {
+	if err := s.Start(ctx, "run_sm_sweep", cfgHash, "rev1", 1, "acme"); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	_, callErr := CallProvider(ctx, g, modelEntry(),

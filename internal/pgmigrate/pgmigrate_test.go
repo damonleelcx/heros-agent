@@ -101,8 +101,27 @@ func TestCatalogGuardsAreScopedToTheCurrentSchema(t *testing.T) {
 		}
 	}
 
-	// A catalog query in a migration is fine; an UNSCOPED one is not. current_schema() is what makes it
-	// a question about this database's own schema rather than about every schema in the cluster.
+	// A catalog query in a migration is fine; an UNSCOPED one is not. The catalogs are database-wide, so
+	// an unscoped guard is satisfied by an object of the same name in ANOTHER schema — including another
+	// test package's, since `internal/pgtest` gives each one its own schema in one shared database.
+	//
+	// TWO spellings scope it, and the rule is the property rather than the syntax:
+	//
+	//   current_schema()          joining through pg_class/pg_namespace, as 0026 and 0028 do.
+	//   `…`::regclass             binding conrelid/indrelid to one TABLE, resolved through search_path.
+	//
+	// 🔴 The second was added by P27 task 11, and not for tidiness. `pg_get_constraintdef(c.oid)` is a
+	// FUNCTION over a catalog row and the planner may evaluate it BEFORE the namespace filter — so the
+	// join form calls it on constraints in every schema in the database, and a concurrent `DROP SCHEMA`
+	// from another test package makes it fail with `could not open relation with OID nnn`. That is not
+	// hypothetical: 0038 was written the join way, `make pg-proof` went red across four packages the
+	// moment three more joined the target, and it passed alone every time.
+	//
+	// So `regclass` is not a weaker spelling of this rule — where a catalog FUNCTION is applied it is the
+	// only correct one, because it narrows the rows before the function ever runs.
+	scoped := func(sql string) bool {
+		return strings.Contains(sql, "current_schema()") || strings.Contains(sql, "::regclass")
+	}
 	catalogs := []string{"pg_constraint", "pg_class", "pg_indexes", "pg_index", "pg_attribute"}
 	for _, m := range ms {
 		if _, exempt := repairedBy[m.Name]; exempt {
@@ -112,13 +131,37 @@ func TestCatalogGuardsAreScopedToTheCurrentSchema(t *testing.T) {
 			if !strings.Contains(m.SQL, cat) {
 				continue
 			}
-			if strings.Contains(m.SQL, "current_schema()") {
+			if scoped(m.SQL) {
 				continue
 			}
-			t.Errorf("%s queries %s without scoping to current_schema(): the catalog is database-wide, "+
-				"so the guard is satisfied by an object of the same name in ANOTHER schema — including "+
-				"another test package's. Join through pg_class/pg_namespace and match "+
-				"n.nspname = current_schema(), as 0026 and 0028 do.", m.Name, cat)
+			t.Errorf("%s queries %s without scoping it: the catalog is database-wide, so the guard is "+
+				"satisfied by an object of the same name in ANOTHER schema — including another test "+
+				"package's. Either join through pg_class/pg_namespace matching n.nspname = "+
+				"current_schema() (0026, 0028), or bind conrelid to a `'table'::regclass` — which is "+
+				"REQUIRED where a catalog function like pg_get_constraintdef is applied, because the "+
+				"planner may run it before a namespace filter.", m.Name, cat)
+		}
+	}
+
+	// And the sharper half: a catalog FUNCTION over a row this migration did not narrow first. The
+	// namespace-join form is not enough here — see above — so these need a regclass bound.
+	catalogFuncs := []string{"pg_get_constraintdef(", "pg_get_indexdef(", "pg_get_expr("}
+	for _, m := range ms {
+		if _, exempt := repairedBy[m.Name]; exempt {
+			continue
+		}
+		for _, fn := range catalogFuncs {
+			if !strings.Contains(m.SQL, fn) {
+				continue
+			}
+			if strings.Contains(m.SQL, "::regclass") {
+				continue
+			}
+			t.Errorf("%s calls %s without binding the scan to a `'table'::regclass`.\n"+
+				"A catalog function may be evaluated before the row filter, so this runs over every "+
+				"schema in the database — and a concurrent DROP SCHEMA in another test package makes it "+
+				"fail with `could not open relation with OID nnn`, only in a batch, only sometimes.",
+				m.Name, fn)
 		}
 	}
 }

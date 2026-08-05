@@ -39,7 +39,29 @@ const REPO = join(ROOT, "..", "..");
 
 const LEDGER = join(REPO, "openspec", "operator-surface-ledger.md");
 const SPECS_DIR = join(REPO, "openspec", "specs");
-const CHANGE_SPECS_DIR = join(REPO, "openspec", "changes", "p26-operator-console-refresh", "specs");
+/**
+ * The UNARCHIVED changes this ledger governs, named one per line.
+ *
+ * 🔴 P27 added this list, because the constant it replaces was a single hard-coded P26 path — so the
+ * fence covered exactly the change that introduced it and nothing after. P27's five capabilities were
+ * invisible to it, and would have stayed invisible until the change archived into `openspec/specs/`,
+ * which is months of oversight-free surface area for the one thing this file exists to prevent. A fence
+ * scoped to its own author is the shape of the drift it was written against.
+ *
+ * # Why a NAMED LIST and not a derived one
+ *
+ * The obvious derivation — "a change's capability is landing if `openspec/specs/<name>` does not exist"
+ * — was tried and is wrong. It reports 87 capabilities across 30 changes: every phase back to P0 keeps
+ * its change directory after archiving, and most of their capabilities were archived under different
+ * names or folded into others. Adopting it would demand 80 ledger rows for capabilities that shipped
+ * years of phases ago, which is how a fence gets switched off.
+ *
+ * So the list is a decision, made once per phase, by the phase. Adding a change here is a line of diff
+ * in a review; forgetting to is what section 10.5 of P27 exists to catch, and it now catches it for
+ * whoever comes next rather than only for P27.
+ */
+const GOVERNED_CHANGES = ["p26-operator-console-refresh", "p27-account-system"];
+const CHANGE_SPECS_DIRS = GOVERNED_CHANGES.map((c) => join(REPO, "openspec", "changes", c, "specs"));
 const SURFACES = join(ROOT, "src", "lib", "surfaces.ts");
 
 /** The three states. There is no fourth, and adding one here is a spec change, not a fix. */
@@ -189,7 +211,9 @@ async function main() {
   compareSets(
     findings,
     "section B",
-    await directories(CHANGE_SPECS_DIR),
+    // Every governed change's capabilities, as one set. Sorted and de-duplicated so two changes landing
+    // the same capability name is a single row rather than a mismatch nobody can act on.
+    [...new Set((await Promise.all(CHANGE_SPECS_DIRS.map(directories))).flat())].sort(),
     sectionRows(SECTION_B).map((r) => r.subject),
     "capability",
   );

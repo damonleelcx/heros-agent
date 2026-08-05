@@ -1,26 +1,32 @@
 # Customer console (P9) — its own origin (Service `console`), distinct from the operator console's. The
 # platform credential is server-side only; the browser gets an HttpOnly session cookie and never the key.
 #
-# 🔴 ONE REPLICA, AND THE WORD "STATELESS" IS GONE — this is a correction, so it is recorded here.
+# 🔴 TWO REPLICAS AGAIN, AND THE WHOLE HISTORY IS KEPT — because the reason it went to one is the reason
+# it can come back.
 #
-# This said "stateless BFF, replicas 2 + PDB". The BFF is not stateless: `web/console/src/lib/session.ts`
-# holds sessions in a Map hung off `globalThis`, which is ONE STORE PER PROCESS, and that file's own
-# header says so ("a restart ends every session, and a horizontally-scaled console needs a shared
-# store"). Two replicas are therefore two disjoint session stores behind one Service: a user signs in on
-# pod A, the next request load-balances to pod B, `getSession` finds no record, and they are bounced to
-# `/signin?reason=session_ended`. Roughly half of all requests after sign-in, intermittently, with no
-# error anywhere — it presents as "the console keeps logging me out", which is nobody's search term.
+# This file once said "stateless BFF, replicas 2 + PDB". The BFF was not stateless: sessions lived in a
+# Map hung off `globalThis`, which is ONE STORE PER PROCESS. Two replicas were therefore two disjoint
+# session stores behind one Service — a user signed in on pod A, the next request load-balanced to pod
+# B, no record was found, and they were bounced to `/signin?reason=session_ended`. Roughly half of all
+# requests after sign-in, intermittently, with no error anywhere: it presents as "the console keeps
+# logging me out", which is nobody's search term.
 #
-# It is the same defect agentd carried (`replicas: 2` over per-pod state, justified by a comment claiming
-# the state lived elsewhere) and the same resolution: run one, and say why. The horizontal-scaling door
-# is not closed — when sessions move to the platform database, as the OPERATOR console's already have
-# (they are rows in `admin_session`, which is why that Deployment can and does run two), this goes back
-# to being a value and the PDB below returns to minAvailable: 1.
+# The count was reduced to one and the door was left open in writing: *"when sessions move to the
+# platform database, as the OPERATOR console's already have, this goes back to being a value."*
 #
-# ⚠️ ONE REPLICA DOES NOT MAKE SESSIONS DURABLE. A rollout replaces the pod and the new one starts with
-# an empty Map, so every user is signed out on each apply — `maxSurge: 1, maxUnavailable: 0` keeps the
-# SERVICE up across that, not the sessions. Only a shared store fixes it; this fixes the half where a
-# session dies while nothing restarted at all.
+# P27 moved them. `web/console/src/lib/sessionStore.ts` writes a row per session through the platform,
+# the way `admin_session` has worked since P8, and `CONSOLE_SESSION_STORE=platform` selects it. So the
+# count is a value again — and the PodDisruptionBudget returns to `minAvailable: 1`, which is safe only
+# now that there is more than one pod to protect.
+#
+# 🔴 `CONSOLE_SESSION_STORE` MUST BE `platform` HERE. With it unset the console falls back to the
+# in-process Map and this Deployment reproduces the original defect exactly. `internal/deploy`'s
+# `TestConsoleReplicasMatchItsSessionStore` fences the pair — it is what caught this file when the store
+# changed, and it fails in both directions.
+#
+# ⚠️ A rollout still replaces pods, and that is no longer a mass sign-out: the sessions are rows, and a
+# new pod reads the same rows. `maxSurge: 1, maxUnavailable: 0` keeps the SERVICE up across the apply;
+# the store keeps the SESSIONS up, which is the half one replica could never fix.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -29,7 +35,7 @@ metadata:
     app.kubernetes.io/name: console
     heros.dev/plane: control
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
       app.kubernetes.io/name: console
@@ -60,6 +66,11 @@ spec:
           env:
             - { name: PLATFORM_API_BASE, value: "http://agentd:4321" }
             - { name: CONSOLE_TENANT_IDENTITY, value: "configured" }
+            # 🔴 The session store. Without this the console falls back to the in-process Map and two
+            # replicas become two disjoint session stores again — the exact defect the replica count was
+            # reduced to one to avoid. Declared, never inferred: a store nobody chose is the kind of
+            # default discovered during an incident.
+            - { name: CONSOLE_SESSION_STORE, value: "platform" }
             - { name: NODE_ENV, value: "production" }
             # The BFF's OWN credential + the assertion->tenant map, from the operator's external store.
             - name: CONSOLE_PLATFORM_CREDENTIAL
@@ -181,7 +192,11 @@ kind: PodDisruptionBudget
 metadata:
   name: console
 spec:
-  minAvailable: 0
+  # Back to 1 now that there are two pods. It was 0 while the count was 1, because a minAvailable: 1
+  # budget over a single replica denies that pod's eviction forever — a node drain waits for a
+  # replacement that cannot start until the original terminates, and blocks. See agentd's PDB for the
+  # same reasoning in the same words.
+  minAvailable: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: console

@@ -4,7 +4,7 @@ import { withSession, isResponse, forward } from "@/lib/bff";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
-  const context = withSession(request);
+  const context = await withSession(request);
   if (isResponse(context)) return context;
   const name = new URL(request.url).searchParams.get("name") ?? "";
   return forward(context, context.paths.promptTimeline(name));

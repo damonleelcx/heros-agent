@@ -78,6 +78,70 @@ const BANNED_PHRASES = [
    */
   { phrase: "this product names no third-party origin", say: "state the PREFIX: a tenant prefix names none except the error-reporting one" },
   { phrase: "the console names no third-party origin", say: "state the prefix — the public prefix names allowlisted origins" },
+
+  /*
+   * P27 · accounts, members and seats (docs/sales/P27-account-copy.md §5).
+   *
+   * These are the over-claims a BUYER checks themselves, in normal use, within a week. A customer told
+   * "remove a member and their access ends" removes a member and then tries the key; a customer told
+   * "fully deleted" asks their regulator what we meant. Each of these has an honest sentence beside it
+   * and the honest one is barely longer.
+   */
+  { phrase: "instantly revoked everywhere", say: "denied at their next request — and say the second half: organization API keys they created keep working until you revoke them" },
+  // Affirmative forms only, for the reason the directory-sync note below gives: "not revoked everywhere"
+  // is the honest half of the sentence and must stay writable.
+  { phrase: "is revoked everywhere", say: "name the scope: their sessions and personal keys stop; organization keys do not" },
+  { phrase: "are revoked everywhere", say: "name the scope: their sessions and personal keys stop; organization keys do not" },
+  { phrase: "fully deleted", say: "closing suspends the organization and stops billing; erasure is a separate, audited request" },
+  { phrase: "permanently deleted", say: "closure is not erasure — say which one you mean" },
+  { phrase: "syncs with your directory", say: "you invite and remove people here; there is no SCIM and no push channel from your IdP" },
+  /*
+   * 🔴 The bare noun "directory sync" was on this list for about a minute and flagged
+   * `src/content/identity.ts`, whose sign-in copy states the boundary CORRECTLY — "no directory sync, no
+   * per-seat user model, no audit attribution by person". A fence that reports the honest sentence as the
+   * violation is a fence somebody switches off, and this list already learned that once (see the
+   * third-party-origin entries above, which were narrowed for the same reason).
+   *
+   * What is banned is the CLAIM, not the word. So only the affirmative form is listed, and the negation
+   * that names the absence stays sayable — it is the sentence we want people to use.
+   */
+  { phrase: "your data persists", say: "your runs are listed under your organization — lead with the capability, not with persistence" },
+  { phrase: "unlimited history", say: "nothing — retention is unenforced, so a retention promise quotes something no code implements" },
+  { phrase: "enterprise-grade permissions", say: "three roles: owner, admin, member" },
+  { phrase: "granular permissions", say: "three roles: owner, admin, member" },
+];
+
+/**
+ * PUBLIC_ONLY_PATTERNS are banned on the MARKETING surface and legal everywhere else, which is a
+ * distinction the flat list above cannot make.
+ *
+ * 🔴 The seat rule is why this exists. `/app/settings/members` renders "3 of 5 seats" and MUST — task 8.4
+ * requires that no seat figure appears without naming which quantity it is, and the whole point of P27's
+ * seat work is that the number is finally measured from membership instead of read off a usage record
+ * nothing writes. The same digits on a pricing page are a different sentence: a claim about what a seat
+ * INCLUDES. And that is undecided — PRD Open Question 3, whether a CLI-only member holding a personal key
+ * occupies one — with our own commercial guidance pointing one way and the plan fixtures the other.
+ *
+ * So: measured and labelled inside the product is the product being honest. Quoted on a page somebody
+ * buys from is a promise nobody can currently define. Banning both would delete the honest half; banning
+ * neither is how "5 seats included" reaches a deck before anyone has agreed what a seat is.
+ */
+const PUBLIC_ONLY_PATTERNS = [
+  {
+    pattern: /\b\d+\s+seats?\b|\bseats?\s+included\b/i,
+    what: "a seat number or a seats-included claim",
+    say:
+      "nothing — do not quote a seat number on a page somebody buys from until PRD Open Question 3 is " +
+      "decided (does a CLI-only member occupy a seat?). Inside the product, a MEASURED count with its " +
+      "label is correct and required",
+  },
+  {
+    pattern: /\b\d+\s*(?:-|\s)?(?:day|month|year)s?\s+(?:of\s+)?(?:history|retention)\b/i,
+    what: "a retention period",
+    say:
+      "nothing — `LimitRetention` is enforced against nothing, so quoting a plan's retention number " +
+      "states a policy no code implements (PRD Open Question 4)",
+  },
 ];
 
 /** SCAN_ALL_DIRS is every shipped source file, because a banned phrase is banned everywhere. */
@@ -128,6 +192,25 @@ async function manifestIds() {
   return { shipped, listed };
 }
 
+/** publicOnlyClaims walks the marketing surface and reports the patterns banned only there. */
+async function publicOnlyClaims() {
+  const findings = [];
+  for (const dir of PUBLIC_DIRS) {
+    for await (const file of walk(dir)) {
+      const source = await readFile(file, "utf8");
+      const rel = relative(ROOT, file);
+      for (const { pattern, what, say } of PUBLIC_ONLY_PATTERNS) {
+        // The FILE is named and the match is not quoted back, for the reason the phrase scan gives: a
+        // scan that echoed the copy would make the CI log the second place it lives.
+        if (pattern.test(source)) {
+          findings.push(`PUBLIC-SURFACE CLAIM: ${rel} carries ${what} — say instead: ${say}`);
+        }
+      }
+    }
+  }
+  return findings;
+}
+
 /** bannedPhrases walks every shipped source and reports any phrase the product may not say. */
 async function bannedPhrases() {
   const findings = [];
@@ -154,6 +237,7 @@ async function main() {
   let scanned = 0;
 
   const banned = await bannedPhrases();
+  const publicOnly = await publicOnlyClaims();
 
   for (const dir of PUBLIC_DIRS) {
     for await (const file of walk(dir)) {
@@ -170,9 +254,10 @@ async function main() {
     }
   }
 
-  if (banned.findings.length > 0) {
-    console.error(`claim scan FAILED — ${banned.findings.length} banned phrase(s):`);
-    for (const f of banned.findings) console.error(`  - ${f}`);
+  if (banned.findings.length > 0 || publicOnly.length > 0) {
+    const all = [...banned.findings, ...publicOnly];
+    console.error(`claim scan FAILED — ${all.length} banned claim(s):`);
+    for (const f of all) console.error(`  - ${f}`);
     process.exit(1);
   }
 

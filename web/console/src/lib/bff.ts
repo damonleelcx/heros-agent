@@ -1,5 +1,5 @@
 import "server-only";
-import { sessionFromRequest } from "./session";
+import { sessionFromRequest, type Session } from "./session";
 import { scoped, type Scoped } from "./scope";
 import { platformFetch, type PlatformOutcome } from "./platformApi";
 
@@ -31,7 +31,7 @@ import { platformFetch, type PlatformOutcome } from "./platformApi";
  * destroy it before any component saw it.
  */
 
-export type RouteContext = { session: NonNullable<ReturnType<typeof sessionFromRequest>>; paths: Scoped };
+export type RouteContext = { session: Session; paths: Scoped };
 
 /**
  * withSession resolves the session for a route handler or refuses.
@@ -39,8 +39,8 @@ export type RouteContext = { session: NonNullable<ReturnType<typeof sessionFromR
  * The middleware has already refused a request with no cookie at all; this catches the cases it
  * structurally cannot see — expired and revoked — because only the server-side store knows those.
  */
-export function withSession(request: Request): RouteContext | Response {
-  const session = sessionFromRequest(request);
+export async function withSession(request: Request): Promise<RouteContext | Response> {
+  const session = await sessionFromRequest(request);
   if (!session) {
     return Response.json(
       { error: "your session has ended — sign in again", kind: "unauthenticated" },
@@ -77,6 +77,9 @@ export function respond<T>(outcome: PlatformOutcome<T>): Response {
 export async function forward<T>(context: RouteContext, path: string, init?: { method?: string; body?: unknown }) {
   const outcome = await platformFetch<T>(path, {
     tenantId: context.session.tenantId,
+    // The acting person travels with the call, so the platform can refuse an action a machine
+    // credential must not take and attribute the ones it may.
+    userId: context.session.userId,
     method: init?.method,
     body: init?.body,
   });

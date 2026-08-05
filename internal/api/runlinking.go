@@ -159,7 +159,29 @@ func (s *Server) handleWhoAmI(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, specError{Error: "authentication required"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"identity": principal.TenantID})
+	// 🔴 ADDITIVE. `identity` keeps its name, its meaning and its value — both existing callers (the
+	// CLI's `Validate` and the console's platform-token seam) read only that field, and P27 must not
+	// break either. What is added beside it is who and where.
+	body := map[string]any{
+		"identity": principal.TenantID,
+		// The organization, under its own name, so a caller does not have to know that `identity`
+		// happens to be an organization id.
+		"organization_id": principal.TenantID,
+		// "personal" or "machine". The difference decides what member removal covers, and a caller that
+		// has to infer it from a blank field will infer it wrong.
+		"credential_kind": credentialKind(principal),
+	}
+	if principal.UserID != "" {
+		// ABSENT for a machine credential, never a placeholder: a placeholder here would let a caller
+		// attribute an action to a person who did not take it.
+		body["user_id"] = principal.UserID
+	}
+	if s.accounts != nil {
+		if t, err := s.accounts.Store().GetTenant(principal.TenantID); err == nil {
+			body["organization_name"] = t.Name
+		}
+	}
+	writeJSON(w, http.StatusOK, body)
 }
 
 // handleRunLink ingests one linked run.

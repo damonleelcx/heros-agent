@@ -355,3 +355,79 @@ async function* walk(dir) {
     else yield rel;
   }
 }
+
+// ── P27 · the account claim boundary (task 12.6) ─────────────────────────────
+//
+// docs/sales/P27-account-copy.md §5 lists the sentences this phase may not say. A list in a document is a
+// list somebody has to remember; these assert it is a gate. Each probe writes one file, runs the scan, and
+// asserts the exit code — the same shape the two claim-gate tests above use, and for the same reason: a
+// banned-phrase list nobody has watched fire is indistinguishable from one with a typo in it.
+//
+// The phrases were narrowed once already while writing this. A bare "directory sync" flagged
+// `src/content/identity.ts`, whose sign-in copy states the boundary CORRECTLY — "no directory sync, no
+// per-seat user model". Only affirmative claims are banned; the negation that names an absence is the
+// sentence we want people to write.
+
+/** claimProbe writes one file, runs the scan, asserts the outcome, and always cleans up. */
+async function claimProbe(relPath, contents, expectRed) {
+  const path = join(ROOT, relPath);
+  await writeFile(path, contents);
+  try {
+    if (expectRed) {
+      await assert.rejects(
+        () => exec("node", ["scripts/scan-claims.mjs"], { cwd: ROOT }),
+        (error) => {
+          assert.equal(error.code, 1, `${relPath} should have failed the scan`);
+          return true;
+        },
+      );
+    } else {
+      const { stdout } = await exec("node", ["scripts/scan-claims.mjs"], { cwd: ROOT });
+      assert.match(stdout, /claim scan passed/, `${relPath} should have passed the scan`);
+    }
+  } finally {
+    await unlink(path);
+  }
+}
+
+test("🔴 every P27 banned phrase is enforced at build time, not remembered", async () => {
+  const banned = [
+    "// Their key is instantly revoked everywhere.",
+    "// Closing your account means the data is fully deleted.",
+    "// The platform syncs with your directory.",
+    "// Your data persists across releases.",
+    "// Unlimited history on every plan.",
+    "// Enterprise-grade permissions for your team.",
+  ];
+  for (const line of banned) {
+    await claimProbe("src/lib/__claim_probe.ts", `${line}\nexport const P = 1;\n`, true);
+  }
+});
+
+test("🔴 a seat number is banned on the PUBLIC surface and legal inside the product", async () => {
+  // Both halves, because banning both would delete the honest one. `/app/settings/members` must render a
+  // measured count with its label (task 8.4) — that is the whole point of P27's seat work, since the
+  // number finally comes from membership instead of a usage record nothing writes. The same digits on a
+  // page somebody buys from are a claim about what a seat INCLUDES, and that is undecided: PRD Open
+  // Question 3, whether a CLI-only member holding a personal key occupies one.
+  await claimProbe(
+    "src/app/(public)/__claim_probe.tsx",
+    'export const P = () => <p>5 seats included in Team</p>;\n',
+    true,
+  );
+  await claimProbe(
+    "src/app/app/__claim_probe.tsx",
+    'export const P = () => <p>3 of 5 seats used</p>;\n',
+    false,
+  );
+});
+
+test("🔴 a retention period is banned on the public surface: nothing enforces one", async () => {
+  // `LimitRetention` sits exactly where `seats` sat before this phase — a published allowance with no
+  // writer behind it. Quoting it on a pricing page states a policy no code implements (Open Question 4).
+  await claimProbe(
+    "src/app/(public)/__claim_probe.tsx",
+    'export const P = () => <p>90 days of history retained</p>;\n',
+    true,
+  );
+});

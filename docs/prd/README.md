@@ -265,6 +265,40 @@ pages shipped, so the phase can fail visibly.
 | P24 — Product Analytics & Error Monitoring *(GA4 + Clarity on the public prefix only; Sentry allowlist-constructed; consent by category; the origin fence extended)* | [P24-analytics-and-error-monitoring.md](P24-analytics-and-error-monitoring.md) | `p24-analytics-error-monitoring` | Frontend + DevOps |
 | P26 — Operator Console Refresh *(the surface ledger + its build fence; delivery, release, axis and oversight surfaces; three honesty corrections)* | [P26-operator-console-refresh.md](P26-operator-console-refresh.md) | `p26-operator-console-refresh` | Frontend + Backend |
 
+### The Customer Is a Row — P27
+
+The commercial front door assumed a customer existed and nothing made one. **P27 — Account System** closes that
+chain. A tenant is not a row anywhere in the thirty-seven migrations — it is a key in a map
+[`auth.Registry`](../../internal/auth/registry.go) builds from configuration at boot, so onboarding a customer
+is a deploy and self-serve sign-up is impossible. There is **no user**:
+[`session.ts`](../../web/console/src/lib/session.ts) says the session holds a tenant and not a person "because
+the platform cannot currently prove one" — true when ADR-008 was written, made **false by P22**, and never
+revisited. Nothing calls `account.Store.Create` outside demos, so P21's checkout path opens with
+`accounts.Get → ErrNotFound`. The `run` table has no owner column and there is no `GET /api/v1/runs`, so *"what
+did I run last week?"* is not a question the API can be asked. And the isolation `scope.ts` carefully defers to
+does not exist — the platform never reads `X-Console-Tenant`, and every console request carries one
+process-wide credential.
+
+P27 makes the tenant a durable row (configuration demoted to an **expand-only boot seed**, so every existing
+deployment keeps its tenants and its keys), the person a first-class record with membership, invitations and
+per-user revocation, and the run **owned** — with scope travelling *inside* the credential and the tenant header
+**deleted and fenced** rather than made authoritative, because the cheap fix lets any holder of one credential
+name any tenant. It splits `seats` into the two quantities that were collapsed into one word (a **state** that
+gates the next invitation, a **period peak** that prices an invoice — today's limit is enforced against a number
+nothing ever writes), and makes sign-up create `{tenant, user, owner membership, Free account}` atomically so the
+first *Upgrade* finds an account instead of a 404. It adds **no** price, plan, billing dimension or permission
+system, and changes nothing above the ADR-008 seam.
+
+| Phase | PRD | OpenSpec change | Lead role(s) |
+|-------|-----|-----------------|--------------|
+| P27 — Account System *(durable tenant + config-as-seed; users, memberships, invitations; run ownership and credential-carried scope; seats made measurable; self-serve sign-up and first upgrade)* | [P27-account-system.md](P27-account-system.md) | `p27-account-system` | System Designer + Backend |
+
+**P27 is not implemented.** Nothing in its [§13 exit checklist](P27-account-system.md) is checked, and its
+[customer-facing copy](../sales/P27-account-copy.md) is written *before* the phase specifically so the wrong
+sentences do not enter a deck during implementation — every claim in it carries the tasks that license it, and
+one claim is blocked on a question nobody has answered: **whether a CLI-only member occupies a seat.** Until
+that is ratified, no seat number may be quoted, because we cannot state what one includes.
+
 ## PRD template
 
 Every phase PRD follows this structure:

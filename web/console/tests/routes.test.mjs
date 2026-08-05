@@ -17,6 +17,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { startStubPlatform, startConsole, signIn } from "./support/harness.mjs";
+import { routes } from "../src/lib/routes.ts";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -57,9 +58,24 @@ function text(html) {
 
 // ── No default subject ───────────────────────────────────────────────────────
 
+/*
+ * 🔴 `/app/runs` left this list in P27, and the reason is a change in what the page IS rather than a
+ * relaxation of the rule.
+ *
+ * The rule is "a selection surface must not choose a subject for the user", and it was written when the
+ * only way to reach a run was to already know its id — because the platform had no collection route.
+ * `run` carried no owning organization, so "which runs are mine" was not a question the API could be
+ * asked, and a page that fetched anything would have been fetching somebody's guess.
+ *
+ * P27 gave runs an owner and a collection. `/app/runs` is now a LIST of the caller's own runs, and
+ * fetching the collection is not choosing a subject — it is the page. The direct-entry accelerator is
+ * still there, below the list, for a run somebody else produced.
+ *
+ * So the rule did not move; the page did. Its own test is below, and it asserts the property that
+ * matters now: the collection is fetched, a SPECIFIC run never is, and the accelerator survives.
+ */
 const SELECTION_ROUTES = [
   ["/app/workflows", "workflow"],
-  ["/app/runs", "run"],
   ["/app/transforms", "transform"],
   ["/app/variants", "variant"],
 ];
@@ -79,6 +95,31 @@ for (const [route, subject] of SELECTION_ROUTES) {
     assert.doesNotMatch(html, /wf-demo/, `${route} mentions the hardcoded legacy default`);
   });
 }
+
+test("/app/runs lists the caller's own runs and still never picks one for them", async () => {
+  const before = platform.requests.length;
+  const { status, html } = await page("/app/runs");
+  assert.equal(status, 200);
+
+  const fetched = platform.requests.slice(before).map((r) => r.url);
+  // The COLLECTION, which is the page's subject. No organization in it: the scope comes from the
+  // credential, and there is no parameter that could carry one.
+  assert.ok(
+    fetched.some((u) => u.startsWith("/api/v1/runs") && !/\/api\/v1\/runs\/[^?]/.test(u)),
+    `the runs list did not fetch the collection (asked for: ${fetched.join(", ") || "nothing"})`,
+  );
+  // 🔴 And never a SPECIFIC run. Fetching one would be choosing a subject for the user, which is the
+  // rule this page used to be listed under and still obeys.
+  assert.ok(
+    !fetched.some((u) => /\/api\/v1\/runs\/[^?/]+/.test(u)),
+    `the runs list opened a run nobody asked for: ${fetched.join(", ")}`,
+  );
+
+  const rendered = text(html);
+  assert.match(rendered, /Open a run by identifier/i, "the direct-entry accelerator was lost");
+  assert.match(rendered, /Opened in this session/, "the already-visited list was lost");
+  assert.doesNotMatch(html, /wf-demo/, "/app/runs mentions the hardcoded legacy default");
+});
 
 test("the overview offers subjects and next actions, and fetches nothing", async () => {
   const before = platform.requests.length;
@@ -208,4 +249,29 @@ test("a data view names its subject even when the upstream call fails", async ()
   // to load — which is the difference between an actionable error and a mystifying one.
   assert.match(html, /<h1[^>]*>owner\/repo<\/h1>/);
   assert.match(text(html), /not mounted on this deployment/);
+});
+
+/**
+ * P27 task 13.1 · the terminal-approval path is compiled into TWO artifacts and must not drift.
+ *
+ * The CLI prints a URL before any browser is open, so the platform hands it the path — `deviceVerificationPath`
+ * in `internal/api/deviceauth.go`. The console owns the page at that path. Nothing connects them at
+ * runtime: a rename on either side produces a terminal telling somebody to open a 404, and it fails for
+ * whoever is signing in rather than for whoever renamed it.
+ */
+test("the device-approval path the platform prints is the path the console serves", async () => {
+  const consoleRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+  const repoRoot = join(consoleRoot, "..", "..");
+  const go = await readFile(join(repoRoot, "internal", "api", "deviceauth.go"), "utf8");
+  const printed = go.match(/deviceVerificationPath\s*=\s*"([^"]+)"/)?.[1];
+  assert.ok(printed, "internal/api/deviceauth.go no longer declares deviceVerificationPath");
+  assert.equal(
+    routes.device(),
+    printed,
+    "the console's device route and the path the platform prints to a terminal have diverged. " +
+      "Nothing connects them at runtime: the CLI prints this before a browser is open, so a rename on " +
+      "either side sends somebody to a 404 while they are trying to sign in.",
+  );
+  const page = join(consoleRoot, "src", "app", ...printed.replace(/^\//, "").split("/"), "page.tsx");
+  await assert.doesNotReject(readFile(page, "utf8"), `no page is served at ${printed}`);
 });

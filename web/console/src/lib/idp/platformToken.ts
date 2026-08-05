@@ -46,7 +46,7 @@ const WHOAMI_PATH = "/api/v1/whoami";
 const TIMEOUT_MS = Number(process.env.CONSOLE_UPSTREAM_TIMEOUT_MS ?? 10_000);
 
 export type PlatformTokenOutcome =
-  | { ok: true; tenantId: string }
+  | { ok: true; tenantId: string; userId?: string }
   | { ok: false; cause: string };
 
 /**
@@ -135,7 +135,14 @@ export async function verifyPlatformToken(token: string): Promise<PlatformTokenO
       // is a session scoped to everything, and `scope.ts` derives every upstream call from this value.
       return { ok: false, cause: "the platform accepted the credential but returned no identity" };
     }
-    return { ok: true, tenantId: identity };
+    // 🔴 `user_id` is read ADDITIVELY and is optional. A machine credential names nobody, and the
+    // platform says so by omitting the field rather than by sending an empty one — so an absent value
+    // here means "not a person", never "we failed to record who".
+    const userId =
+      body && typeof body === "object" && typeof (body as { user_id?: unknown }).user_id === "string"
+        ? (body as { user_id: string }).user_id.trim()
+        : "";
+    return userId ? { ok: true, tenantId: identity, userId } : { ok: true, tenantId: identity };
   } catch (cause) {
     const reason = cause instanceof Error && cause.name === "AbortError"
       ? `the platform did not respond within ${TIMEOUT_MS} ms`
