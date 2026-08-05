@@ -26,6 +26,39 @@ touches production behavior without evidence.
 > project; see [`docs/reproposal-migration-checklist.md`](docs/reproposal-migration-checklist.md) for
 > what was kept, adapted, and removed.
 
+## Demo — the `heros` CLI against a real 30,500-file repo
+
+<video src="https://heros-agent-assets.s3.us-east-1.amazonaws.com/demo/heros-cli-openclaw.mp4" poster="https://heros-agent-assets.s3.us-east-1.amazonaws.com/demo/heros-cli-openclaw-poster.jpg" controls muted playsinline width="880">
+  <a href="https://heros-agent-assets.s3.us-east-1.amazonaws.com/demo/heros-cli-openclaw.mp4">Watch the demo — 1:06, MP4</a>
+</video>
+
+A real terminal session (1:06, no audio) running the full CLI path against
+[`openclaw/openclaw`](https://github.com/openclaw/openclaw) — a real TypeScript monorepo, not a
+fixture — **offline, with no account and no network**. It was captured under a PTY into an
+asciicast and replayed into a terminal; **no output was retyped or re-simulated**. Idle gaps are
+capped at 3.2s, so the 565-second real session plays in 63; nothing else about the timing or the
+content is altered.
+
+| step | what it shows |
+|---|---|
+| **1** | the binary and the contracts it implements |
+| **2** | the target: a real 30,500-file TypeScript monorepo |
+| **3** | `doctor` — is this machine ready, and what is missing |
+| **4** | `discover` — extract every LLM call site into the Workflow IR |
+| **5** | `coverage` — what THIS build can apply, per axis and language |
+| **6** | author a model change — and watch it be **refused by name** |
+| **7** | author a context change the offline build **can** carry — preflight only |
+| **8** | `--apply`: write the reviewable diff, worktree-isolated |
+| **9** | apply a full Variant Spec — same engine, spec-driven |
+| **10** | `eval` — multi-seed, scored, with confidence intervals |
+| **11** | `link --dry-run` — the **exact** payload, transmitted nowhere |
+
+Three things in it are worth watching for, because they are the product's actual claims rather than
+its features. A change the build cannot carry is **refused by name** (step 6) instead of silently
+skipped. A failed gate is an **exit code**, not a warning — `eval` exits `1` and says which gate
+failed and by how much (step 10). And `link --dry-run` prints the payload in full (step 11): metrics,
+IR structure, and a commit sha — **no file paths, no prompt text, no provider keys.**
+
 ## How it works
 
 ```
