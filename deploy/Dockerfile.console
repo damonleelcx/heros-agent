@@ -63,6 +63,20 @@ COPY --from=build /app/next.config.mjs ./next.config.mjs
 # failure `docs`/`legal` exist to prevent, so the air-gapped parity check (task 11.3) asserts it.
 COPY --from=build /app/content ./content
 
+# The static assets Next serves from `public/`, for the same reason and with the same failure mode.
+#
+# 🔴 This line was missing until the home page's demo recording became the first thing in `public/`.
+# While the directory was empty the omission cost nothing, so it read as a deliberate difference from
+# `deploy/Dockerfile.admin-console` — which has always copied `public` — rather than as the drift it
+# was. One rule, two Dockerfiles, and the copy that got it right was not the one under test.
+#
+# The failure it produces is the quiet kind: `next build` succeeds, the page renders, every reference
+# resolves on a developer's machine, and only in the container does the poster 404 and the play button
+# do nothing. `web/console/tests/deploy-parity.test.mjs` now DERIVES the required COPYs from the
+# directories that are actually present, for both consoles, so the next directory added to either one
+# is covered without anybody remembering this.
+COPY --from=build /app/public ./public
+
 # Non-root. The console holds the platform credential in its environment; a process that does not need
 # root must not have it, so a container escape starts from the least useful possible position.
 USER node

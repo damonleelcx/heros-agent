@@ -59,6 +59,65 @@ test("11.1 — the console image copies the content corpus, so a copy fix is an 
   assert.match(runtimeStage, /COPY --from=build \/app\/content/, "the content COPY is not in the runtime stage");
 });
 
+/**
+ * RUNTIME_DIRS are the directories Next reads from disk while SERVING, as opposed to compiling.
+ *
+ * `content` is read per request by the /docs and /legal routes; `public` is served verbatim at the URL
+ * root. Neither is bundled into `.next`, so for both of them "it works locally" and "it works in the
+ * container" are independent facts.
+ */
+const RUNTIME_DIRS = ["content", "public"];
+
+/**
+ * 🔴 This test exists because the one above it was not enough, and the way it was not enough is the
+ * point.
+ *
+ * The assertion above names `content` — the single directory that existed when it was written. It is a
+ * fence shaped around an instance rather than around the requirement, so it stayed green while
+ * `Dockerfile.console` shipped without `public`. That went unnoticed for as long as `public` was empty,
+ * and became a real defect the moment the home page's demo recording landed in it: the page rendered,
+ * the poster 404'd, and the play button did nothing — in the container only.
+ *
+ * `deploy/Dockerfile.admin-console` had the `public` COPY the whole time. Two Dockerfiles, one rule,
+ * and no test comparing them — which is the same scar `web/design-system/third-party-policy.ts` was
+ * created to close for the CSP.
+ *
+ * So this DERIVES the obligation: for each console, whichever of RUNTIME_DIRS actually exists on disk
+ * must have a runtime-stage COPY. A directory added tomorrow is covered by this test today, and a
+ * console that gains `content/` cannot ship without carrying it.
+ */
+test("11.1 — every runtime-read directory that EXISTS is carried into each console image", async () => {
+  const consoles = [
+    { app: "console", dockerfile: "Dockerfile.console" },
+    { app: "admin-console", dockerfile: "Dockerfile.admin-console" },
+  ];
+
+  let obligations = 0;
+  for (const { app, dockerfile } of consoles) {
+    const source = await readFile(join(REPO, "deploy", dockerfile), "utf8");
+    const runtimeStage = source.slice(source.lastIndexOf("FROM "));
+
+    for (const dir of RUNTIME_DIRS) {
+      const present = await readdir(join(REPO, "web", app, dir)).then(
+        () => true,
+        () => false,
+      );
+      if (!present) continue;
+      obligations += 1;
+      assert.match(
+        runtimeStage,
+        new RegExp(`COPY --from=build /app/${dir}\\b`),
+        `web/${app}/${dir}/ exists and is read at runtime, but deploy/${dockerfile}'s runtime stage ` +
+          `does not copy it — it would 404 in the container while passing every test locally`,
+      );
+    }
+  }
+
+  // Not vacuous: if the walk finds nothing, the loop above asserts nothing and this test would pass by
+  // discovering no obligations at all — which is precisely how a derived fence rots into decoration.
+  assert.ok(obligations >= 3, `expected at least 3 runtime-dir obligations, derived ${obligations}`);
+});
+
 test("11.1 — reverting a copy change needs no migration and no platform restart", async () => {
   // The claim is structural: the corpus is FILES IN AN IMAGE, referenced by no table and by no platform
   // service. So "revert the copy change" is "deploy the previous console image", full stop.
