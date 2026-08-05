@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { randomUUID, randomBytes } from "node:crypto";
 import { SESSION_COOKIE } from "./cookies";
 import { logSession } from "./telemetry";
+import { sessionStore } from "./sessionStore";
 import type { TenantPrincipal } from "./identity";
 
 /**
@@ -20,22 +21,43 @@ import type { TenantPrincipal } from "./identity";
  * The check is by ROUTE PREFIX as well as per page (see middleware.ts): a fail-closed rule enforced
  * page by page fails the first time somebody adds a page.
  *
- * # What the session holds, and what it deliberately does not
+ * # What the session holds
  *
- * `{ id, tenantId, issuedAt, expiresAt, revokedAt }`. It does NOT hold the assertion that produced it
- * (identity.ts rule 1), and it does NOT hold a user — P9 has no concept of a user, because the
- * platform cannot currently prove one. When P7 introduces users, per-user revocation and audit
- * attribution become possible; today a session can be revoked but cannot say WHOSE it was, and
- * inventing a value for that field would be worse than the gap (ADR-008).
+ * `{ id, tenantId, userId?, issuedAt, expiresAt, revokedAt }`.
  *
- * # Why the store is in-process, and what that means operationally
+ * It does NOT hold the assertion that produced it (identity.ts rule 1). It DOES now hold the person,
+ * where there is one — and the sentence that used to be here is worth keeping beside the change:
  *
- * Sessions live in a process-local map. That is honest for the deployment ADR-006 describes — one
- * console container per unit — and it has a stated consequence: a console restart ends every session,
- * and a horizontally-scaled console needs a shared store. Both are recorded rather than discovered.
- * What matters for the security property is unchanged either way: the session is SERVER-SIDE, the
- * browser holds only an opaque token it cannot read, and revocation is effective at the next request
- * because the next request reads the store.
+ *   > "it does NOT hold a user — P9 has no concept of a user, because the platform cannot currently
+ *   > prove one."
+ *
+ * That was true when ADR-008 was written. **P22 made it false**: a verified assertion yields
+ * `sub@issuer`, which is exactly the proof whose absence was the reason, and the deferral was never
+ * revisited. P27 promotes it. `userId` is ABSENT — never `""` — when the principal is not a person,
+ * because a placeholder would put a name on an action nobody took.
+ *
+ * # Where the store lives, and why that changed
+ *
+ * Sessions used to live in a process-local map. That was honest for the one-container deployment
+ * ADR-006 describes, and it had two stated consequences: a console restart ended every session, and a
+ * horizontally-scaled console needed a shared store. P19's Kubernetes overlay declares `replicas: 2`,
+ * under which a user signs in against one pod and is signed out by the next request that lands on the
+ * other — intermittently, which is the worst failure mode to diagnose.
+ *
+ * So the STORE moved and nothing else did. Two implementations behind one seam:
+ *
+ *   * `memory` — the original map. Still the default, still honest, still what a deployment with no
+ *     platform session backing runs on.
+ *   * `platform` — a row in the platform's `console_session` table, written through three routes the
+ *     browser cannot reach.
+ *
+ * 🔴 The platform never sees a console session token. This module mints it, hashes it, and sends only
+ * the HASH; there is no field on any of those requests a plaintext could arrive in. And a console
+ * session is not an API credential: the platform stores it with `purpose = 'console'` and its `auth`
+ * layer refuses that purpose, so a stolen cookie reaches the console and stops there.
+ *
+ * What did NOT change, and is asserted rather than assumed: the TTL, the cookie flags, revocation at
+ * the next request with no grace period, and the fail-closed middleware.
  */
 
 // The cookie name and flags live in `cookies.ts`, which has no imports, because `middleware.ts` runs
@@ -56,6 +78,14 @@ const SESSION_TTL_SECONDS = Number(process.env.CONSOLE_SESSION_TTL_SECONDS ?? 8 
 export type Session = {
   id: string;
   tenantId: string;
+  /**
+   * userId is the acting person, when the principal is one.
+   *
+   * 🔴 ABSENT, never `""`, for a machine principal. `undefined` and `""` would both be falsy and the
+   * code would work either way — which is the argument for choosing deliberately: an empty string in
+   * an audit field reads as a person whose id we failed to record, and absence reads as what it is.
+   */
+  userId?: string;
   issuedAt: number;
   expiresAt: number;
   revokedAt?: number;
@@ -67,41 +97,19 @@ export type Session = {
   visited?: import("./subjects").Subject[];
 };
 
-/**
- * The store. Keyed by the opaque token the browser holds, which is NOT the session id — the id is for
- * logs, the token is the bearer. Separating them means a log line naming a session cannot be replayed
- * as that session.
- *
- * # Why it hangs off globalThis rather than being a plain module-level Map
- *
- * Found by rendering the console in a real browser, which is the whole argument for R11: a plain
- * `const store = new Map()` passes every test under `next start` and then, under `next dev`, signs
- * you in and immediately tells you your session ended. Next's development server compiles route
- * handlers and pages into SEPARATE module graphs, so the module is instantiated more than once and
- * the sign-in handler writes into a different Map from the one the page reads. The build is green,
- * the types check, the production suite passes, and the product is unusable — precisely the class of
- * defect a passing build cannot see.
- *
- * Anchoring to `globalThis` gives one store per PROCESS, which is what the design actually meant.
- *
- * The operational consequence is unchanged and still worth stating: one process means a console
- * restart ends every session, and a horizontally-scaled console needs a shared store. Both are
- * recorded rather than discovered. The security property is unaffected either way — the session is
- * server-side, the browser holds an opaque token it cannot read, and revocation takes effect at the
- * next request because the next request reads the store.
+/*
+ * The store now lives in `sessionStore.ts`, behind a seam with two implementations. The token is still
+ * the key and it is still NOT the session id — the id is for logs, the token is the bearer, and
+ * separating them means a log line naming a session cannot be replayed as that session.
  */
-const SESSION_STORE = Symbol.for("heros.console.sessions");
 
-type SessionGlobal = typeof globalThis & { [SESSION_STORE]?: Map<string, Session> };
-
-const store: Map<string, Session> = ((): Map<string, Session> => {
-  const scope = globalThis as SessionGlobal;
-  if (!scope[SESSION_STORE]) scope[SESSION_STORE] = new Map<string, Session>();
-  return scope[SESSION_STORE];
-})();
-
-/** issueSession mints a session for a verified tenant principal and returns the browser's token. */
-export function issueSession(principal: TenantPrincipal): { token: string; session: Session } {
+/**
+ * issueSession mints a session for a verified tenant principal and returns the browser's token.
+ *
+ * Async since P27, because the store may be durable. Nothing else about it moved: the same TTL, the
+ * same 32 bytes of CSPRNG, the same telemetry line.
+ */
+export async function issueSession(principal: TenantPrincipal): Promise<{ token: string; session: Session }> {
   const now = Date.now();
   const session: Session = {
     id: randomUUID(),
@@ -109,11 +117,16 @@ export function issueSession(principal: TenantPrincipal): { token: string; sessi
     issuedAt: now,
     expiresAt: now + SESSION_TTL_SECONDS * 1000,
   };
+  // 🔴 Set only when the principal names a person. `undefined` and `""` are both falsy and the code
+  // would work either way — which is why the choice is made here rather than left to fall out: an empty
+  // string in an audit field reads as a person whose id we failed to record.
+  if (principal.userId) session.userId = principal.userId;
+
   // 32 bytes of CSPRNG. The token is the only thing standing between a guess and a tenant's data, and
   // it is never derived from the tenant id — a token you can construct from a subject you know is not
   // a token.
   const token = randomBytes(32).toString("base64url");
-  store.set(token, session);
+  await sessionStore.create(token, session);
   logSession({ action: "issued", sessionId: session.id, tenantId: session.tenantId });
   return { token, session };
 }
@@ -126,9 +139,9 @@ export function issueSession(principal: TenantPrincipal): { token: string; sessi
  * path: a grace period is a window in which a revoked session still works, and the length of that
  * window is exactly how long a compromised session outlives its revocation.
  */
-export function resolveSession(token: string | null | undefined): Session | null {
+export async function resolveSession(token: string | null | undefined): Promise<Session | null> {
   if (!token) return null;
-  const session = store.get(token);
+  const session = await sessionStore.resolve(token);
   if (!session) return null;
   if (session.revokedAt !== undefined) {
     logSession({ action: "denied", sessionId: session.id, reason: "revoked" });
@@ -136,20 +149,17 @@ export function resolveSession(token: string | null | undefined): Session | null
   }
   if (Date.now() >= session.expiresAt) {
     logSession({ action: "denied", sessionId: session.id, reason: "expired" });
-    // Dropped on read rather than swept on a timer: the store is only consulted here, so a session
-    // nobody reads costs a map entry and nothing else, and a sweeper is one more thing to get wrong.
-    store.delete(token);
     return null;
   }
   return session;
 }
 
 /** revokeSession ends a session server-side. The next request presenting it is denied. */
-export function revokeSession(token: string | null | undefined): void {
+export async function revokeSession(token: string | null | undefined): Promise<void> {
   if (!token) return;
-  const session = store.get(token);
+  const session = await sessionStore.resolve(token);
   if (!session) return;
-  session.revokedAt = Date.now();
+  await sessionStore.revoke(token);
   logSession({ action: "revoked", sessionId: session.id, tenantId: session.tenantId });
   // The record is kept (rather than deleted) with `revokedAt` set, so `resolveSession` can log the
   // denial as a REVOCATION rather than as an unknown token. "Someone presented a session we revoked"
@@ -170,7 +180,7 @@ export async function readSessionToken(): Promise<string | null> {
  */
 export async function requireSession(): Promise<Session> {
   const token = await readSessionToken();
-  const session = resolveSession(token);
+  const session = await resolveSession(token);
   if (!session) {
     redirect(token ? "/signin?reason=session_ended" : "/signin?reason=no_session");
   }
@@ -182,14 +192,14 @@ export async function requireSession(): Promise<Session> {
  * own semantics but does have the request. Route handlers must fail closed too: a BFF data route that
  * served without a session would make the page-level check decorative.
  */
-export function sessionFromRequest(request: Request): Session | null {
+export async function sessionFromRequest(request: Request): Promise<Session | null> {
   const header = request.headers.get("cookie") ?? "";
   const match = header
     .split(";")
     .map((part) => part.trim())
     .find((part) => part.startsWith(`${SESSION_COOKIE}=`));
   if (!match) return null;
-  return resolveSession(decodeURIComponent(match.slice(SESSION_COOKIE.length + 1)));
+  return await resolveSession(decodeURIComponent(match.slice(SESSION_COOKIE.length + 1)));
 }
 
 /** sessionTtlSeconds is exported so the cookie and the test read the same bound. */
@@ -202,5 +212,5 @@ export function sessionTtlSeconds(): number {
  * a non-test call site is obvious in review.
  */
 export function __resetSessionsForTest(): void {
-  store.clear();
+  sessionStore.clear();
 }

@@ -60,9 +60,18 @@ export function SubjectPicker({
     <>
       <Section title="Opened in this session" aside="held for this session only, never shared" id="recent">
         {visited.length === 0 ? (
+          /*
+           * 🔴 This sentence used to say "the platform does not expose a way to list your {label}s".
+           *
+           * That was true when it was written, and P27 made it false for RUNS: runs now carry an owning
+           * organization and `/api/v1/runs` lists them. It is still true for the other three subjects,
+           * which have no collection route — so the copy names what this list actually is rather than
+           * making a claim about the platform that is now half wrong. A sentence that quietly stops
+           * being true is worse than one that never said much.
+           */
           <p className="hint">
-            Nothing yet. The platform does not expose a way to list your {label}s, so this console can
-            offer the ones you have opened and no more — open one below and it will be here next time.
+            Nothing yet. This is a per-session shortcut list, held in your session and never shared —
+            open a {label} below and it will be here next time.
           </p>
         ) : (
           <ul className="divide-y divide-border/50 overflow-hidden rounded-xl border border-border">

@@ -15,7 +15,7 @@ import { redirectTo } from "@/lib/redirect";
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request, { params }: { params: Promise<{ workflowId: string; proposalId: string }> }) {
-  const context = withSession(request);
+  const context = await withSession(request);
   if (isResponse(context)) return context;
   const { workflowId, proposalId } = await params;
 

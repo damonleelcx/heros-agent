@@ -21,7 +21,6 @@ import (
 
 	"github.com/heros-foreal/agentd/internal/adminlaunch"
 	"github.com/heros-foreal/agentd/internal/api"
-	"github.com/heros-foreal/agentd/internal/auth"
 	"github.com/heros-foreal/agentd/internal/config"
 	"github.com/heros-foreal/agentd/internal/db"
 	"github.com/heros-foreal/agentd/internal/erroreport"
@@ -47,11 +46,21 @@ type Server struct {
 // StartAgentd opens the ledger and serves the HTTP API in a background
 // goroutine. Call Shutdown when finished.
 func StartAgentd(ctx context.Context, cfg config.Config) (*Server, error) {
-	if cfg.AuthMode == "required" {
-		reg := auth.NewRegistry(cfg)
-		if !reg.HasKeys() {
-			return nil, fmt.Errorf("auth_mode=required but tenant_credentials is empty")
-		}
+	// 🔴 P27 widened this check rather than deleting it.
+	//
+	// Before, `auth_mode=required` with no `tenant_credentials` was a boot failure, and it was right:
+	// authentication was a map built from that list, so an empty list meant nobody could ever
+	// authenticate. It is no longer the only way in — a deployment with a durable identity store can
+	// have organizations and credentials that no configuration file mentions, which is the entire point
+	// of the phase. Keeping the old check would have made self-serve sign-up impossible on exactly the
+	// deployments it is for.
+	//
+	// So the requirement is now "there is SOME way to authenticate", and the two ways are named. A
+	// deployment with neither still fails to start, loudly, which is the property worth keeping.
+	if cfg.AuthMode == "required" && len(cfg.TenantCredentials) == 0 && !platformDSNDeclared() {
+		return nil, fmt.Errorf("auth_mode=required but this deployment has neither tenant_credentials " +
+			"nor a platform database: nothing could ever authenticate. Configure one credential, or " +
+			"declare a platform database so organizations can be created")
 	}
 	if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
 		return nil, err
@@ -115,9 +124,27 @@ func StartAgentd(ctx context.Context, cfg config.Config) (*Server, error) {
 		handler.AddComponentProbe(api.NewDBComponentProbe("postgres", platformDB))
 	}
 
+	// P27's identity domain: pick the store, seed it from configuration, point the ONE registry at it,
+	// and report the posture. It runs AFTER the schema is up (the durable store's tables come from
+	// migration 0038) and BEFORE any request is served — a registry pointed at an unseeded store would
+	// refuse every configured credential for as long as the seed takes, which on a slow database is a
+	// window in which an upgrade locks out every existing customer.
+	accounts, err := buildAccountSystem(cfg, platformDB, time.Now().UTC())
+	if err != nil {
+		if platformDB != nil {
+			_ = platformDB.Close()
+		}
+		_ = database.Close()
+		return nil, err
+	}
+	handler.AuthRegistry().WithSource(accounts.Store)
+	handler.SetAccountSystem(accounts.Posture)
+	// The account ROUTES are mounted by mountCapabilities below, with every other capability, so the
+	// ledger an operator reads has one row for them and the deployed-path fence can see the call.
+
 	// Every capability surface the platform ships is registered here — sourced where a durable store
 	// exists, nil where none does so the answer is 503 not-mounted rather than 404 (Decision 10).
-	caps, err := mountCapabilities(handler, platformDB, cfg.DataDir, strings.TrimSpace(os.Getenv("CONSOLE_HEALTH_URL")), secrets)
+	caps, err := mountCapabilities(handler, platformDB, cfg.DataDir, strings.TrimSpace(os.Getenv("CONSOLE_HEALTH_URL")), secrets, accounts)
 	if err != nil {
 		if platformDB != nil {
 			_ = platformDB.Close()

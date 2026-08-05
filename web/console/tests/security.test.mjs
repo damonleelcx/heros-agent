@@ -216,7 +216,8 @@ test("a signed-in request reaches the platform scoped to the session's tenant", 
   assert.equal(res.status, 200);
   const upstream = platform.requests[before];
   assert.equal(upstream.url, "/api/v1/runs/run-1");
-  assert.equal(upstream.headers["x-console-tenant"], TENANT);
+  // P27: the tenant header is gone. Scope travels inside the credential — see platformApi.ts.
+  assert.equal(upstream.headers["x-console-tenant"], undefined);
 });
 
 test("a client-supplied tenant identifier cannot widen scope", async () => {
@@ -231,7 +232,18 @@ test("a client-supplied tenant identifier cannot widen scope", async () => {
     headers: { cookie, "X-Console-Tenant": "tenant-other", "X-Tenant-Id": "tenant-other" },
   });
   const upstream = platform.requests[before];
-  assert.equal(upstream.headers["x-console-tenant"], TENANT, "a client-supplied tenant reached the platform");
+  // 🔴 P27 changed what this asserts, and strengthened it.
+  //
+  // It used to check that the forwarded `X-Console-Tenant` carried the SESSION's tenant rather than the
+  // client's. That was true and it was measuring the wrong thing: the platform never read the header, so
+  // the assertion proved the console filled in a field nobody consumed. The header is now DELETED, and
+  // scope travels inside a short-lived organization-scoped token the BFF exchanges its session for.
+  //
+  // So the assertion becomes an ABSENCE, plus the one that always mattered: nothing a client supplied
+  // reaches the upstream request in any position.
+  assert.equal(upstream.headers["x-console-tenant"], undefined,
+    "the console still forwards a tenant header — an ignored header that names authority is read by the " +
+    "next person as the mechanism, and P27 removed it on purpose");
   assert.doesNotMatch(upstream.url, /tenant-other/, "a client-supplied tenant reached the upstream path");
 });
 

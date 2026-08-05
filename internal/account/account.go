@@ -48,10 +48,27 @@ func (s Status) Suspended() bool { return s == StatusSuspended }
 type Account struct {
 	CustomerID string `json:"customer_id"`
 	// ProviderCustomerHandle is the billing provider's OPAQUE customer reference. No card data — ever.
-	ProviderCustomerHandle string `json:"provider_customer_handle"`
+	//
+	// EMPTY means "no billing-provider customer yet", which is what a Free account looks like before its
+	// first upgrade. It was mandatory until P27, correctly for a BILLABLE account and wrongly for a free
+	// one: sign-up would have had to either fail or register a customer object at a payment provider for
+	// every person who ever tried the free tier and never came back. The guarantee is preserved by
+	// stating the condition it actually was — see PlanCharges.
+	ProviderCustomerHandle string `json:"provider_customer_handle,omitempty"`
 	ActivePlanID           string `json:"active_plan_id"`
 	// PlanConfigVersion is the config-store version the active plan was resolved under.
 	PlanConfigVersion string `json:"plan_config_version"`
+	// PlanCharges is whether the active plan costs money, and it is the third thing that moves with the
+	// plan id and its version rather than a fourth thing somebody remembers to update.
+	//
+	// 🔴 It exists because the DATABASE has to hold P27's invariant — *a provider handle may be absent
+	// only while the plan charges nothing* — and the database cannot read plan configuration. Without a
+	// column the CHECK cannot be written, and "paid plan with no billing customer" goes back to being a
+	// state something has to detect rather than a row that cannot exist.
+	//
+	// It defaults TRUE for the same reason the column does: every account that existed before P27 has a
+	// handle, so the strict reading is the safe one and no existing row becomes invalid.
+	PlanCharges bool `json:"plan_charges"`
 	// GainshareConsent is the informed, recorded, REVOCABLE consent to verified-savings billing. It is a
 	// contract state, not a preference: gainshare may not be charged without it.
 	GainshareConsent bool       `json:"gainshare_consent"`
@@ -88,11 +105,15 @@ func (a Account) QuotaOverride(limit string) (float64, bool) {
 // Errors the store returns. They are distinguishable because callers act differently on each: a missing
 // account is a setup problem, a bad handle is a security problem.
 var (
-	ErrNotFound      = errors.New("account: no such customer")
-	ErrExists        = errors.New("account: customer already exists")
-	ErrCardData      = errors.New("account: refusing to store a value that looks like card data — the platform holds provider handles only")
-	ErrEmptyHandle   = errors.New("account: provider customer handle is required")
-	ErrEmptyCustomer = errors.New("account: customer_id is required")
+	ErrNotFound    = errors.New("account: no such customer")
+	ErrExists      = errors.New("account: customer already exists")
+	ErrCardData    = errors.New("account: refusing to store a value that looks like card data — the platform holds provider handles only")
+	ErrEmptyHandle = errors.New("account: provider customer handle is required")
+	// ErrHandleRequired is the P27 invariant, named: an account may hold no provider handle only while
+	// its plan charges nothing. It is distinct from ErrEmptyHandle because the two have different
+	// remedies — one says "you passed nothing", the other says "mint the customer first".
+	ErrHandleRequired = errors.New("account: a plan that charges requires a billing-provider customer")
+	ErrEmptyCustomer  = errors.New("account: customer_id is required")
 )
 
 // digitsOnly matches a run of 12–19 digits after separators are stripped: the shape of every card PAN
@@ -102,6 +123,25 @@ var digitsOnly = regexp.MustCompile(`^\d{12,19}$`)
 
 // sepStripper removes the separators a pasted card number carries.
 var sepStripper = strings.NewReplacer(" ", "", "-", "", ".", "")
+
+// ValidateHandle checks a provider handle against the plan's charging state.
+//
+// 🔴 This is the whole of P27's D3, in one function. Before P27 an empty handle was always refused,
+// which is correct for a BILLABLE account and makes a free one inexpressible. The guarantee — a customer
+// who cannot be billed must not look billable — survives, stated as the condition it actually was.
+//
+// The database holds the same rule in `account_handle_required_when_plan_charges`. Both, deliberately:
+// the database is the last line and cannot be bypassed, and this one gives the caller a named error
+// instead of a constraint violation.
+func ValidateHandle(s string, planCharges bool) (string, error) {
+	if strings.TrimSpace(s) == "" {
+		if planCharges {
+			return "", ErrHandleRequired
+		}
+		return "", nil
+	}
+	return NewHandle(s)
+}
 
 // NewHandle validates an opaque provider customer handle before it can be stored.
 //
@@ -141,9 +181,16 @@ func luhn(s string) bool {
 type Store interface {
 	Create(a Account) (Account, error)
 	Get(customerID string) (Account, error)
-	// SetPlan repoints the account at a plan AND the config version that plan was resolved under. The
-	// two move together on purpose: a plan id without its version cannot explain a closed period.
-	SetPlan(customerID, planID, planConfigVersion string) (Account, error)
+	// SetPlan repoints the account at a plan, the config version that plan was resolved under, AND
+	// whether that plan charges. All three move together on purpose: a plan id without its version
+	// cannot explain a closed period, and a plan without its charging flag lets an account sit on a paid
+	// plan with no billing customer — which P27's database CHECK refuses, so a caller that forgot would
+	// discover it as a write failure rather than as a wrong bill.
+	SetPlan(customerID, planID, planConfigVersion string, charges bool) (Account, error)
+	// SetProviderHandle records the billing-provider customer minted at first checkout. It is a separate
+	// method from SetPlan because the handle is created BEFORE the plan moves, so a failed provider call
+	// never leaves a plan change to undo.
+	SetProviderHandle(customerID, handle string) (Account, error)
 	// SetGainshareConsent records consent or its REVOCATION. Revocation clears consented_at; consent
 	// stamps it. Both are ordinary updates — the audit of the change lives in the billing ledger.
 	SetGainshareConsent(customerID string, consented bool, at time.Time) (Account, error)
@@ -178,7 +225,7 @@ func (s *MemStore) Create(a Account) (Account, error) {
 	if strings.TrimSpace(a.CustomerID) == "" {
 		return Account{}, ErrEmptyCustomer
 	}
-	h, err := NewHandle(a.ProviderCustomerHandle)
+	h, err := ValidateHandle(a.ProviderCustomerHandle, a.PlanCharges)
 	if err != nil {
 		return Account{}, err
 	}
@@ -206,8 +253,13 @@ func (s *MemStore) Get(customerID string) (Account, error) {
 	return a, nil
 }
 
-// SetPlan repoints the account's plan and pins the config version it resolved under.
-func (s *MemStore) SetPlan(customerID, planID, planConfigVersion string) (Account, error) {
+// SetPlan repoints the account's plan, pins the config version it resolved under, and records whether
+// the plan charges.
+//
+// 🔴 It refuses to move an account onto a CHARGING plan while it holds no provider handle. The database
+// refuses the same write; doing it here too means the caller gets a named error instead of a constraint
+// violation, and the in-memory store does not quietly permit what the durable one forbids.
+func (s *MemStore) SetPlan(customerID, planID, planConfigVersion string, charges bool) (Account, error) {
 	if planConfigVersion == "" {
 		return Account{}, errors.New("account: a plan change must pin the plan_config_version it resolved under")
 	}
@@ -217,7 +269,30 @@ func (s *MemStore) SetPlan(customerID, planID, planConfigVersion string) (Accoun
 	if !ok {
 		return Account{}, fmt.Errorf("%w: %s", ErrNotFound, customerID)
 	}
-	a.ActivePlanID, a.PlanConfigVersion = planID, planConfigVersion
+	if charges && strings.TrimSpace(a.ProviderCustomerHandle) == "" {
+		return Account{}, ErrHandleRequired
+	}
+	a.ActivePlanID, a.PlanConfigVersion, a.PlanCharges = planID, planConfigVersion, charges
+	s.by[customerID] = a
+	return a, nil
+}
+
+// SetProviderHandle records the billing-provider customer minted at first checkout.
+//
+// Separate from SetPlan because the two happen at different moments and in that order: the handle is
+// created BEFORE the plan moves, so the plan change never has to be undone when the provider call fails.
+func (s *MemStore) SetProviderHandle(customerID, handle string) (Account, error) {
+	h, err := NewHandle(handle)
+	if err != nil {
+		return Account{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	a, ok := s.by[customerID]
+	if !ok {
+		return Account{}, fmt.Errorf("%w: %s", ErrNotFound, customerID)
+	}
+	a.ProviderCustomerHandle = h
 	s.by[customerID] = a
 	return a, nil
 }

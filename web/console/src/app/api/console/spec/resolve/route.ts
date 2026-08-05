@@ -4,7 +4,7 @@ import { withSession, isResponse, forward } from "@/lib/bff";
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
-  const context = withSession(request);
+  const context = await withSession(request);
   if (isResponse(context)) return context;
   // The body is forwarded as received. It is a Variant Spec — customer content — so it is never
   // logged, never inspected for business rules, and never "normalised" on the way through.

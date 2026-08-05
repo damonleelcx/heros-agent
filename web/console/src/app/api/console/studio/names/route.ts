@@ -4,7 +4,7 @@ import { withSession, isResponse, forward } from "@/lib/bff";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
-  const context = withSession(request);
+  const context = await withSession(request);
   if (isResponse(context)) return context;
   return forward(context, context.paths.promptNames());
 }

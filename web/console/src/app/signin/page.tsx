@@ -201,6 +201,26 @@ export default async function SignInPage({
                       for a session held on the server; your browser receives a cookie it cannot read, and
                       never the token itself.
                     </>
+                  ) : identityProvider() === "configured" ? (
+                    /*
+                     * 🔴 WHERE IT COMES FROM, not only what we do with it.
+                     *
+                     * The paragraph above says the generic hint "is true for every mode and therefore
+                     * tells the reader nothing about which credential they hold" — and then fixed that
+                     * for `platform` only. `configured` kept the generic sentence, and it is the mode
+                     * where the question bites hardest: this is the single-customer and air-gapped shape,
+                     * where people are added by CONFIGURATION rather than by invitation, so a reader who
+                     * does not already have the value has no way to work out who to ask.
+                     *
+                     * Asked by somebody looking at this screen: "how do my users know what to use?".
+                     * That is the whole defect, and the answer is one sentence long.
+                     */
+                    <>
+                      This install issues its own credentials rather than federating with an identity
+                      provider — whoever runs it gives you this value. The console exchanges it once for a
+                      session held on the server; your browser receives a cookie it cannot read, and never
+                      a platform key.
+                    </>
                   ) : (
                     <>
                       The console exchanges this once for a session held on the server. Your browser

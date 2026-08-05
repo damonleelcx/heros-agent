@@ -48,6 +48,19 @@ services:
       # `dev` refuses to start in production, by design.
       CONSOLE_TENANT_IDENTITY: ${CONSOLE_TENANT_IDENTITY:-configured}
       CONSOLE_TENANT_ASSERTIONS: ${CONSOLE_TENANT_ASSERTIONS:?set CONSOLE_TENANT_ASSERTIONS from your secret store}
+      # Where console sessions live (P27 task 7.1). `platform` writes a row per session through the
+      # platform API; `memory` is the original per-process map.
+      #
+      # 🔴 `platform` here, and NOT because Compose needs it for horizontal scale — this unit runs one
+      # console container, so the disjoint-store defect the Kubernetes count was reduced over cannot
+      # happen. It is the default because of the OTHER half: with the map, every `docker compose up -d`
+      # signs every user out, silently, and that reads as "the console keeps logging me out" rather than
+      # as a consequence of a deploy. The platform is a service away on this network.
+      #
+      # It is declared on BOTH substrates deliberately. `scripts/deploy/check-env-parity.sh` caught this
+      # variable existing only in the Kubernetes base, and it was right to: a variable on one substrate
+      # only does not fail anything at apply — it silently changes what that deployment does.
+      CONSOLE_SESSION_STORE: ${CONSOLE_SESSION_STORE:-platform}
       # ── Identity federation (P22 task 7.2) ──────────────────────────────────────────────────────
       #
       # `${VAR:-}` interpolation only — a literal here is a hardcoded credential, and

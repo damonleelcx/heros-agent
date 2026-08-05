@@ -43,6 +43,11 @@ const (
 	hashSyntaxOnly = "4444444444444444444444444444444444444444444444444444444444444444"
 )
 
+// demoTenant is the organization the demo's runs belong to. P27 made a run's owner a column; a demo that
+// left it NULL would render as "created before ownership was recorded", which is true of a customer's
+// history and false of a fixture written today.
+const demoTenant = "demo-org"
+
 func main() {
 	addr := flag.String("addr", "127.0.0.1:8477", "listen address")
 	pgURL := flag.String("pg", os.Getenv("HEROS_TEST_POSTGRES_URL"), "postgres url")
@@ -236,7 +241,7 @@ func seed(ctx context.Context, db *sql.DB, blobs *registry.CatalogingBlobStore) 
 
 	es := executor.NewStore(db)
 	// A succeeded run with per-node I/O.
-	_ = es.Start(ctx, "run_ok", hashBuilt, "rev1", 42)
+	_ = es.Start(ctx, "run_ok", hashBuilt, "rev1", 42, demoTenant)
 	for i, n := range []string{"n_classify", "n_resolve"} {
 		in, _ := blobs.Put(ctx, []byte(fmt.Sprintf(`{"query":"ticket %d"}`, i)))
 		out, _ := blobs.Put(ctx, []byte(fmt.Sprintf(`{"answer":"triaged %d"}`, i)))
@@ -253,7 +258,7 @@ func seed(ctx context.Context, db *sql.DB, blobs *registry.CatalogingBlobStore) 
 	}
 
 	// A halted run — stopped by us on a contract violation, naming the node.
-	_ = es.Start(ctx, "run_halted", hashBuilt, "rev1", 42)
+	_ = es.Start(ctx, "run_halted", hashBuilt, "rev1", 42, demoTenant)
 	in, _ := blobs.Put(ctx, []byte(`{"query":"ticket"}`))
 	out, _ := blobs.Put(ctx, []byte(`{"answer":42}`))
 	if err := es.RecordNode(ctx, "run_halted", executor.NodeResult{
@@ -271,6 +276,6 @@ func seed(ctx context.Context, db *sql.DB, blobs *registry.CatalogingBlobStore) 
 	}
 
 	// A run with no node executions — the empty state.
-	_ = es.Start(ctx, "run_empty", hashBaseline, "rev1", 1)
+	_ = es.Start(ctx, "run_empty", hashBaseline, "rev1", 1, demoTenant)
 	return nil
 }

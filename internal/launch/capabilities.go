@@ -77,7 +77,7 @@ type Capability struct {
 // providers read verification state that has no store yet. Mounting those over memory would turn "not
 // installed" into "installed and quietly lossy", which is a worse lie than the 404 this replaces. They
 // are PRD Q6, and deploy/README.md lists them.
-func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL string, secrets providergateway.Secrets) ([]Capability, error) {
+func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL string, secrets providergateway.Secrets, accounts *AccountSystem) ([]Capability, error) {
 	caps := make([]Capability, 0, 16)
 	served := func(name string) { caps = append(caps, Capability{Name: name, Served: true}) }
 	absent := func(name, why string) { caps = append(caps, Capability{Name: name, Why: why}) }
@@ -284,6 +284,22 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 				// would be two answers to "may this tenant do this", and the one the billing page shows is not
 				// the one that decides whether a pull request is opened.
 				entGate = entitlement.NewGate(acctStore, plans, usageStore)
+				// 🔴 The seat allowance becomes measurable HERE, and only here.
+				//
+				// `plancfg.LimitSeats` has gated the dashboard since P7 against a `seats` usage record
+				// that nothing ever wrote — so the comparison was against zero, forever, and passed. The
+				// counter reads MEMBERSHIP, which is where a seat count actually lives. Without this
+				// line the gate skips the limit and SAYS it could not measure, which is the honest
+				// alternative; with it, the number is real.
+				if accounts != nil && accounts.Surface != nil {
+					entGate.WithSeatCounter(accounts.Surface)
+					// The same counter refuses a downgrade that would leave the organization over its new
+					// allowance — with both numbers named, and removal as the stated remedy.
+					svc.WithSeatCounter(accounts.Surface)
+					// And the surface gains the meter it records the period PEAK into. Two quantities,
+					// two names: the counter above gates the next invitation, this prices the invoice.
+					accounts.Surface.meter = meter
+				}
 				if billingView, err = billingview.New(acctStore, plans, usageStore, deltas, entGate, svc); err != nil {
 					return nil, fmt.Errorf("billing view: %w", err)
 				}
@@ -584,6 +600,29 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 			"so there is no proposal for a reported verdict to attach to")
 	}
 	h.MountOptimizer(nil)
+	// ── P27 · the account system ────────────────────────────────────────────────────────────────────
+	//
+	// Registered HERE rather than beside the boot wiring, because a capability the deployed process does
+	// not register answers 404 rather than 503 — and nothing else fails, so the build stays green while
+	// the surface looks like a bad identifier. That is exactly what `TestEveryMountFunctionIsCalledByTheDeployedPath`
+	// exists to catch, and it caught this one.
+	switch {
+	case accounts == nil:
+		absent("p27_account_system", "the account system was not composed at boot")
+	case accounts.Surface == nil:
+		absent("p27_account_system", "this deployment declares no plan catalog, so the organization "+
+			"surface cannot state a seat allowance — see the boot log for the path it looked for")
+	default:
+		h.MountAccounts(accounts.Surface)
+		if accounts.Surface.SelfServeEnabled() {
+			served("p27_account_system (organizations, members, invitations, credentials; self-serve sign-up ON)")
+		} else {
+			// Not "degraded". A deployment with self-serve off is CONFIGURED, and saying so beside the
+			// served capability is what keeps the two apart on the ledger an operator reads.
+			served("p27_account_system (organizations, members, invitations, credentials; self-serve sign-up off)")
+		}
+	}
+
 	absent("p6_optimizer", noAdapter)
 	if !mountedPatternGraph {
 		h.MountPatternGraph(nil)

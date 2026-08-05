@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -46,11 +47,25 @@ var ErrRunIDCollision = errors.New("executor: this run_id already names a differ
 // "already there, fine" would report a write that never landed as a success, and — worse — would
 // silently accept a run_id that names a DIFFERENT configuration, so the UI would then watch a run
 // that has nothing to do with what the user submitted. That case is a loud error instead.
-func (s *Store) Start(ctx context.Context, runID, configHash, sourceRevision string, seed int64) error {
+// # The owning organization is recorded HERE, at the moment the run is created
+//
+// P27 added `run.tenant_id`, and this is the one write that fills it. It comes from the VERIFIED
+// principal the caller already resolved — never from anything the request said about itself — and it is
+// written once and never changed, because a transfer would move billed usage between customers.
+//
+// An empty `tenantID` stores NULL, which means PRE-OWNERSHIP: a run created before P27, whose owner was
+// never written and is not recoverable. Every listing surface renders that as its own state rather than
+// as "you have no runs", because a phase that silently redefines a customer's history as starting at the
+// upgrade reads as data loss.
+func (s *Store) Start(ctx context.Context, runID, configHash, sourceRevision string, seed int64, tenantID string) error {
+	var owner any
+	if strings.TrimSpace(tenantID) != "" {
+		owner = strings.TrimSpace(tenantID)
+	}
 	res, err := s.db.ExecContext(ctx,
-		`INSERT INTO run (run_id, config_hash, source_revision, seed, status)
-		 VALUES ($1, $2, $3, $4, 'running') ON CONFLICT (run_id) DO NOTHING`,
-		runID, configHash, sourceRevision, seed)
+		`INSERT INTO run (run_id, config_hash, source_revision, seed, status, tenant_id)
+		 VALUES ($1, $2, $3, $4, 'running', $5) ON CONFLICT (run_id) DO NOTHING`,
+		runID, configHash, sourceRevision, seed, owner)
 	if err != nil {
 		return fmt.Errorf("executor: start run %s: %w", runID, err)
 	}
@@ -198,7 +213,86 @@ type RunRecord struct {
 	Status         Status
 	HaltedNodeID   string
 	HaltedReason   string
-	Nodes          []NodeResult
+	// TenantID is the OWNING organization. EMPTY means pre-ownership: a run created before P27, whose
+	// owner was never written and is not recoverable. It is deliberately not "unowned" — a listing
+	// surface renders the two differently, because telling a returning customer their history is gone
+	// when it is not reads as data loss.
+	TenantID string
+	Nodes    []NodeResult
+}
+
+// ListForTenant returns one page of an organization's runs, newest first.
+//
+// 🔴 It takes the tenant as an argument and there is no variant that does not: the caller supplies the
+// value the platform verified, and no code path here accepts one from a request. Pre-ownership rows are
+// excluded — `tenant_id IS NOT NULL` is also what makes the partial index the right index — and are
+// reported separately by PreOwnedCount so a surface can say "runs exist that predate ownership" instead
+// of showing an empty table.
+func (s *Store) ListForTenant(ctx context.Context, tenantID string, limit int, before time.Time) ([]RunSummary, error) {
+	if strings.TrimSpace(tenantID) == "" {
+		// Not an empty list. An empty tenant would match every pre-ownership row if the predicate were
+		// written naively, and "the caller forgot the scope" must never resolve to "here is everything".
+		return nil, errors.New("executor: listing runs requires an organization")
+	}
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	cursor := before
+	if cursor.IsZero() {
+		cursor = time.Now().UTC().Add(24 * time.Hour)
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT run_id, config_hash, source_revision, seed, status, started_at, finished_at
+		  FROM run
+		 WHERE tenant_id = $1 AND started_at < $2
+		 ORDER BY started_at DESC
+		 LIMIT $3`, strings.TrimSpace(tenantID), cursor, limit)
+	if err != nil {
+		return nil, fmt.Errorf("executor: list runs: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := []RunSummary{}
+	for rows.Next() {
+		var r RunSummary
+		var status string
+		var finished sql.NullTime
+		if err := rows.Scan(&r.RunID, &r.ConfigHash, &r.SourceRevision, &r.Seed, &status, &r.StartedAt, &finished); err != nil {
+			return nil, fmt.Errorf("executor: list runs: %w", err)
+		}
+		r.Status = Status(status)
+		r.StartedAt = r.StartedAt.UTC()
+		if finished.Valid {
+			t := finished.Time.UTC()
+			r.FinishedAt = &t
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// PreOwnedCount is how many runs exist with NO recorded owner.
+//
+// It is deliberately not scoped to an organization, because a pre-ownership row belongs to nobody — that
+// is the whole meaning of the NULL. A listing surface uses it to say "there are runs here that predate
+// ownership recording" rather than rendering the same empty table it would show a brand-new customer.
+func (s *Store) PreOwnedCount(ctx context.Context) (int, error) {
+	var n int
+	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM run WHERE tenant_id IS NULL`).Scan(&n); err != nil {
+		return 0, fmt.Errorf("executor: count pre-ownership runs: %w", err)
+	}
+	return n, nil
+}
+
+// RunSummary is one row of a listing. It carries what a list renders and nothing more — node executions
+// are a detail view's query, and loading them per row would make a page of fifty runs fifty joins.
+type RunSummary struct {
+	RunID          string     `json:"run_id"`
+	ConfigHash     string     `json:"config_hash"`
+	SourceRevision string     `json:"source_revision"`
+	Seed           int64      `json:"seed"`
+	Status         Status     `json:"status"`
+	StartedAt      time.Time  `json:"started_at"`
+	FinishedAt     *time.Time `json:"finished_at,omitempty"`
 }
 
 // Get returns a run and its node executions — the query the UI's inspect view is (FR18).
@@ -206,10 +300,11 @@ func (s *Store) Get(ctx context.Context, runID string) (*RunRecord, error) {
 	var r RunRecord
 	var status string
 	var nodeID, reason sql.NullString
+	var owner sql.NullString
 	err := s.db.QueryRowContext(ctx,
-		`SELECT config_hash, source_revision, seed, status, halted_node_id, halted_reason
+		`SELECT config_hash, source_revision, seed, status, halted_node_id, halted_reason, tenant_id
 		 FROM run WHERE run_id = $1`, runID).
-		Scan(&r.ConfigHash, &r.SourceRevision, &r.Seed, &status, &nodeID, &reason)
+		Scan(&r.ConfigHash, &r.SourceRevision, &r.Seed, &status, &nodeID, &reason, &owner)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("%w: %s", ErrRunNotFound, runID)
 	}
@@ -218,6 +313,10 @@ func (s *Store) Get(ctx context.Context, runID string) (*RunRecord, error) {
 	}
 	r.RunID, r.Status = runID, Status(status)
 	r.HaltedNodeID, r.HaltedReason = nodeID.String, reason.String
+	// NULL means PRE-OWNERSHIP — a run created before P27, whose owner was never written. It is the
+	// empty string in Go, and the caller distinguishes it from a real owner by asking whether it is
+	// empty, never by asking whether it matches.
+	r.TenantID = owner.String
 
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT node_id, attempt_group, status, input_blob_hash, output_blob_hash, idempotency_key, error

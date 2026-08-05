@@ -34,7 +34,7 @@ export const dynamic = "force-dynamic";
 const RETURN_PATHS = new Set(["/app/billing", "/app/account"]);
 
 export async function POST(request: Request) {
-  const context = withSession(request);
+  const context = await withSession(request);
   if (isResponse(context)) return context;
 
   const body = (await request.json().catch(() => null)) as { plan_name?: unknown; return_path?: unknown } | null;

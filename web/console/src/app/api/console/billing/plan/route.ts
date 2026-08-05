@@ -18,7 +18,7 @@ import type { PlanChangeView } from "@/lib/types.generated";
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
-  const context = withSession(request);
+  const context = await withSession(request);
   if (isResponse(context)) return context;
 
   const body = (await request.json().catch(() => null)) as { plan_name?: unknown } | null;

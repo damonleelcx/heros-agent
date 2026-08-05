@@ -12,7 +12,7 @@ import { withSession, isResponse, forward } from "@/lib/bff";
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
-  const context = withSession(request);
+  const context = await withSession(request);
   if (isResponse(context)) return context;
   const body: unknown = await request.json().catch(() => null);
   return forward(context, context.paths.submitSpec(), { method: "POST", body });

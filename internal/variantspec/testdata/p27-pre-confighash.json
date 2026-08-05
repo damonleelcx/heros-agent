@@ -1,0 +1,171 @@
+[
+  {
+    "name": "discovered-defaults",
+    "why": "a spec that overrides nothing still hashes a COMPLETE configuration — the dimensions nobody overrode are pinned by source_revision. This is the shape most stored rows have.",
+    "canonical_json": "{\"edges\":[{\"from_node_id\":\"n_a\",\"kind\":\"data\",\"to_node_id\":\"n_b\"}],\"ir_version\":\"1.0.0\",\"nodes\":[{\"context_params\":{},\"context_policy\":\"inline_messages\",\"model_ref\":\"anthropic/claude-opus-4-8\",\"node_id\":\"n_a\",\"prompt_ref\":\"inline://54e78a8152f09586130fa9ab631cd0677bf7626d9862db557333d9a5a6dd1fff\",\"provider_params\":{},\"skill_refs\":[]},{\"context_params\":{},\"context_policy\":\"inline_messages\",\"model_ref\":\"anthropic/claude-sonnet-5\",\"node_id\":\"n_b\",\"prompt_ref\":\"inline://4899bde81ad8cb02561b2c09b13244cf3c2cc6ab014c20ddcc1d3c075c1c463b\",\"provider_params\":{},\"skill_refs\":[\"search_kb\"]}]}",
+    "config_hash": "d902ae8f59197d8816da45edc951a3e034ae62e091187446e4a43f010138d73c",
+    "resolved_config": {
+      "ir_version": "1.0.0",
+      "nodes": [
+        {
+          "node_id": "n_a",
+          "model_ref": "anthropic/claude-opus-4-8",
+          "prompt_ref": "inline://54e78a8152f09586130fa9ab631cd0677bf7626d9862db557333d9a5a6dd1fff",
+          "skill_refs": [],
+          "context_policy": "inline_messages",
+          "context_params": {},
+          "provider_params": {}
+        },
+        {
+          "node_id": "n_b",
+          "model_ref": "anthropic/claude-sonnet-5",
+          "prompt_ref": "inline://4899bde81ad8cb02561b2c09b13244cf3c2cc6ab014c20ddcc1d3c075c1c463b",
+          "skill_refs": [
+            "search_kb"
+          ],
+          "context_policy": "inline_messages",
+          "context_params": {},
+          "provider_params": {}
+        }
+      ],
+      "edges": [
+        {
+          "from_node_id": "n_a",
+          "to_node_id": "n_b",
+          "kind": "data"
+        }
+      ]
+    }
+  },
+  {
+    "name": "every-dimension-overridden",
+    "why": "model, prompt, skills and context all resolved through the registries on one node. Covers every projection that turns a version_id into a hashed value.",
+    "canonical_json": "{\"edges\":[{\"from_node_id\":\"n_a\",\"kind\":\"data\",\"to_node_id\":\"n_b\"}],\"ir_version\":\"1.0.0\",\"nodes\":[{\"context_params\":{\"turns\":8},\"context_policy\":\"sliding_window\",\"model_ref\":\"openai/gpt-5\",\"node_id\":\"n_a\",\"prompt_ref\":\"prompt://triage@p-triage\",\"provider_params\":{\"max_tokens\":1024,\"temperature\":0.2},\"skill_refs\":[\"search_kb@sk-search\",\"issue_lookup@sk-lookup\"]},{\"context_params\":{},\"context_policy\":\"inline_messages\",\"model_ref\":\"anthropic/claude-sonnet-5\",\"node_id\":\"n_b\",\"prompt_ref\":\"inline://4899bde81ad8cb02561b2c09b13244cf3c2cc6ab014c20ddcc1d3c075c1c463b\",\"provider_params\":{},\"skill_refs\":[\"search_kb\"]}]}",
+    "config_hash": "9f699d364dabcae320f61c976915fb6b8270786c600b9941cad98b2f06732aef",
+    "resolved_config": {
+      "ir_version": "1.0.0",
+      "nodes": [
+        {
+          "node_id": "n_a",
+          "model_ref": "openai/gpt-5",
+          "prompt_ref": "prompt://triage@p-triage",
+          "skill_refs": [
+            "search_kb@sk-search",
+            "issue_lookup@sk-lookup"
+          ],
+          "context_policy": "sliding_window",
+          "context_params": {
+            "turns": 8
+          },
+          "provider_params": {
+            "max_tokens": 1024,
+            "temperature": 0.2
+          }
+        },
+        {
+          "node_id": "n_b",
+          "model_ref": "anthropic/claude-sonnet-5",
+          "prompt_ref": "inline://4899bde81ad8cb02561b2c09b13244cf3c2cc6ab014c20ddcc1d3c075c1c463b",
+          "skill_refs": [
+            "search_kb"
+          ],
+          "context_policy": "inline_messages",
+          "context_params": {},
+          "provider_params": {}
+        }
+      ],
+      "edges": [
+        {
+          "from_node_id": "n_a",
+          "to_node_id": "n_b",
+          "kind": "data"
+        }
+      ]
+    }
+  },
+  {
+    "name": "node-order-reversed",
+    "why": "the SAME overrides with the node order flipped. Node order is identity-bearing (JCS does not sort arrays), so this hash must differ from the one above — which is what makes the pair evidence that ordering still counts, rather than two rows that happen to agree.",
+    "canonical_json": "{\"edges\":[{\"from_node_id\":\"n_a\",\"kind\":\"data\",\"to_node_id\":\"n_b\"}],\"ir_version\":\"1.0.0\",\"nodes\":[{\"context_params\":{},\"context_policy\":\"inline_messages\",\"model_ref\":\"anthropic/claude-sonnet-5\",\"node_id\":\"n_b\",\"prompt_ref\":\"inline://4899bde81ad8cb02561b2c09b13244cf3c2cc6ab014c20ddcc1d3c075c1c463b\",\"provider_params\":{},\"skill_refs\":[\"search_kb\"]},{\"context_params\":{\"turns\":8},\"context_policy\":\"sliding_window\",\"model_ref\":\"openai/gpt-5\",\"node_id\":\"n_a\",\"prompt_ref\":\"prompt://triage@p-triage\",\"provider_params\":{\"max_tokens\":1024,\"temperature\":0.2},\"skill_refs\":[\"search_kb@sk-search\",\"issue_lookup@sk-lookup\"]}]}",
+    "config_hash": "32d263c5709eef549d5aadee6ca26f8baed306225bfe91caea960a53363927b9",
+    "resolved_config": {
+      "ir_version": "1.0.0",
+      "nodes": [
+        {
+          "node_id": "n_b",
+          "model_ref": "anthropic/claude-sonnet-5",
+          "prompt_ref": "inline://4899bde81ad8cb02561b2c09b13244cf3c2cc6ab014c20ddcc1d3c075c1c463b",
+          "skill_refs": [
+            "search_kb"
+          ],
+          "context_policy": "inline_messages",
+          "context_params": {},
+          "provider_params": {}
+        },
+        {
+          "node_id": "n_a",
+          "model_ref": "openai/gpt-5",
+          "prompt_ref": "prompt://triage@p-triage",
+          "skill_refs": [
+            "search_kb@sk-search",
+            "issue_lookup@sk-lookup"
+          ],
+          "context_policy": "sliding_window",
+          "context_params": {
+            "turns": 8
+          },
+          "provider_params": {
+            "max_tokens": 1024,
+            "temperature": 0.2
+          }
+        }
+      ],
+      "edges": [
+        {
+          "from_node_id": "n_a",
+          "to_node_id": "n_b",
+          "kind": "data"
+        }
+      ]
+    }
+  },
+  {
+    "name": "additive-field-present",
+    "why": "an authored context_drop_tolerance: one of the omitempty fields later phases added. Included so the recording covers a PRESENT additive key and not only absent ones.",
+    "canonical_json": "{\"edges\":[{\"from_node_id\":\"n_a\",\"kind\":\"data\",\"to_node_id\":\"n_b\"}],\"ir_version\":\"1.0.0\",\"nodes\":[{\"context_params\":{},\"context_policy\":\"inline_messages\",\"model_ref\":\"anthropic/claude-opus-4-8\",\"node_id\":\"n_a\",\"prompt_ref\":\"inline://54e78a8152f09586130fa9ab631cd0677bf7626d9862db557333d9a5a6dd1fff\",\"provider_params\":{},\"skill_refs\":[]},{\"context_drop_tolerance\":0.15,\"context_params\":{},\"context_policy\":\"inline_messages\",\"model_ref\":\"anthropic/claude-sonnet-5\",\"node_id\":\"n_b\",\"prompt_ref\":\"inline://4899bde81ad8cb02561b2c09b13244cf3c2cc6ab014c20ddcc1d3c075c1c463b\",\"provider_params\":{},\"skill_refs\":[\"search_kb\"]}]}",
+    "config_hash": "35a5ddc606f2f2d54bc771b4a484364841928b51da5be1c530828689b394fdd5",
+    "resolved_config": {
+      "ir_version": "1.0.0",
+      "nodes": [
+        {
+          "node_id": "n_a",
+          "model_ref": "anthropic/claude-opus-4-8",
+          "prompt_ref": "inline://54e78a8152f09586130fa9ab631cd0677bf7626d9862db557333d9a5a6dd1fff",
+          "skill_refs": [],
+          "context_policy": "inline_messages",
+          "context_params": {},
+          "provider_params": {}
+        },
+        {
+          "node_id": "n_b",
+          "model_ref": "anthropic/claude-sonnet-5",
+          "prompt_ref": "inline://4899bde81ad8cb02561b2c09b13244cf3c2cc6ab014c20ddcc1d3c075c1c463b",
+          "skill_refs": [
+            "search_kb"
+          ],
+          "context_policy": "inline_messages",
+          "context_params": {},
+          "provider_params": {},
+          "context_drop_tolerance": 0.15
+        }
+      ],
+      "edges": [
+        {
+          "from_node_id": "n_a",
+          "to_node_id": "n_b",
+          "kind": "data"
+        }
+      ]
+    }
+  }
+]

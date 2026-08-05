@@ -191,3 +191,12 @@ func logCapabilities(caps []Capability) {
 		}
 	}
 }
+
+// platformDSNDeclared reports whether this deployment declares a platform database.
+//
+// It reads the environment rather than taking the opened handle, because the one caller runs BEFORE the
+// pool is opened: the boot check that refuses to start a deployment with no way to authenticate has to
+// answer "will there be a durable identity store?" before there is one.
+func platformDSNDeclared() bool {
+	return strings.TrimSpace(os.Getenv(EnvPlatformDSN)) != ""
+}

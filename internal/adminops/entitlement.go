@@ -111,7 +111,7 @@ func (s *EntitlementService) Override(ctx context.Context, tenantID, planRef, re
 		if err != nil {
 			return nil, err
 		}
-		after, err := s.accounts.SetPlan(tenantID, plan.PlanID, version)
+		after, err := s.accounts.SetPlan(tenantID, plan.PlanID, version, plan.Charges())
 		if err != nil {
 			return nil, err
 		}

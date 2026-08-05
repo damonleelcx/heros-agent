@@ -1,0 +1,12 @@
+// DELIBERATELY BROKEN. This file is a FIXTURE, not code — see p27_fence_fixtures_test.go.
+//
+// It reintroduces the header P27 deleted. `internal/deploy` and the console both used to forward it, and
+// the erosion this models is not somebody re-adding it on purpose: it is somebody adding a "tracing"
+// header whose name reads as authority, and the next reader wiring scope to it.
+package broken
+
+import "net/http"
+
+func forward(r *http.Request, upstream *http.Request) {
+	upstream.Header.Set("X-Console-Tenant", r.Header.Get("X-Console-Tenant"))
+}

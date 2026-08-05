@@ -175,6 +175,13 @@ type Request struct {
 	// default would make the platform non-reproducible by default, which is the opposite of what it
 	// is for.
 	Seed int64
+	// TenantID is the OWNING organization, taken from the verified principal by the caller.
+	//
+	// 🔴 It is never read from anything the request said about itself, and it is written once: there is
+	// no interface anywhere that changes a run's owner afterwards, because a transfer would move billed
+	// usage between customers. An empty value stores NULL, which means *created before ownership was
+	// recorded* — a state every listing surface renders as its own rather than as "you have no runs".
+	TenantID string
 }
 
 // Outcome is what a submission became. Every terminal state is a value here, not an error — a
@@ -341,7 +348,7 @@ func (s *Service) Submit(ctx context.Context, req Request) (*Outcome, error) {
 	// idempotent on a derived run_id. The reverse order would leave a queue item whose run row does
 	// not exist, which a worker would pick up and fail on.
 	runID := executor.RunIDFor(resolved.ConfigHash, rev, req.Seed)
-	if err := s.runs.Start(ctx, runID, resolved.ConfigHash, rev, req.Seed); err != nil {
+	if err := s.runs.Start(ctx, runID, resolved.ConfigHash, rev, req.Seed, req.TenantID); err != nil {
 		return nil, err
 	}
 	if err := s.queue.Enqueue(ctx, runID, resolved.ConfigHash, rev, req.Seed); err != nil {

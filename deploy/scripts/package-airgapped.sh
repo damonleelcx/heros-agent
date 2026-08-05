@@ -187,6 +187,22 @@ ORIGIN_GATE="$SCRIPT_DIR/check-external-origins.sh"
 log "checking the staged package references no external origin"
 sh "$ORIGIN_GATE" "$STAGE" || die "the staged package references an external origin or a reporting identity (see above) — refusing to cut an air-gapped package that can phone home"
 
+# ── 2c) 🔴 SELF-SERVE SIGN-UP IS DECLARED OFF (P27 task 10.4). ─────────────────────────────────────────
+# The same argument as 2b, one phase later. P27 lets a verified identity that maps to no organization
+# create one — right for the hosted product, wrong for a machine room, where the customer's own IdP means
+# everybody it admits is already inside the perimeter and could mint an organization on a platform with
+# no egress to alert over it.
+#
+# The gate refuses two things, and the SECOND is the one worth the script: a package that turns it on,
+# and a package that never mentions it. Unset already means off, so silence is not dangerous today — it
+# is unreadable, which is the failure this phase's readiness work exists to remove. An operator diffing
+# two packages can see "0" become "1"; nobody can see an absent line start being absent for a different
+# reason.
+SELFSERVE_GATE="$SCRIPT_DIR/check-self-serve-off.sh"
+[ -f "$SELFSERVE_GATE" ] || die "missing $SELFSERVE_GATE — the self-serve posture gate is part of the package build, not optional"
+log "checking the staged package declares self-serve sign-up OFF"
+sh "$SELFSERVE_GATE" "$STAGE" || die "the staged package does not declare self-serve sign-up off (see above) — refusing to cut an air-gapped package whose registration posture is unstated or on"
+
 # ── 3) A VERSION marker (no secrets): records the identity install/rollback compare against, and the
 #    exact pinned image set, so an operator can read what they hold without trusting a filename. ────────
 {

@@ -1,0 +1,17 @@
+// DELIBERATELY BROKEN. A run created with no owner.
+//
+// The empty final argument stores NULL, which means PRE-OWNERSHIP — a run from before P27 whose owner
+// was never written. A NEW run written that way is indistinguishable from one of those forever: it
+// belongs to nobody, appears in nobody's listing, and its usage is billed to nobody.
+package broken
+
+import "context"
+
+type store interface {
+	Start(ctx context.Context, runID, configHash, rev string, seed int64, tenantID string) error
+}
+
+func enqueue(ctx context.Context, runs store, runID, hash, rev string) error {
+	// The owner is right there on the verified principal and this drops it.
+	return runs.Start(ctx, runID, hash, rev, 0, "")
+}

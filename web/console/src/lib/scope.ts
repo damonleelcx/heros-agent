@@ -132,7 +132,49 @@ export function scoped(session: Session) {
     // what someone paid. The handler takes no tenant at all; the session still scopes the call so
     // there is one call convention rather than two.
     deliveryRoutes: () => `/api/v1/change-delivery`,
+
+    // ── P27 · the organization, its people, and the work it owns ──────────
+    //
+    // 🔴 Not one of these takes an organization. The platform reads it from the credential it verified,
+    // and there is no parameter here a caller could put one in — which is the structural version of the
+    // rule rather than a note asking somebody to keep it.
+    //
+    // `X-Console-Tenant` used to carry the scope and the platform never read it. It is deleted; see
+    // `platformApi.ts`.
+    organization: () => `/api/v1/organization`,
+    members: () => `/api/v1/organization/members`,
+    memberRole: (userId: string) => `/api/v1/organization/members/${encode(userId)}/role`,
+    memberRemovalPreview: (userId: string) =>
+      `/api/v1/organization/members/${encode(userId)}/removal-preview`,
+    member: (userId: string) => `/api/v1/organization/members/${encode(userId)}`,
+    invitations: () => `/api/v1/organization/invitations`,
+    invitation: (invitationId: string) => `/api/v1/organization/invitations/${encode(invitationId)}`,
+    credentials: () => `/api/v1/organization/credentials`,
+    credential: (credentialId: string) => `/api/v1/organization/credentials/${encode(credentialId)}`,
+    closeOrganization: () => `/api/v1/organization/close`,
+
+    // The RUN COLLECTION — the question this API could not be asked before P27. `before` is a cursor
+    // the platform hands back, never an offset the client computes: an offset page shifts under a
+    // concurrent write and silently skips or repeats a row.
+    runs: (opts?: { limit?: number; before?: string }) => `/api/v1/runs` + runQuery(opts),
   };
 }
 
 export type Scoped = ReturnType<typeof scoped>;
+
+/**
+ * runQuery builds the collection's query string.
+ *
+ * It is a function rather than an interpolation INSIDE the path literal, and that is not a style
+ * choice: `tests/platform-routes.test.mjs` reads every `/api/v1/…` literal out of this file as TEXT and
+ * checks it against the routes the platform registers. A template that interpolated the query would
+ * present `/api/v1/runs${suffix ? ` to that scanner — a path no server answers, reported as a defect
+ * that is really a parser artefact. Keeping the literal literal keeps the fence able to read it.
+ */
+function runQuery(opts?: { limit?: number; before?: string }): string {
+  const query = new URLSearchParams();
+  if (opts?.limit) query.set("limit", String(opts.limit));
+  if (opts?.before) query.set("before", opts.before);
+  const suffix = query.toString();
+  return suffix ? `?${suffix}` : "";
+}

@@ -187,7 +187,31 @@ type Gate struct {
 	accounts account.Store
 	plans    *plancfg.Resolver
 	usage    metering.UsageStore
-	now      func() time.Time
+	// seats answers the seat meter, which is a STATE rather than a flow. See stateMetrics.
+	seats SeatCounter
+	now   func() time.Time
+}
+
+// SeatCounter reports how many seats an organization holds RIGHT NOW.
+//
+// 🔴 It exists because the seat meter is not a meter. `plancfg.LimitSeats` and `metering.MetricSeats`
+// have both existed since P7 and nothing ever wrote a `seats` usage record — so this gate compared an
+// allowance against zero, forever, and passed. A plan that sold five seats admitted five hundred.
+//
+// The reason nobody wrote the record is that there was nothing to accumulate: membership already held
+// the answer. A STATE modelled as a FLOW is a number nobody writes, and a number nobody writes reads as
+// zero. So the seat count is read from wherever it lives — `internal/seats`, over membership — and this
+// interface is the seam.
+type SeatCounter interface {
+	SeatsHeld(tenantID string) (int, error)
+}
+
+// stateMetrics names the meters whose value is a STATE read now, not a FLOW accumulated over a period.
+//
+// A table rather than a branch, for the same reason `meteredLimits` is one: adding a metered gate must
+// not mean editing a decision tree, and neither must correcting one's category.
+var stateMetrics = map[metering.Metric]bool{
+	metering.MetricSeats: true,
 }
 
 // NewGate builds the entitlement gate. The usage store may be nil in a deployment with no metering yet;
@@ -197,6 +221,17 @@ type Gate struct {
 func NewGate(accounts account.Store, plans *plancfg.Resolver, usage metering.UsageStore) *Gate {
 	return &Gate{accounts: accounts, plans: plans, usage: usage, now: time.Now}
 }
+
+// WithSeatCounter points the gate at the live seat count. Returns the same gate, for chaining.
+//
+// Without one, seat limits are NOT evaluated — see overLimit. That is deliberate and it is the honest
+// half of the P7 defect: an unmeasurable limit must be skipped and sayable, never compared against a
+// zero that passes and looks enforced.
+func (g *Gate) WithSeatCounter(c SeatCounter) *Gate { g.seats = c; return g }
+
+// SeatsEnforced reports whether this deployment can actually evaluate a seat allowance. A surface that
+// quotes a seat number should be able to ask.
+func (g *Gate) SeatsEnforced() bool { return g != nil && g.seats != nil }
 
 // SetClock injects a deterministic clock (tests).
 func (g *Gate) SetClock(now func() time.Time) { g.now = now }
@@ -288,7 +323,15 @@ func (g *Gate) CheckLimit(customerID string, limit plancfg.Limit, metric meterin
 		d.Allowed = true // unset limit == unlimited (see plancfg.PlanConfig.Limits)
 		return d, nil
 	}
-	observed := g.observed(customerID, metric) + additional
+	current, measurable := g.measure(customerID, metric)
+	if !measurable {
+		// The same rule `overLimit` applies: an unmeasurable limit is skipped rather than compared
+		// against a zero that passes. A pre-flight that cannot measure must not report "you have room".
+		d.Allowed = true
+		d.Reason = "this deployment cannot measure " + string(metric) + ", so the allowance was not evaluated"
+		return d, nil
+	}
+	observed := current + additional
 	if observed > allowed {
 		hit := LimitHit{Limit: limit, Metric: metric, Allowed: allowed, Observed: observed, Period: g.period().ID}
 		d.Limit = &hit
@@ -308,6 +351,30 @@ func (g *Gate) period() metering.Period { return metering.MonthPeriod(g.now()) }
 // deliberate, narrow choice: the alternative — denying every action because the meter is unreachable —
 // would take the whole product down on a metering outage, and the outage is already alerted on the
 // P2.5 substrate. A metering outage must not be able to lock customers out of the CLI.
+// measure returns a meter's value and whether it could be measured at all.
+//
+// The two kinds are resolved differently and the difference is the whole of P27's seat correction:
+//
+//   - a FLOW is accumulated into the usage store and read from it;
+//   - a STATE is read from wherever it lives, now. There is no usage record to consult, and consulting
+//     one would return the zero nobody ever wrote.
+func (g *Gate) measure(customerID string, metric metering.Metric) (float64, bool) {
+	if stateMetrics[metric] {
+		if g.seats == nil {
+			return 0, false
+		}
+		n, err := g.seats.SeatsHeld(customerID)
+		if err != nil {
+			// A membership read that fails is NOT a seat count of zero. Skipping is the same choice
+			// `observed` makes for a metering outage, and for the same reason: a store outage must not
+			// silently deny, and it must not silently allow while looking like it measured something.
+			return 0, false
+		}
+		return float64(n), true
+	}
+	return g.observed(customerID, metric), true
+}
+
 func (g *Gate) observed(customerID string, metric metering.Metric) float64 {
 	if g.usage == nil {
 		return 0
@@ -342,7 +409,13 @@ func (g *Gate) overLimit(acct account.Account, plan plancfg.PlanConfig, feature 
 		if !set {
 			continue // unset == unlimited
 		}
-		observed := g.observed(customerID, m.Metric)
+		observed, measurable := g.measure(customerID, m.Metric)
+		if !measurable {
+			// 🔴 SKIPPED, not zero. A state meter with no counter cannot be evaluated, and comparing it
+			// against zero is exactly what made `seats` decorative for the whole of P7: the check passed,
+			// looked enforced, and admitted any number. An unmeasurable limit is not a satisfied one.
+			continue
+		}
 		if observed > allowed {
 			return LimitHit{Limit: m.Limit, Metric: m.Metric, Allowed: allowed, Observed: observed, Period: g.period().ID}, true
 		}

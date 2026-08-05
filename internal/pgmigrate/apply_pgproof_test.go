@@ -146,6 +146,9 @@ func TestTheSchemaCarriesWhatTheStoresQuery(t *testing.T) {
 			"gainshare_consent", "consented_at", "created_at",
 			// The four P8 columns migration 0024 adds. Their absence is what it was written for.
 			"status", "suspension_reason", "suspended_at", "quota_overrides",
+			// 0038: a Free customer has no billing-provider customer yet, and this column is what lets
+			// the database say when that is allowed.
+			"plan_charges",
 		},
 		"billing_event": {
 			"event_id", "customer_id", "period", "type", "kind", "idempotency_key", "provider_ref",
@@ -182,6 +185,21 @@ func TestTheSchemaCarriesWhatTheStoresQuery(t *testing.T) {
 		"workflow_ir":             {"tenant_id", "workflow_id", "source_revision", "ir_version", "received_at", "nodes_json", "edges_json"},
 		"source_bundle":           {"tenant_id", "workflow_id", "source_revision", "content_hash", "size_bytes", "received_at"},
 		"platform_workflow_graph": {"tenant_id", "workflow_id", "source_revision", "ir_version", "taxonomy_version", "discovered_at", "llm_calls", "view_json"},
+
+		// 0038's account system. The tenant is the row `auth.Registry` reads instead of a map built from
+		// the configuration file, and the four beside it are what could not be represented without it.
+		// `platform_user` rather than `user`: USER is a reserved word, and quoting it at every call site
+		// is a rule that holds until one query forgets.
+		"tenant":          {"tenant_id", "name", "status", "created_at"},
+		"platform_user":   {"user_id", "issuer", "subject", "email", "created_at"},
+		"membership":      {"user_id", "tenant_id", "role", "status", "invited_by", "joined_at", "removed_at"},
+		"invitation":      {"invitation_id", "tenant_id", "email", "role", "invited_by", "created_at", "expires_at", "accepted_at", "revoked_at"},
+		"api_credential":  {"credential_id", "tenant_id", "user_id", "label", "role", "hash", "created_at", "revoked_at"},
+		"console_session": {"token_hash", "session_id", "tenant_id", "user_id", "issued_at", "expires_at", "revoked_at"},
+		// `plan_charges` is what lets the database hold D3's invariant: a handle may be absent only while
+		// the plan charges nothing. Without the column the CHECK cannot be written, because the database
+		// cannot read plan configuration.
+		"run": {"run_id", "tenant_id"},
 	}
 
 	for table, columns := range want {

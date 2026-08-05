@@ -250,7 +250,10 @@ func (s *Service) applyPlanChange(customerID, planID, cause, why string) (bool, 
 	}
 
 	// ── 2. MOVE THE PLAN, pinning the config version it resolved under ────────
-	if _, err := s.accounts.SetPlan(customerID, plan.PlanID, plan.Version); err != nil {
+	// `plan.Charges()` travels with the id and the version, so the account's charging flag can never
+	// disagree with the plan it points at — which is what lets the database refuse "paid plan, no
+	// billing customer" instead of leaving it to be detected later.
+	if _, err := s.accounts.SetPlan(customerID, plan.PlanID, plan.Version, plan.Charges()); err != nil {
 		return false, fmt.Errorf("billing: set plan: %w", err)
 	}
 	return true, nil

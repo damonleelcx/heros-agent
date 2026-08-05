@@ -75,18 +75,30 @@ build; a row naming no directory fails it too, so a typo cannot masquerade as co
 | stripe-billing-provider | not-yet-readable | requires the P21 provider object records — the recorded subscription, price and charge handles per tenant. The operator billing read model predates any payment provider and holds provider references only where the pre-PSP ledger already carried one |
 | wiring-safety | surface | /axes |
 
-## B. Capabilities landing in this change — `openspec/changes/p26-operator-console-refresh/specs/`
+## B. Capabilities landing in this change — the unarchived changes
 
-Same rule, same fence. When P26 archives, these rows move into section A unchanged.
+Same rule, same fence. When a change archives, its rows move into section A unchanged.
+
+The governed changes are named in
+[`scan-ledger.mjs`](../web/admin-console/scripts/scan-ledger.mjs)'s `GOVERNED_CHANGES`, one line per
+phase. 🔴 That list replaced a single hard-coded P26 path, which meant the fence covered exactly the
+change that created it: **P27's five capabilities were invisible to it** and would have stayed invisible
+until P27 archived. A fence scoped to its own author is the drift it was written against, wearing a
+uniform. Adding a phase there is a line of diff in a review; forgetting to is what P27 task 10.5 caught.
 
 | capability | state | detail |
 |---|---|---|
+| account-registry | surface | /tenants |
 | operator-axis-oversight | surface | /axes |
 | operator-delivery-oversight | surface | /delivery |
 | operator-metering-honesty | surface | /billing |
 | operator-oversight-health | surface | /oversight |
 | operator-release-oversight | surface | /releases |
 | operator-surface-ledger | no-operator-surface | This capability is a checked-in ledger and a build fence. Rendering it as a page would put a second, staler copy of the fence's answer in front of an operator, and the answer that matters is the one that fails the build (P26) |
+| run-ownership | not-yet-readable | requires a fleet ownership read model — per-tenant run counts and the pre-ownership residue side by side. Ownership is now recorded per run and `PreOwnedCount` answers the residue as ONE platform-wide integer on the customer runs endpoint; neither is a collection an operator page can list or page through, and a per-tenant breakdown has no query behind it |
+| seat-accounting | not-yet-readable | requires a fleet seat read model — each tenant's current count beside its period peak. `seats.Current` answers one tenant at a time from membership and the peak lives in the metering store under a different key, so a fleet view today is an N+1 loop over two stores. **And the definition is blocking**: design.md D5 leaves *whether a credential-only member occupies a seat* undecided by Product and Sales, and until it is ratified no surface may quote a seat number — an operator page would be the first place a number nobody has agreed on gets read as authoritative |
+| self-serve-subscription | not-yet-readable | requires tenant provenance — which organizations created themselves and which were seeded from configuration. The deployment POSTURE is reported (`/readyz` `account_system.self_serve_signup`, a value not an inference), but `tenant` records no origin, so "list the organizations that signed themselves up" has nothing to select. The operator controls that matter for such a tenant — plan override and suspension — already exist on /tenants under `account-registry` |
+| user-identity | no-operator-surface | Deliberately none, and it is the one row here that must not later be "upgraded" to a surface without a decision. An operator page listing a customer's people by verified email is a privacy expansion nobody asked for, and it is the exact join migration 0038 forbids in writing: `admin_principal` has no tenant column and no foreign key into any customer table, and "a future migration that connects those two halves is a review failure, not a modelling improvement". The capability's own last requirement says it: a user is not an operator. Membership disputes are the customer's own administration, on their console (P27) |
 
 ## C. Operator destinations — the governing capability in `adminrbac`
 

@@ -22,7 +22,7 @@ export async function POST() {
   // holding the token could still use; revoking first means the token is dead before the browser is
   // told to forget it.
   const token = await readSessionToken();
-  revokeSession(token);
+  await revokeSession(token);
   // Set on the RESPONSE, and RELATIVE. See the note in ../route.ts: an immutable redirect cannot carry
   // a `Set-Cookie`, and an absolute one built from `request.url` can leave this origin.
   const response = redirectTo("/signin?reason=session_ended");

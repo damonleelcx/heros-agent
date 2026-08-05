@@ -63,7 +63,7 @@ export async function load<T>(
 ): Promise<Loaded<T>> {
   const session = await requireSession();
   const paths = scoped(session);
-  const outcome = await platformFetch<T>(path(paths), { tenantId: session.tenantId });
+  const outcome = await platformFetch<T>(path(paths), { tenantId: session.tenantId, userId: session.userId });
 
   if (outcome.ok && requires.length > 0) {
     const body = outcome.data as Record<string, unknown> | null;

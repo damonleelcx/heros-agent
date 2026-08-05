@@ -44,6 +44,11 @@ type Service struct {
 	secrets  Secrets
 	now      Clock
 
+	// seats reports how many seats an organization holds now, so a downgrade below that number can be
+	// refused with both numbers named rather than accepted into a state the customer did not choose.
+	// Optional; see WithSeatCounter.
+	seats SeatCounter
+
 	// subs maps a customer to their provider subscription ref. Held here rather than on `account`
 	// because it is a billing-integration detail, and `account` is the model three capabilities share.
 	subs map[string]string

@@ -28,7 +28,7 @@ import { openPlatformStream } from "@/lib/platformApi";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request, { params }: { params: Promise<{ runId: string }> }) {
-  const context = withSession(request);
+  const context = await withSession(request);
   if (isResponse(context)) return context;
   const { runId } = await params;
 

@@ -56,6 +56,7 @@ import (
 
 	"github.com/heros-foreal/agentd/internal/discovery"
 	"github.com/heros-foreal/agentd/internal/executor"
+	"github.com/heros-foreal/agentd/internal/pgmigrate"
 	"github.com/heros-foreal/agentd/internal/pgtest"
 	"github.com/heros-foreal/agentd/internal/providergateway"
 	"github.com/heros-foreal/agentd/internal/registry"
@@ -73,18 +74,16 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	testDB = db
-	for _, f := range []string{"0001_p0_lineage", "0002_p2_registries", "0003_p2_variant_spec",
-		"0004_p2_transform", "0005_p2_run", "0006_p2_run_queue",
-		"0007_p2_verification_strength"} {
-		b, err := os.ReadFile(filepath.Join("..", "..", "db", "migrations", "postgres", f+".up.sql"))
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "read %s: %v\n", f, err)
-			os.Exit(1)
-		}
-		if _, err := db.Exec(string(b)); err != nil {
-			fmt.Fprintf(os.Stderr, "apply %s: %v\n", f, err)
-			os.Exit(1)
-		}
+	// 🔴 The FULL embedded set, exactly as a booting deployment applies it.
+	//
+	// This used to hand-list the handful of migrations this package's own tables need. That is the
+	// pattern `internal/pgmigrate`'s header names as the reason nothing in CI applied anything past
+	// ~0009: a proof against its own subset is a proof against a schema no deployment has, and it goes
+	// red the first time another phase adds a column to a table this package writes. P27 adding
+	// `run.tenant_id` was that first time.
+	if _, err := pgmigrate.Apply(context.Background(), db); err != nil {
+		fmt.Fprintf(os.Stderr, "apply migrations: %v\n", err)
+		os.Exit(1)
 	}
 	os.Exit(m.Run())
 }
@@ -515,7 +514,7 @@ func TestE2E_PromptOverride_TakesEffectAsAMinimalDeterministicDiffThatBuildsAndR
 
 	// 4 · assert via the DOWNSTREAM READ PATH, not the function's return: persist, then read back the
 	// way the UI does. A run that only exists in memory is not a run.
-	if err := s.runs.Start(ctx, "run_prompt", r.ConfigHash, fx.Rev, 7); err != nil {
+	if err := s.runs.Start(ctx, "run_prompt", r.ConfigHash, fx.Rev, 7, "acme"); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	for _, n := range run.Nodes {
@@ -912,7 +911,7 @@ func TestE2E_IdempotencyProviderSwapAndSeedThroughTheRealGateway(t *testing.T) {
 	}
 
 	// ONE node_execution row for the retried invocation (task 5.2).
-	if err := s.runs.Start(ctx, "run_e2e", r.ConfigHash, fx.Rev, seed); err != nil {
+	if err := s.runs.Start(ctx, "run_e2e", r.ConfigHash, fx.Rev, seed, "acme"); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	in, _ := s.blobs.Put(ctx, []byte(`{"q":"hi"}`))
@@ -1001,7 +1000,7 @@ func TestE2E_ContractViolationHaltsTheRunAndIsRecordedAsHalted(t *testing.T) {
 	}
 
 	// Persisted as `halted`, with the node — which is what the UI renders.
-	if err := s.runs.Start(ctx, "run_halt_e2e", r.ConfigHash, fx.Rev, 1); err != nil {
+	if err := s.runs.Start(ctx, "run_halt_e2e", r.ConfigHash, fx.Rev, 1, "acme"); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	for _, n := range run.Nodes {
@@ -1105,7 +1104,7 @@ func TestE2E_M2_HardcodedGraphIsTransformedBuiltAndRunEndToEnd(t *testing.T) {
 	}
 
 	// 5 · persist it, and read it back the way the UI does.
-	if err := s.runs.Start(ctx, "run_m2", r.ConfigHash, fx.Rev, 99); err != nil {
+	if err := s.runs.Start(ctx, "run_m2", r.ConfigHash, fx.Rev, 99, "acme"); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	for _, n := range run.Nodes {
