@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { AlertTriangle, ArrowLeft, ArrowRight, KeyRound, Mail, ShieldCheck } from "lucide-react";
 import { identityProvider } from "@/lib/identity";
-import { signInState, IDENTITY_ASSURANCES, PASSWORD_ASSURANCES } from "@/content/identity";
+import { signInState, IDENTITY_ASSURANCES, PASSWORD_ASSURANCES, SIGNIN_LEDE } from "@/content/identity";
 import { PASSWORD_COPY } from "@/content/passwordAccount";
+import { PasswordField } from "@/components/passwordField";
 
 export const dynamic = "force-dynamic";
 
@@ -105,8 +106,7 @@ export default async function SignInPage({
             Heros
           </p>
           <p className="mt-4 max-w-md text-sm leading-relaxed text-marketing-ink/50">
-            The console renders one tenant&apos;s work. Signing in binds this browser to that tenant
-            and to nothing else.
+            {password ? SIGNIN_LEDE.password : SIGNIN_LEDE.federated}
           </p>
           <ul className="mt-10 flex flex-col gap-6">
             {assurances.map((assurance) => (
@@ -179,11 +179,10 @@ export default async function SignInPage({
                       <KeyRound className="size-3" aria-hidden="true" />
                       {PASSWORD_COPY.signIn.passwordLabel}
                     </label>
-                    <input
+                    <PasswordField
                       className="w-full rounded-lg border border-marketing-ink/12 bg-marketing-canvas px-4 py-3 text-sm text-marketing-ink outline-none transition-colors placeholder:text-marketing-ink/25 focus:border-marketing-accent/60"
                       id="password"
                       name="password"
-                      type="password"
                       autoComplete="current-password"
                       required
                       aria-describedby="password-hint"
@@ -257,11 +256,10 @@ export default async function SignInPage({
                       <KeyRound className="size-3" aria-hidden="true" />
                       Tenant credential
                     </label>
-                    <input
+                    <PasswordField
                       className="w-full rounded-lg border border-marketing-ink/12 bg-marketing-canvas px-4 py-3 font-mono text-sm text-marketing-ink outline-none transition-colors placeholder:text-marketing-ink/25 focus:border-marketing-accent/60"
                       id="assertion"
                       name="assertion"
-                      type="password"
                       autoComplete="off"
                       spellCheck={false}
                       required

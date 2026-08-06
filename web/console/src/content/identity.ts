@@ -57,7 +57,11 @@ export type SignInState = {
 export const SIGN_IN_STATES: Record<SignInStateKey, SignInState> = {
   sign_in: {
     title: "Sign in to continue",
-    body: "This surface renders your tenant's data — the workspace your organization's runs, prompts and transforms belong to — so it is not served without a session.",
+    // 🔴 One noun. This sentence used to say "your tenant's data — the workspace your organization's
+    // runs … belong to", naming the same thing twice in twelve words, which the noun dictionary calls a
+    // defect rather than a synonym. `organization` is the customer's word and is accurate on every seam
+    // — the tenant IS the organization — so this is one corrected sentence, not a per-seam split.
+    body: "This surface renders your organization's work — the runs, prompts and transforms that belong to it — so it is not served without a session.",
   },
   session_ended: {
     title: "Your session ended",
@@ -121,6 +125,36 @@ export function signInState(reason: string | undefined): SignInState {
  * "instant" is a word a security reviewer will ask us to defend and "at the next request, with no
  * grace period" is the thing we can actually defend.
  */
+/**
+ * SIGNIN_LEDE is the sentence above the assurance list, per seam.
+ *
+ * 🔴 It lives here now because it did not, and that is exactly why it was wrong. The assurances below
+ * were split per seam with a comment explaining that "No password database" three centimetres from a
+ * password field would be a false claim — and the sentence directly ABOVE them was left hard-coded in
+ * `app/signin/page.tsx`, so the split never reached it. Somebody auditing the wording opens this file;
+ * the one line that was not in it is the one line that stayed wrong.
+ *
+ * Two things were wrong on the `password` seam, not one:
+ *
+ *   1. **"binds this browser to that tenant" has no antecedent.** On the federated seams the reader
+ *      presents a credential that NAMES a tenant, so "that tenant" refers to something they just did.
+ *      On this seam they present an email and a password, which name a PERSON. Nothing in the act
+ *      identified an organization, and a person may belong to more than one — `heros login --org`
+ *      exists for precisely that case ("when you are a member of more than one").
+ *   2. **"tenant" is the operator's word.** Every customer-facing screen in this flow says
+ *      *organization* — "Organization name", "One organization, one owner — you". The noun dictionary
+ *      calls a word that means two things a defect rather than a synonym.
+ *
+ * What the second sentence must still carry is the ISOLATION guarantee — that is its job on the page —
+ * without claiming a binding the seam does not perform.
+ */
+export const SIGNIN_LEDE = {
+  federated:
+    "The console renders one tenant's work. Signing in binds this browser to that tenant and to nothing else.",
+  password:
+    "The console renders one organization's work. You sign in as yourself, and this browser sees only the organization you signed in to.",
+};
+
 export const IDENTITY_ASSURANCES: Array<{ label: string; body: string }> = [
   {
     label: "No password database",
@@ -153,8 +187,17 @@ export const IDENTITY_ASSURANCES: Array<{ label: string; body: string }> = [
  */
 export const PASSWORD_ASSURANCES: Array<{ label: string; body: string }> = [
   {
-    label: "Your password is never stored",
-    body: "What we keep is an argon2id hash with a salt unique to your account — a value that cannot be turned back into your password, and that is deliberately slow and memory-hungry to guess against.",
+    // 🔴 NOT "Your password is never stored". That heading was contradicted by its own next sentence —
+    // it claimed nothing is kept, then described what is kept — and a reader who notices stops
+    // believing the other two lines. Something derived from the password IS stored; what is true is
+    // that it cannot be turned back. This file's own rule is that each line states a property the code
+    // has, in the present tense, NO STRONGER THAN IT IS, and the old heading broke it.
+    //
+    // The salt wording moved too: it is drawn per password RECORD, so a password change draws a new
+    // one. "Unique to your account" implies a value that persists across changes, which is not what
+    // `internal/password` writes.
+    label: "We store a hash, not your password",
+    body: "The hash is argon2id with a random salt of its own — a value that cannot be turned back into your password, and that is deliberately slow and memory-hungry to guess against.",
   },
   {
     label: "Your browser never holds a key",

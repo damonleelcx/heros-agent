@@ -30,6 +30,14 @@
  * different things. The noun dictionary in the PRD is the authority; this is where it is spelled.
  */
 export const PASSWORD_COPY = {
+  // The reveal toggle's accessible name, single-sourced with everything else for the same reason: it is
+  // the only name a screen-reader user has for this control, and six copies of it become six wordings.
+  // It states the ACTION the control performs, not the state it is in — "Show password" on a masked
+  // field — which is the convention `aria-pressed` completes.
+  field: {
+    show: "Show password",
+    hide: "Hide password",
+  },
   signIn: {
     emailLabel: "Email",
     passwordLabel: "Password",

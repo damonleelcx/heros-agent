@@ -9,6 +9,7 @@ import { issueSession, sessionTtlSeconds } from "@/lib/session";
 import { SESSION_COOKIE, SESSION_COOKIE_OPTIONS } from "@/lib/cookies";
 import { PASSWORD_COPY } from "@/content/passwordAccount";
 import { REFUSAL_COPY } from "@/lib/organizationCopy";
+import { PasswordField } from "@/components/passwordField";
 
 /**
  * Creating an account on the `password` seam — the screen S1 in the PRD walks through.
@@ -167,11 +168,10 @@ export default async function CreateAccountPage({
             <KeyRound className="size-3" aria-hidden="true" />
             {PASSWORD_COPY.signUp.passwordLabel}
           </label>
-          <input
+          <PasswordField
             className="w-full rounded-lg border border-marketing-ink/12 bg-marketing-canvas px-4 py-3 text-sm text-marketing-ink outline-none transition-colors placeholder:text-marketing-ink/25 focus:border-marketing-accent/60"
             id="password"
             name="password"
-            type="password"
             autoComplete="new-password"
             minLength={12}
             required
