@@ -180,6 +180,31 @@ func (s *Server) handleWhoAmI(w http.ResponseWriter, r *http.Request) {
 		if t, err := s.accounts.Store().GetTenant(principal.TenantID); err == nil {
 			body["organization_name"] = t.Name
 		}
+		// 🔴 `email_verified`, and its ABSENCE was a shipped defect rather than an omission of
+		// something nobody wanted. The console's account page reads exactly this field
+		// (`Boolean(who.data.email_verified)`), so a body that never carries it renders `undefined` as
+		// FALSE — and the banner "Confirm your address to unlock inviting people and paid plans" was
+		// shown to a person whose address WAS confirmed, permanently, with no action that could clear
+		// it. Observed in production: `platform_user.email_verified_at` was set the moment the link was
+		// clicked, and the banner never moved.
+		//
+		// Read from the store, not from the principal: verification happens AFTER a session is issued,
+		// so anything carried on the credential is a snapshot that is stale exactly when it matters.
+		// This is the same rule the session store follows for revocation — read it every time, because
+		// a cached "was true a moment ago" is a window in which the answer is wrong.
+		//
+		// Only for a person. A machine credential has no address, so the field stays ABSENT rather than
+		// false — the two are different facts and a caller must be able to tell them apart.
+		if principal.UserID != "" {
+			if u, err := s.accounts.Store().GetUser(principal.UserID); err == nil {
+				body["email_verified"] = u.EmailVerified()
+				if u.Email != "" {
+					body["email"] = u.Email
+				}
+			}
+			// A read failure leaves the field absent, deliberately: absent means "we could not say",
+			// and the console is required to treat that as unknown rather than as unconfirmed.
+		}
 	}
 	writeJSON(w, http.StatusOK, body)
 }

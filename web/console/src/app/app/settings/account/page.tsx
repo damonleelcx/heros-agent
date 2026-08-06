@@ -55,7 +55,13 @@ export default async function AccountPage() {
   // 🔴 UNKNOWN is not the same as unconfirmed. A failed read must not render "your address is not
   // confirmed" — that sentence would send somebody hunting for an email that was never re-sent, over an
   // outage of ours. The banner is shown only when the platform actually said so.
-  const verified = who.ok ? Boolean(who.data.email_verified) : true;
+  //
+  // 🔴 AN ABSENT FIELD IS ALSO UNKNOWN, and reading it as `false` was a shipped defect. `whoami` did
+  // not return `email_verified` at all, so `Boolean(undefined)` said "unconfirmed" to a person whose
+  // address was confirmed — permanently, with a "Send it again" button that could not change the
+  // answer. The rule above was already written; it was applied to a failed READ and not to a missing
+  // FIELD, which is the same unknown arriving by a different route.
+  const verified = who.ok ? who.data.email_verified !== false : true;
 
   return (
     <PageFrame eyebrow="Settings" title="Account" lede="Your sign-in on this install.">
