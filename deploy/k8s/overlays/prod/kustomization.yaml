@@ -386,6 +386,33 @@ patches:
                   cidr: 0.0.0.0/0
                   except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.169.254/32]
             ports: [{ protocol: TCP, port: 443 }]
+          # 🔴 THE MAIL RELAY, on 587 — without which NOTHING THIS DEPLOYMENT MAILS CAN LEAVE.
+          #
+          # This block sets HEROS_SMTP_PORT=587 (STARTTLS) about eighty lines above, and the rule beside
+          # it opened 443 only. So every confirmation link, every password reset and the bootstrap
+          # owner's single-use link failed with `dial tcp …:587: connect: connection refused` — the mail
+          # seam was forbidden the one port its own manifest told it to use.
+          #
+          # ⚠️ HOW IT SURVIVED A PROOF. `make mail-proof` runs on a BUILD HOST, not in this pod, so it
+          # exercised the credential, the relay and our own code and never once crossed this policy.
+          # A send proven from somewhere the product does not run is not a proven send. The runbook's
+          # own layer 3 says the inbox is the layer people skip; this is the layer BEFORE it.
+          #
+          # A SEPARATE rule rather than another port on the one above, for the reason stated at the 4311
+          # rule: every `to` in a rule applies to every port in it. Keeping the relay its own rule means
+          # the destination set for mail is described in exactly one place and can be narrowed or removed
+          # without touching model-provider egress.
+          #
+          # The ipBlock is as broad as the 443 rule's, and it is worth saying why rather than implying
+          # it: SES publishes no stable address for `email-smtp.us-east-1.amazonaws.com`, so a narrower
+          # cidr would be a guess that breaks silently the day AWS renumbers. The private-range
+          # exceptions are kept, so this cannot become a path to an in-cluster service, and 587 reaches
+          # nothing inside the VPC.
+          - to:
+              - ipBlock:
+                  cidr: 0.0.0.0/0
+                  except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.169.254/32]
+            ports: [{ protocol: TCP, port: 587 }]
           # 🔴 THE INSTANCE METADATA SERVICE, on port 80 — without which this deployment's declared
           # secrets source cannot authenticate at all.
           #
