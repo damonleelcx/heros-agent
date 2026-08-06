@@ -302,6 +302,40 @@ patches:
                   # give it a mailbox.
                   - { name: HEROS_SMTP_FROM, value: "support@heros-agent.space" }
 
+  # ── The customer console's identity seam ─────────────────────────────────────────────────────────
+  #
+  # 🔴 `password`, and this is the switch that makes P28 a product rather than deployed code. The base
+  # says `configured` because a shared assertion string is the only thing an install can have before it
+  # has an identity system; this deployment has one, so it uses it.
+  #
+  # ⚠️ IT IS DECLARED HERE, NOT SET WITH `kubectl set env`. The value is declared in the base, so a
+  # `set env` is reverted by the next `kubectl apply` — silently, because reverting a literal to another
+  # literal is a clean merge that reports success. That is how the operator-SSO values were lost on every
+  # apply before this overlay adopted them, and the password seam turning itself back off would present
+  # as "sign-in stopped working" with nothing in any log to say why.
+  #
+  # 🔴 WHAT THIS ENDS THE MOMENT IT LANDS: the shared tenant-credential form. `CONSOLE_TENANT_ASSERTIONS`
+  # is still projected and still holds a value, so putting this line back to `configured` restores it —
+  # but until then, that string is not a way in for anybody. That is the intent (a shared string is not
+  # a person, cannot be attributed, and survives offboarding), not a side effect.
+  #
+  # PRECONDITION, asserted rather than assumed: `CONSOLE_SESSION_STORE=platform`. With the in-memory
+  # store `identity.ts` THROWS AT MODULE LOAD under this value — deliberately, because a password reset
+  # cannot revoke a cookie living in the console's own process. This deployment already sets `platform`
+  # (base/console.yaml), which is why this flip does not take the console down.
+  - target: { kind: Deployment, name: console }
+    patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata: { name: console }
+      spec:
+        template:
+          spec:
+            containers:
+              - name: console
+                env:
+                  - { name: CONSOLE_TENANT_IDENTITY, value: "password" }
+
   # The operator console's half of the same three values. It reads its own copies — `isFederated()` in
   # src/lib/idpConfig.ts accepts only `oidc` and `saml`, and with an empty value GET /auth/login 303s
   # straight to /signin?reason=not_federated and the operator can never leave the sign-in page.
