@@ -33,19 +33,20 @@ resources:
 # images.env, and scripts/deploy/check-digest-pins.sh fails if any of these is a floating tag. The
 # `newTag`-less `digest:` form is what makes an apply reproducible: the same digest is the same image.
 images:
-  # The platform's own three, built for linux/arm64 and pushed to this account's ECR. agentd is at
-  # 8fbfff0 (P21 collection made reachable and durable); the two consoles are still at 2eafe12.
-  # `newName` retargets the registry; the digest is the artifact. Both must match deploy/images.env
-  # exactly or check-image-parity.sh fails the build.
+  # The platform's own three, built for linux/arm64 and pushed to this account's ECR. All three are at
+  # a4b854c (P28 email-and-password identity, plus P27's account system beneath it) — the first release
+  # in which the set moves together, which is why this comment no longer names a different commit per
+  # image. `newName` retargets the registry; the digest is the artifact. Both must match
+  # deploy/images.env exactly or check-image-parity.sh fails the build.
   - name: ghcr.io/heros-foreal/agentd
     newName: 373468206837.dkr.ecr.us-east-1.amazonaws.com/agentd
-    digest: sha256:245b26aba600aec1ae781acdf29532404c8cde59314867cbb2f7fdff3c976405
+    digest: sha256:746d4a4d189e164972b3dec191f5f271255b9659df3be84b39988422aa2f0c77
   - name: ghcr.io/heros-foreal/heros-console
     newName: 373468206837.dkr.ecr.us-east-1.amazonaws.com/heros-console
-    digest: sha256:793416a4b6573398a86df04a606d447ac0774262c3f0d0b798e4d0df9416dff7
+    digest: sha256:20cbbf8ce5f0f170754898d43a826b4ab3fd7f0ce9f0845f00126d8968cb0fc2
   - name: ghcr.io/heros-foreal/heros-admin-console
     newName: 373468206837.dkr.ecr.us-east-1.amazonaws.com/heros-admin-console
-    digest: sha256:45e0d0d2e619536d2070d582557e1b184adb8895922e3db7a545fb8eb4638099
+    digest: sha256:099e3034ee772e0ab9d69b8ba26381f48762e37b1fcc3b5bf623f607515ed498
   - name: postgres
     digest: sha256:6efd0df010dc3cb40d5e33e3ef84acecc5e73161bd3df06029ee8698e5e12c60
   - name: minio/minio
