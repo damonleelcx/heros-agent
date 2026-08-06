@@ -2,8 +2,10 @@
 
 - **Applies to:** the hosted deployment (`deploy/k8s/overlays/prod`, k3s on `i-05f4712279b04fac5`).
 - **Relay:** Amazon SES in `us-east-1`, sending as `support@heros-agent.space`.
-- **State:** the relay is **configured and proven**. The sandbox request was **submitted and DENIED**
-  (§5.1), and the P28 code is **not deployed** (§5.2).
+- **State:** the relay is **configured and proven**, and the P28 code is **DEPLOYED** as of 2026-08-06
+  (§5.2 — image `a4b854c`, `/readyz` reports `mail_configured: true`). The sandbox request was
+  **submitted and DENIED** (§5.1), so mail still reaches separately-verified addresses only. The
+  console seam has **not** been flipped (§6).
 
 ---
 
@@ -140,14 +142,35 @@ so do not read a green `make mail-proof` as "sign-up mail works".
 link) and everything works for exactly those people. That is an honest launch shape for a handful of
 users; it does not scale past the 200/day cap or reach strangers.
 
-### 5.2 The P28 code is not deployed
+### 5.2 ✅ The P28 code IS deployed (2026-08-06)
 
-The overlay pins the image at `2eafe12`, which predates all of this. The running agentd does not serve
-`/api/v1/auth/password/*`, does not read `HEROS_SMTP_*`, and does not report `mail_configured`. **So mail
-is configured and the product cannot yet use it.**
+All three images built from `a4b854c` for `linux/arm64`, pushed to ECR and pinned by digest. `/readyz`
+reports `mail_configured: true`, `self_serve_signup: true`, `store: postgres`, `status: ready`.
 
-Shipping it is a release — build, push, repin, apply — not a config change, and it should carry §2's
-ordering. The branch is `feat/p28-email-password-identity` and nothing is committed yet.
+**🔴 Three things this release found, each of which had been invisible:**
+
+1. **agentd was forbidden the port its own manifest configured.** The overlay set `HEROS_SMTP_PORT=587`
+   and its egress allowlist opened **443 only**, so the first real send failed with
+   `dial tcp …:587: connect: connection refused`. Fixed in the overlay (a separate 587 rule).
+
+   ⚠️ **`make mail-proof` cannot catch this and never could** — it runs on a build host, not in the
+   pod, so it crosses no NetworkPolicy. **A send proven from somewhere the product does not run is not
+   a proven send.** §3's layer 3 calls the inbox the layer people skip; this is the layer before it.
+
+2. **The admin-console image had been unbuildable since P27.** `scan:ledger` reads every change in
+   `GOVERNED_CHANGES`; P27 added one without adding the matching `COPY`. No CI job builds that
+   Dockerfile, so main stayed green and the release stopped at the first `docker build`.
+
+3. **The live cluster had drifted from these manifests.** agentd and console were running digests
+   pinned nowhere in the repo, and `ADMIN_IDP_ISSUER`/`ADMIN_IDP_CLIENT_ID` were literal values from an
+   out-of-band `kubectl set env`. That drift makes `kubectl apply` **fail outright** — a strategic merge
+   keeps the existing `value` and adds the manifest's `valueFrom`, which the API rejects as
+   `may not be specified when value is not empty`.
+
+   ⚠️ `--server-side --force-conflicts` does **not** rescue this: `env` merges by `name` there too. The
+   fix is one **atomic JSON patch** replacing each drifted entry with the manifest's, guarded by `test`
+   ops on the index — atomic because a two-step "clear, then apply" leaves an intermediate template with
+   an empty issuer, and `adminlaunch` refuses that boot.
 
 ## 6. And the step deliberately left for a decision
 
@@ -159,6 +182,16 @@ address into an organization that **already exists**, as an owner, with a single
 so flipping the seam no longer strands the tenant holding the data. It refuses to create an organization,
 refuses a suspended one, refuses to promote an existing member, and mints nothing for an account that
 already has a password.
+
+**Step 1 is done as of 2026-08-06.** `damonlee1020@gmail.com` is an **owner of `heros`**
+(`usr_e2204f72f2ee3a237bd56f97`, active), and a single-use link was minted and **accepted by the relay**
+with no send warning. Step 3 is still pending: it waits on that password actually working.
+
+⚠️ **`kubectl set env` for step 1 does not survive an apply.** `HEROS_BOOTSTRAP_OWNER_EMAIL` is declared
+in the manifest with an empty value, so the next `kubectl apply` silently sets it back and no link is
+minted — observed on this deployment. `HEROS_BOOTSTRAP_OWNER_TENANT` survives only because the manifest
+does not declare it at all. Set the pair **after** the apply, never before, and remove both once the
+password exists.
 
 To flip, in this order:
 
