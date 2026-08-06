@@ -38,13 +38,20 @@ COPY web/admin-console/src/middleware.ts /admin-console/src/middleware.ts
 COPY web/admin-console/next.config.mjs /admin-console/next.config.mjs
 
 # `npm run scan:ledger` (P26) checks every operator surface BOTH WAYS against the ledger that declares
-# it, the deployed specs, and the P26 change's specs — all of which live outside web/ entirely. Same
+# it, the deployed specs, and the governed changes' specs — all of which live outside web/ entirely. Same
 # reasoning as the four files above: carried into the image so the gate runs, rather than made skippable
 # so the gate passes. It is ~4MB of markdown in a build stage that is discarded, and it buys a build in
 # which an operator surface cannot diverge from its declaration.
 COPY openspec/operator-surface-ledger.md /openspec/operator-surface-ledger.md
 COPY openspec/specs /openspec/specs
-COPY openspec/changes/p26-operator-console-refresh/specs /openspec/changes/p26-operator-console-refresh/specs
+# 🔴 THE WHOLE `changes` TREE, not the governed ones enumerated again here. The scanner's list lives in
+# `GOVERNED_CHANGES` (web/admin-console/scripts/scan-ledger.mjs) and grows once per phase; this line used
+# to name `p26-operator-console-refresh` alone, so P27 adding `p27-account-system` to that list made this
+# image UNBUILDABLE — `ENOENT … /openspec/changes/p27-account-system/specs`, at `npm run build`, inside a
+# Dockerfile no CI job builds. Green CI, and the release stops at the first `docker build`. Copying the
+# tree makes the Dockerfile track whatever the list says, so the next phase to add a governed change
+# cannot reintroduce this. The decision about WHICH changes are governed stays where it was.
+COPY openspec/changes /openspec/changes
 
 RUN npm run build
 
