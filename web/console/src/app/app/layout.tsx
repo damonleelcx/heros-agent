@@ -91,7 +91,13 @@ const SETTINGS: Surface[] = [
   { href: "/docs", label: "Documentation", icon: <BookOpen /> },
   { href: "/app/configure", label: "Configure", icon: <Settings /> },
   { href: "/app/billing", label: "Billing", icon: <CreditCard /> },
-  { href: "/app/account", label: "Account", icon: <User /> },
+  // 🔴 "Organization", not "Account". This renders the ORGANIZATION's plan, entitlements and usage
+  // (its heading is the organization id); P28 added a personal `/app/settings/account` below, and for
+  // a while the rail carried TWO items labelled "Account" pointing at different pages. The noun
+  // dictionary calls a word that means two things a defect rather than a synonym, and a rail is where
+  // that costs the most: the reader cannot tell which one holds what they came for, and picks wrong
+  // half the time.
+  { href: "/app/account", label: "Organization", icon: <User /> },
   // P27. It sits beside Account and Billing because it answers the same class of question — who and
   // what this organization is — rather than being a subject you open.
   { href: "/app/settings/members", label: "Members", icon: <Users /> },
@@ -126,7 +132,12 @@ export default async function ConsoleLayout({ children }: { children: React.Reac
     { id: "s:account", group: "Surface", label: "Plan and spend", href: routes.account() },
     { id: "s:billing", group: "Surface", label: "Billing and payment method", href: routes.billing() },
     { id: "s:members", group: "Surface", label: "Members, invitations and API keys", href: "/app/settings/members" },
-    { id: "s:account", group: "Surface", label: "Your account, password and email", href: "/app/settings/account" },
+    // 🔴 `s:my-account`, not a second `s:account`. Two entries carried the SAME id — a duplicate React
+    // key, and a duplicate identifier in a palette that is keyed by it, so which of the two the reader
+    // reaches is a rendering detail rather than a decision. Same root as the two "Account" items in the
+    // rail above: P28's personal page was added beside an existing organization page and took its name
+    // and its id with it.
+    { id: "s:my-account", group: "Surface", label: "Your account, password and email", href: "/app/settings/account" },
     ...visited.map((subject) => ({
       id: `v:${subject.kind}:${subject.id}`,
       group: SUBJECT_LABELS[subject.kind],
