@@ -6,8 +6,8 @@
 | Target window | Lands as one wave; blocks every self-serve claim P27 made |
 | Lead role(s) | Product Designer + Backend (co-leads) |
 | Supporting role(s) | System Designer, Frontend, DevOps, QA Engineer, Sales Operations |
-| Status | **Draft** |
-| OpenSpec change | `p28-email-password-identity` |
+| Status | **Deployed 2026-08-06** (image `a4b854c`) — ⚠️ **§12: the first-owner path does not work as shipped** |
+| OpenSpec change | `p28-email-password-identity`; follow-up `p28-first-owner-reachability` |
 
 > **The one-sentence job.** *Let a person create their own credential and use it* — an email address and a
 > password they chose — **in the browser and in the terminal**, without anybody running a command against the
@@ -371,6 +371,9 @@ removed. `--token` remains the machine path and is unchanged. The device flow re
 - [ ] `CONSOLE_TENANT_IDENTITY=configured` still signs in exactly as before
 - [ ] The SSM command appears in no runbook, README, or onboarding document
 - [ ] `kubectl apply -f prod.yaml` leaves every public platform route reachable (§10)
+- [ ] 🔴 **The first owner of a deployment still running `configured` can open the mailed link and set a
+      password** — the one item this list was missing, and the one that fails (§12.1)
+- [ ] 🔴 **The mail that proves delivery was sent by the deployed workload**, not by a build host (§12.3)
 
 ## 10. Delivery
 
@@ -392,3 +395,95 @@ CLI's hidden password prompt is the single most platform-dependent thing in this
 - [P21 — Stripe Payments](P21-stripe-payments.md) — the paid-plan gate FR10 attaches to
 - [P11 — CLI & CI Integration](P11-cli-ci-integration.md) — the non-interactive contract FR19 preserves
 - ADR-012 — email/password as a first-class identity seam (decisions and rejected alternatives)
+
+## 12. What the deployment found (2026-08-06)
+
+P28 was deployed to the hosted cluster on 2026-08-06 as image `a4b854c`. The platform reports
+`mail_configured: true`, `self_serve_signup: true`, `store: postgres`, `status: ready`. Three things this
+document asserted turned out not to hold, and they are recorded here rather than quietly repaired,
+because two of them are requirements this PRD never wrote down.
+
+### 12.1 🔴 The first owner cannot obtain a password — FR22, new
+
+**FR22 — Spending a valid identity token does not depend on the sign-in seam.**
+
+The bootstrap owner was P28's answer to the lockout objection: naming an address adopts them as owner of
+an existing organization and mails them a single-use password-set link, so flipping the seam "no longer
+strands the tenant holding the data". On the deployed cluster the adoption worked and the mail was
+delivered. **The link does not work:**
+
+```
+GET /reset-password?t=<valid token>   →  307  →  /signin
+```
+
+Every page that could spend that token is gated on the seam *already* being `password`
+(`(identity)/reset-password/page.tsx:64` and the same line in `forgot-password`, `verify-email`,
+`create-account`, where `passwordSignInEnabled()` is `PROVIDER === "password"`).
+
+So the safety step and the thing it protects block each other. The delivery order in
+`docs/runbooks/p28-smtp-setup.md` §6 — set the password, *then* flip — **cannot be executed**, and it is
+the order the entire "this is not a lockout" argument rests on. The flip is available only as a leap.
+
+This is an L3 failure reached through an L2 one, and it may not be traded against implementation cost.
+What the reader experiences: a mail saying *"This install named you as its first owner"*, a click, and a
+form headed **"That sign-in was not accepted."** — a sentence that is false about their situation, on a
+page they were not trying to reach, about a credential they never presented.
+
+> **How it passed.** The console suite was green at 618 tests. It drives handlers and never loads a
+> non-`password` seam, so the redirect that makes the feature unreachable is invisible to all of them.
+> The acceptance list above asserted that `configured` *still signs in as before* — it never asked
+> whether a person could **arrive** at `password` from `configured`, which is the only path any real
+> deployment takes.
+
+Resolution and the open design fork are in `openspec/changes/p28-first-owner-reachability` (**D1**, which
+is a decision for the deployment owner and is deliberately not taken there).
+
+### 12.2 Is the tenant-credential form still needed?
+
+Asked directly during the deploy, and worth answering in the PRD because it is a product question, not a
+configuration one.
+
+- **On the hosted deployment — no, once the flip lands.** `configured` exists so that somebody can be let
+  in before there is an identity system. After the flip there is one, and the shared string is strictly
+  worse than it on every count P28 already listed: it is not a person, it cannot be attributed, and
+  removing a member does not revoke it. Keeping both means keeping a way in that survives offboarding.
+- **On other installs — yes, and it is not deprecated.** An air-gapped install that federates with nobody
+  and wants no password store is exactly who `configured` is for. P28 added a fifth kind; it did not
+  retire the other four, and this PRD's scope discipline says so.
+- **Therefore:** the tenant-credential form should disappear from *this* deployment when the seam flips,
+  and remain shipped. That is a per-deployment fact, which is where it already lives. It is listed as
+  task 1.2 rather than settled here, because retiring a way in is a one-way door for whoever is holding
+  that string today.
+
+### 12.3 The mail proof proved the wrong system — FR23, new
+
+**FR23 — A deployment's mail proof is executed from the deployed workload.**
+
+FR15 required mail to go through one seam with an operator-visible fallback, and it does. What no
+requirement stated is *where the proof runs*. `make mail-proof` runs on a build host; it exercised the
+credential, the relay and `internal/mailer`, and passed — while every send from the workload failed:
+
+```
+dial tcp 52.206.145.59:587: connect: connection refused
+```
+
+The production overlay set `HEROS_SMTP_PORT=587` and its egress allowlist, in the same file, opened
+**443 only**. The build host is subject to no NetworkPolicy, so the proof could never have crossed the
+thing that was broken. Fixed in the overlay; the fence that would catch the next one is task 7.3.
+
+> The runbook already called the inbox "the layer people skip". This is the layer before it, and it was
+> skipped by a green check — which is worse, because a green check is read as evidence.
+
+### 12.4 Delivery notes that belong in §10
+
+- **An out-of-band `kubectl set env` makes the next apply fail outright**, not merely revert it: where the
+  live workload holds a literal `value` for a variable the manifest declares `valueFrom`, the API rejects
+  the whole Deployment. `--server-side --force-conflicts` does not help — `env` merges by name there too.
+- **`HEROS_BOOTSTRAP_OWNER_EMAIL` is declared in the manifest** with an empty value, so an apply silently
+  clears it and no link is minted. `HEROS_BOOTSTRAP_OWNER_TENANT` is not declared and survives. Set the
+  pair **after** the apply.
+- **Self-serve sign-up cannot be offered to strangers yet.** SES production access was requested and
+  **denied** (case `178599389200025`). Mail reaches separately-verified addresses only; an unverified
+  stranger receives nothing **and sees no error**, because SES accepts the message and drops it. S1 —
+  *"Priya evaluates the product on a Tuesday afternoon"* — is not deliverable on the hosted deployment
+  today, and no sales material may claim it.
