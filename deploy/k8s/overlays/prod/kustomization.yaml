@@ -376,6 +376,40 @@ patches:
                   - { name: QUEUE_HEALTH_URL,        $patch: delete }
                   - { name: VECTOR_STORE_HEALTH_URL, $patch: delete }
                   - { name: GRAPH_STORE_HEALTH_URL,  $patch: delete }
+                  # 🔴 CONSOLE_HEALTH_URL IS DELETED, AND IT IS NOT A TIDY-UP — it is a CYCLE, and it
+                  # took production down for eight minutes on the 20a5439 deploy.
+                  #
+                  # agentd aggregates the customer console's /api/health into its own /readyz. On the
+                  # federated seams that is a plain downstream check. On `password` — which this
+                  # deployment now runs — the console's `identity_provider` health IS "can I reach the
+                  # platform API", so the reading goes:
+                  #
+                  #   agentd not ready  →  kubelet drops it from the agentd Service's endpoints
+                  #                     →  console's fetch to http://agentd:4321 gets ECONNREFUSED
+                  #                     →  console reports identity_provider not_ready
+                  #                     →  agentd aggregates that and stays not ready
+                  #
+                  # It is SELF-SUSTAINING. There is no timeout it ages out of and no retry that breaks
+                  # it: the observed state was `agentd 0/1 Running`, `ENDPOINTS <none>` and a /readyz
+                  # naming `identity_provider: the platform API is unreachable: ECONNREFUSED` for eight
+                  # minutes, while every page still rendered 200 because the console serves those itself
+                  # and only the platform calls behind them failed.
+                  #
+                  # ⚠️ It is armed by any agentd RESTART, not by this release. The seam flip introduced
+                  # it and nothing restarted agentd until the next deploy, so it sat dormant. The next
+                  # deploy is always what finds this class of defect.
+                  #
+                  # 🔴 THE COST, STATED RATHER THAN BURIED: agentd no longer reports `customer_console`
+                  # on /readyz at all. That is a real signal lost, and the honest reason it is acceptable
+                  # here is that a component which cannot be observed without deadlocking the observer is
+                  # not being observed — it is being gambled on. The console's own health endpoint is
+                  # still there and still answers; what is removed is agentd GATING ITSELF on it.
+                  #
+                  # The proper fix is on the console side: `identity_provider` on the `password` seam
+                  # should report whether the seam is CONFIGURED, not whether agentd answers — asking the
+                  # platform whether it can reach itself, through a proxy, is the whole bug. Until that
+                  # ships, this deletion is what keeps the platform up.
+                  - { name: CONSOLE_HEALTH_URL,      $patch: delete }
                   # ⚠️ THIS CLUSTER CHARGES PEOPLE. The base sets BILLING_MODE="" and says in place why
                   # the decision belongs here: an empty value mounts no checkout, no plan change and no
                   # webhook, and the base must not decide that a cluster takes money.
