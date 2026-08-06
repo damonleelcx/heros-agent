@@ -1,7 +1,8 @@
 import Link from "next/link";
-import { AlertTriangle, ArrowLeft, ArrowRight, KeyRound, ShieldCheck } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ArrowRight, KeyRound, Mail, ShieldCheck } from "lucide-react";
 import { identityProvider } from "@/lib/identity";
-import { signInState, IDENTITY_ASSURANCES } from "@/content/identity";
+import { signInState, IDENTITY_ASSURANCES, PASSWORD_ASSURANCES } from "@/content/identity";
+import { PASSWORD_COPY } from "@/content/passwordAccount";
 
 export const dynamic = "force-dynamic";
 
@@ -64,6 +65,15 @@ export default async function SignInPage({
   // The provider KIND, never a credential and never an issuer. It decides which of the two sign-in
   // paths this deployment offers — not what the reader is told about our internals.
   const federated = identityProvider() === "oidc" || identityProvider() === "saml";
+  // 🔴 P28. The password seam replaces the credential FIELD, and nothing else on this page: the same
+  // shell, the same five reason states, the same form posting to the same route with no client
+  // JavaScript. `ui-redesign-feature-and-visual-consistency` forbids a redesign dropping a capability,
+  // and the reverse applies too — a new capability does not get to quietly rebuild the page around it.
+  const password = identityProvider() === "password";
+  // The assurance list is kind-aware, and that is not cosmetic. The federated list opens with "No
+  // password database", which would be rendered three centimetres from a password field — a false claim
+  // on the one screen where a reader is thinking about exactly this question.
+  const assurances = password ? PASSWORD_ASSURANCES : IDENTITY_ASSURANCES;
 
   return (
     <div className="relative min-h-screen bg-marketing-canvas text-marketing-ink">
@@ -99,7 +109,7 @@ export default async function SignInPage({
             and to nothing else.
           </p>
           <ul className="mt-10 flex flex-col gap-6">
-            {IDENTITY_ASSURANCES.map((assurance) => (
+            {assurances.map((assurance) => (
               <li className="flex gap-3" key={assurance.label}>
                 <ShieldCheck className="mt-0.5 size-4 shrink-0 text-marketing-accent" aria-hidden="true" />
                 <div>
@@ -130,7 +140,90 @@ export default async function SignInPage({
               </p>
             ) : null}
 
-            {federated ? (
+            {password ? (
+              /*
+               * Two fields, one native form, no client JavaScript — the same three properties the
+               * credential form has always had (see the route handler's header for why they are worth
+               * more than the interactivity given up). `autoComplete` is set so a password manager
+               * recognises this as a sign-in, which is the single most effective thing this page can do
+               * for the strength of the passwords people actually choose.
+               */
+              <>
+                <form className="mt-7 flex flex-col gap-4" method="post" action="/api/session">
+                  <input type="hidden" name="next" value={next} />
+                  <div className="flex flex-col gap-2">
+                    <label
+                      className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-marketing-ink/50"
+                      htmlFor="email"
+                    >
+                      <Mail className="size-3" aria-hidden="true" />
+                      {PASSWORD_COPY.signIn.emailLabel}
+                    </label>
+                    <input
+                      className="w-full rounded-lg border border-marketing-ink/12 bg-marketing-canvas px-4 py-3 text-sm text-marketing-ink outline-none transition-colors placeholder:text-marketing-ink/25 focus:border-marketing-accent/60"
+                      id="email"
+                      name="email"
+                      type="email"
+                      autoComplete="username"
+                      autoCapitalize="none"
+                      spellCheck={false}
+                      required
+                      aria-invalid={state.tone === "error" ? true : undefined}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <label
+                      className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-marketing-ink/50"
+                      htmlFor="password"
+                    >
+                      <KeyRound className="size-3" aria-hidden="true" />
+                      {PASSWORD_COPY.signIn.passwordLabel}
+                    </label>
+                    <input
+                      className="w-full rounded-lg border border-marketing-ink/12 bg-marketing-canvas px-4 py-3 text-sm text-marketing-ink outline-none transition-colors placeholder:text-marketing-ink/25 focus:border-marketing-accent/60"
+                      id="password"
+                      name="password"
+                      type="password"
+                      autoComplete="current-password"
+                      required
+                      aria-describedby="password-hint"
+                      aria-invalid={state.tone === "error" ? true : undefined}
+                    />
+                  </div>
+                  <button
+                    className="w-full cursor-pointer rounded-lg bg-marketing-accent py-3 text-sm font-semibold text-marketing-accent-ink transition-opacity hover:opacity-90 active:opacity-80"
+                    type="submit"
+                  >
+                    {PASSWORD_COPY.signIn.submit}
+                  </button>
+                </form>
+
+                <div className="mt-5 flex items-center justify-between text-xs text-marketing-ink/40">
+                  <Link className="underline underline-offset-4 hover:text-marketing-ink/70" href="/forgot-password">
+                    {PASSWORD_COPY.signIn.forgot}
+                  </Link>
+                  <Link className="underline underline-offset-4 hover:text-marketing-ink/70" href="/signup">
+                    {PASSWORD_COPY.signIn.noAccount}
+                  </Link>
+                </div>
+
+                <p className="mt-4 text-center text-xs leading-relaxed text-marketing-ink/40" id="password-hint">
+                  {PASSWORD_COPY.signIn.hint}
+                </p>
+
+                {/* P23 task 8.7 — the same legal line the credential form carries. Signing in is not an
+                    acceptance; the commitment gate records that, against a version and a content hash. */}
+                <p className="mt-3 text-center text-xs leading-relaxed text-marketing-ink/35">
+                  <Link className="underline underline-offset-4 hover:text-marketing-ink/60" href="/legal/terms">
+                    Terms of Service
+                  </Link>
+                  {" · "}
+                  <Link className="underline underline-offset-4 hover:text-marketing-ink/60" href="/legal/privacy">
+                    Privacy Notice
+                  </Link>
+                </p>
+              </>
+            ) : federated ? (
               /*
                * A LINK, not a form. `/auth/login` answers with a redirect to the identity provider —
                * a different origin — and this console serves `form-action 'self'`, which Firefox

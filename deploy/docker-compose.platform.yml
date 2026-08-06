@@ -106,6 +106,35 @@ services:
       # and got wrong, and the alternative is a process that looks healthy and reports nothing for a month.
       HEROS_EDITION: ${HEROS_EDITION:-compose}
       HEROS_VERSION: ${HEROS_VERSION:-}
+      # ── P28 SELF-SERVE IDENTITY AND MAIL ─────────────────────────────────────────────────────────
+      #
+      # 🔴 Sign-up is OFF unless declared. Never inferred from whether an identity provider is
+      # configured: the three deployment shapes want three different answers, and an air-gapped install
+      # must not grow a registration form by upgrading.
+      HEROS_SELF_SERVE_SIGNUP: ${HEROS_SELF_SERVE_SIGNUP:-0}
+      # The origin the links in outgoing mail point at. NO default — a guessed origin produces a link
+      # that 404s in somebody's inbox, which reads as a broken product rather than an unconfigured one.
+      HEROS_CONSOLE_URL: ${HEROS_CONSOLE_URL:-}
+      # The first owner on an install with no sign-up form: boot mints a single-use password-set link
+      # for this address if it has no password, and does nothing if it has one.
+      HEROS_BOOTSTRAP_OWNER_EMAIL: ${HEROS_BOOTSTRAP_OWNER_EMAIL:-}
+      # ── Mail (P28) ───────────────────────────────────────────────────────────────────────────────
+      #
+      # 🔴 Declared though empty on BOTH substrates. Unset does NOT mean "mail is off and nothing
+      # happens": it selects the OPERATOR FALLBACK, which writes every confirmation and reset link to an
+      # operator-readable surface with a WARN and makes `/readyz` report `mail_configured: false`. That is
+      # a working configuration and emphatically not the one most operators think they have, so it is a
+      # reported value rather than a silent default — a discarded reset link is indistinguishable, to the
+      # person waiting for it, from a product that does not work.
+      #
+      # HEROS_SMTP_TLS defaults to starttls and REFUSES clear text to a non-loopback host: a reset link
+      # crossing a network in the clear is the credential this whole capability exists to protect.
+      HEROS_SMTP_HOST: ${HEROS_SMTP_HOST:-}
+      HEROS_SMTP_PORT: ${HEROS_SMTP_PORT:-}
+      HEROS_SMTP_FROM: ${HEROS_SMTP_FROM:-}
+      HEROS_SMTP_TLS: ${HEROS_SMTP_TLS:-}
+      HEROS_SMTP_USERNAME: ${HEROS_SMTP_USERNAME:-}
+      HEROS_SMTP_PASSWORD: ${HEROS_SMTP_PASSWORD:-}
       # ── Operator identity (P22) ──────────────────────────────────────────────────────────────────
       # Present so `/readyz` can report `admin_idp` on a deployment that ships the operator console.
       # 🔴 `test` | `oidc` | `saml` — NOT `configured`, which used to be the default here and is not a

@@ -82,6 +82,33 @@ spec:
           - path: /billing/webhook
             pathType: Exact
             backend: { service: { name: agentd, port: { number: 4321 } } }
+          # 🔴 THE TWO DEVICE PATHS AND THE PASSWORD SIGN-IN. These were the gap that made `heros login`
+          # 404 against production while the code was deployed and correct.
+          #
+          # The device pair (P27 §13) were added to the RUNNING cluster by hand and were never in this
+          # file, so the next `kubectl apply -k` of this overlay deleted them and broke CLI login again —
+          # silently, because nothing in the repository compared this list to the routes the CLI calls.
+          # `internal/api/ingress_fence_test.go` now does: it reads the paths
+          # `internal/runlink/transport` actually addresses out of the Go source and fails when one is
+          # missing here. Adding a fourth transport tomorrow fails a test instead of a customer's login.
+          #
+          # ⚠️ `Exact` on all three, for the reason the block above gives, and it bites hardest on the
+          # last one: `/api/v1/auth/password` as a Prefix would publish `reset`, `change` and `signup`
+          # beside `signin`. Those are reached by the console's server side INSIDE the cluster and have
+          # no business on the internet — the fence checks that direction too.
+          - path: /api/v1/device/authorize
+            pathType: Exact
+            backend: { service: { name: agentd, port: { number: 4321 } } }
+          - path: /api/v1/device/token
+            pathType: Exact
+            backend: { service: { name: agentd, port: { number: 4321 } } }
+          # P28 · `heros login` with an email and a password. Unauthenticated by construction — it is a
+          # sign-in — and guarded by argon2id verification plus a per-account lockout, not by the network.
+          # 🚫 `/api/v1/device/approve` is deliberately absent: it is the step that mints a credential
+          # naming a person, and it is reached console→agentd inside the cluster.
+          - path: /api/v1/auth/password/signin
+            pathType: Exact
+            backend: { service: { name: agentd, port: { number: 4321 } } }
           - path: /
             pathType: Prefix
             backend: { service: { name: console, port: { number: 4320 } } }

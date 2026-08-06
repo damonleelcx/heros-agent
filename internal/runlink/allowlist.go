@@ -175,6 +175,17 @@ var PlatformPaths = []string{
 	LinkPath,         // run linking
 	WorkflowIRPath,   // workflow IR, source snapshots, platform-side discovery (prefix)
 	VerdictPath,      // CI-measured verification verdicts (prefix)
+	// ⚠️ The three below were MISSING, and the omission was invisible for the same reason the comment
+	// above describes: `TestEveryPlatformPathIsALinkTarget` drives this list from a hand-maintained list
+	// of transport calls, and P27 added two transports without adding two cases. The pin is checked on
+	// the BASE for these calls rather than on the full URL, so nothing refused them — the list simply
+	// stopped being "every path this package is allowed to address" and nobody could tell.
+	//
+	// `internal/api`'s ingress fence now derives the set from the transport SOURCE, so a fourth transport
+	// added without a case here fails a test instead of quietly widening this comment's claim.
+	"/api/v1/device/authorize",     // P27 · the terminal asks for a code, holding no credential
+	"/api/v1/device/token",         // P27 · the terminal polls for the approval
+	"/api/v1/auth/password/signin", // P28 · `heros login` with an email and a password
 }
 
 // IsLinkTarget reports whether rawURL is on the one permitted linking origin and addresses a declared

@@ -31,7 +31,12 @@ type MemStore struct {
 	devices      map[string]DeviceAuthorization
 	byUserCode   map[string]string
 	byDeviceCode map[string]string
-	nextID       int
+	// P28: the password a person chose, and the single-use links that confirm an address or replace a
+	// forgotten password. Both keyed the way the durable store indexes them — by user, and by token hash —
+	// so neither store finds a record by scanning where the other uses an index.
+	passwords map[string]UserPassword  // user_id -> password record
+	tokens    map[string]IdentityToken // token_hash -> token
+	nextID    int
 }
 
 // NewMemStore builds an empty identity store.
@@ -49,6 +54,9 @@ func NewMemStore() *MemStore {
 		devices:      map[string]DeviceAuthorization{},
 		byUserCode:   map[string]string{},
 		byDeviceCode: map[string]string{},
+
+		passwords: map[string]UserPassword{},
+		tokens:    map[string]IdentityToken{},
 	}
 }
 

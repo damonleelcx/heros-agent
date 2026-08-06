@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { verifyTenantAssertion } from "@/lib/identity";
+import { verifyTenantAssertion, verifyPasswordCredentials, passwordSignInEnabled } from "@/lib/identity";
 import { issueSession, readSessionToken, revokeSession, sessionTtlSeconds } from "@/lib/session";
 import { SESSION_COOKIE, SESSION_COOKIE_OPTIONS } from "@/lib/cookies";
 import { redirectTo, samePath } from "@/lib/redirect";
@@ -43,9 +43,25 @@ export const dynamic = "force-dynamic";
 export async function POST(request: Request) {
   const form = await request.formData().catch(() => null);
   const assertion = String(form?.get("assertion") ?? "");
+  const email = String(form?.get("email") ?? "");
+  const password = String(form?.get("password") ?? "");
   const next = samePath(form ? String(form.get("next") ?? "") || null : null);
 
-  const outcome = await verifyTenantAssertion(assertion);
+  /*
+   * 🔴 P28: the `password` seam posts to THIS route, in the same shape, with two fields instead of one.
+   *
+   * Everything below the branch is byte-for-byte what it was: the same session issue, the same cookie, the
+   * same relative redirect, the same failure path. That is the whole of ADR-008's Rule 3 in practice — the
+   * seam changed and nothing above it did — and it is why a password sign-in inherits, for free, the two
+   * corrections this handler already carries (the cookie set ON the response, and a relative destination).
+   *
+   * The password is read out of the form, forwarded once, and never touched again. It is not put in the
+   * redirect, not logged, and not carried into the session record; `logSession` has no parameter it would
+   * fit in.
+   */
+  const outcome = passwordSignInEnabled()
+    ? await verifyPasswordCredentials(email, password)
+    : await verifyTenantAssertion(assertion);
   if (!outcome.ok) {
     logSession({ action: "denied", reason: "assertion_rejected" });
     // Back to the form with a reason code, not the value that failed. The message is deliberately the

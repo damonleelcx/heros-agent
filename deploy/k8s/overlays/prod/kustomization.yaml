@@ -206,12 +206,31 @@ patches:
   # EVERY *.heros-agent.space origin, including the customer console. Origin-binding is the one thing
   # WebAuthn gives over TOTP, and a loose RP ID gives it straight back.
   #
-  # ⚠️ Its two companions, ADMIN_CONSOLE_ORIGIN and ADMIN_IDP_ISSUER, are deliberately NOT set here.
-  # ADMIN_CONSOLE_ORIGIN is a full `https://…` URL, and deploy/scripts/check-external-origins.sh scans
-  # this whole directory asserting an air-gapped package names ZERO external origins — so writing the
-  # platform's own public origin into a shipped manifest turns that fence red. That tension is real and
-  # unresolved: this tree ships both to this deployment and to customers who must be able to prove it
-  # phones nowhere. Until it is resolved, set that one out of band on this deployment only.
+  # ✅ ADMIN_CONSOLE_ORIGIN IS SET HERE NOW, and the reason it could not be is gone.
+  #
+  # This block used to say: "ADMIN_CONSOLE_ORIGIN is a full https:// URL, and check-external-origins.sh
+  # scans this whole directory asserting an air-gapped package names ZERO external origins — so writing
+  # the platform's own public origin into a shipped manifest turns that fence red. That tension is real
+  # and unresolved; until it is, set that one out of band on this deployment only."
+  #
+  # 🔴 It was not a tension. It was `cp -R k8s` in package-airgapped.sh, which put THIS overlay — the
+  # platform's own hosted deployment — inside every customer's air-gapped tarball. The packager now ships
+  # `base` + `overlays/airgapped` only, which is what a customer runs, so this file is no longer scanned
+  # by a gate about somebody else's network.
+  #
+  # And the cost of "set it out of band" was not small: with the values living only on the live cluster,
+  # every `kubectl apply -k overlays/prod` reverted operator SSO to OFF. `ADMIN_IDENTITY_MODE=""` does
+  # not fail — agentd simply serves no admin API and the console 303s every sign-in to
+  # `/signin?reason=not_federated`. A deploy that silently disables the operator console is exactly the
+  # class of failure this whole deploy tree is commented against, and it sat in a comment as a known
+  # unresolved item.
+  #
+  # ⚠️ ADMIN_WEBAUTHN_RP_ID must be set BEFORE any operator enrols a security key. A WebAuthn credential
+  # is bound to the Relying Party ID at registration, so changing it later invalidates every key already
+  # registered. It must be the OPERATOR subdomain, never the apex: an RP ID may be any registrable suffix
+  # of the origin, so `heros-agent.space` here would make operator security keys valid on EVERY
+  # *.heros-agent.space origin, including the customer console. Origin-binding is the one thing WebAuthn
+  # gives over TOTP, and a loose RP ID gives it straight back.
   - target: { kind: Deployment, name: agentd }
     patch: |
       apiVersion: apps/v1
@@ -224,6 +243,84 @@ patches:
               - name: agentd
                 env:
                   - { name: ADMIN_WEBAUTHN_RP_ID, value: "admin.heros-agent.space" }
+                  - { name: ADMIN_CONSOLE_ORIGIN, value: "https://admin.heros-agent.space" }
+                  # 🔴 `oidc`, and this one line is the whole drift. The base leaves it empty because
+                  # whether a cluster federates is the cluster's own fact; this cluster does.
+                  #
+                  # ADMIN_IDP_ISSUER and ADMIN_IDP_CLIENT_ID are NOT here: they come from the
+                  # `heros-platform` Secret (see base/externalsecrets.yaml). They are deployment-specific
+                  # rather than secret, and reading them from the store is what makes this manifest
+                  # complete — the previous arrangement left them on the cluster only, which is why an
+                  # apply could revert them.
+                  #
+                  # adminlaunch REFUSES THE BOOT if this says `oidc` and the issuer, client id, origin or
+                  # RP ID is missing. That is the correct direction: a pod that will not start says
+                  # exactly what is wrong to the person doing the deploy, where the old behaviour was a
+                  # console that came up and refused every operator with a message about federation.
+                  - { name: ADMIN_IDENTITY_MODE, value: "oidc" }
+                  # The EXACT callback URI, matched character for character. Three values must agree or
+                  # sign-in fails at a different step each time: this one, the admin console's
+                  # ADMIN_IDP_CALLBACK_URL below, and the app's registered redirect URI at the IdP.
+                  - { name: ADMIN_IDP_REDIRECTS, value: '["https://admin.heros-agent.space/auth/callback"]' }
+                  # ── P28 self-serve sign-up ─────────────────────────────────────────────────────
+                  #
+                  # 🔴 ON for this deployment, and OFF everywhere else including the base. This is the
+                  # hosted product: a person creates their own account with an email and a password and
+                  # needs nothing from an operator. An air-gapped install must not grow a registration
+                  # form by upgrading, which is why the base says 0 and this says 1 rather than the other
+                  # way round.
+                  - { name: HEROS_SELF_SERVE_SIGNUP, value: "1" }
+                  # The origin the links in confirmation and reset mail point at. No default anywhere: a
+                  # guessed origin produces a link that 404s in somebody's inbox.
+                  - { name: HEROS_CONSOLE_URL, value: "https://heros-agent.space" }
+                  # ── P28 mail ───────────────────────────────────────────────────────────────────
+                  #
+                  # The SENDER, and the only mail value that is a stated fact of this deployment rather
+                  # than a credential. It is the address a person replies to when a reset link surprises
+                  # them, so it must be a mailbox somebody reads — not `noreply@`.
+                  #
+                  # Amazon SES in this account's own region. Chosen over a third-party free tier for a
+                  # reason that is not price: it needed no new account, no new vendor relationship and no
+                  # credential handed between systems — the domain is already in this account's Route 53,
+                  # so DKIM was published automatically and verified in under a minute.
+                  #
+                  # ⚠️ It is not literally free. At this volume it is pennies ($0.10 per 1,000 messages,
+                  # with a monthly free allowance), which is worth stating plainly rather than filing
+                  # under "free tier". Swapping to a genuinely-zero relay later is these three values plus
+                  # the two store keys — nothing in the platform knows which relay it is talking to.
+                  #
+                  # 🔴 STARTTLS on 587. `mailer.New` REFUSES clear text to a non-loopback host, so there is
+                  # no configuration of these three that quietly sends a reset link across a network in
+                  # the open.
+                  - { name: HEROS_SMTP_HOST, value: "email-smtp.us-east-1.amazonaws.com" }
+                  - { name: HEROS_SMTP_PORT, value: "587" }
+                  - { name: HEROS_SMTP_TLS,  value: "starttls" }
+                  # ⚠️ `support@heros-agent.space` is a SEND-ONLY address today: the domain has no MX
+                  # record, so a reply to a confirmation or reset mail bounces. The message bodies do not
+                  # invite a reply, so nothing we send makes a promise this breaks — but somebody will
+                  # reply anyway, and right now nobody receives it. See the runbook for the two ways to
+                  # give it a mailbox.
+                  - { name: HEROS_SMTP_FROM, value: "support@heros-agent.space" }
+
+  # The operator console's half of the same three values. It reads its own copies — `isFederated()` in
+  # src/lib/idpConfig.ts accepts only `oidc` and `saml`, and with an empty value GET /auth/login 303s
+  # straight to /signin?reason=not_federated and the operator can never leave the sign-in page.
+  - target: { kind: Deployment, name: admin-console }
+    patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata: { name: admin-console }
+      spec:
+        template:
+          spec:
+            containers:
+              - name: admin-console
+                env:
+                  - { name: ADMIN_IDENTITY_MODE, value: "oidc" }
+                  # Character-for-character the same string as ADMIN_IDP_REDIRECTS' single entry above.
+                  # An absolute URL on the OPERATOR origin — pointing it at the customer origin would
+                  # land an operator's assertion in the customer console's cookie jar.
+                  - { name: ADMIN_IDP_CALLBACK_URL, value: "https://admin.heros-agent.space/auth/callback" }
 
   # ── Drop the four unused stores' health URLs from agentd ─────────────────────────────────────────
   #

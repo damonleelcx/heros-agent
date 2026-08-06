@@ -129,3 +129,16 @@
 # the fence the second line of defence instead of the only one.
 /deploy/config/plans.json
 /deploy/config/models.json
+
+# ── Claude Code's local working directory ───────────────────────────────────────────────────────────
+#
+# Not a product artefact and not shareable: `.claude/worktrees/` holds FULL CHECKOUTS of this repository
+# — 696 MB at the time this line was written — so a `git add -A` commits the repo inside itself. That is
+# not hypothetical; it was one pathspec away during P28, and the only thing that prevented it was
+# committing by explicit path instead.
+#
+# `launch.json` is the one file here somebody might reasonably want shared: it names the dev server the
+# preview tooling starts. It is ignored with the rest deliberately — it carries a PORT and a start
+# command chosen for one person's machine, and a checked-in copy is a value two developers silently
+# disagree about. Anyone who wants it shared should move it somewhere it is read on purpose.
+/.claude/

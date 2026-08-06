@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/heros-foreal/agentd/internal/auth"
+	"github.com/heros-foreal/agentd/internal/mailer"
 	"github.com/heros-foreal/agentd/internal/seats"
 	"github.com/heros-foreal/agentd/internal/signup"
 	"github.com/heros-foreal/agentd/internal/tenancy"
@@ -70,6 +71,13 @@ type AccountSurface interface {
 	// meter is absent would take an identity operation down over a billing dependency.
 	ObserveSeats(tenantID string)
 	Now() time.Time
+	// Mailer delivers confirmation and reset links (P28). It may be nil, in which case this layer builds the
+	// operator-visible fallback itself — 🔴 there is deliberately no path on which a message is dropped, so
+	// "no mailer" means "held for the operator", never "discarded".
+	Mailer() mailer.Mailer
+	// ConsoleURL is the origin the links in those messages point at. Empty produces relative links, which is
+	// wrong in an email and is why the deployment declares it; the readiness surface reports it unset.
+	ConsoleURL() string
 }
 
 // MountAccounts registers P27's routes. Nothing is registered when the surface is absent, so an
@@ -100,6 +108,9 @@ func (s *Server) MountAccounts(a AccountSurface) {
 	// The terminal's way in (task 13.1). Mounted here, with the account system, because a deployment
 	// with no memberships has nothing for an approval to select.
 	s.mountDeviceAuth()
+	// A person's own way in (P28). Mounted here for the same reason: every route writes a person, a
+	// membership or a credential, so without an account system they could only ever refuse.
+	s.mountPasswordAuth()
 }
 
 // ── resolving a verified identity to a person ───────────────────────────────────────────────────────
@@ -926,6 +937,15 @@ func (s *Server) handleCreateInvitation(w http.ResponseWriter, r *http.Request) 
 	}
 	acting, ok := s.actingMember(w, p, store, tenancy.Role.CanInvite)
 	if !ok {
+		return
+	}
+	// 🔴 P28: an unconfirmed address may not send mail to a third party under our name.
+	//
+	// This is one of exactly TWO actions confirmation gates (the other is moving to a plan that charges);
+	// see ADR-012 Decision 7 for why sign-in itself is not one of them. Both gates exist because both spend
+	// something the account has not proved it owns — an invitation puts a message in somebody else's inbox
+	// with our SPF record on it, which is what an unverified account would otherwise turn this product into.
+	if !s.confirmedAddress(w, store, p.UserID, "inviting people") {
 		return
 	}
 	var req struct {

@@ -383,3 +383,21 @@ install-smoke-refusals:
 ## rather than skips without it.
 install-smoke:
 	GOWORK=off $(PYTHON) scripts/install_smoke.py
+
+## mail-proof: send ONE real message through the deployment's configured relay, using the production code
+## path (mailer.New + a real ResetPassword body). This is the layer `go test` cannot reach: the mailer's own
+## tests cover the fallback, header injection, the clear-text refusal and the bodies — none of which answers
+## "does mail leave this deployment and arrive?".
+##
+## Credentials come from the secret store and are passed as ENVIRONMENT, never on a command line: a password
+## in argv is in the shell history and in every process listing. Nothing here echoes them.
+##
+##   make mail-proof TO=you@example.com
+##
+## ⚠️ Amazon SES is in the SANDBOX until production access is granted, and a sandbox account only delivers to
+## addresses that are separately verified. So a green run here proves the relay path and NOT that a stranger
+## signing up would receive anything — check `aws sesv2 get-account --query ProductionAccessEnabled` before
+## reading this as production-ready.
+mail-proof:
+	@test -n "$(TO)" || { echo "usage: make mail-proof TO=you@example.com"; exit 2; }
+	@GOWORK=off $(PYTHON) scripts/mail_proof.py "$(TO)"

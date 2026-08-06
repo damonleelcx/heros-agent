@@ -156,6 +156,40 @@ spec:
             # an empty slot is one `--set` from being filled, in a file a customer edits without reading,
             # and those integrations belong to the platform's own hosted deployment, not to a customer's.
             - { name: HEROS_EDITION, value: "kubernetes" }
+            # ── P28 SELF-SERVE IDENTITY AND MAIL ─────────────────────────────────────────────────
+            #
+            # 🔴 Sign-up is OFF unless an overlay says otherwise, and it is DECLARED rather than inferred
+            # from whether an identity provider is configured. The three deployment shapes want three
+            # different answers, so no single inference is right, and an air-gapped install must not grow
+            # a registration form by upgrading.
+            - { name: HEROS_SELF_SERVE_SIGNUP, value: "0" }
+            # The origin the links in outgoing mail point at. There is NO default: a guessed origin
+            # produces a link that 404s in somebody's inbox, which looks like a broken product rather
+            # than an unconfigured one. Set it in the overlay that knows the hostname.
+            - { name: HEROS_CONSOLE_URL, value: "" }
+            # The first owner on a deployment with no sign-up form. Boot mints a single-use password-set
+            # link for this address if it has no password, and does nothing if it has one. Empty here:
+            # the base must not name a person.
+            - { name: HEROS_BOOTSTRAP_OWNER_EMAIL, value: "" }
+            # ── Mail (P28) ────────────────────────────────────────────────────────────────────────
+            #
+            # 🔴 DECLARED though empty, for the reason the provider credentials above are: a deployment
+            # that turns mail on by setting these in an overlay needs the names to exist here, and one
+            # that leaves them empty gets the OPERATOR FALLBACK — confirmation and reset links written to
+            # an operator-readable surface with a WARN, and `/readyz` reporting `mail_configured: false`.
+            # That is a working configuration and emphatically not the one most operators think they
+            # have, which is why it is a reported value rather than a silent default.
+            #
+            # HEROS_SMTP_TLS defaults to starttls and REFUSES clear text to a non-loopback host: a reset
+            # link crossing a network in the clear is the credential this whole capability protects.
+            - { name: HEROS_SMTP_HOST, value: "" }
+            - { name: HEROS_SMTP_PORT, value: "" }
+            - { name: HEROS_SMTP_FROM, value: "" }
+            - { name: HEROS_SMTP_TLS, value: "" }
+            - name: HEROS_SMTP_USERNAME
+              valueFrom: { secretKeyRef: { name: heros-platform, key: smtp-username, optional: true } }
+            - name: HEROS_SMTP_PASSWORD
+              valueFrom: { secretKeyRef: { name: heros-platform, key: smtp-password, optional: true } }
             # ── Operator identity (P8/P22) ────────────────────────────────────────────────────────
             #
             # 🔴 `configured` is NOT a value this side accepts, and used to be the default here. It is the
@@ -166,8 +200,15 @@ spec:
             # until internal/adminlaunch. Empty here: a cluster that federates states so in its overlay,
             # and one that does not serves no admin API, which /readyz reports as `admin_idp` absent.
             - { name: ADMIN_IDENTITY_MODE, value: "" }
-            - { name: ADMIN_IDP_ISSUER, value: "" }
-            - { name: ADMIN_IDP_CLIENT_ID, value: "" }
+            # 🔴 From the STORE, not an empty literal patched per overlay. These are deployment-specific
+            # and they are the two that were being set on the live cluster out of band — so every
+            # `kubectl apply -k overlays/prod` reverted operator SSO to off, silently, because an empty
+            # mode simply serves no admin API. `optional: true` keeps a cluster that federates with
+            # nobody bootable: it gets "", which with an empty mode is the correct not-federated state.
+            - name: ADMIN_IDP_ISSUER
+              valueFrom: { secretKeyRef: { name: heros-platform, key: admin-idp-issuer, optional: true } }
+            - name: ADMIN_IDP_CLIENT_ID
+              valueFrom: { secretKeyRef: { name: heros-platform, key: admin-idp-client-id, optional: true } }
             # A JSON array of the EXACT callback URIs, matched character for character. Three values must
             # agree or sign-in fails at a different step each time: this one, the console's
             # ADMIN_IDP_CALLBACK_URL, and the app's registered redirect URI at the IdP.

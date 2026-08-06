@@ -199,9 +199,17 @@ func TestTheTokenPathIsUnchangedAndReportsAMachineCredential(t *testing.T) {
 }
 
 // deviceCfg builds the resolved config the dispatcher would hand the command.
+// deviceCfg builds the configuration for a device login.
+//
+// ⚠️ It sets `--device` explicitly, and that is a P28 CHANGE to what these tests exercised. Before P28,
+// `heros login` with no token ran the device flow by default; the default is now the email-and-password
+// path, because the device flow's second step is "sign in to the console" and on the production seam that
+// meant obtaining a shared string from a cluster operator — so the default led to a door most people had no
+// key to. The flow itself is unchanged and every assertion below still holds against it; what moved is how
+// it is asked for. The no-terminal refusal names `--device` among the four ways in.
 func deviceCfg(t *testing.T, kv map[string]string) cli.Config {
 	t.Helper()
-	r := cli.NewResolver(map[string]string{"repo": ".", "run": "", "token": "", "dry-run": "false"})
+	r := cli.NewResolver(map[string]string{"repo": ".", "run": "", "token": "", "dry-run": "false", "device": "true"})
 	for k, v := range kv {
 		r.SetFlag(k, v)
 	}

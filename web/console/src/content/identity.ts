@@ -135,3 +135,33 @@ export const IDENTITY_ASSURANCES: Array<{ label: string; body: string }> = [
     body: "Sessions are server-side records, read on every request. When one is revoked, the very next request is denied — there is no grace period in which it still works.",
   },
 ];
+
+/**
+ * PASSWORD_ASSURANCES replaces the federated list on the `password` seam.
+ *
+ * 🔴 It exists because the first line of `IDENTITY_ASSURANCES` says "No password database", and rendering
+ * that sentence three centimetres from a password field would be a false claim on the one screen where a
+ * reader is thinking about exactly this question. A sign-in page that lies about how it stores credentials
+ * is worse than one that says nothing, and this is not a hypothetical drift — it is what the same array
+ * would have said on the new seam if nobody looked.
+ *
+ * Each line is a property the code has, stated in the present tense and no stronger than it is:
+ *   - argon2id with a per-row salt IS what `internal/password` writes, and the parameters are in the value.
+ *   - the browser holding only an opaque cookie is unchanged from the federated seams.
+ *   - the revocation sentence is the same one, for the same reason: "at the next request, with no grace
+ *     period" is defensible where "instant" is not.
+ */
+export const PASSWORD_ASSURANCES: Array<{ label: string; body: string }> = [
+  {
+    label: "Your password is never stored",
+    body: "What we keep is an argon2id hash with a salt unique to your account — a value that cannot be turned back into your password, and that is deliberately slow and memory-hungry to guess against.",
+  },
+  {
+    label: "Your browser never holds a key",
+    body: "Your password is checked on the server and dropped. Your browser keeps one opaque session cookie it cannot read, and never a platform credential.",
+  },
+  {
+    label: "Revocation lands on the next request",
+    body: "Sessions are server-side records, read on every request. When one is revoked — by signing out, by a password reset, or by an owner removing you — the very next request is denied, with no grace period.",
+  },
+];

@@ -197,17 +197,25 @@ func (c RefusalCause) Describe() string {
 // because a token that outlived either would be a second, weaker way in, and a second way in is how a
 // revocation that works on one path stops meaning anything.
 func principalFromSession(src CredentialSource, sess tenancy.Session) (Principal, RefusalCause) {
-	// 🔴 A CONSOLE session is the browser's cookie, not a credential.
+	// 🔴 ONLY an upstream session authenticates here. This is an ALLOWLIST, and it used to be a denylist.
 	//
-	// The two share a table because they share a shape — an opaque token, an organization, a person, an
-	// expiry, a revocation — and they are emphatically not the same thing. Resolving a console cookie
-	// here would mean a stolen cookie authenticates against the whole platform API; today it reaches
-	// only the console, which holds the platform credential and exposes a closed set of routes.
+	// The rule it enforces is unchanged: a CONSOLE session is the browser's cookie, not a credential. The two
+	// share a table because they share a shape — an opaque token, an organization, a person, an expiry, a
+	// revocation — and they are emphatically not the same thing. Resolving a console cookie here would mean a
+	// stolen cookie authenticates against the whole platform API; today it reaches only the console, which
+	// holds the platform credential and exposes a closed set of routes.
 	//
-	// It is refused as UNKNOWN rather than as its own cause: whoever presented it learns nothing, and
-	// the only party who could be presenting one is either the console (a bug) or somebody who stole a
-	// cookie (who must not be told what they hold).
-	if sess.Purpose == tenancy.PurposeConsole {
+	// What changed is the DIRECTION of the test. It read `if sess.Purpose == PurposeConsole { refuse }`,
+	// which is correct by accident while exactly two purposes exist and becomes wrong the moment a third is
+	// added — because the third is accepted by default, silently, with no line of code looking wrong. P28 is
+	// the change that would have detonated it: a password-reset token in this table would have been a
+	// platform API credential. (P28 puts those tokens in their own table as well, so the mistake is not
+	// merely fixed but unavailable — belt and braces, because this is the one place a wrong answer is total.)
+	//
+	// It is refused as UNKNOWN rather than as its own cause: whoever presented it learns nothing, and the
+	// only party who could be presenting one is either the console (a bug) or somebody who stole a cookie
+	// (who must not be told what they hold).
+	if sess.Purpose != tenancy.PurposeUpstream {
 		return Principal{}, RefusalUnknown
 	}
 	if !sess.Live(nowMillis()) {

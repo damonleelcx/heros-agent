@@ -61,8 +61,32 @@ func TestSelfServeGateIsConnected(t *testing.T) {
 }
 
 // TestAirGappedManifestsDeclareSelfServeOff is the assertion itself.
+//
+// ⚠️ It scanned `../../deploy/k8s` — the WHOLE Kustomize tree — which was correct only while the packager
+// shipped the whole tree. It no longer does: the platform's own hosted overlay is not a customer artefact,
+// and that overlay is precisely where self-serve sign-up is ON, because the hosted product is the one
+// deployment where a stranger creating their own account is the entire point.
+//
+// 🔴 The distinction the gate is written to protect is unchanged and is worth restating, because the
+// narrowing looks like a loosening: an air-gapped install has ONE customer by construction, its identity
+// provider is that customer's own, so everybody it admits is already inside the perimeter — and with
+// self-serve on, any of them can mint an organization on a platform with no egress to alert over it. That
+// argument is about the package. It was never about our own cluster, and scanning our cluster's overlay
+// was the gate answering a question nobody asked.
+//
+// The scope is now THE PACKAGE'S OWN FILE SET, shared with the origin gate via `stagedByPackager`, so the
+// two gates and the packager cannot disagree about what ships.
 func TestAirGappedManifestsDeclareSelfServeOff(t *testing.T) {
-	out, err := runSelfServeGate(t, "../../deploy/k8s")
+	roots := []string{}
+	for _, p := range stagedByPackager {
+		if strings.HasPrefix(strings.TrimPrefix(p, "../../deploy/"), "k8s") {
+			roots = append(roots, p)
+		}
+	}
+	if len(roots) == 0 {
+		t.Fatal("no k8s path is staged by the packager — this test would pass by scanning nothing")
+	}
+	out, err := runSelfServeGate(t, roots...)
 	if err != nil {
 		t.Fatalf("the deployment manifests do not declare self-serve sign-up off:\n%s", out)
 	}

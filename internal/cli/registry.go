@@ -97,7 +97,10 @@ var flags = map[string]Flag{
 	"seeds":       {Name: "seeds", Type: "int", Default: "5", Env: EnvPrefix + "SEEDS", Summary: "evaluation seeds"},
 	"cases":       {Name: "cases", Type: "int", Default: "8", Env: EnvPrefix + "CASES", Summary: "evaluation cases"},
 	"run":         {Name: "run", Type: "string", Default: "", Env: EnvPrefix + "RUN", Summary: "run id to link"},
-	"token":       {Name: "token", Type: "string", Default: "", Env: EnvPrefix + "TOKEN", Summary: "platform token (login)"},
+	"token":       {Name: "token", Type: "string", Default: "", Env: EnvPrefix + "TOKEN", Summary: "platform token (login) — the MACHINE path: a credential naming nobody, which survives the offboarding of whoever created it"},
+	"email":       {Name: "email", Type: "string", Default: "", Env: EnvPrefix + "EMAIL", Summary: "email address to sign in as (login). The password is NEVER a flag: set " + EnvPrefix + "PASSWORD, pipe it on stdin, or let the command prompt for it without echo"},
+	"device":      {Name: "device", Type: "bool", Default: "false", Env: EnvPrefix + "DEVICE", Summary: "approve this terminal from a browser instead of typing a password (login) — for a shared terminal, a screen share, or a recorded session"},
+	"org":         {Name: "org", Type: "string", Default: "", Env: EnvPrefix + "ORG", Summary: "organization to sign in to, when you are a member of more than one (login). Absent picks the one you joined first, and the sign-in lists them all"},
 	// One catalogue entry, two commands, so the wording must be true of both: `link` prints the exact
 	// payload, `push-source` prints what the snapshot contains (it is far too large to print). Saying
 	// "the exact link payload" here documented a behaviour push-source does not have.
@@ -214,10 +217,10 @@ var commands = []Command{
 		SuccessExit:  0,
 	},
 	{
-		Name: "login", Summary: "store a platform token", Avail: AvailNetwork,
-		Flags:       []string{"token"},
-		Example:     "heros login --token <your platform token>",
-		Success:     "the token stored, and the non-secret identity it resolves to echoed back. The token value is never printed.",
+		Name: "login", Summary: "sign in and store a credential", Avail: AvailNetwork,
+		Flags:       []string{"email", "token", "device", "org"},
+		Example:     "heros login --email you@example.com",
+		Success:     "the credential stored 0600, and the non-secret identity it resolves to echoed back, including whether it is PERSONAL (ends when you are removed from the organization) or MACHINE (does not). No secret is ever printed.",
 		SuccessExit: 0,
 		Unavailable: "login is a platform command and is unavailable in this build",
 	},

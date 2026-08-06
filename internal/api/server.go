@@ -21,6 +21,7 @@ import (
 	"github.com/heros-foreal/agentd/internal/auth"
 	"github.com/heros-foreal/agentd/internal/config"
 	"github.com/heros-foreal/agentd/internal/erroreport"
+	"github.com/heros-foreal/agentd/internal/mailer"
 	"github.com/heros-foreal/agentd/internal/providergateway"
 	"github.com/heros-foreal/agentd/internal/tenancy"
 )
@@ -122,6 +123,13 @@ type Server struct {
 	// this deployment does not mount the account system, and the routes are not registered at all — a
 	// deployment answers 404 for a route it does not have rather than 503 for one it does.
 	accounts AccountSurface
+
+	// fallbackMail is the operator-visible mailer used when the mounted surface supplies none (P28).
+	//
+	// 🔴 It exists so there is NO nil-mailer path. A `if m != nil { send }` at six call sites is six places
+	// a confirmation or reset link can be silently discarded, which is the single failure mode
+	// `internal/mailer` was written to make impossible.
+	fallbackMail mailer.Mailer
 
 	// authRegistry is the ONE registry every authenticated request resolves against. Exposed so the boot
 	// path can point it at the durable identity store after the schema is up.

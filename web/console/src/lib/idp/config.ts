@@ -27,10 +27,15 @@ import { parseTenantMap, type TenantMap } from "./federation";
  * token `heros login` authenticates and `heros link` transmits with. It exists because the console
  * previously demanded a SECOND secret that no CLI command could produce, which made the dashboard URL
  * `heros link` prints unopenable by the person who ran it. See `idp/platformToken.ts`.
+ *
+ * `password` (P28) is an email address and a password, verified by the platform. It is the kind a person
+ * can obtain WITHOUT an operator, which is what the other four could not offer: `configured` maps a string
+ * an operator hands out, `platform` takes a token an operator provisions, and the federated pair require an
+ * identity provider a small customer does not have. See `idp/password.ts` and ADR-012.
  */
-export type IdentityProviderKind = "oidc" | "saml" | "configured" | "platform" | "dev";
+export type IdentityProviderKind = "oidc" | "saml" | "configured" | "platform" | "password" | "dev";
 
-const KINDS: readonly IdentityProviderKind[] = ["oidc", "saml", "configured", "platform", "dev"];
+const KINDS: readonly IdentityProviderKind[] = ["oidc", "saml", "configured", "platform", "password", "dev"];
 
 function requireEnv(name: string, kind: IdentityProviderKind): string {
   const value = (process.env[name] ?? "").trim();
@@ -117,7 +122,10 @@ function load(): IdentityConfig {
   // `platform` needs no tenant map and no allowlist: the platform IS the map, and there is no redirect
   // flow to protect. Its one dependency (PLATFORM_API_BASE) is the BFF's own, already required for the
   // console to render anything at all — so there is nothing here that could be half-configured.
-  if (kind === "configured" || kind === "platform" || kind === "dev") return base;
+  // `password` needs no tenant map and no allowlist, for the same reason `platform` does not: the platform
+  // IS the map, and there is no redirect flow to protect. Its one dependency (PLATFORM_API_BASE) is the
+  // BFF's own, already required for the console to render anything at all.
+  if (kind === "configured" || kind === "platform" || kind === "password" || kind === "dev") return base;
 
   // A federated deployment MUST carry a tenant map: without one there is no rule that resolves a
   // claim to a tenant, and the only honest behaviours are "refuse to boot" and "authenticate nobody".

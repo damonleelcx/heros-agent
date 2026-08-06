@@ -503,6 +503,259 @@ func storeSuite(t *testing.T, fresh func(t *testing.T) Store) {
 			t.Fatalf("a second authorization took the same DEVICE code (%v)", err)
 		}
 	})
+
+	// ── P28: passwords and identity tokens ──────────────────────────────────────────────────────────
+
+	// 🔴 The store refuses anything that is not an argon2id encoding. This is the code-side copy of the
+	// database CHECK, and it is asserted against BOTH stores precisely so the in-memory one does not
+	// quietly permit what the durable one forbids — the hex string below is what `HashSecret` produces,
+	// which is the specific wrong value this guard exists to catch.
+	t.Run("a stored password must be an argon2id encoding", func(t *testing.T) {
+		s := fresh(t)
+		mustTenant(t, s, "acme", "Acme")
+		u := mustUser(t, s, "sub-pw", "dana@acme.com")
+		for _, bad := range []string{
+			"",
+			HashSecret("hunter2hunter2"),
+			"$argon2i$v=19$m=1,t=1,p=1$c2FsdA$aGFzaA",
+			"plaintext-obviously",
+		} {
+			if _, err := s.SetPassword(u.UserID, bad, t0); err == nil {
+				t.Errorf("the store accepted a non-argon2id stored password: %q", bad)
+			}
+		}
+		if _, err := s.GetPassword(u.UserID); !errors.Is(err, ErrNoPassword) {
+			t.Errorf("a person with no password must be ErrNoPassword, got %v", err)
+		}
+	})
+
+	t.Run("a password round-trips and setting one clears the lockout", func(t *testing.T) {
+		s := fresh(t)
+		mustTenant(t, s, "acme", "Acme")
+		u := mustUser(t, s, "sub-pw", "dana@acme.com")
+		enc := "$argon2id$v=19$m=65536,t=3,p=4$c2FsdHNhbHRzYWx0c2ExMg$aGFzaGhhc2hoYXNoaGFzaGhhc2hoYXNoaDI"
+		if _, err := s.SetPassword(u.UserID, enc, t0); err != nil {
+			t.Fatalf("set: %v", err)
+		}
+		back, err := s.GetPassword(u.UserID)
+		if err != nil || back.Encoded != enc {
+			t.Fatalf("the encoding did not round-trip: %q / %v", back.Encoded, err)
+		}
+
+		// Lock it, then set a new password. 🔴 The lock must be gone: somebody who has just proved control
+		// of their address by resetting must not still be locked out by the failures that made them reset.
+		pol := LockoutPolicy{Threshold: 2, Window: time.Hour, LockFor: time.Hour}
+		if _, err := s.RecordPasswordFailure(u.UserID, t0, pol); err != nil {
+			t.Fatalf("failure: %v", err)
+		}
+		locked, err := s.RecordPasswordFailure(u.UserID, t0, pol)
+		if err != nil {
+			t.Fatalf("failure: %v", err)
+		}
+		if !locked.Locked(t0) {
+			t.Fatalf("reaching the threshold did not lock: %+v", locked)
+		}
+		after, err := s.SetPassword(u.UserID, enc, t0)
+		if err != nil {
+			t.Fatalf("set after lock: %v", err)
+		}
+		if after.Locked(t0) || after.FailedAttempts != 0 {
+			t.Fatalf("setting a password left the account locked: %+v", after)
+		}
+	})
+
+	// The window is the sentence the copy promises — "ten failures WITHIN fifteen minutes" — so a failure
+	// after the window has run out starts counting again rather than accumulating forever. A store that
+	// implemented a plain counter would pass every other assertion here and fail this one.
+	t.Run("the lockout window restarts rather than accumulating", func(t *testing.T) {
+		s := fresh(t)
+		mustTenant(t, s, "acme", "Acme")
+		u := mustUser(t, s, "sub-pw", "dana@acme.com")
+		enc := "$argon2id$v=19$m=65536,t=3,p=4$c2FsdHNhbHRzYWx0c2ExMg$aGFzaGhhc2hoYXNoaGFzaGhhc2hoYXNoaDI"
+		if _, err := s.SetPassword(u.UserID, enc, t0); err != nil {
+			t.Fatalf("set: %v", err)
+		}
+		pol := LockoutPolicy{Threshold: 3, Window: 10 * time.Minute, LockFor: time.Hour}
+		if _, err := s.RecordPasswordFailure(u.UserID, t0, pol); err != nil {
+			t.Fatalf("failure: %v", err)
+		}
+		if _, err := s.RecordPasswordFailure(u.UserID, t0.Add(time.Minute), pol); err != nil {
+			t.Fatalf("failure: %v", err)
+		}
+		// Well outside the window: this is attempt ONE of a new run, not attempt three of the old one.
+		out, err := s.RecordPasswordFailure(u.UserID, t0.Add(time.Hour), pol)
+		if err != nil {
+			t.Fatalf("failure: %v", err)
+		}
+		if out.FailedAttempts != 1 {
+			t.Fatalf("a failure outside the window counted as %d, want 1 — the window is accumulating", out.FailedAttempts)
+		}
+		if out.Locked(t0.Add(time.Hour)) {
+			t.Fatal("a single failure in a fresh window locked the account")
+		}
+		if err := s.ClearPasswordFailures(u.UserID); err != nil {
+			t.Fatalf("clear: %v", err)
+		}
+		cleared, _ := s.GetPassword(u.UserID)
+		if cleared.FailedAttempts != 0 || cleared.LockedUntil != nil {
+			t.Fatalf("clearing left state behind: %+v", cleared)
+		}
+	})
+
+	t.Run("a person is findable by address on the password issuer only", func(t *testing.T) {
+		s := fresh(t)
+		mustTenant(t, s, "acme", "Acme")
+		// Two people at ONE address under two issuers. 🔴 They are different people, and neither lookup may
+		// return the other — this is what stops a federated identity and a password identity from merging.
+		pw, err := s.UpsertUser(User{Issuer: IssuerPassword, Subject: PasswordSubject("Dana@Acme.com"),
+			Email: "Dana@Acme.com", CreatedAt: t0})
+		if err != nil {
+			t.Fatalf("upsert password user: %v", err)
+		}
+		fed, err := s.UpsertUser(User{Issuer: "https://idp.acme", Subject: "sub-fed",
+			Email: "dana@acme.com", CreatedAt: t0})
+		if err != nil {
+			t.Fatalf("upsert federated user: %v", err)
+		}
+		if pw.UserID == fed.UserID {
+			t.Fatal("two issuers at one address collapsed into one person")
+		}
+		// Case-insensitive: the address was stored with capitals and is looked up without them.
+		got, err := s.FindUserByEmail(IssuerPassword, "dana@acme.com")
+		if err != nil || got.UserID != pw.UserID {
+			t.Fatalf("FindUserByEmail returned %q/%v, want %q", got.UserID, err, pw.UserID)
+		}
+		if _, err := s.FindUserByEmail(IssuerPassword, "nobody@acme.com"); !errors.Is(err, ErrNotFound) {
+			t.Errorf("an unknown address must be ErrNotFound, got %v", err)
+		}
+		if got.EmailVerified() {
+			t.Error("a new person is not verified")
+		}
+		v, err := s.MarkEmailVerified(pw.UserID, t0)
+		if err != nil || !v.EmailVerified() {
+			t.Fatalf("MarkEmailVerified: %+v / %v", v, err)
+		}
+		// Idempotent, keeping the FIRST time: an audit reading this asks when the address was proved.
+		again, err := s.MarkEmailVerified(pw.UserID, t0.Add(time.Hour))
+		if err != nil {
+			t.Fatalf("verify again: %v", err)
+		}
+		if !again.EmailVerifiedAt.Equal(*v.EmailVerifiedAt) {
+			t.Errorf("a second confirmation moved the timestamp: %v -> %v", v.EmailVerifiedAt, again.EmailVerifiedAt)
+		}
+	})
+
+	// 🔴 The single-use property. `ConsumeIdentityToken` must be the decider — a store that read the row,
+	// checked it in Go and wrote it back would pass the sequential case below and lose the concurrent one.
+	t.Run("an identity token is spent exactly once, and only for its own purpose", func(t *testing.T) {
+		s := fresh(t)
+		mustTenant(t, s, "acme", "Acme")
+		u := mustUser(t, s, "sub-pw", "dana@acme.com")
+		mint := func(secret string, purpose TokenPurpose, expires time.Time) {
+			if _, err := s.MintIdentityToken(IdentityToken{
+				TokenHash: HashSecret(secret), UserID: u.UserID, Purpose: purpose,
+				Email: "dana@acme.com", CreatedAt: t0, ExpiresAt: expires,
+			}); err != nil {
+				t.Fatalf("mint %s: %v", secret, err)
+			}
+		}
+		mint("reset-secret", TokenResetPassword, t0.Add(time.Hour))
+		mint("verify-secret", TokenVerifyEmail, t0.Add(24*time.Hour))
+		mint("expired-secret", TokenResetPassword, t0.Add(-time.Minute))
+
+		// Wrong purpose: refused, and NOT consumed — the right purpose still works afterwards.
+		if _, err := s.ConsumeIdentityToken(HashSecret("reset-secret"), TokenVerifyEmail, t0); !errors.Is(err, ErrIdentityToken) {
+			t.Fatalf("a reset token was accepted at the confirmation purpose: %v", err)
+		}
+		got, err := s.ConsumeIdentityToken(HashSecret("reset-secret"), TokenResetPassword, t0)
+		if err != nil {
+			t.Fatalf("consume: %v", err)
+		}
+		if got.UserID != u.UserID || got.Email != "dana@acme.com" || got.ConsumedAt == nil {
+			t.Fatalf("the consumed token is wrong: %+v", got)
+		}
+		// Twice is refused.
+		if _, err := s.ConsumeIdentityToken(HashSecret("reset-secret"), TokenResetPassword, t0); !errors.Is(err, ErrIdentityToken) {
+			t.Fatalf("a token was spent twice: %v", err)
+		}
+		// Expired and unknown are the SAME error as spent — one answer, four causes.
+		if _, err := s.ConsumeIdentityToken(HashSecret("expired-secret"), TokenResetPassword, t0); !errors.Is(err, ErrIdentityToken) {
+			t.Fatalf("an expired token was accepted: %v", err)
+		}
+		if _, err := s.ConsumeIdentityToken(HashSecret("never-existed"), TokenResetPassword, t0); !errors.Is(err, ErrIdentityToken) {
+			t.Fatalf("an unknown token gave a different error from a spent one: %v", err)
+		}
+		// A token minted with an unknown purpose is refused at the store.
+		if _, err := s.MintIdentityToken(IdentityToken{
+			TokenHash: HashSecret("x"), UserID: u.UserID, Purpose: "something_else",
+			Email: "dana@acme.com", ExpiresAt: t0.Add(time.Hour),
+		}); !errors.Is(err, ErrUnknownTokenPurpose) {
+			t.Fatalf("an unknown token purpose was minted: %v", err)
+		}
+		// And one with no expiry: a link that never dies is a way in nobody is tracking.
+		if _, err := s.MintIdentityToken(IdentityToken{
+			TokenHash: HashSecret("y"), UserID: u.UserID, Purpose: TokenResetPassword, Email: "dana@acme.com",
+		}); err == nil {
+			t.Fatal("a token with no expiry was minted")
+		}
+	})
+
+	// 🔴 What a reset actually does. The failure this catches is the one that matters: a reset that revokes
+	// the sessions and leaves the personal credentials — or the reverse — tells somebody who is resetting
+	// because they were compromised that they are now safe.
+	t.Run("a reset ends every session and personal credential, across organizations, and reports what it left", func(t *testing.T) {
+		s := fresh(t)
+		mustTenant(t, s, "acme", "Acme")
+		mustTenant(t, s, "beta", "Beta")
+		u := mustUser(t, s, "sub-pw", "dana@acme.com")
+		other := mustUser(t, s, "sub-other", "sam@acme.com")
+		mustMember(t, s, u.UserID, "acme", RoleOwner)
+		mustMember(t, s, u.UserID, "beta", RoleMember)
+		mustMember(t, s, other.UserID, "acme", RoleOwner)
+
+		mustSession(t, s, "acme", u.UserID, "sess-acme")
+		mustSession(t, s, "beta", u.UserID, "sess-beta")
+		mustSession(t, s, "acme", other.UserID, "sess-other")
+		mustCredential(t, s, "acme", u.UserID, "dana laptop")
+		mustCredential(t, s, "beta", u.UserID, "dana ci-personal")
+		ciAcme := mustCredential(t, s, "acme", "", "acme deploy key")
+		mustCredential(t, s, "acme", other.UserID, "sam laptop")
+
+		rev, err := s.RevokeEverythingFor(u.UserID, t0.Add(time.Minute))
+		if err != nil {
+			t.Fatalf("revoke: %v", err)
+		}
+		if rev.SessionsRevoked != 2 {
+			t.Errorf("revoked %d sessions, want 2 (both organizations)", rev.SessionsRevoked)
+		}
+		if rev.CredentialsRevoked != 2 {
+			t.Errorf("revoked %d personal credentials, want 2 (both organizations)", rev.CredentialsRevoked)
+		}
+		if len(rev.MachineCredentials) != 1 || rev.MachineCredentials[0].CredentialID != ciAcme.CredentialID {
+			t.Fatalf("the machine credentials left running were not reported: %+v", rev.MachineCredentials)
+		}
+		// 🔴 Somebody else's session and credential are untouched. A revocation scoped by person rather
+		// than by organization is easy to write as "everything in these organizations".
+		if sess, err := s.ResolveSession(HashSecret("sess-other-token")); err != nil || !sess.Live(t0.Add(time.Hour).UnixMilli()) {
+			t.Fatalf("another person's session was revoked: %+v / %v", sess, err)
+		}
+		creds, err := s.ListCredentials("acme")
+		if err != nil {
+			t.Fatalf("list: %v", err)
+		}
+		for _, c := range creds {
+			switch c.Label {
+			case "sam laptop", "acme deploy key":
+				if c.Revoked() {
+					t.Errorf("%q was revoked and should not have been", c.Label)
+				}
+			case "dana laptop":
+				if !c.Revoked() {
+					t.Errorf("%q survived the reset", c.Label)
+				}
+			}
+		}
+	})
 }
 
 // ── fixtures ────────────────────────────────────────────────────────────────────────────────────────

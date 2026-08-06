@@ -11,6 +11,7 @@ import (
 	"github.com/heros-foreal/agentd/internal/account"
 	"github.com/heros-foreal/agentd/internal/auth"
 	"github.com/heros-foreal/agentd/internal/config"
+	"github.com/heros-foreal/agentd/internal/mailer"
 	"github.com/heros-foreal/agentd/internal/metering"
 	"github.com/heros-foreal/agentd/internal/plancfg"
 	"github.com/heros-foreal/agentd/internal/seats"
@@ -48,11 +49,17 @@ type testSurface struct {
 	// membership correctly contributes nothing to a seat peak — so a test built on one asserts against
 	// the fixture rather than against the behaviour.
 	clock time.Time
+	// mail is the P28 delivery seam. A test that wants to READ what was sent sets it to an
+	// `*mailer.OperatorMailer` and inspects `Undelivered()` — which is also the real unconfigured path, so
+	// the assertion is made against the code a deployment without SMTP actually runs.
+	mail mailer.Mailer
 }
 
 func (s *testSurface) Store() tenancy.Store    { return s.store }
 func (s *testSurface) SignUp() *signup.Service { return s.signUp }
 func (s *testSurface) SelfServeEnabled() bool  { return s.selfServe }
+func (s *testSurface) Mailer() mailer.Mailer   { return s.mail }
+func (s *testSurface) ConsoleURL() string      { return "https://console.example" }
 func (s *testSurface) Now() time.Time {
 	if s.clock.IsZero() {
 		return apiAt
@@ -86,6 +93,17 @@ func (s *testSurface) SeatsAllowed(tenantID string) (float64, bool, error) {
 
 func newSurface(t *testing.T, selfServe bool) (*Server, *testSurface) {
 	t.Helper()
+	return newSurfaceWith(t, selfServe, config.Config{})
+}
+
+// newSurfaceWith is newSurface with the server's configuration chosen by the caller.
+//
+// It exists for `authgate_fence_test.go`, which needs `AuthMode: "required"` — the value that makes
+// `New` compose the auth middleware around the mux. Splitting it here rather than building a second
+// server in that file keeps ONE composition under test: a fence that assembled its own would prove
+// something about its own assembly.
+func newSurfaceWith(t *testing.T, selfServe bool, cfg config.Config) (*Server, *testSurface) {
+	t.Helper()
 	src := plancfg.NewMemSource()
 	if err := src.PublishJSON([]byte(testCatalog)); err != nil {
 		t.Fatalf("catalog: %v", err)
@@ -107,7 +125,7 @@ func newSurface(t *testing.T, selfServe bool) (*Server, *testSurface) {
 	if selfServe {
 		surface.signUp = svc
 	}
-	s := New(nil, config.Config{})
+	s := New(nil, cfg)
 	s.MountAccounts(surface)
 	return s, surface
 }

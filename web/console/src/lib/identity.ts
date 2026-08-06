@@ -4,9 +4,11 @@ import { REFUSAL, resolveTenant, type FederatedClaims } from "./idp/federation";
 import { spendAssertion } from "./idp/flow";
 import { verifyIdToken, reachable as oidcReachable, IdpUnreachableError } from "./idp/oidc";
 import { verifyPlatformToken, reachable as platformReachable } from "./idp/platformToken";
+import { verifyPassword, reachable as passwordReachable, type PasswordOutcome } from "./idp/password";
 import { platformApiBase, platformFetch } from "./platformApi";
 import { verifySamlResponse, reachableMetadata } from "./idp/saml";
 import { SecretUnavailableError, describeSecrets } from "./idp/secrets";
+import { sessionStore } from "./sessionStore";
 import { logIdentity } from "./telemetry";
 
 /**
@@ -38,12 +40,21 @@ import { logIdentity } from "./telemetry";
  * 3. **A development provider must not be able to run in production.** The guard below is the
  *    load-bearing part of the `dev` implementation, not a nicety.
  *
- * # The four provider kinds are ONE seam
+ * # The provider kinds are ONE seam
  *
  * `oidc` and `saml` are the federated mechanisms (Decision 2). `configured` is the deployment-injected
  * assertion → tenant map that shipped before P22 and still serves an open-core deployment that
- * federates against nothing. `dev` is local-only. All four answer the same question and none of them
- * is visible above this file.
+ * federates against nothing. `platform` takes the token `heros login` stores. `password` (P28) is an
+ * email address and a password. `dev` is local-only. All of them answer the same question and none of
+ * them is visible above this file.
+ *
+ * # 🔴 `password` adds a SECOND ENTRY POINT, and that is the only shape change to the seam
+ *
+ * `verify(assertion) → {tenantId}` is unchanged and every existing caller compiles untouched. What P28
+ * adds beside it is `verifyPasswordCredentials(email, password)`, because a two-field credential cannot
+ * be carried by a one-string assertion without inventing an encoding — and an encoding is a wire contract
+ * nobody asked for, on the one input where getting it wrong is a sign-in that silently accepts the wrong
+ * split. Everything ABOVE the seam still sees one abstract authenticated principal.
  */
 
 export type TenantPrincipal = {
@@ -107,7 +118,88 @@ export type AssertionBinding =
 const PROVIDER: IdentityProviderKind = CONFIG.kind;
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
 
-if (PROVIDER === "dev" && IS_PRODUCTION) {
+/**
+ * IS_BUILD is true while `next build` collects page data.
+ *
+ * 🔴 The configuration guards below must not run then, and the reason is not convenience. At build time
+ * there is no deployment: no assertion map, no session-store choice, no identity provider — Next imports
+ * every route module to collect its data, and a guard that asserts a DEPLOYMENT's configuration would fail
+ * the build of an image that is perfectly capable of running correctly once configured.
+ *
+ * It cost two broken builds to find, both times with the guard itself being right. The check belongs at
+ * startup and at request time, where a configuration exists to be wrong.
+ */
+const IS_BUILD = process.env.NEXT_PHASE === "phase-production-build";
+
+/*
+ * 🔴 A `configured` deployment with no map authenticates NOBODY, and used to do so silently.
+ *
+ * The guard lived in `deploy/docker-compose.console.yml` as `${CONSOLE_TENANT_ASSERTIONS:?}` — which is
+ * the right check on the wrong substrate twice over: it does not exist on Kubernetes, and it fires for
+ * every kind including the ones that need no map at all. P28 is where the second half bites, because a
+ * `password` deployment has no assertions to declare and would have been forced to invent an empty one.
+ *
+ * So the check moves here, where it can be kind-aware and where it holds on every substrate. Refusing to
+ * BOOT rather than at sign-in, for the reason the `dev` guard below gives: a process that starts and then
+ * rejects every login looks like a broken deployment, and one that will not start says exactly what is
+ * wrong, once, to the person doing the deploy.
+ */
+if (!IS_BUILD && PROVIDER === "configured" && Object.keys(configuredTenants()).length === 0) {
+  throw new Error(
+    "CONSOLE_TENANT_IDENTITY=configured needs CONSOLE_TENANT_ASSERTIONS — an empty map authenticates nobody, " +
+      "and a console that starts and refuses every sign-in is indistinguishable from a broken deployment",
+  );
+}
+
+/*
+ * 🔴 The `password` seam requires a DURABLE session store, and refuses to boot without one.
+ *
+ * The sign-in page tells every reader: *"Sessions are server-side records, read on every request. When one
+ * is revoked — by signing out, by a password reset, or by an owner removing you — the very next request is
+ * denied, with no grace period."*
+ *
+ * On `CONSOLE_SESSION_STORE=memory` — the DEFAULT — that sentence is false in its most important clause. A
+ * memory session is a `Map` in this process. A password reset runs on the PLATFORM: it revokes the
+ * platform's sessions and every personal credential, and it cannot reach a map inside the console. So the
+ * browser that was signed in stays signed in until the cookie expires — and the single commonest reason to
+ * reset a password is that somebody else has the device it is signed in on.
+ *
+ * The other two clauses survive on memory (sign-out is this process revoking its own record), which is
+ * exactly what makes the gap dangerous: two thirds of the sentence keep working, so nothing looks broken.
+ *
+ * Three ways out were possible. Weakening the copy would ship a product whose password reset does not do
+ * what a reader reasonably expects. Making the copy conditional would put a security claim in two versions
+ * and let a deployment pick the weak one silently. Refusing the combination makes the claim true wherever
+ * it is rendered, which is the only one of the three that is a property rather than a description.
+ *
+ * ⚠️ WHEN this fires, stated precisely, because "refuses to boot" is easy to write and hard to earn.
+ *
+ * Next lazy-loads route modules, so a module-scope throw is not literally a startup failure. In practice it
+ * is the next thing to it: `/api/health` imports this file to report the identity provider, so the guard
+ * runs on the FIRST READINESS PROBE, the probe never returns 200, and the console never becomes ready. A
+ * deployment on a bad combination does not serve — it fails its health check, which is what an orchestrator
+ * and an operator both act on.
+ *
+ * That is the observed behaviour, not the intended one: `tests/password-identity.test.mjs` asserts it by
+ * starting a console on the bad combination and requiring that it never comes up. If the health route ever
+ * stops reading identity, this degrades to "the first sign-in fails" — still fail-closed, no longer
+ * self-announcing — and that test is what would notice.
+ *
+ * A real boot hook was tried — `src/instrumentation.ts` importing this module — and it breaks the build:
+ * Next compiles instrumentation for the edge runtime too, and this module reaches Node builtins through the
+ * crypto and secrets seams. A broken build is worse than a guard that announces itself through the health
+ * check, so the hook was removed and this paragraph exists instead of a comment that is not true.
+ */
+if (!IS_BUILD && PROVIDER === "password" && sessionStore.kind === "memory") {
+  throw new Error(
+    "CONSOLE_TENANT_IDENTITY=password requires CONSOLE_SESSION_STORE=platform. With the in-memory store a " +
+      "password reset cannot revoke this console's own session cookie — it lives in this process, and the " +
+      "reset happens on the platform — so a browser signed in on a lost or stolen device stays signed in " +
+      "until the cookie expires, while the sign-in page promises the opposite.",
+  );
+}
+
+if (!IS_BUILD && PROVIDER === "dev" && IS_PRODUCTION) {
   // Refuse to boot rather than refuse at sign-in. A process that starts and then rejects every login
   // looks like a broken deployment; a process that will not start says exactly what is wrong, once,
   // to the person doing the deploy.
@@ -171,6 +263,14 @@ export async function verifyTenantAssertion(assertion: string, binding?: Asserti
       const userId = await resolveSeamPerson("configured", value, tenantId);
       return { ok: true, principal: userId ? { tenantId, userId } : { tenantId } };
     }
+
+    case "password":
+      // 🔴 A `password` deployment has no assertion form. Anything arriving here is a one-string credential
+      // presented to a seam that takes two fields — a stale bookmark, a scripted POST, or a bug — and
+      // honouring it would be a second, weaker way in beside `verifyPasswordCredentials`. Refused with the
+      // same generic reason as everything else: whoever sent it learns nothing.
+      logIdentity({ event: "assertion_refused", provider: PROVIDER, cause: "an assertion was presented to the password seam" });
+      return refuse("credential");
 
     case "platform": {
       // The credential IS the platform token, so the platform is asked whose it is rather than a second
@@ -391,6 +491,13 @@ export type IdentityHealth = { kind: string; issuer: string; reachable: boolean;
  * the deployment does not have.
  */
 export async function identityHealth(): Promise<IdentityHealth> {
+  if (PROVIDER === "password") {
+    // The platform verifies the password, so its reachability IS this seam's health — the same reasoning
+    // `platform` uses below. A deployment whose platform is down cannot sign anybody in, and reporting a
+    // hard-coded `true` would be a component that cannot fail.
+    const probe = await passwordReachable();
+    return { kind: PROVIDER, issuer: platformApiBase(), ...probe };
+  }
   if (PROVIDER === "oidc") {
     const probe = await oidcReachable();
     return { kind: PROVIDER, issuer: CONFIG.issuer, ...probe };
@@ -406,6 +513,27 @@ export async function identityHealth(): Promise<IdentityHealth> {
     return { kind: PROVIDER, issuer: platformApiBase(), ...probe };
   }
   return { kind: PROVIDER, issuer: "", reachable: true };
+}
+
+/**
+ * verifyPasswordCredentials is the `password` seam's entry point.
+ *
+ * 🔴 It refuses on every OTHER kind rather than falling through to something weaker. A deployment
+ * federating with Okta must not also accept a password, because two doors and one lock is how a
+ * revocation that works on one path stops meaning anything — the same reasoning `verifyTenantAssertion`
+ * uses to refuse an OIDC assertion presented outside the callback.
+ */
+export async function verifyPasswordCredentials(email: string, plaintext: string): Promise<PasswordOutcome> {
+  if (PROVIDER !== "password") {
+    logIdentity({ event: "assertion_refused", provider: PROVIDER, cause: "a password was presented to a seam that does not accept one" });
+    return { ok: false, reason: REFUSAL, reasonCode: "" };
+  }
+  return verifyPassword(email, plaintext);
+}
+
+/** passwordSignInEnabled reports whether this deployment offers email-and-password sign-in. */
+export function passwordSignInEnabled(): boolean {
+  return PROVIDER === "password";
 }
 
 /** identitySecretsSource names where identity credentials come from, for the health surface. */

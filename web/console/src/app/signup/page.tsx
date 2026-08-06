@@ -1,7 +1,9 @@
+import { redirect } from "next/navigation";
 import { SIGNUP_COPY, REFUSAL_COPY } from "@/lib/organizationCopy";
 import { SignUpForm } from "@/components/signup";
 import { selfServeEnabled } from "@/lib/posture";
 import { readSessionToken, resolveSession } from "@/lib/session";
+import { passwordSignInEnabled } from "@/lib/identity";
 
 /**
  * Creating an organization.
@@ -37,11 +39,30 @@ import { readSessionToken, resolveSession } from "@/lib/session";
  *
  * It was found by walking the flow in a browser, and nothing had failed: the page rendered, the button
  * worked, and the refusal was correct. Which is the argument for walking it.
+ *
+ * # 🔴 P28: on the `password` seam the second precondition is CIRCULAR, so it does not apply
+ *
+ * "You need a session to create an organization" is correct for the federated seams, where an identity
+ * provider vouches for you before you ever reach us — the platform takes the issuer, subject and email
+ * from a session this console issued, and there is no other way for it to learn them.
+ *
+ * On the password seam there is no such provider, and signing up is HOW you get a session. Requiring one
+ * first means `/signup` sends you to `/signin`, which sends you to `/signup`: a loop with no exit, on the
+ * first screen of the product. So this page renders `PasswordSignUpForm` instead, which supplies the
+ * identity in the same request that creates the organization — the platform's own
+ * `POST /api/v1/auth/password/signup` writes the person, the organization, the owner membership, the free
+ * account and the password in one transaction, or none of them.
+ *
+ * The posture check is UNCHANGED and still comes first: an air-gapped install must not grow a registration
+ * form by upgrading, whichever seam it runs.
  */
 export const dynamic = "force-dynamic";
 
 export default async function SignUpPage() {
   const enabled = await selfServeEnabled();
+  // The password seam's own sign-up, which needs no prior session. Rendered by its own route so this
+  // file keeps the federated flow exactly as it was — see the header.
+  if (enabled && passwordSignInEnabled()) redirect("/create-account");
   // Read, never require: `requireSession` REDIRECTS, and bouncing somebody who asked to create an
   // organization onto a sign-in screen with no explanation is the same dead end wearing a different URL.
   // The page says why, and links onward carrying `next` so they land back here.
