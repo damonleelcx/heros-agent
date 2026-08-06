@@ -34,19 +34,19 @@ resources:
 # `newTag`-less `digest:` form is what makes an apply reproducible: the same digest is the same image.
 images:
   # The platform's own three, built for linux/arm64 and pushed to this account's ECR. All three are at
-  # a4b854c (P28 email-and-password identity, plus P27's account system beneath it) — the first release
+  # 20a5439 (the sign-in reveal toggle and copy corrections, and the confirmation banner that could never clear) — the first release
   # in which the set moves together, which is why this comment no longer names a different commit per
   # image. `newName` retargets the registry; the digest is the artifact. Both must match
   # deploy/images.env exactly or check-image-parity.sh fails the build.
   - name: ghcr.io/heros-foreal/agentd
     newName: 373468206837.dkr.ecr.us-east-1.amazonaws.com/agentd
-    digest: sha256:746d4a4d189e164972b3dec191f5f271255b9659df3be84b39988422aa2f0c77
+    digest: sha256:c9cb9249b8d8abbcd953950150ce0c3cc4fa2fdb53fd487a29cd7325184310d3
   - name: ghcr.io/heros-foreal/heros-console
     newName: 373468206837.dkr.ecr.us-east-1.amazonaws.com/heros-console
-    digest: sha256:20cbbf8ce5f0f170754898d43a826b4ab3fd7f0ce9f0845f00126d8968cb0fc2
+    digest: sha256:41878fbff856a0af1775ef9c98f2378f34e876796f2cb83b73795b40f8e34cd7
   - name: ghcr.io/heros-foreal/heros-admin-console
     newName: 373468206837.dkr.ecr.us-east-1.amazonaws.com/heros-admin-console
-    digest: sha256:099e3034ee772e0ab9d69b8ba26381f48762e37b1fcc3b5bf623f607515ed498
+    digest: sha256:34d67d61ed168cca4190e4360e6b135db8e4e34bbedf49557634f89d6c9a7550
   - name: postgres
     digest: sha256:6efd0df010dc3cb40d5e33e3ef84acecc5e73161bd3df06029ee8698e5e12c60
   - name: minio/minio
