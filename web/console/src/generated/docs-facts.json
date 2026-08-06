@@ -480,21 +480,42 @@
     },
     {
       "name": "login",
-      "summary": "store a platform token",
+      "summary": "sign in and store a credential",
       "availability": "network",
       "offline": false,
       "needs_account": true,
       "flags": [
         {
+          "name": "device",
+          "type": "bool",
+          "default": "false",
+          "env": "HEROS_DEVICE",
+          "summary": "approve this terminal from a browser instead of typing a password (login) — for a shared terminal, a screen share, or a recorded session"
+        },
+        {
+          "name": "email",
+          "type": "string",
+          "default": "",
+          "env": "HEROS_EMAIL",
+          "summary": "email address to sign in as (login). The password is NEVER a flag: set HEROS_PASSWORD, pipe it on stdin, or let the command prompt for it without echo"
+        },
+        {
+          "name": "org",
+          "type": "string",
+          "default": "",
+          "env": "HEROS_ORG",
+          "summary": "organization to sign in to, when you are a member of more than one (login). Absent picks the one you joined first, and the sign-in lists them all"
+        },
+        {
           "name": "token",
           "type": "string",
           "default": "",
           "env": "HEROS_TOKEN",
-          "summary": "platform token (login)"
+          "summary": "platform token (login) — the MACHINE path: a credential naming nobody, which survives the offboarding of whoever created it"
         }
       ],
-      "example": "heros login --token \u003cyour platform token\u003e",
-      "success": "the token stored, and the non-secret identity it resolves to echoed back. The token value is never printed.",
+      "example": "heros login --email you@example.com",
+      "success": "the credential stored 0600, and the non-secret identity it resolves to echoed back, including whether it is PERSONAL (ends when you are removed from the organization) or MACHINE (does not). No secret is ever printed.",
       "success_exit": 0,
       "unavailable": "login is a platform command and is unavailable in this build"
     },
