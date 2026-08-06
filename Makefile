@@ -56,7 +56,7 @@ test:
 
 ## console-types: regenerate the console's data contract from the Go view structs (P9 ADR-007)
 console-types:
-	$(GO) run ./cmd/consoletypes
+	GOWORK=off $(GO) run ./cmd/consoletypes
 
 ## console-types-check: fail if a Go view type changed and the checked-in contract did not.
 #
@@ -64,8 +64,12 @@ console-types:
 # The failure mode it prevents is not a compile error — it is a BLANK CELL in production, because a
 # field renamed in Go becomes `undefined` in TypeScript and renders as an em-dash that looks exactly
 # like legitimately absent data.
+#
+# ⚠️ GOWORK=off for docs-facts-check's reason: inside a parent workspace this target dies with
+# `go work use .` instead of reporting drift, and a gate that errors for an unrelated reason is a gate
+# nobody reads the output of.
 console-types-check:
-	$(GO) run ./cmd/consoletypes -check
+	GOWORK=off $(GO) run ./cmd/consoletypes -check
 
 ## docs-facts: regenerate the facts P23's documentation is generated from and fenced against.
 #
@@ -74,7 +78,7 @@ console-types-check:
 # for the same reason ADR-007 gives for console types: a JavaScript parser for Go source is a second
 # implementation of the truth, and it drifts silently.
 docs-facts:
-	$(GO) run ./cmd/docsfacts
+	GOWORK=off $(GO) run ./cmd/docsfacts
 
 ## docs-facts-check: fail if a command, exit code, metric or install channel changed and the checked-in
 ## facts did not.
@@ -82,8 +86,13 @@ docs-facts:
 # The failure this prevents is P23 Decision 14's: adding a subcommand is a normal Tuesday, and
 # remembering the reference is not. With this gate, forgetting is a red build; without it, the product
 # accumulates commands nobody can look up.
+#
+# ⚠️ GOWORK=off, matching the other targets that set it. This repo ships no go.work, but a developer who
+# keeps it inside a parent workspace gets `directory cmd/docsfacts is contained in a module that is not
+# one of the workspace modules` — a module error, which reads as broken tooling rather than as stale
+# facts. That is a second way for this gate to be silent, and it is the way it was silent locally.
 docs-facts-check:
-	$(GO) run ./cmd/docsfacts /tmp/heros-docs-facts.json
+	GOWORK=off $(GO) run ./cmd/docsfacts /tmp/heros-docs-facts.json
 	@diff -u web/console/src/generated/docs-facts.json /tmp/heros-docs-facts.json \
 	  || { echo ""; echo "docs facts are STALE. Run 'make docs-facts' and commit the result."; exit 1; }
 	@echo "docs facts are current."

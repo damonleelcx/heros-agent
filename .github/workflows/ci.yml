@@ -34,6 +34,25 @@ jobs:
         run: make go
       - name: go.mod tidy check
         run: make tidy-check
+      # 🔴 The two gates that `make ci` named and no workflow ran.
+      #
+      # `make ci` listed five prerequisites; the workflows ran three. `docs-facts-check` and
+      # `console-types-check` were invoked by nothing, so both were green in nobody's hands. That is how
+      # P28 merged with stale docs facts: `heros login` grew --email, --device and --org, the generated
+      # reference did not, and the gate written to catch exactly that (P23 Decision 14) never ran. Three
+      # pull requests went green over the top of it.
+      #
+      # Same reasoning as the reproducibility step below: a gate nobody can see run is a gate that stops
+      # working silently. These are cheap and belong to the job that already has Go.
+      - name: generated docs facts are current
+        run: make docs-facts-check
+      - name: generated console types are current
+        run: make console-types-check
+      # And the guard that keeps the list honest: it reads `ci:`'s prerequisites out of the Makefile and
+      # fails if any of them is invoked by no workflow. Without it, the next target added to `make ci`
+      # is dark again the moment it is added, and looks wired to everyone reading the Makefile.
+      - name: every `make ci` gate is actually invoked by a workflow
+        run: bash scripts/ci/check-ci-targets-run.sh
       # 🔴 The reproducibility gate, named as its own REQUIRED step (P20 task 7.6).
       #
       # It already runs inside `make go`, so this looks redundant — and it is not. Reproducibility is the
