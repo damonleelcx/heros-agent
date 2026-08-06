@@ -53,11 +53,17 @@ const (
 // noTerminal is the refusal a CI runner gets. It names every non-interactive way in, because "no terminal"
 // on its own is a diagnosis with no next action — and this is the one command a person is most likely to
 // first run from a script.
+//
+// ⚠️ The stdin example says `<your-password>` rather than `password`, and the angle brackets are load-bearing
+// in two directions. A reader could take a bare `password` as the literal string to type; and a secret
+// scanner reads `'you@example.com\npassword\n'` as an address-and-credential pair and opens a finding on
+// this file — GitGuardian did, on PR #73. It was a false positive, and that is the problem: a scanner that
+// cries wolf on placeholder text is one whose next finding gets waved through.
 const noTerminal = `login: no terminal to prompt on, and no credentials supplied.
 
 Supply them one of these ways:
   heros login --email you@example.com          and set ` + EnvPassword + `
-  printf 'you@example.com\npassword\n' | heros login     (on stdin)
+  printf 'you@example.com\n<your-password>\n' | heros login   (on stdin)
   heros login --token <machine-credential>     (a machine credential, for CI)
   heros login --device                          (approve from a browser instead)`
 
