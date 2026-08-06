@@ -230,21 +230,24 @@ heros link --run run-7 --dry-run
 
 ### login
 
-store a platform token.
+sign in and store a credential.
 
 **Needs the network and a platform account.**
 
 ```bash
-heros login --token <your platform token>
+heros login --email you@example.com
 ```
 
-**On success:** the token stored, and the non-secret identity it resolves to echoed back. The token value is never printed. Exit code `0`.
+**On success:** the credential stored 0600, and the non-secret identity it resolves to echoed back, including whether it is PERSONAL (ends when you are removed from the organization) or MACHINE (does not). No secret is ever printed. Exit code `0`.
 
 **When this build does not include it:** the command exits `2` and prints `login is a platform command and is unavailable in this build`. That is an operational outcome, not a malformed invocation — you have not typed anything wrong.
 
 | Flag | Type | Default | Environment | Meaning |
 |---|---|---|---|---|
-| `--token` | string | *unset* | `HEROS_TOKEN` | platform token (login) |
+| `--device` | bool | `false` | `HEROS_DEVICE` | approve this terminal from a browser instead of typing a password (login) — for a shared terminal, a screen share, or a recorded session |
+| `--email` | string | *unset* | `HEROS_EMAIL` | email address to sign in as (login). The password is NEVER a flag: set HEROS_PASSWORD, pipe it on stdin, or let the command prompt for it without echo |
+| `--org` | string | *unset* | `HEROS_ORG` | organization to sign in to, when you are a member of more than one (login). Absent picks the one you joined first, and the sign-in lists them all |
+| `--token` | string | *unset* | `HEROS_TOKEN` | platform token (login) — the MACHINE path: a credential naming nobody, which survives the offboarding of whoever created it |
 
 ### push-source
 

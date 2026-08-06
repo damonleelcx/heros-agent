@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { PASSWORD_COPY } from "@/content/passwordAccount";
+import { PasswordField } from "@/components/passwordField";
 
 /**
  * The two controls on `/app/settings/account`.
@@ -89,9 +90,8 @@ export function ChangePasswordForm() {
     >
       <label className="flex flex-col gap-1 text-xs text-muted-foreground">
         Current password
-        <input
+        <PasswordField
           name="current_password"
-          type="password"
           autoComplete="current-password"
           required
           className="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
@@ -99,9 +99,8 @@ export function ChangePasswordForm() {
       </label>
       <label className="flex flex-col gap-1 text-xs text-muted-foreground">
         {PASSWORD_COPY.reset.passwordLabel}
-        <input
+        <PasswordField
           name="new_password"
-          type="password"
           autoComplete="new-password"
           minLength={12}
           required

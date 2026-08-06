@@ -7,6 +7,7 @@ import { issueSession, sessionTtlSeconds } from "@/lib/session";
 import { SESSION_COOKIE, SESSION_COOKIE_OPTIONS } from "@/lib/cookies";
 import { PASSWORD_COPY } from "@/content/passwordAccount";
 import { cookies } from "next/headers";
+import { PasswordField } from "@/components/passwordField";
 
 /**
  * Setting a new password from a reset link.
@@ -144,11 +145,10 @@ export default async function ResetPasswordPage({
             <KeyRound className="size-3" aria-hidden="true" />
             {PASSWORD_COPY.reset.passwordLabel}
           </label>
-          <input
+          <PasswordField
             className="w-full rounded-lg border border-marketing-ink/12 bg-marketing-canvas px-4 py-3 text-sm text-marketing-ink outline-none transition-colors placeholder:text-marketing-ink/25 focus:border-marketing-accent/60"
             id="password"
             name="password"
-            type="password"
             autoComplete="new-password"
             minLength={12}
             required
