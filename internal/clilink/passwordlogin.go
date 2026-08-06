@@ -54,11 +54,15 @@ const (
 // on its own is a diagnosis with no next action — and this is the one command a person is most likely to
 // first run from a script.
 //
-// ⚠️ The stdin example says `<your-password>` rather than `password`, and the angle brackets are load-bearing
-// in two directions. A reader could take a bare `password` as the literal string to type; and a secret
-// scanner reads `'you@example.com\npassword\n'` as an address-and-credential pair and opens a finding on
-// this file — GitGuardian did, on PR #73. It was a false positive, and that is the problem: a scanner that
-// cries wolf on placeholder text is one whose next finding gets waved through.
+// ⚠️ The stdin example uses an angle-bracketed placeholder rather than the bare word, and the brackets are
+// load-bearing in two directions. A reader could take the bare word as the literal string to type; and a
+// secret scanner reads an address followed by a credential-shaped literal as a credential PAIR and opens a
+// finding on this file — GitGuardian did, on PR #73. It was a false positive, and that is the problem: a
+// scanner that cries wolf on placeholder text is one whose next real finding gets waved through.
+//
+// 🔴 Which is also why this note describes the shape instead of quoting it. The first version of this
+// comment reproduced the offending literal in order to explain it, so the commit that FIXED the finding
+// contained the finding. Documenting a pattern by pasting it is how a scanner exemption becomes permanent.
 const noTerminal = `login: no terminal to prompt on, and no credentials supplied.
 
 Supply them one of these ways:
