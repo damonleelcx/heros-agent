@@ -25,6 +25,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -36,18 +37,87 @@ const gatePath = "../../deploy/scripts/check-external-origins.sh"
 // Keeping the list here rather than re-globbing is deliberate: the packager copies BY NAME so a filled
 // `.env` can never be swept in by a glob, and this test would be worthless if it scanned a different
 // set from the one that ships.
+//
+// ⚠️ Which is exactly the hazard, and it bit: this said `../../deploy/k8s` — the whole Kustomize tree —
+// for as long as the packager did `cp -R k8s`. When the packager was narrowed to ship only what a
+// customer runs, this mirror still named the whole tree, so the gate scanned files the package no longer
+// contains. It failed loudly, which is the good outcome; it could equally have gone the other way and
+// scanned LESS than ships, which is a green gate over an unscanned file.
+//
+// 🔴 `TestThisListMatchesWhatThePackagerCopies` below now derives the k8s half from the script itself, so
+// the two cannot drift again in either direction.
 var stagedByPackager = []string{
 	"../../deploy/docker-compose.platform.yml",
 	"../../deploy/docker-compose.admin-console.yml",
 	"../../deploy/images.env",
 	"../../deploy/.env.platform.example",
 	"../../deploy/.env.admin-console.example",
-	"../../deploy/k8s",
+	// The base and the ONE overlay a customer runs. The platform's own prod/staging overlays are not
+	// shipped — see package-airgapped.sh for why that is a correction rather than a tidy-up.
+	"../../deploy/k8s/base",
+	"../../deploy/k8s/overlays/airgapped",
 	"../../deploy/scripts/package-airgapped.sh",
 	"../../deploy/scripts/verify-package.sh",
 	"../../deploy/scripts/install-airgapped.sh",
 	"../../deploy/scripts/doctor.sh",
 	"../../deploy/scripts/pg-backup.sh",
+}
+
+// TestThisListMatchesWhatThePackagerCopies keeps the mirror above honest.
+//
+// It reads the `cp` targets out of the packager and asserts that every k8s path the script copies appears
+// in `stagedByPackager`, and that no k8s path in `stagedByPackager` is absent from the script. Both
+// directions, because they fail differently: a path in the script and not here is a file that ships
+// UNSCANNED, and a path here and not in the script is a gate scanning something no customer receives —
+// the first is a hole and the second is noise that gets the gate switched off.
+func TestThisListMatchesWhatThePackagerCopies(t *testing.T) {
+	raw, err := os.ReadFile("../../deploy/scripts/package-airgapped.sh")
+	if err != nil {
+		t.Fatalf("reading the packager: %v", err)
+	}
+	// Comments stripped: the script explains this change at length and the prose names the very paths
+	// being asserted, so a substring check over the whole file would pass on the commentary alone.
+	var body strings.Builder
+	for _, line := range strings.Split(string(raw), "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "#") {
+			continue
+		}
+		body.WriteString(line)
+		body.WriteString("\n")
+	}
+	script := body.String()
+
+	inScript := map[string]bool{}
+	for _, m := range regexp.MustCompile(`\$DEPLOY_DIR/(k8s[a-z/]*)`).FindAllStringSubmatch(script, -1) {
+		// The bare `k8s` occurrences are the directory guard and the mkdir, not a copy of the whole tree.
+		if m[1] == "k8s" {
+			continue
+		}
+		inScript[m[1]] = true
+	}
+	if len(inScript) == 0 {
+		t.Fatal("no k8s path was found in the packager — this test is reading the wrong thing, and would " +
+			"pass for the wrong reason")
+	}
+
+	inList := map[string]bool{}
+	for _, p := range stagedByPackager {
+		if rel := strings.TrimPrefix(p, "../../deploy/"); strings.HasPrefix(rel, "k8s") {
+			inList[rel] = true
+		}
+	}
+	for path := range inScript {
+		if !inList[path] {
+			t.Errorf("the packager copies %s and stagedByPackager does not list it — that file SHIPS "+
+				"UNSCANNED by the zero-external-origin gate", path)
+		}
+	}
+	for path := range inList {
+		if !inScript[path] {
+			t.Errorf("stagedByPackager lists %s and the packager does not copy it — the gate is scanning "+
+				"something no customer receives, which is how a gate earns a reputation for crying wolf", path)
+		}
+	}
 }
 
 func runGate(t *testing.T, args ...string) (string, error) {

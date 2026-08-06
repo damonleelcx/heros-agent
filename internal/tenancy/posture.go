@@ -40,6 +40,23 @@ type Posture struct {
 	SelfServeSignup bool `json:"self_serve_signup"`
 	// Seed is what the boot seed did. Absent when this deployment seeds nothing.
 	Seed *SeedResult `json:"seed,omitempty"`
+	// MailConfigured reports whether this deployment can DELIVER a confirmation or password-reset link
+	// (P28).
+	//
+	// 🔴 It is reported for the same reason `SelfServeSignup` is, and it matters more: a deployment with no
+	// SMTP still signs people up and still accepts a `forgot password`, and the links go to an operator
+	// surface instead of an inbox. That is a working configuration and it is emphatically not the one most
+	// operators think they have. Held only in a log line, "why did nobody get their reset email" is a
+	// question answered during an incident, from a terminal, by somebody who did not do the deploy.
+	//
+	// It is a VALUE and not a gate, like everything else here — but a `password` deployment with no mail is
+	// the one combination where the honest word is *degraded*, because the front door has no recovery path.
+	// `Describe` says so rather than leaving the reader to combine two fields.
+	MailConfigured bool `json:"mail_configured"`
+	// IdentityKind is the sign-in mechanism the CONSOLE is configured with, as the platform understands it.
+	// Empty when this deployment does not declare one — the platform does not guess, because a guessed
+	// answer here reads exactly like a checked one.
+	IdentityKind string `json:"identity_kind,omitempty"`
 }
 
 // Describe returns the posture for a readiness surface. It never contains a credential: a `SeedResult`
@@ -48,6 +65,17 @@ func (p Posture) Describe() map[string]any {
 	out := map[string]any{
 		"store":             string(p.Store),
 		"self_serve_signup": p.SelfServeSignup,
+		"mail_configured":   p.MailConfigured,
+	}
+	if p.IdentityKind != "" {
+		out["identity_kind"] = p.IdentityKind
+	}
+	if !p.MailConfigured {
+		// The consequence, spelled out, because "mail_configured: false" is a fact and this is what it
+		// MEANS. An operator reading a health surface should not have to know which product features
+		// depend on mail in order to understand what they are looking at.
+		out["mail_detail"] = "confirmation and password-reset links cannot be delivered; they are held on " +
+			"the operator surface. Set HEROS_SMTP_HOST and HEROS_SMTP_FROM to deliver them."
 	}
 	if p.Seed != nil {
 		seed := map[string]any{

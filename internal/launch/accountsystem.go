@@ -11,6 +11,7 @@ import (
 
 	"github.com/heros-foreal/agentd/internal/account"
 	"github.com/heros-foreal/agentd/internal/config"
+	"github.com/heros-foreal/agentd/internal/mailer"
 	"github.com/heros-foreal/agentd/internal/metering"
 	"github.com/heros-foreal/agentd/internal/plancfg"
 	"github.com/heros-foreal/agentd/internal/seats"
@@ -113,6 +114,12 @@ func buildAccountSystem(cfg config.Config, platformDB *sql.DB, now time.Time) (*
 			Store:           kind,
 			SelfServeSignup: SelfServeEnabled(),
 			Seed:            &seed,
+			// Filled in below, once the mailer is built. It is FALSE here rather than absent because the
+			// early-return paths (no plan catalog, a catalog that will not load) leave the surface unmounted
+			// and never reach the mailer — and a deployment with no account surface genuinely cannot deliver
+			// a confirmation link, so `false` is the true answer on those paths and not a placeholder.
+			MailConfigured: false,
+			IdentityKind:   consoleIdentityKind(),
 		},
 	}
 
@@ -162,11 +169,28 @@ func buildAccountSystem(cfg config.Config, platformDB *sql.DB, now time.Time) (*
 	}
 	plans := signup.NewCatalogPlans(src)
 
+	// Mail. 🔴 A configuration error here REFUSES THE BOOT rather than degrading silently — `mailer.New`
+	// only errors on a configuration that is present and wrong (clear-text to a real host, an unknown TLS
+	// mode), and a deployment that asked for mail and got a fallback would believe its reset links were
+	// being delivered. An ABSENT configuration is not an error: it selects the operator fallback, which is
+	// reported on the readiness surface rather than assumed away.
+	mail, merr := mailer.New(mailer.ConfigFromEnv(), nil)
+	if merr != nil {
+		return nil, fmt.Errorf("mail: %w", merr)
+	}
+	if !mail.Configured() {
+		log.Printf("account system: WARN mail is NOT configured — confirmation and password-reset links " +
+			"cannot be delivered. They are held on the operator surface and reported by /readyz; set " +
+			"HEROS_SMTP_HOST and HEROS_SMTP_FROM to deliver them.")
+	}
+
 	surface := &accountSurface{
 		store:       store,
 		selfServe:   SelfServeEnabled(),
 		plans:       plans,
 		accountRead: accounts,
+		mail:        mail,
+		consoleURL:  consoleBaseURL(),
 		now:         func() time.Time { return time.Now().UTC() },
 	}
 	if SelfServeEnabled() {
@@ -180,6 +204,13 @@ func buildAccountSystem(cfg config.Config, platformDB *sql.DB, now time.Time) (*
 		}
 		surface.signUp = svc
 	}
+	sys.Posture.MailConfigured = mail.Configured()
+
+	// The first owner, on a deployment with no sign-up form. Runs LAST, after the store, the seed and the
+	// mailer are all in place — it needs all three, and a bootstrap that ran earlier would find no seeded
+	// person to bootstrap. Idempotent and non-fatal: see ownerbootstrap.go.
+	bootstrapOwner(store, mail, surface.consoleURL, at)
+
 	sys.Surface = surface
 	return sys, nil
 }
@@ -198,13 +229,19 @@ type accountSurface struct {
 	// meter records the period's seat PEAK after a membership change. Nil on a deployment with no
 	// metering, which makes ObserveSeats a no-op rather than a failure.
 	meter *metering.Meter
-	now   func() time.Time
+	// mail delivers confirmation and reset links (P28). Never nil: `mailer.New` returns the operator-visible
+	// fallback when no SMTP is configured, so "unconfigured" is a reported state and never a discard.
+	mail       mailer.Mailer
+	consoleURL string
+	now        func() time.Time
 }
 
 func (a *accountSurface) Store() tenancy.Store    { return a.store }
 func (a *accountSurface) SignUp() *signup.Service { return a.signUp }
 func (a *accountSurface) SelfServeEnabled() bool  { return a.selfServe }
 func (a *accountSurface) Now() time.Time          { return a.now() }
+func (a *accountSurface) Mailer() mailer.Mailer   { return a.mail }
+func (a *accountSurface) ConsoleURL() string      { return a.consoleURL }
 
 // SeatsHeld is `entitlement.SeatCounter`: the seat count read from MEMBERSHIP, which is where it lives.
 // The entitlement gate used to read a `seats` usage record that nothing ever wrote — see

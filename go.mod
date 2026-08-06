@@ -11,6 +11,8 @@ require (
 	github.com/lib/pq v1.12.3
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
 	github.com/smacker/go-tree-sitter v0.0.0-20240827094217-dd81d9e9be82
+	golang.org/x/crypto v0.40.0
+	golang.org/x/term v0.33.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.29.6
 )

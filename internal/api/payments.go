@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/heros-foreal/agentd/internal/auth"
 	"github.com/heros-foreal/agentd/internal/billing"
 )
 
@@ -196,6 +197,23 @@ func (s *Server) handleCheckout(w http.ResponseWriter, r *http.Request) {
 	if s.payments == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "the p21 payment surface is not mounted on this server"})
 		return
+	}
+	// 🔴 P28: an unconfirmed address may not start a checkout.
+	//
+	// The second of exactly two actions confirmation gates (the other is inviting a member). Both spend
+	// something the account has not proved it owns; this one spends money, and a payment taken from somebody
+	// who typed an address they do not control is a refund and a support conversation at best. The gate is
+	// here rather than at the provider because this is the last point at which refusing costs nothing.
+	//
+	// It passes on every deployment that mounts no account system, on every federated and machine principal,
+	// and whenever the person cannot be read — see confirmedAddress for why an open gate here is a missing
+	// confirmation and not a missing authorization.
+	if s.accounts != nil {
+		if p, ok := auth.PrincipalFrom(r.Context()); ok {
+			if !s.confirmedAddress(w, s.accounts.Store(), p.UserID, "changing to a paid plan") {
+				return
+			}
+		}
 	}
 	var body struct {
 		PlanName   string `json:"plan_name"`

@@ -110,9 +110,21 @@ type User struct {
 	Issuer  string `json:"issuer"`
 	Subject string `json:"subject"`
 	// Email is a display attribute. 🚫 Never the identity — see the package doc.
-	Email     string    `json:"email"`
-	CreatedAt time.Time `json:"created_at"`
+	//
+	// ⚠️ With one stated exception, added by P28: on the `password` seam the address IS the subject, because
+	// there is no identity provider and no `sub` to be stable instead. `passwordidentity.go` carries the whole
+	// argument, and ADR-012 Decision 5 records it. The rule above is unchanged for every federated seam.
+	Email string `json:"email"`
+	// EmailVerifiedAt is when this person proved control of `Email` by following a link sent to it. NULL
+	// means unverified — which is what every row that existed before P28 is, honestly, since nobody ever
+	// verified them. It gates exactly two actions (inviting a member, moving to a plan that charges) and
+	// nothing else; see ADR-012 Decision 7 for why not sign-in itself.
+	EmailVerifiedAt *time.Time `json:"email_verified_at,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
 }
+
+// EmailVerified reports whether this person has proved control of their address.
+func (u User) EmailVerified() bool { return u.EmailVerifiedAt != nil }
 
 // Membership is a person's relationship to one organization.
 type Membership struct {
@@ -241,6 +253,20 @@ var (
 	// ErrDevicePollTooFast is the CLI polling faster than it was told to. Its own error because the
 	// caller's action differs: back off, do not start over.
 	ErrDevicePollTooFast = errors.New("tenancy: polling faster than the interval the server set")
+	// ErrNoPassword is a person who has no password set. Distinct from ErrNotFound because the person may
+	// exist perfectly well and simply authenticate another way — a federated user has no password and that
+	// is not a missing record.
+	ErrNoPassword = errors.New("tenancy: that person has no password")
+	// ErrNotArgon2id refuses a stored password that is not argon2id-tagged. It is its own error because it
+	// means something wrote a value this system does not produce, which is an operator-grade problem and not
+	// a user-grade one.
+	ErrNotArgon2id = errors.New("tenancy: a stored password must be an argon2id encoding")
+	// ErrUnknownTokenPurpose is an identity token minted for something that is not one of the two purposes.
+	ErrUnknownTokenPurpose = errors.New("tenancy: unknown identity-token purpose")
+	// ErrIdentityToken is the ONE answer for spent, expired, wrong-purpose and unknown. The reasoning is
+	// ErrDeviceCode's, unchanged: distinguishing them helps only somebody enumerating tokens, and a real
+	// person's next action — request another link — is the same in all four cases.
+	ErrIdentityToken = errors.New("tenancy: that link is no longer usable")
 )
 
 // RemovalPreview is what a member-removal screen must show BEFORE the removal can be confirmed.
@@ -335,6 +361,45 @@ type Store interface {
 	// CollectDevice exchanges the CLI's device code for its issued credential, exactly once. It returns
 	// the authorization it collected; the caller reads CredentialID from it.
 	CollectDevice(deviceCodeHash string, at time.Time) (DeviceAuthorization, error)
+
+	// ── passwords (P28) ────────────────────────────────────────────────────────────────────────────
+	// SetPassword stores an argon2id encoding, creating the record or replacing it, and CLEARS the failure
+	// counters. Clearing is part of the same write on purpose: a person who has just proved control of
+	// their address by resetting must not still be locked out by the failures that made them reset.
+	//
+	// 🔴 It takes an ENCODING, never a plaintext. There is no parameter here a password could arrive in.
+	SetPassword(userID, encoded string, at time.Time) (UserPassword, error)
+	// GetPassword returns the stored record, or ErrNoPassword. It returns the record even while locked, so
+	// the caller can tell a person how long the lock has left rather than refusing them opaquely.
+	GetPassword(userID string) (UserPassword, error)
+	// RecordPasswordFailure advances the lockout state under the given policy and returns the new state, so
+	// the caller learns from the same call whether this failure was the one that locked the account.
+	RecordPasswordFailure(userID string, at time.Time, pol LockoutPolicy) (UserPassword, error)
+	// ClearPasswordFailures is what a successful sign-in does.
+	ClearPasswordFailures(userID string) error
+
+	// ── addresses and identity tokens (P28) ────────────────────────────────────────────────────────
+	// FindUserByEmail resolves a person by issuer and address. It exists beside FindUser because on the
+	// password seam the caller has an address and not a subject, and normalising in two places is how the
+	// two would eventually differ.
+	FindUserByEmail(issuer, email string) (User, error)
+	// MarkEmailVerified stamps the address as proved. Idempotent: verifying twice keeps the first time,
+	// because the first time is the one that is true.
+	MarkEmailVerified(userID string, at time.Time) (User, error)
+	// MintIdentityToken stores a hashed, expiring, purpose-bound token.
+	MintIdentityToken(t IdentityToken) (IdentityToken, error)
+	// ConsumeIdentityToken spends a token, exactly once, at the store.
+	//
+	// 🔴 It is ONE conditional statement — not read-then-write — so two clicks on the same link cannot both
+	// win. Spent, expired, wrong-purpose and unknown all return ErrIdentityToken; the wire must not learn
+	// which.
+	ConsumeIdentityToken(tokenHash string, purpose TokenPurpose, at time.Time) (IdentityToken, error)
+	// RevokeEverythingFor ends every session and every PERSONAL credential a person holds, across every
+	// organization they belong to, and reports the machine credentials it did not touch.
+	//
+	// It is the store's operation rather than a loop in the caller because a password reset that revokes
+	// half of somebody's access is worse than one that revokes none: they would believe they were safe.
+	RevokeEverythingFor(userID string, at time.Time) (PersonRevocation, error)
 
 	// ── console sessions ───────────────────────────────────────────────────────────────────────────
 	CreateSession(s Session) (Session, error)

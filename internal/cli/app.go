@@ -153,6 +153,11 @@ func parse(cmd string, args []string, env func(string) (string, bool), s Streams
 	cases := fs.Int("cases", 8, "eval cases")
 	run := fs.String("run", "", "run id to link")
 	token := fs.String("token", "", "platform token (login)")
+	// P28 sign-in. 🚫 There is deliberately NO --password: a password in argv is a password in the shell
+	// history and in every `ps` on the machine. It arrives by $HEROS_PASSWORD, stdin, or a hidden prompt.
+	email := fs.String("email", "", "email address to sign in as (login)")
+	device := fs.Bool("device", false, "approve this terminal from a browser instead of typing a password (login)")
+	org := fs.String("org", "", "organization to sign in to, when you belong to more than one (login)")
 	withIR := fs.String("with-ir", "", "ALSO transmit this workflow's structure as a second, opt-in payload (link)")
 	dryRun := fs.Bool("dry-run", false, "render the exact link payload without transmitting it")
 
@@ -239,6 +244,9 @@ func parse(cmd string, args []string, env func(string) (string, bool), s Streams
 	put("cases", strconv.Itoa(*cases))
 	put("run", *run)
 	put("token", *token)
+	put("email", *email)
+	put("device", strconv.FormatBool(*device))
+	put("org", *org)
 	put("dry-run", strconv.FormatBool(*dryRun))
 	put("with-ir", *withIR)
 	put("force", strconv.FormatBool(*force))
@@ -339,7 +347,16 @@ Update (the only command that reaches the network for a version; nothing else ev
              current, and it defers to your package manager when one owns this file
 
 Platform commands (explicit, authenticated; transmit only to https://heros-agent.space):
-  login      store a platform token
+  login      sign in and store a credential (0600). Three ways, in this order:
+               --email you@example.com   with $HEROS_PASSWORD, stdin, or a hidden prompt.
+                                         Stores a PERSONAL credential: removing you from the
+                                         organization ends it at the next request.
+               --token <credential>      the MACHINE path, for CI. Names nobody, so it survives
+                                         the offboarding of whoever created it.
+               --device                  approve this terminal from a browser instead of typing
+                                         a password.
+             There is no --password flag: a password in an argument is in your shell history
+             and in every process listing on the machine.
   link       transmit a run's allowlisted metrics + structure to the platform
              (use --dry-run to print the exact payload without sending it)
   push-source  send a SOURCE SNAPSHOT (git archive of a revision) so the platform can run

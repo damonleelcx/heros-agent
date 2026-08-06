@@ -45,9 +45,15 @@ services:
       # in exactly one process's environment, and it crosses exactly one boundary: console -> agentd.
       CONSOLE_PLATFORM_CREDENTIAL: ${CONSOLE_PLATFORM_CREDENTIAL:?set CONSOLE_PLATFORM_CREDENTIAL from your secret store}
       # The tenant identity seam (ADR-008). `configured` reads the deployment's assertion -> tenant map;
-      # `dev` refuses to start in production, by design.
+      # `password` (P28) takes an email address and a password; `dev` refuses to start in production.
       CONSOLE_TENANT_IDENTITY: ${CONSOLE_TENANT_IDENTITY:-configured}
-      CONSOLE_TENANT_ASSERTIONS: ${CONSOLE_TENANT_ASSERTIONS:?set CONSOLE_TENANT_ASSERTIONS from your secret store}
+      # ⚠️ This was `${CONSOLE_TENANT_ASSERTIONS:?…}` — the right check on the wrong substrate, twice: it
+      # does not exist on Kubernetes, and it fired for every kind including the ones that need no map. A
+      # `password` deployment has no assertions to declare and would have been forced to invent an empty
+      # one to satisfy it. The check now lives in `web/console/src/lib/identity.ts`, where it is
+      # kind-aware and holds on BOTH substrates: a `configured` console with an empty map refuses to boot
+      # rather than starting and rejecting every sign-in.
+      CONSOLE_TENANT_ASSERTIONS: ${CONSOLE_TENANT_ASSERTIONS:-}
       # Where console sessions live (P27 task 7.1). `platform` writes a row per session through the
       # platform API; `memory` is the original per-process map.
       #

@@ -46,27 +46,62 @@ func (c Commands) client(token string) *transport.Client {
 	return transport.NewClient(token, opts...)
 }
 
-// Login validates a platform token against https://heros-agent.space and stores it 0600. The token is
-// read from --token, $HEROS_PLATFORM_TOKEN, or stdin (task 1.6). It is never echoed.
+// Login authenticates against https://heros-agent.space and stores a credential 0600. Nothing is echoed.
+//
+// # Three paths, and the order they are chosen in
+//
+//	--token / $HEROS_PLATFORM_TOKEN   → MACHINE. A credential naming nobody, for CI. Unchanged since P11.
+//	--device                          → the browser approval flow (P27 task 13.2). Personal.
+//	an address and a password         → P28. Personal, and the default a person gets.
+//
+// The order is explicit-beats-implicit: a flag that was given is honoured, and the password path is what
+// remains. 🔴 The password path became the DEFAULT because the alternative it replaces was not one: before
+// P28 the only console sign-in on the production seam was a shared string an operator read out of the
+// cluster, so `heros login`'s device flow ended by sending a person to a door they had no key to.
+//
+// # How stdin stays unambiguous across the P11 and P28 meanings
+//
+// A single piped line has meant "a platform token" since P11 and still does. Two lines mean an address and
+// a password; one line with an address already supplied means the password. The rule is positional, so
+// nothing sniffs a value to decide what it is — see passwordlogin.go's header.
 func (c Commands) Login(cfg cli.Config, s cli.Streams) error {
 	token := cfg.Get("token")
 	if token == "" {
 		token = os.Getenv(cli.EnvPrefix + "PLATFORM_TOKEN")
 	}
-	if token == "" {
-		// Read from stdin non-interactively (a pipe or a heredoc), never a prompt.
+
+	// stdin is read ONCE, here, because it can only be read once. Both the token path and the password path
+	// need it, and a second reader would find it empty — which is the sort of bug that only appears when
+	// somebody pipes input, in CI, at the worst time.
+	var piped []string
+	if token == "" && !onTerminal() {
 		b, _ := io.ReadAll(io.LimitReader(os.Stdin, 1<<16))
-		token = strings.TrimSpace(string(b))
+		for _, line := range strings.Split(strings.TrimRight(string(b), "\r\n"), "\n") {
+			if line = strings.TrimRight(line, "\r"); strings.TrimSpace(line) != "" {
+				piped = append(piped, line)
+			}
+		}
+		emailSupplied := strings.TrimSpace(cfg.Get("email")) != "" || strings.TrimSpace(os.Getenv(EnvEmail)) != ""
+		if len(piped) == 1 && !emailSupplied && cfg.Get("device") != "true" {
+			// The pre-P28 meaning, preserved exactly: one line and no address is a platform token.
+			token = strings.TrimSpace(piped[0])
+			piped = nil
+		}
 	}
+
 	if token == "" {
-		// 🔴 No token is no longer an error — it is the PERSON path (task 13.2). `--token` remains
-		// untouched below and is still the machine path: a credential with no user reference, reported as
-		// machine, and NOT revoked by removing anybody (task 13.4).
+		if cfg.Get("device") == "true" {
+			// The browser approval flow, kept as an explicit choice. It is the right one on a machine where
+			// typing a password is not wanted — a shared terminal, a screen share, a recorded session.
+			return c.deviceLogin(cfg, s)
+		}
+		// 🔴 The PERSON path. `--token` remains the machine path below: a credential with no user
+		// reference, reported as machine, and NOT revoked by removing anybody (P27 task 13.4).
 		//
 		// This is what makes § 4.5's promise true in a terminal. A person pasting an organization key gets
 		// a credential that names nobody: it survives their offboarding, attributes nothing, and "remove a
 		// member and their access ends" is simply false in a shell.
-		return c.deviceLogin(cfg, s)
+		return c.passwordLogin(cfg, s, piped)
 	}
 
 	s.Narratef("login: validating token against %s…", runlink.PlatformBaseURL)

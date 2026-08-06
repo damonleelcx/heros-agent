@@ -164,10 +164,32 @@ for f in package-airgapped.sh verify-package.sh install-airgapped.sh doctor.sh p
   [ -f "$SCRIPT_DIR/$f" ] || die "expected script missing: $SCRIPT_DIR/$f"
   cp "$SCRIPT_DIR/$f" "$STAGE/deploy/scripts/" || die "cannot copy $f"
 done
-# the whole Kustomize tree (base + overlays), copied verbatim so the artifact audited IS the artifact
-# applied (Decision 1). Optional only in the sense that a compose-only site may ignore it.
+# The Kustomize tree the CUSTOMER runs: the base and the airgapped overlay, copied verbatim so the
+# artifact audited IS the artifact applied (Decision 1).
+#
+# 🔴 `overlays/prod` and `overlays/staging` are NOT shipped, and that is a correction rather than a
+# tidy-up. This was `cp -R k8s`, which put the PLATFORM'S OWN hosted deployment inside every customer's
+# tarball: our public hostnames, `BILLING_MODE: live`, the EC2 instance-metadata egress rule that grants
+# our node's IAM role, our image version pin. None of it is theirs, none of it applies on their network,
+# and an auditor reading their own package found our production configuration in it.
+#
+# It also had a second effect nobody had connected to the first. `check-external-origins.sh` scans this
+# staged tree, so any absolute URL in `overlays/prod` would fail the air-gapped gate — which is why the
+# prod overlay could not carry `ADMIN_CONSOLE_ORIGIN` or `ADMIN_IDP_ISSUER`, and why operator SSO was
+# configured OUT OF BAND on the live cluster and reverted by every `kubectl apply`. The kustomization
+# recorded that as "a real and unresolved tension". It was not a tension; it was this line. Shipping only
+# what a customer runs resolves both halves at once.
+#
+# ⚠️ The gate's blind spot is worth naming while we are here: it matches `https?://…`, so the bare
+# `heros-agent.space` in the prod Ingress's `host:` field was never flagged — our hostnames have been
+# travelling in customer packages without tripping anything. That is fixed by not shipping the file,
+# not by widening the pattern, which would flag every cluster-internal name.
 if [ -d "$DEPLOY_DIR/k8s" ]; then
-  cp -R "$DEPLOY_DIR/k8s" "$STAGE/deploy/k8s" || die "cannot copy k8s tree"
+  mkdir -p "$STAGE/deploy/k8s/overlays" || die "cannot create k8s tree in staging"
+  cp -R "$DEPLOY_DIR/k8s/base" "$STAGE/deploy/k8s/base" || die "cannot copy k8s base"
+  [ -d "$DEPLOY_DIR/k8s/overlays/airgapped" ] || die "the airgapped overlay is missing — it is the only overlay this package ships"
+  cp -R "$DEPLOY_DIR/k8s/overlays/airgapped" "$STAGE/deploy/k8s/overlays/airgapped" || die "cannot copy the airgapped overlay"
+  log "k8s: base + overlays/airgapped (the platform's own prod/staging overlays are deliberately not shipped)"
 else
   log "note: $DEPLOY_DIR/k8s absent — packaging compose substrate only"
 fi

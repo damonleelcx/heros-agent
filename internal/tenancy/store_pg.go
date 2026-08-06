@@ -136,14 +136,19 @@ func (p *PGStore) SetTenantStatus(tenantID string, st Status, _ time.Time) (Tena
 // People
 // ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
-const userColumns = `user_id, issuer, subject, email, created_at`
+const userColumns = `user_id, issuer, subject, email, email_verified_at, created_at`
 
 func scanUser(row interface{ Scan(...any) error }) (User, error) {
 	var u User
-	if err := row.Scan(&u.UserID, &u.Issuer, &u.Subject, &u.Email, &u.CreatedAt); err != nil {
+	var verified sql.NullTime
+	if err := row.Scan(&u.UserID, &u.Issuer, &u.Subject, &u.Email, &verified, &u.CreatedAt); err != nil {
 		return User{}, err
 	}
 	u.CreatedAt = u.CreatedAt.UTC()
+	if verified.Valid {
+		t := verified.Time.UTC()
+		u.EmailVerifiedAt = &t
+	}
 	return u, nil
 }
 
