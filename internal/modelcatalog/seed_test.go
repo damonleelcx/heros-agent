@@ -132,11 +132,11 @@ func TestSeedingIsIdempotentAcrossBoots(t *testing.T) {
 // The first version of this test read `deploy/config/models.json` directly and asserted every entry
 // declared a provider and a model id. That was wrong twice over, and both ways matter:
 //
-//   1. That path is **git-ignored on purpose** — it carries prices, and `gitfence_test.go` FAILS THE
-//      BUILD if it ever reaches the index. So the test passed on the machine that wrote the file and
-//      would have failed on CI, where it does not exist.
-//   2. Worse, the remedy it implied was "commit the catalog", which is the exact thing the other fence
-//      exists to prevent. A fence whose failure message argues for breaking another fence is a trap.
+//  1. That path is **git-ignored on purpose** — it carries prices, and `gitfence_test.go` FAILS THE
+//     BUILD if it ever reaches the index. So the test passed on the machine that wrote the file and
+//     would have failed on CI, where it does not exist.
+//  2. Worse, the remedy it implied was "commit the catalog", which is the exact thing the other fence
+//     exists to prevent. A fence whose failure message argues for breaking another fence is a trap.
 //
 // What IS shippable is the OPERATOR'S INSTRUCTIONS. An operator writes this file by hand from
 // `deploy/config/README.md`; if that document does not tell them to declare a provider and a model id,

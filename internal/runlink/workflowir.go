@@ -128,10 +128,10 @@ var TransformReceiptAllowlist = []AllowlistField{
 
 // WorkflowIRPayload is the exact bytes on the wire. Built field by field by BuildWorkflowIR.
 type WorkflowIRPayload struct {
-	ContractVersion string       `json:"contract_version"`
-	WorkflowID      string       `json:"workflow_id"`
-	SourceRevision  string       `json:"source_revision"`
-	IRVersion       string       `json:"ir_version"`
+	ContractVersion string `json:"contract_version"`
+	WorkflowID      string `json:"workflow_id"`
+	SourceRevision  string `json:"source_revision"`
+	IRVersion       string `json:"ir_version"`
 	// CoverageVersion is the coverage table the per-node verdicts below were computed against.
 	//
 	// `omitempty`, and that is the contract rather than tidiness: a CLI built before P29 sends no such

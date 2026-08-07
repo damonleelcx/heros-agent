@@ -21,7 +21,6 @@ import (
 // A test per endpoint is a test somebody adds for the endpoint they are working on. A loop over the set
 // fails when a NEW enumeration is added without the property, which is the failure worth catching.
 
-
 func enumRequest(t *testing.T, s *Server, path, tenant string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, path, nil)

@@ -16,7 +16,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"time"
 
 	"github.com/heros-foreal/agentd/internal/runlink"
@@ -239,7 +238,3 @@ func (c *Client) SendWorkflowIR(ctx context.Context, p runlink.WorkflowIRPayload
 		return WorkflowIRResult{}, fmt.Errorf("link: platform returned %d: %s", resp.StatusCode, string(raw))
 	}
 }
-
-// urlPathEscape escapes a workflow id for use as one path segment. Workflow ids contain "/" (they are
-// owner/repo), and an unescaped one would silently address a different route.
-func urlPathEscape(s string) string { return url.PathEscape(s) }

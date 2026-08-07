@@ -109,7 +109,7 @@ func TestP29CoverageVersionIsNullableText(t *testing.T) {
 // 🔴 §3.5 — a row written BEFORE this change reads back as `not reported`, never as a default.
 //
 // This is asserted by writing the pre-change row the pre-change way — an INSERT that names the old column
-// list — and then reading it through the CURRENT store. Simulating it by writing '' through the new
+// list — and then reading it through the CURRENT store. Simulating it by writing ” through the new
 // store would test the wrong thing entirely: it would prove the store round-trips an empty string.
 func TestP29ARowWrittenBeforeThisChangeReadsAsNotReported(t *testing.T) {
 	db := openSchema(t, "p29_absent")

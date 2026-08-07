@@ -237,13 +237,15 @@ func TestTransmittedVerdictsAgreeWithTheLocalCoverageTable(t *testing.T) {
 // `.py`-named file in a directory no frontend walks then reported `python`, and every axis got a verdict
 // computed against an engine that had never seen the call site.
 func TestAnUnclaimedNodeGetsNoLanguageAndNoVerdicts(t *testing.T) {
-	ir, rep := computeFixture(t, "testdata/pyrepo")
+	// The fixture's own report is not read here — this test is about the WIDENED one below — so it is
+	// discarded rather than assigned and overwritten, which reads as a value somebody forgot to check.
+	ir, _ := computeFixture(t, "testdata/pyrepo")
 	// Add a node the tree does not contain. It is `.py` by path, so an extension-derived language would
 	// happily label it.
 	ghost := discovery.IRNode{NodeID: "n_ghost", CallSite: discovery.IRCallSite{File: "app/svc.py", Symbol: "gone"}}
 	widened := *ir
 	widened.Nodes = append(append([]discovery.IRNode{}, ir.Nodes...), ghost)
-	rep = Compute(&widened, "testdata/pyrepo")
+	rep := Compute(&widened, "testdata/pyrepo")
 
 	for _, nr := range rep.Nodes {
 		if nr.NodeID != "n_ghost" {
