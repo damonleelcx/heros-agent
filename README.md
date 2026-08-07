@@ -1,3 +1,5 @@
+<img src="web/console/src/app/icon.svg" alt="Heros" width="64" height="64">
+
 # LLM Agentic Workflow Optimization Platform
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
