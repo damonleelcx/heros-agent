@@ -292,6 +292,62 @@ verify_signature() { # verify_signature <manifest> <sshsig> <rawsig>
       "       docker run --rm -v \"\$PWD:/repo\" ghcr.io/damonleelcx/heros:latest discover --repo /repo"
 }
 
+# ── the mark ────────────────────────────────────────────────────────────────────────────────────────────
+# print_mark draws the Heros mark — the H that is also a confidence interval: two end caps, the span, and a
+# point estimate on it. The rows are held identical to scripts/install.ps1 and to the source SVG's figure by
+# TestInstallScriptsCarryTheSameMark; edit internal/distribution/mark.go, not this copy.
+#
+# It prints on a SUCCESSFUL install only. A banner at the top of a run that then refuses would put the brand
+# on a failure and, worse, would be the last thing a user saw before "Nothing was installed" — this script
+# spends 300 lines refusing carefully, and a celebratory logo above a refusal undoes that.
+#
+# Three things can make it wrong, so all three are checked rather than assumed:
+#
+#   1. stdout is not a terminal. `curl … | sh` pipes stdin, NOT stdout, so a real install still passes this;
+#      what fails it is `… | sh > install.log` and CI, where the escapes would be recorded as garbage.
+#   2. colour is unwanted (NO_COLOR, TERM=dumb) or unavailable at the depth we want. The ladder degrades
+#      truecolor → 256 → the terminal's own cyan → no colour at all, rather than assuming 24-bit.
+#   3. the locale cannot carry box-drawing characters, in which case the ASCII drawing of the same figure is
+#      printed. Mojibake at the end of an install reads as a broken install.
+print_mark() {
+  [ -t 1 ] || return 0
+
+  mark_on=""
+  mark_off=""
+  if [ -z "${NO_COLOR:-}" ] && [ "${TERM:-}" != "dumb" ]; then
+    case "${COLORTERM:-}" in
+      truecolor|24bit) mark_on="$(printf '\033[38;2;46;207;168m')" ;;
+      *)
+        case "${TERM:-}" in
+          *256color*|*direct*) mark_on="$(printf '\033[38;5;43m')" ;;
+          *) mark_on="$(printf '\033[36m')" ;;
+        esac
+        ;;
+    esac
+    mark_off="$(printf '\033[0m')"
+  fi
+
+  # The charset is read from the locale rather than probed by printing: a terminal that cannot render the
+  # glyph will happily accept the bytes and show boxes, so there is nothing to detect after the fact.
+  case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in
+    *UTF-8*|*utf-8*|*UTF8*|*utf8*)
+      printf '  %s┃         ┃%s\n' "${mark_on}" "${mark_off}"
+      printf '  %s┃         ┃%s\n' "${mark_on}" "${mark_off}"
+      printf '  %s┃━━━ ● ━━━┃%s\n' "${mark_on}" "${mark_off}"
+      printf '  %s┃         ┃%s\n' "${mark_on}" "${mark_off}"
+      printf '  %s┃         ┃%s\n' "${mark_on}" "${mark_off}"
+      ;;
+    *)
+      printf '  %s|         |%s\n' "${mark_on}" "${mark_off}"
+      printf '  %s|         |%s\n' "${mark_on}" "${mark_off}"
+      printf '  %s|--- o ---|%s\n' "${mark_on}" "${mark_off}"
+      printf '  %s|         |%s\n' "${mark_on}" "${mark_off}"
+      printf '  %s|         |%s\n' "${mark_on}" "${mark_off}"
+      ;;
+  esac
+  printf '\n'
+}
+
 # ── 5. choose an install directory ──────────────────────────────────────────────────────────────────────
 choose_dir() {
   if [ -n "${HEROS_INSTALL_DIR:-}" ]; then
@@ -348,6 +404,8 @@ chmod +x "${TMP}/${asset}"
 # half-overwritten file: rename within a filesystem is atomic.
 mv "${TMP}/${asset}" "${dest}/.heros.new"
 mv "${dest}/.heros.new" "${dest}/heros"
+printf '\n'
+print_mark
 say "✓ installed ${dest}/heros"
 
 # ── first-run OS trust notice, printed only while the release still needs it ─────────────────────────────

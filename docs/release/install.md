@@ -33,6 +33,11 @@ heros install: next: cd into a repository and run
     heros discover    # find the agent workflow in your code
 ```
 
+This capture is from **v0.21.0**, and it is left exactly as it was captured. The release after it draws the
+Heros mark between the signature line and the install line; that is not spliced in here, because a transcript
+labelled *verbatim* stops being worth anything the first time it shows output no published version produced.
+It is re-captured when the next release publishes.
+
 That last path is worth reading rather than skipping. The installer places the binary in the first
 **writable** entry of `/usr/local/bin`, then `~/.local/bin` — and on the machine this was captured on,
 `/usr/local/bin` is `root:wheel` and not writable, so it chose the home directory and said so. It did not

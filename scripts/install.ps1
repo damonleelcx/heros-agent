@@ -71,6 +71,45 @@ function Fail {
     exit 1
 }
 
+# Show-Mark draws the Heros mark - the H that is also a confidence interval: two end caps, the span, and a
+# point estimate on it. Held identical to scripts/install.sh and to the source SVG's figure by
+# TestInstallScriptsCarryTheSameMark; edit internal/distribution/mark.go, not this copy.
+#
+# It prints on a SUCCESSFUL install only, for the reason install.sh gives at its own copy: a logo above
+# "Nothing was installed" would put the brand on a refusal.
+#
+# # Why the glyphs are built from code points instead of typed into this file
+#
+# This script has no UTF-8 BOM, and it is normally run as `irm ... | iex` - so on Windows PowerShell 5.1 the
+# bytes are decoded as the system ANSI code page, not as UTF-8. A box-drawing character typed as a literal
+# here would arrive mojibake on exactly the platform this script exists to serve. Composing it from
+# [char]0x2503 depends on no encoding at all, and the ASCII drawing is used whenever the console is not
+# actually in UTF-8, so nothing is emitted that the console cannot show.
+#
+# # Why a named console colour rather than the brand teal
+#
+# install.sh paints the mark in #2ecfa8 with a truecolor escape. A raw VT escape is not safe here: consoles
+# without virtual-terminal processing print it as literal characters, and 5.1 runs on plenty of them. Cyan is
+# the nearest colour the console can be asked for by name, which always renders - the same trade this script
+# already makes with `[X]` for the sh script's refusal marker.
+function Show-Mark {
+    if ([Console]::IsOutputRedirected) { return }
+
+    $cap = '|'; $span = '-'; $dot = 'o'
+    if ([Console]::OutputEncoding.CodePage -eq 65001) {
+        $cap  = [string][char]0x2503
+        $span = [string][char]0x2501
+        $dot  = [string][char]0x25CF
+    }
+    $blank = "$cap         $cap"
+    $bar   = "$cap$span$span$span $dot $span$span$span$cap"
+
+    $colour = @{}
+    if (-not $env:NO_COLOR) { $colour = @{ ForegroundColor = 'Cyan' } }
+    foreach ($row in @($blank, $blank, $bar, $blank, $blank)) { Write-Host "  $row" @colour }
+    Write-Host ''
+}
+
 # ── uninstall (task 3.8) ────────────────────────────────────────────────────────────────────────────────
 if ($env:HEROS_UNINSTALL -eq '1') {
     $found = $false
@@ -249,6 +288,8 @@ try {
         }
     }
     Copy-Item $assetPath $exe -Force
+    Write-Host ''
+    Show-Mark
     Say "[ok] installed $exe"
 
     $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
