@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Section, Card, Row, Chip, Banner, Loading, Empty } from "@/components/primitives";
 import { cx } from "@/lib/cx";
+import type { WorkflowRow } from "@/lib/enumeration";
 
 /**
  * The node × model matrix (P10 M-series, FR34–FR40). Agent nodes are COLUMNS, models are ROWS. Each
@@ -39,7 +40,20 @@ function slotsOf(body: string): string[] {
 }
 
 export function StudioMatrix() {
-  const [workflows, setWorkflows] = useState<string[] | null>(null);
+  /*
+   * 🔴 ROWS OF OBJECTS, not a list of ids.
+   *
+   * P29 §4.1 moved `GET /api/v1/workflows` off the process-local catalog and onto the reported-structure
+   * store, and its rows became objects: `{workflow_id, source_revision, nodes, edges, coverage_version…}`.
+   * §4.7 updated the four SERVER-rendered pickers and missed this one, because it is a client component —
+   * so the fix type-checked, every test passed, the page server-rendered fine, and the moment React
+   * hydrated it threw #31 (`Objects are not valid as a React child`) and the whole studio rendered
+   * "A transport failure, not an empty result" — which is not what happened and sends the reader to check
+   * a network that is working.
+   *
+   * Only a browser could see this: `curl` gets the server shell, which is correct right up until hydration.
+   */
+  const [workflows, setWorkflows] = useState<WorkflowRow[] | null>(null);
   const [workflow, setWorkflow] = useState<string>("");
   const [models, setModels] = useState<Model[]>([]);
   const [nodes, setNodes] = useState<Node[]>([]);
@@ -51,12 +65,15 @@ export function StudioMatrix() {
     (async () => {
       try {
         const [wf, mc] = await Promise.all([
-          getJSON<{ workflows: string[] }>("/api/console/studio/workflows"),
+          getJSON<{ workflows: WorkflowRow[] }>("/api/console/studio/workflows"),
           getJSON<{ models: Model[] }>("/api/console/studio/models"),
         ]);
-        setWorkflows(wf.workflows);
+        // A row with no `workflow_id` is dropped rather than rendered as a blank chip that opens nothing —
+        // the same rule §4.7 applies to a remembered subject the enumeration no longer lists.
+        const rows = (wf.workflows ?? []).filter((w) => Boolean(w?.workflow_id));
+        setWorkflows(rows);
         setModels(mc.models);
-        if (wf.workflows.length > 0) setWorkflow(wf.workflows[0]);
+        if (rows.length > 0) setWorkflow(rows[0].workflow_id);
       } catch (e) {
         setError(e instanceof Error ? e.message : "could not load the matrix");
       }
@@ -98,9 +115,13 @@ export function StudioMatrix() {
         ) : (
           <Row>
             {workflows.map((w) => (
-              <button key={w} type="button" onClick={() => setWorkflow(w)}
-                className={cx("chip cursor-pointer", workflow === w ? "border-primary/40 bg-primary/10 text-primary" : "")}>
-                {w}
+              <button key={w.workflow_id} type="button" onClick={() => setWorkflow(w.workflow_id)}
+                title={[w.source_revision_display, w.nodes !== undefined ? `${w.nodes} node(s)` : undefined]
+                  .filter(Boolean)
+                  .join(" · ")}
+                className={cx("chip cursor-pointer", workflow === w.workflow_id ? "border-primary/40 bg-primary/10 text-primary" : "")}>
+                {w.workflow_id}
+                {w.nodes !== undefined ? <span className="hint"> · {w.nodes} node(s)</span> : null}
               </button>
             ))}
           </Row>
