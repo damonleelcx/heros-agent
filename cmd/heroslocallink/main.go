@@ -83,6 +83,15 @@ func main() {
 	device := flag.Bool("device", false, "run the DEVICE authorization instead: print a code, wait for somebody to approve it in the console, and store the personal credential it issues (P27 §13). Implies -login and needs no -token")
 	withIR := flag.Bool("with-ir", false, "ALSO transmit the workflow STRUCTURE, as `heros link --with-ir` does")
 	irPath := flag.String("ir", "", "path to the IR to transmit with -with-ir (default <repo>/ir.json)")
+	// P29 §1.10 — the live proof needs `push-source` over the same redirected dial, for the same reason
+	// `link` is run through the command path rather than through the transport: a hand-rolled POST proves
+	// a route answers, and what has to be proved is that the SHIPPED command reaches it.
+	pushSource := flag.Bool("push-source", false, "run `heros push-source` against the local deployment instead of linking")
+	// P29 §8.3 — the acceptance walk includes `heros apply --link-receipt`, and `apply` is dispatched by
+	// cli.Main rather than by a method on Commands. It is run through the dispatcher here, over the same
+	// redirected dial, so the RECEIPT travels the shipped command path exactly as the link does.
+	applySpec := flag.String("apply", "", "run `heros apply --link-receipt` with this Variant Spec against the local deployment")
+	forget := flag.Bool("forget", false, "with -push-source: retract a previously pushed snapshot")
 	flag.Parse()
 
 	// 🔴 The device flow is the PERSON path and deliberately has no token: that is the whole point of it.
@@ -153,7 +162,10 @@ func main() {
 	cmds := clilink.Commands{RT: localDial{addr: *addr}, Timeout: 30 * time.Second}
 	streams := cli.Streams{Out: os.Stdout, Err: os.Stderr}
 	cfg := func(kv map[string]string) cli.Config {
-		r := cli.NewResolver(map[string]string{"repo": ".", "run": "", "token": "", "dry-run": "false", "with-ir": ""})
+		r := cli.NewResolver(map[string]string{
+			"repo": ".", "run": "", "token": "", "dry-run": "false", "with-ir": "",
+			"workflow-id": "", "commit": "", "forget": "false",
+		})
 		r.SetFlag("repo", *repo)
 		for k, v := range kv {
 			r.SetFlag(k, v)
@@ -165,6 +177,30 @@ func main() {
 		if err := cmds.Login(cfg(map[string]string{"token": *token}), streams); err != nil {
 			log.Fatalf("heroslocallink: login: %v", err)
 		}
+	}
+
+	if *applySpec != "" {
+		streams := cli.Streams{Out: os.Stdout, Err: os.Stderr}
+		args := []string{"apply", "--repo", *repo, "--spec", *applySpec, "--link-receipt",
+			"--workflow-id", record.WorkflowID, "--out", filepath.Join(os.TempDir(), "heroslocallink.diff")}
+		if code := cli.Main(args, streams, func(string) (string, bool) { return "", false },
+			clilink.Commands{RT: localDial{addr: *addr}, Timeout: 60 * time.Second}); code != cli.ExitOK {
+			log.Fatalf("heroslocallink: apply exited %d", code)
+		}
+		return
+	}
+
+	// P29 §1.10 — `push-source` over the same dial. It is its own mode rather than a second thing `link`
+	// does, exactly as it is in the CLI: source is a separate act with a separate consent.
+	if *pushSource {
+		flags := map[string]string{"workflow-id": record.WorkflowID, "commit": record.SourceRevision}
+		if *forget {
+			flags["forget"] = "true"
+		}
+		if err := cmds.PushSource(cfg(flags), streams); err != nil {
+			log.Fatalf("heroslocallink: push-source: %v", err)
+		}
+		return
 	}
 
 	linkFlags := map[string]string{"run": runID}

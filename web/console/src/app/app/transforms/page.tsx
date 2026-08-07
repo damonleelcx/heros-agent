@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { requireSession } from "@/lib/session";
 import { visitedSubjects, routes } from "@/lib/subjects";
+import { listTransforms, orderByRecentlyVisited, discardedVisits } from "@/lib/enumeration";
 import { Banner, PageFrame } from "@/components/primitives";
 import { SubjectPicker } from "@/components/subjectPicker";
 
@@ -26,6 +27,17 @@ export default async function TransformsPage({
 
   const incomplete = Boolean(hash) !== Boolean(revision);
 
+  // 🔴 The list comes from the PLATFORM (P29 §4), not from this browser. The session's own list is
+  // demoted to an ORDERING HINT, and a remembered subject the enumeration does not contain is DISCARDED
+  // rather than offered — a session's memory is not evidence that a subject still exists.
+  const visited = visitedSubjects(session, "transform");
+  const enumeration = await listTransforms();
+  const available =
+    enumeration.state === "ok"
+      ? { ...enumeration, subjects: orderByRecentlyVisited(enumeration.subjects, visited) }
+      : enumeration;
+  const discarded = discardedVisits(available.subjects, visited);
+
   return (
     <PageFrame
       eyebrow="Transforms"
@@ -43,7 +55,8 @@ export default async function TransformsPage({
       ) : null}
       <SubjectPicker
         kind="transform"
-        visited={visitedSubjects(session, "transform")}
+        available={available}
+        discarded={discarded}
         action="/app/transforms"
         field={{ name: "config_hash", label: "Config hash", placeholder: "sha256…" }}
         help="Both fields are required. A run's record carries this pair, so opening a run and following its link is usually faster than typing them."

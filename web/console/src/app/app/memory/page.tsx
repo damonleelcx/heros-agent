@@ -3,6 +3,8 @@ import { PageFrame, Section, Chip, Banner, DataTable } from "@/components/primit
 import { Tabs, type TabItem } from "@/components/tabs";
 import { MemoryAuthoring } from "./authoring";
 import { STRATEGIES, BOUNDARY } from "./strategies";
+import { AxisProjectionPanel } from "@/components/axisProjection";
+import { loadProjection } from "@/lib/projection";
 
 /**
  * The memory surface (P17).
@@ -212,12 +214,25 @@ function ProposalsTab() {
 }
 
 export default async function MemoryPage() {
+  // 🔴 P29 §5.10 — `coverage × your nodes`, BESIDE the worked examples and never instead of them.
+  // The examples carry the engine's own verbatim sentences and are what makes a refusal legible;
+  // the projection is this organization's own rows, under its own heading and its own denominator.
+  const projection = await loadProjection();
   await requireSession();
 
   const tabs: TabItem[] = [
     { id: "author", label: "Set a strategy", content: <AuthorTab /> },
     { id: "boundary", label: "What applies where", content: <BoundaryTab /> },
     { id: "proposals", label: "Proposals", content: <ProposalsTab /> },
+    {
+      id: "your-nodes",
+      label: "Your nodes",
+      // 🔴 P29 §5.10 — a TAB rather than a panel below the tab strip. `Tabs` is `flex-1` and
+      // owns the remaining viewport (NFR17, viewport-first), so a sibling after it collides
+      // with the tab bar — observed in the browser on this very page before it was moved here.
+      // The worked examples keep their own tabs; this is added BESIDE them, never instead.
+      content: <AxisProjectionPanel axis="memory" outcome={projection} />,
+    },
   ];
 
   return (

@@ -31,7 +31,8 @@ type VerdictResult struct {
 // The destination is re-asserted here, exactly as it is for a link: the pin is per-request, so a new
 // transmit path cannot inherit an unchecked base.
 func (c *Client) ReportVerdict(ctx context.Context, p runlink.VerdictPayload) (VerdictResult, error) {
-	url := c.base + runlink.VerdictPath + urlPathEscape(p.ProposalID) + "/verdict"
+	// P29 · flat. The proposal id is in the payload and nowhere else.
+	url := c.base + runlink.VerdictPath
 	if err := assertLinkTarget(url); err != nil {
 		return VerdictResult{}, err
 	}
@@ -53,6 +54,13 @@ func (c *Client) ReportVerdict(ctx context.Context, p runlink.VerdictPayload) (V
 	}
 	defer func() { _ = resp.Body.Close() }()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+
+	// 🔴 An edge 404 is not a platform refusal. See edge404.go: reporting "no such thing"
+	// for a path the reverse proxy never routed sends the reader to check an id that was
+	// never wrong, which is exactly what happened to these routes in production.
+	if err := c.edge404("verdict", runlink.VerdictPath, resp, raw); err != nil {
+		return VerdictResult{}, err
+	}
 
 	switch resp.StatusCode {
 	case http.StatusOK, http.StatusCreated:

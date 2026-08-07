@@ -36,7 +36,14 @@ type StudioMatrix struct {
 // MountStudioMatrix registers the matrix routes. Call after MountPromptRegistry.
 func (s *Server) MountStudioMatrix(m StudioMatrix) {
 	s.studioMatrix = m
-	s.Mux.HandleFunc("GET /api/v1/workflows", s.handleWorkflows)
+	// 🔴 `GET /api/v1/workflows` is NO LONGER registered here (P29 §4.1). It answered from
+	// `studio.WorkflowCatalog`, a PROCESS-LOCAL map filled only by `cmd/demo` and `cmd/proof` — so on
+	// every real deployment it returned an empty list, permanently, and the studio's workflow picker had
+	// nothing in it for a reason no screen stated. `MountEnumeration` now serves it from the reported
+	// structure store, which is durable and scoped to the authenticated organization.
+	//
+	// The catalog itself stays: the demo binaries still fill it and still read it through
+	// `handleWorkflowNodes` below. What changed is that it is off the CONSOLE-FACING path.
 	s.Mux.HandleFunc("GET /api/v1/models", s.handleModelCatalog)
 	s.Mux.HandleFunc("GET /api/v1/workflows/{id}/nodes", s.handleWorkflowNodes)
 	s.Mux.HandleFunc("GET /api/v1/workflows/{id}/bindings", s.handleWorkflowBindings)
@@ -61,18 +68,6 @@ func matrixPrincipal(w http.ResponseWriter, r *http.Request) (auth.Principal, bo
 	return p, true
 }
 
-// handleWorkflows lists the loaded workflow ids the matrix can be opened for.
-func (s *Server) handleWorkflows(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.matrixReady(w); !ok {
-		return
-	}
-	ids := []string{}
-	if s.studioMatrix.Workflows != nil {
-		ids = s.studioMatrix.Workflows.Workflows()
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"workflows": ids})
-}
-
 // handleModelCatalog serves the matrix ROWS.
 func (s *Server) handleModelCatalog(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.matrixReady(w); !ok {
@@ -86,21 +81,97 @@ func (s *Server) handleModelCatalog(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"models": models})
 }
 
-// handleWorkflowNodes serves the matrix COLUMNS for a workflow.
+// handleWorkflowNodes serves the matrix COLUMNS for a workflow (P29 §6.1).
+//
+// 🔴 The columns are THE TENANT'S OWN NODES, read from the reported structure. They used to come from
+// `studio.WorkflowCatalog` — a process-local map filled only by `cmd/demo` and `cmd/proof` — so on every
+// real deployment this answered 404 "no such workflow is loaded" for every workflow a customer had, and
+// the matrix had no columns at all.
+//
+// Each column carries the node's SYMBOL and its CURRENT MODEL, because a matrix whose columns are opaque
+// hashes is a matrix nobody can use: the whole question it answers is "which of MY call sites should
+// this model go to", and a hash does not tell a reader which call site they are looking at.
+//
+// The catalog is still consulted FIRST, so the demo binaries keep working unchanged — and, more to the
+// point, so a deployment that has loaded a workflow the platform-side way is not overridden by a
+// reported one. Reported structure is the FALLBACK, which is the direction that cannot regress anything.
 func (s *Server) handleWorkflowNodes(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.matrixReady(w); !ok {
 		return
 	}
-	if s.studioMatrix.Workflows == nil {
-		writeJSON(w, http.StatusServiceUnavailable, specError{Error: "no workflows are loaded"})
+	workflowID := r.PathValue("id")
+	if s.studioMatrix.Workflows != nil {
+		if nodes, ok := s.studioMatrix.Workflows.Nodes(workflowID); ok {
+			writeJSON(w, http.StatusOK, map[string]any{"workflow_id": workflowID, "nodes": nodes})
+			return
+		}
+	}
+
+	if s.workflowIR == nil {
+		// No reported-structure store to fall back to. The catalog's own answer stands, unchanged: on a
+		// catalog-only deployment "no such workflow is loaded" was true before this change and is true
+		// after it, and widening it to 503 would tell an operator their deployment is broken when it is
+		// doing exactly what it is configured to do.
+		if s.studioMatrix.Workflows != nil {
+			writeJSON(w, http.StatusNotFound, specError{Error: "no such workflow is loaded"})
+			return
+		}
+		writeJSON(w, http.StatusServiceUnavailable, specError{
+			Error: "this deployment neither loads workflows nor accepts reported structure, so the matrix has no columns",
+		})
 		return
 	}
-	nodes, ok := s.studioMatrix.Workflows.Nodes(r.PathValue("id"))
+	principal, ok := matrixPrincipal(w, r)
 	if !ok {
-		writeJSON(w, http.StatusNotFound, specError{Error: "no such workflow is loaded"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"workflow_id": r.PathValue("id"), "nodes": nodes})
+	ir, found, err := s.workflowIR.Latest(principal.TenantID, workflowID)
+	if err != nil {
+		// A read failure is NOT "you reported nothing" and NOT "no such workflow". Three states, three
+		// next actions — see the enumeration's header.
+		writeJSON(w, http.StatusBadGateway, map[string]any{
+			"state": StateReadFailed,
+			"error": "could not read this workflow's reported structure: " + err.Error(),
+		})
+		return
+	}
+	if !found {
+		// 🔴 200, not 404. The workflow may well exist — the platform has simply never been told its
+		// shape, and 404 would read as "no such workflow" and send the reader to check an id that is
+		// correct. The response names the command that would fill it.
+		writeJSON(w, http.StatusOK, map[string]any{
+			"state": "not-reported", "workflow_id": workflowID, "nodes": []studioColumn{},
+			"detail": "This organization has not reported this workflow's structure, so the matrix has no " +
+				"columns to draw. The platform does not invent the nodes it was not told about.",
+			"fill_with": "heros link --with-ir",
+		})
+		return
+	}
+
+	cols := make([]studioColumn, 0, len(ir.Nodes))
+	for _, n := range ir.Nodes {
+		cols = append(cols, studioColumn{
+			NodeID: n.NodeID, Symbol: n.Symbol, File: n.File,
+			Provider: n.Provider, ModelID: n.ModelID, Language: n.Language,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"state": "ok", "workflow_id": workflowID, "nodes": cols,
+		"source_revision": ir.SourceRevision,
+	})
+}
+
+// studioColumn is one matrix column: a node the customer reported, named so a reader can tell which of
+// their call sites it is.
+type studioColumn struct {
+	NodeID string `json:"node_id"`
+	Symbol string `json:"symbol,omitempty"`
+	File   string `json:"file,omitempty"`
+	// Provider and ModelID are the node's CURRENT binding as discovered — what the call site does today,
+	// which is the baseline every cell in that column is a change FROM.
+	Provider string `json:"provider,omitempty"`
+	ModelID  string `json:"model_id,omitempty"`
+	Language string `json:"language,omitempty"`
 }
 
 // handleWorkflowBindings serves the current in-force selection per node (one bound cell per column).
@@ -139,7 +210,29 @@ func (s *Server) handleStudioRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.studioMatrix.Runner == nil {
-		writeJSON(w, http.StatusServiceUnavailable, specError{Error: "studio test-run is not available on this deployment"})
+		// 🔴 P29 §6.2 — REFUSED BY NAME, and the name is the whole message.
+		//
+		// "studio test-run is not available on this deployment" was the old sentence, and it is the
+		// shape of answer that produces a support ticket: it reads as a capability the platform has and
+		// has switched off, so the reader's next move is to ask which plan turns it on. There is no such
+		// plan. A test-run calls a MODEL PROVIDER, that call needs a provider credential, and **the
+		// platform holds no customer provider credential and will not** — which is a boundary the
+		// product is built on rather than a gap in this deployment.
+		//
+		// So the refusal says which thing is missing, says nobody can supply it here, names the local
+		// command that does the same work with the customer's own key, and — explicitly — does not imply
+		// a plan would change it. `reason_code` is the machine half; the console branches on that and
+		// renders its own copy.
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"reason_code": "no_customer_provider_credential",
+			"error": "A test-run calls your model provider, and this platform holds no provider " +
+				"credential of yours. It never will: your keys stay in your environment, which is the " +
+				"boundary the whole product rests on — no plan, role or flag changes it. Run the same " +
+				"comparison locally with `heros author --model <ref>` (or `heros eval`), where your own " +
+				"key is already configured.",
+			"local_command":  "heros author --model <model_ref>",
+			"plan_would_fix": false,
+		})
 		return
 	}
 	var req studioRunRequest

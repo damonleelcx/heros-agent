@@ -81,6 +81,16 @@ type Store interface {
 	// into variants is a decision with a rule behind it (see internal/hostedboard), and putting that
 	// rule in SQL would hide it where nobody looks for it and make it untestable without a database.
 	ForWorkflow(tenantID, workflowID string) ([]LinkedRun, error)
+	// ListForTenant returns a tenant's linked runs, newest first, bounded by limit and by an optional
+	// `before` timestamp (P29 §4.2).
+	//
+	// 🔴 It exists because `GET /api/v1/runs` reads the EXECUTOR's `run` table and a linked run lands in
+	// `run_link` — two tables, one identifier, nothing joining them — so the run a developer linked
+	// ninety seconds ago was not in the list of their runs. This is the read side of that join.
+	//
+	// The cursor is a TIMESTAMP, not an offset, matching the executor's list: an offset page shifts
+	// under a concurrent write and silently skips or repeats a row.
+	ListForTenant(tenantID string, limit int, before time.Time) ([]LinkedRun, error)
 }
 
 // LinkCoverage is how much of a tenant's activity the linked figure reflects (FR17). It distinguishes
@@ -165,6 +175,29 @@ func (m *MemStore) LinkedRunIDs(tenantID string) ([]string, error) {
 	var out []string
 	for id := range m.linked[tenantID] {
 		out = append(out, id)
+	}
+	return out, nil
+}
+
+// ListForTenant returns a tenant's linked runs, newest first.
+func (m *MemStore) ListForTenant(tenantID string, limit int, before time.Time) ([]LinkedRun, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var out []LinkedRun
+	for _, lr := range m.linked[tenantID] {
+		if !before.IsZero() && !lr.LinkedAt.Before(before) {
+			continue
+		}
+		out = append(out, lr)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].LinkedAt.Equal(out[j].LinkedAt) {
+			return out[i].LinkedAt.After(out[j].LinkedAt)
+		}
+		return out[i].RunID < out[j].RunID
+	})
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
 	}
 	return out, nil
 }

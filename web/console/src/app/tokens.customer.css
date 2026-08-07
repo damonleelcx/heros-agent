@@ -163,6 +163,20 @@
   --info: #0369a1;
   --neutral: #52525b;
   --unknown: #5b6270;
+  /*
+   * 🔴 `--not-reported` is the FOURTH state of an axis cell, and it has its own token rather than
+   * borrowing `--unknown` (P29 §5.12).
+   *
+   * They are different facts. `--unknown` is "we could not determine this" — a read that failed, a
+   * value the platform could not compute. `--not-reported` is "you did not tell us", which is not a
+   * failure at all: it is a boundary the customer chose, and it names a command that would change it.
+   * Giving them one colour would make an egress decision look like an outage on the same screen where
+   * the reader is deciding whether to opt in.
+   *
+   * Two concepts that happen to share a value are still two concepts — the same argument `--llm` and
+   * `--halt` are given above — so they are independently settable in every theme.
+   */
+  --not-reported: #6b7280;
 
   /*
    * 🔴 Two concepts that happen to share a value are still two concepts.
@@ -224,6 +238,7 @@
   --info: #38bdf8;
   --neutral: #a1a1aa;
   --unknown: #8b95b5;
+  --not-reported: #9aa1ad;
 
   --llm: #a78bfa;
   --gated: #a78bfa;
@@ -274,6 +289,7 @@
     --info: #38bdf8;
     --neutral: #a1a1aa;
     --unknown: #8b95b5;
+  --not-reported: #9aa1ad;
 
     --llm: #a78bfa;
     --gated: #a78bfa;
@@ -342,6 +358,7 @@
   --color-info: var(--info);
   --color-neutral: var(--neutral);
   --color-unknown: var(--unknown);
+  --color-not-reported: var(--not-reported);
   --color-gated: var(--gated);
   --color-llm: var(--llm);
   --color-ctl: var(--ctl);

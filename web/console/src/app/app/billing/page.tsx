@@ -1,3 +1,4 @@
+import { loadLinkCoverage, type LinkCoverageOutcome } from "@/lib/projection";
 import Link from "next/link";
 import type { BillingView, LineView, PaymentView } from "@/lib/types.generated";
 import { load } from "@/lib/view";
@@ -131,6 +132,10 @@ export default async function BillingPage({
     hasAnyAcceptance: consent.ok ? (consent.data.accepted ?? []).length > 0 : true,
   });
 
+  // Read alongside the billing view, never inside it: an organization with no account must still be
+  // able to see how complete its own figures are.
+  const coverage = await loadLinkCoverage();
+
   return (
     <PageFrame
       eyebrow="Billing"
@@ -147,16 +152,100 @@ export default async function BillingPage({
 
       {gated ? <CommitmentGate pending={pending} method="checkout" /> : null}
 
+      {/*
+        🔴 P29 §7.5 — THREE MESSAGES, and they used to be one.
+        
+        `no-data`, `no-account` and `not-served` are three different facts with three different next
+        actions, and the page collapsed the last two into a generic failure. A developer who linked a run
+        and opened this page saw the billing surface ABSENT — not empty, absent — because their
+        organization had no account row, and nothing on the screen said so.
+        
+          not-served  this deployment does not collect payment. Permanent, and nothing is wrong.
+          no-account  we have no billing account for you. Your runs are still linked and counted, and
+                      the coverage below is readable without one.
+          no-data     you have an account and nothing has been recorded this period yet.
+      */}
       {!outcome.ok ? (
         outcome.reasonCode === "collection_not_configured" ? (
           <NoCollection tenantId={session.tenantId} />
+        ) : outcome.kind === "not-found" ? (
+          <NoAccount />
         ) : (
           <Failure kind={outcome.kind} error={outcome.error} denial={outcome.denial} subject="billing" />
         )
       ) : (
         <Body view={outcome.data} />
       )}
+
+      {/*
+        Coverage renders whether or not any of the above resolved. It is the one number a link certainly
+        produces, and it lived INSIDE the billing read model — so an organization with no account could
+        not read it at all, on the very screen where its absence mattered most.
+      */}
+      <LinkCoveragePanel outcome={coverage} />
     </PageFrame>
+  );
+}
+
+/**
+ * NoAccount is the state that used to render as a generic failure.
+ *
+ * The distinction it draws is the one a reader needs: their runs ARE linked and counted, and the thing
+ * that is missing is a billing account — which costs them nothing and blocks nothing they have done so
+ * far. Rendering that as "billing could not be loaded" sends somebody to check a deployment that is fine.
+ */
+function NoAccount() {
+  return (
+    <Banner tone="info" title="This organization has no billing account yet">
+      <p>
+        Nothing is wrong and nothing is lost. Your runs are linked and counted — the coverage below is
+        read from them and needs no account at all. An account is created at your first authenticated
+        act, so this normally resolves on its own; if it persists, nothing you have done is affected by
+        it.
+      </p>
+    </Banner>
+  );
+}
+
+/**
+ * LinkCoveragePanel renders the three-state coverage OUTSIDE the billing view (P29 §7.2).
+ *
+ * 🔴 It reuses `<LinkCoverage>` rather than drawing a second one. That component already renders the
+ * three states correctly, with its colours from the token layer and its copy written for this exact
+ * distinction — a parallel renderer here would be a second source of truth for the one number this page
+ * most needs to be unambiguous about, and the copy is always the one that drifts.
+ *
+ * What is new is WHERE THE DATA COMES FROM. It used to arrive inside `BillingView`, so an organization
+ * with no billing account could not read its own coverage at all — on the very screen where the absence
+ * mattered most. It now comes from `/api/v1/link-coverage`, which needs no plan, no account and no
+ * invoice.
+ */
+function LinkCoveragePanel({ outcome }: { outcome: LinkCoverageOutcome }) {
+  if (outcome.state === "not-mounted") {
+    return (
+      <Section title="Link coverage">
+        <p className="hint">
+          This deployment does not accept run links, so there is no coverage to report. Nothing failed.
+        </p>
+      </Section>
+    );
+  }
+  // `unknown` is passed through as an UNKNOWN view, not as zeros: the component's own third state is
+  // exactly right for it, and constructing `{runs_linked: 0, runs_reported: 0, known: true}` here would
+  // turn "we cannot say" into "you linked none".
+  const view =
+    outcome.state === "unknown"
+      ? { runs_linked: 0, runs_reported: 0, known: false, complete: false }
+      : {
+          runs_linked: outcome.runsLinked,
+          runs_reported: outcome.runsReported,
+          known: true,
+          complete: outcome.complete,
+        };
+  return (
+    <Section title="Link coverage" aside="read without a billing account">
+      <LinkCoverage coverage={view} />
+    </Section>
   );
 }
 

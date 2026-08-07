@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { requireSession } from "@/lib/session";
 import { visitedSubjects, routes } from "@/lib/subjects";
+import { listWorkflows, orderByRecentlyVisited, discardedVisits } from "@/lib/enumeration";
 import { PageFrame } from "@/components/primitives";
 import { SubjectPicker } from "@/components/subjectPicker";
 
@@ -27,6 +28,17 @@ export default async function WorkflowsPage({
   const typed = params.workflow_id?.trim();
   if (typed) redirect(routes.workflow(typed));
 
+  // 🔴 The list comes from the PLATFORM (P29 §4), not from this browser. The session's own list is
+  // demoted to an ORDERING HINT, and a remembered subject the enumeration does not contain is DISCARDED
+  // rather than offered — a session's memory is not evidence that a subject still exists.
+  const visited = visitedSubjects(session, "workflow");
+  const enumeration = await listWorkflows();
+  const available =
+    enumeration.state === "ok"
+      ? { ...enumeration, subjects: orderByRecentlyVisited(enumeration.subjects, visited) }
+      : enumeration;
+  const discarded = discardedVisits(available.subjects, visited);
+
   return (
     <PageFrame
       eyebrow="Workflows"
@@ -35,7 +47,8 @@ export default async function WorkflowsPage({
     >
       <SubjectPicker
         kind="workflow"
-        visited={visitedSubjects(session, "workflow")}
+        available={available}
+        discarded={discarded}
         action="/app/workflows"
         field={{ name: "workflow_id", label: "Workflow id", placeholder: "owner/repository" }}
         help="The identifier the CLI prints and the one your discovery run was keyed by. Opening it here makes it available from the command path for the rest of this session."

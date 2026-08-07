@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/heros-foreal/agentd/internal/discovery"
+	"github.com/heros-foreal/agentd/internal/nodeaxis"
 	"github.com/heros-foreal/agentd/internal/runlink"
 )
 
@@ -31,8 +32,29 @@ import (
 // payload is CONSTRUCTED, so anything not written here cannot be sent.
 // BuildWorkflowIR is exported for internal/clilink, which owns the network half of linking.
 func BuildWorkflowIR(ir *discovery.IR) runlink.WorkflowIRPayload {
+	return BuildWorkflowIRWithVerdicts(ir, nodeaxis.Report{})
+}
+
+// BuildWorkflowIRWithVerdicts is BuildWorkflowIR plus the per-node axis verdicts the engine computed
+// against the real tree (P29 §2.1, §2.3).
+//
+// 🔴 A SEPARATE parameter rather than a field read off the IR, and that is the same construction argument
+// this file opens with. A verdict is not a property of the IR — it is the answer the transform engine
+// gave when it was run — so there is no way for one to arrive by being present on a struct somebody
+// passed in. A caller that has not run the engine transmits no verdicts, and every projection cell reads
+// `not-reported`, which is true.
+//
+// An EMPTY report is the pre-P29 behaviour exactly: no `coverage_version`, no `language`, no
+// `axis_verdicts`, and — because all three are `omitempty` — byte-identical JSON. That identity is
+// asserted, not assumed (§2.6).
+func BuildWorkflowIRWithVerdicts(ir *discovery.IR, verdicts nodeaxis.Report) runlink.WorkflowIRPayload {
+	byNode := make(map[string]nodeaxis.NodeReport, len(verdicts.Nodes))
+	for _, nr := range verdicts.Nodes {
+		byNode[nr.NodeID] = nr
+	}
 	p := runlink.WorkflowIRPayload{
 		ContractVersion: runlink.WorkflowIRContractVersion,
+		CoverageVersion: verdicts.CoverageVersion,
 		WorkflowID:      ir.Workflow.ID,
 		SourceRevision:  ir.Workflow.Repo.CommitSHA,
 		IRVersion:       ir.IRVersion,
@@ -40,7 +62,7 @@ func BuildWorkflowIR(ir *discovery.IR) runlink.WorkflowIRPayload {
 		Edges:           make([]runlink.WireIREdge, 0, len(ir.Edges)),
 	}
 	for _, n := range ir.Nodes {
-		p.Nodes = append(p.Nodes, runlink.WireIRNode{
+		wire := runlink.WireIRNode{
 			NodeID:        n.NodeID,
 			Symbol:        n.CallSite.Symbol,
 			File:          n.CallSite.File,
@@ -50,7 +72,20 @@ func BuildWorkflowIR(ir *discovery.IR) runlink.WorkflowIRPayload {
 			ModelID:       n.Model.ModelID,
 			ContextPolicy: n.ContextAssembly.Policy,
 			ToolCount:     len(n.ToolsSkills),
-		})
+		}
+		// The verdicts and the language are read from the ENGINE's report, keyed by node id. A node the
+		// report does not mention keeps both fields absent — never an empty string and never an empty
+		// list, because `omitempty` on an empty slice and on a nil slice produce the same wire bytes and
+		// only one of them is what a reader means by "we were not told".
+		if nr, ok := byNode[n.NodeID]; ok {
+			wire.Language = nr.Language
+			for _, v := range nr.Verdicts {
+				wire.AxisVerdicts = append(wire.AxisVerdicts, runlink.WireAxisVerdict{
+					Axis: v.Axis, Status: v.Status, Cause: v.Cause,
+				})
+			}
+		}
+		p.Nodes = append(p.Nodes, wire)
 	}
 	for _, e := range ir.Edges {
 		// Provenance/Confidence/Signal are on the IR edge and are NOT read: an inferred edge's confidence

@@ -92,6 +92,32 @@ var routeExposure = RouteExposure{
 	// It correctly 404s publicly: it is the step that mints a credential naming a person.
 	"/api/v1/device/approve": ExposureInternal,
 
+	// ── the machine-addressed structure surface (P29 §1) ──────────────────────────────────────────
+	// 🔴 These are the routes the edge fence was BLIND to, and the blindness was structural rather than an
+	// omission: they were addressed as `/api/v1/workflows/{id}/ir` and `/api/v1/proposals/{id}/verdict`,
+	// so an `Exact` ingress rule could not match them, and the fence skipped anything it could not publish
+	// Exact. Three commands 404'd at the edge behind a green build.
+	//
+	// The remedy is the flat shape, not a wider fence. A `Prefix` rule under `/api/v1/workflows/` would
+	// publish `commit`, `orderings`, `orderings/stream`, `validate`, `proposals/generate`,
+	// `proposals/{id}/open-pr`, `pattern-graph`, `eval-board` and `nodes` beside the two wanted routes —
+	// see TestAPrefixRuleWouldPublishItsSiblings, which names every one of them.
+	"/api/v1/workflow-ir":               ExposurePublic,
+	"/api/v1/workflow-source":           ExposurePublic,
+	"/api/v1/workflow-source-discovery": ExposurePublic,
+	"/api/v1/proposal-verdicts":         ExposurePublic,
+	// P29 §2.9 · the transform receipt. It has no parameterised predecessor — it is new, and it was born
+	// flat, which is the pattern this family now establishes for every machine route.
+	"/api/v1/transform-receipts": ExposurePublic,
+
+	// The parameterised originals. EXPAND-CONTRACT: they stay registered for one release so a CLI built
+	// before this change still works from INSIDE a cluster, and they are never published — which is the
+	// status quo, stated rather than inherited. They are removed when the CLI floor moves.
+	"/api/v1/workflows/{workflow_id}/ir":                                ExposureInternal,
+	"/api/v1/workflows/{workflow_id}/source/{source_revision}":          ExposureInternal,
+	"/api/v1/workflows/{workflow_id}/source/{source_revision}/discover": ExposureInternal,
+	"/api/v1/proposals/{proposal_id}/verdict":                           ExposureInternal,
+
 	// ── password identity (P28) ───────────────────────────────────────────────────────────────────
 	// 🔴 Sign-in is the ONE password route that must be public, because `heros login` calls it with no
 	// credential from a customer's laptop. Everything else on this surface is reached by the console's

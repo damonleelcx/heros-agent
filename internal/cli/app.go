@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+
+	"github.com/heros-foreal/agentd/internal/runlink"
 )
 
 // app.go is the command dispatcher and flag→config wiring. It is TTY-free and non-interactive by
@@ -53,6 +55,11 @@ type NetCommands interface {
 	// reach the network, and keeping it out is what makes "no update check on the hot path" (P20 task 5.6)
 	// structural instead of a promise — the code that runs discover/apply/eval does not link a network stack.
 	Upgrade(cfg Config, s Streams) error
+	// SendTransformReceipt transmits a TRANSFORM RECEIPT — what a locally-generated change did, as
+	// counts and per-node outcomes (P29 §2.9). Its own method for the reason every other one here is:
+	// a run's numbers, a repository, a measurement and a change's outcome are four different things to
+	// agree to, and a reviewer must be able to point at the one entry point that sends each.
+	SendTransformReceipt(cfg Config, s Streams, receipt runlink.TransformReceipt) error
 }
 
 // Main is the process entry point. It parses args, resolves config with provenance, dispatches, and
@@ -85,7 +92,7 @@ func Main(args []string, s Streams, env func(string) (string, bool), net NetComm
 	case "discover":
 		return codeOf(Discover(cfg, s), s, cmd)
 	case "apply":
-		return codeOf(Apply(cfg, s), s, cmd)
+		return codeOf(Apply(cfg, s, net), s, cmd)
 	case "author":
 		return codeOf(Author(cfg, s), s, cmd)
 	case "eval":
@@ -158,8 +165,28 @@ func parse(cmd string, args []string, env func(string) (string, bool), s Streams
 	email := fs.String("email", "", "email address to sign in as (login)")
 	device := fs.Bool("device", false, "approve this terminal from a browser instead of typing a password (login)")
 	org := fs.String("org", "", "organization to sign in to, when you belong to more than one (login)")
-	withIR := fs.String("with-ir", "", "ALSO transmit this workflow's structure as a second, opt-in payload (link)")
+	// 🔴 `--with-ir` takes an OPTIONAL value (P29 §2.5). Both forms are kept, on purpose:
+	//
+	//	--with-ir            discover the structure in place from --repo, and transmit it
+	//	--with-ir <path>     transmit a previously written representation
+	//
+	// Go's flag package cannot express an optional value: a `String` flag makes the bare form an error
+	// ("flag needs an argument"), and a flag whose `IsBoolFlag` returns true makes the SPACE form stop
+	// working — `--with-ir ir.json` would parse as the bare flag plus a stray positional. Taking the
+	// space form away is not an option; it is the documented spelling and people have it in scripts, and
+	// `UI 改版不得丢失既有功能` applies to a command line as much as to a screen.
+	//
+	// So the flag is bool-like and `joinOptionalValueFlags` re-attaches a following non-flag argument
+	// before parsing. Both spellings reach the same field, and neither is a special case downstream.
+	withIR := &optionalStringFlag{}
+	fs.Var(withIR, "with-ir", "ALSO transmit this workflow's structure as a second, opt-in payload; "+
+		"bare it discovers from --repo, or give it the path to an IR written by `heros discover -out` (link)")
+	args = joinOptionalValueFlags(args, "with-ir")
 	dryRun := fs.Bool("dry-run", false, "render the exact link payload without transmitting it")
+	// P29 §2.9 — the third opt-in, named, on `apply`. Absent, nothing is transmitted and `apply` stays
+	// the fully offline command it has always been.
+	linkReceipt := fs.Bool("link-receipt", false, "ALSO transmit a transform RECEIPT — per-node outcomes "+
+		"and diff STATISTICS, never the diff — so /app/transforms resolves for this change (apply)")
 
 	// Onboarding + release-verification flags (P20 section 5).
 	force := fs.Bool("force", false, "overwrite an existing config (init)")
@@ -193,7 +220,7 @@ func parse(cmd string, args []string, env func(string) (string, bool), s Streams
 	defaults := map[string]string{
 		"repo": ".", "config": "", "out": "", "report": "", "spec": "",
 		"commit": "", "repo-url": "", "workflow-id": "", "seeds": "5", "cases": "8",
-		"run": "", "dry-run": "false",
+		"run": "", "dry-run": "false", "link-receipt": "false",
 		"force": "false", "manifest": "", "sig": "", "asset": "",
 		"node": "", "model": "", "prompt": "", "context-policy": "", "skills": "", "tools": "",
 		"apply-mode": "", "drop-tolerance": "", "clear-drop-tolerance": "false", "apply": "false",
@@ -248,7 +275,11 @@ func parse(cmd string, args []string, env func(string) (string, bool), s Streams
 	put("device", strconv.FormatBool(*device))
 	put("org", *org)
 	put("dry-run", strconv.FormatBool(*dryRun))
-	put("with-ir", *withIR)
+	put("link-receipt", strconv.FormatBool(*linkReceipt))
+	// The bare form resolves to the sentinel, so a Config consumer can tell "discover in place" from
+	// "not asked for" — `Get` returning "" would collapse the two, and the collapse would silently turn
+	// an opt-in into a no-op.
+	put("with-ir", withIR.String())
 	put("force", strconv.FormatBool(*force))
 	put("manifest", *manifest)
 	put("sig", *sig)
@@ -373,4 +404,61 @@ Platform commands (explicit, authenticated; transmit only to https://heros-agent
 
 Exit codes: 0 ok · 1 configured-gate-failed · 2 operational-error · 3 invalid-config
 `, "\n"))
+}
+
+// ── optional-value flags ─────────────────────────────────────────────────────────────────────────
+
+// WithIRDiscover is the value `--with-ir` resolves to when it is given with no path: discover the
+// structure in place from `--repo`.
+//
+// A named sentinel rather than the empty string, because the empty string already means "the flag was
+// not given" everywhere in this package (`Config.Has`). Collapsing the two would turn an opt-in the
+// developer typed into a silent no-op — the worst available failure for a flag whose entire job is to be
+// explicit.
+const WithIRDiscover = "discover"
+
+// optionalStringFlag is a flag that may be given with or without a value.
+//
+// `IsBoolFlag` reporting true is what lets `--with-ir` stand alone; `joinOptionalValueFlags` is what
+// keeps `--with-ir <path>` working, since a bool-like flag does not consume the next argument.
+type optionalStringFlag struct{ value string }
+
+func (f *optionalStringFlag) String() string {
+	if f == nil {
+		return ""
+	}
+	return f.value
+}
+
+func (f *optionalStringFlag) Set(v string) error {
+	// `-with-ir` alone arrives here as "true", from the flag package's bool handling.
+	if v == "" || v == "true" {
+		f.value = WithIRDiscover
+		return nil
+	}
+	f.value = v
+	return nil
+}
+
+// IsBoolFlag makes the bare spelling legal.
+func (f *optionalStringFlag) IsBoolFlag() bool { return true }
+
+// joinOptionalValueFlags rewrites `--name value` into `--name=value` so a bool-like flag keeps accepting
+// the space-separated form.
+//
+// It only joins a following argument that does not itself start with `-`, so `--with-ir --dry-run` stays
+// two flags. A path beginning with `-` must be written `--with-ir=-odd-name`, which is the same
+// restriction every other CLI in this position has and is documented on the flag.
+func joinOptionalValueFlags(args []string, name string) []string {
+	out := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if (a == "-"+name || a == "--"+name) && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+			out = append(out, a+"="+args[i+1])
+			i++
+			continue
+		}
+		out = append(out, a)
+	}
+	return out
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/heros-foreal/agentd/internal/auth"
 	"github.com/heros-foreal/agentd/internal/sourceingest"
@@ -86,13 +87,38 @@ type DiscoverySummary struct {
 // MountSourcePush registers source-snapshot ingest. Call after New.
 //
 // discovery may be nil: the snapshot routes still work, and the discover route answers 503.
+//
+// P29 · `PUT|DELETE /api/v1/workflow-source` are the flat routes the CLI addresses. The parameterised
+// ones stay registered and ExposureInternal for one release.
+//
+// 🔴 The identifiers travel in HEADERS here, and only here. Every other flat route in this change moved
+// its identifier into the JSON payload, because there was a JSON payload to move it into. This body is an
+// opaque gzip archive — the whole point of the endpoint — so there is no field to occupy, and the two
+// remaining places an identifier could live are the query string and a header. The query string is
+// REFUSED by `runlink.IsLinkTarget` (a destination must be fully readable from a compiled-in constant, and
+// a query string is a way to carry bytes past that), which leaves the header. Named
+// `X-Heros-Workflow-Id` and `X-Heros-Source-Revision`, validated by the same `sourceingest.Ref.Validate`
+// the path form uses, so the two shapes cannot diverge in what they accept.
 func (s *Server) MountSourcePush(store SourcePushStore, discovery SourceDiscovery) {
 	s.sourcePush = store
 	s.sourceDiscovery = discovery
+	s.Mux.HandleFunc("PUT /api/v1/workflow-source", s.handleSourcePush)
+	s.Mux.HandleFunc("DELETE /api/v1/workflow-source", s.handleSourceDelete)
+	// The fifth machine-addressed path, and the one nobody had counted. `RunDiscovery` used to build its
+	// URL from the value `sourceURL` returned, so it appeared in no scan and no manifest: it is the exact
+	// failure mode this whole wave exists to close, found while closing it.
+	s.Mux.HandleFunc("POST /api/v1/workflow-source-discovery", s.handleSourceDiscover)
 	s.Mux.HandleFunc("PUT /api/v1/workflows/{workflow_id}/source/{source_revision}", s.handleSourcePush)
 	s.Mux.HandleFunc("DELETE /api/v1/workflows/{workflow_id}/source/{source_revision}", s.handleSourceDelete)
 	s.Mux.HandleFunc("POST /api/v1/workflows/{workflow_id}/source/{source_revision}/discover", s.handleSourceDiscover)
 }
+
+// SourceWorkflowHeader and SourceRevisionHeader name the workflow revision a flat source request applies
+// to. Exported so the transport and the tests read the same constants the handler does.
+const (
+	SourceWorkflowHeader = "X-Heros-Workflow-Id"
+	SourceRevisionHeader = "X-Heros-Source-Revision"
+)
 
 // handleSourceDiscover runs discovery over an already-pushed snapshot.
 //
@@ -191,12 +217,32 @@ func (s *Server) sourceRefFrom(w http.ResponseWriter, r *http.Request) (sourcein
 		writeJSON(w, http.StatusUnauthorized, specError{Error: "pushing source requires an authenticated tenant"})
 		return sourceingest.Ref{}, false
 	}
-	// The tenant comes from the PRINCIPAL, never from the path or body. A tenant id a caller can name
-	// is a tenant id a caller can change.
+	// The tenant comes from the PRINCIPAL, never from the path, header or body. A tenant id a caller can
+	// name is a tenant id a caller can change.
+	//
+	// On the flat route the path values are empty and the headers carry the ref. Where BOTH are present
+	// and DISAGREE the request is refused — never resolved by precedence, for the reason the workflow-IR
+	// and verdict handlers give: a precedence rule turns a disagreement into a silent mis-attribution.
+	workflowID, revision := r.PathValue("workflow_id"), r.PathValue("source_revision")
+	hWorkflow := strings.TrimSpace(r.Header.Get(SourceWorkflowHeader))
+	hRevision := strings.TrimSpace(r.Header.Get(SourceRevisionHeader))
+	if (workflowID != "" && hWorkflow != "" && workflowID != hWorkflow) ||
+		(revision != "" && hRevision != "" && revision != hRevision) {
+		writeJSON(w, http.StatusBadRequest, specError{
+			Error: "the workflow revision named in the path and in the headers disagree — refusing rather than choosing one",
+		})
+		return sourceingest.Ref{}, false
+	}
+	if workflowID == "" {
+		workflowID = hWorkflow
+	}
+	if revision == "" {
+		revision = hRevision
+	}
 	ref := sourceingest.Ref{
 		TenantID:       principal.TenantID,
-		WorkflowID:     r.PathValue("workflow_id"),
-		SourceRevision: r.PathValue("source_revision"),
+		WorkflowID:     workflowID,
+		SourceRevision: revision,
 	}
 	if err := ref.Validate(); err != nil {
 		writeJSON(w, http.StatusBadRequest, specError{Error: err.Error()})

@@ -21,6 +21,7 @@ import (
 	"github.com/heros-foreal/agentd/internal/auth"
 	"github.com/heros-foreal/agentd/internal/config"
 	"github.com/heros-foreal/agentd/internal/erroreport"
+	"github.com/heros-foreal/agentd/internal/linkingest"
 	"github.com/heros-foreal/agentd/internal/mailer"
 	"github.com/heros-foreal/agentd/internal/providergateway"
 	"github.com/heros-foreal/agentd/internal/tenancy"
@@ -177,6 +178,19 @@ type Server struct {
 	// this one accepts a MEASUREMENT that decides whether a change may be recommended and delivered, so
 	// a deployment that serves the recommendation surface read-only leaves it nil and answers 503.
 	verdicts VerdictSink
+	// transformReceipts is the P29 opt-in transform-receipt store, mounted by MountTransformReceipts. A
+	// FIFTH separate decision, and separate for the same reason as the other four: a deployment can
+	// accept a run's numbers and refuse to hold what a customer's change did to their own tree.
+	transformReceipts TransformReceiptSource
+	// workflowIndex and linkedRuns are the P29 §4 enumerations — "what does this organization have?".
+	// Mounted separately from the ingests they read, because a deployment can accept structure and not
+	// serve a catalog, and because the read side must not be able to acquire a write.
+	workflowIndex WorkflowIRIndex
+	linkedRuns    linkingest.Store
+	// accountProvisioner creates a Free account at the FIRST AUTHENTICATED ACT (P29 §7.1). Before it,
+	// only organizations the config seed made had one — so a self-serve sign-up linked a run and the
+	// billing read model could not find the customer it was attributed to.
+	accountProvisioner AccountProvisioner
 	// proposalGen is the platform-side generator, mounted by MountProposalGeneration. Separate from
 	// MountProposals for the reason every other pair here is separate: reading a recommendation surface
 	// and running a pass that WRITES proposals are different things to enable.

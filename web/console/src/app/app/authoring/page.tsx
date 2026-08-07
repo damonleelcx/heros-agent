@@ -1,3 +1,5 @@
+import { loadProjection } from "@/lib/projection";
+import { AxisProjectionPanel } from "@/components/axisProjection";
 import { PageFrame, Banner, Card, Chip, Row, Section } from "@/components/primitives";
 import { Tabs } from "@/components/tabs";
 import {
@@ -57,7 +59,9 @@ const NOT_YET: PreflightResult = {
   missing_subject: "hierarchical-summary",
 };
 
-export default function AuthoringPage() {
+export default async function AuthoringPage() {
+  // 🔴 P29 §5.10 — `coverage × your nodes`, BESIDE the worked examples and never instead of them.
+  const projection = await loadProjection();
   return (
     <PageFrame
       eyebrow="Author a change"
@@ -70,6 +74,13 @@ export default function AuthoringPage() {
           { id: "how", label: "How it works", content: <HowItWorks /> },
           { id: "verdicts", label: "The three verdicts", content: <Verdicts /> },
           { id: "changes", label: "Your changes", content: <YourChanges /> },
+          {
+            id: "your-nodes",
+            label: "Your nodes",
+            // 🔴 A TAB, not a sibling: `Tabs` is `flex-1` and owns the remaining viewport, so a panel
+            // placed after it collides with the tab strip.
+            content: <AxisProjectionPanel axis="prompt" outcome={projection} />,
+          },
         ]}
       />
     </PageFrame>

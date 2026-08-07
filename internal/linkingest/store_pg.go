@@ -185,6 +185,48 @@ func (p *PGStore) LinkedRunIDs(tenantID string) ([]string, error) {
 	return out, nil
 }
 
+// ListForTenant returns a tenant's linked runs, newest first, before an optional cursor.
+func (p *PGStore) ListForTenant(tenantID string, limit int, before time.Time) ([]LinkedRun, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if limit <= 0 {
+		limit = 50
+	}
+	// One query with a NULL-tolerant cursor rather than two, so the paged and unpaged reads cannot
+	// diverge in their column list or their ordering.
+	rows, err := p.db.QueryContext(ctx,
+		`SELECT `+runLinkColumns+`
+		   FROM run_link
+		  WHERE tenant_id = $1 AND ($2::timestamptz IS NULL OR linked_at < $2)
+		  ORDER BY linked_at DESC, run_id
+		  LIMIT $3`, tenantID, nullTime(before), limit)
+	if err != nil {
+		return nil, fmt.Errorf("linkingest: list linked runs for %s: %w", tenantID, err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := []LinkedRun{}
+	for rows.Next() {
+		lr, err := scanRunLink(rows)
+		if err != nil {
+			return nil, fmt.Errorf("linkingest: list linked runs for %s: %w", tenantID, err)
+		}
+		out = append(out, lr)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("linkingest: list linked runs for %s: %w", tenantID, err)
+	}
+	return out, nil
+}
+
+// nullTime writes SQL NULL for a zero cursor, so "the first page" and "before this instant" are one
+// query rather than two that can drift.
+func nullTime(t time.Time) any {
+	if t.IsZero() {
+		return nil
+	}
+	return t
+}
+
 // Get returns one linked run, or ok=false when it is not linked.
 //
 // ok=false now means exactly that, and nothing else: a read failure is the error. Those were the same

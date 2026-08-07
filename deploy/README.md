@@ -128,6 +128,10 @@ not exist. `agentd` prints the whole table at boot; `docker compose logs agentd 
 | `p2_config_runtime` | **served** with a platform database | Postgres-backed read views. The **submit** write path stays unmounted: it needs a target repository to transform |
 | `p11_run_linking` | **served** with a platform database | the `heros` CLI's `login`/`link` surface (migration 0020). The derived metering series is still in-memory, so a restart loses the spend figure, not the links |
 | `p11_workflow_ir` | **served** with a platform database | opt-in structure, transmitted only by `heros link --with-ir` |
+| `p29_link_coverage` | **served** with a platform database | `GET /api/v1/link-coverage` — how many of the runs your CLI observed were linked, readable with no plan, no account and no invoice. UNKNOWN renders distinctly from complete, permanently |
+| `p29_axis_projection` | **served** with a platform database | `coverage × your nodes` — the total coverage table crossed with the structure this organization reported. A read, not a table. A node the platform was not told about renders `not reported`, never `not applicable` |
+| `p29_subject_index` | **served** with a platform database | `GET /api/v1/workflows`, `/variants`, `/transforms` — what this organization has, scoped to the authenticated principal. Replaces a process-local map that answered an empty list on every real deployment |
+| `p29_transform_receipts` | **served** with a platform database | opt-in transform outcomes — per-node applied/refused and a diffstat, transmitted only by `heros apply --link-receipt`. Never a diff: the payload has three integers where one would go |
 | `p1_source_discovery` | **served** with a platform database | customer-pushed snapshots; discovery and pattern classification run here |
 | `p35_pattern_graph` | **served** with a platform database | labelled when source has been pushed, drawn from opt-in structure otherwise |
 | `p4_eval_board` | **served** with a platform database | assembled from LINKED runs. No statistical tie detection: the bootstrap replicates stay on the machine that computed them, and the board says so rather than implying none were tied |

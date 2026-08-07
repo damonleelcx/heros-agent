@@ -60,7 +60,20 @@ const SPECS_DIR = join(REPO, "openspec", "specs");
  * in a review; forgetting to is what section 10.5 of P27 exists to catch, and it now catches it for
  * whoever comes next rather than only for P27.
  */
-const GOVERNED_CHANGES = ["p26-operator-console-refresh", "p27-account-system"];
+const GOVERNED_CHANGES = [
+  "p26-operator-console-refresh",
+  "p27-account-system",
+  // P28 — two change sets, eight capability specs between them (two names appear in both). They were
+  // ABSENT from this list until P29 §8.2 noticed, which meant nobody had decided an operator answer for
+  // any of them and nothing failed. That is the exact state §B describes as "a fence scoped to its own
+  // author is the drift it was written against, wearing a uniform" — written about P27, true of P28.
+  "p28-email-password-identity",
+  "p28-first-owner-reachability",
+  // P29 — six capabilities. Added here in the same commit that adds their ledger rows, because the
+  // fence covers exactly the changes named in this list: a phase that lands without a line here has
+  // capabilities nobody has decided an operator answer for, and nothing fails.
+  "p29-linked-run-fanout",
+];
 const CHANGE_SPECS_DIRS = GOVERNED_CHANGES.map((c) => join(REPO, "openspec", "changes", c, "specs"));
 const SURFACES = join(ROOT, "src", "lib", "surfaces.ts");
 

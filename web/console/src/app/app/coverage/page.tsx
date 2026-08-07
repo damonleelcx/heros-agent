@@ -3,6 +3,8 @@ import { PageFrame, Section, Chip, Row, Banner } from "@/components/primitives";
 import { Tabs, type TabItem } from "@/components/tabs";
 import { CoverageLegend, CoverageMatrix, CoverageDetail } from "@/components/coverage";
 import { fetchCoverage } from "./data";
+import { AxisProjectionPanel } from "@/components/axisProjection";
+import { loadProjection } from "@/lib/projection";
 
 /**
  * The coverage surface (P13 13d) — "what applies where, and whose move is the rest".
@@ -36,6 +38,10 @@ import { fetchCoverage } from "./data";
 export const dynamic = "force-dynamic";
 
 export default async function CoveragePage() {
+  // 🔴 P29 §5.10 — `coverage × your nodes`, BESIDE the worked examples and never instead of them.
+  // The examples carry the engine's own verbatim sentences and are what makes a refusal legible;
+  // the projection is this organization's own rows, under its own heading and its own denominator.
+  const projection = await loadProjection();
   const session = await requireSession();
   const view = await fetchCoverage(session.tenantId);
 
@@ -91,6 +97,15 @@ export default async function CoveragePage() {
           <CoverageDetail cells={cells} />
         </Section>
       ),
+    },
+    {
+      id: "your-nodes",
+      label: "Your nodes",
+      // 🔴 P29 §5.10 — a TAB rather than a panel below the tab strip. `Tabs` is `flex-1` and
+      // owns the remaining viewport (NFR17, viewport-first), so a sibling after it collides
+      // with the tab bar — observed in the browser on this very page before it was moved here.
+      // The worked examples keep their own tabs; this is added BESIDE them, never instead.
+      content: <AxisProjectionPanel axis="model" outcome={projection} />,
     },
   ];
 

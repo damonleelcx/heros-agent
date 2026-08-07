@@ -45,7 +45,11 @@ package runlink
 // VerdictPath is the authenticated ingest path a verdict is POSTed to, under PlatformBaseURL. Pinned
 // here for the same reason LinkPath and WorkflowIRPath are: the destination of anything leaving a
 // customer's machine is a constant a reviewer can find, never a value a flag can move.
-const VerdictPath = "/api/v1/proposals/"
+//
+// 🔴 P29 · FLAT, and it was `"/api/v1/proposals/"` with the proposal id appended. See WorkflowIRPath for
+// why a path with a caller-supplied segment is a path that never reaches production. `VerdictPayload`
+// already carried `proposal_id`, so the segment was a duplicate of the body.
+const VerdictPath = "/api/v1/proposal-verdicts"
 
 // VerdictContractVersion versions this payload independently of the other two. A deployment can accept
 // run links and refuse verdicts, and the three move for different reasons.
