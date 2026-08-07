@@ -142,7 +142,7 @@ eval:
 // The refusal is the point: a `heros init` that overwrote a tuned config would destroy work that is not
 // reproducible, and "I ran init again out of habit" is a thing people do. `--force` exists for the case where
 // overwriting is what was meant, so the safe default costs nothing.
-func Init(cfg Config, s Streams) error {
+func Init(cfg Config, s Streams, env func(string) (string, bool), goos string) error {
 	repo := cfg.Get("repo")
 	if repo == "" {
 		repo = "."
@@ -164,6 +164,10 @@ func Init(cfg Config, s Streams) error {
 	if err := os.WriteFile(path, []byte(starterConfig), 0o644); err != nil {
 		return operational("init: cannot write "+path, err)
 	}
+	// Drawn on the CREATE path only. `init` is idempotent and people re-run it out of habit; a wordmark over
+	// "leaving it alone" would announce something that did not happen. This is the moment a repository first
+	// has a heros config in it, which is the only first there is here.
+	s.narrateMark(isTerminal(s.Err), goos, env)
 	s.Narratef("heros init: wrote %s", path)
 	s.Narratef("            Every value in it is already a working default; nothing needs editing to run.")
 	s.Narratef("")
