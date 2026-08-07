@@ -58,7 +58,7 @@ type GreetingData struct {
 // It exits 0. A tool that exits non-zero when run with no arguments teaches CI authors to add `|| true`, and
 // then a real failure is invisible too. The old behaviour — usage text and exit 3 (invalid-config) — treated
 // curiosity as a malformed invocation.
-func Greeting(s Streams, goos, goarch string) error {
+func Greeting(s Streams, env func(string) (string, bool), goos, goarch string) error {
 	target, known := distribution.TargetFor(goos, goarch)
 	data := GreetingData{
 		ToolVersion:       ToolVersion,
@@ -71,6 +71,9 @@ func Greeting(s Streams, goos, goarch string) error {
 		data.Limit, data.LimitAnswer = target.Limit, target.Answer
 	}
 
+	// The mark first — for a user who installed with a package manager, this greeting is the only place
+	// the product introduces itself. Drawn on the human stream only; see mark.go.
+	s.narrateMark(isTerminal(s.Err), goos, env)
 	s.Narratef("heros %s — find, measure and improve the agent workflow already in your repository.", ToolVersion)
 	s.Narratef("")
 	if !data.SupportedPlatform && data.Limit != "" {

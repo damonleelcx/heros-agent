@@ -63,7 +63,7 @@ func Main(args []string, s Streams, env func(string) (string, bool), net NetComm
 		// A bare `heros` GREETS (P20 task 5.1). It used to print usage and exit 3 (invalid-config), which
 		// treated curiosity as a malformed invocation — and a tool that exits non-zero when run with no
 		// arguments teaches CI authors to append `|| true`, after which a real failure is invisible too.
-		return codeOf(Greeting(s, runtime.GOOS, runtime.GOARCH), s, "greeting")
+		return codeOf(Greeting(s, env, runtime.GOOS, runtime.GOARCH), s, "greeting")
 	}
 	cmd := args[0]
 	rest := args[1:]
