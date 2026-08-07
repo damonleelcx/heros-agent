@@ -109,6 +109,72 @@ spec:
           - path: /api/v1/auth/password/signin
             pathType: Exact
             backend: { service: { name: agentd, port: { number: 4321 } } }
+          # 🔴 THE FOUR STRUCTURE PATHS (P29 §1). These are the third instance of the failure this file
+          # opens by describing, and the worst of the three, because it was not an omission — it was
+          # EXEMPT. The routes used to be addressed as `/api/v1/workflows/{id}/ir`,
+          # `/api/v1/workflows/{id}/source/{rev}` (+ `/discover`) and `/api/v1/proposals/{id}/verdict`. An
+          # `Exact` rule cannot match a path with a variable segment, so the fence in
+          # `internal/api/ingress_fence_test.go` skipped every path ending in `/` — and the three commands
+          # that carry a workflow's shape 404'd here behind a green build, a healthy deployment and a
+          # passing fence. A customer who followed the documentation saw a console with nothing in it.
+          #
+          # The fix is the FLAT SHAPE, not a wider rule. `Prefix: /api/v1/workflows/` would have published
+          # `commit`, `orderings`, `orderings/stream`, `validate`, `proposals/generate`,
+          # `proposals/{id}/open-pr`, `pattern-graph`, `eval-board` and `nodes` to the internet beside the
+          # two routes anybody wanted — nine console-only surfaces, reached with the BFF's own credential,
+          # published forever and by default for every future `/api/v1/workflows/*` route. That is a
+          # security decision traded for a YAML convenience, and the fence now REFUSES it by name:
+          # `TestAPrefixRuleWouldPublishItsSiblings` fails with the list above spelled out.
+          #
+          # What each carries, and why publishing it is safe:
+          #
+          #   workflow-ir            · the OPT-IN structure payload — node ids, symbols, file+line spans,
+          #                            model ids, a tool COUNT, edges. Bearer-authenticated; the tenant
+          #                            comes from the principal and the payload has no tenant field at
+          #                            all. `DisallowUnknownFields` rejects any key outside the ratified
+          #                            allowlist, so a future CLI cannot start sending prompt text here.
+          #   workflow-source        · PUT a gzipped source snapshot, DELETE to retract it. The one
+          #                            endpoint that accepts an opaque archive; the workflow revision
+          #                            travels in `X-Heros-Workflow-Id` / `X-Heros-Source-Revision`
+          #                            headers, not the path and not a query string. Bearer-authenticated,
+          #                            capped at 512 MiB compressed, and hostile input by assumption —
+          #                            `internal/sourceingest` refuses traversal entries, links, device
+          #                            nodes and decompression bombs.
+          #   workflow-source-discovery · POST to run discovery over an already-pushed snapshot. It is
+          #                            here because it was the FIFTH machine-addressed path and nobody had
+          #                            counted it: the CLI built its URL from a local variable rather than
+          #                            from a pinned constant, so no scan could see it.
+          #   proposal-verdicts      · the verdict a customer's CI measured. The most consequential write
+          #                            surface on the platform — a passing verdict is what lets P12 open a
+          #                            pull request into a customer's repository — and it is safe to
+          #                            publish for a reason that does not depend on the network:
+          #                            `proposalstore.PutVerdict` verifies OWNERSHIP with a WHERE clause in
+          #                            the same transaction, so a verdict for another tenant's proposal is
+          #                            a zero-row no-op reported as "no such proposal".
+          #
+          # ⚠️ `Exact` on all four. Adding a fifth machine route means adding a fifth flat name and a
+          # fifth rule here — that is the whole pattern, and it is cheaper than it looks compared to what
+          # a prefix costs.
+          - path: /api/v1/workflow-ir
+            pathType: Exact
+            backend: { service: { name: agentd, port: { number: 4321 } } }
+          - path: /api/v1/workflow-source
+            pathType: Exact
+            backend: { service: { name: agentd, port: { number: 4321 } } }
+          - path: /api/v1/workflow-source-discovery
+            pathType: Exact
+            backend: { service: { name: agentd, port: { number: 4321 } } }
+          - path: /api/v1/proposal-verdicts
+            pathType: Exact
+            backend: { service: { name: agentd, port: { number: 4321 } } }
+          # P29 §2.9 · the transform receipt — per-node outcomes and a diffstat, so
+          # /app/transforms/{config_hash}/{source_revision} resolves for a change the customer applied on
+          # their own machine. Bearer-authenticated, tenant from the principal, `DisallowUnknownFields`,
+          # and three integers where a diff would go: the payload has no field a hunk could occupy, so
+          # publishing it cannot become a way to receive source.
+          - path: /api/v1/transform-receipts
+            pathType: Exact
+            backend: { service: { name: agentd, port: { number: 4321 } } }
           - path: /
             pathType: Prefix
             backend: { service: { name: console, port: { number: 4320 } } }

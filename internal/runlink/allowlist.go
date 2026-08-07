@@ -171,10 +171,17 @@ func CategoryOf(key string) string {
 // neither agreed with the shipped commands. TestEveryPlatformPathIsALinkTarget now drives this list
 // from the transports themselves.
 var PlatformPaths = []string{
-	"/api/v1/whoami", // login token validation
-	LinkPath,         // run linking
-	WorkflowIRPath,   // workflow IR, source snapshots, platform-side discovery (prefix)
-	VerdictPath,      // CI-measured verification verdicts (prefix)
+	"/api/v1/whoami",     // login token validation
+	LinkPath,             // run linking
+	WorkflowIRPath,       // opt-in workflow structure
+	WorkflowSourcePath,   // source snapshots (PUT) and their retraction (DELETE)
+	SourceDiscoveryPath,  // platform-side discovery over a pushed snapshot
+	VerdictPath,          // CI-measured verification verdicts
+	TransformReceiptPath, // P29 · what a locally-generated transform did (counts, never a diff)
+	// 🔴 P29 · every entry above is now EXACT. Two of them used to be trailing-slash PREFIX entries
+	// (`/api/v1/workflows/`, `/api/v1/proposals/`), which meant this list permitted anything below those
+	// heads — a much wider pin than the comment above claims, and the same shape as the ingress defect:
+	// a prefix is a standing permission for routes that do not exist yet.
 	// ⚠️ The three below were MISSING, and the omission was invisible for the same reason the comment
 	// above describes: `TestEveryPlatformPathIsALinkTarget` drives this list from a hand-maintained list
 	// of transport calls, and P27 added two transports without adding two cases. The pin is checked on

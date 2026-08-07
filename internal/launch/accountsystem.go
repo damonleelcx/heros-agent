@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/heros-foreal/agentd/internal/account"
+	"github.com/heros-foreal/agentd/internal/api"
 	"github.com/heros-foreal/agentd/internal/config"
 	"github.com/heros-foreal/agentd/internal/mailer"
 	"github.com/heros-foreal/agentd/internal/metering"
@@ -65,6 +66,11 @@ type AccountSystem struct {
 	// which today means it has no plan catalog, because a members page that cannot say how many seats
 	// the plan includes is a members page that invites a support ticket on its first use.
 	Surface *accountSurface
+	// Provisioner creates a Free account at the first authenticated act (P29 §7.1). It is NOT part of
+	// Surface: the account surface needs a plan catalog to render a members page, and provisioning needs
+	// one only to name a plan — so a deployment can provision without serving that surface, and the two
+	// nils are different decisions.
+	Provisioner api.AccountProvisioner
 }
 
 // buildAccountSystem picks a store, seeds it, and returns the wiring.
@@ -168,6 +174,10 @@ func buildAccountSystem(cfg config.Config, platformDB *sql.DB, now time.Time) (*
 		return sys, nil
 	}
 	plans := signup.NewCatalogPlans(src)
+	// 🔴 Built from the SAME resolved catalog the seeding uses, so the plan a first-act account starts on
+	// and the plan a seeded account starts on cannot differ. Two readers of one catalog drift, and the
+	// drift here would be two customers on two plans for the same reason.
+	sys.Provisioner = &firstActProvisioner{accounts: accounts, plans: plans, now: func() time.Time { return at }}
 
 	// Mail. 🔴 A configuration error here REFUSES THE BOOT rather than degrading silently — `mailer.New`
 	// only errors on a configuration that is present and wrong (clear-text to a real host, an unknown TLS
@@ -342,5 +352,74 @@ func ensureSeededAccounts(store tenancy.Store, accounts account.Store, at time.T
 	if created > 0 {
 		log.Printf("account system: created %d free account(s) for seeded organizations", created)
 	}
+	return nil
+}
+
+// firstActProvisioner creates a Free account for an organization that has none, at its first
+// authenticated act (P29 §7.1).
+//
+// # Why boot-time seeding was not enough
+//
+// `ensureSeededAccounts` above runs once, at boot, over the organizations the CONFIG SEED made. Three
+// populations fall outside it and every one of them is a real customer:
+//
+//   - an organization created by SELF-SERVE SIGN-UP after boot;
+//   - an organization created before a plan catalog was configured (the seeding returns early with no
+//     catalog, and never revisits);
+//   - any organization created by any path that is not the seed.
+//
+// Each of those linked a run and had it attributed to a customer the billing read model could not find,
+// so `/app/billing` was ABSENT — not empty, absent — with nothing on any screen saying why.
+//
+// 🔴 It NEVER corrects an existing account. That is the whole reason this is `Get`-then-`Create` rather
+// than an upsert: an upsert here would move a paying customer back to Free on their next link, and the
+// symptom would be indistinguishable from a plan change they made themselves.
+type firstActProvisioner struct {
+	accounts account.Store
+	plans    *signup.CatalogPlans
+	now      func() time.Time
+}
+
+// EnsureAccount creates the Free account if the organization has none.
+func (p *firstActProvisioner) EnsureAccount(tenantID string) error {
+	if p == nil || p.accounts == nil || p.plans == nil || tenantID == "" {
+		return nil
+	}
+	if _, err := p.accounts.Get(tenantID); err == nil {
+		// 🔴 It exists. Whatever plan it is on, that is the answer — return without looking at it, so
+		// there is no code path here that could read a plan and decide to change it.
+		return nil
+	} else if !errors.Is(err, account.ErrNotFound) {
+		// A read failure is NOT "no account". Creating one here would be creating a second account for a
+		// customer who has one, on a day the database was merely unreachable.
+		log.Printf("account system: WARN could not read the account for %q (%v) — not provisioning, "+
+			"because a read failure is not the same as an absent account", tenantID, err)
+		return err
+	}
+
+	freeID := p.plans.FreePlanID()
+	if freeID == "" {
+		return nil
+	}
+	plan, err := p.plans.Resolve(freeID)
+	if err != nil {
+		return err
+	}
+	_, err = p.accounts.Create(account.Account{
+		CustomerID:        tenantID,
+		ActivePlanID:      plan.PlanID,
+		PlanConfigVersion: plan.Version,
+		PlanCharges:       false,
+		CreatedAt:         p.now(),
+	})
+	if errors.Is(err, account.ErrExists) {
+		// Two authenticated acts raced. Both are correct and one row exists, which is the outcome either
+		// of them wanted.
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	log.Printf("account system: provisioned a free account for %q at its first authenticated act", tenantID)
 	return nil
 }

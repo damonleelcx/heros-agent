@@ -16,7 +16,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"time"
 
 	"github.com/heros-foreal/agentd/internal/runlink"
@@ -96,6 +95,13 @@ func (c *Client) Link(ctx context.Context, p runlink.Payload) (LinkResult, error
 	}
 	defer func() { _ = resp.Body.Close() }()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+
+	// 🔴 An edge 404 is not a platform refusal. See edge404.go: reporting "no such thing"
+	// for a path the reverse proxy never routed sends the reader to check an id that was
+	// never wrong, which is exactly what happened to these routes in production.
+	if err := c.edge404("link", runlink.LinkPath, resp, raw); err != nil {
+		return LinkResult{}, err
+	}
 
 	switch resp.StatusCode {
 	case http.StatusOK, http.StatusCreated, http.StatusConflict:
@@ -185,7 +191,8 @@ type WorkflowIRResult struct {
 // The destination is re-asserted here exactly as it is for a link: the pin is per-request, so a new
 // transmit path cannot inherit an unchecked base.
 func (c *Client) SendWorkflowIR(ctx context.Context, p runlink.WorkflowIRPayload) (WorkflowIRResult, error) {
-	url := c.base + runlink.WorkflowIRPath + urlPathEscape(p.WorkflowID) + "/ir"
+	// P29 · flat. The workflow id is in the payload and nowhere else.
+	url := c.base + runlink.WorkflowIRPath
 	if err := assertLinkTarget(url); err != nil {
 		return WorkflowIRResult{}, err
 	}
@@ -208,6 +215,13 @@ func (c *Client) SendWorkflowIR(ctx context.Context, p runlink.WorkflowIRPayload
 	defer func() { _ = resp.Body.Close() }()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 
+	// 🔴 An edge 404 is not a platform refusal. See edge404.go: reporting "no such thing"
+	// for a path the reverse proxy never routed sends the reader to check an id that was
+	// never wrong, which is exactly what happened to these routes in production.
+	if err := c.edge404("link", runlink.WorkflowIRPath, resp, raw); err != nil {
+		return WorkflowIRResult{}, err
+	}
+
 	switch resp.StatusCode {
 	case http.StatusOK, http.StatusCreated:
 		var r WorkflowIRResult
@@ -224,7 +238,3 @@ func (c *Client) SendWorkflowIR(ctx context.Context, p runlink.WorkflowIRPayload
 		return WorkflowIRResult{}, fmt.Errorf("link: platform returned %d: %s", resp.StatusCode, string(raw))
 	}
 }
-
-// urlPathEscape escapes a workflow id for use as one path segment. Workflow ids contain "/" (they are
-// owner/repo), and an unescaped one would silently address a different route.
-func urlPathEscape(s string) string { return url.PathEscape(s) }

@@ -29,15 +29,33 @@ files. A path with no file behind it reads as *not published* — agentd stats i
 install with neither gets a clean "not configured, here is the path" rather than a mounted billing page
 that fails on its first read. Publishing one later needs a restart.
 
-`models.json` is a list of `{name, tier, cost_per_run, latency_ms}`, where `name` matches a registered
-model entry's name and `tier` orders capability from 1 upward:
+`models.json` is a list of `{name, tier, cost_per_run, latency_ms, provider, model_id}`, where `name` is
+this deployment's name for the model and `tier` orders capability from 1 upward:
 
 ```json
 {"models": [
-  {"name": "sonnet", "tier": 3, "cost_per_run": 0.05,  "latency_ms": 900},
-  {"name": "haiku",  "tier": 1, "cost_per_run": 0.004, "latency_ms": 200}
+  {"name": "Claude Sonnet 5",  "tier": 3, "cost_per_run": 0.05,  "latency_ms": 900,
+   "provider": "anthropic", "model_id": "claude-sonnet-5"},
+  {"name": "Claude Haiku 4.5", "tier": 1, "cost_per_run": 0.004, "latency_ms": 200,
+   "provider": "anthropic", "model_id": "claude-haiku-4-5"}
 ]}
 ```
+
+🔴 **Declare `provider` and `model_id`, or this file gates nothing.** They are what agentd registers at
+boot so that `name` has something to match; without them the model registry stays empty, and three
+surfaces go quiet at once for a reason none of them states: `/api/v1/models` returns nothing, the studio
+matrix renders a workflow's node columns over **no rows**, and the proposal generator emits no
+candidates — which reads to a customer as *"we looked at your workflow and found nothing to improve"*.
+
+They are omitted only when some other route already registered the model; an entry without them is a
+judgement about somebody else's registry row, and it is counted and reported as such at boot
+(`model registry: seeded from …; N registered, M published without a provider/model_id`).
+
+Seeding is idempotent — model entries are content-addressed, so a restart publishes nothing new, and
+editing this file mints a new version on the next boot while the old one stays resolvable for any
+configuration that pinned it. Nothing is ever deprecated or deleted from this file's contents: a model
+you remove stops being **offered** and stays **resolvable**, because a `config_hash` somewhere may
+depend on it.
 
 A registered model with no entry here is **skipped and reported**, never defaulted to tier 0 — tier 0 is
 cheaper than everything, so an unjudged model would silently become the first downgrade offered.

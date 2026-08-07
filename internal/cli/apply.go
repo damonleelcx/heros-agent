@@ -9,6 +9,7 @@ import (
 
 	"github.com/heros-foreal/agentd/internal/discovery"
 	"github.com/heros-foreal/agentd/internal/registry"
+	"github.com/heros-foreal/agentd/internal/runlink"
 	"github.com/heros-foreal/agentd/internal/transform"
 	"github.com/heros-foreal/agentd/internal/variantspec"
 	"github.com/heros-foreal/agentd/internal/worktree"
@@ -31,7 +32,7 @@ type ApplyData struct {
 }
 
 // Apply resolves a Variant Spec against the discovered IR and emits the reviewable diff.
-func Apply(cfg Config, s Streams) error {
+func Apply(cfg Config, s Streams, net NetCommands) error {
 	specPath, err := cfg.Require("spec")
 	if err != nil {
 		return err
@@ -79,6 +80,15 @@ func Apply(cfg Config, s Streams) error {
 
 	patch, err := transform.Generate(resolved, isolatedDir)
 	if err != nil {
+		// 🔴 A REFUSAL is a receipt too, and the more useful one. `/app/transforms/…` resolving to "the
+		// engine declined this node, and here is the class" is an answer; the surface being empty is
+		// indistinguishable from the customer never having tried. It is transmitted only under the named
+		// opt-in, and the command still fails — telling the platform about a refusal does not make it a
+		// success.
+		if r, ok := BuildRefusedTransformReceipt(err, resolved.ConfigHash, spec.SourceRevision,
+			ir.Workflow.ID, ToolVersion); ok {
+			sendReceipt(cfg, s, net, r)
+		}
 		return operational("apply: transform failed", err)
 	}
 
@@ -99,6 +109,9 @@ func Apply(cfg Config, s Streams) error {
 		ConfigHash: patch.ConfigHash, SourceRevision: patch.SourceRevision, DiffPath: outPath,
 		DiffHash: patch.DiffHash, Empty: patch.IsEmpty(), TouchedFiles: touched, Isolation: isolation,
 	}
+	receipt := BuildTransformReceipt(patch, ir.Workflow.ID, ToolVersion)
+	sendReceipt(cfg, s, net, receipt)
+
 	if patch.IsEmpty() {
 		s.Narratef("apply: spec is a baseline (no overrides) — empty diff; your working tree is untouched")
 	} else {
@@ -259,4 +272,43 @@ func (noopRegistries) ResolveMemory(context.Context, string) (*registry.MemoryEn
 
 func (noopRegistries) ResolveHarness(context.Context, string) (*registry.HarnessEntry, error) {
 	return nil, registry.ErrNotFound
+}
+
+// sendReceipt transmits a transform receipt when — and only when — `--link-receipt` was given.
+//
+// 🔴 Read the guard order. The flag is checked FIRST, before anything about the network is considered, so
+// that "was this transmitted?" has a single answer that does not depend on how the binary was built. A
+// build with no `NetCommands` and the flag set says so out loud rather than silently succeeding: a
+// developer who asked for a receipt and got none must be told, or they will believe the console is
+// broken when the command was.
+//
+// A transmission failure is NARRATED, never fatal. `apply` produced a reviewable diff on disk; failing
+// the command because the platform could not be told would throw away the work the developer actually
+// asked for — the same rule `link` follows for the run record (FR19).
+func sendReceipt(cfg Config, s Streams, net NetCommands, r runlink.TransformReceipt) {
+	if cfg.Get("link-receipt") != "true" {
+		return
+	}
+	if cfg.Get("dry-run") == "true" {
+		// 🔴 §2.7 — the render is the EXACT bytes, not a summary. A dry-run a reviewer is asked to trust
+		// has to be the transmission written down; anything less is evidence of something that was never
+		// sent. Marshalled from the same value the transport marshals.
+		b, err := json.MarshalIndent(r, "", "  ")
+		if err != nil {
+			s.Narratef("apply: --dry-run could not render the receipt: %v", err)
+			return
+		}
+		s.Narratef("apply: --link-receipt --dry-run — this is the EXACT receipt that would be transmitted, "+
+			"and nothing was:\n%s", string(b))
+		return
+	}
+	if net == nil {
+		s.Narratef("apply: --link-receipt was given, and this build has no platform commands — NOTHING " +
+			"was transmitted. Use a build with linking support, or drop the flag.")
+		return
+	}
+	if err := net.SendTransformReceipt(cfg, s, r); err != nil {
+		s.Narratef("apply: the diff is written and valid; the receipt did NOT transmit (%v). "+
+			"Re-run with --link-receipt to try again — nothing about the diff is affected.", err)
+	}
 }

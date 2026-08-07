@@ -5,12 +5,15 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/heros-foreal/agentd/internal/auth"
 	"github.com/heros-foreal/agentd/internal/executor"
+	"github.com/heros-foreal/agentd/internal/linkingest"
+	"github.com/heros-foreal/agentd/internal/runlink"
 	"github.com/heros-foreal/agentd/internal/submit"
 	"github.com/heros-foreal/agentd/internal/transform"
 	"github.com/heros-foreal/agentd/internal/variantspec"
@@ -178,13 +181,68 @@ type transformView struct {
 	RejectedDim    string `json:"rejected_dimension,omitempty"`
 }
 
+// reportedTransformView is a transform the platform was TOLD about, as the console reads it.
+//
+// # 🔴 Why this is its own type rather than more optional fields on transformView
+//
+// It is the discipline §4.2 settled on for a linked RUN, for the same reason. A transform the platform
+// GENERATED has a diff, a build gate and a verification strength; one it was told about has per-node
+// outcomes and three integers. Merging them would produce a type whose every field is optional, which
+// tells a consumer nothing about which half it is holding — and that is precisely the failure this type
+// exists to close: `/app/transforms/{hash}/{rev}` answered **500** on a reported transform
+// (`Cannot read properties of undefined (reading 'trim')`), because the page read `transform.diff` on a
+// payload that has never carried one. §6.5 built the reported ANSWER and left the page reading the
+// executor's shape; a generated type covering only that shape type-checked perfectly.
+//
+// `origin` is the discriminator, present on the wire and never inferred from which fields are empty.
+//
+// 🚫 There is no `diff` field and there must never be one: the receipt carries counts where a diff would
+// go (§2.8), so such a field could only be filled by inventing content the platform was not sent.
+// `DiffAvailable` is a plain false and `DiffAbsentBecause` says it in words, so a surface renders a
+// stated boundary rather than a blank panel that reads as broken.
+type reportedTransformView struct {
+	// Origin is always "reported". Stated rather than implied, so a consumer branches on a value it can
+	// see instead of on the absence of a field it expected.
+	Origin            string                    `json:"origin"`
+	ConfigHash        string                    `json:"config_hash"`
+	ConfigHash12      string                    `json:"config_hash_display"`
+	SourceRevision    string                    `json:"source_revision"`
+	SourceRevision12  string                    `json:"source_revision_display"`
+	WorkflowID        string                    `json:"workflow_id"`
+	Status            string                    `json:"status"`
+	ToolVersion       string                    `json:"tool_version"`
+	CoverageVersion   string                    `json:"coverage_version,omitempty"`
+	ReportedAt        string                    `json:"reported_at"`
+	NodeOutcomes      []runlink.WireNodeOutcome `json:"node_outcomes"`
+	NodesApplied      int                       `json:"nodes_applied"`
+	NodesRefused      int                       `json:"nodes_refused"`
+	FilesChanged      int                       `json:"files_changed"`
+	LinesAdded        int                       `json:"lines_added"`
+	LinesRemoved      int                       `json:"lines_removed"`
+	DiffAvailable     bool                      `json:"diff_available"`
+	DiffAbsentBecause string                    `json:"diff_absent_because"`
+}
+
 func (s *Server) handleGetTransform(w http.ResponseWriter, r *http.Request) {
+	configHash, sourceRevision := r.PathValue("config_hash"), r.PathValue("source_revision")
 	if s.configRuntime.Transforms == nil {
+		// 🔴 P29 §6.5 — a deployment with no EXECUTOR still has transforms to show, because the customer
+		// generated them on their own machine and told us. Answering "the P2 store is not mounted" to
+		// somebody who ran `heros apply --link-receipt` is telling them their receipt went nowhere.
+		if s.reportedTransform(w, r, configHash, sourceRevision) {
+			return
+		}
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "the P2 store is not mounted"})
 		return
 	}
-	rec, diff, err := s.configRuntime.Transforms.Get(r.Context(), r.PathValue("config_hash"), r.PathValue("source_revision"))
+	rec, diff, err := s.configRuntime.Transforms.Get(r.Context(), configHash, sourceRevision)
 	if errors.Is(err, worktree.ErrTransformNotFound) {
+		// The platform did not generate this transform. It may still have been TOLD about one — which is
+		// the whole point of a receipt, and the reason /app/transforms could not resolve for anything a
+		// customer applied locally.
+		if s.reportedTransform(w, r, configHash, sourceRevision) {
+			return
+		}
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "no such transform"})
 		return
 	}
@@ -472,8 +530,16 @@ func visibleToPrincipal(r *http.Request, owner string) bool {
 
 // handleListRuns answers "what did I run?" — the question this API could not be asked before P27.
 func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
-	if s.configRuntime.Runs == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "the P2 store is not mounted"})
+	// 🔴 EITHER source is enough (P29 §4.2). The old guard returned 503 whenever the EXECUTOR store was
+	// absent, which is the normal shape of a deployment that only receives links: a customer with a
+	// hundred linked runs was told "the P2 store is not mounted" and shown nothing. Hosted execution is
+	// P25's standing refusal — the platform learns of a run, it does not perform one — so "no executor"
+	// is the expected configuration, not a broken one.
+	if s.configRuntime.Runs == nil && s.linkedRuns == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"state": StateNotMounted,
+			"error": "this deployment carries neither executed runs nor run linking",
+		})
 		return
 	}
 	p, ok := auth.PrincipalFrom(r.Context())
@@ -500,16 +566,71 @@ func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
 		before = t
 	}
 
-	runs, err := s.configRuntime.Runs.ListForTenant(r.Context(), p.TenantID, limit, before)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
-		return
+	var executed []executor.RunSummary
+	executedCarried := s.configRuntime.Runs != nil
+	if executedCarried {
+		var err error
+		executed, err = s.configRuntime.Runs.ListForTenant(r.Context(), p.TenantID, limit, before)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+			return
+		}
+	}
+
+	// 🔴 ONE LIST, TWO ORIGINS (P29 §4.2).
+	//
+	// This endpoint read the EXECUTOR's `run` table and nothing else, while a linked run lands in
+	// `run_link` — two tables, one identifier, nothing joining them. So the run a developer linked ninety
+	// seconds ago was not in the list of their runs, and the console looked like the platform had lost
+	// it.
+	//
+	// The fix is not a second endpoint. A developer does not have two kinds of run in their head and
+	// should not be handed two lists to reconcile; what they need is one list where each row says where
+	// it came from. `origin` is that, carried as DATA so the detail view can route on it rather than
+	// guess from which fields happen to be empty.
+	runs := make([]runListRow, 0, len(executed))
+	for i := range executed {
+		runs = append(runs, runListRow{RunSummary: &executed[i], Origin: "executed", At: executed[i].StartedAt})
+	}
+	linkedFailed := false
+	if s.linkedRuns != nil {
+		linked, lerr := s.linkedRuns.ListForTenant(p.TenantID, limit, before)
+		if lerr != nil {
+			// 🔴 NOT fatal, and NOT silent. Half a list rendered as a whole one is the failure this
+			// endpoint already had; reporting the half we have plus the fact that the other half could
+			// not be read is the only honest answer. A 500 here would hide the executed runs too.
+			linkedFailed = true
+		} else {
+			for _, lr := range linked {
+				runs = append(runs, runListRow{Origin: "linked", At: lr.LinkedAt,
+					SummaryFromLink: summaryFromLink(lr)})
+			}
+		}
+	}
+	// ONE ordering over the merged list. Sorting each source separately and concatenating would put
+	// every linked run after every executed one regardless of when either happened, which is a list
+	// ordered by our storage layout rather than by the customer's day.
+	sort.Slice(runs, func(i, j int) bool {
+		if !runs[i].At.Equal(runs[j].At) {
+			return runs[i].At.After(runs[j].At)
+		}
+		return runs[i].RunID < runs[j].RunID
+	})
+	if len(runs) > limit {
+		runs = runs[:limit]
 	}
 	// 🔴 THREE states, not one. "You have no runs yet", "runs exist that predate ownership recording",
 	// and "the platform did not answer" are three different facts with three different next actions, and
 	// collapsing any pair of them into an empty list is what makes a release read as data loss to
 	// somebody who used the product last week.
 	body := map[string]any{"runs": runs}
+	if linkedFailed {
+		// A fourth state on this one endpoint, because it reads two sources and either can fail alone.
+		// Naming it is what stops a reader concluding their linked runs were never stored.
+		body["linked_runs_state"] = string(StateReadFailed)
+		body["linked_runs_note"] = "the executed runs below are complete; linked runs could not be read, " +
+			"so this list is PARTIAL — they are not missing, they are unread"
+	}
 	// 🔴 Reported ALWAYS, not only when the page is empty.
 	//
 	// The first version returned this count only for a tenant with no rows, which made the "runs exist
@@ -518,15 +639,177 @@ func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
 	// platform rather than of a tenant — a pre-ownership row belongs to nobody, which is the whole
 	// meaning of the NULL — so it is the same answer either way and there is no reason to hide it
 	// behind an empty list.
-	if n, cerr := s.configRuntime.Runs.PreOwnedCount(r.Context()); cerr == nil && n > 0 {
-		body["pre_ownership_runs"] = n
-		body["pre_ownership_note"] = "runs created before this platform recorded which organization " +
-			"owns them are not listed; they remain reachable by id"
+	if !executedCarried {
+		// Stated rather than implied by absence: a list with no executed runs on a platform that does not
+		// execute is complete, and a reader must be able to tell that from a list that lost half itself.
+		body["executed_runs_state"] = string(StateNotMounted)
+		body["executed_runs_note"] = "this deployment does not execute runs — every row here was LINKED " +
+			"from a developer's machine, which is the platform's standing boundary and not a gap"
 	}
-	if len(runs) == limit {
+	if executedCarried {
+		if n, cerr := s.configRuntime.Runs.PreOwnedCount(r.Context()); cerr == nil && n > 0 {
+			body["pre_ownership_runs"] = n
+			body["pre_ownership_note"] = "runs created before this platform recorded which organization " +
+				"owns them are not listed; they remain reachable by id"
+		}
+	}
+	if len(runs) == limit && limit > 0 {
 		// The cursor for the next page is the LAST row's timestamp, handed back rather than derived by
-		// the client — the client does not know the ordering column and must not have to guess it.
-		body["next_before"] = runs[len(runs)-1].StartedAt.Format(time.RFC3339Nano)
+		// the client — the client does not know the ordering column and must not have to guess it. It is
+		// the MERGED ordering's timestamp, so one cursor pages both origins.
+		body["next_before"] = runs[len(runs)-1].At.Format(time.RFC3339Nano)
 	}
 	writeJSON(w, http.StatusOK, body)
+}
+
+// runListRow is one row of the MERGED runs list (P29 §4.2).
+//
+// # Why a linked run is not flattened into a RunSummary
+//
+// It cannot honestly be. `RunSummary.Status` is the EXECUTOR's terminal state and a linked run has none
+// — the platform learned of a run, it did not perform one. Filling that field would mean inventing a
+// value, and the two candidates are both wrong: `succeeded` claims we observed something we did not, and
+// an empty string renders as a broken row. So the two shapes are carried side by side, exactly one of
+// them is present, and `origin` says which — the same discipline `LinkedRunView` follows for the detail
+// view and for the same reason `hostedscorecard` reports `FailureAttribution: unavailable`.
+type runListRow struct {
+	// Origin is `executed` or `linked`. Carried as DATA so the detail view routes on it rather than
+	// guessing from which fields happen to be empty.
+	Origin string `json:"origin"`
+	// At is the row's position in the merged ordering — a run's start for an executed one, the link's
+	// timestamp for a linked one. It is the cursor column, so one cursor pages both origins.
+	At time.Time `json:"at"`
+	// RunID is lifted to the top level because it is the ONE field both shapes have and every consumer
+	// needs, and reading it from two places is how a consumer forgets one of them.
+	RunID string `json:"run_id"`
+
+	// Exactly one of the two below is present.
+	*executor.RunSummary `json:",omitempty"`
+	SummaryFromLink      *linkedRunRow `json:"linked,omitempty"`
+}
+
+// MarshalJSON flattens the executed summary and fills RunID from whichever shape is present.
+func (r runListRow) MarshalJSON() ([]byte, error) {
+	type alias runListRow
+	a := alias(r)
+	switch {
+	case a.RunSummary != nil:
+		a.RunID = a.RunSummary.RunID
+	case a.SummaryFromLink != nil:
+		a.RunID = a.SummaryFromLink.RunID
+	}
+	return json.Marshal(a)
+}
+
+// linkedRunRow is what a LINKED run has: the numbers the developer's own harness computed. No status,
+// no attempt groups, no per-node blobs — there is nothing to put in them.
+type linkedRunRow struct {
+	RunID          string  `json:"run_id"`
+	WorkflowID     string  `json:"workflow_id"`
+	ConfigHash     string  `json:"config_hash"`
+	ConfigHash12   string  `json:"config_hash_display"`
+	SourceRevision string  `json:"source_revision"`
+	ToolVersion    string  `json:"tool_version"`
+	LinkedAt       string  `json:"linked_at"`
+	CostUSD        float64 `json:"cost_usd"`
+	LatencyMS      float64 `json:"latency_ms"`
+	// GateOutcome is the customer's OWN gate verdict, empty when the run predates the evidence crossing
+	// the boundary. Empty is deliberately not one of the verdicts.
+	GateOutcome string            `json:"gate_outcome,omitempty"`
+	Scores      []LinkedScoreView `json:"scores"`
+}
+
+func summaryFromLink(lr linkingest.LinkedRun) *linkedRunRow {
+	row := &linkedRunRow{
+		RunID: lr.RunID, WorkflowID: lr.WorkflowID,
+		ConfigHash: lr.ConfigHash, ConfigHash12: shortHash12(lr.ConfigHash),
+		SourceRevision: lr.SourceRevision, ToolVersion: lr.ToolVersion,
+		LinkedAt:    lr.LinkedAt.UTC().Format(time.RFC3339),
+		GateOutcome: string(lr.Eval.GateOutcome),
+		Scores:      make([]LinkedScoreView, 0, len(lr.Scores)),
+	}
+	for _, sc := range lr.Scores {
+		row.Scores = append(row.Scores, LinkedScoreView{
+			Metric: sc.Metric, Value: sc.Value, CILow: sc.CILow, CIHigh: sc.CIHigh,
+		})
+	}
+	return row
+}
+
+// reportedTransform answers from a TRANSMITTED RECEIPT, and reports whether it did.
+//
+// # 🔴 What it renders, and the one thing it cannot
+//
+// Per-node outcomes and a DIFFSTAT. Never a diff — the receipt carries three integers where one would
+// go and there is no field a hunk could occupy, so this handler could not render one if it tried. That
+// is stated in the response itself (`diff_available: false` with a reason), because a transform page
+// with no diff on it looks broken unless the screen says why it is absent.
+//
+// `origin: reported` sits beside the data for the same reason the runs list carries one: a transform the
+// platform GENERATED and one it was TOLD about support different things, and a reader must be able to
+// tell which they are looking at rather than inferring it from which fields are empty.
+func (s *Server) reportedTransform(w http.ResponseWriter, r *http.Request, configHash, sourceRevision string) bool {
+	if s.transformReceipts == nil {
+		return false
+	}
+	p, ok := auth.PrincipalFrom(r.Context())
+	if !ok || p.TenantID == "" {
+		return false
+	}
+	rec, found, err := s.transformReceipts.Get(p.TenantID, configHash, sourceRevision)
+	if err != nil {
+		// A read failure is neither "no such transform" nor a missing store. Saying so costs one branch
+		// and saves a customer from concluding their receipt was never accepted.
+		writeJSON(w, http.StatusBadGateway, map[string]any{
+			"state": StateReadFailed,
+			"error": "could not read the reported transform: " + err.Error(),
+		})
+		return true
+	}
+	if !found {
+		return false
+	}
+	applied, refused := 0, 0
+	for _, o := range rec.NodeOutcomes {
+		switch o.Outcome {
+		case runlink.OutcomeApplied:
+			applied++
+		case runlink.OutcomeRefused:
+			refused++
+		}
+	}
+	// 🔴 A TYPE, not a map literal. The map was invisible to `ConsoleViewTypes` — nothing generated a
+	// TypeScript shape for it — so the console had no declaration of this response and read the
+	// executor's instead. A map cannot participate in the drift gate; a struct must.
+	outcomes := rec.NodeOutcomes
+	if outcomes == nil {
+		// Never null on the wire. A consumer that maps over this must get an empty list, not a crash —
+		// the same rule §4.5 states for an enumeration, applied one level down.
+		outcomes = []runlink.WireNodeOutcome{}
+	}
+	writeJSON(w, http.StatusOK, reportedTransformView{
+		Origin:           "reported",
+		ConfigHash:       rec.ConfigHash,
+		ConfigHash12:     shortHash12(rec.ConfigHash),
+		SourceRevision:   rec.SourceRevision,
+		SourceRevision12: shortHash12(rec.SourceRevision),
+		WorkflowID:       rec.WorkflowID,
+		Status:           rec.Status,
+		ToolVersion:      rec.ToolVersion,
+		CoverageVersion:  rec.CoverageVersion,
+		ReportedAt:       rec.ReceivedAt.UTC().Format(time.RFC3339),
+		NodeOutcomes:     outcomes,
+		NodesApplied:     applied,
+		NodesRefused:     refused,
+		FilesChanged:     rec.FilesChanged,
+		LinesAdded:       rec.LinesAdded,
+		LinesRemoved:     rec.LinesRemoved,
+		// 🚫 Said out loud rather than left as an empty field. A transform page with a blank diff reads
+		// as a broken page; a transform page that says WHY there is no diff reads as a boundary.
+		DiffAvailable: false,
+		DiffAbsentBecause: "This transform was generated on your machine and reported as a receipt. " +
+			"The receipt carries counts, not content: the diff never crosses this boundary and there is " +
+			"no field on the payload it could occupy. It is on the machine that produced it.",
+	})
+	return true
 }

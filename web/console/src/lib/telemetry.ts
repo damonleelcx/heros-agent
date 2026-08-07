@@ -67,6 +67,14 @@ const PATH_TEMPLATES: Array<[RegExp, string]> = [
   [/^\/api\/v1\/workflows\/[^/]+\/nodes$/, "/api/v1/workflows/{workflow_id}/nodes"],
   [/^\/api\/v1\/workflows\/[^/]+\/bindings$/, "/api/v1/workflows/{workflow_id}/bindings"],
   [/^\/api\/v1\/workflows$/, "/api/v1/workflows"],
+  // P29 §4 — the subject index. Listed so their latency and error rates are queryable: an unlisted
+  // route logs as /unknown, and a picker that is slow or failing is exactly the thing this console has
+  // no other way to notice.
+  [/^\/api\/v1\/variants$/, "/api/v1/variants"],
+  [/^\/api\/v1\/transforms$/, "/api/v1/transforms"],
+  [/^\/api\/v1\/link-coverage$/, "/api/v1/link-coverage"],
+  [/^\/api\/v1\/workflows\/[^/]+\/axis-projection$/, "/api/v1/workflows/{workflow_id}/axis-projection"],
+  [/^\/api\/v1\/workflows\/[^/]+\/delivery-projection$/, "/api/v1/workflows/{workflow_id}/delivery-projection"],
   [/^\/api\/v1\/models$/, "/api/v1/models"],
   [/^\/api\/v1\/prompts$/, "/api/v1/prompts"],
   [/^\/api\/v1\/prompts\/diff/, "/api/v1/prompts/diff"],

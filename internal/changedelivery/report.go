@@ -1,6 +1,10 @@
 package changedelivery
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/heros-foreal/agentd/internal/transform"
+)
 
 // report.go — delivery as a REPORTED STATE (P13 §23.1/23.3, FR57/FR58/FR60).
 //
@@ -327,4 +331,32 @@ func deriveState(srcOut, rtOut RouteOutcome, src SourceOutcome, rollout RolloutS
 	// The source route refuses but the runtime route is eligible: the change can be TRIED, and saying so
 	// is the whole reason the second route was added.
 	return StateSourcePending, "The source route refuses this change, so it cannot become permanent. It remains eligible for a bounded rollout, which produces evidence rather than delivery."
+}
+
+// RuntimeDeliversDespiteSourceRefusal answers, for a SOURCE-route refusal cause, whether the RUNTIME
+// route can still deliver the change (P29 §5.8).
+//
+// 🔴 It is exported from HERE rather than reimplemented by the projection, and that is the whole reason
+// it exists. `BuildReport` above already decides this, in two places with two different arguments —
+// `CallSiteCannotCarry` wins on both routes, and `GateRejected` overrides eligibility entirely — and a
+// projection restating the rule would be a second answer to "can this reach my node", disagreeing with
+// `/app/delivery` on the days it matters most.
+//
+// The rule, stated once: a `call-site-cannot-carry-it` refusal is a fact about THIS CALL SITE'S OWN
+// SOURCE, so no route reaches it — a binding-document field would not change that, because the day the
+// field lands the call site still has nothing for either route to act on. `not-expressible-at-a-call-site`
+// is the opposite: the value does not exist in source in ANY language, which is precisely the case a
+// RUNTIME binding was built for. And `no-materializer-for-this-language` names work the platform owes at
+// the source route, which the runtime route does not depend on.
+func RuntimeDeliversDespiteSourceRefusal(cause string) bool {
+	switch transform.CauseClass(cause) {
+	case transform.CauseCallSiteShape:
+		return false
+	case transform.CauseNotAtCallSite, transform.CauseNoMaterializer:
+		return true
+	}
+	// An unrecognised cause is answered NO rather than yes. An unknown refusal reported as "the runtime
+	// route will handle it" is a promise nobody made; reported as undeliverable it is, at worst, an
+	// understatement the reader can act on.
+	return false
 }

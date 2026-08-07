@@ -2591,6 +2591,95 @@
       ],
       "type": "object"
     },
+    "ReportedTransformView": {
+      "description": "Response of GET /api/v1/transforms/{config_hash}/{source_revision} (origin: reported)",
+      "properties": {
+        "config_hash": {
+          "type": "string"
+        },
+        "config_hash_display": {
+          "type": "string"
+        },
+        "coverage_version": {
+          "type": "string"
+        },
+        "diff_absent_because": {
+          "type": "string"
+        },
+        "diff_available": {
+          "type": "boolean"
+        },
+        "files_changed": {
+          "type": "integer"
+        },
+        "lines_added": {
+          "type": "integer"
+        },
+        "lines_removed": {
+          "type": "integer"
+        },
+        "node_outcomes": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/WireNodeOutcome"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "nodes_applied": {
+          "type": "integer"
+        },
+        "nodes_refused": {
+          "type": "integer"
+        },
+        "origin": {
+          "type": "string"
+        },
+        "reported_at": {
+          "type": "string"
+        },
+        "source_revision": {
+          "type": "string"
+        },
+        "source_revision_display": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "tool_version": {
+          "type": "string"
+        },
+        "workflow_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "config_hash",
+        "config_hash_display",
+        "diff_absent_because",
+        "diff_available",
+        "files_changed",
+        "lines_added",
+        "lines_removed",
+        "node_outcomes",
+        "nodes_applied",
+        "nodes_refused",
+        "origin",
+        "reported_at",
+        "source_revision",
+        "source_revision_display",
+        "status",
+        "tool_version",
+        "workflow_id"
+      ],
+      "type": "object"
+    },
     "ResidualItem": {
       "properties": {
         "dimension": {
@@ -3675,6 +3764,24 @@
         "subgraph_id"
       ],
       "type": "object"
+    },
+    "WireNodeOutcome": {
+      "properties": {
+        "cause": {
+          "type": "string"
+        },
+        "node_id": {
+          "type": "string"
+        },
+        "outcome": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "node_id",
+        "outcome"
+      ],
+      "type": "object"
     }
   },
   "$id": "https://heros.dev/schemas/console-view.schema.json",
@@ -3719,6 +3826,9 @@
     },
     "ProposalSurface": {
       "$ref": "#/$defs/ProposalSurface"
+    },
+    "ReportedTransformView": {
+      "$ref": "#/$defs/ReportedTransformView"
     },
     "RunMonitor": {
       "$ref": "#/$defs/RunMonitor"

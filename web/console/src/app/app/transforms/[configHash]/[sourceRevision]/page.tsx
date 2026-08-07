@@ -1,4 +1,4 @@
-import type { TransformView } from "@/lib/types.generated";
+import type { TransformView, ReportedTransformView } from "@/lib/types.generated";
 import { load } from "@/lib/view";
 import { requireSession } from "@/lib/session";
 import { recordVisit, routes } from "@/lib/subjects";
@@ -24,10 +24,17 @@ export default async function TransformPage({
     href: routes.transform(hash, revision),
     hint: `revision ${revision}`,
   });
-  const { outcome } = await load<TransformView>((paths) => paths.transform(hash, revision), [
-    "config_hash",
-    "source_revision",
-  ]);
+  /*
+   * 🔴 The response is a UNION discriminated by `origin` (P29 §6.5), and this page read only the
+   * executor's arm of it — `transform.diff.trim()` on a payload that carries no `diff` — which made
+   * every REPORTED transform answer 500 with `Cannot read properties of undefined (reading 'trim')`.
+   * The required keys asked for below are the two both arms carry, deliberately: asking for `diff`
+   * would turn a reported transform into a load failure, which is a different lie.
+   */
+  const { outcome } = await load<TransformView | ReportedTransformView>(
+    (paths) => paths.transform(hash, revision),
+    ["config_hash", "source_revision"],
+  );
   return (
     <PageFrame
       eyebrow="Transform"
@@ -72,9 +79,100 @@ export default async function TransformPage({
           ) : null}
         </>
       ) : (
-        <TransformBody transform={outcome.data} />
+        <TransformSwitch transform={outcome.data} />
       )}
     </PageFrame>
+  );
+}
+
+/**
+ * isReported is the discriminator, read from the wire rather than guessed from which fields are absent.
+ *
+ * 🚫 It deliberately does NOT test `"diff" in transform`. Inferring the shape from a missing field is
+ * what the 500 was: a page deciding what it is holding by dereferencing and finding out. `origin` is on
+ * the payload precisely so nobody has to.
+ */
+function isReported(t: TransformView | ReportedTransformView): t is ReportedTransformView {
+  return (t as ReportedTransformView).origin === "reported";
+}
+
+function TransformSwitch({ transform }: { transform: TransformView | ReportedTransformView }) {
+  return isReported(transform) ? (
+    <ReportedTransformBody transform={transform} />
+  ) : (
+    <TransformBody transform={transform} />
+  );
+}
+
+/**
+ * ReportedTransformBody renders a transform the platform was TOLD about.
+ *
+ * It shows what the receipt actually carries — per-node outcomes with their refusal class, and the
+ * three diff STATISTICS — and states in the platform's own words why there is no diff, rather than
+ * leaving an empty panel that reads as a broken page. Everything here is rendered as received: the
+ * counts are not recomputed from `node_outcomes`, because two answers to "how many refused" is one
+ * more than this page can be trusted with.
+ */
+function ReportedTransformBody({ transform }: { transform: ReportedTransformView }) {
+  const outcomes = transform.node_outcomes ?? [];
+  return (
+    <>
+      <Section title="This transform">
+        <Row>
+          <Status value={transform.status} />
+          <Chip title="the platform did not generate this transform; your machine did, and told us">
+            origin reported
+          </Chip>
+          <Chip variant="hash" title={transform.config_hash}>
+            config {transform.config_hash_display}
+          </Chip>
+          <Chip>rev {transform.source_revision_display}</Chip>
+          {transform.workflow_id ? <Chip>{transform.workflow_id}</Chip> : null}
+          {transform.coverage_version ? <Chip>{transform.coverage_version}</Chip> : null}
+        </Row>
+        <Row>
+          <Chip>
+            {transform.nodes_applied} applied / {outcomes.length} reported
+          </Chip>
+          <Chip>{transform.nodes_refused} refused</Chip>
+          <Chip>
+            {transform.files_changed} file(s) · +{transform.lines_added}/-{transform.lines_removed}
+          </Chip>
+        </Row>
+        <p className="hint">
+          Reported at {transform.reported_at} by heros {transform.tool_version}.
+        </p>
+      </Section>
+
+      <Section title="Per-node outcome">
+        {outcomes.length === 0 ? (
+          <Empty title="The receipt named no node outcomes.">
+            <p>
+              A transform that changed nothing reports none. The diffstat above is the whole of what
+              happened.
+            </p>
+          </Empty>
+        ) : (
+          <ul className="rows">
+            {outcomes.map((o) => (
+              <li key={o.node_id}>
+                <Row>
+                  <Chip variant="hash">{o.node_id}</Chip>
+                  <Status value={o.outcome} />
+                  {o.cause ? <Chip title="the class of refusal, as the engine named it">{o.cause}</Chip> : null}
+                </Row>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Section>
+
+      <Section title="The diff">
+        <Empty title="No diff crossed the boundary — and that is a boundary, not a gap.">
+          <p>{transform.diff_absent_because}</p>
+        </Empty>
+      </Section>
+    </>
   );
 }
 

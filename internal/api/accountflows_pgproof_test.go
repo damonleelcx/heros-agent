@@ -36,6 +36,7 @@ import (
 	"github.com/heros-foreal/agentd/internal/account"
 	"github.com/heros-foreal/agentd/internal/auth"
 	"github.com/heros-foreal/agentd/internal/config"
+	"github.com/heros-foreal/agentd/internal/mailer"
 	"github.com/heros-foreal/agentd/internal/metering"
 	"github.com/heros-foreal/agentd/internal/pgmigrate"
 	"github.com/heros-foreal/agentd/internal/pgtest"
@@ -62,6 +63,19 @@ type liveSurface struct {
 func (s *liveSurface) Store() tenancy.Store    { return s.store }
 func (s *liveSurface) SignUp() *signup.Service { return s.signUp }
 func (s *liveSurface) SelfServeEnabled() bool  { return true }
+
+// ConsoleURL was added to AccountSurface by P28 (the origin the links in verification and reset messages
+// point at) and was never added here — so this ENTIRE pgproof file has not compiled since, and with it
+// the whole `internal/api` live-Postgres suite has been silently dead. Found by P29 §3.7, which needed
+// to add a test to this package and could not. Reported as a finding; the stub is the minimum that
+// revives the suite, and an empty origin is what this fixture has always effectively had (relative
+// links), so no assertion changes meaning.
+func (s *liveSurface) ConsoleURL() string { return "" }
+
+// Mailer, likewise added by P28 and likewise never added here. nil is the documented meaning "held for
+// the operator" — the interface's own comment is explicit that there is no path on which a message is
+// dropped — so this is the honest stub rather than a silencing one.
+func (s *liveSurface) Mailer() mailer.Mailer { return nil }
 func (s *liveSurface) Now() time.Time {
 	if s.clock.IsZero() {
 		return flowAt

@@ -159,6 +159,10 @@ func (s *Server) handleWhoAmI(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, specError{Error: "authentication required"})
 		return
 	}
+	// Signing in is an authenticated act too, so a person who has signed in and never linked anything
+	// still has a billing surface rather than an absent one.
+	s.provisionAccount(principal.TenantID)
+
 	// 🔴 ADDITIVE. `identity` keeps its name, its meaning and its value — both existing callers (the
 	// CLI's `Validate` and the console's platform-token seam) read only that field, and P27 must not
 	// break either. What is added beside it is who and where.
@@ -221,6 +225,11 @@ func (s *Server) handleRunLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 🔴 The first authenticated act provisions the account (P29 §7.1). It is create-if-absent and it
+	// never corrects an existing one — a "reconciliation" here would move a paying customer back to Free
+	// on their next link, silently.
+	s.provisionAccount(principal.TenantID)
+
 	var payload runlink.Payload
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<20))
 	dec.DisallowUnknownFields() // a payload with a field outside the wire contract is rejected, not silently accepted
@@ -276,8 +285,15 @@ type WorkflowIRSource interface {
 // MountWorkflowIR registers the opt-in structure ingest. Call after New. Optional, like every mount:
 // unmounted, the route answers 503 and `heros link --with-ir` reports that this deployment does not
 // accept structure — which is a policy answer, not a failure.
+// P29 · the FLAT route is the one the CLI addresses, and the parameterised one is kept registered for
+// exactly one release so a deployed CLI reaching it from inside the cluster still works. See
+// publicroutes.go: the flat one is ExposurePublic, the parameterised one is ExposureInternal and is never
+// published. The identifier moved into the payload, where `WorkflowIRPayload.WorkflowID` already carried
+// it — the URL segment was duplicating the body, and that duplication is what made the path unpublishable
+// as an `Exact` ingress rule.
 func (s *Server) MountWorkflowIR(src WorkflowIRSource) {
 	s.workflowIR = src
+	s.Mux.HandleFunc("POST /api/v1/workflow-ir", s.handleWorkflowIRIngest)
 	s.Mux.HandleFunc("POST /api/v1/workflows/{workflow_id}/ir", s.handleWorkflowIRIngest)
 }
 
@@ -309,9 +325,14 @@ func (s *Server) handleWorkflowIRIngest(w http.ResponseWriter, r *http.Request) 
 		})
 		return
 	}
-	// The path names the workflow and so does the body. They must agree: a mismatch means one of them
-	// is describing something else, and guessing which would attach a structure to the wrong subject.
-	if id := r.PathValue("workflow_id"); id != payload.WorkflowID {
+	// On the parameterised route the path names the workflow and so does the body. They must agree: a
+	// mismatch means one of them is describing something else, and guessing which would attach a
+	// structure to the wrong subject. On the FLAT route there is no path identifier — `PathValue` returns
+	// "" — and the body is the only statement of which workflow this is, which is the point of the shape.
+	//
+	// 🔴 The empty check is `!= ""`, not "if this is the flat route". A precedence rule ("the path wins",
+	// "the body wins") is what turns a disagreement into a silent mis-attribution, so there is none.
+	if id := r.PathValue("workflow_id"); id != "" && id != payload.WorkflowID {
 		writeJSON(w, http.StatusBadRequest, specError{
 			Error: "the workflow id in the path and in the payload disagree — refusing rather than choosing one",
 		})
@@ -328,6 +349,10 @@ func (s *Server) handleWorkflowIRIngest(w http.ResponseWriter, r *http.Request) 
 		TenantID: principal.TenantID, WorkflowID: payload.WorkflowID,
 		SourceRevision: payload.SourceRevision, IRVersion: payload.IRVersion,
 		ReceivedAt: time.Now().UTC(), Nodes: payload.Nodes, Edges: payload.Edges,
+		// 🔴 Carried through EXACTLY as sent, including when it is absent. The platform never substitutes
+		// its own `transform.CoverageTableVersion()`: that would date the customer's verdicts to a table
+		// they were never computed against, and it is precisely the STALE label that would be suppressed.
+		CoverageVersion: payload.CoverageVersion,
 	}); err != nil {
 		writeJSON(w, http.StatusBadGateway, specError{Error: "could not store the workflow structure: " + err.Error()})
 		return

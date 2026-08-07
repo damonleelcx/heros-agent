@@ -1,3 +1,6 @@
+import { loadDeliveryProjection, loadProjection } from "@/lib/projection";
+import type { DeliveryProjectionOutcome } from "@/lib/projection";
+import { AxisProjectionPanel } from "@/components/axisProjection";
 import Link from "next/link";
 import type { ChangeDeliveryView, DeliveriesView, DeliveryView } from "@/lib/types.generated";
 import { load } from "@/lib/view";
@@ -47,6 +50,11 @@ export const dynamic = "force-dynamic";
 export default async function DeliveryPage() {
   const { outcome } = await load<DeliveriesView>((paths) => paths.deliveries(), ["route"]);
   const routes = await fetchDeliveryRoutes();
+  // 🔴 P29 §5.10 — the delivery table crossed with THIS organization's nodes. The table above is a
+  // total build fact and it is correct; it has never said anything about the reader's own call sites,
+  // and `undeliverable` is the number it exists to produce.
+  const projection = await loadProjection();
+  const delivery = await loadDeliveryProjection();
 
   const tabs: TabItem[] = [
     {
@@ -59,6 +67,19 @@ export default async function DeliveryPage() {
       ),
     },
     { id: "routes", label: "Routes", content: <RoutesTab view={routes} /> },
+    {
+      id: "your-nodes",
+      label: "Your nodes",
+      // Both projections in ONE tab: "which of my nodes can receive a change" and "what does each axis
+      // do at each of my call sites" are the same question asked twice, and splitting them across two
+      // tabs would make the reader compare across a click.
+      content: (
+        <div className="flex flex-col gap-8">
+          <YourNodesTab outcome={delivery} />
+          <AxisProjectionPanel axis="model" outcome={projection} />
+        </div>
+      ),
+    },
   ];
 
   return (
@@ -70,6 +91,84 @@ export default async function DeliveryPage() {
     >
       <Tabs tabs={tabs} />
     </PageFrame>
+  );
+}
+
+/**
+ * YourNodesTab is `the delivery table × your nodes` — and the one number it exists to produce is
+ * `undeliverable`: how many of THIS reader's reported nodes cannot receive a change by EITHER route.
+ *
+ * 🚫 A node the platform was not told about is NOT counted as undeliverable. That would be a claim
+ * about the customer's code drawn entirely from our own ignorance, and it is exactly the number a
+ * reader would act on — so the denominator is `reported_cells`, printed beside it.
+ */
+function YourNodesTab({ outcome }: { outcome: DeliveryProjectionOutcome }) {
+  if (outcome.state === "not-mounted") {
+    return (
+      <p className="hint">
+        This deployment does not accept workflow structure, so there is nothing to cross the delivery
+        table with. Nothing failed — the capability is not served here.
+      </p>
+    );
+  }
+  if (outcome.state === "read-failed") {
+    return (
+      <p className="hint">
+        Your reported structure could not be read. This is <strong>not</strong> the same as having sent
+        none, and nothing has been lost.
+        {outcome.detail ? <span className="mono block">{outcome.detail}</span> : null}
+      </p>
+    );
+  }
+  if (outcome.state === "not-reported") {
+    return (
+      <div className="flex flex-col gap-3 rounded-xl border border-dashed border-border bg-card/50 p-5">
+        <p className="text-sm text-foreground">
+          No node of yours can be counted as undeliverable, because the platform has not been told about
+          any.
+        </p>
+        <p className="hint">
+          {outcome.detail} Send it with <code className="mono">{outcome.fill_with}</code>.
+        </p>
+      </div>
+    );
+  }
+
+  const p = outcome.projection;
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="rounded-xl border border-border bg-card p-5">
+        <p className="text-sm text-muted-foreground">Undeliverable by BOTH routes</p>
+        {/* 🔴 The denominator, beside the count. `undeliverable / reported_cells` is the honest ratio;
+            over `cells` it would silently treat every unreported cell as deliverable. */}
+        <p className="mono text-2xl text-foreground">
+          {p.undeliverable}
+          <span className="text-base text-muted-foreground"> / {p.reported_cells} reported</span>
+        </p>
+        <p className="hint">
+          across {p.node_count} node{p.node_count === 1 ? "" : "s"} and {p.cells} cell
+          {p.cells === 1 ? "" : "s"}; {p.cells - p.reported_cells} not reported and therefore not counted
+          either way.
+        </p>
+      </div>
+      <ul className="divide-y divide-border/50 overflow-hidden rounded-xl border border-border">
+        {p.rows
+          .filter((r) => r.deliverable === "neither")
+          .map((r) => (
+            <li className="flex items-start gap-3 px-4 py-3" key={`${r.node_id}:${r.axis}`}>
+              <span className="min-w-0 flex-1">
+                <span className="mono block truncate text-sm text-foreground">{r.symbol || r.node_id}</span>
+                <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+                  {[r.axis, r.language].filter(Boolean).join(" · ")}
+                </span>
+              </span>
+              {r.owner ? (
+                <span className="shrink-0 text-xs text-muted-foreground">closed by {r.owner}</span>
+              ) : null}
+            </li>
+          ))}
+      </ul>
+    </div>
   );
 }
 

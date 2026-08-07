@@ -157,15 +157,34 @@ fi
 # answering 404 forever: checkout completes, the customer is charged, and the platform never learns the
 # subscription became active. Nothing about that failure is visible from either console.
 #
-# ⚠️ This publishes exactly ONE path of agentd, and it is safe to publish precisely because the handler
-# verifies the processor's signature over the raw body before any side effect. Do not widen this to a
-# prefix: `/billing/*` or a bare `reverse_proxy agentd:4321` would put the whole platform API — every
-# tenant-scoped route behind it — on the public internet.
+# ⚠️ Never a prefix. `/billing/*`, `/api/v1/*` or a bare `reverse_proxy agentd:4321` would put the whole
+# platform API — every tenant-scoped route behind it — on the public internet. Caddy's `path` matcher is
+# EXACT unless a path ends in `*`, so the list below is the Compose equivalent of `pathType: Exact`.
+#
+# ── 🔴 P29 · THE SUBSTRATE-PARITY DEFECT, and it was larger than the one that prompted the look ──────
+#
+# This file used to publish exactly ONE agentd path: `/billing/webhook`. Everything else went to the
+# console. So on a Compose deployment — the single-VM install this script exists to produce —
+# `heros login` reached Next.js and got a 404, and so did `heros link`, and so did the device
+# authorization pair, and so did password sign-in. The CLI could not authenticate AT ALL against a box
+# installed by our own bootstrap script.
+#
+# The Kubernetes overlay had six of those rules and a fence checking them. This substrate had one rule
+# and no fence, and nothing in the repository compared the two — which is the same shape as the original
+# defect (a route's reachability living in a deployment file and its existence living in Go) with one
+# more axis: reachability now differs by SUBSTRATE, and only one substrate was being checked.
+#
+# So the list below is the single source, and `internal/api/ingress_fence_test.go` reads it FROM THIS
+# FILE and requires it to equal `api.PublicRoutes()` — the same list it requires the k8s overlay to
+# carry. Adding a public route now fails a test twice, once per substrate, rather than working in
+# production and 404ing on every self-hosted install.
+PLATFORM_PUBLIC_PATHS="/api/v1/whoami /api/v1/run-links /billing/webhook /api/v1/device/authorize /api/v1/device/token /api/v1/auth/password/signin /api/v1/workflow-ir /api/v1/workflow-source /api/v1/workflow-source-discovery /api/v1/proposal-verdicts /api/v1/transform-receipts"
+
 log "Writing deploy/caddy/Caddyfile for $DOMAIN"
 cat > deploy/caddy/Caddyfile <<EOF
 $DOMAIN {
-    @billing_webhook path /billing/webhook
-    handle @billing_webhook {
+    @platform path $PLATFORM_PUBLIC_PATHS
+    handle @platform {
         reverse_proxy agentd:4321
     }
     handle {

@@ -157,6 +157,30 @@ export function scoped(session: Session) {
     // the platform hands back, never an offset the client computes: an offset page shifts under a
     // concurrent write and silently skips or repeats a row.
     runs: (opts?: { limit?: number; before?: string }) => `/api/v1/runs` + runQuery(opts),
+
+    // ── The SUBJECT INDEX (P29 §4) ──────────────────────────────────────────────────────────────
+    //
+    // 🔴 These three are what `subjects.ts` opens by saying did not exist: *"the platform exposes no
+    // enumeration endpoint for any of them"*. Every picker in this console offered only what THIS
+    // BROWSER SESSION had already opened, so a developer who linked a run and came back the next day
+    // found a console that had forgotten their workflow. The data was durable the whole time.
+    //
+    // Each takes NO organization parameter in any position: the scope is the verified principal's, and
+    // there is nothing to get wrong.
+    workflows: () => `/api/v1/workflows`,
+    variants: () => `/api/v1/variants`,
+    transforms: () => `/api/v1/transforms`,
+
+    // P29 §5.8 — `coverage × your nodes`, and the delivery table crossed with them. Both are READS
+    // computed at request time; neither is a stored projection, which would go stale the moment the
+    // coverage table version moved and become a second source of truth for a refusal.
+    axisProjection: (workflowId: string) => `/api/v1/workflows/${encode(workflowId)}/axis-projection`,
+    deliveryProjection: (workflowId: string) => `/api/v1/workflows/${encode(workflowId)}/delivery-projection`,
+
+    // P29 §7.2 — link coverage, OUTSIDE the billing view. It needs no plan, no account and no invoice:
+    // it is the one number a link certainly produces, and it was unreadable for exactly as long as it
+    // lived inside `BillingView`.
+    linkCoverage: () => `/api/v1/link-coverage`,
   };
 }
 

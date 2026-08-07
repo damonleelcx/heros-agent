@@ -50,8 +50,13 @@ type VerdictSink interface {
 // MountVerdictIngest registers the verdict ingest route. Call after New. Optional, like every mount:
 // unmounted it answers 503, which says "this deployment does not accept reported verdicts" rather than
 // "that proposal does not exist".
+//
+// P29 · the flat `/api/v1/proposal-verdicts` is what the CLI addresses; the parameterised route stays
+// registered and ExposureInternal for one release. `VerdictPayload.ProposalID` already carried the
+// identifier, so the path segment was a duplicate that made the route impossible to publish `Exact`.
 func (s *Server) MountVerdictIngest(sink VerdictSink) {
 	s.verdicts = sink
+	s.Mux.HandleFunc("POST /api/v1/proposal-verdicts", s.handleVerdictIngest)
 	s.Mux.HandleFunc("POST /api/v1/proposals/{proposal_id}/verdict", s.handleVerdictIngest)
 }
 
@@ -82,9 +87,11 @@ func (s *Server) handleVerdictIngest(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	// The path names the proposal and so does the body. They must agree: a mismatch means one of them
-	// describes a different proposal, and choosing either would attach a measurement to the wrong change.
-	if id := r.PathValue("proposal_id"); id != payload.ProposalID {
+	// On the parameterised route the path names the proposal and so does the body. They must agree: a
+	// mismatch means one of them describes a different proposal, and choosing either would attach a
+	// measurement to the wrong change. On the flat route there is no path identifier and the body is the
+	// only statement — refused on disagreement, never resolved by precedence.
+	if id := r.PathValue("proposal_id"); id != "" && id != payload.ProposalID {
 		writeJSON(w, http.StatusBadRequest, specError{
 			Error: "the proposal id in the path and in the payload disagree — refusing rather than choosing one",
 		})

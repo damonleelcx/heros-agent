@@ -299,6 +299,31 @@ sentences do not enter a deck during implementation — every claim in it carrie
 one claim is blocked on a question nobody has answered: **whether a CLI-only member occupies a seat.** Until
 that is ratified, no seat number may be quoted, because we cannot state what one includes.
 
+### The Bridge Carries Nothing — P29
+
+The free surface is the CLI; the paid surface is the console; and a developer who ran a real workflow,
+signed in and linked the run found **fifteen console surfaces with nothing to say about it.** Six distinct
+causes wearing one symptom, the worst two being structural: `heros link --with-ir` and `heros push-source`
+address paths the deployed Ingress does not publish — and the fence written to catch exactly that skips
+every path with a variable segment, which is precisely those two. Meanwhile the axis surfaces render
+*total, correct build facts* (`128 apply / 123 refuse`) and the platform has never multiplied them by the
+customer's own nodes.
+
+**P29 — Linked Run Fan-out** makes one `heros link` fill every one of those surfaces with the
+organization's own data, or say in a named, typed sentence why it cannot — without widening the egress
+promise by one byte on the default path. Its centre is a refusal: the platform **never computes** whether
+an axis applies to a call site, because that depends on source it must never hold. The customer's machine
+computes it with the real engine on the real code and transmits a stable identifier; a node we were not
+told about renders **`not reported`**, a fourth state beside applies / refused / not-applicable.
+
+| Phase | PRD | OpenSpec change | Lead role(s) |
+|-------|-----|-----------------|--------------|
+| P29 — Linked Run Fan-out *(edge reach + its fence; per-node applicability computed client-side; subject enumeration; the coverage × your-nodes projection; hosted workflow catalog; link coverage without a billing account)* | [P29-linked-run-fanout.md](P29-linked-run-fanout.md) | `p29-linked-run-fanout` | Backend + Frontend |
+
+**P29 is not implemented.** Its metric is chosen so it cannot be satisfied by shipping pages: *the number
+of console surfaces that render an unexplained empty state after one fully opted-in link* — today fifteen,
+at exit zero. A surface that renders a named, typed refusal counts as explained; a blank does not.
+
 ## PRD template
 
 Every phase PRD follows this structure:

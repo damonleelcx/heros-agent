@@ -27,11 +27,38 @@ a review that finds one in the wrong layer is a review that found a defect.
 | **API key** | `api_credential` | `tenancy.Credential` | "token", "secret". Those are what it contains. |
 | *(never shown)* | `account` | `account.Account` | **"account" for a login.** See below. |
 | *(never shown)* | — | `auth.Principal` | "user". A machine credential is a principal and is nobody. |
+| **reported node** | `workflow_ir.nodes_json[]` | `runlink.WireIRNode` | "your node" unqualified. The platform knows the nodes a customer CHOSE to send; saying "your workflow" implies it has the whole thing. See §7 below. |
+| **not reported** | *(absence)* | `axisprojection.StateNotReported` | "not applicable", "unknown", "none", "n/a". It is the FOURTH state and it means *we were not told* — a boundary the customer chose, not a fact about their code and not a failure of ours. |
+| **projection** | *(derived, no table)* | `axisprojection.Build` | "analysis", "scan", "report". It is one multiplication — this build's coverage table × the nodes you sent — and calling it an analysis implies we looked at something we did not. |
+| **undeliverable** | *(derived)* | `changedelivery.StateUndeliverable` | "unsupported", "failed". A change can be undeliverable because nobody could deliver it, because this call site cannot carry it, or because we have not built the rewriter — three different owners, and the word must not imply the last one. |
+| **link coverage** | `run_link` count / `runs_reported` | `linkingest.LinkCoverage` | a bare percentage. It always carries its denominator, and **unknown is never rendered as 0% or 100%**. |
 
 **"Create an account" is the single most tempting wrong sentence in this phase**, because it is what
 every other product says. Here `account` names the *billing* record. Using it for sign-up would make the
 one screen that talks about money ambiguous, so sign-up says **"Name your organization"** and the word
 account appears only where a plan and a bill do.
+
+### 🔴 §7 — "shows your workflow" is the wrong sentence
+
+The single most tempting wrong sentence in P29, and it is wrong in the same way "create an account" was
+wrong in P27 — it is what every other product says.
+
+The console does **not** show your workflow. It shows **the structure you chose to send**, and the
+difference is the entire egress boundary the product is built on: `heros link` transmits an allowlisted
+summary and nothing else, `--with-ir` is opt-in and named, and a node the customer did not send is one
+the platform will say nothing about.
+
+| 🚫 Never write | ✅ Write |
+|---|---|
+| "the console shows your workflow" | "the console shows the structure you chose to send" |
+| "we analyse your code" | "your CLI computes the verdicts; the platform crosses them with its coverage table" |
+| "N of your nodes are not covered" | "N of your nodes were not reported" — *covered* is our table, *reported* is your decision |
+| "full visibility into your agent" | "the shape you sent, and what each axis does at each of those call sites" |
+| "we found 31 undeliverable changes" | "31 of the nodes you reported are undeliverable by both routes" |
+
+The rule generalises: **every customer-facing sentence about a node names whose fact it is.** The
+coverage table is ours. The verdict is theirs, computed on their machine. The multiplication is ours and
+is only as complete as what they sent.
 
 ---
 

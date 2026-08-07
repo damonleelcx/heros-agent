@@ -422,6 +422,40 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 		h.MountWorkflowIR(irStore)
 		served("p11_workflow_ir (opt-in structure: `heros link --with-ir`)")
 
+		// The OPT-IN transform receipt (`heros apply --link-receipt`), P29 §2.9 — per-node outcomes and a
+		// diffstat, so /app/transforms/{config_hash}/{source_revision} resolves for a change the customer
+		// generated on their own machine.
+		receiptStore := linkingest.NewPGTransformReceiptStore(pg)
+		h.MountTransformReceipts(receiptStore)
+		served("p29_transform_receipts (opt-in transform outcomes: `heros apply --link-receipt`)")
+
+		// 🔴 The SUBJECT INDEX (P29 §4). Until this, `web/console/src/lib/subjects.ts` said it plainly:
+		// "the platform exposes no enumeration endpoint for any of them" — so every picker in the console
+		// offered only the subjects THIS BROWSER SESSION had already opened, and a developer who linked a
+		// run and came back the next day found a console that had forgotten their workflow existed. The
+		// data was durable the whole time; nothing could ask for it.
+		//
+		// It is mounted where the durable stores are, and NOT where the studio matrix is: the matrix's
+		// `GET /api/v1/workflows` read a process-local map that only the demo binaries fill.
+		h.MountEnumeration(irStore, linkStore, receiptStore)
+		// 🔴 `coverage × your nodes` (P29 §5). The coverage table and the reported structure are both
+		// already here and correct; nothing had ever multiplied them, which is why /app/coverage rendered
+		// a full table that said nothing about the reader.
+		h.MountAxisProjection()
+		// 🔴 LINK COVERAGE, outside BillingView (P29 §7.2), and the first-act account provisioner with it.
+		// `linkCoverageFor` already returned three states correctly and was only ever read INSIDE the
+		// billing view — so when an organization had no account, the one number a link certainly produced
+		// became unreadable.
+		var provisioner api.AccountProvisioner
+		if accounts != nil {
+			provisioner = accounts.Provisioner
+		}
+		h.MountLinkCoverage(provisioner)
+		served("p29_link_coverage (GET /api/v1/link-coverage — three-state, no plan or account required)")
+		served("p29_axis_projection (coverage × this organization's reported nodes; a READ, never a table)")
+		served("p29_subject_index (GET /api/v1/workflows, /variants, /transforms — scoped to the " +
+			"authenticated organization)")
+
 		// Platform-side discovery (migration 0022) — the source the platform never had, and the
 		// LABELLED graph that follows from it.
 		//
@@ -511,6 +545,41 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 		// an action. Mounting it over an empty menu would answer 200 with an empty proposal list, which
 		// reads as "we looked at your workflow and found nothing wrong".
 		if mcSrc, ok := modelcatalog.FileSourceFromEnv(); ok {
+			// 🔴 Seed the REGISTRY from the published catalog before anything joins against it.
+			//
+			// `modelcatalog.Menu` joins published judgements onto REGISTERED models by name, and the only
+			// caller of `registry.RegisterModel` in this repository was a demo binary — so on every real
+			// deployment the registry was empty, which made `/api/v1/models` an empty list, the Studio
+			// matrix a set of columns with no rows, and the proposal menu empty for a reason no screen
+			// stated. The catalog is where a deployment already declares which models it offers; this makes
+			// that declaration true of the registry as well instead of only of the price list.
+			//
+			// Idempotent by construction (content-addressed ids), so it runs on every boot with no state to
+			// get wrong. Failure NARRATES and does not abort: a deployment that cannot seed still serves
+			// everything that does not need a model row, and an operator reading `served`/`not mounted`
+			// gets a line naming what happened rather than a process that would not start.
+			// Bounded, because a hung database at boot must not hold the process open forever with no
+			// message: seeding is a convenience over a declaration, never a reason not to serve.
+			seedCtx, cancelSeed := context.WithTimeout(context.Background(), 30*time.Second)
+			rep, err := modelcatalog.SeedRegistry(seedCtx, mcSrc, reg)
+			cancelSeed()
+			//
+			// 🔴 `log.Printf`, NOT `served(...)`. The capability fence caught the first version of this and
+			// was right to: `served` declares a capability this deployment offers, and every one of those
+			// owes a row in deploy/README.md's table. Seeding is a boot ACTION on a capability that is
+			// already declared — it belongs beside the account-system seeding lines, which log the same way
+			// for the same reason.
+			if err != nil {
+				log.Printf("model registry: seeding FAILED from %s: %v — the studio matrix will have "+
+					"columns and no rows, and the proposal menu will be empty, until this is fixed",
+					mcSrc.Describe(), err)
+			} else {
+				log.Printf("model registry: seeded from %s; %d registered, %d published without a "+
+					"provider/model_id, %d failed", mcSrc.Describe(), rep.Registered, rep.Undeclared, len(rep.Failed))
+				for name, why := range rep.Failed {
+					log.Printf("model registry: %q was NOT registered: %s", name, why)
+				}
+			}
 			gen := &proposalgen.Generator{
 				Runs:   linkStore,
 				Graphs: graphStore,

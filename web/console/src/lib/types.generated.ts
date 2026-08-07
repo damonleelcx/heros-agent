@@ -57,6 +57,34 @@ export interface TransformView {
   rejected_dimension?: string;
 }
 
+/** Response of `GET /api/v1/transforms/{config_hash}/{source_revision} (origin: reported)`. */
+export interface ReportedTransformView {
+  origin: string;
+  config_hash: string;
+  config_hash_display: string;
+  source_revision: string;
+  source_revision_display: string;
+  workflow_id: string;
+  status: string;
+  tool_version: string;
+  coverage_version?: string;
+  reported_at: string;
+  node_outcomes: WireNodeOutcome[] | null;
+  nodes_applied: number;
+  nodes_refused: number;
+  files_changed: number;
+  lines_added: number;
+  lines_removed: number;
+  diff_available: boolean;
+  diff_absent_because: string;
+}
+
+export interface WireNodeOutcome {
+  node_id: string;
+  outcome: string;
+  cause?: string;
+}
+
 /** Response of `POST /api/v1/specs/submit`. */
 export interface SubmitResult {
   config_hash: string;

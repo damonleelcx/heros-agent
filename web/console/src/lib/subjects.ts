@@ -7,22 +7,34 @@ import type { Session } from "./session";
 export { routes } from "./routes";
 
 /**
- * subjects.ts is the console's answer to a gap it is not allowed to close (task 5.12, FR30).
+ * subjects.ts remembers which subjects THIS SESSION opened. As of P29 that is all it does.
  *
- * # The gap
+ * # 🔴 What this file used to be, and why the change matters
  *
- * FR10 requires the user to **select** a workflow, run, variant, board or transform from
- * platform-provided data. The platform exposes **no enumeration endpoint for any of them** — every
- * customer route is keyed by an identifier the caller must already hold. P9's standing constraint
- * forbids adding a platform endpoint, and 🔴 `careful-api-creation` makes one a one-way door belonging
- * to the phase that owns the data. So the gap is FILED (see
- * `openspec/changes/p9-web-console/surface-or-drop.md` §3), not papered over.
+ * It opened by describing a gap: FR10 required the user to SELECT a workflow, run, variant, board or
+ * transform from platform-provided data, and the platform exposed no enumeration endpoint for any of
+ * them. P9's standing constraint forbade adding one, so this module — the subjects this browser session
+ * had already opened — WAS the picker's list.
  *
- * # What this module legitimately has
+ * The consequence was quiet and expensive: a developer who linked a run, closed the tab and came back
+ * the next day found a console that had forgotten their workflow existed. The data was durable the whole
+ * time; nothing could ask for it. Every picker looked broken, for a reason no screen stated.
  *
- * The subjects **this session has already opened**. That is a console-local fact — it is not a
- * platform statistic, it is not derived from one, and it says nothing the session could not already
- * see. It lives on the session record, so it is:
+ * P29 §4 closed the gap — `GET /api/v1/workflows`, `/variants`, `/transforms`, and a `/api/v1/runs` that
+ * merges executed and linked runs. See `lib/enumeration.ts`, which is now what fills a picker.
+ *
+ * # What this module is now: an ORDERING HINT
+ *
+ * "Which of these were you just looking at" is still true, still useful, and still console-local. What
+ * it may no longer do is BE the list — and a remembered subject the enumeration does not contain is
+ * DISCARDED rather than rendered (`enumeration.ts`, `orderByRecentlyVisited`). A session's memory is not
+ * evidence that a subject still exists, and a picker that offers a door which does not open is worse
+ * than one that offers fewer doors.
+ *
+ * # What it legitimately has
+ *
+ * A console-local fact — not a platform statistic, not derived from one, and saying nothing the session
+ * could not already see. It lives on the session record, so it is:
  *
  *   - **per session**, and disappears with it;
  *   - **never shared** between sessions or tenants;
@@ -57,8 +69,8 @@ export type Subject = {
  * VISITED_LIMIT bounds the list.
  *
  * Twelve: enough to cover the handful of subjects an investigation moves between, small enough that
- * the list is scannable rather than a history to search. A longer list is a search problem, and the
- * console does not have search over subjects it cannot enumerate.
+ * the list is scannable rather than a history to search. A longer list is a search problem — and now
+ * that the platform enumerates, a search belongs over THAT list rather than over this one.
  */
 const VISITED_LIMIT = 12;
 

@@ -35,14 +35,30 @@ type ExitError struct {
 	Err error
 }
 
+// Error renders the reason a reader is shown. When there is BOTH a message and a wrapped cause, it
+// renders both — `<msg>: <cause>`.
+//
+// 🔴 It used to return `Msg` alone whenever `Msg` was set, which silently discarded the cause on every
+// error built by `operational(msg, err)` — that is, on almost all of them. The symptom found on a real
+// repository: `heros apply` printed exactly `heros apply: apply: transform failed` and nothing else,
+// while the engine's own sentence — which names the node, the dimension and the refusal class — was
+// wrapped inside and thrown away. The platform was told (the refusal reaches `/app/transforms` as a
+// receipt) and the developer at the terminal was not, which inverts who has the context to act.
+//
+// The two halves are joined rather than one replacing the other because they answer different
+// questions: `Msg` says which step failed, the cause says why. A reader needs both, and `interaction-
+// simplicity-first` asks for the next action — which lives in the cause.
 func (e *ExitError) Error() string {
-	if e.Msg != "" {
+	switch {
+	case e.Msg != "" && e.Err != nil:
+		return e.Msg + ": " + e.Err.Error()
+	case e.Msg != "":
 		return e.Msg
-	}
-	if e.Err != nil {
+	case e.Err != nil:
 		return e.Err.Error()
+	default:
+		return "cli error"
 	}
-	return "cli error"
 }
 
 func (e *ExitError) Unwrap() error { return e.Err }

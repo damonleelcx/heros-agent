@@ -42,13 +42,72 @@ import (
 // is correctly unreachable from the internet, and the only thing keeping it that way is that nobody has
 // added a line to a YAML file.
 
+// runlinkStringConsts reads every `const Name = "…"` in `internal/runlink`.
+//
+// 🔴 This exists because the scan below was blind to MOST of what the transport addresses, and the
+// blindness was invisible. Every path that matters is written `c.base + runlink.SomePath + …` — an
+// IDENTIFIER, not a string literal — so `bin.Y.(*ast.BasicLit)` never matched it. The scan found four
+// paths (`whoami`, `device/authorize`, `device/token`, `auth/password/signin`), all four of them the ones
+// written inline, and it found none of `run-links`, `/api/v1/workflows/` or `/api/v1/proposals/`.
+//
+// The consequence is worth stating plainly, because it is bigger than the exemption this change deletes:
+// the `strings.HasSuffix(path, "/") → continue` line was not what excluded the workflow and proposal
+// paths from the fence. They were never in the set to begin with. Deleting the exemption alone would have
+// changed nothing and would have LOOKED like the defect was closed.
+func runlinkStringConsts(t *testing.T) map[string]string {
+	t.Helper()
+	dir := filepath.Join("..", "..", "internal", "runlink")
+	fset := token.NewFileSet()
+	pkgs, err := parser.ParseDir(fset, dir, func(fi os.FileInfo) bool {
+		return !strings.HasSuffix(fi.Name(), "_test.go")
+	}, 0)
+	if err != nil {
+		t.Fatalf("parsing %s: %v", dir, err)
+	}
+	out := map[string]string{}
+	for _, p := range pkgs {
+		for _, f := range p.Files {
+			for _, decl := range f.Decls {
+				gen, ok := decl.(*ast.GenDecl)
+				if !ok || gen.Tok != token.CONST {
+					continue
+				}
+				for _, spec := range gen.Specs {
+					vs, ok := spec.(*ast.ValueSpec)
+					if !ok {
+						continue
+					}
+					for i, name := range vs.Names {
+						if i >= len(vs.Values) {
+							continue
+						}
+						lit, ok := vs.Values[i].(*ast.BasicLit)
+						if !ok || lit.Kind != token.STRING {
+							continue
+						}
+						if v, err := strconv.Unquote(lit.Value); err == nil {
+							out[name.Name] = v
+						}
+					}
+				}
+			}
+		}
+	}
+	if len(out) < 3 {
+		t.Fatalf("the runlink constant scan found %d string const(s) — it is not reading %s", len(out), dir)
+	}
+	return out
+}
+
 // transportPaths reads every platform path `internal/runlink/transport` addresses.
 //
-// It matches `c.base + "…"` — the one construction every call in that package uses to build a URL. A call
-// written any other way would be missed, so the count is asserted below: a scan that silently found
-// nothing would make every assertion here pass vacuously.
+// It matches `c.base + X` — the one construction every call in that package uses to build a URL — where X
+// is either a string literal or a `runlink.Name` constant this package can resolve. A call written any
+// other way would be missed, so the count is asserted below: a scan that silently found nothing would
+// make every assertion here pass vacuously.
 func transportPaths(t *testing.T) []string {
 	t.Helper()
+	consts := runlinkStringConsts(t)
 	dir := filepath.Join("..", "..", "internal", "runlink", "transport")
 	fset := token.NewFileSet()
 	pkgs, err := parser.ParseDir(fset, dir, func(fi os.FileInfo) bool {
@@ -65,18 +124,14 @@ func transportPaths(t *testing.T) []string {
 				if !ok || bin.Op != token.ADD {
 					return true
 				}
-				// `c.base + "/api/v1/…"`, possibly with further concatenation for path segments; only the
-				// literal immediately after the base is a fixed path.
+				// `c.base + "/api/v1/…"` or `c.base + runlink.SomePath`, possibly with further
+				// concatenation for path segments; only the term immediately after the base is a fixed path.
 				sel, ok := bin.X.(*ast.SelectorExpr)
 				if !ok || sel.Sel.Name != "base" {
 					return true
 				}
-				lit, ok := bin.Y.(*ast.BasicLit)
-				if !ok || lit.Kind != token.STRING {
-					return true
-				}
-				value, err := strconv.Unquote(lit.Value)
-				if err != nil || !strings.HasPrefix(value, "/") {
+				value, ok := resolvePathTerm(bin.Y, consts)
+				if !ok || !strings.HasPrefix(value, "/") {
 					return true
 				}
 				seen[value] = true
@@ -84,7 +139,10 @@ func transportPaths(t *testing.T) []string {
 			})
 		}
 	}
-	if len(seen) < 3 {
+	// 6, not 3: the constant resolution above brings `run-links` and the two parameterised heads into the
+	// set. A regression that re-broke the resolution would drop straight back to four and every assertion
+	// here would pass again for the wrong reason — which is precisely how this fence spent its life.
+	if len(seen) < 6 {
 		t.Fatalf("the transport scan found %d path(s) — it is not reading %s, so every assertion in this "+
 			"file would pass for the wrong reason", len(seen), dir)
 	}
@@ -94,6 +152,27 @@ func transportPaths(t *testing.T) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// resolvePathTerm reads one term of a URL concatenation as a fixed path, if it is one.
+func resolvePathTerm(e ast.Expr, consts map[string]string) (string, bool) {
+	switch x := e.(type) {
+	case *ast.BasicLit:
+		if x.Kind != token.STRING {
+			return "", false
+		}
+		v, err := strconv.Unquote(x.Value)
+		return v, err == nil
+	case *ast.SelectorExpr:
+		// `runlink.LinkPath` — a package-qualified constant this package can read.
+		pkg, ok := x.X.(*ast.Ident)
+		if !ok || pkg.Name != "runlink" {
+			return "", false
+		}
+		v, ok := consts[x.Sel.Name]
+		return v, ok
+	}
+	return "", false
 }
 
 // ingressPaths reads the customer-hostname Ingress and returns the paths routed to `agentd`.
@@ -146,11 +225,20 @@ func TestEveryPathTheCLIAddressesIsPublished(t *testing.T) {
 	}
 
 	for _, path := range transportPaths(t) {
-		// A prefix entry in the transport (a path with caller-supplied segments below it) is addressed
-		// with further concatenation; the fixed head is what an Exact ingress rule would have to match, so
-		// those are reported rather than asserted — see the trailing-slash convention in
-		// `runlink.PlatformPaths`.
+		// 🔴 THE EXEMPTION IS GONE. It used to read:
+		//
+		//     if strings.HasSuffix(path, "/") { continue }
+		//
+		// …justified as "a prefix entry is addressed with further concatenation, so the fixed head is
+		// reported rather than asserted". Nothing reported it. A path with a variable segment below it is
+		// a path an `Exact` ingress rule cannot match, and the remedy is to give the route a FLAT shape —
+		// not to widen the fence and not to publish a `Prefix` rule, which would publish every sibling
+		// route beneath it (see TestAPrefixRuleWouldPublishItsSiblings).
 		if strings.HasSuffix(path, "/") {
+			t.Errorf("the CLI addresses %s, which has a caller-supplied segment below it.\n"+
+				"  An Exact ingress rule cannot match it, and a Prefix rule would publish every route "+
+				"beneath it. Publish it Exact, which means giving it a FLAT shape: move the identifier "+
+				"into the request payload and address a path with no variable segment.", path)
 			continue
 		}
 		if !declared[path] {
@@ -176,6 +264,92 @@ func TestEveryPathTheCLIAddressesIsPublished(t *testing.T) {
 	}
 }
 
+// 🔴 THE PREFIX-CONSEQUENCE FENCE (P29 §1.6).
+//
+// The previous fence said "a public platform path is Exact, never Prefix" and gave one illustrative
+// example in a comment. That is a rule a reviewer has to believe. This one COMPUTES the consequence: for
+// any agentd-backed rule that is not Exact, it names every route in this package that rule publishes.
+//
+// The distinction matters because the argument against a prefix rule is quantitative. "Prefix is riskier"
+// invites a trade; "this rule publishes these nine console-only routes, by name, and every
+// `/api/v1/workflows/*` route anybody adds after today" does not. The nine were the actual alternative
+// under review for P29, and the list is what made it a one-line decision instead of a discussion.
+func TestAPrefixRuleWouldPublishItsSiblings(t *testing.T) {
+	registered := registeredRoutes(t)
+	for path, pathType := range ingressPaths(t) {
+		if pathType == "Exact" {
+			continue
+		}
+		siblings := routesUnderPrefix(registered, path)
+		t.Errorf("deploy/k8s/overlays/prod/ingress.yaml routes %s to agentd with pathType %q.\n"+
+			"  That rule publishes %d registered route(s) to the internet:\n    %s\n"+
+			"  …and every route added under that prefix from now on, by default, forever. If one of these "+
+			"is the route you wanted, give it a FLAT name and publish that name Exact.",
+			path, pathType, len(siblings), strings.Join(siblings, "\n    "))
+	}
+}
+
+// routesUnderPrefix names every registered route a Prefix rule at `prefix` would publish.
+//
+// Braces and all: `/api/v1/workflows/{workflow_id}/commit` is what the reader needs to see, because the
+// question a reviewer is answering is "is THAT surface allowed on the internet", and a normalised form
+// would hide which routes take a caller-supplied identifier.
+func routesUnderPrefix(registered map[string]bool, prefix string) []string {
+	var out []string
+	for route := range registered {
+		if strings.HasPrefix(route, prefix) {
+			out = append(out, route)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// 🔴 EXPAND-CONTRACT, asserted (P29 §1.7).
+//
+// The four parameterised routes the CLI used to address stay REGISTERED — so a CLI built before this
+// change still works when it runs inside the cluster — and are never PUBLISHED. Both halves need a fence,
+// and they fail in opposite directions:
+//
+//   - unregistered, and an older CLI inside the cluster breaks on the release that was supposed to be
+//     compatible with it. Nothing else in the tree would notice; the flat routes serve everything the
+//     current CLI does;
+//   - published, and the identifier-in-the-path shape is back on the internet, which is the entire defect
+//     this wave closed. Publishing one is what verified this test red.
+//
+// When the CLI floor moves and these are deleted, this test is deleted with them — it is the contract's
+// expiry note, not a permanent rule.
+func TestTheParameterisedRoutesAreRegisteredAndNeverPublished(t *testing.T) {
+	parameterised := []string{
+		"/api/v1/workflows/{workflow_id}/ir",
+		"/api/v1/workflows/{workflow_id}/source/{source_revision}",
+		"/api/v1/workflows/{workflow_id}/source/{source_revision}/discover",
+		"/api/v1/proposals/{proposal_id}/verdict",
+	}
+	registered := registeredRoutes(t)
+	published := ingressPaths(t)
+	declared := map[string]bool{}
+	for _, r := range PublicRoutes() {
+		declared[r] = true
+	}
+	for _, route := range parameterised {
+		if !registered[route] {
+			t.Errorf("%s is no longer registered. It is the pre-P29 shape a deployed CLI still addresses "+
+				"from inside the cluster; removing it is a CONTRACT change that waits for the CLI floor to "+
+				"move, not a cleanup.", route)
+		}
+		if declared[route] {
+			t.Errorf("%s is classified ExposurePublic. It carries a caller-supplied path segment, so no "+
+				"Exact rule can match it and publishing it needs a Prefix rule — which is the defect P29 "+
+				"closed. The flat replacement is what gets published.", route)
+		}
+		if _, ok := published[route]; ok {
+			t.Errorf("deploy/k8s/overlays/prod/ingress.yaml routes %s to agentd. It must never be "+
+				"published: the flat replacement carries the same traffic and can be matched Exact.", route)
+		}
+	}
+}
+
 // The reverse: nothing is published that was not meant to be. Nothing BREAKS when this is wrong, which is
 // exactly why it needs a test — the route simply becomes reachable, and stays that way.
 func TestNothingIsPublishedThatIsNotDeclaredPublic(t *testing.T) {
@@ -190,6 +364,88 @@ func TestNothingIsPublishedThatIsNotDeclaredPublic(t *testing.T) {
 				"need a person to decide, which is why this is not a warning.", path)
 		}
 	}
+}
+
+// 🔴 SUBSTRATE PARITY (P29 §1.9). The product ships on two substrates and only one of them was checked.
+//
+// `deploy/k8s/overlays/prod/ingress.yaml` had six agentd rules and this file's fence watching them.
+// `deploy/scripts/bootstrap-vm.sh` — the single-VM Compose install, which is what a self-hosting customer
+// actually runs — published ONE: `/billing/webhook`. `heros login` reached Next.js and got a 404 on every
+// box our own bootstrap script produced, and so did `heros link`, the device pair and password sign-in.
+//
+// The two substrates are read from ONE list here, deliberately. A test per substrate is a test somebody
+// adds for the substrate they are working on; a loop over both is a test that fails twice when a public
+// route is added and once when a substrate is forgotten.
+func TestBothSubstratesPublishExactlyTheDeclaredPublicRoutes(t *testing.T) {
+	declared := map[string]bool{}
+	for _, r := range PublicRoutes() {
+		declared[r] = true
+	}
+	substrates := map[string]map[string]bool{
+		"deploy/k8s/overlays/prod/ingress.yaml": ingressPathSet(t),
+		"deploy/scripts/bootstrap-vm.sh":        setOf(composePlatformPaths(t)),
+	}
+	for name, published := range substrates {
+		for route := range declared {
+			if !published[route] {
+				t.Errorf("%s does not publish %s, which publicroutes.go declares public.\n"+
+					"  On that substrate the command that calls it answers 404 — from the console app, "+
+					"not from the platform — and neither the build nor the deployment reports anything.",
+					name, route)
+			}
+		}
+		for route := range published {
+			if !declared[route] {
+				t.Errorf("%s publishes %s, which publicroutes.go does not declare public.", name, route)
+			}
+		}
+	}
+}
+
+// composePlatformPaths reads the exact path list the generated Caddyfile publishes to agentd.
+//
+// Read from the SCRIPT rather than from a generated Caddyfile, because the Caddyfile is written at
+// install time on the customer's box from the operator's domain and is not in the repository. The
+// assignment is the artefact that exists here, so the assignment is what is checked.
+func composePlatformPaths(t *testing.T) []string {
+	t.Helper()
+	script := filepath.Join("..", "..", "deploy", "scripts", "bootstrap-vm.sh")
+	raw, err := os.ReadFile(script)
+	if err != nil {
+		t.Fatalf("reading %s: %v", script, err)
+	}
+	m := regexp.MustCompile(`(?m)^PLATFORM_PUBLIC_PATHS="([^"]*)"`).FindSubmatch(raw)
+	if m == nil {
+		t.Fatalf("%s has no PLATFORM_PUBLIC_PATHS assignment — either the Compose substrate stopped "+
+			"declaring what it publishes, or this reader stopped finding it. Both are the same failure: "+
+			"nothing is checking that substrate any more.", script)
+	}
+	paths := strings.Fields(string(m[1]))
+	if len(paths) == 0 {
+		t.Fatalf("%s declares an empty PLATFORM_PUBLIC_PATHS", script)
+	}
+	// The generated Caddyfile must actually USE the variable. A list nothing reads is a list that agrees
+	// with this test and with nothing else.
+	if !strings.Contains(string(raw), "@platform path $PLATFORM_PUBLIC_PATHS") {
+		t.Errorf("%s declares PLATFORM_PUBLIC_PATHS but the generated Caddyfile does not use it", script)
+	}
+	return paths
+}
+
+func ingressPathSet(t *testing.T) map[string]bool {
+	out := map[string]bool{}
+	for p := range ingressPaths(t) {
+		out[p] = true
+	}
+	return out
+}
+
+func setOf(items []string) map[string]bool {
+	out := make(map[string]bool, len(items))
+	for _, i := range items {
+		out[i] = true
+	}
+	return out
 }
 
 // A declared route that this package no longer registers is stale, and a stale entry is how a list stops

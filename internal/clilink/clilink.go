@@ -23,6 +23,8 @@ import (
 	"time"
 
 	"github.com/heros-foreal/agentd/internal/cli"
+	"github.com/heros-foreal/agentd/internal/discovery"
+	"github.com/heros-foreal/agentd/internal/nodeaxis"
 	"github.com/heros-foreal/agentd/internal/runlink"
 	"github.com/heros-foreal/agentd/internal/runlink/transport"
 )
@@ -151,6 +153,10 @@ type LinkData struct {
 	// WorkflowIR is present only when --with-ir was given. Its absence in the envelope is the machine
 	// -readable form of "structure was not transmitted", which a CI job can assert on.
 	WorkflowIR *WorkflowIRData `json:"workflow_ir,omitempty"`
+	// Surfaces names every console page this transmission filled, and for each one it did not, the ONE
+	// option that would (P29 §2.10). Derived from the surface registry, so a page added to the console
+	// cannot be omitted from this list silently — see cli.LinkSurfaces and its fence.
+	Surfaces []cli.LinkSurfaceReport `json:"surfaces,omitempty"`
 }
 
 // WorkflowIRData reports the OPT-IN structure upload.
@@ -195,18 +201,39 @@ func (c Commands) Link(cfg cli.Config, s cli.Streams) error {
 	// --with-ir is the OPT-IN second payload. It is resolved before any transmission so a mismatched or
 	// unreadable IR fails the command outright rather than after the run has already been linked —
 	// half a transmission is the one outcome neither the developer nor the platform can reason about.
-	irPath := cfg.Get("with-ir")
+	//
+	// P29 §2.5 — the flag now has TWO forms and one meaning. `--with-ir <path>` transmits a
+	// previously-written representation, exactly as before. Bare `--with-ir` discovers in place from
+	// `--repo`, because the choreography was indefensible: opting in cost two commands and a file path
+	// (`heros discover -out ir.json` then `heros link --with-ir ir.json`), and a developer who ran only
+	// the second got a message about an artefact they had no reason to know existed.
+	//
+	// 🔴 What did NOT change is that it is opt-in and named. Making the structure default-on would trade
+	// the egress promise — the product's most load-bearing sentence — for convenience, which is a level-1
+	// concession bought with a level-3 gain.
+	irSource := cfg.Get("with-ir")
 	var irPayload *runlink.WorkflowIRPayload
-	if irPath != "" {
-		ir, ierr := cli.LoadIRForLink(irPath, record.WorkflowID, record.SourceRevision)
+	var irOrigin string
+	if cfg.Has("with-ir") {
+		ir, origin, ierr := c.resolveIR(irSource, repo, record, s)
 		if ierr != nil {
 			return ierr
 		}
-		built := cli.BuildWorkflowIR(ir)
+		irOrigin = origin
+		// 🔴 The verdicts are computed HERE, against the real tree, by the real engine. See
+		// internal/nodeaxis: the platform is forbidden from deriving one, and this is the only place the
+		// source is.
+		s.Narratef("link: computing per-node applicability against %s with the transform engine…", repo)
+		report := nodeaxis.Compute(ir, repo)
+		built := cli.BuildWorkflowIRWithVerdicts(ir, report)
 		irPayload = &built
+		applies, refused, reported := verdictTally(built)
 		s.Narratef("link: --with-ir — %d node(s) and %d edge(s) of STRUCTURE will be transmitted as a "+
 			"second payload: symbols, files, line spans, models, context policies and tool COUNTS. "+
 			"No prompt text, no source, no keys.", len(built.Nodes), len(built.Edges))
+		s.Narratef("link: %d node(s) carry axis verdicts computed here (%d applies, %d refused, coverage "+
+			"%s). A node with no verdict is transmitted as REPORTED-BUT-UNDECIDED and the console shows "+
+			"`not reported`, never `not applicable`.", reported, applies, refused, built.CoverageVersion)
 	}
 
 	dryRun := cfg.Get("dry-run") == "true"
@@ -214,7 +241,7 @@ func (c Commands) Link(cfg cli.Config, s cli.Streams) error {
 		s.Narratef("link: dry-run — rendering the exact payload for %s; nothing is transmitted", runID)
 		d := LinkData{RunID: runID, DryRun: true, Endpoint: runlink.PlatformBaseURL, Payload: payload}
 		if irPayload != nil {
-			d.WorkflowIR = &WorkflowIRData{Path: irPath, Nodes: len(irPayload.Nodes), Edges: len(irPayload.Edges), Payload: irPayload}
+			d.WorkflowIR = &WorkflowIRData{Path: irOrigin, Nodes: len(irPayload.Nodes), Edges: len(irPayload.Edges), Payload: irPayload}
 		}
 		return s.EmitJSON("link", cli.ExitOK, d, nil, nil)
 	}
@@ -246,11 +273,27 @@ func (c Commands) Link(cfg cli.Config, s cli.Streams) error {
 		if ierr != nil {
 			s.Narratef("link: the run linked, but the structure did NOT (%v). Nothing about the run is "+
 				"affected; re-run with --with-ir to try the structure again.", ierr)
-			data.WorkflowIR = &WorkflowIRData{Sent: false, Path: irPath, Nodes: len(irPayload.Nodes), Edges: len(irPayload.Edges)}
+			data.WorkflowIR = &WorkflowIRData{Sent: false, Path: irOrigin, Nodes: len(irPayload.Nodes), Edges: len(irPayload.Edges)}
 		} else {
 			s.Narratef("link: structure transmitted — %d node(s), %d edge(s) · graph at %s", ires.Nodes, ires.Edges, ires.GraphURL)
-			data.WorkflowIR = &WorkflowIRData{Sent: true, Path: irPath, Nodes: ires.Nodes, Edges: ires.Edges, GraphURL: ires.GraphURL}
+			data.WorkflowIR = &WorkflowIRData{Sent: true, Path: irOrigin, Nodes: ires.Nodes, Edges: ires.Edges, GraphURL: ires.GraphURL}
 		}
+	}
+
+	// 🔴 What the reader is told next. This block is the CLI's half of the defect this phase closes: a
+	// successful link used to print a URL and stop, and the console behind that URL had fifteen pages
+	// with nothing on them and no explanation. The moment of maximum context is right here.
+	data.Surfaces = cli.ReportLinkSurfaces(data.WorkflowIR != nil && data.WorkflowIR.Sent, false)
+	var unfilled []cli.LinkSurfaceReport
+	for _, sf := range data.Surfaces {
+		if !sf.Filled {
+			unfilled = append(unfilled, sf)
+		}
+	}
+	s.Narratef("link: %d of %d console surface(s) now carry this organization's data.",
+		len(data.Surfaces)-len(unfilled), len(data.Surfaces))
+	for _, sf := range unfilled {
+		s.Narratef("link:   %-28s not filled — %s", sf.Route, sf.FillWith)
 	}
 
 	if res.AlreadyLinked {
@@ -268,6 +311,58 @@ func (c Commands) Link(cfg cli.Config, s cli.Streams) error {
 		s.Narratef("link: sign in there with the same token `heros login` stored — no second credential.")
 	}
 	return s.EmitJSON("link", cli.ExitOK, data, nil, nil)
+}
+
+// resolveIR turns the `--with-ir` value into a discovered IR, by either of the two forms.
+//
+// It returns the ORIGIN as well, because the success output has to say which one happened: "discovered in
+// place" and "read from ir.json" fail in different ways and a reader debugging an unexpected graph needs
+// to know which artefact to look at.
+func (c Commands) resolveIR(value, repo string, record runlink.RunRecord, s cli.Streams) (*discovery.IR, string, error) {
+	if value != cli.WithIRDiscover {
+		ir, err := cli.LoadIRForLink(value, record.WorkflowID, record.SourceRevision)
+		return ir, value, err
+	}
+	// 🔴 Discovered with the run's OWN workflow id and revision, not with whatever the repo would derive.
+	// `LoadIRForLink` refuses a mismatch for the path form precisely because attaching one repository's
+	// shape to another's measurements produces a graph that looks right and describes something else; the
+	// in-place form must not be the way around that check — so it is given the run's identity up front
+	// and cannot disagree with it.
+	s.Narratef("link: --with-ir with no path — discovering %s in place (offline, no account)…", repo)
+	res, err := discovery.Run(discovery.Options{
+		Repo:       repo,
+		WorkflowID: record.WorkflowID,
+		CommitSHA:  record.SourceRevision,
+	})
+	if err != nil {
+		return nil, "", &cli.ExitError{Code: cli.ExitOperational,
+			Msg: "link: --with-ir could not discover " + repo + ": " + err.Error(), Err: err}
+	}
+	if len(res.IR.Nodes) == 0 {
+		return nil, "", &cli.ExitError{Code: cli.ExitInvalidCfg,
+			Msg: "link: --with-ir discovered no call sites in " + repo + " — transmitting an empty " +
+				"structure would tell the console this workflow has no nodes, which is a claim about your " +
+				"code. Check --repo, or run `heros discover` to see the diagnostics."}
+	}
+	return &res.IR, "discovered in place", nil
+}
+
+// verdictTally counts what the structure payload is about to say, for the narration.
+func verdictTally(p runlink.WorkflowIRPayload) (applies, refused, reported int) {
+	for _, n := range p.Nodes {
+		if len(n.AxisVerdicts) > 0 {
+			reported++
+		}
+		for _, v := range n.AxisVerdicts {
+			switch v.Status {
+			case runlink.VerdictApplies:
+				applies++
+			case runlink.VerdictRefused:
+				refused++
+			}
+		}
+	}
+	return applies, refused, reported
 }
 
 // allowlistCheck marshals the payload and asserts every key is allowlisted.

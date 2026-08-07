@@ -1,7 +1,8 @@
 import Link from "next/link";
-import { ChevronRight } from "lucide-react";
-import type { Subject, SubjectKind } from "@/lib/subjects";
+import { ChevronRight, CircleSlash, TriangleAlert } from "lucide-react";
+import type { SubjectKind } from "@/lib/subjects";
 import { SUBJECT_LABELS } from "@/lib/subjects";
+import type { Enumeration } from "@/lib/enumeration";
 import { Section } from "./primitives";
 
 /**
@@ -9,11 +10,18 @@ import { Section } from "./primitives";
  *
  * # What it offers, in order
  *
- * 1. **Subjects this session already opened.** The thing the user is most likely to want, offered
- *    without typing. This is the console's answer to a gap it is not permitted to close: the platform
- *    exposes no enumeration endpoint for workflows, runs, variants or transforms, so the console
- *    cannot list "all of yours" — but it can always offer the ones you have opened, and it must never
- *    ask you to retype one of them.
+ * 1. **Everything this organization has**, from the platform's own subject index (P29 §4), with the
+ *    ones this session opened ordered first.
+ *
+ *    🔴 That first clause is new, and the sentence it replaces is worth keeping in view: this component
+ *    used to list only *"subjects this session already opened"*, because the platform exposed no
+ *    enumeration endpoint for any of them. A developer who linked a run, closed the tab and came back
+ *    the next day found a console that had forgotten their workflow existed — the data was durable the
+ *    whole time and nothing could ask for it.
+ *
+ *    The session list is now an ORDERING HINT. A remembered subject the enumeration does not contain is
+ *    DISCARDED rather than rendered: a session's memory is not evidence that a subject still exists, and
+ *    a picker that offers a door which does not open is worse than one that offers fewer doors.
  * 2. **Direct identifier entry, as an accelerator.** Explicitly permitted by task 7.2 and required by
  *    R9's shareability — but never the ONLY path, which is what all four legacy pages made it.
  *
@@ -40,14 +48,22 @@ import { Section } from "./primitives";
  */
 export function SubjectPicker({
   kind,
-  visited,
+  available,
+  discarded = 0,
   action,
   field,
   help,
   children,
 }: {
   kind: SubjectKind;
-  visited: Subject[];
+  /**
+   * available is the platform's own list, already ordered (session-visited first). Its STATE is carried
+   * with it, unflattened, so this component renders three different sentences rather than one empty
+   * list for three different facts.
+   */
+  available: Enumeration;
+  /** discarded counts remembered subjects the enumeration does not contain — surfaced, never silent. */
+  discarded?: number;
   /** action is the route that resolves a typed identifier to its canonical route. */
   action: string;
   field: { name: string; label: string; placeholder?: string };
@@ -56,26 +72,60 @@ export function SubjectPicker({
   children?: React.ReactNode;
 }) {
   const label = SUBJECT_LABELS[kind];
+  const subjects = available.subjects;
   return (
     <>
-      <Section title="Opened in this session" aside="held for this session only, never shared" id="recent">
-        {visited.length === 0 ? (
-          /*
-           * 🔴 This sentence used to say "the platform does not expose a way to list your {label}s".
-           *
-           * That was true when it was written, and P27 made it false for RUNS: runs now carry an owning
-           * organization and `/api/v1/runs` lists them. It is still true for the other three subjects,
-           * which have no collection route — so the copy names what this list actually is rather than
-           * making a claim about the platform that is now half wrong. A sentence that quietly stops
-           * being true is worse than one that never said much.
-           */
+      <Section
+        title={`Your ${label}s`}
+        aside={
+          subjects.length > 0
+            ? `${subjects.length} · the ones you opened this session are first`
+            : undefined
+        }
+        id="recent"
+      >
+        {/*
+          🔴 THREE STATES, THREE SENTENCES, and never one empty list for all of them.
+
+          `empty` is a fact about the reader's data and its next action is to produce some.
+          `read-failed` is a fact about US and its next action is to wait — rendering it as "you have
+          none" tells a returning customer their history is gone when it is not, which is precisely how
+          a release reads as data loss.
+          `not-mounted` is a POLICY answer: this deployment does not carry the capability at all.
+        */}
+        {available.state === "not-mounted" ? (
+          <div className="state state--empty flex flex-col items-center">
+            <CircleSlash className="mb-3 size-6 text-muted-foreground/40" aria-hidden="true" />
+            <p className="state__title text-foreground">
+              This deployment does not carry a {label} index
+            </p>
+            <div className="state__body text-center">
+              <p className="hint">
+                Nothing is missing and nothing failed — the capability is not served here. You can still
+                open a {label} by identifier below.
+              </p>
+            </div>
+          </div>
+        ) : available.state === "read-failed" ? (
+          <div className="state state--empty flex flex-col items-center">
+            <TriangleAlert className="mb-3 size-6 text-[var(--warn-fg,theme(colors.amber.500))]" aria-hidden="true" />
+            <p className="state__title text-foreground">Your {label}s could not be read</p>
+            <div className="state__body text-center">
+              <p className="hint">
+                This is not the same as having none. Nothing has been lost; the platform did not answer.
+                Retrying is safe, and the identifier field below still works.
+              </p>
+              {available.detail ? <p className="hint mono mt-2">{available.detail}</p> : null}
+            </div>
+          </div>
+        ) : subjects.length === 0 ? (
           <p className="hint">
-            Nothing yet. This is a per-session shortcut list, held in your session and never shared —
-            open a {label} below and it will be here next time.
+            No {label}s yet for this organization. This list comes from the platform, not from your
+            browser — so it will be here on any machine you sign in from.
           </p>
         ) : (
           <ul className="divide-y divide-border/50 overflow-hidden rounded-xl border border-border">
-            {visited.map((subject) => (
+            {subjects.map((subject) => (
               <li key={`${subject.kind}:${subject.id}`}>
                 <Link
                   className="group flex items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/30"
@@ -98,6 +148,14 @@ export function SubjectPicker({
             ))}
           </ul>
         )}
+        {discarded > 0 ? (
+          <p className="hint">
+            {discarded} {discarded === 1 ? "shortcut" : "shortcuts"} from this session{" "}
+            {discarded === 1 ? "is" : "are"} not shown: the platform no longer lists{" "}
+            {discarded === 1 ? "it" : "them"}. They are discarded rather than offered, because a link
+            that does not open is worse than one that is absent.
+          </p>
+        ) : null}
       </Section>
 
       <form className="flex flex-col gap-4" method="get" action={action} aria-labelledby="open-title">

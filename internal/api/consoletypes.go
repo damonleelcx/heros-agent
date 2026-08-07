@@ -55,6 +55,10 @@ func ConsoleViewTypes() []ConsoleViewType {
 		// ── P2 · configure / diff / run ──────────────────────────────────────
 		{Name: "RunView", Sample: runView{}, Endpoint: "GET /api/v1/runs/{run_id}"},
 		{Name: "TransformView", Sample: transformView{}, Endpoint: "GET /api/v1/transforms/{config_hash}/{source_revision}"},
+		// 🔴 The SAME endpoint's other shape (P29 §6.5). Registered as its own view because the response
+		// is a union discriminated by `origin`, and a console that has a declaration for only one arm of
+		// a union has a claim that is false half the time — which is how that route came to answer 500.
+		{Name: "ReportedTransformView", Sample: reportedTransformView{}, Endpoint: "GET /api/v1/transforms/{config_hash}/{source_revision} (origin: reported)"},
 		{Name: "SubmitResult", Sample: submitResult{}, Endpoint: "POST /api/v1/specs/submit"},
 		{Name: "SpecError", Sample: specError{}, Endpoint: "POST /api/v1/specs/{resolve,submit} (rejection)"},
 
