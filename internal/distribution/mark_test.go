@@ -161,9 +161,9 @@ func TestInstallScriptsCarryTheSameMark(t *testing.T) {
 		if to == ' ' {
 			continue
 		}
-		if !strings.Contains(ps, fmt.Sprintf("'%c' = '%c'", from, to)) &&
-			!strings.Contains(ps, fmt.Sprintf("'%c' = '%c'", from, to)) {
-			t.Errorf("install.ps1's ASCII pen does not map %q to %q", from, to)
+		if !strings.Contains(ps, fmt.Sprintf("'%c' = '%c'", from, to)) {
+			t.Errorf("install.ps1's ASCII pen does not map %q to %q, so a console that is not in UTF-8 draws "+
+				"a different figure than the one internal/distribution defines", from, to)
 		}
 	}
 	// And it must still choose the ASCII drawing when the console is not in UTF-8. Without this branch the
