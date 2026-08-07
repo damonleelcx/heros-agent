@@ -331,18 +331,18 @@ print_mark() {
   # glyph will happily accept the bytes and show boxes, so there is nothing to detect after the fact.
   case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in
     *UTF-8*|*utf-8*|*UTF8*|*utf8*)
-      printf '  %s%s%s\n' "${mark_on}" '┃     ┃ ┏━━━━ ┏━━━┓ ┏━━━┓ ┏━━━┓' "${mark_off}"
-      printf '  %s%s%s\n' "${mark_on}" '┃     ┃ ┃     ┃   ┃ ┃   ┃ ┃    ' "${mark_off}"
-      printf '  %s%s%s\n' "${mark_on}" '┃━ ● ━┃ ┣━━━  ┣━━━┛ ┃   ┃ ┗━━━┓' "${mark_off}"
-      printf '  %s%s%s\n' "${mark_on}" '┃     ┃ ┃     ┃  ╲  ┃   ┃     ┃' "${mark_off}"
-      printf '  %s%s%s\n' "${mark_on}" '┃     ┃ ┗━━━━ ┃   ╲ ┗━━━┛ ┗━━━┛' "${mark_off}"
+      printf '  %s%s%s\n' "${mark_on}" '██     ██ ██████ █████  ██████ ██████' "${mark_off}"
+      printf '  %s%s%s\n' "${mark_on}" '██     ██ ██     ██  ██ ██  ██ ██    ' "${mark_off}"
+      printf '  %s%s%s\n' "${mark_on}" '██━ ● ━██ █████  █████  ██  ██ ██████' "${mark_off}"
+      printf '  %s%s%s\n' "${mark_on}" '██     ██ ██     ██ ██  ██  ██     ██' "${mark_off}"
+      printf '  %s%s%s\n' "${mark_on}" '██     ██ ██████ ██  ██ ██████ ██████' "${mark_off}"
       ;;
     *)
-      printf '  %s%s%s\n' "${mark_on}" '|     | +---- +---+ +---+ +---+' "${mark_off}"
-      printf '  %s%s%s\n' "${mark_on}" '|     | |     |   | |   | |    ' "${mark_off}"
-      printf '  %s%s%s\n' "${mark_on}" '|- o -| +---  +---+ |   | +---+' "${mark_off}"
-      printf '  %s%s%s\n' "${mark_on}" '|     | |     |  \  |   |     |' "${mark_off}"
-      printf '  %s%s%s\n' "${mark_on}" '|     | +---- |   \ +---+ +---+' "${mark_off}"
+      printf '  %s%s%s\n' "${mark_on}" '##     ## ###### #####  ###### ######' "${mark_off}"
+      printf '  %s%s%s\n' "${mark_on}" '##     ## ##     ##  ## ##  ## ##    ' "${mark_off}"
+      printf '  %s%s%s\n' "${mark_on}" '##- o -## #####  #####  ##  ## ######' "${mark_off}"
+      printf '  %s%s%s\n' "${mark_on}" '##     ## ##     ## ##  ##  ##     ##' "${mark_off}"
+      printf '  %s%s%s\n' "${mark_on}" '##     ## ###### ##  ## ###### ######' "${mark_off}"
       ;;
   esac
   printf '\n'

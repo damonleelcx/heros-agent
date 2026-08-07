@@ -96,18 +96,16 @@ function Show-Mark {
     if ([Console]::IsOutputRedirected) { return }
 
     $skeleton = @(
-        '|     | 1---- 1---2 1---2 1---2',
-        '|     | |     |   | |   | |    ',
-        '|- o -| 5---  5---4 |   | 3---2',
-        '|     | |     |  \  |   |     |',
-        '|     | 3---- |   \ 3---4 3---4')
+        '##     ## ###### #####  ###### ######',
+        '##     ## ##     ##  ## ##  ## ##    ',
+        '##- o -## #####  #####  ##  ## ######',
+        '##     ## ##     ## ##  ##  ##     ##',
+        '##     ## ###### ##  ## ###### ######')
 
     # The two pens. Held identical to distribution.MarkGlyphs by the Go fence, so Windows cannot end up
     # drawing a different picture than everyone else.
-    $box = @{ '|' = 0x2503; '-' = 0x2501; 'o' = 0x25CF; '\' = 0x2572;
-              '1' = 0x250F; '2' = 0x2513; '3' = 0x2517; '4' = 0x251B; '5' = 0x2523 }
-    $ascii = @{ '|' = '|'; '-' = '-'; 'o' = 'o'; '\' = '\';
-                '1' = '+'; '2' = '+'; '3' = '+'; '4' = '+'; '5' = '+' }
+    $box = @{ '#' = 0x2588; '-' = 0x2501; 'o' = 0x25CF }
+    $ascii = @{ '#' = '#'; '-' = '-'; 'o' = 'o' }
     $utf8 = [Console]::OutputEncoding.CodePage -eq 65001
 
     $colour = @{}

@@ -74,11 +74,16 @@ func TestBothPensRenderEverySkeletonGlyph(t *testing.T) {
 // TestTheMarkIsTheWordHEROS — the drawing must be the word, and its H must still be the interval.
 //
 // A wordmark can decay in two directions and both look fine in a diff: a letter loses a stroke and reads as
-// something else, or the H is replaced by an ordinary H and the figure that means something is gone.
+// something else, or the H is replaced by an ordinary block H and the figure that means something is gone.
+//
+// The H occupies the first hMarkWidth columns; each of the other four is letterWidth columns after it,
+// separated by one.
+const (
+	hMarkWidth  = 9
+	letterWidth = 6
+)
+
 func TestTheMarkIsTheWordHEROS(t *testing.T) {
-	// The H is the first seven columns: two end caps, a span, and a point estimate with a blank cell of halo
-	// on each side. The halo is not decoration — a dot set directly into the span reads as a defect in the
-	// bar rather than as a mark of its own, which is the failure the source SVG's own comment describes.
 	mid := []rune(MarkUnicode[MarkHeight/2])
 	dot := -1
 	for i, r := range mid {
@@ -90,33 +95,41 @@ func TestTheMarkIsTheWordHEROS(t *testing.T) {
 	if dot < 0 {
 		t.Fatalf("the middle row carries no point estimate: %q", string(mid))
 	}
-	if dot >= 7 {
+	if dot >= hMarkWidth {
 		t.Errorf("the point estimate is at column %d, outside the H — the mark is supposed to BE the H of "+
 			"the word, not sit beside it", dot)
 	}
+	// The halo. A dot set directly into the rule reads as a defect in the line rather than as a mark of its
+	// own — the failure the source SVG's own comment describes at 16px.
 	if mid[dot-1] != ' ' || mid[dot+1] != ' ' {
-		t.Errorf("the point estimate has no halo (%q): at this size a dot set into the span reads as a thick "+
-			"spot in the bar and the H collapses", string(mid[:7]))
+		t.Errorf("the point estimate has no halo (%q): a dot set into the rule reads as a thick spot in the "+
+			"line and the H collapses", string(mid[:hMarkWidth]))
 	}
-	if mid[0] != '┃' || mid[6] != '┃' {
-		t.Errorf("the H has lost an end cap: %q", string(mid[:7]))
+	// The end caps, and the rule between them. The caps are solid because the letters are; the rule is NOT,
+	// because a solid crossbar makes the H a sixth letter instead of a measurement.
+	if mid[0] != '█' || mid[hMarkWidth-1] != '█' {
+		t.Errorf("the H has lost an end cap: %q", string(mid[:hMarkWidth]))
+	}
+	if !strings.ContainsRune(string(mid[:hMarkWidth]), '━') {
+		t.Errorf("the H has no interval rule through it (%q) — without the span it is two bars and a dot, "+
+			"which is not the figure", string(mid[:hMarkWidth]))
 	}
 
 	// And the other four letters must still be there. Counted by columns of ink rather than read as glyphs:
-	// each letter occupies a five-column cell after the H, and an empty one means a letter went missing.
+	// an empty cell means a letter went missing.
 	for n, letter := range []string{"E", "R", "O", "S"} {
-		start := 8 + n*6
+		start := hMarkWidth + 1 + n*(letterWidth+1)
 		inked := false
 		for _, row := range MarkUnicode {
 			r := []rune(row)
-			for c := start; c < start+5 && c < len(r); c++ {
+			for c := start; c < start+letterWidth && c < len(r); c++ {
 				if r[c] != ' ' {
 					inked = true
 				}
 			}
 		}
 		if !inked {
-			t.Errorf("columns %d-%d carry no ink, so the %s of HEROS is missing", start, start+4, letter)
+			t.Errorf("columns %d-%d carry no ink, so the %s of HEROS is missing", start, start+letterWidth-1, letter)
 		}
 	}
 }

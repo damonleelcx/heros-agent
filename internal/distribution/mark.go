@@ -28,11 +28,11 @@ import "strings"
 // pens incapable of disagreeing about the shape: they are the same string with different glyphs substituted,
 // so the ASCII fallback can never quietly become a different picture.
 //
-// Digits in the skeleton are corner POSITIONS, never drawn as digits: 1 ┏, 2 ┓, 3 ┗, 4 ┛, 5 ┣.
+// The skeleton uses three marks: `#` is a solid block, `-` is the interval rule, `o` is the point estimate.
 const (
 	// MarkWidth and MarkHeight are the drawing's extent, asserted rather than assumed: a row one column
 	// short leaves a letter out of line, and that is not visible in a diff.
-	MarkWidth  = 31
+	MarkWidth  = 37
 	MarkHeight = 5
 
 	// MarkAccentHex is the stroke colour of the source SVG, without the `#`. The installers and the CLI paint
@@ -49,28 +49,27 @@ var MarkAccentRGB = [3]int{46, 207, 168}
 // MarkSkeleton is the drawing, pen-neutral. H is seven columns because it is the mark and needs room for the
 // halo; the other four are five, separated by a single column.
 var MarkSkeleton = []string{
-	`|     | 1---- 1---2 1---2 1---2`,
-	`|     | |     |   | |   | |    `,
-	`|- o -| 5---  5---4 |   | 3---2`,
-	`|     | |     |  \  |   |     |`,
-	`|     | 3---- |   \ 3---4 3---4`,
+	`##     ## ###### #####  ###### ######`,
+	`##     ## ##     ##  ## ##  ## ##    `,
+	`##- o -## #####  #####  ##  ## ######`,
+	`##     ## ##     ## ##  ##  ##     ##`,
+	`##     ## ###### ##  ## ###### ######`,
 }
 
 // markPens are the two renderings of the skeleton. Every skeleton character must appear in both, or
 // TestBothPensRenderEverySkeletonGlyph fails: a missing entry would silently drop ink from one pen only.
 var markPens = map[string]map[rune]rune{
+	// The letters are solid because a terminal cell is about twice as tall as it is wide, and an outline
+	// letterform at this size reads as wire rather than as type. The H's crossbar is deliberately NOT solid:
+	// a fine rule with the estimate sitting on it is the figure the product means, and against five heavy
+	// letters it reads as a measurement rather than as a sixth letter.
 	"unicode": {
-		'|': '┃', '-': '━', 'o': '●', '\\': '╲',
-		'1': '┏', '2': '┓', '3': '┗', '4': '┛', '5': '┣',
-		' ': ' ',
+		'#': '█', '-': '━', 'o': '●', ' ': ' ',
 	},
 	// ASCII is a fallback, not a lesser brand: it is what a user on a non-UTF-8 locale or a legacy Windows
-	// code page actually sees, and mojibake at the end of an install reads as a broken install. Every corner
-	// becomes `+`, which is why the skeleton distinguishes them and the ASCII drawing does not need to.
+	// code page actually sees, and mojibake at the end of an install reads as a broken install.
 	"ascii": {
-		'|': '|', '-': '-', 'o': 'o', '\\': '\\',
-		'1': '+', '2': '+', '3': '+', '4': '+', '5': '+',
-		' ': ' ',
+		'#': '#', '-': '-', 'o': 'o', ' ': ' ',
 	},
 }
 
