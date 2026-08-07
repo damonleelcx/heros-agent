@@ -10,7 +10,7 @@ import (
 
 	"github.com/heros-foreal/agentd/internal/cli"
 	"github.com/heros-foreal/agentd/internal/runlink"
-	"github.com/heros-foreal/agentd/internal/verification"
+	"github.com/heros-foreal/agentd/internal/verdictrecord"
 )
 
 // reportverdict.go implements `heros report-verdict` — the command a customer's CI runs after it has
@@ -26,7 +26,7 @@ import (
 //
 // # What it drops, in one visible place
 //
-// The input is a `verification.Verdict` — the local, complete record, with case ids and a free-text
+// The input is a `verdictrecord.Verdict` — the local, complete record, with case ids and a free-text
 // reason. Neither crosses. The drop happens in runlink.BuildVerdict, and `--dry-run` renders the exact
 // bytes so a customer can see for themselves that it did, before anything is transmitted.
 
@@ -147,8 +147,8 @@ func (c Commands) ReportVerdict(cfg cli.Config, s cli.Streams) error {
 	return s.EmitJSON("report-verdict", cli.ExitOK, data, nil, nil)
 }
 
-// readVerdict loads a verification.Verdict from a file, or from stdin when the path is "-".
-func readVerdict(path string) (verification.Verdict, error) {
+// readVerdict loads a verdictrecord.Verdict from a file, or from stdin when the path is "-".
+func readVerdict(path string) (verdictrecord.Verdict, error) {
 	var raw []byte
 	var err error
 	if path == "-" {
@@ -157,16 +157,16 @@ func readVerdict(path string) (verification.Verdict, error) {
 		raw, err = os.ReadFile(path)
 	}
 	if err != nil {
-		return verification.Verdict{}, &cli.ExitError{Code: cli.ExitOperational,
+		return verdictrecord.Verdict{}, &cli.ExitError{Code: cli.ExitOperational,
 			Msg: "report-verdict: cannot read the verdict: " + err.Error()}
 	}
-	var v verification.Verdict
+	var v verdictrecord.Verdict
 	if err := json.Unmarshal(raw, &v); err != nil {
-		return verification.Verdict{}, &cli.ExitError{Code: cli.ExitOperational,
+		return verdictrecord.Verdict{}, &cli.ExitError{Code: cli.ExitOperational,
 			Msg: "report-verdict: " + path + " is not a verification verdict: " + err.Error()}
 	}
 	if v.GateResult == "" {
-		return verification.Verdict{}, &cli.ExitError{Code: cli.ExitOperational,
+		return verdictrecord.Verdict{}, &cli.ExitError{Code: cli.ExitOperational,
 			Msg: "report-verdict: " + path + " carries no gate_result — a verdict with no gate result is " +
 				"not an unverified proposal, it is an unreadable file, and the platform stores the two differently"}
 	}
