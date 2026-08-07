@@ -293,8 +293,8 @@ verify_signature() { # verify_signature <manifest> <sshsig> <rawsig>
 }
 
 # ── the mark ────────────────────────────────────────────────────────────────────────────────────────────
-# print_mark draws the Heros mark — the H that is also a confidence interval: two end caps, the span, and a
-# point estimate on it. The rows are held identical to scripts/install.ps1 and to the source SVG's figure by
+# print_mark draws the Heros wordmark — HEROS, whose H is the mark: two end caps, the span, and a point
+# estimate on it. The rows are held identical to scripts/install.ps1 and to the source SVG's figure by
 # TestInstallScriptsCarryTheSameMark; edit internal/distribution/mark.go, not this copy.
 #
 # It prints on a SUCCESSFUL install only. A banner at the top of a run that then refuses would put the brand
@@ -331,18 +331,18 @@ print_mark() {
   # glyph will happily accept the bytes and show boxes, so there is nothing to detect after the fact.
   case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in
     *UTF-8*|*utf-8*|*UTF8*|*utf8*)
-      printf '  %s┃         ┃%s\n' "${mark_on}" "${mark_off}"
-      printf '  %s┃         ┃%s\n' "${mark_on}" "${mark_off}"
-      printf '  %s┃━━━ ● ━━━┃%s\n' "${mark_on}" "${mark_off}"
-      printf '  %s┃         ┃%s\n' "${mark_on}" "${mark_off}"
-      printf '  %s┃         ┃%s\n' "${mark_on}" "${mark_off}"
+      printf '  %s%s%s\n' "${mark_on}" '┃     ┃ ┏━━━━ ┏━━━┓ ┏━━━┓ ┏━━━┓' "${mark_off}"
+      printf '  %s%s%s\n' "${mark_on}" '┃     ┃ ┃     ┃   ┃ ┃   ┃ ┃    ' "${mark_off}"
+      printf '  %s%s%s\n' "${mark_on}" '┃━ ● ━┃ ┣━━━  ┣━━━┛ ┃   ┃ ┗━━━┓' "${mark_off}"
+      printf '  %s%s%s\n' "${mark_on}" '┃     ┃ ┃     ┃  ╲  ┃   ┃     ┃' "${mark_off}"
+      printf '  %s%s%s\n' "${mark_on}" '┃     ┃ ┗━━━━ ┃   ╲ ┗━━━┛ ┗━━━┛' "${mark_off}"
       ;;
     *)
-      printf '  %s|         |%s\n' "${mark_on}" "${mark_off}"
-      printf '  %s|         |%s\n' "${mark_on}" "${mark_off}"
-      printf '  %s|--- o ---|%s\n' "${mark_on}" "${mark_off}"
-      printf '  %s|         |%s\n' "${mark_on}" "${mark_off}"
-      printf '  %s|         |%s\n' "${mark_on}" "${mark_off}"
+      printf '  %s%s%s\n' "${mark_on}" '|     | +---- +---+ +---+ +---+' "${mark_off}"
+      printf '  %s%s%s\n' "${mark_on}" '|     | |     |   | |   | |    ' "${mark_off}"
+      printf '  %s%s%s\n' "${mark_on}" '|- o -| +---  +---+ |   | +---+' "${mark_off}"
+      printf '  %s%s%s\n' "${mark_on}" '|     | |     |  \  |   |     |' "${mark_off}"
+      printf '  %s%s%s\n' "${mark_on}" '|     | +---- |   \ +---+ +---+' "${mark_off}"
       ;;
   esac
   printf '\n'

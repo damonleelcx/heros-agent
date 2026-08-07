@@ -34,7 +34,7 @@ heros install: next: cd into a repository and run
 ```
 
 This capture is from **v0.21.0**, and it is left exactly as it was captured. The release after it draws the
-Heros mark between the signature line and the install line; that is not spliced in here, because a transcript
+Heros wordmark between the signature line and the install line; that is not spliced in here, because a transcript
 labelled *verbatim* stops being worth anything the first time it shows output no published version produced.
 It is re-captured when the next release publishes.
 
