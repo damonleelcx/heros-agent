@@ -20,7 +20,7 @@ import (
 // what makes the copy assertions meaningful: two scripts agreeing on a malformed row is not a property worth
 // having.
 func TestMarkGeometry(t *testing.T) {
-	for name, rows := range map[string][]string{"unicode": MarkUnicode, "ascii": MarkASCII} {
+	for name, rows := range map[string][]string{"unicode": MarkUnicode, "ascii": MarkASCII, "skeleton": MarkSkeleton} {
 		if len(rows) != MarkHeight {
 			t.Errorf("%s mark is %d rows, want %d", name, len(rows), MarkHeight)
 		}
@@ -31,8 +31,9 @@ func TestMarkGeometry(t *testing.T) {
 		}
 	}
 
-	// The two pens must draw the same figure, not two figures that happen to be the same size. Compared by
-	// ink position: a cell is inked in one drawing exactly when it is inked in the other.
+	// Both pens render the SAME skeleton, so they cannot disagree about the figure — but only if every pen
+	// renders every glyph. Compared by ink position: a cell is inked in one drawing exactly when it is inked
+	// in the other. A pen missing an entry would drop ink on one platform only.
 	for i := range MarkUnicode {
 		u, a := []rune(MarkUnicode[i]), []rune(MarkASCII[i])
 		for j := range u {
@@ -42,13 +43,81 @@ func TestMarkGeometry(t *testing.T) {
 			}
 		}
 	}
+}
 
-	// The halo: the point estimate must have a blank cell on each side. Without it the dot reads as a
-	// thick spot in the bar and the H collapses — the failure the source SVG's own comment describes.
-	bar := []rune(MarkUnicode[MarkHeight/2])
-	mid := MarkWidth / 2
-	if bar[mid] == ' ' || bar[mid-1] != ' ' || bar[mid+1] != ' ' {
-		t.Errorf("the middle row has no haloed point estimate at its centre: %q", MarkUnicode[MarkHeight/2])
+// TestBothPensRenderEverySkeletonGlyph is what keeps the comparison above from passing vacuously.
+//
+// renderMark falls back to a space for a glyph a pen does not define, so a missing table entry does not crash
+// — it silently erases part of the drawing, and erases it in BOTH pens if the glyph is missing from both,
+// which the ink-parity check would then happily accept.
+func TestBothPensRenderEverySkeletonGlyph(t *testing.T) {
+	used := map[rune]bool{}
+	for _, row := range MarkSkeleton {
+		for _, r := range row {
+			used[r] = true
+		}
+	}
+	for _, pen := range []string{"unicode", "ascii"} {
+		table := MarkGlyphs(pen)
+		if table == nil {
+			t.Fatalf("no %s pen", pen)
+		}
+		for r := range used {
+			if _, ok := table[r]; !ok {
+				t.Errorf("the %s pen has no glyph for skeleton character %q, so that ink is silently dropped",
+					pen, r)
+			}
+		}
+	}
+}
+
+// TestTheMarkIsTheWordHEROS — the drawing must be the word, and its H must still be the interval.
+//
+// A wordmark can decay in two directions and both look fine in a diff: a letter loses a stroke and reads as
+// something else, or the H is replaced by an ordinary H and the figure that means something is gone.
+func TestTheMarkIsTheWordHEROS(t *testing.T) {
+	// The H is the first seven columns: two end caps, a span, and a point estimate with a blank cell of halo
+	// on each side. The halo is not decoration — a dot set directly into the span reads as a defect in the
+	// bar rather than as a mark of its own, which is the failure the source SVG's own comment describes.
+	mid := []rune(MarkUnicode[MarkHeight/2])
+	dot := -1
+	for i, r := range mid {
+		if r == '●' {
+			dot = i
+			break
+		}
+	}
+	if dot < 0 {
+		t.Fatalf("the middle row carries no point estimate: %q", string(mid))
+	}
+	if dot >= 7 {
+		t.Errorf("the point estimate is at column %d, outside the H — the mark is supposed to BE the H of "+
+			"the word, not sit beside it", dot)
+	}
+	if mid[dot-1] != ' ' || mid[dot+1] != ' ' {
+		t.Errorf("the point estimate has no halo (%q): at this size a dot set into the span reads as a thick "+
+			"spot in the bar and the H collapses", string(mid[:7]))
+	}
+	if mid[0] != '┃' || mid[6] != '┃' {
+		t.Errorf("the H has lost an end cap: %q", string(mid[:7]))
+	}
+
+	// And the other four letters must still be there. Counted by columns of ink rather than read as glyphs:
+	// each letter occupies a five-column cell after the H, and an empty one means a letter went missing.
+	for n, letter := range []string{"E", "R", "O", "S"} {
+		start := 8 + n*6
+		inked := false
+		for _, row := range MarkUnicode {
+			r := []rune(row)
+			for c := start; c < start+5 && c < len(r); c++ {
+				if r[c] != ' ' {
+					inked = true
+				}
+			}
+		}
+		if !inked {
+			t.Errorf("columns %d-%d carry no ink, so the %s of HEROS is missing", start, start+4, letter)
+		}
 	}
 }
 
@@ -68,35 +137,40 @@ func TestInstallScriptsCarryTheSameMark(t *testing.T) {
 	}
 
 	ps := readScript(t, "install.ps1")
-	// The ASCII pen is typed literally on both sides, so it is compared literally.
-	for _, row := range MarkASCII {
-		if strings.Contains(ps, row) {
+	// install.ps1 cannot hold either drawing: it has no UTF-8 BOM and is normally run through `irm | iex`,
+	// so a box-drawing literal is decoded as the system ANSI code page and arrives as mojibake. It carries
+	// the pen-neutral SKELETON, which is pure ASCII, plus both pen tables — so what is checked here is the
+	// skeleton it draws and the code points it maps to, which is the same assertion one substitution later.
+	for _, row := range MarkSkeleton {
+		if !strings.Contains(ps, row) {
+			t.Errorf("install.ps1 does not carry the skeleton row %q — Windows is drawing a different "+
+				"picture than every other platform", row)
+		}
+	}
+	for from, to := range MarkGlyphs("unicode") {
+		if to == ' ' {
 			continue
 		}
-		// install.ps1 builds its rows from $cap/$span/$dot rather than pasting them, so the literal row is
-		// not expected to appear; what must appear is the three ASCII pen characters it builds them from.
-		for _, pen := range []string{`$cap = '|'`, `$span = '-'`, `$dot = 'o'`} {
-			if !strings.Contains(ps, pen) {
-				t.Errorf("install.ps1 does not use the ASCII pen %s that install.sh's fallback draws with", pen)
-			}
-		}
-		break
-	}
-	// The unicode pen, as the code points the script composes. Derived from MarkUnicode rather than written
-	// as literals, so a change to the drawing moves this assertion with it.
-	bar := []rune(MarkUnicode[MarkHeight/2])
-	for what, r := range map[string]rune{"cap": bar[0], "span": bar[1], "dot": bar[MarkWidth/2]} {
-		want := fmt.Sprintf("0x%04X", r)
+		want := fmt.Sprintf("0x%04X", to)
 		if !strings.Contains(ps, want) {
-			t.Errorf("install.ps1 does not compose the %s from %s (%q) — it is drawing a different glyph "+
-				"than install.sh", what, want, r)
+			t.Errorf("install.ps1 maps no skeleton %q to %s (%q) — the Windows drawing has drifted from "+
+				"the one internal/distribution defines", from, want, to)
+		}
+	}
+	for from, to := range MarkGlyphs("ascii") {
+		if to == ' ' {
+			continue
+		}
+		if !strings.Contains(ps, fmt.Sprintf("'%c' = '%c'", from, to)) {
+			t.Errorf("install.ps1's ASCII pen does not map %q to %q, so a console that is not in UTF-8 draws "+
+				"a different figure than the one internal/distribution defines", from, to)
 		}
 	}
 	// And it must still choose the ASCII drawing when the console is not in UTF-8. Without this branch the
 	// script would emit box-drawing bytes into a code page that cannot show them.
 	if !strings.Contains(ps, "OutputEncoding.CodePage -eq 65001") {
-		t.Error("install.ps1 does not check the console code page before drawing the unicode mark — on a " +
-			"legacy code page it would print mojibake at the end of a successful install")
+		t.Error("install.ps1 does not check the console code page before drawing the unicode wordmark — on " +
+			"a legacy code page it would print mojibake at the end of a successful install")
 	}
 }
 

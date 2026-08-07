@@ -93,7 +93,7 @@ func Main(args []string, s Streams, env func(string) (string, bool), net NetComm
 	case "coverage":
 		return codeOf(Coverage(cfg, s), s, cmd)
 	case "init":
-		return codeOf(Init(cfg, s), s, cmd)
+		return codeOf(Init(cfg, s, env, runtime.GOOS), s, cmd)
 	case "doctor":
 		return codeOf(Doctor(cfg, s, env), s, cmd)
 	case "verify-release":

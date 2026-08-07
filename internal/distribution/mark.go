@@ -1,74 +1,105 @@
 package distribution
 
-// mark.go is the Heros mark as a terminal drawing — the one the install scripts print when an install
-// succeeds.
+import "strings"
+
+// mark.go is the Heros wordmark as a terminal drawing — the one the install scripts and the CLI print.
 //
-// # Why this lives in Go rather than in the scripts that print it
+// # What the drawing is
 //
-// The mark is drawn twice, once in `scripts/install.sh` and once in `scripts/install.ps1`, because neither
-// script can call the other and neither can call this package. Two hand-maintained copies of the same
-// picture drift, and the drift is silent in the way installers_test.go already describes: each script is
-// correct read on its own, and nobody sees the two side by side. So the rows are written here once, and
-// TestInstallScriptsCarryTheSameMark holds both copies to them.
+// The word HEROS, whose H is the mark: two end caps, the span between them, and a point estimate sitting on
+// the span with a blank cell of halo on each side. That H is the figure this product always draws — a
+// confidence interval with an estimate on it — and the figure it refuses to draw is a bare point with no
+// interval around it. The other four letters are set in the same pen so the word reads as one object rather
+// than as a logo with text stuck next to it.
 //
-// # What the drawing is, and what it drops
+// The tile from web/console/src/app/icon.svg does NOT survive the trip. That tile is opaque and dark because
+// a favicon has to look the same against any browser chrome; a terminal already supplies a background, and
+// painting one would turn a five-row wordmark into a five-row block that fights every theme it lands in.
 //
-// The source mark (web/console/src/app/icon.svg, the console favicon) is an H that is also a confidence
-// interval: two end caps, the span between them, and a point estimate sitting on the span, haloed so it
-// reads as its own mark rather than as a thick spot in the bar. All three parts survive the trip to a
-// terminal — the caps, the span, and the haloed dot — because they are the figure, and the figure is the
-// claim the product makes.
+// # One skeleton, two pens
 //
-// The tile does NOT survive, and that is deliberate rather than an omission. The SVG's tile is opaque and
-// dark because a favicon has to look the same against any browser chrome. A terminal already supplies that
-// background, and painting one would turn a five-row mark into a five-row block that fights every theme it
-// is printed into.
+// The drawing is written ONCE, in MarkSkeleton, in characters that are not the ones printed. Each pen renders
+// it: box-drawing where the terminal can show it, ASCII everywhere else.
 //
-// # Why eleven columns
+// The reason is scripts/install.ps1. That file has no UTF-8 BOM and is normally run through `irm | iex`, so on
+// Windows PowerShell 5.1 its bytes are decoded as the system ANSI code page — a box-drawing character typed
+// into it arrives as mojibake on exactly the platform it exists to serve. It therefore holds the SKELETON,
+// which is pure ASCII, and maps it through the same tables below at runtime. A skeleton also makes the two
+// pens incapable of disagreeing about the shape: they are the same string with different glyphs substituted,
+// so the ASCII fallback can never quietly become a different picture.
 //
-// Terminal cells are about twice as tall as they are wide, so 11×5 is roughly the square the SVG tile is.
-// Wider reads as a banner, and the point estimate stops being centred on anything.
+// Digits in the skeleton are corner POSITIONS, never drawn as digits: 1 ┏, 2 ┓, 3 ┗, 4 ┛, 5 ┣.
 const (
-	// MarkWidth and MarkHeight are the drawing's extent. Asserted rather than assumed, because a row that
-	// is one column short leaves the right-hand cap out of line and it is not obvious in a diff.
-	MarkWidth  = 11
+	// MarkWidth and MarkHeight are the drawing's extent, asserted rather than assumed: a row one column
+	// short leaves a letter out of line, and that is not visible in a diff.
+	MarkWidth  = 31
 	MarkHeight = 5
 
-	// MarkAccentHex is the stroke colour of the source SVG, without the `#`. The installer paints the mark
-	// in it, so a rebrand that changed the SVG and not the installer would leave a user watching the old
-	// colour at the one moment the product introduces itself. TestTerminalMarkUsesTheBrandAccent reads the
-	// SVG and holds this to it.
+	// MarkAccentHex is the stroke colour of the source SVG, without the `#`. The installers and the CLI paint
+	// the wordmark in it, so a rebrand that changed the icon and not the terminal would leave a user watching
+	// the old colour at the one moment the product introduces itself.
 	MarkAccentHex = "2ecfa8"
 )
 
 // MarkAccentRGB is MarkAccentHex as the three decimal components an SGR truecolor escape takes. Kept beside
-// the hex rather than derived in the script, because a shell script that does its own hex arithmetic is a
+// the hex rather than derived at each call site, because a shell script doing its own hex arithmetic is a
 // second place the colour can be wrong.
 var MarkAccentRGB = [3]int{46, 207, 168}
 
-// MarkUnicode is the drawing for a terminal that can render box-drawing characters: heavy verticals for the
-// end caps, a heavy horizontal for the span, and a filled circle for the point estimate with a blank cell of
-// halo on each side.
-//
-// The halo is not decoration. At this size, a dot set directly into the span reads as a defect in the bar
-// rather than as a mark of its own — the same failure the SVG's comment describes at 16px.
-var MarkUnicode = []string{
-	"┃         ┃",
-	"┃         ┃",
-	"┃━━━ ● ━━━┃",
-	"┃         ┃",
-	"┃         ┃",
+// MarkSkeleton is the drawing, pen-neutral. H is seven columns because it is the mark and needs room for the
+// halo; the other four are five, separated by a single column.
+var MarkSkeleton = []string{
+	`|     | 1---- 1---2 1---2 1---2`,
+	`|     | |     |   | |   | |    `,
+	`|- o -| 5---  5---4 |   | 3---2`,
+	`|     | |     |  \  |   |     |`,
+	`|     | 3---- |   \ 3---4 3---4`,
 }
 
-// MarkASCII is the same figure in characters that survive any encoding.
-//
-// This is a fallback, not a lesser brand: it is what a user on a non-UTF-8 locale or a legacy Windows code
-// page actually sees, and mojibake at the end of an install reads as a broken install. The geometry is
-// identical — same width, same height, same halo — so the two are the same picture drawn with different pens.
-var MarkASCII = []string{
-	"|         |",
-	"|         |",
-	"|--- o ---|",
-	"|         |",
-	"|         |",
+// markPens are the two renderings of the skeleton. Every skeleton character must appear in both, or
+// TestBothPensRenderEverySkeletonGlyph fails: a missing entry would silently drop ink from one pen only.
+var markPens = map[string]map[rune]rune{
+	"unicode": {
+		'|': '┃', '-': '━', 'o': '●', '\\': '╲',
+		'1': '┏', '2': '┓', '3': '┗', '4': '┛', '5': '┣',
+		' ': ' ',
+	},
+	// ASCII is a fallback, not a lesser brand: it is what a user on a non-UTF-8 locale or a legacy Windows
+	// code page actually sees, and mojibake at the end of an install reads as a broken install. Every corner
+	// becomes `+`, which is why the skeleton distinguishes them and the ASCII drawing does not need to.
+	"ascii": {
+		'|': '|', '-': '-', 'o': 'o', '\\': '\\',
+		'1': '+', '2': '+', '3': '+', '4': '+', '5': '+',
+		' ': ' ',
+	},
+}
+
+// MarkUnicode is the wordmark for a terminal that can render box-drawing characters.
+var MarkUnicode = renderMark("unicode")
+
+// MarkASCII is the same wordmark in characters that survive any encoding.
+var MarkASCII = renderMark("ascii")
+
+// MarkGlyphs returns the pen's substitution table. install.ps1 carries the unicode table as code points and
+// is held to this one, so the drawing Windows composes cannot drift from the drawing everyone else prints.
+func MarkGlyphs(pen string) map[rune]rune { return markPens[pen] }
+
+func renderMark(pen string) []string {
+	table := markPens[pen]
+	out := make([]string, 0, len(MarkSkeleton))
+	for _, row := range MarkSkeleton {
+		var b strings.Builder
+		for _, r := range row {
+			if g, ok := table[r]; ok {
+				b.WriteRune(g)
+				continue
+			}
+			// Unreachable while the pen tables are complete, and the test that keeps them complete is the
+			// reason this does not panic: dropping to a space keeps a malformed pen from taking down an
+			// install over a banner.
+			b.WriteRune(' ')
+		}
+		out = append(out, b.String())
+	}
+	return out
 }
