@@ -158,6 +158,17 @@ func extractTarGz(ctx context.Context, r io.Reader, dest string) error {
 			return fmt.Errorf("entry path exceeds %d bytes", MaxBundlePathLength)
 		}
 
+		// 🔴 A pax header is METADATA, not a filesystem entry, and it is skipped before anything treats
+		// its name as a path. `git archive` writes `pax_global_header` (typeflag 'g') at the head of every
+		// archive of a repository that has a commit — so without this, `push-source` failed on EVERY
+		// repository, with `entry pax_global_header has unsupported type "g"`: the default branch below
+		// classifying a comment as a device node. Skipping it writes nothing and relaxes no rule; the
+		// extended-header form ('x') carries per-entry metadata Go's tar reader has already folded into
+		// the NEXT header by the time it is returned, so it is likewise nothing to unpack.
+		if hdr.Typeflag == tar.TypeXGlobalHeader || hdr.Typeflag == tar.TypeXHeader {
+			continue
+		}
+
 		target, err := safeJoin(root, hdr.Name)
 		if err != nil {
 			return err

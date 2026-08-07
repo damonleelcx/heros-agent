@@ -83,6 +83,15 @@ func makeTarGz(t *testing.T, entries ...tarEntry) []byte {
 		if flag == tar.TypeSymlink || flag == tar.TypeLink {
 			hdr.Size = 0
 		}
+		// A pax global header carries records, not a body. `git archive` writes one comment record holding
+		// the commit id; Go's writer encodes the same bytes from PAXRecords and refuses a hand-set body,
+		// so the entry is expressed the way the format defines it rather than the way the struct allows.
+		if flag == tar.TypeXGlobalHeader {
+			hdr.Size = 0
+			hdr.Mode = 0
+			hdr.Format = tar.FormatPAX
+			hdr.PAXRecords = map[string]string{"comment": e.body}
+		}
 		if err := tw.WriteHeader(hdr); err != nil {
 			t.Fatalf("write header %s: %v", e.name, err)
 		}
@@ -403,5 +412,58 @@ func TestNonGzipInputIsRefused(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "gzip") {
 		t.Errorf("err = %v, want a gzip error", err)
+	}
+}
+
+// TestAPaxGlobalHeaderIsSkippedRatherThanRefused pins the shape `git archive` actually writes.
+//
+// 🔴 This is a regression fence for a defect that made `push-source` fail on EVERY repository with a
+// commit, not on some unusual one. `git archive` emits `pax_global_header` (typeflag 'g') as the first
+// entry of the archive, carrying the commit id as a comment. Extraction classified it through the
+// default branch — the one written for char devices and FIFOs — and answered
+// `entry pax_global_header has unsupported type "g"`, which reached the customer as a 500 from
+// `POST /api/v1/workflow-source-discovery`: an opaque failure about a device node, for a valid archive.
+//
+// The entry is asserted to leave NOTHING behind, because "skipped" and "written somewhere harmless" are
+// different outcomes and only one of them is safe. The refusals around it are asserted in the same test
+// so that a future relaxation of 'g' cannot quietly widen into 'x'-adjacent link handling: the symlink
+// still has to be refused with the archive containing a pax header, or this fence would be evidence
+// that the skip is narrow when it is not.
+func TestAPaxGlobalHeaderIsSkippedRatherThanRefused(t *testing.T) {
+	archive := makeTarGz(t,
+		tarEntry{name: "pax_global_header", body: "bb612cbe4c1dbfa18b44a653c4338e9466a1a8ce",
+			typeflag: tar.TypeXGlobalHeader},
+		tarEntry{name: "src", typeflag: tar.TypeDir},
+		tarEntry{name: "src/app.ts", body: "export const x = 1\n"},
+	)
+	m, err := materializeBundle(t, archive)
+	if err != nil {
+		t.Fatalf("an archive with a pax global header was refused: %v", err)
+	}
+	defer m.Release()
+
+	got, err := os.ReadFile(filepath.Join(m.Dir, "src", "app.ts"))
+	if err != nil {
+		t.Fatalf("read extracted file: %v", err)
+	}
+	if string(got) != "export const x = 1\n" {
+		t.Errorf("extracted body = %q", got)
+	}
+	if _, err := os.Lstat(filepath.Join(m.Dir, "pax_global_header")); !os.IsNotExist(err) {
+		t.Errorf("the pax header was WRITTEN to the tree (lstat err = %v); it must be skipped, not unpacked", err)
+	}
+
+	// The skip must not have widened. A link in the same archive is still refused by name.
+	linked := makeTarGz(t,
+		tarEntry{name: "pax_global_header", body: "deadbeef", typeflag: tar.TypeXGlobalHeader},
+		tarEntry{name: "etc", typeflag: tar.TypeSymlink, linkname: "/etc"},
+	)
+	m2, err := materializeBundle(t, linked)
+	if err == nil {
+		m2.Release()
+		t.Fatal("a symlink was accepted when the archive also carried a pax header")
+	}
+	if !strings.Contains(err.Error(), "is a link") {
+		t.Errorf("err = %v, want the link refusal", err)
 	}
 }
