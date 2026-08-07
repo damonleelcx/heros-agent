@@ -55,6 +55,27 @@ type Entry struct {
 	CostPerRun float64 `json:"cost_per_run"`
 	// LatencyMS is the estimated per-run latency, for the latency-SLA constraint check.
 	LatencyMS float64 `json:"latency_ms"`
+
+	// Provider and ModelID are the REGISTRY half of this row: what `Name` refers to.
+	//
+	// 🔴 Both are optional, and the reason they exist here at all is a gap this file's own header
+	// describes without noticing. `Menu` JOINS published judgements onto registered models by name — so
+	// a deployment whose registry has no entry for "Claude Sonnet 5" gets an empty menu, an empty
+	// `/api/v1/models`, and a Studio matrix with columns and NO ROWS. The only caller of
+	// `registry.RegisterModel` in this repository is a demo binary, so that was every real deployment.
+	//
+	// They are DECLARED here rather than inferred from the name because a provider and a model id are
+	// facts about what this deployment can resolve, and guessing "Claude Sonnet 5" → `anthropic/
+	// claude-sonnet-5` would be the platform inventing an upstream identifier — the same class of
+	// mistake as inventing a tier. An entry that omits them publishes a judgement about a model somebody
+	// else registered, which is exactly what this file did before and stays valid.
+	Provider string `json:"provider,omitempty"`
+	ModelID  string `json:"model_id,omitempty"`
+}
+
+// Registrable reports whether this entry declares enough to create the registry entry it names.
+func (e Entry) Registrable() bool {
+	return strings.TrimSpace(e.Provider) != "" && strings.TrimSpace(e.ModelID) != ""
 }
 
 type catalogFile struct {
@@ -222,4 +243,63 @@ type Report struct {
 	Unjudged []string `json:"unjudged,omitempty"`
 	// Unregistered are published models the registry cannot resolve.
 	Unregistered []string `json:"unregistered,omitempty"`
+}
+
+// ModelRegistrar is the registry write this package needs to seed. One method, so a caller can see at
+// the type level that seeding cannot read, delete or deprecate anything.
+type ModelRegistrar interface {
+	RegisterModel(ctx context.Context, name string, spec registry.ModelSpec) (string, error)
+}
+
+// SeedReport is what a seeding pass did, for the operator log. Counts, never a spec.
+type SeedReport struct {
+	// Registered is how many entries were published to the registry.
+	Registered int
+	// Undeclared is how many published entries carry a judgement but no provider/model_id. Legitimate —
+	// they describe models registered by some other route — and reported so a deployment whose matrix is
+	// empty can tell "nobody declared them" from "seeding failed".
+	Undeclared int
+	// Failed names the entries that could not be registered, with the reason.
+	Failed map[string]string
+}
+
+// SeedRegistry publishes every catalog entry that declares a provider and a model id.
+//
+// # Idempotent by construction, not by check
+//
+// `RegisterModel` is content-addressed: registering identical content returns the same version_id and
+// publishes nothing. So this runs on every boot with no "have I already done this" state to get wrong —
+// and an operator who edits the catalog gets a NEW version on the next boot while the old one stays
+// resolvable, which is what any spec pinning it needs.
+//
+// 🚫 It never deletes or deprecates. A model that disappears from the published catalog stops being
+// OFFERED (the join in Menu drops it) and stays RESOLVABLE, because a config_hash somewhere may pin it
+// and a deployment that unregisters on edit would break specs it already accepted.
+//
+// A single entry failing does not abort the pass: the remaining models are still worth having, and the
+// report names what did not land rather than leaving one bad row to empty the whole matrix.
+func SeedRegistry(ctx context.Context, src Source, reg ModelRegistrar) (SeedReport, error) {
+	rep := SeedReport{Failed: map[string]string{}}
+	if src == nil || reg == nil {
+		return rep, ErrNoCatalog
+	}
+	published, err := src.Load()
+	if err != nil {
+		return rep, err
+	}
+	for _, e := range published {
+		if !e.Registrable() {
+			rep.Undeclared++
+			continue
+		}
+		if _, err := reg.RegisterModel(ctx, e.Name, registry.ModelSpec{
+			Provider: strings.TrimSpace(e.Provider),
+			ModelID:  strings.TrimSpace(e.ModelID),
+		}); err != nil {
+			rep.Failed[e.Name] = err.Error()
+			continue
+		}
+		rep.Registered++
+	}
+	return rep, nil
 }
