@@ -724,6 +724,31 @@ decide how much of it to pay for today.
 
 ---
 
+## 11. Mail — the one component this deploy does *not* stand up
+
+🔴 **`overlays/prod` no longer points at Amazon SES, and you cannot bring mail up by applying these
+manifests.** SES production access for this account was **denied**, which leaves it in the sandbox —
+delivering only to separately-verified addresses. That failure is invisible from inside the platform:
+`mailer.Configured()` answers true, `/readyz` is green, `make mail-proof` passes against a verified
+address, and a stranger who signs up receives nothing.
+
+The overlay now names a relay this platform owns, built by **[`deploy/mail/`](mail/README.md)** —
+Postfix + OpenDKIM + Dovecot on one EC2 host with an Elastic IP. It is a separate machine and a
+separate runbook on purpose: it is not a Kubernetes workload, it needs DNS records and an AWS Support
+case, and every one of its failure modes is silent.
+
+Two things that will stop you, both covered there:
+
+- **Outbound port 25 is blocked on every EC2 instance** until a Support case removes it — a *different*
+  approval from SES production access. `deploy/mail/` ships a `smarthost` mode for the case where that
+  one is refused too, and nothing in these manifests changes when the mode does.
+- **`make deploy-lint` fails until you substitute the relay's Elastic IP** into the 587 egress rule
+  (`scripts/deploy/check-mail-relay-pinned.sh`). It ships as an RFC 5737 placeholder, and a
+  NetworkPolicy denying that connection produces no event, no log line and no metric — just a customer
+  who never got their reset link.
+
+---
+
 ## Appendix A — every environment variable
 
 The complete contract, extracted from `deploy/k8s/base/` — **58 declarations across three workloads, 51

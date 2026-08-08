@@ -131,6 +131,7 @@ deploy-lint:
 	bash scripts/deploy/check-image-parity.sh
 	bash scripts/deploy/check-env-parity.sh
 	bash scripts/deploy/check-no-plaintext-secrets.sh
+	bash scripts/deploy/check-mail-relay-pinned.sh
 	@echo "== make deploy-lint: PASS =="
 
 ## console-test: the customer console's own suite (needs npm; see web/console/README.md)

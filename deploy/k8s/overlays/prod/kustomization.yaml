@@ -61,6 +61,15 @@ resources:
   # Plain HTTP redirects to HTTPS instead of 404ing — see the file's header for why it is a
   # separate Ingress rather than a middleware on the existing one.
   - http-redirect.yaml
+  # This deployment's SMTP relay. Overlay-only on purpose: the base ships no mail server, because
+  # `internal/mailer`'s operator fallback is the honest default for an install that has none. See
+  # the file's header, and deploy/mail/README.md for the delivery reasoning behind it.
+  - mail.yaml
+  # ⚠️ `coredns-mail.yaml` DECLARES NO RESOURCES ANY MORE — it is a record of a fix that was wrong.
+  # A cluster-wide CoreDNS rewrite for `mail.heros-agent.space` kept agentd's SMTP traffic in the
+  # cluster and, in the same stroke, broke cert-manager's HTTP-01 self-check for that hostname —
+  # so no certificate was ever issued and the mail pod never started. Read that file before reaching
+  # for a DNS override again. The replacement is the `hostAliases` patch below.
 
 patches:
   # ── Build identity ───────────────────────────────────────────────────────────────────────────────
@@ -127,6 +136,35 @@ patches:
                 resources:
                   requests: { cpu: "500m", memory: "512Mi" }
                   limits: { cpu: "2", memory: "1Gi" }
+
+  # ── Keeping agentd's mail inside the cluster ─────────────────────────────────────────────────
+  #
+  # 🔴 ONE LINE IN ONE POD'S /etc/hosts, AND IT REPLACED A CLUSTER-WIDE DNS OVERRIDE THAT BROKE
+  # CERTIFICATE ISSUANCE. See `coredns-mail.yaml` for the full account; the short version is that a
+  # CoreDNS rewrite for `mail.heros-agent.space` also answered cert-manager's HTTP-01 self-check for
+  # that same hostname, pointing it at an SMTP port — so the challenge never validated, no Secret was
+  # created, and the mail pod sat in Init forever. `hostAliases` is scoped to this pod and is
+  # invisible to every other controller in the cluster.
+  #
+  # Why the public name at all: `internal/mailer` sets `tls.Config{ServerName: cfg.Host}` from
+  # HEROS_SMTP_HOST, and Let's Encrypt will not sign a `.svc.cluster.local` name — so the NAME must
+  # be the public one and only the RESOLUTION is made local. Without this, agentd's mail leaves
+  # through the internet gateway and comes back to a pod one virtual hop away: it works, which is
+  # exactly why nobody would notice.
+  #
+  # ⚠️ The address is the mail Service's PINNED ClusterIP (mail.yaml). Change one and you must change
+  # the other; nothing will tell you.
+  - target: { kind: Deployment, name: agentd }
+    patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata: { name: agentd }
+      spec:
+        template:
+          spec:
+            hostAliases:
+              - ip: 10.43.120.55
+                hostnames: [mail.heros-agent.space]
   # The ledger's claim. 20Gi, not the base's 10Gi floor and not the 50Gi an EKS nodegroup could spare:
   # on a single VM every PVC comes out of the same EBS volume the OS, the images and Postgres share.
   - target: { kind: PersistentVolumeClaim, name: agentd-ledger }
@@ -279,27 +317,48 @@ patches:
                   # than a credential. It is the address a person replies to when a reset link surprises
                   # them, so it must be a mailbox somebody reads — not `noreply@`.
                   #
-                  # Amazon SES in this account's own region. Chosen over a third-party free tier for a
-                  # reason that is not price: it needed no new account, no new vendor relationship and no
-                  # credential handed between systems — the domain is already in this account's Route 53,
-                  # so DKIM was published automatically and verified in under a minute.
+                  # ⚠️ THIS WAS AMAZON SES AND IS NOT ANY MORE. The old note here said SES was chosen
+                  # because it needed no new account and no new vendor relationship, and published DKIM
+                  # automatically from this account's own Route 53. All of that was true and none of it
+                  # survived the outcome: **production access was DENIED**, so the account stays in the
+                  # SES sandbox, and a sandbox account delivers only to separately-verified addresses.
                   #
-                  # ⚠️ It is not literally free. At this volume it is pennies ($0.10 per 1,000 messages,
-                  # with a monthly free allowance), which is worth stating plainly rather than filing
-                  # under "free tier". Swapping to a genuinely-zero relay later is these three values plus
-                  # the two store keys — nothing in the platform knows which relay it is talking to.
+                  # 🔴 THE SHAPE OF THAT FAILURE IS WHY THIS COMMENT IS LONG. Nothing in the platform
+                  # reports it. `mailer.New` builds an SMTPMailer, `Configured()` answers true, /readyz
+                  # is green, and `make mail-proof TO=<a verified address>` PASSES — because the relay
+                  # really did accept that message. Every one of those signals stays green while a
+                  # stranger who signs up receives nothing at all. A relay that is answering is not a
+                  # relay that is delivering, and this deployment had no layer that could tell them apart.
+                  #
+                  # This is now the platform's OWN relay: Postfix + OpenDKIM + Dovecot on one EC2 host
+                  # with an Elastic IP, built by `deploy/mail/` (see its README before touching these
+                  # values). Two consequences worth stating rather than implying:
+                  #
+                  #   - ⚠️ It is not free either. ~$21/month for the instance and the Elastic IP,
+                  #     against SES's pennies-per-thousand. What it buys is that no third party's
+                  #     approval decision can stop this deployment's password resets again.
+                  #   - 🔴 It depends on a DIFFERENT AWS approval — outbound port 25 is blocked on every
+                  #     EC2 instance until a Support case removes it. `deploy/mail/` ships a `smarthost`
+                  #     mode for the case where that one is refused too, and NOTHING HERE CHANGES when
+                  #     the mode does. That is the property being bought: the relay's egress is the
+                  #     relay's problem, and these four values do not know about it.
                   #
                   # 🔴 STARTTLS on 587. `mailer.New` REFUSES clear text to a non-loopback host, so there is
                   # no configuration of these three that quietly sends a reset link across a network in
                   # the open.
-                  - { name: HEROS_SMTP_HOST, value: "email-smtp.us-east-1.amazonaws.com" }
+                  #
+                  # ⚠️ HEROS_SMTP_HOST must match the certificate the relay presents — `mailer` sets
+                  # `tls.Config.ServerName` from this exact value, so an IP address here fails the
+                  # handshake against a certificate issued for the name.
+                  - { name: HEROS_SMTP_HOST, value: "mail.heros-agent.space" }
                   - { name: HEROS_SMTP_PORT, value: "587" }
                   - { name: HEROS_SMTP_TLS,  value: "starttls" }
-                  # ⚠️ `support@heros-agent.space` is a SEND-ONLY address today: the domain has no MX
-                  # record, so a reply to a confirmation or reset mail bounces. The message bodies do not
-                  # invite a reply, so nothing we send makes a promise this breaks — but somebody will
-                  # reply anyway, and right now nobody receives it. See the runbook for the two ways to
-                  # give it a mailbox.
+                  # `support@heros-agent.space` — and this line USED TO CARRY A CAVEAT THAT IS NOW
+                  # RESOLVED. It read: "a SEND-ONLY address today: the domain has no MX record, so a
+                  # reply to a confirmation or reset mail bounces… right now nobody receives it." The
+                  # relay publishes an MX and delivers `support@` to a real mailbox readable over IMAPS,
+                  # so a reply now lands somewhere. It is only true once the MX record in
+                  # `deploy/mail/dns-records.sh` is actually published — until then the old caveat holds.
                   - { name: HEROS_SMTP_FROM, value: "support@heros-agent.space" }
 
   # ── The customer console's identity seam ─────────────────────────────────────────────────────────
@@ -471,15 +530,27 @@ patches:
           # the destination set for mail is described in exactly one place and can be narrowed or removed
           # without touching model-provider egress.
           #
-          # The ipBlock is as broad as the 443 rule's, and it is worth saying why rather than implying
-          # it: SES publishes no stable address for `email-smtp.us-east-1.amazonaws.com`, so a narrower
-          # cidr would be a guess that breaks silently the day AWS renumbers. The private-range
-          # exceptions are kept, so this cannot become a path to an in-cluster service, and 587 reaches
-          # nothing inside the VPC.
-          - to:
-              - ipBlock:
-                  cidr: 0.0.0.0/0
-                  except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.169.254/32]
+          # 🔴 A podSelector, AND THE TWO SHAPES THIS WAS BEFORE ARE BOTH INSTRUCTIVE.
+          #
+          # It began as `0.0.0.0/0` on 587, with the note: "SES publishes no stable address for
+          # `email-smtp.us-east-1.amazonaws.com`, so a narrower cidr would be a guess that breaks
+          # silently the day AWS renumbers." True of SES. It then briefly became a /32 pinned to a
+          # dedicated mail host's Elastic IP — narrower, and still the wrong construct, because that
+          # host was then folded into this cluster and the address released. An egress rule naming a
+          # RELEASED public address is worse than a wide one: it points at whatever AWS hands to the
+          # next customer.
+          #
+          # The relay is now a pod in this namespace, so the rule is a selector — like the console and
+          # postgres rules above. No address to pin, nothing to update when anything moves, and it
+          # cannot silently start permitting a host that is not ours.
+          #
+          # ⚠️ THIS ALSO REMOVES A ROUND TRIP NOBODY WOULD HAVE NOTICED. With an ipBlock pointed at
+          # the node's own public address, agentd's mail leaves the cluster, traverses the internet
+          # gateway and comes back through svclb to a pod one hop away — succeeding at every step,
+          # exposing a credential-bearing connection to the public internet, and requiring the
+          # security group to permit 587 from the world. `coredns-mail.yaml` is the other half of
+          # closing that: the rule permits the pod, and DNS makes sure the pod is what is dialled.
+          - to: [{ podSelector: { matchLabels: { app.kubernetes.io/name: mail } } }]
             ports: [{ protocol: TCP, port: 587 }]
           # 🔴 THE INSTANCE METADATA SERVICE, on port 80 — without which this deployment's declared
           # secrets source cannot authenticate at all.
