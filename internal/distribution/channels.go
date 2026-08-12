@@ -315,7 +315,7 @@ func mustChannel(id string) Channel {
 // (TestReadmeInstallSectionMatchesContract) keeping the README's rendering equal to the contract's. The release
 // pipeline regenerates the section with the real tag and the real install.sh checksum for the release notes; a
 // human bumps this line when the docs move to a new release.
-const DocumentedRelease = "v0.21.0"
+const DocumentedRelease = "v0.22.0"
 
 // ReadmeMarkerStart and ReadmeMarkerEnd delimit the generated install section in README.md.
 //

@@ -1,7 +1,7 @@
 #!/bin/sh
 # install.sh installs the `heros` CLI on macOS and Linux: detect → download → VERIFY → place on PATH.
 #
-#   curl -fsSL https://raw.githubusercontent.com/damonleelcx/heros-agent/v0.21.0/scripts/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/damonleelcx/heros-agent/v0.22.0/scripts/install.sh | sh
 #
 # Environment:
 #   HEROS_VERSION=0.20.0     install a specific version instead of the latest (this is the rollback, task 3.8)

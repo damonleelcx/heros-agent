@@ -3,7 +3,7 @@
   Installs the heros CLI on Windows: detect -> download -> VERIFY -> place on PATH.
 
 .DESCRIPTION
-  irm https://raw.githubusercontent.com/damonleelcx/heros-agent/v0.21.0/scripts/install.ps1 | iex
+  irm https://raw.githubusercontent.com/damonleelcx/heros-agent/v0.22.0/scripts/install.ps1 | iex
 
   Environment:
     HEROS_VERSION      install a specific version instead of the latest (this is the rollback, task 3.8)
