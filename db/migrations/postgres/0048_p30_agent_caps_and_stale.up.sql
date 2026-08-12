@@ -59,19 +59,28 @@ DO $$
 DECLARE
     n INTEGER;
 BEGIN
+    -- `table_schema = current_schema()` — see 0047's note: the catalog is database-wide and the proof
+    -- harness gives every test package its own schema, so a count over `table_name` alone multiplies.
     SELECT count(*) INTO n
       FROM information_schema.columns
-     WHERE table_name = 'heros_cap'
+     WHERE table_schema = current_schema()
+       AND table_name = 'heros_cap'
        AND column_name IN ('tenant_id', 'max_tokens', 'reason', 'set_by', 'updated_at_ms');
     IF n <> 5 THEN
         RAISE EXCEPTION 'heros_cap has % of its 5 columns — `CREATE TABLE IF NOT EXISTS` is a NAME '
                         'guard, so a pre-existing table of another shape satisfies it silently', n;
     END IF;
 
+    -- See 0047's note: `constraint_table_usage` does not list CHECK constraints, and `pg_constraint`
+    -- alone is database-wide. Table + current schema + contype is the predicate that means what it says.
     SELECT count(*) INTO n
-      FROM information_schema.check_constraints c
-      JOIN information_schema.constraint_table_usage u ON u.constraint_name = c.constraint_name
-     WHERE u.table_name = 'heros_cap' AND c.constraint_name = 'heros_cap_positive';
+      FROM pg_constraint c
+      JOIN pg_class     t ON t.oid = c.conrelid
+      JOIN pg_namespace ns ON ns.oid = t.relnamespace
+     WHERE c.conname = 'heros_cap_positive'
+       AND t.relname = 'heros_cap'
+       AND ns.nspname = current_schema()
+       AND c.contype = 'c';
     IF n = 0 THEN
         RAISE EXCEPTION 'heros_cap accepts a zero ceiling. `0` is ambiguous between `spend nothing` and '
                         '`no limit`, and a checker reading it has to guess — removing a cap must be a '
@@ -103,9 +112,13 @@ ALTER TABLE heros_inference ADD COLUMN IF NOT EXISTS stale_at_ms BIGINT;
 DO $$
 BEGIN
     IF NOT EXISTS (
-        SELECT 1 FROM information_schema.check_constraints c
-          JOIN information_schema.constraint_table_usage u ON u.constraint_name = c.constraint_name
-         WHERE u.table_name = 'heros_inference' AND c.constraint_name = 'heros_inference_stale_reason'
+        SELECT 1 FROM pg_constraint c
+          JOIN pg_class     t ON t.oid = c.conrelid
+          JOIN pg_namespace ns ON ns.oid = t.relnamespace
+         WHERE c.conname = 'heros_inference_stale_reason'
+           AND t.relname = 'heros_inference'
+           AND ns.nspname = current_schema()
+           AND c.contype = 'c'
     ) THEN
         ALTER TABLE heros_inference ADD CONSTRAINT heros_inference_stale_reason
             CHECK (stale_reason IS NULL OR stale_reason IN ('analysis_disabled', 'definition_retired'));
@@ -114,9 +127,13 @@ BEGIN
     -- A reason and a timestamp travel together. A row marked stale with no timestamp cannot answer
     -- "since when", which is the question asked when a customer notices their graph stopped moving.
     IF NOT EXISTS (
-        SELECT 1 FROM information_schema.check_constraints c
-          JOIN information_schema.constraint_table_usage u ON u.constraint_name = c.constraint_name
-         WHERE u.table_name = 'heros_inference' AND c.constraint_name = 'heros_inference_stale_pair'
+        SELECT 1 FROM pg_constraint c
+          JOIN pg_class     t ON t.oid = c.conrelid
+          JOIN pg_namespace ns ON ns.oid = t.relnamespace
+         WHERE c.conname = 'heros_inference_stale_pair'
+           AND t.relname = 'heros_inference'
+           AND ns.nspname = current_schema()
+           AND c.contype = 'c'
     ) THEN
         ALTER TABLE heros_inference ADD CONSTRAINT heros_inference_stale_pair
             CHECK ((stale_reason IS NULL) = (stale_at_ms IS NULL));

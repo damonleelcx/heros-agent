@@ -103,6 +103,102 @@ DRILLS: list[Drill] = [
         package="./internal/patternclassifier/",
         test="TestTheCompositionIsNotADispatcher",
     ),
+    # ── task 10.1 · the frontend edge wins ────────────────────────────────────────────────────────
+    Drill(
+        name="10.1 · an agent edge may overwrite a frontend one",
+        path="internal/herosagent/residue.go",
+        # The plausible edit: "the agent is more specific, let it refine the edge."
+        old="\t\tif (e.FromNodeID == from && e.ToNodeID == to) || (e.FromNodeID == to && e.ToNodeID == from) {\n\t\t\treturn false\n\t\t}",
+        new="\t\tif false {\n\t\t\treturn false\n\t\t}",
+        package="./internal/herosagent/",
+        test="TestAGoFixtureIRIsByteIdenticalWithTheAgentOnAndOff",
+    ),
+    # ── task 10.15 · the six axis-authoring refusals ───────────────────────────────────────────────
+    Drill(
+        name="10.15a · an unsupplied harness service is accepted at save",
+        path="internal/herosagent/definition.go",
+        old="\t\tif a.Available {\n\t\t\treturn nil\n\t\t}",
+        new="\t\tif true {\n\t\t\treturn nil\n\t\t}",
+        package="./internal/herosagent/",
+        test="TestAnUnsuppliedHarnessServiceIsRefusedAtSaveNamingTheService",
+    ),
+    Drill(
+        name="10.15b · max_turns may exceed the ceiling",
+        path="internal/herosagent/axiseditor.go",
+        # The plausible edit: "16 is too low, customers want longer loops."
+        old="const MaxTurnsCeiling = 16",
+        new="const MaxTurnsCeiling = 16_000",
+        package="./internal/herosagent/",
+        test="TestHarnessParamsAreValidatedAtSave",
+    ),
+    Drill(
+        name="10.15c · a network-declaring tool becomes bindable",
+        path="internal/herosagent/axiseditor.go",
+        old="t.DeclaresNetwork",
+        new="false && t.DeclaresNetwork",
+        package="./internal/herosagent/",
+        test="TestNetworkDeclaringAndUnapprovedToolsAreNotBindable",
+    ),
+    Drill(
+        name="10.15d · a remote $ref is fetched rather than rejected",
+        path="internal/herosagent/axiseditor.go",
+        old="\t\tcase hasRemoteRef(s.Schema):",
+        new="\t\tcase false && hasRemoteRef(s.Schema):",
+        package="./internal/herosagent/",
+        test="TestUnselectableSkillsAreRefusedWithTheirReason",
+    ),
+    Drill(
+        name="10.15e · malformed policy params are accepted at save",
+        path="internal/herosagent/axiseditor.go",
+        old="func ValidatePolicyParams(",
+        new="func ValidatePolicyParams_disabled(",
+        package="./internal/herosagent/",
+        test="TestMalformedPolicyParamsAreRefusedAtSaveNamingPolicyAndParameter",
+    ),
+    Drill(
+        name="10.15f · an unsupplied memory host service is accepted at save",
+        path="internal/herosagent/definition.go",
+        old='\t\t\ta.Available = h.Embedder && h.EmbeddingRef != ""',
+        new="\t\t\ta.Available = true",
+        package="./internal/herosagent/",
+        test="TestMemoryHostServiceFencesRefuseAtSaveAndNeverDegrade",
+    ),
+    # ── task 10.17 · the no-key fence, on each of the four surfaces ────────────────────────────────
+    Drill(
+        name="10.17a · a heros_* column could hold a key",
+        path="db/migrations/postgres/0048_p30_agent_caps_and_stale.up.sql",
+        # The plausible edit: "cache the resolved key so the checker does not resolve on every call."
+        old="    reason        TEXT   NOT NULL,\n    set_by        TEXT   NOT NULL,",
+        new="    reason        TEXT   NOT NULL,\n    provider_api_key TEXT,\n    set_by        TEXT   NOT NULL,",
+        package="./internal/herosagent/",
+        test="TestNoHerosColumnCouldCarryAKey",
+    ),
+    Drill(
+        name="10.17b · an agent console surface offers a password field",
+        path="web/admin-console/src/app/agent/page.tsx",
+        old="export default",
+        new='const CredentialInput = () => <input type="password" name="api_key" />;\n\nexport default',
+        package="./internal/herosagent/",
+        test="TestNoAgentConsoleSurfaceOffersAFieldForAKey",
+    ),
+    Drill(
+        name="10.17c · a formatting call takes a credential as an argument",
+        path="internal/herosagent/readiness.go",
+        old="\t\tout.CredentialSource = in.Credentials.Describe()",
+        new='\t\tout.CredentialSource = in.Credentials.Describe()\n\t\tcred := active.Definition.CredentialRef\n\t\t_ = fmt.Sprintf("%v", cred)',
+        package="./internal/herosagent/",
+        test="TestNoLogOrErrorInThisPackageFormatsACredential",
+    ),
+    # ── task 10.18 · the cross-tenant memory scope ─────────────────────────────────────────────────
+    Drill(
+        name="10.18 · the memory session widens to the tenant id",
+        path="internal/herosagent/runner.go",
+        # The exact widening task 10.18 names: prove it red by scoping memory to the tenant.
+        old="func MemorySessionID(inferenceID string) string { return inferenceID }",
+        new='func MemorySessionID(_ string) string { return "tenant-scope" }',
+        package="./internal/herosagent/",
+        test="TestMemoryCannotCrossTenants",
+    ),
 ]
 
 
@@ -128,6 +224,18 @@ def drill(d: Drill) -> bool:
         print(f"  ✖ {d.name}\n      the drill's anchor is not in {d.path} — this drill is STALE and is "
               f"proving nothing. Fix the anchor or delete the drill; a drill that cannot find its own "
               f"target silently stops testing.")
+        return False
+
+    # 🔴 AN AMBIGUOUS ANCHOR IS A DRILL THAT MAY BE MUTATING A COMMENT.
+    #
+    # `10.15b` was written with the anchor `MaxTurnsCeiling`, whose first occurrence in the file is the
+    # prose above the constant. The drill dutifully rewrote a comment, the code was untouched, the test
+    # passed — and the run reported the ceiling fence as DEAD. A false "not a fence" is the most
+    # expensive output this script can produce, because it sends somebody to fix working machinery.
+    if original.count(d.old) != 1:
+        print(f"  ✖ {d.name}\n      the anchor appears {original.count(d.old)} times in {d.path}. Only "
+              f"the first is replaced, so this drill may be mutating a comment while reporting on the "
+              f"code — which produces a false `not a fence`. Make the anchor unique.")
         return False
 
     path.write_text(original.replace(d.old, d.new, 1))

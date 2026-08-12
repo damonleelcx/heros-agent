@@ -618,31 +618,10 @@ func TestMemoryCannotCrossTenants(t *testing.T) {
 	}
 }
 
-// 🔴 TASK 10.19 — THE MEMORY LIFETIME FENCE.
+// 🔴 TASK 10.19's fence lives in p30_qa_test.go, against the REAL memoryruntime store.
 //
-// Entries are gone when an inference completes, and a SECOND inference for the same workflow and
-// revision starts with zero entries — so D2's cache key remains the whole of the result's input.
-func TestMemoryDoesNotSurviveAnInference(t *testing.T) {
-	// Two inferences of the same workflow at the same revision under the same definition are, by D2,
-	// THE SAME inference — so this uses two different config hashes to model two genuinely separate
-	// runs, which is the only way the same (workflow, revision) is analysed twice.
-	first := defaultInferenceID("wf", "rev1", "cfg1")
-	second := defaultInferenceID("wf", "rev1", "cfg2")
-
-	type key struct{ node, session string }
-	store := map[key]string{}
-	store[key{"n_1", MemorySessionID(first)}] = "notes from the first analysis"
-
-	if got := store[key{"n_1", MemorySessionID(second)}]; got != "" {
-		t.Errorf("a second inference of the same workflow and revision started with %q already in "+
-			"memory. D2 pins a result to (workflow, revision, config_hash) on the claim that those three "+
-			"determine it; memory carried across adds a fourth, invisible input — what HEROS happened to "+
-			"analyse first — and the stored result stops being a function of its own key.", got)
-	}
-
-	// And the discard is real rather than implied: an inference's entries are dropped with it.
-	delete(store, key{"n_1", MemorySessionID(first)})
-	if len(store) != 0 {
-		t.Errorf("%d entries survived the inference that created them", len(store))
-	}
-}
+// It used to live here and asserted against a hand-rolled `map[key]string` — which is a test of a map.
+// Two inference ids that differ produce two keys in any map, so it passed for reasons that had nothing
+// to do with `memoryruntime`, and would have kept passing had the runtime's own expiry been broken.
+// The replacement seeds a real `memoryruntime.MemStore`, discards through `Expire(key, 0)`, and reads
+// back — so what it proves is a property of the code that runs.

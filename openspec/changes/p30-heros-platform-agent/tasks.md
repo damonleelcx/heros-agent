@@ -297,45 +297,76 @@ Each binds to its existing vocabulary. 🚫 No axis is a text box. All params va
 
 ## 10. QA — every fence proved red before it is trusted
 
-- [ ] 10.1 Frontend edge wins over a HEROS proposal → revert the fence, confirm red, restore.
-- [ ] 10.2 Go fixture IR byte-identical with HEROS on and off.
-- [ ] 10.3 Zero provider calls on a fully rule-covered repository — assert the **count**, not "no error".
-- [ ] 10.4 Cache hit asserts zero provider calls and an identical body.
-- [ ] 10.5 Provenance survives aggregation on a mixed graph.
-- [ ] 10.6 Unresolvable credential → `unavailable`, zero calls.
-- [ ] 10.7 Placement parity on a fixture.
-- [ ] 10.8 Concurrent double-submit against **real Postgres** writes one row. A unique index is invisible
+- [x] 10.1 Frontend edge wins over a HEROS proposal → revert the fence, confirm red, restore.
+- [x] 10.2 Go fixture IR byte-identical with HEROS on and off.
+      Bytes, not edge sets: an edge-set assertion passes while the agent adds a field, reorders a slice
+      or stamps an author. The model is handed proposals over BOTH established pairs, so a pass is not
+      the absence of an opportunity, and the refusals are asserted as abstentions.
+- [x] 10.3 Zero provider calls on a fully rule-covered repository — assert the **count**, not "no error".
+- [x] 10.4 Cache hit asserts zero provider calls and an identical body.
+      The body comparison is over the FACTS, marshalled — `ProviderCalls` and `Usage` are correctly
+      different on a hit — and the fixture is asserted non-thin so the identity is not vacuous.
+- [x] 10.5 Provenance survives aggregation on a mixed graph.
+      Aggregation is where authorship is most likely to be lost, because aggregating is the operation
+      that discards per-item detail — and a summary reporting a mixed graph all one way looks tidy.
+- [x] 10.6 Unresolvable credential → `unavailable`, zero calls.
+      The SURFACE half was missing: an enabled agent that cannot reach its provider contributes nothing,
+      so the panel read `not analysed` — false, and the reassuring one of the two readings. It now reads
+      the readiness answer rather than re-deriving it.
+- [x] 10.7 Placement parity on a fixture.
+- [x] 10.8 Concurrent double-submit against **real Postgres** writes one row. A unique index is invisible
       to a test that never contends.
-- [ ] 10.9 Provider fake is **recording with injectable errors**. 🚫 No silent-return stub.
-- [ ] 10.10 ≥30% of new test functions target error and boundary paths: abstention, cap reached,
-      credential missing, provider timeout, oversized repository, conflicting edge, unresolved model ref,
-      injected instruction in source.
-- [ ] 10.11 Injection fixture: a repository whose source instructs the analyser. Assert the output is
-      still vocabulary-validated and floor-gated.
-- [ ] 10.12 Rendered-string assertions for the `llm_calls` copy and the four unlabelled causes.
-- [ ] 10.13 🔴 Live acceptance on `openclaw`: **set placement to `platform`** (it defaults to `disabled`
-      and the step must be explicit, not inherited) → push source → run analysis → row in
-      `heros_inference` → edge count changes in the served IR → **the page draws edges with an `inferred`
-      marking and a composition paragraph**. Four layers; a 200 is none of them.
-- [ ] 10.14 Default-posture fence: a freshly migrated deployment runs **zero** inferences and makes zero
+      Eight writers released from a barrier, each with its OWN inference id — a shared id would let the
+      primary key do the work and never test the UNIQUE index. 🔴 Running it found TWO defects in
+      migrations 0047/0048 that no unit test could reach: see the deviation note below.
+- [x] 10.9 Provider fake is **recording with injectable errors**. 🚫 No silent-return stub.
+- [x] 10.10 ≥30% of new test functions target error and boundary paths.
+      Measured, not eyeballed: 59 of 105 (56%). The first classifier said 91% because it matched prose
+      like "never" and "cannot" in comments — a classifier that classifies everything measures nothing.
+      Comments are stripped and the phrase list is two entries; symbols alone give 37%.
+- [x] 10.11 Injection fixture: a repository whose source instructs the analyser.
+- [x] 10.12 Rendered-string assertions for the `llm_calls` copy and the four unlabelled causes.
+- [~] 10.13 🔴 Live acceptance on `openclaw` — **3 of 4 layers run; NOT a pass.**
+      ⚠️ **Deviation, stated rather than reported green.** `scripts/agent_acceptance.py` is the machine
+      form of all four layers and `make agent-acceptance` runs it. Against the local proof stack layers
+      1, 3 and 4 PASS — placement explicitly set, the served IR carrying an agent-authored edge whose
+      count the composition agrees with, and the rendered page carrying `edge--inferred`, the
+      composition panel and the `assessed` mark. Layer 2 — a row in `heros_inference` — did NOT run: it
+      needs a platform Postgres and a real provider credential, and the run spends real tokens. The
+      runner exits NON-ZERO on an incomplete run and prints "This is NOT a pass", because a partial
+      acceptance reported as an acceptance is the failure the four-layer shape exists to prevent.
+      🔴 `openclaw/openclaw` is not checked out on this machine; the layers that ran used the local
+      fixture stack. Carried to §11.5.
+- [x] 10.14 Default-posture fence: a freshly migrated deployment runs **zero** inferences and makes zero
       provider calls until a placement is set. Assert the call count, not the absence of an error.
-- [ ] 10.15 🔴 Axis-authoring fences, each proved red first: an unsupplied-service harness selection is
-      refused at save; an out-of-ceiling `max_turns` is refused; a network-declaring tool is not
-      bindable; an unapproved tool is not bindable; a remote-`$ref` skill schema is rejected rather than
-      fetched; malformed policy params are refused at save and write no version row.
-- [ ] 10.16 Vocabulary-drift fence: a definition referencing a closed set records that set's version, and
+- [x] 10.15 🔴 Axis-authoring fences, each proved red first — all six, as drills 10.15a–f.
+- [x] 10.16 Vocabulary-drift fence: a definition referencing a closed set records that set's version, and
       a stored `config_hash` remains interpretable after the set is versioned forward.
-- [ ] 10.17 🔴 No-key fence: assert the console's request schema, storage schema, logs and rendered output
-      contain **no field** capable of carrying a provider key value. Auto-discovering, not a whitelist.
-- [ ] 10.18 🔴 Cross-tenant memory fence: analyse two tenants' workflows with a recall-capable memory
-      strategy, seeding tenant A's memory with a distinctive marker; assert no recall in tenant B's
-      analysis can return it. Prove it red by widening the session scope to the tenant id first.
-- [ ] 10.19 Memory lifetime fence: assert entries are gone after an inference completes, and that a
-      second inference for the same workflow and revision starts with zero entries — so the D2 cache key
-      remains the whole of the result's input.
-- [ ] 10.20 Memory host-service fences: an unsupplied summarizer or embedder is refused at **save**; a
-      similarity-recall strategy without a pinned `embedding_ref` is refused; neither degrades to a
-      cheaper strategy.
+      Plus: a definition recording NO set versions must hash differently from one that does, or a
+      pre-P30 row and a post-P30 row collide and one answers for the other.
+- [x] 10.17 🔴 No-key fence across all four surfaces — request schema, storage schema, logs, rendered
+      output. Auto-discovering: the columns are parsed out of the migration FILES, so a table added
+      tomorrow is covered.
+- [x] 10.18 🔴 Cross-tenant memory fence, proved red by widening the session scope to the tenant id.
+- [x] 10.19 Memory lifetime fence.
+      The existing test asserted against a hand-rolled `map[key]string` — a test of a map, in a file
+      named for a behaviour. Rewritten against the real `memoryruntime.MemStore`, discarding through
+      `Expire(key, 0)`.
+- [x] 10.20 Memory host-service fences: an unsupplied summarizer or embedder is refused at **save**; a
+      similarity-recall strategy without a pinned `embedding_ref` is refused; neither degrades.
+
+### 🔴 What running the fences found
+
+**Migration 0047 could never have been applied anywhere.** Its own guard queried
+`information_schema.constraint_table_usage`, which does not list CHECK constraints at all — so it found
+nothing and raised on every run. It was written in §7, reviewed, committed, and only ran for the first
+time when 10.8 pointed a real Postgres at it. Fixed to `pg_constraint` joined to the table AND the
+current schema, which is 0028's repair applied in advance.
+
+**And then it raised again**, on `information_schema.columns`: that catalog is database-wide, the proof
+harness gives every test package its own schema, and a `count(*)` over `table_name` alone counted the
+table once per schema. Same class of defect, twice, in the same file — a predicate that asks "does this
+name exist anywhere" while meaning "does THIS table have it".
 
 ## 11. Documentation and commitments
 

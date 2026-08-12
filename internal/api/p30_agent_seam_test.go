@@ -570,3 +570,55 @@ func TestNoPanelSentenceCarriesMarkupTheConsoleCannotRender(t *testing.T) {
 		t.Error("the unavailable panel's reason carries a backtick")
 	}
 }
+
+// 🔴 TASK 10.6 — AN UNRESOLVABLE CREDENTIAL SURFACES AS `unavailable`, and the graph still renders.
+//
+// Without the link, the two readings are indistinguishable on the page: the agent is enabled, it
+// cannot reach its provider, it contributes nothing, and the panel reports "nothing has looked at
+// this" — which is false, and is the reassuring one of the two. The customer waits; nobody is coming.
+func TestAnUnresolvableCredentialSurfacesAsUnavailableRatherThanNotAnalysed(t *testing.T) {
+	plain := patternclassifier.GraphView{
+		WorkflowID: "wf-1",
+		Nodes:      []patternclassifier.ViewNode{{NodeID: "a"}},
+		Edges:      []patternclassifier.ViewEdge{},
+	}
+	s := graphSeam(t, plain, panelSource{placement: herosagent.PlacementPlatform})
+	s.SetAgentReadiness(func(context.Context) herosagent.Readiness {
+		return herosagent.Readiness{
+			State:  herosagent.ReadyCredentialUnresolved,
+			Detail: "the secret is missing",
+		}
+	})
+
+	got := readGraph(t, s)
+	if got.Agent.State != patternclassifier.StateUnavailable {
+		t.Errorf("state is %q, want %q — an enabled agent that cannot reach its provider contributes "+
+			"nothing, and reporting that as `not analysed` tells a customer to wait for something that "+
+			"is not coming", got.Agent.State, patternclassifier.StateUnavailable)
+	}
+	if got.Agent.Failure == "" {
+		t.Error("the panel carries no failure to render")
+	}
+	// The placement is still attributed — withholding the definition must not withhold the reason.
+	if got.Agent.Placement != string(herosagent.PlacementPlatform) {
+		t.Errorf("placement is %q", got.Agent.Placement)
+	}
+	// 🚫 And the graph still renders. Task 8.8: a HEROS failure is never a full-screen error.
+	if len(got.Nodes) != 1 {
+		t.Error("the rule-derived graph was lost")
+	}
+}
+
+// A DISABLED tenant is not reported as `unavailable` even when the credential is broken. Nothing is
+// trying to run for them, so a fault in machinery they are not using is not their state.
+func TestADisabledTenantIsNotReportedAsUnavailable(t *testing.T) {
+	s := graphSeam(t, inferredGraph(), panelSource{placement: herosagent.PlacementDisabled})
+	s.SetAgentReadiness(func(context.Context) herosagent.Readiness {
+		return herosagent.Readiness{State: herosagent.ReadyCredentialUnresolved, Detail: "broken"}
+	})
+	got := readGraph(t, s)
+	if got.Agent.State != patternclassifier.StateNotAnalysed {
+		t.Errorf("state is %q, want %q — a fault in machinery this organization is not using is not "+
+			"their state", got.Agent.State, patternclassifier.StateNotAnalysed)
+	}
+}

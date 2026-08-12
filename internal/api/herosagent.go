@@ -241,6 +241,25 @@ func (s *Server) agentPanelFor(r *http.Request, tenantID string,
 		return patternclassifier.AgentUnavailable("this organization's analysis setting could not be read")
 	}
 
+	// 🔴 TASK 10.6 — AN UNRESOLVABLE CREDENTIAL RENDERS AS `unavailable`, NOT AS `not_analysed`.
+	//
+	// Without this the two are indistinguishable on the page: the agent is enabled, it cannot reach its
+	// provider, it therefore contributes nothing, and the graph reports "nothing has looked at this" —
+	// which is false and is the reassuring one of the two readings. The customer waits; nobody is coming.
+	//
+	// The readiness check already resolves this by DOING the resolution (task 9.1), so the panel reads
+	// its answer rather than re-deriving it. A second implementation here would be a second opinion
+	// about whether the platform can reach its vendor.
+	if s.agentReadiness != nil && placement != herosagent.PlacementDisabled {
+		if ready := s.agentReadiness(r.Context()); ready.State == herosagent.ReadyCredentialUnresolved {
+			panel := patternclassifier.AgentUnavailable(
+				"The analysis agent's provider credential does not resolve on this deployment, so it " +
+					"fails closed: zero provider calls and no substitution.")
+			panel.Placement = string(placement)
+			return panel
+		}
+	}
+
 	inferred := view.Composition.EdgesInferred > 0 || view.Composition.NodesCoveredInferred > 0
 	// Read ONLY when something was actually inferred. A narrative attached to a graph carrying no
 	// inferred fact would be prose about an analysis whose conclusions are not on the page.

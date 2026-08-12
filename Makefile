@@ -292,7 +292,7 @@ db-proof:
 ##           These tests are behind the `pgproof` build tag, so `make go` does not compile them; with
 ##           no database they FAIL rather than skip.
 pg-proof:
-	bash db/migrations/postgres/run_pg_docker.sh $(GO) test -tags pgproof -count=1 ./internal/pgmigrate/ ./internal/launch/ ./internal/billing/ ./internal/proposalstore/ ./internal/registry/ ./internal/variantspec/ ./internal/worktree/ ./internal/executor/ ./internal/runqueue/ ./internal/submit/ ./internal/e2e/ ./internal/telemetry/ ./internal/evalrun/ ./internal/metering/ ./internal/legal/ ./internal/api/ ./internal/tenancy/ ./internal/signup/
+	bash db/migrations/postgres/run_pg_docker.sh $(GO) test -tags pgproof -count=1 ./internal/pgmigrate/ ./internal/launch/ ./internal/billing/ ./internal/proposalstore/ ./internal/registry/ ./internal/variantspec/ ./internal/worktree/ ./internal/executor/ ./internal/runqueue/ ./internal/submit/ ./internal/e2e/ ./internal/telemetry/ ./internal/evalrun/ ./internal/metering/ ./internal/legal/ ./internal/api/ ./internal/tenancy/ ./internal/signup/ ./internal/herosagent/
 
 ## demo-evalboard: stand up the P4 eval board against a live fan-out with a stubbed provider.
 ##                Everything between the queue and the pixel is the shipped path: the eval set comes
@@ -443,3 +443,22 @@ agent-rollout:
 ## PASS and reports a real fence as dead. That has happened on this repository before.
 agent-drills:
 	@GOWORK=off $(PYTHON) scripts/agent_drills.py
+
+## agent-acceptance: P30 task 10.13 — the LIVE acceptance, four layers.
+##
+## 🔴 A 200 is none of the four. Setting the placement is layer 1 and is deliberately EXPLICIT: it
+## defaults to `disabled`, and an acceptance that inherits a default stops proving anything the day the
+## default changes. Layer 2 spends REAL TOKENS against a live provider.
+##
+## 🚫 A layer that cannot run prints NOT RUN and the command exits non-zero. There is no "skipped" that
+## reads as green — a partial acceptance reported as an acceptance is how a capability ships having
+## never once worked end to end.
+##
+##   make agent-acceptance TENANT=acme WORKFLOW=openclaw/openclaw \
+##     API=https://heros-agent.space CONSOLE=https://heros-agent.space
+agent-acceptance:
+	@test -n "$(TENANT)" || { echo "usage: make agent-acceptance TENANT=<id> WORKFLOW=<id>"; exit 2; }
+	@test -n "$(WORKFLOW)" || { echo "usage: make agent-acceptance TENANT=<id> WORKFLOW=<id>"; exit 2; }
+	@GOWORK=off $(PYTHON) scripts/agent_acceptance.py \
+		--tenant "$(TENANT)" --workflow "$(WORKFLOW)" \
+		$(if $(API),--api "$(API)",) $(if $(CONSOLE),--console "$(CONSOLE)",)

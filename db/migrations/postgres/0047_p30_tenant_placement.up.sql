@@ -58,9 +58,16 @@ DO $$
 DECLARE
     n INTEGER;
 BEGIN
+    -- 🔴 `table_schema = current_schema()`. `information_schema.columns` is DATABASE-WIDE, so a
+    -- count over `table_name` alone counts this table once per schema that holds one — and
+    -- `internal/pgtest` gives every test package its own schema, so the second proof run saw ten
+    -- columns and raised. Same class of bug as the constraint guard above, and the same one 0028
+    -- repaired on `account`: a predicate that asks "does this name exist anywhere" while meaning
+    -- "does THIS table have it".
     SELECT count(*) INTO n
       FROM information_schema.columns
-     WHERE table_name = 'heros_tenant_placement'
+     WHERE table_schema = current_schema()
+       AND table_name = 'heros_tenant_placement'
        AND column_name IN ('tenant_id', 'placement', 'reason', 'set_by', 'updated_at_ms');
     IF n <> 5 THEN
         RAISE EXCEPTION 'heros_tenant_placement has % of its 5 columns — `CREATE TABLE IF NOT EXISTS` '
@@ -68,11 +75,21 @@ BEGIN
                         'silently', n;
     END IF;
 
+    -- 🔴 `pg_constraint`, joined to the TABLE and the CURRENT SCHEMA — not
+    -- `information_schema.constraint_table_usage`, which does not list CHECK constraints at all. The
+    -- first version of this guard used it, found nothing, and raised on every run: this migration could
+    -- never have been applied anywhere, and it was only discovered by running it against a real
+    -- Postgres. `contype = 'c'` and the schema join are 0028's repair applied here in advance —
+    -- `pg_constraint` is database-wide, so a name-only predicate is satisfied by a same-named
+    -- constraint in ANOTHER schema, which is exactly what the per-test-schema proof harness produces.
     SELECT count(*) INTO n
-      FROM information_schema.check_constraints c
-      JOIN information_schema.constraint_table_usage u ON u.constraint_name = c.constraint_name
-     WHERE u.table_name = 'heros_tenant_placement'
-       AND c.constraint_name = 'heros_tenant_placement_value';
+      FROM pg_constraint c
+      JOIN pg_class     t ON t.oid = c.conrelid
+      JOIN pg_namespace ns ON ns.oid = t.relnamespace
+     WHERE c.conname = 'heros_tenant_placement_value'
+       AND t.relname = 'heros_tenant_placement'
+       AND ns.nspname = current_schema()
+       AND c.contype = 'c';
     IF n = 0 THEN
         RAISE EXCEPTION 'heros_tenant_placement accepts any placement string. The three-state '
                         'vocabulary is the whole of task 7.5, and a fourth value written here would '
