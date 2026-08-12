@@ -53,10 +53,21 @@ func WriteBack(ir *discovery.IR, res Result) (*discovery.IR, error) {
 		if err := l.Validate(); err != nil {
 			return nil, fmt.Errorf("patternclassifier: refusing to write an invalid label: %w", err)
 		}
+		// 🔴 THE WRITER'S OWN CHECK (P30 task 2.8). A fact written without an author is a fact nobody can
+		// attribute afterwards, and the only moment that is recoverable is BEFORE it is stored — after
+		// that it is indistinguishable from a `legacy` row, which is the one value a writer may never
+		// produce. This is not Validate()'s job: Validate answers "is this label well-formed", and a
+		// perfectly well-formed label with no author is exactly the thing being refused here.
+		if !discovery.ValidAuthor(l.Author) {
+			return nil, fmt.Errorf("patternclassifier: refusing to write label %q on %q with author %q: "+
+				"every fact records who authored it, and an unrecorded author is indistinguishable from a "+
+				"pre-P30 `legacy` fact once it is stored", l.Pattern, l.SubgraphRef, l.Author)
+		}
 		wire := discovery.IRPatternLabel{
 			Pattern: string(l.Pattern), Confidence: l.Confidence, Source: string(l.Source),
 			SubgraphRef: l.SubgraphRef, DetectorID: l.DetectorID, LLMRunRef: l.LLMRunRef,
 			TaxonomyVersion: l.TaxonomyVersion, Candidate: l.Candidate,
+			Author: string(l.Author),
 		}
 		if i, ok := sgIdx[l.SubgraphRef]; ok {
 			out.Subgraphs[i].PatternLabels = append(out.Subgraphs[i].PatternLabels, wire)
@@ -120,6 +131,11 @@ func ReadLabels(ir *discovery.IR) ([]Label, []Diagnostic, error) {
 				Pattern: Pattern(w.Pattern), Confidence: w.Confidence, Source: Source(w.Source),
 				SubgraphRef: ref, DetectorID: w.DetectorID, LLMRunRef: w.LLMRunRef,
 				TaxonomyVersion: w.TaxonomyVersion, Candidate: w.Candidate,
+				// 🔴 The READ resolves an absent author to `legacy` (P30 task 2.3) rather than leaving it
+				// empty. A caller comparing against "" would have to know which spelling this document
+				// used; a caller comparing against `frontend` would read a pre-P30 label as one. One
+				// accessor, one answer — and `legacy` is a value a query can select on.
+				Author: discovery.AuthorOf(w.Author),
 			}
 			if err := l.Validate(); err != nil {
 				diags.rejectLabel(l, err)

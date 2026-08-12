@@ -253,6 +253,9 @@ func ToIREdges(edges []Edge) []discovery.IREdge {
 		out = append(out, discovery.IREdge{
 			FromNodeID: e.From, ToNodeID: e.To, Kind: kind,
 			Provenance: string(e.Provenance), Confidence: e.Confidence, Signal: string(e.Signal),
+			// P30 D4. `detector`: this package's own inference rules established it. Its `Provenance`
+			// says how strong the evidence is; this says who wrote it, and the two are orthogonal.
+			Author: string(discovery.AuthorDetector),
 		})
 	}
 	return out

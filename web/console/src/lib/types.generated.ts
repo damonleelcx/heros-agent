@@ -169,12 +169,15 @@ export interface ViewLabel {
   provenance: string;
   primary_metric: string;
   metrics: string[] | null;
+  author?: string;
 }
 
 export interface ViewEdge {
   from: string;
   to: string;
   kind: string;
+  author?: string;
+  confidence?: number;
 }
 
 export interface ViewRegion {

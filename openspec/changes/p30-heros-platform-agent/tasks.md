@@ -42,16 +42,21 @@ acceptance that stops proving anything the day the default changes.
 
 ## 2. Provenance and the inference store
 
-- [ ] 2.1 Migration 0045: `provenance TEXT NULL` on IR fact storage, both dialects. Additive,
+- [x] 2.1 Migration 0045: `provenance TEXT NULL` on IR fact storage, both dialects. Additive,
       down-migratable. 🚫 No back-fill — NULL reads as `legacy`.
-- [ ] 2.2 `discovery`/`patternclassifier`: stamp `frontend` and `detector` on emission. One place each.
-- [ ] 2.3 Reader: NULL → `legacy`, distinguishable in a query from `frontend`.
-- [ ] 2.4 Migration 0046: `heros_agent_version`, `heros_inference`, `heros_abstention`, `heros_spend`
+      ⚠️ **Deviation, agreed with damon:** PostgreSQL only. There is no second dialect to write to —
+      `db/migrations/README.md` and migration 0042's header both argue that these tables exist in one
+      dialect, and the SQLite store in `internal/db/db.go` is the retired agent's dev ledger (API keys,
+      registries, episodic memory). It holds no IR fact and no part of this domain, so a copy there
+      would be a second schema nothing reads. Stated in both migration headers. Carried to §11.5.
+- [x] 2.2 `discovery`/`patternclassifier`: stamp `frontend` and `detector` on emission. One place each.
+- [x] 2.3 Reader: NULL → `legacy`, distinguishable in a query from `frontend`.
+- [x] 2.4 Migration 0046: `heros_agent_version`, `heros_inference`, `heros_abstention`, `heros_spend`
       (see design.md). Both dialects, real migration in tests — 🚫 no inlined `CREATE TABLE`.
-- [ ] 2.5 `UNIQUE (workflow_id, source_revision, agent_config_hash)` and the conflict path in the writer.
-- [ ] 2.6 Timestamps as `int64` ms; no timestamp literals in SQL.
-- [ ] 2.7 Down-migration test: every previously readable IR stays readable.
-- [ ] 2.8 Fence: a fact written without provenance fails the writer's own check.
+- [x] 2.5 `UNIQUE (workflow_id, source_revision, agent_config_hash)` and the conflict path in the writer.
+- [x] 2.6 Timestamps as `int64` ms; no timestamp literals in SQL.
+- [x] 2.7 Down-migration test: every previously readable IR stays readable.
+- [x] 2.8 Fence: a fact written without provenance fails the writer's own check.
 
 ## 3. Agent definition
 

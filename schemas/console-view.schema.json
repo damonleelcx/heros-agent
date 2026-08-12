@@ -3790,6 +3790,12 @@
     },
     "ViewEdge": {
       "properties": {
+        "author": {
+          "type": "string"
+        },
+        "confidence": {
+          "type": "number"
+        },
         "from": {
           "type": "string"
         },
@@ -3832,6 +3838,9 @@
     },
     "ViewLabel": {
       "properties": {
+        "author": {
+          "type": "string"
+        },
         "candidate": {
           "type": "boolean"
         },

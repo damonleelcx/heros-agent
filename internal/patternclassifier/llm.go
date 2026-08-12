@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/heros-foreal/agentd/internal/confighash"
+	"github.com/heros-foreal/agentd/internal/discovery"
 )
 
 // FallbackConfig is everything about a fallback run that must be reproducible. It is hashed into a
@@ -231,6 +232,10 @@ func runFallback(
 			l := Label{
 				Pattern: Pattern(r.Pattern), Confidence: *r.Confidence, Source: SourceLLM,
 				SubgraphRef: sg.SubgraphID, LLMRunRef: runRef, TaxonomyVersion: TaxonomyVersion,
+				// The constrained fallback is a DETECTOR in P30's authorship vocabulary: it is this
+				// package's own model layer, configured by this deployment, not the P30 agent. Attributing
+				// it to `heros` would make every pre-P30 llm-sourced label read as agent output.
+				Author: discovery.AuthorDetector,
 				// A behavioral pattern named by the model is still a candidate: the model saw the same
 				// topology the detectors did, and topology cannot confirm behavior whoever reads it.
 				Candidate: IsBehavioral(Pattern(r.Pattern)),

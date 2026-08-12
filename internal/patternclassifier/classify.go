@@ -97,6 +97,11 @@ func Classify(ctx context.Context, ir *discovery.IR, opts Options) (Result, erro
 			Pattern: r.Pattern, Confidence: r.Confidence, Source: SourceRule,
 			SubgraphRef: r.SubgraphID, DetectorID: r.DetectorID,
 			TaxonomyVersion: TaxonomyVersion, Candidate: r.Candidate,
+			// 🔴 THE ONE PLACE a rule-layer label is minted (P30 task 2.2). The author comes from the
+			// PROPOSAL rather than being hardcoded to `detector` here — HEROS's labels arrive through
+			// this same path by design (D3), and a hardcoded value would silently re-attribute every
+			// one of them to a rule that never fired.
+			Author: r.AuthorOrDetector(),
 		}
 		// EVERY label passes the same write-time gate, whatever produced it. A detector cannot ship a
 		// label the contract forbids just because it is "one of ours".

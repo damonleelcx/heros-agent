@@ -136,6 +136,14 @@ type ViewEdge struct {
 	From string `json:"from"`
 	To   string `json:"to"`
 	Kind string `json:"kind"` // data | control
+	// Author is who wrote this edge (P30 D4): frontend | detector | heros | operator. Empty reads as
+	// `legacy`. It reaches the view because the customer surface has to draw an inferred edge
+	// differently from a measured one (task 8.3), and a page cannot distinguish them from anything else
+	// on this struct — by design, since an inferred edge is the same shape as any other.
+	Author string `json:"author,omitempty"`
+	// Confidence is the author's confidence in [0,1]. Meaningful for an inferred edge; a frontend edge
+	// carries none, and absence must not be read as zero confidence.
+	Confidence float64 `json:"confidence,omitempty"`
 }
 
 // ViewRegion is a subgraph as the UI shows it. Labels may be empty — that is the unclassified state,
@@ -171,12 +179,16 @@ type ViewLabel struct {
 	// dispatcher on screen rather than decoration.
 	PrimaryMetric string   `json:"primary_metric"`
 	Metrics       []string `json:"metrics"`
+	// Author is who wrote this label (P30 D4). 🔴 NOT derivable from Source: P30's agent emits through
+	// the rule layer by design (one arbitration path, D3), so a heros label reads `source: rule` and is
+	// otherwise identical in shape to a detector's.
+	Author discovery.FactAuthor `json:"author,omitempty"`
 }
 
 func toViewLabel(l Label) ViewLabel {
 	v := ViewLabel{
 		Pattern: l.Pattern, Confidence: l.Confidence, Source: l.Source, Candidate: l.Candidate,
-		Provenance: l.DetectorID + l.LLMRunRef,
+		Provenance: l.DetectorID + l.LLMRunRef, Author: l.Author,
 	}
 	if info, ok := Info(l.Pattern); ok {
 		v.Title, v.Group, v.Ordinal = info.Title, info.Group, info.Ordinal
@@ -269,7 +281,10 @@ func BuildGraphView(ir *discovery.IR, res Result, rep discovery.DiscoveryReport)
 		if g.nodes[e.FromNodeID] == nil || g.nodes[e.ToNodeID] == nil {
 			continue
 		}
-		gv.Edges = append(gv.Edges, ViewEdge{From: e.FromNodeID, To: e.ToNodeID, Kind: e.Kind})
+		gv.Edges = append(gv.Edges, ViewEdge{
+			From: e.FromNodeID, To: e.ToNodeID, Kind: e.Kind,
+			Author: e.Author, Confidence: e.Confidence,
+		})
 	}
 
 	for _, sg := range res.Subgraphs {

@@ -57,6 +57,10 @@ func RecoverTopology(ir *discovery.IR) (*discovery.IR, int) {
 		out.Edges = append(out.Edges, discovery.IREdge{
 			FromNodeID: e.From, ToNodeID: e.To, Kind: "data",
 			Provenance: string(e.Provenance), Confidence: e.Confidence, Signal: string(e.Signal),
+			// P30 D4. `detector`: recovered by internal/linkage's rules, not read from source by a
+			// frontend and not inferred by the P30 agent. The two `provenance` values beside it answer
+			// the orthogonal question of evidence strength — see internal/discovery/author.go.
+			Author: string(discovery.AuthorDetector),
 		})
 		added++
 	}

@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+
+	"github.com/heros-foreal/agentd/internal/discovery"
 )
 
 // Source names the layer that produced a label. Closed set: a third source would change what
@@ -69,6 +71,9 @@ type Label struct {
 	// redundant with IsBehavioral(Pattern) by construction and is written anyway: a consumer reading
 	// a stored label must not have to carry the taxonomy to know the label is unconfirmed.
 	Candidate bool `json:"candidate,omitempty"`
+	// Author is WHO WROTE THIS LABEL (P30 D4). Required at the WRITE boundary — see WriteBack — and
+	// deliberately not derivable from Source, because P30's agent enters through the rule layer.
+	Author discovery.FactAuthor `json:"author,omitempty"`
 }
 
 // labelWire mirrors Label with a pointer Confidence so "absent" is distinguishable from "0.0".

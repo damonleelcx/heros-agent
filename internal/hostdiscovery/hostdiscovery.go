@@ -57,6 +57,12 @@ type Graph struct {
 	DiscoveredAt    time.Time
 	LLMCalls        int
 	View            patternclassifier.GraphView
+	// Provenance is the DERIVED set of fact authors present in View, canonicalised (migration 0045).
+	//
+	// 🔴 Never set by a caller and never trusted from one: Put derives it from the view it is writing,
+	// so the index cannot disagree with what it indexes. Empty means the view carries no authored fact
+	// — a graph discovered before P30 — and is stored as SQL NULL, which reads back as `legacy`.
+	Provenance string
 }
 
 // GraphStore records and reads discovered graphs.
