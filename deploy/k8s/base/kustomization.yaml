@@ -40,13 +40,13 @@ images:
   # deploy/images.env exactly or check-image-parity.sh fails the build.
   - name: ghcr.io/heros-foreal/agentd
     newName: 373468206837.dkr.ecr.us-east-1.amazonaws.com/agentd
-    digest: sha256:c9cb9249b8d8abbcd953950150ce0c3cc4fa2fdb53fd487a29cd7325184310d3
+    digest: sha256:8a315ef1a6f761652f937dc33898df1918f358e2e0c32584bb1e494611efd5eb
   - name: ghcr.io/heros-foreal/heros-console
     newName: 373468206837.dkr.ecr.us-east-1.amazonaws.com/heros-console
-    digest: sha256:41878fbff856a0af1775ef9c98f2378f34e876796f2cb83b73795b40f8e34cd7
+    digest: sha256:0d88bf0dead49b1b0f0216a4a43f41930446df9c6b62c2d2e2b5ce35dbe35834
   - name: ghcr.io/heros-foreal/heros-admin-console
     newName: 373468206837.dkr.ecr.us-east-1.amazonaws.com/heros-admin-console
-    digest: sha256:34d67d61ed168cca4190e4360e6b135db8e4e34bbedf49557634f89d6c9a7550
+    digest: sha256:fe1678d338f7847b7a3d57c2b1a36d832f1b3ea867ae17520482212f17aed899
   - name: postgres
     digest: sha256:6efd0df010dc3cb40d5e33e3ef84acecc5e73161bd3df06029ee8698e5e12c60
   - name: minio/minio
