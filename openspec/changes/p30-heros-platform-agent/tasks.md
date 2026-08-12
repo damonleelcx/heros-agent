@@ -60,16 +60,16 @@ acceptance that stops proving anything the day the default changes.
 
 ## 3. Agent definition
 
-- [ ] 3.1 `internal/herosagent`: `Definition` as a Variant Spec over the six axes; resolve against the P2
+- [x] 3.1 `internal/herosagent`: `Definition` as a Variant Spec over the six axes; resolve against the P2
       registries; `config_hash` via `internal/confighash`.
-- [ ] 3.2 Refuse a wiring (P15) override at publish, naming the axis.
-- [ ] 3.3 No mutation API. `Publish` only; content determines identity.
-- [ ] 3.4 Model ref validated against `internal/adminstore` model registry; refuse an unregistered model.
-- [ ] 3.5 Credential as a provider **reference**, resolved through `providergateway`'s `Secrets`.
+- [x] 3.2 Refuse a wiring (P15) override at publish, naming the axis.
+- [x] 3.3 No mutation API. `Publish` only; content determines identity.
+- [x] 3.4 Model ref validated against `internal/adminstore` model registry; refuse an unregistered model.
+- [x] 3.5 Credential as a provider **reference**, resolved through `providergateway`'s `Secrets`.
       🔴 No field, column, log line or response may carry a key value. Fence it.
-- [ ] 3.6 Unresolvable reference → `credential_unresolved`, zero provider calls, no provider substitution.
-- [ ] 3.7 Exactly one active version, enforced in the activation transaction.
-- [ ] 3.8 Deprecated-model notice on an active definition; do not auto-switch.
+- [x] 3.6 Unresolvable reference → `credential_unresolved`, zero provider calls, no provider substitution.
+- [x] 3.7 Exactly one active version, enforced in the activation transaction.
+- [x] 3.8 Deprecated-model notice on an active definition; do not auto-switch.
 
 ## 4. Inference runner
 

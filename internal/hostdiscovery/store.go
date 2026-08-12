@@ -81,8 +81,8 @@ func (p *PGGraphStore) Latest(ctx context.Context, tenantID, workflowID string) 
 
 // nullProvenance writes the empty index as SQL NULL.
 //
-// 🔴 NULL and '' are the SAME STATE here — "this row's facts name no author" — and storing both would
-// make `WHERE provenance IS NULL` answer a different question from `WHERE provenance = ''` for rows
+// 🔴 NULL and ” are the SAME STATE here — "this row's facts name no author" — and storing both would
+// make `WHERE provenance IS NULL` answer a different question from `WHERE provenance = ”` for rows
 // that mean the same thing. NULL is the spelling migration 0045 documents as `legacy`, so it is the
 // one used, and the reader maps it back through discovery.AuthorOf.
 func nullProvenance(p string) any {
