@@ -370,8 +370,22 @@ name exist anywhere" while meaning "does THIS table have it".
 
 ## 11. Documentation and commitments
 
-- [ ] 11.1 Fold the delta specs into `openspec/specs/` on deploy.
-- [ ] 11.2 Operator runbook: tuning HEROS, reading a rehearsal report, arming the switch, caps.
-- [ ] 11.3 Customer docs: what `inferred` means, which placement applies, how to disable.
-- [ ] 11.4 Sales boundary card from PRD §9.8 — including the four sentences that may not be said.
-- [ ] 11.5 Update the PRD's DAG and mark anything deferred, with the reason. 🚫 No silent deferral.
+- [x] 11.1 Fold the delta specs into `openspec/specs/` on deploy.
+      Nine capabilities, 48 requirements. The operation headers are dropped per `openspec/AGENTS.md`:
+      a folded spec STATES requirements, it does not describe a change.
+- [x] 11.2 Operator runbook: tuning HEROS, reading a rehearsal report, arming the switch, caps.
+      `docs/runbooks/p30-heros-agent.md`. It opens with the two sentences to have in your head —
+      nothing analyses until a placement is set, and the platform never holds a customer key — because
+      both are what somebody on call at 2am would otherwise get wrong.
+- [x] 11.3 Customer docs: what `inferred` means, which placement applies, how to disable.
+      `/docs/concepts/inferred-structure`. 🔴 Writing it tripped the CLI-reference fence: `heros analyse`
+      was added to the registry in §7 and `make docs-facts` was never re-run, so the generated CLI
+      reference had never listed it. A §7 artifact left unregenerated, found by §11.
+- [x] 11.4 Sales boundary card from PRD §9.8 — including the sentences that may not be said.
+      `docs/sales/P30-heros-agent-claims.md`. Five, not four — §9.8 carries five rows, and §5 of the card
+      adds what is NOT yet true and must not be implied: no definition activated, no measured numbers,
+      no price list, the acceptance incomplete.
+- [x] 11.5 Update the PRD's DAG and mark anything deferred, with the reason. 🚫 No silent deferral.
+      PRD §15, the delivery register: the ordering against what happened, all ten acceptance criteria
+      with status, seven deferrals each with its reason, and the two defects the phase's own fences
+      found. §12 now points at it, because a DAG is a plan and §15 is the record.

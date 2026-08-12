@@ -885,6 +885,10 @@ because it is the repository that produced the report.
 **Gates.** No activation without a passing rehearsal. No default-on without a design-partner tenant
 running for a full billing period. No stage verified by hand.
 
+> 🔴 **What actually happened is recorded in §15**, including the one thing this ordering did not
+> anticipate — that the placement table did not exist until §7 built it, so §6's console control wrote
+> to nothing. A DAG is a plan; §15 is the register.
+
 ---
 
 ## 13. Success metrics & acceptance criteria
@@ -972,3 +976,125 @@ the request; §2.6 explains why a workflow-level label cannot be built without b
 dispatcher, and what is built instead is a composition. That substitution is the only place this phase
 delivers something other than what was asked for, and it should be accepted knowingly rather than by
 silence.
+
+---
+
+## 15. 🔴 Delivery register — what shipped, what deferred, and why
+
+*Added at close of build (2026-08-12). 🚫 No silent deferral: every item below was recorded in the task
+list as it was found, and this is the single place they are collected.*
+
+### 15.1 The ordering §12 proposed, against what happened
+
+§12's ordering held. Workstreams shipped 1 → 11 in that order, and the two properties the ordering
+exists to buy both held: the §D7 surface fixes (§1) went out correct without HEROS, and the platform-side
+runner (§4) was built behind a placement that defaults to `disabled`, so nothing analysed anything at any
+point during the build.
+
+One thing the DAG did not anticipate: **§7 had to create the placement table itself.** §6 shipped the
+console control and `adminops.SetPlacement`; there was no table under either, so the gate §7 built had
+nothing to read. Migration 0047 is §7's, not §6's, and §9 then found the same shape again — the cap
+editors also wrote to nothing (`AgentSpendSource` was nil on every deployed path) until §9.3 wired it.
+
+**The lesson worth carrying:** a control and its store are two deliverables, and a phase that ships the
+control alone leaves a surface that accepts a decision and drops it — which is worse than one that
+refuses, because the operator comes away believing the fleet is configured.
+
+### 15.2 Acceptance criteria — status
+
+| # | Criterion | Status |
+|---|---|---|
+| A1 | `openclaw` renders a graph with edges | ⚠️ **NOT RUN on openclaw.** Layers 1, 3, 4 pass against a local fixture stack; see 15.3.1 |
+| A2 | Every inferred fact is marked, and the mark survives counting | ✅ `TestProvenanceSurvivesAggregationOnAMixedGraph` |
+| A3 | A Go workflow's served IR is byte-identical with HEROS on and off | ✅ `TestAGoFixtureIRIsByteIdenticalWithTheAgentOnAndOff` |
+| A4 | A second page load makes zero provider calls | ✅ `TestACacheHitReturnsAByteIdenticalBody` — count **and** body |
+| A5 | Disabling leaves every surface honest and no surface broken | ✅ `TestDisablingMarksStaleRatherThanDeleting`, `TestAPreP30StructureUploadIsUnaffectedByAnyPlacement` |
+| A6 | The header never says "fully rule-covered" over an unclassified graph | ✅ rendered-string assertion (§1.3) |
+| A7 | An eval set's cases are listed, with indecisive oracles named | ✅ §1.12–1.15, plus §8.9's third state |
+| A8 | The proposals surface names its state, and a pass is triggerable through the published edge path | ✅ §1.5–1.11; the edge-reach fence proved red |
+| A9 | An unresolvable credential yields `unavailable` and zero provider calls | ✅ both halves — the runner (§3.6) and the **surface** (§10.6), which was missing until §10 |
+| A10 | Per-fixture calibration meets its floor for every supported language | ⚠️ **Vacuous today.** No definition has been activated, so no model has been measured; see 15.3.2 |
+
+### 15.3 Deferrals, each with its reason
+
+#### 15.3.1 🔴 The live acceptance is three of four layers, and not on `openclaw`
+
+`scripts/agent_acceptance.py` is the machine form of all four layers and `make agent-acceptance` runs it.
+Layers 1 (placement explicitly set), 3 (the served IR carrying an agent-authored edge whose count the
+composition agrees with) and 4 (the page drawing `edge--inferred`, the composition panel and the
+`assessed` mark) **pass** against a local fixture stack.
+
+**Layer 2 — a row in `heros_inference` — did not run.** It needs a platform Postgres and a live provider
+credential, and it spends real tokens. `openclaw/openclaw` is also not checked out on the build machine,
+so the layers that did run used a Go fixture rather than the acceptance target §12 names.
+
+🚫 The runner exits **non-zero** and prints *"This is NOT a pass"*. This is recorded as **incomplete**,
+not as passed — a partial acceptance reported as an acceptance is precisely what the four-layer shape
+exists to prevent.
+
+**To close it:** check out `openclaw/openclaw`, point a deployment with a provider credential at it, set
+the placement to `platform` deliberately, and run `make agent-acceptance TENANT=… WORKFLOW=openclaw/openclaw`.
+
+#### 15.3.2 The activation floors are a design starting point, not a measurement (Q4)
+
+P ≥ 0.90 / R ≥ 0.70 shipped as the gate's thresholds. **No definition has been activated, so no model has
+been measured** — these are design.md's proposed numbers, not ours.
+
+What HAS been measured is the calibration **set**, against three synthetic analysers — and that
+measurement found a real defect: the set could not fail an agent that proposes nothing. Recorded in
+[`docs/heros/ablation-protocol.md`](../heros/ablation-protocol.md) §2 rather than here, because that is
+where somebody replacing them will be reading.
+
+🚫 Sales may not quote them as our agent's numbers — see
+[`docs/sales/P30-heros-agent-claims.md`](../sales/P30-heros-agent-claims.md) §5.
+
+#### 15.3.3 Migration 0045 is PostgreSQL-only (agreed with damon)
+
+There is no second dialect to write to. `db/migrations/postgres/README.md` and migration 0042's header
+both argue that these tables exist in one dialect; the SQLite store in `internal/db/db.go` is the retired
+agent's dev ledger and holds no IR fact. A copy there would be a second schema nothing reads. Stated in
+both migration headers. The same answer applies to 0046, 0047 and 0048.
+
+#### 15.3.4 The critic model is conditional and was not triggered (task 6b.12)
+
+`critic-loop` is unavailable because the runner supplies no `Critic`, so no critic model is selectable —
+which the task's own "only if" excludes. The three things it requires be **visible** are built and
+asserted: separate `CriticModelRef`/`CriticCredentialRef` fields so spend attributes separately, a refusal
+when a critic model is bound without its own credential, and the second-spend-line marking. What is not
+built is the runner-side critic.
+
+#### 15.3.5 The definition reaches a `customer`-placed tenant's machine (D1's consequence)
+
+D1 leaves "whether HEROS's definition is visible to customers" undecided and calls it operator-only in
+P30. That governs **surfaces** and cannot govern placement `customer`, because there is no way to execute
+a prompt on a machine without the prompt being on that machine.
+
+The decision taken: the definition is served **only** to a tenant whose placement is `customer`. A
+`platform`-placed or `disabled` tenant receives its placement and nothing else. Fenced by
+`TestTheDefinitionCrossesOnlyToACustomerPlacedTenant`.
+
+#### 15.3.6 No price list is wired
+
+Every spend row reads `unpriced` — the word, never `0`. The meter records tokens; nothing converts them
+to a cost, so `heros_spend.priced` is false on every row this phase writes. 🚫 No cost per analysis may
+be quoted.
+
+#### 15.3.7 The rollout ladder is at `none`
+
+No tenant anywhere is placed for analysis. Every rung above `none` is machinery that has been tested and
+not exercised on a fleet.
+
+### 15.4 Two defects found by the phase's own fences, worth remembering
+
+**Migration 0047 could never have been applied anywhere.** Its guard queried
+`information_schema.constraint_table_usage`, which does not list CHECK constraints — so it raised on
+every run. Written in §7, reviewed, committed, and first executed in §10 when a live-Postgres proof
+pointed a real database at it. Fixed to `pg_constraint` joined to the table **and** the current schema.
+Then it raised again on `information_schema.columns` for the same reason: database-wide catalog, per-test
+schemas, `count(*)` multiplying. **The same class of defect twice in one file.**
+
+**Three fences were checking nothing.** A memory-lifetime test asserting against a hand-rolled map; a
+coverage classifier matching prose in comments and reporting 91% where the honest figure is 56%; a
+narrative fence whose regex matched a later conditional's `) : null}`. Each was green, each was cited as
+evidence, and each was found only by trying to defeat it.
+

@@ -24,6 +24,22 @@
       ]
     },
     {
+      "route": "/docs/concepts/inferred-structure",
+      "title": "Inferred structure",
+      "section": "Concepts",
+      "summary": "Some edges on your graph were proposed by a model rather than read out of your source — here is how to tell which, who ran the analysis, and how to switch it off.",
+      "headings": [
+        "The short version",
+        "Four states, and why they are four",
+        "Reading the graph",
+        "The composition panel",
+        "The assessed paragraph",
+        "Whose machine ran it",
+        "Turning it off",
+        "What it does not do"
+      ]
+    },
+    {
       "route": "/docs/concepts/refusals",
       "title": "Refusals are outcomes, not errors",
       "section": "Concepts",
@@ -142,6 +158,7 @@
         "Exit codes",
         "Configuration and which source wins",
         "Commands",
+        "analyse",
         "apply",
         "author",
         "coverage",
