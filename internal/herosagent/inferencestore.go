@@ -227,3 +227,39 @@ func (s *PGInferenceStore) CountFor(parent context.Context, tenantID string) (in
 	}
 	return n, nil
 }
+
+// LatestFor returns the most recently created inference for one workflow (task 8.2's narrative read).
+//
+// Scoped by TENANT as well as workflow, and that is not belt-and-braces: workflow ids are chosen by
+// customers and they collide. A query on `workflow_id` alone would serve one organization's narrative
+// on another's graph page, and nothing in the response would look wrong.
+func (s *PGInferenceStore) LatestFor(parent context.Context, tenantID, workflowID string) (Stored, bool, error) {
+	ctx, cancel := s.ctx(parent)
+	defer cancel()
+
+	var st Stored
+	var edges, labels string
+	var narrative sql.NullString
+	err := s.db.QueryRowContext(ctx,
+		`SELECT inference_id, tenant_id, workflow_id, source_revision, agent_config_hash, placement,
+		        edges_json, labels_json, narrative, tokens_in, tokens_out, created_at_ms
+		   FROM heros_inference
+		  WHERE tenant_id = $1 AND workflow_id = $2
+		  ORDER BY created_at_ms DESC, inference_id DESC
+		  LIMIT 1`,
+		tenantID, workflowID).
+		Scan(&st.InferenceID, &st.TenantID, &st.WorkflowID, &st.SourceRevision, &st.AgentConfigHash,
+			&st.Placement, &edges, &labels, &narrative, &st.TokensIn, &st.TokensOut, &st.CreatedAtMS)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return Stored{}, false, nil
+	case err != nil:
+		return Stored{}, false, fmt.Errorf("herosagent: reading the latest inference for %s/%s: %w",
+			tenantID, workflowID, err)
+	}
+	st.Narrative = narrative.String
+	// 🚫 Edges and labels are deliberately NOT decoded here. This read exists for the narrative, and a
+	// caller that wanted the facts would be addressing them by D2's three-part key rather than by "the
+	// latest" — decoding them would make this look like a second way to obtain an inference.
+	return st, true, nil
+}

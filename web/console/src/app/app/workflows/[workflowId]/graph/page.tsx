@@ -5,6 +5,9 @@ import type {
   ViewRegion,
   ViewLabel,
   ViewTopology,
+  ViewAgent,
+  Composition,
+  CompositionPattern,
 } from "@/lib/types.generated";
 import { load } from "@/lib/view";
 import {
@@ -75,6 +78,17 @@ function GraphBody({ view }: { view: GraphView }) {
   const regions = view.regions ?? [];
   const unclassified = view.unclassified ?? [];
   const diagnostics = view.diagnostics ?? [];
+  // 🔴 NULLABLE, and it is not defensive habit. A 200 whose body does not carry a composition is a
+  // FOURTH state on this console — not a crash and not a zero — and this page dereferenced it
+  // unguarded, which turned a pre-P30 response into a server-rendered error page for the whole route.
+  // Found by the acceptance suite, whose graph fixture is deliberately a body from before this field
+  // existed.
+  //
+  // 🚫 It is NOT defaulted to an empty composition. `{nodes_covered: 0}` would render "0 of 0 nodes
+  // covered" — a measurement nobody made — which is the same fabrication `uncovered_nodes` avoids on
+  // the eval-set page for the same reason.
+  const composition = view.composition ?? null;
+  const agent = view.agent ?? null;
 
   return (
     <>
@@ -88,7 +102,20 @@ function GraphBody({ view }: { view: GraphView }) {
       >
         <Stats>
           <Stat label="Nodes" value={integer(nodes.length)} note="call sites found" />
-          <Stat label="Edges" value={integer(edges.length)} note="dependencies mapped" />
+          {/* 🔴 TASK 8.4 — a mixed count reports the TOTAL and the INFERRED PORTION, never one
+              undifferentiated number. `19 edges` over a graph where four were proposed by a model is
+              a number a reader takes as measured, and the arithmetic is how a hypothesis gets promoted
+              to a fact without anybody claiming it. When nothing is inferred the note is the plain one:
+              the split appears where there is a split, and does not nag where there is not. */}
+          <Stat
+            label="Edges"
+            value={integer(edges.length)}
+            note={
+              composition && composition.edges_inferred > 0
+                ? `dependencies mapped — ${integer(composition.edges_inferred)} of them inferred, not measured`
+                : "dependencies mapped"
+            }
+          />
           {/* The sentence is resolved on the platform (patternclassifier.llmCallsNote). It used to be
               computed here from the count alone, which got the most common case exactly backwards:
               zero calls over a graph with zero labels read as "fully rule-covered". */}
@@ -128,6 +155,8 @@ function GraphBody({ view }: { view: GraphView }) {
         )}
         {view.topology ? null : <GraphLegend />}
       </Section>
+
+      <CompositionSection composition={composition} agent={agent} />
 
       <Section title="Patterns" aside={`${regions.length} labelled · ${unclassified.length} unlabelled`}>
         {regions.length === 0 && unclassified.length === 0 ? (
@@ -237,6 +266,206 @@ function NoTopology({
   );
 }
 
+/**
+ * What this workflow is made of, and what the agent contributed (P30 tasks 8.1, 8.2, 8.6–8.8).
+ *
+ * # Why a composition and not a workflow-level label
+ *
+ * The classifier deliberately refuses to name the whole workflow, because a label is the metric-set
+ * DISPATCHER and a graph containing both a router and a RAG pipeline needs two metric sets. That
+ * refusal left a real question unanswered — a reader opening this page wants to know what they are
+ * looking at — and a composition answers it by ENUMERATING rather than collapsing. Two patterns read as
+ * two patterns; one pattern reads as a composition of one, not as a workflow-level label restated.
+ *
+ * Everything here is computed on the platform. This component branches on data and renders sentences it
+ * was handed, so a second copy of "how do we know this" cannot grow in TypeScript.
+ */
+function CompositionSection({
+  composition,
+  agent,
+}: {
+  composition: Composition | null;
+  agent: ViewAgent | null;
+}) {
+  const patterns = composition?.patterns ?? [];
+  return (
+    <Section
+      title="What this workflow is made of"
+      aside={
+        /* 🔴 TASK 8.4 again, on the figure a reader is most likely to quote. `12 of 19 nodes covered`
+           reads as measured; the inferred portion is stated in the same breath or not at all. */
+        !composition
+          ? "not reported"
+          : composition.nodes_covered_inferred > 0
+            ? `${integer(composition.nodes_covered)} of ${integer(composition.nodes_total)} nodes covered · ${integer(composition.nodes_covered_inferred)} by inference alone`
+            : `${integer(composition.nodes_covered)} of ${integer(composition.nodes_total)} nodes covered`
+      }
+    >
+      {agent ? <AgentPanel agent={agent} /> : null}
+
+      {!composition ? (
+        /* The body carried no composition. 🚫 NOT rendered as "nothing is covered": this deployment
+           did not tell us, and an invented zero here is a measurement nobody made. */
+        <Empty title="This deployment did not report a composition for this workflow.">
+          <p>
+            The graph above is unaffected — it is what the classifier found. What is missing is the
+            summary of which patterns cover which nodes, which a platform older than this console does
+            not compute.
+          </p>
+        </Empty>
+      ) : patterns.length === 0 ? (
+        <Empty title="No pattern covers any part of this workflow yet.">
+          <p>
+            That is a statement about the twenty patterns in the taxonomy and what has been established
+            so far — not about whether this workflow does something worth naming. The regions below name
+            the cause for each part that carries no label.
+          </p>
+        </Empty>
+      ) : (
+        <div className="flex flex-col gap-4">
+          <DataTable
+            caption="Every pattern present in this workflow, what it covers, and how it is known"
+            columns={[
+              { key: "pattern", label: "Pattern" },
+              { key: "state", label: "How we know" },
+              { key: "regions", label: "Regions", numeric: true },
+              { key: "nodes", label: "Nodes", numeric: true },
+              { key: "provenance", label: "Established by" },
+            ]}
+          >
+            <tbody>
+              {patterns.map((p) => (
+                <CompositionRow key={p.pattern} pattern={p} />
+              ))}
+            </tbody>
+          </DataTable>
+          <p className="caption">
+            {integer(composition.unlabelled_remainder)}{" "}
+            {plural(composition.unlabelled_remainder, "node is", "nodes are")} covered by no pattern at
+            all. A composition names what was found; the remainder is what was not, and it is stated
+            rather than left to be worked out from the difference.
+          </p>
+        </div>
+      )}
+    </Section>
+  );
+}
+
+/**
+ * One pattern in the composition.
+ *
+ * The `state` chip is the load-bearing cell. A pattern every contributing detector read out of the
+ * source and one the agent alone proposed occupy the same row shape and are different claims, and the
+ * table would otherwise present them identically.
+ */
+function CompositionRow({ pattern }: { pattern: CompositionPattern }) {
+  const provenance = pattern.provenance ?? [];
+  return (
+    <tr>
+      <td>
+        <span className="flex flex-wrap items-center gap-2">
+          <Chip variant="count">#{integer(pattern.ordinal)}</Chip>
+          <span className="text-sm font-medium">
+            <Value flags={pattern.candidate ? ["candidate"] : []}>{pattern.title || pattern.pattern}</Value>
+          </span>
+          {pattern.group ? <Chip title="taxonomy group">{pattern.group}</Chip> : null}
+        </span>
+      </td>
+      <td>
+        <Chip tone={STATE_TONE[pattern.state] ?? "unknown"} title="how this pattern is known">
+          {pattern.state.replace(/_/g, " ")}
+        </Chip>
+      </td>
+      <td className="num">{integer(pattern.regions)}</td>
+      <td className="num">{integer(pattern.nodes)}</td>
+      <td className="mono text-xs">{provenance.length > 0 ? provenance.join(", ") : "—"}</td>
+    </tr>
+  );
+}
+
+/**
+ * The four states, and the tone each carries.
+ *
+ * 🔴 `not_analysed` is NEUTRAL and `unavailable` is WARN, and that is the whole distinction rendered.
+ * One is a setting — the default one, which every organization sees before an operator turns analysis
+ * on — and the other is a fault on our side. Giving the default an alarming tone would report a
+ * deliberate configuration as a problem on every customer's first visit.
+ */
+const STATE_TONE: Record<string, "ok" | "info" | "neutral" | "warn"> = {
+  measured: "ok",
+  inferred: "info",
+  not_analysed: "neutral",
+  unavailable: "warn",
+};
+
+/**
+ * The agent's contribution to this graph: what it knows, which machine produced it, and what a reader
+ * may do next.
+ *
+ * 🔴 TASK 8.8 — this is a PANEL. A HEROS failure renders here and the rest of the page renders
+ * normally: every other surface on it is rule-derived and did not depend on the agent at all, so
+ * replacing them with a full-screen error would make an optional subsystem's outage look like a total
+ * loss of the customer's data.
+ */
+function AgentPanel({ agent }: { agent: ViewAgent }) {
+  return (
+    <div className="flex flex-col gap-3">
+      <p className="flex flex-wrap items-center gap-2">
+        <Chip tone={STATE_TONE[agent.state] ?? "unknown"} title="what the analysis agent contributed">
+          {agent.state.replace(/_/g, " ")}
+        </Chip>
+        {/* 🔴 TASK 8.6 — WHICH MACHINE. `platform` means we read your source; `customer` means you ran
+            it and we never saw it. Those are different promises, and a page that showed inferred facts
+            without saying which one applied would be silent about the only part a security review
+            cares about. */}
+        {agent.placement ? (
+          <Chip tone="unknown" title="where this organization's analysis runs">
+            {agent.placement}
+          </Chip>
+        ) : null}
+      </p>
+      <p className="hint">{agent.state_sentence}</p>
+      {agent.placement_sentence ? <p className="hint">{agent.placement_sentence}</p> : null}
+
+      {/* 🚫 A failure is a BANNER inside this panel, never the page. */}
+      {agent.failure ? (
+        <Banner tone="warn" title="The analysis agent could not be reached.">
+          <p>{agent.failure}</p>
+          <p>
+            Everything else on this page was established by reading your source and is unaffected. What
+            is missing is anything the agent would have added.
+          </p>
+        </Banner>
+      ) : null}
+
+      {/* 🔴 TASK 8.2 — the narrative is ASSESSED, and it is ABSENT rather than fabricated. There is no
+          `else` branch here on purpose: when the agent wrote nothing, nothing is rendered. Prose
+          assembled from the counts above would appear in this same treatment, which tells a reader a
+          model wrote it. */}
+      {agent.narrative ? (
+        <div className="assessed">
+          <span className="assessed__mark">assessed</span>
+          <p className="text-sm">{agent.narrative}</p>
+          <p className="caption">
+            Written by the analysis agent about this workflow. It is an assessment, not a measurement —
+            nothing on this console dispatches off it.
+          </p>
+        </div>
+      ) : null}
+
+      {/* 🔴 TASK 8.7 — an action where one is available, a stated reason where none is. Never a control
+          that cannot work: an action that fails on press is worse than an absent one with a sentence. */}
+      {agent.action === "analyse" ? (
+        <p className="hint">
+          Analysis runs on this platform for your organization. A new revision is analysed when it is
+          discovered; there is nothing to start by hand.
+        </p>
+      ) : null}
+      {agent.action_reason ? <p className="hint">{agent.action_reason}</p> : null}
+    </div>
+  );
+}
+
 function textAlternative(view: GraphView): string {
   const nodes = view.nodes ?? [];
   const edges = view.edges ?? [];
@@ -282,12 +511,16 @@ function GraphTable({ nodes, edges }: { nodes: ViewNode[]; edges: ViewEdge[] }) 
           ))}
         </tbody>
       </DataTable>
+      {/* The table is the drawing's text alternative, so the inferred/measured distinction has to be
+          IN it — a reader using the table instead of the SVG must not lose the one channel that says
+          which edges are hypotheses. */}
       <DataTable
-        caption="Every edge and its kind"
+        caption="Every edge, its kind, and whether it was measured or inferred"
         columns={[
           { key: "from", label: "From" },
           { key: "to", label: "To" },
           { key: "kind", label: "Kind" },
+          { key: "how", label: "How we know" },
         ]}
       >
         <tbody>
@@ -296,6 +529,16 @@ function GraphTable({ nodes, edges }: { nodes: ViewNode[]; edges: ViewEdge[] }) 
               <td className="mono">{edge.from}</td>
               <td className="mono">{edge.to}</td>
               <td>{edge.kind}</td>
+              <td>
+                {edge.author === "heros" ? (
+                  <span className="flex flex-wrap items-center gap-2">
+                    <Chip tone="info">inferred</Chip>
+                    <span className="caption">{percent(edge.confidence ?? 0)} confidence</span>
+                  </span>
+                ) : (
+                  <Chip tone="ok">measured</Chip>
+                )}
+              </td>
             </tr>
           ))}
         </tbody>
@@ -346,6 +589,22 @@ function GraphSVG({
         <marker id="arrow-data" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
           <path d="M 0 0 L 10 5 L 0 10 z" className="marker-data" />
         </marker>
+        {/* 🔴 An inferred edge gets its OWN marker as well as its own stroke (task 8.3). Two channels,
+            not one: a reader who cannot separate the hues — greyscale, a projector, colour vision
+            deficiency — still sees a smaller, hollow arrowhead. Colour is never the only channel on
+            this drawing, which is the same rule that makes a control edge differ from a data edge by
+            arrowhead shape rather than by hue alone. */}
+        <marker
+          id="arrow-inferred"
+          viewBox="0 0 10 10"
+          refX="9"
+          refY="5"
+          markerWidth="6"
+          markerHeight="6"
+          orient="auto"
+        >
+          <path d="M 0 0 L 10 5 L 0 10 z" className="marker-inferred" />
+        </marker>
         <marker
           id="arrow-control"
           viewBox="0 0 10 10"
@@ -391,13 +650,39 @@ function GraphSVG({
           ? `M ${sx} ${sy} C ${sx + 40} ${dip}, ${tx - 40} ${dip}, ${tx} ${ty}`
           : `M ${sx} ${sy} C ${sx + COL * 0.32} ${sy}, ${tx - COL * 0.32} ${ty}, ${tx} ${ty}`;
         // Control and data edges differ by line style AND arrowhead shape, never by colour alone.
+        //
+        // 🔴 AUTHORSHIP WINS OVER KIND (task 8.3). An inferred data edge and an inferred control edge
+        // are both drawn as inferred, because "a model proposed this dependency" is the fact a reader
+        // has to see first — the kind is a detail of a relationship whose existence is the hypothesis.
+        // Rendering an inferred control edge in the control treatment would put a model's guess in the
+        // same channel as a parsed fact.
+        const inferred = edge.author === "heros";
+        const className = inferred
+          ? "edge edge--inferred"
+          : edge.kind === "control"
+            ? "edge edge--control"
+            : "edge edge--data";
+        const marker = inferred
+          ? "url(#arrow-inferred)"
+          : edge.kind === "control"
+            ? "url(#arrow-control)"
+            : "url(#arrow-data)";
         return (
           <path
             key={index}
             d={d}
-            className={edge.kind === "control" ? "edge edge--control" : "edge edge--data"}
-            markerEnd={edge.kind === "control" ? "url(#arrow-control)" : "url(#arrow-data)"}
-          />
+            className={className}
+            markerEnd={marker}
+          >
+            {/* The title is the accessible name for a reader on a pointer device, and it carries the
+                confidence — which exists only for an inferred edge and must not read as zero on one
+                that has none. */}
+            <title>
+              {inferred
+                ? `${edge.from} → ${edge.to} (${edge.kind}) — inferred, ${percent(edge.confidence ?? 0)} confidence`
+                : `${edge.from} → ${edge.to} (${edge.kind}) — measured`}
+            </title>
+          </path>
         );
       })}
 
@@ -537,6 +822,10 @@ function GraphLegend() {
   const items = [
     { swatch: "legend__swatch--data", label: "data edge — dashed line, plain arrow" },
     { swatch: "legend__swatch--control", label: "control edge — solid line, notched arrow" },
+    {
+      swatch: "legend__swatch--inferred",
+      label: "inferred edge — a model proposed this dependency; it was not parsed out of your source",
+    },
     { swatch: "legend__swatch--rule", label: "rule-labelled region" },
     { swatch: "legend__swatch--llm", label: "model-labelled region — a candidate, not a fact" },
     { swatch: "legend__swatch--none", label: "not yet classified" },

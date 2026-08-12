@@ -54,5 +54,9 @@ func (s *Server) handlePatternGraph(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "no such workflow"})
 		return
 	}
+	// 🔴 The agent panel is attached HERE, at read time, from the LIVE placement (tasks 8.2, 8.6–8.8).
+	// Not stored beside the graph: a placement an operator changes this afternoon would leave every
+	// stored view attributing facts to a machine that no longer runs them.
+	view.Agent = s.agentPanelFor(r, principal.TenantID, view)
 	writeJSON(w, http.StatusOK, view)
 }

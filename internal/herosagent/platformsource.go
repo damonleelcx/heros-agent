@@ -45,6 +45,7 @@ type PlatformSource struct {
 	prompts    PromptResolver
 	models     ModelResolver
 	ingester   *Ingester
+	inferences InferenceStore
 	budget     Budget
 	floor      float64
 }
@@ -94,7 +95,7 @@ func NewPlatformSource(cfg PlatformSourceConfig) (*PlatformSource, error) {
 	}
 	return &PlatformSource{
 		placements: cfg.Placements, versions: cfg.Versions, active: cfg.Versions,
-		prompts: cfg.Prompts, models: cfg.Models,
+		prompts: cfg.Prompts, models: cfg.Models, inferences: cfg.Inferences,
 		ingester: ing, budget: cfg.Budget, floor: cfg.Floor,
 	}, nil
 }
@@ -162,4 +163,36 @@ func (p *PlatformSource) ActiveDefinition(ctx context.Context) (runlink.AgentDef
 // Accept ingests a customer-placed submission.
 func (p *PlatformSource) Accept(ctx context.Context, sub Submission) (IngestResult, error) {
 	return p.ingester.Accept(ctx, sub)
+}
+
+// NarrativeFor returns the agent's prose about one workflow (task 8.2).
+//
+// 🔴 It reads the LATEST inference for the workflow rather than one keyed by a revision, and the reason
+// is what the caller has: a graph page knows the workflow it is drawing and not which revision the
+// stored analysis ran against. Reading the latest is honest about that — it is the analysis whose facts
+// are on the page, because the same store is what put them there.
+//
+// ok=false is NO NARRATIVE and is a NORMAL outcome: the agent may produce edges and no prose, and an
+// abstention-only inference is a real row with nothing to say. 🚫 Never a summary this platform writes.
+func (p *PlatformSource) NarrativeFor(ctx context.Context, tenantID, workflowID string) (string, bool, error) {
+	reader, ok := p.inferences.(latestReader)
+	if !ok {
+		// A store that cannot answer "the latest for this workflow" reports NO narrative rather than an
+		// error. The prose is the least load-bearing thing on the page and its absence renders as
+		// nothing; failing the read would turn a missing paragraph into a panel-level fault.
+		return "", false, nil
+	}
+	st, found, err := reader.LatestFor(ctx, tenantID, workflowID)
+	if err != nil || !found {
+		return "", false, err
+	}
+	return st.Narrative, st.Narrative != "", nil
+}
+
+// latestReader is the optional half of an InferenceStore that can answer "the most recent inference for
+// this workflow". Optional rather than on the interface, because only the narrative needs it and every
+// other caller addresses an inference by D2's three-part key — which is the addressing the whole design
+// rests on, and which this must not look like an alternative to.
+type latestReader interface {
+	LatestFor(ctx context.Context, tenantID, workflowID string) (Stored, bool, error)
 }

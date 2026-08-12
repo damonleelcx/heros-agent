@@ -35,6 +35,18 @@ type GraphView struct {
 	// Topology is why this graph looks the way it does when it has nodes and no edges. Nil when the
 	// graph has edges — there is nothing to explain.
 	Topology *ViewTopology `json:"topology,omitempty"`
+
+	// Composition is what this workflow is MADE OF: every pattern present, what it covers, and the
+	// remainder nothing covered (task 8.1). 🚫 It dispatches nothing — see composition.go.
+	Composition Composition `json:"composition"`
+
+	// Agent is the analysis agent's contribution and its current availability (tasks 8.2, 8.6–8.8).
+	//
+	// 🔴 Nil until a caller attaches it, and nil means THIS DEPLOYMENT RUNS NO AGENT. It is deliberately
+	// not computed here: everything on it is a CURRENT fact (a placement an operator can change this
+	// afternoon) while the rest of this view is a fact about a stored analysis, and a ViewAgent stored
+	// beside the graph would report a placement that was true when discovery ran. See viewagent.go.
+	Agent *ViewAgent `json:"agent,omitempty"`
 }
 
 // TopologyReason is the closed vocabulary for "why does this graph have no edges".
@@ -325,6 +337,10 @@ func BuildGraphView(ir *discovery.IR, res Result, rep discovery.DiscoveryReport)
 	sort.SliceStable(gv.Unclassified, func(i, j int) bool {
 		return gv.Unclassified[i].SubgraphID < gv.Unclassified[j].SubgraphID
 	})
+	// LAST, over the assembled view rather than over `res`: everything the composition needs has been
+	// resolved once already, and re-deriving ordinals and authors from the raw result would be the
+	// second implementation this file's header warns about.
+	gv.Composition = buildComposition(gv)
 	return gv
 }
 

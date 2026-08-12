@@ -75,3 +75,26 @@ func (s *MemInferenceStore) Len() int {
 	defer s.mu.RUnlock()
 	return len(s.m)
 }
+
+// LatestFor returns the most recently created inference for one workflow (task 8.2's narrative read).
+//
+// "Most recent" by `CreatedAtMS`, with the inference id as the tie-break so a store holding two rows
+// written in the same millisecond answers the same way twice. A map iteration order left as the
+// tie-break would make the narrative on a graph page change between reloads — which is exactly the kind
+// of instability D2's pinning exists to remove.
+func (s *MemInferenceStore) LatestFor(_ context.Context, tenantID, workflowID string) (Stored, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var best Stored
+	var found bool
+	for _, st := range s.m {
+		if st.TenantID != tenantID || st.WorkflowID != workflowID {
+			continue
+		}
+		if !found || st.CreatedAtMS > best.CreatedAtMS ||
+			(st.CreatedAtMS == best.CreatedAtMS && st.InferenceID > best.InferenceID) {
+			best, found = st, true
+		}
+	}
+	return best, found, nil
+}

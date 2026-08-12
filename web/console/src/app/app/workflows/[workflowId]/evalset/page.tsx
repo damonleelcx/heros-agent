@@ -58,6 +58,9 @@ function EvalSetBody({ view, workflowId }: { view: EvalSetView; workflowId: stri
   const families = view.families ?? [];
   const vacuous = view.vacuous_dimensions ?? [];
   const uncovered = view.uncovered_nodes ?? [];
+  // The platform names the columns it does not hold. `uncovered_nodes` among them means the empty list
+  // above is an absence of knowledge rather than an absence of uncovered nodes.
+  const coverageUnknown = (view.unattributed ?? []).includes("uncovered_nodes");
   const reasons = view.indecisive_reasons ?? [];
 
   return (
@@ -181,8 +184,28 @@ function EvalSetBody({ view, workflowId }: { view: EvalSetView; workflowId: stri
         </Section>
       ) : null}
 
-      {uncovered.length > 0 ? (
-        <Section title="Graph nodes no case exercises" aside={`${integer(uncovered.length)}`}>
+      {/* 🔴 TASK 8.9 — this section renders in ALL THREE states, and the third is why.
+          An empty list of unexercised nodes and a deployment that cannot compute one produce the same
+          absence, and only one of them means "every node is exercised". The section used to be hidden
+          whenever the list was empty, which rendered the reassuring reading of both. */}
+      <Section
+        title="Graph nodes no case exercises"
+        aside={coverageUnknown ? "not attributable" : integer(uncovered.length)}
+      >
+        {coverageUnknown ? (
+          <Empty title="This deployment cannot say which nodes your cases exercise.">
+            <p>
+              Node coverage is computed from a coverage report, and none was attributed to this eval
+              set. That is a gap in what we hold — <span className="mono">not</span> a finding that
+              every node is exercised, which is what an empty list here would have implied.
+            </p>
+          </Empty>
+        ) : uncovered.length === 0 ? (
+          <p className="hint">
+            Every node in this workflow&rsquo;s graph is exercised by at least one case. This is a
+            measured statement: the coverage report was attributed, and its uncovered set is empty.
+          </p>
+        ) : (
           <ul className="diagnostics">
             {uncovered.map((id) => (
               <li key={id} className="mono">
@@ -190,8 +213,8 @@ function EvalSetBody({ view, workflowId }: { view: EvalSetView; workflowId: stri
               </li>
             ))}
           </ul>
-        </Section>
-      ) : null}
+        )}
+      </Section>
     </>
   );
 }

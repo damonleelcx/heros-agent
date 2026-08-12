@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -14,6 +15,7 @@ import (
 	"github.com/heros-foreal/agentd/internal/config"
 	"github.com/heros-foreal/agentd/internal/herosagent"
 	"github.com/heros-foreal/agentd/internal/linkingest"
+	"github.com/heros-foreal/agentd/internal/patternclassifier"
 	"github.com/heros-foreal/agentd/internal/runlink"
 )
 
@@ -308,5 +310,263 @@ func TestAnUnmountedAgentRefusesAgentFactsRatherThanStoringThem(t *testing.T) {
 		t.Errorf("returned %d, want 503 — a deployment with no version store cannot tell a published "+
 			"config_hash from a string, and accepting the facts anyway would store what nothing can "+
 			"re-derive: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// ── the graph page's agent panel (tasks 8.2, 8.5–8.8) ────────────────────────────────────────────
+
+// graphSeam wires a server serving one graph view, with an agent source a test controls.
+func graphSeam(t *testing.T, view patternclassifier.GraphView, agent HerosAgentSource) *Server {
+	t.Helper()
+	s := New(nil, config.Config{})
+	s.MountPatternGraph(stubGraphs{view: view})
+	if agent != nil {
+		s.MountHerosAgent(agent)
+	}
+	return s
+}
+
+type stubGraphs struct{ view patternclassifier.GraphView }
+
+func (g stubGraphs) GraphView(string, string) (patternclassifier.GraphView, bool) {
+	return g.view, true
+}
+
+// panelSource is a HerosAgentSource whose every answer a test sets.
+type panelSource struct {
+	placement herosagent.Placement
+	placeErr  error
+	narrative string
+	narrErr   error
+}
+
+func (p panelSource) PlacementFor(context.Context, string) (herosagent.Placement, error) {
+	return p.placement, p.placeErr
+}
+func (p panelSource) ActiveDefinition(context.Context) (runlink.AgentDefinition, bool, error) {
+	return runlink.AgentDefinition{}, false, nil
+}
+func (p panelSource) Accept(context.Context, herosagent.Submission) (herosagent.IngestResult, error) {
+	return herosagent.IngestResult{}, nil
+}
+func (p panelSource) NarrativeFor(context.Context, string, string) (string, bool, error) {
+	return p.narrative, p.narrative != "", p.narrErr
+}
+
+func readGraph(t *testing.T, s *Server) patternclassifier.GraphView {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workflows/wf-1/pattern-graph", nil)
+	rec := seamDo(t, s, req, "t-1")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("graph read returned %d: %s", rec.Code, rec.Body.String())
+	}
+	var got patternclassifier.GraphView
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	return got
+}
+
+// inferredGraph is a view carrying one measured edge and one inferred one.
+func inferredGraph() patternclassifier.GraphView {
+	return patternclassifier.GraphView{
+		WorkflowID: "wf-1",
+		Nodes:      []patternclassifier.ViewNode{{NodeID: "a"}, {NodeID: "b"}},
+		Edges: []patternclassifier.ViewEdge{
+			{From: "a", To: "b", Kind: "data"},
+			{From: "b", To: "a", Kind: "control", Author: "heros", Confidence: 0.88},
+		},
+		Composition: patternclassifier.Composition{EdgesTotal: 2, EdgesInferred: 1},
+	}
+}
+
+// 🔴 TASK 8.8 — A HEROS FAILURE IS A PANEL, NOT A PAGE. The graph still answers 200 and still carries
+// its nodes and edges; only the agent panel reports the fault.
+func TestAnAgentFailureDegradesToAPanelAndTheGraphStillRenders(t *testing.T) {
+	s := graphSeam(t, inferredGraph(), panelSource{placeErr: errors.New("the placement store is down")})
+	got := readGraph(t, s)
+
+	if len(got.Nodes) != 2 || len(got.Edges) != 2 {
+		t.Fatalf("the graph lost its rule-derived facts: %d nodes, %d edges", len(got.Nodes), len(got.Edges))
+	}
+	if got.Agent == nil {
+		t.Fatal("no agent panel was attached, so the failure is invisible")
+	}
+	if got.Agent.State != patternclassifier.StateUnavailable {
+		t.Errorf("state is %q, want %q — `not_analysed` would claim nobody looked, which is not "+
+			"something a failed read knows", got.Agent.State, patternclassifier.StateUnavailable)
+	}
+	if got.Agent.Failure == "" || got.Agent.Action != patternclassifier.ActionNone {
+		t.Errorf("panel is %+v, want a stated failure and no offered action", got.Agent)
+	}
+}
+
+// 🔴 TASK 8.2 — the narrative is ABSENT, not fabricated, when the agent is off.
+func TestTheNarrativeIsAbsentRatherThanFabricatedWhenTheAgentIsOff(t *testing.T) {
+	s := graphSeam(t, inferredGraph(), panelSource{
+		placement: herosagent.PlacementDisabled,
+		// Even with prose available, a disabled tenant gets none: the facts on the page were not the
+		// agent's, so prose about them would be prose about somebody else's analysis.
+		narrative: "This workflow routes on an intent classifier.",
+	})
+	got := readGraph(t, s)
+	if got.Agent.Narrative != "" {
+		t.Errorf("a disabled tenant's page carries a narrative: %q", got.Agent.Narrative)
+	}
+	if got.Agent.State != patternclassifier.StateNotAnalysed {
+		t.Errorf("state is %q, want %q", got.Agent.State, patternclassifier.StateNotAnalysed)
+	}
+	// And it is NOT rendered as a failure. This is the default for every organization, so an alarming
+	// panel here would report a deliberate configuration as a problem on every first visit.
+	if got.Agent.Failure != "" {
+		t.Errorf("the DEFAULT state carries a failure: %q", got.Agent.Failure)
+	}
+}
+
+// 🔴 TASK 8.6 — the placement is attributed on the graph, and the two placements say different things
+// about whose machine read the source.
+func TestThePlacementIsAttributedAndTheTwoDifferInWhatTheyClaim(t *testing.T) {
+	platform := readGraph(t, graphSeam(t, inferredGraph(), panelSource{
+		placement: herosagent.PlacementPlatform, narrative: "assessed prose",
+	}))
+	customer := readGraph(t, graphSeam(t, inferredGraph(), panelSource{
+		placement: herosagent.PlacementCustomer, narrative: "assessed prose",
+	}))
+
+	for _, c := range []struct {
+		name string
+		got  *patternclassifier.ViewAgent
+		want string
+		says string
+	}{
+		{"platform", platform.Agent, "platform", "reading your source"},
+		{"customer", customer.Agent, "customer", "your own machine"},
+	} {
+		if c.got.Placement != c.want {
+			t.Errorf("%s: placement is %q, want %q", c.name, c.got.Placement, c.want)
+		}
+		if !strings.Contains(c.got.PlacementSentence, c.says) {
+			t.Errorf("%s: attribution reads %q, which does not tell the reader %q — whose machine read "+
+				"the source is the only part a security review cares about",
+				c.name, c.got.PlacementSentence, c.says)
+		}
+		if c.got.State != patternclassifier.StateInferred {
+			t.Errorf("%s: state is %q, want %q", c.name, c.got.State, patternclassifier.StateInferred)
+		}
+		if c.got.Narrative == "" {
+			t.Errorf("%s: the narrative was dropped from a graph carrying inferred facts", c.name)
+		}
+	}
+
+	// 🔴 TASK 8.7 — the customer placement still offers an ACTION, because the reader can run it even
+	// though the platform cannot. A refusal with no next step is a dead end, and the next step is one
+	// line of shell.
+	if customer.Agent.Action != patternclassifier.ActionRunLocally {
+		t.Errorf("a customer-placed tenant is offered %q, want %q",
+			customer.Agent.Action, patternclassifier.ActionRunLocally)
+	}
+	if !strings.Contains(customer.Agent.ActionReason, "heros analyse") {
+		t.Errorf("the customer action does not name the command: %q", customer.Agent.ActionReason)
+	}
+}
+
+// A graph with NO inferred facts, on a tenant whose agent is on, is `not_analysed` for THIS workflow —
+// and carries no narrative, because prose about an analysis with no conclusions on the page is prose
+// about something else.
+func TestAnEnabledTenantWithNothingInferredIsNotAnalysedForThisWorkflow(t *testing.T) {
+	plain := patternclassifier.GraphView{
+		WorkflowID: "wf-1",
+		Nodes:      []patternclassifier.ViewNode{{NodeID: "a"}},
+		Edges:      []patternclassifier.ViewEdge{},
+	}
+	got := readGraph(t, graphSeam(t, plain, panelSource{
+		placement: herosagent.PlacementPlatform, narrative: "assessed prose",
+	}))
+	if got.Agent.State != patternclassifier.StateNotAnalysed {
+		t.Errorf("state is %q, want %q", got.Agent.State, patternclassifier.StateNotAnalysed)
+	}
+	if got.Agent.Narrative != "" {
+		t.Errorf("a graph with no inferred fact carries a narrative: %q", got.Agent.Narrative)
+	}
+	// 🔴 AND IT MUST NOT SAY ANALYSIS IS OFF. Found by reading the rendered page: a `platform`-placed
+	// organization's graph said "Analysis is off for this organization, which is the default" while
+	// analysis was running for it — one sentence over two situations, wrong in the one it was in.
+	if got.Agent.StateSentence != patternclassifier.SentenceNotAnalysedYet {
+		t.Errorf("the sentence is %q.\n  An ENABLED organization with nothing inferred yet must not be "+
+			"told analysis is off — that sends a reader to ask an operator to enable something that is "+
+			"already enabled.", got.Agent.StateSentence)
+	}
+
+	// The switched-off tenant keeps the other sentence, so the two situations stay distinguishable.
+	off := readGraph(t, graphSeam(t, plain, panelSource{placement: herosagent.PlacementDisabled}))
+	if off.Agent.StateSentence == got.Agent.StateSentence {
+		t.Error("a disabled organization and an enabled one with nothing inferred read identically")
+	}
+}
+
+// 🔴 NIL, not a panel, when this deployment runs no agent at all. A panel reading "not analysed" would
+// imply an agent that could be switched on, and on this deployment there is nothing to switch.
+func TestADeploymentWithNoAgentAttachesNoPanel(t *testing.T) {
+	got := readGraph(t, graphSeam(t, inferredGraph(), nil))
+	if got.Agent != nil {
+		t.Errorf("a deployment with no agent attached a panel: %+v", got.Agent)
+	}
+	if len(got.Edges) != 2 {
+		t.Error("the graph lost its edges")
+	}
+}
+
+// A narrative read that FAILS costs a paragraph and nothing else. Turning it into an `unavailable`
+// panel would hide the inferred facts — which are real and on the page — to report the loss of their
+// commentary.
+func TestAFailedNarrativeReadDoesNotDowngradeThePanel(t *testing.T) {
+	got := readGraph(t, graphSeam(t, inferredGraph(), panelSource{
+		placement: herosagent.PlacementPlatform, narrErr: errors.New("the inference store is slow"),
+	}))
+	if got.Agent.State != patternclassifier.StateInferred {
+		t.Errorf("state is %q, want %q — the facts are on the page and are real",
+			got.Agent.State, patternclassifier.StateInferred)
+	}
+	if got.Agent.Failure != "" {
+		t.Errorf("a lost paragraph became a panel failure: %q", got.Agent.Failure)
+	}
+}
+
+// 🔴 The panel's copy is rendered as PLAIN TEXT by the console, so a backtick is a backtick.
+//
+// Found by reading the rendered page: the customer action said "Run `heros analyse --ir <path>`",
+// which looks like markdown that failed to render — on the one actionable sentence the panel has. The
+// fence is over every sentence the panel can produce, because the next one will be written by somebody
+// who has markdown in their fingers.
+func TestNoPanelSentenceCarriesMarkupTheConsoleCannotRender(t *testing.T) {
+	views := []patternclassifier.GraphView{inferredGraph(), {WorkflowID: "wf-1"}}
+	placements := []herosagent.Placement{
+		herosagent.PlacementPlatform, herosagent.PlacementCustomer, herosagent.PlacementDisabled,
+	}
+	for _, view := range views {
+		for _, p := range placements {
+			got := readGraph(t, graphSeam(t, view, panelSource{placement: p, narrative: "prose"}))
+			if got.Agent == nil {
+				continue
+			}
+			for label, sentence := range map[string]string{
+				"state_sentence":     got.Agent.StateSentence,
+				"placement_sentence": got.Agent.PlacementSentence,
+				"action_reason":      got.Agent.ActionReason,
+			} {
+				for _, markup := range []string{"`", "**", "<code>", "](", "_ "} {
+					if strings.Contains(sentence, markup) {
+						t.Errorf("%s under placement %s contains %q: %q\n"+
+							"  The console renders these strings verbatim. Markup that does not render "+
+							"makes the sentence look broken, and these are the sentences a reader acts on.",
+							label, p, markup, sentence)
+					}
+				}
+			}
+		}
+	}
+	// The unavailable panel's sentence too — it is produced by a constructor rather than the handler.
+	if strings.Contains(patternclassifier.AgentUnavailable("x").ActionReason, "`") {
+		t.Error("the unavailable panel's reason carries a backtick")
 	}
 }

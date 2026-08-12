@@ -587,6 +587,24 @@
     stroke: var(--ctl);
   }
 
+  /* 🔴 An INFERRED edge (P30 task 8.3), drawn in the SAME channel a model-labelled region already
+     uses: the `--llm` hue plus a dashed stroke. Reusing that treatment rather than inventing a sixth
+     one is the whole point — a reader who has learned that this hue means "a model said so" reads an
+     inferred edge correctly on first sight, and a new colour would need a new thing to learn.
+
+     It is drawn THINNER as well, so the distinction survives a greyscale print and a reader who cannot
+     separate the two hues. Colour is never the only channel here, for the same reason a control edge
+     differs from a data edge by arrowhead as well as by line style. */
+  .graph .edge--inferred {
+    stroke: var(--llm);
+    stroke-dasharray: 2 5;
+    stroke-width: 1.25;
+  }
+
+  .graph .marker-inferred {
+    fill: var(--llm);
+  }
+
   .graph .marker-data {
     fill: var(--graph-edge-muted);
   }
@@ -671,6 +689,11 @@
     background-color: color-mix(in oklab, var(--llm) 10%, transparent);
   }
 
+  .legend__swatch--inferred {
+    border-style: dashed;
+    border-color: var(--llm);
+  }
+
   .legend__swatch--none {
     border-style: dashed;
     border-color: var(--none);
@@ -689,6 +712,20 @@
        border style says so without the reader having to have learned the palette. */
     border-style: dashed;
     border-color: color-mix(in oklab, var(--llm) 55%, transparent);
+  }
+
+  /* The ASSESSED treatment (P30 task 8.2): prose a model wrote, marked so a reader never mistakes it
+     for a measured fact. It reuses `--llm` — the console's one "a model was consulted" channel — and
+     adds the same dashed left border a model-guessed label carries, so the marking is the one the
+     reader has already learned rather than a second convention for the same idea. */
+  .assessed {
+    @apply flex flex-col gap-2 border-l-2 border-dashed pl-4;
+    border-color: color-mix(in oklab, var(--llm) 55%, transparent);
+  }
+
+  .assessed__mark {
+    @apply text-xs font-medium uppercase tracking-wide;
+    color: color-mix(in oklab, var(--llm) 80%, var(--foreground));
   }
 
   .confidence {

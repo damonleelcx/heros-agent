@@ -7,6 +7,7 @@ import (
 
 	"github.com/heros-foreal/agentd/internal/auth"
 	"github.com/heros-foreal/agentd/internal/herosagent"
+	"github.com/heros-foreal/agentd/internal/patternclassifier"
 	"github.com/heros-foreal/agentd/internal/runlink"
 )
 
@@ -39,6 +40,14 @@ type HerosAgentSource interface {
 	// Accept ingests a customer-placed result. It applies the confidence floor and refuses an unknown
 	// `agent_config_hash` by name.
 	Accept(ctx context.Context, sub herosagent.Submission) (herosagent.IngestResult, error)
+	// NarrativeFor returns the agent's prose about one workflow, from the inference that produced its
+	// inferred facts. ok=false is NO NARRATIVE — a normal outcome, since the agent may produce edges and
+	// no prose, and since D2 stores an abstention-only inference too.
+	//
+	// 🔴 It is a READ of what the agent said, never a summary this platform composes. An `ok` of false
+	// renders NOTHING: prose assembled from the composition would appear in the `assessed` treatment,
+	// which tells a reader a model wrote it.
+	NarrativeFor(ctx context.Context, tenantID, workflowID string) (string, bool, error)
 }
 
 // MountHerosAgent registers the definition read. The INGEST half needs no route of its own — it rides
@@ -192,4 +201,113 @@ func (s *Server) acceptAgentFacts(w http.ResponseWriter, r *http.Request,
 		return false
 	}
 	return true
+}
+
+// agentPanelFor builds the graph page's agent panel from the LIVE placement (tasks 8.2, 8.6–8.8).
+//
+// # Why a failure here returns a panel rather than an error
+//
+// 🚫 A HEROS failure must never become a full-screen error (task 8.8). Everything else on a graph page —
+// the nodes, the edges a frontend established, the rule labels, the composition — was produced without
+// the agent and is unaffected by its outage. Replacing all of it with an error would make an OPTIONAL
+// subsystem's failure look like a total loss of the customer's data, which is both false and the most
+// alarming possible way to be false.
+//
+// So every path below returns a *ViewAgent. The panel says what happened; the page renders.
+func (s *Server) agentPanelFor(r *http.Request, tenantID string,
+	view patternclassifier.GraphView) *patternclassifier.ViewAgent {
+
+	if s.herosAgent == nil {
+		// 🔴 NIL, not a panel. This deployment runs no agent at all, so there is no state to report and
+		// no action to withhold — a panel reading "not analysed" would imply an agent that could be
+		// switched on, and on this deployment there is nothing to switch.
+		return nil
+	}
+
+	placement, err := s.herosAgent.PlacementFor(r.Context(), tenantID)
+	if err != nil {
+		// We could not read the placement, so we do not know whether anything analysed this workflow.
+		// `unavailable`, never `not_analysed`: one is a fault on our side and the other is a claim that
+		// nobody has looked, and only one of them is something we actually know.
+		return patternclassifier.AgentUnavailable("this organization's analysis setting could not be read")
+	}
+
+	inferred := view.Composition.EdgesInferred > 0 || view.Composition.NodesCoveredInferred > 0
+	// Read ONLY when something was actually inferred. A narrative attached to a graph carrying no
+	// inferred fact would be prose about an analysis whose conclusions are not on the page.
+	narrative := ""
+	if inferred {
+		if got, ok, nerr := s.herosAgent.NarrativeFor(r.Context(), tenantID, view.WorkflowID); nerr == nil && ok {
+			narrative = got
+		}
+		// 🚫 A narrative read that FAILS is not a panel failure. The inferred facts are on the page and
+		// are real; losing the prose about them costs a paragraph, and turning that into an
+		// `unavailable` panel would hide the facts to report the loss of their commentary.
+	}
+
+	switch placement {
+	case herosagent.PlacementDisabled:
+		return patternclassifier.AgentNotAnalysed(string(placement),
+			"Agent analysis is off for this organization, which is the default. Everything on this page "+
+				"was established by reading your source. An operator enables analysis per organization.")
+
+	case herosagent.PlacementCustomer:
+		panel := &patternclassifier.ViewAgent{
+			Placement: string(placement),
+			// 🔴 The ACTION is offered even though the platform cannot run it, because the reader CAN
+			// (task 8.7). "Your organization runs this itself" with no next step reads as a dead end.
+			Action: patternclassifier.ActionRunLocally,
+			// 🔴 NO BACKTICKS. The console renders this string as plain text, so a backtick is a
+			// backtick — the page read "Run `heros analyse --ir <path>`", which looks like markdown
+			// that failed to render and makes the one actionable sentence on the panel look broken.
+			// Found by reading the rendered page, not the string.
+			ActionReason: "Analysis for this organization runs on your own machine under your own " +
+				"provider credential — this platform never holds one. Run heros analyse --ir <path> " +
+				"against the IR that heros discover wrote, and the result arrives here.",
+		}
+		fillAgentState(panel, inferred, narrative,
+			"These inferred facts were produced on your own machine and submitted from there. This "+
+				"platform did not read your source to obtain them.")
+		return panel
+
+	case herosagent.PlacementPlatform:
+		panel := &patternclassifier.ViewAgent{
+			Placement:    string(placement),
+			Action:       patternclassifier.ActionAnalyse,
+			ActionReason: "",
+		}
+		fillAgentState(panel, inferred, narrative,
+			"These inferred facts were produced by this platform, reading your source under the "+
+				"platform's own provider credential.")
+		return panel
+	}
+
+	// A placement outside the closed set. It cannot arrive from the store — `ParsePlacement` refuses one
+	// — so reaching here means something upstream invented a value, and inventing a reading for it is
+	// exactly how a fifth state ships looking like one of the four.
+	return patternclassifier.AgentUnavailable(
+		"this organization carries an analysis setting this build does not recognise")
+}
+
+// fillAgentState resolves the two fields that depend on whether anything was actually inferred.
+//
+// 🔴 The narrative is carried through verbatim or left EMPTY. 🚫 It is never assembled from the
+// composition to fill the space: prose generated from counts would render in the `assessed` treatment —
+// which tells a reader a model wrote it — while actually having been written by a template here.
+func fillAgentState(panel *patternclassifier.ViewAgent, inferred bool,
+	narrative, placementSentence string) {
+
+	if !inferred {
+		// Analysis is ON and this graph carries nothing from it. The STATE is `not_analysed` and the
+		// SENTENCE is not the switched-off one — see SentenceNotAnalysedYet for the defect that
+		// distinction fixes. Found by reading the rendered page for a `platform`-placed organization,
+		// which said analysis was off while it was running.
+		panel.State = patternclassifier.StateNotAnalysed
+		panel.StateSentence = patternclassifier.SentenceNotAnalysedYet
+		return
+	}
+	panel.State = patternclassifier.StateInferred
+	panel.StateSentence = patternclassifier.SentenceForState(patternclassifier.StateInferred)
+	panel.PlacementSentence = placementSentence
+	panel.Narrative = narrative
 }

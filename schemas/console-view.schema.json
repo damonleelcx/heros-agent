@@ -932,6 +932,118 @@
       ],
       "type": "object"
     },
+    "Composition": {
+      "properties": {
+        "edges_inferred": {
+          "type": "integer"
+        },
+        "edges_total": {
+          "type": "integer"
+        },
+        "nodes_covered": {
+          "type": "integer"
+        },
+        "nodes_covered_inferred": {
+          "type": "integer"
+        },
+        "nodes_total": {
+          "type": "integer"
+        },
+        "patterns": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/CompositionPattern"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unlabelled_remainder": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "edges_inferred",
+        "edges_total",
+        "nodes_covered",
+        "nodes_covered_inferred",
+        "nodes_total",
+        "patterns",
+        "unlabelled_remainder"
+      ],
+      "type": "object"
+    },
+    "CompositionPattern": {
+      "properties": {
+        "authors": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "candidate": {
+          "type": "boolean"
+        },
+        "group": {
+          "type": "string"
+        },
+        "nodes": {
+          "type": "integer"
+        },
+        "ordinal": {
+          "type": "integer"
+        },
+        "pattern": {
+          "type": "string"
+        },
+        "provenance": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "regions": {
+          "type": "integer"
+        },
+        "state": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "authors",
+        "candidate",
+        "group",
+        "nodes",
+        "ordinal",
+        "pattern",
+        "provenance",
+        "regions",
+        "state",
+        "title"
+      ],
+      "type": "object"
+    },
     "CoverageCause": {
       "properties": {
         "id": {
@@ -1855,6 +1967,19 @@
     "GraphView": {
       "description": "Response of GET /api/v1/workflows/{workflow_id}/pattern-graph",
       "properties": {
+        "agent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ViewAgent"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "composition": {
+          "$ref": "#/$defs/Composition"
+        },
         "diagnostics": {
           "anyOf": [
             {
@@ -1947,6 +2072,7 @@
         }
       },
       "required": [
+        "composition",
         "edges",
         "ir_version",
         "llm_calls",
@@ -3785,6 +3911,41 @@
         "label",
         "reason",
         "variant_id"
+      ],
+      "type": "object"
+    },
+    "ViewAgent": {
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "action_reason": {
+          "type": "string"
+        },
+        "failure": {
+          "type": "string"
+        },
+        "narrative": {
+          "type": "string"
+        },
+        "placement": {
+          "type": "string"
+        },
+        "placement_sentence": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "state_sentence": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "placement",
+        "state",
+        "state_sentence"
       ],
       "type": "object"
     },

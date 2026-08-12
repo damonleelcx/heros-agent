@@ -218,19 +218,48 @@ Each binds to its existing vocabulary. 🚫 No axis is a text box. All params va
 
 ## 8. Customer console surfaces
 
-- [ ] 8.1 Composition panel above Patterns: patterns present, node coverage, unlabelled remainder,
+- [x] 8.1 Composition panel above Patterns: patterns present, node coverage, unlabelled remainder,
       per-pattern provenance.
-- [ ] 8.2 Narrative rendered as `assessed`, visually distinct; absent (not fabricated) when HEROS is off.
-- [ ] 8.3 Inferred edges visually distinct, reusing the existing model-labelled-region treatment; legend
+      Computed in `patternclassifier` from the assembled view. 🚫 It DISPATCHES NOTHING —
+      `TestTheCompositionIsNotADispatcher` parses the whole tree for a `MetricSetFor`-family call whose
+      argument comes off a Composition, because the failure is a convenient edit somebody makes three
+      packages away next year.
+- [x] 8.2 Narrative rendered as `assessed`, visually distinct; absent (not fabricated) when HEROS is off.
+      The conditional ends `: null` and the fence extracts it by BALANCING BRACES — the regex version
+      passed against a page that had a generated-prose else branch, because a non-greedy match ran on
+      and found a later `) : null}`.
+- [x] 8.3 Inferred edges visually distinct, reusing the existing model-labelled-region treatment; legend
       updated.
-- [ ] 8.4 🔴 Mixed counts report total **and** inferred portion. No undifferentiated number.
-- [ ] 8.5 Four states kept distinct everywhere: `measured`, `inferred`, `not analysed`, `unavailable`.
-- [ ] 8.6 Placement attribution on the graph.
-- [ ] 8.7 Analysis action where available; a stated reason where not.
-- [ ] 8.8 Panel-level degradation on HEROS failure. 🚫 Never a full-screen error.
-- [ ] 8.9 Eval-set surface reports graph nodes no case exercises; says so where attribution is
+      Reuses `--llm`, the console's one "a model was consulted" channel, plus its own dash and a smaller
+      arrowhead — two channels, so the distinction survives greyscale. 🔴 Authorship beats KIND: an
+      inferred control edge is drawn inferred, not control. The edge TABLE carries the column too, so a
+      reader using the drawing's text alternative does not lose it.
+- [x] 8.4 🔴 Mixed counts report total **and** inferred portion. No undifferentiated number.
+      A node covered by both a rule label and an agent label is MEASURED, so the parts sum to the whole.
+- [x] 8.5 Four states kept distinct everywhere: `measured`, `inferred`, `not analysed`, `unavailable`.
+      `not_analysed` is neutral and `unavailable` is warn: one is the default every organization has
+      before an operator turns analysis on, and styling it as a fault would report a deliberate
+      configuration as a problem on every customer's first visit.
+      ⚠️ A DEFECT found by reading the rendered page: `not_analysed` is reached two ways — the agent is
+      off, or the agent is on and this workflow has nothing from it — and one sentence covered both, so
+      a `platform`-placed organization was told "Analysis is off for this organization". Two sentences
+      now, the same shape task 1.3 gave `llm_calls_note`.
+- [x] 8.6 Placement attribution on the graph.
+- [x] 8.7 Analysis action where available; a stated reason where not.
+      A `customer`-placed tenant is still offered an ACTION — the reader can run it even though the
+      platform cannot — and the panel renders no control at all, because an action that fails on press
+      is worse than an absent one with a sentence.
+- [x] 8.8 Panel-level degradation on HEROS failure. 🚫 Never a full-screen error.
+      Every path in `agentPanelFor` returns a panel. A failed NARRATIVE read does not even do that: it
+      costs a paragraph, and downgrading the panel would hide real inferred facts to report the loss of
+      their commentary.
+- [x] 8.9 Eval-set surface reports graph nodes no case exercises; says so where attribution is
       unavailable rather than reporting zero.
-- [ ] 8.10 English only; no improvised styling — every token has an existing anchor.
+      §1 built the list; the missing half was the third state. With no coverage report the list is
+      empty, which is indistinguishable from every node being exercised — the reassuring reading. The
+      absence now joins `Unattributed`, which is the mechanism that already exists for it.
+- [x] 8.10 English only; no improvised styling — every token has an existing anchor.
+      Two new classes (`assessed`, `edge--inferred`) and both resolve through `--llm`.
 
 ## 9. DevOps
 

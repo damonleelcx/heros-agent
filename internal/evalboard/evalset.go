@@ -77,13 +77,22 @@ type EvalSetView struct {
 	// (P30 task 1.13). "1 axis not measurable" tells a reader nothing they can act on; "path coverage
 	// was not measurable" tells them the workflow's inter-node flow has not been observed.
 	VacuousDimensions []string `json:"vacuous_dimensions"`
-	// UncoveredNodes are graph nodes no case exercises, by id (P30 task 8.9 leans on this).
+	// UncoveredNodes are graph nodes no case exercises, by id (P30 task 8.9).
+	//
+	// 🔴 EMPTY IS AMBIGUOUS ON ITS OWN and must never be read as "every node is exercised". When this
+	// deployment holds no coverage report, `Unattributed` carries UnattributedUncoveredNodes and the
+	// console says it cannot tell — see BuildEvalSet.
 	UncoveredNodes []string `json:"uncovered_nodes"`
 	// Unattributed names the per-case columns the platform does not hold on this deployment. It is a
 	// list of column names rather than a boolean so the console can mark the exact cells that are
 	// unknown, instead of showing an em-dash that looks like legitimately absent data.
 	Unattributed []string `json:"unattributed"`
 }
+
+// UnattributedUncoveredNodes is the `Unattributed` member meaning "this deployment cannot say which
+// graph nodes no case exercises". A named constant rather than a literal at two call sites, because the
+// console branches on the exact string and a typo would silently restore the ambiguity it removes.
+const UnattributedUncoveredNodes = "uncovered_nodes"
 
 // EvalCaseView is one case, at the resolution this surface is allowed to show.
 //
@@ -165,6 +174,17 @@ func BuildEvalSet(in EvalSetInput) EvalSetView {
 		// axis was unmeasurable without reading prose.
 		v.VacuousDimensions = append(v.VacuousDimensions, in.Coverage.Vacuous()...)
 		v.UncoveredNodes = append(v.UncoveredNodes, in.Coverage.Node.Uncovered()...)
+	} else {
+		// 🔴 TASK 8.9's SECOND HALF, and the half that was missing. With no coverage report,
+		// `UncoveredNodes` stays empty — and an empty list of unexercised nodes is INDISTINGUISHABLE
+		// from every node being exercised, which is the most reassuring possible reading and is not
+		// something this deployment knows.
+		//
+		// It joins `Unattributed` rather than gaining a boolean of its own, because that list is
+		// already the mechanism for "the platform does not hold this" and the console already renders
+		// its members as unknown rather than as absent. A second mechanism for one idea is how two
+		// surfaces come to disagree about what an empty list means.
+		v.Unattributed = append(v.Unattributed, UnattributedUncoveredNodes)
 	}
 
 	for _, c := range in.Cases {

@@ -144,6 +144,8 @@ export interface GraphView {
   llm_calls: number;
   llm_calls_note: string;
   topology?: ViewTopology | null;
+  composition: Composition;
+  agent?: ViewAgent | null;
 }
 
 export interface ViewNode {
@@ -207,6 +209,40 @@ export interface ViewFrontend {
   analysis_kind: string;
   nodes: number;
   edges: number;
+}
+
+export interface Composition {
+  patterns: CompositionPattern[] | null;
+  nodes_total: number;
+  nodes_covered: number;
+  nodes_covered_inferred: number;
+  unlabelled_remainder: number;
+  edges_total: number;
+  edges_inferred: number;
+}
+
+export interface CompositionPattern {
+  pattern: string;
+  ordinal: number;
+  title: string;
+  group: string;
+  regions: number;
+  nodes: number;
+  provenance: string[] | null;
+  authors: string[] | null;
+  state: string;
+  candidate: boolean;
+}
+
+export interface ViewAgent {
+  state: string;
+  state_sentence: string;
+  placement: string;
+  placement_sentence?: string;
+  narrative?: string;
+  action: string;
+  action_reason?: string;
+  failure?: string;
 }
 
 /** Response of `GET /api/v1/workflows/{workflow_id}/eval-board`. */
