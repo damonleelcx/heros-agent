@@ -56,7 +56,18 @@ type Diff struct {
 // ReInfer runs the agent again against the same key and returns what WOULD change.
 //
 // 🔴 It does not write. `ConfirmReplace` does, and only with a diff a person has seen.
-func (r *Runner) ReInfer(ctx context.Context, in Input, agentConfigHash, placement string) (Diff, Result, error) {
+func (r *Runner) ReInfer(ctx context.Context, in Input, agentConfigHash string, placement Placement) (Diff, Result, error) {
+	// 🔴 The placement gate again, and NOT because it is tidy to repeat it. `ReInfer` calls the model
+	// directly — it deliberately bypasses `Infer`'s cache read, which is the whole point of a
+	// re-inference — so it also bypasses the gate that lives there. A second provider-reaching entry
+	// point is exactly how a "customer runs nothing platform-side" rule ends up true of one function.
+	if err := r.host.MayRun(placement); err != nil {
+		code := CodeDisabled
+		if placement != PlacementDisabled {
+			code = CodeWrongPlacement
+		}
+		return Diff{}, Result{Code: code, ProviderCalls: 0, Cause: err.Error()}, err
+	}
 	stored, ok, err := r.store.Get(ctx, in.WorkflowID, in.SourceRevision, agentConfigHash)
 	if err != nil {
 		return Diff{}, Result{Code: CodeProviderFailed}, err
@@ -158,8 +169,11 @@ func DiffOf(stored Stored, fresh Result) Diff {
 // what makes "replacing only on confirmation" structural rather than a UI convention: a caller cannot
 // replace without having computed what would change, and cannot pass a diff of a different inference.
 func (r *Runner) ConfirmReplace(ctx context.Context, d Diff, in Input, fresh Result,
-	agentConfigHash, placement string) error {
+	agentConfigHash string, placement Placement) error {
 
+	if err := r.host.MayRun(placement); err != nil {
+		return err
+	}
 	stored, ok, err := r.store.Get(ctx, in.WorkflowID, in.SourceRevision, agentConfigHash)
 	if err != nil {
 		return err
@@ -177,8 +191,9 @@ func (r *Runner) ConfirmReplace(ctx context.Context, d Diff, in Input, fresh Res
 		WorkflowID:      in.WorkflowID,
 		SourceRevision:  in.SourceRevision,
 		AgentConfigHash: agentConfigHash,
-		Placement:       placement,
-		Edges:           fresh.Edges, Labels: fresh.Labels, Abstentions: fresh.Abstentions,
+		// The host's own placement, for the same reason Infer stamps it that way.
+		Placement: r.host.PlacementOf(),
+		Edges:     fresh.Edges, Labels: fresh.Labels, Abstentions: fresh.Abstentions,
 		Narrative: fresh.Narrative,
 		TokensIn:  fresh.Usage.InputTokens, TokensOut: fresh.Usage.OutputTokens,
 		CreatedAtMS: r.nowMS(),

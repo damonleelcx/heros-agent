@@ -49,7 +49,7 @@ type scriptedAnalyser struct {
 	err               error
 }
 
-func (s scriptedAnalyser) Infer(_ context.Context, in Input, _, _ string) (Result, error) {
+func (s scriptedAnalyser) Infer(_ context.Context, in Input, _ string, _ Placement) (Result, error) {
 	if s.err != nil {
 		return Result{Code: CodeProviderFailed}, s.err
 	}

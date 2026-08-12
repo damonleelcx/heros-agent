@@ -110,6 +110,7 @@ var flags = map[string]Flag{
 	"proposal":             {Name: "proposal", Type: "string", Default: "", Env: EnvPrefix + "PROPOSAL", Summary: "the platform-issued proposal id a verdict measures (report-verdict). Taken from the flag, never from the verdict file: where the two disagree the command refuses rather than attaching a measurement to the wrong change"},
 	"from":                 {Name: "from", Type: "string", Default: "", Env: EnvPrefix + "FROM", Summary: "path to the verdict your verification run produced, or `-` for stdin (report-verdict). Its case ids and free-text reason are NOT transmitted"},
 	"revision":             {Name: "revision", Type: "string", Default: "", Env: EnvPrefix + "REVISION", Summary: "the commit the verification ran at (report-verdict) — a revision id, never the code at it"},
+	"ir":                   {Name: "ir", Type: "string", Default: "", Env: EnvPrefix + "IR", Summary: "path to the IR `heros discover -out` wrote — the graph whose GAP is analysed, and the one the result is submitted against (analyse)"},
 	"forget":               {Name: "forget", Type: "bool", Default: "false", Env: EnvPrefix + "FORGET", Summary: "DELETE a previously pushed source snapshot from the platform instead of sending one (push-source)"},
 	"manifest":             {Name: "manifest", Type: "path", Default: "", Env: EnvPrefix + "MANIFEST", Summary: "path to a downloaded SHA256SUMS"},
 	"sig":                  {Name: "sig", Type: "path", Default: "", Env: EnvPrefix + "SIG", Summary: "detached signature; defaults to the manifest path with .sig appended"},
@@ -242,6 +243,18 @@ var commands = []Command{
 		SuccessExit:  0,
 		Prerequisite: "a git repository with at least one commit — the snapshot is `git archive` of a revision, never the working directory",
 		Unavailable:  "push-source is a platform command and is unavailable in this build",
+	},
+	{
+		Name: "analyse", Summary: "run the platform's analysis agent HERE, under your own provider credential, and submit what it found", Avail: AvailNetwork,
+		Flags:   []string{"ir", "dry-run"},
+		Example: "heros analyse --ir ir.json --dry-run",
+		// The success line names WHOSE CREDENTIAL was spent, because that is the whole reason this command
+		// exists rather than a switch on the platform. A summary that reported only the edges would leave
+		// a reader unable to tell which of the two placements they were looking at.
+		Success:      "with --dry-run, the exact payload — including every inferred edge and its confidence — and nothing transmitted. Without it, the inferred edges and abstentions submitted, and the graph URL.",
+		SuccessExit:  0,
+		Prerequisite: "an IR from `heros discover -out`, an organization an operator has placed `customer`, and a provider credential in this machine's own environment — the platform never holds one",
+		Unavailable:  "analyse is a platform command and is unavailable in this build",
 	},
 	{
 		Name: "report-verdict", Summary: "report a verification verdict your CI measured for a proposal the platform issued", Avail: AvailNetwork,

@@ -343,6 +343,18 @@ func (s *Server) handleWorkflowIRIngest(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// 🔴 P30 task 7.3 — THE HEROS RESULT RIDES THIS PAYLOAD. No second transport, no second route, no
+	// second allowlist: a customer-placed tenant's inference arrives on the ingest that already carries
+	// its workflow's shape, under the contract that already versions it.
+	//
+	// It runs BEFORE the structure is stored, and a refusal fails the whole request. Storing the
+	// structure and dropping the inference would answer 201 to a submission whose most important half
+	// was discarded — and the customer's console would then show a graph with no inferred edges and no
+	// statement that any had been refused, which is indistinguishable from an agent that found nothing.
+	if !s.acceptAgentFacts(w, r, principal.TenantID, payload) {
+		return
+	}
+
 	// Scope is the AUTHENTICATED tenant, never anything in the body — the payload has no tenant field
 	// at all, which is the strongest form of "this cannot widen scope".
 	if err := s.workflowIR.Put(linkingest.WorkflowIR{

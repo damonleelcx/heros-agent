@@ -22,6 +22,7 @@ import (
 	"github.com/heros-foreal/agentd/internal/entitlement"
 	"github.com/heros-foreal/agentd/internal/executor"
 	"github.com/heros-foreal/agentd/internal/forgedelivery"
+	"github.com/heros-foreal/agentd/internal/herosagent"
 	"github.com/heros-foreal/agentd/internal/hostdiscovery"
 	"github.com/heros-foreal/agentd/internal/hostedboard"
 	"github.com/heros-foreal/agentd/internal/hostedcompile"
@@ -93,6 +94,7 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 	mountedScorecard := false
 	mountedVerdictIngest := false
 	mountedProposalGen := false
+	mountedHerosAgent := false
 	mountedProposals := false
 	mountedForgeDelivery := false
 	mountedProposalCompile := false
@@ -448,6 +450,47 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 		// It is mounted where the durable stores are, and NOT where the studio matrix is: the matrix's
 		// `GET /api/v1/workflows` read a process-local map that only the demo binaries fill.
 		h.MountEnumeration(irStore, linkStore, receiptStore)
+
+		// P30 §7 · the analysis agent's CUSTOMER-FACING half: read the active definition (so a
+		// `customer`-placed tenant can run it on its own machine) and accept what that run produced.
+		//
+		// 🔴 There is no route for the ingest and that is task 7.3: a customer-side result rides the
+		// opt-in structure payload mounted just above. What is mounted here is the READ.
+		//
+		// ⚠️ On the day this deploys it serves exactly one thing to every tenant: `{"placement":
+		// "disabled"}`. Q2 made that the default, `heros_tenant_placement` starts EMPTY and is
+		// deliberately not back-filled, so nothing analyses anything until an operator sets a placement.
+		// That is the intended posture and it is the reason task 10.13's acceptance run has to include
+		// the enablement step explicitly — an acceptance that silently depends on a default stops
+		// proving anything the day the default changes.
+		placementStore, perr := herosagent.NewPGPlacementStore(pg)
+		if perr != nil {
+			return nil, fmt.Errorf("heros agent placement store: %w", perr)
+		}
+		versionStore, verr := herosagent.NewPGVersionStore(pg)
+		if verr != nil {
+			return nil, fmt.Errorf("heros agent version store: %w", verr)
+		}
+		inferenceStore, ierr := herosagent.NewPGInferenceStore(pg)
+		if ierr != nil {
+			return nil, fmt.Errorf("heros agent inference store: %w", ierr)
+		}
+		agentSource, aerr := herosagent.NewPlatformSource(herosagent.PlatformSourceConfig{
+			Placements: placementStore,
+			Versions:   versionStore,
+			Prompts:    registryPrompts{reg},
+			Models:     registryModels{reg},
+			Inferences: inferenceStore,
+			Floor:      herosagent.DefaultConfidenceFloor,
+			Budget:     herosagent.DefaultBudget(),
+			NowMS:      func() int64 { return time.Now().UnixMilli() },
+		})
+		if aerr != nil {
+			return nil, fmt.Errorf("heros agent source: %w", aerr)
+		}
+		h.MountHerosAgent(agentSource)
+		mountedHerosAgent = true
+		served("p30_heros_agent (agent definition read + customer-placed result ingest)")
 		// 🔴 `coverage × your nodes` (P29 §5). The coverage table and the reported structure are both
 		// already here and correct; nothing had ever multiplied them, which is why /app/coverage rendered
 		// a full table that said nothing about the reader.
@@ -680,6 +723,16 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 	if !mountedProposalGen {
 		h.MountProposalGeneration(nil)
 		absent("p55_proposal_generation", proposalGenAbsentReason(pg))
+	}
+	if !mountedHerosAgent {
+		// 🔴 Mounted with a NIL source rather than left unmounted, and the difference is what a customer
+		// sees: an unmounted route answers 404 from the console app, which reads as a bad identifier or a
+		// broken CLI, while a mounted one answers 503 with "this deployment runs no analysis agent" —
+		// which is the true statement and the one that stops somebody debugging their own machine.
+		h.MountHerosAgent(nil)
+		absent("p30_heros_agent", "this deployment declares no platform database (DATABASE_URL is unset), "+
+			"so there is no store for published agent definitions, no per-tenant placement, and nowhere "+
+			"to record a submitted inference")
 	}
 	if !mountedVerdictIngest {
 		h.MountVerdictIngest(nil)

@@ -2,6 +2,7 @@ package herosagent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
@@ -43,40 +44,11 @@ func (m *recordingModel) count() int {
 	return len(m.calls)
 }
 
-// memInferences is an in-memory InferenceStore keyed exactly as the database is.
-type memInferences struct {
-	mu sync.Mutex
-	m  map[string]Stored
-}
-
-func newMemInferences() *memInferences { return &memInferences{m: map[string]Stored{}} }
-
-func key(w, r, c string) string { return w + "\x00" + r + "\x00" + c }
-
-func (s *memInferences) Get(_ context.Context, w, r, c string) (Stored, bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	v, ok := s.m[key(w, r, c)]
-	return v, ok, nil
-}
-
-func (s *memInferences) Replace(_ context.Context, st Stored) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.m[key(st.WorkflowID, st.SourceRevision, st.AgentConfigHash)] = st
-	return nil
-}
-
-func (s *memInferences) Put(_ context.Context, st Stored) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	k := key(st.WorkflowID, st.SourceRevision, st.AgentConfigHash)
-	if _, exists := s.m[k]; exists {
-		return nil // idempotent on the key, as the UNIQUE index is
-	}
-	s.m[k] = st
-	return nil
-}
+// 🔴 The tests use the SHIPPED MemInferenceStore (meminferencestore.go) rather than a fake of their
+// own. There used to be one here, keyed the same way and idempotent the same way, and it was a second
+// implementation of a contract — the shape that lets a store pass every test while differing from the
+// one that runs. The customer-side runner needs a real in-memory store anyway (task 7.1), so the fake
+// had a shipped equivalent and no reason to exist.
 
 func conf(v float64) *float64 { return &v }
 
@@ -94,9 +66,9 @@ func irWith(nodes []string, edges ...[2]string) *discovery.IR {
 	return ir
 }
 
-func testRunner(t *testing.T, m Model) (*Runner, *memInferences) {
+func testRunner(t *testing.T, m Model) (*Runner, *MemInferenceStore) {
 	t.Helper()
-	store := newMemInferences()
+	store := NewMemInferenceStore()
 	ms := int64(1_700_000_000_000)
 	r, err := NewRunner(m, store, 0.7, func() int64 { ms++; return ms })
 	if err != nil {
@@ -565,8 +537,24 @@ func TestTheAgentIsNeverShownAnythingOutsideTheResidue(t *testing.T) {
 				p.From, p.To)
 		}
 	}
-	// The prompt payload carries ids and the gap. Not source, not prompts, not anything outside it.
-	payload := residueForPrompt(sent)
+	// The assembled context carries ids and the gap. Not source, not prompts, not anything outside it.
+	// Read back off the BYTES the assembler produces, because the bytes are what a provider receives —
+	// asserting on an intermediate struct would leave the marshalling itself unexamined.
+	assembled, err := AssembleModelInput(sent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := assembled.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Nodes []string `json:"nodes"`
+		Pairs []Pair   `json:"candidate_pairs"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatal(err)
+	}
 	if len(payload.Nodes) != 3 {
 		t.Errorf("the payload's node vocabulary is %v, want the IR's three ids", payload.Nodes)
 	}

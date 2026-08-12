@@ -118,7 +118,7 @@ type FixtureLoader interface {
 // Analyser runs one inference over a fixture's residue. It is the Runner in production and a fake in
 // tests; the rehearsal does not care which, only that it produces edges.
 type Analyser interface {
-	Infer(ctx context.Context, in Input, agentConfigHash, placement string) (Result, error)
+	Infer(ctx context.Context, in Input, agentConfigHash string, placement Placement) (Result, error)
 }
 
 // Discoverer produces a fixture's rule IR. Injected so the rehearsal can run against real trees
@@ -195,7 +195,10 @@ func (r *Rehearsal) Run(ctx context.Context, agentConfigHash string) (RehearsalR
 			WorkflowID: f.Name, SourceRevision: "fixture", RuleIR: ir,
 			Residue: SelectResidue(ir, report, nil),
 			Budget:  Budget{MaxTokens: 100_000, MaxWall: rehearsalWall},
-		}, agentConfigHash, "platform")
+			// A rehearsal is the PLATFORM rehearsing, whatever any tenant's placement says — it runs
+			// against pinned fixture repositories, not against a customer, so there is no tenant here
+			// whose setting could apply.
+		}, agentConfigHash, PlacementPlatform)
 		if aerr != nil {
 			return rep, fmt.Errorf("herosagent: fixture %q (%s) could not be analysed: %w",
 				f.Name, f.Language, aerr)

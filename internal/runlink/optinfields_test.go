@@ -46,6 +46,12 @@ func closedSets() map[string][]string {
 			"call-site-cannot-carry-it",
 			"no-materializer-for-this-language",
 		},
+		// P30 · who wrote an edge, and why the agent declined a subject. Both defined in THIS package
+		// (EdgeAuthors, AbstentionReasons) rather than imported from internal/herosagent, for the reason
+		// the cause classes above are spelled out: the egress package must not import the thing whose
+		// output it constrains. TestAbstentionCausesMatchTheAgent catches the drift.
+		"edges.author":      EdgeAuthors(),
+		"abstentions.cause": AbstentionCauses(),
 	}
 }
 
@@ -65,6 +71,11 @@ func identifierFields() map[string]bool {
 		"nodes.axis_verdicts.axis": true,
 		"edges.from":               true, "edges.to": true, "edges.kind": true,
 		"node_outcomes.node_id": true,
+		// P30 · `agent_config_hash` is a content hash of a configuration the PLATFORM published, so it
+		// originates here rather than in the customer's repository. `abstentions.subject` is a node id or
+		// an ordered pair of them written `a→b` — the same identifiers `edges.from` and `edges.to`
+		// already carry, and no more expressive than they are.
+		"agent_config_hash": true, "abstentions.subject": true,
 	}
 }
 

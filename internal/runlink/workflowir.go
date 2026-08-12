@@ -97,6 +97,23 @@ var WorkflowIRAllowlist = []AllowlistField{
 	{"nodes.axis_verdicts.axis", "shape", "Which optimization axis a verdict is about — a member of transform.CoverageAxes(), which is closed."},
 	{"nodes.axis_verdicts.status", "shape", "`applies` or `refused`. Two values, and a third is not expressible: a verdict the CLI could not compute is ABSENT, which the platform renders `not-reported`. That asymmetry is the whole safety property — an uncomputable verdict must never arrive looking like a computed one."},
 	{"nodes.axis_verdicts.cause", "shape", "The refusal's stable cause identifier — one of the three transform.CauseClass values, and nothing else. NEVER the refusal's sentence: the console renders its own copy from its own catalogue, so a CLI three versions old cannot put stale prose on a paid surface, and a `Detail` string (which names arguments, symbols and policies lifted out of source) has no field to occupy here."},
+
+	// ── P30 · what a CUSTOMER-PLACED analysis submits (task 7.3) ───────────────────────────────────
+	//
+	// 🔴 These four fields are the whole of "no second transport". A tenant placed `customer` runs the
+	// platform's own agent definition on its own machine under its own credential, and the ANSWER comes
+	// back here — through the ingest that already carries structure, versioned by the same contract,
+	// scoped by the same authenticated tenant. Inventing a `/api/v1/heros-results` beside it would have
+	// been a second egress surface for the same bytes, with its own auth, its own allowlist and its own
+	// chance of disagreeing with this one about what a workflow id means.
+	//
+	// Each is an identifier, a closed-set member or a number, exactly as every row above is.
+	{"agent_config_hash", "identity", "Which agent definition produced the inferred facts below — the `config_hash` of a published version. A content hash of a configuration the PLATFORM published, so the platform can refuse a submission naming a version it has no row for rather than storing facts it can never re-derive. Absent when the submission carries no inferred facts at all."},
+	{"edges.author", "shape", "WHO wrote this edge: `frontend` (a language frontend parsed it out of the source) or `heros` (the analysis agent inferred it). A closed set of two on this boundary. It is the field that keeps `measured` and `inferred` distinct on every surface downstream — without it a hypothesis and a parsed fact arrive indistinguishable, and the console would have to guess which it was drawing."},
+	{"edges.confidence", "shape", "How confident the agent was in an inferred edge, 0–1. A NUMBER, and it is here because the platform applies its own confidence floor at ingest (task 7.4) — a floor cannot be applied to a value that did not cross. Absent on a frontend-authored edge, which is not a hypothesis and has no confidence to report."},
+	{"abstentions.subject", "shape", "What the agent DECLINED to answer about: a node id, or a pair of them written `a→b`. The same identifiers `edges.from` and `edges.to` already carry, and nothing else — an abstention names a subject, never a sentence about it."},
+	{"abstentions.cause", "shape", "Why it declined — one of the five closed AbstentionReason values. Named `cause` and not `reason` for the same purpose `nodes.axis_verdicts.cause` is: on this boundary a `cause` is a stable class identifier and a `reason` would be a sentence, and TestNoOptInFieldIsShapedLikeContent enforces the distinction by name. Not knowing is an OUTPUT (FR3.4), transmitted so a customer-placed tenant's stored inference has the same shape as a platform-placed one."},
+	{"abstentions.confidence", "shape", "The value that fell below the floor, when there was one. A number. Absent when the agent offered no candidate at all, which is a different fact from one it offered at 0.0."},
 }
 
 // TransformReceiptAllowlist is the ratified field set for the THIRD opt-in payload (P29 §2.8) — what a
@@ -141,7 +158,72 @@ type WorkflowIRPayload struct {
 	CoverageVersion string       `json:"coverage_version,omitempty"`
 	Nodes           []WireIRNode `json:"nodes"`
 	Edges           []WireIREdge `json:"edges"`
+
+	// AgentConfigHash names the agent definition that produced the `heros`-authored edges below (P30
+	// task 7.3).
+	//
+	// 🔴 `omitempty`, and the ABSENCE is load-bearing in two directions. A CLI that predates P30 sends
+	// no such key and no inferred edges, and its payload is byte-identical to the one it always sent —
+	// which matters more than usual here, because Q2 makes `disabled` the default placement, so on the
+	// day this ships EVERY existing customer is still sending exactly the pre-P30 shape. And in the
+	// other direction, a payload carrying a `heros`-authored edge and NO hash is refused: a fact the
+	// agent wrote whose definition cannot be named is a fact nothing can ever re-derive or re-run.
+	AgentConfigHash string `json:"agent_config_hash,omitempty"`
+
+	// Abstentions are what the agent declined to answer about. Empty and absent for a submission with
+	// no inferred facts.
+	//
+	// Transmitted so a customer-placed tenant's stored inference has the SAME SHAPE as a platform-placed
+	// one (D6). An asymmetry here would be invisible and would read as an agent that abstains less on
+	// customer hardware — a conclusion about the model drawn from a gap in a wire format.
+	Abstentions []WireAbstention `json:"abstentions,omitempty"`
 }
+
+// WireAbstention is one subject the agent declined. FR3.4: not knowing is an OUTPUT.
+type WireAbstention struct {
+	// Subject is a node id, or an ordered pair written `a→b`. The identifiers already on this wire.
+	Subject string `json:"subject"`
+	// Cause is one of the five closed AbstentionReason values. 🚫 Never prose.
+	//
+	// `cause`, not `reason`, exactly as `WireAxisVerdict.Cause` is: on this boundary a cause is a stable
+	// class identifier and a reason is a sentence. TestNoOptInFieldIsShapedLikeContent refuses the
+	// second name outright, which is how it caught this field being called the wrong thing.
+	Cause string `json:"cause"`
+	// Confidence is the value that fell below the floor, when there was one. A POINTER: a decline with
+	// no candidate at all is a different fact from one at 0.0, and a float cannot say which.
+	Confidence *float64 `json:"confidence,omitempty"`
+}
+
+// AbstentionCauses is the closed set this boundary accepts, spelled here rather than imported.
+//
+// 🔴 `internal/runlink` must not import `internal/herosagent` — the egress package does not import the
+// thing whose output it constrains, exactly as it does not import the transform engine whose cause
+// classes it lists. TestAbstentionReasonsMatchTheAgent in internal/herosagent, which CAN see both,
+// catches a drift between the two.
+func AbstentionCauses() []string {
+	return []string{
+		"below_confidence_floor",
+		"no_candidate_offered",
+		"out_of_vocabulary",
+		"unknown_node",
+		"frontend_already_established",
+	}
+}
+
+// Edge authors. A closed set of two ON THIS BOUNDARY — `detector` and `operator` exist in
+// `discovery.FactAuthor` and neither can author an EDGE a CLI submits, so neither is accepted here.
+// Widening a wire vocabulary to match an internal one "just in case" is how a boundary stops describing
+// what actually crosses it.
+const (
+	// AuthorFrontend — a language frontend established this edge by parsing the source.
+	AuthorFrontend = "frontend"
+	// AuthorHEROS — the analysis agent inferred it. Carries a confidence, and requires an
+	// `agent_config_hash` on the payload.
+	AuthorHEROS = "heros"
+)
+
+// EdgeAuthors returns the closed set, so a consumer's switch can be proved exhaustive.
+func EdgeAuthors() []string { return []string{AuthorFrontend, AuthorHEROS} }
 
 // WireIRNode is one call site's shape. Every field here is on WorkflowIRAllowlist.
 type WireIRNode struct {
@@ -218,6 +300,28 @@ type WireIREdge struct {
 	From string `json:"from"`
 	To   string `json:"to"`
 	Kind string `json:"kind"`
+
+	// Author is WHO wrote this edge — `frontend` or `heros` (P30 D4, task 7.3).
+	//
+	// 🔴 P29's projection deliberately did not send this, with the argument that "an inferred edge's
+	// confidence is a fact about our analysis, not about the customer's workflow, and the graph draws
+	// neither". The graph draws BOTH now, and that is what changed: task 8.3 renders inferred edges
+	// visually distinct and task 8.4 reports the inferred portion of a mixed count, neither of which is
+	// possible from an undifferentiated edge list. The P29 argument was right about the graph P29 drew.
+	//
+	// ABSENT is not `frontend`. It reads as `legacy` — "we were not told who wrote this" — for the same
+	// reason `coverage_version` is never substituted with the platform's own: a pre-P30 CLI made no
+	// authorship claim, and answering on its behalf would make its rows indistinguishable from stamped
+	// ones, which is precisely the distinction the field exists to create.
+	Author string `json:"author,omitempty"`
+
+	// Confidence is how sure the agent was, 0–1. Present only on a `heros`-authored edge.
+	//
+	// The platform applies its OWN floor to this at ingest (task 7.4) rather than trusting that the
+	// submitter applied one. A floor enforced only on the machine that produced the number is not a
+	// floor; it is a convention, and the one participant it does not bind is the one that would benefit
+	// from ignoring it.
+	Confidence float64 `json:"confidence,omitempty"`
 }
 
 // WorkflowIRAllowlistKeys returns the permitted wire keys for the opt-in payload.

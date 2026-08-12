@@ -32,9 +32,16 @@ func TestEveryCodeAndEventComesFromTheCentralEnumeration(t *testing.T) {
 	for _, c := range []Code{
 		CodeOK, CodeDisabled, CodeCredentialUnresolved, CodeModelUnregistered, CodeNoActiveDefinition,
 		CodeRehearsalPending, CodeCapReached, CodeBudgetExceeded, CodeProviderFailed,
-		CodeOutputRejected, CodeNothingToInfer,
+		CodeOutputRejected, CodeNothingToInfer, CodeWrongPlacement,
 	} {
 		reserved[string(c)] = true
+	}
+	// 🔴 Placements are reserved too, and one of them is why. `PlacementDisabled` and `CodeDisabled` are
+	// both the string `disabled` while answering different questions — "where does this tenant analyse"
+	// against "why did this analysis not happen". A literal `"disabled"` typed at a call site is
+	// indistinguishable between them to a reader and to a monitor, so neither may be written as one.
+	for _, p := range Placements() {
+		reserved[string(p)] = true
 	}
 	for _, r := range []AbstentionReason{
 		AbstainBelowFloor, AbstainNoCandidate, AbstainOutOfVocabulary, AbstainUnknownNode,

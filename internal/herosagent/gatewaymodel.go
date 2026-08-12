@@ -52,9 +52,16 @@ func NewGatewayModel(gw *providergateway.Gateway, entry *registry.ModelEntry, pr
 // there is one answer to "is this output acceptable" — and so a second Model implementation (the
 // customer-side runner, §7) cannot validate differently.
 func (m *GatewayModel) Infer(ctx context.Context, in Input) (RawResult, providercall.Usage, error) {
-	body, err := json.Marshal(residueForPrompt(in))
+	// 🔴 THE SHARED ASSEMBLER (task 7.2). The customer-side runner calls the same function, and the
+	// parity test asserts both produce the same bytes — see modelinput.go for why this is a call and not
+	// a struct literal.
+	assembled, err := AssembleModelInput(in)
 	if err != nil {
-		return RawResult{}, providercall.Usage{}, fmt.Errorf("herosagent: encoding the residue: %w", err)
+		return RawResult{}, providercall.Usage{}, err
+	}
+	body, err := assembled.Bytes()
+	if err != nil {
+		return RawResult{}, providercall.Usage{}, err
 	}
 
 	resp, err := m.gw.Complete(ctx, m.entry, providergateway.Request{
@@ -79,50 +86,4 @@ func (m *GatewayModel) Infer(ctx context.Context, in Input) (RawResult, provider
 			"shape: %w", err)
 	}
 	return raw, resp.Usage, nil
-}
-
-// residueForPrompt is what the model is SHOWN. Named and separate so the answer to "what did HEROS see"
-// is one function rather than an argument about a prompt string.
-//
-// 🔴 It carries the residue, the node ids, and the frontend records — and NOT the source, NOT the
-// prompts of the customer's nodes, and NOT anything outside the gap. There is no field here a whole
-// repository could occupy, which is NFR1 restated at the wire.
-type promptResidue struct {
-	WorkflowID string `json:"workflow_id"`
-	// Nodes are ids ONLY. The vocabulary the answer is validated against — and the reason an injected
-	// instruction cannot make the agent name something that does not exist.
-	Nodes []string `json:"nodes"`
-	// Pairs are the pairs no frontend established. The only pairs an edge may be proposed for.
-	Pairs []Pair `json:"candidate_pairs"`
-	// UnlabelledRegions are the subgraphs no rule detector covered.
-	UnlabelledRegions []string `json:"unlabelled_regions"`
-	// Frontends tells the analyser WHY the gap exists — "the python frontend is syntactic and cannot
-	// follow a value across a statement" is the single most useful thing it can be told.
-	Frontends []frontendNote `json:"frontends"`
-}
-
-type frontendNote struct {
-	Language     string `json:"language"`
-	AnalysisKind string `json:"analysis_kind"`
-}
-
-func residueForPrompt(in Input) promptResidue {
-	out := promptResidue{
-		WorkflowID:        in.WorkflowID,
-		Nodes:             []string{},
-		Pairs:             in.Residue.Pairs,
-		UnlabelledRegions: in.Residue.UnlabelledRegions,
-		Frontends:         []frontendNote{},
-	}
-	if in.RuleIR != nil {
-		for _, n := range in.RuleIR.Nodes {
-			out.Nodes = append(out.Nodes, n.NodeID)
-		}
-	}
-	for _, f := range in.Residue.Frontends {
-		out.Frontends = append(out.Frontends, frontendNote{
-			Language: f.Language, AnalysisKind: string(f.AnalysisKind),
-		})
-	}
-	return out
 }

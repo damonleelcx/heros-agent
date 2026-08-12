@@ -122,6 +122,18 @@ var routeExposure = RouteExposure{
 	// It is safe to publish for the same reason `/api/v1/run-links` is: it takes a bearer credential, it
 	// acts only on the tenant that credential names, and it writes nothing a caller can aim elsewhere.
 	"/api/v1/proposal-generations": ExposurePublic,
+	// P30 §7.1 · the active agent definition, READ by a customer-placed tenant's CLI so it can run the
+	// platform's own agent on its own machine.
+	//
+	// 🔴 The only route in this family that travels platform → customer, and the only one where "what
+	// does publishing this expose" is a question about OUR data rather than the customer's. It answers
+	// with a rendered prompt, a model id and a provider NAME — and only to a tenant whose placement is
+	// `customer`, which is the placement whose whole meaning is that the definition executes on their
+	// hardware. A `platform`-placed or `disabled` tenant gets its placement and nothing else.
+	//
+	// 🚫 No key value can occupy any field of the response, and `TestTheDefinitionResponseHasNoFieldForAKey`
+	// asserts that reflectively rather than by reading the struct.
+	"/api/v1/agent-definition": ExposurePublic,
 
 	// The parameterised originals. EXPAND-CONTRACT: they stay registered for one release so a CLI built
 	// before this change still works from INSIDE a cluster, and they are never published — which is the

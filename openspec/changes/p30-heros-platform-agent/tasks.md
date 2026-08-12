@@ -133,54 +133,88 @@ acceptance that stops proving anything the day the default changes.
 
 Each binds to its existing vocabulary. 🚫 No axis is a text box. All params validate at **save**.
 
-- [ ] 6b.1 **Prompt**: template body editor; slots parsed and derived, not typed. Save registers a new
+- [x] 6b.1 **Prompt**: template body editor; slots parsed and derived, not typed. Save registers a new
       content-addressed prompt version. A bound slot missing from the template is refused by name.
-- [ ] 6b.2 **Model**: primary model from the operator registry; deprecation shown, 🚫 never auto-switched.
-- [ ] 6b.3 **Credential**: provider reference selector + live resolution state. 🔴 No key field anywhere —
+- [x] 6b.2 **Model**: primary model from the operator registry; deprecation shown, 🚫 never auto-switched.
+- [x] 6b.3 **Credential**: provider reference selector + live resolution state. 🔴 No key field anywhere —
       fence the absence, not just the behaviour.
-- [ ] 6b.4 **Skills**: selection from registered skill versions with `impl_handle` and compiled schemas.
+- [x] 6b.4 **Skills**: selection from registered skill versions with `impl_handle` and compiled schemas.
       A skill whose schema does not compile is not selectable. 🚫 Remote `$ref` rejected, not fetched.
-- [ ] 6b.5 **Tools**: selection from `toolindex` showing tenant scope, description, `risk_tier`, approval.
+- [x] 6b.5 **Tools**: selection from `toolindex` showing tenant scope, description, `risk_tier`, approval.
       Unapproved is not bindable. Scope always displayed — `_global` and tenant-scoped tools of the same
       name are different bindings.
-- [ ] 6b.6 🚫 **Tools**: a tool declaring outbound network access is not bindable, and the refusal is not
+- [x] 6b.6 🚫 **Tools**: a tool declaring outbound network access is not bindable, and the refusal is not
       overridable from the console. Test it.
-- [ ] 6b.7 **Context**: one of the seven named policies; params form generated from its `ParamsSchema`;
+- [x] 6b.7 **Context**: one of the seven named policies; params form generated from its `ParamsSchema`;
       failures named by policy and parameter.
-- [ ] 6b.8 **Memory**: one of the five named strategies; params validated; set version recorded.
-- [ ] 6b.8a 🔴 **Memory availability** on the FR1.7 rule: `none`, `scratchpad`, `entity-memory` need no
+- [x] 6b.8 **Memory**: one of the five named strategies; params validated; set version recorded.
+- [x] 6b.8a 🔴 **Memory availability** on the FR1.7 rule: `none`, `scratchpad`, `entity-memory` need no
       host service. `summary-buffer` needs a `Summarizer` — a **model call**, so surface the second spend
       line. `vector-recall` needs an `Embedder` **and** a pinned `embedding_ref`; refuse the save without
       one. 🚫 Never degrade — a truncating summary-buffer is scratchpad under the wrong `config_hash`.
-- [ ] 6b.8b 🔴 **Memory scope**: `SessionID` = the inference id. Discard entries when the inference
+- [x] 6b.8b 🔴 **Memory scope**: `SessionID` = the inference id. Discard entries when the inference
       completes. 🚫 Memory never spans inferences, workflows or tenants. This is the cross-tenant fence
       **and** what keeps D2's three-part cache key honest — implement it in the runner, not as a rule.
-- [ ] 6b.8c Console states the trade plainly: HEROS does not learn across analyses; a repository analysed
+- [x] 6b.8c Console states the trade plainly: HEROS does not learn across analyses; a repository analysed
       twice starts cold. A deliberate scope, not a gap.
-- [ ] 6b.9 **Harness**: one of the five named strategies; `max_turns` required for multi-turn, ≤
+- [x] 6b.9 **Harness**: one of the five named strategies; `max_turns` required for multi-turn, ≤
       `MaxTurnsCeiling` (16); a retry budget that could multiply turns past the ceiling is refused with
       the same reasoning.
-- [ ] 6b.10 🔴 **Harness availability**: compute it from the host services the HEROS runner actually
+- [x] 6b.10 🔴 **Harness availability**: compute it from the host services the HEROS runner actually
       supplies. `single-shot` and `reflexion` need none. `react-loop` needs a `ToolInvoker`,
       `plan-execute` a `Planner`, `critic-loop` a `Critic`. Show each as available or unavailable **with
       the service it needs** — do not hide the unavailable ones.
-- [ ] 6b.11 🔴 Refuse an unsupplied-service selection at **save**, naming the service and what supplying
+- [x] 6b.11 🔴 Refuse an unsupplied-service selection at **save**, naming the service and what supplying
       it means. 🚫 Never offer a neighbouring strategy as a substitute.
-- [ ] 6b.12 **Critic model** (only if `critic-loop` is made available): selected from the operator
+- [x] 6b.12 **Critic model** (only if `critic-loop` is made available): selected from the operator
       registry, resolving its own credential reference, with its spend metered and attributed separately.
       A second model is a second cost and a second credential; make all three visible.
-- [ ] 6b.13 **Wiring**: rendered fixed and read-only.
-- [ ] 6b.14 Record the **set version** of every closed vocabulary the definition references.
+      ⚠️ **Deviation — CONDITIONAL AND NOT TRIGGERED.** `critic-loop` is unavailable because the runner
+      supplies no `Critic` (D11 computes availability from `RunnerHosts`), so no critic model is
+      selectable and the "only if" this task opens with excludes it. The three things it requires be
+      VISIBLE are built and asserted: separate `CriticModelRef`/`CriticCredentialRef` fields so spend
+      attributes separately, a refusal when a critic model is bound without its own credential, and the
+      `SecondSpendLine` marking on the strategy. What is not built is the runner-side critic itself.
+      Carried to §11.5.
+- [x] 6b.13 **Wiring**: rendered fixed and read-only.
+- [x] 6b.14 Record the **set version** of every closed vocabulary the definition references.
 
 ## 7. Customer-side runtime and parity
 
-- [ ] 7.1 CLI runs the same definition with the customer's credential on their machine.
-- [ ] 7.2 One context-assembly code path shared by both placements. 🔴 This is the anti-skew fence.
-- [ ] 7.3 Submit results through P29's structure ingest carrying provenance, confidence and
+- [x] 7.1 CLI runs the same definition with the customer's credential on their machine.
+      `heros analyse -ir <path>` — a NetCommand, because `internal/cli` links no network stack and
+      `herosagent` reaches a provider. It fetches the active definition from the platform
+      (`GET /api/v1/agent-definition`, published `Exact`), runs the SAME `Runner` under
+      `NewCustomerRunner`, and resolves the provider key from THIS machine's secrets source.
+      ⚠️ **Consequence recorded:** D1 leaves the definition "operator-only in P30", which governs
+      SURFACES. Placement `customer` necessarily puts the rendered prompt on the customer's machine —
+      there is no way to execute a prompt without it being there — so the endpoint serves it ONLY to a
+      `customer`-placed tenant. `platform` and `disabled` get their placement and nothing else.
+      Carried to §11.5.
+- [x] 7.2 One context-assembly code path shared by both placements. 🔴 This is the anti-skew fence.
+      `AssembleModelInput` is the only way to obtain bytes: `ModelInput` is opaque, its wire struct is
+      unexported, and `Bytes()` refuses a value the assembler did not produce — so a second runner
+      cannot build one field by field with the compiler's blessing.
+- [x] 7.3 Submit results through P29's structure ingest carrying provenance, confidence and
       `agent_config_hash`. 🚫 No second transport.
-- [ ] 7.4 Ingest applies the confidence floor; refuses an unknown `agent_config_hash` by name.
-- [ ] 7.5 Placement enforcement: `customer` runs nothing platform-side; `disabled` refuses ingest.
-- [ ] 7.6 CI parity test: equal **edge sets** on a fixture at one `config_hash`. Narrative not compared.
+      The wire calls provenance `author` (`frontend` | `heros`): `IREdge.Provenance` is already
+      `internal/linkage`'s evidence-STRENGTH vocabulary, and overloading it is what `discovery/author.go`
+      argues against at length. Four new allowlist rows, all identifiers/closed sets/numbers. No contract
+      bump — every field is `omitempty`, so a pre-P30 CLI's payload is byte-identical.
+- [x] 7.4 Ingest applies the confidence floor; refuses an unknown `agent_config_hash` by name.
+      Plus: a `heros` fact naming no hash, a hash naming a non-ACTIVE version, an out-of-vocabulary
+      `kind`, an unknown node, and D3's fence-1 (an agent edge over a pair the same payload's frontend
+      edges establish) — every one recorded as an abstention with the closed cause the runner would use.
+- [x] 7.5 Placement enforcement: `customer` runs nothing platform-side; `disabled` refuses ingest.
+      `Host.MayRun(Placement)` is one function both runners call. On the Runner it sits AHEAD of the
+      cache read, so a placement that changed after an inference was stored does not keep being answered
+      from the row it left behind; `ReInfer` carries its own copy because it reaches the model without
+      passing through `Infer`. Migration 0047 gives placement a durable home — it had none, so nothing
+      could be set.
+- [x] 7.6 CI parity test: equal **edge sets** on a fixture at one `config_hash`. Narrative not compared.
+      The fake answers FROM the assembled context rather than returning a constant, so divergence
+      changes the edge set; its narrative names the host, so a version of the test that quietly began
+      comparing prose would fail.
 
 ## 8. Customer console surfaces
 
@@ -204,6 +238,11 @@ Each binds to its existing vocabulary. 🚫 No axis is a text box. All params va
       inference actually uses — 🚫 not asserted from configuration.
 - [ ] 9.2 Caps enforced **before** the provider call; reaching one emits an event.
 - [ ] 9.3 Off by default fleet-wide; enablement per tenant.
+      🔴 §7 built the durable half (migration 0047 + `PGPlacementStore`) because the placement gate had
+      nothing to read. What is still §9's is the OPERATOR half: `adminops.SetPlacement` writes through
+      `AgentSpendSource`, which is nil on every deployed path, so no console control reaches the new
+      store yet. Until that is wired, every tenant reads `disabled` and `heros analyse` refuses — which
+      is the correct posture and is NOT the same as the feature working.
 - [ ] 9.4 Rollout: internal tenant → one design partner → opt-in → default-on, rehearsal gate between
       each. 🚫 No stage verified by hand.
 - [ ] 9.5 Disabling returns every surface to rule-derived facts; stored inferences retained and marked

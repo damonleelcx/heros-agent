@@ -582,10 +582,12 @@ func (s *AgentService) SetPlacement(ctx context.Context, tenantID, placement, re
 	if err != nil {
 		return err
 	}
-	switch placement {
-	case "platform", "customer", "disabled":
-	default:
-		return fmt.Errorf("adminops: %q is not a placement; it is one of platform, customer, disabled", placement)
+	// 🔴 ONE vocabulary, parsed by the package that owns it. This was a local `switch` over three string
+	// literals — a second copy of a closed set, in a different package from the gate that branches on it,
+	// and the failure mode is the quiet one: `herosagent` gains a fourth placement, this switch keeps
+	// accepting exactly three, and an operator setting the new one is told it is not a placement.
+	if _, err := herosagent.ParsePlacement(placement); err != nil {
+		return err
 	}
 	if strings.TrimSpace(reason) == "" {
 		return errors.New("adminops: setting a placement requires a reason — `platform` makes this " +

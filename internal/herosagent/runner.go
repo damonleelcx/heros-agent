@@ -155,20 +155,26 @@ type Stored struct {
 	WorkflowID      string
 	SourceRevision  string
 	AgentConfigHash string
-	Placement       string
-	Edges           []ProvenancedEdge
-	Labels          []patternclassifier.RegionProposal
-	Abstentions     []Abstention
-	Narrative       string
-	TokensIn        int
-	TokensOut       int
-	CreatedAtMS     int64
+	// Placement is which host produced this — the value the graph attributes (task 8.6). Typed, so a
+	// reader of a stored row cannot find a fourth word here.
+	Placement   Placement
+	Edges       []ProvenancedEdge
+	Labels      []patternclassifier.RegionProposal
+	Abstentions []Abstention
+	Narrative   string
+	TokensIn    int
+	TokensOut   int
+	CreatedAtMS int64
 }
 
 // Runner performs one inference. It is the ONLY thing in the package that reaches a provider.
 type Runner struct {
 	model Model
 	store InferenceStore
+	// host is WHICH RUNNER this is. Set at construction and never afterwards, because the alternative —
+	// a host passed per call — puts the answer to "am I allowed to run this" in the hands of the caller
+	// who wants to run it (task 7.5).
+	host Host
 	// Floor is the confidence below which an output becomes a stored ABSTENTION rather than a fact
 	// (task 4.4). Required: a zero floor accepts everything, and a floor nobody set is a floor that is
 	// zero.
@@ -177,8 +183,26 @@ type Runner struct {
 	newID func(workflowID, sourceRevision, configHash string) string
 }
 
-// NewRunner wires a runner.
+// NewRunner wires the PLATFORM-side runner (task 7.5). See NewCustomerRunner for the other host.
 func NewRunner(m Model, store InferenceStore, floor float64, nowMS func() int64) (*Runner, error) {
+	return newRunner(HostPlatform, m, store, floor, nowMS)
+}
+
+// NewCustomerRunner wires the runner that executes on the CUSTOMER's machine, under the customer's own
+// credential (task 7.1).
+//
+// 🔴 It is the same Runner type with the same validation and the same confidence floor — a second
+// implementation is exactly what D6 says produces two agents that diverge in the first month. What
+// differs is one field, and that field only decides which placements it may run.
+//
+// The floor is passed in rather than defaulted here, because the floor is the PLATFORM's: a customer
+// runner that chose its own would submit facts the platform would have declined, under a `config_hash`
+// that claims otherwise.
+func NewCustomerRunner(m Model, store InferenceStore, floor float64, nowMS func() int64) (*Runner, error) {
+	return newRunner(HostCustomer, m, store, floor, nowMS)
+}
+
+func newRunner(host Host, m Model, store InferenceStore, floor float64, nowMS func() int64) (*Runner, error) {
 	switch {
 	case m == nil:
 		return nil, errors.New("herosagent: a model is required — there is deliberately no default stub, " +
@@ -191,9 +215,14 @@ func NewRunner(m Model, store InferenceStore, floor float64, nowMS func() int64)
 			"accepts everything, and a floor nobody set is a floor that is zero", floor)
 	case nowMS == nil:
 		return nil, errors.New("herosagent: a clock is required")
+	case host != HostPlatform && host != HostCustomer:
+		return nil, fmt.Errorf("herosagent: %q is not a host", host)
 	}
-	return &Runner{model: m, store: store, floor: floor, nowMS: nowMS, newID: defaultInferenceID}, nil
+	return &Runner{model: m, store: store, host: host, floor: floor, nowMS: nowMS, newID: defaultInferenceID}, nil
 }
+
+// Host reports which runner this is, for a caller narrating what it is about to do.
+func (r *Runner) Host() Host { return r.host }
 
 // Infer runs one inference, READ-THROUGH on the three-part key (task 4.7).
 //
@@ -201,7 +230,22 @@ func NewRunner(m Model, store InferenceStore, floor float64, nowMS func() int64)
 // stores; every later request READS. "The same revision always shows you the same graph" is therefore a
 // property of the store, provable by a test that counts provider calls — and it survives changing
 // vendors, which temperature-0-and-a-seed does not.
-func (r *Runner) Infer(ctx context.Context, in Input, agentConfigHash, placement string) (Result, error) {
+func (r *Runner) Infer(ctx context.Context, in Input, agentConfigHash string, placement Placement) (Result, error) {
+	// 🔴 TASK 7.5, AND IT IS FIRST — before the budget, before the cache read, before the residue.
+	//
+	// Ahead of the cache specifically: a `customer`-placed tenant whose answer is already stored
+	// platform-side must still refuse here. Serving that row would be the platform answering for a
+	// tenant it is not allowed to analyse, and it would look exactly like a healthy cache hit — the
+	// stored result is real, it is just an artifact of a placement that has since changed.
+	if err := r.host.MayRun(placement); err != nil {
+		code := CodeDisabled
+		if placement != PlacementDisabled {
+			// Not `disabled`: this host simply is not the one. A surface must not render it as HEROS being
+			// off, because for this tenant it is on — somewhere else.
+			code = CodeWrongPlacement
+		}
+		return Result{Code: code, ProviderCalls: 0, Cause: err.Error()}, err
+	}
 	if err := in.Budget.Validate(); err != nil {
 		return Result{Code: CodeBudgetExceeded, Cause: err.Error()}, err
 	}
@@ -260,8 +304,12 @@ func (r *Runner) Infer(ctx context.Context, in Input, agentConfigHash, placement
 		WorkflowID:      in.WorkflowID,
 		SourceRevision:  in.SourceRevision,
 		AgentConfigHash: agentConfigHash,
-		Placement:       placement,
-		Edges:           res.Edges, Labels: res.Labels, Abstentions: res.Abstentions,
+		// 🔴 The HOST's placement, not the argument. They agree — MayRun has already refused every
+		// combination where they would not — and taking it from the host is what makes that agreement
+		// structural: a stored inference cannot claim a placement its writer could not have run under,
+		// which is what the graph attributes in task 8.6.
+		Placement: r.host.PlacementOf(),
+		Edges:     res.Edges, Labels: res.Labels, Abstentions: res.Abstentions,
 		Narrative: res.Narrative,
 		TokensIn:  usage.InputTokens, TokensOut: usage.OutputTokens,
 		CreatedAtMS: r.nowMS(),

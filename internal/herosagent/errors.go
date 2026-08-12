@@ -1,6 +1,9 @@
 package herosagent
 
-import "errors"
+import (
+	"errors"
+	"time"
+)
 
 // errors.go is the CENTRAL ENUMERATION of every code and event this subsystem emits (task 4.11).
 //
@@ -50,6 +53,13 @@ const (
 	// CodeNothingToInfer: the residue was empty — every node and pair already carries a rule-derived
 	// fact. A healthy answer, and ZERO provider calls.
 	CodeNothingToInfer Code = "nothing_to_infer"
+	// CodeWrongPlacement: this HOST may not run this tenant — it analyses on the other one (task 7.5).
+	//
+	// 🔴 Its own member rather than a reading of `disabled`, and the difference is what a surface tells
+	// somebody. `disabled` means nothing analyses this tenant anywhere; this means something does, on a
+	// machine that is not this one, and the answer will arrive from there. Collapsing them would have a
+	// customer-placed tenant's console report HEROS as off while their own CI was producing inferences.
+	CodeWrongPlacement Code = "wrong_placement"
 )
 
 // AbstentionReason is the closed enum stored on `heros_abstention.reason` (FR3.4).
@@ -72,6 +82,46 @@ const (
 	// AbstainFrontendOwns: the agent proposed an edge a frontend already established. 🔴 D3 fence 1 —
 	// rule-derived topology is IMMUTABLE to HEROS. Recorded, never applied.
 	AbstainFrontendOwns AbstentionReason = "frontend_already_established"
+)
+
+// Placement is where a tenant's inference RUNS (D6). Three named states, and `disabled` is one of them
+// rather than the absence of the other two.
+//
+// 🔴 It lives in this file for the same reason every Code does, and the reason is sharper here: one of
+// its values collides with a Code. `CodeDisabled` and `PlacementDisabled` are both the string
+// `disabled`, they answer different questions — "why did this analysis not happen" versus "where does
+// this tenant's analysis run" — and a literal `"disabled"` typed at a call site is indistinguishable
+// between them. TestEveryCodeAndEventComesFromTheCentralEnumeration reserves these values too, so the
+// collision is caught by a parser rather than by whoever reads the diff.
+type Placement string
+
+const (
+	// PlacementPlatform: the platform runs the inference, spending the PLATFORM's credential. It reads
+	// the tenant's source, which is why Q2 made it something somebody must choose.
+	PlacementPlatform Placement = "platform"
+	// PlacementCustomer: the tenant runs it on their own machine with their own credential, and submits
+	// the result. The supported answer for a customer whose source may not leave their network — the
+	// platform is never offered a way to hold their key on their behalf.
+	PlacementCustomer Placement = "customer"
+	// PlacementDisabled: no inference runs anywhere for this tenant. THE DEFAULT (Q2), and a real state
+	// rather than the absence of a setting — the console distinguishes it from "nobody has decided yet",
+	// because "we turned it off" and "nobody looked" are different facts about a fleet.
+	PlacementDisabled Placement = "disabled"
+)
+
+// Host is WHICH RUNNER is executing — not where the tenant is placed, which is the setting the host is
+// checked against.
+//
+// Two words for what reads like one thing, and the distinction is the whole of task 7.5: the platform
+// runner asking "may I run this tenant" and the customer runner asking the same question must get
+// DIFFERENT answers for the same placement, and a single value cannot express that.
+type Host string
+
+const (
+	// HostPlatform is the runner inside the platform.
+	HostPlatform Host = "host_platform"
+	// HostCustomer is the runner on the customer's machine, reached through the CLI.
+	HostCustomer Host = "host_customer"
 )
 
 // Event is the closed set of things worth emitting to telemetry.
@@ -112,4 +162,40 @@ var (
 	ErrNoChange = errors.New("herosagent: this edit resolves to the active definition — no version was created")
 	// ErrInvalidDefinition covers the structural refusals.
 	ErrInvalidDefinition = errors.New("herosagent: invalid definition")
+	// ErrWrongPlacement refuses a run on the host the tenant's placement does not name (task 7.5).
+	ErrWrongPlacement = errors.New("herosagent: this tenant's placement does not run inference on this host")
+	// ErrUnknownAgentVersion refuses an ingested result naming a `config_hash` no version row carries
+	// (task 7.4). Matchable because "your CLI is ahead of this deployment" and "your submission is
+	// malformed" send a developer to different places.
+	ErrUnknownAgentVersion = errors.New("herosagent: no published agent version carries that config_hash")
+	// ErrUnattributedInference refuses a submitted fact the agent authored that names no agent version.
+	// A `heros` fact whose definition cannot be named is a fact nothing can ever be re-derived from.
+	ErrUnattributedInference = errors.New("herosagent: an agent-authored fact must name the agent version that produced it")
+	// ErrAssemblerBypassed reports a ModelInput that was not produced by AssembleModelInput (task 7.2).
+	ErrAssemblerBypassed = errors.New("herosagent: this model input did not come from the shared assembler")
 )
+
+// DefaultConfidenceFloor is the confidence below which an output becomes an abstention rather than a
+// fact, for a deployment that has not chosen its own.
+//
+// 🔴 It is a DEFAULT and not a measurement, stated here the way `docs/heros/ablation-protocol.md` §2
+// states the rehearsal floors: no definition has been activated, so no model has been measured, and a
+// number presented as calibrated when nothing was calibrated is worse than one presented as a starting
+// point. 0.7 is chosen to be clearly above "the model guessed" and clearly below a threshold that would
+// make the agent abstain on everything — the first real measurement replaces it, and Q4's protocol is
+// how.
+//
+// It is the PLATFORM's, and the customer-side runner is handed it rather than choosing one: a runner
+// that picked its own floor would submit facts the platform would have declined, under a `config_hash`
+// claiming otherwise.
+const DefaultConfidenceFloor = 0.7
+
+// DefaultBudget is the per-run ceiling a deployment runs the agent under.
+//
+// Both halves are real limits rather than round numbers meaning "plenty": 60s is longer than any
+// single provider call should take and short enough that a hung analysis fails a CI step instead of
+// occupying it, and 200k tokens is roughly the largest residue a repository-sized graph produces before
+// the pair count itself becomes the problem — which is the case D3 exists to bound.
+func DefaultBudget() Budget {
+	return Budget{MaxTokens: 200_000, MaxWall: 60 * time.Second}
+}
