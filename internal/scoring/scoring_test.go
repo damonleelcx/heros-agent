@@ -3,6 +3,7 @@ package scoring
 import (
 	"math"
 	"math/rand"
+	"sort"
 	"testing"
 	"time"
 
@@ -392,41 +393,208 @@ func TestProfileSwitchReRanksWithZeroNewRuns(t *testing.T) {
 		quality.Ranked[0].VariantID, cost.Ranked[0].VariantID)
 }
 
-// Task 5.4 / 8.3 — a re-rank of 500 variants completes in under 200 ms.
-func TestReRankOf500VariantsIsUnder200ms(t *testing.T) {
+// ─────────────────────────────────────────────────────────────────────────────
+// Task 5.4 / 8.3 — the re-rank stays fast enough to be interactive
+//
+// # Why this fence measures a RATIO and not a stopwatch
+//
+// It used to assert `best-of-5 < 200ms`, justified in its own comment by "the isolated re-rank runs
+// in ~50 ms, so a genuine >4x regression still blows the 200 ms budget even at its best sample".
+// That argument is only sound on the machine the 50 ms was measured on, and CI is not that machine.
+// On 2026-08-12 the identical code — `internal/scoring/` had not changed one byte since v0.21.0 —
+// measured 46-51 ms on a developer laptop and 217 ms and 236 ms on GitHub's shared ubuntu runners.
+// The runner is 4-5x slower, so the environment consumed the whole 4x margin the teeth depended on,
+// and the fence failed 2 of 3 consecutive main-branch runs. A fence that says "someone made Rank
+// quadratic" in the same words it says "the runner was busy" has stopped carrying information.
+//
+// The fix is to stop measuring in seconds and start measuring in units of THIS machine, taken on
+// THIS run. referenceRerank below does the same quantity of work as one healthy re-rank, built out
+// of nothing but slices and a sort, and the real re-rank must stay within maxRerankRatio of it. A
+// slow machine slows both sides and the ratio does not move; a real regression moves the numerator
+// only. That is the property a test running on hardware it does not choose can honestly own.
+//
+// # What this deliberately does NOT assert
+//
+// The absolute 200 ms product budget. A shared runner cannot tell you whether a developer machine
+// meets it, so asserting it there is how the flake got in. The absolute figure is LOGGED on every
+// run for a human to read, and never asserted. It is a product claim about a class of machine, not
+// a property of the code, and the two want different instruments.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// The ruler's dimensions. They are LITERALS rather than values read off the cache, because a ruler
+// that resizes itself to whatever the code under test now does is not a ruler — if Rank started
+// weighting zero metrics, a derived reference would shrink with it and the ratio would stay 1.
+// TestReRankStaysWithinItsReferenceWorkload checks the cache still has this shape and fails loudly
+// if not, so a real change to the workload forces a deliberate re-sizing of the ruler here.
+const (
+	refVariants   = 500  // variants on the board
+	refMetrics    = 6    // len(DefaultSpecs())
+	refWeighted   = 4    // of those, the ones a profile gives a non-zero weight (2 are informational)
+	refReplicates = 2000 // evalstats.DefaultConfig().Bootstrap
+)
+
+// maxRerankRatio is how many reference workloads one re-rank may cost.
+//
+// The reference does the same per-variant work as `row` does — accumulate the weighted metric
+// replicates, subtract a per-replicate penalty and a constant, then sort for the percentile
+// interval — so a healthy re-rank sits near 1.
+//
+// Measured on healthy code, 2026-08-12, by running this fence on both machine classes:
+//
+//	developer laptop (arm64, 18 cores) : re-rank 46ms / reference 36ms = 1.26x  (spread 0.03 over 3 runs)
+//	GitHub shared ubuntu runner        : re-rank 145ms / reference 91ms = 1.60x
+//
+// That pair IS the argument for this design. The absolute time moves 3.1x between the two machines —
+// the swing that made the old wall-clock budget fire on a docs-only commit — while the ratio moves
+// 1.26 to 1.60. The ruler is not perfectly invariant (Rank does map lookups and allocation the
+// slice-only reference does not, and those degrade faster on a shared runner), so the drift is real
+// and is why the budget is not set just above the laptop's number.
+//
+// 4.0 keeps the teeth the original comment claimed while clearing the worst observed baseline by
+// 2.5x: a regression has to more than double Rank's cost on CI before this fires. Tightening below
+// ~3.0 wants more than the single CI sample above, because one measurement cannot show how far the
+// ratio itself moves run to run — and guessing at that is what put the flake here in the first place.
+const maxRerankRatio = 4.0
+
+// referenceSink defeats dead-store elimination: without a consumed result the compiler is free to
+// delete the reference workload entirely, which would make the ruler measure nothing and the ratio
+// unbounded — a fence that goes red for the one reason it must not.
+var referenceSink float64
+
+// referenceData builds the replicate slices the reference workload chews through. Built once,
+// OUTSIDE the timed region, exactly as the real cache is built outside it.
+func referenceData(variants, metrics, replicates int) [][][]float64 {
+	rng := rand.New(rand.NewSource(0x5EED))
+	out := make([][][]float64, variants)
+	for v := range out {
+		out[v] = make([][]float64, metrics)
+		for m := range out[v] {
+			s := make([]float64, replicates)
+			for i := range s {
+				s[i] = rng.Float64()
+			}
+			out[v][m] = s
+		}
+	}
+	return out
+}
+
+// referenceRerank is a synthetic workload shaped like one re-rank of the same board.
+//
+// It is implemented HERE, in the test, out of the standard library only, and it must stay that way:
+// it is the ruler, and a ruler that calls into the thing it measures cannot detect that thing
+// getting slower.
+func referenceRerank(data [][][]float64) float64 {
+	if len(data) == 0 || len(data[0]) == 0 {
+		return 0
+	}
+	n := len(data[0][0])
+	buf := make([]float64, n)
+	sorted := make([]float64, n)
+	var acc float64
+	for _, variant := range data {
+		for i := range buf {
+			buf[i] = 0
+		}
+		// The weighted composite: refWeighted metrics accumulated per replicate.
+		for m := 0; m < refWeighted && m < len(variant); m++ {
+			w := 0.1 + float64(m)*0.2
+			reps := variant[m]
+			for i := 0; i < n && i < len(reps); i++ {
+				buf[i] += w * reps[i]
+			}
+		}
+		// One MEASURED penalty, subtracted per replicate from its own metric's replicate.
+		if pr := variant[len(variant)-1]; len(pr) > 0 {
+			for i := 0; i < n && i < len(pr); i++ {
+				buf[i] -= 0.05 * pr[i]
+			}
+		}
+		// One CONSTANT penalty, subtracted from every replicate.
+		for i := range buf {
+			buf[i] -= 0.01
+		}
+		// The percentile interval: a sort of the composite replicates.
+		copy(sorted, buf)
+		sort.Float64s(sorted)
+		acc += sorted[n/40] + sorted[n-1-n/40]
+	}
+	return acc
+}
+
+// bestOf runs fn iterations times and returns its fastest wall-clock sample. The minimum is used
+// rather than the mean because a single sample conflates how fast the work IS with whatever
+// scheduler stall the machine was under; the fastest sample is the closest available estimate of
+// the former, and both sides of the ratio are estimated the same way.
+func bestOf(iterations int, fn func()) time.Duration {
+	var best time.Duration
+	for i := 0; i < iterations; i++ {
+		start := time.Now()
+		fn()
+		if elapsed := time.Since(start); i == 0 || elapsed < best {
+			best = elapsed
+		}
+	}
+	return best
+}
+
+func TestReRankStaysWithinItsReferenceWorkload(t *testing.T) {
 	b := Board{EvalSetHash: repeatHex("evalset"), Specs: DefaultSpecs()}
-	for i := 0; i < 500; i++ {
+	for i := 0; i < refVariants; i++ {
 		q := 0.50 + float64(i%40)/100
 		b.Variants = append(b.Variants, variant("v-"+itoa(i), q, 0.005+float64(i%10)/1000, 400+float64(i%20)*30, 0.95, []string{"anthropic"}, int64(1000+i)))
 	}
 	c := buildCache(t, b)
 
-	// The cache build is the expensive step and happens once; the profile switch is what must be fast.
-	// We measure the BEST of several re-ranks rather than a single wall-clock sample. The budget describes
-	// how fast the re-rank *is*, and a one-shot timing conflates that with whatever scheduler stall the
-	// machine happened to be under when the suite ran (this test sits near the end of a long run). Taking
-	// the minimum cancels transient contention while keeping the fence's teeth: the isolated re-rank runs
-	// in ~50 ms, so a genuine >4x regression still blows the 200 ms budget even at its best sample.
-	const iterations = 5
-	var best time.Duration
-	var lb Leaderboard
-	for i := 0; i < iterations; i++ {
-		start := time.Now()
-		lb = c.Rank(CostOptimized(), GateSet{Name: "prod", MinQuality: f(0.55)})
-		if elapsed := time.Since(start); i == 0 || elapsed < best {
-			best = elapsed
+	// The ruler is sized by hand, so a change to the real workload's shape must not slip past it.
+	if len(c.Specs) != refMetrics || c.replicateCount != refReplicates || len(c.Order) != refVariants {
+		t.Fatalf("the reference workload is sized for %d variants x %d metrics x %d replicates, but the cache "+
+			"now holds %d x %d x %d — re-size the ruler deliberately, do not let it drift",
+			refVariants, refMetrics, refReplicates, len(c.Order), len(c.Specs), c.replicateCount)
+	}
+	weighted := 0
+	for _, spec := range c.Specs {
+		if weightFor(CostOptimized(), spec.Role) != 0 {
+			weighted++
 		}
 	}
+	if weighted != refWeighted {
+		t.Fatalf("the reference workload accumulates %d weighted metrics, but the profile now weights %d — "+
+			"re-size the ruler deliberately", refWeighted, weighted)
+	}
 
-	t.Logf("re-rank of %d variants took %v (best of %d; %d ranked, %d disqualified, %d runs enqueued)",
-		len(b.Variants), best, iterations, len(lb.Ranked), len(lb.Disqualified), lb.RunsEnqueued)
-	if best > 200*time.Millisecond {
-		t.Fatalf("re-rank took %v (best of %d), over the 200ms budget", best, iterations)
+	// The cache build is the expensive step and happens once; the profile switch is what must be fast.
+	const iterations = 5
+	var lb Leaderboard
+	rerank := bestOf(iterations, func() {
+		lb = c.Rank(CostOptimized(), GateSet{Name: "prod", MinQuality: f(0.55)})
+	})
+
+	// The ruler, measured on the same machine, in the same process, moments later.
+	refData := referenceData(refVariants, refMetrics, refReplicates)
+	reference := bestOf(iterations, func() {
+		referenceSink = referenceRerank(refData)
+	})
+	if reference <= 0 {
+		t.Fatalf("the reference workload measured %v — the ruler is broken, so the ratio below would be "+
+			"meaningless", reference)
+	}
+
+	ratio := float64(rerank) / float64(reference)
+	t.Logf("re-rank of %d variants: %v (best of %d) | reference workload: %v | ratio %.2fx of %.2fx allowed "+
+		"| %d ranked, %d disqualified, %d runs enqueued",
+		len(b.Variants), rerank, iterations, reference, ratio, maxRerankRatio,
+		len(lb.Ranked), len(lb.Disqualified), lb.RunsEnqueued)
+
+	if ratio > maxRerankRatio {
+		t.Fatalf("re-rank cost %.2fx the reference workload (%v vs %v), over the %.2fx budget — this is a "+
+			"regression in Rank, not a slow machine: a slow machine slows the reference by the same factor",
+			ratio, rerank, reference, maxRerankRatio)
 	}
 	if lb.RunsEnqueued != 0 {
 		t.Fatalf("re-rank must enqueue zero runs, got %d", lb.RunsEnqueued)
 	}
-	if len(lb.Ranked)+len(lb.Disqualified) != 500 {
+	if len(lb.Ranked)+len(lb.Disqualified) != refVariants {
 		t.Fatalf("every variant must appear exactly once, got %d + %d", len(lb.Ranked), len(lb.Disqualified))
 	}
 }
