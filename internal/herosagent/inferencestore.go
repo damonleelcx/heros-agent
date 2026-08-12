@@ -1,0 +1,229 @@
+package herosagent
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+)
+
+// inferencestore.go is the durable InferenceStore over migration 0046.
+
+// PGInferenceStore is the pinned-inference store.
+type PGInferenceStore struct{ db *sql.DB }
+
+// NewPGInferenceStore returns a store over an open Postgres handle.
+func NewPGInferenceStore(db *sql.DB) (*PGInferenceStore, error) {
+	if db == nil {
+		return nil, errors.New("herosagent: nil database")
+	}
+	return &PGInferenceStore{db: db}, nil
+}
+
+func (s *PGInferenceStore) ctx(parent context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(parent, 15*time.Second)
+}
+
+// Get reads a stored inference by its three-part key. ok=false is NOT INFERRED — never an error.
+func (s *PGInferenceStore) Get(parent context.Context, workflowID, sourceRevision, hash string) (Stored, bool, error) {
+	ctx, cancel := s.ctx(parent)
+	defer cancel()
+
+	var st Stored
+	var edges, labels string
+	var narrative sql.NullString
+	err := s.db.QueryRowContext(ctx,
+		`SELECT inference_id, tenant_id, workflow_id, source_revision, agent_config_hash, placement,
+		        edges_json, labels_json, narrative, tokens_in, tokens_out, created_at_ms
+		   FROM heros_inference
+		  WHERE workflow_id = $1 AND source_revision = $2 AND agent_config_hash = $3`,
+		workflowID, sourceRevision, hash).
+		Scan(&st.InferenceID, &st.TenantID, &st.WorkflowID, &st.SourceRevision, &st.AgentConfigHash,
+			&st.Placement, &edges, &labels, &narrative, &st.TokensIn, &st.TokensOut, &st.CreatedAtMS)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return Stored{}, false, nil
+	case err != nil:
+		return Stored{}, false, fmt.Errorf("herosagent: reading the inference for %s@%s: %w",
+			workflowID, sourceRevision, err)
+	}
+	if err := json.Unmarshal([]byte(edges), &st.Edges); err != nil {
+		return Stored{}, false, fmt.Errorf("herosagent: decoding edges for %s: %w", st.InferenceID, err)
+	}
+	if err := json.Unmarshal([]byte(labels), &st.Labels); err != nil {
+		return Stored{}, false, fmt.Errorf("herosagent: decoding labels for %s: %w", st.InferenceID, err)
+	}
+	st.Narrative = narrative.String
+
+	abst, err := s.abstentions(ctx, st.InferenceID)
+	if err != nil {
+		return Stored{}, false, err
+	}
+	st.Abstentions = abst
+	return st, true, nil
+}
+
+func (s *PGInferenceStore) abstentions(ctx context.Context, inferenceID string) ([]Abstention, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT subject, reason, confidence FROM heros_abstention WHERE inference_id = $1
+		  ORDER BY subject, reason`, inferenceID)
+	if err != nil {
+		return nil, fmt.Errorf("herosagent: reading abstentions for %s: %w", inferenceID, err)
+	}
+	defer rows.Close()
+	out := []Abstention{}
+	for rows.Next() {
+		var a Abstention
+		var reason string
+		var conf sql.NullFloat64
+		if err := rows.Scan(&a.Subject, &reason, &conf); err != nil {
+			return nil, err
+		}
+		a.Reason = AbstentionReason(reason)
+		if conf.Valid {
+			// A pointer, so "declined at 0.0" stays distinguishable from "declined with no candidate".
+			v := conf.Float64
+			a.Confidence = &v
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// Put records an inference IDEMPOTENTLY on the three-part key.
+//
+// 🔴 `ON CONFLICT DO NOTHING` on the unique index, and the conflict is NOT an error to the caller
+// (task 2.5's writer path). Two runners that raced produced answers for one key; the row that won is
+// the answer, and failing the loser would turn a benign race into an analysis failure a customer sees.
+//
+// 🚫 It never OVERWRITES. Replacing a pinned result is a separate, confirmed operation — see Replace.
+func (s *PGInferenceStore) Put(parent context.Context, st Stored) error {
+	ctx, cancel := s.ctx(parent)
+	defer cancel()
+
+	edges, labels, err := encodeFacts(st)
+	if err != nil {
+		return err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("herosagent: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	res, err := tx.ExecContext(ctx,
+		`INSERT INTO heros_inference
+		   (inference_id, workflow_id, source_revision, agent_config_hash, tenant_id, placement,
+		    edges_json, labels_json, narrative, tokens_in, tokens_out, created_at_ms)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+		 ON CONFLICT ON CONSTRAINT uq_heros_inference_key DO NOTHING`,
+		st.InferenceID, st.WorkflowID, st.SourceRevision, st.AgentConfigHash, st.TenantID,
+		st.Placement, edges, labels, nullString(st.Narrative),
+		st.TokensIn, st.TokensOut, st.CreatedAtMS)
+	if err != nil {
+		return fmt.Errorf("herosagent: recording inference %s: %w", st.InferenceID, err)
+	}
+	// Zero rows means the other runner won. Its abstentions belong to ITS inference id, so writing ours
+	// against a row that does not exist would violate the foreign key — and would attribute our
+	// refusals to somebody else's run.
+	if n, _ := res.RowsAffected(); n == 0 {
+		return tx.Commit()
+	}
+	if err := writeAbstentions(ctx, tx, st); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// Replace overwrites a pinned inference after a CONFIRMED re-inference (task 4.8).
+func (s *PGInferenceStore) Replace(parent context.Context, st Stored) error {
+	ctx, cancel := s.ctx(parent)
+	defer cancel()
+
+	edges, labels, err := encodeFacts(st)
+	if err != nil {
+		return err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("herosagent: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE heros_inference
+		    SET edges_json = $1, labels_json = $2, narrative = $3,
+		        tokens_in = $4, tokens_out = $5, created_at_ms = $6
+		  WHERE inference_id = $7`,
+		edges, labels, nullString(st.Narrative), st.TokensIn, st.TokensOut,
+		st.CreatedAtMS, st.InferenceID); err != nil {
+		return fmt.Errorf("herosagent: replacing inference %s: %w", st.InferenceID, err)
+	}
+	// Abstentions are REPLACED, not merged: a re-inference that declined different things must not
+	// accumulate the previous run's refusals, which would report a decline nobody made this time.
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM heros_abstention WHERE inference_id = $1`, st.InferenceID); err != nil {
+		return fmt.Errorf("herosagent: clearing abstentions for %s: %w", st.InferenceID, err)
+	}
+	if err := writeAbstentions(ctx, tx, st); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func encodeFacts(st Stored) (string, string, error) {
+	edges, err := json.Marshal(nonNilEdges(st.Edges))
+	if err != nil {
+		return "", "", fmt.Errorf("herosagent: encoding edges: %w", err)
+	}
+	labels, err := json.Marshal(st.Labels)
+	if err != nil {
+		return "", "", fmt.Errorf("herosagent: encoding labels: %w", err)
+	}
+	return string(edges), string(labels), nil
+}
+
+func nonNilEdges(e []ProvenancedEdge) []ProvenancedEdge {
+	if e == nil {
+		return []ProvenancedEdge{}
+	}
+	return e
+}
+
+func writeAbstentions(ctx context.Context, tx *sql.Tx, st Stored) error {
+	for _, a := range st.Abstentions {
+		var conf any
+		if a.Confidence != nil {
+			conf = *a.Confidence
+		}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO heros_abstention (inference_id, subject, reason, confidence)
+			 VALUES ($1,$2,$3,$4)
+			 ON CONFLICT (inference_id, subject, reason) DO NOTHING`,
+			st.InferenceID, a.Subject, string(a.Reason), conf); err != nil {
+			return fmt.Errorf("herosagent: recording abstention %s/%s: %w", a.Subject, a.Reason, err)
+		}
+	}
+	return nil
+}
+
+// ByAuthor reports how many stored inferences a tenant has, and their token totals — the read the
+// spend meter and the `/agent` overview both need.
+func (s *PGInferenceStore) CountFor(parent context.Context, tenantID string) (int, error) {
+	ctx, cancel := s.ctx(parent)
+	defer cancel()
+	var n int
+	q := `SELECT count(*) FROM heros_inference`
+	args := []any{}
+	if strings.TrimSpace(tenantID) != "" {
+		q += ` WHERE tenant_id = $1`
+		args = append(args, tenantID)
+	}
+	if err := s.db.QueryRowContext(ctx, q, args...).Scan(&n); err != nil {
+		return 0, fmt.Errorf("herosagent: counting inferences: %w", err)
+	}
+	return n, nil
+}

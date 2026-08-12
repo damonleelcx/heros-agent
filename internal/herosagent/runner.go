@@ -1,0 +1,388 @@
+package herosagent
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"sort"
+	"time"
+
+	"github.com/heros-foreal/agentd/internal/discovery"
+	"github.com/heros-foreal/agentd/internal/patternclassifier"
+	"github.com/heros-foreal/agentd/internal/providercall"
+)
+
+// runner.go performs one inference (tasks 4.1–4.10).
+
+// Input is the residue and nothing else.
+//
+// 🔴 A CALLER CANNOT ASK FOR A WHOLE-REPOSITORY PASS: there is no field for it. NFR1 stays true by
+// construction rather than by review — see residue.go.
+type Input struct {
+	TenantID       string
+	WorkflowID     string
+	SourceRevision string
+	// RuleIR is what the frontends already established. It is the VOCABULARY the output is validated
+	// against (node ids must already be in it) and the SOURCE of D3's first fence.
+	RuleIR *discovery.IR
+	// Residue is the gap. Nothing outside it is offered to the agent.
+	Residue Residue
+	// Budget bounds this run. Exceeding it aborts, records the abort, and writes NO partial IR.
+	Budget Budget
+}
+
+// Budget is the per-run ceiling (task 4.9).
+//
+// 🔴 Both halves are required, and a zero is not "unlimited": Validate refuses one. An unbounded run is
+// how a repository-shaped cost arrives on a bill nobody approved, and "unlimited" spelled as the zero
+// value is the version of that which nobody chose.
+type Budget struct {
+	MaxTokens int
+	MaxWall   time.Duration
+}
+
+// Validate refuses an unbounded budget.
+func (b Budget) Validate() error {
+	switch {
+	case b.MaxTokens <= 0:
+		return fmt.Errorf("%w: a run needs a token ceiling — a zero here would read as `unlimited`, "+
+			"which is a cost nobody chose", ErrInvalidDefinition)
+	case b.MaxWall <= 0:
+		return fmt.Errorf("%w: a run needs a wall-clock ceiling", ErrInvalidDefinition)
+	}
+	return nil
+}
+
+// ProvenancedEdge is an edge HEROS wrote, carrying everything D4 requires of a `heros` fact.
+type ProvenancedEdge struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+	// Kind is validated against the closed set {data, control}. 🚫 Rejected, never repaired.
+	Kind       string  `json:"kind"`
+	Confidence float64 `json:"confidence"`
+}
+
+// Abstention is a subject the agent declined. FR3.4: not knowing is an OUTPUT.
+type Abstention struct {
+	Subject string           `json:"subject"`
+	Reason  AbstentionReason `json:"reason"`
+	// Confidence is the value that fell below the floor, when there was one. A pointer because a
+	// decline with NO candidate is a different thing from one at 0.0, and a float cannot say which.
+	Confidence *float64 `json:"confidence,omitempty"`
+}
+
+// Result is one inference: what was produced, and what was declined. BOTH are stored.
+type Result struct {
+	InferenceID string
+	Code        Code
+	Edges       []ProvenancedEdge
+	// Labels are patternclassifier.RegionProposal — the EXISTING type (task 4.6), so HEROS's proposals
+	// enter through the same partitioner and the same precedence rule as every detector's.
+	// 🚫 There is no second arbitration path, which is what keeps "an LLM label never overrides a rule
+	// label" true by construction rather than by a second implementation of the same rule.
+	Labels      []patternclassifier.RegionProposal
+	Abstentions []Abstention
+	// Narrative is ASSESSED, never measured. Rendered visually distinct, and absent rather than
+	// fabricated when the agent produced none.
+	Narrative string
+	Usage     providercall.Usage
+	// ProviderCalls is the COUNT, surfaced so a test can assert zero rather than "no error" (task 10.3).
+	ProviderCalls int
+	// Cause carries a failure's reason. 🚫 A failed inference is `analysis failed` WITH THIS — never an
+	// empty graph, which reads as a finding about the customer's workflow (task 4.10).
+	Cause string
+}
+
+// RawEdge and RawLabel are what the MODEL returns, BEFORE validation — the pattern as a plain string,
+// the node ids unchecked. Representable so an out-of-vocabulary answer can be explicitly REJECTED
+// rather than failing to parse into something that looks legitimate (the shape patternclassifier's
+// RawLabel already uses, for the same reason).
+type RawEdge struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+	Kind string `json:"kind"`
+	// Pointer: a MISSING confidence is distinguishable from 0.0. A model that answers without one has
+	// not met the contract and must not be read as "confidently zero".
+	Confidence *float64 `json:"confidence"`
+}
+
+type RawLabel struct {
+	Pattern    string   `json:"pattern"`
+	NodeIDs    []string `json:"node_ids"`
+	Confidence *float64 `json:"confidence"`
+}
+
+// RawResult is one model answer.
+type RawResult struct {
+	Edges     []RawEdge  `json:"edges"`
+	Labels    []RawLabel `json:"labels"`
+	Narrative string     `json:"narrative"`
+}
+
+// Model is the seam the agent's provider call is made through.
+//
+// 🔴 An INTERFACE with no default implementation, exactly as `patternclassifier.FallbackModel` is and
+// for the same reason: "a stub wired in by default is how a classifier comes to look like it is working
+// while classifying nothing, and the resulting labels would be indistinguishable from real ones."
+//
+// The only implementation that reaches a provider goes through `providergateway` (task 4.2), and a
+// static fence asserts this package constructs no `http.Client` of its own.
+type Model interface {
+	Infer(ctx context.Context, in Input) (RawResult, providercall.Usage, error)
+}
+
+// InferenceStore is the pinned-result store (D2).
+type InferenceStore interface {
+	// Get reads a stored inference by its three-part key. ok=false is NOT INFERRED — never an error.
+	Get(ctx context.Context, workflowID, sourceRevision, agentConfigHash string) (Stored, bool, error)
+	// Put records one. It must be idempotent on the key: the UNIQUE index is the fence, and a writer
+	// that raced must resolve to the row that won rather than failing the caller.
+	Put(ctx context.Context, s Stored) error
+	// Replace overwrites a stored inference AFTER a confirmed re-inference (task 4.8).
+	//
+	// 🔴 A SEPARATE METHOD from Put, and that is the whole of "replacing only on confirmation": Put is
+	// idempotent and refuses to overwrite, so no ordinary inference path can replace a stored answer
+	// by accident. Replacing needs a caller that meant to, holding a diff somebody looked at.
+	Replace(ctx context.Context, s Stored) error
+}
+
+// Stored is one pinned inference.
+type Stored struct {
+	InferenceID     string
+	TenantID        string
+	WorkflowID      string
+	SourceRevision  string
+	AgentConfigHash string
+	Placement       string
+	Edges           []ProvenancedEdge
+	Labels          []patternclassifier.RegionProposal
+	Abstentions     []Abstention
+	Narrative       string
+	TokensIn        int
+	TokensOut       int
+	CreatedAtMS     int64
+}
+
+// Runner performs one inference. It is the ONLY thing in the package that reaches a provider.
+type Runner struct {
+	model Model
+	store InferenceStore
+	// Floor is the confidence below which an output becomes a stored ABSTENTION rather than a fact
+	// (task 4.4). Required: a zero floor accepts everything, and a floor nobody set is a floor that is
+	// zero.
+	floor float64
+	nowMS func() int64
+	newID func(workflowID, sourceRevision, configHash string) string
+}
+
+// NewRunner wires a runner.
+func NewRunner(m Model, store InferenceStore, floor float64, nowMS func() int64) (*Runner, error) {
+	switch {
+	case m == nil:
+		return nil, errors.New("herosagent: a model is required — there is deliberately no default stub, " +
+			"because a stub returning plausible edges is indistinguishable from a working agent")
+	case store == nil:
+		return nil, errors.New("herosagent: an inference store is required — D2's guarantee is a property " +
+			"of the store, and a runner without one re-infers on every read")
+	case floor <= 0 || floor > 1:
+		return nil, fmt.Errorf("herosagent: the confidence floor must be in (0,1]; got %v. A zero floor "+
+			"accepts everything, and a floor nobody set is a floor that is zero", floor)
+	case nowMS == nil:
+		return nil, errors.New("herosagent: a clock is required")
+	}
+	return &Runner{model: m, store: store, floor: floor, nowMS: nowMS, newID: defaultInferenceID}, nil
+}
+
+// Infer runs one inference, READ-THROUGH on the three-part key (task 4.7).
+//
+// 🔴 D2: `inference_key = (workflow_id, source_revision, agent_config_hash)`. First request infers and
+// stores; every later request READS. "The same revision always shows you the same graph" is therefore a
+// property of the store, provable by a test that counts provider calls — and it survives changing
+// vendors, which temperature-0-and-a-seed does not.
+func (r *Runner) Infer(ctx context.Context, in Input, agentConfigHash, placement string) (Result, error) {
+	if err := in.Budget.Validate(); err != nil {
+		return Result{Code: CodeBudgetExceeded, Cause: err.Error()}, err
+	}
+
+	// The cache read comes FIRST, before the residue is even considered: a stored answer is the answer,
+	// and computing a residue to discard it would be work nobody asked for.
+	if stored, ok, err := r.store.Get(ctx, in.WorkflowID, in.SourceRevision, agentConfigHash); err != nil {
+		return Result{Code: CodeProviderFailed, Cause: "the inference store could not be read"}, err
+	} else if ok {
+		return Result{
+			InferenceID: stored.InferenceID, Code: CodeOK,
+			Edges: stored.Edges, Labels: stored.Labels, Abstentions: stored.Abstentions,
+			Narrative: stored.Narrative,
+			// 🔴 ZERO. This is the number task 10.4 asserts, and it is why the count is on the Result
+			// rather than left for a caller to infer from the absence of an error.
+			ProviderCalls: 0,
+		}, nil
+	}
+
+	// 🔴 An empty residue makes ZERO provider calls. A fully rule-covered repository costs nothing,
+	// which is D3's "cost proportional to the gap" made countable (task 10.3).
+	if in.Residue.Empty() {
+		return Result{Code: CodeNothingToInfer, ProviderCalls: 0}, nil
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, in.Budget.MaxWall)
+	defer cancel()
+
+	raw, usage, err := r.model.Infer(ctx, in)
+	res := Result{Code: CodeOK, ProviderCalls: 1, Usage: usage}
+	if err != nil {
+		// Task 4.10 — the cause travels. 🚫 Never an empty graph: a caller that rendered one would be
+		// reporting a provider outage as a finding about the customer's workflow.
+		code := CodeProviderFailed
+		if errors.Is(err, context.DeadlineExceeded) {
+			code = CodeBudgetExceeded
+		}
+		return Result{Code: code, ProviderCalls: 1, Usage: usage, Cause: err.Error()}, err
+	}
+
+	// Task 4.9 — the token ceiling is checked against what the call actually used. Exceeding it aborts
+	// and 🚫 WRITES NO PARTIAL IR: a half-applied inference is a graph nobody can reproduce from its key.
+	if spent := usage.InputTokens + usage.OutputTokens; spent > in.Budget.MaxTokens {
+		return Result{
+			Code: CodeBudgetExceeded, ProviderCalls: 1, Usage: usage,
+			Cause: fmt.Sprintf("the run spent %d tokens against a ceiling of %d; nothing was written",
+				spent, in.Budget.MaxTokens),
+		}, nil
+	}
+
+	res.Edges, res.Labels, res.Abstentions, res.Narrative = r.validate(in, raw)
+
+	stored := Stored{
+		InferenceID:     r.newID(in.WorkflowID, in.SourceRevision, agentConfigHash),
+		TenantID:        in.TenantID,
+		WorkflowID:      in.WorkflowID,
+		SourceRevision:  in.SourceRevision,
+		AgentConfigHash: agentConfigHash,
+		Placement:       placement,
+		Edges:           res.Edges, Labels: res.Labels, Abstentions: res.Abstentions,
+		Narrative: res.Narrative,
+		TokensIn:  usage.InputTokens, TokensOut: usage.OutputTokens,
+		CreatedAtMS: r.nowMS(),
+	}
+	if err := r.store.Put(ctx, stored); err != nil {
+		return Result{Code: CodeProviderFailed, ProviderCalls: 1, Usage: usage,
+			Cause: "the inference completed and could not be stored"}, err
+	}
+	res.InferenceID = stored.InferenceID
+	return res, nil
+}
+
+// validate turns a raw model answer into facts and abstentions.
+//
+// 🔴 REJECTED, NEVER REPAIRED (D8). "A validator that coerces a near-miss into the nearest legal value
+// would turn a detectable failure into an undetectable one." Every rejection becomes a stored
+// abstention with a closed-enum reason, so the rejection has a trace and can be aggregated.
+func (r *Runner) validate(in Input, raw RawResult) (
+	[]ProvenancedEdge, []patternclassifier.RegionProposal, []Abstention, string) {
+
+	edges := []ProvenancedEdge{}
+	labels := []patternclassifier.RegionProposal{}
+	abstain := []Abstention{}
+	add := func(subject string, reason AbstentionReason, conf *float64) {
+		abstain = append(abstain, Abstention{Subject: subject, Reason: reason, Confidence: conf})
+	}
+
+	for _, e := range raw.Edges {
+		subject := e.From + "→" + e.To
+		switch {
+		// Node ids must ALREADY EXIST in the IR. This is the sentence D8 rests on: the only thing HEROS
+		// can express is a graph over nodes that already exist, so the worst an injected instruction in
+		// the customer's source achieves is a wrong edge.
+		case !NodeExists(in.RuleIR, e.From) || !NodeExists(in.RuleIR, e.To):
+			add(subject, AbstainUnknownNode, e.Confidence)
+		// The closed edge vocabulary. 🚫 A `kind` of "dataflow" is not coerced to "data".
+		case e.Kind != "data" && e.Kind != "control":
+			add(subject, AbstainOutOfVocabulary, e.Confidence)
+		// 🔴 D3 FENCE 1 at the WRITE boundary. The residue never offered this pair, so an answer naming
+		// it is an answer about something it was not asked — recorded, never applied.
+		case !EdgeIsAvailable(in.RuleIR, e.From, e.To):
+			add(subject, AbstainFrontendOwns, e.Confidence)
+		case e.Confidence == nil:
+			add(subject, AbstainNoCandidate, nil)
+		case *e.Confidence < r.floor:
+			c := *e.Confidence
+			add(subject, AbstainBelowFloor, &c)
+		default:
+			edges = append(edges, ProvenancedEdge{
+				From: e.From, To: e.To, Kind: e.Kind, Confidence: *e.Confidence,
+			})
+		}
+	}
+
+	for _, l := range raw.Labels {
+		p := patternclassifier.Pattern(l.Pattern)
+		subject := l.Pattern
+		switch {
+		// The 20-pattern taxonomy, closed. `Info` is the vocabulary's own membership test, so this
+		// package does not carry a second copy of the list.
+		case !patternTaxonomyHas(p):
+			add(subject, AbstainOutOfVocabulary, l.Confidence)
+		case len(l.NodeIDs) == 0 || !allNodesExist(in.RuleIR, l.NodeIDs):
+			add(subject, AbstainUnknownNode, l.Confidence)
+		case l.Confidence == nil:
+			add(subject, AbstainNoCandidate, nil)
+		case *l.Confidence < r.floor:
+			c := *l.Confidence
+			add(subject, AbstainBelowFloor, &c)
+		default:
+			ids := append([]string(nil), l.NodeIDs...)
+			sort.Strings(ids)
+			labels = append(labels, patternclassifier.RegionProposal{
+				Pattern:    p,
+				DetectorID: HerosDetectorID,
+				Scope:      patternclassifier.ScopeRegion,
+				NodeIDs:    ids,
+				Confidence: *l.Confidence,
+				Candidate:  patternclassifier.IsBehavioral(p),
+				// 🔴 THE AUTHOR. Without it these enter the partitioner indistinguishable from a rule
+				// detector's — which they are by design in every other respect (D3, task 4.6).
+				Author: discovery.AuthorHEROS,
+			})
+		}
+	}
+
+	sort.SliceStable(abstain, func(i, j int) bool {
+		if abstain[i].Subject != abstain[j].Subject {
+			return abstain[i].Subject < abstain[j].Subject
+		}
+		return abstain[i].Reason < abstain[j].Reason
+	})
+	return edges, labels, abstain, raw.Narrative
+}
+
+// HerosDetectorID identifies the agent in a label's `detector_id`, so a stored label names WHICH
+// producer without a reader having to consult the author field.
+const HerosDetectorID = "heros-agent"
+
+func patternTaxonomyHas(p patternclassifier.Pattern) bool {
+	_, ok := patternclassifier.Info(p)
+	return ok
+}
+
+func allNodesExist(ir *discovery.IR, ids []string) bool {
+	for _, id := range ids {
+		if !NodeExists(ir, id) {
+			return false
+		}
+	}
+	return true
+}
+
+// defaultInferenceID derives an id from the three-part key, so the same key always names the same
+// inference and a retry after a lost response resolves to the row that already exists.
+func defaultInferenceID(workflowID, sourceRevision, configHash string) string {
+	return "inf_" + shortHash(workflowID+"\x00"+sourceRevision+"\x00"+configHash)
+}
+
+// shortHash is a stable 16-hex digest, used only to derive readable ids.
+func shortHash(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:])[:16]
+}

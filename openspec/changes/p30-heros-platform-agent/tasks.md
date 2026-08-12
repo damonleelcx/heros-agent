@@ -73,24 +73,24 @@ acceptance that stops proving anything the day the default changes.
 
 ## 4. Inference runner
 
-- [ ] 4.1 Residue selection from the IR plus the frontend diagnostics. The input type has **no** field
+- [x] 4.1 Residue selection from the IR plus the frontend diagnostics. The input type has **no** field
       for a whole-repository pass — NFR1 holds by construction.
-- [ ] 4.2 `Runner.Infer` through `providergateway`. Static fence against a bare `http.Client` in the
+- [x] 4.2 `Runner.Infer` through `providergateway`. Static fence against a bare `http.Client` in the
       package.
-- [ ] 4.3 Output validation against the closed vocabularies: edge `kind ∈ {data, control}`, node ids
+- [x] 4.3 Output validation against the closed vocabularies: edge `kind ∈ {data, control}`, node ids
       already in the IR, labels in the 20-pattern taxonomy. **Reject, never repair.**
-- [ ] 4.4 Confidence floor; below-floor output becomes a stored abstention with a reason from a closed
+- [x] 4.4 Confidence floor; below-floor output becomes a stored abstention with a reason from a closed
       enum.
-- [ ] 4.5 🔴 Never emit an edge where a frontend emitted one; never delete one. Test with a fixture that
+- [x] 4.5 🔴 Never emit an edge where a frontend emitted one; never delete one. Test with a fixture that
       pushes toward the conflict.
-- [ ] 4.6 Labels emitted as `patternclassifier.RegionProposal` so they enter the existing partitioner and
+- [x] 4.6 Labels emitted as `patternclassifier.RegionProposal` so they enter the existing partitioner and
       precedence rule. 🚫 No second arbitration path.
-- [ ] 4.7 Cache: read-through on `(workflow_id, source_revision, agent_config_hash)`; second request
+- [x] 4.7 Cache: read-through on `(workflow_id, source_revision, agent_config_hash)`; second request
       makes zero provider calls.
-- [ ] 4.8 Explicit re-inference, presented as a diff, replacing only on confirmation.
-- [ ] 4.9 Per-run token and wall-clock budget; exceeding aborts, records the abort, writes no partial IR.
-- [ ] 4.10 Provider failure → `analysis failed` with the cause. 🚫 Never an empty graph.
-- [ ] 4.11 Events and error codes from the central enumeration only. Fence literals.
+- [x] 4.8 Explicit re-inference, presented as a diff, replacing only on confirmation.
+- [x] 4.9 Per-run token and wall-clock budget; exceeding aborts, records the abort, writes no partial IR.
+- [x] 4.10 Provider failure → `analysis failed` with the cause. 🚫 Never an empty graph.
+- [x] 4.11 Events and error codes from the central enumeration only. Fence literals.
 
 ## 5. Calibration and the rehearsal gate
 
