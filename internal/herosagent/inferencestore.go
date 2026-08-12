@@ -73,7 +73,7 @@ func (s *PGInferenceStore) abstentions(ctx context.Context, inferenceID string) 
 	if err != nil {
 		return nil, fmt.Errorf("herosagent: reading abstentions for %s: %w", inferenceID, err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []Abstention{}
 	for rows.Next() {
 		var a Abstention

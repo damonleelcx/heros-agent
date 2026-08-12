@@ -10,7 +10,7 @@ import type { AgentSpendView, AgentSpendRow } from "@/lib/types";
  *
  * # 🔴 `unpriced` is a WORD, never a zero
  *
- * A model with no published price produces a real token count and NO cost. Rendering `$0.00` there
+ * A model with no published price produces a real token count and NO cost. Rendering a zero there
  * reports a spend nobody incurred — the most reassuring possible lie about a bill — so this page prints
  * "unpriced" and counts how many tenants are in that state, because a total that silently omits them is
  * a total a reader will take as complete.
@@ -181,8 +181,8 @@ function SpendRow({ row }: { row: AgentSpendRow }) {
           absence of spend to a pricing gap that may not exist. Nothing ran; there is nothing to price.
 
           🔴 And the number is rendered with `Num kind="quantity"`. The default `count` formatter is for
-          WHOLE numbers and rounded $4.87 to "5" — a 2.7% error on a money figure, shown on the page
-          somebody reads to decide whether a cap is needed. Also found by looking. */}
+          WHOLE numbers and rounded 4.87 to "5" — an error of nearly three percent on a money figure,
+          shown on the page somebody reads to decide whether a cap is needed. Also found by looking. */}
       <td>
         {row.inferences === 0 ? (
           <em>no analysis has run for this tenant</em>

@@ -151,7 +151,7 @@ func (s *PGVersionStore) List(parent context.Context) ([]Version, error) {
 	if err != nil {
 		return nil, fmt.Errorf("herosagent: listing versions: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []Version{}
 	for rows.Next() {
 		v, err := scanVersion(rows)

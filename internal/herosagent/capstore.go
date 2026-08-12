@@ -83,7 +83,7 @@ func (s *PGCapStore) List(parent context.Context) ([]Cap, error) {
 	if err != nil {
 		return nil, fmt.Errorf("herosagent: listing caps: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []Cap{}
 	for rows.Next() {
 		var c Cap

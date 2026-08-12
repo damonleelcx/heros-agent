@@ -109,7 +109,7 @@ func (s *PGPlacementStore) List(parent context.Context) ([]TenantPlacement, erro
 	if err != nil {
 		return nil, fmt.Errorf("herosagent: listing placements: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []TenantPlacement{}
 	for rows.Next() {
 		var tp TenantPlacement
