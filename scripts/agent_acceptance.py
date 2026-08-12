@@ -35,6 +35,7 @@ import os
 import subprocess
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -104,11 +105,16 @@ def get_json(url: str, token: str | None = None) -> tuple[int, dict]:
             return err.code, {}
 
 
-def psql(dsn: str, sql: str) -> str:
-    """Runs one query and returns stdout, or raises."""
-    proc = subprocess.run(
-        ["psql", dsn, "-At", "-c", sql], capture_output=True, text=True, cwd=ROOT
-    )
+def psql(dsn: str, sql: str, cmd: list[str] | None = None) -> str:
+    """Runs one query and returns stdout, or raises.
+
+    🔴 `--psql` exists because the platform database is very often NOT reachable by a local `psql` —
+    it is in a container, or behind a bastion. The first version of this shelled out to a bare `psql`
+    and reported "could not read heros_inference" when the binary simply was not installed, which
+    reads as a product failure and is a tooling one.
+    """
+    argv = (cmd or ["psql"]) + [dsn, "-At", "-c", sql]
+    proc = subprocess.run(argv, capture_output=True, text=True, cwd=ROOT)
     if proc.returncode != 0:
         raise RuntimeError(proc.stderr.strip())
     return proc.stdout.strip()
@@ -129,6 +135,12 @@ def main() -> int:
     ap.add_argument("--workflow", required=True, help="the workflow id (openclaw/openclaw)")
     ap.add_argument("--token", default=os.getenv("HEROS_PLATFORM_TOKEN", ""), help="platform credential")
     ap.add_argument("--dsn", default=os.getenv("DATABASE_URL", ""), help="platform DSN; layer 2 needs it")
+    ap.add_argument(
+        "--psql",
+        default=os.getenv("HEROS_PSQL", ""),
+        help="the psql invocation, when it is not a bare `psql` on PATH — e.g. "
+        "'docker exec -i pg psql'. Space-separated.",
+    )
     args = ap.parse_args()
 
     run = Run()
@@ -165,10 +177,11 @@ def main() -> int:
         l2.detail = "no --dsn/DATABASE_URL, so the row cannot be read. A 200 from the API is not this."
     else:
         try:
-            before = int(psql(args.dsn, f"SELECT count(*) FROM heros_inference WHERE tenant_id = '{args.tenant}'"))
+            pcmd = args.psql.split() if args.psql else None
+            before = int(psql(args.dsn, f"SELECT count(*) FROM heros_inference WHERE tenant_id = '{args.tenant}'", pcmd))
             # The analysis is triggered by the platform's own discovery path; this asserts the ROW, which
             # is the layer, rather than triggering it here and asserting a status code.
-            after = int(psql(args.dsn, f"SELECT count(*) FROM heros_inference WHERE tenant_id = '{args.tenant}'"))
+            after = int(psql(args.dsn, f"SELECT count(*) FROM heros_inference WHERE tenant_id = '{args.tenant}'", pcmd))
             if after == 0:
                 l2.state = "fail"
                 l2.detail = (
@@ -187,9 +200,12 @@ def main() -> int:
     if not args.token:
         l3.detail = "no --token, so the served read model cannot be fetched"
     else:
-        status, graph = get_json(
-            f"{args.api}/api/v1/workflows/{args.workflow}/pattern-graph", args.token
-        )
+        # 🔴 ENCODED. A workflow id is `org/repo` in the normal case — it is what the README's own demo
+        # uses — and an unencoded slash makes the path one segment longer than the route, so the mux
+        # answers 404. The first run of this reported "the graph read answered 404" against a workflow
+        # that was there, which is the failure looking exactly like the finding.
+        wf = urllib.parse.quote(args.workflow, safe="")
+        status, graph = get_json(f"{args.api}/api/v1/workflows/{wf}/pattern-graph", args.token)
         if status != 200:
             l3.state, l3.detail = "fail", f"the graph read answered {status}"
         else:
@@ -198,11 +214,23 @@ def main() -> int:
             comp = graph.get("composition") or {}
             if not inferred:
                 l3.state = "fail"
-                l3.detail = (
-                    f"the served IR carries {len(edges)} edge(s) and NONE is agent-authored. The row "
-                    "exists and the read model does not return it — the layer that breaks silently when "
-                    "a column is added to the write and forgotten in the read."
-                )
+                # 🔴 The diagnosis DEPENDS ON LAYER 2. With a row present, no inferred edge on the wire
+                # means the read model is dropping it — the layer that breaks silently. With no row, the
+                # analysis simply has not run, and saying "the row exists" would send a reader to debug
+                # a SELECT that is fine.
+                if l2.state == "pass":
+                    l3.detail = (
+                        f"the served IR carries {len(edges)} edge(s) and NONE is agent-authored, while "
+                        "an inference row DOES exist. The read model is not returning what was written "
+                        "— the layer that breaks silently when a column is added to the write and "
+                        "forgotten in the read."
+                    )
+                else:
+                    l3.detail = (
+                        f"the served IR carries {len(edges)} edge(s) and none is agent-authored, and "
+                        "layer 2 found no inference row either — so nothing has been analysed yet. "
+                        "This is layer 2's failure showing through, not a read-model fault."
+                    )
             elif comp.get("edges_inferred", 0) != len(inferred):
                 l3.state = "fail"
                 l3.detail = (
@@ -222,7 +250,7 @@ def main() -> int:
             "layers 1-3 can all be green while a customer sees nothing."
         )
     else:
-        url = f"{args.console}/app/workflows/{args.workflow}/graph"
+        url = f"{args.console}/app/workflows/{urllib.parse.quote(args.workflow, safe='')}/graph"
         req = urllib.request.Request(url)
         if args.console_cookie:
             req.add_header("Cookie", args.console_cookie)

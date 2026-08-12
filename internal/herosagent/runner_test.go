@@ -549,8 +549,12 @@ func TestTheAgentIsNeverShownAnythingOutsideTheResidue(t *testing.T) {
 		t.Fatal(err)
 	}
 	var payload struct {
-		Nodes []string `json:"nodes"`
-		Pairs []Pair   `json:"candidate_pairs"`
+		Nodes []struct {
+			ID     string `json:"id"`
+			Symbol string `json:"symbol"`
+			File   string `json:"file"`
+		} `json:"nodes"`
+		Pairs []Pair `json:"candidate_pairs"`
 	}
 	if err := json.Unmarshal(raw, &payload); err != nil {
 		t.Fatal(err)

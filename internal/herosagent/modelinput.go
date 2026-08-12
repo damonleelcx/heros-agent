@@ -36,9 +36,21 @@ import (
 // could occupy, which is NFR1 restated at the wire.
 type modelInputWire struct {
 	WorkflowID string `json:"workflow_id"`
-	// Nodes are ids ONLY. The vocabulary the answer is validated against — and the reason an injected
-	// instruction cannot make the agent name something that does not exist.
-	Nodes []string `json:"nodes"`
+	// Nodes are the call sites, each with the facts that say WHERE it is — and nothing that says what
+	// it contains.
+	//
+	// 🔴 THIS CARRIED IDS ONLY, and the first live rehearsal is what found it. The comment that stood
+	// here said "Nodes are ids ONLY. The vocabulary the answer is validated against" — which is a true
+	// statement about VALIDATION that had been mistaken for a statement about EVIDENCE. The model was
+	// shown `n_494e69b8f47d6257` and `n_77e56db62b2208b3` and asked which depends on which, and there is
+	// no answer to that question in two hashes. Every calibration fixture with real edges scored 0.00;
+	// the only fixtures that "passed" were the near-misses whose correct answer is no edges at all.
+	//
+	// 🚫 What is added is exactly the field set `runlink.WorkflowIRAllowlist` already ratified as
+	// structure rather than content, with the argument made there: "a path and a line range say where a
+	// call is; they do not carry what it says". Not the prompt text, not the source lines, not the
+	// I/O-contract schemas, not the tool names — a COUNT crosses for those, as it does on that wire.
+	Nodes []modelInputNode `json:"nodes"`
 	// Pairs are the pairs no frontend established. The only pairs an edge may be proposed for.
 	Pairs []Pair `json:"candidate_pairs"`
 	// UnlabelledRegions are the subgraphs no rule detector covered.
@@ -51,6 +63,29 @@ type modelInputWire struct {
 type frontendNote struct {
 	Language     string `json:"language"`
 	AnalysisKind string `json:"analysis_kind"`
+}
+
+// modelInputNode is one call site, as the model is shown it.
+//
+// Every field here is on the P29 opt-in allowlist, which ratified each one against the same question
+// this file asks: does it say WHERE the call is, or WHAT it says? `Symbol` is the enclosing function
+// name — "without it every node is an opaque hash, which is the whole reason this payload exists", in
+// that allowlist's own words about the same field.
+type modelInputNode struct {
+	ID     string `json:"id"`
+	Symbol string `json:"symbol,omitempty"`
+	File   string `json:"file,omitempty"`
+	// Line is the first line of the call span. A LOCATION, never the line itself.
+	Line int `json:"line,omitempty"`
+	// Provider and Model name the vendor and model this call site targets, or carry the documented
+	// `unresolved` sentinel — which is itself the signal FR3.4 asks the agent to reason about.
+	Provider string `json:"provider,omitempty"`
+	Model    string `json:"model,omitempty"`
+	// ContextPolicy is a strategy LABEL, never assembled context.
+	ContextPolicy string `json:"context_policy,omitempty"`
+	// Tools is a COUNT. The names are call-site identifiers from the customer's source and do not
+	// cross — the same rule the structure payload follows.
+	Tools int `json:"tools,omitempty"`
 }
 
 // ModelInput is assembled context, as bytes. Obtainable only from AssembleModelInput.
@@ -75,7 +110,7 @@ func (m ModelInput) Bytes() ([]byte, error) {
 func AssembleModelInput(in Input) (ModelInput, error) {
 	w := modelInputWire{
 		WorkflowID:        in.WorkflowID,
-		Nodes:             []string{},
+		Nodes:             []modelInputNode{},
 		Pairs:             in.Residue.Pairs,
 		UnlabelledRegions: in.Residue.UnlabelledRegions,
 		Frontends:         []frontendNote{},
@@ -88,7 +123,11 @@ func AssembleModelInput(in Input) (ModelInput, error) {
 	}
 	if in.RuleIR != nil {
 		for _, n := range in.RuleIR.Nodes {
-			w.Nodes = append(w.Nodes, n.NodeID)
+			w.Nodes = append(w.Nodes, modelInputNode{
+				ID: n.NodeID, Symbol: n.CallSite.Symbol, File: n.CallSite.File,
+				Line: n.CallSite.LineStart, Provider: n.Model.Provider, Model: n.Model.ModelID,
+				ContextPolicy: n.ContextAssembly.Policy, Tools: len(n.ToolsSkills),
+			})
 		}
 	}
 	for _, f := range in.Residue.Frontends {
