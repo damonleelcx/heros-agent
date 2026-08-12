@@ -91,7 +91,10 @@ func (d demo) classify() (patternclassifier.GraphView, error) {
 	if err != nil {
 		return patternclassifier.GraphView{}, err
 	}
-	return patternclassifier.BuildGraphView(labelled, res), nil
+	// The zero report, and deliberately: this demo's IR is a hand-built fixture that no discovery run
+	// produced, so there is no frontend to name. The view renders that as "discovery recorded no
+	// contributing frontend" rather than attributing the fixture to an analysis that never ran.
+	return patternclassifier.BuildGraphView(labelled, res, discovery.DiscoveryReport{}), nil
 }
 
 // cannedModel answers with one fixed in-taxonomy label plus one deliberately BOGUS one, so the demo

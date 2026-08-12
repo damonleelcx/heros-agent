@@ -18,6 +18,7 @@ import {
 import { Disclosure } from "@/components/figure";
 import { Diff } from "@/components/diff";
 import { Tabs } from "@/components/tabs";
+import { GenerationPass } from "@/components/proposalGeneration";
 import { score, usd2, ms, integer, plural } from "@/lib/format";
 import { cx } from "@/lib/cx";
 
@@ -91,6 +92,14 @@ function ProposalsBody({
         ) : null}
       </Section>
 
+      {/* 🔴 The state, its sentence and its implied action, above the lists rather than inside an empty
+          one. It belongs here because it is true of the WHOLE surface — "you have linked no runs"
+          explains an empty recommended tab and an empty withheld tab at once — and because it is the
+          only part of this page that is still worth reading when both lists are empty. */}
+      <Section title="The last generation pass">
+        <GenerationPass workflowId={workflowId} state={surface.state} pass={surface.pass ?? null} />
+      </Section>
+
       {/*
         🔴 Recommended and Withheld are TABS, not a stack (NFR17; PageFrame: "a page whose sections would
         stack tall should split them into <Tabs>").
@@ -119,7 +128,16 @@ function ProposalsBody({
                     </p>
                   </Empty>
                 ) : (
-                  <Empty title="Nothing is pending." />
+                  /* 🔴 "Nothing is pending." is gone. It was rendered here unconditionally and it
+                     covered two opposite situations — a workflow nobody had analysed and one that was
+                     analysed and healthy — with the same three words. What the platform actually found,
+                     and what to do about it, is stated once above, in "The last generation pass". */
+                  <Empty title="No proposal on this workflow is recommended.">
+                    <p>
+                      A proposal is recommended only once a verdict your CI reported passes its gate.
+                      What the last generation pass found, and what it implies, is stated above.
+                    </p>
+                  </Empty>
                 )
               ) : (
                 <Section title="Recommended" aside="gate-passing, in verified-delta order">

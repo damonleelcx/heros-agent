@@ -134,9 +134,20 @@ func indexOf(s, sub string) int {
 type fakeFrontend struct {
 	lang string
 	node ExtractedNode
+	kind AnalysisKind
 }
 
-func (f *fakeFrontend) Language() string         { return f.lang }
+func (f *fakeFrontend) Language() string { return f.lang }
+
+// AnalysisKind defaults to syntactic, which is what a non-Go frontend is today. A test that needs the
+// other answer sets `kind` explicitly.
+func (f *fakeFrontend) AnalysisKind() AnalysisKind {
+	if f.kind == "" {
+		return AnalysisSyntactic
+	}
+	return f.kind
+}
+
 func (f *fakeFrontend) Handles(path string) bool { return false }
 func (f *fakeFrontend) Discover(repo string, reg *Registry, decl *declaredIndex) (FrontendResult, error) {
 	return FrontendResult{Nodes: []ExtractedNode{f.node}, CallSites: 1, WorkflowID: "example.com/py"}, nil

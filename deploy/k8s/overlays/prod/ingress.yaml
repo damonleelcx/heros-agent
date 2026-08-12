@@ -175,6 +175,19 @@ spec:
           - path: /api/v1/transform-receipts
             pathType: Exact
             backend: { service: { name: agentd, port: { number: 4321 } } }
+          # P30 §1.8 · trigger a proposal-generation pass. Born FLAT — the workflow id travels in the
+          # body — for exactly the reason the four routes above it were flattened: the parameterised
+          # shape `/api/v1/workflows/{id}/proposals/generate` cannot be matched by an Exact rule, and the
+          # only rule that reaches it is a Prefix under `/api/v1/workflows/`, which would publish
+          # `commit`, `orderings`, `orderings/stream`, `validate`, `proposals/{id}/open-pr`,
+          # `pattern-graph`, `eval-board` and `nodes` alongside it.
+          #
+          # Bearer-authenticated; the tenant comes from the principal and nothing in the body can select
+          # one. The pass reads that tenant's own linked runs and discovered graph and writes proposal
+          # rows attributed to them.
+          - path: /api/v1/proposal-generations
+            pathType: Exact
+            backend: { service: { name: agentd, port: { number: 4321 } } }
           - path: /
             pathType: Prefix
             backend: { service: { name: console, port: { number: 4320 } } }

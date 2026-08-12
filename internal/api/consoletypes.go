@@ -71,6 +71,9 @@ func ConsoleViewTypes() []ConsoleViewType {
 		// ── P4 · eval board ──────────────────────────────────────────────────
 		{Name: "BoardView", Sample: evalboard.View{}, Endpoint: "GET /api/v1/workflows/{workflow_id}/eval-board"},
 
+		// ── P30 · the eval set behind the board's denominator ────────────────
+		{Name: "EvalSetView", Sample: evalboard.EvalSetView{}, Endpoint: "GET /api/v1/workflows/{workflow_id}/eval-set"},
+
 		// ── P4.5 · attribution scorecard ─────────────────────────────────────
 		{Name: "ScorecardView", Sample: scorecard.View{}, Endpoint: "GET /api/v1/variants/{variant_id}/scorecard"},
 

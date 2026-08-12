@@ -329,9 +329,16 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 			}
 		}
 
-		h.MountEvalBoard(hostedboard.NewSource(linkStore))
+		boardSource := hostedboard.NewSource(linkStore)
+		h.MountEvalBoard(boardSource)
 		served("p4_eval_board (assembled from linked runs; no tie detection — replicates do not cross)")
 		mountedEvalBoard = true
+		// P30 §1.12 · the eval set behind the board's denominator. Same source, because the two numbers
+		// must come from one read: a case count on the board that disagrees with the eval-set surface
+		// would be two answers to "how many cases is this score over".
+		h.MountEvalSet(boardSource)
+		served("p30_eval_set (the board's denominator, its family split and its indecisive count; the " +
+			"cases themselves do not cross)")
 		h.MountScorecard(hostedscorecard.NewSource(linkStore))
 		served("p45_scorecard (cost/latency attribution from linked runs; failure attribution stays local)")
 		mountedScorecard = true
@@ -371,7 +378,10 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 		// CI, and read exactly why it stops there — and it is emphatically better than the 503 it
 		// replaces, which said the capability was not installed when the truth is that it is installed
 		// and bounded.
-		h.MountProposals(hostedproposals.NewSource(verdictStore, blobs))
+		// The pass store is the SAME PGStore. Without it the surface cannot tell "nobody has ever
+		// analysed this workflow" from "a pass ran and found nothing", and it renders the first as the
+		// second — one reader told they are finished when they have not started (P30 task 1.5).
+		h.MountProposals(hostedproposals.NewSource(verdictStore, blobs, verdictStore))
 		served("p55_proposals (recommendation surface over reported verdicts; no diff, so open-PR refuses)")
 		mountedProposals = true
 
@@ -588,6 +598,9 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 				// The candidate spec goes to the SAME blob store the diff and the prompt registry use.
 				// A proposal recorded without it can never be compiled (migration 0031).
 				Blobs: blobs,
+				// Every pass records what it FOUND (migration 0044), including — especially — the passes
+				// that write no proposal row, which are the ones the surface could not previously explain.
+				Passes: verdictStore,
 			}
 			h.MountProposalGeneration(gen)
 			served("p55_proposal_generation (cost-bottleneck operators only; a diagnosis needs the eval " +
@@ -640,6 +653,11 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 	if !mountedEvalBoard {
 		h.MountEvalBoard(nil)
 		absent("p4_eval_board", noAdapter)
+		// Registered unsourced alongside the board it explains. Without this the route is not on the mux
+		// at all and answers 404 — which a console classifies as "no such workflow" and renders over a
+		// workflow that plainly exists, the exact miscategorisation this whole convention prevents.
+		h.MountEvalSet(nil)
+		absent("p30_eval_set", noAdapter)
 	}
 	if !mountedScorecard {
 		h.MountScorecard(nil)

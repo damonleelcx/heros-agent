@@ -109,6 +109,19 @@ var routeExposure = RouteExposure{
 	// P29 §2.9 · the transform receipt. It has no parameterised predecessor — it is new, and it was born
 	// flat, which is the pattern this family now establishes for every machine route.
 	"/api/v1/transform-receipts": ExposurePublic,
+	// P30 §1.8 · triggering a proposal-generation pass.
+	//
+	// 🔴 Stated plainly because it is the one entry here whose external caller does not exist yet: today
+	// this is reached by the console's BFF from inside the cluster, so `Internal` would also be defensible.
+	// It is `Public` because a generation pass is a MACHINE action a customer's CI has every reason to
+	// take after an eval, the handler already scopes strictly to the authenticated principal's tenant
+	// (nothing in the body selects a tenant), and the alternative is the failure this file exists to
+	// prevent: a route that becomes externally addressable later and is patched into a running cluster by
+	// hand, which the next `kubectl apply` deletes.
+	//
+	// It is safe to publish for the same reason `/api/v1/run-links` is: it takes a bearer credential, it
+	// acts only on the tenant that credential names, and it writes nothing a caller can aim elsewhere.
+	"/api/v1/proposal-generations": ExposurePublic,
 
 	// The parameterised originals. EXPAND-CONTRACT: they stay registered for one release so a CLI built
 	// before this change still works from INSIDE a cluster, and they are never published — which is the

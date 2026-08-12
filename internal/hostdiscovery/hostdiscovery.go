@@ -132,7 +132,7 @@ func (r *Runner) Run(ctx context.Context, ref sourceingest.Ref) (Graph, error) {
 	// defer is the retention policy, and hostdiscovery_test.go asserts the directory is gone afterwards.
 	defer mat.Release()
 
-	ir, err := r.discover(ctx, mat.Dir, ref)
+	ir, report, err := r.discover(ctx, mat.Dir, ref)
 	if err != nil {
 		return Graph{}, err
 	}
@@ -153,7 +153,7 @@ func (r *Runner) Run(ctx context.Context, ref sourceingest.Ref) (Graph, error) {
 		return Graph{}, fmt.Errorf("hostdiscovery: classify %s: %w", ref, err)
 	}
 
-	view := patternclassifier.BuildGraphView(ir, res)
+	view := patternclassifier.BuildGraphView(ir, res, report)
 	// The IR's workflow id is a discovery-time suggestion; the ref is what the customer and every other
 	// table call this workflow. Disagreeing here would store a graph under an id no console asks for.
 	view.WorkflowID = ref.WorkflowID
@@ -200,7 +200,8 @@ func (r *Runner) IR(ctx context.Context, ref sourceingest.Ref) (*discovery.IR, e
 		return nil, fmt.Errorf("hostdiscovery: materialize %s: %w", ref, err)
 	}
 	defer mat.Release()
-	return r.discover(ctx, mat.Dir, ref)
+	ir, _, err := r.discover(ctx, mat.Dir, ref)
+	return ir, err
 }
 
 // WithSource materializes the snapshot, derives its IR, and hands BOTH to fn for the lifetime of the
@@ -230,7 +231,7 @@ func (r *Runner) WithSource(ctx context.Context, ref sourceingest.Ref, fn func(d
 	}
 	defer mat.Release()
 
-	ir, err := r.discover(ctx, mat.Dir, ref)
+	ir, _, err := r.discover(ctx, mat.Dir, ref)
 	if err != nil {
 		return err
 	}
@@ -238,12 +239,12 @@ func (r *Runner) WithSource(ctx context.Context, ref sourceingest.Ref, fn func(d
 }
 
 // discover runs the discovery pipeline over an extracted tree.
-func (r *Runner) discover(ctx context.Context, dir string, ref sourceingest.Ref) (*discovery.IR, error) {
+func (r *Runner) discover(ctx context.Context, dir string, ref sourceingest.Ref) (*discovery.IR, discovery.DiscoveryReport, error) {
 	// Discovery is CPU-bound and does not take a context; check for cancellation before starting rather
 	// than pretending we can interrupt it. A caller who has already given up should not pay for a full
 	// parse of a repository.
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, discovery.DiscoveryReport{}, err
 	}
 	opts := discovery.Options{
 		Repo:       dir,
@@ -253,10 +254,13 @@ func (r *Runner) discover(ctx context.Context, dir string, ref sourceingest.Ref)
 	}
 	out, err := discovery.Run(opts)
 	if err != nil {
-		return nil, fmt.Errorf("hostdiscovery: discovery over %s: %w", ref, err)
+		return nil, discovery.DiscoveryReport{}, fmt.Errorf("hostdiscovery: discovery over %s: %w", ref, err)
 	}
 	ir := out.IR
-	return &ir, nil
+	// The report rides alongside the IR because the graph view needs it to explain an edgeless graph,
+	// and it is the ONLY thing that can: which frontend ran and whether that frontend can emit edges is
+	// not recoverable from the IR. It is not stored — see Graph — only used to compute the sentence.
+	return &ir, out.Report, nil
 }
 
 // llmEvalConfigPath returns the workflow's declared config if the tree carries one, else "".

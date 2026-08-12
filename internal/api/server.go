@@ -53,6 +53,8 @@ type Server struct {
 
 	// p4 is the P4 eval-board read model, mounted by MountEvalBoard when available.
 	evalBoard BoardSource
+	// evalSet is the P30 eval-set read model, mounted by MountEvalSet when available.
+	evalSet EvalSetSource
 
 	// p45 is the P4.5 read-only scorecard read model, mounted by MountScorecard when available.
 	scorecard ScorecardSource

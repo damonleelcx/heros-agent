@@ -272,8 +272,11 @@ item("P25-11", "config_hash is surfaced per its surface-or-drop decision", "live
 
 item("P35-1", "the meta line: ir version and taxonomy version", "graph",
   "ir_version", "taxonomy_version");
+// The "Fully rule-covered" needle moved to the platform in P30 task 1.3 — see P30-1.3 below, which
+// requires the page to render the platform's sentence and forbids it from re-deriving one. The counter
+// and its pluralisation are what this item is actually protecting, and both are still here.
 item("P35-2", "the LLM-call counter with correct pluralisation", "graph",
-  "llm_calls", 'plural(view.llm_calls, "call", "calls")', "Fully rule-covered");
+  "llm_calls", 'plural(view.llm_calls, "call", "calls")');
 item("P35-3", "🔴 deterministic layout from layer and order — no heuristic auto-layout", "graph",
   /node\.layer/, /node\.order/);
 item("P35-4", "the node box carries id, model and node-scoped label titles", "graph",
@@ -296,10 +299,36 @@ item("P35-12", "a candidate label explains that structure shows the shape but tr
   /candidate/i, /runtime traces|traces have not/i);
 item("P35-13", "the dispatch line, including the no-metric-set case", "graph",
   "dispatches", /no metric-set|no metric set/i);
-item("P35-14", "🔴 unclassified explains why, and says unlabelled is not 'no pattern'", "graph",
-  /not yet classified|unclassified/i, /no structural signature/i);
+// 🔴 P30 task 1.4 REPLACED this item's contract, deliberately and not by drift.
+//
+// The old needle required the sentence "No structural signature matched this region, and either no
+// model was consulted or the fallback returned nothing in the taxonomy" to be written in this file.
+// That single sentence covered FOUR causes with four different next actions, and its "either/or" gave a
+// reader none of them. The four causes and their sentences now come from the platform
+// (patternclassifier's UnclassifiedReason), so the needle is the CARRIAGE — the page must render the
+// cause and the platform's sentence — rather than a copy of the sentence itself. A page that stopped
+// rendering `reason_sentence` would go back to saying nothing, and this catches that.
+item("P35-14", "🔴 an unlabelled region renders the platform's cause and its sentence", "graph",
+  /unclassified/i, "region.reason", "region.reason_sentence", "no pattern");
 item("P35-15", "the whole-workflow empty state repeats the distinction", "graph",
   "That is a state, not an error", "does not mean the workflow implements no patterns");
+// P30 task 1.2 — the zero-edge state states the cause instead of drawing disconnected boxes, and keeps
+// the node list. A page that drew the SVG anyway would render a column of unconnected nodes, which is a
+// picture of a finding nobody made.
+item("P30-1.2", "🔴 nodes with no edges withhold the drawing and state the cause", "graph",
+  "view.topology", "topology.sentence", "no dependency drawing is shown", "<GraphTable");
+// P30 task 1.3 — the llm_calls sentence comes from the platform. Computing it in the browser from the
+// count alone is what made "0 calls" read as "fully rule-covered" over a graph with zero labels.
+item("P30-1.3", "🔴 the llm_calls note is the platform's, not derived from the count", "graph",
+  "view.llm_calls_note");
+test("P30-1.3 — the browser does not re-derive the llm_calls sentence", async () => {
+  const text = await source("graph");
+  assert.ok(
+    !/llm_calls === 0/.test(text),
+    "the page branches on llm_calls === 0 again — the count cannot distinguish " +
+      "'fully covered' from 'nothing looked', which is the defect P30 task 1.3 removed",
+  );
+});
 item("P35-16", "the diagnostics card, hidden unless non-empty", "graph",
   "diagnostics", "diagnostics.length > 0");
 item("P35-17", "🔴 an error hides the graph, the label cards AND the diagnostics together", "graph",

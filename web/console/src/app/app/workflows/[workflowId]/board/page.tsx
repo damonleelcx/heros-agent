@@ -236,7 +236,7 @@ function BoardBody({ workflowId, board }: { workflowId: string; board: BoardView
         )}
       </Section>
 
-      <CoverageSection coverage={board.coverage} />
+      <CoverageSection coverage={board.coverage} workflowId={workflowId} />
       <SpendSection board={board} />
 
       {notes.length > 0 ? (
@@ -329,7 +329,7 @@ function BoardBanners({ board }: { board: BoardView }) {
   );
 }
 
-function CoverageSection({ coverage }: { coverage: CoverageView }) {
+function CoverageSection({ coverage, workflowId }: { coverage: CoverageView; workflowId: string }) {
   const dimensions = coverage.dimensions ?? [];
   const residual = coverage.residual ?? [];
   const reasons = coverage.reasons ?? [];
@@ -426,7 +426,18 @@ function CoverageSection({ coverage }: { coverage: CoverageView }) {
       >
         <tbody>
           <tr>
-            <td>Cases</td>
+            {/* 🔴 The denominator is a LINK (P30 task 1.14). Every score on this board is computed over
+                it, and until this route existed the number was unopenable — "8 cases" doing load-bearing
+                work with no way to ask which eight. The eval-set surface asserts that its list and this
+                number agree, and reports an error rather than a table when they do not. */}
+            <td>
+              <Link
+                className="text-primary underline-offset-2 hover:underline"
+                href={routes.evalSet(workflowId)}
+              >
+                Cases
+              </Link>
+            </td>
             <td className="num">{integer(coverage.n_cases)}</td>
           </tr>
           <tr>

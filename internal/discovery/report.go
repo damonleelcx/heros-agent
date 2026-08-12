@@ -23,6 +23,14 @@ type DiscoveryReport struct {
 	DeclarationDiagnostics []Diagnostic     `json:"declaration_diagnostics"`
 	FileDiagnostics        []Diagnostic     `json:"file_diagnostics"`
 	FrameworkSubgraphs     []FrameworkGraph `json:"framework_subgraphs"`
+	// Frontends are the frontends that actually contributed nodes to this run, with the analysis kind
+	// each declares. It answers "why does this graph have no edges?" with the only two facts that can
+	// answer it — which frontend produced the graph, and whether that frontend can produce edges at all.
+	//
+	// 🔴 Only CONTRIBUTING frontends are listed. All seven run on every repository, and recording the
+	// Rust frontend against a Python repository would make the explanation name a language that is not
+	// in the source — a true sentence about the wrong thing, which reads as a false one.
+	Frontends []FrontendRun `json:"frontends"`
 }
 
 type ReportSummary struct {
@@ -60,6 +68,7 @@ type reportBuilder struct {
 	ambiguities     []AmbiguityFlag
 	merges          []MergeRecord
 	bySource        map[string]int
+	frontends       []FrontendRun
 }
 
 func newReportBuilder() *reportBuilder {
@@ -119,6 +128,7 @@ func (rb *reportBuilder) build(wf IRWorkflow, edgesEmitted int, declDiags []Diag
 		DeclarationDiagnostics: nonNilDiags(declDiags),
 		FileDiagnostics:        nonNilDiags(rb.fileDiags),
 		FrameworkSubgraphs:     rb.frameworks,
+		Frontends:              nonNilFrontends(rb.frontends),
 	}
 }
 
@@ -127,6 +137,13 @@ func nonNilDiags(d []Diagnostic) []Diagnostic {
 		return []Diagnostic{}
 	}
 	return d
+}
+
+func nonNilFrontends(f []FrontendRun) []FrontendRun {
+	if f == nil {
+		return []FrontendRun{}
+	}
+	return f
 }
 
 func nonNilMerges(m []MergeRecord) []MergeRecord {

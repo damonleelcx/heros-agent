@@ -243,7 +243,7 @@ func TestM4ExitChecklist(t *testing.T) {
 		if majorOf(labelled.IRVersion) != majorOf(composite.ir.IRVersion) {
 			t.Errorf("MAJOR bumped: %q -> %q", composite.ir.IRVersion, labelled.IRVersion)
 		}
-		gv := BuildGraphView(labelled, res)
+		gv := BuildGraphView(labelled, res, discovery.DiscoveryReport{})
 		if len(gv.Regions) != 2 {
 			t.Errorf("the view does not surface both regions: %d", len(gv.Regions))
 		}
@@ -257,7 +257,7 @@ func TestM4ExitChecklist(t *testing.T) {
 		// The empty state is representable as data.
 		f := fxAmbiguous()
 		er, _ := Classify(ctx, f.ir, f.opts())
-		ev := BuildGraphView(f.ir, er)
+		ev := BuildGraphView(f.ir, er, discovery.DiscoveryReport{})
 		if len(ev.Unclassified) != 1 {
 			t.Errorf("the empty state is not first-class: %+v", ev)
 		}

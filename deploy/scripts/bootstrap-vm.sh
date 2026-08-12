@@ -178,7 +178,7 @@ fi
 # FILE and requires it to equal `api.PublicRoutes()` — the same list it requires the k8s overlay to
 # carry. Adding a public route now fails a test twice, once per substrate, rather than working in
 # production and 404ing on every self-hosted install.
-PLATFORM_PUBLIC_PATHS="/api/v1/whoami /api/v1/run-links /billing/webhook /api/v1/device/authorize /api/v1/device/token /api/v1/auth/password/signin /api/v1/workflow-ir /api/v1/workflow-source /api/v1/workflow-source-discovery /api/v1/proposal-verdicts /api/v1/transform-receipts"
+PLATFORM_PUBLIC_PATHS="/api/v1/whoami /api/v1/run-links /billing/webhook /api/v1/device/authorize /api/v1/device/token /api/v1/auth/password/signin /api/v1/workflow-ir /api/v1/workflow-source /api/v1/workflow-source-discovery /api/v1/proposal-verdicts /api/v1/transform-receipts /api/v1/proposal-generations"
 
 log "Writing deploy/caddy/Caddyfile for $DOMAIN"
 cat > deploy/caddy/Caddyfile <<EOF

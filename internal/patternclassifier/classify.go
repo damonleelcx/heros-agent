@@ -47,6 +47,11 @@ type Result struct {
 	// LLMCalls counts fallback invocations. Asserted to be 0 on a fully rule-covered IR: this is the
 	// determinism guarantee made countable rather than merely claimed.
 	LLMCalls int `json:"llm_calls"`
+	// FallbackConfigured records whether a model was AVAILABLE to be consulted, which LLMCalls cannot
+	// answer: zero calls happens both when no model is wired and when a wired model had nothing to look
+	// at. Those are opposite states — "nothing looked at this region" versus "everything was covered
+	// before the model was needed" — and telling them apart is what the unclassified reasons rest on.
+	FallbackConfigured bool `json:"fallback_configured"`
 }
 
 // LabelsFor returns the labels attached to one subgraph_ref, in stable order.
@@ -84,7 +89,7 @@ func Classify(ctx context.Context, ir *discovery.IR, opts Options) (Result, erro
 	}
 	regions := resolve(proposals, &diags)
 
-	res := Result{}
+	res := Result{FallbackConfigured: opts.Fallback != nil}
 	covered := map[string]bool{}
 	seenSubgraph := map[string]bool{}
 	for _, r := range regions {

@@ -137,6 +137,15 @@ type Generator struct {
 	// majority), which is the same threshold the scorecard flags with — two thresholds for one word
 	// would let the console call a node a bottleneck that the generator does not.
 	Coverage float64
+	// Passes records what each pass FOUND, so the recommendation surface can distinguish a workflow
+	// nobody has analysed from one that was analysed and is healthy. Those are opposites — press the
+	// button versus you are done — and before this the surface rendered both as "Nothing is pending."
+	//
+	// Optional, and the ONE place in this struct where that is the right answer: a deployment with no
+	// pass store still generates proposals correctly, and the surface reading no row says "never
+	// analysed", which is true of what it can see. Compare Blobs above, which is required because a
+	// proposal recorded without its spec is a row that can never become a diff.
+	Passes proposalstore.PassStore
 	// Now is injectable so a pass is deterministic under test.
 	Now func() time.Time
 }
@@ -148,12 +157,54 @@ func (g *Generator) now() time.Time {
 	return time.Now().UTC()
 }
 
-// Generate runs one pass for a tenant's workflow.
+// Generate runs one pass for a tenant's workflow and RECORDS WHAT IT FOUND.
 //
 // It is explicit rather than scheduled: generating a proposal reads a customer's discovered graph and
 // writes rows that a delivery pipeline can later act on, and a background loop that does that on its
 // own schedule is harder to reason about than a call somebody made.
+//
+// 🔴 The recording is here, wrapping the pass, rather than beside each of the nine `return res.with(...)`
+// paths. Nine call sites is nine chances for the next state to be added without one — and the states
+// that matter most are exactly the ones that write no proposal row, so a missed recording is invisible
+// until a customer reads "Nothing is pending." over a workflow that has never been analysed.
 func (g *Generator) Generate(ctx context.Context, tenantID, workflowID string) (Result, error) {
+	res, err := g.generate(ctx, tenantID, workflowID)
+	if err != nil {
+		// 🚫 A pass that FAILED records nothing. An error means the platform could not read the store —
+		// writing a state row for it would turn an outage into a finding about the customer's workflow,
+		// which is the same conflation this recording exists to remove, one layer up.
+		return res, err
+	}
+	if perr := g.recordPass(ctx, res); perr != nil {
+		// 🔴 Loud, not swallowed. The tempting alternative — return the result and drop the write — leaves
+		// the surface reading no row, which it renders as "never analysed": an outage reported as a fact
+		// about the customer's workflow, which is the exact conflation this recording exists to remove.
+		//
+		// Safe to fail here because a pass is re-runnable: proposal ids are derived from (tenant,
+		// workflow, candidate) and the sink upserts, so running it again writes the same rows.
+		return res, fmt.Errorf("proposalgen: the pass found %q and its record could not be written: %w",
+			res.State, perr)
+	}
+	return res, nil
+}
+
+// recordPass persists the pass's state and sentence, so a surface read from another process minutes
+// later can tell "never analysed" from "analysed and found nothing".
+func (g *Generator) recordPass(ctx context.Context, res Result) error {
+	if g.Passes == nil {
+		return nil
+	}
+	return g.Passes.PutPass(ctx, proposalstore.Pass{
+		TenantID:   res.TenantID,
+		WorkflowID: res.WorkflowID,
+		State:      string(res.State),
+		Detail:     res.Detail,
+		Proposals:  len(res.ProposalIDs),
+		RanAtMS:    g.now().UnixMilli(),
+	})
+}
+
+func (g *Generator) generate(ctx context.Context, tenantID, workflowID string) (Result, error) {
 	res := Result{TenantID: tenantID, WorkflowID: workflowID}
 
 	runs, err := g.Runs.ForWorkflow(tenantID, workflowID)

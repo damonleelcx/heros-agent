@@ -21,6 +21,11 @@ const (
 	CodePackagePanic        = "PACKAGE_PANIC"
 	CodeFrameworkReaderErr  = "FRAMEWORK_READER_ERROR"
 	CodeLanguageUnsupported = "LANGUAGE_UNSUPPORTED"
+	// CodeFrontendSyntactic records that a frontend which CANNOT emit edges produced part of this
+	// graph. It is `info` because nothing failed — but it is the difference between "this workflow's
+	// calls are independent" and "nobody looked", and a surface that cannot tell those apart is
+	// asserting the first while only knowing the second.
+	CodeFrontendSyntactic = "FRONTEND_SYNTACTIC"
 
 	// §4 extraction ambiguity codes (unresolved fields → P5 dynamic-trace candidates, FR8 / doc 08).
 	CodeModelUnresolved        = "MODEL_UNRESOLVED"

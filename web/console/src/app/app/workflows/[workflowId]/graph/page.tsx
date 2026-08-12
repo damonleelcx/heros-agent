@@ -1,4 +1,11 @@
-import type { GraphView, ViewNode, ViewEdge, ViewRegion, ViewLabel } from "@/lib/types.generated";
+import type {
+  GraphView,
+  ViewNode,
+  ViewEdge,
+  ViewRegion,
+  ViewLabel,
+  ViewTopology,
+} from "@/lib/types.generated";
 import { load } from "@/lib/view";
 import {
   PageFrame,
@@ -11,6 +18,7 @@ import {
   Stat,
   Stats,
   Card,
+  Banner,
 } from "@/components/primitives";
 import { Figure } from "@/components/figure";
 import { percent, integer, plural } from "@/lib/format";
@@ -81,14 +89,13 @@ function GraphBody({ view }: { view: GraphView }) {
         <Stats>
           <Stat label="Nodes" value={integer(nodes.length)} note="call sites found" />
           <Stat label="Edges" value={integer(edges.length)} note="dependencies mapped" />
+          {/* The sentence is resolved on the platform (patternclassifier.llmCallsNote). It used to be
+              computed here from the count alone, which got the most common case exactly backwards:
+              zero calls over a graph with zero labels read as "fully rule-covered". */}
           <Stat
             label={`LLM fallback ${plural(view.llm_calls, "call", "calls")}`}
             value={integer(view.llm_calls)}
-            note={
-              view.llm_calls === 0
-                ? "Fully rule-covered — no model was consulted"
-                : "a model was consulted to classify this graph"
-            }
+            note={view.llm_calls_note}
           />
         </Stats>
       </Section>
@@ -101,6 +108,13 @@ function GraphBody({ view }: { view: GraphView }) {
               call sites.
             </p>
           </Empty>
+        ) : view.topology ? (
+          /* 🔴 Nodes and no edges. The positional drawing is WITHHELD rather than drawn, because a
+             column of disconnected boxes looks like a finding — "these calls are independent" — and
+             for a syntactic frontend that is a claim nobody made. The statement and its cause take
+             its place; the node list stays, as a table, so nothing that was readable stops being
+             readable. */
+          <NoTopology topology={view.topology} nodes={nodes} edges={edges} />
         ) : (
           <Figure
             title="Nodes positioned by layer and order, with region rectangles beneath them"
@@ -112,16 +126,23 @@ function GraphBody({ view }: { view: GraphView }) {
             </div>
           </Figure>
         )}
-        <GraphLegend />
+        {view.topology ? null : <GraphLegend />}
       </Section>
 
-      <Section title="Patterns" aside={`${regions.length} labelled · ${unclassified.length} not yet`}>
+      <Section title="Patterns" aside={`${regions.length} labelled · ${unclassified.length} unlabelled`}>
         {regions.length === 0 && unclassified.length === 0 ? (
-          <Empty title="No region in this workflow carries a label yet.">
+          <Empty title="This graph was not partitioned into regions at all.">
+            {/* Not the same as "regions exist and none is labelled" — that case renders cards below,
+                each naming its own cause. This is the case where there was nothing to partition. */}
             <p>
-              That is a state, not an error. It does not mean the workflow implements no patterns — it
-              means no structural signature matched and, where a model was consulted, nothing it
-              returned was in the taxonomy.
+              That is a state, not an error, and it does not mean the workflow implements no patterns.
+            </p>
+            <p>
+              {view.topology
+                ? "A region is a connected subgraph, and this graph has no edges — so there is nothing " +
+                  "for the classifier to partition. The statement above says why there are no edges."
+                : "The classifier produced neither a labelled region nor an unlabelled one, which means " +
+                  "the graph carries no nodes the partitioner could group."}
             </p>
           </Empty>
         ) : (
@@ -153,6 +174,66 @@ function GraphBody({ view }: { view: GraphView }) {
         </Section>
       ) : null}
     </>
+  );
+}
+
+/**
+ * The zero-edge state: the statement, its cause, and the node list.
+ *
+ * Nothing here is written in this file. `sentence` is assembled on the platform from the discovery
+ * report's frontend records, and the table below it names each contributing frontend with the analysis
+ * kind that frontend declares. The day a frontend learns to emit edges, the sentence changes with no
+ * edit here — which is the difference between an explanation and a caption.
+ */
+function NoTopology({
+  topology,
+  nodes,
+  edges,
+}: {
+  topology: ViewTopology;
+  nodes: ViewNode[];
+  edges: ViewEdge[];
+}) {
+  const frontends = topology.frontends ?? [];
+  return (
+    <div className="flex flex-col gap-4">
+      <Banner tone="warn" title="This graph has no edges, so no dependency drawing is shown.">
+        <p>{topology.sentence}</p>
+        <p>
+          Everything on this console that reads topology — the pattern detectors, the metric sets they
+          dispatch, cost attribution and proposal admissibility — has nothing to read for this workflow.
+          That is why those surfaces are sparse, and it is one cause rather than several.
+        </p>
+      </Banner>
+      {frontends.length > 0 ? (
+        <DataTable
+          caption="The frontends that produced this graph, and how deeply each analyses"
+          columns={[
+            { key: "language", label: "Language" },
+            { key: "kind", label: "Analysis" },
+            { key: "nodes", label: "Nodes", numeric: true },
+            { key: "edges", label: "Edges", numeric: true },
+          ]}
+        >
+          <tbody>
+            {frontends.map((f) => (
+              <tr key={f.language}>
+                <td className="mono">{f.language}</td>
+                <td>
+                  <Chip tone={f.analysis_kind === "typed" ? "ok" : "unknown"}>{f.analysis_kind}</Chip>
+                </td>
+                <td className="num">{integer(f.nodes)}</td>
+                <td className="num">{integer(f.edges)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </DataTable>
+      ) : null}
+      {/* The node list survives the withheld drawing. A reader who could see the call sites yesterday
+          can still see them, and the reason the picture is gone is stated above rather than implied by
+          its absence. */}
+      <GraphTable nodes={nodes} edges={edges} />
+    </div>
   );
 }
 
@@ -415,17 +496,31 @@ function LabelRow({ label }: { label: ViewLabel }) {
   );
 }
 
+/**
+ * An unlabelled region, with the ONE cause that explains it.
+ *
+ * 🔴 The old copy covered all four causes with one sentence beginning "No structural signature matched
+ * this region, and either…". The four have four different next actions — push a revision a typed
+ * frontend can read, nothing at all, configure a model, look at what the model was asked — and an
+ * "either/or" sentence gives a reader none of them. The cause and its sentence are both resolved on the
+ * platform, so this component cannot invent a fifth.
+ */
 function UnclassifiedCard({ region }: { region: ViewRegion }) {
   return (
     <Card className="flex flex-col gap-3 border-dashed">
       <p className="flex flex-wrap items-center gap-2">
         <span className="mono text-xs text-muted-foreground">{region.subgraph_id}</span>
-        <Chip tone="unknown">not yet classified</Chip>
+        <Chip tone="unknown">unlabelled</Chip>
+        {region.reason ? (
+          <Chip tone="info" title="why this region carries no label">
+            {region.reason.replace(/_/g, " ")}
+          </Chip>
+        ) : null}
       </p>
+      {region.reason_sentence ? <p className="hint">{region.reason_sentence}</p> : null}
       <p className="hint">
-        No structural signature matched this region, and either no model was consulted or the fallback
-        returned nothing in the taxonomy. This region is <strong>unlabelled</strong> — which is not the
-        same as &ldquo;no pattern&rdquo;.
+        Unlabelled is not the same as &ldquo;no pattern&rdquo;: it is a statement about what has been
+        established, not about what this code does.
       </p>
     </Card>
   );

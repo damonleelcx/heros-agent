@@ -1647,6 +1647,145 @@
       ],
       "type": "object"
     },
+    "EvalCaseView": {
+      "properties": {
+        "case_id": {
+          "type": "string"
+        },
+        "family": {
+          "type": "string"
+        },
+        "indecisive": {
+          "type": "boolean"
+        },
+        "oracle": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "case_id",
+        "family",
+        "indecisive",
+        "oracle"
+      ],
+      "type": "object"
+    },
+    "EvalSetView": {
+      "description": "Response of GET /api/v1/workflows/{workflow_id}/eval-set",
+      "properties": {
+        "cases": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/EvalCaseView"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "families": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/FamilyCount"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "indecisive_reasons": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "n_cases": {
+          "type": "integer"
+        },
+        "n_indecisive": {
+          "type": "integer"
+        },
+        "n_oracle": {
+          "type": "integer"
+        },
+        "sentence": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "unattributed": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "uncovered_nodes": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "vacuous_dimensions": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "workflow_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "cases",
+        "families",
+        "indecisive_reasons",
+        "n_cases",
+        "n_indecisive",
+        "n_oracle",
+        "sentence",
+        "state",
+        "unattributed",
+        "uncovered_nodes",
+        "vacuous_dimensions",
+        "workflow_id"
+      ],
+      "type": "object"
+    },
     "EvidenceView": {
       "properties": {
         "kind": {
@@ -1698,6 +1837,21 @@
       ],
       "type": "object"
     },
+    "FamilyCount": {
+      "properties": {
+        "cases": {
+          "type": "integer"
+        },
+        "family": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "cases",
+        "family"
+      ],
+      "type": "object"
+    },
     "GraphView": {
       "description": "Response of GET /api/v1/workflows/{workflow_id}/pattern-graph",
       "properties": {
@@ -1733,6 +1887,9 @@
         "llm_calls": {
           "type": "integer"
         },
+        "llm_calls_note": {
+          "type": "string"
+        },
         "nodes": {
           "anyOf": [
             {
@@ -1762,6 +1919,16 @@
         "taxonomy_version": {
           "type": "string"
         },
+        "topology": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ViewTopology"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "unclassified": {
           "anyOf": [
             {
@@ -1783,6 +1950,7 @@
         "edges",
         "ir_version",
         "llm_calls",
+        "llm_calls_note",
         "nodes",
         "regions",
         "taxonomy_version",
@@ -2313,6 +2481,29 @@
       ],
       "type": "object"
     },
+    "PassView": {
+      "properties": {
+        "detail": {
+          "type": "string"
+        },
+        "proposals": {
+          "type": "integer"
+        },
+        "ran_at_ms": {
+          "type": "integer"
+        },
+        "state": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "detail",
+        "proposals",
+        "ran_at_ms",
+        "state"
+      ],
+      "type": "object"
+    },
     "PaymentMethodView": {
       "properties": {
         "brand": {
@@ -2544,6 +2735,16 @@
         },
         "error": {
           "type": "string"
+        },
+        "pass": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PassView"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "recommendations": {
           "anyOf": [
@@ -3606,6 +3807,29 @@
       ],
       "type": "object"
     },
+    "ViewFrontend": {
+      "properties": {
+        "analysis_kind": {
+          "type": "string"
+        },
+        "edges": {
+          "type": "integer"
+        },
+        "language": {
+          "type": "string"
+        },
+        "nodes": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "analysis_kind",
+        "edges",
+        "language",
+        "nodes"
+      ],
+      "type": "object"
+    },
     "ViewLabel": {
       "properties": {
         "candidate": {
@@ -3754,6 +3978,12 @@
             }
           ]
         },
+        "reason": {
+          "type": "string"
+        },
+        "reason_sentence": {
+          "type": "string"
+        },
         "subgraph_id": {
           "type": "string"
         }
@@ -3762,6 +3992,35 @@
         "labels",
         "node_ids",
         "subgraph_id"
+      ],
+      "type": "object"
+    },
+    "ViewTopology": {
+      "properties": {
+        "frontends": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/ViewFrontend"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason": {
+          "type": "string"
+        },
+        "sentence": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "frontends",
+        "reason",
+        "sentence"
       ],
       "type": "object"
     },
@@ -3805,6 +4064,9 @@
     },
     "DeliveriesView": {
       "$ref": "#/$defs/DeliveriesView"
+    },
+    "EvalSetView": {
+      "$ref": "#/$defs/EvalSetView"
     },
     "GraphView": {
       "$ref": "#/$defs/GraphView"

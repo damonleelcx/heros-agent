@@ -45,15 +45,58 @@ type ProposalsSource interface {
 type Surface struct {
 	WorkflowID      string `json:"workflow_id"`
 	AutomationLevel string `json:"automation_level"` // "advisory" | "assisted"
-	// State is the first-class surface state (§6.5): "ready" | "empty" | "verifying" | "error".
+	// State is the first-class surface state (§6.5):
+	// "ready" | "empty" | "verifying" | "error" | "never_analysed".
+	//
+	// 🔴 `empty` is RESERVED for "a generation pass ran and found nothing". It used to mean that AND
+	// "nobody has ever run a pass", and the console rendered both as "Nothing is pending." — one reader
+	// told to stop, the other told to stop when they should have pressed the button. `never_analysed` is
+	// the second state, and the two are never merged again.
 	State string `json:"state"`
 	Error string `json:"error,omitempty"`
+	// Pass is what the last generation pass found: its closed state, the sentence the generator wrote,
+	// and when it ran. Nil means no pass has been recorded — which is what `never_analysed` reports.
+	//
+	// The sentence is the GENERATOR's, carried through rather than re-derived. "Your newest linked run
+	// is at revision X and your graph is at Y" is a fact about a pass that happened; a console cannot
+	// reconstruct it without running one.
+	Pass *PassView `json:"pass,omitempty"`
 	// Recommendations are gate-passing proposals, in ranked (verified-delta) order.
 	Recommendations []Card `json:"recommendations"`
 	// Withheld are gate-failed / build-failed proposals, clearly separated (§6.2) — never mixed in.
 	Withheld []Card `json:"withheld"`
 	// Trend is the across-variants-over-time view (§6.3).
 	Trend verification.TrendView `json:"trend"`
+}
+
+// SurfaceState values. A closed set the console switches on; an unrecognised one renders as unknown
+// rather than falling through to a plausible sentence.
+const (
+	// SurfaceReady: proposals exist and at least one passed its gate.
+	SurfaceReady = "ready"
+	// SurfaceEmpty: A PASS RAN AND FOUND NOTHING. Reserved — see Surface.State.
+	SurfaceEmpty = "empty"
+	// SurfaceVerifying: proposals exist and are waiting on a measurement the customer's CI performs.
+	SurfaceVerifying = "verifying"
+	// SurfaceError: the surface could not be read. Not a statement about the workflow.
+	SurfaceError = "error"
+	// SurfaceNeverAnalysed: no generation pass has ever run for this workflow. The opposite of
+	// SurfaceEmpty in terms of what the reader should do next.
+	SurfaceNeverAnalysed = "never_analysed"
+)
+
+// PassView is one generation pass as the console reads it.
+type PassView struct {
+	// State is proposalgen.State, verbatim — the closed value, so a console can branch on it.
+	State string `json:"state"`
+	// Detail is the sentence the generator wrote for that state.
+	Detail string `json:"detail"`
+	// Proposals is how many rows THAT pass recorded — not how many exist now, which includes every
+	// earlier pass's output. A surface that showed the second under the first's sentence would report
+	// last week's work as this pass's finding.
+	Proposals int `json:"proposals"`
+	// RanAtMS is epoch milliseconds.
+	RanAtMS int64 `json:"ran_at_ms"`
 }
 
 // Card is one proposal rendered for the surface: the diagnosis + failing-case evidence + reviewable

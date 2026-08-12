@@ -99,10 +99,10 @@ func main() {
 		}
 	}
 
-	path := *irPath
+	path, reportPath := *irPath, ""
 	if path == "" {
 		var err error
-		path, err = discoverInto(*repo)
+		path, reportPath, err = discoverInto(*repo)
 		if err != nil {
 			log.Fatalf("discovery over %s: %v", *repo, err)
 		}
@@ -120,7 +120,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("write labels back into the IR: %v", err)
 	}
-	view := patternclassifier.BuildGraphView(labelled, result)
+	view := patternclassifier.BuildGraphView(labelled, result, loadReport(reportPath))
 
 	// Register the console's credential → tenant, so a tenant-scoped read model (the studio matrix's
 	// bindings) resolves a principal. The subject-keyed graph never needed one; the matrix does, because
@@ -215,7 +215,7 @@ func workflowIDIn(path string) (string, error) {
 // It shells out to cmd/discover rather than calling the package directly, so what this command serves
 // is byte-for-byte what a customer running the CLI would get. A second in-process code path would be
 // a second thing that could differ from the shipped one.
-func discoverInto(repo string) (string, error) {
+func discoverInto(repo string) (irPath, reportPath string, err error) {
 	out := filepath.Join(os.TempDir(), "p9hermes-ir.json")
 	report := filepath.Join(os.TempDir(), "p9hermes-report.json")
 	cmd := exec.Command("go", "run", "./cmd/discover",
@@ -223,9 +223,30 @@ func discoverInto(repo string) (string, error) {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		return "", err
+		return "", "", err
 	}
-	return out, nil
+	return out, report, nil
+}
+
+// loadReport reads the discovery run report beside the IR.
+//
+// 🔴 A missing or unreadable report is NOT an error here and is NOT silently equivalent to a healthy
+// one: the zero value flows into BuildGraphView, which renders "discovery recorded no contributing
+// frontend" rather than inventing an explanation. That is the whole reason the report is a value
+// parameter — see BuildGraphView.
+func loadReport(path string) discovery.DiscoveryReport {
+	var rep discovery.DiscoveryReport
+	if path == "" {
+		return rep
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return discovery.DiscoveryReport{}
+	}
+	if err := json.Unmarshal(raw, &rep); err != nil {
+		return discovery.DiscoveryReport{}
+	}
+	return rep
 }
 
 // loadAndClassify reads the IR and classifies it, returning a human-readable account of what was

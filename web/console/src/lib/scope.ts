@@ -98,6 +98,10 @@ export function scoped(session: Session) {
     // not invent one — the board response carries `profiles` for exactly that reason.
     board: (workflowId: string, profile?: string) =>
       `/api/v1/workflows/${encode(workflowId)}/eval-board` + (profile ? `?profile=${encode(profile)}` : ""),
+    // P30 §1.12 · the eval set behind the board's denominator. A separate read rather than a wider
+    // board response: the board is loaded on every visit and this list is not, and folding the two
+    // would make every board render carry a table most readers never open.
+    evalSet: (workflowId: string) => `/api/v1/workflows/${encode(workflowId)}/eval-set`,
 
     // ── P4.5 · attribution scorecard ──────────────────────────────────────
     scorecard: (variantId: string) => `/api/v1/variants/${encode(variantId)}/scorecard`,
@@ -106,6 +110,10 @@ export function scoped(session: Session) {
     proposals: (workflowId: string) => `/api/v1/workflows/${encode(workflowId)}/proposals`,
     openPR: (workflowId: string, proposalId: string) =>
       `/api/v1/workflows/${encode(workflowId)}/proposals/${encode(proposalId)}/open-pr`,
+    // P30 §1.8 · trigger a generation pass. FLAT, and takes no argument, because the workflow id
+    // travels in the request BODY — which is what lets the route be published as an `Exact` ingress
+    // rule instead of a `Prefix` under /api/v1/workflows/ that would publish eight siblings with it.
+    generateProposals: () => `/api/v1/proposal-generations`,
 
     // ── P7 · plan, entitlements, spend ────────────────────────────────────
     // The ONLY route keyed by the tenant itself — and it takes the session's tenant, which is the

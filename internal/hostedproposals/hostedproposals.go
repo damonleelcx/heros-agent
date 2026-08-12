@@ -38,15 +38,30 @@ type ProposalReader interface {
 	ForWorkflow(ctx context.Context, tenantID, workflowID string) ([]proposalstore.Scored, error)
 }
 
-// Source implements api.ProposalsSource over the durable store.
-type Source struct {
-	store ProposalReader
-	diffs DiffReader
+// PassReader answers "what did the last generation pass find for this workflow?".
+//
+// ok=false means NO PASS HAS EVER RUN, which is a different answer from "a pass ran and found nothing"
+// and is the whole reason this read exists. The error is a third answer again.
+type PassReader interface {
+	LastPass(ctx context.Context, tenantID, workflowID string) (proposalstore.Pass, bool, error)
 }
 
-// NewSource returns the hosted recommendation surface. diffs may be nil.
-func NewSource(store ProposalReader, diffs DiffReader) *Source {
-	return &Source{store: store, diffs: diffs}
+// Source implements api.ProposalsSource over the durable store.
+type Source struct {
+	store  ProposalReader
+	diffs  DiffReader
+	passes PassReader
+}
+
+// NewSource returns the hosted recommendation surface. diffs and passes may be nil.
+//
+// 🔴 What a nil `passes` costs, stated rather than defaulted away: with no pass reader, a workflow with
+// no proposals reports `never_analysed`, because that is the honest reading of what this surface can
+// see. It does NOT report `empty` — `empty` asserts that a pass ran, and a deployment that cannot read
+// passes has no grounds for that assertion. The safe direction is the one that tells a reader to press
+// the button, not the one that tells them they are finished.
+func NewSource(store ProposalReader, diffs DiffReader, passes PassReader) *Source {
+	return &Source{store: store, diffs: diffs, passes: passes}
 }
 
 // Surface returns one tenant's recommendation surface for a workflow.
@@ -65,7 +80,7 @@ func (s *Source) Surface(tenantID, workflowID string) (api.Surface, bool) {
 		// precisely so a database outage cannot render as "we looked and found nothing".
 		return api.Surface{
 			WorkflowID: workflowID,
-			State:      "error",
+			State:      api.SurfaceError,
 			Error:      "The recommendation surface could not be read. This is not a statement about your workflow.",
 			// Both lists are non-nil so the console renders two empty sections rather than crashing on a
 			// null — and so an error surface is visibly an error rather than a quiet zero.
@@ -80,10 +95,11 @@ func (s *Source) Surface(tenantID, workflowID string) (api.Surface, bool) {
 		// request on the customer's behalf, and this deployment cannot: it compiles no diff. Declaring
 		// `assisted` would light the Open-PR affordance on every card and every click would fail.
 		AutomationLevel: string(verification.Advisory),
-		State:           "ready",
+		State:           api.SurfaceReady,
 		Recommendations: []api.Card{},
 		Withheld:        []api.Card{},
 	}
+	out.Pass = s.lastPass(tenantID, workflowID)
 
 	for _, sc := range scored {
 		card := s.cardFor(sc)
@@ -100,16 +116,40 @@ func (s *Source) Surface(tenantID, workflowID string) (api.Surface, bool) {
 		return out.Recommendations[i].Delta > out.Recommendations[j].Delta
 	})
 
-	if len(scored) == 0 {
-		out.State = "empty"
-	} else if len(out.Recommendations) == 0 && anyAwaitingVerdict(scored) {
+	switch {
+	case len(scored) == 0 && out.Pass == nil:
+		// 🔴 The state that did not exist. No proposals AND no recorded pass means nobody has ever asked
+		// this platform to look — the opposite of `empty`, which asserts that a pass ran and found
+		// nothing. Both used to render "Nothing is pending."
+		out.State = api.SurfaceNeverAnalysed
+	case len(scored) == 0:
+		// A pass ran and recorded no proposals. `empty` now means exactly that, and the generator's own
+		// sentence on out.Pass says WHICH of the eight ways it came to be empty.
+		out.State = api.SurfaceEmpty
+	case len(out.Recommendations) == 0 && anyAwaitingVerdict(scored):
 		// `verifying` rather than `empty`: proposals exist and are waiting on a measurement the customer's
 		// CI performs. Reporting that as empty would tell a customer the product found nothing on a day it
 		// found several things and is waiting for them.
-		out.State = "verifying"
+		out.State = api.SurfaceVerifying
 	}
 	out.Trend = trendFor(scored)
 	return out, true
+}
+
+// lastPass reads the recorded pass, or nil when there is none to read.
+//
+// A read FAILURE also returns nil, and the consequence is deliberate: the surface reports
+// `never_analysed` rather than `empty`. Both are wrong when the store is down, and only one of them
+// tells the reader to do something that will make the truth visible.
+func (s *Source) lastPass(tenantID, workflowID string) *api.PassView {
+	if s.passes == nil {
+		return nil
+	}
+	p, ok, err := s.passes.LastPass(context.Background(), tenantID, workflowID)
+	if err != nil || !ok {
+		return nil
+	}
+	return &api.PassView{State: p.State, Detail: p.Detail, Proposals: p.Proposals, RanAtMS: p.RanAtMS}
 }
 
 // cardFor renders one stored proposal.
