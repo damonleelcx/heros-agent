@@ -50,6 +50,15 @@ type HerosAgentSource interface {
 	NarrativeFor(ctx context.Context, tenantID, workflowID string) (string, bool, error)
 }
 
+// SetAgentReadiness wires the agent's `/readyz` entry (task 9.1).
+//
+// Separate from MountHerosAgent, and the separation is the point: a deployment can serve the definition
+// read without being able to resolve a credential, and one that reported readiness from the fact that
+// the surface is mounted would be asserting from configuration — which is precisely what 9.1 forbids.
+func (s *Server) SetAgentReadiness(fn func(context.Context) herosagent.Readiness) {
+	s.agentReadiness = fn
+}
+
 // MountHerosAgent registers the definition read. The INGEST half needs no route of its own — it rides
 // the structure ingest, which is the whole of task 7.3.
 // The path is written as a LITERAL rather than as `"GET "+runlink.AgentDefinitionPath`, matching

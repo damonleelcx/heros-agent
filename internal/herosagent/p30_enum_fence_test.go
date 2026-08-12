@@ -43,6 +43,13 @@ func TestEveryCodeAndEventComesFromTheCentralEnumeration(t *testing.T) {
 	for _, p := range Placements() {
 		reserved[string(p)] = true
 	}
+	// 🔴 And the readiness vocabulary, whose collision with Code is worse: `disabled`,
+	// `credential_unresolved` and `no_active_definition` are each BOTH a Code and a ReadyState. One
+	// answers "why did this inference not happen" and the other "what would happen if one ran now" —
+	// two questions, one string, and a literal at a call site belongs to neither.
+	for _, r := range ReadyStates() {
+		reserved[string(r)] = true
+	}
 	for _, r := range []AbstentionReason{
 		AbstainBelowFloor, AbstainNoCandidate, AbstainOutOfVocabulary, AbstainUnknownNode,
 		AbstainFrontendOwns,

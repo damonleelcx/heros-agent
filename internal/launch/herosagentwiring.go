@@ -3,6 +3,9 @@ package launch
 import (
 	"context"
 	"errors"
+	"strings"
+
+	"github.com/heros-foreal/agentd/internal/providergateway"
 
 	"github.com/heros-foreal/agentd/internal/registry"
 )
@@ -67,4 +70,35 @@ func (m registryModels) Resolve(ctx context.Context, modelRef string) (string, s
 		return "", "", false, err
 	}
 	return entry.Spec.Provider, entry.Spec.ModelID, true, nil
+}
+
+// secretsResolver adapts the gateway's own Secrets source onto the readiness check's resolver.
+//
+// 🔴 IT PERFORMS THE RESOLUTION. That is the whole of task 9.1's "not asserted from configuration":
+// this asks the same source, for the same provider, that the runner will ask at use — so a reference
+// pointing at a secret nobody provisioned reports `credential_unresolved` here rather than looking
+// identical to a working one until the first customer analysis.
+//
+// 🚫 It discards the credential immediately. `Resolve` returns an error or nil and never the value: a
+// readiness surface that held one would be a readiness surface that could leak one, and nothing on
+// `/readyz` needs it.
+type secretsResolver struct{ secrets providergateway.Secrets }
+
+func (r secretsResolver) Resolve(ctx context.Context, provider string) error {
+	if r.secrets == nil {
+		return errors.New("this deployment has no configured secrets source, so no provider credential " +
+			"can be resolved at all")
+	}
+	if strings.TrimSpace(provider) == "" {
+		return errors.New("the active definition binds no provider name")
+	}
+	_, err := r.secrets.Credential(ctx, provider)
+	return err
+}
+
+func (r secretsResolver) Describe() string {
+	if r.secrets == nil {
+		return "none"
+	}
+	return string(r.secrets.Describe().Kind)
 }

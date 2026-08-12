@@ -263,20 +263,37 @@ Each binds to its existing vocabulary. 🚫 No axis is a text box. All params va
 
 ## 9. DevOps
 
-- [ ] 9.1 `/readyz` reports `disabled | ready | credential_unresolved | capped`, resolved from what
+- [x] 9.1 `/readyz` reports `disabled | ready | credential_unresolved | capped`, resolved from what
       inference actually uses — 🚫 not asserted from configuration.
-- [ ] 9.2 Caps enforced **before** the provider call; reaching one emits an event.
-- [ ] 9.3 Off by default fleet-wide; enablement per tenant.
-      🔴 §7 built the durable half (migration 0047 + `PGPlacementStore`) because the placement gate had
-      nothing to read. What is still §9's is the OPERATOR half: `adminops.SetPlacement` writes through
-      `AgentSpendSource`, which is nil on every deployed path, so no console control reaches the new
-      store yet. Until that is wired, every tenant reads `disabled` and `heros analyse` refuses — which
-      is the correct posture and is NOT the same as the feature working.
-- [ ] 9.4 Rollout: internal tenant → one design partner → opt-in → default-on, rehearsal gate between
+      The credential is RESOLVED through the same `providergateway.Secrets` the runner calls at use, so
+      a reference pointing at a secret nobody provisioned reports the fault instead of looking healthy.
+      🔴 The entry is top-level, NOT in `components`: every entry there is a gate, and none of the
+      agent's states may take a deployment down — `disabled` is the default and `capped` is a ceiling
+      working. A fifth state, `no_active_definition`, separates "nobody enabled" from "somebody enabled
+      and there is nothing to run".
+- [x] 9.2 Caps enforced **before** the provider call; reaching one emits an event.
+      Migration 0048 gives ceilings a home (the fleet cap under a `tenant_id = ''` sentinel; a zero is
+      refused at the schema because it is ambiguous between "spend nothing" and "no limit"). The check
+      sits AFTER the cache read — a stored answer costs nothing, and refusing it would make the ceiling
+      an availability limit rather than a spend limit — and BEFORE the residue and the model.
+- [x] 9.3 Off by default fleet-wide; enablement per tenant.
+      `AgentSpendSource` was nil on every deployed path, so §6's placement column and cap editors wrote
+      to nothing. Wired through an adapter in `adminlaunch`, the one package that sees both vocabularies.
+- [x] 9.4 Rollout: internal tenant → one design partner → opt-in → default-on, rehearsal gate between
       each. 🚫 No stage verified by hand.
-- [ ] 9.5 Disabling returns every surface to rule-derived facts; stored inferences retained and marked
+      `Advance` reads the evidence itself — it counts the placement table, reads the active definition's
+      rehearsal state and checks the fleet ceiling — and names the ONE precondition that failed.
+      🔴 The gate is between EVERY pair, not only the first: a republished definition that reached one
+      rung has its own rehearsal to pass, or an unrehearsed one reaches the fleet a rung at a time.
+      Retreating is never gated. `make agent-rollout` asks the question; it changes nothing.
+- [x] 9.5 Disabling returns every surface to rule-derived facts; stored inferences retained and marked
       stale, not deleted (pending Q5).
-- [ ] 9.6 Repeatable commands into the Makefile — 🚫 no throwaway shell.
+      Q5's assumed answer implemented rather than deferred — deferring means the first tenant to disable
+      gets delete-by-omission. The mark is written when the placement changes and 🚫 is NOT computed at
+      read time, which would erase the fact that a gap existed the moment somebody re-enabled.
+- [x] 9.6 Repeatable commands into the Makefile — 🚫 no throwaway shell.
+      `make agent-status` (reads the LIVE signal, exits non-zero only on a fault), `make agent-rollout`,
+      `make agent-drills` — which defeats each of seven fences, confirms it goes red, and restores.
 
 ## 10. QA — every fence proved red before it is trusted
 

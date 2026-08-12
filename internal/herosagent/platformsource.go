@@ -48,6 +48,8 @@ type PlatformSource struct {
 	inferences InferenceStore
 	budget     Budget
 	floor      float64
+	caps       *CapChecker
+	meter      SpendReader
 }
 
 type activeReader interface {
@@ -69,6 +71,12 @@ type PlatformSourceConfig struct {
 	Floor      float64
 	Budget     Budget
 	NowMS      func() int64
+	// Caps is the ceiling checker a platform-side runner enforces before every provider call (9.2).
+	// Nil means NO CEILING — reported by `Readiness` rather than hidden, because a deployment with
+	// unwired caps looks identical on every other signal to one whose caps are merely generous.
+	Caps *CapChecker
+	// Meter records what a run spent, so the next check reads it.
+	Meter SpendReader
 }
 
 // NewPlatformSource wires the platform half.
@@ -97,6 +105,7 @@ func NewPlatformSource(cfg PlatformSourceConfig) (*PlatformSource, error) {
 		placements: cfg.Placements, versions: cfg.Versions, active: cfg.Versions,
 		prompts: cfg.Prompts, models: cfg.Models, inferences: cfg.Inferences,
 		ingester: ing, budget: cfg.Budget, floor: cfg.Floor,
+		caps: cfg.Caps, meter: cfg.Meter,
 	}, nil
 }
 
@@ -163,6 +172,20 @@ func (p *PlatformSource) ActiveDefinition(ctx context.Context) (runlink.AgentDef
 // Accept ingests a customer-placed submission.
 func (p *PlatformSource) Accept(ctx context.Context, sub Submission) (IngestResult, error) {
 	return p.ingester.Accept(ctx, sub)
+}
+
+// RunnerOptions returns the options a platform-side runner should be built with, so the ceiling and
+// the meter reach it from the same wiring that reported readiness about them.
+//
+// 🔴 A method rather than two exported fields, because the cap checker and the meter must travel
+// TOGETHER: `NewCapChecker` already refuses a checker with no meter ("a ceiling with nothing to measure
+// against is a number nobody is under"), and handing a runner one without the other would reintroduce
+// exactly that at the next layer up.
+func (p *PlatformSource) RunnerOptions() []RunnerOption {
+	if p.caps == nil || p.meter == nil {
+		return nil
+	}
+	return []RunnerOption{WithCaps(p.caps, p.meter)}
 }
 
 // NarrativeFor returns the agent's prose about one workflow (task 8.2).

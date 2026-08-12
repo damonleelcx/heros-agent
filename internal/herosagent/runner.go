@@ -165,6 +165,10 @@ type Stored struct {
 	TokensIn    int
 	TokensOut   int
 	CreatedAtMS int64
+	// StaleReason marks an inference nothing is maintaining any more (task 9.5). EMPTY means NOT
+	// STALE. 🚫 The facts are kept and still attributed — see stale.go for why retention beats deletion.
+	StaleReason StaleReason
+	StaleAtMS   int64
 }
 
 // Runner performs one inference. It is the ONLY thing in the package that reaches a provider.
@@ -181,11 +185,42 @@ type Runner struct {
 	floor float64
 	nowMS func() int64
 	newID func(workflowID, sourceRevision, configHash string) string
+	// caps is the per-tenant and fleet ceiling, checked BEFORE the provider call (task 9.2). Nil means
+	// NO CEILING IS ENFORCED — an honest and dangerous state that `Readiness` reports rather than
+	// hides, because a deployment whose caps are unwired looks identical to one whose caps are simply
+	// generous.
+	caps *CapChecker
+	// meter records what a run spent, so the next check has something to read. A cap with no meter is
+	// a number nobody is under, which is why `NewCapChecker` refuses that combination — this field is
+	// set from the same wiring.
+	meter SpendReader
+	// emit receives events. Nil is legal and drops them: telemetry is not a precondition for analysis,
+	// and a runner that refused to start without an event sink would make an observability dependency
+	// into an availability one.
+	emit func(Event, map[string]any)
+}
+
+// RunnerOption configures a Runner.
+type RunnerOption func(*Runner)
+
+// WithCaps enforces per-tenant and fleet token ceilings before every provider call (task 9.2).
+//
+// 🔴 An OPTION rather than a required argument, and the asymmetry is deliberate. The customer-side
+// runner spends the customer's own credential, so a platform ceiling on it would be this platform
+// limiting somebody else's bill — which is not ours to limit. The platform-side runner should always
+// have one, and `Readiness` reports when it does not rather than this constructor guessing.
+func WithCaps(c *CapChecker, meter SpendReader) RunnerOption {
+	return func(r *Runner) { r.caps, r.meter = c, meter }
+}
+
+// WithEvents wires a telemetry sink.
+func WithEvents(emit func(Event, map[string]any)) RunnerOption {
+	return func(r *Runner) { r.emit = emit }
 }
 
 // NewRunner wires the PLATFORM-side runner (task 7.5). See NewCustomerRunner for the other host.
-func NewRunner(m Model, store InferenceStore, floor float64, nowMS func() int64) (*Runner, error) {
-	return newRunner(HostPlatform, m, store, floor, nowMS)
+func NewRunner(m Model, store InferenceStore, floor float64, nowMS func() int64, opts ...RunnerOption) (*Runner, error) {
+	return newRunner(HostPlatform, m, store, floor, nowMS, opts...)
 }
 
 // NewCustomerRunner wires the runner that executes on the CUSTOMER's machine, under the customer's own
@@ -198,11 +233,12 @@ func NewRunner(m Model, store InferenceStore, floor float64, nowMS func() int64)
 // The floor is passed in rather than defaulted here, because the floor is the PLATFORM's: a customer
 // runner that chose its own would submit facts the platform would have declined, under a `config_hash`
 // that claims otherwise.
-func NewCustomerRunner(m Model, store InferenceStore, floor float64, nowMS func() int64) (*Runner, error) {
-	return newRunner(HostCustomer, m, store, floor, nowMS)
+func NewCustomerRunner(m Model, store InferenceStore, floor float64, nowMS func() int64, opts ...RunnerOption) (*Runner, error) {
+	return newRunner(HostCustomer, m, store, floor, nowMS, opts...)
 }
 
-func newRunner(host Host, m Model, store InferenceStore, floor float64, nowMS func() int64) (*Runner, error) {
+func newRunner(host Host, m Model, store InferenceStore, floor float64, nowMS func() int64,
+	opts ...RunnerOption) (*Runner, error) {
 	switch {
 	case m == nil:
 		return nil, errors.New("herosagent: a model is required — there is deliberately no default stub, " +
@@ -218,8 +254,23 @@ func newRunner(host Host, m Model, store InferenceStore, floor float64, nowMS fu
 	case host != HostPlatform && host != HostCustomer:
 		return nil, fmt.Errorf("herosagent: %q is not a host", host)
 	}
-	return &Runner{model: m, store: store, host: host, floor: floor, nowMS: nowMS, newID: defaultInferenceID}, nil
+	r := &Runner{model: m, store: store, host: host, floor: floor, nowMS: nowMS, newID: defaultInferenceID}
+	for _, o := range opts {
+		o(r)
+	}
+	return r, nil
 }
+
+// event emits to the sink when one is wired.
+func (r *Runner) event(e Event, fields map[string]any) {
+	if r.emit != nil {
+		r.emit(e, fields)
+	}
+}
+
+// CapsEnforced reports whether this runner checks a ceiling. Read by `Readiness`, so a deployment with
+// unwired caps says so instead of looking identical to one whose caps are generous.
+func (r *Runner) CapsEnforced() bool { return r.caps != nil }
 
 // Host reports which runner this is, for a caller narrating what it is about to do.
 func (r *Runner) Host() Host { return r.host }
@@ -263,6 +314,35 @@ func (r *Runner) Infer(ctx context.Context, in Input, agentConfigHash string, pl
 			// rather than left for a caller to infer from the absence of an error.
 			ProviderCalls: 0,
 		}, nil
+	}
+
+	// 🔴 TASK 9.2 — THE CEILING, BEFORE THE PROVIDER CALL.
+	//
+	// It sits AFTER the cache read and that ordering is a decision. A cache hit makes zero provider
+	// calls, so it costs nothing — refusing one under a cap would deny a customer an answer that spends
+	// nothing, which is a cap acting as an availability limit rather than a spend limit. The cap is
+	// about money, and a read of a stored row is not money.
+	//
+	// It sits BEFORE the residue and before the model, because a cap enforced afterwards is an
+	// accounting record: the tokens are spent, the bill is incurred, and what the check buys is a
+	// slightly faster stop on the NEXT run — which is the behaviour of having no cap at all on the run
+	// that mattered.
+	if r.caps != nil {
+		verdict, err := r.caps.Check(ctx, in.TenantID)
+		if err != nil {
+			return Result{Code: CodeProviderFailed, Cause: "the token ceiling could not be read"}, err
+		}
+		if !verdict.Allowed {
+			capErr := verdict.CapError()
+			// 🔴 The EVENT is emitted here and not by the caller. A cap that stops spend silently is a
+			// cap nobody knows is binding, and "which tenant is capped, and since when" is the question
+			// asked the moment a customer reports that analysis stopped.
+			r.event(EventCapReached, map[string]any{
+				"tenant_id": in.TenantID, "scope": verdict.Scope,
+				"limit": verdict.Limit, "spent": verdict.Spent,
+			})
+			return Result{Code: CodeCapReached, ProviderCalls: 0, Cause: capErr.Error()}, capErr
+		}
 	}
 
 	// 🔴 An empty residue makes ZERO provider calls. A fully rule-covered repository costs nothing,
@@ -319,6 +399,26 @@ func (r *Runner) Infer(ctx context.Context, in Input, agentConfigHash string, pl
 			Cause: "the inference completed and could not be stored"}, err
 	}
 	res.InferenceID = stored.InferenceID
+
+	// 🔴 The meter is written AFTER the store and its failure does NOT fail the run. The inference is
+	// stored and correct; losing its meter reading costs accuracy on the next cap check, and failing
+	// the caller would throw away a completed analysis to report a bookkeeping problem. The loss is
+	// emitted rather than swallowed, so it is visible as what it is.
+	if r.meter != nil {
+		if err := r.meter.Record(ctx, Spend{
+			TenantID: in.TenantID, InferenceID: stored.InferenceID,
+			TokensIn: int64(usage.InputTokens), TokensOut: int64(usage.OutputTokens),
+			// 🚫 No cost and Priced=false. This runner does not hold a price list — pricing is the
+			// operator surface's, and a zero written here with Priced=true would report a spend nobody
+			// incurred, which is exactly what task 6.5's `unpriced` word exists to prevent.
+			CreatedAtMS: stored.CreatedAtMS,
+		}); err != nil {
+			r.event(EventInferenceStored, map[string]any{
+				"inference_id": stored.InferenceID, "meter_write_failed": err.Error(),
+			})
+		}
+	}
+	r.event(EventInferenceStored, map[string]any{"inference_id": stored.InferenceID})
 	return res, nil
 }
 

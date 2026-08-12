@@ -51,6 +51,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/heros-foreal/agentd/internal/api"
 	"github.com/heros-foreal/agentd/internal/config"
@@ -166,6 +167,35 @@ func main() {
 	srv.MountHerosAgent(&demoAgentSource{
 		placement: herosagent.Placement(*placement),
 		narrative: narrative,
+	})
+
+	// P30 §9.1 · the agent's `/readyz` entry, resolved by DOING what an inference does. The stores are
+	// in-memory here — that is what this demo honestly has — but the CHECK is the shipped one, so the
+	// state, its sentence and the four-way distinction on the page are the real code's.
+	demoPlacements := herosagent.NewMemPlacementStore()
+	if herosagent.Placement(*placement) != herosagent.PlacementDisabled {
+		if err := demoPlacements.Set(context.Background(), herosagent.TenantPlacement{
+			TenantID: workflowID, Placement: herosagent.Placement(*placement),
+			Reason: "set by the customerconsole proof's -placement flag", SetBy: "customerconsole",
+		}); err != nil {
+			log.Fatalf("demo placement: %v", err)
+		}
+	}
+	demoCaps, cerr := herosagent.NewCapChecker(herosagent.NewMemCapStore(), herosagent.NewMemSpendStore(),
+		func() int64 { return time.Now().UnixMilli() })
+	if cerr != nil {
+		log.Fatalf("demo cap checker: %v", cerr)
+	}
+	srv.SetAgentReadiness(func(ctx context.Context) herosagent.Readiness {
+		return herosagent.Check(ctx, herosagent.ReadinessInput{
+			Versions:   herosagent.NewMemVersionStore(),
+			Placements: demoPlacements,
+			// 🔴 A resolver that always FAILS, because this demo has no provider credential and never
+			// calls one. Reporting `ready` here would be the assertion-from-configuration that task 9.1
+			// exists to prevent — on the very binary somebody would use to check it.
+			Credentials: demoUnresolvableCredential{},
+			Caps:        demoCaps,
+		})
 	})
 
 	// P10 Prompt & Model Studio MATRIX (P9 §11b) — mounted with the REAL discovered nodes as the
@@ -435,3 +465,17 @@ func stampFixtureInference(view *patternclassifier.GraphView) string {
 	view.Composition = patternclassifier.RebuildComposition(*view)
 	return ""
 }
+
+// demoUnresolvableCredential is the readiness resolver this demo honestly has: none.
+//
+// 🔴 It FAILS rather than succeeding. This binary reaches no provider, so a resolver that returned nil
+// would make `/readyz` report `ready` on a process that could not run a single inference — which is
+// precisely the assertion-from-configuration task 9.1 exists to prevent, reproduced on the binary an
+// operator would use to check for it.
+type demoUnresolvableCredential struct{}
+
+func (demoUnresolvableCredential) Resolve(context.Context, string) error {
+	return fmt.Errorf("this proof binary configures no secrets source and reaches no provider")
+}
+
+func (demoUnresolvableCredential) Describe() string { return "none (proof binary)" }

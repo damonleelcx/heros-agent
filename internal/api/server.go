@@ -21,6 +21,7 @@ import (
 	"github.com/heros-foreal/agentd/internal/auth"
 	"github.com/heros-foreal/agentd/internal/config"
 	"github.com/heros-foreal/agentd/internal/erroreport"
+	"github.com/heros-foreal/agentd/internal/herosagent"
 	"github.com/heros-foreal/agentd/internal/linkingest"
 	"github.com/heros-foreal/agentd/internal/mailer"
 	"github.com/heros-foreal/agentd/internal/providergateway"
@@ -159,6 +160,15 @@ type Server struct {
 	// Empty when a deployment ships no dependent components — saying so by omission beats inventing a
 	// status for one that does not exist.
 	probes []ComponentProbe
+
+	// agentReadiness resolves the P30 analysis agent's state by DOING what an inference does — reading
+	// the active definition, resolving the credential through the gateway's own secrets source, and
+	// comparing the real meter against the real ceiling (task 9.1).
+	//
+	// 🔴 A FUNCTION rather than a value, because every one of those is a live fact. A struct filled in
+	// at boot would report the credential that resolved at boot, which is the readiness signal that
+	// cannot go red — the exact failure P19 Decision 9 records for `components.postgres`.
+	agentReadiness func(context.Context) herosagent.Readiness
 
 	// p10 is the Postgres-backed prompt-authoring write surface (publish + timeline/diff/impact read
 	// models), mounted by MountPromptRegistry when available. The platform API's first WRITE surface.
@@ -592,6 +602,17 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 	// `secrets_source` rather than inside `components`, because it is deliberately NOT a gate — see
 	// errorReporterState.
 	body["error_reporting"] = s.errorReporterState()
+	if s.agentReadiness != nil {
+		// P30 task 9.1. Top level beside `secrets_source`, and 🚫 NOT in `components` — every entry in
+		// that map is a GATE, and none of the agent's states may take a deployment down.
+		//
+		// `disabled` is the default (Q2), so gating on it would page somebody about the configuration
+		// every deployment ships with. `capped` is a ceiling working as intended. Even
+		// `credential_unresolved` is contained: HEROS is optional, every other surface is rule-derived,
+		// and taking a platform down because an optional subsystem cannot reach its vendor is a bigger
+		// outage than the one being reported.
+		body["heros_agent"] = s.agentReadiness(r.Context())
+	}
 	if s.billingCapability != nil {
 		// Which processor, and where its credentials come from. Absent rather than "unknown" when
 		// unset, exactly like the two signals above.

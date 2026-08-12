@@ -411,3 +411,35 @@ install-smoke:
 mail-proof:
 	@test -n "$(TO)" || { echo "usage: make mail-proof TO=you@example.com"; exit 2; }
 	@GOWORK=off $(PYTHON) scripts/mail_proof.py "$(TO)"
+
+## agent-status: what the analysis agent is actually doing on a deployment, read from /readyz.
+##
+## 🔴 It reads the LIVE signal rather than a config file, which is the whole of task 9.1: `heros_agent`
+## on /readyz is resolved by doing what an inference does — reading the active definition, RESOLVING the
+## credential through the same secrets source the runner calls, and comparing the real meter against the
+## real ceiling. A green line here means an inference would work, not that somebody set a variable.
+##
+##   make agent-status                                  # the local deployment
+##   make agent-status READYZ=https://heros-agent.space/readyz
+agent-status:
+	@GOWORK=off $(PYTHON) scripts/agent_status.py "$(or $(READYZ),http://127.0.0.1:4321/readyz)"
+
+## agent-rollout: whether this fleet's CURRENT SHAPE permits the next rollout stage (task 9.4).
+##
+## 🚫 "No stage verified by hand" is the task's own words, and this is what replaces the hand. It counts
+## the placement table, reads the active definition's rehearsal state and checks the fleet ceiling —
+## then prints the one precondition that fails, or that the step is permitted. It CHANGES NOTHING: an
+## operator still sets each placement deliberately, with a reason, because automating enablement would
+## put "read a customer's source under a platform credential" behind a scheduler.
+##
+##   make agent-rollout                       # what stage this fleet is at
+##   make agent-rollout WANT=partner          # may it advance to `partner`?
+agent-rollout:
+	@GOWORK=off $(GO) run ./cmd/agentrollout -want "$(WANT)"
+
+## agent-drills: the P30 mutation drills — defeat each fence, confirm it goes RED, restore.
+##
+## 🔴 `-count=1` on every run, because a mutation followed by a same-second test run reads a CACHED
+## PASS and reports a real fence as dead. That has happened on this repository before.
+agent-drills:
+	@GOWORK=off $(PYTHON) scripts/agent_drills.py

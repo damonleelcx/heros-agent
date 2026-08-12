@@ -124,6 +124,34 @@ const (
 	HostCustomer Host = "host_customer"
 )
 
+// ReadyState is the closed vocabulary `/readyz` reports for the agent (task 9.1).
+//
+// 🔴 It lives here for the same reason Placement does, and the collision is sharper: THREE of its
+// values are also Code values. `disabled`, `credential_unresolved` and `no_active_definition` are each
+// both a terminal outcome of ONE inference and a posture of the WHOLE deployment, and they coincide
+// because a deployment's posture is "what would happen if an inference ran right now".
+//
+// They are still two vocabularies answering two questions, and a literal typed at a call site is
+// indistinguishable between them — so TestEveryCodeAndEventComesFromTheCentralEnumeration reserves
+// these too. It caught exactly this the first time they were written in readiness.go.
+type ReadyState string
+
+const (
+	// ReadyDisabled: no tenant is placed anywhere but `disabled`. THE DEFAULT, and not a fault.
+	ReadyDisabled ReadyState = "disabled"
+	// ReadyReady: an active definition, a credential that RESOLVES, and headroom under every ceiling.
+	ReadyReady ReadyState = "ready"
+	// ReadyCredentialUnresolved: the active definition's credential reference does not resolve through
+	// the configured secrets source. Inference fails closed, so this is a fault — but a contained one.
+	ReadyCredentialUnresolved ReadyState = "credential_unresolved"
+	// ReadyCapped: a ceiling is reached, so nothing will spend until it is raised or the window rolls.
+	// The deployment is HEALTHY and declining to spend.
+	ReadyCapped ReadyState = "capped"
+	// ReadyNoDefinition: nothing is published and activated. Distinct from `disabled` — somebody has
+	// enabled a tenant and there is no agent to run for it, which is a configuration half-done.
+	ReadyNoDefinition ReadyState = "no_active_definition"
+)
+
 // Event is the closed set of things worth emitting to telemetry.
 type Event string
 
@@ -171,6 +199,14 @@ var (
 	// ErrUnattributedInference refuses a submitted fact the agent authored that names no agent version.
 	// A `heros` fact whose definition cannot be named is a fact nothing can ever be re-derived from.
 	ErrUnattributedInference = errors.New("herosagent: an agent-authored fact must name the agent version that produced it")
+	// ErrCapReached refuses a run whose tenant or fleet token ceiling is reached (task 9.2). Matchable
+	// because a caller deciding between "tell the customer analysis is paused" and "this is broken"
+	// cannot do it on a string.
+	ErrCapReached = errors.New("herosagent: a token ceiling is reached")
+	// ErrRolloutStageSkipped refuses a rollout step that jumps a rung (task 9.4).
+	ErrRolloutStageSkipped = errors.New("herosagent: a rollout stage cannot be skipped")
+	// ErrNoFleetCap refuses reaching a customer-facing rollout stage with no fleet ceiling set.
+	ErrNoFleetCap = errors.New("herosagent: no fleet token ceiling is set")
 	// ErrAssemblerBypassed reports a ModelInput that was not produced by AssembleModelInput (task 7.2).
 	ErrAssemblerBypassed = errors.New("herosagent: this model input did not come from the shared assembler")
 )

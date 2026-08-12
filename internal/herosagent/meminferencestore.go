@@ -2,6 +2,7 @@ package herosagent
 
 import (
 	"context"
+	"fmt"
 	"sync"
 )
 
@@ -67,6 +68,50 @@ func (s *MemInferenceStore) Replace(_ context.Context, st Stored) error {
 	defer s.mu.Unlock()
 	s.m[key(st.WorkflowID, st.SourceRevision, st.AgentConfigHash)] = st
 	return nil
+}
+
+// MarkStale marks every inference for one tenant, and returns how many it marked (task 9.5).
+//
+// 🔴 IT MARKS. It does not delete, and the count it returns is how a caller proves that — a version
+// that removed rows would return the same number while leaving nothing to read.
+//
+// An already-stale row keeps its FIRST reason and timestamp. "Since when did this stop being
+// maintained" is the question the timestamp answers, and the first cause is when maintenance actually
+// stopped; re-marking would move the answer forward every time something else changed.
+func (s *MemInferenceStore) MarkStale(_ context.Context, tenantID string, reason StaleReason, atMS int64) (int64, error) {
+	if SentenceForStale(reason) == "" {
+		return 0, fmt.Errorf("%w: %q is not a stale reason", ErrInvalidDefinition, reason)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var n int64
+	for k, st := range s.m {
+		if st.TenantID != tenantID || st.StaleReason != "" {
+			continue
+		}
+		st.StaleReason, st.StaleAtMS = reason, atMS
+		s.m[k] = st
+		n++
+	}
+	return n, nil
+}
+
+// ClearStale removes the disabled-mark for one tenant, for when analysis is re-enabled.
+//
+// 🚫 It re-runs nothing. The stored facts are still the ones written before the gap.
+func (s *MemInferenceStore) ClearStale(_ context.Context, tenantID string) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var n int64
+	for k, st := range s.m {
+		if st.TenantID != tenantID || st.StaleReason != StaleDisabled {
+			continue
+		}
+		st.StaleReason, st.StaleAtMS = "", 0
+		s.m[k] = st
+		n++
+	}
+	return n, nil
 }
 
 // Len reports how many inferences are held. For a caller narrating what it did, and for tests.

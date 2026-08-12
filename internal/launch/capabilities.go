@@ -475,6 +475,36 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 		if ierr != nil {
 			return nil, fmt.Errorf("heros agent inference store: %w", ierr)
 		}
+		agentCaps, cerr := herosagent.NewPGCapStore(pg)
+		if cerr != nil {
+			return nil, fmt.Errorf("heros agent cap store: %w", cerr)
+		}
+		agentMeter, merr := herosagent.NewPGSpendStore(pg)
+		if merr != nil {
+			return nil, fmt.Errorf("heros agent spend store: %w", merr)
+		}
+		agentCapChecker, kerr := herosagent.NewCapChecker(agentCaps, agentMeter,
+			func() int64 { return time.Now().UnixMilli() })
+		if kerr != nil {
+			return nil, fmt.Errorf("heros agent cap checker: %w", kerr)
+		}
+
+		// 🔴 TASK 9.1 — readiness resolved by DOING what an inference does, not by reading configuration.
+		//
+		// The credential resolver handed here is the SAME `providergateway.Secrets` the runner calls at
+		// use, so `/readyz` reports `credential_unresolved` when a real resolution fails rather than
+		// `ready` because a reference is set. This product has already shipped the other version of this
+		// once — `components.postgres: ready` on a process that had never opened a Postgres connection —
+		// and that signal could not go red no matter what happened to Postgres.
+		h.SetAgentReadiness(func(ctx context.Context) herosagent.Readiness {
+			return herosagent.Check(ctx, herosagent.ReadinessInput{
+				Versions:    versionStore,
+				Placements:  placementStore,
+				Credentials: secretsResolver{secrets},
+				Caps:        agentCapChecker,
+			})
+		})
+
 		agentSource, aerr := herosagent.NewPlatformSource(herosagent.PlatformSourceConfig{
 			Placements: placementStore,
 			Versions:   versionStore,
@@ -484,6 +514,8 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 			Floor:      herosagent.DefaultConfidenceFloor,
 			Budget:     herosagent.DefaultBudget(),
 			NowMS:      func() int64 { return time.Now().UnixMilli() },
+			Caps:       agentCapChecker,
+			Meter:      agentMeter,
 		})
 		if aerr != nil {
 			return nil, fmt.Errorf("heros agent source: %w", aerr)
