@@ -175,6 +175,34 @@ spec:
           - path: /api/v1/transform-receipts
             pathType: Exact
             backend: { service: { name: agentd, port: { number: 4321 } } }
+          # P30 §1.8 · trigger a proposal-generation pass. Born FLAT — the workflow id travels in the
+          # body — for exactly the reason the four routes above it were flattened: the parameterised
+          # shape `/api/v1/workflows/{id}/proposals/generate` cannot be matched by an Exact rule, and the
+          # only rule that reaches it is a Prefix under `/api/v1/workflows/`, which would publish
+          # `commit`, `orderings`, `orderings/stream`, `validate`, `proposals/{id}/open-pr`,
+          # `pattern-graph`, `eval-board` and `nodes` alongside it.
+          #
+          # Bearer-authenticated; the tenant comes from the principal and nothing in the body can select
+          # one. The pass reads that tenant's own linked runs and discovered graph and writes proposal
+          # rows attributed to them.
+          - path: /api/v1/proposal-generations
+            pathType: Exact
+            backend: { service: { name: agentd, port: { number: 4321 } } }
+          # P30 §7.1 · READ the active agent definition, so a `customer`-placed tenant can run the
+          # platform's own analysis agent on its own machine under its own provider credential.
+          #
+          # 🔴 The one route in this list that travels PLATFORM → CUSTOMER, so the question "what does
+          # publishing this expose" is about our data rather than theirs. It answers with a rendered
+          # prompt, a model id and a provider NAME — and only to a tenant whose placement is `customer`,
+          # which is the placement whose entire meaning is that the definition executes on their
+          # hardware. `platform` and `disabled` tenants get their placement and nothing else.
+          #
+          # 🚫 There is no field in the response a provider KEY could occupy. Q1: the platform stores no
+          # customer provider key under any placement, and it does not ship one down here either — the
+          # customer's own secrets source resolves the provider name on their machine.
+          - path: /api/v1/agent-definition
+            pathType: Exact
+            backend: { service: { name: agentd, port: { number: 4321 } } }
           - path: /
             pathType: Prefix
             backend: { service: { name: console, port: { number: 4320 } } }

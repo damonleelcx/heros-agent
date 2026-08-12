@@ -27,6 +27,9 @@ export const routes = {
   board: (id: string, profile?: string) =>
     `/app/workflows/${encodeURIComponent(id)}/board` + (profile ? `?profile=${encodeURIComponent(profile)}` : ""),
   proposals: (id: string) => `/app/workflows/${encodeURIComponent(id)}/proposals`,
+  // P30 §1.12 · deep-linkable, not a modal: "which cases is this number over?" is a question somebody
+  // asks in a review and links to, and an overlay has no URL to send.
+  evalSet: (id: string) => `/app/workflows/${encodeURIComponent(id)}/evalset`,
   proposal: (workflowId: string, proposalId: string) =>
     `/app/workflows/${encodeURIComponent(workflowId)}/proposals/${encodeURIComponent(proposalId)}`,
   run: (id: string) => `/app/runs/${encodeURIComponent(id)}`,

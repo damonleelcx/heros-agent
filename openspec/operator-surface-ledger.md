@@ -40,8 +40,10 @@ build; a row naming no directory fails it too, so a typo cannot masquerade as co
 
 | capability | state | detail |
 |---|---|---|
+| agent-runtime-placement | surface | /agent/spend#placements, /agent/spend |
 | authored-change | surface | /crosstenant |
 | billing-webhooks | not-yet-readable | requires the P21 webhook receipt store — the recorded provider webhook events and their idempotent dispositions. P21 is specified and not built; nothing renders a zero for it |
+| chain-inference | surface | /agent, /agent/spend |
 | ci-integration | surface | /delivery |
 | cli | no-operator-surface | The CLI is customer-installed and runs offline against the customer's own repository; the platform holds no state about an invocation it never observes. Its linked runs are overseen on /billing via link coverage (P26) |
 | cli-reference | no-operator-surface | Reference documentation whose accuracy is enforced by the P23 documentation fence at build time; there is no runtime state for an operator to oversee (P26) |
@@ -53,7 +55,11 @@ build; a row naming no directory fails it too, so a typo cannot masquerade as co
 | delivery-record | surface | /delivery |
 | developer-docs | no-operator-surface | Published documentation with no per-tenant state; accuracy is a build fence, not an operator watch (P26) |
 | docs-accuracy-fence | no-operator-surface | The capability IS a build fence. Its state is the build's state, and a console rendering of a fence's last result would be a second, staler source of truth for it (P26) |
+| eval-set-visibility | no-operator-surface | The cases never leave the customer's machine. The platform holds `counts_only` and the capability exists to stop a denominator being reported as if it were a set — so an operator page could render only the number the capability refuses to leave unexplained, and the explanation is on the customer's own eval-set route. What an operator legitimately needs is whether analysis is running and what it costs, which is /agent (P30) |
 | forge-delivery | surface | /delivery |
+| graph-composition-summary | no-operator-surface | A per-workflow reading of ONE tenant's graph — which patterns are present, what they cover, what is unlabelled — rendered on the customer console's graph view. An operator reproducing one tenant's view is what impersonation is for, which is the reason `reading-surface` already carries (P30) |
+| heros-agent-definition | surface | /agent, /agent#publish |
+| inference-provenance | no-operator-surface | Provenance sits on the FACT, and the question it answers — who authored this edge — is asked of one tenant's stored graph on the surface that draws it. The operator's fleet-level version of the question is how much analysis has run and where, which /agent answers as a stored-inference count (`unknown`, never zero, when no store is wired) and /agent/spend answers per tenant. A cross-tenant listing of customers' edges would be the privacy expansion `linked-subject-index` records as a review failure rather than a modelling improvement (P30) |
 | install-documentation | no-operator-surface | Documents the install channels; the channels themselves, their published artefacts and their trust state are overseen on /releases, so an operator surface here would duplicate that one (P26) |
 | language-coverage | surface | /axes |
 | legal-documents | surface | /oversight |
@@ -62,11 +68,14 @@ build; a row naming no directory fails it too, so a typo cannot masquerade as co
 | memory-store | surface | /axes |
 | model-selection | surface | /registry, /axes |
 | node-wiring | surface | /axes |
+| operator-agent-authoring | surface | /agent#publish, /agent |
+| operator-agent-control | surface | /agent, /agent/spend, /agent/spend#placements |
 | operator-sso-mfa | surface | /oversight |
 | payment-collection | not-yet-readable | requires the P21 payment collection records — checkout sessions, their outcomes, and the dunning attempts against a failed collection. Not derivable from the pre-PSP billing ledger, which records quantities and never an attempt to collect |
 | prompt-model-authoring | surface | /axes |
 | prompt-model-language-coverage | surface | /axes |
 | prompt-rewrite | surface | /axes |
+| proposal-generation-reach | no-operator-surface | The generator's state is per workflow — `no_linked_runs`, `no_per_node_metrics`, `no_discovered_graph`, `no_model_menu`, `no_bottleneck` — and each answer's next action belongs to the organization that owns the workflow, on its own proposals surface. An operator page would list customers' workflow identifiers to report a state only they can act on (P30) |
 | reading-surface | no-operator-surface | The customer console's own reading surface; it holds no cross-tenant state, and an operator reproducing one tenant's view is what impersonation is for (P26) |
 | retrieval-tuning | surface | /axes |
 | run-linking | surface | /billing |
@@ -128,6 +137,8 @@ finding.
 | delivery.read | surface | /delivery |
 | release.read | surface | /releases |
 | axis.read | surface | /axes |
+| agent.read | surface | /agent, /agent/spend |
+| agent.admin | surface | /agent#publish, /agent/spend#placements |
 | entitlement.override | surface | /tenants |
 | gdpr.execute | surface | /compliance, /compliance#erasure |
 | impersonate.read | surface | /tenants |

@@ -51,7 +51,7 @@ func TestNoCardOffersAPullRequestThereIsNoDiffFor(t *testing.T) {
 	s := NewSource(fakeStore{scored: []proposalstore.Scored{
 		rec("prop-1", passing(0.06), proposalstore.BuildUnbuilt),
 		rec("prop-2", nil, proposalstore.BuildUnbuilt),
-	}}, nil)
+	}}, nil, nil)
 	surface, ok := s.Surface("t1", "wf")
 	if !ok {
 		t.Fatal("the surface did not resolve")
@@ -82,7 +82,7 @@ func TestTheCardCarriesTheStoresProposalID(t *testing.T) {
 	s := NewSource(fakeStore{scored: []proposalstore.Scored{
 		rec("prop-1", passing(0.06), proposalstore.BuildUnbuilt),
 		rec("prop-2", nil, proposalstore.BuildUnbuilt),
-	}}, nil)
+	}}, nil, nil)
 	surface, _ := s.Surface("t1", "wf")
 	seen := map[string]bool{}
 	for _, c := range append(surface.Recommendations, surface.Withheld...) {
@@ -98,7 +98,7 @@ func TestTheCardCarriesTheStoresProposalID(t *testing.T) {
 
 // An unmeasured proposal is "awaiting verification", never "gate failed". They are opposite claims.
 func TestAnUnmeasuredProposalIsNotReportedAsRejected(t *testing.T) {
-	s := NewSource(fakeStore{scored: []proposalstore.Scored{rec("prop-1", nil, proposalstore.BuildUnbuilt)}}, nil)
+	s := NewSource(fakeStore{scored: []proposalstore.Scored{rec("prop-1", nil, proposalstore.BuildUnbuilt)}}, nil, nil)
 	surface, _ := s.Surface("t1", "wf")
 	if len(surface.Withheld) != 1 {
 		t.Fatalf("withheld = %+v", surface.Withheld)
@@ -119,18 +119,42 @@ func TestAnUnmeasuredProposalIsNotReportedAsRejected(t *testing.T) {
 	}
 }
 
-// Each "nothing to show" reason is its own state. A read failure is emphatically not an empty surface.
+// fakePasses is a pass reader. `has=false` is NO PASS HAS EVER RUN — never a read failure, which is
+// the error, so the three answers stay three.
+type fakePasses struct {
+	pass proposalstore.Pass
+	has  bool
+	err  error
+}
+
+func (f fakePasses) LastPass(context.Context, string, string) (proposalstore.Pass, bool, error) {
+	return f.pass, f.has, f.err
+}
+
+// Each "nothing to show" reason is its own state. A read failure is emphatically not an empty surface,
+// and — P30 task 1.5 — neither is a workflow nobody has ever analysed.
 func TestEachSurfaceStateIsDistinct(t *testing.T) {
+	ranAndFoundNothing := fakePasses{
+		pass: proposalstore.Pass{State: "no_bottleneck",
+			Detail: "No node dominates this workflow's cost or latency.", RanAtMS: 1_700_000_000_000},
+		has: true,
+	}
 	for name, tc := range map[string]struct {
-		store fakeStore
-		want  string
+		store  fakeStore
+		passes PassReader
+		want   string
 	}{
-		"no proposals at all":      {fakeStore{}, "empty"},
-		"proposals awaiting a run": {fakeStore{scored: []proposalstore.Scored{rec("p", nil, proposalstore.BuildUnbuilt)}}, "verifying"},
-		"the store is unreadable":  {fakeStore{err: errors.New("connection refused")}, "error"},
+		// 🔴 The two that used to be one. Same store, same zero proposals, opposite next actions.
+		"no proposals and no pass ever run": {fakeStore{}, fakePasses{}, "never_analysed"},
+		"a pass ran and found nothing":      {fakeStore{}, ranAndFoundNothing, "empty"},
+		// With no pass reader the surface cannot assert that a pass ran, so it does not: it reports the
+		// state that tells a reader to press the button rather than the one that says they are finished.
+		"no pass reader at all":    {fakeStore{}, nil, "never_analysed"},
+		"proposals awaiting a run": {fakeStore{scored: []proposalstore.Scored{rec("p", nil, proposalstore.BuildUnbuilt)}}, nil, "verifying"},
+		"the store is unreadable":  {fakeStore{err: errors.New("connection refused")}, ranAndFoundNothing, "error"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			surface, ok := NewSource(tc.store, nil).Surface("t1", "wf")
+			surface, ok := NewSource(tc.store, nil, tc.passes).Surface("t1", "wf")
 			if !ok {
 				t.Fatal("the surface must resolve: `no such workflow` and `nothing proposed` send a " +
 					"reader to two different places")
@@ -147,7 +171,7 @@ func TestEachSurfaceStateIsDistinct(t *testing.T) {
 
 // A read failure must not leak the driver's words to a tenant, and must not read as a verdict.
 func TestAReadFailureDoesNotLeakOrLookLikeAFinding(t *testing.T) {
-	surface, _ := NewSource(fakeStore{err: errors.New("dial tcp 10.0.0.5:5432: connection refused")}, nil).Surface("t1", "wf")
+	surface, _ := NewSource(fakeStore{err: errors.New("dial tcp 10.0.0.5:5432: connection refused")}, nil, nil).Surface("t1", "wf")
 	if strings.Contains(surface.Error, "10.0.0.5") || strings.Contains(surface.Error, "dial tcp") {
 		t.Errorf("the read error leaked into the surface: %q", surface.Error)
 	}
@@ -158,7 +182,7 @@ func TestAReadFailureDoesNotLeakOrLookLikeAFinding(t *testing.T) {
 
 // OpenPR refuses for every proposal, including a gate-passing one, and names the limit.
 func TestOpenPRRefusesAndSaysWhy(t *testing.T) {
-	s := NewSource(fakeStore{scored: []proposalstore.Scored{rec("prop-1", passing(0.06), proposalstore.BuildUnbuilt)}}, nil)
+	s := NewSource(fakeStore{scored: []proposalstore.Scored{rec("prop-1", passing(0.06), proposalstore.BuildUnbuilt)}}, nil, nil)
 	_, err := s.OpenPR("t1", "wf", "prop-1")
 	if err == nil {
 		t.Fatal("OpenPR returned success with no diff behind it")
@@ -178,7 +202,7 @@ func TestTheTrendIsBuiltFromMeasurementsOnly(t *testing.T) {
 		rec("p1", nil, proposalstore.BuildUnbuilt),
 		rec("p2", nil, proposalstore.BuildUnbuilt),
 		rec("p3", nil, proposalstore.BuildUnbuilt),
-	}}, nil)
+	}}, nil, nil)
 	surface, _ := s.Surface("t1", "wf")
 	if len(surface.Trend.Points) != 0 {
 		t.Fatalf("unverified proposals became trend points: %+v", surface.Trend.Points)
@@ -192,7 +216,7 @@ func TestTheTrendIsBuiltFromMeasurementsOnly(t *testing.T) {
 func TestRecommendationsRankByVerifiedDelta(t *testing.T) {
 	small := rec("p-small", passing(0.02), proposalstore.BuildBuilt)
 	big := rec("p-big", passing(0.09), proposalstore.BuildBuilt)
-	s := NewSource(fakeStore{scored: []proposalstore.Scored{small, big}}, nil)
+	s := NewSource(fakeStore{scored: []proposalstore.Scored{small, big}}, nil, nil)
 	surface, _ := s.Surface("t1", "wf")
 	if len(surface.Recommendations) != 2 {
 		t.Fatalf("recommendations = %+v", surface.Recommendations)
@@ -205,7 +229,7 @@ func TestRecommendationsRankByVerifiedDelta(t *testing.T) {
 // A gate-passing proposal that never BUILT is withheld, not recommended. Both halves are required —
 // api.Recommendable says so, and this deployment only ever produces the unbuilt half.
 func TestAPassingButUnbuiltProposalIsWithheld(t *testing.T) {
-	s := NewSource(fakeStore{scored: []proposalstore.Scored{rec("p1", passing(0.09), proposalstore.BuildUnbuilt)}}, nil)
+	s := NewSource(fakeStore{scored: []proposalstore.Scored{rec("p1", passing(0.09), proposalstore.BuildUnbuilt)}}, nil, nil)
 	surface, _ := s.Surface("t1", "wf")
 	if len(surface.Recommendations) != 0 {
 		t.Errorf("an unbuilt proposal was recommended: %+v", surface.Recommendations)
@@ -218,7 +242,7 @@ func TestAPassingButUnbuiltProposalIsWithheld(t *testing.T) {
 // Advisory, not assisted: assisted is the level at which the platform opens the pull request, and it
 // cannot. Declaring it would light the Open-PR affordance on every card.
 func TestTheSurfaceDeclaresAdvisory(t *testing.T) {
-	surface, _ := NewSource(fakeStore{}, nil).Surface("t1", "wf")
+	surface, _ := NewSource(fakeStore{}, nil, nil).Surface("t1", "wf")
 	if surface.AutomationLevel != string(verification.Advisory) {
 		t.Errorf("automation level = %q, want %q", surface.AutomationLevel, verification.Advisory)
 	}
@@ -368,7 +392,7 @@ func compiled(id string, v *verification.Verdict) proposalstore.Scored {
 // without it asks a reviewer to trust a config hash.
 func TestACompiledProposalRendersItsDiff(t *testing.T) {
 	diffs := memDiffs{data: map[string][]byte{strings.Repeat("d", 64): []byte(sampleDiff)}}
-	s := NewSource(fakeStore{scored: []proposalstore.Scored{compiled("prop-1", passing(0.06))}}, diffs)
+	s := NewSource(fakeStore{scored: []proposalstore.Scored{compiled("prop-1", passing(0.06))}}, diffs, nil)
 
 	surface, _ := s.Surface("t1", "wf")
 	cards := append(surface.Recommendations, surface.Withheld...)
@@ -394,7 +418,7 @@ func TestTheTwoPRReasonsAreDistinct(t *testing.T) {
 	s := NewSource(fakeStore{scored: []proposalstore.Scored{
 		compiled("has-diff", passing(0.06)),
 		rec("no-diff", passing(0.04), proposalstore.BuildUnbuilt),
-	}}, diffs)
+	}}, diffs, nil)
 
 	surface, _ := s.Surface("t1", "wf")
 	byID := map[string]string{}
@@ -413,7 +437,7 @@ func TestTheTwoPRReasonsAreDistinct(t *testing.T) {
 // A diff the object store cannot return renders as ABSENT, never as a partial or an error string.
 func TestAnUnreadableDiffRendersAsAbsent(t *testing.T) {
 	s := NewSource(fakeStore{scored: []proposalstore.Scored{compiled("prop-1", passing(0.06))}},
-		memDiffs{err: errors.New("dial tcp 10.0.0.5:9000: connection refused")})
+		memDiffs{err: errors.New("dial tcp 10.0.0.5:9000: connection refused")}, nil)
 	surface, _ := s.Surface("t1", "wf")
 	cards := append(surface.Recommendations, surface.Withheld...)
 	if cards[0].SourceDiff != "" {
@@ -447,5 +471,54 @@ func TestAnUnreadableDiffIsNotDelivered(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].DiffPatch != "" {
 		t.Fatalf("a partially-read patch was served for delivery: %+v", got)
+	}
+}
+
+// P30 task 1.5 — the generator's own sentence reaches the surface. Re-deriving it here would mean
+// re-running a pass to learn what the last one saw, which is the fact the store exists to keep.
+func TestTheGeneratorsSentenceReachesTheSurface(t *testing.T) {
+	passes := fakePasses{has: true, pass: proposalstore.Pass{
+		State: "revision_mismatch",
+		Detail: "The newest linked run is at abc123 and the discovered graph is at def456. " +
+			"Push source for abc123, or link a run measured at def456.",
+		Proposals: 0,
+		RanAtMS:   1_700_000_000_000,
+	}}
+	surface, ok := NewSource(fakeStore{}, nil, passes).Surface("t1", "wf")
+	if !ok {
+		t.Fatal("the surface must resolve")
+	}
+	if surface.Pass == nil {
+		t.Fatal("the recorded pass did not reach the surface at all")
+	}
+	if surface.Pass.State != "revision_mismatch" {
+		t.Errorf("pass state = %q, want revision_mismatch", surface.Pass.State)
+	}
+	if !strings.Contains(surface.Pass.Detail, "abc123") {
+		t.Errorf("the generator's sentence was not carried through: %q", surface.Pass.Detail)
+	}
+	if surface.Pass.RanAtMS != 1_700_000_000_000 {
+		t.Errorf("ran_at_ms = %d, want 1700000000000", surface.Pass.RanAtMS)
+	}
+	// `empty` now MEANS "a pass ran and found nothing", and this is one of those passes.
+	if surface.State != "empty" {
+		t.Errorf("state = %q, want empty", surface.State)
+	}
+}
+
+// 🔴 A pass-store read FAILURE must not be reported as `empty`. `empty` asserts a pass ran; a store
+// that could not be read gives no grounds for that assertion, and the safe direction is the state that
+// tells the reader to press the button.
+func TestAnUnreadablePassStoreDoesNotAssertAPassRan(t *testing.T) {
+	surface, _ := NewSource(fakeStore{}, nil,
+		fakePasses{err: errors.New("dial tcp 10.0.0.5:5432: connection refused")}).Surface("t1", "wf")
+	if surface.State == "empty" {
+		t.Error("an unreadable pass store is reported as `a pass ran and found nothing`")
+	}
+	if surface.State != "never_analysed" {
+		t.Errorf("state = %q, want never_analysed", surface.State)
+	}
+	if surface.Pass != nil {
+		t.Errorf("a pass was rendered from a failed read: %+v", surface.Pass)
 	}
 }

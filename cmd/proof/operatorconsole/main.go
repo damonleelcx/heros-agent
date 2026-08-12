@@ -27,6 +27,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -42,6 +43,7 @@ import (
 	"github.com/heros-foreal/agentd/internal/billing"
 	"github.com/heros-foreal/agentd/internal/deliveryrecord"
 	"github.com/heros-foreal/agentd/internal/forgedelivery"
+	"github.com/heros-foreal/agentd/internal/herosagent"
 	"github.com/heros-foreal/agentd/internal/linkingest"
 	"github.com/heros-foreal/agentd/internal/metering"
 	"github.com/heros-foreal/agentd/internal/metricevent"
@@ -312,6 +314,36 @@ func wire(repoDir string) (api.AdminDeps, error) {
 			return api.AdminDeps{}, err
 		}
 	}
+	// P30 · the analysis agent, with a POPULATED store so the surface can be seen with data.
+	//
+	// 🔴 The demo publishes one definition and leaves it `pending`, because that is the honest default
+	// state and it is the one worth looking at: a published definition that has not met its floor is
+	// NOT serving, and the page has to say so. A demo that pre-activated one would show the happy path
+	// and hide the gate.
+	agentVersions := herosagent.NewMemVersionStore()
+	if err := agentVersions.Put(context.Background(), herosagent.Version{
+		ConfigHash: "b7f2c1d4e9a08e5c3f6b1a2d4e7c9f0b1a2d4e7c9f0b1a2d4e7c9f0b1a2d4e7c",
+		Definition: herosagent.Definition{
+			PromptRef: "prompt/heros-residue@3", ModelRef: "claude-opus-5",
+			// A PROVIDER NAME. There is no key here and no field that could hold one.
+			CredentialRef: "anthropic",
+			ContextRef:    "context/residue-only@1",
+			HarnessRef:    "harness/single-shot@1",
+		},
+		ModelRef: "claude-opus-5", CredentialRef: "anthropic",
+		RehearsalState: herosagent.RehearsalPending,
+		CreatedAtMS:    now().UnixMilli(),
+	}); err != nil {
+		return api.AdminDeps{}, err
+	}
+	agentSvc, err := adminops.NewAgentService(exec, agentVersions, nil, demoAgentSpend{}, nil, nil,
+		// P30's runner supplies NO host services, so `react-loop`, `plan-execute` and `critic-loop`
+		// render unavailable WITH what each would need — which is the half of D11 worth seeing.
+		herosagent.RunnerHosts{})
+	if err != nil {
+		return api.AdminDeps{}, err
+	}
+
 	crossSvc, err := adminops.NewCrossTenantService(exec, adminops.CrossTenantConfig{
 		Accounts: accounts, Meter: meter, Ledger: billSvc.Ledger(), Admission: admission,
 		Authored: authored, Deltas: deltas,
@@ -478,6 +510,7 @@ func wire(repoDir string) (api.AdminDeps, error) {
 		Delivery:           deliverySvc,
 		Release:            releaseSvc,
 		Axis:               axisSvc,
+		Agent:              agentSvc,
 		Oversight:          oversightSvc,
 		TestModeIdP:        layer.TestModeIdP,
 		IdP:                layer.IdP,
@@ -612,4 +645,45 @@ func (demoReadiness) Integrations() []adminops.IntegrationRow {
 			FailureClass: "configured, and the exporter has not accepted a flush since this process started",
 			Source:       src},
 	}
+}
+
+// demoAgentSpend is the analysis-agent spend source for the demo.
+//
+// 🔴 It carries an UNPRICED tenant and a DEFAULTED placement on purpose. Those are the two states this
+// surface exists to keep distinguishable — `unpriced` must never render as `0`, and a tenant nobody has
+// considered must never look like one somebody switched off — and a demo showing only priced, explicitly
+// placed tenants would show neither.
+type demoAgentSpend struct{}
+
+func (demoAgentSpend) Spend(context.Context) ([]adminops.AgentSpendRow, error) {
+	return []adminops.AgentSpendRow{
+		{
+			TenantID: "acme", Inferences: 12, TokensIn: 184_320, TokensOut: 9_140,
+			EstimatedCost: 4.87, Priced: true,
+			Placement: "platform", PlacementSource: adminops.PlacementExplicit,
+			Cap: 500_000,
+		},
+		{
+			// UNPRICED: a real token count and no cost. The page prints the word.
+			TenantID: "globex", Inferences: 3, TokensIn: 41_002, TokensOut: 2_210,
+			Priced:    false,
+			Placement: "customer", PlacementSource: adminops.PlacementExplicit,
+		},
+		{
+			// DEFAULTED: nobody has looked at this tenant. Same VALUE as an explicit `disabled`, and a
+			// completely different fact.
+			TenantID: "initech", Placement: "disabled", PlacementSource: adminops.PlacementDefaulted,
+		},
+	}, nil
+}
+
+func (demoAgentSpend) FleetCap(context.Context) (int64, error) { return 0, nil }
+func (demoAgentSpend) SetFleetCap(context.Context, int64) error {
+	return errors.New("the demo does not persist caps")
+}
+func (demoAgentSpend) SetTenantCap(context.Context, string, int64) error {
+	return errors.New("the demo does not persist caps")
+}
+func (demoAgentSpend) SetPlacement(context.Context, string, string) error {
+	return errors.New("the demo does not persist placements")
 }

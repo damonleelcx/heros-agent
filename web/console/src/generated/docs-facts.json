@@ -13,6 +13,34 @@
   ],
   "commands": [
     {
+      "name": "analyse",
+      "summary": "run the platform's analysis agent HERE, under your own provider credential, and submit what it found",
+      "availability": "network",
+      "offline": false,
+      "needs_account": true,
+      "flags": [
+        {
+          "name": "dry-run",
+          "type": "bool",
+          "default": "false",
+          "env": "HEROS_DRY_RUN",
+          "summary": "show exactly what would be transmitted, and transmit nothing (link: the payload itself; push-source: the snapshot's revision, file count and size)"
+        },
+        {
+          "name": "ir",
+          "type": "string",
+          "default": "",
+          "env": "HEROS_IR",
+          "summary": "path to the IR `heros discover -out` wrote — the graph whose GAP is analysed, and the one the result is submitted against (analyse)"
+        }
+      ],
+      "example": "heros analyse --ir ir.json --dry-run",
+      "success": "with --dry-run, the exact payload — including every inferred edge and its confidence — and nothing transmitted. Without it, the inferred edges and abstentions submitted, and the graph URL.",
+      "success_exit": 0,
+      "prerequisite": "an IR from `heros discover -out`, an organization an operator has placed `customer`, and a provider credential in this machine's own environment — the platform never holds one",
+      "unavailable": "analyse is a platform command and is unavailable in this build"
+    },
+    {
       "name": "apply",
       "summary": "realize a Variant Spec as a reviewable diff, in an isolated worktree",
       "availability": "offline",

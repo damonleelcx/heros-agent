@@ -55,6 +55,11 @@ type NetCommands interface {
 	// reach the network, and keeping it out is what makes "no update check on the hot path" (P20 task 5.6)
 	// structural instead of a promise — the code that runs discover/apply/eval does not link a network stack.
 	Upgrade(cfg Config, s Streams) error
+	// Analyse runs the PLATFORM's analysis agent on THIS machine, under this machine's own provider
+	// credential, and submits what it produced (P30 task 7.1). Its own method for the reason every
+	// other one here has one: this is the entry point that spends a provider credential and transmits
+	// facts a model wrote about the customer's repository, and a reviewer must be able to point at it.
+	Analyse(cfg Config, s Streams) error
 	// SendTransformReceipt transmits a TRANSFORM RECEIPT — what a locally-generated change did, as
 	// counts and per-node outcomes (P29 §2.9). Its own method for the reason every other one here is:
 	// a run's numbers, a repository, a measurement and a change's outcome are four different things to
@@ -128,6 +133,11 @@ func Main(args []string, s Streams, env func(string) (string, bool), net NetComm
 			return report(operational("report-verdict is a platform command and is unavailable in this build", nil), s, cmd)
 		}
 		return codeOf(net.ReportVerdict(cfg, s), s, cmd)
+	case "analyse":
+		if net == nil {
+			return report(operational("analyse is a platform command and is unavailable in this build", nil), s, cmd)
+		}
+		return codeOf(net.Analyse(cfg, s), s, cmd)
 	case "upgrade":
 		if net == nil {
 			return report(operational("upgrade needs the network and is unavailable in this build; "+
@@ -183,6 +193,11 @@ func parse(cmd string, args []string, env func(string) (string, bool), s Streams
 		"bare it discovers from --repo, or give it the path to an IR written by `heros discover -out` (link)")
 	args = joinOptionalValueFlags(args, "with-ir")
 	dryRun := fs.Bool("dry-run", false, "render the exact link payload without transmitting it")
+	// P30 §7.1 — which IR `analyse` reads the gap out of. A path rather than an in-place discovery,
+	// because the analysis is only meaningful against the graph a developer already looked at: running
+	// discovery again inside the command would let the submitted structure and the analysed structure be
+	// two different things, and the mismatch would be invisible.
+	irPath := fs.String("ir", "", "path to the IR `heros discover -out` wrote, to analyse (analyse)")
 	// P29 §2.9 — the third opt-in, named, on `apply`. Absent, nothing is transmitted and `apply` stays
 	// the fully offline command it has always been.
 	linkReceipt := fs.Bool("link-receipt", false, "ALSO transmit a transform RECEIPT — per-node outcomes "+
@@ -220,7 +235,7 @@ func parse(cmd string, args []string, env func(string) (string, bool), s Streams
 	defaults := map[string]string{
 		"repo": ".", "config": "", "out": "", "report": "", "spec": "",
 		"commit": "", "repo-url": "", "workflow-id": "", "seeds": "5", "cases": "8",
-		"run": "", "dry-run": "false", "link-receipt": "false",
+		"run": "", "dry-run": "false", "link-receipt": "false", "ir": "",
 		"force": "false", "manifest": "", "sig": "", "asset": "",
 		"node": "", "model": "", "prompt": "", "context-policy": "", "skills": "", "tools": "",
 		"apply-mode": "", "drop-tolerance": "", "clear-drop-tolerance": "false", "apply": "false",
@@ -275,6 +290,7 @@ func parse(cmd string, args []string, env func(string) (string, bool), s Streams
 	put("device", strconv.FormatBool(*device))
 	put("org", *org)
 	put("dry-run", strconv.FormatBool(*dryRun))
+	put("ir", *irPath)
 	put("link-receipt", strconv.FormatBool(*linkReceipt))
 	// The bare form resolves to the sentinel, so a Config consumer can tell "discover in place" from
 	// "not asked for" — `Get` returning "" would collapse the two, and the collapse would silently turn
@@ -395,6 +411,12 @@ Platform commands (explicit, authenticated; transmit only to https://heros-agent
              graph carry real labels rather than unclassified dots. The largest thing this
              CLI ever sends; --dry-run reports exactly what it contains and sends nothing,
              and --forget deletes a snapshot the platform is holding.
+  analyse    run the platform's analysis agent on THIS machine, against the gap in an IR you
+             already discovered, spending YOUR provider credential — and submit what it found
+             through the same opt-in ingest that link --with-ir uses. For organizations an
+             operator has placed 'customer', which is the answer when your source may not
+             leave your network: the platform never holds your provider key. --dry-run prints
+             the exact payload, inferred edges and confidences included, and sends nothing.
   report-verdict  report a verification verdict your CI measured, for a proposal the platform
              issued. The platform cannot measure one itself — the gate needs your eval cases,
              your traces and your provider, and none of them leaves your environment. It

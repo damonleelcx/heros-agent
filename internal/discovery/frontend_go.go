@@ -24,6 +24,10 @@ func NewGoFrontend(readers ...FrameworkReader) *GoFrontend {
 
 func (f *GoFrontend) Language() string { return "go" }
 
+// AnalysisKind is typed: this frontend resolves values through go/ast with a real import map and builds
+// intra-unit edges, so an empty edge list from it is a fact about the repository.
+func (f *GoFrontend) AnalysisKind() AnalysisKind { return AnalysisTyped }
+
 func (f *GoFrontend) Handles(path string) bool {
 	return strings.HasSuffix(path, ".go") && !strings.HasSuffix(path, "_test.go")
 }

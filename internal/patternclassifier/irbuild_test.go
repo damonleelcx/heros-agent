@@ -57,12 +57,17 @@ func node(id string, opts ...nodeOpt) discovery.IRNode {
 	return n
 }
 
+// The fixtures simulate DISCOVERY OUTPUT, so their edges carry the author discovery.BuildIR stamps.
+// A fixture that left it empty would be modelling a pre-P30 document, which is a different thing and is
+// tested explicitly in p30_provenance_test.go.
 func dataEdge(from, to string) discovery.IREdge {
-	return discovery.IREdge{FromNodeID: from, ToNodeID: to, Kind: "data"}
+	return discovery.IREdge{FromNodeID: from, ToNodeID: to, Kind: "data",
+		Author: string(discovery.AuthorFrontend)}
 }
 
 func controlEdge(from, to string) discovery.IREdge {
-	return discovery.IREdge{FromNodeID: from, ToNodeID: to, Kind: "control"}
+	return discovery.IREdge{FromNodeID: from, ToNodeID: to, Kind: "control",
+		Author: string(discovery.AuthorFrontend)}
 }
 
 func buildIR(nodes []discovery.IRNode, edges []discovery.IREdge) *discovery.IR {

@@ -51,12 +51,15 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/heros-foreal/agentd/internal/api"
 	"github.com/heros-foreal/agentd/internal/config"
 	"github.com/heros-foreal/agentd/internal/discovery"
+	"github.com/heros-foreal/agentd/internal/herosagent"
 	"github.com/heros-foreal/agentd/internal/patternclassifier"
 	"github.com/heros-foreal/agentd/internal/registry"
+	"github.com/heros-foreal/agentd/internal/runlink"
 	"github.com/heros-foreal/agentd/internal/studio"
 )
 
@@ -78,6 +81,15 @@ func main() {
 	addr := flag.String("addr", "127.0.0.1:4321", "listen address for the platform API")
 	repo := flag.String("repo", "", "path to a hermes-agent checkout; discovery runs over it")
 	irPath := flag.String("ir", "", "path to an IR already emitted by cmd/discover (skips discovery)")
+	placement := flag.String("placement", "disabled", "P30 placement for this organization: "+
+		"platform | customer | disabled. The DEFAULT is `disabled`, which is what every real "+
+		"organization has until an operator sets one — so the default run shows the state a customer "+
+		"actually sees on day one")
+	fixtureInference := flag.Bool("fixture-inference", false,
+		"🔴 stamp a SYNTHETIC agent inference onto this graph so the inferred-edge treatment, the "+
+			"mixed counts and the assessed narrative can be seen. It is a FIXTURE: no model was "+
+			"consulted and nothing here is a claim about the repository being read. Off by default, "+
+			"because a demo that shows invented findings as real ones is the demo that overstates")
 	wantID := flag.String("workflow-id", "", "identifier the console addresses this workflow by "+
 		"(default: the IR's own workflow.id, else nousresearch/hermes-agent)")
 	flag.Parse()
@@ -99,10 +111,10 @@ func main() {
 		}
 	}
 
-	path := *irPath
+	path, reportPath := *irPath, ""
 	if path == "" {
 		var err error
-		path, err = discoverInto(*repo)
+		path, reportPath, err = discoverInto(*repo)
 		if err != nil {
 			log.Fatalf("discovery over %s: %v", *repo, err)
 		}
@@ -120,7 +132,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("write labels back into the IR: %v", err)
 	}
-	view := patternclassifier.BuildGraphView(labelled, result)
+	view := patternclassifier.BuildGraphView(labelled, result, loadReport(reportPath))
 
 	// Register the console's credential → tenant, so a tenant-scoped read model (the studio matrix's
 	// bindings) resolves a principal. The subject-keyed graph never needed one; the matrix does, because
@@ -135,8 +147,56 @@ func main() {
 			TenantID: workflowID, APIKey: "p9hermes-demo-credential-do-not-ship", Role: "member", KeyID: "p9hermes",
 		}},
 	}
+	// 🔴 P30 §8 — the SYNTHETIC inference, applied only under an explicit flag and labelled as such.
+	//
+	// Nothing about this comes from a model. It stamps `heros` authorship onto one edge and one label
+	// already in the real graph, so the treatments workstream 8 introduces — an inferred edge's own
+	// stroke and arrowhead, the composition's split counts, the `assessed` narrative — can be looked at
+	// on a real workflow's shape. The flag's help text says so and the narrative below says so on the
+	// page itself: a reader who runs this and screenshots it cannot accidentally present it as a finding.
+	narrative := ""
+	if *fixtureInference {
+		narrative = stampFixtureInference(&view)
+	}
+
 	srv := api.New(nil, cfg)
 	srv.MountPatternGraph(&graphSource{views: map[string]patternclassifier.GraphView{workflowID: view}})
+
+	// P30 §8 — the agent panel. A REAL PlatformSource over in-memory stores: the placement comes from
+	// the flag, and every refusal, sentence and state on the panel is the shipped code's, not a stub's.
+	srv.MountHerosAgent(&demoAgentSource{
+		placement: herosagent.Placement(*placement),
+		narrative: narrative,
+	})
+
+	// P30 §9.1 · the agent's `/readyz` entry, resolved by DOING what an inference does. The stores are
+	// in-memory here — that is what this demo honestly has — but the CHECK is the shipped one, so the
+	// state, its sentence and the four-way distinction on the page are the real code's.
+	demoPlacements := herosagent.NewMemPlacementStore()
+	if herosagent.Placement(*placement) != herosagent.PlacementDisabled {
+		if err := demoPlacements.Set(context.Background(), herosagent.TenantPlacement{
+			TenantID: workflowID, Placement: herosagent.Placement(*placement),
+			Reason: "set by the customerconsole proof's -placement flag", SetBy: "customerconsole",
+		}); err != nil {
+			log.Fatalf("demo placement: %v", err)
+		}
+	}
+	demoCaps, cerr := herosagent.NewCapChecker(herosagent.NewMemCapStore(), herosagent.NewMemSpendStore(),
+		func() int64 { return time.Now().UnixMilli() })
+	if cerr != nil {
+		log.Fatalf("demo cap checker: %v", cerr)
+	}
+	srv.SetAgentReadiness(func(ctx context.Context) herosagent.Readiness {
+		return herosagent.Check(ctx, herosagent.ReadinessInput{
+			Versions:   herosagent.NewMemVersionStore(),
+			Placements: demoPlacements,
+			// 🔴 A resolver that always FAILS, because this demo has no provider credential and never
+			// calls one. Reporting `ready` here would be the assertion-from-configuration that task 9.1
+			// exists to prevent — on the very binary somebody would use to check it.
+			Credentials: demoUnresolvableCredential{},
+			Caps:        demoCaps,
+		})
+	})
 
 	// P10 Prompt & Model Studio MATRIX (P9 §11b) — mounted with the REAL discovered nodes as the
 	// matrix COLUMNS, so the studio shows a model-per-node grid over the actual hermes call sites, not
@@ -215,7 +275,7 @@ func workflowIDIn(path string) (string, error) {
 // It shells out to cmd/discover rather than calling the package directly, so what this command serves
 // is byte-for-byte what a customer running the CLI would get. A second in-process code path would be
 // a second thing that could differ from the shipped one.
-func discoverInto(repo string) (string, error) {
+func discoverInto(repo string) (irPath, reportPath string, err error) {
 	out := filepath.Join(os.TempDir(), "p9hermes-ir.json")
 	report := filepath.Join(os.TempDir(), "p9hermes-report.json")
 	cmd := exec.Command("go", "run", "./cmd/discover",
@@ -223,9 +283,30 @@ func discoverInto(repo string) (string, error) {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		return "", err
+		return "", "", err
 	}
-	return out, nil
+	return out, report, nil
+}
+
+// loadReport reads the discovery run report beside the IR.
+//
+// 🔴 A missing or unreadable report is NOT an error here and is NOT silently equivalent to a healthy
+// one: the zero value flows into BuildGraphView, which renders "discovery recorded no contributing
+// frontend" rather than inventing an explanation. That is the whole reason the report is a value
+// parameter — see BuildGraphView.
+func loadReport(path string) discovery.DiscoveryReport {
+	var rep discovery.DiscoveryReport
+	if path == "" {
+		return rep
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return discovery.DiscoveryReport{}
+	}
+	if err := json.Unmarshal(raw, &rep); err != nil {
+		return discovery.DiscoveryReport{}
+	}
+	return rep
 }
 
 // loadAndClassify reads the IR and classifies it, returning a human-readable account of what was
@@ -320,3 +401,81 @@ func (demoModels) ResolveModel(ctx context.Context, versionID string) (*registry
 func (demoModels) StudioRender(ctx context.Context, versionID string, bindings map[string]string) (string, error) {
 	return "", registry.ErrNotFound
 }
+
+// ── P30 §8 · the agent panel and a labelled synthetic inference ──────────────────────────────────
+
+// demoAgentSource answers the three questions the graph page's agent panel asks.
+//
+// 🔴 It implements the SHIPPED interface, so every sentence, state and refusal a reader sees on the
+// panel is produced by `internal/api`'s own `agentPanelFor` — not by this file. What this supplies is
+// the two inputs a deployment would have: a placement, and whatever narrative the last inference wrote.
+type demoAgentSource struct {
+	placement herosagent.Placement
+	narrative string
+}
+
+func (d *demoAgentSource) PlacementFor(context.Context, string) (herosagent.Placement, error) {
+	return d.placement, nil
+}
+
+func (d *demoAgentSource) ActiveDefinition(context.Context) (runlink.AgentDefinition, bool, error) {
+	// Nothing published on this demo, which is the honest answer: `heros analyse` against it reports
+	// that no definition is active rather than running something invented.
+	return runlink.AgentDefinition{}, false, nil
+}
+
+func (d *demoAgentSource) Accept(context.Context, herosagent.Submission) (herosagent.IngestResult, error) {
+	return herosagent.IngestResult{}, fmt.Errorf("this demo accepts no submissions")
+}
+
+func (d *demoAgentSource) NarrativeFor(context.Context, string, string) (string, bool, error) {
+	return d.narrative, d.narrative != "", nil
+}
+
+// stampFixtureInference marks one edge and one label as agent-authored, and returns the narrative to
+// show beside them.
+//
+// 🚫 IT INVENTS NOTHING. Every edge and label it touches was already in the graph, established by the
+// real classifier over the real repository; all it changes is the recorded AUTHOR, so the console's
+// authorship-dependent treatments have something to render. It adds no edge, removes none, and changes
+// no confidence except to give the marked edge one — an inferred edge carries a confidence and a
+// measured one does not.
+func stampFixtureInference(view *patternclassifier.GraphView) string {
+	for i := range view.Edges {
+		if view.Edges[i].Author == "" || view.Edges[i].Author == string(discovery.AuthorFrontend) {
+			view.Edges[i].Author = string(discovery.AuthorHEROS)
+			view.Edges[i].Confidence = 0.86
+			break
+		}
+	}
+	for i := range view.Regions {
+		for j := range view.Regions[i].Labels {
+			if view.Regions[i].Labels[j].Author != discovery.AuthorHEROS {
+				view.Regions[i].Labels[j].Author = discovery.AuthorHEROS
+				// The composition is recomputed so its split counts reflect the stamp — otherwise the
+				// page would draw an inferred edge above a composition that says nothing was inferred,
+				// which is the exact inconsistency §8 exists to prevent.
+				view.Composition = patternclassifier.RebuildComposition(*view)
+				return "This graph is being shown with a SYNTHETIC inference stamped onto it, so the " +
+					"treatments for inferred facts can be seen. No model was consulted and nothing " +
+					"marked inferred here is a claim about this repository."
+			}
+		}
+	}
+	view.Composition = patternclassifier.RebuildComposition(*view)
+	return ""
+}
+
+// demoUnresolvableCredential is the readiness resolver this demo honestly has: none.
+//
+// 🔴 It FAILS rather than succeeding. This binary reaches no provider, so a resolver that returned nil
+// would make `/readyz` report `ready` on a process that could not run a single inference — which is
+// precisely the assertion-from-configuration task 9.1 exists to prevent, reproduced on the binary an
+// operator would use to check for it.
+type demoUnresolvableCredential struct{}
+
+func (demoUnresolvableCredential) Resolve(context.Context, string) error {
+	return fmt.Errorf("this proof binary configures no secrets source and reaches no provider")
+}
+
+func (demoUnresolvableCredential) Describe() string { return "none (proof binary)" }

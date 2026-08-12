@@ -42,6 +42,27 @@ The three gate flags — `--min-quality`, `--max-cost-per-run`, `--latency-sla-m
 
 ## Commands
 
+### analyse
+
+run the platform's analysis agent HERE, under your own provider credential, and submit what it found.
+
+**Needs the network and a platform account.**
+
+**Before this runs:** an IR from `heros discover -out`, an organization an operator has placed `customer`, and a provider credential in this machine's own environment — the platform never holds one
+
+```bash
+heros analyse --ir ir.json --dry-run
+```
+
+**On success:** with --dry-run, the exact payload — including every inferred edge and its confidence — and nothing transmitted. Without it, the inferred edges and abstentions submitted, and the graph URL. Exit code `0`.
+
+**When this build does not include it:** the command exits `2` and prints `analyse is a platform command and is unavailable in this build`. That is an operational outcome, not a malformed invocation — you have not typed anything wrong.
+
+| Flag | Type | Default | Environment | Meaning |
+|---|---|---|---|---|
+| `--dry-run` | bool | `false` | `HEROS_DRY_RUN` | show exactly what would be transmitted, and transmit nothing (link: the payload itself; push-source: the snapshot's revision, file count and size) |
+| `--ir` | string | *unset* | `HEROS_IR` | path to the IR `heros discover -out` wrote — the graph whose GAP is analysed, and the one the result is submitted against (analyse) |
+
 ### apply
 
 realize a Variant Spec as a reviewable diff, in an isolated worktree.

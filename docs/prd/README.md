@@ -324,6 +324,38 @@ told about renders **`not reported`**, a fourth state beside applies / refused /
 of console surfaces that render an unexplained empty state after one fully opted-in link* — today fifteen,
 at exit zero. A surface that renders a named, typed refusal counts as explained; a blank does not.
 
+### One Frontend Emits Edges — P30
+
+An operator opened a real workflow and reported four problems: the Structure drawing is an unordered
+stack, no overall pattern is reported, the eval set's scenarios are nowhere, and there are no proposals.
+Three of the four are one defect. **Exactly one discovery frontend has ever emitted an edge** —
+`frontend_go.go` appends `g.Edges`; the other five contain no occurrence of the word. `BuildGraph` walks a
+`go/ast` tree, so the syntactic frontends have nothing to hand it. Every non-Go repository therefore gets a
+node list, and seven of the eight pattern detectors are topology predicates — **0/22 can fire by
+construction**. The header then renders `llm_calls == 0` as *"Fully rule-covered"*, asserting complete
+coverage over a graph with zero labels.
+
+**P30 — HEROS** introduces the platform's own agent: it produces the graph the static frontends cannot,
+and it reports whether each surface's answer rests on evidence. It is configured entirely from the
+operator console — prompt, model, credential reference, skills, tools, context, memory, harness — through
+**the six-axis vocabulary the product already sells**. HEROS is a Variant Spec resolved against the P2
+registries, sealed to a `config_hash`; the platform optimizes agentic workflows for a living and its own
+agent is one of them. Its centre is a refusal: **determinism does not come from the model.** An inference
+runs once per `(source_revision, config_hash)`, is content-addressed and pinned, and re-running is an
+explicit act shown as a diff. Seed and temperature are recorded because they explain a result, not because
+they guarantee one.
+
+| Phase | PRD | OpenSpec change | Lead role(s) |
+|-------|-----|-----------------|--------------|
+| P30 — HEROS, the Platform Agent *(residue-only chain inference; provenance on every IR fact; pinned-by-content determinism; two placements one definition; composition not a workflow label; six axis editors bound to their existing vocabularies — no axis is a text box, and a harness the runner cannot serve is refused at save; the four surface-honesty fixes)* | [P30-heros-platform-agent.md](P30-heros-platform-agent.md) | `p30-heros-platform-agent` | AI Engineer + Backend |
+
+**P30 is not implemented; it is cleared to start.** The two decisions that gated it are closed (PRD §14):
+platform-side HEROS spends the **platform's** credential and the platform stores no customer provider key
+under **any** placement — so P29's promise carries forward unweakened rather than qualified — and the
+default placement is **`disabled`**, so deploying the phase changes nothing for any existing tenant until
+an operator acts. Its first workstream, the four surface-honesty fixes, depends on neither decision and
+ships alone.
+
 ## PRD template
 
 Every phase PRD follows this structure:

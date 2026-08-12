@@ -81,6 +81,22 @@ func Run(opts Options) (Result, error) {
 		allEdges = append(allEdges, r.Edges...)
 		if len(r.Nodes) > 0 {
 			contributed[fe.Language()] = true
+			// Recorded for the frontend that PRODUCED part of this graph, so the report can explain an
+			// edgeless graph by naming the analysis that produced it (P30 task 1.1). A frontend that
+			// found nothing explains nothing and is not listed — see DiscoveryReport.Frontends.
+			rb.frontends = append(rb.frontends, FrontendRun{
+				Language: fe.Language(), AnalysisKind: fe.AnalysisKind(),
+				Nodes: len(r.Nodes), Edges: len(r.Edges),
+			})
+			if fe.AnalysisKind() == AnalysisSyntactic && len(r.Edges) == 0 {
+				rb.fileDiags = append(rb.fileDiags, Diagnostic{
+					Code: CodeFrontendSyntactic, Severity: SeverityInfo,
+					Message: fmt.Sprintf("the %s frontend is syntactic: it enumerates call sites by matching a "+
+						"parse tree and cannot follow a value across a statement, so it emitted %d nodes and no "+
+						"edges. The absence of edges is a limit of this analysis, not a finding about the code.",
+						fe.Language(), len(r.Nodes)),
+				})
+			}
 		}
 		if wfID == "" {
 			wfID = r.WorkflowID

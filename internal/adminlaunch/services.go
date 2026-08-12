@@ -17,6 +17,7 @@ import (
 	"github.com/heros-foreal/agentd/internal/authoring"
 	"github.com/heros-foreal/agentd/internal/billing"
 	"github.com/heros-foreal/agentd/internal/deliveryrecord"
+	"github.com/heros-foreal/agentd/internal/herosagent"
 	"github.com/heros-foreal/agentd/internal/legal"
 	"github.com/heros-foreal/agentd/internal/metering"
 	"github.com/heros-foreal/agentd/internal/plancfg"
@@ -84,6 +85,13 @@ type PlatformSources struct {
 	Releases   *adminstore.Releases
 	Axes       *adminstore.AxisAdoption
 	Subjects   *adminstore.SubjectContent
+	// AgentSpend is the P30 placement + cap + meter surface, wired to the durable stores (task 9.3).
+	// Nil on a deployment with no platform database, where the console renders the absence it already
+	// knows how to show.
+	AgentSpend adminops.AgentSpendSource
+	// AgentInferences counts pinned inferences for the `/agent` overview. Nil reads as UNKNOWN, never
+	// as zero — a zero there would claim the agent has never done anything.
+	AgentInferences *herosagent.PGInferenceStore
 	// CatalogWhy is set when the plan catalog is absent or unreadable, which is what stops the three
 	// plan-dependent services from mounting. Named so the log says which file to publish.
 	CatalogWhy string
@@ -137,6 +145,29 @@ func buildSources(pg *sql.DB, secretsSrc providergateway.Secrets, now func() tim
 	src.Deltas = metering.NewMemVerifiedDeltas()
 	src.Authored = authoring.NewMemRecorder()
 	src.Meter = metering.NewMeter(metering.NewMemCostEvents(), usage)
+
+	// P30 §9.3 · the agent's durable placement, ceiling and meter stores. Built here with the same
+	// `*sql.DB` everything else uses, so the operator console's controls reach the tables the runtime
+	// reads rather than the nothing they reached before.
+	agentPlacements, aperr := herosagent.NewPGPlacementStore(pg)
+	if aperr != nil {
+		return nil, fmt.Errorf("agent placement store: %w", aperr)
+	}
+	agentCaps, acerr := herosagent.NewPGCapStore(pg)
+	if acerr != nil {
+		return nil, fmt.Errorf("agent cap store: %w", acerr)
+	}
+	agentSpendStore, aserr := herosagent.NewPGSpendStore(pg)
+	if aserr != nil {
+		return nil, fmt.Errorf("agent spend store: %w", aserr)
+	}
+	agentInferences, aierr := herosagent.NewPGInferenceStore(pg)
+	if aierr != nil {
+		return nil, fmt.Errorf("agent inference store: %w", aierr)
+	}
+	src.AgentInferences = agentInferences
+	src.AgentSpend = newAgentSpend(agentPlacements, agentCaps, agentSpendStore, agentInferences, now,
+		"operator-console")
 
 	src.Delivery = deliveryrecord.NewPGStore(pg)
 	src.Queue = runqueue.New(pg)
@@ -354,6 +385,35 @@ func mountServices(exec *adminops.Executor, src *PlatformSources, sessions *admi
 	}
 	deps.Axis = axis
 
+	// P30 · the analysis agent.
+	//
+	// 🔴 Mounted with a version store and NOTHING ELSE on this deployment: no publisher, no spend
+	// source, no inference counter, no kill-switch reader. Every one of those reads as its own honest
+	// state rather than as a zero — an unknown inference count, an empty spend table, an unarmed
+	// switch — and the console renders them that way. Mounting the surface with a publisher it does not
+	// have would offer a Publish control that fails at the moment somebody presses it.
+	//
+	// The store is in-memory here for the same reason: `heros_agent_version` exists (migration 0046) and
+	// nothing in this launch path opens it yet, so an in-memory store is what this deployment honestly
+	// has. It is stated rather than implied — a restart loses published definitions, which is why
+	// nothing here activates one.
+	// 🔴 The SPEND SOURCE and the INFERENCE COUNTER are wired now (task 9.3). Both were nil, so the
+	// console's placement column and its cap editors wrote to nothing: §6 shipped the controls, §7 and
+	// §9.2 shipped the tables, and there was no wire between them. A surface that accepts a decision
+	// and drops it is worse than one that refuses — the operator comes away believing the fleet is
+	// configured.
+	//
+	// The publisher stays nil and the version store stays in-memory, which remains the honest state of
+	// THIS deployment: nothing here opens `heros_agent_version`, so a Publish control would fail at the
+	// moment somebody pressed it. Stated rather than quietly wired to a store that would lose its rows
+	// on restart.
+	agent, err := adminops.NewAgentService(exec, herosagent.NewMemVersionStore(),
+		nil, src.AgentSpend, src.AgentInferences, nil, herosagent.RunnerHosts{})
+	if err != nil {
+		return fmt.Errorf("agent service: %w", err)
+	}
+	deps.Agent = agent
+
 	gdpr, err := adminops.NewGDPRService(exec, src.Subjects)
 	if err != nil {
 		return fmt.Errorf("gdpr service: %w", err)
@@ -425,5 +485,6 @@ type serviceSet struct {
 	Registry      *adminops.RegistryService
 	Release       *adminops.ReleaseService
 	Axis          *adminops.AxisService
+	Agent         *adminops.AgentService
 	GDPR          *adminops.GDPRService
 }

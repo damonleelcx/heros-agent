@@ -38,6 +38,27 @@ type RegionProposal struct {
 	Confidence float64
 	// Candidate marks a behavioral pattern the detector could only find a structural candidate for.
 	Candidate bool
+	// Author is WHO PROPOSED this region (P30 D4). Empty means `detector` — which is correct for every
+	// proposal a rule detector makes, and is why the eight shipped detectors need no edit.
+	//
+	// 🔴 It exists because P30's agent emits its labels as RegionProposals, so they enter through this
+	// same partitioner and the same precedence rule (design D3 / task 4.6) — one arbitration path, not
+	// two. That is exactly what makes the author unrecoverable from anything else on the proposal: a
+	// heros label and a detector label are otherwise identical in shape by design.
+	Author discovery.FactAuthor
+}
+
+// AuthorOrDetector resolves the proposal's author, defaulting to `detector`.
+//
+// The default is safe in the one direction that matters: a proposal that forgets to say it is HEROS
+// gets attributed to a rule, which UNDERSTATES the uncertainty — and the fence in
+// TestEveryHEROSProposalIsAuthored refuses that mistake at the runner rather than letting the default
+// absorb it silently.
+func (p RegionProposal) AuthorOrDetector() discovery.FactAuthor {
+	if p.Author == "" {
+		return discovery.AuthorDetector
+	}
+	return p.Author
 }
 
 // Subgraph is a named region of the IR, the unit classification is emitted against. It mirrors the

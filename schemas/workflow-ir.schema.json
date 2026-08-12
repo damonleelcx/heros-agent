@@ -302,6 +302,10 @@
           "candidate": {
             "type": "boolean",
             "description": "OPTIONAL (added in IR 1.1.0). true when structure could only show a CANDIDATE for a behavioral pattern (e.g. a loop-back edge suggests Reflection but cannot prove the loop iterates). Behavioral confirmation is P5; such a label carries a capped confidence and is never asserted as fact."
+          },
+          "author": {
+            "enum": ["frontend", "detector", "heros", "operator"],
+            "description": "OPTIONAL (added in IR 1.3.0, P30 D4). WHO AUTHORED this fact: a language frontend (frontend), a rule detector or the constrained classifier fallback (detector), the platform's analysis agent (heros), or a human correction (operator). ABSENCE reads as `legacy` \u2014 the fact predates authorship being recorded \u2014 and is deliberately NOT back-filled, because back-filling would assert something about facts nobody examined. It is an ENUM rather than an is_inferred boolean so a fourth author can be added without replacing a field written into stored documents. Distinct from an edge's `provenance`, which answers the orthogonal question of evidence STRENGTH. On a label it is NOT derivable from `source`: P30's agent emits its labels through the RULE layer by design (one arbitration path), so a heros label reads source=rule."
           }
         }
       }
@@ -354,6 +358,10 @@
         "signal": {
           "type": "string",
           "description": "OPTIONAL (added in IR 1.2.0). The specific evidence the edge was recovered from (e.g. call_graph, data_flow, shared_state, span_parent, shared_thread, temporal, framework), so a reader sees WHY the edge exists, not only its provenance tier."
+        },
+        "author": {
+          "enum": ["frontend", "detector", "heros", "operator"],
+          "description": "OPTIONAL (added in IR 1.3.0, P30 D4). WHO AUTHORED this fact: a language frontend (frontend), a rule detector or the constrained classifier fallback (detector), the platform's analysis agent (heros), or a human correction (operator). ABSENCE reads as `legacy` \u2014 the fact predates authorship being recorded \u2014 and is deliberately NOT back-filled, because back-filling would assert something about facts nobody examined. It is an ENUM rather than an is_inferred boolean so a fourth author can be added without replacing a field written into stored documents. Distinct from an edge's `provenance`, which answers the orthogonal question of evidence STRENGTH."
         }
       }
     }

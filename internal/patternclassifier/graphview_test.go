@@ -18,7 +18,7 @@ func viewOf(t *testing.T, f fixture, opts Options) GraphView {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return BuildGraphView(labelled, res)
+	return BuildGraphView(labelled, res, discovery.DiscoveryReport{})
 }
 
 // Task 7.1: each subgraph's label(s) and confidence reach the view, tied to their region.

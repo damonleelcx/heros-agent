@@ -95,6 +95,23 @@ export const SURFACES: Surface[] = [
     nav: true,
   },
   {
+    capability: "agent.read",
+    href: "/agent",
+    label: "Analysis Agent",
+    hint: "The platform's own analysis agent — its definition, rehearsal, placements and spend",
+    nav: true,
+  },
+  {
+    capability: "agent.read",
+    href: "/agent/spend",
+    label: "Analysis Spend",
+    hint: "Per-tenant analysis spend, the caps, and where analysis is allowed to run",
+    // 🔴 NOT in the primary nav, and reachable by name from the palette. It is a detail OF the agent
+    // surface rather than a sibling of it, and the ledger fence is what caught it missing here: a page
+    // with no registry entry is reachable from a URL and absent from the palette, which is the "slot
+    // disappears silently" failure task 6.9 names.
+  },
+  {
     capability: "axis.read",
     href: "/axes",
     label: "Axes",
@@ -145,6 +162,20 @@ export const SURFACES: Surface[] = [
     href: "/killswitch#per-tenant-kill-switch",
     label: "Halt one tenant's merges",
     hint: "Per-tenant kill switch — opens its confirmation",
+    danger: true,
+  },
+  {
+    capability: "agent.admin",
+    href: "/agent#publish",
+    label: "Publish an agent definition",
+    hint: "Opens the axis editor and its resolved diff — nothing is published until it is confirmed",
+    danger: true,
+  },
+  {
+    capability: "agent.admin",
+    href: "/agent/spend#placements",
+    label: "Set a tenant's analysis placement",
+    hint: "`platform` makes this platform read that tenant's source under a platform-held credential",
     danger: true,
   },
   {

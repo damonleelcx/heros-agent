@@ -606,3 +606,96 @@ export type OversightView = {
   read_only: boolean;
   source: string;
 };
+
+// ── P30 · the platform's own analysis agent ──────────────────────────────────
+
+/** How a tenant's placement came to be what it is. A DEFAULT and a DECISION are different facts. */
+export type PlacementSource = "defaulted" | "explicit";
+
+/** The three-valued axis status. `not_in_effect` always carries a reason. */
+export type AgentAxisStatus = "set" | "defaulted" | "not_in_effect";
+
+export type AgentAxisRow = {
+  axis: string;
+  status: AgentAxisStatus;
+  value: string;
+  /** Present when status is `not_in_effect`. An inert axis with no stated reason cannot be acted on. */
+  reason?: string;
+  /** False for the wiring axis, which is fixed and rendered read-only rather than hidden. */
+  editable: boolean;
+};
+
+/** One strategy's availability, with the host service it would need. */
+export type Availability = {
+  name: string;
+  available: boolean;
+  needs?: string;
+  reason?: string;
+  /** True when making this available costs a SECOND metered model call. */
+  second_spend_line?: boolean;
+};
+
+export type AgentVersionRow = {
+  config_hash: string;
+  display: string;
+  model_ref: string;
+  credential_ref: string;
+  rehearsal_state: string;
+  /** True for at most one row, and never derived from recency. */
+  active: boolean;
+  created_at_ms: number;
+};
+
+export type AgentOverview = {
+  serving_config_hash: string;
+  serving_since_ms: number;
+  state: "serving" | "none_published" | "pending_rehearsal" | "rehearsal_failed";
+  sentence: string;
+  axes: AgentAxisRow[] | null;
+  rehearsal_state: string;
+  rehearsal_report?: string;
+  stored_inferences: number;
+  /** False when no inference store is wired — the count then renders as unknown, never as zero. */
+  inferences_known: boolean;
+  harness_availability: Availability[] | null;
+  memory_availability: Availability[] | null;
+  versions: AgentVersionRow[] | null;
+  kill_switch_armed: boolean;
+  kill_switch_note?: string;
+  can_admin: boolean;
+};
+
+export type AgentSpendRow = {
+  tenant_id: string;
+  inferences: number;
+  tokens_in: number;
+  tokens_out: number;
+  estimated_cost: number;
+  /** 🔴 False means UNPRICED. The console renders the word, never a zero. */
+  priced: boolean;
+  placement: string;
+  placement_source: PlacementSource;
+  cap_tokens: number;
+};
+
+export type AgentSpendView = {
+  /** Always true and stated on the wire: these are estimates, not an invoice. */
+  estimated: boolean;
+  rows: AgentSpendRow[] | null;
+  fleet_cap_tokens: number;
+  unpriced_tenants: number;
+  can_admin: boolean;
+};
+
+export type AxisChange = { axis: string; from: string; to: string };
+
+export type PublishPreview = {
+  config_hash: string;
+  display: string;
+  changes: AxisChange[] | null;
+  /** True when the edit resolves to a definition that already exists. It creates no version. */
+  no_change: boolean;
+  already_published: boolean;
+  deprecated_model?: string;
+  refusals: string[] | null;
+};

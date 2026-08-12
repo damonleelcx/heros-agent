@@ -292,7 +292,7 @@ db-proof:
 ##           These tests are behind the `pgproof` build tag, so `make go` does not compile them; with
 ##           no database they FAIL rather than skip.
 pg-proof:
-	bash db/migrations/postgres/run_pg_docker.sh $(GO) test -tags pgproof -count=1 ./internal/pgmigrate/ ./internal/launch/ ./internal/billing/ ./internal/proposalstore/ ./internal/registry/ ./internal/variantspec/ ./internal/worktree/ ./internal/executor/ ./internal/runqueue/ ./internal/submit/ ./internal/e2e/ ./internal/telemetry/ ./internal/evalrun/ ./internal/metering/ ./internal/legal/ ./internal/api/ ./internal/tenancy/ ./internal/signup/
+	bash db/migrations/postgres/run_pg_docker.sh $(GO) test -tags pgproof -count=1 ./internal/pgmigrate/ ./internal/launch/ ./internal/billing/ ./internal/proposalstore/ ./internal/registry/ ./internal/variantspec/ ./internal/worktree/ ./internal/executor/ ./internal/runqueue/ ./internal/submit/ ./internal/e2e/ ./internal/telemetry/ ./internal/evalrun/ ./internal/metering/ ./internal/legal/ ./internal/api/ ./internal/tenancy/ ./internal/signup/ ./internal/herosagent/
 
 ## demo-evalboard: stand up the P4 eval board against a live fan-out with a stubbed provider.
 ##                Everything between the queue and the pixel is the shipped path: the eval set comes
@@ -411,3 +411,54 @@ install-smoke:
 mail-proof:
 	@test -n "$(TO)" || { echo "usage: make mail-proof TO=you@example.com"; exit 2; }
 	@GOWORK=off $(PYTHON) scripts/mail_proof.py "$(TO)"
+
+## agent-status: what the analysis agent is actually doing on a deployment, read from /readyz.
+##
+## 🔴 It reads the LIVE signal rather than a config file, which is the whole of task 9.1: `heros_agent`
+## on /readyz is resolved by doing what an inference does — reading the active definition, RESOLVING the
+## credential through the same secrets source the runner calls, and comparing the real meter against the
+## real ceiling. A green line here means an inference would work, not that somebody set a variable.
+##
+##   make agent-status                                  # the local deployment
+##   make agent-status READYZ=https://heros-agent.space/readyz
+agent-status:
+	@GOWORK=off $(PYTHON) scripts/agent_status.py "$(or $(READYZ),http://127.0.0.1:4321/readyz)"
+
+## agent-rollout: whether this fleet's CURRENT SHAPE permits the next rollout stage (task 9.4).
+##
+## 🚫 "No stage verified by hand" is the task's own words, and this is what replaces the hand. It counts
+## the placement table, reads the active definition's rehearsal state and checks the fleet ceiling —
+## then prints the one precondition that fails, or that the step is permitted. It CHANGES NOTHING: an
+## operator still sets each placement deliberately, with a reason, because automating enablement would
+## put "read a customer's source under a platform credential" behind a scheduler.
+##
+##   make agent-rollout                       # what stage this fleet is at
+##   make agent-rollout WANT=partner          # may it advance to `partner`?
+agent-rollout:
+	@GOWORK=off $(GO) run ./cmd/agentrollout -want "$(WANT)"
+
+## agent-drills: the P30 mutation drills — defeat each fence, confirm it goes RED, restore.
+##
+## 🔴 `-count=1` on every run, because a mutation followed by a same-second test run reads a CACHED
+## PASS and reports a real fence as dead. That has happened on this repository before.
+agent-drills:
+	@GOWORK=off $(PYTHON) scripts/agent_drills.py
+
+## agent-acceptance: P30 task 10.13 — the LIVE acceptance, four layers.
+##
+## 🔴 A 200 is none of the four. Setting the placement is layer 1 and is deliberately EXPLICIT: it
+## defaults to `disabled`, and an acceptance that inherits a default stops proving anything the day the
+## default changes. Layer 2 spends REAL TOKENS against a live provider.
+##
+## 🚫 A layer that cannot run prints NOT RUN and the command exits non-zero. There is no "skipped" that
+## reads as green — a partial acceptance reported as an acceptance is how a capability ships having
+## never once worked end to end.
+##
+##   make agent-acceptance TENANT=acme WORKFLOW=openclaw/openclaw \
+##     API=https://heros-agent.space CONSOLE=https://heros-agent.space
+agent-acceptance:
+	@test -n "$(TENANT)" || { echo "usage: make agent-acceptance TENANT=<id> WORKFLOW=<id>"; exit 2; }
+	@test -n "$(WORKFLOW)" || { echo "usage: make agent-acceptance TENANT=<id> WORKFLOW=<id>"; exit 2; }
+	@GOWORK=off $(PYTHON) scripts/agent_acceptance.py \
+		--tenant "$(TENANT)" --workflow "$(WORKFLOW)" \
+		$(if $(API),--api "$(API)",) $(if $(CONSOLE),--console "$(CONSOLE)",)

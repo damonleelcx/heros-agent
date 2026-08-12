@@ -68,6 +68,14 @@ type IRSubgraph struct {
 // A drift test in the classifier asserts these two representations serialise identically, so the
 // split cannot silently become two different formats.
 type IRPatternLabel struct {
+	// Author is WHO WROTE THIS LABEL (P30 D4): detector | heros | operator. Absent reads as `legacy`.
+	//
+	// It is NOT derivable from Source. Source says which LAYER produced the label (`rule` or `llm`), and
+	// P30's agent enters through the rule layer by design — its output is a patternclassifier
+	// .RegionProposal so it passes the same partitioner and the same precedence rule as every detector's
+	// (D3, task 4.6). So a `heros` label reads `source: rule`, and without this field it would be
+	// indistinguishable from one a hand-written detector produced.
+	Author          string  `json:"author,omitempty"`
 	Pattern         string  `json:"pattern"`
 	Confidence      float64 `json:"confidence"`
 	Source          string  `json:"source,omitempty"`
@@ -348,6 +356,14 @@ type IREdge struct {
 	Provenance string  `json:"provenance,omitempty"`
 	Confidence float64 `json:"confidence,omitempty"`
 	Signal     string  `json:"signal,omitempty"`
+	// Author is WHO WROTE THIS EDGE (P30 D4): frontend | detector | heros | operator. Absent reads as
+	// `legacy` — see AuthorOf, and see author.go for why this is not the Provenance field above, which
+	// answers the orthogonal question of evidence STRENGTH.
+	//
+	// 🔴 ADDITIVE and omitempty, so an IR that predates it serialises byte-identically, the P0 golden
+	// vectors keep reproducing, and every config_hash-keyed row stays addressable — the same discipline
+	// DeclaredEnv, Tools, Skills, Memory and Harness follow.
+	Author string `json:"author,omitempty"`
 }
 
 // BuildIR maps the extracted graph to the frozen IR. Nodes and edges are sorted for byte-stable,
@@ -365,7 +381,12 @@ func BuildIR(wf IRWorkflow, nodes []ExtractedNode, edges []GraphEdge) IR {
 	}
 	for _, e := range edges {
 		if present[e.From] && present[e.To] {
-			ir.Edges = append(ir.Edges, IREdge{FromNodeID: e.From, ToNodeID: e.To, Kind: e.Kind})
+			// 🔴 THE ONE PLACE a frontend-authored edge is minted (P30 task 2.2). Every language frontend
+			// funnels through BuildIR, so stamping here means no frontend can forget — and a second
+			// stamping site would be a second answer to "who wrote this".
+			ir.Edges = append(ir.Edges, IREdge{
+				FromNodeID: e.From, ToNodeID: e.To, Kind: e.Kind, Author: string(AuthorFrontend),
+			})
 		}
 	}
 

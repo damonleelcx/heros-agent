@@ -172,6 +172,50 @@ func assertLinkTarget(url string) error {
 	return nil
 }
 
+// FetchAgentDefinition reads the active agent definition, for a customer-placed analysis (task 7.1).
+//
+// The ONE request on this seam that travels platform → customer. It is a GET carrying nothing but the
+// bearer token: the tenant comes from the principal, exactly as it does on every ingest here, so there
+// is no field a caller could use to ask about somebody else's placement.
+func (c *Client) FetchAgentDefinition(ctx context.Context) (runlink.AgentDefinition, error) {
+	url := c.base + runlink.AgentDefinitionPath
+	if err := assertLinkTarget(url); err != nil {
+		return runlink.AgentDefinition{}, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return runlink.AgentDefinition{}, fmt.Errorf("analyse: build request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("X-Heros-Contract", runlink.AgentDefinitionContractVersion)
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return runlink.AgentDefinition{}, fmt.Errorf("analyse: transport: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+
+	if err := c.edge404("analyse", runlink.AgentDefinitionPath, resp, raw); err != nil {
+		return runlink.AgentDefinition{}, err
+	}
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+		var d runlink.AgentDefinition
+		if err := json.Unmarshal(raw, &d); err != nil {
+			return runlink.AgentDefinition{}, fmt.Errorf("analyse: decode response: %w", err)
+		}
+		return d, nil
+	case http.StatusUnauthorized:
+		return runlink.AgentDefinition{}, fmt.Errorf("analyse: authentication rejected — run `heros login`")
+	case http.StatusServiceUnavailable:
+		return runlink.AgentDefinition{}, fmt.Errorf("analyse: this deployment runs no analysis agent: %s", string(raw))
+	default:
+		return runlink.AgentDefinition{}, fmt.Errorf("analyse: platform returned %d: %s", resp.StatusCode, string(raw))
+	}
+}
+
 // WorkflowIRResult is the platform's response to an opt-in structure upload.
 type WorkflowIRResult struct {
 	Accepted   bool   `json:"accepted"`

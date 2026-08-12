@@ -59,10 +59,17 @@ const PATH_TEMPLATES: Array<[RegExp, string]> = [
   [/^\/api\/v1\/runs\/[^/]+\/monitor\/stream$/, "/api/v1/runs/{run_id}/monitor/stream"],
   [/^\/api\/v1\/workflows\/[^/]+\/pattern-graph$/, "/api/v1/workflows/{workflow_id}/pattern-graph"],
   [/^\/api\/v1\/workflows\/[^/]+\/eval-board/, "/api/v1/workflows/{workflow_id}/eval-board"],
+  // P30 §1.12 — the eval set behind the board's denominator. Anchored, so it cannot be shadowed by the
+  // eval-board matcher above (which is deliberately unanchored to absorb the `?profile=` query).
+  [/^\/api\/v1\/workflows\/[^/]+\/eval-set$/, "/api/v1/workflows/{workflow_id}/eval-set"],
   [/^\/api\/v1\/variants\/[^/]+\/scorecard$/, "/api/v1/variants/{variant_id}/scorecard"],
   // Ordered before the open-PR pattern below only for readability; the two cannot both match, because
   // this one is anchored and that one has two more segments.
   [/^\/api\/v1\/workflows\/[^/]+\/proposals$/, "/api/v1/workflows/{workflow_id}/proposals"],
+  // P30 §1.8 — the FLAT generation action. Flat so it can be published `Exact`; listed here so its
+  // latency and error rate are queryable, which for a POST that runs a read-heavy pass is the one
+  // signal that says whether the button is worth pressing.
+  [/^\/api\/v1\/proposal-generations$/, "/api/v1/proposal-generations"],
   [/^\/api\/v1\/workflows\/[^/]+\/proposals\/[^/]+\/open-pr$/, "/api/v1/workflows/{workflow_id}/proposals/{proposal_id}/open-pr"],
   [/^\/api\/v1\/workflows\/[^/]+\/nodes$/, "/api/v1/workflows/{workflow_id}/nodes"],
   [/^\/api\/v1\/workflows\/[^/]+\/bindings$/, "/api/v1/workflows/{workflow_id}/bindings"],

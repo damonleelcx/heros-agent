@@ -24,6 +24,21 @@
       ]
     },
     {
+      "route": "/docs/concepts/inferred-structure",
+      "source": "docs/en/concepts/inferred-structure.md",
+      "content_hash": "abbb28cdc77056e89aee3e86ac22c7d28567fafde5067b0629031051f95be610",
+      "anchors": [
+        "the-short-version",
+        "four-states-and-why-they-are-four",
+        "reading-the-graph",
+        "the-composition-panel",
+        "the-assessed-paragraph",
+        "whose-machine-ran-it",
+        "turning-it-off",
+        "what-it-does-not-do"
+      ]
+    },
+    {
       "route": "/docs/concepts/refusals",
       "source": "docs/en/concepts/refusals.md",
       "content_hash": "8e4d0dd347e167930c0dd4a54e68408e1ceec50ca3df2cf2def83cc9151987dd",
@@ -129,11 +144,12 @@
     {
       "route": "/docs/reference/cli",
       "source": "docs/en/reference/cli.md",
-      "content_hash": "43d57b2c59d046186f966f4f90737057ba26064756a506428bb50638a7febe1c",
+      "content_hash": "7e1b01caad5ea2dfdee487be655da3935a8592187258a82f59224035cb64eb18",
       "anchors": [
         "exit-codes",
         "configuration-and-which-source-wins",
         "commands",
+        "analyse",
         "apply",
         "author",
         "coverage",
@@ -176,7 +192,7 @@
     {
       "route": "/docs/reference/schemas",
       "source": "docs/en/reference/schemas.md",
-      "content_hash": "51b216236067e56cc74c49adfe6bc016cd7e9bf4c33b28e0e12431e328838d65",
+      "content_hash": "95d5f1997b39e35c3508f7e79ae111ac90e884b77d613400f1e405771b0339a9",
       "anchors": [
         "console-view",
         "metric-event",

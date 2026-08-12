@@ -1,0 +1,104 @@
+package launch
+
+import (
+	"context"
+	"errors"
+	"strings"
+
+	"github.com/heros-foreal/agentd/internal/providergateway"
+
+	"github.com/heros-foreal/agentd/internal/registry"
+)
+
+// herosagentwiring.go adapts the P2 registries onto the two resolvers `herosagent.PlatformSource`
+// needs, and holds the two defaults a deployment runs the agent under.
+//
+// # Why the adapters are here rather than in internal/herosagent
+//
+// `herosagent` declares `PromptResolver` and `ModelResolver` as interfaces so it can be tested without a
+// database, and so the ONE place a prompt is rendered stays visible. If it imported `internal/registry`
+// to satisfy them itself, that seam would close and the customer-side runner's "has no template engine"
+// property would be a fact about the CLI's build rather than about the design.
+
+// registryPrompts renders a prompt-registry version into the instruction a runner sends.
+type registryPrompts struct{ reg *registry.Store }
+
+// Render resolves the version and renders its template with NO BINDINGS.
+//
+// 🔴 No bindings, and that is a statement about HEROS rather than a shortcut. Its prompt is the
+// analyst's standing instruction — what a residue is, which vocabularies are closed, that a rule-derived
+// edge is immutable — and none of that varies per analysis. The per-analysis input is the RESIDUE, and
+// it travels as the user message that `AssembleModelInput` builds. A slot filled here would be a second
+// channel for context, assembled somewhere the anti-skew fence cannot see.
+//
+// A template that DECLARES a slot therefore cannot be rendered, and `Render` refuses rather than
+// substituting an empty string: a prompt with a hole where an instruction should be is one the model
+// answers anyway.
+func (p registryPrompts) Render(ctx context.Context, promptRef string) (string, bool, error) {
+	if promptRef == "" {
+		return "", false, nil
+	}
+	entry, err := p.reg.ResolvePrompt(ctx, promptRef)
+	if err != nil {
+		if errors.Is(err, registry.ErrNotFound) {
+			// NOT PUBLISHED is a state, not a failure — a definition whose prompt version was never
+			// registered has nothing to run, and the customer's CLI says exactly that.
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	body, err := entry.Template.Render(nil)
+	if err != nil {
+		return "", false, err
+	}
+	return body, true, nil
+}
+
+// registryModels resolves the definition's model ref to a provider and model id.
+type registryModels struct{ reg *registry.Store }
+
+// Resolve reads the operator registry so the CUSTOMER's machine does not have to.
+func (m registryModels) Resolve(ctx context.Context, modelRef string) (string, string, bool, error) {
+	if modelRef == "" {
+		return "", "", false, nil
+	}
+	entry, err := m.reg.ResolveModel(ctx, modelRef)
+	if err != nil {
+		if errors.Is(err, registry.ErrNotFound) {
+			return "", "", false, nil
+		}
+		return "", "", false, err
+	}
+	return entry.Spec.Provider, entry.Spec.ModelID, true, nil
+}
+
+// secretsResolver adapts the gateway's own Secrets source onto the readiness check's resolver.
+//
+// 🔴 IT PERFORMS THE RESOLUTION. That is the whole of task 9.1's "not asserted from configuration":
+// this asks the same source, for the same provider, that the runner will ask at use — so a reference
+// pointing at a secret nobody provisioned reports `credential_unresolved` here rather than looking
+// identical to a working one until the first customer analysis.
+//
+// 🚫 It discards the credential immediately. `Resolve` returns an error or nil and never the value: a
+// readiness surface that held one would be a readiness surface that could leak one, and nothing on
+// `/readyz` needs it.
+type secretsResolver struct{ secrets providergateway.Secrets }
+
+func (r secretsResolver) Resolve(ctx context.Context, provider string) error {
+	if r.secrets == nil {
+		return errors.New("this deployment has no configured secrets source, so no provider credential " +
+			"can be resolved at all")
+	}
+	if strings.TrimSpace(provider) == "" {
+		return errors.New("the active definition binds no provider name")
+	}
+	_, err := r.secrets.Credential(ctx, provider)
+	return err
+}
+
+func (r secretsResolver) Describe() string {
+	if r.secrets == nil {
+		return "none"
+	}
+	return string(r.secrets.Describe().Kind)
+}

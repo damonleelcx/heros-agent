@@ -217,7 +217,11 @@ func ReconcileIntoIR(ir *discovery.IR, report Report) *discovery.IR {
 		existing[key] = true
 		out.Edges = append(out.Edges, discovery.IREdge{
 			FromNodeID: e.FromNodeID, ToNodeID: e.ToNodeID, Kind: "data",
-			Provenance: "runtime_only"})
+			Provenance: "runtime_only",
+			// P30 D4. `detector` and not `frontend`: no parser established this edge — it was recovered
+			// from run traces by this platform's own rules. And emphatically not `heros`, which would
+			// attribute a trace-derived fact to an agent that did not exist when it was written.
+			Author: string(discovery.AuthorDetector)})
 		added = true
 	}
 	if added && out.IRVersion == discovery.IRVersion {

@@ -47,6 +47,11 @@ type Result struct {
 	// LLMCalls counts fallback invocations. Asserted to be 0 on a fully rule-covered IR: this is the
 	// determinism guarantee made countable rather than merely claimed.
 	LLMCalls int `json:"llm_calls"`
+	// FallbackConfigured records whether a model was AVAILABLE to be consulted, which LLMCalls cannot
+	// answer: zero calls happens both when no model is wired and when a wired model had nothing to look
+	// at. Those are opposite states — "nothing looked at this region" versus "everything was covered
+	// before the model was needed" — and telling them apart is what the unclassified reasons rest on.
+	FallbackConfigured bool `json:"fallback_configured"`
 }
 
 // LabelsFor returns the labels attached to one subgraph_ref, in stable order.
@@ -84,7 +89,7 @@ func Classify(ctx context.Context, ir *discovery.IR, opts Options) (Result, erro
 	}
 	regions := resolve(proposals, &diags)
 
-	res := Result{}
+	res := Result{FallbackConfigured: opts.Fallback != nil}
 	covered := map[string]bool{}
 	seenSubgraph := map[string]bool{}
 	for _, r := range regions {
@@ -92,6 +97,11 @@ func Classify(ctx context.Context, ir *discovery.IR, opts Options) (Result, erro
 			Pattern: r.Pattern, Confidence: r.Confidence, Source: SourceRule,
 			SubgraphRef: r.SubgraphID, DetectorID: r.DetectorID,
 			TaxonomyVersion: TaxonomyVersion, Candidate: r.Candidate,
+			// 🔴 THE ONE PLACE a rule-layer label is minted (P30 task 2.2). The author comes from the
+			// PROPOSAL rather than being hardcoded to `detector` here — HEROS's labels arrive through
+			// this same path by design (D3), and a hardcoded value would silently re-attribute every
+			// one of them to a rule that never fired.
+			Author: r.AuthorOrDetector(),
 		}
 		// EVERY label passes the same write-time gate, whatever produced it. A detector cannot ship a
 		// label the contract forbids just because it is "one of ours".

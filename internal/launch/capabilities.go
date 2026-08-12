@@ -22,6 +22,7 @@ import (
 	"github.com/heros-foreal/agentd/internal/entitlement"
 	"github.com/heros-foreal/agentd/internal/executor"
 	"github.com/heros-foreal/agentd/internal/forgedelivery"
+	"github.com/heros-foreal/agentd/internal/herosagent"
 	"github.com/heros-foreal/agentd/internal/hostdiscovery"
 	"github.com/heros-foreal/agentd/internal/hostedboard"
 	"github.com/heros-foreal/agentd/internal/hostedcompile"
@@ -93,6 +94,7 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 	mountedScorecard := false
 	mountedVerdictIngest := false
 	mountedProposalGen := false
+	mountedHerosAgent := false
 	mountedProposals := false
 	mountedForgeDelivery := false
 	mountedProposalCompile := false
@@ -329,9 +331,16 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 			}
 		}
 
-		h.MountEvalBoard(hostedboard.NewSource(linkStore))
+		boardSource := hostedboard.NewSource(linkStore)
+		h.MountEvalBoard(boardSource)
 		served("p4_eval_board (assembled from linked runs; no tie detection — replicates do not cross)")
 		mountedEvalBoard = true
+		// P30 §1.12 · the eval set behind the board's denominator. Same source, because the two numbers
+		// must come from one read: a case count on the board that disagrees with the eval-set surface
+		// would be two answers to "how many cases is this score over".
+		h.MountEvalSet(boardSource)
+		served("p30_eval_set (the board's denominator, its family split and its indecisive count; the " +
+			"cases themselves do not cross)")
 		h.MountScorecard(hostedscorecard.NewSource(linkStore))
 		served("p45_scorecard (cost/latency attribution from linked runs; failure attribution stays local)")
 		mountedScorecard = true
@@ -371,7 +380,10 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 		// CI, and read exactly why it stops there — and it is emphatically better than the 503 it
 		// replaces, which said the capability was not installed when the truth is that it is installed
 		// and bounded.
-		h.MountProposals(hostedproposals.NewSource(verdictStore, blobs))
+		// The pass store is the SAME PGStore. Without it the surface cannot tell "nobody has ever
+		// analysed this workflow" from "a pass ran and found nothing", and it renders the first as the
+		// second — one reader told they are finished when they have not started (P30 task 1.5).
+		h.MountProposals(hostedproposals.NewSource(verdictStore, blobs, verdictStore))
 		served("p55_proposals (recommendation surface over reported verdicts; no diff, so open-PR refuses)")
 		mountedProposals = true
 
@@ -438,6 +450,79 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 		// It is mounted where the durable stores are, and NOT where the studio matrix is: the matrix's
 		// `GET /api/v1/workflows` read a process-local map that only the demo binaries fill.
 		h.MountEnumeration(irStore, linkStore, receiptStore)
+
+		// P30 §7 · the analysis agent's CUSTOMER-FACING half: read the active definition (so a
+		// `customer`-placed tenant can run it on its own machine) and accept what that run produced.
+		//
+		// 🔴 There is no route for the ingest and that is task 7.3: a customer-side result rides the
+		// opt-in structure payload mounted just above. What is mounted here is the READ.
+		//
+		// ⚠️ On the day this deploys it serves exactly one thing to every tenant: `{"placement":
+		// "disabled"}`. Q2 made that the default, `heros_tenant_placement` starts EMPTY and is
+		// deliberately not back-filled, so nothing analyses anything until an operator sets a placement.
+		// That is the intended posture and it is the reason task 10.13's acceptance run has to include
+		// the enablement step explicitly — an acceptance that silently depends on a default stops
+		// proving anything the day the default changes.
+		placementStore, perr := herosagent.NewPGPlacementStore(pg)
+		if perr != nil {
+			return nil, fmt.Errorf("heros agent placement store: %w", perr)
+		}
+		versionStore, verr := herosagent.NewPGVersionStore(pg)
+		if verr != nil {
+			return nil, fmt.Errorf("heros agent version store: %w", verr)
+		}
+		inferenceStore, ierr := herosagent.NewPGInferenceStore(pg)
+		if ierr != nil {
+			return nil, fmt.Errorf("heros agent inference store: %w", ierr)
+		}
+		agentCaps, cerr := herosagent.NewPGCapStore(pg)
+		if cerr != nil {
+			return nil, fmt.Errorf("heros agent cap store: %w", cerr)
+		}
+		agentMeter, merr := herosagent.NewPGSpendStore(pg)
+		if merr != nil {
+			return nil, fmt.Errorf("heros agent spend store: %w", merr)
+		}
+		agentCapChecker, kerr := herosagent.NewCapChecker(agentCaps, agentMeter,
+			func() int64 { return time.Now().UnixMilli() })
+		if kerr != nil {
+			return nil, fmt.Errorf("heros agent cap checker: %w", kerr)
+		}
+
+		// 🔴 TASK 9.1 — readiness resolved by DOING what an inference does, not by reading configuration.
+		//
+		// The credential resolver handed here is the SAME `providergateway.Secrets` the runner calls at
+		// use, so `/readyz` reports `credential_unresolved` when a real resolution fails rather than
+		// `ready` because a reference is set. This product has already shipped the other version of this
+		// once — `components.postgres: ready` on a process that had never opened a Postgres connection —
+		// and that signal could not go red no matter what happened to Postgres.
+		h.SetAgentReadiness(func(ctx context.Context) herosagent.Readiness {
+			return herosagent.Check(ctx, herosagent.ReadinessInput{
+				Versions:    versionStore,
+				Placements:  placementStore,
+				Credentials: secretsResolver{secrets},
+				Caps:        agentCapChecker,
+			})
+		})
+
+		agentSource, aerr := herosagent.NewPlatformSource(herosagent.PlatformSourceConfig{
+			Placements: placementStore,
+			Versions:   versionStore,
+			Prompts:    registryPrompts{reg},
+			Models:     registryModels{reg},
+			Inferences: inferenceStore,
+			Floor:      herosagent.DefaultConfidenceFloor,
+			Budget:     herosagent.DefaultBudget(),
+			NowMS:      func() int64 { return time.Now().UnixMilli() },
+			Caps:       agentCapChecker,
+			Meter:      agentMeter,
+		})
+		if aerr != nil {
+			return nil, fmt.Errorf("heros agent source: %w", aerr)
+		}
+		h.MountHerosAgent(agentSource)
+		mountedHerosAgent = true
+		served("p30_heros_agent (agent definition read + customer-placed result ingest)")
 		// 🔴 `coverage × your nodes` (P29 §5). The coverage table and the reported structure are both
 		// already here and correct; nothing had ever multiplied them, which is why /app/coverage rendered
 		// a full table that said nothing about the reader.
@@ -588,6 +673,9 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 				// The candidate spec goes to the SAME blob store the diff and the prompt registry use.
 				// A proposal recorded without it can never be compiled (migration 0031).
 				Blobs: blobs,
+				// Every pass records what it FOUND (migration 0044), including — especially — the passes
+				// that write no proposal row, which are the ones the surface could not previously explain.
+				Passes: verdictStore,
 			}
 			h.MountProposalGeneration(gen)
 			served("p55_proposal_generation (cost-bottleneck operators only; a diagnosis needs the eval " +
@@ -640,6 +728,11 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 	if !mountedEvalBoard {
 		h.MountEvalBoard(nil)
 		absent("p4_eval_board", noAdapter)
+		// Registered unsourced alongside the board it explains. Without this the route is not on the mux
+		// at all and answers 404 — which a console classifies as "no such workflow" and renders over a
+		// workflow that plainly exists, the exact miscategorisation this whole convention prevents.
+		h.MountEvalSet(nil)
+		absent("p30_eval_set", noAdapter)
 	}
 	if !mountedScorecard {
 		h.MountScorecard(nil)
@@ -662,6 +755,16 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 	if !mountedProposalGen {
 		h.MountProposalGeneration(nil)
 		absent("p55_proposal_generation", proposalGenAbsentReason(pg))
+	}
+	if !mountedHerosAgent {
+		// 🔴 Mounted with a NIL source rather than left unmounted, and the difference is what a customer
+		// sees: an unmounted route answers 404 from the console app, which reads as a bad identifier or a
+		// broken CLI, while a mounted one answers 503 with "this deployment runs no analysis agent" —
+		// which is the true statement and the one that stops somebody debugging their own machine.
+		h.MountHerosAgent(nil)
+		absent("p30_heros_agent", "this deployment declares no platform database (DATABASE_URL is unset), "+
+			"so there is no store for published agent definitions, no per-tenant placement, and nowhere "+
+			"to record a submitted inference")
 	}
 	if !mountedVerdictIngest {
 		h.MountVerdictIngest(nil)

@@ -355,6 +355,13 @@ func NewSyntacticFrontend(a LanguageAnalyzer) *SyntacticFrontend {
 
 func (f *SyntacticFrontend) Language() string { return f.analyzer.Language() }
 
+// AnalysisKind is syntactic for every analyzer on this substrate, and that is a property of the
+// substrate rather than of any one language: detectSyntacticUnit matches call shapes in a parse tree
+// and the floor extractor reads literal arguments. Nothing here follows a value from one statement into
+// the next, so no analyzer on it can emit an edge, and its empty edge list must never be read as
+// "these calls are independent".
+func (f *SyntacticFrontend) AnalysisKind() AnalysisKind { return AnalysisSyntactic }
+
 func (f *SyntacticFrontend) Handles(path string) bool {
 	ext := strings.ToLower(filepath.Ext(path))
 	for _, e := range f.analyzer.Extensions() {

@@ -26,18 +26,24 @@ func (p *PGGraphStore) Put(ctx context.Context, g Graph) error {
 	if err != nil {
 		return fmt.Errorf("hostdiscovery: encode graph view: %w", err)
 	}
+	// 🔴 DERIVED HERE, from the document being written, and never taken from the caller. An index that
+	// can disagree with what it indexes is worse than no index, because it is believed. See
+	// provenance.go, and TestTheStoredProvenanceIndexCannotDriftFromTheDocument.
+	prov := ProvenanceOf(g.View)
 	_, err = p.db.ExecContext(ctx,
 		`INSERT INTO platform_workflow_graph
-		   (tenant_id, workflow_id, source_revision, ir_version, taxonomy_version, discovered_at, llm_calls, view_json)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+		   (tenant_id, workflow_id, source_revision, ir_version, taxonomy_version, discovered_at,
+		    llm_calls, view_json, provenance)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
 		 ON CONFLICT (tenant_id, workflow_id, source_revision) DO UPDATE
 		   SET ir_version       = EXCLUDED.ir_version,
 		       taxonomy_version = EXCLUDED.taxonomy_version,
 		       discovered_at    = EXCLUDED.discovered_at,
 		       llm_calls        = EXCLUDED.llm_calls,
-		       view_json        = EXCLUDED.view_json`,
+		       view_json        = EXCLUDED.view_json,
+		       provenance       = EXCLUDED.provenance`,
 		g.TenantID, g.WorkflowID, g.SourceRevision, g.IRVersion, g.TaxonomyVersion,
-		g.DiscoveredAt, g.LLMCalls, view)
+		g.DiscoveredAt, g.LLMCalls, view, nullProvenance(prov))
 	if err != nil {
 		return fmt.Errorf("hostdiscovery: put graph %s/%s: %w", g.WorkflowID, g.SourceRevision, err)
 	}
@@ -48,14 +54,18 @@ func (p *PGGraphStore) Put(ctx context.Context, g Graph) error {
 func (p *PGGraphStore) Latest(ctx context.Context, tenantID, workflowID string) (Graph, bool, error) {
 	var g Graph
 	var view []byte
+	// NULL provenance is a PRE-P30 ROW, not an error and not an empty set of a different kind. It is
+	// scanned into a sql.NullString and resolved below, so the two spellings a reader could receive —
+	// SQL NULL and the empty string — collapse to one before anything branches on them.
+	var prov sql.NullString
 	err := p.db.QueryRowContext(ctx,
 		`SELECT tenant_id, workflow_id, source_revision, ir_version, taxonomy_version,
-		        discovered_at, llm_calls, view_json
+		        discovered_at, llm_calls, view_json, provenance
 		   FROM platform_workflow_graph
 		  WHERE tenant_id = $1 AND workflow_id = $2
 		  ORDER BY discovered_at DESC LIMIT 1`, tenantID, workflowID).
 		Scan(&g.TenantID, &g.WorkflowID, &g.SourceRevision, &g.IRVersion, &g.TaxonomyVersion,
-			&g.DiscoveredAt, &g.LLMCalls, &view)
+			&g.DiscoveredAt, &g.LLMCalls, &view, &prov)
 	switch {
 	case err == sql.ErrNoRows:
 		return Graph{}, false, nil
@@ -65,7 +75,21 @@ func (p *PGGraphStore) Latest(ctx context.Context, tenantID, workflowID string) 
 	if err := json.Unmarshal(view, &g.View); err != nil {
 		return Graph{}, false, fmt.Errorf("hostdiscovery: decode graph view for %s: %w", workflowID, err)
 	}
+	g.Provenance = prov.String
 	return g, true, nil
+}
+
+// nullProvenance writes the empty index as SQL NULL.
+//
+// 🔴 NULL and ” are the SAME STATE here — "this row's facts name no author" — and storing both would
+// make `WHERE provenance IS NULL` answer a different question from `WHERE provenance = ”` for rows
+// that mean the same thing. NULL is the spelling migration 0045 documents as `legacy`, so it is the
+// one used, and the reader maps it back through discovery.AuthorOf.
+func nullProvenance(p string) any {
+	if p == "" {
+		return nil
+	}
+	return p
 }
 
 // MemGraphStore is the in-memory store, for tests and demos.

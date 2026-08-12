@@ -142,6 +142,10 @@ export interface GraphView {
   unclassified: ViewRegion[] | null;
   diagnostics?: Diagnostic[] | null;
   llm_calls: number;
+  llm_calls_note: string;
+  topology?: ViewTopology | null;
+  composition: Composition;
+  agent?: ViewAgent | null;
 }
 
 export interface ViewNode {
@@ -167,18 +171,23 @@ export interface ViewLabel {
   provenance: string;
   primary_metric: string;
   metrics: string[] | null;
+  author?: string;
 }
 
 export interface ViewEdge {
   from: string;
   to: string;
   kind: string;
+  author?: string;
+  confidence?: number;
 }
 
 export interface ViewRegion {
   subgraph_id: string;
   node_ids: string[] | null;
   labels: ViewLabel[] | null;
+  reason?: string;
+  reason_sentence?: string;
 }
 
 export interface Diagnostic {
@@ -187,6 +196,53 @@ export interface Diagnostic {
   raw_pattern?: string;
   source?: string;
   reason: string;
+}
+
+export interface ViewTopology {
+  reason: string;
+  frontends: ViewFrontend[] | null;
+  sentence: string;
+}
+
+export interface ViewFrontend {
+  language: string;
+  analysis_kind: string;
+  nodes: number;
+  edges: number;
+}
+
+export interface Composition {
+  patterns: CompositionPattern[] | null;
+  nodes_total: number;
+  nodes_covered: number;
+  nodes_covered_inferred: number;
+  unlabelled_remainder: number;
+  edges_total: number;
+  edges_inferred: number;
+}
+
+export interface CompositionPattern {
+  pattern: string;
+  ordinal: number;
+  title: string;
+  group: string;
+  regions: number;
+  nodes: number;
+  provenance: string[] | null;
+  authors: string[] | null;
+  state: string;
+  candidate: boolean;
+}
+
+export interface ViewAgent {
+  state: string;
+  state_sentence: string;
+  placement: string;
+  placement_sentence?: string;
+  narrative?: string;
+  action: string;
+  action_reason?: string;
+  failure?: string;
 }
 
 /** Response of `GET /api/v1/workflows/{workflow_id}/eval-board`. */
@@ -339,6 +395,34 @@ export interface UnmeasuredView {
   reason: string;
 }
 
+/** Response of `GET /api/v1/workflows/{workflow_id}/eval-set`. */
+export interface EvalSetView {
+  workflow_id: string;
+  state: string;
+  sentence: string;
+  n_cases: number;
+  cases: EvalCaseView[] | null;
+  families: FamilyCount[] | null;
+  n_oracle: number;
+  n_indecisive: number;
+  indecisive_reasons: string[] | null;
+  vacuous_dimensions: string[] | null;
+  uncovered_nodes: string[] | null;
+  unattributed: string[] | null;
+}
+
+export interface EvalCaseView {
+  case_id: string;
+  family: string;
+  oracle: string;
+  indecisive: boolean;
+}
+
+export interface FamilyCount {
+  family: string;
+  cases: number;
+}
+
 /** Response of `GET /api/v1/variants/{variant_id}/scorecard`. */
 export interface ScorecardView {
   variant_id: string;
@@ -444,9 +528,17 @@ export interface ProposalSurface {
   automation_level: string;
   state: string;
   error?: string;
+  pass?: PassView | null;
   recommendations: Card[] | null;
   withheld: Card[] | null;
   trend: TrendView;
+}
+
+export interface PassView {
+  state: string;
+  detail: string;
+  proposals: number;
+  ran_at_ms: number;
 }
 
 export interface Card {

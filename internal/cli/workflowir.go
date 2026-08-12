@@ -88,9 +88,21 @@ func BuildWorkflowIRWithVerdicts(ir *discovery.IR, verdicts nodeaxis.Report) run
 		p.Nodes = append(p.Nodes, wire)
 	}
 	for _, e := range ir.Edges {
-		// Provenance/Confidence/Signal are on the IR edge and are NOT read: an inferred edge's confidence
-		// is a fact about our analysis, not about the customer's workflow, and the graph draws neither.
-		p.Edges = append(p.Edges, runlink.WireIREdge{From: e.FromNodeID, To: e.ToNodeID, Kind: e.Kind})
+		// 🔴 P30 · `Author` IS read now, and the P29 comment that stood here said the opposite: "an
+		// inferred edge's confidence is a fact about our analysis, not about the customer's workflow, and
+		// the graph draws neither". The graph draws both as of task 8.3, so the premise expired — and a
+		// comment left arguing against the code beside it is worse than none, because the next reader
+		// trusts it.
+		//
+		// What is still NOT read: `Provenance` (internal/linkage's evidence-STRENGTH vocabulary, a
+		// different question with different values — see discovery/author.go) and `Signal`. Confidence is
+		// carried only for an agent-authored edge, because that is the only kind that has one; a frontend
+		// edge is not a hypothesis.
+		wire := runlink.WireIREdge{From: e.FromNodeID, To: e.ToNodeID, Kind: e.Kind, Author: e.Author}
+		if e.Author == runlink.AuthorHEROS {
+			wire.Confidence = e.Confidence
+		}
+		p.Edges = append(p.Edges, wire)
 	}
 	return p
 }
@@ -106,17 +118,9 @@ func BuildWorkflowIRWithVerdicts(ir *discovery.IR, verdicts nodeaxis.Report) run
 // here, where both values are in hand and the message can name them.
 // LoadIRForLink is exported for internal/clilink.
 func LoadIRForLink(path, wantWorkflow, wantRevision string) (*discovery.IR, error) {
-	b, err := os.ReadFile(path)
+	ir, err := LoadIR(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, invalidConfig("link: no IR at " + path +
-				" — `heros discover -out <path>` writes one, and --with-ir transmits it")
-		}
-		return nil, operational("link: read IR", err)
-	}
-	var ir discovery.IR
-	if err := json.Unmarshal(b, &ir); err != nil {
-		return nil, invalidConfig("link: " + path + " is not a valid Workflow IR: " + err.Error())
+		return nil, err
 	}
 	if ir.Workflow.ID != wantWorkflow {
 		return nil, invalidConfig(fmt.Sprintf(
@@ -129,6 +133,26 @@ func LoadIRForLink(path, wantWorkflow, wantRevision string) (*discovery.IR, erro
 			"link: %s was discovered at revision %s, but the run was measured at %s. A graph drawn at one "+
 				"revision and scored at another is not a picture of either.",
 			path, short12(ir.Workflow.Repo.CommitSHA), short12(wantRevision)))
+	}
+	return ir, nil
+}
+
+// LoadIR reads a discovered IR off disk. The identity checks are LoadIRForLink's, deliberately: a
+// caller that has an expected workflow and revision must be made to state them, and a caller that
+// derives both FROM the IR (`heros analyse`, which analyses whatever it was pointed at) has nothing to
+// compare against and must not be handed a checker that would silently pass.
+func LoadIR(path string) (*discovery.IR, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, invalidConfig("no IR at " + path +
+				" — `heros discover -out <path>` writes one")
+		}
+		return nil, operational("read IR", err)
+	}
+	var ir discovery.IR
+	if err := json.Unmarshal(b, &ir); err != nil {
+		return nil, invalidConfig(path + " is not a valid Workflow IR: " + err.Error())
 	}
 	return &ir, nil
 }

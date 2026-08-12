@@ -932,6 +932,118 @@
       ],
       "type": "object"
     },
+    "Composition": {
+      "properties": {
+        "edges_inferred": {
+          "type": "integer"
+        },
+        "edges_total": {
+          "type": "integer"
+        },
+        "nodes_covered": {
+          "type": "integer"
+        },
+        "nodes_covered_inferred": {
+          "type": "integer"
+        },
+        "nodes_total": {
+          "type": "integer"
+        },
+        "patterns": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/CompositionPattern"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unlabelled_remainder": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "edges_inferred",
+        "edges_total",
+        "nodes_covered",
+        "nodes_covered_inferred",
+        "nodes_total",
+        "patterns",
+        "unlabelled_remainder"
+      ],
+      "type": "object"
+    },
+    "CompositionPattern": {
+      "properties": {
+        "authors": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "candidate": {
+          "type": "boolean"
+        },
+        "group": {
+          "type": "string"
+        },
+        "nodes": {
+          "type": "integer"
+        },
+        "ordinal": {
+          "type": "integer"
+        },
+        "pattern": {
+          "type": "string"
+        },
+        "provenance": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "regions": {
+          "type": "integer"
+        },
+        "state": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "authors",
+        "candidate",
+        "group",
+        "nodes",
+        "ordinal",
+        "pattern",
+        "provenance",
+        "regions",
+        "state",
+        "title"
+      ],
+      "type": "object"
+    },
     "CoverageCause": {
       "properties": {
         "id": {
@@ -1647,6 +1759,145 @@
       ],
       "type": "object"
     },
+    "EvalCaseView": {
+      "properties": {
+        "case_id": {
+          "type": "string"
+        },
+        "family": {
+          "type": "string"
+        },
+        "indecisive": {
+          "type": "boolean"
+        },
+        "oracle": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "case_id",
+        "family",
+        "indecisive",
+        "oracle"
+      ],
+      "type": "object"
+    },
+    "EvalSetView": {
+      "description": "Response of GET /api/v1/workflows/{workflow_id}/eval-set",
+      "properties": {
+        "cases": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/EvalCaseView"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "families": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/FamilyCount"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "indecisive_reasons": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "n_cases": {
+          "type": "integer"
+        },
+        "n_indecisive": {
+          "type": "integer"
+        },
+        "n_oracle": {
+          "type": "integer"
+        },
+        "sentence": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "unattributed": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "uncovered_nodes": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "vacuous_dimensions": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "workflow_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "cases",
+        "families",
+        "indecisive_reasons",
+        "n_cases",
+        "n_indecisive",
+        "n_oracle",
+        "sentence",
+        "state",
+        "unattributed",
+        "uncovered_nodes",
+        "vacuous_dimensions",
+        "workflow_id"
+      ],
+      "type": "object"
+    },
     "EvidenceView": {
       "properties": {
         "kind": {
@@ -1698,9 +1949,37 @@
       ],
       "type": "object"
     },
+    "FamilyCount": {
+      "properties": {
+        "cases": {
+          "type": "integer"
+        },
+        "family": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "cases",
+        "family"
+      ],
+      "type": "object"
+    },
     "GraphView": {
       "description": "Response of GET /api/v1/workflows/{workflow_id}/pattern-graph",
       "properties": {
+        "agent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ViewAgent"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "composition": {
+          "$ref": "#/$defs/Composition"
+        },
         "diagnostics": {
           "anyOf": [
             {
@@ -1733,6 +2012,9 @@
         "llm_calls": {
           "type": "integer"
         },
+        "llm_calls_note": {
+          "type": "string"
+        },
         "nodes": {
           "anyOf": [
             {
@@ -1762,6 +2044,16 @@
         "taxonomy_version": {
           "type": "string"
         },
+        "topology": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ViewTopology"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "unclassified": {
           "anyOf": [
             {
@@ -1780,9 +2072,11 @@
         }
       },
       "required": [
+        "composition",
         "edges",
         "ir_version",
         "llm_calls",
+        "llm_calls_note",
         "nodes",
         "regions",
         "taxonomy_version",
@@ -2313,6 +2607,29 @@
       ],
       "type": "object"
     },
+    "PassView": {
+      "properties": {
+        "detail": {
+          "type": "string"
+        },
+        "proposals": {
+          "type": "integer"
+        },
+        "ran_at_ms": {
+          "type": "integer"
+        },
+        "state": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "detail",
+        "proposals",
+        "ran_at_ms",
+        "state"
+      ],
+      "type": "object"
+    },
     "PaymentMethodView": {
       "properties": {
         "brand": {
@@ -2544,6 +2861,16 @@
         },
         "error": {
           "type": "string"
+        },
+        "pass": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PassView"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "recommendations": {
           "anyOf": [
@@ -3587,8 +3914,49 @@
       ],
       "type": "object"
     },
+    "ViewAgent": {
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "action_reason": {
+          "type": "string"
+        },
+        "failure": {
+          "type": "string"
+        },
+        "narrative": {
+          "type": "string"
+        },
+        "placement": {
+          "type": "string"
+        },
+        "placement_sentence": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "state_sentence": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "placement",
+        "state",
+        "state_sentence"
+      ],
+      "type": "object"
+    },
     "ViewEdge": {
       "properties": {
+        "author": {
+          "type": "string"
+        },
+        "confidence": {
+          "type": "number"
+        },
         "from": {
           "type": "string"
         },
@@ -3606,8 +3974,34 @@
       ],
       "type": "object"
     },
+    "ViewFrontend": {
+      "properties": {
+        "analysis_kind": {
+          "type": "string"
+        },
+        "edges": {
+          "type": "integer"
+        },
+        "language": {
+          "type": "string"
+        },
+        "nodes": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "analysis_kind",
+        "edges",
+        "language",
+        "nodes"
+      ],
+      "type": "object"
+    },
     "ViewLabel": {
       "properties": {
+        "author": {
+          "type": "string"
+        },
         "candidate": {
           "type": "boolean"
         },
@@ -3754,6 +4148,12 @@
             }
           ]
         },
+        "reason": {
+          "type": "string"
+        },
+        "reason_sentence": {
+          "type": "string"
+        },
         "subgraph_id": {
           "type": "string"
         }
@@ -3762,6 +4162,35 @@
         "labels",
         "node_ids",
         "subgraph_id"
+      ],
+      "type": "object"
+    },
+    "ViewTopology": {
+      "properties": {
+        "frontends": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/ViewFrontend"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason": {
+          "type": "string"
+        },
+        "sentence": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "frontends",
+        "reason",
+        "sentence"
       ],
       "type": "object"
     },
@@ -3805,6 +4234,9 @@
     },
     "DeliveriesView": {
       "$ref": "#/$defs/DeliveriesView"
+    },
+    "EvalSetView": {
+      "$ref": "#/$defs/EvalSetView"
     },
     "GraphView": {
       "$ref": "#/$defs/GraphView"
