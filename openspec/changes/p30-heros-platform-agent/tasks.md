@@ -94,20 +94,25 @@ acceptance that stops proving anything the day the default changes.
 
 ## 5. Calibration and the rehearsal gate
 
-- [ ] 5.1 Fixture set per language: at least one repository with a known true graph, plus the
+- [x] 5.1 Fixture set per language: at least one repository with a known true graph, plus the
       near-misses (linear chain that is not a router; fan-out with no merge; two calls with no data
       dependency).
-- [ ] 5.2 Go fixtures use the Go frontend's real edge output as ground truth.
-- [ ] 5.3 Rehearsal harness: per-fixture precision and recall on **edges**.
-- [ ] 5.4 🔴 The gate reads the **minimum** across fixtures, not the mean. Report the mean; gate on the
+- [x] 5.2 Go fixtures use the Go frontend's real edge output as ground truth.
+- [x] 5.3 Rehearsal harness: per-fixture precision and recall on **edges**.
+- [x] 5.4 🔴 The gate reads the **minimum** across fixtures, not the mean. Report the mean; gate on the
       minimum.
-- [ ] 5.5 Block activation on failure; name the failing fixture, its language and its numbers.
-- [ ] 5.6 Store the per-fixture report on the version row.
-- [ ] 5.7 Anti-vacuity: a fixture set that fails to load **fails** the rehearsal. 🚫 Never passes over an
+- [x] 5.5 Block activation on failure; name the failing fixture, its language and its numbers.
+- [x] 5.6 Store the per-fixture report on the version row.
+- [x] 5.7 Anti-vacuity: a fixture set that fails to load **fails** the rehearsal. 🚫 Never passes over an
       empty set.
-- [ ] 5.8 Ablation protocol documented: one axis at a time; report the delta against the previous
+- [x] 5.8 Ablation protocol documented: one axis at a time; report the delta against the previous
       `config_hash`.
-- [ ] 5.9 Fill Q4's numbers from the first measurement; record them in the PRD.
+- [x] 5.9 Fill Q4's numbers from the first measurement; record them in the PRD.
+      ⚠️ **Recorded in `docs/heros/ablation-protocol.md` §2 rather than the PRD**, and stated there:
+      the floors shipped (P ≥ 0.90, R ≥ 0.70) are design.md's proposed starting point and NOT a
+      measurement, because no definition has been activated so no model has been measured. What HAS
+      been measured is the calibration SET, against three synthetic analysers — and that measurement
+      found a real defect (the set could not fail an agent that proposes nothing). Carried to §11.5.
 
 ## 6. Operator console — the agent overview
 
