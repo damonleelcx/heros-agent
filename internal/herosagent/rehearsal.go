@@ -73,8 +73,13 @@ type Score struct {
 	// Vacuous marks a fixture whose true graph is EMPTY. Precision over an empty truth is defined as 1
 	// when the agent emitted nothing and 0 when it emitted anything — see scoreEdges — and the flag is
 	// carried so a report never presents "precision 1.0" from a near-miss as evidence of skill.
-	Vacuous bool   `json:"vacuous"`
-	Note    string `json:"note"`
+	Vacuous bool `json:"vacuous"`
+	// HeldOutEdges is how many edges were REMOVED from the IR this fixture was shown, so that its own
+	// answer was proposable at all — see withholdAnswer. Non-zero only for a fixture whose truth the
+	// frontend itself produced. Carried because a report that did not say so would present a held-out
+	// measurement as a finding over an untouched graph.
+	HeldOutEdges int    `json:"held_out_edges"`
+	Note         string `json:"note"`
 }
 
 // RehearsalReport is the whole verdict.
@@ -191,9 +196,21 @@ func (r *Rehearsal) Run(ctx context.Context, agentConfigHash string) (RehearsalR
 			return rep, fmt.Errorf("herosagent: fixture %q (%s) could not be discovered, so it measured "+
 				"nothing: %w", f.Name, f.Language, derr)
 		}
+		// 🔴 THE ANSWER IS HELD OUT. See withholdAnswer — without this the measured fixture asks for two
+		// edges the residue is not allowed to offer.
+		shown, held := withholdAnswer(ir, f.TrueEdges)
+		residue := SelectResidue(shown, report, nil)
+		if missing := unproposable(shown, residue, f.TrueEdges); len(missing) > 0 {
+			return rep, fmt.Errorf("herosagent: fixture %q (%s) is UNMEASURABLE: %d of its %d true edges "+
+				"are not in the residue it is scored against (%v). The agent would be asked for an edge it "+
+				"is structurally forbidden to propose, so its recall on this fixture is zero whatever it "+
+				"answers. That is a defect in the CALIBRATION SET, and a rehearsal that reported the "+
+				"number anyway would be blaming the model for the harness",
+				f.Name, f.Language, len(missing), len(f.TrueEdges), missing)
+		}
 		res, aerr := r.analyse.Infer(ctx, Input{
-			WorkflowID: f.Name, SourceRevision: "fixture", RuleIR: ir,
-			Residue: SelectResidue(ir, report, nil),
+			WorkflowID: f.Name, SourceRevision: "fixture", RuleIR: shown,
+			Residue: residue,
 			Budget:  Budget{MaxTokens: 100_000, MaxWall: rehearsalWall},
 			// A rehearsal is the PLATFORM rehearsing, whatever any tenant's placement says — it runs
 			// against pinned fixture repositories, not against a customer, so there is no tenant here
@@ -203,10 +220,79 @@ func (r *Rehearsal) Run(ctx context.Context, agentConfigHash string) (RehearsalR
 			return rep, fmt.Errorf("herosagent: fixture %q (%s) could not be analysed: %w",
 				f.Name, f.Language, aerr)
 		}
-		rep.Scores = append(rep.Scores, scoreEdges(f, res.Edges))
+		sc := scoreEdges(f, res.Edges)
+		sc.HeldOutEdges = held
+		rep.Scores = append(rep.Scores, sc)
 	}
 
 	return r.verdict(rep), nil
+}
+
+// withholdAnswer returns the IR the agent is SHOWN — the fixture's own answer removed from it — and how
+// many edges that removed.
+//
+// # 🔴 Why a rehearsal has to ablate, and what the first live run proved
+//
+// D3's fence 1 is a SELECTION: an edge a frontend established is never offered to the agent, so it
+// cannot propose one over it. `go_chain`'s ground truth IS the Go frontend's edges (task 5.2, and the
+// only ground truth this platform owns). Those two statements together made that fixture UNANSWERABLE:
+// the residue excluded exactly the two edges the answer key demanded, and the first live gate run scored
+// it 0.00 precision and 0.00 recall — a number that read as a model failure and was a harness one.
+//
+// Holding the answer out is what makes the question askable, and it is not a trick played to get a pass:
+// it manufactures, on a Go tree, the condition every other language is in permanently — a graph whose
+// dependencies the frontend did not resolve. The ground truth stays MEASURED, because what was removed
+// was measured. What the fixture then tests is the product's actual claim: recover a dependency that is
+// really there from a graph that does not carry it.
+//
+// 🚫 REHEARSAL ONLY. On a customer's repository the gap is real and nothing is withheld; there is no
+// answer to hold out. `Score.HeldOutEdges` records the count so a stored report can never be read as the
+// agent having found edges in an untouched graph.
+//
+// For every hand-declared fixture this is a no-op — those frontends emit no edges, which is the problem
+// HEROS exists for — and the no-op is asserted rather than assumed (TestTheHeldOutAnswerIsProposable).
+func withholdAnswer(ir *discovery.IR, answer []Pair) (*discovery.IR, int) {
+	if ir == nil || len(answer) == 0 {
+		return ir, 0
+	}
+	held := map[Pair]bool{}
+	for _, p := range answer {
+		held[p] = true
+	}
+	shown := *ir
+	shown.Edges = make([]discovery.IREdge, 0, len(ir.Edges))
+	var n int
+	for _, e := range ir.Edges {
+		if held[Pair{From: e.FromNodeID, To: e.ToNodeID}] {
+			n++
+			continue
+		}
+		shown.Edges = append(shown.Edges, e)
+	}
+	return &shown, n
+}
+
+// unproposable returns the true edges a fixture's own residue cannot express.
+//
+// 🔴 This is the anti-vacuity rule at the grain the set itself needed. Task 5.7 refuses a set that
+// measured nothing; this refuses a FIXTURE that can measure nothing — one whose answer the agent is not
+// allowed to give. Both fences check the residue AND the write boundary, because those are two different
+// gates and a fixture is only measurable if it clears both.
+func unproposable(ir *discovery.IR, res Residue, answer []Pair) []Pair {
+	if len(answer) == 0 {
+		return nil
+	}
+	offered := map[Pair]bool{}
+	for _, p := range res.Pairs {
+		offered[p] = true
+	}
+	var out []Pair
+	for _, p := range answer {
+		if !offered[p] || !EdgeIsAvailable(ir, p.From, p.To) {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // verdict aggregates the per-fixture scores into the gate's answer.

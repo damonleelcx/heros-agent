@@ -299,6 +299,110 @@ func TestAPerfectAgentPassesAndCanBeActivated(t *testing.T) {
 	}
 }
 
+// 🔴 EVERY FIXTURE'S ANSWER MUST BE PROPOSABLE, and the first live gate run is what found that one was
+// not.
+//
+// `go_chain`'s ground truth is the Go frontend's own edges (task 5.2). D3's fence 1 excludes exactly
+// those from the residue. The agent was therefore asked for two edges it was structurally forbidden to
+// propose, and scored 0.00 precision and 0.00 recall no matter what it answered — a harness defect that
+// read as a model result, on the one fixture in the set that measures edge-finding against a measurement.
+//
+// Nothing in the harness could see it. `TestAPerfectAgentPassesAndCanBeActivated` could not: its oracle
+// is a scripted analyser that answers with the truth directly and never passes through the write fence a
+// real runner applies. This test asserts the property itself — the answer is in the residue the fixture
+// is scored against — which is analyser-independent and is the shape of the defect rather than one
+// instance of it.
+func TestEveryFixtureAnswerIsProposableInItsOwnResidue(t *testing.T) {
+	loader := DiskFixtures{Root: repoRoot(t), Discover: realDiscoverer(t)}
+	fixtures, err := loader.Fixtures()
+	if err != nil {
+		t.Fatal(err)
+	}
+	disc := realDiscoverer(t)
+
+	var everHeld int
+	for _, f := range fixtures {
+		ir, report, derr := disc(f.Repo)
+		if derr != nil {
+			t.Fatalf("%s: %v", f.Name, derr)
+		}
+
+		// 🔴 The fence has CONTENT: without the hold-out, this fixture's answer is unproposable. If this
+		// ever stops being true for every measured fixture, the hold-out has become decoration and the
+		// test below would pass for the wrong reason.
+		if f.Truth == TruthMeasured && len(f.TrueEdges) > 0 {
+			if len(unproposable(ir, SelectResidue(ir, report, nil), f.TrueEdges)) == 0 {
+				t.Errorf("%s: its answer is proposable from the UNTOUCHED IR, so the hold-out this test "+
+					"guards is doing nothing and the test would pass whether or not Run withheld anything",
+					f.Name)
+			}
+		}
+
+		shown, held := withholdAnswer(ir, f.TrueEdges)
+		everHeld += held
+		if f.Truth == TruthDeclared && held != 0 {
+			t.Errorf("%s: the hold-out removed %d edge(s) from a HAND-DECLARED fixture. Those frontends "+
+				"emit no edges, so removing one means the answer key and the frontend now disagree about "+
+				"a fact somebody measured", f.Name, held)
+		}
+		if f.Truth == TruthMeasured && held != len(f.TrueEdges) {
+			t.Errorf("%s: %d of %d measured true edges were withheld. A measured truth IS the frontend's "+
+				"edge set; any it did not match is an answer key that drifted from the measurement",
+				f.Name, held, len(f.TrueEdges))
+		}
+
+		if missing := unproposable(shown, SelectResidue(shown, report, nil), f.TrueEdges); len(missing) > 0 {
+			t.Errorf("%s (%s): %d of %d true edges are NOT in the residue it is scored against: %v. This "+
+				"fixture's recall is zero whatever the agent answers, and the number would be reported "+
+				"against the model.", f.Name, f.Language, len(missing), len(f.TrueEdges), missing)
+		}
+	}
+	if everHeld == 0 {
+		t.Error("no fixture in the set held anything out. That is only correct if no fixture's truth is " +
+			"the frontend's own output — and if so the set has lost its one MEASURED answer")
+	}
+}
+
+// The hold-out is recorded on the score, so a stored report cannot be read as the agent having found
+// edges in a graph nobody touched.
+func TestTheReportSaysWhatWasHeldOut(t *testing.T) {
+	loader := DiskFixtures{Root: repoRoot(t), Discover: realDiscoverer(t)}
+	fixtures, err := loader.Fixtures()
+	if err != nil {
+		t.Fatal(err)
+	}
+	byWorkflow := map[string][]ProvenancedEdge{}
+	for _, f := range fixtures {
+		for _, p := range f.TrueEdges {
+			byWorkflow[f.Name] = append(byWorkflow[f.Name],
+				ProvenancedEdge{From: p.From, To: p.To, Kind: "data", Confidence: 0.99})
+		}
+	}
+	r, err := NewRehearsal(loader, realDiscoverer(t), scriptedAnalyser{byWorkflow: byWorkflow},
+		DefaultMinPrecision, DefaultMinRecall)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rep, rerr := r.Run(context.Background(), "cfg1")
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	var found bool
+	for _, s := range rep.Scores {
+		if s.Truth == TruthMeasured && s.HeldOutEdges > 0 {
+			found = true
+		}
+		if s.Truth == TruthDeclared && s.HeldOutEdges != 0 {
+			t.Errorf("%s: a hand-declared fixture reports %d held-out edges", s.Fixture, s.HeldOutEdges)
+		}
+	}
+	if !found {
+		t.Error("no score records a hold-out. A measured fixture's report has to say that its answer was " +
+			"removed from the graph the agent was shown, or the number reads as a finding over an " +
+			"untouched one")
+	}
+}
+
 // 🔴 THE ANTI-VACUITY FENCE THE SET ITSELF NEEDED, found by MEASURING the set rather than reading it.
 //
 // The first calibration set loaded, scored and passed — and every one of its nine fixtures had an EMPTY

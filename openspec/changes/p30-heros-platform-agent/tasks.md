@@ -98,6 +98,12 @@ acceptance that stops proving anything the day the default changes.
       near-misses (linear chain that is not a router; fan-out with no merge; two calls with no data
       dependency).
 - [x] 5.2 Go fixtures use the Go frontend's real edge output as ground truth.
+      🔴 That truth must be **held out** of the IR the agent is shown, and was not at first: D3's fence 1
+      excludes established edges from the residue, so the one fixture measuring edge-finding against a
+      measurement asked for two edges the agent was forbidden to propose and scored 0.00/0.00 whatever it
+      answered. Found by the first live gate run, fixed in `Rehearsal.Run` (`withholdAnswer`), fenced by
+      `TestEveryFixtureAnswerIsProposableInItsOwnResidue`, recorded in
+      `docs/heros/ablation-protocol.md` §2.
 - [x] 5.3 Rehearsal harness: per-fixture precision and recall on **edges**.
 - [x] 5.4 🔴 The gate reads the **minimum** across fixtures, not the mean. Report the mean; gate on the
       minimum.

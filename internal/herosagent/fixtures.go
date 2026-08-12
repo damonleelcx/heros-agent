@@ -24,6 +24,12 @@ import (
 // Go fixtures matter even though Go is the language that needs HEROS least. A Go fixture's TrueEdges
 // are therefore left empty in this declaration and FILLED BY RUNNING THE FRONTEND — see
 // DiskFixtures.Fixtures. Hand-writing them would replace a measurement with somebody's reading of it.
+//
+// 🔴 A measured truth is also HELD OUT before the agent sees the graph, and it has to be: D3's fence 1
+// removes established edges from the residue, so a fixture whose answer is the frontend's own edges is
+// asking for something the agent cannot propose. The first live gate run scored `go_chain` 0.00/0.00 for
+// that reason and nothing else. Rehearsal.Run withholds the answer and refuses any fixture whose answer
+// is still not proposable afterwards — see withholdAnswer and unproposable.
 
 // fixtureDecl is the static half of a fixture: everything a human decides.
 type fixtureDecl struct {
@@ -60,7 +66,9 @@ var calibrationSet = []fixtureDecl{
 		note: "a real Go tree whose two-edge chain the typed frontend RESOLVES. Its true graph is a " +
 			"measurement, not a reading of one — which is why this fixture is the anchor even though Go " +
 			"is the language that needs HEROS least. It also carries an unrelated call in the same " +
-			"package, so it measures discrimination and edge-finding at once",
+			"package, so it measures discrimination and edge-finding at once. Its answer is HELD OUT of " +
+			"the IR the agent is shown (Rehearsal.Run), because D3's fence 1 excludes established edges " +
+			"from the residue and those edges ARE the answer here",
 	},
 
 	// ── The three NEAR-MISSES, named in the design (D7 "Fixture design"). ────────────────────────────

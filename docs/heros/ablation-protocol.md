@@ -63,9 +63,60 @@ They are `DefaultMinPrecision` / `DefaultMinRecall` in `internal/herosagent/rehe
 rather than defaults buried in a constructor, so that moving them is a visible edit.
 
 🔴 **These are design.md's proposed starting point, not a measurement.** The design says the number
-"must come from measurement before activation, not before build", and no HEROS definition has been
-activated, so no model has been measured against this set yet. That is stated here rather than left for
-somebody to infer from the absence of a table.
+"must come from measurement before activation, not before build". A model has now been measured against
+this set (§2.1) and it did **not** pass, so no definition has been activated and the floors are still
+the proposed ones. They will be set from a measurement that supports them, not from this one.
+
+### 2.1 The first live runs — `15f6d8efc399`, gpt-4o, one axis unchanged between them
+
+Both runs are the same `config_hash`: same prompt, same model, same fixtures. What changed between them
+is the **harness**, and that is the only reason they are compared here at all — an ablation compares
+axes, and this pair is a bug fix, reported as one.
+
+| fixture | truth | run 1 · P/R | run 2 · P/R | |
+|---|---|---|---|---|
+| `go_chain` | measured | **0.00 / 0.00** (tp 0, fn 2) | **1.00 / 1.00** (tp 2) | the fixture was unanswerable — see below |
+| `py_linear_chain` | declared | 1.00 / 1.00 | 1.00 / 1.00 | |
+| `py_fanout_no_merge` | declared | 1.00 / 1.00 | 1.00 / 1.00 | |
+| `py_independent_calls` | declared | 1.00 / 1.00 | 1.00 / 1.00 | |
+| `java_svc`, `rust_svc` | declared | 1.00 / 1.00 | 1.00 / 1.00 | |
+| `kotlin_svc` | declared | 0.00 / 1.00 (fp 1) | 1.00 / 1.00 | 🔴 **noise, not the fix** |
+| `python_triage` | declared | 0.00 / 1.00 (fp 1) | 0.00 / 1.00 (fp 1) | genuine over-proposal |
+| `typescript_svc` | declared | 0.00 / 1.00 (fp 1) | 0.00 / 1.00 (fp 1) | genuine over-proposal |
+| **verdict** | | **failed**, worst P 0.00 | **failed**, worst P 0.00 | activation refused both times |
+
+🔴 **`kotlin_svc` moved and nothing was done to it.** Two runs of one `config_hash` produced a different
+answer on an empty-truth fixture, which is §1's own rule about re-running a definition and comparing it
+to itself — except the swing is a whole fixture rather than ±0.03. Read it as the size of the noise on
+this set, and do not read it as evidence for the change above it. `go_chain` is the claim being made
+here, and it is the one that moved for a reason a test can state.
+
+🚫 **Not tuned until green.** The gate refuses this definition, and the refusal is the correct outcome:
+one wrong edge on an empty-truth near-miss is precision 0.00 by the rule those fixtures exist to apply.
+
+### 🔴 The second defect this measurement found: a fixture that could not be answered
+
+`go_chain`'s ground truth is the Go frontend's own edges (task 5.2). D3's fence 1 removes every edge a
+frontend established from the residue — and the residue is the only thing HEROS is ever shown. Those two
+sentences are each correct and together they made the one fixture that measures **edge-finding against a
+measurement** unanswerable: the agent was asked for two edges it was structurally forbidden to propose,
+and scored 0.00/0.00 whatever it said.
+
+The number read as a model result. It was a harness result, and it was reported against the model.
+
+The fix is a **held-out answer**: `Rehearsal.Run` removes the fixture's true edges from the IR it shows
+the agent, so the pairs land in the residue and the question becomes askable. That is not a concession
+to get a pass — it manufactures on a Go tree the condition every other language is in permanently, a
+graph whose dependencies the frontend did not resolve, which is the product's actual claim. The ground
+truth stays MEASURED, because what was withheld was measured. `Score.HeldOutEdges` records the count on
+the stored report, so a held-out measurement can never be read as a finding over an untouched graph.
+
+The fence is `TestEveryFixtureAnswerIsProposableInItsOwnResidue`, and it asserts the property rather than
+the instance: **every** fixture's true edges must appear in the residue that fixture is scored against.
+It also asserts that `go_chain`'s answer is *not* proposable without the hold-out, so the hold-out cannot
+quietly become decoration. Nothing that existed could see this — `TestAPerfectAgentPassesAndCanBeActivated`
+least of all, because its oracle answers with the truth directly and never passes through the write fence
+a real runner applies.
 
 ### What HAS been measured: the calibration set itself
 
@@ -130,7 +181,13 @@ Stated rather than left to be discovered, per §11.5's rule against silent defer
 - **Only one fixture has a MEASURED ground truth**, and it can only ever be Go: the other six frontends
   are syntactic and emit no edges, which is the problem HEROS exists to address. Every non-Go answer in
   the set is hand-declared, and `Score.Truth` records which is which so a report cannot present one as
-  the other.
+  the other. That fixture is also the only one whose answer has to be **held out** to be askable at all
+  (§2), and holding it out is what makes it a Go tree standing in for a syntactic frontend's output
+  rather than a Go tree as the Go frontend really sees it.
+- **Six of the nine fixtures have an EMPTY truth, and one of those swings between runs.** `kotlin_svc`
+  flipped between the two runs in §2.1 at one `config_hash`. A set where a single spurious edge takes a
+  fixture from 1.00 to 0.00 is doing its job on precision and is noisy in exactly that way; a floor set
+  from one run of it would be a floor set from a coin flip. Repeat runs before moving a floor.
 - **No fixture exercises a control edge.** The Go frontend's data-edge rule is intra-procedural and
   produces `data`; a control-edge fixture needs a framework graph, which is a different reader. An agent
   that proposes `control` edges is therefore measured on precision but not on its ability to tell the
