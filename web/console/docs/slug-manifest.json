@@ -203,7 +203,7 @@
     {
       "route": "/docs/start/install",
       "source": "docs/en/start/install.md",
-      "content_hash": "802cd65aff7540fc739c25d32ee31cd74969cf2cd9ffd9d1568c27ead810d573",
+      "content_hash": "18e3505e83f75dcb94a9af1a4c07df35a2c08000b325f7d159ec9c090a7090b6",
       "anchors": [
         "the-one-command",
         "what-your-operating-system-will-say",
