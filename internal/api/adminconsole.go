@@ -17,6 +17,7 @@ import (
 	"github.com/heros-foreal/agentd/internal/adminops"
 	"github.com/heros-foreal/agentd/internal/adminrbac"
 	"github.com/heros-foreal/agentd/internal/erroreport"
+	"github.com/heros-foreal/agentd/internal/herosagent"
 	"github.com/heros-foreal/agentd/internal/metering"
 	"github.com/heros-foreal/agentd/internal/plancfg"
 	"github.com/heros-foreal/agentd/internal/providergateway"
@@ -95,6 +96,13 @@ type AdminDeps struct {
 	// Axis is P26's axis oversight — per-axis declared status, fleet adoption, refusal counts by stable
 	// typed cause, and the coverage matrix read from the ONE coverage source. Read-only.
 	Axis *adminops.AxisService
+
+	// Agent is P30's analysis-agent surface — the published definition, its rehearsal state, per-tenant
+	// placement and spend, and the caps. It is the FIRST oversight surface in this console with a WRITE
+	// path (publish, activate, cap, placement), which is why it carries its own `agent.admin` capability
+	// rather than folding into `registry.admin`: administering a model repoints a price reference, and
+	// publishing an agent definition changes what the platform infers about every customer's source.
+	Agent *adminops.AgentService
 
 	// Oversight is P26's identity, consent and reporting-health surface — which factor authenticated
 	// each operator session, which legal versions each tenant owes, whether reporting is working, and
@@ -268,6 +276,14 @@ func (a *AdminAPI) routes() {
 	m.HandleFunc("GET /admin/api/delivery/{tenant}/{id}", a.session(a.mounted(a.deps.Delivery != nil, "delivery oversight", a.handleDeliveryHistory)))
 
 	m.HandleFunc("GET /admin/api/releases", a.session(a.mounted(a.deps.Release != nil, "release oversight", a.handleReleases)))
+
+	m.HandleFunc("GET /admin/api/agent", a.session(a.mounted(a.deps.Agent != nil, "analysis agent", a.handleAgent)))
+	m.HandleFunc("GET /admin/api/agent/spend", a.session(a.mounted(a.deps.Agent != nil, "analysis agent", a.handleAgentSpend)))
+	m.HandleFunc("POST /admin/api/agent/preview", a.session(a.mounted(a.deps.Agent != nil, "analysis agent", a.handleAgentPreview)))
+	m.HandleFunc("POST /admin/api/agent/publish", a.session(a.mounted(a.deps.Agent != nil, "analysis agent", a.handleAgentPublish)))
+	m.HandleFunc("POST /admin/api/agent/activate", a.session(a.mounted(a.deps.Agent != nil, "analysis agent", a.handleAgentActivate)))
+	m.HandleFunc("POST /admin/api/agent/cap", a.session(a.mounted(a.deps.Agent != nil, "analysis agent", a.handleAgentCap)))
+	m.HandleFunc("POST /admin/api/agent/placement", a.session(a.mounted(a.deps.Agent != nil, "analysis agent", a.handleAgentPlacement)))
 
 	m.HandleFunc("GET /admin/api/axes", a.session(a.mounted(a.deps.Axis != nil, "axis oversight", a.handleAxes)))
 	m.HandleFunc("GET /admin/api/axes/{axis}/refused", a.session(a.mounted(a.deps.Axis != nil, "axis oversight", a.handleAxisRefused)))
@@ -611,6 +627,17 @@ func (c commandBody) confirmation() adminops.Confirmation {
 	return adminops.Confirmation{Confirmed: c.Confirmed, TypedTarget: c.TypedTarget}
 }
 
+// decodeAdminJSON decodes a request body, reporting a malformed one as `bad_request` rather than as a
+// server fault. Generic so the P30 handlers do not each re-implement the same three lines and drift on
+// the error shape.
+func decodeAdminJSON[T any](w http.ResponseWriter, r *http.Request, into *T) bool {
+	if err := json.NewDecoder(r.Body).Decode(into); err != nil {
+		writeAdminError(w, http.StatusBadRequest, "bad_request", err.Error(), nil)
+		return false
+	}
+	return true
+}
+
 func decodeCommand(w http.ResponseWriter, r *http.Request) (commandBody, bool) {
 	var body commandBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -951,6 +978,142 @@ func (a *AdminAPI) handleReleases(w http.ResponseWriter, r *http.Request) {
 }
 
 // ── Axes (P26, read-only) ───────────────────────────────────────────────────────────────────────
+
+// ── P30 · the analysis agent ────────────────────────────────────────────────────────────────────
+//
+// 🔴 Every write below takes a REASON and refuses without one. They are not ordinary configuration
+// edits: publishing changes what the platform infers about every customer's source, and setting a
+// placement to `platform` makes the platform read that source under a platform-held credential. Q2
+// made `disabled` the default precisely so those are deliberate acts, and a deliberate act leaves a
+// record naming the person who took it.
+
+func (a *AdminAPI) handleAgent(w http.ResponseWriter, r *http.Request) {
+	view, err := a.deps.Agent.Overview(r.Context())
+	if err != nil {
+		writeCapabilityError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
+}
+
+func (a *AdminAPI) handleAgentSpend(w http.ResponseWriter, r *http.Request) {
+	view, err := a.deps.Agent.Spend(r.Context())
+	if err != nil {
+		writeCapabilityError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
+}
+
+// agentEditRequest is an operator's axis edit as the console submits it.
+//
+// 🔴 `Axes` is a MAP keyed by axis name, not a struct with seven fields, and that is the same decision
+// `herosagent.AxisEdit` records: a struct silently drops an unknown JSON key, and the failure it
+// produces is a definition published without the thing the operator thought they set. An unknown axis
+// — including `wiring` — is refused BY NAME.
+type agentEditRequest struct {
+	Axes          map[string]string `json:"axes"`
+	SkillRefs     []string          `json:"skill_refs"`
+	ToolNames     []string          `json:"tool_names"`
+	CredentialRef string            `json:"credential_ref"`
+	Reason        string            `json:"reason"`
+}
+
+func (req agentEditRequest) definition() (herosagent.Definition, error) {
+	edit := herosagent.AxisEdit{}
+	for k, v := range req.Axes {
+		edit[herosagent.Axis(k)] = v
+	}
+	return herosagent.DefinitionFromAxes(edit,
+		herosagent.ListEdit{SkillRefs: req.SkillRefs, ToolNames: req.ToolNames}, req.CredentialRef)
+}
+
+func (a *AdminAPI) handleAgentPreview(w http.ResponseWriter, r *http.Request) {
+	var req agentEditRequest
+	if !decodeAdminJSON(w, r, &req) {
+		return
+	}
+	d, err := req.definition()
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	// 🔴 A PREVIEW WRITES NOTHING. "Confirmed before it happens" is only true if there is something to
+	// look at before it happens.
+	view, err := a.deps.Agent.Preview(r.Context(), d)
+	if err != nil {
+		writeCapabilityError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
+}
+
+func (a *AdminAPI) handleAgentPublish(w http.ResponseWriter, r *http.Request) {
+	var req agentEditRequest
+	if !decodeAdminJSON(w, r, &req) {
+		return
+	}
+	d, err := req.definition()
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	view, err := a.deps.Agent.Publish(r.Context(), d, req.Reason)
+	if err != nil {
+		writeCapabilityError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
+}
+
+func (a *AdminAPI) handleAgentActivate(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ConfigHash string `json:"config_hash"`
+		Reason     string `json:"reason"`
+	}
+	if !decodeAdminJSON(w, r, &req) {
+		return
+	}
+	if err := a.deps.Agent.Activate(r.Context(), req.ConfigHash, req.Reason); err != nil {
+		writeCapabilityError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"activated": req.ConfigHash})
+}
+
+func (a *AdminAPI) handleAgentCap(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		// An empty TenantID sets the FLEET cap. Explicit rather than a separate route, so the two caps
+		// cannot drift into two different validation paths.
+		TenantID string `json:"tenant_id"`
+		Tokens   int64  `json:"tokens"`
+		Reason   string `json:"reason"`
+	}
+	if !decodeAdminJSON(w, r, &req) {
+		return
+	}
+	if err := a.deps.Agent.SetCap(r.Context(), req.TenantID, req.Tokens, req.Reason); err != nil {
+		writeCapabilityError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"tenant_id": req.TenantID, "tokens": req.Tokens})
+}
+
+func (a *AdminAPI) handleAgentPlacement(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		TenantID  string `json:"tenant_id"`
+		Placement string `json:"placement"`
+		Reason    string `json:"reason"`
+	}
+	if !decodeAdminJSON(w, r, &req) {
+		return
+	}
+	if err := a.deps.Agent.SetPlacement(r.Context(), req.TenantID, req.Placement, req.Reason); err != nil {
+		writeCapabilityError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"tenant_id": req.TenantID, "placement": req.Placement})
+}
 
 func (a *AdminAPI) handleAxes(w http.ResponseWriter, r *http.Request) {
 	view, err := a.deps.Axis.View(r.Context())

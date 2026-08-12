@@ -153,4 +153,13 @@ var CapabilityWave = map[string]Wave{
 	// cross-tenant aggregates to be live before anything reads across tenants. Putting them in 8a
 	// would light three cross-tenant surfaces in the wave whose checklist says nothing about them.
 	"delivery.read": Wave8b, "release.read": Wave8b, "axis.read": Wave8b,
+	// P30's two. 8b for the same reason the three above are: `agent.read` carries a fleet-wide spend
+	// aggregate, and 8b is the wave whose checklist requires the cross-tenant aggregates to be live
+	// before anything reads across tenants.
+	//
+	// 🔴 `agent.admin` is in 8b too, and it is the first WRITE capability this file places outside the
+	// autonomous-controls group. It belongs with them: publishing a definition and setting a placement
+	// to `platform` are fleet-shaped acts with the same blast radius as arming the kill switch, and
+	// gating them behind an earlier wave would light them before the surface that shows their cost.
+	"agent.read": Wave8b, "agent.admin": Wave8b,
 }

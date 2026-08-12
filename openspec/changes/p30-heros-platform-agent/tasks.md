@@ -116,18 +116,18 @@ acceptance that stops proving anything the day the default changes.
 
 ## 6. Operator console — the agent overview
 
-- [ ] 6.1 `/agent`: active definition, `config_hash`, rehearsal state, stored-inference count.
-- [ ] 6.2 Publish flow → resolved diff against the active definition + the resulting `config_hash`,
+- [x] 6.1 `/agent`: active definition, `config_hash`, rehearsal state, stored-inference count.
+- [x] 6.2 Publish flow → resolved diff against the active definition + the resulting `config_hash`,
       confirmed before it happens. An edit resolving to no change says so and creates no version.
-- [ ] 6.3 New version lands `pending rehearsal`; never rendered as active before the gate. The surface
+- [x] 6.3 New version lands `pending rehearsal`; never rendered as active before the gate. The surface
       always names which definition is actually serving inference.
-- [ ] 6.4 Rehearsal report with the per-fixture delta against the previous definition; regressions marked.
-- [ ] 6.5 `/agent/spend`: per-tenant meter, estimate-labelled, `unpriced` never `0`.
-- [ ] 6.6 Cap editors, per tenant and fleet-wide.
-- [ ] 6.7 Placement column per tenant, distinguishing "defaulted" from "explicitly set to `disabled`".
-- [ ] 6.8 Kill-switch wiring for HEROS through the existing durable store.
-- [ ] 6.9 Nav registration — all three pieces, or the slot disappears silently.
-- [ ] 6.10 Every axis shows **set / defaulted / not in effect**; "not in effect" carries its reason.
+- [x] 6.4 Rehearsal report with the per-fixture delta against the previous definition; regressions marked.
+- [x] 6.5 `/agent/spend`: per-tenant meter, estimate-labelled, `unpriced` never `0`.
+- [x] 6.6 Cap editors, per tenant and fleet-wide.
+- [x] 6.7 Placement column per tenant, distinguishing "defaulted" from "explicitly set to `disabled`".
+- [x] 6.8 Kill-switch wiring for HEROS through the existing durable store.
+- [x] 6.9 Nav registration — all three pieces, or the slot disappears silently.
+- [x] 6.10 Every axis shows **set / defaulted / not in effect**; "not in effect" carries its reason.
 
 ## 6b. Operator console — the six axis editors
 

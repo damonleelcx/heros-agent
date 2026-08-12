@@ -68,9 +68,18 @@ func TestNoExistingRoleWidened(t *testing.T) {
 			}
 		}
 	}
-	// And the only capabilities that are NEW are the three this phase argued for.
+	// And the only capabilities that are NEW are ones a phase argued for.
+	//
+	// P26's three, plus P30's two. The list grows by a deliberate edit, which is the point: a
+	// capability appearing here without a line in this map is a capability nobody argued for, and this
+	// test is where that argument gets made.
 	newOnes := map[adminrbac.Capability]bool{
 		adminrbac.CapDeliveryRead: true, adminrbac.CapReleaseRead: true, adminrbac.CapAxisRead: true,
+		// P30. `agent.read` goes to Platform-SRE, who runs the machinery and must be able to see what
+		// the analysis agent costs; `agent.admin` goes to Superadmin ALONE, because publishing a
+		// definition changes what the platform infers about every customer's source and setting a
+		// placement to `platform` makes it read that source under a platform-held credential.
+		adminrbac.CapAgentRead: true, adminrbac.CapAgentAdmin: true,
 	}
 	for _, c := range adminrbac.Capabilities {
 		if _, existed := preP26Capabilities[c]; existed {

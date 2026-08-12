@@ -17,6 +17,7 @@ import (
 	"github.com/heros-foreal/agentd/internal/authoring"
 	"github.com/heros-foreal/agentd/internal/billing"
 	"github.com/heros-foreal/agentd/internal/deliveryrecord"
+	"github.com/heros-foreal/agentd/internal/herosagent"
 	"github.com/heros-foreal/agentd/internal/legal"
 	"github.com/heros-foreal/agentd/internal/metering"
 	"github.com/heros-foreal/agentd/internal/plancfg"
@@ -354,6 +355,25 @@ func mountServices(exec *adminops.Executor, src *PlatformSources, sessions *admi
 	}
 	deps.Axis = axis
 
+	// P30 · the analysis agent.
+	//
+	// 🔴 Mounted with a version store and NOTHING ELSE on this deployment: no publisher, no spend
+	// source, no inference counter, no kill-switch reader. Every one of those reads as its own honest
+	// state rather than as a zero — an unknown inference count, an empty spend table, an unarmed
+	// switch — and the console renders them that way. Mounting the surface with a publisher it does not
+	// have would offer a Publish control that fails at the moment somebody presses it.
+	//
+	// The store is in-memory here for the same reason: `heros_agent_version` exists (migration 0046) and
+	// nothing in this launch path opens it yet, so an in-memory store is what this deployment honestly
+	// has. It is stated rather than implied — a restart loses published definitions, which is why
+	// nothing here activates one.
+	agent, err := adminops.NewAgentService(exec, herosagent.NewMemVersionStore(),
+		nil, nil, nil, nil, herosagent.RunnerHosts{})
+	if err != nil {
+		return fmt.Errorf("agent service: %w", err)
+	}
+	deps.Agent = agent
+
 	gdpr, err := adminops.NewGDPRService(exec, src.Subjects)
 	if err != nil {
 		return fmt.Errorf("gdpr service: %w", err)
@@ -425,5 +445,6 @@ type serviceSet struct {
 	Registry      *adminops.RegistryService
 	Release       *adminops.ReleaseService
 	Axis          *adminops.AxisService
+	Agent         *adminops.AgentService
 	GDPR          *adminops.GDPRService
 }

@@ -128,6 +128,8 @@ finding.
 | delivery.read | surface | /delivery |
 | release.read | surface | /releases |
 | axis.read | surface | /axes |
+| agent.read | surface | /agent, /agent/spend |
+| agent.admin | surface | /agent#publish, /agent/spend#placements |
 | entitlement.override | surface | /tenants |
 | gdpr.execute | surface | /compliance, /compliance#erasure |
 | impersonate.read | surface | /tenants |

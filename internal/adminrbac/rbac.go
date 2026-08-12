@@ -188,6 +188,27 @@ const (
 	// breath, and the question "which materializer would unblock the most refused nodes" needs none of
 	// them.
 	CapAxisRead Capability = "axis.read"
+
+	// ── P30. Two capabilities, and the split is the point (design D5, task 6.6) ──
+
+	// CapAgentRead is reading HEROS's definition, its rehearsal report, its per-tenant placement and
+	// its spend.
+	//
+	// NOT granted to Support or Billing-Ops. The agent's definition names a MODEL and a CREDENTIAL
+	// REFERENCE, and its spend is a fleet-wide money aggregate — the same reasoning that keeps
+	// CapCrossTenantRead off Support. An axis owner reading refusals needs none of it.
+	CapAgentRead Capability = "agent.read"
+
+	// CapAgentAdmin is publishing a definition, activating one, editing a cap, and setting a tenant's
+	// placement.
+	//
+	// 🔴 SEPARATE FROM CapAgentRead, and NOT folded into CapRegistryAdmin, because the blast radius is
+	// different in kind. Administering a model repoints a price reference; publishing an agent
+	// definition changes what the platform INFERS about every customer's source, and setting a
+	// placement to `platform` makes the platform read that source under a platform-held credential.
+	// Q2 made the default `disabled` precisely so that is a deliberate act, and a deliberate act needs
+	// a capability somebody was granted on purpose.
+	CapAgentAdmin Capability = "agent.admin"
 )
 
 // Capabilities is every gated capability. The matrix test iterates this, so a capability added
@@ -200,6 +221,7 @@ var Capabilities = []Capability{
 	CapRoleGrant, CapGDPRExecute,
 	CapCrossTenantRead, CapAuditRead, CapImpersonateElevate,
 	CapDeliveryRead, CapReleaseRead, CapAxisRead,
+	CapAgentRead, CapAgentAdmin,
 }
 
 // Description is the operator-facing explanation of a capability, used by the console's
@@ -232,6 +254,8 @@ var capabilityDescriptions = map[Capability]string{
 	CapDeliveryRead:        "Read delivery records and the change-delivery rollout picture",
 	CapReleaseRead:         "Read published releases, artefact verification and signing-key state",
 	CapAxisRead:            "Read per-axis adoption, refusals and coverage",
+	CapAgentRead:           "Read the platform analysis agent's definition, rehearsal and spend",
+	CapAgentAdmin:          "Publish and activate an agent definition, and set caps and placements",
 }
 
 // RequiresConfirmation reports whether a capability must go through the confirm + recorded reason +
@@ -338,6 +362,11 @@ var permissions = map[Role]map[Capability]bool{
 		CapDeliveryRead: true,
 		CapReleaseRead:  true,
 		CapAxisRead:     true,
+		// P30 read, and NOT P30 admin. Platform-SRE runs the machinery and must be able to SEE what the
+		// analysis agent is doing and what it costs. Publishing a definition changes what the platform
+		// infers about every customer's source; that stays with Superadmin until somebody decides
+		// otherwise on purpose, which is the same judgement CapReleaseRead records one field up.
+		CapAgentRead: true,
 	},
 	RoleSuperadmin: superadminGrants(),
 }

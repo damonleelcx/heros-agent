@@ -312,6 +312,7 @@ func Build(ctx context.Context, secretsSrc providergateway.Secrets, platformDB *
 		Registry:      svcs.Registry,
 		Release:       svcs.Release,
 		Axis:          svcs.Axis,
+		Agent:         svcs.Agent,
 		GDPR:          svcs.GDPR,
 		ErrorReporter: reporter,
 		Secrets:       secretsSrc,

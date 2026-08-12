@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/heros-foreal/agentd/internal/adminops"
 	"github.com/heros-foreal/agentd/internal/providergateway"
 )
 
@@ -24,11 +23,11 @@ func goodDefinition() Definition {
 
 // fakeCatalogue is the operator model registry.
 type fakeCatalogue struct {
-	models []adminops.ModelRecord
+	models []RegisteredModel
 	err    error
 }
 
-func (f fakeCatalogue) Models(context.Context) ([]adminops.ModelRecord, error) {
+func (f fakeCatalogue) Models(context.Context) ([]RegisteredModel, error) {
 	return f.models, f.err
 }
 
@@ -65,9 +64,9 @@ func testPublisher(t *testing.T, cat ModelCatalogue, sec providergateway.Secrets
 }
 
 func registered(ids ...string) fakeCatalogue {
-	var out []adminops.ModelRecord
+	var out []RegisteredModel
 	for _, id := range ids {
-		out = append(out, adminops.ModelRecord{ModelID: id, Provider: "anthropic"})
+		out = append(out, RegisteredModel{ModelID: id, Provider: "anthropic"})
 	}
 	return fakeCatalogue{models: out}
 }
@@ -318,7 +317,7 @@ func TestExactlyOneVersionIsActive(t *testing.T) {
 
 // Task 3.8 — a deprecated model produces a NOTICE, never a refusal and never an auto-switch.
 func TestADeprecatedModelIsANoticeAndIsNeverAutoSwitched(t *testing.T) {
-	cat := fakeCatalogue{models: []adminops.ModelRecord{
+	cat := fakeCatalogue{models: []RegisteredModel{
 		{ModelID: "claude-opus-5", Provider: "anthropic", Deprecated: true},
 		{ModelID: "claude-sonnet-5", Provider: "anthropic"},
 	}}

@@ -7,7 +7,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/heros-foreal/agentd/internal/adminops"
 	"github.com/heros-foreal/agentd/internal/providergateway"
 )
 
@@ -22,14 +21,29 @@ import (
 // `agent_config_hash` a pointer to a definition that may since have changed under it. Then "what
 // produced this edge" is answerable only for as long as nobody edits a config.
 
+// RegisteredModel is a model this package needs to know about, and NOTHING MORE.
+//
+// 🔴 It is a local type rather than `adminops.ModelRecord`, and that is a dependency-direction
+// decision, not a convenience. `internal/adminops` is the OPERATOR SURFACE — it renders this package's
+// read models — so a domain package importing it is a cycle, and the compiler said so. The fix is the
+// right one anyway: the analysis agent needs a model id, its provider and whether it is deprecated, and
+// has no business knowing about price references, revisions or audit timestamps.
+type RegisteredModel struct {
+	ModelID  string
+	Provider string
+	// Deprecated marks a model that must not be selected for new runs. It is a NOTICE at publish, never
+	// a refusal and never an auto-switch (task 3.8).
+	Deprecated bool
+}
+
 // ModelCatalogue is the operator model registry, as this package needs it.
 //
-// An interface rather than *adminstore.ModelRegistry so a caller with no Postgres can exercise
-// publishing — and note what it does NOT do: it does not make validation optional. Publisher refuses a
-// nil catalogue outright, because "we could not reach the registry" reported as "that model is fine"
-// would publish a definition naming a model nothing can resolve.
+// An interface rather than a concrete store so a caller with no Postgres can exercise publishing — and
+// note what it does NOT do: it does not make validation optional. Publisher refuses a nil catalogue
+// outright, because "we could not reach the registry" reported as "that model is fine" would publish a
+// definition naming a model nothing can resolve.
 type ModelCatalogue interface {
-	Models(ctx context.Context) ([]adminops.ModelRecord, error)
+	Models(ctx context.Context) ([]RegisteredModel, error)
 }
 
 // VersionStore persists published definitions.
@@ -188,12 +202,12 @@ func (p *Publisher) Publish(ctx context.Context, d Definition) (PublishResult, e
 }
 
 // model looks one up, refusing an unregistered ref by name.
-func (p *Publisher) model(ctx context.Context, ref string) (adminops.ModelRecord, error) {
+func (p *Publisher) model(ctx context.Context, ref string) (RegisteredModel, error) {
 	models, err := p.models.Models(ctx)
 	if err != nil {
 		// 🚫 NOT treated as "the model is fine". An unreachable registry is an outage, and publishing
 		// through it would record a definition nobody validated.
-		return adminops.ModelRecord{}, fmt.Errorf("herosagent: the operator model registry could not be "+
+		return RegisteredModel{}, fmt.Errorf("herosagent: the operator model registry could not be "+
 			"read, so %q could not be validated: %w", ref, err)
 	}
 	names := make([]string, 0, len(models))
@@ -204,7 +218,7 @@ func (p *Publisher) model(ctx context.Context, ref string) (adminops.ModelRecord
 		names = append(names, m.ModelID)
 	}
 	sort.Strings(names) // a list in map order is a different error message every time
-	return adminops.ModelRecord{}, fmt.Errorf("%w: %q. Registered: %s",
+	return RegisteredModel{}, fmt.Errorf("%w: %q. Registered: %s",
 		ErrModelUnregistered, ref, strings.Join(names, ", "))
 }
 

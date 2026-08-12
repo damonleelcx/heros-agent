@@ -386,3 +386,28 @@ func shortHash(s string) string {
 	sum := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(sum[:])[:16]
 }
+
+// MemorySessionID is the session id HEROS supplies to `memoryruntime` (D13, task 6b.8b).
+//
+// 🔴 IT IS THE INFERENCE ID, and that is the whole of D13. `memoryruntime.Key` is `{NodeID, SessionID}`
+// and the runtime NEVER invents a session id — its own comment says a defaulted one "silently merges
+// conversations that should be separate". So whatever HEROS supplies here decides the blast radius.
+//
+// Two things follow, and both are load-bearing:
+//
+//  1. CROSS-TENANT LEAKAGE BECOMES STRUCTURALLY IMPOSSIBLE rather than policy-prevented. There is no
+//     key under which two tenants' entries can meet, because an inference id belongs to exactly one
+//     inference of one workflow of one tenant. A tenant id here — or a workflow id — would create one.
+//
+//  2. D2'S THREE-PART CACHE KEY STAYS HONEST. Memory carried between inferences would add a fourth,
+//     invisible input: what HEROS happened to analyse first. Two tenants analysed in different orders
+//     would get different graphs, the stored result would no longer be a function of its own key, and
+//     re-inference would diff against something the key cannot explain.
+//
+// What it costs, stated rather than discovered: HEROS cannot learn across analyses. A repository
+// analysed twice starts cold both times. That is a real capability given up, and it is the right trade —
+// the alternative buys learning with a cross-tenant surface and a false determinism claim.
+//
+// 🚫 It is a FUNCTION rather than a field an assembler fills in, so there is one place the scope is
+// decided and no call site can widen it.
+func MemorySessionID(inferenceID string) string { return inferenceID }

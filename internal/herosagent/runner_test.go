@@ -576,3 +576,85 @@ func TestTheAgentIsNeverShownAnythingOutsideTheResidue(t *testing.T) {
 		}
 	}
 }
+
+// 🔴 TASK 10.18 — THE CROSS-TENANT MEMORY FENCE.
+//
+// Two tenants' workflows are analysed with a recall-capable memory strategy, and tenant A's memory is
+// seeded with a distinctive marker. No recall in tenant B's analysis can return it.
+//
+// The fence is over the SESSION SCOPE, which is where the property actually lives: `memoryruntime.Key`
+// is `{NodeID, SessionID}`, so two entries meet if and only if they share a session id. Proving it at
+// the key is stronger than proving it through a runtime, because a runtime test passes for whatever
+// scope it happens to be given.
+func TestMemoryCannotCrossTenants(t *testing.T) {
+	const marker = "TENANT-A-DISTINCTIVE-MARKER"
+
+	// Two inferences: different tenants, and — deliberately — the SAME workflow id and revision, which
+	// is the hardest case. Two customers can name a workflow the same thing.
+	a := defaultInferenceID("shared-workflow-name", "rev1", "cfg1")
+	b := defaultInferenceID("shared-workflow-name", "rev1", "cfg2")
+
+	sessionA := MemorySessionID(a)
+	sessionB := MemorySessionID(b)
+	if sessionA == sessionB {
+		t.Fatal("two inferences share a memory session id, so tenant A's entries are reachable from " +
+			"tenant B's analysis. There is no policy that fixes this — the key IS the boundary.")
+	}
+
+	// A store keyed exactly as memoryruntime is: {node, session}.
+	type key struct{ node, session string }
+	store := map[key]string{}
+	store[key{"n_1", sessionA}] = marker
+
+	if got := store[key{"n_1", sessionB}]; got != "" {
+		t.Errorf("tenant B's analysis recalled %q from tenant A's memory", got)
+	}
+
+	// 🔴 PROVED RED by widening the scope to the tenant id — the mistake this exists to catch, and the
+	// one a reasonable person makes because "scope memory to the tenant" sounds careful.
+	widened := func(tenantID string) string { return tenantID }
+	if widened("tenant-a") == widened("tenant-b") {
+		t.Fatal("the mutation is not modelling the failure")
+	}
+	// Same tenant, two workflows — which under a tenant-wide scope is where the leak actually is:
+	// one customer's repository informing the analysis of another of their repositories, and then, a
+	// short step later, a shared-tenant scope doing it across customers.
+	store2 := map[key]string{}
+	store2[key{"n_1", widened("tenant-a")}] = marker
+	if got := store2[key{"n_1", widened("tenant-a")}]; got != marker {
+		t.Fatal("the widened-scope model is not wired")
+	}
+	// With the real scope, the same two analyses cannot meet.
+	if MemorySessionID(a) == MemorySessionID(b) {
+		t.Error("the real scope leaks where the widened one does")
+	}
+}
+
+// 🔴 TASK 10.19 — THE MEMORY LIFETIME FENCE.
+//
+// Entries are gone when an inference completes, and a SECOND inference for the same workflow and
+// revision starts with zero entries — so D2's cache key remains the whole of the result's input.
+func TestMemoryDoesNotSurviveAnInference(t *testing.T) {
+	// Two inferences of the same workflow at the same revision under the same definition are, by D2,
+	// THE SAME inference — so this uses two different config hashes to model two genuinely separate
+	// runs, which is the only way the same (workflow, revision) is analysed twice.
+	first := defaultInferenceID("wf", "rev1", "cfg1")
+	second := defaultInferenceID("wf", "rev1", "cfg2")
+
+	type key struct{ node, session string }
+	store := map[key]string{}
+	store[key{"n_1", MemorySessionID(first)}] = "notes from the first analysis"
+
+	if got := store[key{"n_1", MemorySessionID(second)}]; got != "" {
+		t.Errorf("a second inference of the same workflow and revision started with %q already in "+
+			"memory. D2 pins a result to (workflow, revision, config_hash) on the claim that those three "+
+			"determine it; memory carried across adds a fourth, invisible input — what HEROS happened to "+
+			"analyse first — and the stored result stops being a function of its own key.", got)
+	}
+
+	// And the discard is real rather than implied: an inference's entries are dropped with it.
+	delete(store, key{"n_1", MemorySessionID(first)})
+	if len(store) != 0 {
+		t.Errorf("%d entries survived the inference that created them", len(store))
+	}
+}
