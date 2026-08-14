@@ -88,3 +88,77 @@ func TestAnalyseNamesTheInputItIsMissing(t *testing.T) {
 			"the platform which definition is active before it can run anything", err)
 	}
 }
+
+// ── The pinned model parameters (the B5 wire-contract gap) ──────────────────────────────────────────
+//
+// `runLocally` built `ModelSpec{Provider, ModelID}` and stopped, so a customer-placed run executed the
+// operator's model under NOBODY's parameters. A ModelSpec bundles all three as one versioned unit
+// exactly so a ref resolves what was stored; this seam un-bundled it.
+//
+// Silent for OpenAI — the run just used different settings from the ones the config_hash names. FATAL
+// for Anthropic: the gateway refuses a call that sets no max_tokens rather than inventing a ceiling on
+// somebody's bill, so every `claude-*` definition died at the first inference, on the customer's
+// machine, after their repository had already been read.
+
+func intp(i int) *int         { return &i }
+func f64p(f float64) *float64 { return &f }
+
+func TestThePinnedParametersReachTheModelSpec(t *testing.T) {
+	def := runlink.AgentDefinition{
+		Provider: "anthropic", ModelID: "claude-sonnet-5",
+		ModelParams: &runlink.ModelParams{MaxTokens: intp(4096), Temperature: f64p(0.2)},
+	}
+	got, err := modelParamsFrom(def)
+	if err != nil {
+		t.Fatalf("modelParamsFrom: %v", err)
+	}
+	if got.MaxTokens == nil || *got.MaxTokens != 4096 {
+		t.Errorf("max_tokens did not reach the spec: %v — the gateway will refuse this call", got.MaxTokens)
+	}
+	if got.Temperature == nil || *got.Temperature != 0.2 {
+		t.Errorf("temperature did not reach the spec: %v — the run would not match the definition its "+
+			"own config_hash names", got.Temperature)
+	}
+}
+
+// 🔴 An Anthropic definition with no parameters is refused HERE, naming the platform as the fix.
+//
+// This is the older-platform case: `model_params` is optional so a newer CLI still runs against a
+// platform that does not send it. Letting it through would surface as the gateway's "model entry … does
+// not set it", which reads as a fault in an entry the customer cannot see, on a machine with no
+// registry to inspect.
+func TestAnAnthropicDefinitionWithNoParametersIsRefusedWithTheRealCause(t *testing.T) {
+	def := runlink.AgentDefinition{Provider: "anthropic", ModelID: "claude-sonnet-5"}
+	_, err := modelParamsFrom(def)
+	if err == nil {
+		t.Fatal("an anthropic definition carrying no max_tokens was accepted; it dies at the first call")
+	}
+	msg := err.Error()
+	for _, want := range []string{"max_tokens", "claude-sonnet-5", "operator"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("the refusal does not mention %q, so the reader cannot act on it: %s", want, msg)
+		}
+	}
+}
+
+// A provider that needs no parameters runs fine without them. Without this the refusal above could be
+// widened to every provider and nothing would notice.
+func TestANonAnthropicDefinitionNeedsNoParameters(t *testing.T) {
+	def := runlink.AgentDefinition{Provider: "openai", ModelID: "gpt-5"}
+	got, err := modelParamsFrom(def)
+	if err != nil {
+		t.Fatalf("an openai definition with no params was refused: %v", err)
+	}
+	if got.MaxTokens != nil {
+		t.Errorf("a max_tokens was invented for openai: %v", *got.MaxTokens)
+	}
+}
+
+// The provider match is case-insensitive. A catalog that spells it "Anthropic" must not slip past the
+// check and fail at the vendor instead.
+func TestTheAnthropicCheckIsCaseInsensitive(t *testing.T) {
+	def := runlink.AgentDefinition{Provider: "Anthropic", ModelID: "claude-sonnet-5"}
+	if _, err := modelParamsFrom(def); err == nil {
+		t.Fatal(`provider "Anthropic" bypassed the max_tokens check`)
+	}
+}

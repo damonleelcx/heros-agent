@@ -65,8 +65,50 @@ type AgentDefinition struct {
 	// MaxTokens and MaxWallSeconds are the per-run budget. A customer spending their own credential
 	// still gets a ceiling: an unbounded run is how a repository-shaped cost arrives on a bill nobody
 	// approved, and whose bill it is does not change that.
+	//
+	// 🔴 NOT the model's `max_tokens`. This one is CUMULATIVE across the whole analysis and is checked
+	// against `usage.InputTokens + usage.OutputTokens` after each call; the model's is a ceiling on ONE
+	// completion and goes on the wire to the vendor. They are different numbers with the same name, and
+	// `ModelParams` below carries the other one. Conflating them would either truncate every answer to
+	// a run budget or let one completion spend the entire run.
 	MaxTokens      int `json:"max_tokens,omitempty"`
 	MaxWallSeconds int `json:"max_wall_seconds,omitempty"`
+
+	// ModelParams are the inference parameters PINNED on the model version this definition binds.
+	//
+	// 🔴 Why they have to cross. `ModelSpec` bundles provider, model id and params as ONE versioned
+	// unit precisely so that a `model_ref` resolves all of them exactly as stored — that is what makes
+	// a `config_hash` fully determine a run. This seam used to send the first two and drop the third,
+	// so a customer-placed run used the operator's model with NOBODY's parameters: the temperature and
+	// seed an operator pinned were silently ignored, and the run did not match the definition its own
+	// config_hash names.
+	//
+	// For Anthropic it was not silent, it was fatal. `providergateway` refuses a call whose spec sets
+	// no `max_tokens` rather than inventing a ceiling on somebody's bill, so `heros analyse` against
+	// any `claude-*` model failed at the first inference — on the customer's machine, after the CLI
+	// had already read their repository.
+	//
+	// Optional, and it must stay optional: a CLI newer than its platform receives nil here, which is a
+	// state to report clearly rather than a reason to refuse a definition that an OpenAI model runs
+	// fine. See `analyse.go`, which names the platform as the thing to upgrade.
+	ModelParams *ModelParams `json:"model_params,omitempty"`
+}
+
+// ModelParams is the wire form of the inference parameters a model version pins.
+//
+// 🚫 Deliberately NOT `registry.ModelParams`. This is a versioned CONTRACT across a trust boundary and
+// the registry type is an internal domain type; sharing one struct would make any future field on the
+// domain type an unversioned change to what the platform sends every customer CLI. The mapping lives in
+// exactly one place, the adapter that already resolves the ref.
+//
+// Every field is a pointer because "unset" and "zero" are different: a temperature of 0 is a real,
+// deliberate setting, and a `max_tokens` of 0 is not a ceiling.
+type ModelParams struct {
+	MaxTokens      *int     `json:"max_tokens,omitempty"`
+	Temperature    *float64 `json:"temperature,omitempty"`
+	ThinkingBudget *int     `json:"thinking_budget,omitempty"`
+	Seed           *int64   `json:"seed,omitempty"`
+	TimeoutSeconds *int     `json:"timeout_seconds,omitempty"`
 }
 
 // Runnable reports whether this response actually carries a definition to run.

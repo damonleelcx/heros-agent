@@ -9,6 +9,7 @@ import (
 	"github.com/heros-foreal/agentd/internal/providergateway"
 
 	"github.com/heros-foreal/agentd/internal/registry"
+	"github.com/heros-foreal/agentd/internal/runlink"
 )
 
 // herosagentwiring.go adapts the P2 registries onto the two resolvers `herosagent.PlatformSource`
@@ -83,18 +84,55 @@ func (m registryModels) Models(ctx context.Context) ([]herosagent.RegisteredMode
 }
 
 // Resolve reads the operator registry so the CUSTOMER's machine does not have to.
-func (m registryModels) Resolve(ctx context.Context, modelRef string) (string, string, bool, error) {
+func (m registryModels) Resolve(ctx context.Context, modelRef string) (herosagent.ResolvedModel, bool, error) {
 	if modelRef == "" {
-		return "", "", false, nil
+		return herosagent.ResolvedModel{}, false, nil
 	}
 	entry, err := m.reg.ResolveModel(ctx, modelRef)
 	if err != nil {
 		if errors.Is(err, registry.ErrNotFound) {
-			return "", "", false, nil
+			return herosagent.ResolvedModel{}, false, nil
 		}
-		return "", "", false, err
+		return herosagent.ResolvedModel{}, false, err
 	}
-	return entry.Spec.Provider, entry.Spec.ModelID, true, nil
+	return resolvedFrom(entry), true, nil
+}
+
+// resolvedFrom maps a registry entry onto what a customer-side runner needs to CALL it.
+//
+// 🔴 Extracted as a pure function so it can be fenced WITHOUT a database. The defect this file had —
+// returning provider and model id and letting `entry.Spec.Params` fall on the floor — lived exactly
+// here, and every test that could have caught it went through a hand-written fake resolver instead of
+// this code. A fence over a fake proves the contract, never the adapter, and the adapter was the bug.
+func resolvedFrom(entry *registry.ModelEntry) herosagent.ResolvedModel {
+	return herosagent.ResolvedModel{
+		Provider: entry.Spec.Provider,
+		ModelID:  entry.Spec.ModelID,
+		Params:   wireParams(entry.Spec.Params),
+	}
+}
+
+// wireParams maps the registry's domain params onto the versioned wire type.
+//
+// The ONE place the two shapes meet, deliberately: a contract that shared the domain struct would make
+// any future field on it an unversioned change to what every customer CLI receives.
+//
+// Returns nil when the version pins nothing, rather than an empty struct. Nil is what "this model
+// declares no parameters" means on the wire, and an empty object would be indistinguishable from a
+// platform that sent the field and forgot to fill it.
+func wireParams(p registry.ModelParams) *runlink.ModelParams {
+	out := runlink.ModelParams{
+		MaxTokens:      p.MaxTokens,
+		Temperature:    p.Temperature,
+		ThinkingBudget: p.ThinkingBudget,
+		Seed:           p.Seed,
+		TimeoutSeconds: p.TimeoutSeconds,
+	}
+	if out.MaxTokens == nil && out.Temperature == nil && out.ThinkingBudget == nil &&
+		out.Seed == nil && out.TimeoutSeconds == nil {
+		return nil
+	}
+	return &out
 }
 
 // secretsResolver adapts the gateway's own Secrets source onto the readiness check's resolver.

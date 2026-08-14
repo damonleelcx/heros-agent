@@ -148,16 +148,23 @@ func newAgentRehearsal(cfg agentRehearsalConfig) (adminops.RehearseFunc, error) 
 			return fmt.Errorf("herosagent: the definition's prompt %q is not published, so this "+
 				"definition cannot be measured or served", v.Definition.PromptRef)
 		}
-		provider, modelID, ok, merr := cfg.Models.Resolve(ctx, v.ModelRef)
+		resolved, ok, merr := cfg.Models.Resolve(ctx, v.ModelRef)
 		if merr != nil {
 			return merr
 		}
+		provider, modelID := resolved.Provider, resolved.ModelID
 		if !ok {
 			return fmt.Errorf("herosagent: the definition's model %q is not in the operator registry. "+
 				"Register it (a provider, a model id and a price reference) and rehearse again",
 				v.ModelRef)
 		}
 
+		// ⚠️ The rehearsal keeps its OWN ceiling and does not adopt `resolved.Params`, which is now
+		// available. Deliberate, and narrow: adopting them would change what the calibration set
+		// measures — temperature and seed would start applying — and a gate whose verdict moves because
+		// an unrelated field was plumbed is worse than one that measures a fixed configuration. It does
+		// mean a rehearsal does not measure the exact parameters a customer-placed run uses; that gap is
+		// real and is a question about what the gate should assert, not something to close in passing.
 		maxTokens := rehearsalAnswerTokens
 		model, gerr := herosagent.NewGatewayModel(cfg.Gateway, &registry.ModelEntry{
 			Name: modelID,
