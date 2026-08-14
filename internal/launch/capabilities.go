@@ -125,6 +125,9 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 		blobs := registry.NewCatalogingBlobStore(pg, fsBlobs, "application/json")
 
 		reg := registry.NewStore(pg, blobs)
+		// The operator console authors the platform agent's own instruction through THIS store — the
+		// same one every prompt_ref resolves through. See adminlaunch.AgentAdmin.Prompts.
+		agentAdmin.Prompts = reg
 		h.MountPromptRegistry(reg)
 		served("p10_prompt_registry")
 

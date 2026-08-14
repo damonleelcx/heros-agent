@@ -280,6 +280,10 @@ func (a *AdminAPI) routes() {
 	m.HandleFunc("GET /admin/api/agent", a.session(a.mounted(a.deps.Agent != nil, "analysis agent", a.handleAgent)))
 	m.HandleFunc("GET /admin/api/agent/spend", a.session(a.mounted(a.deps.Agent != nil, "analysis agent", a.handleAgentSpend)))
 	m.HandleFunc("POST /admin/api/agent/preview", a.session(a.mounted(a.deps.Agent != nil, "analysis agent", a.handleAgentPreview)))
+	// The platform agent's OWN instruction. A definition's prompt_ref must resolve before it can be
+	// published, and the only other write route in the prompt registry is tenant-scoped — so without
+	// this the operator console could compose a definition it could never publish.
+	m.HandleFunc("POST /admin/api/agent/prompt", a.session(a.mounted(a.deps.Agent != nil, "analysis agent", a.handleAgentPrompt)))
 	m.HandleFunc("POST /admin/api/agent/publish", a.session(a.mounted(a.deps.Agent != nil, "analysis agent", a.handleAgentPublish)))
 	m.HandleFunc("POST /admin/api/agent/activate", a.session(a.mounted(a.deps.Agent != nil, "analysis agent", a.handleAgentActivate)))
 	m.HandleFunc("POST /admin/api/agent/cap", a.session(a.mounted(a.deps.Agent != nil, "analysis agent", a.handleAgentCap)))
@@ -1064,6 +1068,22 @@ func (a *AdminAPI) handleAgentPublish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, view)
+}
+
+func (a *AdminAPI) handleAgentPrompt(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name string `json:"name"`
+		Body string `json:"body"`
+	}
+	if !decodeAdminJSON(w, r, &req) {
+		return
+	}
+	res, err := a.deps.Agent.PublishPlatformPrompt(r.Context(), req.Name, req.Body)
+	if err != nil {
+		writeCapabilityError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
 }
 
 func (a *AdminAPI) handleAgentActivate(w http.ResponseWriter, r *http.Request) {

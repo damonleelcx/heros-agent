@@ -251,6 +251,19 @@ type AgentService struct {
 	kill      AgentKillSwitch
 	hosts     herosagent.RunnerHosts
 	rehearse  RehearseFunc
+	// prompts is the platform's OWN prompt-authoring path (see platformprompt.go). Optional for the
+	// same reason `rehearse` is: a deployment with no platform database has no registry to write to,
+	// and that is an absence the surface reports rather than a construction error.
+	prompts PlatformPromptRegistrar
+}
+
+// WithPlatformPrompts wires the platform prompt-authoring path.
+//
+// Separate from NewAgentService, like WithRehearsal: every existing caller is correct without one, and
+// a required parameter would make them all pass nil to say so.
+func (s *AgentService) WithPlatformPrompts(p PlatformPromptRegistrar) *AgentService {
+	s.prompts = p
+	return s
 }
 
 // WithRehearsal returns the service with the activation gate wired.
