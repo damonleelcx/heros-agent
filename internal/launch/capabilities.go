@@ -532,32 +532,54 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 		// NIL publisher, and said so in a comment: "a Publish control would fail at the moment somebody
 		// pressed it". That was honest about the wiring and it meant the console could not configure the
 		// agent at all — while `heros_agent_version` (migration 0046) sat here, open, one field away.
-		agentPublisher, perr := herosagent.NewPublisher(registryModels{reg}, secrets, versionStore,
-			herosagent.RunnerHosts{}, func() int64 { return time.Now().UnixMilli() })
-		if perr != nil {
-			return nil, nil, fmt.Errorf("heros agent publisher: %w", perr)
-		}
+		//
+		// 🔴 A DEPLOYMENT WITHOUT A PUBLISHER STILL BOOTS. The first cut of this returned a hard error
+		// and would have refused to start every deployment with no secrets source — a dev box, a test
+		// harness, any install that has not configured a provider yet — because `NewPublisher` requires
+		// one to resolve a credential reference. That is a console CONTROL failing to build; it is not
+		// the customer analysis path, and taking the platform down for it inverts the priority the rest
+		// of this function follows: an absent capability is registered WITH ITS REASON, never fatal.
 		agentAdmin.Versions = versionStore
-		agentAdmin.Publisher = agentPublisher
+		if secrets == nil {
+			agentAdmin.RehearsalWhy = "this deployment declares no secrets source, so a definition's " +
+				"credential reference cannot be resolved: publishing is refused rather than recording a " +
+				"definition nobody could run"
+		} else if agentPublisher, perr := herosagent.NewPublisher(registryModels{reg}, secrets,
+			versionStore, herosagent.RunnerHosts{},
+			func() int64 { return time.Now().UnixMilli() }); perr != nil {
+			agentAdmin.RehearsalWhy = "the agent publisher could not be built: " + perr.Error()
+		} else {
+			agentAdmin.Publisher = agentPublisher
+		}
 
 		// The gate. A deployment that cannot build one keeps refusing to activate — which is the safe
 		// direction — and the reason is logged rather than discovered by pressing the button.
-		discoveryReg, dregErr := discovery.DefaultRegistry()
-		if dregErr != nil {
-			agentAdmin.RehearsalWhy = "discovery's frontend registry could not be built: " + dregErr.Error()
-		} else {
-			rehearse, rerr := newAgentRehearsal(agentRehearsalConfig{
-				Versions:  versionStore,
-				Prompts:   registryPrompts{reg},
-				Models:    registryModels{reg},
-				Gateway:   providergateway.New(secrets),
-				Discovery: discoveryReg,
-				NowMS:     func() int64 { return time.Now().UnixMilli() },
-			})
-			if rerr != nil {
-				agentAdmin.RehearsalWhy = rerr.Error()
-			} else {
-				agentAdmin.Rehearse = rehearse
+		//
+		// ⚠️ The reason is set ONCE. A later branch overwriting an earlier one would report the last
+		// thing that went wrong rather than the first, and the first is the one to fix.
+		switch {
+		case agentAdmin.Publisher == nil:
+			// Already explained above. A gate with nothing to activate is not worth building, and it
+			// would need the same credential the publisher could not resolve.
+		default:
+			discoveryReg, dregErr := discovery.DefaultRegistry()
+			switch {
+			case dregErr != nil:
+				agentAdmin.RehearsalWhy = "discovery's frontend registry could not be built: " + dregErr.Error()
+			default:
+				rehearse, rerr := newAgentRehearsal(agentRehearsalConfig{
+					Versions:  versionStore,
+					Prompts:   registryPrompts{reg},
+					Models:    registryModels{reg},
+					Gateway:   providergateway.New(secrets),
+					Discovery: discoveryReg,
+					NowMS:     func() int64 { return time.Now().UnixMilli() },
+				})
+				if rerr != nil {
+					agentAdmin.RehearsalWhy = rerr.Error()
+				} else {
+					agentAdmin.Rehearse = rehearse
+				}
 			}
 		}
 		served("p30_heros_agent (agent definition read + customer-placed result ingest)")
