@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/heros-foreal/agentd/internal/herosagent"
 	"github.com/heros-foreal/agentd/internal/providergateway"
 
 	"github.com/heros-foreal/agentd/internal/registry"
@@ -56,6 +57,30 @@ func (p registryPrompts) Render(ctx context.Context, promptRef string) (string, 
 
 // registryModels resolves the definition's model ref to a provider and model id.
 type registryModels struct{ reg *registry.Store }
+
+// Models lists the registry as the PUBLISHER needs it — the catalogue a `model_ref` is validated
+// against before a definition is recorded.
+//
+// 🔴 `RegisteredModel.ModelID` carries the VERSION ID, not the vendor's model name, because that is
+// what a `model_ref` is and what `Resolve` below reads. The two must be the same key space: a
+// publisher validating against one and a runner resolving against the other accepts references that
+// cannot be run, and says so only at the first analysis.
+//
+// `Deprecated` is always false here: deprecation lives in the operator PRICE registry
+// (`adminops.ModelRegistry`), which is keyed by vendor model id and is a different question — "should
+// anybody choose this model" rather than "does this reference resolve". Reporting a guess would make
+// the publisher's deprecation notice a statement about nothing.
+func (m registryModels) Models(ctx context.Context) ([]herosagent.RegisteredModel, error) {
+	entries, err := m.reg.AllModelVersions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]herosagent.RegisteredModel, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, herosagent.RegisteredModel{ModelID: e.VersionID, Provider: e.Spec.Provider})
+	}
+	return out, nil
+}
 
 // Resolve reads the operator registry so the CUSTOMER's machine does not have to.
 func (m registryModels) Resolve(ctx context.Context, modelRef string) (string, string, bool, error) {

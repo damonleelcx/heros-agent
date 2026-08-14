@@ -171,6 +171,51 @@ func (s *Store) ModelVersions(ctx context.Context, name string) ([]string, error
 	return s.versions(ctx, tableModel, name)
 }
 
+// AllModelVersions lists every published model version, oldest first.
+//
+// # Why this exists, when ModelVersions already lists by name
+//
+// P30's publisher validates a definition's `model_ref` against the registry BEFORE recording the
+// definition, and it can only do that against the whole set: a ref is a version id, and the caller
+// asking "is this ref registered" does not know which entry NAME it belongs to — that is exactly what
+// it is trying to find out.
+//
+// 🔴 It returns the same key space `ResolveModel` reads, and that matters more than it looks. The
+// publisher's check and the runtime's resolution must agree about what a `model_ref` IS; if publish
+// validated against the operator price registry (keyed by model id, e.g. `claude-sonnet-4-5`) while
+// the runner resolved against this one (keyed by content-addressed version id), publishing would
+// accept references the runner could never resolve, and the failure would arrive at the first
+// analysis rather than at the moment somebody pressed publish.
+func (s *Store) AllModelVersions(ctx context.Context) ([]*ModelEntry, error) {
+	rows, err := s.db.QueryContext(ctx,
+		fmt.Sprintf(`SELECT version_id, envelope FROM %s ORDER BY created_at, version_id`, tableModel))
+	if err != nil {
+		return nil, fmt.Errorf("registry: all model versions: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []*ModelEntry
+	for rows.Next() {
+		var versionID string
+		var env []byte
+		if err := rows.Scan(&versionID, &env); err != nil {
+			return nil, fmt.Errorf("registry: all model versions: scan: %w", err)
+		}
+		var spec ModelSpec
+		name, derr := decodeEnvelope(KindModel, versionID, env, &spec)
+		if derr != nil {
+			// 🚫 NOT skipped. A row this store cannot decode is a registry that is not what the process
+			// thinks it is, and a caller validating a reference against a silently shortened list would
+			// reject a model that IS registered.
+			return nil, fmt.Errorf("registry: all model versions: %s: %w", versionID, derr)
+		}
+		out = append(out, &ModelEntry{VersionID: versionID, Name: name, Spec: spec, Envelope: env})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("registry: all model versions: %w", err)
+	}
+	return out, nil
+}
+
 // PromptVersions lists every published version of a prompt entry name, oldest first.
 func (s *Store) PromptVersions(ctx context.Context, name string) ([]string, error) {
 	return s.versions(ctx, tablePrompt, name)

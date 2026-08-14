@@ -111,7 +111,13 @@ func Federated() bool {
 // Build assembles the admin API from the deployment's environment, secrets source and platform database.
 //
 // `platformDB` is REQUIRED and the refusal is the point — see the comment on that check.
-func Build(ctx context.Context, secretsSrc providergateway.Secrets, platformDB *sql.DB, reporter erroreport.Reporter) (*Assembly, error) {
+// Build assembles the operator console.
+//
+// `agentAdmin` carries P30's publish/activate wiring from the capability graph, which already holds
+// the registry, the gateway and the durable version store. Nil is a valid deployment: the agent
+// surface then reads, and its publish control refuses rather than writing to a store that would lose
+// its rows at a restart.
+func Build(ctx context.Context, secretsSrc providergateway.Secrets, platformDB *sql.DB, reporter erroreport.Reporter, agentAdmin *AgentAdmin) (*Assembly, error) {
 	now := func() time.Time { return time.Now().UTC() }
 
 	if secretsSrc == nil {
@@ -281,7 +287,7 @@ func Build(ctx context.Context, secretsSrc providergateway.Secrets, platformDB *
 		return nil, fmt.Errorf("adminlaunch: operator sources: %w", err)
 	}
 	var svcs serviceSet
-	if err := mountServices(exec, sources, sessions, authn.Describe(), newReadinessSource(readyzAddr()), &svcs); err != nil {
+	if err := mountServices(exec, sources, sessions, authn.Describe(), newReadinessSource(readyzAddr()), agentAdmin, &svcs); err != nil {
 		return nil, fmt.Errorf("adminlaunch: %w", err)
 	}
 

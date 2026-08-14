@@ -223,6 +223,24 @@ type AgentKillSwitch interface {
 
 // ── Service ─────────────────────────────────────────────────────────────────────────────────────
 
+// RehearseFunc runs the pinned calibration set against ONE published definition and records the
+// verdict on its version row. It returns an error when the definition did not meet the floor, naming
+// the fixtures that failed.
+//
+// # 🔴 Why this is a function handed in rather than a Rehearsal held here
+//
+// A rehearsal needs a live model, and WHICH model is a property of the definition being rehearsed —
+// its `model_ref` and `prompt_ref`, resolved through the operator registry, called through the
+// provider gateway under the deployment's own credential. None of that is knowledge this package has
+// or should acquire: `adminops` owns authorisation, audit and the shape of an operator action. So the
+// gate is injected as one function, and the launch path that already holds the registry, the gateway
+// and the fixture root builds it.
+//
+// 🚫 A nil RehearseFunc is a deployment that cannot measure, NOT a deployment that activates freely:
+// `Publisher.Activate` still refuses any version whose rehearsal state is not `passed`, and nothing
+// else can set it. The absence closes the door rather than opening it.
+type RehearseFunc func(ctx context.Context, configHash string) error
+
 // AgentService serves the P30 operator surface.
 type AgentService struct {
 	exec      *Executor
@@ -232,6 +250,17 @@ type AgentService struct {
 	counter   AgentInferenceCounter
 	kill      AgentKillSwitch
 	hosts     herosagent.RunnerHosts
+	rehearse  RehearseFunc
+}
+
+// WithRehearsal returns the service with the activation gate wired.
+//
+// Separate from NewAgentService because every existing caller — the demo binary, the tests, a
+// deployment with no provider credential — is correct without one, and a required parameter would
+// make them all pass nil to say so.
+func (s *AgentService) WithRehearsal(f RehearseFunc) *AgentService {
+	s.rehearse = f
+	return s
 }
 
 // NewAgentService wires the surface.
@@ -561,6 +590,38 @@ func (s *AgentService) Activate(ctx context.Context, configHash, reason string) 
 	if strings.TrimSpace(reason) == "" {
 		return errors.New("adminops: activating an agent definition requires a reason")
 	}
+
+	// 🔴 THE GATE RUNS HERE, and it is the only place it can run in the product (D7).
+	//
+	// Before this, `NewRehearsal` was constructed in exactly one file in the repository and that file
+	// was `cmd/proof/acceptance` — a proof binary. So the gate existed, had fences that went red, and
+	// no deployed path could reach it: a published definition stayed `pending` for ever and Activate
+	// refused it for ever. The refusal was correct and the capability was dark.
+	//
+	// ⚠️ IT SPENDS. One provider call per calibration fixture, on the deployment's own credential, at
+	// the moment an operator presses activate. That is deliberate rather than hidden behind a schedule:
+	// the operator who decides to activate is the one who should see the bill for measuring it.
+	//
+	// Skipped when the definition already PASSED — re-measuring an unchanged `config_hash` spends
+	// tokens to reproduce a number that is already on the row, and D2 is explicit that the difference
+	// between two runs of one hash is noise rather than signal.
+	if s.rehearse != nil {
+		v, ok, verr := s.versions.Get(ctx, configHash)
+		if verr != nil {
+			return verr
+		}
+		if !ok {
+			return fmt.Errorf("adminops: no definition is published under %s", displayHash(configHash))
+		}
+		if v.RehearsalState != herosagent.RehearsalPassed {
+			if rerr := s.rehearse(ctx, configHash); rerr != nil {
+				// The report is already stored on the row by the gate itself, pass or fail, so an
+				// operator reading the console sees the per-fixture numbers behind this refusal.
+				return rerr
+			}
+		}
+	}
+
 	if err := s.publisher.Activate(ctx, configHash); err != nil {
 		return err
 	}
