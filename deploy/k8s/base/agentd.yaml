@@ -302,10 +302,19 @@ spec:
               # naming the parse error) but is a worse state than having no catalog at all. A cluster
               # that sells nothing should carry no plans-json key and not apply this line.
               #
-              # models.json is deliberately NOT projected here. It gates the proposal generator, not
-              # billing, and this deployment publishes no model catalog — leaving it absent keeps that
-              # capability honestly unmounted rather than mounted over an empty file.
+              # models.json IS projected now. It was absent deliberately while this deployment published
+              # no model catalog — "honestly unmounted" was the right state for a cluster with nothing
+              # to declare. It now has something to declare, and the absence had a second cost the
+              # original note did not see: `modelcatalog.SeedRegistry` reads this file at boot and is
+              # the ONLY thing that creates a P2 model version. With no catalog the registry held zero
+              # models, so a HEROS agent definition had no `model_ref` it could name at all.
+              #
+              # ⚠️ Same rule as plans-json in both directions: this key must be synced by the
+              # ExternalSecret on every cluster applying this base, and it may not be empty — the
+              # loader refuses a catalog publishing no models, on the grounds that an empty catalog and
+              # no catalog are different things and such a file says neither.
               - { key: plans-json, path: plans.json }
+              - { key: models-json, path: models.json }
         # The ledger is USER STATE (FR22), not scratch: tenant credentials, the registries, memory, the
         # tool index, the inbox. It was an emptyDir, which destroyed all of it on every rollout.
         - name: ledger

@@ -33,14 +33,20 @@ resources:
 # images.env, and scripts/deploy/check-digest-pins.sh fails if any of these is a floating tag. The
 # `newTag`-less `digest:` form is what makes an apply reproducible: the same digest is the same image.
 images:
-  # The platform's own three, built for linux/arm64 and pushed to this account's ECR. All three are at
-  # 63a3a03 — the v0.22.0 release line: the DocumentedRelease bump (#95) and the install page
-  # regenerated from the published Release (#97). The set moves together, which is why this comment
-  # names one commit rather than one per image. `newName` retargets the registry; the digest is the
-  # artifact. Both must match deploy/images.env exactly or check-image-parity.sh fails the build.
+  # The platform's own three, built for linux/arm64 and pushed to this account's ECR.
+  #
+  # agentd is at bdd511d (PR #100: the platform prompt-authoring surface, and the model-catalog params
+  # carriage without which a seeded Anthropic entry registers and cannot be called). The two consoles
+  # stay at 63a3a03. The set moved together for v0.22.0 because internal/api/install.go serves its
+  # install surface from distribution.DocumentedRelease, so a console-only push would leave the API
+  # answering an older version than the page showed. bdd511d touches no version surface, so agentd
+  # moves alone here — repin the consoles only when something they render changes.
+  #
+  # `newName` retargets the registry; the digest is the artifact. Both must match deploy/images.env
+  # exactly or check-image-parity.sh fails the build.
   - name: ghcr.io/heros-foreal/agentd
     newName: 373468206837.dkr.ecr.us-east-1.amazonaws.com/agentd
-    digest: sha256:4d2e9725367da88c12e2df37c18b7e2a92d84b44d97d8b41b868498da931399f
+    digest: sha256:0dd8e5673184c333e3b2757e2a4615cff75d6f5411f72c5acc0e446b4c27f9c6
   - name: ghcr.io/heros-foreal/heros-console
     newName: 373468206837.dkr.ecr.us-east-1.amazonaws.com/heros-console
     digest: sha256:e882d793d83d442fbd1a39e7ff7fa1450ff6173105a7cd4b2cd4c30a027b751e
