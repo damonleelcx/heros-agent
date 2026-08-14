@@ -557,29 +557,25 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 		//
 		// ⚠️ The reason is set ONCE. A later branch overwriting an earlier one would report the last
 		// thing that went wrong rather than the first, and the first is the one to fix.
-		switch {
-		case agentAdmin.Publisher == nil:
-			// Already explained above. A gate with nothing to activate is not worth building, and it
-			// would need the same credential the publisher could not resolve.
-		default:
+		//
+		// Skipped entirely when there is no publisher: the reason is already recorded above, a gate
+		// with nothing to activate is not worth building, and it would need the same credential the
+		// publisher could not resolve.
+		if agentAdmin.Publisher != nil {
 			discoveryReg, dregErr := discovery.DefaultRegistry()
-			switch {
-			case dregErr != nil:
+			if dregErr != nil {
 				agentAdmin.RehearsalWhy = "discovery's frontend registry could not be built: " + dregErr.Error()
-			default:
-				rehearse, rerr := newAgentRehearsal(agentRehearsalConfig{
-					Versions:  versionStore,
-					Prompts:   registryPrompts{reg},
-					Models:    registryModels{reg},
-					Gateway:   providergateway.New(secrets),
-					Discovery: discoveryReg,
-					NowMS:     func() int64 { return time.Now().UnixMilli() },
-				})
-				if rerr != nil {
-					agentAdmin.RehearsalWhy = rerr.Error()
-				} else {
-					agentAdmin.Rehearse = rehearse
-				}
+			} else if rehearse, rerr := newAgentRehearsal(agentRehearsalConfig{
+				Versions:  versionStore,
+				Prompts:   registryPrompts{reg},
+				Models:    registryModels{reg},
+				Gateway:   providergateway.New(secrets),
+				Discovery: discoveryReg,
+				NowMS:     func() int64 { return time.Now().UnixMilli() },
+			}); rerr != nil {
+				agentAdmin.RehearsalWhy = rerr.Error()
+			} else {
+				agentAdmin.Rehearse = rehearse
 			}
 		}
 		served("p30_heros_agent (agent definition read + customer-placed result ingest)")
