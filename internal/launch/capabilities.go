@@ -14,11 +14,13 @@ import (
 	"time"
 
 	"github.com/heros-foreal/agentd/internal/account"
+	"github.com/heros-foreal/agentd/internal/adminlaunch"
 	"github.com/heros-foreal/agentd/internal/api"
 	"github.com/heros-foreal/agentd/internal/billing"
 	"github.com/heros-foreal/agentd/internal/billingview"
 	"github.com/heros-foreal/agentd/internal/deliveryrecord"
 	"github.com/heros-foreal/agentd/internal/deliveryroute"
+	"github.com/heros-foreal/agentd/internal/discovery"
 	"github.com/heros-foreal/agentd/internal/entitlement"
 	"github.com/heros-foreal/agentd/internal/executor"
 	"github.com/heros-foreal/agentd/internal/forgedelivery"
@@ -78,7 +80,8 @@ type Capability struct {
 // providers read verification state that has no store yet. Mounting those over memory would turn "not
 // installed" into "installed and quietly lossy", which is a worse lie than the 404 this replaces. They
 // are PRD Q6, and deploy/README.md lists them.
-func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL string, secrets providergateway.Secrets, accounts *AccountSystem) ([]Capability, error) {
+func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL string, secrets providergateway.Secrets, accounts *AccountSystem) ([]Capability, *adminlaunch.AgentAdmin, error) {
+	agentAdmin := &adminlaunch.AgentAdmin{}
 	caps := make([]Capability, 0, 16)
 	served := func(name string) { caps = append(caps, Capability{Name: name, Served: true}) }
 	absent := func(name, why string) { caps = append(caps, Capability{Name: name, Why: why}) }
@@ -115,7 +118,7 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 	if pg != nil {
 		fsBlobs, err := registry.NewFSBlobStore(filepath.Join(dataDir, "blobs"))
 		if err != nil {
-			return nil, fmt.Errorf("blob store: %w", err)
+			return nil, nil, fmt.Errorf("blob store: %w", err)
 		}
 		// A CATALOGING blob store: 0001's node_execution FK to blob(content_hash) requires every
 		// referenced blob to have a catalog row, so writing the bytes alone is not enough.
@@ -229,15 +232,15 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 			if rerr == nil {
 				acctStore, err := account.NewPGStore(pg)
 				if err != nil {
-					return nil, fmt.Errorf("account store: %w", err)
+					return nil, nil, fmt.Errorf("account store: %w", err)
 				}
 				usageStore, err := metering.NewPGUsageStore(pg)
 				if err != nil {
-					return nil, fmt.Errorf("usage store: %w", err)
+					return nil, nil, fmt.Errorf("usage store: %w", err)
 				}
 				ledger, err := billing.NewPGLedger(pg)
 				if err != nil {
-					return nil, fmt.Errorf("billing ledger: %w", err)
+					return nil, nil, fmt.Errorf("billing ledger: %w", err)
 				}
 				deltas := metering.NewMemVerifiedDeltas()
 				meter := metering.NewMeter(metering.NewMemCostEvents(), usageStore)
@@ -258,7 +261,7 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 				provider, mode, collectionAbsentWhy = collectionProvider(secrets)
 				svc, err := billing.NewService(provider.provider, ledger, acctStore, plans, meter, provider.secrets)
 				if err != nil {
-					return nil, fmt.Errorf("billing service: %w", err)
+					return nil, nil, fmt.Errorf("billing service: %w", err)
 				}
 				// ── The webhook's two DURABLE stores ───────────────────────────────────────────────────
 				//
@@ -275,11 +278,11 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 				// restart re-applies an effect that was already applied, and Stripe redelivers for days.
 				deliveries, derr := billing.NewPGDeliveries(pg)
 				if derr != nil {
-					return nil, fmt.Errorf("billing webhook deliveries: %w", derr)
+					return nil, nil, fmt.Errorf("billing webhook deliveries: %w", derr)
 				}
 				states, serr := billing.NewPGStates(pg)
 				if serr != nil {
-					return nil, fmt.Errorf("billing state mirror: %w", serr)
+					return nil, nil, fmt.Errorf("billing state mirror: %w", serr)
 				}
 				svc.WithDeliveries(deliveries).WithStates(states)
 				// ONE gate, shared with P12 delivery below. Two gates over the same plans and the same usage
@@ -303,7 +306,7 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 					accounts.Surface.meter = meter
 				}
 				if billingView, err = billingview.New(acctStore, plans, usageStore, deltas, entGate, svc); err != nil {
-					return nil, fmt.Errorf("billing view: %w", err)
+					return nil, nil, fmt.Errorf("billing view: %w", err)
 				}
 
 				// P21 collection, mounted only where a provider was DECLARED.
@@ -320,7 +323,7 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 				if mode != "" {
 					pv, perr := paymentsview.New(billingView, svc)
 					if perr != nil {
-						return nil, fmt.Errorf("payments view: %w", perr)
+						return nil, nil, fmt.Errorf("payments view: %w", perr)
 					}
 					h.MountPayments(pv)
 					h.MountBillingWebhook(svc)
@@ -358,7 +361,7 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 		// rewritten on its way to the WHERE clause that scopes it.
 		verdictStore, err := proposalstore.NewPGStore(pg)
 		if err != nil {
-			return nil, fmt.Errorf("proposal store: %w", err)
+			return nil, nil, fmt.Errorf("proposal store: %w", err)
 		}
 		h.MountVerdictIngest(verdictStore)
 		served("p55_verdict_ingest (CI reports what it measured; the platform never authors a verdict)")
@@ -409,7 +412,7 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 			)
 			routeStore, err := deliveryroute.NewPGStore(pg)
 			if err != nil {
-				return nil, fmt.Errorf("delivery route store: %w", err)
+				return nil, nil, fmt.Errorf("delivery route store: %w", err)
 			}
 			h.MountForgeDelivery(forgedelivery.NewService(
 				deliverer, routeStore,
@@ -465,28 +468,28 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 		// proving anything the day the default changes.
 		placementStore, perr := herosagent.NewPGPlacementStore(pg)
 		if perr != nil {
-			return nil, fmt.Errorf("heros agent placement store: %w", perr)
+			return nil, nil, fmt.Errorf("heros agent placement store: %w", perr)
 		}
 		versionStore, verr := herosagent.NewPGVersionStore(pg)
 		if verr != nil {
-			return nil, fmt.Errorf("heros agent version store: %w", verr)
+			return nil, nil, fmt.Errorf("heros agent version store: %w", verr)
 		}
 		inferenceStore, ierr := herosagent.NewPGInferenceStore(pg)
 		if ierr != nil {
-			return nil, fmt.Errorf("heros agent inference store: %w", ierr)
+			return nil, nil, fmt.Errorf("heros agent inference store: %w", ierr)
 		}
 		agentCaps, cerr := herosagent.NewPGCapStore(pg)
 		if cerr != nil {
-			return nil, fmt.Errorf("heros agent cap store: %w", cerr)
+			return nil, nil, fmt.Errorf("heros agent cap store: %w", cerr)
 		}
 		agentMeter, merr := herosagent.NewPGSpendStore(pg)
 		if merr != nil {
-			return nil, fmt.Errorf("heros agent spend store: %w", merr)
+			return nil, nil, fmt.Errorf("heros agent spend store: %w", merr)
 		}
 		agentCapChecker, kerr := herosagent.NewCapChecker(agentCaps, agentMeter,
 			func() int64 { return time.Now().UnixMilli() })
 		if kerr != nil {
-			return nil, fmt.Errorf("heros agent cap checker: %w", kerr)
+			return nil, nil, fmt.Errorf("heros agent cap checker: %w", kerr)
 		}
 
 		// 🔴 TASK 9.1 — readiness resolved by DOING what an inference does, not by reading configuration.
@@ -518,10 +521,63 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 			Meter:      agentMeter,
 		})
 		if aerr != nil {
-			return nil, fmt.Errorf("heros agent source: %w", aerr)
+			return nil, nil, fmt.Errorf("heros agent source: %w", aerr)
 		}
 		h.MountHerosAgent(agentSource)
 		mountedHerosAgent = true
+
+		// ── The OPERATOR half: publish, and the gate that stands between publishing and serving ──────
+		//
+		// 🔴 Until this, `adminlaunch` built the agent surface over an IN-MEMORY version store with a
+		// NIL publisher, and said so in a comment: "a Publish control would fail at the moment somebody
+		// pressed it". That was honest about the wiring and it meant the console could not configure the
+		// agent at all — while `heros_agent_version` (migration 0046) sat here, open, one field away.
+		//
+		// 🔴 A DEPLOYMENT WITHOUT A PUBLISHER STILL BOOTS. The first cut of this returned a hard error
+		// and would have refused to start every deployment with no secrets source — a dev box, a test
+		// harness, any install that has not configured a provider yet — because `NewPublisher` requires
+		// one to resolve a credential reference. That is a console CONTROL failing to build; it is not
+		// the customer analysis path, and taking the platform down for it inverts the priority the rest
+		// of this function follows: an absent capability is registered WITH ITS REASON, never fatal.
+		agentAdmin.Versions = versionStore
+		if secrets == nil {
+			agentAdmin.RehearsalWhy = "this deployment declares no secrets source, so a definition's " +
+				"credential reference cannot be resolved: publishing is refused rather than recording a " +
+				"definition nobody could run"
+		} else if agentPublisher, perr := herosagent.NewPublisher(registryModels{reg}, secrets,
+			versionStore, herosagent.RunnerHosts{},
+			func() int64 { return time.Now().UnixMilli() }); perr != nil {
+			agentAdmin.RehearsalWhy = "the agent publisher could not be built: " + perr.Error()
+		} else {
+			agentAdmin.Publisher = agentPublisher
+		}
+
+		// The gate. A deployment that cannot build one keeps refusing to activate — which is the safe
+		// direction — and the reason is logged rather than discovered by pressing the button.
+		//
+		// ⚠️ The reason is set ONCE. A later branch overwriting an earlier one would report the last
+		// thing that went wrong rather than the first, and the first is the one to fix.
+		//
+		// Skipped entirely when there is no publisher: the reason is already recorded above, a gate
+		// with nothing to activate is not worth building, and it would need the same credential the
+		// publisher could not resolve.
+		if agentAdmin.Publisher != nil {
+			discoveryReg, dregErr := discovery.DefaultRegistry()
+			if dregErr != nil {
+				agentAdmin.RehearsalWhy = "discovery's frontend registry could not be built: " + dregErr.Error()
+			} else if rehearse, rerr := newAgentRehearsal(agentRehearsalConfig{
+				Versions:  versionStore,
+				Prompts:   registryPrompts{reg},
+				Models:    registryModels{reg},
+				Gateway:   providergateway.New(secrets),
+				Discovery: discoveryReg,
+				NowMS:     func() int64 { return time.Now().UnixMilli() },
+			}); rerr != nil {
+				agentAdmin.RehearsalWhy = rerr.Error()
+			} else {
+				agentAdmin.Rehearse = rehearse
+			}
+		}
 		served("p30_heros_agent (agent definition read + customer-placed result ingest)")
 		// 🔴 `coverage × your nodes` (P29 §5). The coverage table and the reported structure are both
 		// already here and correct; nothing had ever multiplied them, which is why /app/coverage rendered
@@ -566,18 +622,18 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 		// removes this block and the routes answer 503, which is a policy answer rather than a fault.
 		bundleStore, err := sourceingest.NewPGBundleStore(pg, blobs)
 		if err != nil {
-			return nil, fmt.Errorf("source bundle store: %w", err)
+			return nil, nil, fmt.Errorf("source bundle store: %w", err)
 		}
 		bundleSource, err := sourceingest.NewBundleSource(bundleStore, filepath.Join(dataDir, "source-scratch"))
 		if err != nil {
-			return nil, fmt.Errorf("source scratch: %w", err)
+			return nil, nil, fmt.Errorf("source scratch: %w", err)
 		}
 		// reg is the SAME registry.Store mounted as the prompt registry above. Deliberately shared: the
 		// classifier must resolve tool bindings against the registry this deployment actually serves,
 		// and a second store pointed at the same tables would be a second answer to one question.
 		runner, err := hostdiscovery.NewRunner(bundleSource, hostdiscovery.RegistrySkills(reg), graphStore)
 		if err != nil {
-			return nil, fmt.Errorf("discovery runner: %w", err)
+			return nil, nil, fmt.Errorf("discovery runner: %w", err)
 		}
 		h.MountSourcePush(bundleStore, newDiscoveryAdapter(runner))
 		served("p1_source_discovery (customer-pushed snapshots; discovery and classification run here)")
@@ -849,7 +905,7 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 	// internet-facing path on every deployment, including air-gapped ones, to answer 503. It is mounted
 	// when billing has a durable ledger to mount it over; today it has none.
 
-	return caps, nil
+	return caps, agentAdmin, nil
 }
 
 // originOf returns scheme://host for a URL, or "" if it is not one. Used to turn the customer console's

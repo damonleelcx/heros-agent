@@ -77,7 +77,7 @@ func TestBillingIsRegisteredEvenWhenUnserved(t *testing.T) {
 // reason recorded for each unserved capability.
 func capabilityReasons(t *testing.T) map[string]string {
 	t.Helper()
-	caps, err := mountCapabilities(api.New(nil, config.Config{}), nil, t.TempDir(), "", nil, nil)
+	caps, _, err := mountCapabilities(api.New(nil, config.Config{}), nil, t.TempDir(), "", nil, nil)
 	if err != nil {
 		t.Fatalf("mountCapabilities: %v", err)
 	}

@@ -78,6 +78,36 @@ and an edit that resolves to no change says so and creates nothing.
 steps, and the surface always names which definition is *actually serving inference* separately from the
 one you are looking at.
 
+### What pressing **activate** actually does
+
+🔴 **It spends.** Activation runs the pinned calibration set against a live model first — **one provider
+call per fixture, nine of them**, on this deployment's own credential, using the definition's *own*
+prompt and model rather than a pair chosen for the test. Then it stores the per-fixture report on the
+version row, and activates only if every fixture cleared both floors.
+
+That is deliberate: the operator who decides to activate is the one who should see the bill for
+measuring it. A definition that already **passed** is not re-measured — two runs of one `config_hash`
+differ by noise rather than signal, and re-running would overwrite a stored report with a noisier one.
+
+Two prerequisites, and both fail loudly rather than quietly:
+
+| prerequisite | what happens without it |
+|---|---|
+| The definition's **model ref is in the P2 registry** | Publish itself refuses, naming what is registered. Register the model first (`/registry#add-model`). |
+| The deployment carries the **calibration fixtures** | No gate is built, one line says so at boot, and every activation is refused for ever — safe, and indistinguishable from a gate that measured and said no unless you read the log. The image ships them at `/usr/share/heros/calibration`; `HEROS_CALIBRATION_ROOT` overrides it. |
+
+Check the boot log for which of the two states this deployment is in:
+
+```
+operator console: the agent activation gate is ARMED — pressing activate runs the pinned
+calibration set against a live model, on this deployment's own provider credential
+```
+
+```
+operator console: 🔴 NO AGENT ACTIVATION GATE — <reason>. A definition can be published and
+can NEVER be activated, because nothing can move its rehearsal state off `pending`
+```
+
 ### Reading the report
 
 The report is per-fixture: a precision and a recall for each pinned fixture repository, with the delta
@@ -92,9 +122,12 @@ A failing gate names the failing fixture, its language and its numbers. Fix the 
 that this one does not ship; there is no override.
 
 ⚠️ **The floors shipped (P ≥ 0.90, R ≥ 0.70) are a design starting point, not a measurement.** No
-definition has been activated, so no model has been measured. See
-[the ablation protocol](../heros/ablation-protocol.md) §2 — and replace them with the first real
-numbers rather than treating them as established.
+definition has been activated, so no model has been measured *in a deployment*. Two live runs of the
+set exist and are recorded in [the ablation protocol](../heros/ablation-protocol.md) §2.1: gpt-4o
+scored 1.00/1.00 on six fixtures and 0.00 precision on two near-misses, by proposing one edge where the
+answer is none. Replace the floors with numbers a measurement supports rather than treating these as
+established — and note that one fixture swung a full 1.00 between two runs of one `config_hash`, so a
+floor set from a single run is a floor set from a coin flip.
 
 ---
 

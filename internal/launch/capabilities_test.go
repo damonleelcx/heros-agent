@@ -56,7 +56,7 @@ var capabilityRoutes = []struct {
 func mountedServer(t *testing.T) *api.Server {
 	t.Helper()
 	srv := api.New(nil, config.Config{})
-	if _, err := mountCapabilities(srv, nil, t.TempDir(), "", nil, nil); err != nil {
+	if _, _, err := mountCapabilities(srv, nil, t.TempDir(), "", nil, nil); err != nil {
 		t.Fatalf("mountCapabilities: %v", err)
 	}
 	return srv

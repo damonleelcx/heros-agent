@@ -74,7 +74,7 @@ func TestBillingMountsWithADatabaseAndACatalog(t *testing.T) {
 
 	t.Setenv("PLAN_CATALOG_PATH", writeCatalog(t))
 
-	caps, err := mountCapabilities(api.New(nil, config.Config{}), db, t.TempDir(), "", nil, nil)
+	caps, _, err := mountCapabilities(api.New(nil, config.Config{}), db, t.TempDir(), "", nil, nil)
 	if err != nil {
 		t.Fatalf("mountCapabilities with a database and a catalog: %v\n\n"+
 			"The billing stack wires six collaborators; any one refusing its constructor turns a "+
@@ -111,7 +111,7 @@ func TestBillingStaysUnservedWithoutACatalog(t *testing.T) {
 
 	t.Setenv("PLAN_CATALOG_PATH", "")
 
-	caps, err := mountCapabilities(api.New(nil, config.Config{}), db, t.TempDir(), "", nil, nil)
+	caps, _, err := mountCapabilities(api.New(nil, config.Config{}), db, t.TempDir(), "", nil, nil)
 	if err != nil {
 		t.Fatalf("mountCapabilities: %v", err)
 	}
@@ -149,7 +149,7 @@ func TestCollectionMountsWhenAModeIsDeclared(t *testing.T) {
 	t.Setenv("PLAN_CATALOG_PATH", writeCatalog(t))
 	t.Setenv(BillingModeEnv, "test")
 
-	caps, err := mountCapabilities(api.New(nil, config.Config{}), db, t.TempDir(), "", providergateway.EnvSecrets{}, nil)
+	caps, _, err := mountCapabilities(api.New(nil, config.Config{}), db, t.TempDir(), "", providergateway.EnvSecrets{}, nil)
 	if err != nil {
 		t.Fatalf("mountCapabilities with a declared billing mode: %v", err)
 	}
@@ -198,7 +198,7 @@ func TestThePublishedCatalogIsActuallyLoaded(t *testing.T) {
 
 	catalog := writeCatalog(t)
 	t.Setenv("PLAN_CATALOG_PATH", catalog)
-	if _, err := mountCapabilities(api.New(nil, config.Config{}), db, t.TempDir(), "", nil, nil); err != nil {
+	if _, _, err := mountCapabilities(api.New(nil, config.Config{}), db, t.TempDir(), "", nil, nil); err != nil {
 		t.Fatalf("mountCapabilities: %v", err)
 	}
 

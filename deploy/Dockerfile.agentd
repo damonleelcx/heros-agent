@@ -68,6 +68,25 @@ COPY --from=build /out/legalretention /app/legalretention
 # the named volume is root-owned and the nonroot process cannot create its ledger.
 COPY --from=build --chown=nonroot:nonroot /out/datadir /var/lib/heros
 
+# ── The calibration fixtures, which are the ACTIVATION GATE's input ──────────────────────────────
+#
+# 🔴 WITHOUT THESE THE OPERATOR CONSOLE CANNOT ACTIVATE AN AGENT DEFINITION, and the failure is a
+# refusal rather than a crash: `calibrationRoot` looks for them, does not find them, no gate is built,
+# and `Publisher.Activate` keeps refusing every `pending` version. Safe, and completely silent unless
+# somebody reads the boot log — which is why the absence is logged there in words.
+#
+# They are REAL repositories, not test data in the sense of "only tests need it": D7's gate measures a
+# candidate definition against nine trees whose true graphs are known, one of them MEASURED by the Go
+# frontend itself. The relative paths under this root are the paths `calibrationSet` declares, so one
+# root resolves all nine — see internal/launch/herosagentrehearsal.go.
+#
+# ⚠️ Two trees, from two packages, and both are needed: `herosagent/testdata` carries the purpose-built
+# fixtures (the measured Go chain and the three near-misses) and `discovery/testdata` carries the
+# per-language ones the set reuses. A copy of only the first loads five fixtures and fails the set,
+# which is the anti-vacuity rule doing its job at deploy time.
+COPY --from=build /src/internal/herosagent/testdata /usr/share/heros/calibration/internal/herosagent/testdata
+COPY --from=build /src/internal/discovery/testdata /usr/share/heros/calibration/internal/discovery/testdata
+
 # The data directory is a MOUNT POINT for a named volume, and its contents are DURABLE, not scratch. The
 # SQLite ledger here holds tenant credentials, the registries, memory, the tool index and the inbox; the
 # platform database holds lineage, specs, transforms, runs, eval results and consent. Both are user

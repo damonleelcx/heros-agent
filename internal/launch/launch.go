@@ -144,7 +144,7 @@ func StartAgentd(ctx context.Context, cfg config.Config) (*Server, error) {
 
 	// Every capability surface the platform ships is registered here — sourced where a durable store
 	// exists, nil where none does so the answer is 503 not-mounted rather than 404 (Decision 10).
-	caps, err := mountCapabilities(handler, platformDB, cfg.DataDir, strings.TrimSpace(os.Getenv("CONSOLE_HEALTH_URL")), secrets, accounts)
+	caps, agentAdmin, err := mountCapabilities(handler, platformDB, cfg.DataDir, strings.TrimSpace(os.Getenv("CONSOLE_HEALTH_URL")), secrets, accounts)
 	if err != nil {
 		if platformDB != nil {
 			_ = platformDB.Close()
@@ -249,7 +249,7 @@ func StartAgentd(ctx context.Context, cfg config.Config) (*Server, error) {
 	// deployment is misconfigured".
 	var adminServer *http.Server
 	if adminlaunch.Federated() {
-		assembly, aErr := adminlaunch.Build(ctx, secrets, platformDB, reporter)
+		assembly, aErr := adminlaunch.Build(ctx, secrets, platformDB, reporter, agentAdmin)
 		if aErr != nil {
 			if platformDB != nil {
 				_ = platformDB.Close()

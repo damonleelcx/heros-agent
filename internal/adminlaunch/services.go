@@ -67,6 +67,27 @@ import (
 // `mountCapabilities`: every one is a stateless handle over shared tables, so a second instance reads
 // exactly the same rows. What is deliberately NOT duplicated is anything holding state in the process
 // — see `deltas` and `authored` below, which are honestly empty on both sides.
+// AgentAdmin is the P30 wiring the OPERATOR console needs to do more than read: the durable version
+// store behind its publish control, the publisher itself, and the rehearsal gate its activate control
+// must pass.
+//
+// 🔴 It is carried out of here rather than rebuilt in `adminlaunch` because every piece already exists
+// in this function — the registry, the provider gateway, the version store the platform source reads.
+// A second construction would be a second set of stores answering the same questions, and the first
+// time they disagreed the console would render one and the runtime would serve the other.
+//
+// Every field may be nil: a deployment with no platform database has no version store, and one with
+// no calibration fixtures has no gate. Both cases leave the console refusing rather than pretending —
+// see `newAgentRehearsal`.
+type AgentAdmin struct {
+	Versions  *herosagent.PGVersionStore
+	Publisher *herosagent.Publisher
+	Rehearse  adminops.RehearseFunc
+	// RehearsalWhy is set when a gate could not be built, so the boot log names what to fix rather
+	// than leaving an operator to discover it by pressing activate.
+	RehearsalWhy string
+}
+
 type PlatformSources struct {
 	Accounts   account.Store
 	Plans      *plancfg.Resolver
@@ -294,7 +315,8 @@ func originOf(healthURL string) string {
 
 // mountServices fills in every operator service that has a real source, and logs the ones that do not.
 func mountServices(exec *adminops.Executor, src *PlatformSources, sessions *adminidentity.SessionStore,
-	identity adminidentity.ProviderInfo, readiness adminops.ReadinessSource, deps *serviceSet) error {
+	identity adminidentity.ProviderInfo, readiness adminops.ReadinessSource, agentAdmin *AgentAdmin,
+	deps *serviceSet) error {
 
 	// ── Two that need nothing but the command path ──
 	//
@@ -407,10 +429,47 @@ func mountServices(exec *adminops.Executor, src *PlatformSources, sessions *admi
 	// THIS deployment: nothing here opens `heros_agent_version`, so a Publish control would fail at the
 	// moment somebody pressed it. Stated rather than quietly wired to a store that would lose its rows
 	// on restart.
-	agent, err := adminops.NewAgentService(exec, herosagent.NewMemVersionStore(),
-		nil, src.AgentSpend, src.AgentInferences, nil, herosagent.RunnerHosts{})
+	//
+	// 🔴 THE VERSION STORE AND THE PUBLISHER ARE NOW THE DURABLE ONES when the capability graph could
+	// build them (P30 §6.4). What stood here was an in-memory store and a nil publisher, and the
+	// comment above said what that meant: "a Publish control would fail at the moment somebody pressed
+	// it". `heros_agent_version` (migration 0046) was open two packages away the whole time, read by
+	// the platform half — so the console rendered an empty list of definitions on a deployment that
+	// could have had them, and the operator surface for configuring the agent could not configure it.
+	//
+	// A deployment with no platform database still gets the in-memory pair, and the console still
+	// refuses at publish rather than losing rows silently.
+	agentVersions := adminops.AgentVersions(herosagent.NewMemVersionStore())
+	var agentPublisher adminops.AgentPublisher
+	var rehearse adminops.RehearseFunc
+	if agentAdmin != nil {
+		if agentAdmin.Versions != nil {
+			agentVersions = agentAdmin.Versions
+		}
+		if agentAdmin.Publisher != nil {
+			agentPublisher = agentAdmin.Publisher
+		}
+		rehearse = agentAdmin.Rehearse
+	}
+	agent, err := adminops.NewAgentService(exec, agentVersions,
+		agentPublisher, src.AgentSpend, src.AgentInferences, nil, herosagent.RunnerHosts{})
 	if err != nil {
 		return fmt.Errorf("agent service: %w", err)
+	}
+	// 🔴 The activation gate. Without it `Publisher.Activate` refuses every `pending` version for ever
+	// — safe, and indistinguishable from a gate that measured and said no. The boot log says which of
+	// the two this deployment is.
+	if rehearse != nil {
+		agent = agent.WithRehearsal(rehearse)
+		log.Printf("operator console: the agent activation gate is ARMED — pressing activate runs the " +
+			"pinned calibration set against a live model, on this deployment's own provider credential")
+	} else {
+		why := "this deployment carries no rehearsal gate"
+		if agentAdmin != nil && agentAdmin.RehearsalWhy != "" {
+			why = agentAdmin.RehearsalWhy
+		}
+		log.Printf("operator console: 🔴 NO AGENT ACTIVATION GATE — %s. A definition can be published "+
+			"and can NEVER be activated, because nothing can move its rehearsal state off `pending`", why)
 	}
 	deps.Agent = agent
 
