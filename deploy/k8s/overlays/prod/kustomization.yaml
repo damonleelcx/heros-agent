@@ -313,6 +313,11 @@ patches:
                   # form by upgrading, which is why the base says 0 and this says 1 rather than the other
                   # way round.
                   - { name: HEROS_SELF_SERVE_SIGNUP, value: "1" }
+                  # Every NEW organization is created platform-placed. This deployment's orgs are the
+                  # operator's own, and requiring a manual click per org is a step that gets forgotten
+                  # — and the forgetting looks exactly like a broken pipeline. Existing organizations
+                  # are untouched by this; it applies at creation only.
+                  - { name: HEROS_SIGNUP_PLACEMENT, value: "platform" }
                   # The origin the links in confirmation and reset mail point at. No default anywhere: a
                   # guessed origin produces a link that 404s in somebody's inbox.
                   - { name: HEROS_CONSOLE_URL, value: "https://heros-agent.space" }

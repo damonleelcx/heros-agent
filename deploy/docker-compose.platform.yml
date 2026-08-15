@@ -112,6 +112,8 @@ services:
       # configured: the three deployment shapes want three different answers, and an air-gapped install
       # must not grow a registration form by upgrading.
       HEROS_SELF_SERVE_SIGNUP: ${HEROS_SELF_SERVE_SIGNUP:-0}
+      # Unset by default — see the note in deploy/k8s/base/agentd.yaml. Empty keeps the Q2 default.
+      HEROS_SIGNUP_PLACEMENT: ${HEROS_SIGNUP_PLACEMENT:-}
       # The origin the links in outgoing mail point at. NO default — a guessed origin produces a link
       # that 404s in somebody's inbox, which reads as a broken product rather than an unconfigured one.
       HEROS_CONSOLE_URL: ${HEROS_CONSOLE_URL:-}

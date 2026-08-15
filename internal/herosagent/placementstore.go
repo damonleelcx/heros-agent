@@ -175,3 +175,49 @@ func (s *MemPlacementStore) List(_ context.Context) ([]TenantPlacement, error) {
 	}
 	return out, nil
 }
+
+// PlacementExecer is the transaction handle SetPlacementWithin writes through. Structural, so
+// `tenancy.Execer` and `*sql.Tx` both satisfy it without this package importing either.
+type PlacementExecer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+// SetPlacementWithin writes a placement inside a transaction the CALLER owns.
+//
+// # Why this exists beside Set
+//
+// Sign-up creates the tenant, the user, the membership and the account in ONE transaction, so that a
+// half-created organization is not a state the system can be left in. A placement seeded after that
+// transaction commits would be a fifth write outside it — and the window between them is exactly long
+// enough for a crash to leave an organization whose placement says nobody ever decided, on a
+// deployment whose policy is that every new organization is decided at creation.
+//
+// 🔴 It writes an EXPLICIT row rather than changing what an absent row means. The default stays
+// `disabled` (Q2) and `TenantPlacement.Explicit` keeps meaning "somebody decided": a seeded org has a
+// row, a reason and a set_by, and can be individually disabled afterwards. Flipping the read default
+// instead would enable every tenant at once, leave no record of the choice for any of them, and remove
+// the per-tenant off switch — three losses for the same effect.
+func SetPlacementWithin(ctx context.Context, ex PlacementExecer, tp TenantPlacement) error {
+	if ex == nil {
+		return fmt.Errorf("herosagent: SetPlacementWithin needs a transaction")
+	}
+	if _, err := ParsePlacement(string(tp.Placement)); err != nil {
+		return err
+	}
+	if strings.TrimSpace(tp.Reason) == "" {
+		return fmt.Errorf("%w: seeding a placement requires a reason — `%s` is what makes this platform "+
+			"read that tenant's source under a platform-held credential", ErrInvalidDefinition, PlacementPlatform)
+	}
+	_, err := ex.ExecContext(ctx,
+		`INSERT INTO heros_tenant_placement (tenant_id, placement, reason, set_by, updated_at_ms)
+		 VALUES ($1,$2,$3,$4,$5)
+		 -- DO NOTHING, never DO UPDATE. A seed is the value for an organization nobody has decided
+		 -- about yet; if a row already exists then somebody DID decide, and a creation-time default
+		 -- must never overwrite an operator's decision.
+		 ON CONFLICT (tenant_id) DO NOTHING`,
+		tp.TenantID, string(tp.Placement), tp.Reason, tp.SetBy, tp.UpdatedAtMS)
+	if err != nil {
+		return fmt.Errorf("herosagent: seeding the placement for %s: %w", tp.TenantID, err)
+	}
+	return nil
+}

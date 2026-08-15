@@ -1,6 +1,7 @@
 package launch
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"github.com/heros-foreal/agentd/internal/account"
 	"github.com/heros-foreal/agentd/internal/api"
 	"github.com/heros-foreal/agentd/internal/config"
+	"github.com/heros-foreal/agentd/internal/herosagent"
 	"github.com/heros-foreal/agentd/internal/mailer"
 	"github.com/heros-foreal/agentd/internal/metering"
 	"github.com/heros-foreal/agentd/internal/plancfg"
@@ -44,6 +46,25 @@ import (
 // deployment shapes this product ships in want three different answers, so no single inference is right,
 // and an air-gapped install must not grow a registration form by upgrading.
 const SelfServeSignupEnv = "HEROS_SELF_SERVE_SIGNUP"
+
+// SignupPlacementEnv names the analysis placement a NEW organization is created with.
+//
+// # Why this is declared and not inferred
+//
+// `disabled` is every tenant's default (Q2), chosen so that enabling analysis is a decision somebody
+// makes. That is right for a deployment serving customers and wrong for one whose organizations are all
+// its operator's own — there, every new org needing a manual click is a step that will be forgotten,
+// and the forgetting looks exactly like a broken pipeline.
+//
+// 🔴 Unset means UNSET, not `platform`. A deployment that says nothing keeps the Q2 default, because
+// the failure modes are not symmetrical: a missing analysis is a missing enrichment, while analysing an
+// organization nobody meant to enrol means reading somebody's source under this platform's credential
+// and spending this platform's money on it. The quiet option has to be the safe one.
+//
+// 🚫 It seeds an EXPLICIT row per organization; it does NOT change what an absent row means. So every
+// enrolled org carries a reason and a set_by, can be individually disabled afterwards, and an operator
+// reading the placement list can still tell a decision from a default.
+const SignupPlacementEnv = "HEROS_SIGNUP_PLACEMENT"
 
 // SelfServeEnabled reads the declared posture. Only an explicit affirmative turns it on.
 func SelfServeEnabled() bool {
@@ -211,6 +232,30 @@ func buildAccountSystem(cfg config.Config, platformDB *sql.DB, now time.Time) (*
 		svc, serr := signup.New(creator, accounts, plans, surface.now)
 		if serr != nil {
 			return nil, fmt.Errorf("sign-up: %w", serr)
+		}
+		// Creation-time placement, when this deployment declares one.
+		//
+		// 🔴 The value is PARSED, and an unrecognised one is a boot failure rather than a fallback to
+		// the default. A deployment that meant `platform` and typed `plaftorm` would otherwise come up
+		// looking healthy and enrol nobody — the silent half of the failure this whole variable exists
+		// to prevent.
+		if raw := strings.TrimSpace(os.Getenv(SignupPlacementEnv)); raw != "" {
+			place, perr := herosagent.ParsePlacement(raw)
+			if perr != nil {
+				return nil, fmt.Errorf("%s=%q: %w", SignupPlacementEnv, raw, perr)
+			}
+			svc = svc.WithPlacementSeed(func(ctx context.Context, ex tenancy.Execer, tenantID string, at time.Time) error {
+				return herosagent.SetPlacementWithin(ctx, ex, herosagent.TenantPlacement{
+					TenantID: tenantID, Placement: place,
+					Reason: "created under this deployment's " + SignupPlacementEnv + " policy",
+					// Names the MECHANISM, never an operator — nobody clicked anything, and a set_by
+					// that read like a person would be the audit trail lying about who decided.
+					SetBy:       "signup-policy:" + SignupPlacementEnv,
+					UpdatedAtMS: at.UnixMilli(),
+				})
+			})
+			log.Printf("sign-up: every NEW organization is created with analysis placement %q (%s). "+
+				"Existing organizations are untouched", place, SignupPlacementEnv)
 		}
 		surface.signUp = svc
 	}
