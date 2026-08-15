@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 import { ADMIN_SESSION_COOKIE, AdminApiError, adminFetch, exchangeAssertion, revokeSession } from "./adminApi";
 import { readSessionToken, SESSION_COOKIE_OPTIONS } from "./session";
 import { DENSITY_COOKIE, DENSITY_COOKIE_OPTIONS, THEME_COOKIE, THEME_COOKIE_OPTIONS, isTheme } from "./prefs";
+import { count } from "./format";
 import type { PublishPreview, Receipt } from "./types";
 
 /**
@@ -661,6 +662,193 @@ export async function activateAgentDefinition(_p: ActionResult | null, fd: FormD
           `Activated. ${configHash} met the floor on every calibration fixture and is now serving ` +
           `inference. Its per-fixture report is on the Rehearsal tab.`,
       };
+    } catch (error) {
+      return toResult(error, command);
+    }
+  });
+}
+
+// ── The analysis agent's placement and caps ─────────────────────────────────
+//
+// Neither of the two below uses `post`, and the reason is the same for both: `post` returns the
+// platform's `Receipt`, and these two routes answer with the value they set. Handing that to the
+// receipt renderer would not merely lose the audit link — it reads `entry_hash` off the object, so a
+// SUCCESSFUL command would throw while rendering. The outcome is assembled here instead, which is what
+// `activateAgentDefinition` does and for the same reason.
+//
+// ⚠️ So the receipt's audit-sequence link is absent on these two, and the outcome says what changed
+// instead. Both acts ARE audited — `SetPlacement` and `SetCap` each append before returning — but the
+// sequence number is not on the wire to link to. Recorded here rather than papered over with a link
+// that would have to guess.
+
+/**
+ * setAgentPlacement decides where one tenant's analysis runs, and whether it runs at all.
+ *
+ * # What `platform` means, and why this is not a toggle
+ *
+ * It makes THIS platform read that tenant's source under a platform-held credential. `customer` means
+ * the tenant runs it on their own machine under their own key and submits the result. `disabled` means
+ * nothing runs anywhere. Three states, one of which is the default — which is why the control names all
+ * three and offers no "enable" shortcut: "on" would have to pick one of two very different answers.
+ *
+ * # 🔴 The placement is NOT validated here
+ *
+ * The value goes to the server as typed and `herosagent.ParsePlacement` refuses anything outside the
+ * set. Re-checking it here would be a copy of a closed set in a second language — the exact duplication
+ * the option list is fetched from the platform to avoid.
+ */
+export async function setAgentPlacement(_p: ActionResult | null, fd: FormData): Promise<ActionResult> {
+  const tenantId = String(fd.get("tenant_id") ?? "").trim();
+  const placement = String(fd.get("placement") ?? "").trim();
+  const reason = String(fd.get("reason") ?? "");
+  const command: Command = {
+    action: "agent.placement",
+    target: `${tenantId || "(no tenant)"} → ${placement || "(none)"}`,
+    reason,
+    undo:
+      "Set the placement again — it is a current value rather than an event, and moving a tenant back " +
+      "off `disabled` also clears the stale mark that disabling put on its stored inferences",
+  };
+  if (!tenantId || !placement) {
+    return {
+      ok: false,
+      kind: "request",
+      message:
+        "A placement needs both a tenant and a value, and nothing was sent. A blank tenant id would " +
+        "not name the fleet here — it would write a placement against no tenant at all.",
+      command,
+    };
+  }
+  return withSession(async (token) => {
+    const jar = await cookies();
+    const impersonationId = jar.get("heros_admin_impersonation")?.value;
+    try {
+      await adminFetch<unknown>("/admin/api/agent/placement", {
+        method: "POST",
+        body: { tenant_id: tenantId, placement, reason },
+        sessionToken: token,
+        impersonationId,
+      });
+      revalidatePath("/agent/spend");
+      return { ok: true, command, message: placementOutcome(tenantId, placement) };
+    } catch (error) {
+      return toResult(error, command);
+    }
+  });
+}
+
+/**
+ * placementOutcome says what the new placement MEANS, not that it was saved.
+ *
+ * 🔴 The three sentences are different on purpose, the same way `Host.MayRun`'s refusals are. "Placement
+ * set to platform" tells an operator nothing they did not type; "this platform now reads that
+ * tenant's source under a platform-held credential" is the fact they are accountable for. The default
+ * branch exists because the option list comes from the PLATFORM: a placement added there arrives on
+ * this console before this function knows a sentence for it, and the honest answer then is the value
+ * itself rather than a sentence borrowed from a neighbouring state.
+ */
+function placementOutcome(tenantId: string, placement: string): string {
+  switch (placement) {
+    case "platform":
+      return (
+        `${tenantId} is now placed \`platform\`: this platform reads that tenant's source and analyses ` +
+        `it under a platform-held credential. The spend lands on this deployment's own bill.`
+      );
+    case "customer":
+      return (
+        `${tenantId} is now placed \`customer\`: it analyses on its own machine under its own ` +
+        `credential, and the result arrives through the structure ingest. This platform runs nothing ` +
+        `for it and spends nothing on it.`
+      );
+    case "disabled":
+      return (
+        `${tenantId} is now placed \`disabled\`: no inference runs for it on either host. Its stored ` +
+        `inferences are marked stale rather than deleted, so nothing keeps rendering agent-authored ` +
+        `facts as current.`
+      );
+    default:
+      return `${tenantId} is now placed \`${placement}\`.`;
+  }
+}
+
+/**
+ * setAgentCap edits a token ceiling. It is checked BEFORE the provider call, so it bounds a cost
+ * rather than reporting one.
+ *
+ * # Two forms, one action, and the scope is decided on the SERVER
+ *
+ * Exactly the kill switch's shape: the fleet form carries `scope="fleet"` in a hidden field, the
+ * per-tenant form carries a tenant id, and this reads which one it got.
+ *
+ * 🔴 That indirection is the point. The API spells "the fleet" as an EMPTY tenant id, so the obvious
+ * implementation — send whatever the field holds — turns a per-tenant form submitted with a blank
+ * tenant into a fleet-wide ceiling change, reported as success. The blank is refused here instead.
+ *
+ * # 🔴 Zero REMOVES the ceiling, and an empty field is not zero
+ *
+ * The store deletes the cap row at zero, so `0` means unbounded. `Number("")` is also `0` — which
+ * would make an empty field, the commonest slip on any form, silently remove the bound on fleet-wide
+ * analysis spend and then say "done". The field is parsed strictly and anything that is not a whole
+ * number is refused with nothing sent.
+ */
+export async function setAgentCap(_p: ActionResult | null, fd: FormData): Promise<ActionResult> {
+  const fleet = String(fd.get("scope") ?? "").trim() === "fleet";
+  const tenantId = String(fd.get("tenant_id") ?? "").trim();
+  const raw = String(fd.get("tokens") ?? "").trim();
+  const reason = String(fd.get("reason") ?? "");
+  const command: Command = {
+    action: "agent.cap",
+    target: `${fleet ? "fleet" : tenantId || "(no tenant)"} · ${raw || "(no value)"} tokens`,
+    reason,
+    // No trailing full stop: the receipt renders `To reverse: {undo}.` and adds its own, which showed
+    // up on the rendered page as "Zero removes it entirely..".
+    undo: "Set the cap again — it is a current value rather than an event, and zero removes it entirely",
+  };
+  if (!fleet && !tenantId) {
+    return {
+      ok: false,
+      kind: "request",
+      message:
+        "No tenant was named, and nothing was sent. An empty tenant id is how the platform spells " +
+        "`the fleet`, so submitting this would have changed the FLEET-WIDE ceiling from the per-tenant " +
+        "control. Name a tenant, or use the fleet control.",
+      command,
+    };
+  }
+  if (!/^\d+$/.test(raw) || !Number.isSafeInteger(Number(raw))) {
+    return {
+      ok: false,
+      kind: "request",
+      message:
+        "A cap is a whole number of tokens, and nothing was sent. `0` is a valid entry and REMOVES the " +
+        "ceiling — an empty field is not the same thing, which is why it is refused here rather than " +
+        "read as a zero.",
+      command,
+    };
+  }
+  const tokens = Number(raw);
+  return withSession(async (token) => {
+    const jar = await cookies();
+    const impersonationId = jar.get("heros_admin_impersonation")?.value;
+    try {
+      await adminFetch<unknown>("/admin/api/agent/cap", {
+        method: "POST",
+        // 🔴 The empty string is written HERE, from the scope this action resolved — never forwarded
+        // from a field an operator could leave blank.
+        body: { tenant_id: fleet ? "" : tenantId, tokens, reason },
+        sessionToken: token,
+        impersonationId,
+      });
+      revalidatePath("/agent/spend");
+      const what = fleet ? "Fleet-wide analysis" : `Analysis for ${tenantId}`;
+      const message =
+        tokens === 0
+          ? `${what} now has NO ceiling. A cap is what stops analysis before the provider call, so ` +
+            `nothing bounds this spend.` +
+            (fleet ? "" : " The fleet cap, if one is set, still applies.")
+          : `${what} stops before the provider call once ${count(tokens)} tokens are spent, and emits ` +
+            `an event.`;
+      return { ok: true, command, message };
     } catch (error) {
       return toResult(error, command);
     }

@@ -27,12 +27,12 @@ package main
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/heros-foreal/agentd/internal/account"
@@ -336,7 +336,7 @@ func wire(repoDir string) (api.AdminDeps, error) {
 	}); err != nil {
 		return api.AdminDeps{}, err
 	}
-	agentSvc, err := adminops.NewAgentService(exec, agentVersions, nil, demoAgentSpend{}, nil, nil,
+	agentSvc, err := adminops.NewAgentService(exec, agentVersions, nil, newDemoAgentSpend(), nil, nil,
 		// P30's runner supplies NO host services, so `react-loop`, `plan-execute` and `critic-loop`
 		// render unavailable WITH what each would need — which is the half of D11 worth seeing.
 		herosagent.RunnerHosts{})
@@ -653,10 +653,29 @@ func (demoReadiness) Integrations() []adminops.IntegrationRow {
 // surface exists to keep distinguishable — `unpriced` must never render as `0`, and a tenant nobody has
 // considered must never look like one somebody switched off — and a demo showing only priced, explicitly
 // placed tenants would show neither.
-type demoAgentSpend struct{}
+// It HOLDS the edits it is given, in memory, for the life of the process.
+//
+// 🔴 The three setters used to return "the demo does not persist caps", which was true and harmless
+// only for as long as nothing could call them: the console had no cap or placement control, so the
+// write path of this surface was undemonstrable — and the demo binary is where this repository shows
+// the console working. Now that the controls exist, a setter that always fails would mean the only way
+// to see a placement change is production.
+//
+// It is in-memory ON PURPOSE and does not pretend otherwise: a restart returns the three tenants
+// below, which is the demo's fixture and the state every run should start from.
+type demoAgentSpend struct {
+	mu         sync.Mutex
+	fleetCap   int64
+	caps       map[string]int64
+	placements map[string]string
+}
 
-func (demoAgentSpend) Spend(context.Context) ([]adminops.AgentSpendRow, error) {
-	return []adminops.AgentSpendRow{
+func newDemoAgentSpend() *demoAgentSpend {
+	return &demoAgentSpend{caps: map[string]int64{}, placements: map[string]string{}}
+}
+
+func (d *demoAgentSpend) Spend(context.Context) ([]adminops.AgentSpendRow, error) {
+	rows := []adminops.AgentSpendRow{
 		{
 			TenantID: "acme", Inferences: 12, TokensIn: 184_320, TokensOut: 9_140,
 			EstimatedCost: 4.87, Priced: true,
@@ -674,16 +693,58 @@ func (demoAgentSpend) Spend(context.Context) ([]adminops.AgentSpendRow, error) {
 			// completely different fact.
 			TenantID: "initech", Placement: "disabled", PlacementSource: adminops.PlacementDefaulted,
 		},
-	}, nil
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for i := range rows {
+		if p, ok := d.placements[rows[i].TenantID]; ok {
+			rows[i].Placement = p
+			// 🔴 And the SOURCE moves with it. An operator setting `initech` to `disabled` — the value it
+			// already had — has turned "nobody has looked at this" into "somebody decided", which is the
+			// entire distinction this column exists for and the one a demo must not flatten.
+			rows[i].PlacementSource = adminops.PlacementExplicit
+		}
+		if c, ok := d.caps[rows[i].TenantID]; ok {
+			rows[i].Cap = c
+		}
+	}
+	return rows, nil
 }
 
-func (demoAgentSpend) FleetCap(context.Context) (int64, error) { return 0, nil }
-func (demoAgentSpend) SetFleetCap(context.Context, int64) error {
-	return errors.New("the demo does not persist caps")
+func (d *demoAgentSpend) FleetCap(context.Context) (int64, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.fleetCap, nil
 }
-func (demoAgentSpend) SetTenantCap(context.Context, string, int64) error {
-	return errors.New("the demo does not persist caps")
+
+func (d *demoAgentSpend) SetFleetCap(_ context.Context, tokens int64) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.fleetCap = tokens
+	return nil
 }
-func (demoAgentSpend) SetPlacement(context.Context, string, string) error {
-	return errors.New("the demo does not persist placements")
+
+func (d *demoAgentSpend) SetTenantCap(_ context.Context, tenantID string, tokens int64) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	// Zero REMOVES the ceiling, matching the real store, which deletes the row. Recording a literal
+	// zero instead would render as "cap: 0" — a ceiling of nothing rather than the absence of one.
+	if tokens == 0 {
+		delete(d.caps, tenantID)
+		return nil
+	}
+	d.caps[tenantID] = tokens
+	return nil
+}
+
+func (d *demoAgentSpend) SetPlacement(_ context.Context, tenantID, placement string) error {
+	// Parsed by the package that owns the vocabulary, exactly as the real store does — so the demo
+	// refuses an invalid placement for the same reason and with the same sentence.
+	if _, err := herosagent.ParsePlacement(placement); err != nil {
+		return err
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.placements[tenantID] = placement
+	return nil
 }

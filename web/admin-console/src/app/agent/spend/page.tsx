@@ -3,7 +3,9 @@ import { adminFetch, AdminApiError } from "@/lib/adminApi";
 import { OperatorShell } from "@/components/shell";
 import { DegradedState, DeniedState, EmptyState, NotMountedState, Pill } from "@/components/states";
 import { DataTable, Num, PageFrame, Section } from "@/components/primitives";
-import type { AgentSpendView, AgentSpendRow } from "@/lib/types";
+import { ActionForm } from "@/components/actionForm";
+import { setAgentCap, setAgentPlacement } from "@/lib/actions";
+import type { AgentSpendView, AgentSpendRow, AdminIdentity } from "@/lib/types";
 
 /**
  * The analysis agent's spend, its caps, and every tenant's placement (P30 tasks 6.5–6.7).
@@ -99,11 +101,70 @@ export default async function AgentSpendPage() {
                 )}
               </p>
               {view.can_admin ? (
-                <p>
-                  Editing a cap or a placement takes a <strong>reason</strong> and is recorded in the
-                  audit chain. Setting a placement to <code>platform</code> makes this platform read
-                  that tenant&rsquo;s source under a platform-held credential.
-                </p>
+                <>
+                  <p>
+                    Editing a cap or a placement takes a <strong>reason</strong> and is recorded in the
+                    audit chain. Setting a placement to <code>platform</code> makes this platform read
+                    that tenant&rsquo;s source under a platform-held credential.
+                  </p>
+                  <p>
+                    A cap of <strong>0 removes the ceiling</strong> rather than setting one of zero. It
+                    is the only way to remove a cap, so it is offered — but a blank field is refused
+                    rather than read as a zero, because &ldquo;I left it empty&rdquo; and &ldquo;make
+                    this unbounded&rdquo; must not be the same submission.
+                  </p>
+                  {/* 🔴 The fleet control and the per-tenant control are ADJACENT and deliberately
+                      unequal: the fleet one is the console's heaviest treatment, the per-tenant one is
+                      the amber tier. Same argument as the kill switch — two spend ceilings that look
+                      alike are two ceilings an operator can confuse under pressure, and only one of
+                      them is fleet-wide. */}
+                  <ActionForm
+                    title="Set the FLEET-WIDE cap"
+                    hint="The ceiling on analysis spend across every tenant. Checked before the provider call, so it bounds a cost rather than reporting one."
+                    submitLabel="Set the fleet cap"
+                    global
+                    actionName="agent.cap"
+                    targetLabel="fleet"
+                    action={setAgentCap}
+                  >
+                    {/* The scope is a hidden field the ACTION reads, never a variable in a closure:
+                        the platform spells "the fleet" as an empty tenant id, and this is what keeps a
+                        blank tenant on the control below from meaning fleet-wide. */}
+                    <input type="hidden" name="scope" value="fleet" />
+                    <label htmlFor="fleet-cap-tokens">Ceiling in tokens (0 removes it)</label>
+                    <input
+                      id="fleet-cap-tokens"
+                      name="tokens"
+                      type="number"
+                      min={0}
+                      step={1}
+                      autoComplete="off"
+                      required
+                    />
+                  </ActionForm>
+                  <ActionForm
+                    title="Set one tenant's cap"
+                    hint="A ceiling for a single tenant. The fleet cap still applies to it — the tighter of the two is what stops an analysis."
+                    submitLabel="Set this tenant's cap"
+                    danger
+                    actionName="agent.cap"
+                    action={setAgentCap}
+                  >
+                    <label htmlFor="tenant-cap-id">Tenant id</label>
+                    <p className="hint">As it appears in the table below.</p>
+                    <input id="tenant-cap-id" name="tenant_id" type="text" autoComplete="off" required />
+                    <label htmlFor="tenant-cap-tokens">Ceiling in tokens (0 removes it)</label>
+                    <input
+                      id="tenant-cap-tokens"
+                      name="tokens"
+                      type="number"
+                      min={0}
+                      step={1}
+                      autoComplete="off"
+                      required
+                    />
+                  </ActionForm>
+                </>
               ) : (
                 <p>
                   You hold <code>agent.read</code> and not <code>agent.admin</code>, so the caps and
@@ -145,10 +206,90 @@ export default async function AgentSpendPage() {
                 </DataTable>
               )}
             </Section>
+
+            <PlacementSection view={view} identity={identity} />
           </>
         )}
       </PageFrame>
     </OperatorShell>
+  );
+}
+
+/**
+ * The placement editor — `#placements`, which the command palette has named all along.
+ *
+ * 🔴 The anchor is not decoration. `surfaces.ts` registers "Set a tenant's analysis placement" at
+ * `/agent/spend#placements`, so an operator could find that command by name, press it, and land on a
+ * page that rendered placements READ-ONLY with no such control anywhere on it. The palette was
+ * advertising a capability the console did not have.
+ *
+ * # Why the options come from the platform
+ *
+ * `view.placements` is the closed set as the owning Go package declares it. Typing `platform`,
+ * `customer` and `disabled` into this file would make the editor the fourth copy of that set, and the
+ * failure would be silent in the worst direction: a placement added to the platform would simply not
+ * appear here, on the one surface that exists to set it, and nothing would look broken.
+ *
+ * # Why an empty first option
+ *
+ * A `<select>` always has something selected, and whatever is selected first is a decision the console
+ * made for the operator. FR37 is explicit that no field arrives pre-filled, and this field decides
+ * whether a platform reads a customer's source — so it opens on nothing and `required` refuses the
+ * submission until somebody chooses.
+ */
+function PlacementSection({ view, identity }: { view: AgentSpendView; identity: AdminIdentity }) {
+  const placements = view.placements ?? [];
+  return (
+    <Section id="placements" title="Where analysis runs" flush>
+      <p>
+        A placement is per tenant and it is a <strong>decision</strong>, not a switch:{" "}
+        <code>platform</code> has this platform read that tenant&rsquo;s source under a platform-held
+        credential, <code>customer</code> has the tenant analyse on its own machine under its own
+        credential and submit the result, and <code>disabled</code> runs nothing anywhere. The default
+        is <code>disabled</code>, which is why the table above distinguishes a tenant somebody switched
+        off from one nobody has looked at.
+      </p>
+      {!view.can_admin ? (
+        <DeniedState
+          capability="agent.admin"
+          description="Set a tenant's analysis placement"
+          heldBy={holdersOf(identity, "agent.admin")}
+        />
+      ) : placements.length === 0 ? (
+        /* 🔴 Said, not hidden, and NOT replaced by a list typed here. This deployment's platform sent
+           no placement set — an older build, or a surface that stopped carrying it — and the honest
+           answer is that the console cannot offer a vocabulary it was not given. Falling back to three
+           values written into this file is how the copy this control exists to avoid gets made. */
+        <DegradedState
+          what="the placement vocabulary"
+          detail="The platform sent no placement set with this view, so the options cannot be listed. This console does not carry its own copy of them — a list typed here would go stale against the platform without anything looking wrong."
+        />
+      ) : (
+        <ActionForm
+          title="Set a tenant's placement"
+          hint="Takes effect on the next analysis. Moving a tenant to `disabled` also marks its stored inferences stale — they are kept, not deleted, so nothing keeps rendering agent-authored facts as current."
+          submitLabel="Set placement"
+          danger
+          actionName="agent.placement"
+          action={setAgentPlacement}
+        >
+          <label htmlFor="placement-tenant">Tenant id</label>
+          <p className="hint">As it appears in the table above.</p>
+          <input id="placement-tenant" name="tenant_id" type="text" autoComplete="off" required />
+          <label htmlFor="placement-value">Placement</label>
+          <select id="placement-value" name="placement" defaultValue="" required>
+            <option value="" disabled>
+              Choose a placement
+            </option>
+            {placements.map((p) => (
+              <option key={p} value={p}>
+                {p}
+              </option>
+            ))}
+          </select>
+        </ActionForm>
+      )}
+    </Section>
   );
 }
 
