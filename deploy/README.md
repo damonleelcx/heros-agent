@@ -171,6 +171,50 @@ not exist. `agentd` prints the whole table at boot; `docker compose logs agentd 
 Without `DATABASE_URL` the four Postgres-backed rows join the unmounted set and say so. That is a
 supported single-binary form, not a misconfiguration.
 
+### Pointing a provider somewhere other than its vendor
+
+Set `HEROS_PROVIDER_<NAME>_BASE_URL` to route one provider through an API relay, a regional gateway or
+a corporate egress proxy. `<NAME>` is `OPENAI`, `ANTHROPIC` or `BEDROCK`, and the credential for that
+provider is resolved exactly as before — only the address changes.
+
+```
+HEROS_PROVIDER_OPENAI_BASE_URL=https://relay.example.com/v1
+```
+
+Unset means the vendor endpoint, which is what every deployment did before this existed. Each override
+is named on the boot log, because the console shows a provider's *name* and never its address — if it
+is not said at boot it is not said anywhere.
+
+⚠️ On Kubernetes, set it in **`deploy/k8s/overlays/prod/kustomization.yaml`** and deploy — not with
+`kubectl set env`. The deploy applies a full render, so an out-of-band edit is reverted by the next one
+and the redirect disappears at the least convenient moment. It is deliberately not declared with an
+empty value in the manifests: an unset variable and one set to `""` behave identically here, so a dead
+placeholder would add env-contract surface to every deployment to save one line in the one that uses it.
+
+Four values are **refused at boot** rather than ignored, because a base URL is where this deployment's
+provider credential gets sent and a silent fallback means the operator believes traffic goes to their
+relay while the key goes to the vendor:
+
+| Refused | Why |
+|---|---|
+| `http://` to any non-loopback host | the provider key would cross the network in clear text. Loopback may use `http` — a relay on the same host puts nothing on a wire |
+| a URL with no scheme or host | there is nothing to send to; `relay.example.com/v1` is not an address |
+| userinfo in the URL (`https://user:pass@…`) | anything that logs the endpoint then logs the credential, and this logs it at boot |
+| a query or fragment | the adapters append a path (`/chat/completions`), so `?key=abc` would silently become a URL nobody wrote |
+
+A variable naming something that is not a provider — `HEROS_PROVIDER_OPENAI2_BASE_URL` — also fails the
+boot. An ignored override leaves an operator certain they redirected traffic they did not redirect, and
+the evidence that they did not is a bill from the vendor they were trying to stop using.
+
+> 🔴 **A relay sees what you send it.** Under a `platform` placement this deployment reads a customer's
+> source and posts it to whichever endpoint the provider points at. Redirecting `openai` therefore puts
+> customer source code in the hands of whoever runs that relay. The agent's *rehearsal* only ever sends
+> the pinned calibration fixtures, which are this repository's own test trees — so measuring a
+> definition through a relay exposes nothing of a customer's, while serving one does. Those are
+> separable, and worth separating deliberately.
+
+---
+
 ### Provisioned ahead of use
 
 The object store, queue, vector store and graph store are **started but not yet connected** by any
