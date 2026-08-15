@@ -26,6 +26,14 @@ import (
 // store so a test can decide what the tenant is.
 func agentSeam(t *testing.T) (*Server, *herosagent.MemPlacementStore, *herosagent.MemInferenceStore, string) {
 	t.Helper()
+	return agentSeamWithModel(t, fixedModel{provider: "anthropic", modelID: "claude-x"})
+}
+
+// agentSeamWithModel is agentSeam with the bound model chosen by the caller, so a test can vary what
+// the model version PINS. The credential ref is taken from the model's provider: the source refuses a
+// definition whose two disagree, and that refusal is a different test's subject.
+func agentSeamWithModel(t *testing.T, models fixedModel) (*Server, *herosagent.MemPlacementStore, *herosagent.MemInferenceStore, string) {
+	t.Helper()
 	ctx := context.Background()
 
 	versions := herosagent.NewMemVersionStore()
@@ -33,7 +41,7 @@ func agentSeam(t *testing.T) (*Server, *herosagent.MemPlacementStore, *herosagen
 	if err := versions.Put(ctx, herosagent.Version{
 		ConfigHash: hash, RehearsalState: herosagent.RehearsalPassed, CreatedAtMS: 1,
 		Definition: herosagent.Definition{
-			PromptRef: "prm-1", ModelRef: "mdl-1", CredentialRef: "anthropic",
+			PromptRef: "prm-1", ModelRef: "mdl-1", CredentialRef: models.provider,
 			ContextRef: "ctx-1", HarnessRef: "hrn-1",
 		},
 	}); err != nil {
@@ -49,7 +57,7 @@ func agentSeam(t *testing.T) (*Server, *herosagent.MemPlacementStore, *herosagen
 		Placements: placements,
 		Versions:   versions,
 		Prompts:    fixedPrompt{"You are the analyst. Propose edges only for the pairs you are shown."},
-		Models:     fixedModel{provider: "anthropic", modelID: "claude-x"},
+		Models:     models,
 		Inferences: inferences,
 		Floor:      herosagent.DefaultConfidenceFloor,
 		Budget:     herosagent.DefaultBudget(),
@@ -69,10 +77,15 @@ type fixedPrompt struct{ body string }
 
 func (f fixedPrompt) Render(context.Context, string) (string, bool, error) { return f.body, true, nil }
 
-type fixedModel struct{ provider, modelID string }
+type fixedModel struct {
+	provider, modelID string
+	// params are what the model version pins. Carried so a test can assert they reach the wire, which
+	// is the whole of the defect this seam had: provider and id crossed, params did not.
+	params *runlink.ModelParams
+}
 
-func (f fixedModel) Resolve(context.Context, string) (string, string, bool, error) {
-	return f.provider, f.modelID, true, nil
+func (f fixedModel) Resolve(context.Context, string) (herosagent.ResolvedModel, bool, error) {
+	return herosagent.ResolvedModel{Provider: f.provider, ModelID: f.modelID, Params: f.params}, true, nil
 }
 
 func placeTenant(t *testing.T, store *herosagent.MemPlacementStore, tenant string, p herosagent.Placement) {
@@ -620,5 +633,68 @@ func TestADisabledTenantIsNotReportedAsUnavailable(t *testing.T) {
 	if got.Agent.State != patternclassifier.StateNotAnalysed {
 		t.Errorf("state is %q, want %q — a fault in machinery this organization is not using is not "+
 			"their state", got.Agent.State, patternclassifier.StateNotAnalysed)
+	}
+}
+
+// ── The pinned model parameters cross the seam ──────────────────────────────────────────────────────
+
+// The parameters a model version pins travel with it. `ModelResolver` used to return only provider and
+// model id, so `entry.Spec.Params` was dropped at the adapter and the customer ran the operator's model
+// with none of the operator's settings.
+func TestThePinnedModelParametersCrossToTheCustomer(t *testing.T) {
+	max := 4096
+	s, placements, _, _ := agentSeamWithModel(t, fixedModel{
+		provider: "anthropic", modelID: "claude-x",
+		params: &runlink.ModelParams{MaxTokens: &max},
+	})
+	placeTenant(t, placements, "t-customer", herosagent.PlacementCustomer)
+
+	got := fetchDefinition(t, s, "t-customer")
+	if got.ModelParams == nil {
+		t.Fatal("the definition carries no model_params — a customer-side run would call anthropic " +
+			"with no max_tokens, which the gateway refuses at the first inference")
+	}
+	if got.ModelParams.MaxTokens == nil || *got.ModelParams.MaxTokens != 4096 {
+		t.Errorf("max_tokens = %v, want 4096", got.ModelParams.MaxTokens)
+	}
+}
+
+// 🔴 THE TWO MaxTokens ARE DIFFERENT NUMBERS.
+//
+// `AgentDefinition.MaxTokens` is the CUMULATIVE run budget, checked against input+output after each
+// call. `AgentDefinition.ModelParams.MaxTokens` is the ceiling on ONE completion and goes to the vendor.
+// They share a name and nothing else. Collapsing them would either truncate every answer to the run
+// budget or let a single completion spend the entire run — and both would look plausible in a diff.
+func TestTheRunBudgetIsNotTheModelsMaxTokens(t *testing.T) {
+	perAnswer := 4096
+	s, placements, _, _ := agentSeamWithModel(t, fixedModel{
+		provider: "anthropic", modelID: "claude-x",
+		params: &runlink.ModelParams{MaxTokens: &perAnswer},
+	})
+	placeTenant(t, placements, "t-customer", herosagent.PlacementCustomer)
+
+	got := fetchDefinition(t, s, "t-customer")
+	if got.ModelParams == nil || got.ModelParams.MaxTokens == nil {
+		t.Fatal("no model params crossed")
+	}
+	if got.MaxTokens == *got.ModelParams.MaxTokens {
+		t.Fatalf("the run budget (%d) and the model's per-answer max_tokens (%d) are the same value — "+
+			"either they have been wired to one source, or this fixture no longer distinguishes them",
+			got.MaxTokens, *got.ModelParams.MaxTokens)
+	}
+	if got.MaxTokens <= 0 {
+		t.Errorf("the run budget did not survive: %d", got.MaxTokens)
+	}
+}
+
+// A model version that pins nothing sends nothing. `omitempty` plus a nil means the wire carries no
+// `model_params` at all, which is what an OpenAI entry legitimately looks like — distinguishable from a
+// platform that sent the field and left it blank.
+func TestAModelPinningNoParametersSendsNone(t *testing.T) {
+	s, placements, _, _ := agentSeamWithModel(t, fixedModel{provider: "openai", modelID: "gpt-5"})
+	placeTenant(t, placements, "t-customer", herosagent.PlacementCustomer)
+
+	if got := fetchDefinition(t, s, "t-customer"); got.ModelParams != nil {
+		t.Errorf("parameters were invented for a model that pins none: %+v", got.ModelParams)
 	}
 }

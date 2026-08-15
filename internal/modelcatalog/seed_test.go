@@ -49,7 +49,7 @@ func catalogFileWith(t *testing.T, body string) *FileSource {
 
 func TestSeedRegistersEveryDeclaredModel(t *testing.T) {
 	src := catalogFileWith(t, `{"models":[
-	  {"name":"Claude Sonnet 5","tier":3,"cost_per_run":0.05,"latency_ms":900,"provider":"anthropic","model_id":"claude-sonnet-5"},
+	  {"name":"Claude Sonnet 5","tier":3,"cost_per_run":0.05,"latency_ms":900,"provider":"anthropic","model_id":"claude-sonnet-5","params":{"max_tokens":4096}},
 	  {"name":"GPT-5","tier":4,"cost_per_run":0.14,"latency_ms":2100,"provider":"openai","model_id":"gpt-5"}
 	]}`)
 	reg := &recordingRegistrar{}
@@ -110,7 +110,7 @@ func TestAFailedEntryDoesNotAbortTheRest(t *testing.T) {
 
 func TestSeedingIsIdempotentAcrossBoots(t *testing.T) {
 	src := catalogFileWith(t, `{"models":[
-	  {"name":"Claude Haiku 4.5","tier":1,"cost_per_run":0.004,"latency_ms":200,"provider":"anthropic","model_id":"claude-haiku-4-5"}
+	  {"name":"Claude Haiku 4.5","tier":1,"cost_per_run":0.004,"latency_ms":200,"provider":"anthropic","model_id":"claude-haiku-4-5","params":{"max_tokens":4096}}
 	]}`)
 	reg := &recordingRegistrar{}
 	for boot := 0; boot < 3; boot++ {
@@ -181,5 +181,79 @@ func TestALocalCatalogIfPresentDeclaresItsIdentifiers(t *testing.T) {
 			t.Errorf("the local deploy/config/models.json publishes %q with no provider/model_id. Nothing "+
 				"will register it, so `Menu` joins onto nothing and the studio matrix has no rows.", e.Name)
 		}
+	}
+}
+
+// ── Params carriage (the entry that registered and could not be called) ─────────────────────────────
+//
+// Seeding built `registry.ModelSpec{Provider, ModelID}` and left Params zero, so every entry this
+// package created had a nil MaxTokens. The Anthropic adapter refuses a call with no max_tokens by
+// design. So a published Anthropic model registered cleanly, joined onto the menu, resolved from a
+// Variant Spec — and failed at the FIRST inference. Both halves were correct in isolation; nothing
+// tested the pair, because every seeding test asserted on Provider and ModelID only.
+
+func TestDeclaredParamsReachTheRegisteredSpec(t *testing.T) {
+	src := catalogFileWith(t, `{"models":[
+		{"name":"Claude Sonnet 5","tier":3,"cost_per_run":0.9,"latency_ms":1200,
+		 "provider":"anthropic","model_id":"claude-sonnet-5",
+		 "params":{"max_tokens":4096,"temperature":0.2}}]}`)
+	reg := &recordingRegistrar{}
+	rep, err := SeedRegistry(context.Background(), src, reg)
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if rep.Registered != 1 {
+		t.Fatalf("registered %d, want 1", rep.Registered)
+	}
+	got := reg.got[0]
+	// The fence is on the PARAMS, not on provider/model_id — those already had coverage, and their
+	// passing is exactly what made the gap invisible.
+	if got.Params.MaxTokens == nil {
+		t.Fatal("max_tokens did not reach the registered spec: the gateway will refuse every call to " +
+			"this entry with \"anthropic requires max_tokens\", at the first inference")
+	}
+	if *got.Params.MaxTokens != 4096 {
+		t.Errorf("max_tokens = %d, want 4096", *got.Params.MaxTokens)
+	}
+	if got.Params.Temperature == nil || *got.Params.Temperature != 0.2 {
+		t.Errorf("temperature did not round-trip: %+v", got.Params.Temperature)
+	}
+}
+
+func TestAnAnthropicEntryWithNoMaxTokensIsRefusedAtLoad(t *testing.T) {
+	src := catalogFileWith(t, `{"models":[
+		{"name":"Claude Sonnet 5","tier":3,"cost_per_run":0.9,"latency_ms":1200,
+		 "provider":"anthropic","model_id":"claude-sonnet-5"}]}`)
+	_, err := src.Load()
+	if err == nil {
+		t.Fatal("an anthropic entry with no max_tokens loaded cleanly — it will register, appear on the " +
+			"menu, and fail at the first inference")
+	}
+	// The message must name the remedy, not just the condition: an operator reading it is holding the
+	// file that needs the edit.
+	if !strings.Contains(err.Error(), "max_tokens") {
+		t.Errorf("the refusal does not name max_tokens: %v", err)
+	}
+	if !strings.Contains(err.Error(), "Claude Sonnet 5") {
+		t.Errorf("the refusal does not name which entry is wrong: %v", err)
+	}
+}
+
+func TestANonPositiveMaxTokensIsRefused(t *testing.T) {
+	src := catalogFileWith(t, `{"models":[
+		{"name":"C","tier":1,"cost_per_run":0.1,"latency_ms":10,
+		 "provider":"anthropic","model_id":"claude-sonnet-5","params":{"max_tokens":0}}]}`)
+	if _, err := src.Load(); err == nil {
+		t.Fatal("max_tokens 0 loaded cleanly; it bounds one answer and cannot be zero")
+	}
+}
+
+// A judgement-only entry (no provider/model_id) describes a model registered by some other route, and
+// that registration owns its params. Checking it here would refuse a legitimate publication.
+func TestAJudgementOnlyEntryIsNotHeldToProviderRequirements(t *testing.T) {
+	src := catalogFileWith(t, `{"models":[
+		{"name":"Claude Sonnet 5","tier":3,"cost_per_run":0.9,"latency_ms":1200}]}`)
+	if _, err := src.Load(); err != nil {
+		t.Fatalf("a judgement-only entry was refused: %v", err)
 	}
 }

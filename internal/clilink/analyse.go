@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/heros-foreal/agentd/internal/cli"
@@ -184,12 +185,26 @@ func (c Commands) runLocally(ctx context.Context, def runlink.AgentDefinition,
 	}
 	gw := providergateway.New(secrets, opts...)
 
+	// 🔴 The parameters the platform PINNED, not an empty set.
+	//
+	// This block used to build `ModelSpec{Provider, ModelID}` and stop. A `ModelSpec` bundles provider,
+	// id and params as one versioned unit so a ref resolves exactly what was stored — so dropping the
+	// third meant a customer-placed run executed the operator's model under nobody's settings, and the
+	// run did not match the definition its own config_hash names.
+	//
+	// On Anthropic it was fatal rather than silent: `providergateway` refuses a call whose spec sets no
+	// max_tokens instead of inventing a ceiling on somebody's bill, so every `claude-*` definition died
+	// at the first inference — here, on the customer's machine, after their repository had been read.
+	params, perr := modelParamsFrom(def)
+	if perr != nil {
+		return herosagent.Result{}, perr
+	}
 	entry := &registry.ModelEntry{
 		// A model entry assembled from what the platform sent rather than resolved from a registry: this
 		// machine has no operator registry and must not need one. The definition already resolved it —
 		// see AgentDefinition.ModelID.
 		Name: def.ModelID,
-		Spec: registry.ModelSpec{Provider: def.Provider, ModelID: def.ModelID},
+		Spec: registry.ModelSpec{Provider: def.Provider, ModelID: def.ModelID, Params: params},
 	}
 	model, err := herosagent.NewGatewayModel(gw, entry, def.Prompt)
 	if err != nil {
@@ -254,4 +269,38 @@ func short12(s string) string {
 		return s
 	}
 	return s[:12]
+}
+
+// modelParamsFrom maps the pinned parameters the platform sent onto the spec the gateway calls with.
+//
+// # Why a nil ModelParams is not simply "no parameters"
+//
+// The field is optional so that a CLI newer than its platform still runs: an older platform sends no
+// `model_params`, and for an OpenAI model that is completely fine — the gateway needs nothing from it.
+// For Anthropic it is not fine, and the failure it produces is one of the least legible in the system:
+// the gateway refuses with "anthropic requires max_tokens; model entry … does not set it", which reads
+// as a fault in the model entry the customer cannot see, on a machine that has no registry to inspect.
+//
+// So the refusal is raised HERE, where the cause is known: the definition came from a platform that
+// does not send parameters, and the fix is on the platform, not on this machine.
+func modelParamsFrom(def runlink.AgentDefinition) (registry.ModelParams, error) {
+	var out registry.ModelParams
+	if p := def.ModelParams; p != nil {
+		out = registry.ModelParams{
+			MaxTokens:      p.MaxTokens,
+			Temperature:    p.Temperature,
+			ThinkingBudget: p.ThinkingBudget,
+			Seed:           p.Seed,
+			TimeoutSeconds: p.TimeoutSeconds,
+		}
+	}
+	if strings.EqualFold(def.Provider, providergateway.ProviderAnthropic) && out.MaxTokens == nil {
+		return registry.ModelParams{}, failed(fmt.Sprintf(
+			"analyse: the active definition binds %q, served by %s, and the platform sent no max_tokens "+
+				"for it. Anthropic rejects a request without one and this machine must not invent a "+
+				"ceiling on your bill. Nothing here can fix it: ask the operator of this deployment to "+
+				"publish a model catalog entry carrying \"params\": {\"max_tokens\": <n>}, or to activate "+
+				"a definition on a model that needs none", def.ModelID, def.Provider), nil)
+	}
+	return out, nil
 }

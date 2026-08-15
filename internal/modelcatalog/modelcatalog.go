@@ -31,6 +31,7 @@ import (
 	"strings"
 
 	"github.com/heros-foreal/agentd/internal/proposal"
+	"github.com/heros-foreal/agentd/internal/providergateway"
 	"github.com/heros-foreal/agentd/internal/registry"
 )
 
@@ -71,6 +72,21 @@ type Entry struct {
 	// else registered, which is exactly what this file did before and stays valid.
 	Provider string `json:"provider,omitempty"`
 	ModelID  string `json:"model_id,omitempty"`
+
+	// Params are the inference parameters the seeded registry entry carries.
+	//
+	// 🔴 Why this exists: seeding built `registry.ModelSpec{Provider, ModelID}` and left Params ZERO, so
+	// every entry this file created had a nil MaxTokens. `providergateway`'s Anthropic adapter REQUIRES
+	// max_tokens and refuses the call when it is unset (`adapters.go`: "anthropic requires max_tokens"),
+	// deliberately, rather than defaulting to a number nobody configured. The two facts together meant a
+	// published Anthropic entry registered cleanly, appeared on the menu, resolved from a Variant Spec —
+	// and then failed at the FIRST inference, which is the worst place to discover it.
+	//
+	// They live on the entry rather than being defaulted at seed time for the same reason the tier does:
+	// max_tokens changes what the model costs and how it answers, so it is a declaration an operator
+	// makes, not a number the platform picks. Params are part of the content-addressed ModelSpec, so
+	// editing them mints a new version_id and leaves any pinned config_hash resolving the old one.
+	Params *registry.ModelParams `json:"params,omitempty"`
 }
 
 // Registrable reports whether this entry declares enough to create the registry entry it names.
@@ -153,8 +169,41 @@ func (f *FileSource) Load() ([]Entry, error) {
 		if e.CostPerRun < 0 || e.LatencyMS < 0 {
 			return nil, fmt.Errorf("modelcatalog: %q gives %q a negative cost or latency", f.Path, e.Name)
 		}
+		// 🔴 Refused HERE, at load, rather than at the first inference. This entry is about to become a
+		// registry row that resolves from a Variant Spec and appears on the proposal menu; a provider that
+		// cannot be called from it is a publishing mistake, and the only cheap moment to say so is while
+		// the operator is looking at the file they just wrote. Deferring it turns a typo into a run-time
+		// failure inside a rehearsal that has already spent money on the fixtures before this one.
+		if err := e.callable(); err != nil {
+			return nil, fmt.Errorf("modelcatalog: %q publishes %q: %w", f.Path, e.Name, err)
+		}
 	}
 	return cf.Models, nil
+}
+
+// callable reports whether a declared entry carries what its PROVIDER requires to be called. It checks
+// only requirements the gateway enforces as hard refusals — not defaults, which the gateway is entitled
+// to choose — so this never invents policy of its own.
+//
+// An entry that declares no provider/model_id is not checked: it publishes a judgement about a model
+// somebody else registered, and that model's params are that registration's business.
+func (e Entry) callable() error {
+	if !e.Registrable() {
+		return nil
+	}
+	if strings.EqualFold(strings.TrimSpace(e.Provider), providergateway.ProviderAnthropic) {
+		if e.Params == nil || e.Params.MaxTokens == nil {
+			return fmt.Errorf("provider %q requires max_tokens and this entry sets none — add "+
+				`"params": {"max_tokens": <n>}. The gateway refuses the call rather than picking a `+
+				"number nobody configured, so without it this model registers, appears on the menu, "+
+				"and fails at the first inference", providergateway.ProviderAnthropic)
+		}
+		if *e.Params.MaxTokens <= 0 {
+			return fmt.Errorf("max_tokens is %d — it bounds one answer and must be positive",
+				*e.Params.MaxTokens)
+		}
+	}
+	return nil
 }
 
 // ModelLister is the registry read this package joins against.
@@ -292,10 +341,18 @@ func SeedRegistry(ctx context.Context, src Source, reg ModelRegistrar) (SeedRepo
 			rep.Undeclared++
 			continue
 		}
-		if _, err := reg.RegisterModel(ctx, e.Name, registry.ModelSpec{
+		spec := registry.ModelSpec{
 			Provider: strings.TrimSpace(e.Provider),
 			ModelID:  strings.TrimSpace(e.ModelID),
-		}); err != nil {
+		}
+		// Params are part of the content-addressed spec, so an entry that declares them registers a
+		// DIFFERENT version_id from one that does not. That is the intended behaviour and the reason
+		// Load refuses an Anthropic entry without max_tokens: the alternative was seeding a spec whose
+		// zero Params the gateway could not call.
+		if e.Params != nil {
+			spec.Params = *e.Params
+		}
+		if _, err := reg.RegisterModel(ctx, e.Name, spec); err != nil {
 			rep.Failed[e.Name] = err.Error()
 			continue
 		}

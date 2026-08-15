@@ -6,7 +6,7 @@ import { redirect } from "next/navigation";
 import { ADMIN_SESSION_COOKIE, AdminApiError, adminFetch, exchangeAssertion, revokeSession } from "./adminApi";
 import { readSessionToken, SESSION_COOKIE_OPTIONS } from "./session";
 import { DENSITY_COOKIE, DENSITY_COOKIE_OPTIONS, THEME_COOKIE, THEME_COOKIE_OPTIONS, isTheme } from "./prefs";
-import type { Receipt } from "./types";
+import type { PublishPreview, Receipt } from "./types";
 
 /**
  * actions.ts holds every mutating server action.
@@ -461,6 +461,150 @@ export async function executeGDPR(_p: ActionResult | null, fd: FormData): Promis
         target: String(body.subject_ref ?? ""),
         reason: String(body.reason ?? ""),
       });
+    }
+  });
+}
+
+// ── The platform agent's own instruction ────────────────────────────────────
+
+/**
+ * publishPlatformPrompt authors the PLATFORM's agent instruction and returns the ref a definition
+ * binds.
+ *
+ * # Why this control exists on the operator console at all
+ *
+ * `Publisher.Publish` refuses a definition whose `prompt_ref` does not resolve, and the prompt
+ * registry's only other write route is TENANT-scoped. The platform is not a tenant, so without this
+ * an operator could compose a definition here and never publish it — the ref had no operator-side
+ * origin.
+ *
+ * # It does NOT use `post`
+ *
+ * `post` returns the platform's `Receipt`, and this route answers with the published version id
+ * instead. That id is the entire point of the control — it is what the operator pastes into a
+ * definition's prompt axis — so it is surfaced in the outcome `message` rather than discarded to fit
+ * a shared helper.
+ *
+ * # The reason field
+ *
+ * The API does not REQUIRE a reason: publishing a prompt version changes nothing on its own, and
+ * demanding a justification for an inert act is how the reason on the act that does change something
+ * becomes noise. The console asks for one anyway, because every mutating control here asks for one and
+ * a single exception would read as an oversight. The split is deliberate: uniform discipline in the
+ * UI, no bootstrap-blocking requirement in the API.
+ */
+export async function publishPlatformPrompt(_p: ActionResult | null, fd: FormData): Promise<ActionResult> {
+  const name = String(fd.get("name") ?? "").trim();
+  const body = String(fd.get("body") ?? "");
+  const command: Command = {
+    action: "agent.publish_prompt",
+    target: name,
+    reason: String(fd.get("reason") ?? ""),
+    undo: "Publish the previous text again — versions are immutable and content-addressed, so the " +
+      "earlier one stays resolvable and republishing it returns its original id",
+  };
+  return withSession(async (token) => {
+    const jar = await cookies();
+    const impersonationId = jar.get("heros_admin_impersonation")?.value;
+    try {
+      const res = await adminFetch<{ version_id: string; name: string; created: boolean }>(
+        "/admin/api/agent/prompt",
+        { method: "POST", body: { name, body }, sessionToken: token, impersonationId },
+      );
+      revalidatePath("/agent");
+      // The two outcomes are reported apart. Content-addressing makes a re-publish of identical text a
+      // no-op, and calling that "published" would tell an operator they had edited the platform's
+      // instruction when they had not — after which they would go looking for a version that does not
+      // exist.
+      const message = res.created
+        ? `Published. Bind this as the definition's prompt_ref: ${res.version_id}`
+        : `No change — this text was already published. Its existing ref is ${res.version_id}`;
+      return { ok: true, command, message };
+    } catch (error) {
+      return toResult(error, command);
+    }
+  });
+}
+
+/**
+ * publishAgentDefinition composes a definition from its axes and publishes it as a PENDING version.
+ *
+ * # What pressing this does and does not do
+ *
+ * It creates a version. It does NOT change what any customer is analysed by: a published definition is
+ * inert until it passes the activation gate and is activated, and those are separate acts on purpose.
+ * The copy on the control says so, because "Publish" on an operator console otherwise reads like it
+ * takes effect.
+ *
+ * # Why the outcome is assembled here rather than shown as a receipt
+ *
+ * This route answers with a `PublishPreview`, not a `Receipt` — it carries the config_hash, the
+ * axis-by-axis diff against what is active, and any refusals. Those are the things the operator needs
+ * next (the hash is what `activate` takes), so they are surfaced in the outcome message rather than
+ * discarded to fit the shared `post` helper.
+ *
+ * 🔴 `no_change` is reported as its own outcome. A definition is identified by its CONTENT, so an edit
+ * that resolves to something already published creates nothing. Calling that "published" would leave an
+ * operator waiting for a version that was never made — the same failure the instruction control avoids.
+ */
+export async function publishAgentDefinition(_p: ActionResult | null, fd: FormData): Promise<ActionResult> {
+  const axes: Record<string, string> = {};
+  // Only NON-EMPTY axes are sent. An empty string is a real edit meaning "unset this axis", and
+  // submitting one for every field an operator left blank would silently clear axes they never touched.
+  for (const axis of ["prompt", "model", "context", "memory", "harness"]) {
+    const v = String(fd.get(axis) ?? "").trim();
+    if (v !== "") axes[axis] = v;
+  }
+  const list = (name: string) =>
+    String(fd.get(name) ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s !== "");
+
+  const credentialRef = String(fd.get("credential_ref") ?? "").trim();
+  const reason = String(fd.get("reason") ?? "");
+  const command: Command = {
+    action: "agent.publish",
+    target: axes.model ? `model ${axes.model}` : "definition",
+    reason,
+    undo: "Publish the previous definition again — versions are immutable and content-addressed, so " +
+      "the earlier one is still there and republishing it creates nothing",
+  };
+
+  return withSession(async (token) => {
+    const jar = await cookies();
+    const impersonationId = jar.get("heros_admin_impersonation")?.value;
+    try {
+      const view = await adminFetch<PublishPreview>("/admin/api/agent/publish", {
+        method: "POST",
+        body: {
+          axes,
+          skill_refs: list("skill_refs"),
+          tool_names: list("tool_names"),
+          credential_ref: credentialRef,
+          reason,
+        },
+        sessionToken: token,
+        impersonationId,
+      });
+      revalidatePath("/agent");
+
+      // Refusals come back on a 200 — the definition was rejected on its content, not by transport.
+      // Reported as a FAILURE so the operator is not told something was published when nothing was.
+      if (view.refusals && view.refusals.length > 0) {
+        return {
+          ok: false,
+          kind: "request",
+          message: `Not published. ${view.refusals.join(" ")}`,
+        };
+      }
+      const message = view.no_change
+        ? `No change — this definition is already published as ${view.display}. Nothing was created.`
+        : `Published as ${view.config_hash}. It is PENDING and serving nothing: activate it to run the ` +
+          `calibration set against it, and only a definition that passes is served.`;
+      return { ok: true, command, message };
+    } catch (error) {
+      return toResult(error, command);
     }
   });
 }

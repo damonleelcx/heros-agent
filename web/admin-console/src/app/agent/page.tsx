@@ -4,7 +4,9 @@ import { OperatorShell } from "@/components/shell";
 import { DegradedState, DeniedState, NotMountedState, Pill } from "@/components/states";
 import { DataTable, Num, PageFrame, Section } from "@/components/primitives";
 import { Tabs } from "@/components/tabs";
-import type { AgentOverview, AgentAxisRow, Availability } from "@/lib/types";
+import { ActionForm } from "@/components/actionForm";
+import { publishPlatformPrompt, publishAgentDefinition } from "@/lib/actions";
+import type { AgentOverview, AgentAxisRow, Availability, AdminIdentity } from "@/lib/types";
 
 /**
  * The platform's own analysis agent (P30 §6).
@@ -63,6 +65,10 @@ export default async function AgentPage() {
     );
   }
 
+  // Authoring the instruction IS changing what the platform infers with, so it needs the write
+  // capability — not the read one that got us onto this page.
+  const canAdmin = hasCapability(identity, "agent.admin");
+
   let view: AgentOverview | null = null;
   let failure: { kind: string; message: string } | null = null;
   try {
@@ -97,14 +103,23 @@ export default async function AgentPage() {
         ) : !view ? (
           <DegradedState what="the analysis agent" />
         ) : (
-          <AgentBody view={view} />
+          <AgentBody view={view} canAdmin={canAdmin} identity={identity} />
         )}
       </PageFrame>
     </OperatorShell>
   );
 }
 
-function AgentBody({ view }: { view: AgentOverview }) {
+function AgentBody({
+  view,
+  canAdmin,
+  identity,
+}: {
+  view: AgentOverview;
+  /** Whether this operator may CHANGE the agent, not merely read it. */
+  canAdmin: boolean;
+  identity: AdminIdentity;
+}) {
   const axes = view.axes ?? [];
   const versions = view.versions ?? [];
 
@@ -243,6 +258,148 @@ function AgentBody({ view }: { view: AgentOverview }) {
                     </tr>
                   ))}
                 </DataTable>
+              </Section>
+            ),
+          },
+          {
+            id: "instruction",
+            label: "Instruction",
+            content: (
+              <Section title="The agent's instruction" flush>
+                <p>
+                  A definition binds its instruction by <code>prompt_ref</code>, and publishing one is
+                  refused if that ref does not resolve — a definition that cannot render its instruction
+                  can be neither measured nor served. Publish the text here first, then bind the ref it
+                  returns on the definition&apos;s prompt axis.
+                </p>
+                <p>
+                  This is the <strong>platform&apos;s own</strong> instruction and belongs to no tenant.
+                  It is stored outside every tenant namespace, so it can never collide with, or be
+                  enumerated by, a customer&apos;s prompts.
+                </p>
+                <p>
+                  Versions are <strong>immutable and content-addressed</strong>: editing publishes a new
+                  version and leaves the previous one resolvable, and publishing identical text twice
+                  returns the ref that already existed rather than making a second version. Publishing
+                  changes nothing on its own — the new text reaches customers only once a definition
+                  binds it <em>and</em> that definition passes the activation gate.
+                </p>
+                {canAdmin ? (
+                  <ActionForm
+                    title="Publish the instruction"
+                    hint="Returns the prompt_ref to bind on a definition. Nothing is served until a definition binds it and passes its rehearsal."
+                    submitLabel="Publish instruction"
+                    actionName="agent.publish_prompt"
+                    action={publishPlatformPrompt}
+                  >
+                    <label htmlFor="prompt-name">Name</label>
+                    <p className="hint">
+                      How you find this instruction again, and what its versions line up under. Not
+                      shown to customers.
+                    </p>
+                    <input
+                      id="prompt-name"
+                      name="name"
+                      type="text"
+                      autoComplete="off"
+                      required
+                    />
+                    <label htmlFor="prompt-body">Instruction</label>
+                    <p className="hint">
+                      Stored exactly as typed — leading and trailing whitespace included, because the
+                      text the agent is given is the text you wrote.
+                    </p>
+                    <textarea id="prompt-body" name="body" rows={12} required />
+                  </ActionForm>
+                ) : (
+                  <DeniedState
+                    capability="agent.admin"
+                    description="Publish the platform analysis agent's instruction"
+                    heldBy={holdersOf(identity, "agent.admin")}
+                  />
+                )}
+              </Section>
+            ),
+          },
+          {
+            id: "publish",
+            label: "Publish",
+            content: (
+              <Section title="Publish a definition" flush>
+                <p>
+                  A definition is <strong>identified by its content</strong>: publishing composes the
+                  axes below into one immutable version and names it by its <code>config_hash</code>.
+                  Editing publishes a new version rather than changing an existing one, and republishing
+                  identical axes creates nothing.
+                </p>
+                <p>
+                  <strong>Publishing serves nothing.</strong> A new version lands <em>pending</em> and
+                  analyses no customer&apos;s source until it passes the calibration set{" "}
+                  <em>on every fixture individually</em> and is activated. Those are separate acts on
+                  purpose — this control cannot change what is running.
+                </p>
+                <p>
+                  The <code>prompt</code> axis takes the ref returned by the Instruction tab, and{" "}
+                  <code>model</code> takes a model version id from the platform registry. Both must
+                  resolve or the publish is refused — a definition that cannot render its instruction or
+                  reach its model can be neither measured nor served.
+                </p>
+                {canAdmin ? (
+                  <ActionForm
+                    title="Publish definition"
+                    hint="Creates a pending version. Activation is a separate, gated act."
+                    submitLabel="Publish definition"
+                    actionName="agent.publish"
+                    action={publishAgentDefinition}
+                  >
+                    <label htmlFor="def-prompt">prompt_ref (required)</label>
+                    <p className="hint">The version id returned by the Instruction tab.</p>
+                    <input id="def-prompt" name="prompt" type="text" autoComplete="off" required />
+
+                    <label htmlFor="def-model">model_ref (required)</label>
+                    <p className="hint">
+                      A model version id from the platform registry — not a vendor model name.
+                    </p>
+                    <input id="def-model" name="model" type="text" autoComplete="off" required />
+
+                    <label htmlFor="def-credential">credential_ref (required)</label>
+                    <p className="hint">
+                      A provider <strong>name</strong> such as <code>anthropic</code> or{" "}
+                      <code>openai</code> — never a key. It must match the provider that serves the
+                      bound model, or a run authenticates against one vendor and calls another.
+                    </p>
+                    <input id="def-credential" name="credential_ref" type="text" autoComplete="off" required />
+
+                    <label htmlFor="def-context">context (required)</label>
+                    <input id="def-context" name="context" type="text" autoComplete="off" required />
+
+                    <label htmlFor="def-harness">harness (required)</label>
+                    <p className="hint">Single-shot unless this deployment offers another strategy.</p>
+                    <input id="def-harness" name="harness" type="text" autoComplete="off" required />
+
+                    <label htmlFor="def-memory">memory (optional)</label>
+                    <input id="def-memory" name="memory" type="text" autoComplete="off" />
+
+                    <label htmlFor="def-skills">skill_refs (optional, comma-separated)</label>
+                    <input id="def-skills" name="skill_refs" type="text" autoComplete="off" />
+
+                    <label htmlFor="def-tools">tool_names (optional, comma-separated)</label>
+                    <input id="def-tools" name="tool_names" type="text" autoComplete="off" />
+                  </ActionForm>
+                ) : (
+                  <DeniedState
+                    capability="agent.admin"
+                    description="Publish the platform analysis agent's definition"
+                    heldBy={holdersOf(identity, "agent.admin")}
+                  />
+                )}
+                <p>
+                  <em>
+                    The <code>wiring</code> axis is fixed and cannot be authored: HEROS is a single node,
+                    so there is no ordering to write. It is refused at publish rather than accepted and
+                    ignored.
+                  </em>
+                </p>
               </Section>
             ),
           },

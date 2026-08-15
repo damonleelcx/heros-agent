@@ -30,11 +30,27 @@ type PromptResolver interface {
 	Render(ctx context.Context, promptRef string) (body string, ok bool, err error)
 }
 
-// ModelResolver turns the definition's operator-registry model ref into the provider and model id a
-// customer-side runner needs. Platform-side for the same reason: the customer has no operator registry
-// and must not need one.
+// ModelResolver turns the definition's operator-registry model ref into everything a customer-side
+// runner needs to CALL that model. Platform-side for the same reason: the customer has no operator
+// registry and must not need one.
 type ModelResolver interface {
-	Resolve(ctx context.Context, modelRef string) (provider, modelID string, ok bool, err error)
+	Resolve(ctx context.Context, modelRef string) (ResolvedModel, bool, error)
+}
+
+// ResolvedModel is a model ref resolved into the three things a call needs.
+//
+// 🔴 It is a struct rather than the three return values this interface used to have, because the third
+// one is what was missing. `Resolve` returned (provider, modelID) and the adapter dropped
+// `entry.Spec.Params` on the floor — a `ModelSpec` bundles all three as ONE versioned unit so that a
+// ref resolves exactly what was stored, and this seam un-bundled it. A struct is also what stops the
+// next parameter from being added by growing a signature nobody wants to touch.
+type ResolvedModel struct {
+	// Provider and ModelID are what the definition binds.
+	Provider string
+	ModelID  string
+	// Params are the pinned inference parameters, or nil when the model version pins none. Nil is a
+	// legitimate state — an OpenAI entry needs no `max_tokens` — so it is carried, not defaulted.
+	Params *runlink.ModelParams
 }
 
 // PlatformSource serves the definition and accepts submissions.
@@ -136,13 +152,14 @@ func (p *PlatformSource) ActiveDefinition(ctx context.Context) (runlink.AgentDef
 	if !ok || body == "" {
 		return runlink.AgentDefinition{}, false, nil
 	}
-	provider, modelID, ok, err := p.models.Resolve(ctx, v.Definition.ModelRef)
+	model, ok, err := p.models.Resolve(ctx, v.Definition.ModelRef)
 	if err != nil {
 		return runlink.AgentDefinition{}, false, err
 	}
 	if !ok {
 		return runlink.AgentDefinition{}, false, nil
 	}
+	provider, modelID := model.Provider, model.ModelID
 	// 🔴 The model's provider and the credential reference must AGREE, and a disagreement is an error
 	// rather than a preference between them. A definition binding an Anthropic model and an `openai`
 	// credential is incoherent, and the failure it produces on a customer's machine is a 401 from a
@@ -166,6 +183,10 @@ func (p *PlatformSource) ActiveDefinition(ctx context.Context) (runlink.AgentDef
 		ConfidenceFloor: p.floor,
 		MaxTokens:       p.budget.MaxTokens,
 		MaxWallSeconds:  int(p.budget.MaxWall / time.Second),
+		// The parameters the model version pins, carried rather than dropped. Without them a
+		// customer-placed run uses the operator's model with nobody's settings — and on Anthropic it
+		// does not run at all, because the gateway refuses a call that sets no max_tokens.
+		ModelParams: model.Params,
 	}, true, nil
 }
 

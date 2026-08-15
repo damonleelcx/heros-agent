@@ -83,6 +83,15 @@ type AgentAdmin struct {
 	Versions  *herosagent.PGVersionStore
 	Publisher *herosagent.Publisher
 	Rehearse  adminops.RehearseFunc
+	// Prompts is the P2 registry, carried so the operator console can author the PLATFORM's own agent
+	// instruction. The only other write path into this registry is `POST /api/v1/prompts/publish`,
+	// which namespaces by tenant — so without this a definition's prompt_ref had no operator-side
+	// origin, and a definition could be composed that could never be published.
+	//
+	// It is the SAME *registry.Store the platform half resolves refs through. A second store here
+	// would be a second answer to "does this ref resolve", and publish would accept what the runner
+	// could not find.
+	Prompts adminops.PlatformPromptRegistrar
 	// RehearsalWhy is set when a gate could not be built, so the boot log names what to fix rather
 	// than leaving an operator to discover it by pressing activate.
 	RehearsalWhy string
@@ -459,6 +468,9 @@ func mountServices(exec *adminops.Executor, src *PlatformSources, sessions *admi
 	// 🔴 The activation gate. Without it `Publisher.Activate` refuses every `pending` version for ever
 	// — safe, and indistinguishable from a gate that measured and said no. The boot log says which of
 	// the two this deployment is.
+	if agentAdmin != nil && agentAdmin.Prompts != nil {
+		agent = agent.WithPlatformPrompts(agentAdmin.Prompts)
+	}
 	if rehearse != nil {
 		agent = agent.WithRehearsal(rehearse)
 		log.Printf("operator console: the agent activation gate is ARMED — pressing activate runs the " +
