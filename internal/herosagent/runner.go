@@ -31,6 +31,24 @@ type Input struct {
 	Residue Residue
 	// Budget bounds this run. Exceeding it aborts, records the abort, and writes NO partial IR.
 	Budget Budget
+	// AgentConfigHash is WHICH DEFINITION is running. Set by [Runner.Infer] from its own argument;
+	// callers constructing an Input do not fill it.
+	//
+	// 🔴 It exists for the idempotency key, and its absence was a real defect. `GatewayModel` built that
+	// key as `defaultInferenceID(workflowID, sourceRevision, "")` under a comment reading "the three-part
+	// key IS the idempotency key" — the third part was empty, so two DIFFERENT definitions analysing the
+	// same workflow at the same revision sent the SAME `Idempotency-Key` header to the provider. A
+	// provider that honours the header answers the second from the first, and the gate then scores
+	// definition B on definition A's answers while looking entirely healthy.
+	//
+	// That is the worst shape this can take: the activation gate exists to tell definitions apart, and
+	// this made it unable to. It was found on the rehearsal, where WorkflowID is a fixture name and
+	// SourceRevision is the constant "fixture" — so every definition ever measured collided on all nine.
+	//
+	// 🚫 NOT part of the model's input wire. `AssembleModelInput` does not read it, and must not: the
+	// bytes the model sees are what `config_hash` is computed over, so feeding the hash into them would
+	// make a definition's identity depend on itself.
+	AgentConfigHash string
 }
 
 // Budget is the per-run ceiling (task 4.9).
@@ -354,6 +372,9 @@ func (r *Runner) Infer(ctx context.Context, in Input, agentConfigHash string, pl
 	ctx, cancel := context.WithTimeout(ctx, in.Budget.MaxWall)
 	defer cancel()
 
+	// The definition travels with the input, so the model layer can name WHICH definition this call is
+	// for — see Input.AgentConfigHash for what went wrong when it could not.
+	in.AgentConfigHash = agentConfigHash
 	raw, usage, err := r.model.Infer(ctx, in)
 	res := Result{Code: CodeOK, ProviderCalls: 1, Usage: usage}
 	if err != nil {

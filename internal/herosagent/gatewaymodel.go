@@ -71,7 +71,12 @@ func (m *GatewayModel) Infer(ctx context.Context, in Input) (RawResult, provider
 		},
 		// The three-part key IS the idempotency key: a retry of the same inference is the same request,
 		// which is exactly what the gateway's retry needs to avoid a double charge.
-		IdempotencyKey: defaultInferenceID(in.WorkflowID, in.SourceRevision, ""),
+		//
+		// 🔴 ALL THREE PARTS. This passed "" for the config hash, so two different definitions analysing
+		// the same workflow at the same revision sent an IDENTICAL Idempotency-Key — and a provider that
+		// honours the header serves the second from the first, making the activation gate score one
+		// definition on another's answers. See Input.AgentConfigHash.
+		IdempotencyKey: defaultInferenceID(in.WorkflowID, in.SourceRevision, in.AgentConfigHash),
 	}, nil)
 	if err != nil {
 		return RawResult{}, providercall.Usage{}, err
