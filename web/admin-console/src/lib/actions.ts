@@ -608,3 +608,61 @@ export async function publishAgentDefinition(_p: ActionResult | null, fd: FormDa
     }
   });
 }
+
+/**
+ * activateAgentDefinition makes a rehearsed definition the one serving inference.
+ *
+ * # 🔴 This is the control that spends
+ *
+ * Pressing it runs the pinned calibration set against a live model on this deployment's own provider
+ * credential — one provider call per fixture, at the moment of the press. Deliberately not behind a
+ * schedule: the operator who decides to activate is the one who should see the bill for measuring it.
+ *
+ * The gate then decides. `Publisher.Activate` refuses any version whose rehearsal state is not `passed`,
+ * and the floor is read as the MINIMUM across fixtures rather than the mean — a mean is exactly the
+ * aggregate that hides a per-repository catastrophe.
+ *
+ * # Why the outcome is not a receipt
+ *
+ * The route answers 204 on success and carries the gate's refusal in its error, which is the useful half:
+ * a refusal names the fixture and the score that failed. So a failure here is rendered with that text
+ * intact rather than flattened into "activation failed", which would send an operator to look for an
+ * outage instead of at a measurement.
+ *
+ * 🚫 No typed-target friction, deliberately. The friction tier on this console is driven by the SERVER's
+ * classification, and `handleAgentActivate` takes a config_hash and a reason — it does not request a
+ * confirmation. Inventing a red tier here would be the console deciding blast radius on its own, which
+ * is the one thing the friction rules forbid.
+ */
+export async function activateAgentDefinition(_p: ActionResult | null, fd: FormData): Promise<ActionResult> {
+  const configHash = String(fd.get("config_hash") ?? "").trim();
+  const reason = String(fd.get("reason") ?? "");
+  const command: Command = {
+    action: "agent.activate",
+    target: configHash || "definition",
+    reason,
+    undo: "Activate a different published definition — a version is never un-activated, it is replaced",
+  };
+  return withSession(async (token) => {
+    const jar = await cookies();
+    const impersonationId = jar.get("heros_admin_impersonation")?.value;
+    try {
+      await adminFetch<unknown>("/admin/api/agent/activate", {
+        method: "POST",
+        body: { config_hash: configHash, reason },
+        sessionToken: token,
+        impersonationId,
+      });
+      revalidatePath("/agent");
+      return {
+        ok: true,
+        command,
+        message:
+          `Activated. ${configHash} met the floor on every calibration fixture and is now serving ` +
+          `inference. Its per-fixture report is on the Rehearsal tab.`,
+      };
+    } catch (error) {
+      return toResult(error, command);
+    }
+  });
+}

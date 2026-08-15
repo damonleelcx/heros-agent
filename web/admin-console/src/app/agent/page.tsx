@@ -5,7 +5,7 @@ import { DegradedState, DeniedState, NotMountedState, Pill } from "@/components/
 import { DataTable, Num, PageFrame, Section } from "@/components/primitives";
 import { Tabs } from "@/components/tabs";
 import { ActionForm } from "@/components/actionForm";
-import { publishPlatformPrompt, publishAgentDefinition } from "@/lib/actions";
+import { publishPlatformPrompt, publishAgentDefinition, activateAgentDefinition } from "@/lib/actions";
 import type { AgentOverview, AgentAxisRow, Availability, AdminIdentity } from "@/lib/types";
 
 /**
@@ -418,6 +418,28 @@ function AgentBody({
                 <p>
                   Newest definition: <Pill tone={view.rehearsal_state === "passed" ? "ok" : "neutral"}>{view.rehearsal_state || "not run"}</Pill>
                 </p>
+                {canAdmin ? (
+                  <ActionForm
+                    title="Activate a definition"
+                    hint="Runs the calibration set against a live model on this deployment's own provider credential, and spends at the press. Only a definition that meets the floor on every fixture is served."
+                    submitLabel="Run the gate and activate"
+                    actionName="agent.activate"
+                    action={activateAgentDefinition}
+                    danger
+                  >
+                    <label htmlFor="activate-hash">config_hash</label>
+                    <p className="hint">
+                      The hash of the published definition to measure, from the Versions tab.
+                    </p>
+                    <input id="activate-hash" name="config_hash" type="text" autoComplete="off" required />
+                  </ActionForm>
+                ) : (
+                  <DeniedState
+                    capability="agent.admin"
+                    description="Activate a published agent definition"
+                    heldBy={holdersOf(identity, "agent.admin")}
+                  />
+                )}
                 {view.rehearsal_report ? (
                   /* `mono` is the stylesheet's existing preformatted treatment. An invented `.report`
                      class was caught here by the class fence — the console has one visual language and
