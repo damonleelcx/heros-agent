@@ -87,6 +87,29 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 	served := func(name string) { caps = append(caps, Capability{Name: name, Served: true}) }
 	absent := func(name, why string) { caps = append(caps, Capability{Name: name, Why: why}) }
 
+	// ── Provider endpoints ──────────────────────────────────────────────────────────────────────────
+	//
+	// Read ONCE and applied to every gateway this function builds. Two gateways are constructed below —
+	// the rehearsal's and the platform analyser's — and they must agree about where a provider lives:
+	// a deployment whose rehearsal measured a relay and whose serving path called the vendor would gate
+	// on one endpoint and serve from another.
+	//
+	// 🔴 A malformed value fails the BOOT. This error reaches launch.go, which aborts. Falling back to
+	// the vendor default would leave an operator believing their traffic is redirected while the
+	// credential goes to the vendor — see baseurl.go for why every branch refuses rather than defaults.
+	baseURLs, err := providergateway.BaseURLOverridesFromEnv()
+	if err != nil {
+		return nil, nil, fmt.Errorf("provider endpoints: %w", err)
+	}
+	if baseURLs.Len() > 0 {
+		for _, line := range baseURLs.Describe() {
+			log.Printf("provider endpoint: %s", line)
+		}
+		log.Printf("provider endpoint: 🔴 %d provider(s) do NOT point at their vendor. This deployment's "+
+			"provider credential is sent to the address above, and every analysis it runs — including "+
+			"customers' source under a `platform` placement — transits it", baseURLs.Len())
+	}
+
 	// ── The Postgres-backed surfaces ────────────────────────────────────────────────────────────────
 	//
 	// These need the platform database. A deployment that declares no DSN gets them registered and
@@ -573,7 +596,7 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 				Versions:  versionStore,
 				Prompts:   registryPrompts{reg},
 				Models:    registryModels{reg},
-				Gateway:   providergateway.New(secrets),
+				Gateway:   providergateway.New(secrets, baseURLs.Options()...),
 				Discovery: discoveryReg,
 				NowMS:     func() int64 { return time.Now().UnixMilli() },
 			}); rerr != nil {
@@ -660,7 +683,7 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 			Definitions: agentSource,
 			Placements:  agentSource,
 			Source:      runner,
-			Gateway:     providergateway.New(secrets),
+			Gateway:     providergateway.New(secrets, baseURLs.Options()...),
 			Inferences:  inferenceStore,
 			Floor:       herosagent.DefaultConfidenceFloor,
 			Budget:      herosagent.DefaultBudget(),
