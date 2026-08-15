@@ -2,12 +2,14 @@ package launch
 
 import (
 	"context"
+	"log"
 	"time"
 
 	"github.com/heros-foreal/agentd/internal/api"
 	"github.com/heros-foreal/agentd/internal/discovery"
 	"github.com/heros-foreal/agentd/internal/hostdiscovery"
 	"github.com/heros-foreal/agentd/internal/patternclassifier"
+	"github.com/heros-foreal/agentd/internal/platformanalyse"
 	"github.com/heros-foreal/agentd/internal/sourceingest"
 )
 
@@ -84,7 +86,66 @@ func newPlatformGraphSource(discovered hostdiscovery.GraphStore, optIn api.Patte
 // The adapter lives here rather than as a method on Runner so that internal/hostdiscovery does not
 // import internal/api. The domain package does not need to know an HTTP surface exists, and the day it
 // does is the day the two cannot be tested apart.
-type discoveryAdapter struct{ runner *hostdiscovery.Runner }
+type discoveryAdapter struct {
+	runner *hostdiscovery.Runner
+	// analyse is the platform-side agent, or nil when this deployment does not carry one. Optional in
+	// the same way the rehearsal gate is: a deployment with no provider credential still discovers.
+	analyse *platformanalyse.Service
+	// slots bounds concurrent analyses. A buffered channel rather than a worker pool because the bound
+	// is the whole requirement — an analysis is one provider call under a wall-clock budget, and the
+	// thing to prevent is a push storm opening one per request. A FULL channel drops the analysis and
+	// says so; it never queues, because a queue with no durable backing is a promise this process
+	// cannot keep across a restart.
+	slots chan struct{}
+}
+
+// analyseAsync starts the platform-side analysis for a completed discovery, and returns immediately.
+//
+// 🔴 NOT synchronous, and not on the request's context. Discovery is the main line — it produces the
+// graph every page draws — and an analysis is an enrichment that costs a provider round-trip under a
+// wall-clock budget measured in minutes. Blocking the push/discover response on it would make the
+// user's flow wait for the slowest optional thing in the system, which is the one trade the UX rules
+// put above every other consideration here.
+//
+// The context is DETACHED for the same reason: the request's context is cancelled the moment the
+// response is written, so an analysis started on it would be killed immediately and every run would
+// report as cancelled. It carries its own ceiling instead — the runner's budget bounds the work, and
+// this bounds the wait for a runner that never returns.
+func (d discoveryAdapter) analyseAsync(ref sourceingest.Ref) {
+	if d.analyse == nil {
+		return
+	}
+	select {
+	case d.slots <- struct{}{}:
+	default:
+		// Reported, never silent. A dropped analysis is invisible on every surface — the graph still
+		// renders, just without inferred edges — so the log line is the only place it can exist.
+		log.Printf("platform analysis: SKIPPED for %s — %d analyses already in flight. The graph is "+
+			"unaffected; the inferred edges and narrative for this revision were not produced",
+			ref, cap(d.slots))
+		return
+	}
+	go func() {
+		defer func() { <-d.slots }()
+		ctx, cancel := context.WithTimeout(context.Background(), platformAnalysisWall)
+		defer cancel()
+		out, err := d.analyse.Analyse(ctx, ref)
+		switch {
+		case err != nil:
+			log.Printf("platform analysis: FAILED for %s: %v", ref, err)
+		case out.Reason == platformanalyse.ReasonAnalysed:
+			log.Printf("platform analysis: %s analysed under definition %s", ref, out.ConfigHash)
+		case out.Reason == platformanalyse.ReasonNotPlaced:
+			// The default for every tenant. Not worth a line at INFO on every push.
+		default:
+			log.Printf("platform analysis: %s produced nothing for %s: %s", ref, out.Reason, out.Detail)
+		}
+	}()
+}
+
+// platformAnalysisWall bounds a detached analysis. Longer than the runner's own budget on purpose: this
+// is the backstop for a runner that never returns, not a second opinion about how long a run may take.
+const platformAnalysisWall = 15 * time.Minute
 
 // Discover runs discovery and summarises the result.
 //
@@ -96,6 +157,9 @@ func (d discoveryAdapter) Discover(ctx context.Context, ref sourceingest.Ref) (a
 	if err != nil {
 		return api.DiscoverySummary{}, err
 	}
+	// The enrichment, started only after the main line has succeeded. It cannot fail this call: it does
+	// not run on this context and its result reaches the caller through the stored inference, not here.
+	d.analyseAsync(ref)
 	// Labelled regions are counted from the view's Regions, which by construction hold only regions a
 	// detector named. Counting node-level labels too would double-count a node-scoped label that is
 	// already represented as a region of one.
@@ -166,12 +230,14 @@ func newEditorIRSource(graphs hostdiscovery.GraphStore, runner *hostdiscovery.Ru
 }
 
 // newDiscoveryAdapter returns the API-facing discovery runner, or nil when there is no runner.
-func newDiscoveryAdapter(runner *hostdiscovery.Runner) api.SourceDiscovery {
+func newDiscoveryAdapter(runner *hostdiscovery.Runner, analyse *platformanalyse.Service) api.SourceDiscovery {
 	if runner == nil {
 		// A typed nil in an interface is not nil, and the handler's `s.sourceDiscovery == nil` check
 		// would pass while every call panicked. Returning an untyped nil is the difference between a
 		// 503 and a 500 on every deployment that mounts snapshots without a runner.
 		return nil
 	}
-	return discoveryAdapter{runner: runner}
+	// One slot. A second concurrent analysis buys nothing on a single-node deployment and doubles
+	// the peak provider spend; raise it deliberately, with a reason, not as a default.
+	return discoveryAdapter{runner: runner, analyse: analyse, slots: make(chan struct{}, 1)}
 }
