@@ -4,7 +4,9 @@ import { OperatorShell } from "@/components/shell";
 import { DegradedState, DeniedState, NotMountedState, Pill } from "@/components/states";
 import { DataTable, Num, PageFrame, Section } from "@/components/primitives";
 import { Tabs } from "@/components/tabs";
-import type { AgentOverview, AgentAxisRow, Availability } from "@/lib/types";
+import { ActionForm } from "@/components/actionForm";
+import { publishPlatformPrompt } from "@/lib/actions";
+import type { AgentOverview, AgentAxisRow, Availability, AdminIdentity } from "@/lib/types";
 
 /**
  * The platform's own analysis agent (P30 §6).
@@ -63,6 +65,10 @@ export default async function AgentPage() {
     );
   }
 
+  // Authoring the instruction IS changing what the platform infers with, so it needs the write
+  // capability — not the read one that got us onto this page.
+  const canAdmin = hasCapability(identity, "agent.admin");
+
   let view: AgentOverview | null = null;
   let failure: { kind: string; message: string } | null = null;
   try {
@@ -97,14 +103,23 @@ export default async function AgentPage() {
         ) : !view ? (
           <DegradedState what="the analysis agent" />
         ) : (
-          <AgentBody view={view} />
+          <AgentBody view={view} canAdmin={canAdmin} identity={identity} />
         )}
       </PageFrame>
     </OperatorShell>
   );
 }
 
-function AgentBody({ view }: { view: AgentOverview }) {
+function AgentBody({
+  view,
+  canAdmin,
+  identity,
+}: {
+  view: AgentOverview;
+  /** Whether this operator may CHANGE the agent, not merely read it. */
+  canAdmin: boolean;
+  identity: AdminIdentity;
+}) {
   const axes = view.axes ?? [];
   const versions = view.versions ?? [];
 
@@ -243,6 +258,66 @@ function AgentBody({ view }: { view: AgentOverview }) {
                     </tr>
                   ))}
                 </DataTable>
+              </Section>
+            ),
+          },
+          {
+            id: "instruction",
+            label: "Instruction",
+            content: (
+              <Section title="The agent's instruction" flush>
+                <p>
+                  A definition binds its instruction by <code>prompt_ref</code>, and publishing one is
+                  refused if that ref does not resolve — a definition that cannot render its instruction
+                  can be neither measured nor served. Publish the text here first, then bind the ref it
+                  returns on the definition&apos;s prompt axis.
+                </p>
+                <p>
+                  This is the <strong>platform&apos;s own</strong> instruction and belongs to no tenant.
+                  It is stored outside every tenant namespace, so it can never collide with, or be
+                  enumerated by, a customer&apos;s prompts.
+                </p>
+                <p>
+                  Versions are <strong>immutable and content-addressed</strong>: editing publishes a new
+                  version and leaves the previous one resolvable, and publishing identical text twice
+                  returns the ref that already existed rather than making a second version. Publishing
+                  changes nothing on its own — the new text reaches customers only once a definition
+                  binds it <em>and</em> that definition passes the activation gate.
+                </p>
+                {canAdmin ? (
+                  <ActionForm
+                    title="Publish the instruction"
+                    hint="Returns the prompt_ref to bind on a definition. Nothing is served until a definition binds it and passes its rehearsal."
+                    submitLabel="Publish instruction"
+                    actionName="agent.publish_prompt"
+                    action={publishPlatformPrompt}
+                  >
+                    <label htmlFor="prompt-name">Name</label>
+                    <p className="hint">
+                      How you find this instruction again, and what its versions line up under. Not
+                      shown to customers.
+                    </p>
+                    <input
+                      id="prompt-name"
+                      name="name"
+                      type="text"
+                      autoComplete="off"
+                      required
+                    />
+                    <label htmlFor="prompt-body">Instruction</label>
+                    <p className="hint">
+                      Stored exactly as typed — leading and trailing whitespace included, because the
+                      text the agent is given is the text you wrote.
+                    </p>
+                    <textarea id="prompt-body" name="body" rows={12} required />
+                  </ActionForm>
+                ) : (
+                  <DeniedState
+                    capability="agent.admin"
+                    description="Publish the platform analysis agent's instruction"
+                    heldBy={holdersOf(identity, "agent.admin")}
+                  />
+                )}
               </Section>
             ),
           },

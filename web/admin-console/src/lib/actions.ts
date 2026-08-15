@@ -464,3 +464,64 @@ export async function executeGDPR(_p: ActionResult | null, fd: FormData): Promis
     }
   });
 }
+
+// ── The platform agent's own instruction ────────────────────────────────────
+
+/**
+ * publishPlatformPrompt authors the PLATFORM's agent instruction and returns the ref a definition
+ * binds.
+ *
+ * # Why this control exists on the operator console at all
+ *
+ * `Publisher.Publish` refuses a definition whose `prompt_ref` does not resolve, and the prompt
+ * registry's only other write route is TENANT-scoped. The platform is not a tenant, so without this
+ * an operator could compose a definition here and never publish it — the ref had no operator-side
+ * origin.
+ *
+ * # It does NOT use `post`
+ *
+ * `post` returns the platform's `Receipt`, and this route answers with the published version id
+ * instead. That id is the entire point of the control — it is what the operator pastes into a
+ * definition's prompt axis — so it is surfaced in the outcome `message` rather than discarded to fit
+ * a shared helper.
+ *
+ * # The reason field
+ *
+ * The API does not REQUIRE a reason: publishing a prompt version changes nothing on its own, and
+ * demanding a justification for an inert act is how the reason on the act that does change something
+ * becomes noise. The console asks for one anyway, because every mutating control here asks for one and
+ * a single exception would read as an oversight. The split is deliberate: uniform discipline in the
+ * UI, no bootstrap-blocking requirement in the API.
+ */
+export async function publishPlatformPrompt(_p: ActionResult | null, fd: FormData): Promise<ActionResult> {
+  const name = String(fd.get("name") ?? "").trim();
+  const body = String(fd.get("body") ?? "");
+  const command: Command = {
+    action: "agent.publish_prompt",
+    target: name,
+    reason: String(fd.get("reason") ?? ""),
+    undo: "Publish the previous text again — versions are immutable and content-addressed, so the " +
+      "earlier one stays resolvable and republishing it returns its original id",
+  };
+  return withSession(async (token) => {
+    const jar = await cookies();
+    const impersonationId = jar.get("heros_admin_impersonation")?.value;
+    try {
+      const res = await adminFetch<{ version_id: string; name: string; created: boolean }>(
+        "/admin/api/agent/prompt",
+        { method: "POST", body: { name, body }, sessionToken: token, impersonationId },
+      );
+      revalidatePath("/agent");
+      // The two outcomes are reported apart. Content-addressing makes a re-publish of identical text a
+      // no-op, and calling that "published" would tell an operator they had edited the platform's
+      // instruction when they had not — after which they would go looking for a version that does not
+      // exist.
+      const message = res.created
+        ? `Published. Bind this as the definition's prompt_ref: ${res.version_id}`
+        : `No change — this text was already published. Its existing ref is ${res.version_id}`;
+      return { ok: true, command, message };
+    } catch (error) {
+      return toResult(error, command);
+    }
+  });
+}
