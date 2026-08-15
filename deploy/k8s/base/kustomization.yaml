@@ -35,7 +35,7 @@ resources:
 images:
   # The platform's own three, built for linux/arm64 and pushed to this account's ECR.
   #
-  # agentd is at f9e640c and admin-console at 13dcdf0 (PR #100). The customer console stays at
+  # agentd is at f9e640c and admin-console at d04a09f (PR #100). The customer console stays at
   # 63a3a03: nothing in that PR touches it, and repinning an image whose code did not change would
   # make the pin stop meaning "the tree this was built from".
   #
@@ -54,7 +54,7 @@ images:
     digest: sha256:e882d793d83d442fbd1a39e7ff7fa1450ff6173105a7cd4b2cd4c30a027b751e
   - name: ghcr.io/heros-foreal/heros-admin-console
     newName: 373468206837.dkr.ecr.us-east-1.amazonaws.com/heros-admin-console
-    digest: sha256:2cf43a088229daa334bea1dc73ed6fd6a1a6c043ae1e82544be1b4ce38d234a2
+    digest: sha256:f4bacae454eb73f8550f1ea9197753110577aa727d5a2ce93c1457791b67f527
   - name: postgres
     digest: sha256:6efd0df010dc3cb40d5e33e3ef84acecc5e73161bd3df06029ee8698e5e12c60
   - name: minio/minio
