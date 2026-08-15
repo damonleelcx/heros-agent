@@ -2,6 +2,7 @@ package adminops
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -400,13 +401,72 @@ func agentState(hasActive bool, versions []herosagent.Version) (string, string) 
 		return "none_published", "No definition has been published. HEROS is not configured on this " +
 			"deployment, which is different from being disabled for a tenant — nothing exists to enable."
 	case versions[0].RehearsalState == herosagent.RehearsalFailed:
-		return "rehearsal_failed", "The newest definition ran against the pinned fixtures and did not " +
-			"meet the floor on every one. The per-fixture report below names which failed and by how " +
-			"much. Nothing is serving inference."
+		return "rehearsal_failed", rehearsalFailureSentence(versions[0].RehearsalReport)
 	default:
 		return "pending_rehearsal", "A definition is published and has NOT been measured. It is not " +
 			"active and will not become active until it meets the floor on every fixture individually. " +
 			"Nothing is serving inference."
+	}
+}
+
+// rehearsalFailureSentence separates the two unrelated facts `RehearsalFailed` carries.
+//
+// 🔴 One state, two situations with different causes and different next actions:
+//
+//   - The gate MEASURED the definition and it scored below the floor. The model is the problem, and the
+//     per-fixture numbers say where.
+//   - The run never reached the model at all. Nothing was measured, there are no numbers, and the
+//     problem is somewhere between this deployment and the provider.
+//
+// This said the FIRST for both. Found in production on the first real activation: the provider account
+// had no credits, every attempt came back `429 insufficient_quota`, and this page reported a definition
+// that "ran against the pinned fixtures and did not meet the floor on every one" whose report "names
+// which failed and by how much". It ran against nothing and named nothing. An operator reading that
+// goes looking for per-fixture scores that do not exist, and concludes the model is bad when the real
+// answer is a billing page.
+//
+// That is this file's own rule turned on itself: `unpriced` must not render as `0` because an absence
+// is not a measurement — and neither is this.
+//
+// # Why the REPORT is the discriminator, and not a new state
+//
+// `GateActivation` already writes two different documents: `{"error": …}` when the run itself failed,
+// and the serialised `RehearsalReport` when it produced numbers. The distinction is therefore already
+// recorded, and reading it here needs no new state on the wire, no schema change, and no second thing
+// to keep in sync. `rehearsal_failed` stays the closed-set value the console switches on — the rehearsal
+// did fail either way, and it is only the CLAIM ABOUT WHAT WAS MEASURED that was wrong.
+func rehearsalFailureSentence(report string) string {
+	const nothingServing = " Nothing is serving inference."
+
+	var probe struct {
+		Error string `json:"error"`
+	}
+	trimmed := strings.TrimSpace(report)
+	switch {
+	case trimmed == "":
+		// 🚫 Neither claim, because neither is available. A missing report cannot be read as "it scored
+		// badly" — that is the assumption this function exists to stop making.
+		return "The newest definition did not pass its rehearsal, and no report was stored for it. " +
+			"Whether it was measured and scored low, or never reached the model at all, cannot be " +
+			"told from here." + nothingServing
+
+	case json.Unmarshal([]byte(trimmed), &probe) != nil:
+		// Same reasoning. An unreadable report is an unknown, not a bad score.
+		return "The newest definition did not pass its rehearsal, and its stored report could not be " +
+			"read. It is shown below verbatim so it can be inspected; until it can be parsed, whether " +
+			"anything was measured is unknown." + nothingServing
+
+	case probe.Error != "":
+		// The error text itself is NOT inlined here. The console renders the full report below this
+		// sentence already, and a 429 body pasted mid-paragraph makes the one line an operator reads
+		// first unreadable.
+		return "The newest definition was NOT measured. Its rehearsal could not complete, so there are " +
+			"no per-fixture scores and nothing here is a judgement about the definition — the report " +
+			"below is the failure that stopped the run, and it names the cause." + nothingServing
+
+	default:
+		return "The newest definition ran against the pinned fixtures and did not meet the floor on " +
+			"every one. The per-fixture report below names which failed and by how much." + nothingServing
 	}
 }
 
