@@ -35,24 +35,26 @@ resources:
 images:
   # The platform's own three, built for linux/arm64 and pushed to this account's ECR.
   #
-  # agentd is at bdd511d (PR #100: the platform prompt-authoring surface, and the model-catalog params
-  # carriage without which a seeded Anthropic entry registers and cannot be called). The two consoles
-  # stay at 63a3a03. The set moved together for v0.22.0 because internal/api/install.go serves its
-  # install surface from distribution.DocumentedRelease, so a console-only push would leave the API
-  # answering an older version than the page showed. bdd511d touches no version surface, so agentd
-  # moves alone here — repin the consoles only when something they render changes.
+  # agentd is at f9e640c and admin-console at 13dcdf0 (PR #100). The customer console stays at
+  # 63a3a03: nothing in that PR touches it, and repinning an image whose code did not change would
+  # make the pin stop meaning "the tree this was built from".
+  #
+  # They are at DIFFERENT commits deliberately. v0.22.0 moved all three together because
+  # internal/api/install.go serves its install surface from distribution.DocumentedRelease, so a
+  # console-only push would leave the API answering an older version than the page showed. Nothing in
+  # PR #100 touches a version surface, so each image moves on its own evidence.
   #
   # `newName` retargets the registry; the digest is the artifact. Both must match deploy/images.env
   # exactly or check-image-parity.sh fails the build.
   - name: ghcr.io/heros-foreal/agentd
     newName: 373468206837.dkr.ecr.us-east-1.amazonaws.com/agentd
-    digest: sha256:0dd8e5673184c333e3b2757e2a4615cff75d6f5411f72c5acc0e446b4c27f9c6
+    digest: sha256:91eeb4294c1e373d9cfff6635f205dae5da7776b1e8d0962b3403ec01d860e92
   - name: ghcr.io/heros-foreal/heros-console
     newName: 373468206837.dkr.ecr.us-east-1.amazonaws.com/heros-console
     digest: sha256:e882d793d83d442fbd1a39e7ff7fa1450ff6173105a7cd4b2cd4c30a027b751e
   - name: ghcr.io/heros-foreal/heros-admin-console
     newName: 373468206837.dkr.ecr.us-east-1.amazonaws.com/heros-admin-console
-    digest: sha256:9a3185de4b9eb3e8fcb18571cbc3bbaf7c11113aa74be53af783ec152e6545eb
+    digest: sha256:2cf43a088229daa334bea1dc73ed6fd6a1a6c043ae1e82544be1b4ce38d234a2
   - name: postgres
     digest: sha256:6efd0df010dc3cb40d5e33e3ef84acecc5e73161bd3df06029ee8698e5e12c60
   - name: minio/minio

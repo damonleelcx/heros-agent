@@ -82,10 +82,10 @@ patches:
   # This is the COMMIT each image is built from, so tag, digest and version all name one tree.
   # A bare SHA rather than a URL, which also keeps it clear of the zero-external-origin gate.
   #
-  # ⚠️ PER WORKLOAD, not one value for the deployment. agentd is at bdd511d and the two consoles are
-  # at 63a3a03, because agentd moved alone (see base/kustomization.yaml). Setting all three to the
-  # newest commit would put the label back to naming a tree the console binaries were not built from —
-  # which is the exact defect this block was added to fix, in the other direction.
+  # ⚠️ PER WORKLOAD, not one value for the deployment. agentd is at f9e640c, admin-console at 13dcdf0,
+  # and the CUSTOMER console still at 63a3a03 because PR #100 does not touch it. Setting all three to
+  # the newest commit would put the label back to naming a tree a binary was not built from — the exact
+  # defect this block was added to fix, in the other direction.
   #
   # ⚠️ THREE PATCHES, ONE PER WORKLOAD, each naming its own container. A single patch targeting all three
   # by regex does NOT work: a strategic merge keys `containers` by `name`, so a placeholder name does not
@@ -102,7 +102,7 @@ patches:
             containers:
               - name: agentd
                 env:
-                  - { name: HEROS_VERSION, value: "bdd511d" }
+                  - { name: HEROS_VERSION, value: "f9e640c" }
   - target: { kind: Deployment, name: console }
     patch: |
       apiVersion: apps/v1
@@ -126,7 +126,7 @@ patches:
             containers:
               - name: admin-console
                 env:
-                  - { name: HEROS_VERSION, value: "63a3a03" }
+                  - { name: HEROS_VERSION, value: "13dcdf0" }
 
   - target: { kind: Deployment, name: agentd }
     patch: |
