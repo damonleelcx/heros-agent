@@ -35,26 +35,25 @@ resources:
 images:
   # The platform's own three, built for linux/arm64 and pushed to this account's ECR.
   #
-  # agentd and admin-console are both at 125df81 (PR #105). The customer console stays at 63a3a03:
-  # nothing in that PR touches it, and repinning an image whose code did not change would make the pin
+  # agentd is at 286c511 (PRs #106, #107), the admin console at 125df81 (PR #105), the customer console
+  # at 63a3a03. All three differ, and that is the pins working rather than drift: each names the tree
+  # its own bytes were built from, and repinning an image whose code did not change would make the pin
   # stop meaning "the tree this was built from".
   #
-  # 🔴 Those two moved TOGETHER because PR #105 spans the wire: it adds `placements` to the
-  # `/agent/spend` read model in agentd AND the editor in the console that renders those options.
-  # Shipping the console alone would leave its placement control with no option set to offer — it
-  # degrades honestly and says so, but the control would be dead on arrival.
+  # 🔴 PR #105 moved agentd AND the admin console together because it spanned the wire — a field on the
+  # `/agent/spend` read model plus the editor rendering it — and shipping one half would have left the
+  # control with no options to offer. #106 and #107 are Go-only and touch no console, so only agentd
+  # moves. When one side of a wire field moves, both pins move; otherwise each moves on its own evidence.
   #
-  # They are at DIFFERENT commits from the customer console deliberately. v0.22.0 moved all three
-  # together because internal/api/install.go serves its install surface from
-  # distribution.DocumentedRelease, so a console-only push would leave the API answering an older
-  # version than the page showed. PR #105 touches no version surface, so each image moves on its own
-  # evidence — which here means the two ends of one wire field, and not the third.
+  # v0.22.0 moved all three at once for a third reason again: internal/api/install.go serves its install
+  # surface from distribution.DocumentedRelease, so a console-only push would leave the API answering an
+  # older version than the page showed.
   #
   # `newName` retargets the registry; the digest is the artifact. Both must match deploy/images.env
   # exactly or check-image-parity.sh fails the build.
   - name: ghcr.io/heros-foreal/agentd
     newName: 373468206837.dkr.ecr.us-east-1.amazonaws.com/agentd
-    digest: sha256:dffc850ef6c79b128fadba11fa0060c529280cacacd7b4f2618fa65195c0ca78
+    digest: sha256:a83237b2921e7d3f0e58ac15c79e1e1233ce2df0c27daca77d1a75f4c89bb7eb
   - name: ghcr.io/heros-foreal/heros-console
     newName: 373468206837.dkr.ecr.us-east-1.amazonaws.com/heros-console
     digest: sha256:e882d793d83d442fbd1a39e7ff7fa1450ff6173105a7cd4b2cd4c30a027b751e
