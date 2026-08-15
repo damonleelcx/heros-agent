@@ -261,3 +261,81 @@ func TestOnePersonMaySignUpTwice(t *testing.T) {
 		t.Fatalf("expected two memberships, got %d", len(ms))
 	}
 }
+
+// ── Creation-time placement seeding ─────────────────────────────────────────────────────────────────
+//
+// A deployment whose organizations are all its operator's own wants every new one enrolled for
+// analysis. The dangerous way to give it that is to flip what an ABSENT placement row means, which
+// enables every tenant at once, records nobody's decision, and removes the per-tenant off switch. The
+// seed writes an explicit row per organization instead. These hold that distinction.
+
+func TestWithoutASeedSignUpWritesNoPlacement(t *testing.T) {
+	svc, _, _ := newService(t, catalog)
+	// No WithPlacementSeed: the service must not invent a placement, because `disabled` by absence is
+	// the Q2 default and a signup path that quietly enrolled everybody would be the change this design
+	// exists to avoid.
+	if svc.seed != nil {
+		t.Fatal("a service built with no seed carries one")
+	}
+	if _, err := svc.Create(context.Background(), Request{
+		Name: "Acme Inc", Issuer: "https://idp.acme", Subject: "sub-1", Email: "dana@acme.com",
+	}); err != nil {
+		t.Fatalf("sign up: %v", err)
+	}
+}
+
+func TestTheSeedRunsForANewOrganisation(t *testing.T) {
+	svc, _, _ := newService(t, catalog)
+	var gotTenant string
+	var calls int
+	svc = svc.WithPlacementSeed(func(_ context.Context, _ tenancy.Execer, tenantID string, _ time.Time) error {
+		calls++
+		gotTenant = tenantID
+		return nil
+	})
+	res, err := svc.Create(context.Background(), Request{
+		Name: "Acme Inc", Issuer: "https://idp.acme", Subject: "sub-1", Email: "dana@acme.com",
+	})
+	if err != nil {
+		t.Fatalf("sign up: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("the seed ran %d time(s), want 1", calls)
+	}
+	// The tenant the seed is told about must be the one that was created — a seed pointed at a
+	// different id would enrol an organization nobody signed up.
+	if gotTenant != res.Organization.Tenant.TenantID {
+		t.Errorf("the seed was given %q, want the created tenant %q", gotTenant, res.Organization.Tenant.TenantID)
+	}
+}
+
+// 🔴 A FAILING SEED FAILS THE SIGN-UP.
+//
+// This is the opposite of the bypass rule that governs the analysis itself, and deliberately: the seed
+// runs INSIDE the creation transaction, so returning nil would commit an organization the deployment's
+// own policy says should have been enrolled. A missing analysis is a missing enrichment; an
+// organization created outside its deployment's policy is a record that is wrong.
+func TestAFailingSeedFailsTheSignUp(t *testing.T) {
+	svc, tenants, _ := newService(t, catalog)
+	svc = svc.WithPlacementSeed(func(context.Context, tenancy.Execer, string, time.Time) error {
+		return errors.New("placement store is unreachable")
+	})
+	_, err := svc.Create(context.Background(), Request{
+		Name: "Acme Inc", Issuer: "https://idp.acme", Subject: "sub-1", Email: "dana@acme.com",
+	})
+	if err == nil {
+		t.Fatal("a sign-up whose placement seed failed was reported as successful")
+	}
+	if !strings.Contains(err.Error(), "unreachable") {
+		t.Errorf("the failure does not carry the seed's reason: %v", err)
+	}
+	// And the organization must not survive the failure: the identity store undoes its writes, so a
+	// retry is a clean creation rather than a collision with a half-made org.
+	list, lerr := tenants.ListTenants()
+	if lerr != nil {
+		t.Fatalf("list tenants: %v", lerr)
+	}
+	if len(list) != 0 {
+		t.Errorf("%d organization(s) were left behind after the seed failed: %+v", len(list), list)
+	}
+}

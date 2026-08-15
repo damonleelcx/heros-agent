@@ -63,6 +63,33 @@ type Service struct {
 	accounts account.Store
 	plans    Plans
 	now      func() time.Time
+	// seed runs inside the creation transaction, after the account, for deployments that decide a new
+	// organization's analysis placement at creation rather than leaving it to an operator. Nil on every
+	// deployment that does not — which is the default, and is why this is an option rather than a
+	// parameter every caller would pass nil to.
+	seed PlacementSeed
+}
+
+// PlacementSeed writes a newly created organization's analysis placement inside the SAME transaction
+// that created it.
+//
+// 🔴 A function rather than a store, so this package stays ignorant of what a placement IS. Sign-up
+// creates organizations; `platform` versus `customer` is a P30 policy, and a signup path that imported
+// the agent's vocabulary would be a signup path that has to change when that vocabulary does.
+//
+// `ex` is nil on the in-memory path, where there is no transaction to join.
+type PlacementSeed func(ctx context.Context, ex tenancy.Execer, tenantID string, at time.Time) error
+
+// WithPlacementSeed returns the service with creation-time placement seeding wired.
+//
+// 🔴 It seeds an EXPLICIT row; it does not change what an absent row means. A deployment that wants
+// every new organization analysed platform-side gets exactly that, while `disabled` stays the default
+// for anything unseeded, every seeded org carries a reason, and any one of them can still be turned
+// off individually. Flipping the default instead would enable every tenant at once with no record of
+// the choice and no per-tenant off switch.
+func (s *Service) WithPlacementSeed(seed PlacementSeed) *Service {
+	s.seed = seed
+	return s
 }
 
 // New builds the service. `accounts` is used only on the in-memory path; on the durable path the
@@ -167,15 +194,36 @@ func (s *Service) Create(ctx context.Context, req Request) (Result, error) {
 			// In-memory path: no transaction to join. The identity store undoes its own three writes if
 			// this returns an error, which is as strong as a store that loses everything on restart can be.
 			out, err := s.accounts.Create(acct)
+			if err != nil {
+				return err
+			}
 			stored = out
-			return err
+			return s.seedPlacement(ctx, nil, tenantID, at)
 		}
 		out, err := account.CreateWithin(ctx, ex, acct)
+		if err != nil {
+			return err
+		}
 		stored = out
-		return err
+		return s.seedPlacement(ctx, ex, tenantID, at)
 	})
 	if err != nil {
 		return Result{}, err
 	}
 	return Result{Organization: org, Account: stored}, nil
+}
+
+// seedPlacement runs the creation-time placement seed, if one is wired.
+//
+// 🔴 A failure here FAILS THE SIGN-UP, because it runs inside the creation transaction and returning
+// nil would commit an organization the deployment's own policy says should have been decided. That is
+// the opposite of the bypass rule elsewhere in this system, and deliberately: an analysis that does not
+// run is a missing enrichment, while an organization created outside its deployment's policy is a
+// record that is wrong. The transaction is the reason the choice is available at all — without it the
+// only options would be "commit a wrong record" or "leave a half-created org".
+func (s *Service) seedPlacement(ctx context.Context, ex tenancy.Execer, tenantID string, at time.Time) error {
+	if s.seed == nil {
+		return nil
+	}
+	return s.seed(ctx, ex, tenantID, at)
 }

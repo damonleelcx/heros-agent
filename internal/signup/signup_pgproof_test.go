@@ -20,10 +20,12 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/heros-foreal/agentd/internal/account"
+	"github.com/heros-foreal/agentd/internal/herosagent"
 	"github.com/heros-foreal/agentd/internal/pgmigrate"
 	"github.com/heros-foreal/agentd/internal/pgtest"
 	"github.com/heros-foreal/agentd/internal/plancfg"
@@ -204,5 +206,85 @@ func TestTwoConcurrentSignUpsForTheSameIdentityBothSucceedWithTheirOwnOrganizati
 	}
 	if err := db.QueryRow(`SELECT count(*) FROM membership WHERE user_id=$1`, first.Organization.Owner.UserID).Scan(&n); err != nil || n != 2 {
 		t.Fatalf("memberships=%d err=%v", n, err)
+	}
+}
+
+// ── The placement seed on the DURABLE path ──────────────────────────────────────────────────────────
+//
+// 🔴 Why this file and not signup_test.go. The in-memory tests exercise the `ex == nil` branch, so a
+// mutation that removed the seed from the DURABLE branch left them green — the branch that actually
+// runs in production had no coverage at all. Found by drilling, which is the only reason it is here.
+
+func TestDurableSignUpSeedsThePlacementInsideTheTransaction(t *testing.T) {
+	db := openPG(t, "signup_placement_seed")
+	svc, _ := durableService(t, db)
+	if _, err := db.Exec(`DELETE FROM heros_tenant_placement`); err != nil {
+		t.Fatalf("clear placements: %v", err)
+	}
+
+	svc = svc.WithPlacementSeed(func(ctx context.Context, ex tenancy.Execer, tenantID string, at time.Time) error {
+		// 🔴 The REAL writer, through the transaction handle sign-up passes. A test that wrote through
+		// `db` here would pass while the production seam was broken: it would prove a row can be
+		// written, never that it is written inside the creation transaction.
+		return herosagent.SetPlacementWithin(ctx, ex, herosagent.TenantPlacement{
+			TenantID: tenantID, Placement: herosagent.PlacementPlatform,
+			Reason: "created under this deployment's signup policy", SetBy: "signup-policy:test",
+			UpdatedAtMS: at.UnixMilli(),
+		})
+	})
+
+	res, err := svc.Create(context.Background(), Request{
+		Name: "Acme Inc", Issuer: "https://idp.acme", Subject: "sub-1", Email: "dana@acme.com",
+	})
+	if err != nil {
+		t.Fatalf("sign up: %v", err)
+	}
+
+	var placement, setBy, reason string
+	err = db.QueryRow(`SELECT placement, set_by, reason FROM heros_tenant_placement WHERE tenant_id = $1`,
+		res.Organization.Tenant.TenantID).Scan(&placement, &setBy, &reason)
+	if err != nil {
+		t.Fatalf("the new organization has no placement row: %v", err)
+	}
+	if placement != string(herosagent.PlacementPlatform) {
+		t.Errorf("placement = %q, want %q", placement, herosagent.PlacementPlatform)
+	}
+	// The row must be attributable to the POLICY, not to a person: nobody clicked anything, and a
+	// set_by that read like an operator would be the audit trail lying about who decided.
+	if !strings.Contains(setBy, "signup-policy") {
+		t.Errorf("set_by = %q — a seeded row must name the mechanism, never an operator", setBy)
+	}
+	if strings.TrimSpace(reason) == "" {
+		t.Error("the seeded row carries no reason")
+	}
+}
+
+// 🔴 A FAILING SEED ROLLS THE WHOLE ORGANIZATION BACK.
+//
+// The transaction is the entire justification for seeding at creation rather than after it. If the
+// seed can fail and leave the organization committed, the deployment ends up with exactly the record
+// its policy says should not exist — and nothing downstream would ever notice.
+func TestDurableSignUpRollsBackWhenTheSeedFails(t *testing.T) {
+	db := openPG(t, "signup_placement_rollback")
+	svc, _ := durableService(t, db)
+
+	svc = svc.WithPlacementSeed(func(context.Context, tenancy.Execer, string, time.Time) error {
+		return errors.New("placement store is unreachable")
+	})
+	if _, err := svc.Create(context.Background(), Request{
+		Name: "Acme Inc", Issuer: "https://idp.acme", Subject: "sub-1", Email: "dana@acme.com",
+	}); err == nil {
+		t.Fatal("a sign-up whose placement seed failed was reported as successful")
+	}
+
+	for _, table := range []string{"tenant", "platform_user", "membership", "account"} {
+		var n int
+		if err := db.QueryRow(`SELECT count(*) FROM ` + table).Scan(&n); err != nil {
+			t.Fatalf("count %s: %v", table, err)
+		}
+		if n != 0 {
+			t.Errorf("%s kept %d row(s) after the seed failed — the organization survived a failure "+
+				"that was supposed to roll it back", table, n)
+		}
 	}
 }

@@ -163,6 +163,21 @@ spec:
             # different answers, so no single inference is right, and an air-gapped install must not grow
             # a registration form by upgrading.
             - { name: HEROS_SELF_SERVE_SIGNUP, value: "0" }
+            # The analysis placement a NEW organization is created with.
+            #
+            # 🔴 EMPTY here, and empty means UNSET rather than a default of `platform`. `disabled` is
+            # every tenant's placement until somebody decides otherwise (Q2), and the two failure modes
+            # are not symmetrical: a missing analysis is a missing enrichment, while analysing an org
+            # nobody meant to enrol reads somebody's source under this platform's credential and spends
+            # this platform's money on it. The quiet option has to be the safe one, so a deployment that
+            # says nothing keeps the default.
+            #
+            # It seeds an EXPLICIT row per organization rather than changing what an absent row means,
+            # so every enrolled org carries a reason, can be disabled individually, and an operator can
+            # still tell a decision from a default. An unparseable value FAILS THE BOOT — a deployment
+            # that meant `platform` and typed `plaftorm` would otherwise come up healthy and enrol
+            # nobody, which is the silent half of the failure this variable exists to prevent.
+            - { name: HEROS_SIGNUP_PLACEMENT, value: "" }
             # The origin the links in outgoing mail point at. There is NO default: a guessed origin
             # produces a link that 404s in somebody's inbox, which looks like a broken product rather
             # than an unconfigured one. Set it in the overlay that knows the hostname.
