@@ -38,9 +38,26 @@ type Commands struct {
 }
 
 func (c Commands) client(token string) *transport.Client {
+	return c.clientAtLeast(token, 0)
+}
+
+// clientAtLeast builds a client whose timeout is at least `floor`.
+//
+// # Why a floor rather than a second Commands field
+//
+// Most platform calls are answered from storage and `transport.DefaultTimeout` fits them. One is not:
+// discovery PARSES THE CALLER'S REPOSITORY, so its duration is a property of the repository rather than
+// of the platform, and a bound that suits a fetch cannot suit it. Expressing that as a floor keeps one
+// construction path — an injected `c.Timeout` (tests, `heroslocallink`) still wins when it is LONGER,
+// so nothing that deliberately shortens the wait is overridden by a default it never asked for.
+func (c Commands) clientAtLeast(token string, floor time.Duration) *transport.Client {
+	timeout := c.Timeout
+	if floor > timeout {
+		timeout = floor
+	}
 	var opts []transport.Option
-	if c.Timeout > 0 {
-		opts = append(opts, transport.WithTimeout(c.Timeout))
+	if timeout > 0 {
+		opts = append(opts, transport.WithTimeout(timeout))
 	}
 	if c.RT != nil {
 		opts = append(opts, transport.WithRoundTripper(c.RT))
