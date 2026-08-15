@@ -36,6 +36,7 @@ import (
 	"github.com/heros-foreal/agentd/internal/modelcatalog"
 	"github.com/heros-foreal/agentd/internal/paymentsview"
 	"github.com/heros-foreal/agentd/internal/plancfg"
+	"github.com/heros-foreal/agentd/internal/platformanalyse"
 	"github.com/heros-foreal/agentd/internal/proposal"
 	"github.com/heros-foreal/agentd/internal/proposalgen"
 	"github.com/heros-foreal/agentd/internal/proposalstore"
@@ -638,7 +639,44 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 		if err != nil {
 			return nil, nil, fmt.Errorf("discovery runner: %w", err)
 		}
-		h.MountSourcePush(bundleStore, newDiscoveryAdapter(runner))
+		// The PLATFORM-SIDE ANALYSIS, joined to the discovery that feeds it.
+		//
+		// 🔴 Every part of this existed and nothing called it. `herosagent.NewRunner` says "the
+		// PLATFORM-side runner" and had two callers — the rehearsal gate and a proof binary — both
+		// passing an in-memory store, so a `platform`-placed tenant started nothing and could have kept
+		// nothing. `platformanalyse` is the caller; it runs the SAME definition the customer path
+		// resolves, against the DURABLE store, under the same ceiling.
+		//
+		// Nil when this deployment declares no secrets source: an analysis needs a provider credential,
+		// and a service wired without one would accept a push and fail at the call. Discovery is
+		// unaffected either way — the adapter treats the analysis as optional, which is what keeps the
+		// graph independent of whether the enrichment can run.
+		var analyseSvc *platformanalyse.Service
+		if secrets == nil {
+			log.Printf("platform analysis: NOT wired — this deployment declares no secrets source, so " +
+				"there is no provider credential to run an analysis with. Discovery is unaffected; a " +
+				"`platform`-placed tenant will get a graph and no inferred edges")
+		} else if svc, perr := platformanalyse.New(platformanalyse.Config{
+			Definitions: agentSource,
+			Placements:  agentSource,
+			Source:      runner,
+			Gateway:     providergateway.New(secrets),
+			Inferences:  inferenceStore,
+			Floor:       herosagent.DefaultConfidenceFloor,
+			Budget:      herosagent.DefaultBudget(),
+			// The ceiling and the meter, from the SAME wiring that reported readiness about them — so a
+			// platform-side run is capped by the tenant's cap rather than by a second opinion.
+			RunnerOption: agentSource.RunnerOptions(),
+			NowMS:        func() int64 { return time.Now().UnixMilli() },
+		}); perr != nil {
+			log.Printf("platform analysis: NOT wired — %v. Discovery is unaffected", perr)
+		} else {
+			analyseSvc = svc
+			log.Printf("platform analysis: wired. A `platform`-placed tenant's pushed revision is " +
+				"analysed after discovery, on this deployment's own provider credential")
+		}
+
+		h.MountSourcePush(bundleStore, newDiscoveryAdapter(runner, analyseSvc))
 		served("p1_source_discovery (customer-pushed snapshots; discovery and classification run here)")
 
 		// P5's editor, mounted for the first time. Its reason for being unsourced was the same as the

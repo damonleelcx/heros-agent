@@ -1,6 +1,8 @@
 package launch
 
 import (
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/heros-foreal/agentd/internal/registry"
@@ -68,5 +70,81 @@ func TestASinglePinnedFieldStillTravels(t *testing.T) {
 	})
 	if got.Params == nil || got.Params.Temperature == nil {
 		t.Fatal("a pinned temperature was dropped because no max_tokens was set alongside it")
+	}
+}
+
+// ── The platform-side analysis is CONSTRUCTED outside the proof binaries ────────────────────────────
+//
+// 🔴 This is the same fence shape PR #99 needed for the rehearsal gate, for the same reason and one
+// layer along. `herosagent.NewRunner` is documented as the platform-side runner and had exactly two
+// callers: the rehearsal gate and `cmd/proof/acceptance`. Both passed `NewMemInferenceStore()`. So the
+// mechanism was written, tested, and unreachable — nothing started a platform-placed analysis, and
+// nothing could have kept one if it had.
+//
+// The assertion is the PROPERTY (a deployed path constructs it, against a durable store), not that a
+// particular function exists — which would pass the moment somebody renamed it.
+
+func TestThePlatformAnalysisIsConstructedOutsideTheProofBinaries(t *testing.T) {
+	src, err := os.ReadFile("capabilities.go")
+	if err != nil {
+		t.Fatalf("read capabilities.go: %v", err)
+	}
+	body := string(src)
+	if !strings.Contains(body, "platformanalyse.New(") {
+		t.Fatal("no deployed path constructs platformanalyse.Service. The platform-side runner is " +
+			"reachable only from a proof binary again, which is the state PR #99 existed to end")
+	}
+	// And it must be given the DURABLE store. A memory store here reproduces the exact defect: an
+	// analysis that runs, costs money, and is forgotten.
+	idx := strings.Index(body, "platformanalyse.New(")
+	cfg := body[idx:min(idx+900, len(body))]
+	if strings.Contains(cfg, "NewMemInferenceStore") {
+		t.Error("the platform analysis is wired to an IN-MEMORY inference store — it would run, spend, " +
+			"and forget, which is indistinguishable on every surface from never having run")
+	}
+	if !strings.Contains(cfg, "Inferences:  inferenceStore") && !strings.Contains(cfg, "Inferences: inferenceStore") {
+		t.Error("the platform analysis is not wired to the durable inference store")
+	}
+}
+
+// The analysis must never be able to fail the discovery it enriches. Asserted on the ADAPTER: Discover
+// returns the summary and the error from the runner, and the analysis is started by a call that returns
+// nothing — so there is no expression in which its failure reaches the caller.
+func TestTheAnalysisCannotFailTheDiscovery(t *testing.T) {
+	src, err := os.ReadFile("platformgraph.go")
+	if err != nil {
+		t.Fatalf("read platformgraph.go: %v", err)
+	}
+	body := string(src)
+	// analyseAsync returns nothing: its result cannot be assigned into the error path.
+	if !strings.Contains(body, "func (d discoveryAdapter) analyseAsync(ref sourceingest.Ref) {") {
+		t.Fatal("analyseAsync no longer returns nothing — if it can return an error, Discover can " +
+			"propagate it, and one unavailable provider takes out the graph as well as the commentary")
+	}
+	if !strings.Contains(body, "d.analyseAsync(ref)") {
+		t.Fatal("discovery no longer starts the analysis")
+	}
+	// It must not run on the request's context: that context is cancelled when the response is written,
+	// so every detached run would report as cancelled.
+	if !strings.Contains(body, "context.WithTimeout(context.Background(), platformAnalysisWall)") {
+		t.Error("the analysis runs on a context that is not detached — the request's context is " +
+			"cancelled when the response is written, so the run would be killed immediately")
+	}
+	// And it must be bounded, by DROPPING rather than queueing. Asserted on the semantics, not on a
+	// field name: the acquire is a select with a `default`, so a full channel falls through instead of
+	// blocking. Without the default the send blocks, the goroutine count is still bounded — and every
+	// push after the first waits on a provider call, which is the blocking behaviour the detachment
+	// exists to avoid, arriving by a different door.
+	if !strings.Contains(body, "case d.slots <- struct{}{}:") {
+		t.Error("the analysis no longer acquires a slot — concurrent analyses are unbounded, and one " +
+			"push storm becomes one provider call per push")
+	}
+	acquire := body[strings.Index(body, "case d.slots <- struct{}{}:"):]
+	if !strings.Contains(acquire[:min(400, len(acquire))], "default:") {
+		t.Error("the slot acquire has no `default` branch, so a full channel BLOCKS instead of " +
+			"dropping — the caller waits on a provider call again, by a different route")
+	}
+	if !strings.Contains(body, "make(chan struct{}, 1)") {
+		t.Error("the concurrency bound is not the deliberate single slot")
 	}
 }

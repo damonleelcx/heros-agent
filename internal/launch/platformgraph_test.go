@@ -128,8 +128,8 @@ func TestNilOptInStillServesTheDiscoveredGraph(t *testing.T) {
 // *Runner wrapped in an interface is NOT nil, so `s.sourceDiscovery == nil` in the handler would be
 // false and every discover request would panic instead of answering 503.
 func TestNilRunnerYieldsAnUntypedNilAdapter(t *testing.T) {
-	if got := newDiscoveryAdapter(nil); got != nil {
-		t.Fatalf("newDiscoveryAdapter(nil) = %#v, want an untyped nil — a typed nil in the interface "+
+	if got := newDiscoveryAdapter(nil, nil); got != nil {
+		t.Fatalf("newDiscoveryAdapter(nil, nil) = %#v, want an untyped nil — a typed nil in the interface "+
 			"turns the handler's not-mounted 503 into a panic on every request", got)
 	}
 }
