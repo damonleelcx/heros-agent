@@ -221,3 +221,40 @@ acceptance is how a capability ships having never once worked end to end.
 - **Pricing.** No price list is wired, so every spend row reads `unpriced` — the word, never `0`.
 - **Layer 2 of the acceptance** has not been run on a real deployment: it needs a platform Postgres and
   a live provider credential. Recorded in the phase's task list rather than left to be discovered.
+
+---
+
+## 10. 🔴 Production placement was set by DIRECT SQL, not through the console
+
+On 2026-08-15, `org_efb27534e29c6c1c77400e30` ("ahegao", owner `damonlee1020@gmail.com`) was set to
+`platform` placement by writing `heros_tenant_placement` directly:
+
+```
+tenant_id  org_efb27534e29c6c1c77400e30
+placement  platform
+set_by     direct-sql:no-operator-session
+```
+
+**Why it matters, and what is missing.** The only writer of that table is
+`AgentService.SetPlacement`, which writes the row *and* appends to the hash-chained audit log. A direct
+write produces the row and **no audit entry**. So the question the audit log exists to answer — *who
+enabled this tenant, and why* — has no answer for this row, on a platform that otherwise commits the
+audit entry **before** the effect.
+
+`set_by` deliberately names the mechanism rather than impersonating an operator. Nothing in the code
+reads that column for a decision, so the value is safe; the point of the string is that anybody reading
+the row learns immediately that no operator session stands behind it.
+
+**How to correct it.** Setting the same placement again through
+`/agent/spend#placements` (`POST /admin/api/agent/placement`) overwrites the row via `ON CONFLICT` and
+appends the missing audit entry. It is idempotent and costs nothing — the placement does not change,
+only its provenance. Do that at the next operator sign-in.
+
+**Why it was done this way.** The operator console is behind Okta OIDC and the work was being carried
+out without an operator session. The alternative was to leave B2 unset and block the pipeline. The
+trade was made deliberately and is recorded here rather than discovered later from a placement nobody
+can account for.
+
+**Related:** the state this unblocked is visible on `/readyz` under `heros_agent`, which moved from
+`disabled` to `no_active_definition` — `enabled_tenants: 1`, and now waiting on a published and
+activated definition.
