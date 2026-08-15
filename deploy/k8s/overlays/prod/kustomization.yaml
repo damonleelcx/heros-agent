@@ -129,6 +129,49 @@ patches:
                 env:
                   - { name: HEROS_VERSION, value: "125df81" }
 
+  # ── The OpenAI endpoint ──────────────────────────────────────────────────────────────────────────
+  #
+  # 🔴 THE ACTIVATION GATE ONLY. Customers' analyses are NOT redirected and keep going to OpenAI.
+  #
+  # The gate's calibration runs send the pinned fixtures — this repository's own test trees — so
+  # measuring a definition through a relay exposes nothing of any customer's. An analysis under a
+  # `platform` placement sends that customer's SOURCE, and its endpoint is a separate variable
+  # (`HEROS_ANALYSIS_PROVIDER_OPENAI_BASE_URL`) that is deliberately left unset here. The two scopes do
+  # not inherit from one another precisely so this configuration is expressible.
+  #
+  # The credential still comes from `heros/providers/openai` in Secrets Manager; only the address moves,
+  # and only for the gate.
+  #
+  # 🔴 `/v1`, and it is not a guess. The relay's own configuration records its site address as
+  # `https://www.cun.ai` with no path, and the adapters append `/chat/completions` to whatever is set
+  # here — so the bare host would POST to `https://www.cun.ai/chat/completions`, which answers **200
+  # with the web app's HTML**. A 200 whose body is a page rather than a completion fails at the JSON
+  # parse, which is a long way from the actual mistake. Probed unauthenticated before choosing:
+  #
+  #   POST /v1/chat/completions  → 401 {"type":"new_api_error","message":"Invalid token"}   ← exists
+  #   POST /chat/completions     → 200 <!doctype html>                                      ← the SPA
+  #
+  # ⚠️ A RELAY SEES WHAT IT IS SENT. Under a `platform` placement this deployment reads a customer's
+  # source and posts it to this address, so whoever operates this relay receives customer source code.
+  # The agent's REHEARSAL only ever sends the pinned calibration fixtures — this repository's own test
+  # trees — so measuring a definition through the relay exposes nothing of a customer's. Serving one
+  # does. Every tenant on this deployment is currently placed `platform`.
+  #
+  # To send the gate back to the vendor, delete this patch. An unset variable is the vendor endpoint; there is no
+  # "off" value to set, and `""` would mean the same as unset rather than something different.
+  - target: { kind: Deployment, name: agentd }
+    patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata: { name: agentd }
+      spec:
+        template:
+          spec:
+            containers:
+              - name: agentd
+                env:
+                  - { name: HEROS_REHEARSAL_PROVIDER_OPENAI_BASE_URL, value: "https://www.cun.ai/v1" }
+
   - target: { kind: Deployment, name: agentd }
     patch: |
       apiVersion: apps/v1
