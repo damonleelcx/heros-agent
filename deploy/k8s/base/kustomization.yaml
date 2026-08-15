@@ -35,7 +35,7 @@ resources:
 images:
   # The platform's own three, built for linux/arm64 and pushed to this account's ECR.
   #
-  # agentd is at 1b04533 (PRs #106, #107, #109, #110), the admin console at 125df81 (PR #105), and the
+  # agentd is at 6b9db03 (PRs #106, #107, #109, #110, #112), the admin console at 125df81 (PR #105), and the
   # customer console at 63a3a03. All three differ, and that is the pins working rather than drift: each names the tree
   # its own bytes were built from, and repinning an image whose code did not change would make the pin
   # stop meaning "the tree this was built from".
@@ -54,7 +54,7 @@ images:
   # exactly or check-image-parity.sh fails the build.
   - name: ghcr.io/heros-foreal/agentd
     newName: 373468206837.dkr.ecr.us-east-1.amazonaws.com/agentd
-    digest: sha256:2d043609d85c36654c71068d40a34e28410d64569ce0b58fa9ac6f2f2ee00002
+    digest: sha256:4090ce60e94acb3e5ec501216f0a30fc8e7c93551fd8cdf69e06868ac1a553c4
   - name: ghcr.io/heros-foreal/heros-console
     newName: 373468206837.dkr.ecr.us-east-1.amazonaws.com/heros-console
     digest: sha256:e882d793d83d442fbd1a39e7ff7fa1450ff6173105a7cd4b2cd4c30a027b751e
