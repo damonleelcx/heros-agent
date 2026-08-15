@@ -5,7 +5,7 @@ import { DegradedState, DeniedState, NotMountedState, Pill } from "@/components/
 import { DataTable, Num, PageFrame, Section } from "@/components/primitives";
 import { Tabs } from "@/components/tabs";
 import { ActionForm } from "@/components/actionForm";
-import { publishPlatformPrompt } from "@/lib/actions";
+import { publishPlatformPrompt, publishAgentDefinition } from "@/lib/actions";
 import type { AgentOverview, AgentAxisRow, Availability, AdminIdentity } from "@/lib/types";
 
 /**
@@ -318,6 +318,88 @@ function AgentBody({
                     heldBy={holdersOf(identity, "agent.admin")}
                   />
                 )}
+              </Section>
+            ),
+          },
+          {
+            id: "publish",
+            label: "Publish",
+            content: (
+              <Section title="Publish a definition" flush>
+                <p>
+                  A definition is <strong>identified by its content</strong>: publishing composes the
+                  axes below into one immutable version and names it by its <code>config_hash</code>.
+                  Editing publishes a new version rather than changing an existing one, and republishing
+                  identical axes creates nothing.
+                </p>
+                <p>
+                  <strong>Publishing serves nothing.</strong> A new version lands <em>pending</em> and
+                  analyses no customer&apos;s source until it passes the calibration set{" "}
+                  <em>on every fixture individually</em> and is activated. Those are separate acts on
+                  purpose — this control cannot change what is running.
+                </p>
+                <p>
+                  The <code>prompt</code> axis takes the ref returned by the Instruction tab, and{" "}
+                  <code>model</code> takes a model version id from the platform registry. Both must
+                  resolve or the publish is refused — a definition that cannot render its instruction or
+                  reach its model can be neither measured nor served.
+                </p>
+                {canAdmin ? (
+                  <ActionForm
+                    title="Publish definition"
+                    hint="Creates a pending version. Activation is a separate, gated act."
+                    submitLabel="Publish definition"
+                    actionName="agent.publish"
+                    action={publishAgentDefinition}
+                  >
+                    <label htmlFor="def-prompt">prompt_ref (required)</label>
+                    <p className="hint">The version id returned by the Instruction tab.</p>
+                    <input id="def-prompt" name="prompt" type="text" autoComplete="off" required />
+
+                    <label htmlFor="def-model">model_ref (required)</label>
+                    <p className="hint">
+                      A model version id from the platform registry — not a vendor model name.
+                    </p>
+                    <input id="def-model" name="model" type="text" autoComplete="off" required />
+
+                    <label htmlFor="def-credential">credential_ref (required)</label>
+                    <p className="hint">
+                      A provider <strong>name</strong> such as <code>anthropic</code> or{" "}
+                      <code>openai</code> — never a key. It must match the provider that serves the
+                      bound model, or a run authenticates against one vendor and calls another.
+                    </p>
+                    <input id="def-credential" name="credential_ref" type="text" autoComplete="off" required />
+
+                    <label htmlFor="def-context">context (required)</label>
+                    <input id="def-context" name="context" type="text" autoComplete="off" required />
+
+                    <label htmlFor="def-harness">harness (required)</label>
+                    <p className="hint">Single-shot unless this deployment offers another strategy.</p>
+                    <input id="def-harness" name="harness" type="text" autoComplete="off" required />
+
+                    <label htmlFor="def-memory">memory (optional)</label>
+                    <input id="def-memory" name="memory" type="text" autoComplete="off" />
+
+                    <label htmlFor="def-skills">skill_refs (optional, comma-separated)</label>
+                    <input id="def-skills" name="skill_refs" type="text" autoComplete="off" />
+
+                    <label htmlFor="def-tools">tool_names (optional, comma-separated)</label>
+                    <input id="def-tools" name="tool_names" type="text" autoComplete="off" />
+                  </ActionForm>
+                ) : (
+                  <DeniedState
+                    capability="agent.admin"
+                    description="Publish the platform analysis agent's definition"
+                    heldBy={holdersOf(identity, "agent.admin")}
+                  />
+                )}
+                <p>
+                  <em>
+                    The <code>wiring</code> axis is fixed and cannot be authored: HEROS is a single node,
+                    so there is no ordering to write. It is refused at publish rather than accepted and
+                    ignored.
+                  </em>
+                </p>
               </Section>
             ),
           },

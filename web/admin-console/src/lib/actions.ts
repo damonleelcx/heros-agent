@@ -6,7 +6,7 @@ import { redirect } from "next/navigation";
 import { ADMIN_SESSION_COOKIE, AdminApiError, adminFetch, exchangeAssertion, revokeSession } from "./adminApi";
 import { readSessionToken, SESSION_COOKIE_OPTIONS } from "./session";
 import { DENSITY_COOKIE, DENSITY_COOKIE_OPTIONS, THEME_COOKIE, THEME_COOKIE_OPTIONS, isTheme } from "./prefs";
-import type { Receipt } from "./types";
+import type { PublishPreview, Receipt } from "./types";
 
 /**
  * actions.ts holds every mutating server action.
@@ -519,6 +519,89 @@ export async function publishPlatformPrompt(_p: ActionResult | null, fd: FormDat
       const message = res.created
         ? `Published. Bind this as the definition's prompt_ref: ${res.version_id}`
         : `No change — this text was already published. Its existing ref is ${res.version_id}`;
+      return { ok: true, command, message };
+    } catch (error) {
+      return toResult(error, command);
+    }
+  });
+}
+
+/**
+ * publishAgentDefinition composes a definition from its axes and publishes it as a PENDING version.
+ *
+ * # What pressing this does and does not do
+ *
+ * It creates a version. It does NOT change what any customer is analysed by: a published definition is
+ * inert until it passes the activation gate and is activated, and those are separate acts on purpose.
+ * The copy on the control says so, because "Publish" on an operator console otherwise reads like it
+ * takes effect.
+ *
+ * # Why the outcome is assembled here rather than shown as a receipt
+ *
+ * This route answers with a `PublishPreview`, not a `Receipt` — it carries the config_hash, the
+ * axis-by-axis diff against what is active, and any refusals. Those are the things the operator needs
+ * next (the hash is what `activate` takes), so they are surfaced in the outcome message rather than
+ * discarded to fit the shared `post` helper.
+ *
+ * 🔴 `no_change` is reported as its own outcome. A definition is identified by its CONTENT, so an edit
+ * that resolves to something already published creates nothing. Calling that "published" would leave an
+ * operator waiting for a version that was never made — the same failure the instruction control avoids.
+ */
+export async function publishAgentDefinition(_p: ActionResult | null, fd: FormData): Promise<ActionResult> {
+  const axes: Record<string, string> = {};
+  // Only NON-EMPTY axes are sent. An empty string is a real edit meaning "unset this axis", and
+  // submitting one for every field an operator left blank would silently clear axes they never touched.
+  for (const axis of ["prompt", "model", "context", "memory", "harness"]) {
+    const v = String(fd.get(axis) ?? "").trim();
+    if (v !== "") axes[axis] = v;
+  }
+  const list = (name: string) =>
+    String(fd.get(name) ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s !== "");
+
+  const credentialRef = String(fd.get("credential_ref") ?? "").trim();
+  const reason = String(fd.get("reason") ?? "");
+  const command: Command = {
+    action: "agent.publish",
+    target: axes.model ? `model ${axes.model}` : "definition",
+    reason,
+    undo: "Publish the previous definition again — versions are immutable and content-addressed, so " +
+      "the earlier one is still there and republishing it creates nothing",
+  };
+
+  return withSession(async (token) => {
+    const jar = await cookies();
+    const impersonationId = jar.get("heros_admin_impersonation")?.value;
+    try {
+      const view = await adminFetch<PublishPreview>("/admin/api/agent/publish", {
+        method: "POST",
+        body: {
+          axes,
+          skill_refs: list("skill_refs"),
+          tool_names: list("tool_names"),
+          credential_ref: credentialRef,
+          reason,
+        },
+        sessionToken: token,
+        impersonationId,
+      });
+      revalidatePath("/agent");
+
+      // Refusals come back on a 200 — the definition was rejected on its content, not by transport.
+      // Reported as a FAILURE so the operator is not told something was published when nothing was.
+      if (view.refusals && view.refusals.length > 0) {
+        return {
+          ok: false,
+          kind: "request",
+          message: `Not published. ${view.refusals.join(" ")}`,
+        };
+      }
+      const message = view.no_change
+        ? `No change — this definition is already published as ${view.display}. Nothing was created.`
+        : `Published as ${view.config_hash}. It is PENDING and serving nothing: activate it to run the ` +
+          `calibration set against it, and only a definition that passes is served.`;
       return { ok: true, command, message };
     } catch (error) {
       return toResult(error, command);
