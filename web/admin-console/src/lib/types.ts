@@ -685,6 +685,14 @@ export type AgentSpendView = {
   fleet_cap_tokens: number;
   unpriced_tenants: number;
   can_admin: boolean;
+  /**
+   * The closed set of placements, from the package that owns the vocabulary.
+   *
+   * 🔴 Never typed into this console. A `<select>` listing the three values in its own markup would be
+   * a copy of a closed set, and it fails quietly: the platform gains a placement, the editor keeps
+   * offering the old ones, and the new value is unreachable from the surface that exists to set it.
+   */
+  placements: string[] | null;
 };
 
 export type AxisChange = { axis: string; from: string; to: string };

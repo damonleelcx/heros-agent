@@ -151,6 +151,19 @@ type AgentSpendView struct {
 	// incomplete rather than small.
 	UnpricedTenants int  `json:"unpriced_tenants"`
 	CanAdmin        bool `json:"can_admin"`
+	// Placements is the closed set an operator may choose between, sent by the package that OWNS the
+	// vocabulary.
+	//
+	// 🔴 On the wire rather than typed into the console's markup, because a placement editor listing
+	// `platform, customer, disabled` in its own `<select>` would be the FOURTH copy of a closed set —
+	// after the parser, the runner's gate, and the store. [AgentService.SetPlacement] already carries
+	// the note about the third copy and how it failed quietly; an editor is the worst place for the
+	// next one, since the symptom is that a newly added placement is unreachable from the one surface
+	// that exists to set it, and the surface looks entirely healthy while being wrong.
+	//
+	// `herosagent.Placements` is documented as existing for exactly this: "a console can render every
+	// option rather than the ones somebody remembered".
+	Placements []string `json:"placements"`
 }
 
 // PublishPreview is what a publish WOULD do (task 6.2).
@@ -448,7 +461,10 @@ func (s *AgentService) Spend(ctx context.Context) (AgentSpendView, error) {
 	// 🔴 Estimated is TRUE unconditionally. Every number here is a token count multiplied through a
 	// price REFERENCE; it is not an invoice, and the label is on the wire so a renderer cannot decide
 	// to leave it off.
-	out := AgentSpendView{Estimated: true, Rows: []AgentSpendRow{}, CanAdmin: s.canAdmin(ctx)}
+	out := AgentSpendView{
+		Estimated: true, Rows: []AgentSpendRow{}, CanAdmin: s.canAdmin(ctx),
+		Placements: placementNames(),
+	}
 	if s.spend == nil {
 		return out, nil
 	}
@@ -723,6 +739,21 @@ func (s *AgentService) SetCap(ctx context.Context, tenantID string, tokens int64
 func (s *AgentService) canAdmin(ctx context.Context) bool {
 	_, _, err := s.exec.Authorize(ctx, adminrbac.CapAgentAdmin, TargetGlobal)
 	return err == nil
+}
+
+// placementNames renders the closed set for the wire, in the order the owning package declares it.
+//
+// The ORDER is carried through rather than sorted: `Placements` lists the two placements that run
+// something before the one that runs nothing, and an alphabetical sort would put `customer, disabled,
+// platform` on the editor — burying the default in the middle of the list for no reason but the
+// alphabet.
+func placementNames() []string {
+	ps := herosagent.Placements()
+	out := make([]string, 0, len(ps))
+	for _, p := range ps {
+		out = append(out, string(p))
+	}
+	return out
 }
 
 // displayHash shortens a config hash for a screen. Long enough to identify, short enough to read.
