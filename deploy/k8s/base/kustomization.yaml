@@ -35,26 +35,32 @@ resources:
 images:
   # The platform's own three, built for linux/arm64 and pushed to this account's ECR.
   #
-  # agentd is at 90b97d1 and admin-console at 5be804c (PR #100). The customer console stays at
-  # 63a3a03: nothing in that PR touches it, and repinning an image whose code did not change would
-  # make the pin stop meaning "the tree this was built from".
+  # agentd and admin-console are both at 125df81 (PR #105). The customer console stays at 63a3a03:
+  # nothing in that PR touches it, and repinning an image whose code did not change would make the pin
+  # stop meaning "the tree this was built from".
   #
-  # They are at DIFFERENT commits deliberately. v0.22.0 moved all three together because
-  # internal/api/install.go serves its install surface from distribution.DocumentedRelease, so a
-  # console-only push would leave the API answering an older version than the page showed. Nothing in
-  # PR #100 touches a version surface, so each image moves on its own evidence.
+  # 🔴 Those two moved TOGETHER because PR #105 spans the wire: it adds `placements` to the
+  # `/agent/spend` read model in agentd AND the editor in the console that renders those options.
+  # Shipping the console alone would leave its placement control with no option set to offer — it
+  # degrades honestly and says so, but the control would be dead on arrival.
+  #
+  # They are at DIFFERENT commits from the customer console deliberately. v0.22.0 moved all three
+  # together because internal/api/install.go serves its install surface from
+  # distribution.DocumentedRelease, so a console-only push would leave the API answering an older
+  # version than the page showed. PR #105 touches no version surface, so each image moves on its own
+  # evidence — which here means the two ends of one wire field, and not the third.
   #
   # `newName` retargets the registry; the digest is the artifact. Both must match deploy/images.env
   # exactly or check-image-parity.sh fails the build.
   - name: ghcr.io/heros-foreal/agentd
     newName: 373468206837.dkr.ecr.us-east-1.amazonaws.com/agentd
-    digest: sha256:bbea04e8dc8c8c722a74dd022ebf98b6eda3f5ecb64f4456157065cd16382f67
+    digest: sha256:dffc850ef6c79b128fadba11fa0060c529280cacacd7b4f2618fa65195c0ca78
   - name: ghcr.io/heros-foreal/heros-console
     newName: 373468206837.dkr.ecr.us-east-1.amazonaws.com/heros-console
     digest: sha256:e882d793d83d442fbd1a39e7ff7fa1450ff6173105a7cd4b2cd4c30a027b751e
   - name: ghcr.io/heros-foreal/heros-admin-console
     newName: 373468206837.dkr.ecr.us-east-1.amazonaws.com/heros-admin-console
-    digest: sha256:59d41fd8d29b32521c500e6f872b819a5b0316787708a7cfafb980ebe1ab3caf
+    digest: sha256:ffc4e33b963208618744b45eb7e5a0086184c71fe39c25994a53cc24f0156a54
   - name: postgres
     digest: sha256:6efd0df010dc3cb40d5e33e3ef84acecc5e73161bd3df06029ee8698e5e12c60
   - name: minio/minio
