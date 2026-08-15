@@ -35,15 +35,16 @@ resources:
 images:
   # The platform's own three, built for linux/arm64 and pushed to this account's ECR.
   #
-  # agentd is at 286c511 (PRs #106, #107), the admin console at 125df81 (PR #105), the customer console
-  # at 63a3a03. All three differ, and that is the pins working rather than drift: each names the tree
+  # agentd is at 1b04533 (PRs #106, #107, #109, #110), the admin console at 125df81 (PR #105), and the
+  # customer console at 63a3a03. All three differ, and that is the pins working rather than drift: each names the tree
   # its own bytes were built from, and repinning an image whose code did not change would make the pin
   # stop meaning "the tree this was built from".
   #
   # 🔴 PR #105 moved agentd AND the admin console together because it spanned the wire — a field on the
   # `/agent/spend` read model plus the editor rendering it — and shipping one half would have left the
   # control with no options to offer. #106 and #107 are Go-only and touch no console, so only agentd
-  # moves. When one side of a wire field moves, both pins move; otherwise each moves on its own evidence.
+  # moves; nothing since has touched the wire either. When one side of a wire field moves, both pins
+  # move; otherwise each moves on its own evidence.
   #
   # v0.22.0 moved all three at once for a third reason again: internal/api/install.go serves its install
   # surface from distribution.DocumentedRelease, so a console-only push would leave the API answering an
@@ -53,7 +54,7 @@ images:
   # exactly or check-image-parity.sh fails the build.
   - name: ghcr.io/heros-foreal/agentd
     newName: 373468206837.dkr.ecr.us-east-1.amazonaws.com/agentd
-    digest: sha256:a83237b2921e7d3f0e58ac15c79e1e1233ce2df0c27daca77d1a75f4c89bb7eb
+    digest: sha256:2d043609d85c36654c71068d40a34e28410d64569ce0b58fa9ac6f2f2ee00002
   - name: ghcr.io/heros-foreal/heros-console
     newName: 373468206837.dkr.ecr.us-east-1.amazonaws.com/heros-console
     digest: sha256:e882d793d83d442fbd1a39e7ff7fa1450ff6173105a7cd4b2cd4c30a027b751e

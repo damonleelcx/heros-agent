@@ -82,8 +82,8 @@ patches:
   # This is the COMMIT each image is built from, so tag, digest and version all name one tree.
   # A bare SHA rather than a URL, which also keeps it clear of the zero-external-origin gate.
   #
-  # ⚠️ PER WORKLOAD, not one value for the deployment. agentd is at 286c511 (PRs #106, #107 — both
-  # Go-only), the admin console at 125df81 (PR #105, which spanned the wire and moved both), and the
+  # ⚠️ PER WORKLOAD, not one value for the deployment. agentd is at 1b04533 (PRs #106, #107, #109, #110 — all
+  # Go-only except #110, which is this overlay), the admin console at 125df81 (PR #105, which spanned the wire and moved both), and the
   # CUSTOMER console at 63a3a03. Three different values is the correct state: setting all three to the
   # newest commit would put the label back to naming a tree a binary was not built from — the exact
   # defect this block was added to fix, in the other direction.
@@ -103,7 +103,7 @@ patches:
             containers:
               - name: agentd
                 env:
-                  - { name: HEROS_VERSION, value: "286c511" }
+                  - { name: HEROS_VERSION, value: "1b04533" }
   - target: { kind: Deployment, name: console }
     patch: |
       apiVersion: apps/v1
