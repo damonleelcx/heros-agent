@@ -131,16 +131,26 @@ patches:
 
   # ── The OpenAI endpoint ──────────────────────────────────────────────────────────────────────────
   #
-  # 🔴 THE ACTIVATION GATE ONLY. Customers' analyses are NOT redirected and keep going to OpenAI.
+  # 🔴 THE ACTIVATION GATE ONLY, and only for the ANTHROPIC provider.
   #
   # The gate's calibration runs send the pinned fixtures — this repository's own test trees — so
   # measuring a definition through a relay exposes nothing of any customer's. An analysis under a
   # `platform` placement sends that customer's SOURCE, and its endpoint is a separate variable
-  # (`HEROS_ANALYSIS_PROVIDER_OPENAI_BASE_URL`) that is deliberately left unset here. The two scopes do
-  # not inherit from one another precisely so this configuration is expressible.
+  # (`HEROS_ANALYSIS_PROVIDER_ANTHROPIC_BASE_URL`) deliberately left unset. The two scopes do not
+  # inherit from one another precisely so this configuration is expressible.
   #
-  # The credential still comes from `heros/providers/openai` in Secrets Manager; only the address moves,
-  # and only for the gate.
+  # ⚠️ WHY ANTHROPIC AND NOT OPENAI. The relay token is not permitted `gpt-5` — it answers
+  # `403 该令牌无权访问模型 gpt-5` — so the OpenAI-provider route through it cannot run. It does permit
+  # `claude-opus-5`, which is ALREADY in the model registry, so the gate is pointed at the relay for
+  # the anthropic provider instead and a definition binds that model. The relay exposes both wire
+  # protocols (`/v1/messages` and `/v1/chat/completions` each answer 401, not 404), so the Anthropic
+  # adapter's `x-api-key` + `anthropic-version` shape is the right one for this endpoint.
+  #
+  # The previous revision of this patch redirected the OPENAI gate. It is removed rather than left in
+  # place: `heros/providers/openai` now holds the relay key, and a configured route that 403s on every
+  # call is worse than no route — it reads as "the relay is wired" to whoever finds it next.
+  #
+  # The credential comes from `heros/providers/anthropic`, which exists ONLY to hold this relay key.
   #
   # 🔴 `/v1`, and it is not a guess. The relay's own configuration records its site address as
   # `https://www.cun.ai` with no path, and the adapters append `/chat/completions` to whatever is set
@@ -170,7 +180,7 @@ patches:
             containers:
               - name: agentd
                 env:
-                  - { name: HEROS_REHEARSAL_PROVIDER_OPENAI_BASE_URL, value: "https://www.cun.ai/v1" }
+                  - { name: HEROS_REHEARSAL_PROVIDER_ANTHROPIC_BASE_URL, value: "https://www.cun.ai/v1" }
 
   - target: { kind: Deployment, name: agentd }
     patch: |
