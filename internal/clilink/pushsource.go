@@ -2,6 +2,7 @@ package clilink
 
 import (
 	"context"
+	"time"
 
 	"github.com/heros-foreal/agentd/internal/cli"
 )
@@ -158,12 +159,21 @@ func (c Commands) PushSource(cfg cli.Config, s cli.Streams) error {
 	data.Transmitted = true
 
 	s.Narratef("push-source: running discovery on the platform…")
-	res, err := cl.RunDiscovery(ctx, workflowID, revision)
+	// 🔴 A SEPARATE, far longer bound for this leg — see discoveryTimeout.
+	res, err := c.clientAtLeast(cred.Token, discoveryTimeout).RunDiscovery(ctx, workflowID, revision)
 	if err != nil {
 		// The snapshot IS stored — the push succeeded and only the analysis failed. Say so, or the user
 		// will re-push source that is already there while believing nothing was sent.
-		s.Narratef("push-source: the snapshot was stored, but discovery failed. " +
-			"Re-run `heros push-source` to retry the analysis, or `--forget` to remove the snapshot.")
+		//
+		// 🔴 And say what a re-run COSTS. The previous wording — "re-run to retry the analysis" — was
+		// advice that could not work: the discovery leg shared the 30s default, so the retry timed out
+		// identically, and `push-source` re-transmits the whole snapshot before reaching discovery, so
+		// each attempt paid the upload again. A remedy that cannot succeed is worse than none, because
+		// the reader keeps spending on it.
+		s.Narratef("push-source: the snapshot was stored, but discovery failed. A re-run RE-TRANSMITS " +
+			"the snapshot before retrying discovery; `--forget` removes it instead. If this was a " +
+			"timeout, the repository is large enough that discovery outran the client — report it " +
+			"rather than retrying, because a second attempt spends the same upload for the same result.")
 		return &cli.ExitError{Code: cli.ExitOperational, Msg: err.Error(), Err: err}
 	}
 	data.Graph = &GraphSummary{
@@ -174,6 +184,29 @@ func (c Commands) PushSource(cfg cli.Config, s cli.Streams) error {
 		res.Nodes, res.Edges, res.Labelled, res.Unclassified, res.LLMCalls)
 	return s.EmitJSON("push-source", cli.ExitOK, data, nil, nil)
 }
+
+// discoveryTimeout bounds the platform-side discovery leg of `push-source`.
+//
+// # Why it is not transport.DefaultTimeout
+//
+// 🔴 Discovery PARSES THE WHOLE SNAPSHOT. Its duration is a property of the caller's repository, not of
+// the platform, so the 30s that suits a request answered from storage is the wrong shape of number
+// entirely. `nousresearch/hermes-agent` (8487 files) takes ~55s: with the shared default, `push-source`
+// uploaded 60 MiB, timed out, and told the user to re-run — which re-uploaded and timed out again. An
+// unbreakable loop for any repository above roughly thirty seconds of parsing, which is most real ones.
+//
+// # Why the client's number is the whole contract
+//
+// The handler runs discovery on `r.Context()` and the server sets no WriteTimeout, so there is no
+// server-side deadline: when the client gives up, the request context is cancelled and the work the
+// platform was doing is ABANDONED. This value is therefore not "how long the CLI waits" — it is how
+// long the platform is ALLOWED to spend. Generous is the safe direction; the cost of a value too high
+// is a user waiting, and of one too low is work repeatedly thrown away at full upload price.
+//
+// 🚫 It is still finite, and a repository big enough will still outrun it. The durable fix is an
+// asynchronous discovery the caller polls, which is a server-side change and a decision about a new
+// surface. Recorded here so the next person meets the limit as a known edge rather than as this bug.
+const discoveryTimeout = 15 * time.Minute
 
 // humanBytes renders a byte count for the line a user reads before deciding to transmit.
 func humanBytes(n int) string {

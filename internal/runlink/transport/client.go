@@ -43,11 +43,19 @@ func WithTimeout(d time.Duration) Option {
 	return func(c *Client) { c.http.Timeout = d }
 }
 
+// DefaultTimeout bounds an ordinary platform request.
+//
+// 🔴 It suits a request the platform ANSWERS FROM STORAGE — a link, an ingest, a fetch. It does not
+// suit one where the platform DOES WORK proportional to the caller's repository, and exporting it is
+// how a caller that needs a longer bound can say so against a number rather than a guess. See
+// `clilink.discoveryTimeout`, which must exceed this and has a fence saying why.
+const DefaultTimeout = 30 * time.Second
+
 // NewClient builds a client for the pinned endpoint. token authenticates the identity server-side.
 func NewClient(token string, opts ...Option) *Client {
 	c := &Client{
 		token: token,
-		http:  &http.Client{Timeout: 30 * time.Second},
+		http:  &http.Client{Timeout: DefaultTimeout},
 		base:  runlink.PlatformBaseURL,
 	}
 	for _, o := range opts {
