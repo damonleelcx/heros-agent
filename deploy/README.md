@@ -173,17 +173,34 @@ supported single-binary form, not a misconfiguration.
 
 ### Pointing a provider somewhere other than its vendor
 
-Set `HEROS_PROVIDER_<NAME>_BASE_URL` to route one provider through an API relay, a regional gateway or
-a corporate egress proxy. `<NAME>` is `OPENAI`, `ANTHROPIC` or `BEDROCK`, and the credential for that
-provider is resolved exactly as before — only the address changes.
+Two variables, because the platform makes provider calls on two paths that carry **completely
+different data**:
+
+| Variable | What that path sends |
+|---|---|
+| `HEROS_REHEARSAL_PROVIDER_<NAME>_BASE_URL` | the activation gate's calibration runs — the pinned fixtures, which are this repository's own test trees |
+| `HEROS_ANALYSIS_PROVIDER_<NAME>_BASE_URL` | 🔴 customers' analyses under a `platform` placement — **their source code** |
+
+`<NAME>` is `OPENAI`, `ANTHROPIC` or `BEDROCK`. The credential still resolves from the secrets source;
+only the address moves.
 
 ```
-HEROS_PROVIDER_OPENAI_BASE_URL=https://relay.example.com/v1
+HEROS_REHEARSAL_PROVIDER_OPENAI_BASE_URL=https://relay.example.com/v1
 ```
 
-Unset means the vendor endpoint, which is what every deployment did before this existed. Each override
-is named on the boot log, because the console shows a provider's *name* and never its address — if it
-is not said at boot it is not said anywhere.
+**Neither inherits from the other, and that is the whole design.** Unset means the vendor, per path. An
+earlier revision had one variable covering both: redirecting the cheap path to a relay silently
+redirected the other, so an operator measuring a definition through a relay had posted a customer's
+source to a third party without deciding to. Widening the dangerous path now costs a deliberate second
+variable. `HEROS_PROVIDER_<NAME>_BASE_URL` — the retired single-scope spelling — **fails the boot** with
+a message naming both replacements, rather than being ignored.
+
+The two are allowed to disagree, and the useful configuration is exactly that: **relay for the gate,
+vendor for serving.** Measure a definition through a cheap endpoint while customers' source keeps going
+to the vendor you have a contract with.
+
+Each redirect is named on the boot log with its scope and what that scope carries, because the console
+shows a provider's *name* and never its address — if it is not said at boot it is not said anywhere.
 
 ⚠️ On Kubernetes, set it in **`deploy/k8s/overlays/prod/kustomization.yaml`** and deploy — not with
 `kubectl set env`. The deploy applies a full render, so an out-of-band edit is reverted by the next one
@@ -202,16 +219,15 @@ relay while the key goes to the vendor:
 | userinfo in the URL (`https://user:pass@…`) | anything that logs the endpoint then logs the credential, and this logs it at boot |
 | a query or fragment | the adapters append a path (`/chat/completions`), so `?key=abc` would silently become a URL nobody wrote |
 
-A variable naming something that is not a provider — `HEROS_PROVIDER_OPENAI2_BASE_URL` — also fails the
-boot. An ignored override leaves an operator certain they redirected traffic they did not redirect, and
-the evidence that they did not is a bill from the vendor they were trying to stop using.
+A variable naming something that is not a provider — `HEROS_ANALYSIS_PROVIDER_OPENAI2_BASE_URL` — also
+fails the boot. An ignored override leaves an operator certain they redirected traffic they did not
+redirect, and the evidence that they did not is a bill from the vendor they were trying to stop using.
 
-> 🔴 **A relay sees what you send it.** Under a `platform` placement this deployment reads a customer's
-> source and posts it to whichever endpoint the provider points at. Redirecting `openai` therefore puts
-> customer source code in the hands of whoever runs that relay. The agent's *rehearsal* only ever sends
-> the pinned calibration fixtures, which are this repository's own test trees — so measuring a
-> definition through a relay exposes nothing of a customer's, while serving one does. Those are
-> separable, and worth separating deliberately.
+⚠️ **The base URL is a base.** The adapters append `/chat/completions` or `/messages` to it, so a relay
+whose site address is `https://relay.example.com` almost certainly needs `https://relay.example.com/v1`
+here. Getting it wrong tends to return **200 with an HTML page** from the relay's web app, which fails
+at the JSON parse — a symptom a long way from the actual mistake. Probe it before setting it:
+`curl -s -o /dev/null -w '%{http_code}' -X POST <base>/chat/completions` should be 401, not 200.
 
 ---
 

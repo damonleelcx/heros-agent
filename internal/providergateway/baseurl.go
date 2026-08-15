@@ -14,29 +14,81 @@ import (
 //
 // # Why this exists
 //
-// `WithBaseURL` has been on the Gateway since it was written, and until now its ONLY caller anywhere
-// in the tree was `cmd/demo/runmonitor` pointing at an httptest stub. `internal/launch` never called
-// it, `ModelSpec` carries no endpoint field, and `defaultBaseURL` hardcodes the vendor URLs — so a
-// deployment holding a relay key had no way to use it. The key would be sent to `api.openai.com`,
-// which rejects it, and the operator learns nothing about their relay.
+// `WithBaseURL` has been on the Gateway since it was written, and its only caller anywhere in the tree
+// was `cmd/demo/runmonitor` pointing at an httptest stub. `internal/launch` never called it, `ModelSpec`
+// carries no endpoint field, and `defaultBaseURL` hardcodes the vendor URLs — so a deployment holding a
+// relay key had no way to use it.
 //
-// # 🔴 Why the env name is namespaced under HEROS_PROVIDER_
+// # 🔴 TWO SCOPES, and they do not inherit from one another
 //
-// The obvious spelling is `HEROS_<PROVIDER>_BASE_URL`. It is taken: `HEROS_RELEASE_BASE_URL` already
-// configures the release channel that `clilink/upgrade` reads. Under the obvious scheme the unknown-name
-// check below would read `RELEASE` as a misspelled provider and REFUSE TO BOOT a deployment that had
-// merely configured its release channel — a fence breaking the thing it was added to protect.
+// The platform makes provider calls on two paths that carry completely different data:
 //
-// `HEROS_PROVIDER_<NAME>_BASE_URL` cannot collide, which is what makes the unknown-name check safe to
-// have at all.
+//   - the ACTIVATION GATE's calibration runs, which send the pinned fixtures — this repository's own
+//     test trees, and nothing of any customer's;
+//   - CUSTOMER ANALYSES under a `platform` placement, which send that customer's source.
+//
+// One variable covering both means redirecting the cheap path silently redirects the other, and the
+// operator who wanted to measure a definition through a relay has posted a customer's source code to a
+// third party without deciding to. So each path has its OWN variable, neither falls back to the other,
+// and an unset scope is the vendor:
+//
+//	HEROS_REHEARSAL_PROVIDER_OPENAI_BASE_URL=https://relay.example.com/v1   # the gate only
+//	HEROS_ANALYSIS_PROVIDER_OPENAI_BASE_URL=https://relay.example.com/v1    # customers' source
+//
+// Inheritance was the first design and is rejected deliberately. A default that silently widens the
+// blast radius of the safer setting is the wrong direction for a rule about where customer code goes:
+// redirecting the dangerous path should cost a deliberate second act, not come free with the first.
+//
+// # 🔴 Why the names are namespaced the way they are
+//
+// `HEROS_<NAME>_BASE_URL` is taken — `HEROS_RELEASE_BASE_URL` already configures the release channel
+// `clilink/upgrade` reads — so the unknown-name check below would read `RELEASE` as a misspelled
+// provider and refuse to boot a deployment that had merely configured its release channel.
+//
+// `HEROS_PROVIDER_<NAME>_BASE_URL` is the RETIRED spelling from this feature's first revision, when one
+// variable covered both paths. It is refused rather than ignored — see `errRetiredEnvName`.
 //
 // # What it refuses, and why refusing beats defaulting
 //
-// Every rejection below fails the BOOT rather than falling back to the vendor default. A base URL is
-// where this deployment's provider credential gets sent: silently ignoring a malformed one means the
-// operator believes traffic goes to their relay while the key goes to the vendor, and silently
-// accepting a plaintext one puts that key on the wire in clear. Neither is a state to discover later
-// from a bill or a leak.
+// Every rejection fails the BOOT rather than falling back to the vendor. A base URL is where this
+// deployment's provider credential gets sent: silently ignoring a malformed one means the operator
+// believes traffic goes to their relay while the key goes to the vendor, and silently accepting a
+// plaintext one puts that key on the wire in clear.
+
+// BaseURLScope names which provider traffic an override applies to.
+//
+// A type rather than a string, so a caller cannot pass "rehersal" and be quietly given no overrides —
+// the two values below are the whole set and there is no way to construct a third.
+type BaseURLScope struct {
+	name   string
+	prefix string
+	// carries describes what this path sends, for the boot log. An operator reading that a scope is
+	// redirected should not have to know which of the two paths handles customer source.
+	carries string
+}
+
+var (
+	// ScopeRehearsal is the activation gate's calibration runs. They send the pinned fixtures only.
+	ScopeRehearsal = BaseURLScope{
+		name:    "rehearsal",
+		prefix:  "HEROS_REHEARSAL_PROVIDER_",
+		carries: "the activation gate's calibration runs, which send the pinned fixtures and nothing of any customer's",
+	}
+	// ScopeAnalysis is customers' analyses under a `platform` placement. They send customer SOURCE.
+	ScopeAnalysis = BaseURLScope{
+		name:    "analysis",
+		prefix:  "HEROS_ANALYSIS_PROVIDER_",
+		carries: "🔴 CUSTOMERS' ANALYSES, which send that customer's source code",
+	}
+)
+
+// Name is the scope's short name, for logs and errors.
+func (s BaseURLScope) Name() string { return s.name }
+
+const baseURLEnvSuffix = "_BASE_URL"
+
+// retiredEnvPrefix was the single-scope spelling. Kept only so it can be REFUSED.
+const retiredEnvPrefix = "HEROS_PROVIDER_"
 
 // Providers returns the closed set this gateway can reach, derived from the adapters themselves.
 //
@@ -53,44 +105,47 @@ func Providers() []string {
 	return out
 }
 
-const (
-	baseURLEnvPrefix = "HEROS_PROVIDER_"
-	baseURLEnvSuffix = "_BASE_URL"
-)
-
-// BaseURLEnvName is the variable that overrides one provider's endpoint. Exported so a deployment
-// manifest, a document and an error message cannot disagree about the spelling.
-func BaseURLEnvName(provider string) string {
-	return baseURLEnvPrefix + strings.ToUpper(provider) + baseURLEnvSuffix
+// BaseURLEnvName is the variable overriding one provider's endpoint on one scope. Exported so a
+// deployment manifest, a document and an error message cannot disagree about the spelling.
+func BaseURLEnvName(scope BaseURLScope, provider string) string {
+	return scope.prefix + strings.ToUpper(provider) + baseURLEnvSuffix
 }
 
-// BaseURLOverrides is the set of endpoints a deployment has redirected.
+// BaseURLOverrides is the set of endpoints one scope has redirected.
 //
-// Empty is the normal case and means every provider keeps its vendor default — the zero value is
-// therefore the behaviour this deployment had before the file existed.
+// Empty is the normal case and means every provider on that path keeps its vendor default.
 type BaseURLOverrides struct {
+	scope      BaseURLScope
 	byProvider map[string]string
 }
 
-// BaseURLOverridesFromEnv reads one variable per known provider.
+// BaseURLOverridesFromEnv reads one variable per known provider, for ONE scope.
 //
-// 🔴 It also refuses a variable that matches the pattern and names something that is NOT a provider.
-// An ignored `HEROS_PROVIDER_OPENAI2_BASE_URL` leaves an operator certain they redirected traffic they
-// did not redirect, and the evidence that they did not is a bill from the vendor they were trying to
-// stop using.
-func BaseURLOverridesFromEnv() (BaseURLOverrides, error) {
+// 🔴 It reads only its own scope's prefix. There is no fallback to the other scope and none to the
+// retired single-scope name — see the file header for why widening the dangerous path must cost a
+// deliberate act.
+func BaseURLOverridesFromEnv(scope BaseURLScope) (BaseURLOverrides, error) {
 	known := map[string]bool{}
 	for _, p := range Providers() {
 		known[p] = true
 	}
 
-	out := BaseURLOverrides{byProvider: map[string]string{}}
+	out := BaseURLOverrides{scope: scope, byProvider: map[string]string{}}
 	for _, kv := range os.Environ() {
 		name, value, ok := strings.Cut(kv, "=")
-		if !ok || !strings.HasPrefix(name, baseURLEnvPrefix) || !strings.HasSuffix(name, baseURLEnvSuffix) {
+		if !ok || !strings.HasSuffix(name, baseURLEnvSuffix) {
 			continue
 		}
-		middle := strings.TrimSuffix(strings.TrimPrefix(name, baseURLEnvPrefix), baseURLEnvSuffix)
+		// 🔴 The retired spelling is REFUSED, not ignored. It is the one name an operator is most
+		// likely to still have set — this feature shipped with it — and ignoring it would leave them
+		// certain they had redirected traffic that is going to the vendor.
+		if strings.HasPrefix(name, retiredEnvPrefix) {
+			return BaseURLOverrides{}, errRetiredEnvName(name)
+		}
+		if !strings.HasPrefix(name, scope.prefix) {
+			continue
+		}
+		middle := strings.TrimSuffix(strings.TrimPrefix(name, scope.prefix), baseURLEnvSuffix)
 		provider := strings.ToLower(middle)
 		if !known[provider] {
 			return BaseURLOverrides{}, fmt.Errorf(
@@ -99,9 +154,7 @@ func BaseURLOverridesFromEnv() (BaseURLOverrides, error) {
 					"going to the vendor while the operator believes it goes somewhere else",
 				name, provider, strings.Join(Providers(), ", "))
 		}
-		// An explicitly EMPTY value is "no override", not an error. That is how a manifest declares the
-		// variable in its env contract without redirecting anything — which the k8s and Compose
-		// substrates both need in order to declare the same set.
+		// An explicitly EMPTY value is "no override", not an error.
 		if strings.TrimSpace(value) == "" {
 			continue
 		}
@@ -111,6 +164,35 @@ func BaseURLOverridesFromEnv() (BaseURLOverrides, error) {
 		out.byProvider[provider] = strings.TrimSpace(value)
 	}
 	return out, nil
+}
+
+// errRetiredEnvName explains the split rather than just rejecting the old name.
+//
+// The operator set one variable meaning "use my relay". The answer they need is not "unknown variable"
+// but which of the two paths they meant — and that the safe one is not the default.
+func errRetiredEnvName(name string) error {
+	provider := strings.ToLower(strings.TrimSuffix(strings.TrimPrefix(name, retiredEnvPrefix), baseURLEnvSuffix))
+	if !isKnownProvider(provider) {
+		provider = "openai"
+	}
+	return fmt.Errorf(
+		"%s is no longer read. It used to redirect BOTH the activation gate and customers' analyses, "+
+			"which send very different data — the gate sends only this repository's pinned fixtures, "+
+			"while an analysis sends a customer's source code. One variable covering both meant "+
+			"redirecting the cheap path silently redirected the other.\n"+
+			"Set the path you meant, and note that neither inherits from the other:\n"+
+			"  %s   (the gate only — fixtures)\n"+
+			"  %s   (customers' source)",
+		name, BaseURLEnvName(ScopeRehearsal, provider), BaseURLEnvName(ScopeAnalysis, provider))
+}
+
+func isKnownProvider(p string) bool {
+	for _, k := range Providers() {
+		if k == p {
+			return true
+		}
+	}
+	return false
 }
 
 // validateBaseURL refuses everything that would send a credential somewhere unintended.
@@ -174,19 +256,24 @@ func (o BaseURLOverrides) Options() []Option {
 
 // Describe renders one line per override for the boot log.
 //
-// 🔴 A redirected endpoint is a security-relevant fact about where this deployment's credentials go,
-// and it is invisible everywhere else — the console shows a provider NAME, never its address. If it is
-// not said at boot it is not said anywhere.
+// 🔴 A redirected endpoint is a security-relevant fact about where this deployment's credentials and
+// data go, and it is invisible everywhere else — the console shows a provider NAME, never its address.
+// Each line names the SCOPE and what that scope carries, so a redirect of customers' source cannot be
+// read as a redirect of the gate.
 func (o BaseURLOverrides) Describe() []string {
 	out := make([]string, 0, len(o.byProvider))
 	for _, p := range sortedKeys(o.byProvider) {
-		out = append(out, fmt.Sprintf("%s → %s (overridden by %s)", p, o.byProvider[p], BaseURLEnvName(p)))
+		out = append(out, fmt.Sprintf("%s [%s] → %s (set by %s; this path carries %s)",
+			p, o.scope.name, o.byProvider[p], BaseURLEnvName(o.scope, p), o.scope.carries))
 	}
 	return out
 }
 
-// Len is how many providers are redirected.
+// Len is how many providers are redirected on this scope.
 func (o BaseURLOverrides) Len() int { return len(o.byProvider) }
+
+// Scope is the path these overrides apply to.
+func (o BaseURLOverrides) Scope() BaseURLScope { return o.scope }
 
 func sortedKeys(m map[string]string) []string {
 	out := make([]string, 0, len(m))

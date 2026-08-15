@@ -87,27 +87,42 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 	served := func(name string) { caps = append(caps, Capability{Name: name, Served: true}) }
 	absent := func(name, why string) { caps = append(caps, Capability{Name: name, Why: why}) }
 
-	// ── Provider endpoints ──────────────────────────────────────────────────────────────────────────
+	// ── Provider endpoints, PER PATH ────────────────────────────────────────────────────────────────
 	//
-	// Read ONCE and applied to every gateway this function builds. Two gateways are constructed below —
-	// the rehearsal's and the platform analyser's — and they must agree about where a provider lives:
-	// a deployment whose rehearsal measured a relay and whose serving path called the vendor would gate
-	// on one endpoint and serve from another.
+	// 🔴 Two gateways are built below and they are configured SEPARATELY, because they carry different
+	// data:
 	//
-	// 🔴 A malformed value fails the BOOT. This error reaches launch.go, which aborts. Falling back to
-	// the vendor default would leave an operator believing their traffic is redirected while the
-	// credential goes to the vendor — see baseurl.go for why every branch refuses rather than defaults.
-	baseURLs, err := providergateway.BaseURLOverridesFromEnv()
+	//   rehearsalEndpoints → the activation gate. Sends the pinned calibration fixtures — this
+	//                        repository's own test trees, nothing of any customer's.
+	//   analysisEndpoints  → platform-placed customers' analyses. Sends THEIR SOURCE.
+	//
+	// Neither inherits from the other. An earlier revision had one variable covering both, which meant
+	// redirecting the cheap path to a relay silently redirected the other — an operator measuring a
+	// definition through a relay would have posted a customer's source to a third party without
+	// deciding to. Widening the dangerous path now costs a deliberate second variable.
+	//
+	// ⚠️ So the two CAN disagree, and that is the point rather than a hazard to be closed: measuring a
+	// definition against a relay while serving customers from the vendor is a legitimate and
+	// deliberately reachable configuration.
+	//
+	// 🔴 A malformed value fails the BOOT. This error reaches launch.go, which aborts.
+	rehearsalEndpoints, err := providergateway.BaseURLOverridesFromEnv(providergateway.ScopeRehearsal)
 	if err != nil {
 		return nil, nil, fmt.Errorf("provider endpoints: %w", err)
 	}
-	if baseURLs.Len() > 0 {
-		for _, line := range baseURLs.Describe() {
+	analysisEndpoints, err := providergateway.BaseURLOverridesFromEnv(providergateway.ScopeAnalysis)
+	if err != nil {
+		return nil, nil, fmt.Errorf("provider endpoints: %w", err)
+	}
+	for _, o := range []providergateway.BaseURLOverrides{rehearsalEndpoints, analysisEndpoints} {
+		for _, line := range o.Describe() {
 			log.Printf("provider endpoint: %s", line)
 		}
-		log.Printf("provider endpoint: 🔴 %d provider(s) do NOT point at their vendor. This deployment's "+
-			"provider credential is sent to the address above, and every analysis it runs — including "+
-			"customers' source under a `platform` placement — transits it", baseURLs.Len())
+	}
+	if analysisEndpoints.Len() > 0 {
+		log.Printf("provider endpoint: 🔴 %d provider(s) serving CUSTOMER ANALYSES do not point at their "+
+			"vendor. A platform-placed tenant's source is read by this deployment and posted to the "+
+			"address above", analysisEndpoints.Len())
 	}
 
 	// ── The Postgres-backed surfaces ────────────────────────────────────────────────────────────────
@@ -596,7 +611,7 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 				Versions:  versionStore,
 				Prompts:   registryPrompts{reg},
 				Models:    registryModels{reg},
-				Gateway:   providergateway.New(secrets, baseURLs.Options()...),
+				Gateway:   providergateway.New(secrets, rehearsalEndpoints.Options()...),
 				Discovery: discoveryReg,
 				NowMS:     func() int64 { return time.Now().UnixMilli() },
 			}); rerr != nil {
@@ -683,7 +698,7 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 			Definitions: agentSource,
 			Placements:  agentSource,
 			Source:      runner,
-			Gateway:     providergateway.New(secrets, baseURLs.Options()...),
+			Gateway:     providergateway.New(secrets, analysisEndpoints.Options()...),
 			Inferences:  inferenceStore,
 			Floor:       herosagent.DefaultConfidenceFloor,
 			Budget:      herosagent.DefaultBudget(),
