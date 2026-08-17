@@ -28,7 +28,8 @@ PARITY_DIR ?= .parity
         discovery-sandbox-proof discovery-sandbox-proof-redcheck \
         sandbox-proof sandbox-proof-redcheck \
         classifier-calibration demo-patterngraph demo-proposals demo-billing demo-billing-states \
-        release-rehearse release-rehearse-redcheck readme-install packaging-proof install-smoke install-smoke-refusals
+        release-rehearse release-rehearse-redcheck readme-install packaging-proof install-smoke install-smoke-refusals \
+        agent-rehearse agent-status
 
 ## ci: the locally-provable gate (go + schema + console-types + discovery-ci). Lint/db-proof run as their own CI jobs.
 ci: go schema console-types-check docs-facts-check discovery-ci
@@ -411,6 +412,30 @@ install-smoke:
 mail-proof:
 	@test -n "$(TO)" || { echo "usage: make mail-proof TO=you@example.com"; exit 2; }
 	@GOWORK=off $(PYTHON) scripts/mail_proof.py "$(TO)"
+
+## agent-rehearse: run the pinned calibration set against a live model and print the verdict.
+##
+## 🔴 The gate is otherwise only reachable by pressing activate in the operator console, which measures
+## on the deployment's own credential and stores the result on a version row. That makes a FAILING
+## rehearsal impossible to investigate without publishing another definition. This runs the same
+## pieces — the same fixtures, the same assembler, the same validator — against any prompt and model,
+## and prints every abstention, which is what says whether a fixture's zero was the model answering
+## nothing or the validator refusing everything it answered.
+##
+## ⚠️ IT SPENDS: one provider call per fixture. Use DRY_RUN=1 to print exactly what each fixture would
+## send and call nothing.
+##
+##   make agent-rehearse PROMPT=prompt.txt DRY_RUN=1        # no provider call, no spend
+##   make agent-rehearse PROMPT=prompt.txt                  # 9 live calls
+##   make agent-rehearse PROMPT=prompt.txt MODEL=claude-opus-5 PROVIDER=anthropic OUT=/tmp/r.json
+agent-rehearse:
+	@test -n "$(PROMPT)" || { echo "usage: make agent-rehearse PROMPT=<prompt-file> [DRY_RUN=1] [MODEL=…] [PROVIDER=…] [OUT=…]"; exit 2; }
+	@GOWORK=off go run ./cmd/proof/rehearsal \
+		-prompt-file "$(PROMPT)" \
+		$(if $(DRY_RUN),-dry-run,) \
+		$(if $(MODEL),-model "$(MODEL)",) \
+		$(if $(PROVIDER),-provider "$(PROVIDER)",) \
+		$(if $(OUT),-out "$(OUT)",)
 
 ## agent-status: what the analysis agent is actually doing on a deployment, read from /readyz.
 ##
