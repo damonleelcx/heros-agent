@@ -217,41 +217,109 @@ func (r *Rehearsal) Run(ctx context.Context, agentConfigHash string) (RehearsalR
 	}
 
 	for _, f := range fixtures {
-		ir, report, derr := r.discover(f.Repo)
-		if derr != nil {
-			return rep, fmt.Errorf("herosagent: fixture %q (%s) could not be discovered, so it measured "+
-				"nothing: %w", f.Name, f.Language, derr)
+		p, perr := r.prepare(f)
+		if perr != nil {
+			return rep, perr
 		}
-		// 🔴 THE ANSWER IS HELD OUT. See withholdAnswer — without this the measured fixture asks for two
-		// edges the residue is not allowed to offer.
-		shown, held := withholdAnswer(ir, f.TrueEdges)
-		residue := SelectResidue(shown, report, nil)
-		if missing := unproposable(shown, residue, f.TrueEdges); len(missing) > 0 {
-			return rep, fmt.Errorf("herosagent: fixture %q (%s) is UNMEASURABLE: %d of its %d true edges "+
-				"are not in the residue it is scored against (%v). The agent would be asked for an edge it "+
-				"is structurally forbidden to propose, so its recall on this fixture is zero whatever it "+
-				"answers. That is a defect in the CALIBRATION SET, and a rehearsal that reported the "+
-				"number anyway would be blaming the model for the harness",
-				f.Name, f.Language, len(missing), len(f.TrueEdges), missing)
-		}
-		res, aerr := r.analyse.Infer(ctx, Input{
-			WorkflowID: f.Name, SourceRevision: "fixture", RuleIR: shown,
-			Residue: residue,
-			Budget:  Budget{MaxTokens: 100_000, MaxWall: rehearsalWall},
-			// A rehearsal is the PLATFORM rehearsing, whatever any tenant's placement says — it runs
-			// against pinned fixture repositories, not against a customer, so there is no tenant here
-			// whose setting could apply.
-		}, agentConfigHash, PlacementPlatform)
+		res, aerr := r.analyse.Infer(ctx, p.input, agentConfigHash, PlacementPlatform)
 		if aerr != nil {
 			return rep, fmt.Errorf("herosagent: fixture %q (%s) could not be analysed: %w",
 				f.Name, f.Language, aerr)
 		}
 		sc := scoreEdges(f, res.Edges, res.Abstentions)
-		sc.HeldOutEdges = held
+		sc.HeldOutEdges = p.held
 		rep.Scores = append(rep.Scores, sc)
 	}
 
 	return r.verdict(rep), nil
+}
+
+// prepared is one fixture turned into the exact question the gate asks about it.
+type prepared struct {
+	input Input
+	// held is how many edges withholdAnswer removed, for Score.HeldOutEdges.
+	held int
+}
+
+// prepare turns one fixture into the Input the analyser is given.
+//
+// 🔴 ONE PREPARATION PATH, and that is the point of it being a function. Run asks the model; Preview
+// only shows what would be asked. Two callers assembling the residue separately is exactly the skew
+// modelinput.go was written against — the dry run would describe a request the live run never makes,
+// and the divergence would be invisible because both would "work".
+func (r *Rehearsal) prepare(f Fixture) (prepared, error) {
+	ir, report, derr := r.discover(f.Repo)
+	if derr != nil {
+		return prepared{}, fmt.Errorf("herosagent: fixture %q (%s) could not be discovered, so it "+
+			"measured nothing: %w", f.Name, f.Language, derr)
+	}
+	// 🔴 THE ANSWER IS HELD OUT. See withholdAnswer — without this the measured fixture asks for two
+	// edges the residue is not allowed to offer.
+	shown, held := withholdAnswer(ir, f.TrueEdges)
+	residue := SelectResidue(shown, report, nil)
+	if missing := unproposable(shown, residue, f.TrueEdges); len(missing) > 0 {
+		return prepared{}, fmt.Errorf("herosagent: fixture %q (%s) is UNMEASURABLE: %d of its %d true "+
+			"edges are not in the residue it is scored against (%v). The agent would be asked for an edge "+
+			"it is structurally forbidden to propose, so its recall on this fixture is zero whatever it "+
+			"answers. That is a defect in the CALIBRATION SET, and a rehearsal that reported the number "+
+			"anyway would be blaming the model for the harness",
+			f.Name, f.Language, len(missing), len(f.TrueEdges), missing)
+	}
+	return prepared{held: held, input: Input{
+		WorkflowID: f.Name, SourceRevision: "fixture", RuleIR: shown, Residue: residue,
+		Budget: Budget{MaxTokens: 100_000, MaxWall: rehearsalWall},
+		// A rehearsal is the PLATFORM rehearsing, whatever any tenant's placement says — it runs against
+		// pinned fixture repositories, not against a customer, so there is no tenant here whose setting
+		// could apply.
+	}}, nil
+}
+
+// FixturePreview is what one fixture WOULD send, without sending it.
+type FixturePreview struct {
+	Fixture      string `json:"fixture"`
+	Language     string `json:"language"`
+	TrueEdges    int    `json:"true_edges"`
+	HeldOutEdges int    `json:"held_out_edges"`
+	Pairs        int    `json:"candidate_pairs"`
+	// ModelInput is the canonical assembled context — the same bytes Run would send, from the same
+	// assembler, because it came through the same prepare.
+	ModelInput []byte `json:"model_input"`
+}
+
+// Preview runs the calibration set's PREPARATION and stops before the provider.
+//
+// It exists because "what is the model actually being shown" is the first question a bad score raises,
+// and answering it by running the gate costs one provider call per fixture. Every check Run makes — the
+// set loading whole, the answer held out, the true edges still proposable — happens here too, so a
+// preview that succeeds is a run that would have reached the model.
+func (r *Rehearsal) Preview() ([]FixturePreview, error) {
+	fixtures, err := r.loader.Fixtures()
+	if err != nil {
+		return nil, fmt.Errorf("herosagent: the calibration set could not be loaded: %w", err)
+	}
+	if len(fixtures) == 0 {
+		return nil, fmt.Errorf("herosagent: the calibration set is EMPTY")
+	}
+	out := make([]FixturePreview, 0, len(fixtures))
+	for _, f := range fixtures {
+		p, perr := r.prepare(f)
+		if perr != nil {
+			return nil, perr
+		}
+		mi, aerr := AssembleModelInput(p.input)
+		if aerr != nil {
+			return nil, aerr
+		}
+		b, berr := mi.Bytes()
+		if berr != nil {
+			return nil, berr
+		}
+		out = append(out, FixturePreview{
+			Fixture: f.Name, Language: f.Language, TrueEdges: len(f.TrueEdges),
+			HeldOutEdges: p.held, Pairs: len(p.input.Residue.Pairs), ModelInput: b,
+		})
+	}
+	return out, nil
 }
 
 // withholdAnswer returns the IR the agent is SHOWN — the fixture's own answer removed from it — and how

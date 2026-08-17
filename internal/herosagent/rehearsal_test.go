@@ -1,6 +1,7 @@
 package herosagent
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -222,6 +223,69 @@ func TestAnAgentThatConnectsEverythingFailsTheNearMisses(t *testing.T) {
 	}
 	if !named {
 		t.Errorf("the two-independent-calls fixture did not fail: %v", rep.Failures)
+	}
+}
+
+// recordingAnalyser captures the Input the gate actually sends, so a test can assert what was asked
+// rather than only what came back.
+type recordingAnalyser struct{ seen map[string]Input }
+
+func (r recordingAnalyser) Infer(_ context.Context, in Input, _ string, _ Placement) (Result, error) {
+	r.seen[in.WorkflowID] = in
+	return Result{}, nil
+}
+
+// 🔴 PREVIEW AND RUN MUST ASSEMBLE THE SAME BYTES.
+//
+// `Preview` exists so "what is the model being shown" can be answered without a provider call. That is
+// only worth anything if it shows what the LIVE run sends. Two callers preparing the residue separately
+// is the exact skew modelinput.go was written against: the dry run would describe a request the real
+// run never makes, and nothing would notice, because both would work.
+//
+// Both paths go through `Rehearsal.prepare` today. This asserts the consequence rather than the
+// structure, so it keeps holding if someone re-splits them.
+func TestThePreviewShowsExactlyWhatTheRunWouldSend(t *testing.T) {
+	loader := DiskFixtures{Root: repoRoot(t), Discover: realDiscoverer(t)}
+	rec := recordingAnalyser{seen: map[string]Input{}}
+	r, err := NewRehearsal(loader, realDiscoverer(t), rec, 0.9, 0.7)
+	if err != nil {
+		t.Fatalf("NewRehearsal: %v", err)
+	}
+
+	previews, err := r.Preview()
+	if err != nil {
+		t.Fatalf("Preview: %v", err)
+	}
+	if _, err := r.Run(context.Background(), "cfg"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(previews) == 0 || len(previews) != len(rec.seen) {
+		t.Fatalf("preview covered %d fixture(s), the run asked about %d", len(previews), len(rec.seen))
+	}
+
+	for _, p := range previews {
+		in, ok := rec.seen[p.Fixture]
+		if !ok {
+			t.Errorf("%s was previewed and never asked", p.Fixture)
+			continue
+		}
+		mi, aerr := AssembleModelInput(in)
+		if aerr != nil {
+			t.Fatalf("%s: assembling what the run sent: %v", p.Fixture, aerr)
+		}
+		sent, berr := mi.Bytes()
+		if berr != nil {
+			t.Fatalf("%s: %v", p.Fixture, berr)
+		}
+		if !bytes.Equal(p.ModelInput, sent) {
+			t.Errorf("%s: the preview and the run assembled DIFFERENT context.\npreview: %s\nrun:     %s",
+				p.Fixture, p.ModelInput, sent)
+		}
+		// The held-out count travels with it: a preview that showed the ablated graph but reported the
+		// wrong ablation would misdescribe how the fixture was scored.
+		if p.HeldOutEdges > 0 && len(in.RuleIR.Edges) != 0 && p.Fixture == "go_chain" {
+			t.Errorf("go_chain was previewed as ablated but the run was sent %d edge(s)", len(in.RuleIR.Edges))
+		}
 	}
 }
 
