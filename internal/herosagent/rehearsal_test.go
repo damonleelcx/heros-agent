@@ -3,6 +3,7 @@ package herosagent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -224,13 +225,89 @@ func TestAnAgentThatConnectsEverythingFailsTheNearMisses(t *testing.T) {
 	}
 }
 
+// 🔴 A ZERO HAS TWO CAUSES AND THE REPORT MUST NAME WHICH.
+//
+// # The defect this defends
+//
+// "0 correct, 0 wrong, 2 missed" is what the gate printed for three consecutive live runs, and it was
+// read each time as a verdict on the model. It cannot be one. The identical numbers are produced by:
+//
+//   - the model proposed nothing, which IS an answer about the model; and
+//   - the model proposed the right edges and `validate` refused every one of them — a missing
+//     `confidence` key, a `kind` of "dataflow", a node id that is not in the IR.
+//
+// The second is a defect in the prompt or the wire contract, and the fix for it has nothing to do with
+// the model. `Score` carried no abstentions, so the report was structurally incapable of telling an
+// operator which of the two they were looking at, and three runs of evidence were spent on a question
+// the harness could not answer.
+//
+// The assertion is the discrimination itself: two scores with IDENTICAL precision, recall and counts,
+// differing only in what validation refused, must not produce the same sentence.
+func TestAZeroSaysWhetherTheModelOrTheValidatorProducedIt(t *testing.T) {
+	r := &Rehearsal{MinPrecision: 0.9, MinRecall: 0.7}
+	numbers := Score{
+		Fixture: "py_linear_chain", Language: "python", Precision: 0, Recall: 0,
+		TruePositives: 0, FalsePositives: 0, FalseNegatives: 2, Note: "a linear chain",
+	}
+
+	silent := r.verdict(RehearsalReport{Scores: []Score{numbers}})
+	conf := 0.9
+	refusedScore := numbers
+	refusedScore.Abstentions = []Abstention{
+		{Subject: "n_6fbbf0b34ab205dd→n_f74c615ce693e847", Reason: AbstainNoCandidate},
+		{Subject: "n_f74c615ce693e847→n_b812fd2b1a2391ae", Reason: AbstainNoCandidate},
+		{Subject: "n_6fbbf0b34ab205dd→n_b812fd2b1a2391ae", Reason: AbstainBelowFloor, Confidence: &conf},
+	}
+	refused := r.verdict(RehearsalReport{Scores: []Score{refusedScore}})
+
+	if len(silent.Failures) != 1 || len(refused.Failures) != 1 {
+		t.Fatalf("both must fail: silent=%v refused=%v", silent.Failures, refused.Failures)
+	}
+	if silent.Failures[0] == refused.Failures[0] {
+		t.Fatalf("a model that said NOTHING and a model whose every proposal was REFUSED produced the "+
+			"same failure line. That is the defect: the numbers are identical and only the abstentions "+
+			"distinguish them.\n%s", silent.Failures[0])
+	}
+
+	// The silent case must not be describable as a rejection...
+	if !strings.Contains(silent.Failures[0], "proposed NOTHING") {
+		t.Errorf("a genuinely empty answer is not named as one: %s", silent.Failures[0])
+	}
+	// ...and the refused case must name the REASON and the SUBJECTS, because "something was refused"
+	// sends an operator back to the logs while `no_candidate_offered ×2 [n_6fb…→n_f74…]` names the fix.
+	for _, want := range []string{
+		"REFUSED", string(AbstainNoCandidate), "×2", string(AbstainBelowFloor),
+		"n_6fbbf0b34ab205dd→n_f74c615ce693e847",
+	} {
+		if !strings.Contains(refused.Failures[0], want) {
+			t.Errorf("the refusal does not mention %q: %s", want, refused.Failures[0])
+		}
+	}
+}
+
+// The truncation in a summary must SAY it truncated. A list that quietly stopped at six reads as the
+// complete set, which is the "no silent caps" rule at sentence grain.
+func TestALongAbstentionListSaysHowManyItDidNotShow(t *testing.T) {
+	var as []Abstention
+	for i := 0; i < maxSubjectsPerReason+4; i++ {
+		as = append(as, Abstention{Subject: fmt.Sprintf("n_a%d→n_b%d", i, i), Reason: AbstainUnknownNode})
+	}
+	got := abstentionSummary(as)
+	if !strings.Contains(got, "+4 more") {
+		t.Errorf("a truncated summary did not say what it left out: %s", got)
+	}
+	if !strings.Contains(got, fmt.Sprintf("×%d", maxSubjectsPerReason+4)) {
+		t.Errorf("the summary does not carry the TOTAL count, so the truncation hides the size: %s", got)
+	}
+}
+
 // The empty-truth scoring rule, stated as a test because it is a definition rather than a derivation.
 func TestScoringAnEmptyTruth(t *testing.T) {
 	f := Fixture{Name: "near_miss", TrueEdges: nil}
-	if got := scoreEdges(f, nil); got.Precision != 1 || got.Recall != 1 || !got.Vacuous {
+	if got := scoreEdges(f, nil, nil); got.Precision != 1 || got.Recall != 1 || !got.Vacuous {
 		t.Errorf("emitting nothing over an empty truth scored %+v, want perfect and flagged vacuous", got)
 	}
-	got := scoreEdges(f, []ProvenancedEdge{{From: "a", To: "b"}})
+	got := scoreEdges(f, []ProvenancedEdge{{From: "a", To: "b"}}, nil)
 	if got.Precision != 0 {
 		t.Errorf("emitting an edge over an empty truth scored precision %.2f, want 0 — this is the "+
 			"number that catches an agent with no discriminative power", got.Precision)

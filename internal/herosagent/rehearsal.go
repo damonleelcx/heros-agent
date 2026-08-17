@@ -78,8 +78,34 @@ type Score struct {
 	// answer was proposable at all — see withholdAnswer. Non-zero only for a fixture whose truth the
 	// frontend itself produced. Carried because a report that did not say so would present a held-out
 	// measurement as a finding over an untouched graph.
-	HeldOutEdges int    `json:"held_out_edges"`
-	Note         string `json:"note"`
+	HeldOutEdges int `json:"held_out_edges"`
+	// Abstentions is what the model PROPOSED and validation refused, verbatim.
+	//
+	// 🔴 WITHOUT THIS THE GATE CANNOT NAME ITS OWN FAILURE MODE. A score of "0 correct, 0 wrong" has two
+	// causes that need opposite fixes: the model answered nothing, or the model answered and `validate`
+	// rejected every edge — a missing `confidence` key, a `kind` of "dataflow", a stale node id. Both
+	// render identically in precision and recall.
+	//
+	// THE CASE THIS WAS BUILT FOR, and it was real. Four definitions were published against the
+	// calibration set and all four failed; the stored reports showed `go_chain`, `py_linear_chain` and
+	// `py_fanout_no_merge` at 0 correct, 0 wrong, 2 missed, which reads as an agent that finds no edges.
+	// It was not. The published prompt described the edge `kind` as "<short relationship name>" and never
+	// named the closed `{data, control}` vocabulary this package validates against, so EVERY edge came
+	// back `out_of_vocabulary` and was discarded — six correct edges across those three fixtures, at
+	// confidences from 0.74 to 0.98. The agent had the right answer every time and none of it survived.
+	// Reproduced on two unrelated models, which is what proved the defect was the prompt and not the
+	// model. Nothing in a report without this field could have said so.
+	//
+	// The subjects are carried and not just the reason counts, because "no_candidate_offered ×2" does not
+	// say WHICH pairs, and `n_6fb…→n_f74…` next to the fixture's true edges is the whole answer. Bounded
+	// by the answer itself: one rehearsal reply is capped at `rehearsalAnswerTokens`, so this list cannot
+	// outgrow one model response.
+	//
+	// ⚠️ Edge and label abstentions BOTH land here, because `Result.Abstentions` is one list and does not
+	// record which it came from. The subject discriminates by eye — an edge's is `from→to` — and this is
+	// noted rather than papered over with string-sniffing.
+	Abstentions []Abstention `json:"abstentions,omitempty"`
+	Note        string       `json:"note"`
 }
 
 // RehearsalReport is the whole verdict.
@@ -220,7 +246,7 @@ func (r *Rehearsal) Run(ctx context.Context, agentConfigHash string) (RehearsalR
 			return rep, fmt.Errorf("herosagent: fixture %q (%s) could not be analysed: %w",
 				f.Name, f.Language, aerr)
 		}
-		sc := scoreEdges(f, res.Edges)
+		sc := scoreEdges(f, res.Edges, res.Abstentions)
 		sc.HeldOutEdges = held
 		rep.Scores = append(rep.Scores, sc)
 	}
@@ -321,11 +347,18 @@ func (r *Rehearsal) verdict(rep RehearsalReport) RehearsalReport {
 		if s.Precision < r.MinPrecision || s.Recall < r.MinRecall {
 			// Task 5.5 — the failure NAMES the fixture, its language and its numbers. "The rehearsal
 			// failed" sends somebody to read a report; this sends them to a file.
-			rep.Failures = append(rep.Failures, fmt.Sprintf(
+			// Assembled in parts rather than one format string: `proposalNote` is EMPTY in the ordinary
+			// case (edges were emitted and none refused), and a `%s` holding "" leaves a double space
+			// in the one line an operator reads.
+			line := fmt.Sprintf(
 				"%s (%s): precision %.2f (floor %.2f), recall %.2f (floor %.2f) — %d correct, %d wrong, "+
-					"%d missed. This fixture is evidence for: %s",
+					"%d missed.",
 				s.Fixture, s.Language, s.Precision, r.MinPrecision, s.Recall, r.MinRecall,
-				s.TruePositives, s.FalsePositives, s.FalseNegatives, s.Note))
+				s.TruePositives, s.FalsePositives, s.FalseNegatives)
+			if note := proposalNote(s); note != "" {
+				line += " " + note
+			}
+			rep.Failures = append(rep.Failures, line+" This fixture is evidence for: "+s.Note)
 		}
 	}
 	if n := float64(len(rep.Scores)); n > 0 {
@@ -342,6 +375,66 @@ func (r *Rehearsal) verdict(rep RehearsalReport) RehearsalReport {
 // present because an unbounded run is an unbounded bill however rarely it happens.
 const rehearsalWall = 5 * 60 * 1e9 // 5 minutes, as time.Duration nanoseconds
 
+// proposalNote says whether a fixture's zero is the MODEL'S ANSWER or the VALIDATOR'S REFUSAL.
+//
+// 🔴 The distinction this whole field exists for. "0 correct, 0 wrong" is produced by two situations
+// that need opposite fixes — the model proposed nothing, or it proposed and `validate` refused every
+// subject — and the numbers alone cannot tell them apart. An operator who reads the first when it was
+// the second goes to change the prompt or the model, and the actual defect is a missing `confidence`
+// key or a `kind` outside the closed set.
+func proposalNote(s Score) string {
+	emitted := s.TruePositives + s.FalsePositives
+	switch {
+	case emitted == 0 && len(s.Abstentions) == 0:
+		return "The model proposed NOTHING — nothing was emitted and nothing was refused, so this zero " +
+			"is the model's own answer and not a validation failure."
+	case emitted == 0:
+		return fmt.Sprintf("🔴 The model proposed %d subject(s) and validation REFUSED EVERY ONE, so this "+
+			"zero is a rejection and not the model's answer: %s.", len(s.Abstentions),
+			abstentionSummary(s.Abstentions))
+	case len(s.Abstentions) > 0:
+		return fmt.Sprintf("A further %d proposal(s) were refused: %s.", len(s.Abstentions),
+			abstentionSummary(s.Abstentions))
+	default:
+		return ""
+	}
+}
+
+// maxSubjectsPerReason bounds how many subjects one reason names IN THE SENTENCE. The full list is
+// always in `Score.Abstentions`, and the truncation says its own count rather than trailing off —
+// a summary that silently stopped listing would read as "that was all of them".
+const maxSubjectsPerReason = 6
+
+// abstentionSummary groups declines by reason, in a stable order.
+//
+// Grouped rather than listed flat because the reason is the actionable half: "every edge came back
+// `out_of_vocabulary`" names a defect, while twelve lines each naming one pair names a mood.
+func abstentionSummary(as []Abstention) string {
+	order := []AbstentionReason{}
+	subjects := map[AbstentionReason][]string{}
+	for _, a := range as {
+		if _, seen := subjects[a.Reason]; !seen {
+			order = append(order, a.Reason)
+		}
+		subjects[a.Reason] = append(subjects[a.Reason], a.Subject)
+	}
+	sort.Slice(order, func(i, j int) bool { return order[i] < order[j] })
+
+	parts := make([]string, 0, len(order))
+	for _, reason := range order {
+		subs := subjects[reason]
+		shown := subs
+		suffix := ""
+		if len(shown) > maxSubjectsPerReason {
+			shown = shown[:maxSubjectsPerReason]
+			suffix = fmt.Sprintf(", +%d more", len(subs)-maxSubjectsPerReason)
+		}
+		parts = append(parts, fmt.Sprintf("%s ×%d [%s%s]",
+			reason, len(subs), strings.Join(shown, ", "), suffix))
+	}
+	return strings.Join(parts, "; ")
+}
+
 // scoreEdges computes precision and recall on EDGES for one fixture.
 //
 // # 🔴 The empty-truth case, stated rather than left to a division
@@ -354,9 +447,9 @@ const rehearsalWall = 5 * 60 * 1e9 // 5 minutes, as time.Duration nanoseconds
 //
 // The alternative — treating an empty truth as unscoreable and skipping it — would make the
 // near-misses invisible to the gate, which is the same as not having them.
-func scoreEdges(f Fixture, got []ProvenancedEdge) Score {
+func scoreEdges(f Fixture, got []ProvenancedEdge, declined []Abstention) Score {
 	s := Score{Fixture: f.Name, Language: f.Language, Truth: f.Truth, Note: f.Note,
-		Vacuous: len(f.TrueEdges) == 0}
+		Vacuous: len(f.TrueEdges) == 0, Abstentions: declined}
 
 	truth := map[Pair]bool{}
 	for _, p := range f.TrueEdges {

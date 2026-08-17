@@ -121,6 +121,21 @@ because it is useful context; the gate is the minimum.
 A failing gate names the failing fixture, its language and its numbers. Fix the definition or accept
 that this one does not ship; there is no override.
 
+🔴 **A zero has two causes, and the failure line says which.** "0 correct, 0 wrong" is produced both by
+a model that proposed nothing and by a model that proposed the right edges and had every one of them
+*refused by validation* — a missing `confidence` key, a `kind` outside `{data, control}`, a node id the
+IR does not carry. The numbers are identical; the fixes are opposite. So each failing fixture carries
+its `abstentions`, and the sentence says one of:
+
+- `The model proposed NOTHING …` — the zero is the model's own answer. Change the prompt or the model.
+- `🔴 The model proposed N subject(s) and validation REFUSED EVERY ONE …` followed by the reason and the
+  subjects, e.g. `no_candidate_offered ×2 [n_6fb…→n_f74…]`. **This is not a verdict on the model.** The
+  defect is in the answer contract between the prompt and `validate`, and the named reason is the fix.
+
+This was added after three live runs of the gate were read as a model failure when the report did not
+carry the evidence to support that reading. Reason values are the closed `AbstentionReason` set, so
+"which refusal dominates" is aggregatable rather than prose.
+
 ⚠️ **The floors shipped (P ≥ 0.90, R ≥ 0.70) are a design starting point, not a measurement.** No
 definition has been activated, so no model has been measured *in a deployment*. Two live runs of the
 set exist and are recorded in [the ablation protocol](../heros/ablation-protocol.md) §2.1: gpt-4o
