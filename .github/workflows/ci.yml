@@ -186,6 +186,59 @@ jobs:
         run: npm run build
       - run: npm test
 
+  # The CUSTOMER console's own gates. It had none — 661 tests that had never run in CI, on the surface
+  # customers actually use.
+  #
+  # 🔴 What that cost, concretely. P29 replaced the browser-session subject list on `/app/workflows`,
+  # `/app/transforms`, `/app/variants` and `/app/runs` with a platform enumeration, and updated
+  # `routes.test.mjs` for `/app/runs` only. The other three kept asserting "this page fetches nothing"
+  # against pages that now fetch their collection, and all four kept requiring copy that had moved. Four
+  # tests were red from the day P29 landed and nothing said so, because the only console job in this file
+  # ran `web/admin-console`. The suite was not failing quietly — it was not running at all.
+  #
+  # Mirrors the operator job deliberately, including `scan:tokens` as its own named step: a gate that
+  # exists only inside a composite command is a gate nobody can see pass.
+  customer-console:
+    name: customer console · tokens · typecheck · tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web/console
+    steps:
+      - uses: actions/checkout@v4
+      # 24 for the same hard reason the operator job pins it: this suite imports checked-in TypeScript
+      # directly (`routes.test.mjs` imports `../src/lib/routes.ts`), so it asserts against the shipped
+      # artefact rather than a copy. Node cannot load `.ts` without type stripping, which is on by
+      # default from 22.18 — package.json's `engines` states that floor.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/console/package-lock.json
+      - run: npm ci
+      - name: design-language fence
+        run: npm run scan:tokens
+      - run: npm run typecheck
+      # 🔴 The build is REQUIRED, not an optimization. `tests/support/harness.mjs` runs `next start`
+      # against `.next` and fails loud when there is no production build — so without this step every
+      # signed-in assertion in the suite fails against a console that is entirely correct.
+      #
+      # It also runs the gates that live only inside `npm run build`: scan:origins, scan:events,
+      # scan:strings, scan:markup, scan:claims, scan:docs and scan:bundle (the payload ceiling, the
+      # credential scan, and the analytics/replay reachability rule). None of them has ever run in CI.
+      #
+      # 🔴 HEROS_RELEASE_OFFLINE=1 is not a convenience. `gen:release-assets` builds the install page's
+      # checksum table from the latest published GitHub Release, so an online build makes this job's
+      # input change when a release is cut — a CI run that can differ from the one before it without the
+      # commit changing is not a gate. The generator's documented offline path keeps the checked-in
+      # artifact and says so, which is what we want asserted: the artifact in the tree, not whatever the
+      # network answered today.
+      - name: build (runs scan:origins, scan:events, scan:strings, scan:markup, scan:claims, scan:docs, scan:bundle — and produces the .next the live tests need)
+        env:
+          HEROS_RELEASE_OFFLINE: "1"
+        run: npm run build
+      - run: npm test
+
   lint:
     name: golangci-lint
     runs-on: ubuntu-latest
