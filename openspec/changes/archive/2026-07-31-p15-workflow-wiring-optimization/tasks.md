@@ -240,10 +240,10 @@ teaches them the tool is broken.
       (Test: `P15-2`, `P15-3`, `P15-4`).
 - [x] 9.3 An axis the console cannot annotate still renders — the platform's sentence carries it — rather
       than being swallowed. → `AXIS_NOTE` lookup returns undefined and the note is omitted (Test: `P15-4`).
-- [x] 9.4 Browser-verified against a rendered page, not only asserted: `/preview/p15` renders the SAME
+- [x] 9.4 Browser-verified against a rendered page, not only asserted: `/preview/wiring` renders the SAME
       component the submit path renders, one linkable fixture per shape (reorder / merge / rewired edge /
       un-annotated axis), plus the applied case — a page of four refusals reads as a broken feature.
-      → [`preview/p15/page.tsx`](../../../web/console/src/app/preview/p15/page.tsx)
+      → [`preview/wiring/page.tsx`](../../../web/console/src/app/preview/wiring/page.tsx)
       (Test: `9.4 the preview renders the SAME outcome cards the submit path renders`,
       `9.4 one linkable fixture per shape, and the un-annotated axis is one of them` in
       [`tests/wiring-authoring.test.mjs`](../../../web/console/tests/wiring-authoring.test.mjs) — the

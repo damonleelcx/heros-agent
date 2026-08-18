@@ -36,7 +36,7 @@ not just the locator forms, which have landed), the build-gate proof harness, an
 surfaces. Every §9 (wave 14c) task is `[ ]`. The `→ path (Test: Name)` pointer on each
 one names the code that landed and the test that holds it. Verified green with `go build ./...`,
 `go vet ./...`, `gofmt -l`, `go test ./...`, `make schema`, `make discovery-ci`, `make console-types-check`,
-and a browser check of the new console surface at `/preview/p14`.
+and a browser check of the new console surface at `/preview/skills-tools`.
 
 ---
 
@@ -185,12 +185,12 @@ and a browser check of the new console surface at `/preview/p14`.
       tool**", drawn from the split fields. → `proposal.DimChange.Kind`/`Items` + `ChangeKind.Legible`,
       `toolChange` reads `IRNode.Tools` via `Compiled.IR`; rendered by
       [`web/console/src/components/skillsToolsOptimization.tsx`](../../../web/console/src/components/skillsToolsOptimization.tsx)
-      (Test: `TestChangeSurfaceDistinguishesToolFromSkill`; browser-verified at `/preview/p14`).
+      (Test: `TestChangeSurfaceDistinguishesToolFromSkill`; browser-verified at `/preview/skills-tools`).
 - [x] 8.2 A refusal is a **named** surface ("node X, dim skills: no materializer for <language> yet"),
       not a diff that looks complete. → `BuildRefused` + `proposal.ChangeRefusal` (a refusal is a VERDICT,
       not an error that aborts the batch), `api.RefusedCard`, `RefusalNotice` rendered above everything
       for every operator (Test: `TestRefusalIsNamedNotSwallowed`,
-      `TestRealFailureIsNotReportedAsARefusal`; browser-verified at `/preview/p14` -> Refused).
+      `TestRealFailureIsNotReportedAsARefusal`; browser-verified at `/preview/skills-tools` -> Refused).
 
 ## 9. Wave 14c — user-initiated change on this axis (`skill-tool-authoring`)
 

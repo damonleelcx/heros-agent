@@ -161,7 +161,7 @@ export default async function P15PreviewPage({
                 ? "rounded-lg border border-primary/40 bg-primary/10 px-3 py-1.5 font-mono text-xs text-primary"
                 : "rounded-lg border border-border px-3 py-1.5 font-mono text-xs text-muted-foreground transition-colors hover:text-foreground"
             }
-            href={`/preview/p15?tab=${f.id}`}
+            href={`/preview/wiring?tab=${f.id}`}
           >
             {f.label}
           </Link>

@@ -32,7 +32,7 @@ const ROOT = new URL("..", import.meta.url).pathname;
 
 const SRC = {
   configure: "src/app/app/configure/configurator.tsx",
-  // P15's declined-change card. It is its own file because the submit path and /preview/p15 render the
+  // P15's declined-change card. It is its own file because the submit path and /preview/wiring render the
   // SAME element — a preview of a re-implementation would check a page no customer sees.
   axisRefusal: "src/components/axisRefusal.tsx",
   wiring: "src/app/app/wiring/page.tsx",
