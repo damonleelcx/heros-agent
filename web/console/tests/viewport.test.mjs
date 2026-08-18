@@ -78,8 +78,8 @@ test("the proposals list splits recommended from withheld into tabs, and keeps b
 
 test("a review presentation exposes its sections as tabs rather than rendering a stack", async () => {
   for (const [file, fn] of [
-    ["src/components/p14SkillsTools.tsx", "p14ReviewTabs"],
-    ["src/components/p13Optimization.tsx", "p13ReviewTabs"],
+    ["src/components/skillsToolsOptimization.tsx", "skillsToolsReviewTabs"],
+    ["src/components/promptModelOptimization.tsx", "promptModelReviewTabs"],
   ]) {
     const src = await read(file);
     assert.ok(src.includes(`export function ${fn}(`),

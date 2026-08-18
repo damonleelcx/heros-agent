@@ -6,7 +6,7 @@ import { Diff } from "@/components/diff";
 import { score, usd2, integer, plural } from "@/lib/format";
 
 /**
- * P13OptimizationReview presents the *offered change* for a P13 prompt-or-model optimization proposal
+ * PromptModelOptimizationReview presents the *offered change* for a P13 prompt-or-model optimization proposal
  * (openspec/changes/archive/2026-08-01-p13-prompt-model-optimization, tasks 6.1/6.2). It is a REVIEW surface, not an
  * evaluator: it renders no score, rank, winner, or promotion path of its own — it reads the verified
  * card the platform produced and frames it honestly:
@@ -83,7 +83,7 @@ function metaFor(operator: string) {
 }
 
 /**
- * p13ReviewTabs splits this review into one tab per section (NFR17 / PageFrame's own rule: "a page whose
+ * promptModelReviewTabs splits this review into one tab per section (NFR17 / PageFrame's own rule: "a page whose
  * sections would stack tall should split them into <Tabs>").
  *
  * The stacked version was five sections deep — the diff alone is a scrolling block — so a reader looking
@@ -91,22 +91,22 @@ function metaFor(operator: string) {
  * below the fold on every proposal. Tabs make each section a viewport rather than a stop on a long
  * descent. Nothing is removed: every section that stacked is a tab.
  */
-export function p13ReviewTabs(card: ProposalCard): TabItem[] {
+export function promptModelReviewTabs(card: ProposalCard): TabItem[] {
   const meta = metaFor(card.operator);
   const tabs: TabItem[] = [
-    { id: "offered", label: "The offered change", content: <P13Offered card={card} /> },
+    { id: "offered", label: "The offered change", content: <OfferedChange card={card} /> },
   ];
   if (meta.family === "prompt") {
     tabs.push(
       { id: "grounding", label: "Grounding", content: <PromptGrounding card={card} /> },
       { id: "delta", label: "Verified delta", content: <VerifiedDelta card={card} /> },
-      { id: "diff", label: "The change", content: <P13Diff card={card} aside="a reviewable diff of the new version" /> },
+      { id: "diff", label: "The change", content: <ChangeDiff card={card} aside="a reviewable diff of the new version" /> },
     );
   }
   if (meta.family === "downgrade") {
     tabs.push(
       { id: "guardrail", label: "Held-out guardrail", content: <DowngradeGuardrail card={card} /> },
-      { id: "diff", label: "The change", content: <P13Diff card={card} aside="an intra-provider model swap" /> },
+      { id: "diff", label: "The change", content: <ChangeDiff card={card} aside="an intra-provider model swap" /> },
     );
   }
   if (meta.family === "param") {
@@ -115,7 +115,7 @@ export function p13ReviewTabs(card: ProposalCard): TabItem[] {
   return tabs;
 }
 
-function P13Offered({ card }: { card: ProposalCard }) {
+function OfferedChange({ card }: { card: ProposalCard }) {
   const meta = metaFor(card.operator);
   return (
     <>
@@ -144,7 +144,7 @@ function P13Offered({ card }: { card: ProposalCard }) {
 }
 
 /** The diff, as its own tab: it is the tallest block on the page and the one a reviewer opens last. */
-function P13Diff({ card, aside }: { card: ProposalCard; aside: string }) {
+function ChangeDiff({ card, aside }: { card: ProposalCard; aside: string }) {
   return (
     <Section title="The change" aside={aside}>
       {card.source_diff ? <Diff patch={card.source_diff} /> : <p className="caption">No source diff.</p>}

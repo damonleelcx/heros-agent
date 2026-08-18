@@ -184,7 +184,7 @@ and a browser check of the new console surface at `/preview/p14`.
 - [x] 8.1 The change surface distinguishes "**bound a platform skill**" from "**pruned a provider
       tool**", drawn from the split fields. → `proposal.DimChange.Kind`/`Items` + `ChangeKind.Legible`,
       `toolChange` reads `IRNode.Tools` via `Compiled.IR`; rendered by
-      [`web/console/src/components/p14SkillsTools.tsx`](../../../web/console/src/components/p14SkillsTools.tsx)
+      [`web/console/src/components/skillsToolsOptimization.tsx`](../../../web/console/src/components/skillsToolsOptimization.tsx)
       (Test: `TestChangeSurfaceDistinguishesToolFromSkill`; browser-verified at `/preview/p14`).
 - [x] 8.2 A refusal is a **named** surface ("node X, dim skills: no materializer for <language> yet"),
       not a diff that looks complete. → `BuildRefused` + `proposal.ChangeRefusal` (a refusal is a VERDICT,

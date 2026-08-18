@@ -14,7 +14,7 @@ import { Diff } from "@/components/diff";
 import { integer, plural } from "@/lib/format";
 
 /**
- * P14SkillsToolsReview presents a skills-or-tools proposal
+ * SkillsToolsOptimizationReview presents a skills-or-tools proposal
  * (openspec/changes/archive/2026-07-29-p14-skills-tools-optimization, tasks 8.1/8.2).
  *
  * # The one thing this surface exists to do
@@ -93,7 +93,7 @@ const OPERATOR_META: Record<
 };
 
 /** The operators this review surface owns. Anything else keeps the generic proposal layout. */
-export const P14_OPERATORS = new Set(Object.keys(OPERATOR_META));
+export const SKILLS_TOOLS_OPERATORS = new Set(Object.keys(OPERATOR_META));
 
 function metaFor(operator: string) {
   return (
@@ -219,7 +219,7 @@ function ChangeLine({ change }: { change: DimChange }) {
 }
 
 /**
- * p14ReviewTabs splits this review into one tab per section (NFR17, and PageFrame's own rule: "a page
+ * skillsToolsReviewTabs splits this review into one tab per section (NFR17, and PageFrame's own rule: "a page
  * whose sections would stack tall should split them into <Tabs>").
  *
  * Stacked, this review ran four sections deep and the Decision sat below all of them — so on every
@@ -227,21 +227,21 @@ function ChangeLine({ change }: { change: DimChange }) {
  * precisely so a bound skill and a pruned tool cannot be confused) was something a reader scrolled PAST
  * on the way to the diff. Nothing is removed by tabbing: every section that stacked is a tab.
  */
-export function p14ReviewTabs(card: ProposalCard): TabItem[] {
+export function skillsToolsReviewTabs(card: ProposalCard): TabItem[] {
   const changes = card.spec_diff ?? [];
   const hasToolChange = changes.some((c) => c.dimension === "tools");
   const tabs: TabItem[] = [
-    { id: "offered", label: "The offered change", content: <P14Offered card={card} /> },
-    { id: "moved", label: "What moved", content: <P14WhatMoved card={card} /> },
-    { id: "diff", label: "The change", content: <P14Diff card={card} /> },
+    { id: "offered", label: "The offered change", content: <OfferedChange card={card} /> },
+    { id: "moved", label: "What moved", content: <WhatMoved card={card} /> },
+    { id: "diff", label: "The change", content: <ChangeDiff card={card} /> },
   ];
   if (hasToolChange) {
-    tabs.push({ id: "scoring", label: "How this is scored", content: <P14Scoring /> });
+    tabs.push({ id: "scoring", label: "How this is scored", content: <ScoringNote /> });
   }
   return tabs;
 }
 
-function P14Offered({ card }: { card: ProposalCard }) {
+function OfferedChange({ card }: { card: ProposalCard }) {
   const meta = metaFor(card.operator);
   return (
     <Section title="The offered change" aside="P14 skills and tools optimization">
@@ -270,7 +270,7 @@ function P14Offered({ card }: { card: ProposalCard }) {
   );
 }
 
-function P14WhatMoved({ card }: { card: ProposalCard }) {
+function WhatMoved({ card }: { card: ProposalCard }) {
   const changes = card.spec_diff ?? [];
   const toolChanges = changes.filter((c) => c.dimension === "tools");
   const skillChanges = changes.filter((c) => c.dimension === "skills");
@@ -292,7 +292,7 @@ function P14WhatMoved({ card }: { card: ProposalCard }) {
   );
 }
 
-function P14Diff({ card }: { card: ProposalCard }) {
+function ChangeDiff({ card }: { card: ProposalCard }) {
   const refused = Boolean(card.refused_reason);
   return (
     <Section
@@ -315,7 +315,7 @@ function P14Diff({ card }: { card: ProposalCard }) {
   );
 }
 
-function P14Scoring() {
+function ScoringNote() {
   return (
     <Section title="How this is scored" aside="no new metric">
       <Card className="flex items-start gap-3">

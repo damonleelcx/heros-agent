@@ -2,7 +2,7 @@ import type { Card as ProposalCard } from "@/lib/types.generated";
 import { PageFrame } from "@/components/primitives";
 import Link from "next/link";
 import { Tabs } from "@/components/tabs";
-import { p14ReviewTabs, RefusalNotice } from "@/components/p14SkillsTools";
+import { skillsToolsReviewTabs, RefusalNotice } from "@/components/skillsToolsOptimization";
 
 /**
  * A self-contained preview of the P14 skills-and-tools review surface. It renders the same components
@@ -203,7 +203,7 @@ export default async function P14PreviewPage({
       </nav>
 
       <RefusalNotice card={chosen.card} />
-      <Tabs key={chosen.id} tabs={p14ReviewTabs(chosen.card)} />
+      <Tabs key={chosen.id} tabs={skillsToolsReviewTabs(chosen.card)} />
     </PageFrame>
   );
 }

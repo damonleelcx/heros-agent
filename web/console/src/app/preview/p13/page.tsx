@@ -2,11 +2,11 @@ import Link from "next/link";
 import type { Card as ProposalCard } from "@/lib/types.generated";
 import { PageFrame } from "@/components/primitives";
 import { Tabs } from "@/components/tabs";
-import { p13ReviewTabs } from "@/components/p13Optimization";
+import { promptModelReviewTabs } from "@/components/promptModelOptimization";
 
 /**
  * A self-contained preview of the P13 optimization-review surface. It renders the same
- * P13OptimizationReview component the proposal detail page uses, seeded with representative verified
+ * PromptModelOptimizationReview component the proposal detail page uses, seeded with representative verified
  * cards, so the presentation can be reviewed without a live platform backend. It uses only the root
  * layout (no session, no BFF), which is why it lives outside /app.
  */
@@ -147,7 +147,7 @@ export default async function P13PreviewPage({
           </Link>
         ))}
       </nav>
-      <Tabs key={chosen.id} tabs={p13ReviewTabs(chosen.card)} />
+      <Tabs key={chosen.id} tabs={promptModelReviewTabs(chosen.card)} />
     </PageFrame>
   );
 }

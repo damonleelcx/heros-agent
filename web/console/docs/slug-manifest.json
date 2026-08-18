@@ -192,7 +192,7 @@
     {
       "route": "/docs/reference/schemas",
       "source": "docs/en/reference/schemas.md",
-      "content_hash": "95d5f1997b39e35c3508f7e79ae111ac90e884b77d613400f1e405771b0339a9",
+      "content_hash": "374671eb854b02c748201e735751f0ece6e6960f079880132551b77302f19bdc",
       "anchors": [
         "console-view",
         "metric-event",
