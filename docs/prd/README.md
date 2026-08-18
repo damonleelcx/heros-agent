@@ -356,6 +356,51 @@ default placement is **`disabled`**, so deploying the phase changes nothing for 
 an operator acts. Its first workstream, the four surface-honesty fixes, depends on neither decision and
 ships alone.
 
+### Graph Engineering Harness Agent (GEHA) — P31–P36
+
+The platform can do eleven things and asks the customer to perform all eleven; the CLI demo is a numbered
+list, and the numbering is the product's shape rather than the video's editing. **GEHA collapses the list
+into one sentence typed into a conversation** — point at a repository, ask a question, and the platform's
+own agent reads the repository's agent-engineering surfaces, reports what it found with the evidence behind
+each finding, proposes changes, waits to be told yes, applies them, re-measures, and opens the pull request.
+
+Almost every component already exists; the program's discipline is to wire them rather than fork them. Its
+second half is not a convenience: the platform sells the idea that an agentic system is a graph of
+configured nodes, and **its own agent is one node** — `NodeID = "heros_analyst"`, which is why HEROS's
+wiring axis is not merely unused but *vacuous* (*"there is no second node to order it against"*). An agent
+that cannot be a graph cannot do graph engineering. **P36 makes the platform's own agent a graph**, and the
+other five phases exist to make that possible.
+
+Four rulings shape the program and are recorded with their costs in
+[the program document](P31-P36-graph-engineering-agent-program.md) §3: bundle-push stays the default with
+a per-repository read grant as the opt-in upgrade ([ADR-013](../adr/ADR-013-source-acquisition-posture.md));
+**loop and graph become axes separate from harness** ([ADR-014](../adr/ADR-014-harness-loop-graph-axis-split.md));
+the hosted Git App becomes the delivery default **for console-driven runs only**; and assessment produces
+**evidence-backed per-surface findings with no composite score** — because every score in this codebase is
+comparative and verified, and an absolute "your repository is 62 out of 100" is a model's judgement in a
+metric's typeface.
+
+| Phase | PRD | OpenSpec change | Lead role(s) |
+|-------|-----|-----------------|--------------|
+| **Program overview** *(decomposition, the four rulings, the nine axes, sequencing, staged plan)* | [P31-P36-graph-engineering-agent-program.md](P31-P36-graph-engineering-agent-program.md) | — | System Designer |
+| P31 — The Conversational Console *(typed message kinds, not prose; streaming over the existing SSE substrate; approval in dialogue routed to the existing gate; the untrusted-source boundary)* | [P31-conversational-console.md](P31-conversational-console.md) | `p31-conversational-console` | Frontend + Product Designer |
+| P32 — Repo Intake *(GitSource behind the existing seam; bundle default; local bridge; revocation that cascades to derived trees)* | [P32-repo-intake.md](P32-repo-intake.md) | `p32-repo-intake` | Backend + DevOps |
+| P33 — Surface Assessment *(nine axes × four states; `not_measured` names its missing input; decisiveness travels with every score; no composite)* | [P33-surface-assessment.md](P33-surface-assessment.md) | `p33-surface-assessment` | AI Engineer + Product Designer |
+| P34 — Harness / Loop / Graph *(three axes, not one; expand-only, the contract half refused on the record; concurrency, conditional edges and merge)* | [P34-harness-loop-graph-split.md](P34-harness-loop-graph-split.md) | `p34-harness-loop-graph-split` | System Designer + AI Engineer |
+| P35 — The Improvement Run *(a question becomes a bounded plan; re-measurement may disagree and withdraw; hosted App as the console delivery default)* | [P35-autonomous-improvement-run.md](P35-autonomous-improvement-run.md) | `p35-autonomous-improvement-run` | Backend + AI Engineer |
+| P36 — The Agent Is a Graph *(nine axes for the operator; `NodeID` becomes data; the wiring refusal narrows rather than disappears; single-node stays hash-identical)* | [P36-agent-self-configuration.md](P36-agent-self-configuration.md) | `p36-agent-self-configuration` | System Designer + Frontend |
+
+**None of GEHA is implemented, and this program is authored documents-only** — the same scope the OAX
+program (P13–P18) was written under. Every task in every change set is unchecked.
+
+Two phases carry a failure that no test goes red for, and both are stated as the first task of their
+phase rather than as a QA item at the end. **P34**: removing the loop fields from `HarnessSpec` would move
+every harness `version_id` and orphan every measurement taken on a multi-turn node, so the contract half of
+expand-contract is refused *on the record*. **P36**: every pinned inference is keyed by
+`(source_revision, agent config_hash)`, so a change to the agent's definition *shape* orphans every pin —
+silently re-running every assessment at provider cost, weeks later, while the console shows results
+computed by a configuration that no longer exists.
+
 ## PRD template
 
 Every phase PRD follows this structure:
