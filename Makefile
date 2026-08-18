@@ -22,7 +22,7 @@ PARITY_DIR ?= .parity
 
 .PHONY: ci go build vet fmt test schema lint db-proof pg-proof verifier-proof tidy-check clean help demo-evalboard \
         deploy-lint deploy-up deploy-down deploy-down-hard \
-        console-types console-types-check console-test operator-console-test operator-ledger operator-hermes docs-facts docs-facts-check \
+        console-types console-types-check console-tokens console-test operator-console-test operator-ledger operator-hermes docs-facts docs-facts-check \
         build-discover discovery-ci discovery-throughput \
         discovery-parity-snapshot discovery-parity-verify \
         discovery-sandbox-proof discovery-sandbox-proof-redcheck \
@@ -135,9 +135,32 @@ deploy-lint:
 	bash scripts/deploy/check-mail-relay-pinned.sh
 	@echo "== make deploy-lint: PASS =="
 
-## console-test: the customer console's own suite (needs npm; see web/console/README.md)
-console-test:
-	cd web/console && npm run typecheck && npm test
+## console-tokens: the customer console's design-language fence — no colour/spacing/type/radius literal.
+#
+# Its own target for the same reason operator-ledger is one: `npm run build` runs it too, and a gate
+# that exists only inside a composite command is a gate nobody can see pass.
+console-tokens:
+	cd web/console && npm run scan:tokens
+
+## console-test: the customer console's gates — design-language fence, types, build, and its 661 tests.
+#
+# 🔴 The BUILD is not optional, and this target went without it long enough for the omission to matter.
+# tests/support/harness.mjs runs `next start` against `.next` and fails loud when there is no production
+# build, so on a clean checkout this target could not complete — and no CI job ran it, so nothing said
+# so. It is also what runs scan:origins, scan:events, scan:strings, scan:markup, scan:claims, scan:docs
+# and scan:bundle, none of which exist anywhere else.
+#
+# 🔴 Run this with NO `next dev` server running. A dev server clobbers `.next`, which makes the bundle
+# scan refuse to measure and manufactures a large number of spurious sign-in failures — a known trap in
+# this repository, and one that reads as a broken suite rather than as a broken environment.
+#
+# HEROS_RELEASE_OFFLINE=1 for the reason CI pins it: gen:release-assets builds the install page's
+# checksum table from the latest published GitHub Release, so an online build makes this target's input
+# change when a release is cut. A gate whose answer moves without the commit moving is not a gate.
+console-test: console-tokens
+	cd web/console && npm run typecheck
+	cd web/console && HEROS_RELEASE_OFFLINE=1 npm run build
+	cd web/console && npm test
 
 ## operator-ledger: the P26 operator-surface fence — a capability with no recorded operator story fails.
 #
@@ -165,8 +188,14 @@ operator-hermes:
 # 🔴 Run this with NO `next dev` server running. A dev server clobbers `.next`, which makes the bundle
 # scan refuse to measure and manufactures a large number of spurious sign-in failures — a known trap in
 # this repository, and one that reads as a broken suite rather than as a broken environment.
+# 🔴 The BUILD is not optional here either, and for the same reason: since P24 this suite starts
+# `next start` to assert a real Content-Security-Policy header, so without a production build every
+# signed-in assertion fails against a console that is entirely correct. The operator console's own
+# `npm run build` is what runs scan:origins, scan:events, scan:tokens, scan:ledger and scan:bundle.
 operator-console-test: operator-ledger
-	cd web/admin-console && npm run typecheck && npm test
+	cd web/admin-console && npm run typecheck
+	cd web/admin-console && npm run build
+	cd web/admin-console && npm test
 
 ## schema: JSON-schema validation gate + contract proofs (task 4.2)
 schema:

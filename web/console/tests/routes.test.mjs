@@ -59,38 +59,72 @@ function text(html) {
 // ── No default subject ───────────────────────────────────────────────────────
 
 /*
- * 🔴 `/app/runs` left this list in P27, and the reason is a change in what the page IS rather than a
- * relaxation of the rule.
+ * 🔴 All four subject pages left the browser-session list, and the reason is a change in what those
+ * pages ARE rather than a relaxation of the rule.
  *
  * The rule is "a selection surface must not choose a subject for the user", and it was written when the
- * only way to reach a run was to already know its id — because the platform had no collection route.
- * `run` carried no owning organization, so "which runs are mine" was not a question the API could be
- * asked, and a page that fetched anything would have been fetching somebody's guess.
+ * only way to reach a subject was to already know its id — because the platform had no collection
+ * routes. Nothing carried an owning organization, so "which of these are mine" was not a question the
+ * API could be asked, and a page that fetched anything would have been fetching somebody's guess. All a
+ * picker could offer was what THIS browser session had already opened.
  *
- * P27 gave runs an owner and a collection. `/app/runs` is now a LIST of the caller's own runs, and
- * fetching the collection is not choosing a subject — it is the page. The direct-entry accelerator is
- * still there, below the list, for a run somebody else produced.
+ * P27 gave runs an owner; P29 added the enumeration for all four subjects. That spec's opening line
+ * names the old behaviour as the defect it fixed — "what do I have?" is the question the console "has
+ * never been able to ask, which is why every subject picker offers only what the current browser
+ * session already opened" (`openspec/specs/linked-subject-index/spec.md`).
  *
- * So the rule did not move; the page did. Its own test is below, and it asserts the property that
- * matters now: the collection is fetched, a SPECIFIC run never is, and the accelerator survives.
+ * So fetching the COLLECTION is not choosing a subject — it is the page. Fetching a SPECIFIC subject
+ * still is, and that half of the rule did not move. The session's own list survives as an ordering hint
+ * only, and a remembered subject the enumeration does not contain is DISCARDED rather than offered
+ * (`src/app/app/workflows/page.tsx`).
+ *
+ * ⚠️ This block asserted the pre-P29 world until 2026-08-18. P29 updated it for `/app/runs` and left
+ * the other three, so three routes asserted "fetches nothing" against pages that now legitimately fetch
+ * their collection, and all four still required copy ("Opened in this session") that now exists only on
+ * `/app`. It survived because ci.yml's only console job runs `web/admin-console` — this suite has never
+ * run in CI.
+ *
+ * ⚠️ These tests run `next start` against a PREBUILT `.next` (see support/harness.mjs). A mutation drill
+ * on this file's assertions must REBUILD, or the mutation is not in the binary under test and the drill
+ * reports a fence that cannot actually go red.
  */
+
+/**
+ * assertCollectionNotSubject holds the half of the no-default-subject rule that survived P29: a
+ * selection page fetches the collection it lists, and NEVER an individual subject.
+ *
+ * 🔴 It is deliberately two-sided. The assertion this replaced was `requests.length === before`, which
+ * also passes when the page fetches NOTHING — after P29 that is a broken page rendering an empty list.
+ * A fence that cannot fail in both directions only guards the half somebody happened to think of.
+ */
+function assertCollectionNotSubject(fetched, route, collection) {
+  assert.ok(
+    fetched.some((u) => u === collection || u.startsWith(`${collection}?`)),
+    `${route} did not fetch its collection ${collection} (asked for: ${fetched.join(", ") || "nothing"})`,
+  );
+  assert.ok(
+    !fetched.some((u) => new RegExp(`^${collection}/[^?/]`).test(u)),
+    `${route} opened a subject nobody asked for: ${fetched.join(", ")}`,
+  );
+}
+
 const SELECTION_ROUTES = [
-  ["/app/workflows", "workflow"],
-  ["/app/transforms", "transform"],
-  ["/app/variants", "variant"],
+  ["/app/workflows", "workflow", "/api/v1/workflows"],
+  ["/app/transforms", "transform", "/api/v1/transforms"],
+  ["/app/variants", "variant", "/api/v1/variants"],
 ];
 
-for (const [route, subject] of SELECTION_ROUTES) {
-  test(`${route} with no parameters renders selection, never populated data`, async () => {
+for (const [route, subject, collection] of SELECTION_ROUTES) {
+  test(`${route} lists the caller's own subjects and still never picks one for them`, async () => {
     const before = platform.requests.length;
     const { status, html } = await page(route);
     assert.equal(status, 200);
-    // The decisive assertion: a selection surface makes NO upstream call, because there is no subject
-    // to fetch. If it fetched something, it chose a subject for the user.
-    assert.equal(platform.requests.length, before, `${route} fetched a subject it was not given`);
+    assertCollectionNotSubject(platform.requests.slice(before).map((r) => r.url), route, collection);
     const rendered = text(html);
     assert.match(rendered, new RegExp(`Open a ${subject} by identifier`, "i"), "no direct-entry accelerator");
-    assert.match(rendered, /Opened in this session/, "no already-visited list");
+    // The platform-backed list that REPLACED "Opened in this session" here. `SubjectPicker` titles it
+    // `Your {subject}s`; asserting it is what stops the enumeration silently regressing to a browser list.
+    assert.match(rendered, new RegExp(`Your ${subject}s`, "i"), "no platform-backed subject list");
     // And it must never contain the legacy default.
     assert.doesNotMatch(html, /wf-demo/, `${route} mentions the hardcoded legacy default`);
   });
@@ -101,23 +135,20 @@ test("/app/runs lists the caller's own runs and still never picks one for them",
   const { status, html } = await page("/app/runs");
   assert.equal(status, 200);
 
-  const fetched = platform.requests.slice(before).map((r) => r.url);
-  // The COLLECTION, which is the page's subject. No organization in it: the scope comes from the
-  // credential, and there is no parameter that could carry one.
-  assert.ok(
-    fetched.some((u) => u.startsWith("/api/v1/runs") && !/\/api\/v1\/runs\/[^?]/.test(u)),
-    `the runs list did not fetch the collection (asked for: ${fetched.join(", ") || "nothing"})`,
-  );
-  // 🔴 And never a SPECIFIC run. Fetching one would be choosing a subject for the user, which is the
-  // rule this page used to be listed under and still obeys.
-  assert.ok(
-    !fetched.some((u) => /\/api\/v1\/runs\/[^?/]+/.test(u)),
-    `the runs list opened a run nobody asked for: ${fetched.join(", ")}`,
+  // The COLLECTION, and never a SPECIFIC run — the same two-sided property the three selection routes
+  // assert, through the same helper, because it is one rule and not four.
+  //
+  // No organization in the collection URL: the scope comes from the credential, and there is no
+  // parameter that could carry one.
+  assertCollectionNotSubject(
+    platform.requests.slice(before).map((r) => r.url),
+    "/app/runs",
+    "/api/v1/runs",
   );
 
   const rendered = text(html);
   assert.match(rendered, /Open a run by identifier/i, "the direct-entry accelerator was lost");
-  assert.match(rendered, /Opened in this session/, "the already-visited list was lost");
+  assert.match(rendered, /Your runs/i, "no platform-backed run list");
   assert.doesNotMatch(html, /wf-demo/, "/app/runs mentions the hardcoded legacy default");
 });
 
