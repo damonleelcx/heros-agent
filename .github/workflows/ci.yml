@@ -138,9 +138,6 @@ jobs:
   operator-console:
     name: operator console · surface ledger · tokens · tests
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: web/admin-console
     steps:
       - uses: actions/checkout@v4
       # 🔴 24, not 20, and the reason is a hard requirement rather than a preference.
@@ -162,12 +159,10 @@ jobs:
           cache: npm
           cache-dependency-path: web/admin-console/package-lock.json
       - run: npm ci
+        working-directory: web/admin-console
       - name: operator-surface ledger fence (required)
-        run: npm run scan:ledger
-      - name: design-language fence
-        run: npm run scan:tokens
-      - run: npm run typecheck
-      # 🔴 The suite now needs a BUILD, and this step is why the job grew one.
+        run: make operator-ledger
+      # 🔴 The suite needs a BUILD, and the make target is where that now lives.
       #
       # Every assertion in this suite used to be about source shape, which needs no build. P24 added the
       # first ones that read a real response header — a Content-Security-Policy is assembled in
@@ -179,12 +174,10 @@ jobs:
       # whole phase argues against: a fence that does not run in CI is a fence nobody knows is connected,
       # and it would have skipped here forever while reporting green.
       #
-      # It also closes a gap that predates P24 — `scan:bundle` (the payload ceiling, the credential scan
-      # and now the analytics/replay reachability rule) has never run in this job at all, because it only
-      # exists inside `npm run build`.
-      - name: build (runs scan:origins, scan:events, scan:bundle — and produces the .next the live tests need)
-        run: npm run build
-      - run: npm test
+      # `make operator-console-test` also runs scan:origins, scan:events, scan:tokens and scan:bundle
+      # (the payload ceiling and the credential scan), because they exist only inside `npm run build`.
+      - name: typecheck · build (scans) · tests
+        run: make operator-console-test
 
   # The CUSTOMER console's own gates. It had none — 661 tests that had never run in CI, on the surface
   # customers actually use.
@@ -201,9 +194,6 @@ jobs:
   customer-console:
     name: customer console · tokens · typecheck · tests
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: web/console
     steps:
       - uses: actions/checkout@v4
       # 24 for the same hard reason the operator job pins it: this suite imports checked-in TypeScript
@@ -216,28 +206,22 @@ jobs:
           cache: npm
           cache-dependency-path: web/console/package-lock.json
       - run: npm ci
+        working-directory: web/console
       - name: design-language fence
-        run: npm run scan:tokens
-      - run: npm run typecheck
-      # 🔴 The build is REQUIRED, not an optimization. `tests/support/harness.mjs` runs `next start`
-      # against `.next` and fails loud when there is no production build — so without this step every
-      # signed-in assertion in the suite fails against a console that is entirely correct.
+        run: make console-tokens
+      # 🔴 `make console-test` builds, and the build is REQUIRED rather than an optimization.
+      # `tests/support/harness.mjs` runs `next start` against `.next` and fails loud when there is no
+      # production build, so without it every signed-in assertion fails against a console that is
+      # entirely correct.
       #
-      # It also runs the gates that live only inside `npm run build`: scan:origins, scan:events,
-      # scan:strings, scan:markup, scan:claims, scan:docs and scan:bundle (the payload ceiling, the
-      # credential scan, and the analytics/replay reachability rule). None of them has ever run in CI.
+      # The build is also the only place scan:origins, scan:events, scan:strings, scan:markup,
+      # scan:claims, scan:docs and scan:bundle run — the last of which carries the payload ceiling, the
+      # credential scan and the analytics/replay reachability rule. None had ever run in CI.
       #
-      # 🔴 HEROS_RELEASE_OFFLINE=1 is not a convenience. `gen:release-assets` builds the install page's
-      # checksum table from the latest published GitHub Release, so an online build makes this job's
-      # input change when a release is cut — a CI run that can differ from the one before it without the
-      # commit changing is not a gate. The generator's documented offline path keeps the checked-in
-      # artifact and says so, which is what we want asserted: the artifact in the tree, not whatever the
-      # network answered today.
-      - name: build (runs scan:origins, scan:events, scan:strings, scan:markup, scan:claims, scan:docs, scan:bundle — and produces the .next the live tests need)
-        env:
-          HEROS_RELEASE_OFFLINE: "1"
-        run: npm run build
-      - run: npm test
+      # HEROS_RELEASE_OFFLINE=1 lives in the make target, not here, so a developer running the target
+      # locally gets the same answer this job does.
+      - name: typecheck · build (7 scans) · 661 tests
+        run: make console-test
 
   lint:
     name: golangci-lint
