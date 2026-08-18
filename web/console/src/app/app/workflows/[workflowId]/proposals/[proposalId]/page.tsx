@@ -20,8 +20,8 @@ import {
 } from "@/components/primitives";
 import { Disclosure } from "@/components/figure";
 import { Diff } from "@/components/diff";
-import { p13ReviewTabs } from "@/components/p13Optimization";
-import { p14ReviewTabs, P14_OPERATORS, RefusalNotice } from "@/components/p14SkillsTools";
+import { promptModelReviewTabs } from "@/components/promptModelOptimization";
+import { skillsToolsReviewTabs, SKILLS_TOOLS_OPERATORS, RefusalNotice } from "@/components/skillsToolsOptimization";
 import { Tabs, type TabItem } from "@/components/tabs";
 import { score, usd2, ms, integer, plural } from "@/lib/format";
 
@@ -113,11 +113,11 @@ function Body({
   const isP13 = P13_OPERATORS.has(card.operator);
   // A P14 skills-or-tools change gets its own review, whose whole job is to make "bound a platform
   // skill" and "pruned a provider tool" look different. Before the split they rendered as one sentence.
-  const isP14 = P14_OPERATORS.has(card.operator);
+  const isSkillsTools = SKILLS_TOOLS_OPERATORS.has(card.operator);
   const reviewTabs = isP13
-    ? p13ReviewTabs(card)
-    : isP14
-      ? p14ReviewTabs(card)
+    ? promptModelReviewTabs(card)
+    : isSkillsTools
+      ? skillsToolsReviewTabs(card)
       : genericReviewTabs(card, flags);
 
   return (

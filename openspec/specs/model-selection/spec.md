@@ -1,7 +1,7 @@
 # Model Selection — Spec (folded from P13)
 
 Product rationale: [`../../../docs/prd/P13-prompt-model-optimization.md`](../../../docs/prd/P13-prompt-model-optimization.md)
-§6 (FR9–FR16), §7. Design reasoning: [`../../changes/p13-prompt-model-optimization/design.md`](../../changes/p13-prompt-model-optimization/design.md) Decisions 4, 5, 6, 7, 8.
+§6 (FR9–FR16), §7. Design reasoning: [`../../changes/archive/2026-08-01-p13-prompt-model-optimization/design.md`](../../changes/archive/2026-08-01-p13-prompt-model-optimization/design.md) Decisions 4, 5, 6, 7, 8.
 
 Covers model up/down-grade under an explicit quality guardrail, model-parameter tuning within the honest
 apply-mode boundary, and the provider-routing refusal — all expressed through the existing model

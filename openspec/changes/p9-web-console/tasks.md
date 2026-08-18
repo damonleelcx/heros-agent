@@ -415,7 +415,7 @@ Each sub-task below ships only when its inventory section is fully checked.
 > the accessibility floor, and 🔴 11b.3's honesty rule — each now an executable check.
 
 The studio is a console surface, so its routes live in this shell — but its **requirements** belong to
-[`../p10-prompt-model-studio/`](../p10-prompt-model-studio/) and are not duplicated here. P9's rules
+[`../p10-prompt-model-studio/`](../archive/2026-08-01-p10-prompt-model-studio/) and are not duplicated here. P9's rules
 govern it unchanged: single token set, English strings with pinned `en-US` formatting,
 render-as-received, no credential in the browser, three distinct data states, the accessibility floor,
 and browser-rendered acceptance.
@@ -473,7 +473,7 @@ and browser-rendered acceptance.
 Like §11b, these live in this shell but their **requirements** belong to their own phases and are
 not duplicated here.
 
-- [x] 11c.1 **Link coverage** ([P11](../p11-cli-ci-integration/)) — display how much of a customer's
+- [x] 11c.1 **Link coverage** ([P11](../archive/2026-07-25-p11-cli-ci-integration/)) — display how much of a customer's
       activity is linked, **wherever a spend figure derived from linked runs is shown**. It is not a
       footnote: a figure reflecting a fraction of activity, shown without saying so, is what a billing
       dispute is made of. Complete coverage and *unknown* coverage must render distinguishably.
@@ -482,7 +482,7 @@ not duplicated here.
       `partial` (`N of M`, "unlinked runs contribute nothing and are never estimated"), and `unknown`
       (no run count reported — a dashed bar, never 100%). `link-coverage.test.mjs` renders all three
       against a stub and asserts unknown is never collapsed into complete.
-- [x] 11c.2 **Delivery state** ([P12](../p12-forge-delivery/)) — show each delivery as **open /
+- [x] 11c.2 **Delivery state** ([P12](../archive/2026-07-25-p12-forge-delivery/)) — show each delivery as **open /
       merged / closed / superseded**, linked to the proposal that produced it, so the loop from
       proposal to outcome is visible.
       → `app/delivery/page.tsx` renders each `DeliveryView` with the `Status` primitive

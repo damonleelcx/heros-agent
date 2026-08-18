@@ -359,7 +359,7 @@ requirements and are not inventoried here:
 
 | Surface | Owned by |
 |---|---|
-| Prompt browser, version timeline, version diff, editor, binding editor, preview / test-run, comparison, per-node model + prompt selector | [`../p10-prompt-model-studio/`](../p10-prompt-model-studio/) — hosted in this shell per §11b of [`tasks.md`](tasks.md) |
+| Prompt browser, version timeline, version diff, editor, binding editor, preview / test-run, comparison, per-node model + prompt selector | [`../p10-prompt-model-studio/`](../archive/2026-08-01-p10-prompt-model-studio/) — hosted in this shell per §11b of [`tasks.md`](tasks.md) |
 | Attribution / diagnosis views | P4.5, via §11.1 |
 | Proposal review | P5.5, via §11.2 |
 | The **public home page** — the surface a prospect meets before a session exists | P9 itself, via §7b. It ports **nothing**: there is no current public surface, so there is no behavior to lose. Its discipline is the opposite one — it may not **gain** a claim the platform has not shipped (`specs/console-marketing-site/spec.md`, ui-ux-plan R15). |

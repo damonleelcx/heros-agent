@@ -1,7 +1,7 @@
 # HEROS Agent Definition — Spec (folded from P30)
 
 Product rationale: [`../../../docs/prd/P30-heros-platform-agent.md`](../../../docs/prd/P30-heros-platform-agent.md) §6, §8.2 and §9.
-Design reasoning: [`../../changes/p30-heros-platform-agent/design.md`](../../changes/p30-heros-platform-agent/design.md).
+Design reasoning: [`../../changes/archive/2026-08-12-p30-heros-platform-agent/design.md`](../../changes/archive/2026-08-12-p30-heros-platform-agent/design.md).
 
 Covers the agent as an ordinary Variant Spec over the six authorable axes, its content-addressed
 `config_hash`, and the rehearsal gate that stands between publishing one and it serving anything.

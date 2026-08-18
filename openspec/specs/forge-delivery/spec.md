@@ -3,7 +3,7 @@
 Product rationale: [`../../../docs/prd/P12-forge-delivery.md`](../../../docs/prd/P12-forge-delivery.md)
 §6 (FR1–FR15) and §7. Architecture decision:
 [`../../../docs/adr/ADR-005-forge-delivery-and-credential-posture.md`](../../../docs/adr/ADR-005-forge-delivery-and-credential-posture.md).
-Design reasoning: [`../../changes/p12-forge-delivery/design.md`](../../changes/p12-forge-delivery/design.md) Decisions 1, 2, 3, 5, 6, 7, 8.
+Design reasoning: [`../../changes/archive/2026-07-25-p12-forge-delivery/design.md`](../../changes/archive/2026-07-25-p12-forge-delivery/design.md) Decisions 1, 2, 3, 5, 6, 7, 8.
 
 Covers how a verified optimization reaches a customer's repository: two credential modes producing
 identical pull requests, evidence in the pull request, idempotency and supersession, volume bounds, the

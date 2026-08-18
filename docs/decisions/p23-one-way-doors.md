@@ -1,7 +1,7 @@
 # P23 — The one-way doors, ratified
 
 Product rationale: [`docs/prd/P23-legal-and-developer-docs.md`](../prd/P23-legal-and-developer-docs.md).
-Engineering design: [`openspec/changes/p23-legal-and-docs/design.md`](../../openspec/changes/p23-legal-and-docs/design.md).
+Engineering design: [`openspec/changes/archive/2026-08-01-p23-legal-and-docs/design.md`](../../openspec/changes/archive/2026-08-01-p23-legal-and-docs/design.md).
 
 This record closes **tasks 1.1–1.6**. It exists because P23's failure mode is not a crash — it is a
 commitment that cannot be evidenced years after it was made. The decisions below are the ones that cannot

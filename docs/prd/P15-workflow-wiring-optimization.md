@@ -227,7 +227,7 @@ is a customer-console concern.
 ## 6. Functional requirements
 
 Numbered FRs; each maps 1:1 to an OpenSpec requirement under
-`openspec/changes/p15-workflow-wiring-optimization/specs/`.
+`openspec/changes/archive/2026-07-31-p15-workflow-wiring-optimization/specs/`.
 
 ### Node wiring as an axis (capability `node-wiring`)
 

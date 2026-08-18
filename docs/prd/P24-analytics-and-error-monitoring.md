@@ -5,7 +5,7 @@
 | **Status** | Proposed (docs-only; no code in this phase) |
 | **Created** | 2026-07-30 |
 | **Updated** | 2026-07-30 |
-| **OpenSpec change** | [`p24-analytics-error-monitoring`](../../openspec/changes/p24-analytics-error-monitoring/) |
+| **OpenSpec change** | [`p24-analytics-error-monitoring`](../../openspec/changes/archive/2026-08-01-p24-analytics-error-monitoring/) |
 | **Lead role(s)** | Frontend + DevOps, with Product Designer on consent and System Designer on the egress posture |
 | **Upstream** | P2.5 (telemetry substrate), P9 (customer console + public surface), P8 (operator console), P11 (egress allowlist), P19 (deployment substrates), P23 (legal surface + consent records) |
 | **Numbering note** | There is no `P25`. The token `p25` already denotes **P2.5 — Metrics & Observability** in this repository (`/p25/monitor`, the Gantt id in `implementation-timeline/README.md`, and `internal/api/monitor.go`). Reusing it for a new phase would make `p25` ambiguous in exactly the places an operator greps during an incident. The operator-console phase that follows this one is **P26**. |

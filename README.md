@@ -11,20 +11,27 @@ change is better or cheaper before you merge.
 Think **"Dependabot for LLM cost & quality."** You review a diff and merge; the platform never
 touches production behavior without evidence.
 
-> **Status: platform implemented and deployable (P0 → P12, P19); optimization-axis expansion
-> (P13 → P18) and the commercial/distribution phases (P20 → P22) in design.** The four core
-> subsystems and all three delivery surfaces are built:
+> **Status: 22 of 34 phases are deployed and folded into the spec set; 12 still carry open work.**
+> The four core subsystems and all three delivery surfaces are built:
 > Discovery, the source-transformation Config Layer, the sandboxed Runtime, the Eval Harness, the
 > attribution/diagnosis/verification engine, the autonomous optimizer, billing & metering, the
 > admin and customer consoles, the offline `heros` CLI, and CI-mediated forge delivery all live under
-> [`internal/`](internal/) and are demoable end-to-end through the `cmd/pNhermes` walkthroughs. The
-> whole platform now **stands up from one digest-pinned image set** on Docker Compose or Kubernetes
-> ([`deploy/`](deploy/), see [P19](docs/prd/P19-deployment-delivery.md)), and the pipeline has been
-> run **live against a real 3,333-file repo** (a full end-to-end proof lands with the E2E-proof PR).
-> The **complete design**
-> (implementation timeline, per-phase PRDs, and OpenSpec change sets) is committed alongside. The
-> current frontier is the **Optimization Axis Expansion** (P13 → P18) — turning each modeled dimension
-> into an applicable optimization axis. The repo was repurposed from a prior *Heros OS-level agent*
+> [`internal/`](internal/) and are demoable end-to-end through the `cmd/pNhermes` walkthroughs. All six
+> optimization axes (P13 → P18) ship, each one **refusing by name** what its build cannot carry. The
+> whole platform **stands up from one digest-pinned image set** on Docker Compose or Kubernetes
+> ([`deploy/`](deploy/), see [P19](docs/prd/P19-deployment-delivery.md)), and it runs at
+> [heros-agent.space](https://heros-agent.space).
+>
+> **What is not finished is named, not implied.** Twelve phases keep an open change under
+> [`openspec/changes/`](openspec/changes/) — the residue is acceptance runs and commercial cutover, not
+> unbuilt subsystems: P21's live-mode Stripe cutover, P22's real-IdP integration, P19/P20's
+> fresh-machine install matrices, and P28's first-owner path, which **does not work as shipped**
+> ([`p28-first-owner-reachability`](openspec/changes/p28-first-owner-reachability/) is the follow-up
+> and has not been started). A phase is moved to
+> [`openspec/changes/archive/`](openspec/changes/archive/) only once its tasks are all checked and its
+> specs are folded, so the two directories are the honest answer to "what is done" and "what is not."
+>
+> The repo was repurposed from a prior *Heros OS-level agent*
 > project; see [`docs/reproposal-migration-checklist.md`](docs/reproposal-migration-checklist.md) for
 > what was kept, adapted, and removed.
 
@@ -117,24 +124,33 @@ The full engineering plan is committed and specified:
   table below is a map, not a second copy of it.
 - **[OpenSpec change sets](openspec/)** — behavioral, testable specs (`SHALL` requirements with
   scenarios); see [`openspec/AGENTS.md`](openspec/AGENTS.md) for the format and
-  [`openspec/project.md`](openspec/project.md) for conventions.
+  [`openspec/project.md`](openspec/project.md) for conventions. Three directories, three questions:
+  [`openspec/specs/`](openspec/specs/) is **what is true today** (100 capabilities, 747 requirements,
+  1,508 scenarios, folded from every deployed phase); [`openspec/changes/`](openspec/changes/) is
+  **what is still open** (13 changes); [`openspec/changes/archive/`](openspec/changes/archive/) is
+  **why it is the way it is** — the proposal, design and task record of each deployed phase, dated by
+  the day it landed.
 
 ### Phases
 
-Thirty phases in nine programs. Each row links to the program's phases; the
-[PRD index](docs/prd/README.md) carries the per-phase detail.
+Thirty-four phases in twelve programs. Each row links to the program's phases; the
+[PRD index](docs/prd/README.md) carries the per-phase detail. ✅ marks a program whose phases are all
+deployed and folded into [`openspec/specs/`](openspec/specs/); ◐ marks one with an open change.
 
 | Program | Phases | Delivers |
 |---|---|---|
-| **Foundations & Discovery** | [P0](docs/prd/P0-foundations.md) · [P1](docs/prd/P1-discovery-mvp.md) · [P2](docs/prd/P2-config-runtime.md) · [P2.5](docs/prd/P2.5-metrics-observability.md) · [P3](docs/prd/P3-context-skills-sandbox.md) · [P3.5](docs/prd/P3.5-pattern-classifier.md) | Workflow IR, metric-event schema and lineage; multi-language static analysis (Go via `go/ast`, the rest via tree-sitter); the source-transformation engine and runtime; the OpenTelemetry substrate everything else measures against; context strategies, the Skill Registry, the sandbox, and the pattern classifier |
-| **Evaluation & Improvement** | [P4](docs/prd/P4-eval-harness.md) · [P4.5](docs/prd/P4.5-attribution-diagnosis.md) · [P5](docs/prd/P5-contracts-rearrange-tracing.md) · [P5.5](docs/prd/P5.5-proposals-verification.md) · [P6](docs/prd/P6-autonomous-optimizer.md) | The eval harness, eval-set generation and scoring; attribution and diagnosis; typed I/O contracts, re-arrangement and dynamic tracing; the proposal operators and the **verification gate** that decides; and the autonomous optimizer that runs the loop |
-| **Commerce & Consoles** | [P7](docs/prd/P7-billing-metering.md) · [P8](docs/prd/P8-admin-console.md) · [P9](docs/prd/P9-web-console.md) · [P10](docs/prd/P10-prompt-model-studio.md) | Billing, metering and entitlements; the internal **operator** console (RBAC, tenant/billing admin, fleet controls, audit log); the customer-facing **web** console (Next.js + BFF, no API key in the browser); and the Prompt & Model Studio |
-| **Distribution Surfaces** | [P11](docs/prd/P11-cli-ci-integration.md) · [P12](docs/prd/P12-forge-delivery.md) | The offline-first CLI, free on every plan, with opt-in run linking that gives SUM metering its input; and forge delivery — the optimization PR, CI-mediated by default |
-| **Optimization Axis Expansion** | [P13](docs/prd/P13-prompt-model-optimization.md) · [P14](docs/prd/P14-skills-tools-optimization.md) · [P15](docs/prd/P15-workflow-wiring-optimization.md) · [P16](docs/prd/P16-context-strategy-optimization.md) · [P17](docs/prd/P17-memory-strategy-optimization.md) · [P18](docs/prd/P18-harness-strategy-optimization.md) | Six axes: prompt & model, skills & tools, node wiring, context strategy, memory, harness. Each takes a dimension the IR already models and makes it a *verified, applicable* optimization axis — scored by the **axis-agnostic** harness, under the same "diagnosis proposes, verification decides" gate |
-| **Deployment & Packaging** | [P19](docs/prd/P19-deployment-delivery.md) · [P20](docs/prd/P20-installable-packages.md) | The platform as something you can stand up (Docker Compose, Kubernetes, air-gapped); and the `heros` CLI as installable packages — GitHub-Release pipeline, native install channels, verification before the binary reaches `PATH`, onboarding and self-update |
-| **Identity & Payments** | [P21](docs/prd/P21-stripe-payments.md) · [P22](docs/prd/P22-sso-identity.md) | Real Stripe behind the P7 `billing.Provider` interface — checkout, metered usage, idempotent signature-verified webhooks, entitlement sync; and SSO — customer OIDC/SAML behind the ADR-008 seam, plus operator SSO + MFA made real |
-| **Published Word** | [P23](docs/prd/P23-legal-and-developer-docs.md) | The two read-not-computed surfaces: Terms and Privacy Notice as versioned artifacts with append-only consent records, and three-tier developer documentation — both held honest by build-time accuracy fences |
-| **Seeing the System** | [P24](docs/prd/P24-analytics-and-error-monitoring.md) · [P26](docs/prd/P26-operator-console-refresh.md) | Product analytics and error monitoring, installed under a per-prefix origin fence that keeps every tenant surface at `default-src 'self'`; and the operator-console refresh, whose product is a **build fence** that makes oversight drift fail rather than accumulate |
+| ◐ **Foundations & Discovery** | [P0](docs/prd/P0-foundations.md) · [P1](docs/prd/P1-discovery-mvp.md) ◐ · [P2](docs/prd/P2-config-runtime.md) ◐ · [P2.5](docs/prd/P2.5-metrics-observability.md) · [P3](docs/prd/P3-context-skills-sandbox.md) · [P3.5](docs/prd/P3.5-pattern-classifier.md) | Workflow IR, metric-event schema and lineage; multi-language static analysis (Go via `go/ast`, the rest via tree-sitter); the source-transformation engine and runtime; the OpenTelemetry substrate everything else measures against; context strategies, the Skill Registry, the sandbox, and the pattern classifier |
+| ◐ **Evaluation & Improvement** | [P4](docs/prd/P4-eval-harness.md) ◐ · [P4.5](docs/prd/P4.5-attribution-diagnosis.md) · [P5](docs/prd/P5-contracts-rearrange-tracing.md) · [P5.5](docs/prd/P5.5-proposals-verification.md) · [P6](docs/prd/P6-autonomous-optimizer.md) | The eval harness, eval-set generation and scoring; attribution and diagnosis; typed I/O contracts, re-arrangement and dynamic tracing; the proposal operators and the **verification gate** that decides; and the autonomous optimizer that runs the loop |
+| ◐ **Commerce & Consoles** | [P7](docs/prd/P7-billing-metering.md) · [P8](docs/prd/P8-admin-console.md) ◐ · [P9](docs/prd/P9-web-console.md) ◐ · [P10](docs/prd/P10-prompt-model-studio.md) | Billing, metering and entitlements; the internal **operator** console (RBAC, tenant/billing admin, fleet controls, audit log); the customer-facing **web** console (Next.js + BFF, no API key in the browser); and the Prompt & Model Studio |
+| ✅ **Distribution Surfaces** | [P11](docs/prd/P11-cli-ci-integration.md) · [P12](docs/prd/P12-forge-delivery.md) | The offline-first CLI, free on every plan, with opt-in run linking that gives SUM metering its input; and forge delivery — the optimization PR, CI-mediated by default |
+| ◐ **Optimization Axis Expansion** | [P13](docs/prd/P13-prompt-model-optimization.md) · [P14](docs/prd/P14-skills-tools-optimization.md) · [P15](docs/prd/P15-workflow-wiring-optimization.md) · [P16](docs/prd/P16-context-strategy-optimization.md) · [P17](docs/prd/P17-memory-strategy-optimization.md) · [P18](docs/prd/P18-harness-strategy-optimization.md) ◐ | Six axes: prompt & model, skills & tools, node wiring, context strategy, memory, harness. Each takes a dimension the IR already models and makes it a *verified, applicable* optimization axis — scored by the **axis-agnostic** harness, under the same "diagnosis proposes, verification decides" gate |
+| ◐ **Deployment & Packaging** | [P19](docs/prd/P19-deployment-delivery.md) ◐ · [P20](docs/prd/P20-installable-packages.md) ◐ | The platform as something you can stand up (Docker Compose, Kubernetes, air-gapped); and the `heros` CLI as installable packages — GitHub-Release pipeline, native install channels, verification before the binary reaches `PATH`, onboarding and self-update |
+| ◐ **Identity & Payments** | [P21](docs/prd/P21-stripe-payments.md) ◐ · [P22](docs/prd/P22-sso-identity.md) ◐ | Real Stripe behind the P7 `billing.Provider` interface — checkout, metered usage, idempotent signature-verified webhooks, entitlement sync; and SSO — customer OIDC/SAML behind the ADR-008 seam, plus operator SSO + MFA made real. Both are built; what remains open is the **cutover** — live-mode Stripe, and the integration against a customer's real IdP |
+| ✅ **Published Word** | [P23](docs/prd/P23-legal-and-developer-docs.md) | The two read-not-computed surfaces: Terms and Privacy Notice as versioned artifacts with append-only consent records, and three-tier developer documentation — both held honest by build-time accuracy fences |
+| ✅ **Seeing the System** | [P24](docs/prd/P24-analytics-and-error-monitoring.md) · [P26](docs/prd/P26-operator-console-refresh.md) | Product analytics and error monitoring, installed under a per-prefix origin fence that keeps every tenant surface at `default-src 'self'`; and the operator-console refresh, whose product is a **build fence** that makes oversight drift fail rather than accumulate |
+| ◐ **The Customer Is a Row** | [P27](docs/prd/P27-account-system.md) ◐ · [P28](docs/prd/P28-email-password-identity.md) ◐ | The tenant becomes a durable row instead of a key in a boot-time map, the person a first-class record with memberships and invitations, and the run **owned** — with scope travelling inside the credential rather than in a header any holder could set; then the front door those self-serve claims assume: a person creating their own email-and-password credential. ⚠️ **The first-owner path does not work as shipped** — see [`p28-first-owner-reachability`](openspec/changes/p28-first-owner-reachability/) |
+| ✅ **The Bridge Carries Nothing** | [P29](docs/prd/P29-linked-run-fanout.md) | One `heros link` fills the console surfaces that had nothing to say about a real run — edge reach and its fence, subject enumeration, the hosted workflow catalog, and coverage projected onto *your* nodes. Its centre is a refusal: the platform **never computes** whether an axis applies to a call site, because that needs source it must never hold; the customer's machine computes it and a node we were not told about renders **`not reported`** |
+| ✅ **One Frontend Emits Edges** | [P30](docs/prd/P30-heros-platform-agent.md) | HEROS, the platform's own agent — it produces the graph the syntactic frontends cannot (only the Go frontend ever emitted an edge, so seven of eight pattern detectors could not fire), reports whether each surface's answer rests on evidence, and is itself configured through the six-axis vocabulary the product sells. Its centre is a refusal: **determinism does not come from the model** — an inference runs once per `(source_revision, config_hash)`, content-addressed and pinned |
 
 There is no **P25** — the token `p25` already denotes P2.5 in this repository (`/p25/monitor`, the Gantt
 id, `internal/api/monitor.go`), so reusing it would make it ambiguous exactly where someone greps during
@@ -163,8 +179,11 @@ internal/
   linkage  linkingest  runlink  clilink  cli # CLI + opt-in run linking (P11)
   forgedelivery  deliveryrecord  submit  reconcile   # CI-mediated forge delivery (P12)
   studio  broker  approval  auth  db  launch  api    # studio, HITL gate, service core
-docs/                  # implementation-timeline, prd (P0–P22), adr, decisions, migration checklist
-openspec/              # spec-driven change sets (P0–P22)
+docs/                  # implementation-timeline, prd (P0–P30), adr, decisions, migration checklist
+openspec/
+  specs/               # what is TRUE today — 100 capabilities folded from every deployed phase
+  changes/             # what is STILL OPEN — 13 changes
+  changes/archive/     # why it is so — the 26 deployed phases, dated by the day they landed
 web/console            # the customer-facing Next.js dashboard + BFF (P9)
 ```
 
@@ -377,8 +396,16 @@ so the version, commands and checksums on it are the ones the release key signed
 
 Work proceeds phase by phase against the OpenSpec change sets. Before implementing a phase, read its
 PRD (`docs/prd/`) and its OpenSpec change (`openspec/changes/`); every requirement is behavioral and
-carries at least one testable scenario. Keep `go build ./...`, `go vet ./...`, and `go test ./...`
-green.
+carries at least one testable scenario. To learn what the system already guarantees, read
+[`openspec/specs/`](openspec/specs/) rather than the change sets — that is the folded, current truth.
+
+When a phase is finished, **archive it in the same commit that finishes it**: fold each delta into
+`openspec/specs/<capability>/spec.md`, then move the change to
+`openspec/changes/archive/<YYYY-MM-DD>-<change-id>/`. Folding without moving, or moving without
+folding, leaves the two directories disagreeing about what is done — see
+[`openspec/AGENTS.md`](openspec/AGENTS.md#archiving-a-deployed-change).
+
+Keep `go build ./...`, `go vet ./...`, and `go test ./...` green.
 
 ## License
 

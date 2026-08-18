@@ -78,7 +78,7 @@ A runtime invocation is a distinct concept from a static node definition (Decisi
 
 ## workflow-ir
 
-The canonical intermediate representation of a discovered LLM workflow: a versioned graph of static node definitions and typed edges. Emitted by Discovery (P1); consumed by the Config Layer (P2), Pattern Classifier (P3.5), Eval (P4), Re-arrangement (P5), and the graph UI. Frozen at M0. See docs/prd/P0-foundations.md and openspec/changes/p0-foundations.
+The canonical intermediate representation of a discovered LLM workflow: a versioned graph of static node definitions and typed edges. Emitted by Discovery (P1); consumed by the Config Layer (P2), Pattern Classifier (P3.5), Eval (P4), Re-arrangement (P5), and the graph UI. Frozen at M0. See docs/prd/P0-foundations.md and openspec/changes/archive/2026-07-15-p0-foundations.
 
 | Field | Type | Required | Meaning |
 |---|---|---|---|

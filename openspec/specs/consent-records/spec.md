@@ -2,7 +2,7 @@
 
 Product rationale: [`../../../docs/prd/P23-legal-and-developer-docs.md`](../../../docs/prd/P23-legal-and-developer-docs.md)
 §6 (FR10–FR16), §7 (NFR7–NFR9) and §9.3 (Backend lens). Technical decisions:
-[`../../changes/p23-legal-and-docs/design.md`](../../changes/p23-legal-and-docs/design.md) Decisions 2, 3, 4 and 5.
+[`../../changes/archive/2026-08-01-p23-legal-and-docs/design.md`](../../changes/archive/2026-08-01-p23-legal-and-docs/design.md) Decisions 2, 3, 4 and 5.
 
 Covers the record that answers, years later, *"what exactly did this customer accept, and when?"* — and the
 gate that asks for acceptance without becoming a way to take the console down.
@@ -12,7 +12,7 @@ gate that asks for acceptance without becoming a way to take the console down.
 > matters**: an acknowledged consent with no row is indistinguishable from consent that never happened, so
 > the row is written before the acknowledgement, always.
 
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Acceptance SHALL be recorded append-only against an immutable document identity
 

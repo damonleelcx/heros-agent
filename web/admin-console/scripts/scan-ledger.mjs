@@ -14,7 +14,7 @@
 // # What it checks, precisely
 //
 //   A. openspec/specs/                             ⇄ ledger section A   (both directions, exact)
-//   B. openspec/changes/p26-…/specs/               ⇄ ledger section B   (both directions, exact)
+//   B. openspec/changes/<GOVERNED_CHANGES>/specs/  ⇄ ledger section B   (both directions, exact)
 //   C. capabilities used in surfaces.ts            ⇄ ledger section C   (both directions, exact)
 //   forward   every `surface` row's destination exists in surfaces.ts
 //   reverse   every destination in surfaces.ts is named by at least one `surface` row
@@ -61,7 +61,12 @@ const SPECS_DIR = join(REPO, "openspec", "specs");
  * whoever comes next rather than only for P27.
  */
 const GOVERNED_CHANGES = [
-  "p26-operator-console-refresh",
+  // 🔴 P26 and P29 were removed here when their changes ARCHIVED, which is the moment an entry is
+  // supposed to leave this list — the list governs UNARCHIVED changes, and section A governs
+  // `openspec/specs/`. Their capabilities did not lose oversight by leaving: all eleven rows moved
+  // from section B to section A in the same commit, because folding is what puts a capability in
+  // `openspec/specs/` and section A is asserted against exactly that directory. Removing a name here
+  // WITHOUT moving its rows would delete the oversight silently, which is why the two happen together.
   "p27-account-system",
   // P28 — two change sets, eight capability specs between them (two names appear in both). They were
   // ABSENT from this list until P29 §8.2 noticed, which meant nobody had decided an operator answer for
@@ -69,10 +74,6 @@ const GOVERNED_CHANGES = [
   // author is the drift it was written against, wearing a uniform" — written about P27, true of P28.
   "p28-email-password-identity",
   "p28-first-owner-reachability",
-  // P29 — six capabilities. Added here in the same commit that adds their ledger rows, because the
-  // fence covers exactly the changes named in this list: a phase that lands without a line here has
-  // capabilities nobody has decided an operator answer for, and nothing fails.
-  "p29-linked-run-fanout",
 ];
 const CHANGE_SPECS_DIRS = GOVERNED_CHANGES.map((c) => join(REPO, "openspec", "changes", c, "specs"));
 const SURFACES = join(ROOT, "src", "lib", "surfaces.ts");

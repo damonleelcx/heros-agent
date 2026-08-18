@@ -2,7 +2,7 @@
 
 Product rationale: [`../../../docs/prd/P23-legal-and-developer-docs.md`](../../../docs/prd/P23-legal-and-developer-docs.md)
 §6 (FR41–FR48) and §9.6 / §9.8 (DevOps + Sales Operations lenses). Technical decisions:
-[`../../changes/p23-legal-and-docs/design.md`](../../changes/p23-legal-and-docs/design.md) Decisions 6, 12 and 13. Documents — and only documents — the channels
+[`../../changes/archive/2026-08-01-p23-legal-and-docs/design.md`](../../changes/archive/2026-08-01-p23-legal-and-docs/design.md) Decisions 6, 12 and 13. Documents — and only documents — the channels
 [P20](../../../docs/prd/P20-installable-packages.md) delivers.
 
 Covers the page a stranger lands on before they have anything installed: how to get the `heros` CLI from a
@@ -23,7 +23,7 @@ was published.
 > **documents what exists** and refuses to describe channels that do not — which is the claims fence applied
 > where a fabricated install command would 404 in front of a first-time reader.
 
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Installation documentation SHALL describe only channels that actually exist
 

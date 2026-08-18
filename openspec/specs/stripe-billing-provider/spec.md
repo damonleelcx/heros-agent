@@ -3,7 +3,7 @@
 Product rationale: [`../../../docs/prd/P21-stripe-payments.md`](../../../docs/prd/P21-stripe-payments.md)
 §6 (FR1–FR7) and §7. Architecture decisions: [`design.md`](../../changes/p21-payments/design.md) Decisions 1, 4, 8, 9. Implements the
 **existing** [`billing.Provider`](../../../internal/billing/provider.go) interface built by
-[`p7-billing-metering`](../../changes/p7-billing-metering/); reuses the P7 idempotency keys
+[`p7-billing-metering`](../../changes/archive/2026-07-23-p7-billing-metering/); reuses the P7 idempotency keys
 ([`ledger.go`](../../../internal/billing/ledger.go)) and the additive-correction path
 ([`correction.go`](../../../internal/billing/correction.go)).
 

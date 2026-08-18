@@ -1,7 +1,7 @@
 # P7 — Packaging, the paywall-as-invitation, and gainshare consent
 
 Product design for the P7 commercial surface. Companion to
-[`openspec/changes/p7-billing-metering/design.md`](../../openspec/changes/p7-billing-metering/design.md)
+[`openspec/changes/archive/2026-07-23-p7-billing-metering/design.md`](../../openspec/changes/archive/2026-07-23-p7-billing-metering/design.md)
 (engineering) and [`docs/prd/P7-billing-metering.md`](../prd/P7-billing-metering.md) (rationale).
 
 > **No dollar amounts, percentages, or price bands appear in this document, in any design asset, or in

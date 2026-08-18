@@ -2,8 +2,8 @@
 
 Product rationale: [`../../../docs/prd/P16-context-strategy-optimization.md`](../../../docs/prd/P16-context-strategy-optimization.md)
 §6 (FR1–FR9), §7, §8. Design reasoning:
-[`../../changes/p16-context-strategy-optimization/design.md`](../../changes/p16-context-strategy-optimization/design.md)
-Decisions 1, 2, 3, 6, 7; [`decisions.md`](../../changes/p16-context-strategy-optimization/decisions.md) D-1, D-2, D-3.
+[`../../changes/archive/2026-07-29-p16-context-strategy-optimization/design.md`](../../changes/archive/2026-07-29-p16-context-strategy-optimization/design.md)
+Decisions 1, 2, 3, 6, 7; [`decisions.md`](../../changes/archive/2026-07-29-p16-context-strategy-optimization/decisions.md) D-1, D-2, D-3.
 
 Covers context as a first-class **applicable** axis: the Go engine materializes a resolved context
 policy at the call site, every other language keeps a specified and tested interim refusal, context

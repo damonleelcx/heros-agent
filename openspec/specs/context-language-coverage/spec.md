@@ -1,7 +1,7 @@
 # Context Language Coverage — Spec (folded from P16)
 
 Product rationale: [`../../../docs/prd/P16-context-strategy-optimization.md`](../../../docs/prd/P16-context-strategy-optimization.md)
-§6 (FR24–FR29). Design reasoning: [`../../changes/p16-context-strategy-optimization/design.md`](../../changes/p16-context-strategy-optimization/design.md) Decision 9, [`../../changes/p16-context-strategy-optimization/decisions.md`](../../changes/p16-context-strategy-optimization/decisions.md) D-4.
+§6 (FR24–FR29). Design reasoning: [`../../changes/archive/2026-07-29-p16-context-strategy-optimization/design.md`](../../changes/archive/2026-07-29-p16-context-strategy-optimization/design.md) Decision 9, [`../../changes/archive/2026-07-29-p16-context-strategy-optimization/decisions.md`](../../changes/archive/2026-07-29-p16-context-strategy-optimization/decisions.md) D-4.
 
 The cross-axis rules — coverage as a total function over every registered language, per-cell claims, the
 three refusal classes and their evaluation order, one coverage source, executable evidence for every row,

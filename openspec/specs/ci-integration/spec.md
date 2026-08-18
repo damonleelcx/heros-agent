@@ -1,8 +1,8 @@
 # CI Integration — Spec (folded from P11)
 
 Product rationale: [`../../../docs/prd/P11-cli-ci-integration.md`](../../../docs/prd/P11-cli-ci-integration.md)
-§6 (FR20–FR26) and §7. Design reasoning: [`../../changes/p11-cli-ci-integration/design.md`](../../changes/p11-cli-ci-integration/design.md) Decision 5.
-Delivery counterpart: [`../../changes/p12-forge-delivery/`](../../changes/p12-forge-delivery/) — its CI-mediated
+§6 (FR20–FR26) and §7. Design reasoning: [`../../changes/archive/2026-07-25-p11-cli-ci-integration/design.md`](../../changes/archive/2026-07-25-p11-cli-ci-integration/design.md) Decision 5.
+Delivery counterpart: [`../../changes/archive/2026-07-25-p12-forge-delivery/`](../../changes/archive/2026-07-25-p12-forge-delivery/) — its CI-mediated
 mode runs inside this integration.
 
 Covers the supported CI artifact: a published, versioned action rather than a snippet; checks and

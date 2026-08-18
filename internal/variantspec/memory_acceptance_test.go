@@ -37,7 +37,7 @@ var (
 )
 
 // p17TasksPath is the plan under audit.
-const p17TasksPath = "openspec/changes/p17-memory-strategy-optimization/tasks.md"
+const p17TasksPath = "openspec/changes/archive/2026-08-01-p17-memory-strategy-optimization/tasks.md"
 
 // TestP17NamedEvidenceExists — task 11.x, and the audit the memory of this repository asks for.
 //

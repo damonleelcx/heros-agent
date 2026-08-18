@@ -2,7 +2,7 @@
 
 Product rationale: [`../../../docs/prd/P23-legal-and-developer-docs.md`](../../../docs/prd/P23-legal-and-developer-docs.md)
 §6 (FR35–FR40) and §9.3 / §9.7 (Backend + QA lenses). Technical decisions:
-[`../../changes/p23-legal-and-docs/design.md`](../../changes/p23-legal-and-docs/design.md) Decisions 6 and 12.
+[`../../changes/archive/2026-08-01-p23-legal-and-docs/design.md`](../../changes/archive/2026-08-01-p23-legal-and-docs/design.md) Decisions 6 and 12.
 
 Covers the documented command surface of the `heros` binary — the product's free, offline, no-account entry
 point, and the surface a customer's CI branches on.
@@ -17,7 +17,7 @@ The registry at authoring time holds `help`, `version`, `discover`, `apply`, `ev
 from that registry (Decision 6), so this spec constrains the *coverage and content* of the generation, not a
 hand-maintained page.
 
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Every subcommand in the CLI registry SHALL appear in the reference
 

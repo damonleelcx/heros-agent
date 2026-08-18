@@ -168,10 +168,10 @@ test("19.14 the editor derives nothing and ranks nothing", async () => {
 // that renders nothing, and the declined-change card is the wiring axis's most common user-facing
 // state. This guards the preview surface that makes it checkable in a browser.
 
-const P15_PREVIEW = "src/app/preview/p15/page.tsx";
+const WIRING_PREVIEW = "src/app/preview/wiring/page.tsx";
 
 test("9.4 the preview renders the SAME outcome cards the submit path renders", async () => {
-  const src = await read(P15_PREVIEW);
+  const src = await read(WIRING_PREVIEW);
 
   // The load-bearing assertion: the components are IMPORTED from the shared module, not reimplemented.
   // A copy would drift the first time the card changed, and this page would become a picture of a
@@ -189,14 +189,14 @@ test("9.4 the preview renders the SAME outcome cards the submit path renders", a
 });
 
 test("9.4 one linkable fixture per shape, and the un-annotated axis is one of them", async () => {
-  const src = await read(P15_PREVIEW);
+  const src = await read(WIRING_PREVIEW);
 
   // Each shape is addressable by URL. A state reachable only by clicking never reaches a PR
   // description, a bug report, or a screenshot pipeline — so it is the state nobody checks.
   for (const shape of ["reorder", "merge", "edge", "unknown"]) {
     assert.match(src, new RegExp(`id:\\s*"${shape}"`), `no fixture for the ${shape} shape`);
   }
-  assert.match(src, /\/preview\/p15\?tab=\$\{/, "the fixtures are not linkable by URL");
+  assert.match(src, /\/preview\/wiring\?tab=\$\{/, "the fixtures are not linkable by URL");
 
   // 🔴 The un-annotated axis is the load-bearing fixture: it must be an axis AXIS_NOTE does not carry,
   // because what it proves is that an unrecognised refusal still renders rather than being swallowed.

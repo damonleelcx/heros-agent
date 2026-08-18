@@ -1,12 +1,12 @@
 # Memory Store — Spec (folded from P17)
 
 Product rationale: [`../../../docs/prd/P17-memory-strategy-optimization.md`](../../../docs/prd/P17-memory-strategy-optimization.md)
-§6 (FR1–FR6), §7 and §8.5. Design reasoning: [`../../changes/p17-memory-strategy-optimization/design.md`](../../changes/p17-memory-strategy-optimization/design.md) Decisions 1 and 5;
-[`../../changes/p17-memory-strategy-optimization/decisions.md`](../../changes/p17-memory-strategy-optimization/decisions.md) D1, D5.
+§6 (FR1–FR6), §7 and §8.5. Design reasoning: [`../../changes/archive/2026-08-01-p17-memory-strategy-optimization/design.md`](../../changes/archive/2026-08-01-p17-memory-strategy-optimization/design.md) Decisions 1 and 5;
+[`../../changes/archive/2026-08-01-p17-memory-strategy-optimization/decisions.md`](../../changes/archive/2026-08-01-p17-memory-strategy-optimization/decisions.md) D1, D5.
 
 Covers the new content-addressed registry `Kind` `memory` — the versioned vocabulary of memory strategies
 an override references. A memory strategy persists **across** invocations and sessions; it is not context
-assembly (that is [P16](../../changes/p16-context-strategy-optimization/)'s within-call `DimContext`).
+assembly (that is [P16](../../changes/archive/2026-07-29-p16-context-strategy-optimization/)'s within-call `DimContext`).
 
 > **Why a new Kind and a closed strategy set.** The `Kind` is hashed into every `version_id`, so a distinct
 > `memory` Kind is what makes a memory ref pasted into another dimension **fail closed** instead of

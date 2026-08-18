@@ -78,8 +78,8 @@ test("the proposals list splits recommended from withheld into tabs, and keeps b
 
 test("a review presentation exposes its sections as tabs rather than rendering a stack", async () => {
   for (const [file, fn] of [
-    ["src/components/p14SkillsTools.tsx", "p14ReviewTabs"],
-    ["src/components/p13Optimization.tsx", "p13ReviewTabs"],
+    ["src/components/skillsToolsOptimization.tsx", "skillsToolsReviewTabs"],
+    ["src/components/promptModelOptimization.tsx", "promptModelReviewTabs"],
   ]) {
     const src = await read(file);
     assert.ok(src.includes(`export function ${fn}(`),
@@ -91,7 +91,7 @@ test("a review presentation exposes its sections as tabs rather than rendering a
 // A tablist inside a tablist is two roving tab-stops fighting over the arrow keys. The preview pages
 // pick a FIXTURE (navigation, a shareable URL) and tab its SECTIONS — never both with tabs.
 test("no page nests one tablist inside another", async () => {
-  for (const file of ["src/app/preview/p13/page.tsx", "src/app/preview/p14/page.tsx"]) {
+  for (const file of ["src/app/preview/prompt-model/page.tsx", "src/app/preview/skills-tools/page.tsx"]) {
     const src = await read(file);
     // Comments are stripped first: these files EXPLAIN why the picker is not a tablist, and prose that
     // names <Tabs> is not a second tablist. A guard that counted the explanation would punish the comment.

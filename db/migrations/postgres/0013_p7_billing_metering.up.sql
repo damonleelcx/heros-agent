@@ -1,7 +1,7 @@
 -- P7 Billing, Metering & Entitlements — account, usage_record, billable_savings, billing_event,
 -- webhook_delivery.
--- Spec:   openspec/changes/p7-billing-metering/specs/{metering,entitlements,billing}/spec.md
--- Design: openspec/changes/p7-billing-metering/design.md "Data model sketch" (tasks 2.2, 3.2, 4.1,
+-- Spec:   openspec/changes/archive/2026-07-23-p7-billing-metering/specs/{metering,entitlements,billing}/spec.md
+-- Design: openspec/changes/archive/2026-07-23-p7-billing-metering/design.md "Data model sketch" (tasks 2.2, 3.2, 4.1,
 --         6.2, 8.2).
 --
 -- Dialect: PostgreSQL 11+. EXPAND-ONLY. It ADDS five new tables, ALTERs no existing column, drops

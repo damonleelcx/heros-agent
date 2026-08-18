@@ -2,7 +2,7 @@
 
 Versioned JSON Schemas (draft 2020-12) every phase reads from and writes to. Frozen at M0; evolve
 additively (see `docs/prd/P0-foundations.md` NFR1). Design rationale:
-`docs/decisions/` and `openspec/changes/p0-foundations/`.
+`docs/decisions/` and `openspec/changes/archive/2026-07-15-p0-foundations/`.
 
 | File | Contract | Tasks |
 |---|---|---|

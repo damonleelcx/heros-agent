@@ -1,14 +1,14 @@
 # Memory Authoring — Spec (folded from P17)
 
 Product rationale: [`../../../docs/prd/P17-memory-strategy-optimization.md`](../../../docs/prd/P17-memory-strategy-optimization.md)
-§6 (FR17–FR24), §7 (NFR9–NFR12). Design reasoning: [`../../changes/p17-memory-strategy-optimization/design.md`](../../changes/p17-memory-strategy-optimization/design.md) Decision 7;
-[`../../changes/p17-memory-strategy-optimization/decisions.md`](../../changes/p17-memory-strategy-optimization/decisions.md) D7.
+§6 (FR17–FR24), §7 (NFR9–NFR12). Design reasoning: [`../../changes/archive/2026-08-01-p17-memory-strategy-optimization/design.md`](../../changes/archive/2026-08-01-p17-memory-strategy-optimization/design.md) Decision 7;
+[`../../changes/archive/2026-08-01-p17-memory-strategy-optimization/decisions.md`](../../changes/archive/2026-08-01-p17-memory-strategy-optimization/decisions.md) D7.
 
 This capability is P17's **per-axis binding** of the cross-axis contract for user-initiated change,
 defined once in [`authored-change`](../authored-change/spec.md)
 (P13) and referenced — **never restated** — here, as it is by
-[`skill-tool-authoring`](../../changes/p14-skills-tools-optimization/specs/skill-tool-authoring/spec.md) (P14, not yet folded),
-[`wiring-authoring`](../../changes/p15-workflow-wiring-optimization/specs/wiring-authoring/spec.md) (P15, not yet folded), and
+[`skill-tool-authoring`](../../changes/archive/2026-07-29-p14-skills-tools-optimization/specs/skill-tool-authoring/spec.md) (P14, not yet folded),
+[`wiring-authoring`](../../changes/archive/2026-07-31-p15-workflow-wiring-optimization/specs/wiring-authoring/spec.md) (P15, not yet folded), and
 [`context-authoring`](../context-authoring/spec.md) (P16).
 One spine, two origins; origin recorded and never hashed; **a user MAY author the change, a user MAY NOT
 author the evidence.**

@@ -237,7 +237,7 @@ of the customer's LLM product**, who never see this surface.
 ## 6. Functional requirements
 
 Numbered FRs; each maps 1:1 to an OpenSpec requirement under
-`openspec/changes/p10-prompt-model-studio/specs/`.
+`openspec/changes/archive/2026-08-01-p10-prompt-model-studio/specs/`.
 
 ### Prompt authoring (capability `prompt-authoring`)
 

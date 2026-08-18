@@ -199,7 +199,7 @@ capped-confidence candidates awaiting P5. P4 eval-set generator that already shi
 ## 6. Functional requirements
 
 These map 1:1 to the OpenSpec requirements under
-`openspec/changes/p5-contracts-rearrange-tracing/specs/`.
+`openspec/changes/archive/2026-07-23-p5-contracts-rearrange-tracing/specs/`.
 
 **Typed contracts (`typed-contracts`)**
 - FR1. The system SHALL validate a proposed node ordering by checking, for **every** producer→consumer

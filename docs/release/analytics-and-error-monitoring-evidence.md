@@ -1,7 +1,7 @@
 # P24 — acceptance evidence
 
 Records what was actually executed for each wave of
-[`openspec/changes/p24-analytics-error-monitoring/tasks.md`](../../openspec/changes/p24-analytics-error-monitoring/tasks.md),
+[`openspec/changes/archive/2026-08-01-p24-analytics-error-monitoring/tasks.md`](../../openspec/changes/archive/2026-08-01-p24-analytics-error-monitoring/tasks.md),
 including every fence's **red demonstration**, so a `[x]` in that file resolves to a run rather than to
 a claim.
 

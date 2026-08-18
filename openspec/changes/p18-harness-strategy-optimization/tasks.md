@@ -347,8 +347,8 @@ reproduces bit-for-bit. The generated artifact is **dependency-free and determin
       🔴 **And a LANGUAGE SWITCH**, because the boundary genuinely differs per language. Verified in
       Chrome at `/app/harness` (dev-auth console, port 4398): switching Python→Go moves `reflexion` from
       **applies** to **not in this language**, while the three host-service strategies stay **not at a
-      call site** in both — the per-cell answer, visible rather than asserted. A `/preview/p18` route
-      renders the same component with no session, for the same reason `/preview/p15` exists.
+      call site** in both — the per-cell answer, visible rather than asserted. A `/preview/harness` route
+      renders the same component with no session, for the same reason `/preview/wiring` exists.
 - [x] 12.4 🔴 The **per-cell** boundary is stated BEFORE the choice, read from the engine's own coverage
       source rather than a second sentence — and `single-shot` is never presented as refused. →
       `web/console/src/app/app/harness/strategies.ts` (Test: `harness.test.mjs` — boundary-is-per-cell).

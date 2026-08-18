@@ -1,7 +1,7 @@
 # Prompt Rewrite — Spec (folded from P13)
 
 Product rationale: [`../../../docs/prd/P13-prompt-model-optimization.md`](../../../docs/prd/P13-prompt-model-optimization.md)
-§6 (FR1–FR8), §7. Design reasoning: [`../../changes/p13-prompt-model-optimization/design.md`](../../changes/p13-prompt-model-optimization/design.md) Decisions 1, 2, 3, 5, 8.
+§6 (FR1–FR8), §7. Design reasoning: [`../../changes/archive/2026-08-01-p13-prompt-model-optimization/design.md`](../../changes/archive/2026-08-01-p13-prompt-model-optimization/design.md) Decisions 1, 2, 3, 5, 8.
 
 Covers the deeper prompt operators — **instruction hardening**, **few-shot exemplar curation**, **prompt
 compression / token-reduction**, and **redundancy removal** — that extend the single grounded-rewrite

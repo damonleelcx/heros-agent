@@ -1,7 +1,7 @@
-# Console Marketing Site — Spec (folded from P23)
+# Console Marketing Site — Spec (folded from P23, P24)
 
 Product rationale: [`../../../docs/prd/P23-legal-and-developer-docs.md`](../../../docs/prd/P23-legal-and-developer-docs.md).
-Technical decisions: [`../../changes/p23-legal-and-docs/design.md`](../../changes/p23-legal-and-docs/design.md). Related capability:
+Technical decisions: [`../../changes/archive/2026-08-01-p23-legal-and-docs/design.md`](../../changes/archive/2026-08-01-p23-legal-and-docs/design.md). Related capability:
 [`../social-proof-claims/spec.md`](../social-proof-claims/spec.md) — "The repository link SHALL always
 render."
 
@@ -38,40 +38,54 @@ allowlist of analytics *subresource* origins, each gated on a consent grant. Thi
 that axis, and the two are additive: after both, an external subresource still fails unless it is on
 P24's allowlist, and an external navigation is permitted only under the conditions below.
 
-## MODIFIED Requirements
+## Requirements
 
-### Requirement: The public surface SHALL meet the console's floor and SHALL cause no third-party request
+### Requirement: The public surface SHALL meet the console's floor and SHALL reference no third-party origin
 
 The public surface SHALL use the single token set, English strings with `en-US` formatting through the
 locale swap point, keyboard reachability with visible focus, WCAG 2.1 AA contrast, and text alternatives
 on graphical content.
 
-It SHALL NOT load a third-party **subresource** — no external font, script, tracker, image host or
-stylesheet — so that loading the page causes no request to any origin but the console's own.
+It SHALL reference **no third-party origin other than an origin present on the checked-in analytics
+origin allowlist**, and each such origin SHALL be contacted only after an explicit grant for the consent
+category that gates it. No external font and no external stylesheet SHALL be referenced under any
+consent state. A visitor who has granted nothing SHALL cause **zero** third-party requests, which is the
+condition the surface is in by default.
 
-It MAY reference a third-party origin as the `href` of an `<a>` element, which issues no request until
-the visitor chooses the destination. Such an anchor SHALL carry `rel="noreferrer noopener"`, SHALL be
-marked as external in its accessible name, and SHALL be served under the console's
-`Referrer-Policy: no-referrer`, so that the destination learns nothing about the visitor until they act
-and nothing about where they came from when they do.
+The tenant prefix, the BFF data prefix and every operator-console route SHALL continue to reference no
+third-party origin whatsoever except the error-reporting origin under the connect directive, and that
+rule SHALL be asserted **per prefix** rather than by a global assertion over the application.
 
-#### Scenario: No third-party subresource is loaded
+#### Scenario: No unlisted third-party origin is referenced
+- **WHEN** the public surface is loaded with every consent category granted and its network traffic is
+  inspected
+- **THEN** every request targets either the console's own origin or an origin present on the allowlist
+- **AND** no external font and no external stylesheet is requested
+- **AND** the page satisfies the public prefix's policy without any relaxation of the nonce,
+  `'strict-dynamic'`, `'unsafe-inline'` or `'unsafe-eval'` rules.
 
-- **WHEN** the public surface is loaded and its network traffic is inspected
+#### Scenario: With nothing granted, the surface contacts nobody but itself
+- **WHEN** the public surface is loaded by a visitor who has granted no category
 - **THEN** every request targets the console's own origin
-- **AND** the page satisfies the console's `default-src 'self'` policy without relaxation.
+- **AND** the page satisfies a `default-src 'self'` policy with no third-party origin contacted.
 
-#### Scenario: The repository link is present and leaks nothing
+#### Scenario: The absolute rule survives where the data is
+- **WHEN** a tenant-prefixed route or an operator-console route is loaded
+- **THEN** its policy contains `default-src 'self'` and names no analytics or session-replay origin
+- **AND** the assertion establishing this names the prefix, so it cannot be satisfied by an
+  application-wide check that a later change quietly widens.
 
+#### Scenario: The public surface passes the same floor as a data view
+- **WHEN** the public surface is audited
+- **THEN** it passes the automated accessibility audit and a keyboard-only pass
+- **AND** every visual value on it resolves to the token set.
+
+#### Scenario: A visitor is not tracked before they consent to anything
 - **WHEN** an anonymous visitor loads the public surface
-- **THEN** the repository link renders in the header and the footer
-- **AND** loading the page causes no request to the repository host
-- **AND** the anchor carries `rel="noreferrer noopener"` and is announced as opening an external site
-- **AND** the response carries `Referrer-Policy: no-referrer`, so a visitor who clicks is not announced
-  to the destination.
+- **THEN** no analytics, tag manager, or third-party beacon is loaded
+- **AND** no request carries the visitor's address to a party other than the console's own origin.
 
-#### Scenario: An external subresource is still refused
-
-- **WHEN** any element other than an `<a>` names a third-party origin in a `src` or `href`
-- **THEN** the assertion fails and names the element, whether or not the same origin is already
-  permitted as an anchor destination.
+#### Scenario: The public surface still serves with the platform stopped
+- **WHEN** the platform API is unreachable and the public surface is loaded
+- **THEN** it renders in full
+- **AND** a failed or slow third-party script does not prevent or delay that rendering.

@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Phase** | P30 |
-| **OpenSpec change** | [`p30-heros-platform-agent`](../../openspec/changes/p30-heros-platform-agent/) |
+| **OpenSpec change** | [`p30-heros-platform-agent`](../../openspec/changes/archive/2026-08-12-p30-heros-platform-agent/) |
 | **Lead roles** | AI Engineer + Backend Dev |
 | **Support roles** | Product Designer, System Designer, Frontend Dev, DevOps, QA, Sales Operations |
 | **Upstream** | P1 (discovery frontends) · P2 (registries, config_hash) · P3.5 (pattern classifier) · P4 (eval harness) · P5.5 (proposals) · P13–P18 (the six axes) · P26 (operator console) · P29 (platform edge reach, linked-run fan-out) |

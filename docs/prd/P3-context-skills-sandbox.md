@@ -144,7 +144,7 @@ sandbox boundary but is not a hard dependency for P3's exit.
 ## 6. Functional requirements
 
 These map 1:1 to the OpenSpec requirements in
-`openspec/changes/p3-context-skills-sandbox/specs/`.
+`openspec/changes/archive/2026-07-31-p3-context-skills-sandbox/specs/`.
 
 **Context strategies (`context-strategies`)**
 - FR1. The system SHALL provide five named context policies behind the P2 policy interface:

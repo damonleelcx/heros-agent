@@ -2,7 +2,7 @@
 
 Product rationale: [`../../../docs/prd/P23-legal-and-developer-docs.md`](../../../docs/prd/P23-legal-and-developer-docs.md)
 §6 (FR33–FR34), §7 (NFR1–NFR5) and §9.4 (Frontend lens). Technical decisions:
-[`../../changes/p23-legal-and-docs/design.md`](../../changes/p23-legal-and-docs/design.md) Decision 7.
+[`../../changes/archive/2026-08-01-p23-legal-and-docs/design.md`](../../changes/archive/2026-08-01-p23-legal-and-docs/design.md) Decision 7.
 
 Covers the composition legal documents and developer documentation render in — a third one, beside the
 dark-fixed marketing poster and the session-bound console shell.
@@ -13,7 +13,7 @@ dark-fixed marketing poster and the session-bound console shell.
 > requirements, so it is three compositions — not one composition with conditionals, which is how a public
 > page acquires a session call.
 
-## ADDED Requirements
+## Requirements
 
 ### Requirement: The reading surface SHALL be a separate composition that holds no session and makes no fetch
 

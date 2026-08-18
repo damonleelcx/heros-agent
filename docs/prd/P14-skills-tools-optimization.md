@@ -117,7 +117,7 @@ patterns that gate which nodes a skill operator is admissible on). **P4/P4.5** (
 harness and scoring, and `CauseToolSchemaMismatch` / `CauseRetrievalMiss`, the diagnosis codes that
 drive the skill operators). **P5.5** (the proposal catalog, the operators, and the *diagnosis proposes,
 verification decides* discipline this phase's changes are gated by). **P10** (the additive-`config_hash`
-`omitempty` pattern from [decisions.md D-1.4](../../openspec/changes/p10-prompt-model-studio/decisions.md)
+`omitempty` pattern from [decisions.md D-1.4](../../openspec/changes/archive/2026-08-01-p10-prompt-model-studio/decisions.md)
 and the fail-closed "validate against a recorded set" pattern from `in_scope` / `DeclaredEnv`).
 
 ## 3. Goals & non-goals
@@ -260,7 +260,7 @@ Non-personas: **platform operators** (P8), and the end users of the customer's o
 ## 6. Functional requirements
 
 Numbered FRs; each maps 1:1 to an OpenSpec requirement under
-`openspec/changes/p14-skills-tools-optimization/specs/`.
+`openspec/changes/archive/2026-07-29-p14-skills-tools-optimization/specs/`.
 
 ### Skill materialization + the interim-refusal contract (capability `skill-binding`)
 

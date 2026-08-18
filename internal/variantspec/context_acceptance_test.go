@@ -50,7 +50,7 @@ func TestP16AddsNoDimension(t *testing.T) {
 
 // ── the evidence manifest ────────────────────────────────────────────────────────────────────────
 
-// p16NamedTests is the evidence column of openspec/changes/p16-context-strategy-optimization/tasks.md,
+// p16NamedTests is the evidence column of openspec/changes/archive/2026-07-29-p16-context-strategy-optimization/tasks.md,
 // transcribed. Each entry is a test the plan claims proves a task; this asserts each one exists.
 //
 // 🚫 It deliberately does NOT check that they pass — `go test ./...` does that, and a manifest that

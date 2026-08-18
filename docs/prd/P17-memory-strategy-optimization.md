@@ -223,7 +223,7 @@ operators** (P8) — no runtime is introduced here to operate.
 ## 6. Functional requirements
 
 Numbered FRs; each maps 1:1 to an OpenSpec requirement under
-`openspec/changes/p17-memory-strategy-optimization/specs/`.
+`openspec/changes/archive/2026-08-01-p17-memory-strategy-optimization/specs/`.
 
 ### The memory registry (capability `memory-store`)
 
@@ -282,7 +282,7 @@ Numbered FRs; each maps 1:1 to an OpenSpec requirement under
 ### User-initiated change on this axis (capability `memory-authoring`)
 
 The cross-axis rules are **FR21–FR33 of [P13](P13-prompt-model-optimization.md)** (capability
-[`authored-change`](../../openspec/changes/p13-prompt-model-optimization/specs/authored-change/spec.md))
+[`authored-change`](../../openspec/changes/archive/2026-08-01-p13-prompt-model-optimization/specs/authored-change/spec.md))
 and apply here in full without restatement: one spine, two origins; origin recorded and never hashed; *a
 user may author the change, a user may not author the evidence.*
 

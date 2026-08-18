@@ -31,7 +31,7 @@ specs build on.
 **Upstream contract (frozen at M0, additive-only):**
 [`schemas/workflow-ir.schema.json`](../../schemas/workflow-ir.schema.json) ·
 [`schemas/runtime-invocation.schema.json`](../../schemas/runtime-invocation.schema.json) ·
-[`openspec/changes/p0-foundations/specs/workflow-ir/spec.md`](../../openspec/changes/p0-foundations/specs/workflow-ir/spec.md).
+[`openspec/changes/archive/2026-07-15-p0-foundations/specs/workflow-ir/spec.md`](../../openspec/changes/archive/2026-07-15-p0-foundations/specs/workflow-ir/spec.md).
 
 **Product rationale:** [`docs/prd/P1-discovery-mvp.md`](../prd/P1-discovery-mvp.md).
 **Behavioral spec & plan:** [`openspec/changes/p1-discovery-mvp/`](../../openspec/changes/p1-discovery-mvp/).

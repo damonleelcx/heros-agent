@@ -20,7 +20,7 @@ import (
 // shaped — its envelope, its slot set, its body blob. A second reader that re-decoded envelopes would
 // be a second definition of "what a prompt version is," and the two would drift the first time the
 // envelope grows a field. (Lineage stays a name-grouped read model, never a stored derived_from — see
-// openspec/changes/p10-prompt-model-studio/decisions.md D-1.3.)
+// openspec/changes/archive/2026-08-01-p10-prompt-model-studio/decisions.md D-1.3.)
 
 // StudioRender renders a prompt version against supplied bindings and returns the exact string a run
 // would send (P10 tasks 4.6, 6.1). It calls the SAME Template.Render the runtime uses — not a second

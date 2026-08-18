@@ -5,7 +5,7 @@
 | Status | Draft (reviewed alongside P13 13c / P14 14c / P15 15d / P16 16c) |
 | Created | 2026-07-28 |
 | Updated | 2026-07-28 |
-| Related | PRDs [P13](../prd/P13-prompt-model-optimization.md) · [P14](../prd/P14-skills-tools-optimization.md) · [P15](../prd/P15-workflow-wiring-optimization.md) · [P16](../prd/P16-context-strategy-optimization.md); OpenSpec `changes/p13-prompt-model-optimization/specs/authored-change/spec.md` and the three per-axis authoring capabilities; [ADR-002](../adr/ADR-002-provider-gateway-serves-platform-callers.md), [ADR-004](../adr/ADR-004-runtime-config-binding.md) |
+| Related | PRDs [P13](../prd/P13-prompt-model-optimization.md) · [P14](../prd/P14-skills-tools-optimization.md) · [P15](../prd/P15-workflow-wiring-optimization.md) · [P16](../prd/P16-context-strategy-optimization.md); OpenSpec `changes/archive/2026-08-01-p13-prompt-model-optimization/specs/authored-change/spec.md` and the three per-axis authoring capabilities; [ADR-002](../adr/ADR-002-provider-gateway-serves-platform-callers.md), [ADR-004](../adr/ADR-004-runtime-config-binding.md) |
 
 ---
 

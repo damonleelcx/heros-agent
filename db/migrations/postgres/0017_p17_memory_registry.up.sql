@@ -1,5 +1,5 @@
 -- P17 Memory Strategy Optimization — the fifth registry (memory). Task 5.1.
--- Spec: openspec/changes/p17-memory-strategy-optimization/specs/memory-store/spec.md;
+-- Spec: openspec/changes/archive/2026-08-01-p17-memory-strategy-optimization/specs/memory-store/spec.md;
 -- PRD docs/prd/P17-memory-strategy-optimization.md §6 (FR1–FR6); decisions.md D1.
 --
 -- Dialect: PostgreSQL 11+, exactly as 0002. Expand-only: this migration ADDS one table and attaches the

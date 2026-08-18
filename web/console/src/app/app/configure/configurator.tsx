@@ -323,7 +323,7 @@ function Outcome({ outcome }: { outcome: Outcome }) {
   }
 
   if (outcome.kind === "refused") {
-    // The refusal card is a shared component: the submit path and the /preview/p15 state page render
+    // The refusal card is a shared component: the submit path and the /preview/wiring state page render
     // the SAME element, so what is checked in a browser is what a customer sees.
     return <AxisRefusal axis={outcome.axis} nodeId={outcome.nodeId} message={outcome.message} />;
   }

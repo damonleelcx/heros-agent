@@ -9,7 +9,7 @@ changed in one place or not at all.
 
 Architecture decision: [ADR-005](../adr/ADR-005-forge-delivery-and-credential-posture.md). Product
 rationale: [PRD P12](../prd/P12-forge-delivery.md). Design reasoning:
-[`../../openspec/changes/p12-forge-delivery/design.md`](../../openspec/changes/p12-forge-delivery/design.md).
+[`../../openspec/changes/archive/2026-07-25-p12-forge-delivery/design.md`](../../openspec/changes/archive/2026-07-25-p12-forge-delivery/design.md).
 
 | Contract | Machine source of truth (single) | Consumed by |
 |---|---|---|

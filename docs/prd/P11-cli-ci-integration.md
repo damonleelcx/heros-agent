@@ -194,7 +194,7 @@ Non-personas: **platform operators** (P8), and consumers of the customer's own L
 ## 6. Functional requirements
 
 Numbered FRs; each maps 1:1 to an OpenSpec requirement under
-`openspec/changes/p11-cli-ci-integration/specs/`.
+`openspec/changes/archive/2026-07-25-p11-cli-ci-integration/specs/`.
 
 ### The CLI (capability `cli`)
 

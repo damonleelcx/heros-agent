@@ -146,17 +146,17 @@ to salvage — build fresh:
 
 | Subsystem | Phase | Spec |
 |---|:---:|---|
-| Workflow IR + metric event schema + lineage | P0 | `openspec/changes/p0-foundations/` |
+| Workflow IR + metric event schema + lineage | P0 | `openspec/changes/archive/2026-07-15-p0-foundations/` |
 | Discovery Engine (Go `go/ast`) | P1 | `openspec/changes/p1-discovery-mvp/` |
 | Config Layer + source-transformation engine + Variant Spec + Runtime executor | P2 | `openspec/changes/p2-config-runtime/` |
-| Metrics/OTel substrate + 3 stores | P2.5 | `openspec/changes/p2.5-metrics-observability/` |
-| Context strategies + Skill Registry + **Sandbox** | P3 | `openspec/changes/p3-context-skills-sandbox/` |
-| Pattern Classifier | P3.5 | `openspec/changes/p3.5-pattern-classifier/` |
+| Metrics/OTel substrate + 3 stores | P2.5 | `openspec/changes/archive/2026-07-31-p2.5-metrics-observability/` |
+| Context strategies + Skill Registry + **Sandbox** | P3 | `openspec/changes/archive/2026-07-31-p3-context-skills-sandbox/` |
+| Pattern Classifier | P3.5 | `openspec/changes/archive/2026-07-20-p3.5-pattern-classifier/` |
 | Eval Harness + eval-set gen + scoring | P4 | `openspec/changes/p4-eval-harness/` |
-| Attribution + Diagnosis | P4.5 | `openspec/changes/p4.5-attribution-diagnosis/` |
-| Typed contracts + Re-arrangement + Dynamic tracing | P5 | `openspec/changes/p5-contracts-rearrange-tracing/` |
-| Proposals + Verification | P5.5 | `openspec/changes/p5.5-proposals-verification/` |
-| Autonomous optimizer | P6 | `openspec/changes/p6-autonomous-optimizer/` |
+| Attribution + Diagnosis | P4.5 | `openspec/changes/archive/2026-07-23-p4.5-attribution-diagnosis/` |
+| Typed contracts + Re-arrangement + Dynamic tracing | P5 | `openspec/changes/archive/2026-07-23-p5-contracts-rearrange-tracing/` |
+| Proposals + Verification | P5.5 | `openspec/changes/archive/2026-07-23-p5.5-proposals-verification/` |
+| Autonomous optimizer | P6 | `openspec/changes/archive/2026-07-23-p6-autonomous-optimizer/` |
 | React web UI (graph editor, leaderboard, dashboards) | P2+ | across the UI-bearing phases |
 
 ---
@@ -172,7 +172,7 @@ Do the deletions and salvage on a branch, in this order, so the tree stays build
 5. **Prune infra** (nats/neo4j; decide qdrant vs pgvector).
 6. **Trim `go.mod`** and run `go mod tidy`; confirm `go build ./...` is green on the reduced tree.
 7. **Archive/rewrite docs** (§4) and the CI workflow (§3).
-8. **Land P0** (`openspec/changes/p0-foundations`) as the first net-new work on the cleaned foundation.
+8. **Land P0** (`openspec/changes/archive/2026-07-15-p0-foundations`) as the first net-new work on the cleaned foundation.
 
 **Net effect:** you keep the HTTP server, auth, config, DB access, the OpenAI-compatible provider
 client, the tool/skill/prompt registry plumbing, tool contracts, and embeddings (~8 salvageable

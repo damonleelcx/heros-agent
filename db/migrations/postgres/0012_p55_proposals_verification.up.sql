@@ -1,6 +1,6 @@
 -- P5.5 Proposal operators + Verification gate — proposals, evidence, verdicts, rank entries.
--- Spec:   openspec/changes/p5.5-proposals-verification/specs/{proposal-engine,verification}/spec.md
--- Design: openspec/changes/p5.5-proposals-verification/design.md "Data model sketch" (tasks 5.4).
+-- Spec:   openspec/changes/archive/2026-07-23-p5.5-proposals-verification/specs/{proposal-engine,verification}/spec.md
+-- Design: openspec/changes/archive/2026-07-23-p5.5-proposals-verification/design.md "Data model sketch" (tasks 5.4).
 --
 -- Dialect: PostgreSQL 11+. EXPAND-ONLY. It ADDS four new tables and one nullable column to eval_result
 -- (split), ALTERs no existing column, drops nothing, and rewrites no row — the additive-evolution rule

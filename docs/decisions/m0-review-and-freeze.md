@@ -6,7 +6,7 @@
 | Owner | QA (gate) + all P0 roles (review) |
 | Status | **Schemas FROZEN at M0** |
 | Tasks | 6.1 (valid samples), 6.2 (invalid samples), 6.3 (review + open questions), 6.4 (freeze + CI green) |
-| Cross-refs | PRD `P0-foundations.md` §13 (M0 exit checklist), §14 (open questions); all `docs/decisions/*.md`; `openspec/changes/p0-foundations/` |
+| Cross-refs | PRD `P0-foundations.md` §13 (M0 exit checklist), §14 (open questions); all `docs/decisions/*.md`; `openspec/changes/archive/2026-07-15-p0-foundations/` |
 
 The M0 gate: both schemas and the decision records are reviewed by every P0 role, open questions are
 resolved or logged with an owner, and the two schemas are **frozen** — additive-only evolution
