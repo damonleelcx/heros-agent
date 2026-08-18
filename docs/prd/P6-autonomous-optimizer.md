@@ -198,7 +198,7 @@ authority to open *and merge* pull requests.
 ## 6. Functional requirements
 
 These map 1:1 to the OpenSpec requirements under
-`openspec/changes/p6-autonomous-optimizer/specs/autonomous-optimizer/`.
+`openspec/changes/archive/2026-07-23-p6-autonomous-optimizer/specs/autonomous-optimizer/`.
 
 Autonomous **apply = open a pull request AND merge it** (ADR-001). A proposal is a candidate Variant
 Spec *and* the concrete source diff its deterministic AST codemod produces; the merge is **gated by

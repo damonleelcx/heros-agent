@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://heros-agent.dev/schemas/workflow-ir.schema.json",
   "title": "Workflow IR",
-  "description": "The canonical intermediate representation of a discovered LLM workflow: a versioned graph of static node definitions and typed edges. Emitted by Discovery (P1); consumed by the Config Layer (P2), Pattern Classifier (P3.5), Eval (P4), Re-arrangement (P5), and the graph UI. Frozen at M0. See docs/prd/P0-foundations.md and openspec/changes/p0-foundations.",
+  "description": "The canonical intermediate representation of a discovered LLM workflow: a versioned graph of static node definitions and typed edges. Emitted by Discovery (P1); consumed by the Config Layer (P2), Pattern Classifier (P3.5), Eval (P4), Re-arrangement (P5), and the graph UI. Frozen at M0. See docs/prd/P0-foundations.md and openspec/changes/archive/2026-07-15-p0-foundations.",
   "x-frozen": { "milestone": "M0", "policy": "additive-only", "record": "docs/decisions/m0-review-and-freeze.md" },
   "type": "object",
   "$comment": "ir_version is the semantic version of THIS schema (the IR contract), not of the source repo. Referential integrity (every edge endpoint and every runtime-invocation node_id must reference an existing node) is a semantic check performed by CI beyond JSON Schema's expressive power; JSON Schema here validates structure and required fields only.",
@@ -161,7 +161,7 @@
         },
         "tools_skills": {
           "type": "array",
-          "description": "Bound tool/skill names available at this call site. FROZEN and never repurposed: P14 split tools from skills ADDITIVELY into the optional `tools`/`skills` properties below, leaving this conflated view exactly as pre-P14 consumers read it (openspec/changes/p14-skills-tools-optimization/decisions.md D-14.1).",
+          "description": "Bound tool/skill names available at this call site. FROZEN and never repurposed: P14 split tools from skills ADDITIVELY into the optional `tools`/`skills` properties below, leaving this conflated view exactly as pre-P14 consumers read it (openspec/changes/archive/2026-07-29-p14-skills-tools-optimization/decisions.md D-14.1).",
           "items": { "type": "string", "minLength": 1 }
         },
         "tools": {

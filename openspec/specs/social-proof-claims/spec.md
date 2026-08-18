@@ -2,7 +2,7 @@
 
 Product rationale: [`../../../docs/prd/P23-legal-and-developer-docs.md`](../../../docs/prd/P23-legal-and-developer-docs.md)
 §6 (FR49–FR53) and §9.1 / §9.6 / §9.8 (Product Designer + DevOps + Sales Operations lenses). Technical
-decisions: [`../../changes/p23-legal-and-docs/design.md`](../../changes/p23-legal-and-docs/design.md) Decision 15.
+decisions: [`../../changes/archive/2026-08-01-p23-legal-and-docs/design.md`](../../changes/archive/2026-08-01-p23-legal-and-docs/design.md) Decision 15.
 
 Covers the **GitHub link and star count on the public home page**, and — because this is the first of its
 kind and will not be the last — the rule that governs any number the marketing surface states about the
@@ -20,7 +20,7 @@ world rather than about the product.
 > that middleware's own comment names the public page's no-third-party-origin rule as the reason. This
 > capability does not create that rule; it declines to be the exception to it.
 
-## ADDED Requirements
+## Requirements
 
 ### Requirement: The public home page SHALL link to the project's GitHub repository
 

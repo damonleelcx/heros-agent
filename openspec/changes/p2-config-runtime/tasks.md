@@ -226,8 +226,8 @@ Applies the source-transformation apply model per
   > short-lived, forge-rotated. CI-mediated delivery is now the default and the platform holds **no**
   > forge credential; the hosted Git App is opt-in, per-repo and revocable. Blocker #4 is resolved by
   > a **separate append-only `delivery` record** rather than by relaxing `transform` immutability.
-  > Owned by **[P12](../p12-forge-delivery/)**; the CI hook it runs inside is
-  > **[P11](../p11-cli-ci-integration/)**.
+  > Owned by **[P12](../archive/2026-07-25-p12-forge-delivery/)**; the CI hook it runs inside is
+  > **[P11](../archive/2026-07-25-p11-cli-ci-integration/)**.
 
 
 

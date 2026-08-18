@@ -1,6 +1,6 @@
 -- P12 Forge Delivery — the `delivery` record. Tasks 1.2, 4.1–4.6.
--- Spec:   openspec/changes/p12-forge-delivery/specs/delivery-record/spec.md
--- Design: openspec/changes/p12-forge-delivery/design.md Decision 4; ADR-005 blocker #2.
+-- Spec:   openspec/changes/archive/2026-07-25-p12-forge-delivery/specs/delivery-record/spec.md
+-- Design: openspec/changes/archive/2026-07-25-p12-forge-delivery/design.md Decision 4; ADR-005 blocker #2.
 -- Contract: docs/decisions/p12-contracts.md §2.
 --
 -- Dialect: PostgreSQL 11+. EXPAND-ONLY. It ADDS exactly ONE new table (careful-table-creation: ADR-005

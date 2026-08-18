@@ -6,7 +6,7 @@
 | Owner | System Designer (lead) |
 | Status | Draft — freeze at M0 |
 | Tasks | 1.6 (this spec), 2.4 (golden vectors), 1.7 (storage placement) |
-| Cross-refs | `docs/prd/P0-foundations.md` §6 (FR12–FR15), §8.4; `openspec/changes/p0-foundations/specs/storage-and-lineage/spec.md`; `docs/decisions/storage-decision-record.md` |
+| Cross-refs | `docs/prd/P0-foundations.md` §6 (FR12–FR15), §8.4; `openspec/changes/archive/2026-07-15-p0-foundations/specs/storage-and-lineage/spec.md`; `docs/decisions/storage-decision-record.md` |
 
 This spec defines `config_hash`: the immutable, content-defined identifier that makes every result on
 the platform reproducible and attributable. It is precise enough to implement identically in any

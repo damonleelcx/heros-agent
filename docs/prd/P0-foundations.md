@@ -122,7 +122,7 @@ end users. Human end users appear only through the north-star journey Product dr
 
 ## 6. Functional requirements
 
-These map 1:1 to OpenSpec requirements in `openspec/changes/p0-foundations/specs/`.
+These map 1:1 to OpenSpec requirements in `openspec/changes/archive/2026-07-15-p0-foundations/specs/`.
 
 **Workflow IR (capability `workflow-ir`)**
 - **FR1** — The IR SHALL be a versioned JSON document (`ir_version`, semver) describing a workflow as

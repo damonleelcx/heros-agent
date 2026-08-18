@@ -6,7 +6,7 @@
 | Owner | Backend (support to System Designer) |
 | Status | Draft — freeze at M0 |
 | Tasks | 2.1 (relational model), 2.2 (emission boundary), 2.3 (expand-migrate-contract), 2.4 (golden vectors) |
-| Cross-refs | `docs/decisions/storage-decision-record.md` §6; `docs/decisions/config-hash-spec.md`; `openspec/changes/p0-foundations/specs/storage-and-lineage/spec.md`; `openspec/changes/p0-foundations/specs/metric-event-schema/spec.md` |
+| Cross-refs | `docs/decisions/storage-decision-record.md` §6; `docs/decisions/config-hash-spec.md`; `openspec/changes/archive/2026-07-15-p0-foundations/specs/storage-and-lineage/spec.md`; `openspec/changes/archive/2026-07-15-p0-foundations/specs/metric-event-schema/spec.md` |
 
 Backend's job in P0 is to **model the invariants into the schema, not the code** — so the tagging and
 lineage contracts hold on every write, forever, even when application code forgets. Nothing here runs

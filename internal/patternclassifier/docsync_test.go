@@ -100,7 +100,7 @@ func TestPRDTaxonomyTableMatchesTheCode(t *testing.T) {
 // The OpenSpec delta enumerates the taxonomy in prose with the same numbers. Prose is exactly where a
 // second numbering was free to grow last time, so it is checked too.
 func TestOpenSpecTaxonomyListMatchesTheCode(t *testing.T) {
-	doc := readDoc(t, "../../openspec/changes/p3.5-pattern-classifier/specs/pattern-classifier/spec.md")
+	doc := readDoc(t, "../../openspec/changes/archive/2026-07-20-p3.5-pattern-classifier/specs/pattern-classifier/spec.md")
 	entry := regexp.MustCompile(`(\d+)\. ([A-Z][A-Za-z&/ -]+?) \((control-flow|capability|coordination|governance)\)`)
 	found := map[int][2]string{}
 	for _, m := range entry.FindAllStringSubmatch(doc, -1) {

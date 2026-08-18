@@ -1,5 +1,5 @@
 -- P2.5 Metrics & Observability — eval-results expansion (task 5.3).
--- Spec: openspec/changes/p2.5-metrics-observability/specs/metrics-observability/spec.md.
+-- Spec: openspec/changes/archive/2026-07-31-p2.5-metrics-observability/specs/metrics-observability/spec.md.
 --
 -- Dialect: PostgreSQL. EXPAND-ONLY: it ADDS columns to eval_result and WIDENS the natural key. It
 -- removes nothing and narrows nothing, so it is safe on a populated table (a fresh run has no rows).

@@ -5,10 +5,10 @@
 - **Amends:** [ADR-001](ADR-001-source-transformation-apply-model.md) — it is **not** superseded. The
   apply mechanism is still a deterministic AST source transformation delivered as a reviewable diff.
   What this ADR adds is a second, opt-in **shape** for what that transformation writes.
-- **Also amends:** `openspec/changes/p5.5-proposals-verification/specs/verification/spec.md`
+- **Also amends:** `openspec/changes/archive/2026-07-23-p5.5-proposals-verification/specs/verification/spec.md`
   (the scenario clause *"no runtime shim substitutes parameters at execution time"*) — narrowed, see
   §"What this does not change" and the `MODIFIED` delta in
-  [`openspec/changes/p10-prompt-model-studio/specs/runtime-config-binding/spec.md`](../../openspec/changes/p10-prompt-model-studio/specs/runtime-config-binding/spec.md).
+  [`openspec/changes/archive/2026-08-01-p10-prompt-model-studio/specs/runtime-config-binding/spec.md`](../../openspec/changes/archive/2026-08-01-p10-prompt-model-studio/specs/runtime-config-binding/spec.md).
 - **Relates to:** [ADR-002](ADR-002-provider-gateway-serves-platform-callers.md) (the transformed
   program keeps calling its own SDKs — unchanged here).
 

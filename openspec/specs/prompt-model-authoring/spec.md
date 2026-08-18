@@ -1,7 +1,7 @@
 # Prompt & Model Authoring — Spec (folded from P13)
 
 Product rationale: [`../../../docs/prd/P13-prompt-model-optimization.md`](../../../docs/prd/P13-prompt-model-optimization.md)
-§6 (FR34–FR40), §7 (NFR11–NFR18). Design reasoning: [`../../changes/p13-prompt-model-optimization/design.md`](../../changes/p13-prompt-model-optimization/design.md) Decisions 9–12.
+§6 (FR34–FR40), §7 (NFR11–NFR18). Design reasoning: [`../../changes/archive/2026-08-01-p13-prompt-model-optimization/design.md`](../../changes/archive/2026-08-01-p13-prompt-model-optimization/design.md) Decisions 9–12.
 Shared contract: [`../authored-change/spec.md`](../authored-change/spec.md) — every requirement there
 applies here and is **not** restated.
 

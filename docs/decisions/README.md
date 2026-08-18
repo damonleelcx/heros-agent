@@ -17,4 +17,4 @@ OpenSpec specs reference.
 | [`m0-review-and-freeze.md`](m0-review-and-freeze.md) | The M0 gate: sample fixtures (valid pass / negatives fail), cross-role review sign-off, open-questions register, M0 exit-checklist evidence, and the schema **freeze** declaration. | 6.1–6.4 |
 
 Product rationale: [`docs/prd/P0-foundations.md`](../prd/P0-foundations.md). Behavioral specs:
-[`openspec/changes/p0-foundations/`](../../openspec/changes/p0-foundations/).
+[`openspec/changes/archive/2026-07-15-p0-foundations/`](../../openspec/changes/archive/2026-07-15-p0-foundations/).

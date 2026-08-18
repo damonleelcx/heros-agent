@@ -15,7 +15,7 @@ import (
 
 // P10 studio MATRIX surface (M-series): the node × model grid's read/compute routes over the shipped
 // P10 capabilities. Models are the rows, a workflow's nodes are the columns, a cell test-runs and binds.
-// No ranking, no new runtime path (see openspec/changes/p10-studio-matrix).
+// No ranking, no new runtime path (see openspec/changes/archive/2026-08-01-p10-studio-matrix).
 
 // StudioModelStore is the registry surface the matrix needs (rows + per-cell render). *registry.Store
 // satisfies it; an interface for testability.

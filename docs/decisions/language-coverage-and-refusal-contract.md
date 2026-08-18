@@ -5,7 +5,7 @@
 | Status | Draft (reviewed alongside P13 13d / P14 14d / P15 15e / P16 16d) |
 | Created | 2026-07-28 |
 | Updated | 2026-07-28 |
-| Related | PRDs [P13](../prd/P13-prompt-model-optimization.md) · [P14](../prd/P14-skills-tools-optimization.md) · [P15](../prd/P15-workflow-wiring-optimization.md) · [P16](../prd/P16-context-strategy-optimization.md); OpenSpec `changes/p13-prompt-model-optimization/specs/language-coverage/spec.md` and the four per-axis coverage capabilities; [ADR-001](../adr/ADR-001-source-transformation-apply-model.md), [ADR-003](../adr/ADR-003-multi-language-apply-and-verification-strength.md); [`p14-materializer-coverage.md`](p14-materializer-coverage.md) |
+| Related | PRDs [P13](../prd/P13-prompt-model-optimization.md) · [P14](../prd/P14-skills-tools-optimization.md) · [P15](../prd/P15-workflow-wiring-optimization.md) · [P16](../prd/P16-context-strategy-optimization.md); OpenSpec `changes/archive/2026-08-01-p13-prompt-model-optimization/specs/language-coverage/spec.md` and the four per-axis coverage capabilities; [ADR-001](../adr/ADR-001-source-transformation-apply-model.md), [ADR-003](../adr/ADR-003-multi-language-apply-and-verification-strength.md); [`p14-materializer-coverage.md`](p14-materializer-coverage.md) |
 
 ---
 

@@ -69,7 +69,7 @@ modelled, resolved, and hashed, but **refused at transform** with a typed `unsaf
   (`internal/evalharness/metricnames.go`) unchanged; a bespoke harness-quality metric, if ever needed, is
   an additive `RegisterMetric` (`registry.go:86`), not this phase.
 - **New capability `harness-delivery`.** This axis's delivery cells, under P13's
-  [`change-delivery`](../p13-prompt-model-optimization/specs/change-delivery/spec.md) contract and
+  [`change-delivery`](../archive/2026-08-01-p13-prompt-model-optimization/specs/change-delivery/spec.md) contract and
   [ADR-010](../../../docs/adr/ADR-010-runtime-gradual-rollout.md). A **scaffold is structure** —
   swapping a node onto a reason-and-act loop changes how many calls the program makes and in what
   control flow, which no document can introduce: `notRuntimeResolvable`, permanent. But a strategy's

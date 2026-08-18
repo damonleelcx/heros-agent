@@ -1,7 +1,7 @@
 -- P5 Typed contracts + Re-arrangement + Dynamic tracing — lineage, adapters, reconciliation, behavioral
 -- labels, anti-patterns.
--- Spec:   openspec/changes/p5-contracts-rearrange-tracing/specs/{typed-contracts,rearrangement,dynamic-tracing}/spec.md
--- Design: openspec/changes/p5-contracts-rearrange-tracing/design.md "Data model sketch" (tasks 8.1, 8.4).
+-- Spec:   openspec/changes/archive/2026-07-23-p5-contracts-rearrange-tracing/specs/{typed-contracts,rearrangement,dynamic-tracing}/spec.md
+-- Design: openspec/changes/archive/2026-07-23-p5-contracts-rearrange-tracing/design.md "Data model sketch" (tasks 8.1, 8.4).
 --
 -- Dialect: PostgreSQL 11+. EXPAND-ONLY. It ADDS one nullable column to variant_spec (lineage) and six
 -- new tables. It ALTERs no existing column, drops nothing, and rewrites no row — the additive-evolution

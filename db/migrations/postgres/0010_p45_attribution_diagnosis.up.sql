@@ -1,6 +1,6 @@
 -- P4.5 Attribution + Diagnosis — the read-only report schema.
--- Spec: openspec/changes/p4.5-attribution-diagnosis/specs/{attribution,diagnosis}/spec.md
--- Design: openspec/changes/p4.5-attribution-diagnosis/design.md "Data model sketch" + Decision 1.
+-- Spec: openspec/changes/archive/2026-07-23-p4.5-attribution-diagnosis/specs/{attribution,diagnosis}/spec.md
+-- Design: openspec/changes/archive/2026-07-23-p4.5-attribution-diagnosis/design.md "Data model sketch" + Decision 1.
 --
 -- Dialect: PostgreSQL. EXPAND-ONLY: it ADDS six report tables and nothing else. It ALTERs no table
 -- P0/P2/P4 created; in particular it adds NO column, constraint, trigger, or FK to variant, config,

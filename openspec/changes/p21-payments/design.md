@@ -1,7 +1,7 @@
 # Design — P21: Stripe Payments
 
 Product rationale: [`../../../docs/prd/P21-stripe-payments.md`](../../../docs/prd/P21-stripe-payments.md).
-Implements the P7 billing abstraction ([`p7-billing-metering`](../p7-billing-metering/)) against Stripe. Inherits
+Implements the P7 billing abstraction ([`p7-billing-metering`](../archive/2026-07-23-p7-billing-metering/)) against Stripe. Inherits
 [ADR-002](../../../docs/adr/ADR-002-provider-gateway-serves-platform-callers.md) (the platform is never in a
 customer's production request path — billing is unrelated internal commerce),
 [ADR-006](../../../docs/adr/ADR-006-console-deploy-packaging.md) (console deploy packaging), and

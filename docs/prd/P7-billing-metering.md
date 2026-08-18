@@ -218,7 +218,7 @@ entitlement gate, the billing-provider integration, and the billing/usage UI.
 ## 6. Functional requirements
 
 These map 1:1 to the OpenSpec requirements under
-`openspec/changes/p7-billing-metering/specs/{metering,entitlements,billing}/`.
+`openspec/changes/archive/2026-07-23-p7-billing-metering/specs/{metering,entitlements,billing}/`.
 
 **Metering — value metric, idempotent records, verified savings, reconciliation** (`metering`)
 - **FR1 (→ metering).** SUM for a customer in a billing period SHALL be computed as an **aggregation

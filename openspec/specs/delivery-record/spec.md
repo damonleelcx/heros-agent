@@ -4,7 +4,7 @@ Product rationale: [`../../../docs/prd/P12-forge-delivery.md`](../../../docs/prd
 §6 (FR16–FR22) and §8.2. Architecture decision:
 [`../../../docs/adr/ADR-005-forge-delivery-and-credential-posture.md`](../../../docs/adr/ADR-005-forge-delivery-and-credential-posture.md)
 (blocker #2 and its rejected alternatives). Design reasoning:
-[`../../changes/p12-forge-delivery/design.md`](../../changes/p12-forge-delivery/design.md) Decision 4.
+[`../../changes/archive/2026-07-25-p12-forge-delivery/design.md`](../../changes/archive/2026-07-25-p12-forge-delivery/design.md) Decision 4.
 
 Covers the record of what was delivered where: an **append-only** `delivery` record with its own
 lifecycle, leaving `transform` immutable and untouched; the mode captured for audit; the **observed

@@ -2,7 +2,7 @@
 
 Product rationale: [`../../../docs/prd/P23-legal-and-developer-docs.md`](../../../docs/prd/P23-legal-and-developer-docs.md)
 §6 (FR17–FR25), §7 (NFR2, NFR4, NFR10) and §9.1 / §9.5 (Product Designer + AI Engineer lenses). Technical
-decisions: [`../../changes/p23-legal-and-docs/design.md`](../../changes/p23-legal-and-docs/design.md) Decisions 6, 8 and 9.
+decisions: [`../../changes/archive/2026-08-01-p23-legal-and-docs/design.md`](../../changes/archive/2026-08-01-p23-legal-and-docs/design.md) Decisions 6, 8 and 9.
 
 Covers the surface a developer learns the product from: install to a first real result, then task-shaped
 guides, then reference generated from the artifacts the code already produces.
@@ -12,7 +12,7 @@ guides, then reference generated from the artifacts the code already produces.
 > does not exist, the tier says so — an absent tier is honest, a hand-written one is a fiction with a table
 > of contents.
 
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Documentation SHALL ship in three tiers — quickstart, guides and generated reference
 

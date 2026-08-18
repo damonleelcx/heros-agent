@@ -21,11 +21,31 @@ openspec/
       specs/
         <capability>/
           spec.md         # DELTA: ## ADDED / ## MODIFIED / ## REMOVED Requirements
+    archive/              # DEPLOYED changes, already folded into specs/
+      <YYYY-MM-DD>-<change-id>/    # date the phase landed; same layout as above
 ```
 
 A **capability** is a coherent, enduring area of behavior (e.g. `workflow-ir`, `discovery-engine`,
 `eval-harness`) — named as a kebab-case noun, not a phase. One phase-change may touch several
-capabilities. When a change is deployed, its delta specs are folded into `specs/`.
+capabilities.
+
+### Archiving a deployed change
+
+When a change is deployed, it is **archived** in two steps, and the second is not optional:
+
+1. **Fold** each delta into `specs/<capability>/spec.md` — `ADDED` requirements are appended,
+   `MODIFIED` replaces the matching requirement, `REMOVED` deletes it. The folded file drops the
+   operation headers (it is truth, not a diff) and its title records the provenance, e.g.
+   `# Run Linking — Spec (folded from P11, P29)`.
+2. **Move** `changes/<change-id>/` to `changes/archive/<YYYY-MM-DD>-<change-id>/`.
+
+`changes/` therefore answers "what is still open" and `specs/` answers "what is true today". A
+change that is finished but still sitting in `changes/` makes both questions unanswerable, which is
+the failure this layout exists to prevent.
+
+Within a **folded** spec, a link to another capability is `../<capability>/spec.md` — the live
+sibling, never a path into `archive/`. Links to the originating change's own `design.md` /
+`proposal.md` / `tasks.md` do point into `archive/`, because that is where the reasoning now lives.
 
 ## Change files
 

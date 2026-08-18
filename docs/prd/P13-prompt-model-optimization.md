@@ -358,7 +358,7 @@ candidate stream; it does not gain a user-authoring path.
 ## 6. Functional requirements
 
 Numbered FRs; each maps 1:1 to an OpenSpec requirement under
-`openspec/changes/p13-prompt-model-optimization/specs/`.
+`openspec/changes/archive/2026-08-01-p13-prompt-model-optimization/specs/`.
 
 ### Deeper prompt operators (capability `prompt-rewrite`)
 

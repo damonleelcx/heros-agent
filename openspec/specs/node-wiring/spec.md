@@ -1,7 +1,7 @@
 # Node Wiring — Spec (folded from P15)
 
 Product rationale: [`../../../docs/prd/P15-workflow-wiring-optimization.md`](../../../docs/prd/P15-workflow-wiring-optimization.md)
-§6 (FR1–FR8), §7. Design reasoning: [`../../changes/p15-workflow-wiring-optimization/design.md`](../../changes/p15-workflow-wiring-optimization/design.md) Decisions 1, 2, 5, 6.
+§6 (FR1–FR8), §7. Design reasoning: [`../../changes/archive/2026-07-31-p15-workflow-wiring-optimization/design.md`](../../changes/archive/2026-07-31-p15-workflow-wiring-optimization/design.md) Decisions 1, 2, 5, 6.
 
 Covers the wiring axis as a source of optimization proposals: node **merge** (fuse adjacent nodes),
 free **reorder** (including parallelizing independent nodes), and **prune** (drop a dead node) — each

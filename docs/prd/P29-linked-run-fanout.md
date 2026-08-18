@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Phase** | P29 |
-| **OpenSpec change** | [`p29-linked-run-fanout`](../../openspec/changes/p29-linked-run-fanout/) |
+| **OpenSpec change** | [`p29-linked-run-fanout`](../../openspec/changes/archive/2026-08-07-p29-linked-run-fanout/) |
 | **Lead roles** | Backend Dev + Frontend Dev |
 | **Support roles** | Product Designer, System Designer, AI Engineer, DevOps, QA, Sales Operations |
 | **Upstream** | P11 (run linking, egress boundary) · P12 (delivery route table) · P13 (`language-coverage`, `authored-change`) · P19 (the deployment) · P27 (organization identity, run ownership) |

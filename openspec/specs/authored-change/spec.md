@@ -1,12 +1,12 @@
 # Authored Change — Spec (folded from P13)
 
 Product rationale: [`../../../docs/prd/P13-prompt-model-optimization.md`](../../../docs/prd/P13-prompt-model-optimization.md)
-§6 (FR21–FR33), §7 (NFR11–NFR18). Design reasoning: [`../../changes/p13-prompt-model-optimization/design.md`](../../changes/p13-prompt-model-optimization/design.md) Decisions 9–12.
+§6 (FR21–FR33), §7 (NFR11–NFR18). Design reasoning: [`../../changes/archive/2026-08-01-p13-prompt-model-optimization/design.md`](../../changes/archive/2026-08-01-p13-prompt-model-optimization/design.md) Decisions 9–12.
 
 This capability is the **cross-axis contract for user-initiated change**. It is defined once here and
 referenced — never restated — by the per-axis authoring capabilities:
-[`skill-tool-authoring`](../../changes/p14-skills-tools-optimization/specs/skill-tool-authoring/spec.md) (P14),
-[`wiring-authoring`](../../changes/p15-workflow-wiring-optimization/specs/wiring-authoring/spec.md) (P15), and
+[`skill-tool-authoring`](../../changes/archive/2026-07-29-p14-skills-tools-optimization/specs/skill-tool-authoring/spec.md) (P14),
+[`wiring-authoring`](../../changes/archive/2026-07-31-p15-workflow-wiring-optimization/specs/wiring-authoring/spec.md) (P15), and
 [`context-authoring`](../context-authoring/spec.md) (P16).
 
 > **The one sentence this capability exists to enforce: a user MAY author the change; a user MAY NOT

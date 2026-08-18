@@ -202,9 +202,17 @@ for the source specification.
 ## OpenSpec workflow
 
 This project uses OpenSpec for spec-driven development. See [`AGENTS.md`](AGENTS.md) for the
-format and rules. Capabilities live in `specs/`; proposed changes live in `changes/`. Each
-delivery phase (P0–P12, plus the P13–P18 Optimization Axis Expansion program) is tracked as one
-change under `changes/`. **P8 — Admin & Operations
+format and rules. Each delivery phase (P0 → P30) is tracked as one change, and a change lives in
+exactly one of three places:
+
+- `specs/` — the **current truth**: 100 capabilities, folded from every deployed phase. Read this
+  to learn what the system does today.
+- `changes/` — phases **still open**. A change is here only while it has unfinished tasks.
+- `changes/archive/<YYYY-MM-DD>-<change-id>/` — phases **deployed and folded**. Read these for the
+  reasoning (`design.md`, `proposal.md`) behind a requirement that now lives in `specs/`.
+
+Both steps happen together: folding without moving, or moving without folding, leaves `specs/` and
+`changes/` each telling a different story. **P8 — Admin & Operations
 Console** is the platform team's **internal operator** surface (its own admin identity + RBAC);
 **P9 — Web Console** is the **customer-facing** dashboard, scoped to one tenant. The two are distinct
 surfaces and must never be conflated: nothing in P9 crosses a tenant boundary, and no P8 capability is

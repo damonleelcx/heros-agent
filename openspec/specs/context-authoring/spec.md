@@ -1,7 +1,7 @@
 # Context Authoring — Spec (folded from P16)
 
 Product rationale: [`../../../docs/prd/P16-context-strategy-optimization.md`](../../../docs/prd/P16-context-strategy-optimization.md)
-§6 (FR15–FR23), §7. Design reasoning: [`../../changes/p16-context-strategy-optimization/design.md`](../../changes/p16-context-strategy-optimization/design.md) Decision 8.
+§6 (FR15–FR23), §7. Design reasoning: [`../../changes/archive/2026-07-29-p16-context-strategy-optimization/design.md`](../../changes/archive/2026-07-29-p16-context-strategy-optimization/design.md) Decision 8.
 **Shared contract:** [`../authored-change/spec.md`](../authored-change/spec.md)
 — one spine two origins, origin-blind refusals, preflight, `unverified` labeling, conflicts, reversal,
 audit, entitlement, offline parity, no-new-egress, and *a user may not author the evidence*. Every

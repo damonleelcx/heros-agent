@@ -1,13 +1,13 @@
 # Language Coverage — Spec (folded from P13)
 
 Product rationale: [`../../../docs/prd/P13-prompt-model-optimization.md`](../../../docs/prd/P13-prompt-model-optimization.md)
-§6 (FR41–FR51), §7 (NFR19–NFR23). Design reasoning: [`../../changes/p13-prompt-model-optimization/design.md`](../../changes/p13-prompt-model-optimization/design.md) Decision 13.
+§6 (FR41–FR51), §7 (NFR19–NFR23). Design reasoning: [`../../changes/archive/2026-08-01-p13-prompt-model-optimization/design.md`](../../changes/archive/2026-08-01-p13-prompt-model-optimization/design.md) Decision 13.
 
 This capability is the **cross-axis contract for what the apply path can do in which language**. It is
 defined once here and referenced — never restated — by the per-axis coverage capabilities:
 [`prompt-model-language-coverage`](../prompt-model-language-coverage/spec.md) (P13),
-[`skill-tool-language-coverage`](../../changes/p14-skills-tools-optimization/specs/skill-tool-language-coverage/spec.md) (P14),
-[`wiring-language-coverage`](../../changes/p15-workflow-wiring-optimization/specs/wiring-language-coverage/spec.md) (P15), and
+[`skill-tool-language-coverage`](../../changes/archive/2026-07-29-p14-skills-tools-optimization/specs/skill-tool-language-coverage/spec.md) (P14),
+[`wiring-language-coverage`](../../changes/archive/2026-07-31-p15-workflow-wiring-optimization/specs/wiring-language-coverage/spec.md) (P15), and
 [`context-language-coverage`](../context-language-coverage/spec.md) (P16).
 
 > **The one sentence this capability exists to enforce: every language discovery finds, the apply path

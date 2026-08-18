@@ -1,5 +1,5 @@
 -- P23 Legal Surface & Developer Documentation — the consent record. Task 9.1.
--- Design: openspec/changes/p23-legal-and-docs/design.md Decision 5.
+-- Design: openspec/changes/archive/2026-08-01-p23-legal-and-docs/design.md Decision 5.
 -- Ratified decisions: docs/decisions/p23-one-way-doors.md.
 -- Data inventory: docs/decisions/p23-data-inventory.md §1.7.
 --

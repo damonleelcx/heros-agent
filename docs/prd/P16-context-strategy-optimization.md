@@ -259,7 +259,7 @@ forbids it, and P16 adds nothing that would.
 ## 6. Functional requirements
 
 Numbered FRs; each maps 1:1 to an OpenSpec requirement under
-`openspec/changes/p16-context-strategy-optimization/specs/`.
+`openspec/changes/archive/2026-07-29-p16-context-strategy-optimization/specs/`.
 
 ### Context materialization (capability `context-policy`)
 

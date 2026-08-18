@@ -5,7 +5,7 @@
 | **Phase** | P18 (M21) |
 | **Depends on** | [P17](P17-memory-strategy-optimization.md) (the modeled axis), [P16](P16-context-strategy-optimization.md) (the region-rewrite precedent), P10 (bound-mode artifacts), P2 (transform dispatch), P1 (IR) |
 | **Status** | specification |
-| **One-way doors** | [`decisions.md`](../../openspec/changes/p18-memory-runtime/decisions.md) D1–D7 |
+| **One-way doors** | [`decisions.md`](../../openspec/changes/archive/2026-07-31-p18-memory-runtime/decisions.md) D1–D7 |
 | **Capabilities** | `memory-runtime` (new), `memory-materialization` (new) |
 
 ---
@@ -114,7 +114,7 @@ will be narrower than the recall half alone would suggest.
 ## 6. Functional requirements
 
 Each maps 1:1 to an OpenSpec requirement under
-`openspec/changes/p18-memory-runtime/specs/`.
+`openspec/changes/archive/2026-07-31-p18-memory-runtime/specs/`.
 
 ### The memory runtime (capability `memory-runtime`)
 

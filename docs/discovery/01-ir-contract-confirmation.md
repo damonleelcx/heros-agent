@@ -7,7 +7,7 @@
 > **Source of truth (frozen at M0, additive-only):**
 > [`schemas/workflow-ir.schema.json`](../../schemas/workflow-ir.schema.json),
 > [`schemas/runtime-invocation.schema.json`](../../schemas/runtime-invocation.schema.json),
-> [`openspec/changes/p0-foundations/specs/workflow-ir/spec.md`](../../openspec/changes/p0-foundations/specs/workflow-ir/spec.md),
+> [`openspec/changes/archive/2026-07-15-p0-foundations/specs/workflow-ir/spec.md`](../../openspec/changes/archive/2026-07-15-p0-foundations/specs/workflow-ir/spec.md),
 > [`docs/decisions/m0-review-and-freeze.md`](../decisions/m0-review-and-freeze.md).
 
 This is a **confirmation**, not a redesign. Discovery is the first producer of the Workflow IR; the

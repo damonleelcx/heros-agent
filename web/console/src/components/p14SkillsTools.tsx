@@ -15,7 +15,7 @@ import { integer, plural } from "@/lib/format";
 
 /**
  * P14SkillsToolsReview presents a skills-or-tools proposal
- * (openspec/changes/p14-skills-tools-optimization, tasks 8.1/8.2).
+ * (openspec/changes/archive/2026-07-29-p14-skills-tools-optimization, tasks 8.1/8.2).
  *
  * # The one thing this surface exists to do
  *

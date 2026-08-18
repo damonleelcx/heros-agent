@@ -53,7 +53,7 @@ whose runtime LLM-call count is not statically fixed (loop, agent, conditional) 
 annotated with any inferred/estimated invocation count.
 
 **Why load-bearing.** The static-vs-runtime split is a frozen P0 contract (
-[`workflow-ir` spec](../../openspec/changes/p0-foundations/specs/workflow-ir/spec.md)). A guessed
+[`workflow-ir` spec](../../openspec/changes/archive/2026-07-15-p0-foundations/specs/workflow-ir/spec.md)). A guessed
 count is a confident lie: it corrupts every downstream consumer that keys on `node_id` (Metrics,
 Eval, Attribution) and misleads the user into thinking an agent loop is one call. The true count is
 unknowable without executing the repo — which I1 forbids. The honest artifact is the **flag**; P5

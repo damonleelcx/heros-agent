@@ -1,7 +1,7 @@
 # Wiring Safety — Spec (folded from P15)
 
 Product rationale: [`../../../docs/prd/P15-workflow-wiring-optimization.md`](../../../docs/prd/P15-workflow-wiring-optimization.md)
-§6 (FR9–FR14), §7. Design reasoning: [`../../changes/p15-workflow-wiring-optimization/design.md`](../../changes/p15-workflow-wiring-optimization/design.md) Decisions 3, 4.
+§6 (FR9–FR14), §7. Design reasoning: [`../../changes/archive/2026-07-31-p15-workflow-wiring-optimization/design.md`](../../changes/archive/2026-07-31-p15-workflow-wiring-optimization/design.md) Decisions 3, 4.
 
 Covers the typed-contract coherence gate as a first-class requirement: a Variant Spec whose reordering
 or rewiring violates a typed I/O contract is **rejected at compile**, unless a catalogued adapter

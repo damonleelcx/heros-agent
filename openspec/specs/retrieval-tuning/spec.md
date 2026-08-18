@@ -2,7 +2,7 @@
 
 Product rationale: [`../../../docs/prd/P16-context-strategy-optimization.md`](../../../docs/prd/P16-context-strategy-optimization.md)
 §6 (FR10–FR14), §7. Design reasoning:
-[`../../changes/p16-context-strategy-optimization/design.md`](../../changes/p16-context-strategy-optimization/design.md)
+[`../../changes/archive/2026-07-29-p16-context-strategy-optimization/design.md`](../../changes/archive/2026-07-29-p16-context-strategy-optimization/design.md)
 Decisions 4, 5, 7.
 
 Covers RAG parameter optimization — top-k, chunk size, rerank on/off, embedding model — proposed as

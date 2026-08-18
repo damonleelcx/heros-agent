@@ -13,7 +13,7 @@
 - **Relates to:** [ADR-001](ADR-001-source-transformation-apply-model.md),
   [ADR-009](ADR-009-binding-document-format.md)
 - **Introduces:** the cross-axis capability `change-delivery`, defined once in
-  [`p13-prompt-model-optimization/specs/change-delivery/spec.md`](../../openspec/changes/p13-prompt-model-optimization/specs/change-delivery/spec.md)
+  [`p13-prompt-model-optimization/specs/change-delivery/spec.md`](../../openspec/changes/archive/2026-08-01-p13-prompt-model-optimization/specs/change-delivery/spec.md)
   and referenced by P14–P18.
 
 ## Context — what problem this solves
@@ -24,7 +24,7 @@ chain is well specified and it is the right default. It also has a failure mode 
 optimization axes have made impossible to ignore.
 
 **Most cells refuse.** Coverage is a total function over (axis × language × form)
-([`language-coverage`](../../openspec/changes/p13-prompt-model-optimization/specs/language-coverage/spec.md)),
+([`language-coverage`](../../openspec/changes/archive/2026-08-01-p13-prompt-model-optimization/specs/language-coverage/spec.md)),
 and the honest reading of that table is that the majority of cells have no materializer: memory refuses
 in every language (P17), harness refuses in every language (P18), skill binding materializes in Go for
 two providers (P14), context and wiring in two languages (P16, P15). When the rewriter refuses there is

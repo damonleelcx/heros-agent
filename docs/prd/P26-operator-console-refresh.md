@@ -5,7 +5,7 @@
 | **Status** | Proposed (docs-only; no code in this phase) |
 | **Created** | 2026-07-30 |
 | **Updated** | 2026-07-30 |
-| **OpenSpec change** | [`p26-operator-console-refresh`](../../openspec/changes/p26-operator-console-refresh/) |
+| **OpenSpec change** | [`p26-operator-console-refresh`](../../openspec/changes/archive/2026-08-01-p26-operator-console-refresh/) |
 | **Lead role(s)** | Frontend + Backend, with System Designer on the drift fence and DevOps on release oversight |
 | **Upstream** | P8 (the console being refreshed), P10–P12, P13–P18 (OAX), P19, P20, P21, P22, P23, P24 |
 | **Numbering note** | There is no `P25`. The token `p25` already denotes **P2.5 — Metrics & Observability** in this repository (`/p25/monitor`, the Gantt id in `implementation-timeline/README.md`, `internal/api/monitor.go`). Reusing it would make the token ambiguous exactly where an operator greps during an incident. |
@@ -1015,7 +1015,7 @@ failures. Known trap in this repository; stated here so it is not rediscovered.
       bundle scan *833055 shipped bytes, 566945 under the ceiling*; contrast measured in-browser across
       2275 text elements over four pages × two themes with **0 failures**.
 - [x] Browser acceptance recorded for all four pages, in both themes, with a granting and a non-granting
-      role. — Recorded in `openspec/changes/p26-operator-console-refresh/tasks.md` §7.9. It caught a real
+      role. — Recorded in `openspec/changes/archive/2026-08-01-p26-operator-console-refresh/tasks.md` §7.9. It caught a real
       defect: a `nil` Go slice marshalling to `null` crashed `/oversight`.
 - [x] Every `[x]` in the task list names an assertion that exists and runs. — Audited mechanically at
       exit: **32 cited Go assertions, 32 exist, 32 pass, 0 skipped, 0 phantom**; 9 cited console

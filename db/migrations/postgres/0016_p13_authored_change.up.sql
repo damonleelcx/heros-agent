@@ -1,6 +1,6 @@
 -- P13 13c — the `authored_change` record. Tasks 9.1, 9.4, 9.6.
--- Spec:   openspec/changes/p13-prompt-model-optimization/specs/authored-change/spec.md
--- Design: openspec/changes/p13-prompt-model-optimization/design.md Decisions 9 and 12.
+-- Spec:   openspec/changes/archive/2026-08-01-p13-prompt-model-optimization/specs/authored-change/spec.md
+-- Design: openspec/changes/archive/2026-08-01-p13-prompt-model-optimization/design.md Decisions 9 and 12.
 --
 -- Dialect: PostgreSQL 11+. EXPAND-ONLY. It ADDS exactly ONE new table, ALTERs no existing column, drops
 -- nothing, and rewrites no row. Every statement is idempotent, so a re-run is a no-op and a new binary

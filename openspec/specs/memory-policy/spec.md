@@ -1,12 +1,12 @@
 # Memory Policy — Spec (folded from P17)
 
 Product rationale: [`../../../docs/prd/P17-memory-strategy-optimization.md`](../../../docs/prd/P17-memory-strategy-optimization.md)
-§6 (FR7–FR16), §7 and §8. Design reasoning: [`../../changes/p17-memory-strategy-optimization/design.md`](../../changes/p17-memory-strategy-optimization/design.md) Decisions 2, 3, 4, 6;
-[`../../changes/p17-memory-strategy-optimization/decisions.md`](../../changes/p17-memory-strategy-optimization/decisions.md) D2, D3, D4, D6.
+§6 (FR7–FR16), §7 and §8. Design reasoning: [`../../changes/archive/2026-08-01-p17-memory-strategy-optimization/design.md`](../../changes/archive/2026-08-01-p17-memory-strategy-optimization/design.md) Decisions 2, 3, 4, 6;
+[`../../changes/archive/2026-08-01-p17-memory-strategy-optimization/decisions.md`](../../changes/archive/2026-08-01-p17-memory-strategy-optimization/decisions.md) D2, D3, D4, D6.
 
 Covers the new `DimMemory` Dimension — binding a memory strategy at a node, resolving and hashing it, and
 **refusing** to materialize it at the call site until a memory rewrite is safe. Memory persists **across**
-invocations; it is disjoint from [P16](../../changes/p16-context-strategy-optimization/)'s within-call
+invocations; it is disjoint from [P16](../../changes/archive/2026-07-29-p16-context-strategy-optimization/)'s within-call
 `DimContext`.
 
 > **Why the refusal is first-class.** Binding a memory backend at a call site is not an argument swap — it

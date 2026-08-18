@@ -6,7 +6,7 @@ Product rationale: [`../../../../../docs/prd/P18-harness-strategy-optimization.m
 Design reasoning: [`../../design.md`](../../design.md) Decision 13.
 
 The cross-axis rules are defined once in
-[`change-delivery`](../../../p13-prompt-model-optimization/specs/change-delivery/spec.md) (P13) and are
+[`change-delivery`](../../../archive/2026-08-01-p13-prompt-model-optimization/specs/change-delivery/spec.md) (P13) and are
 **not restated here**. This capability adds only what is specific to the harness axis.
 
 > **This axis carries the one distinction the delivery table is most likely to get wrong: a scaffold is

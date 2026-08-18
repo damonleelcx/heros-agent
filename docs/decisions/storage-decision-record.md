@@ -6,7 +6,7 @@
 | Owner | System Designer (lead); Backend, DevOps support |
 | Status | Draft — freeze at M0 |
 | Tasks | 1.1 (assumptions), 1.2 (estimate + cardinality budget), 1.7 (three stores + trade-offs) |
-| Cross-refs | `docs/prd/P0-foundations.md` §8; `docs/decisions/config-hash-spec.md`; `docs/decisions/architecture-and-lineage.md`; `openspec/changes/p0-foundations/specs/storage-and-lineage/spec.md` |
+| Cross-refs | `docs/prd/P0-foundations.md` §8; `docs/decisions/config-hash-spec.md`; `docs/decisions/architecture-and-lineage.md`; `openspec/changes/archive/2026-07-15-p0-foundations/specs/storage-and-lineage/spec.md` |
 
 > **System-designer stance: numbers before boxes.** This record picks the stores *from the volume
 > estimate*, not by reflex. Nothing here is a running service — P0 ships the decision; P2/P2.5 wire it.

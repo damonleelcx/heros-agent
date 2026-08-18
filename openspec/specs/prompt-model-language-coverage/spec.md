@@ -1,7 +1,7 @@
 # Prompt & Model Language Coverage — Spec (folded from P13)
 
 Product rationale: [`../../../docs/prd/P13-prompt-model-optimization.md`](../../../docs/prd/P13-prompt-model-optimization.md)
-§6 (FR52–FR56). Design reasoning: [`../../changes/p13-prompt-model-optimization/design.md`](../../changes/p13-prompt-model-optimization/design.md) Decision 13.
+§6 (FR52–FR56). Design reasoning: [`../../changes/archive/2026-08-01-p13-prompt-model-optimization/design.md`](../../changes/archive/2026-08-01-p13-prompt-model-optimization/design.md) Decision 13.
 
 The cross-axis rules — coverage as a total function, per-cell claims, the three refusal classes and their
 evaluation order, one coverage source, executable evidence for a row, no gate weakened, offline parity,

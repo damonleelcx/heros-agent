@@ -1,6 +1,6 @@
 ## Why
 
-P7 ([`p7-billing-metering`](../p7-billing-metering/)) built the billing **abstraction** and shipped it behind a
+P7 ([`p7-billing-metering`](../archive/2026-07-23-p7-billing-metering/)) built the billing **abstraction** and shipped it behind a
 stub. It defined the [`billing.Provider`](../../../internal/billing/provider.go) interface (subscriptions,
 metered usage, invoices, credits/refunds), the append-only `billing_event` ledger with its write-ahead and
 idempotency discipline, the additive-correction path, reconciliation, the `providergateway.Secrets` seam for

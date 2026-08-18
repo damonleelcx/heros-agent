@@ -7,7 +7,7 @@ import { score, usd2, integer, plural } from "@/lib/format";
 
 /**
  * P13OptimizationReview presents the *offered change* for a P13 prompt-or-model optimization proposal
- * (openspec/changes/p13-prompt-model-optimization, tasks 6.1/6.2). It is a REVIEW surface, not an
+ * (openspec/changes/archive/2026-08-01-p13-prompt-model-optimization, tasks 6.1/6.2). It is a REVIEW surface, not an
  * evaluator: it renders no score, rank, winner, or promotion path of its own — it reads the verified
  * card the platform produced and frames it honestly:
  *

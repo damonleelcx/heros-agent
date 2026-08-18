@@ -2,7 +2,7 @@
 
 Product rationale: [`../../../docs/prd/P23-legal-and-developer-docs.md`](../../../docs/prd/P23-legal-and-developer-docs.md)
 §6 (FR26–FR32), §7 (NFR12) and §9.7 / §9.8 (QA + Sales Operations lenses). Technical decisions:
-[`../../changes/p23-legal-and-docs/design.md`](../../changes/p23-legal-and-docs/design.md) Decision 11.
+[`../../changes/archive/2026-08-01-p23-legal-and-docs/design.md`](../../changes/archive/2026-08-01-p23-legal-and-docs/design.md) Decision 11.
 
 Covers the build-time gates that turn documentation drift from something a customer finds into something a
 build fails on. They extend the idiom `web/console/scripts/scan-claims.mjs` already establishes for the
@@ -13,7 +13,7 @@ public surface.
 > re-reads after the week it was written. A page that describes a system that no longer exists is not a
 > stale page — it is a false statement with the product's authority behind it.
 
-## ADDED Requirements
+## Requirements
 
 ### Requirement: The build SHALL reject documentation describing a capability that has not shipped
 
