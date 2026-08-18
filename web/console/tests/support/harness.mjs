@@ -36,10 +36,11 @@ export const ASSERTION = "test-assertion-value-not-a-secret";
  * is expressed: a socket that accepts and never answers.
  */
 export async function startStubPlatform() {
-  let handler = (_req, res) => {
+  const answerEmpty = (_req, res) => {
     res.writeHead(200, { "content-type": "application/json" });
     res.end("{}");
   };
+  let handler = answerEmpty;
   const requests = [];
   const server = createServer((req, res) => {
     requests.push({ method: req.method, url: req.url, headers: req.headers });
@@ -53,6 +54,27 @@ export async function startStubPlatform() {
     requests,
     set(next) {
       handler = next;
+    },
+    /**
+     * reset restores the default "answer 200 {} immediately" handler.
+     *
+     * 🔴 A handler installed by `set` outlives the test that installed it, and the convention in these
+     * files is to `signIn()` FIRST and `set()` after — which is safe only while the handler left behind
+     * still ANSWERS. A test that installs one which does not (an SSE handler that streams and never
+     * ends, a handler that accepts and replies never) turns the next test's `signIn()` into a request
+     * that hangs until undici's 300s headers timeout.
+     *
+     * That failure is unusually expensive to diagnose because it does not name the test that caused it:
+     * the timeout is attributed to the INNOCENT test that signed in, five minutes later, with a bare
+     * `UND_ERR_HEADERS_TIMEOUT`. It cost exactly that on 2026-08-18, where it had been costing five
+     * minutes per run undetected — passing locally by a hair and failing in CI.
+     *
+     * So a test that installs a non-answering handler resets in a `finally`. The alternative — resetting
+     * automatically before every test — would break the tests that deliberately rely on a handler
+     * persisting across one, and would do it silently.
+     */
+    reset() {
+      handler = answerEmpty;
     },
     async close() {
       server.closeAllConnections?.();

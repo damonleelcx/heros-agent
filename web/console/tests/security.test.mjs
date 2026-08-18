@@ -395,28 +395,39 @@ test("the SSE proxy delivers each event as it arrives, without batching", async 
     };
   });
 
-  const res = await fetch(`${console_.base}/api/stream/runs/run-1`, { headers: { cookie } });
-  assert.equal(res.status, 200);
-  assert.match(res.headers.get("content-type") ?? "", /text\/event-stream/);
-  assert.equal(res.headers.get("x-accel-buffering"), "no");
+  // 🔴 The `finally` is load-bearing and is not tidiness. The handler above STREAMS AND NEVER ENDS
+  // until `close()` is called, and a handler installed by `set` outlives the test that installed it.
+  // The convention in this file is `signIn()` first, `set()` after — safe only while the handler left
+  // behind answers. Left installed, this one turns the NEXT test's `signIn()` into a request that hangs
+  // until undici's 300s headers timeout, and the failure is reported against that innocent test with a
+  // bare UND_ERR_HEADERS_TIMEOUT five minutes later. It cost exactly that until 2026-08-18: the
+  // trace_id test below took 300,725ms, passing locally by a hair and failing in CI.
+  try {
+    const res = await fetch(`${console_.base}/api/stream/runs/run-1`, { headers: { cookie } });
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get("content-type") ?? "", /text\/event-stream/);
+    assert.equal(res.headers.get("x-accel-buffering"), "no");
 
-  const reader = res.body.getReader();
-  const first = await Promise.race([
-    reader.read().then(({ value }) => new TextDecoder().decode(value)),
-    new Promise((_, reject) => setTimeout(() => reject(new Error("no event arrived within 3s — the proxy is batching")), 3000)),
-  ]);
-  assert.match(first, /"status":"running"/, "the first event did not arrive on its own");
+    const reader = res.body.getReader();
+    const first = await Promise.race([
+      reader.read().then(({ value }) => new TextDecoder().decode(value)),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("no event arrived within 3s — the proxy is batching")), 3000)),
+    ]);
+    assert.match(first, /"status":"running"/, "the first event did not arrive on its own");
 
-  // And the upstream close must close the client stream, so the client can tell a completed stream
-  // from a failed one rather than hanging on a socket that will never speak again.
-  close();
-  let sawTerminal = false;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    if (new TextDecoder().decode(value).includes('"terminal":true')) sawTerminal = true;
+    // And the upstream close must close the client stream, so the client can tell a completed stream
+    // from a failed one rather than hanging on a socket that will never speak again.
+    close();
+    let sawTerminal = false;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (new TextDecoder().decode(value).includes('"terminal":true')) sawTerminal = true;
+    }
+    assert.equal(sawTerminal, true, "the terminal event was not delivered before the stream closed");
+  } finally {
+    platform.reset();
   }
-  assert.equal(sawTerminal, true, "the terminal event was not delivered before the stream closed");
 });
 
 test("the platform's trace_id is carried back to the browser", async () => {
