@@ -217,6 +217,33 @@ spec:
           - path: /api/v1/agent-definition
             pathType: Exact
             backend: { service: { name: agentd, port: { number: 4321 } } }
+          # P32 §2 · the repository CONNECTION surface — list, connect, revoke, and read the ledger.
+          #
+          # 🔴 THREE `Exact` RULES, NOT A `/api/v1/repo-` PREFIX. The three paths are siblings and a
+          # prefix would be one line instead of nine — and it would publish every route anybody adds
+          # under that head from now on, which is the failure the four workflow rules above exist to
+          # record. Three rules is the whole pattern and it is cheaper than what a prefix costs.
+          #
+          # 🔴 `POST /api/v1/repo-connections` carries a FORGE CREDENTIAL in its body, and that is the
+          # reason to read this block rather than skim it. It is safe to publish on the same terms as
+          # `/api/v1/run-links`: it takes a bearer credential, it acts only on the tenant that
+          # credential names (the payload has NO tenant field), it refuses a key outside its contract,
+          # and the breadth check runs before the credential is stored — so a too-broad authorization
+          # leaves nothing behind. Nothing reads a credential back out.
+          #
+          # 🚫 The REVOCATION is destructive by design: it deletes the grant, our copy of the
+          # credential, and every tree derived from it. Published deliberately — it can only ever
+          # destroy the caller's OWN data, and an incident is exactly when somebody needs to revoke
+          # from a script rather than from a browser.
+          - path: /api/v1/repo-connections
+            pathType: Exact
+            backend: { service: { name: agentd, port: { number: 4321 } } }
+          - path: /api/v1/repo-connection-revocations
+            pathType: Exact
+            backend: { service: { name: agentd, port: { number: 4321 } } }
+          - path: /api/v1/repo-connection-reads
+            pathType: Exact
+            backend: { service: { name: agentd, port: { number: 4321 } } }
           # P32 §4 · `heros pair` CLAIMS a code the person started in the console, from the machine
           # that already holds the repository.
           #

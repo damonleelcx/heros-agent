@@ -8,8 +8,9 @@
 > a self-hosted local mode (§14 A1 — the console states the limit before the flow starts), and an
 > attended-only connection setting (§14 A6 — revocation is the off switch today).
 >
-> ⚠️ **One deviation from a task's literal wording**, recorded at 2.11: the connection routes are NOT
-> published on the public ingress.
+> The connection routes ARE published on the public ingress (2.11). That reverses a refusal recorded
+> in an earlier revision of this file; the reasoning for both directions is kept in `publicroutes.go`,
+> because a reader deserves to know which way it went and why.
 
 ## 1. System Designer — the boundary before the code
 
@@ -31,7 +32,7 @@
 - [x] 2.8 Append-only `CloneRecord` with `actor` distinguishing person-initiated from scheduled/autonomous.
 - [x] 2.9 Four typed failure causes; **no** fallback to an older snapshot on any of them.
 - [x] 2.10 One constructor call in `internal/launch` selects the implementation — no branch threaded through the pipeline.
-- [x] 2.11 Connection routes on the API, added to the P19 ingress as `Exact` paths. — **routes shipped; ingress publication REFUSED, deviation recorded.** All four are flat so an `Exact` rule is a one-liner if ever needed, but they are classified `ExposureInternal` in `publicroutes.go`: `POST /api/v1/repo-connections` carries the forge credential in its body, no CLI addresses it (the forge redirects to the *console*, which posts inside the cluster), and §7.1 refuses an internet-facing surface for a route nothing calls. Same shape as `/api/v1/device/approve`.
+- [x] 2.11 Connection routes on the API, added to the P19 ingress as `Exact` paths. — **done, both halves.** All four routes are flat, declared `ExposurePublic` in `publicroutes.go`, and published as **three `Exact` rules** (never a `/api/v1/repo-` prefix) on both substrates: `deploy/k8s/overlays/prod/ingress.yaml` and `bootstrap-vm.sh`. ⚠️ I initially refused the publishing half — `POST /api/v1/repo-connections` carries a forge credential and no shipped client addresses it — and was **overruled**, correctly: a machine-addressed route exists for a customer's own automation, and revoking from a script is exactly what an incident needs. Publishing makes the auth gate the FIRST line of defence rather than the second, so `TestTheRestOfThoseFamiliesStaysGated` now asserts all six connection and pairing routes refuse an unauthenticated request; mutation-drilled.
 - [x] 2.12 Central event names — `ingest.connection.created`, `.revoked`, `ingest.clone.succeeded`, `.failed` — in the central enum; error codes `UPPER_SNAKE_CASE`; every WARN/ERROR carries `request_id` / `trace_id`.
 
 ## 3. Backend Dev — credentials

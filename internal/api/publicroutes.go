@@ -137,29 +137,45 @@ var routeExposure = RouteExposure{
 
 	// ── P32 · the repository-connection surface ───────────────────────────────────────────────────
 	//
-	// 🔴 INTERNAL, and this is a DEVIATION from task 2.11's literal wording — recorded here rather
-	// than resolved silently, because the task and the PRD's own posture disagree and one of them has
-	// to lose.
+	// 🔴 PUBLIC BY DECISION, and the decision was not mine — recorded here because the previous entry
+	// argued the opposite and a reader deserves to know which way it went and why.
 	//
-	// Task 2.11 says "connection routes on the API, added to the P19 ingress as `Exact` paths". The
-	// `Exact` half is honoured structurally: all four routes are FLAT (`/api/v1/repo-connections`,
-	// not `/api/v1/workflows/{id}/connection`), so publishing any of them later is a one-line rule
-	// and never needs a `Prefix` — which is the failure that half of the task exists to prevent.
+	// Task 2.11 asked for these on the ingress as `Exact` paths. I refused, on the ground that
+	// `POST /api/v1/repo-connections` carries a forge credential in its body and no shipped client
+	// addresses it — the flow is a browser redirect from the forge back to the CONSOLE, which posts
+	// inside the cluster. That was overruled, and it is a legitimate call to overrule: publishing them
+	// makes the surface reachable by a customer's own automation, which is what a machine-addressed
+	// route is for, and every other route in this family got there the same way.
 	//
-	// The PUBLISHING half is refused, on §7.1's own terms. `POST /api/v1/repo-connections` carries the
-	// forge credential in its body. It is the single most consequential unsolicited-traffic surface
-	// this phase could create, no CLI addresses it (the flow is a browser redirect from the forge back
-	// to the CONSOLE, which posts inside the cluster), and publishing a route nothing calls is exactly
-	// the review this file asks somebody to have: "should this be on the internet?" has a wrong answer
-	// here, and the wrong answer is yes.
+	// What makes it SAFE to publish is not that it is unimportant — it is the most consequential write
+	// this phase has — but that it is built to the standard the rest of this list already meets:
 	//
-	// This is the same shape as `/api/v1/device/approve` above — a step that handles credential
-	// material, reached console→agentd, and deliberately absent from the manifest. If a future phase
-	// gives the CLI a `heros connect`, it changes ONE word here and adds four ingress rules, and
-	// `ingress_fence_test.go` will already be watching.
-	"/api/v1/repo-connections":            ExposureInternal,
-	"/api/v1/repo-connection-revocations": ExposureInternal,
-	"/api/v1/repo-connection-reads":       ExposureInternal,
+	//   - it REQUIRES an authenticated principal; there is no credential-free path to it;
+	//   - the tenant comes from that principal and the payload has NO tenant field, which is the
+	//     strongest available form of "this request cannot widen its own scope";
+	//   - `DisallowUnknownFields` refuses a key nobody ratified, which on this endpoint is a privacy
+	//     control rather than hygiene — the field a future client would add is a scope or a second
+	//     repository;
+	//   - the body is capped at 64 KiB, and the breadth refusal runs BEFORE the credential is stored,
+	//     so a too-broad authorization leaves nothing behind;
+	//   - nothing reads a credential back: no view type has a field one could occupy, and a fence
+	//     reads the structs by reflection to keep it that way.
+	//
+	// ⚠️ The one thing publishing genuinely changes is that the INBOUND token now crosses a public
+	// edge. It always crossed one hop (browser → console); it now may cross browser → ingress → agentd
+	// directly. Both are TLS, both terminate at a handler that hands the value straight to the secret
+	// store, and neither writes it anywhere else — but it is a real widening and it is not disguised
+	// as a routing change. `TestTheConnectionRoutesRefuseAnUnauthenticatedRequest` is the fence that
+	// keeps the authentication half true from here on.
+	//
+	// 🚫 The REVOCATION route is published too, and that deserves its own sentence because it is
+	// destructive: it deletes the grant, the credential and every derived tree. It is safe on the same
+	// terms — authenticated, tenant-scoped by the principal, and it can only ever destroy the caller's
+	// own data. A customer's automation revoking its own grant is a legitimate thing to want, and
+	// making them open a browser to do it is worse for the case that matters (an incident).
+	"/api/v1/repo-connections":            ExposurePublic,
+	"/api/v1/repo-connection-revocations": ExposurePublic,
+	"/api/v1/repo-connection-reads":       ExposurePublic,
 
 	// ── P32 §4 · the local-mode pairing ───────────────────────────────────────────────────────────
 	//

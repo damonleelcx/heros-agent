@@ -119,6 +119,23 @@ func TestTheRestOfThoseFamiliesStaysGated(t *testing.T) {
 	s := gatedServer(t)
 	mustBeGated := []struct{ method, path, why string }{
 		{http.MethodPost, "/api/v1/device/approve", "it mints a credential naming a person"},
+		// 🔴 P32 · the connection routes, added the day they were PUBLISHED on the ingress.
+		//
+		// Before that they were reachable only console→agentd inside the cluster, and the auth gate was
+		// the second line of defence behind the network. It is now the FIRST and only one: the ingress
+		// carries `POST /api/v1/repo-connections` to the internet, and that request body contains a
+		// forge credential and creates a standing read grant over a customer's repository.
+		//
+		// So "these are gated" stopped being a property somebody could reason about from the topology
+		// and became one that has to be asserted. This is that assertion.
+		{http.MethodPost, "/api/v1/repo-connections", "it stores a forge credential and creates a standing read grant"},
+		{http.MethodGet, "/api/v1/repo-connections", "it lists which repositories a tenant has granted us"},
+		{http.MethodPost, "/api/v1/repo-connection-revocations", "it DELETES a grant, a credential and every tree derived from it"},
+		{http.MethodGet, "/api/v1/repo-connection-reads", "it reads the ledger of when a customer's repository was read"},
+		// P32 §4 · the console half of the pairing flow. The CLAIM is credential-free by design and is
+		// in the list above; these two are not, and publishing the claim must not have widened them.
+		{http.MethodPost, "/api/v1/local-pairings", "it issues a pairing code against the caller's tenant"},
+		{http.MethodGet, "/api/v1/local-pairings", "it lists which machines read this tenant's repositories"},
 		{http.MethodPost, "/api/v1/auth/password/signup", "only the console's server side calls it, holding the BFF credential"},
 		{http.MethodPost, "/api/v1/auth/password/forgot", "same — and unauthenticated it is a mail-sending surface for anybody"},
 		{http.MethodPost, "/api/v1/auth/password/reset", "same"},
