@@ -11,6 +11,7 @@ import {
   HardDriveDownload,
   Home,
   Layers,
+  MessageSquareText,
   PenLine,
   Play,
   Repeat,
@@ -54,6 +55,11 @@ type Surface = { href: string; label: string; icon: React.ReactNode; exact?: boo
 
 const SURFACES: Surface[] = [
   { href: "/app", label: "Overview", icon: <Home />, exact: true },
+  // P31. FIRST after Overview, and that position is the argument: the whole premise of this surface is
+  // that a person who has installed nothing can type a sentence instead of learning fifty routes. A rail
+  // entry buried under Coverage would be reached only by somebody who already knows their way around,
+  // which is the reader who needs it least.
+  { href: "/app/ask", label: "Ask", icon: <MessageSquareText /> },
   { href: "/app/workflows", label: "Workflows", icon: <GitBranch /> },
   { href: "/app/runs", label: "Runs", icon: <Play /> },
   { href: "/app/variants", label: "Variants", icon: <Layers /> },
@@ -115,6 +121,7 @@ export default async function ConsoleLayout({ children }: { children: React.Reac
   // static; the subjects are the console's only answer to the enumeration gap (subjects.ts).
   const entries: CommandEntry[] = [
     { id: "s:overview", group: "Surface", label: "Overview", href: routes.overview() },
+    { id: "s:ask", group: "Surface", label: "Ask a question", href: routes.ask() },
     { id: "s:configure", group: "Surface", label: "Configure a variant", href: routes.configure() },
     { id: "s:workflows", group: "Surface", label: "Workflows", href: "/app/workflows" },
     { id: "s:runs", group: "Surface", label: "Runs", href: "/app/runs" },

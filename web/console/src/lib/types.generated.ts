@@ -17,6 +17,62 @@
 //
 // To change anything here: change the Go view struct, then run `make console-types`.
 
+/** The closed set of things the conversational console may say (P31 FR1). A kind added in Go and missing here fails the console type-check rather than rendering blank. */
+export type ConversationKind =
+    "plan"
+  | "progress"
+  | "finding"
+  | "proposal"
+  | "approval_request"
+  | "result"
+  | "refusal"
+  | "answer"
+;
+
+/** Whether a message replayed a pinned inference or was generated in this turn. Without it P30's determinism guarantee is unfalsifiable, and therefore a claim rather than a guarantee. */
+export type ConversationProvenance = "pinned" | "generated";
+
+/** The five phases a turn advances through. A turn that cannot name its phase is a defect, not a slow turn. */
+export type ConversationPhase = "understand" | "plan" | "act" | "verify" | "respond";
+
+/** How one planned step resolved. Everything except `done` names a reason — a `skipped` with no reason is the omission problem with a label on it. */
+export type ConversationStepState = "done" | "skipped" | "refused" | "not_measured";
+
+/** The four states of a finding. They render differently or the component is wrong. */
+export type ConversationFindingState = "measured" | "not_measured" | "refused" | "stale";
+
+/** 503 not-mounted, 404 not-found, transport. Three things a person does three different things about; one apologetic sentence tells them to do none. */
+export type ConversationFailureClass = "not_mounted" | "not_found" | "transport";
+
+/** Why a run ended, from the harness runtime's own closed set — the SAME vocabulary a node loop uses. Expand-only: it participates in `version_id`. */
+export type StopReason =
+    "satisfied"
+  | "ceiling"
+  | "single-shot"
+  | "token-budget"
+  | "tool-call-ceiling"
+  | "wall-clock"
+  | "cancelled"
+;
+
+/** The fourteen things this surface can be asked. Equal, by fence, to the set of working surfaces. */
+export type ConversationIntent =
+    "graph"
+  | "run_history"
+  | "compare"
+  | "preview_change"
+  | "deliver"
+  | "prompt_model"
+  | "author"
+  | "graph_order"
+  | "context"
+  | "memory"
+  | "harness"
+  | "coverage"
+  | "assess"
+  | "improve"
+;
+
 /** Response of `GET /api/v1/runs/{run_id}`. */
 export interface RunView {
   run_id: string;
@@ -994,5 +1050,154 @@ export interface ChannelView {
   upgrade: string;
   uninstall: string;
   pin: string;
+}
+
+/** Response of `POST /api/v1/conversations`. */
+export interface ConversationView {
+  conversation_id: string;
+  workflow_id: string;
+  run_id: string;
+  created_at: string;
+  persistence: string;
+}
+
+/** Response of `POST /api/v1/conversation-turns`. */
+export interface ConversationTurnView {
+  turn_id: string;
+  trace_id: string;
+  first_message_id: number;
+}
+
+/** Response of `GET /api/v1/conversation-stream (event: message)`. */
+export interface ConversationMessage {
+  id: number;
+  conversation_id: string;
+  turn_id: string;
+  kind: ConversationKind;
+  provenance: ConversationProvenance;
+  at: string;
+  trace_id: string;
+  plan?: PlanPayload | null;
+  progress?: ProgressPayload | null;
+  finding?: FindingPayload | null;
+  proposal?: ProposalPayload | null;
+  approval_request?: ApprovalRequestPayload | null;
+  result?: ResultPayload | null;
+  refusal?: RefusalPayload | null;
+  answer?: AnswerPayload | null;
+}
+
+export interface PlanPayload {
+  intent: ConversationIntent;
+  steps: PlanStep[] | null;
+  budget: BudgetEnvelope;
+}
+
+export interface PlanStep {
+  id: string;
+  title: string;
+  surface: string;
+}
+
+export interface BudgetEnvelope {
+  turn_ceiling: number;
+  token_budget: number;
+  tool_call_ceiling: number;
+  wall_clock_seconds: number;
+}
+
+export interface ProgressPayload {
+  phase: ConversationPhase;
+  step_id: string;
+  detail: string;
+  elapsed_ms: number;
+  remaining: BudgetRemaining;
+}
+
+export interface BudgetRemaining {
+  turns: number;
+  tokens: number;
+  tool_calls: number;
+  wall_clock_seconds: number;
+}
+
+export interface FindingPayload {
+  surface: string;
+  surface_href: string;
+  axis: string;
+  node: string;
+  claim: string;
+  evidence_ref: string;
+  state: ConversationFindingState;
+  missing_input: string;
+  cause: string;
+  source_revision: string;
+}
+
+export interface ProposalPayload {
+  proposal_id: string;
+  axis: string;
+  node: string;
+  delta_label: string;
+  diff_ref: string;
+  href: string;
+}
+
+export interface ApprovalRequestPayload {
+  approval_id: string;
+  proposal_id: string;
+  action: string;
+  blast_radius: string;
+  reversible: string;
+  approvable: boolean;
+  unapprovable_reason: string;
+}
+
+export interface ResultPayload {
+  run_id: string;
+  stop_reason: StopReason;
+  stopped_on_limit: boolean;
+  stopped_at_step: string;
+  reconciliation: ReconciliationEntry[] | null;
+  summary: string;
+  verified_claim: boolean;
+  verdict_ref: string;
+  delivery_ref: string;
+  pull_request_url: string;
+}
+
+export interface ReconciliationEntry {
+  step_id: string;
+  state: ConversationStepState;
+  reason: string;
+}
+
+export interface RefusalPayload {
+  axis: string;
+  node: string;
+  cause: string;
+  failure: ConversationFailureClass;
+  can_do: string[] | null;
+  surface_href: string;
+  stop_reason: StopReason;
+}
+
+export interface AnswerPayload {
+  text: string;
+  topic: string;
+}
+
+/** Response of `GET /api/v1/conversation-stream (event: state) and GET /api/v1/conversation-trace`. */
+export interface ConversationTurnState {
+  turn_id: string;
+  trace_id: string;
+  intent: ConversationIntent;
+  phase: ConversationPhase;
+  envelope: BudgetEnvelope;
+  remaining: BudgetRemaining;
+  completed: Record<string, ConversationStepState>;
+  terminal: boolean;
+  stop_reason: StopReason;
+  last_message_id: number;
 }
 

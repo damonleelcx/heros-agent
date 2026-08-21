@@ -20,6 +20,33 @@ kind: Kustomization
 # at Services that do not exist beside it. Both apply cleanly and neither says why.
 namespace: heros
 
+# ── 🔴 P31 · THE EDGE IS THE OPERATOR'S, AND SERVER-SENT EVENTS MUST NOT BE BUFFERED ─────────────
+#
+# This overlay ships NO Ingress. On an air-gapped cluster the front door is the operator's own — their
+# load balancer, their reverse proxy, their TLS — and inventing one here would be a manifest that either
+# does nothing or fights theirs.
+#
+# That makes the following a REQUIREMENT ON THEM rather than a setting we can apply, and it is written
+# here because this file is what they read:
+#
+#   `GET /api/v1/conversation-stream` is Server-Sent Events. **Every hop between a browser and agentd
+#   must forward its response unbuffered.**
+#
+#   nginx      `proxy_buffering off;`  (and `proxy_read_timeout` above the longest turn)
+#   HAProxy    `option http-no-delay`, and no `http-buffer-response` on this backend
+#   Envoy      no response buffering filter on this route
+#   Traefik    no `buffering` middleware on this router
+#
+# 🔴 Why this is worth four lines in a manifest: a proxy that buffers turns streaming into BATCHING. The
+# stream still completes. Nothing errors. Every message arrives at the end in one burst, and the failure
+# is indistinguishable from slowness at the application layer — there is no status code for it and no log
+# line. On an air-gapped install, where we cannot see the edge at all, the first report will be "the
+# product is slow", and nobody will look at the proxy.
+#
+# `make console-edge-proof CONSOLE_URL=…` asserts incremental arrival through a running edge, and is the
+# check to run against the operator's own front door before the install is called done.
+# heros.dev/response-buffering: off   (declared here for the fence; see internal/api/conversation_edge_test.go)
+
 resources:
   - ../../base
   - secretstore.yaml

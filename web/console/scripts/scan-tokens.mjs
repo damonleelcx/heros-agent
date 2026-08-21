@@ -102,6 +102,42 @@ function checkProperty(source, pattern, category, literal, findings, file) {
   }
 }
 
+/**
+ * checkApplyTargets catches `@apply` of a PROJECT CLASS rather than a Tailwind utility.
+ *
+ * # 🔴 The failure this exists for, which cost a real afternoon
+ *
+ * Tailwind v4's `@apply` takes utilities. Given a class this file defines itself — `@apply chip;`,
+ * `@apply stat__label;` — it does not error the build: it produces NOTHING, and the whole
+ * `@layer components` block collapses with it. `npm run build` stays green, `scan-tokens` stays green,
+ * every test stays green, and the product renders as unstyled HTML on every page.
+ *
+ * That is the worst shape a defect can have here: total, invisible to every gate, and discovered only
+ * by opening the console in a browser — which is exactly what happened. The 114KB stylesheet shipped
+ * as 5KB of font declarations.
+ *
+ * The remedy is not "remember not to". It is this: every class this stylesheet defines is collected,
+ * and an `@apply` naming one of them fails, saying what to write instead.
+ */
+function checkApplyTargets(source, findings, rel) {
+  // Every class this file defines. `\.name {` at the start of a rule.
+  const defined = new Set([...source.matchAll(/^\s*\.([a-zA-Z][\w-]*)/gm)].map(([, name]) => name));
+  if (defined.size === 0) return;
+  for (const [, args] of source.matchAll(/@apply\s+([^;{}]+);/g)) {
+    for (const token of args.trim().split(/\s+/)) {
+      // Strip a variant prefix (`hover:`, `motion-safe:`) and any trailing `!`.
+      const bare = token.split(":").pop().replace(/!$/, "");
+      if (!defined.has(bare)) continue;
+      findings.push(
+        `${rel}: \`@apply ${bare}\` names a class this stylesheet defines, not a Tailwind utility. ` +
+          "Tailwind v4 compiles it to NOTHING and takes the surrounding @layer with it — the build " +
+          "stays green and every page renders unstyled. Spell out the declarations, or put the class " +
+          "in the markup beside its modifier.",
+      );
+    }
+  }
+}
+
 async function main() {
   const findings = [];
   let scanned = 0;
@@ -121,6 +157,7 @@ async function main() {
       checkProperty(source, RADIUS, "radius", LENGTH_LITERAL, findings, rel);
       checkProperty(source, FONT_FAMILY, "font-family", FAMILY_LITERAL, findings, rel);
       checkProperty(source, DURATION, "duration", TIME_LITERAL, findings, rel);
+      checkApplyTargets(source, findings, rel);
     }
   }
 
@@ -140,7 +177,10 @@ async function main() {
     process.exit(1);
   }
 
-  console.log(`token scan passed: ${scanned} file(s), no colour, spacing, type-size, radius, font or duration literal.`);
+  console.log(
+    `token scan passed: ${scanned} file(s), no colour, spacing, type-size, radius, font or duration ` +
+      "literal, and no `@apply` of a project class.",
+  );
 }
 
 main().catch((error) => {

@@ -21,6 +21,10 @@
  */
 export const routes = {
   overview: () => "/app",
+  // P31. The conversational surface. It has no subject in its path: the workflow is chosen in the
+  // composer, because a person who arrives here does not yet know which workflow their question is
+  // about — that is the whole reason they are typing a sentence instead of navigating.
+  ask: () => "/app/ask",
   configure: () => "/app/configure",
   workflow: (id: string) => `/app/workflows/${encodeURIComponent(id)}`,
   graph: (id: string) => `/app/workflows/${encodeURIComponent(id)}/graph`,
@@ -53,3 +57,67 @@ export const routes = {
   // Public: no session. The people who need it do not have an account yet — see src/app/install/page.tsx.
   install: () => "/install",
 };
+
+/**
+ * WORKING_SURFACES is the set the conversational console's intent table must be EQUAL to (P31 D9,
+ * task 6.15).
+ *
+ * # Why this list exists beside `routes` rather than being derived from it
+ *
+ * `routes` holds every canonical route, and most of them are not agent goals. `/app/billing` is a
+ * surface; it is not something to ask an agent to do. `/app` is a shell. `/install` is public. Deriving
+ * the intent set from `routes` would demand an intent for each of those, and the only way to satisfy it
+ * would be an exemption list — which is the hand-maintained artefact the fence exists to replace.
+ *
+ * So every route is classified exactly once, HERE, into one of three buckets, and
+ * `tests/intent-surfaces.test.mjs` fails when a route belongs to none. Adding a route therefore forces
+ * a decision — "is this something a person can ask for?" — rather than letting one be inherited.
+ *
+ * # 🔴 The drift this prevents runs in one direction only
+ *
+ * A surface ships, nobody adds its intent, and the conversation quietly cannot reach it. Nothing fails:
+ * the user asks and gets a REFUSAL — well-formed, polite, and indistinguishable from the surface not
+ * existing. That is the shape P26 found after fourteen phases of operator-console drift, with nothing
+ * going red the whole time.
+ */
+export const WORKING_SURFACES: readonly string[] = [
+  "/app/workflows",
+  "/app/runs",
+  "/app/variants",
+  "/app/transforms",
+  "/app/delivery",
+  "/app/studio",
+  "/app/authoring",
+  "/app/wiring",
+  "/app/context",
+  "/app/memory",
+  "/app/harness",
+  "/app/coverage",
+];
+
+/**
+ * OUT_OF_SCOPE_SURFACES are surfaces a person can legitimately ask ABOUT and that the agent will not
+ * DO (FR26). They are surfaces, they are not agent goals: an agent that offers to change a plan or a
+ * password has crossed from answering about a system to administering an account.
+ *
+ * The conversational router names these in its refusal, so the two lists are compared by the fence.
+ */
+export const OUT_OF_SCOPE_SURFACES: readonly string[] = [
+  "/app/billing",
+  "/app/account",
+  "/app/settings/members",
+];
+
+/**
+ * SHELL_SURFACES are routes that are neither a working surface nor a redirection target: the overview,
+ * the configure form, the device approval, the personal account page, and the public install page.
+ * Classified rather than omitted, because "not listed anywhere" is how a route escapes the fence.
+ */
+export const SHELL_SURFACES: readonly string[] = [
+  "/app",
+  "/app/ask",
+  "/app/configure",
+  "/app/device",
+  "/app/settings/account",
+  "/install",
+];

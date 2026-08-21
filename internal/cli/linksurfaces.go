@@ -79,6 +79,16 @@ func LinkSurfaces() []LinkSurface {
 			"run `heros apply --link-receipt` (a transform is generated on your machine; the receipt is " +
 				"what tells the platform it happened)"},
 
+		// P31. `ask` answers ABOUT the surfaces above it, so `heros link --with-ir` is exactly what makes
+		// it able to answer — a workflow the platform has never been told about produces a `not_measured`
+		// finding naming this command, which is the honest state and also the next action.
+		//
+		// 🔴 Listed as `with-ir` rather than `not-by-linking`, and the distinction matters to a reader of
+		// the link report: `ask` is not a settings page. It is empty for the same reason `/app/coverage`
+		// is empty, and it fills for the same reason.
+		{"ask", "/app/ask", FillByStructure,
+			"nothing more — ask about the workflow you just reported, in English"},
+
 		{"authoring", "/app/authoring", FillNotByLinking,
 			"nothing linking can do — authoring fills when you submit a Variant Spec, and linking travels " +
 				"the other way"},

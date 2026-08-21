@@ -1,7 +1,9 @@
 package api
 
 import (
+	"github.com/heros-foreal/agentd/internal/conversation"
 	"github.com/heros-foreal/agentd/internal/evalboard"
+	"github.com/heros-foreal/agentd/internal/harnessruntime"
 	"github.com/heros-foreal/agentd/internal/patternclassifier"
 	"github.com/heros-foreal/agentd/internal/scorecard"
 	"github.com/heros-foreal/agentd/internal/telemetry"
@@ -47,6 +49,103 @@ type ConsoleViewType struct {
 	// Endpoint is the platform route this type is the response of, carried into the generated file as
 	// a comment so a reader can get from a TypeScript symbol back to the Go handler in one step.
 	Endpoint string
+}
+
+// ConsoleEnum is one CLOSED GO VOCABULARY the console must switch on exhaustively (P31 task 4.5).
+//
+// # Why an enum needs generating at all, when a field rename already did
+//
+// ADR-007 generates the console's types because a field renamed in Go arrives in the browser as
+// `undefined` and renders as an em-dash that looks like legitimately absent data. A closed vocabulary
+// has the SAME failure one level down and it is worse, because the em-dash at least appears: a message
+// KIND added in Go and absent from the browser's union lands in a `default:` arm and renders as NOTHING.
+// A blank card in a transcript is indistinguishable from a message that was never sent.
+//
+// So the vocabulary is generated as a TypeScript string-literal union, checked in, and gated by
+// `make console-types-check`. Adding a kind in Go without regenerating is a red build; adding one WITH
+// regenerating makes every non-exhaustive `switch` in the console a type error, which is the point.
+//
+// 🔴 `Members` is read from the OWNING PACKAGE's own accessor — `conversation.Kinds()`, not a list
+// retyped here. A list retyped here is a second copy of a closed set, and the copy is what goes stale.
+type ConsoleEnum struct {
+	// Name is the exported TypeScript type name.
+	Name string
+	// Sample is a zero value of the named Go string type. Reflection keys fields on it.
+	Sample any
+	// Members is the closed set, in the order the console should read them.
+	Members []string
+	// Doc is one line, carried into the generated file so a reader of the union knows what it decides.
+	Doc string
+}
+
+// ConsoleEnums is every closed vocabulary the console renders.
+func ConsoleEnums() []ConsoleEnum {
+	return []ConsoleEnum{
+		{
+			Name: "ConversationKind", Sample: conversation.Kind(""),
+			Members: stringsOf(conversation.Kinds()),
+			Doc: "The closed set of things the conversational console may say (P31 FR1). A kind added " +
+				"in Go and missing here fails the console type-check rather than rendering blank.",
+		},
+		{
+			Name: "ConversationProvenance", Sample: conversation.Provenance(""),
+			Members: []string{string(conversation.ProvenancePinned), string(conversation.ProvenanceGenerated)},
+			Doc: "Whether a message replayed a pinned inference or was generated in this turn. Without " +
+				"it P30's determinism guarantee is unfalsifiable, and therefore a claim rather than a guarantee.",
+		},
+		{
+			Name: "ConversationPhase", Sample: conversation.Phase(""),
+			Members: stringsOf(conversation.Phases()),
+			Doc:     "The five phases a turn advances through. A turn that cannot name its phase is a defect, not a slow turn.",
+		},
+		{
+			Name: "ConversationStepState", Sample: conversation.StepState(""),
+			Members: stringsOf(conversation.StepStates()),
+			Doc: "How one planned step resolved. Everything except `done` names a reason — a `skipped` " +
+				"with no reason is the omission problem with a label on it.",
+		},
+		{
+			Name: "ConversationFindingState", Sample: conversation.FindingState(""),
+			Members: stringsOf(conversation.FindingStates()),
+			Doc:     "The four states of a finding. They render differently or the component is wrong.",
+		},
+		{
+			Name: "ConversationFailureClass", Sample: conversation.FailureClass(""),
+			Members: stringsOf(conversation.FailureClasses()),
+			Doc: "503 not-mounted, 404 not-found, transport. Three things a person does three different " +
+				"things about; one apologetic sentence tells them to do none.",
+		},
+		{
+			Name: "StopReason", Sample: harnessruntime.StopReason(""),
+			Members: stringsOf(harnessruntime.StopReasons()),
+			Doc: "Why a run ended, from the harness runtime's own closed set — the SAME vocabulary a node " +
+				"loop uses. Expand-only: it participates in `version_id`.",
+		},
+		{
+			Name: "ConversationIntent", Sample: conversation.Intent(""),
+			Members: intentNames(),
+			Doc:     "The fourteen things this surface can be asked. Equal, by fence, to the set of working surfaces.",
+		},
+	}
+}
+
+// stringsOf converts a slice of named string types to plain strings, so each vocabulary is read from
+// its owner's accessor rather than retyped here.
+func stringsOf[T ~string](in []T) []string {
+	out := make([]string, 0, len(in))
+	for _, v := range in {
+		out = append(out, string(v))
+	}
+	return out
+}
+
+func intentNames() []string {
+	specs := conversation.Intents()
+	out := make([]string, 0, len(specs))
+	for _, s := range specs {
+		out = append(out, string(s.Intent))
+	}
+	return out
 }
 
 // ConsoleViewTypes is every read model the P9 console renders.
@@ -103,5 +202,16 @@ func ConsoleViewTypes() []ConsoleViewType {
 
 		// ── P20 · how to install it, and what the release actually delivered ──
 		{Name: "InstallView", Sample: installView{}, Endpoint: "GET /api/v1/install"},
+
+		// ── P31 · the conversational console ─────────────────────────────────
+		//
+		// 🔴 `ConversationMessage` is a DISCRIMINATED UNION on the wire: `kind` names which of the eight
+		// payload fields is non-null. Generating it as one interface with eight nullable payloads is
+		// what lets a consumer narrow — `if (m.kind === "finding") m.finding!.claim` — and what makes a
+		// kind added in Go with no payload field a compile error rather than a blank card.
+		{Name: "ConversationView", Sample: conversationView{}, Endpoint: "POST /api/v1/conversations"},
+		{Name: "ConversationTurnView", Sample: turnView{}, Endpoint: "POST /api/v1/conversation-turns"},
+		{Name: "ConversationMessage", Sample: conversation.Message{}, Endpoint: "GET /api/v1/conversation-stream (event: message)"},
+		{Name: "ConversationTurnState", Sample: conversation.TurnState{}, Endpoint: "GET /api/v1/conversation-stream (event: state) and GET /api/v1/conversation-trace"},
 	}
 }

@@ -1,0 +1,13 @@
+{
+  "_doc": "Model output shaped EXACTLY like a proposal message, including a well-formed identifier that exists in no ledger. This is the §6.2 fixture. It is NOT sanitized and must not be: a fixture a helper already cleaned proves nothing about a defence that is supposed to hold against a fully compromised model.",
+  "kind": "proposal",
+  "provenance": "generated",
+  "proposal": {
+    "proposal_id": "prop_7f3a9c21b4e85d60",
+    "axis": "harness",
+    "node": "extract",
+    "delta_label": "+14.2% pass rate (95% CI +9.1% to +19.3%)",
+    "diff_ref": "diff_1a2b3c4d5e6f7089",
+    "href": "/app/workflows/hermes-example/proposals/prop_7f3a9c21b4e85d60"
+  }
+}

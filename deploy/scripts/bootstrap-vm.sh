@@ -178,11 +178,40 @@ fi
 # FILE and requires it to equal `api.PublicRoutes()` — the same list it requires the k8s overlay to
 # carry. Adding a public route now fails a test twice, once per substrate, rather than working in
 # production and 404ing on every self-hosted install.
-PLATFORM_PUBLIC_PATHS="/api/v1/whoami /api/v1/run-links /billing/webhook /api/v1/device/authorize /api/v1/device/token /api/v1/auth/password/signin /api/v1/workflow-ir /api/v1/workflow-source /api/v1/workflow-source-discovery /api/v1/proposal-verdicts /api/v1/transform-receipts /api/v1/proposal-generations /api/v1/agent-definition"
+# 🔴 The LONG-LIVED paths, listed separately because they need a different proxy setting, not a
+# different exposure. Every entry here must also appear in PLATFORM_PUBLIC_PATHS below — the stream is
+# published like any other public route; what differs is only that its response must not be buffered.
+# `TestEveryStreamPathIsPublishedAndUnbuffered` asserts both directions.
+PLATFORM_STREAM_PATHS="/api/v1/conversation-stream"
 
+PLATFORM_PUBLIC_PATHS="/api/v1/whoami /api/v1/run-links /billing/webhook /api/v1/device/authorize /api/v1/device/token /api/v1/auth/password/signin /api/v1/workflow-ir /api/v1/workflow-source /api/v1/workflow-source-discovery /api/v1/proposal-verdicts /api/v1/transform-receipts /api/v1/proposal-generations /api/v1/agent-definition /api/v1/conversations /api/v1/conversation-turns /api/v1/conversation-stream /api/v1/conversation-approvals /api/v1/conversation-trace"
+
+# ── 🔴 P31 · THE STREAM MUST NOT BE BUFFERED, and a buffering hop fails SILENTLY ─────────────────
+#
+# `/api/v1/conversation-stream` is Server-Sent Events. A reverse proxy that buffers turns streaming into
+# BATCHING: the stream still completes, nothing errors, every message arrives at the end in one burst,
+# and the failure is indistinguishable from slowness at the application layer. There is no status code
+# for it and no log line — the only symptom is a conversation that sits blank for four minutes and then
+# fills instantly, which reads as a slow platform rather than as a broken proxy.
+#
+# Caddy's `flush_interval -1` disables response buffering for a handler. It is set on a handler of its
+# OWN — narrower than the platform handle above — so the setting cannot be widened by accident to routes
+# that benefit from buffering, and so a reader can see which route depends on it.
+#
+# ⚠️ Caddy's path matcher is exact-unless-starred, and this route carries a query string rather than a
+# path parameter, so the bare path is the whole match.
+#
+# `make console-edge-proof` asserts INCREMENTAL ARRIVAL through the running edge, because this setting
+# is a request to one hop and the assertion is a fact about all of them.
 log "Writing deploy/caddy/Caddyfile for $DOMAIN"
 cat > deploy/caddy/Caddyfile <<EOF
 $DOMAIN {
+    @stream path $PLATFORM_STREAM_PATHS
+    handle @stream {
+        reverse_proxy agentd:4321 {
+            flush_interval -1
+        }
+    }
     @platform path $PLATFORM_PUBLIC_PATHS
     handle @platform {
         reverse_proxy agentd:4321

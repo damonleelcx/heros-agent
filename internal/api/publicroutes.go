@@ -143,6 +143,27 @@ var routeExposure = RouteExposure{
 	"/api/v1/workflows/{workflow_id}/source/{source_revision}/discover": ExposureInternal,
 	"/api/v1/proposals/{proposal_id}/verdict":                           ExposureInternal,
 
+	// ── the conversational console (P31 §2) ───────────────────────────────────────────────────────
+	//
+	// 🔴 FLAT BY CONSTRUCTION, and the flatness is why they can be published at all. The natural shapes
+	// — `/api/v1/conversations/{id}/turns`, `…/{id}/stream`, `…/{id}/approvals/{approval_id}` — carry
+	// variable segments, an `Exact` ingress rule cannot match those, and the only way to publish them
+	// would be a `Prefix` rule under `/api/v1/conversations/` that also publishes every sibling anybody
+	// adds later. That is the P29 lesson applied before the bug rather than after it: the remedy for a
+	// parameterised route is the flat shape, not a wider fence.
+	//
+	// They are Public rather than Internal because a conversation is a PERSON's act and a person can be
+	// at a terminal as well as in a browser: `heros login` mints a credential naming a person (P27 §13),
+	// and `conversationOwner` refuses a credential that names none — so publishing these adds no path a
+	// machine credential can walk. Everything they touch is scoped to the session's own person and
+	// tenant, nothing in any body names a tenant, and a conversation belonging to somebody else is a
+	// 404 that does not disclose existence.
+	"/api/v1/conversations":          ExposurePublic,
+	"/api/v1/conversation-turns":     ExposurePublic,
+	"/api/v1/conversation-stream":    ExposurePublic,
+	"/api/v1/conversation-approvals": ExposurePublic,
+	"/api/v1/conversation-trace":     ExposurePublic,
+
 	// ── password identity (P28) ───────────────────────────────────────────────────────────────────
 	// 🔴 Sign-in is the ONE password route that must be public, because `heros login` calls it with no
 	// credential from a customer's laptop. Everything else on this surface is reached by the console's

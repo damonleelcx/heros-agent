@@ -152,6 +152,10 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 	// Set when a published catalog exists but could not be parsed — billing, delivery and the
 	// entitlement gate all refuse together, because they all resolve against it.
 	var catalogUnloadable error
+	// The pinned-inference store P31's replay path reads (task 2.8). Nil on a deployment with no
+	// platform database, in which case nothing is pinned and every question is answered fresh — which
+	// the capability line states rather than leaving an operator to assume determinism it does not have.
+	var conversationPins api.ConversationPinSource
 	// Set when this deployment declares no payment provider; read by the p21 capability line below.
 	collectionAbsentWhy := "no payment provider is configured on this deployment; the durable ledger exists, but checkout and plan changes need a provider to call"
 	if pg != nil {
@@ -520,6 +524,7 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 		if ierr != nil {
 			return nil, nil, fmt.Errorf("heros agent inference store: %w", ierr)
 		}
+		conversationPins = inferenceStore
 		agentCaps, cerr := herosagent.NewPGCapStore(pg)
 		if cerr != nil {
 			return nil, nil, fmt.Errorf("heros agent cap store: %w", cerr)
@@ -983,6 +988,17 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 	// this — there is no flag that half-enables an endpoint". Registering it unsourced would publish an
 	// internet-facing path on every deployment, including air-gapped ones, to answer 503. It is mounted
 	// when billing has a durable ledger to mount it over; today it has none.
+
+	// ── P31 the conversational console ─────────────────────────────────────────────────────────────
+	//
+	// LAST, and mounted UNCONDITIONALLY. Last because it reads the surfaces above it — every other
+	// decision on this page has been made by the time it asks which of them are present. Unconditional
+	// because it is the surface that explains the others: on a deployment with nothing reported yet,
+	// "nothing has been reported for this workflow — run `heros link --with-ir`" is the most useful
+	// sentence in the product, and gating the surface on the presence of data would hide it.
+	//
+	// 🔴 What degrades is the READER, not the surface. See internal/launch/conversationwiring.go.
+	caps = append(caps, mountConversations(h, entGate, conversationPins))
 
 	return caps, agentAdmin, nil
 }

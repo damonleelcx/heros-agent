@@ -37,6 +37,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -48,7 +49,17 @@ func main() {
 	root := flag.String("root", ".", "repository root")
 	flag.Parse()
 
-	g := &generator{seen: map[reflect.Type]string{}, names: map[string]bool{}}
+	g := &generator{seen: map[reflect.Type]string{}, names: map[string]bool{}, enums: map[reflect.Type]*tsEnum{}}
+	// 🔴 ENUMS FIRST. A named string type registered here is emitted as a TypeScript string-literal
+	// UNION, and `typeOf` maps every field of that type to the union rather than to `string`. Registering
+	// after the views would emit the fields as `string` and the union as dead code — which type-checks,
+	// which is the shape a silently-useless contract takes.
+	for _, e := range api.ConsoleEnums() {
+		if err := g.registerEnum(e); err != nil {
+			fmt.Fprintf(os.Stderr, "consoletypes: %v\n", err)
+			os.Exit(2)
+		}
+	}
 	for _, view := range api.ConsoleViewTypes() {
 		if err := g.register(reflect.TypeOf(view.Sample), view.Name, view.Endpoint); err != nil {
 			fmt.Fprintf(os.Stderr, "consoletypes: %v\n", err)
@@ -122,11 +133,56 @@ type object struct {
 	order    int
 }
 
+// tsEnum is one closed Go string vocabulary, emitted as a TypeScript string-literal union.
+//
+// # Why this exists, and what it makes impossible
+//
+// A `type Kind string` field reflects as `reflect.String`, so without this the generator emitted
+// `kind: string` — and a browser switching on `m.kind` had NO type-checker help at all. A kind added in
+// Go rendered as a blank card in production, which is the same class of failure ADR-007 was written to
+// close for renamed FIELDS, one level down and harder to see.
+//
+// With it, the union is generated from the Go vocabulary, the artifact is checked in, and
+// `make console-types-check` fails when the two disagree. A `default:` arm in the console then becomes
+// unreachable code the compiler complains about, rather than the place unknown kinds quietly land.
+type tsEnum struct {
+	name    string
+	members []string
+	doc     string
+	order   int
+}
+
 type generator struct {
 	objects []*object
+	enums   map[reflect.Type]*tsEnum
+	emitted []*tsEnum
 	seen    map[reflect.Type]string
 	names   map[string]bool
 	next    int
+}
+
+// registerEnum records one closed vocabulary.
+func (g *generator) registerEnum(e api.ConsoleEnum) error {
+	t := reflect.TypeOf(e.Sample)
+	if t == nil || t.Kind() != reflect.String {
+		return fmt.Errorf("%s: only a named string type can be a console enum", e.Name)
+	}
+	if len(e.Members) == 0 {
+		// 🔴 An empty vocabulary would emit `export type Kind = never`, and every assignment to it would
+		// fail with a message about `never` that names nothing. Refusing here says what is wrong.
+		return fmt.Errorf("%s: a console enum with no members is not a vocabulary", e.Name)
+	}
+	if g.names[e.Name] {
+		return fmt.Errorf("two different things both want the TypeScript name %s", e.Name)
+	}
+	if existing, dup := g.enums[t]; dup {
+		return fmt.Errorf("%s is already generated as %s", t.String(), existing.name)
+	}
+	g.names[e.Name] = true
+	en := &tsEnum{name: e.Name, members: e.Members, doc: e.Doc, order: len(g.emitted)}
+	g.enums[t] = en
+	g.emitted = append(g.emitted, en)
+	return nil
 }
 
 var timeType = reflect.TypeOf(time.Time{})
@@ -242,6 +298,15 @@ func (g *generator) typeOf(t reflect.Type, path string) (string, map[string]any,
 		return inner + " | null", map[string]any{"anyOf": []any{schema, map[string]any{"type": "null"}}}, nil
 
 	case reflect.String:
+		if en, ok := g.enums[t]; ok {
+			// The field's type is a registered vocabulary: emit the UNION, and put the members in the
+			// JSON Schema too so the two artifacts say the same thing.
+			members := make([]any, 0, len(en.members))
+			for _, m := range en.members {
+				members = append(members, m)
+			}
+			return en.name, map[string]any{"type": "string", "enum": members}, nil
+		}
 		return "string", map[string]any{"type": "string"}, nil
 
 	case reflect.Bool:
@@ -351,6 +416,31 @@ func (g *generator) emitTypeScript() []byte {
 	var b bytes.Buffer
 	b.WriteString(header)
 
+	// The vocabularies come first, so an interface below can refer to them and so a reader meets the
+	// closed sets before the shapes that carry them.
+	for _, en := range g.emitted {
+		if en.doc != "" {
+			fmt.Fprintf(&b, "/** %s */\n", en.doc)
+		}
+		quoted := make([]string, 0, len(en.members))
+		for _, m := range en.members {
+			quoted = append(quoted, strconv.Quote(m))
+		}
+		if line := fmt.Sprintf("export type %s = %s;", en.name, strings.Join(quoted, " | ")); len(line) <= 110 {
+			fmt.Fprintf(&b, "%s\n\n", line)
+			continue
+		}
+		fmt.Fprintf(&b, "export type %s =\n", en.name)
+		for i, m := range quoted {
+			sep := "|"
+			if i == 0 {
+				sep = " "
+			}
+			fmt.Fprintf(&b, "  %s %s\n", sep, m)
+		}
+		b.WriteString(";\n\n")
+	}
+
 	objects := append([]*object(nil), g.objects...)
 	sort.Slice(objects, func(i, j int) bool { return objects[i].order < objects[j].order })
 
@@ -396,6 +486,18 @@ func (g *generator) emitJSONSchema() ([]byte, error) {
 			roots[obj.name] = map[string]any{"$ref": "#/$defs/" + obj.name}
 		}
 		defs[obj.name] = def
+	}
+
+	for _, en := range g.emitted {
+		members := make([]any, 0, len(en.members))
+		for _, m := range en.members {
+			members = append(members, m)
+		}
+		def := map[string]any{"type": "string", "enum": members}
+		if en.doc != "" {
+			def["description"] = en.doc
+		}
+		defs[en.name] = def
 	}
 
 	doc := map[string]any{

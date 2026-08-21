@@ -127,9 +127,22 @@ func TestEveryMountFunctionIsCalledByTheDeployedPath(t *testing.T) {
 	// Mount* and Register* are the two names internal/api uses for "attach a capability surface".
 	decl := regexp.MustCompile(`func \(s \*Server\) ((?:Mount|Register)[A-Za-z0-9]*)\(`)
 
-	wiring, err := os.ReadFile("capabilities.go")
+	// 🔴 The scan reads the WHOLE deployed package, not `capabilities.go` alone.
+	//
+	// It read one file until P31, and the narrowness was invisible because every mount happened to live
+	// there. A wiring helper in a sibling file — `conversationwiring.go` is the first — would have failed
+	// this fence while being entirely correct, and the natural "fix" is to inline the call back into
+	// `capabilities.go` to satisfy the test. That is a fence dictating a file layout, which is how a
+	// fence starts costing more than it catches.
+	//
+	// What the fence is actually for is "the deployed process registers it", and the deployed process is
+	// the package. So the package is what is read. A helper in a file NOBODY calls still fails, because
+	// `mountCapabilities` is the only entry point and an uncalled helper's `Mount…` never runs — that
+	// gap is covered by TestEveryCapabilitySurfaceAnswers503WhenUnsourced above, which exercises the
+	// real mux rather than the source.
+	wiring, err := deployedWiringSource()
 	if err != nil {
-		t.Fatalf("read capabilities.go: %v", err)
+		t.Fatalf("read internal/launch: %v", err)
 	}
 
 	// MountBillingWebhook is the documented exception (see the test above).
@@ -150,9 +163,9 @@ func TestEveryMountFunctionIsCalledByTheDeployedPath(t *testing.T) {
 				continue
 			}
 			found++
-			if !strings.Contains(string(wiring), "."+name+"(") {
+			if !strings.Contains(wiring, "."+name+"(") {
 				t.Errorf("api.Server.%s (declared in internal/api/%s) is never called by "+
-					"internal/launch/capabilities.go.\n"+
+					"internal/launch.\n"+
 					"A capability the deployed process does not register answers 404 rather than 503, and "+
 					"nothing else fails: the build is green and the surface just looks like a bad identifier. "+
 					"Call it — with a nil source if it has no durable store yet.", name, e.Name())
@@ -163,4 +176,29 @@ func TestEveryMountFunctionIsCalledByTheDeployedPath(t *testing.T) {
 		t.Fatal("found no Mount*/Register* declarations in internal/api — the scan did not match the " +
 			"source's shape, so this fence was about to pass without checking anything")
 	}
+}
+
+// deployedWiringSource concatenates every non-test source file of the deployed launch package.
+//
+// Concatenated rather than parsed: the question is "does this string appear anywhere in the code the
+// deployed process compiles", and a `go/ast` walk would answer the same question with more machinery and
+// one more way to be subtly wrong about method expressions and aliases.
+func deployedWiringSource() (string, error) {
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
+			continue
+		}
+		body, err := os.ReadFile(e.Name())
+		if err != nil {
+			return "", err
+		}
+		b.Write(body)
+		b.WriteByte('\n')
+	}
+	return b.String(), nil
 }
