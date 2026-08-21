@@ -80,6 +80,18 @@ const PATH_TEMPLATES: Array<[RegExp, string]> = [
   [/^\/api\/v1\/variants$/, "/api/v1/variants"],
   [/^\/api\/v1\/transforms$/, "/api/v1/transforms"],
   [/^\/api\/v1\/link-coverage$/, "/api/v1/link-coverage"],
+  // P31 — the conversational console. Five FLAT routes, five matchers.
+  //
+  // 🔴 `conversation-stream` matters most of the five and is the one an unlisted entry would hurt worst:
+  // it is the only long-lived connection this console opens, so its error rate is the ONE signal that
+  // distinguishes "streaming works" from "the stream dies every ninety seconds and the client hides it
+  // by reconnecting". Logged as /unknown, that signal is unqueryable and the failure is invisible —
+  // which is exactly the shape design.md D3 warns about for buffering proxies, one layer up.
+  [/^\/api\/v1\/conversations$/, "/api/v1/conversations"],
+  [/^\/api\/v1\/conversation-turns$/, "/api/v1/conversation-turns"],
+  [/^\/api\/v1\/conversation-approvals$/, "/api/v1/conversation-approvals"],
+  [/^\/api\/v1\/conversation-trace/, "/api/v1/conversation-trace"],
+  [/^\/api\/v1\/conversation-stream/, "/api/v1/conversation-stream"],
   [/^\/api\/v1\/workflows\/[^/]+\/axis-projection$/, "/api/v1/workflows/{workflow_id}/axis-projection"],
   [/^\/api\/v1\/workflows\/[^/]+\/delivery-projection$/, "/api/v1/workflows/{workflow_id}/delivery-projection"],
   [/^\/api\/v1\/models$/, "/api/v1/models"],

@@ -330,6 +330,425 @@
     background-color: color-mix(in oklab, var(--gated) 7%, transparent);
   }
 
+  /* ── P31 · the conversational surface ─────────────────────────────────────
+   *
+   * Every value below is a TOKEN. `scan-tokens.mjs` fails the build on a colour, a spacing length, a
+   * type size, a radius or a duration literal anywhere outside `tokens.customer.css`, and this block is
+   * exactly where a "just here" literal would otherwise appear: a chat surface invites bubble radii,
+   * accent tints and one-off gaps, none of them decided.
+   *
+   * 🔴 The hazard palette (`--bad`) appears in TWO rules only: `.msg--hazard` and `.approval__button`.
+   * A refusal and an armed approval are hazards; a finding is not, including a `refused` one, which is
+   * a state of a measurement rather than a danger. A palette used for everything is a palette that
+   * signals nothing, and then it is unavailable for the two things that need it.
+   */
+
+  .ask {
+    @apply flex flex-col;
+    gap: --spacing(5);
+  }
+
+  .ask__composer {
+    @apply flex flex-col;
+    gap: --spacing(2);
+  }
+
+  /* 🔴 The declarations, not `@apply stat__label`. Tailwind v4's `@apply` takes UTILITIES; applying a
+     project class compiles to nothing and takes the whole stylesheet with it — the build stays green
+     and every page renders unstyled, which is how this file lost its entire component layer once. */
+  .ask__label {
+    font-size: var(--type-label);
+    @apply font-mono uppercase tracking-[0.12em] text-muted-foreground;
+  }
+
+  .ask__select,
+  .ask__input {
+    @apply w-full rounded-lg border border-border px-3 py-2 text-sm;
+    background-color: var(--input-background);
+    color: var(--foreground);
+    max-width: var(--measure-form);
+  }
+
+  .ask__input {
+    @apply resize-y leading-relaxed;
+    max-width: var(--measure-prose);
+  }
+
+  .ask__actions {
+    @apply flex flex-wrap items-center;
+    gap: --spacing(3);
+  }
+
+  .ask__send {
+    @apply inline-flex items-center rounded-lg px-3 py-2 text-sm font-medium;
+    gap: --spacing(2);
+    background-color: var(--primary);
+    color: var(--primary-foreground);
+    transition-duration: var(--motion-fast);
+  }
+
+  .ask__send:disabled {
+    @apply cursor-not-allowed opacity-50;
+  }
+
+  /* The starters are a HINT, not a menu. The box is free text — an enumerated set of buttons would say
+     the opposite, and §7.7's boundary is stated in the refusal rather than by removing the box. */
+  .ask__starters {
+    @apply flex flex-wrap;
+    gap: --spacing(2);
+  }
+
+  .ask__starter {
+    @apply inline-flex items-center gap-1.5 whitespace-nowrap rounded border border-transparent px-2 py-0.5 font-mono text-xs font-medium;
+    background-color: color-mix(in oklab, var(--muted) 90%, transparent);
+    color: var(--muted-foreground);
+    transition-duration: var(--motion-fast);
+  }
+
+  .ask__starter:hover {
+    color: var(--foreground);
+    border-color: var(--ring);
+  }
+
+  .ask__transcript {
+    @apply flex flex-col;
+    gap: --spacing(3);
+  }
+
+  .ask__trace {
+    @apply flex flex-wrap items-center text-xs;
+    gap: --spacing(2);
+    color: var(--muted-foreground);
+  }
+
+  .ask__copy {
+    @apply inline-flex items-center rounded border border-border px-2 py-1;
+    gap: --spacing(1);
+    transition-duration: var(--motion-fast);
+  }
+
+  /* ── The live turn header · the four facts a spinner withholds ───────────── */
+
+  .turn__head {
+    @apply flex flex-wrap items-center;
+    gap: --spacing(3);
+    margin-bottom: --spacing(4);
+  }
+
+  .turn__phase {
+    @apply text-sm font-medium;
+    color: var(--info);
+  }
+
+  .turn__phase--done {
+    color: var(--muted-foreground);
+  }
+
+  /* ── One card per message kind ───────────────────────────────────────────── */
+
+  .msg {
+    @apply flex flex-col;
+    gap: --spacing(3);
+  }
+
+  /* 🔴 One of the two places the hazard palette is allowed. See the block comment above. */
+  .msg--hazard {
+    border-color: color-mix(in oklab, var(--bad) 30%, transparent);
+    background-color: color-mix(in oklab, var(--bad) 6%, transparent);
+  }
+
+  .msg__head {
+    @apply flex flex-wrap items-center justify-between;
+    gap: --spacing(2);
+  }
+
+  .msg__kind {
+    @apply inline-flex items-center font-mono uppercase tracking-widest;
+    gap: --spacing(2);
+    font-size: var(--type-label);
+    color: var(--muted-foreground);
+  }
+
+  .msg__aside {
+    @apply inline-flex flex-wrap items-center;
+    gap: --spacing(2);
+  }
+
+  .msg__body {
+    @apply flex flex-col;
+    gap: --spacing(3);
+  }
+
+  .msg__claim {
+    @apply text-sm leading-relaxed;
+    max-width: var(--measure-prose);
+  }
+
+  .msg__prose {
+    @apply text-sm leading-relaxed;
+    max-width: var(--measure-prose);
+    color: var(--muted-foreground);
+  }
+
+  .msg__delta {
+    @apply text-sm font-medium;
+    color: var(--ok);
+  }
+
+  .msg__section {
+    @apply flex flex-col;
+    gap: --spacing(2);
+    padding-top: --spacing(3);
+    border-top: 1px solid var(--border);
+  }
+
+  /* ── The plan, as a checklist that fills in ──────────────────────────────── */
+
+  .plan {
+    @apply flex flex-col;
+    gap: --spacing(2);
+  }
+
+  .plan__step {
+    @apply flex flex-wrap items-center text-sm;
+    gap: --spacing(2);
+    color: var(--muted-foreground);
+  }
+
+  .plan__step--done {
+    color: var(--foreground);
+  }
+
+  /*
+   * 🔴 A skipped step and a not-measured step are visually distinct from a done one (task 4.12), and
+   * the distinction is a MARK plus a treatment — never colour alone. The icon carries it in greyscale,
+   * for a colour-blind reader, and for anybody scanning a checklist quickly, which is everybody.
+   */
+  .plan__step--skipped .plan__title,
+  .plan__step--not_measured .plan__title {
+    text-decoration-line: underline;
+    text-decoration-style: dotted;
+    text-underline-offset: 0.25em;
+  }
+
+  .plan__step--refused .plan__title {
+    color: var(--warn);
+  }
+
+  .plan__mark {
+    @apply inline-flex shrink-0;
+  }
+
+  .plan__step--done .plan__mark {
+    color: var(--ok);
+  }
+
+  .plan__step--refused .plan__mark {
+    color: var(--warn);
+  }
+
+  .plan__step--not_measured .plan__mark,
+  .plan__step--skipped .plan__mark {
+    color: var(--not-reported);
+  }
+
+  .plan__surface {
+    @apply font-mono;
+    font-size: var(--type-axis);
+    color: var(--primary);
+  }
+
+  /* ── Progress · an updating line, not a new message ──────────────────────── */
+
+  .progress {
+    @apply flex flex-wrap items-baseline rounded-lg px-3 py-2 text-xs;
+    gap: --spacing(3);
+    background-color: color-mix(in oklab, var(--muted) 40%, transparent);
+    color: var(--muted-foreground);
+  }
+
+  .progress__phase {
+    @apply font-medium;
+    color: var(--info);
+  }
+
+  .progress__detail {
+    @apply grow;
+  }
+
+  .progress__budget {
+    @apply font-mono tabular-nums;
+    font-size: var(--type-axis);
+  }
+
+  /* ── The four states of a finding (task 4.3) ─────────────────────────────── */
+
+  /* The chip's own shape, spelled out. The four modifiers below add the state's treatment on top. */
+  .finding__state {
+    @apply inline-flex items-center gap-1.5 whitespace-nowrap rounded border px-2 py-0.5 font-mono text-xs font-medium;
+    background-color: color-mix(in oklab, var(--muted) 90%, transparent);
+  }
+
+  .finding__state--measured {
+    border-color: color-mix(in oklab, var(--ok) 30%, transparent);
+    color: var(--ok);
+  }
+
+  /* `not_measured` reads as a STATE, not as a failure (§7.1). It gets the not-reported hue the rest of
+     the console already uses for "the platform was never told" — the same fact, one surface over. */
+  .finding__state--not_measured {
+    border-color: color-mix(in oklab, var(--not-reported) 40%, transparent);
+    color: var(--not-reported);
+  }
+
+  .finding__state--refused {
+    border-color: color-mix(in oklab, var(--warn) 35%, transparent);
+    color: var(--warn);
+  }
+
+  .finding__state--stale {
+    border-color: color-mix(in oklab, var(--unknown) 40%, transparent);
+    color: var(--unknown);
+    text-decoration-line: underline;
+    text-decoration-style: dotted;
+    text-underline-offset: 0.25em;
+  }
+
+  .finding__lede {
+    @apply flex flex-col text-sm;
+    gap: --spacing(1);
+    color: var(--muted-foreground);
+    max-width: var(--measure-prose);
+  }
+
+  .finding__reason {
+    color: var(--foreground);
+  }
+
+  /* The lower layer's own words, set as a quotation so it does not read as this surface's sentence. */
+  .finding__cause {
+    @apply rounded px-2 py-1 text-xs leading-relaxed;
+    background-color: color-mix(in oklab, var(--muted) 50%, transparent);
+    color: var(--foreground);
+  }
+
+  /* ── Approval ────────────────────────────────────────────────────────────── */
+
+  .approval__facts {
+    @apply grid grid-cols-[auto_1fr] items-baseline text-sm;
+    gap: --spacing(2);
+  }
+
+  .approval__facts dt {
+    font-size: var(--type-label);
+    @apply font-mono uppercase tracking-[0.12em] text-muted-foreground;
+  }
+
+  .approval__button {
+    @apply inline-flex items-center rounded-lg px-3 py-2 text-sm font-medium;
+    gap: --spacing(2);
+    background-color: var(--bad);
+    color: var(--primary-foreground);
+    transition-duration: var(--motion-fast);
+  }
+
+  .approval__button:disabled {
+    @apply cursor-not-allowed opacity-60;
+  }
+
+  /* §7.2 · an un-approvable request NAMES the reason and renders no control. A hidden card would be
+     indistinguishable from one that does not exist. */
+  .approval__blocked {
+    @apply rounded-lg px-3 py-2 text-sm leading-relaxed;
+    background-color: color-mix(in oklab, var(--gated) 8%, transparent);
+    color: var(--gated);
+    max-width: var(--measure-prose);
+  }
+
+  /* ── Result · stop reason and reconciliation ─────────────────────────────── */
+
+  .result__stop {
+    @apply inline-flex items-center gap-1.5 whitespace-nowrap rounded border px-2 py-0.5 font-mono text-xs font-medium;
+    background-color: color-mix(in oklab, var(--muted) 90%, transparent);
+    border-color: color-mix(in oklab, var(--ok) 30%, transparent);
+    color: var(--ok);
+  }
+
+  /* A run stopped by a limit is neither a failure nor a completion (§7.5). It takes the WARN hue rather
+     than BAD: nothing went wrong, and colouring it as an error would say something did. */
+  .result__stop--limit {
+    border-color: color-mix(in oklab, var(--warn) 35%, transparent);
+    color: var(--warn);
+  }
+
+  .result__summary {
+    @apply text-sm font-medium leading-relaxed;
+    max-width: var(--measure-prose);
+  }
+
+  .result__next {
+    @apply rounded-lg px-3 py-2 text-sm leading-relaxed;
+    background-color: color-mix(in oklab, var(--info) 8%, transparent);
+    max-width: var(--measure-prose);
+  }
+
+  .reconcile {
+    @apply flex flex-col;
+    gap: --spacing(2);
+  }
+
+  .reconcile__row {
+    @apply flex flex-wrap items-baseline text-sm;
+    gap: --spacing(2);
+  }
+
+  .reconcile__step {
+    @apply font-mono;
+    font-size: var(--type-axis);
+  }
+
+  .reconcile__state {
+    @apply font-medium;
+  }
+
+  .reconcile__row--done .reconcile__state {
+    color: var(--ok);
+  }
+
+  .reconcile__row--refused .reconcile__state {
+    color: var(--warn);
+  }
+
+  .reconcile__row--skipped .reconcile__state,
+  .reconcile__row--not_measured .reconcile__state {
+    color: var(--not-reported);
+  }
+
+  .reconcile__reason {
+    @apply grow text-xs leading-relaxed;
+    color: var(--muted-foreground);
+  }
+
+  /* ── Refusal ─────────────────────────────────────────────────────────────── */
+
+  .refusal__next {
+    @apply text-sm leading-relaxed;
+    color: var(--muted-foreground);
+    max-width: var(--measure-prose);
+  }
+
+  .candoo summary {
+    @apply cursor-pointer text-xs font-medium;
+    color: var(--muted-foreground);
+  }
+
+  .candoo__list {
+    @apply flex flex-col text-sm leading-relaxed;
+    gap: --spacing(1);
+    margin-top: --spacing(2);
+    color: var(--muted-foreground);
+  }
+
   /* ── Banners ──────────────────────────────────────────────────────────── */
 
   .banner {

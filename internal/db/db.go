@@ -49,6 +49,11 @@ func ensureTenantColumns(d *sql.DB) error {
 		`ALTER TABLE skill_fs_index ADD COLUMN tenant_scope TEXT NOT NULL DEFAULT '_global'`,
 		`ALTER TABLE tool_fs_index ADD COLUMN script_path TEXT`,
 		`ALTER TABLE tool_fs_index ADD COLUMN tenant_scope TEXT NOT NULL DEFAULT '_global'`,
+		// P31 · WHO approved. `approval.Approve` refuses to write without it, so a proposal cannot
+		// change state with nobody's name on it — an audit entry that names no person is one nobody
+		// can question, and the conversational surface is the first caller that makes approving a
+		// one-click act rather than an operator's deliberate one.
+		`ALTER TABLE proposals ADD COLUMN approved_by TEXT NOT NULL DEFAULT ''`,
 	}
 	for _, s := range alters {
 		if _, err := d.Exec(s); err != nil {

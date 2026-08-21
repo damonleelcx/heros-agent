@@ -37,6 +37,20 @@ metadata:
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-prod
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    # 🔴 P31 · SERVER-SENT EVENTS MUST NOT BE BUFFERED, and a buffering hop fails SILENTLY.
+    #
+    # `/api/v1/conversation-stream` streams a conversation's messages as they are produced. A proxy that
+    # buffers turns streaming into BATCHING: the stream still completes, nothing errors, every message
+    # arrives at the end in one burst, and the failure is indistinguishable from slowness at the
+    # application layer — no status code, no log line, just a conversation that sits blank for four
+    # minutes and then fills instantly.
+    #
+    # Traefik does not buffer responses unless a `buffering` middleware is attached, so this annotation
+    # is a DECLARATION rather than a switch: it records that this Ingress must not acquire one, and the
+    # `traefik.ingress.kubernetes.io/router.middlewares` key below must never name a buffering
+    # middleware. `make console-edge-proof` asserts incremental arrival through the running edge,
+    # because a setting is a request to one hop and the assertion is a fact about all of them.
+    heros.dev/response-buffering: "off"
 spec:
   ingressClassName: traefik
   tls:
@@ -201,6 +215,34 @@ spec:
           # customer provider key under any placement, and it does not ship one down here either — the
           # customer's own secrets source resolves the provider name on their machine.
           - path: /api/v1/agent-definition
+            pathType: Exact
+            backend: { service: { name: agentd, port: { number: 4321 } } }
+          # P31 §2 · the conversational console. Five FLAT routes, five Exact rules.
+          #
+          # ⚠️ The flatness is not a style choice. The natural shapes carry `{id}` segments, an Exact rule
+          # cannot match those, and the only rule that could is a Prefix under `/api/v1/conversations/`
+          # — which would publish every sibling anybody adds under that path from now on. Same lesson as
+          # the four workflow routes above; applied before the 404 rather than after it.
+          #
+          # 🔴 `/api/v1/conversation-stream` is a LONG-LIVED SSE connection, and it is the reason the
+          # `proxy-buffering: "off"` annotation on this Ingress is load-bearing rather than cosmetic. A
+          # hop that buffers turns streaming into batching: the stream still completes, nothing errors,
+          # every message arrives at the end in one burst, and the failure is indistinguishable from
+          # slowness at the application layer. `make console-edge-proof` asserts incremental arrival
+          # against the running edge, because a header is a request and an assertion is a fact.
+          - path: /api/v1/conversations
+            pathType: Exact
+            backend: { service: { name: agentd, port: { number: 4321 } } }
+          - path: /api/v1/conversation-turns
+            pathType: Exact
+            backend: { service: { name: agentd, port: { number: 4321 } } }
+          - path: /api/v1/conversation-stream
+            pathType: Exact
+            backend: { service: { name: agentd, port: { number: 4321 } } }
+          - path: /api/v1/conversation-approvals
+            pathType: Exact
+            backend: { service: { name: agentd, port: { number: 4321 } } }
+          - path: /api/v1/conversation-trace
             pathType: Exact
             backend: { service: { name: agentd, port: { number: 4321 } } }
           - path: /

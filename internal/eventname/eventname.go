@@ -1,0 +1,96 @@
+// Package eventname is the platform's CENTRAL enum of STRUCTURED EVENT NAMES.
+//
+// # Why this exists beside internal/errorcode rather than inside it
+//
+// They answer different questions and are read by different people. An `errorcode.Code` classifies a
+// FAILURE and is the only message-shaped value permitted to cross P24's error-reporting boundary. An
+// event name identifies a POINT IN A FLOW — including the points where nothing failed — and never
+// leaves the deployment. Merging them would put `console.conversation.turn_started` on the list of
+// strings a third party may receive, which is a widening nobody asked for.
+//
+// # The failure a central enum prevents
+//
+// It is the failure `web/design-system/scan-events.mjs` already fences on the browser side, and the Go
+// side had no equivalent. Two shapes, and the second is the one that matters:
+//
+//   - The ordinary one: `turn_started`, `turn-started`, `conversationTurnStarted` all live, none
+//     comparable, and the dashboard that was supposed to answer a question answers three badly.
+//   - The one that matters: an INVENTED name is a free-text field on the far side of a boundary.
+//     `slog.Info(fmt.Sprintf("console.conversation.%s", intent))` is one plausible line and an
+//     exfiltration path — the same shape as `fmt.Errorf("failed to resolve prompt %q", p)`, refused for
+//     the same reason. A closed enum is what makes "you can read this file and know the complete set"
+//     true.
+//
+// # Naming
+//
+// `<service>.<area>.<state>`, lowercase, dot-separated, as PRD P31 §9.3 states and as the repository's
+// logging conventions require. `service` is the deployment component the event happens in; `area` is
+// the capability; `state` is what happened, in the past tense where something completed.
+//
+// # 🚫 What a name may never encode
+//
+// A tenant, a person, a run, a conversation, a workflow, a repository, a path, or any other identifier.
+// Those are ATTRIBUTES on the event, where they can be scrubbed and where cardinality is bounded. A name
+// that interpolated one would reintroduce the leak this file exists to close, one layer down and harder
+// to see. `Valid` is the enforcement: a name is a member of this list or it is not an event name.
+package eventname
+
+import "sort"
+
+// Name is a member of the enum. A bare string is not assignable to it by accident from another package,
+// and the emitting helper checks membership before anything is written.
+type Name string
+
+const (
+	// ── console · conversation (P31) ─────────────────────────────────────────
+	//
+	// The four the conversational console emits. They are named for the four questions an operator
+	// actually asks about this surface: is anyone using it, is it refusing them, are approvals landing,
+	// and are the long-lived streams surviving the deployment.
+
+	// ConversationTurnStarted — a question was accepted and routed, and a turn began.
+	ConversationTurnStarted Name = "console.conversation.turn_started"
+	// ConversationRefused — a turn ended in a refusal: an abstention, a lower-layer cause, a
+	// cross-tenant probe, or a message the emitter would not let through. 🔴 One name for all of them,
+	// with the cause as an attribute: a separate name per refusal reason would make "how often does
+	// this surface say no" a question requiring an operator to know the list in advance.
+	ConversationRefused Name = "console.conversation.refused"
+	// ConversationApprovalRecorded — an approval given inside the conversation was recorded through
+	// `internal/approval`. Emitted AFTER the gate returns, never before: an event emitted on the way in
+	// would count intent rather than effect, and a 200 is not evidence of a write.
+	ConversationApprovalRecorded Name = "console.conversation.approval_recorded"
+	// ConversationStreamResumed — a client reconnected and delivery resumed from its last acknowledged
+	// message. The signal that distinguishes "the stream is fine" from "the stream dies every ninety
+	// seconds and the client hides it", which are indistinguishable from the user's side.
+	ConversationStreamResumed Name = "console.conversation.stream_resumed"
+)
+
+// names is the closure. Sorted output is produced by Names(); the declaration order here groups by
+// capability, which is how somebody adding one reads it.
+var names = []Name{
+	ConversationTurnStarted,
+	ConversationRefused,
+	ConversationApprovalRecorded,
+	ConversationStreamResumed,
+}
+
+// Names returns every event name, sorted. A copy, so no caller can widen the enum.
+func Names() []Name {
+	out := append([]Name(nil), names...)
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out
+}
+
+// Valid reports membership. 🔴 An empty name is invalid rather than defaulted: an event nobody named is
+// an event nobody can find, and a placeholder would make it look like one that can be.
+func (n Name) Valid() bool {
+	for _, v := range names {
+		if v == n {
+			return true
+		}
+	}
+	return false
+}
+
+// String makes Name printable without a conversion at every call site.
+func (n Name) String() string { return string(n) }

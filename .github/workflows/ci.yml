@@ -48,6 +48,13 @@ jobs:
         run: make docs-facts-check
       - name: generated console types are current
         run: make console-types-check
+      # 🔴 P31 added `intent-holdout-strict` to `make ci` and did not add a step, which is the exact
+      # shape the comment above warns about — the guard below caught it on the first pull request that
+      # carried it. Per-intent recall floors are the gate; a router tuned into a mean would pass a
+      # thirteen-of-fourteen build, so the strict form (which exits non-zero on any single intent below
+      # its floor) is the one that runs here.
+      - name: intent routing holdout, per-intent floors
+        run: make intent-holdout-strict
       # And the guard that keeps the list honest: it reads `ci:`'s prerequisites out of the Makefile and
       # fails if any of them is invoked by no workflow. Without it, the next target added to `make ci`
       # is dark again the moment it is added, and looks wired to everyone reading the Makefile.

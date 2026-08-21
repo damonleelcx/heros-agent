@@ -307,15 +307,27 @@ function classify(status: number, error: string): PlatformFailureKind {
  * here is one refactor away from buffering them. The stream is NOT given the request timeout — a
  * stream that is quiet is a run that is quiet, and aborting it after ten seconds would break exactly
  * the long-lived case SSE exists for.
+ *
+ * # 🔴 `userId` is not optional decoration
+ *
+ * A stream opened with the BFF's own machine credential reaches the platform as a caller that NAMES
+ * NOBODY. For the run monitor that is correct — a run belongs to an organization. For P31's
+ * conversation it is fatal: a conversation is per-person (ADR-015) and the platform refuses a
+ * credential naming none, so the stream would answer 403 and the surface would render "could not
+ * connect" forever, on a deployment that is entirely correct.
+ *
+ * This is the same gap `credentialFor` was written to close on `platformFetch`, and it was open here
+ * because until now nothing streamed on behalf of a PERSON. A caller that omits `userId` gets exactly
+ * the previous behaviour.
  */
 export async function openPlatformStream(
   path: string,
-  options: { tenantId: string; signal?: AbortSignal },
+  options: { tenantId: string; userId?: string; signal?: AbortSignal },
 ): Promise<{ ok: true; response: Response } | { ok: false; kind: PlatformFailureKind; status: number; error: string }> {
   try {
     const response = await fetch(`${PLATFORM_API_BASE}${path}`, {
       headers: {
-        "X-API-Key": platformCredential(),
+        "X-API-Key": await credentialFor(options),
         // See platformFetch: the tenant header is deleted, not made authoritative.
         accept: "text/event-stream",
       },

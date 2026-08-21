@@ -66,6 +66,56 @@
       ],
       "type": "object"
     },
+    "AnswerPayload": {
+      "properties": {
+        "text": {
+          "type": "string"
+        },
+        "topic": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "topic"
+      ],
+      "type": "object"
+    },
+    "ApprovalRequestPayload": {
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "approvable": {
+          "type": "boolean"
+        },
+        "approval_id": {
+          "type": "string"
+        },
+        "blast_radius": {
+          "type": "string"
+        },
+        "proposal_id": {
+          "type": "string"
+        },
+        "reversible": {
+          "type": "string"
+        },
+        "unapprovable_reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "approvable",
+        "approval_id",
+        "blast_radius",
+        "proposal_id",
+        "reversible",
+        "unapprovable_reason"
+      ],
+      "type": "object"
+    },
     "AxisCoverageView": {
       "description": "Response of GET /api/v1/coverage",
       "properties": {
@@ -492,6 +542,52 @@
           ]
         }
       },
+      "type": "object"
+    },
+    "BudgetEnvelope": {
+      "properties": {
+        "token_budget": {
+          "type": "integer"
+        },
+        "tool_call_ceiling": {
+          "type": "integer"
+        },
+        "turn_ceiling": {
+          "type": "integer"
+        },
+        "wall_clock_seconds": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "token_budget",
+        "tool_call_ceiling",
+        "turn_ceiling",
+        "wall_clock_seconds"
+      ],
+      "type": "object"
+    },
+    "BudgetRemaining": {
+      "properties": {
+        "tokens": {
+          "type": "integer"
+        },
+        "tool_calls": {
+          "type": "integer"
+        },
+        "turns": {
+          "type": "integer"
+        },
+        "wall_clock_seconds": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "tokens",
+        "tool_calls",
+        "turns",
+        "wall_clock_seconds"
+      ],
       "type": "object"
     },
     "Card": {
@@ -1041,6 +1137,356 @@
         "regions",
         "state",
         "title"
+      ],
+      "type": "object"
+    },
+    "ConversationFailureClass": {
+      "description": "503 not-mounted, 404 not-found, transport. Three things a person does three different things about; one apologetic sentence tells them to do none.",
+      "enum": [
+        "not_mounted",
+        "not_found",
+        "transport"
+      ],
+      "type": "string"
+    },
+    "ConversationFindingState": {
+      "description": "The four states of a finding. They render differently or the component is wrong.",
+      "enum": [
+        "measured",
+        "not_measured",
+        "refused",
+        "stale"
+      ],
+      "type": "string"
+    },
+    "ConversationIntent": {
+      "description": "The fourteen things this surface can be asked. Equal, by fence, to the set of working surfaces.",
+      "enum": [
+        "graph",
+        "run_history",
+        "compare",
+        "preview_change",
+        "deliver",
+        "prompt_model",
+        "author",
+        "graph_order",
+        "context",
+        "memory",
+        "harness",
+        "coverage",
+        "assess",
+        "improve"
+      ],
+      "type": "string"
+    },
+    "ConversationKind": {
+      "description": "The closed set of things the conversational console may say (P31 FR1). A kind added in Go and missing here fails the console type-check rather than rendering blank.",
+      "enum": [
+        "plan",
+        "progress",
+        "finding",
+        "proposal",
+        "approval_request",
+        "result",
+        "refusal",
+        "answer"
+      ],
+      "type": "string"
+    },
+    "ConversationMessage": {
+      "description": "Response of GET /api/v1/conversation-stream (event: message)",
+      "properties": {
+        "answer": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AnswerPayload"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "approval_request": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ApprovalRequestPayload"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "conversation_id": {
+          "type": "string"
+        },
+        "finding": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FindingPayload"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "id": {
+          "type": "integer"
+        },
+        "kind": {
+          "enum": [
+            "plan",
+            "progress",
+            "finding",
+            "proposal",
+            "approval_request",
+            "result",
+            "refusal",
+            "answer"
+          ],
+          "type": "string"
+        },
+        "plan": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PlanPayload"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "progress": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProgressPayload"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "proposal": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProposalPayload"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "provenance": {
+          "enum": [
+            "pinned",
+            "generated"
+          ],
+          "type": "string"
+        },
+        "refusal": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RefusalPayload"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "result": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ResultPayload"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "trace_id": {
+          "type": "string"
+        },
+        "turn_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "at",
+        "conversation_id",
+        "id",
+        "kind",
+        "provenance",
+        "trace_id",
+        "turn_id"
+      ],
+      "type": "object"
+    },
+    "ConversationPhase": {
+      "description": "The five phases a turn advances through. A turn that cannot name its phase is a defect, not a slow turn.",
+      "enum": [
+        "understand",
+        "plan",
+        "act",
+        "verify",
+        "respond"
+      ],
+      "type": "string"
+    },
+    "ConversationProvenance": {
+      "description": "Whether a message replayed a pinned inference or was generated in this turn. Without it P30's determinism guarantee is unfalsifiable, and therefore a claim rather than a guarantee.",
+      "enum": [
+        "pinned",
+        "generated"
+      ],
+      "type": "string"
+    },
+    "ConversationStepState": {
+      "description": "How one planned step resolved. Everything except `done` names a reason — a `skipped` with no reason is the omission problem with a label on it.",
+      "enum": [
+        "done",
+        "skipped",
+        "refused",
+        "not_measured"
+      ],
+      "type": "string"
+    },
+    "ConversationTurnState": {
+      "description": "Response of GET /api/v1/conversation-stream (event: state) and GET /api/v1/conversation-trace",
+      "properties": {
+        "completed": {
+          "additionalProperties": {
+            "enum": [
+              "done",
+              "skipped",
+              "refused",
+              "not_measured"
+            ],
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "envelope": {
+          "$ref": "#/$defs/BudgetEnvelope"
+        },
+        "intent": {
+          "enum": [
+            "graph",
+            "run_history",
+            "compare",
+            "preview_change",
+            "deliver",
+            "prompt_model",
+            "author",
+            "graph_order",
+            "context",
+            "memory",
+            "harness",
+            "coverage",
+            "assess",
+            "improve"
+          ],
+          "type": "string"
+        },
+        "last_message_id": {
+          "type": "integer"
+        },
+        "phase": {
+          "enum": [
+            "understand",
+            "plan",
+            "act",
+            "verify",
+            "respond"
+          ],
+          "type": "string"
+        },
+        "remaining": {
+          "$ref": "#/$defs/BudgetRemaining"
+        },
+        "stop_reason": {
+          "enum": [
+            "satisfied",
+            "ceiling",
+            "single-shot",
+            "token-budget",
+            "tool-call-ceiling",
+            "wall-clock",
+            "cancelled"
+          ],
+          "type": "string"
+        },
+        "terminal": {
+          "type": "boolean"
+        },
+        "trace_id": {
+          "type": "string"
+        },
+        "turn_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "completed",
+        "envelope",
+        "intent",
+        "last_message_id",
+        "phase",
+        "remaining",
+        "stop_reason",
+        "terminal",
+        "trace_id",
+        "turn_id"
+      ],
+      "type": "object"
+    },
+    "ConversationTurnView": {
+      "description": "Response of POST /api/v1/conversation-turns",
+      "properties": {
+        "first_message_id": {
+          "type": "integer"
+        },
+        "trace_id": {
+          "type": "string"
+        },
+        "turn_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "first_message_id",
+        "trace_id",
+        "turn_id"
+      ],
+      "type": "object"
+    },
+    "ConversationView": {
+      "description": "Response of POST /api/v1/conversations",
+      "properties": {
+        "conversation_id": {
+          "type": "string"
+        },
+        "created_at": {
+          "type": "string"
+        },
+        "persistence": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "workflow_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "conversation_id",
+        "created_at",
+        "persistence",
+        "run_id",
+        "workflow_id"
       ],
       "type": "object"
     },
@@ -1964,6 +2410,59 @@
       ],
       "type": "object"
     },
+    "FindingPayload": {
+      "properties": {
+        "axis": {
+          "type": "string"
+        },
+        "cause": {
+          "type": "string"
+        },
+        "claim": {
+          "type": "string"
+        },
+        "evidence_ref": {
+          "type": "string"
+        },
+        "missing_input": {
+          "type": "string"
+        },
+        "node": {
+          "type": "string"
+        },
+        "source_revision": {
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "measured",
+            "not_measured",
+            "refused",
+            "stale"
+          ],
+          "type": "string"
+        },
+        "surface": {
+          "type": "string"
+        },
+        "surface_href": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "axis",
+        "cause",
+        "claim",
+        "evidence_ref",
+        "missing_input",
+        "node",
+        "source_revision",
+        "state",
+        "surface",
+        "surface_href"
+      ],
+      "type": "object"
+    },
     "GraphView": {
       "description": "Response of GET /api/v1/workflows/{workflow_id}/pattern-graph",
       "properties": {
@@ -2810,6 +3309,70 @@
       ],
       "type": "object"
     },
+    "PlanPayload": {
+      "properties": {
+        "budget": {
+          "$ref": "#/$defs/BudgetEnvelope"
+        },
+        "intent": {
+          "enum": [
+            "graph",
+            "run_history",
+            "compare",
+            "preview_change",
+            "deliver",
+            "prompt_model",
+            "author",
+            "graph_order",
+            "context",
+            "memory",
+            "harness",
+            "coverage",
+            "assess",
+            "improve"
+          ],
+          "type": "string"
+        },
+        "steps": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/PlanStep"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "budget",
+        "intent",
+        "steps"
+      ],
+      "type": "object"
+    },
+    "PlanStep": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "surface": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "surface",
+        "title"
+      ],
+      "type": "object"
+    },
     "PricingIssueView": {
       "properties": {
         "checked_at": {
@@ -2850,6 +3413,71 @@
         "seed_floor",
         "units_completed",
         "units_planned"
+      ],
+      "type": "object"
+    },
+    "ProgressPayload": {
+      "properties": {
+        "detail": {
+          "type": "string"
+        },
+        "elapsed_ms": {
+          "type": "integer"
+        },
+        "phase": {
+          "enum": [
+            "understand",
+            "plan",
+            "act",
+            "verify",
+            "respond"
+          ],
+          "type": "string"
+        },
+        "remaining": {
+          "$ref": "#/$defs/BudgetRemaining"
+        },
+        "step_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "detail",
+        "elapsed_ms",
+        "phase",
+        "remaining",
+        "step_id"
+      ],
+      "type": "object"
+    },
+    "ProposalPayload": {
+      "properties": {
+        "axis": {
+          "type": "string"
+        },
+        "delta_label": {
+          "type": "string"
+        },
+        "diff_ref": {
+          "type": "string"
+        },
+        "href": {
+          "type": "string"
+        },
+        "node": {
+          "type": "string"
+        },
+        "proposal_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "axis",
+        "delta_label",
+        "diff_ref",
+        "href",
+        "node",
+        "proposal_id"
       ],
       "type": "object"
     },
@@ -2915,6 +3543,90 @@
         "trend",
         "withheld",
         "workflow_id"
+      ],
+      "type": "object"
+    },
+    "ReconciliationEntry": {
+      "properties": {
+        "reason": {
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "done",
+            "skipped",
+            "refused",
+            "not_measured"
+          ],
+          "type": "string"
+        },
+        "step_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "reason",
+        "state",
+        "step_id"
+      ],
+      "type": "object"
+    },
+    "RefusalPayload": {
+      "properties": {
+        "axis": {
+          "type": "string"
+        },
+        "can_do": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cause": {
+          "type": "string"
+        },
+        "failure": {
+          "enum": [
+            "not_mounted",
+            "not_found",
+            "transport"
+          ],
+          "type": "string"
+        },
+        "node": {
+          "type": "string"
+        },
+        "stop_reason": {
+          "enum": [
+            "satisfied",
+            "ceiling",
+            "single-shot",
+            "token-budget",
+            "tool-call-ceiling",
+            "wall-clock",
+            "cancelled"
+          ],
+          "type": "string"
+        },
+        "surface_href": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "axis",
+        "can_do",
+        "cause",
+        "failure",
+        "node",
+        "stop_reason",
+        "surface_href"
       ],
       "type": "object"
     },
@@ -3031,6 +3743,72 @@
         "kind",
         "reason",
         "unreachable"
+      ],
+      "type": "object"
+    },
+    "ResultPayload": {
+      "properties": {
+        "delivery_ref": {
+          "type": "string"
+        },
+        "pull_request_url": {
+          "type": "string"
+        },
+        "reconciliation": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/ReconciliationEntry"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "stop_reason": {
+          "enum": [
+            "satisfied",
+            "ceiling",
+            "single-shot",
+            "token-budget",
+            "tool-call-ceiling",
+            "wall-clock",
+            "cancelled"
+          ],
+          "type": "string"
+        },
+        "stopped_at_step": {
+          "type": "string"
+        },
+        "stopped_on_limit": {
+          "type": "boolean"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "verdict_ref": {
+          "type": "string"
+        },
+        "verified_claim": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "delivery_ref",
+        "pull_request_url",
+        "reconciliation",
+        "run_id",
+        "stop_reason",
+        "stopped_at_step",
+        "stopped_on_limit",
+        "summary",
+        "verdict_ref",
+        "verified_claim"
       ],
       "type": "object"
     },
@@ -3643,6 +4421,19 @@
       ],
       "type": "object"
     },
+    "StopReason": {
+      "description": "Why a run ended, from the harness runtime's own closed set — the SAME vocabulary a node loop uses. Expand-only: it participates in `version_id`.",
+      "enum": [
+        "satisfied",
+        "ceiling",
+        "single-shot",
+        "token-budget",
+        "tool-call-ceiling",
+        "wall-clock",
+        "cancelled"
+      ],
+      "type": "string"
+    },
     "SubmitResult": {
       "description": "Response of POST /api/v1/specs/submit",
       "properties": {
@@ -4231,6 +5022,18 @@
     },
     "CheckoutView": {
       "$ref": "#/$defs/CheckoutView"
+    },
+    "ConversationMessage": {
+      "$ref": "#/$defs/ConversationMessage"
+    },
+    "ConversationTurnState": {
+      "$ref": "#/$defs/ConversationTurnState"
+    },
+    "ConversationTurnView": {
+      "$ref": "#/$defs/ConversationTurnView"
+    },
+    "ConversationView": {
+      "$ref": "#/$defs/ConversationView"
     },
     "DeliveriesView": {
       "$ref": "#/$defs/DeliveriesView"

@@ -1,0 +1,110 @@
+{
+  "_doc": [
+    "The intent router's HELD-OUT set (P31 task 3.2).",
+    "",
+    "Every entry is a question a person could plausibly type. `intent` is the label; an empty label with",
+    "expect=\"abstain\" is a question the router MUST decline, and expect=\"out_of_scope\" is one it must",
+    "decline BY NAME, redirecting to the surface that performs it (FR26).",
+    "",
+    "🔴 `near_miss` marks the entries task 3.8 requires: a question for one intent that is ALMOST another.",
+    "They are the ones that matter. Adjacent intents — context vs memory, wiring vs graph, assess vs",
+    "improve — are where a confident wrong route is invisible: the answer is well-formed, it is just about",
+    "something else, and nothing on the screen says so.",
+    "",
+    "🚫 Do not add an entry by running the router and writing down what it said. That is a regression",
+    "baseline, not a holdout, and it makes every future measurement agree with whatever shipped."
+  ],
+  "questions": [
+    { "text": "what does my agent actually do, step by step?", "intent": "graph" },
+    { "text": "show me the shape of this workflow", "intent": "graph" },
+    { "text": "what nodes are in this pipeline?", "intent": "graph" },
+    { "text": "give me a diagram of the whole thing", "intent": "graph" },
+    { "text": "what is the structure of my agent?", "intent": "graph", "near_miss": "graph_order" },
+
+    { "text": "what happened in that run?", "intent": "run_history" },
+    { "text": "why did the last run fail?", "intent": "run_history" },
+    { "text": "show me the trace for yesterday's execution", "intent": "run_history" },
+    { "text": "I want the history of runs for this workflow", "intent": "run_history" },
+    { "text": "what happened in that failed run", "intent": "run_history", "near_miss": "coverage" },
+
+    { "text": "is this version better than the last one?", "intent": "compare" },
+    { "text": "compare these two variants for me", "intent": "compare" },
+    { "text": "did that change cause a regression?", "intent": "compare" },
+    { "text": "how does this compare against the baseline?", "intent": "compare" },
+    { "text": "is the new variant better than the last", "intent": "compare", "near_miss": "run_history" },
+
+    { "text": "what exactly would you write into my source?", "intent": "preview_change" },
+    { "text": "show me a preview of the change before you change anything", "intent": "preview_change" },
+    { "text": "can I see the transform as a dry run?", "intent": "preview_change" },
+    { "text": "what would go into my source if I said yes?", "intent": "preview_change", "near_miss": "author" },
+
+    { "text": "how does an approved change reach my repository?", "intent": "deliver" },
+    { "text": "how does a change ship to my repo?", "intent": "deliver" },
+    { "text": "what is my delivery route?", "intent": "deliver" },
+    { "text": "how does an approved change land in my repository", "intent": "deliver", "near_miss": "improve" },
+
+    { "text": "I want to change the instruction this node uses", "intent": "prompt_model" },
+    { "text": "swap the model on the extraction node", "intent": "prompt_model" },
+    { "text": "can we use a cheaper model here?", "intent": "prompt_model" },
+    { "text": "the system message wording needs work", "intent": "prompt_model" },
+    { "text": "change the instruction and the model together", "intent": "prompt_model", "near_miss": "author" },
+
+    { "text": "change something on an axis and show me the diff", "intent": "author" },
+    { "text": "I want to edit this and see the diff", "intent": "author" },
+    { "text": "let me author a change to this node", "intent": "author" },
+
+    { "text": "should these nodes run in this order?", "intent": "graph_order" },
+    { "text": "can these two run in parallel?", "intent": "graph_order" },
+    { "text": "is the wiring right for this sequence?", "intent": "graph_order" },
+    { "text": "should the summariser run before or after the extractor?", "intent": "graph_order" },
+    { "text": "is the topology of these nodes correct in this order", "intent": "graph_order", "near_miss": "graph" },
+
+    { "text": "what conversation history does this node get?", "intent": "context" },
+    { "text": "how much of the prior turns are passed in?", "intent": "context" },
+    { "text": "what is in the context window for the extraction node?", "intent": "context" },
+    { "text": "what conversation history does this node get between calls", "intent": "context", "near_miss": "memory" },
+
+    { "text": "what does this node remember between calls?", "intent": "memory" },
+    { "text": "does anything persist across runs?", "intent": "memory" },
+    { "text": "does the summariser forget everything each time?", "intent": "memory" },
+    { "text": "what is stored in memory for this node", "intent": "memory", "near_miss": "context" },
+
+    { "text": "how many turns does it take, and in what loop?", "intent": "harness" },
+    { "text": "how many turns is this scaffold allowed?", "intent": "harness" },
+    { "text": "does it reflect between iterations?", "intent": "harness" },
+    { "text": "what is the retry loop on this node?", "intent": "harness" },
+
+    { "text": "what did you measure, and what did you not?", "intent": "coverage" },
+    { "text": "what did you not measure here?", "intent": "coverage" },
+    { "text": "where are the gaps in coverage?", "intent": "coverage" },
+    { "text": "which parts are unmeasured?", "intent": "coverage" },
+    { "text": "what did you measure on this workflow", "intent": "coverage", "near_miss": "compare" },
+
+    { "text": "look at my repository and tell me what is weak", "intent": "assess" },
+    { "text": "what's wrong with this agent?", "intent": "assess" },
+    { "text": "audit my repository for problems", "intent": "assess" },
+    { "text": "review my agent and tell me where it is weak", "intent": "assess", "near_miss": "improve" },
+
+    { "text": "fix it, and open a pull request", "intent": "improve" },
+    { "text": "go and improve this for me", "intent": "improve" },
+    { "text": "optimize the extraction node and open a pull request", "intent": "improve" },
+    { "text": "find what is wrong and fix it", "intent": "improve", "near_miss": "assess" },
+
+    { "text": "make it good", "expect": "abstain", "why": "no subject and no surface" },
+    { "text": "help", "expect": "abstain", "why": "no subject at all" },
+    { "text": "can you do the thing we talked about last week?", "expect": "abstain", "why": "depends on memory across conversations, which is refused at this phase" },
+    { "text": "why is it slow", "expect": "abstain", "why": "a real question this surface has no working surface for" },
+    { "text": "what do you think?", "expect": "abstain", "why": "invites an opinion, which is the result position a model may not occupy" },
+    { "text": "sort it out", "expect": "abstain", "why": "an instruction with no object" },
+    { "text": "is it good?", "expect": "abstain", "why": "there is no overall score, by design (program ruling R4)" },
+    { "text": "write me a poem about my agent", "expect": "abstain", "why": "out of scope and not a surface" },
+
+    { "text": "change my plan to the enterprise one", "expect": "out_of_scope", "surface": "/app/billing" },
+    { "text": "I need to update the payment card on the account", "expect": "out_of_scope", "surface": "/app/billing" },
+    { "text": "cancel my plan please", "expect": "out_of_scope", "surface": "/app/billing" },
+    { "text": "reset my password", "expect": "out_of_scope", "surface": "/app/account" },
+    { "text": "invite a member to this organization", "expect": "out_of_scope", "surface": "/app/settings/members" },
+    { "text": "remove this member's access", "expect": "out_of_scope", "surface": "/app/settings/members" },
+    { "text": "revoke that api key", "expect": "out_of_scope", "surface": "/app/settings/members" }
+  ]
+}

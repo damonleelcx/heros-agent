@@ -29,10 +29,11 @@ PARITY_DIR ?= .parity
         sandbox-proof sandbox-proof-redcheck \
         classifier-calibration demo-patterngraph demo-proposals demo-billing demo-billing-states \
         release-rehearse release-rehearse-redcheck readme-install packaging-proof install-smoke install-smoke-refusals \
-        agent-rehearse agent-status
+        agent-rehearse agent-status \
+        intent-holdout intent-holdout-strict p31-fence-redcheck console-edge-proof
 
-## ci: the locally-provable gate (go + schema + console-types + discovery-ci). Lint/db-proof run as their own CI jobs.
-ci: go schema console-types-check docs-facts-check discovery-ci
+## ci: the locally-provable gate (go + schema + console-types + discovery-ci + intent-holdout). Lint/db-proof run as their own CI jobs.
+ci: go schema console-types-check docs-facts-check discovery-ci intent-holdout-strict
 	@echo "== make ci: PASS =="
 
 ## go: build, vet, gofmt-check, test
@@ -203,6 +204,51 @@ schema:
 	$(PYTHON) schemas/test_config_hash.py
 	$(PYTHON) schemas/test_schema_evolution.py
 	$(PYTHON) schemas/spike_io_contract.py
+
+## intent-holdout: P31's intent router against its held-out labelled set (task 3.4/3.5).
+#
+# 🔴 Run this BEFORE landing any change to the router or its term table, and again after — including for
+# a change that "cannot possibly alter behaviour". There is no pure-refactor exemption: the last time
+# somebody was sure about that here, the golden test they were relying on had never actually run.
+#
+# It prints FOURTEEN ROWS and no overall accuracy. A mean over fourteen intents can sit at 93% while the
+# intent that answers "what did you NOT measure" is routed correctly one time in three.
+#
+#	make intent-holdout            # print the table
+#	make intent-holdout STRICT=1   # exit non-zero if any intent is below its floor (what CI asserts)
+STRICT ?=
+intent-holdout:
+	GOWORK=off $(GO) run ./cmd/proof/intentrouting $(if $(STRICT),-strict,)
+
+# intent-holdout-strict is what `make ci` runs: the same evaluation, failing the build on any intent
+# below its floor. Separate from `intent-holdout` so a person can look at the table without being told
+# off, which is the difference between a tool and a gate.
+intent-holdout-strict:
+	GOWORK=off $(GO) run ./cmd/proof/intentrouting -strict
+
+## console-edge-proof: assert a conversation stream arrives INCREMENTALLY through a running edge (task 5.2).
+#
+# 🔴 The manifests REQUEST that each hop not buffer; this is the assertion that one listened. A reverse
+# proxy that buffers turns streaming into batching, the stream still completes, nothing errors, and the
+# failure is indistinguishable from slowness at the application layer — there is no status code for it.
+#
+#	make console-edge-proof CONSOLE_URL=https://… CONSOLE_COOKIE='heros_session=…' CONVERSATION_ID=conv_…
+#
+# It REFUSES rather than skipping when those are unset: a check that passes having measured nothing is
+# worse than no check.
+console-edge-proof:
+	cd web/console && npm run edge-proof
+
+## p31-fence-redcheck: prove P31's server-side refusals can go RED (tasks 6.1, 6.12, 6.13, 6.14, 6.16).
+#
+# 🔴 Three tasks in P31 §6 say "Mutate the check; the test must fail" in those words. This is that,
+# mechanised: each refusal is removed from the real source in turn, the test that claims to catch it is
+# run, and the drill fails if that test still passes.
+#
+# It refuses to run on a dirty working tree — it rewrites source and restores from memory, and it cannot
+# tell work in progress from a mutation a previous crash failed to clean up.
+p31-fence-redcheck:
+	$(PYTHON) scripts/p31_fence_redcheck.py
 
 ## classifier-calibration: print the P3.5 pattern-classifier calibration table (per-detector TP/FP/FN,
 ##                  recall/precision and confidence bands over the hand-labeled fixture set) and the

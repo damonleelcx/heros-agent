@@ -229,6 +229,13 @@ type Server struct {
 	// mounted by MountForgeDelivery when available. It holds no forge credential.
 	forgeDelivery ForgeDeliverySource
 
+	// conversations is P31's conversational surface, mounted by MountConversations. Nil means this
+	// deployment ships no conversational console and the five routes are NOT REGISTERED — a 404 for a
+	// route that does not exist, rather than a 503 for one that does. The distinction matters here more
+	// than it does for a read model: this is a whole product surface, and a console whose navigation
+	// offers it while the platform answers 503 is a console advertising something nobody installed.
+	conversations *ConversationMount
+
 	// p13authoring is the P13 13c user-authoring surface (preflight / submit / revert / history),
 	// mounted by MountAuthoring when available. A deployment without it behaves exactly as it did
 	// before 13c — which is what makes the wave independently revertible.
@@ -601,6 +608,14 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 	// The error-reporting integration's three-state entry. Reported at the top level beside
 	// `secrets_source` rather than inside `components`, because it is deliberately NOT a gate — see
 	// errorReporterState.
+	// P31 §5.4 · the long-lived connections, as COUNTS on a readable endpoint rather than as log lines.
+	//
+	// 🔴 Reported by READING a gauge, never by acquiring a stream slot. A readiness endpoint behind the
+	// same exhaustible resource as the streams would be measuring its own starvation — the exact failure
+	// task 5.3 names, and the one where a box reports unhealthy for a reason unrelated to its health.
+	if s.conversations != nil && s.conversations.streams != nil {
+		body["conversation_streams"] = s.conversations.streams.Health()
+	}
 	body["error_reporting"] = s.errorReporterState()
 	if s.agentReadiness != nil {
 		// P30 task 9.1. Top level beside `secrets_source`, and 🚫 NOT in `components` — every entry in

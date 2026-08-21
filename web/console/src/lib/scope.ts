@@ -185,6 +185,26 @@ export function scoped(session: Session) {
     axisProjection: (workflowId: string) => `/api/v1/workflows/${encode(workflowId)}/axis-projection`,
     deliveryProjection: (workflowId: string) => `/api/v1/workflows/${encode(workflowId)}/delivery-projection`,
 
+    // ── P31 · the conversational console ──────────────────────────────────
+    //
+    // 🔴 FLAT PATHS with the identifier in the body or the query, matching the platform. The natural
+    // shapes (`/api/v1/conversations/{id}/turns`) cannot be published `Exact` at the ingress, and the
+    // only rule that would reach them is a `Prefix` under `/api/v1/conversations/` that also publishes
+    // every sibling anybody adds later. See internal/api/conversations.go.
+    //
+    // The conversation id is a SUBJECT, not an authority — like a run id. The client may name any; the
+    // platform decides whether this person may see it and answers 404 when they may not, with the same
+    // 404 it gives for one that never existed.
+    createConversation: () => `/api/v1/conversations`,
+    conversationTurn: () => `/api/v1/conversation-turns`,
+    conversationApproval: () => `/api/v1/conversation-approvals`,
+    conversationTrace: (traceId: string) => `/api/v1/conversation-trace?trace_id=${encode(traceId)}`,
+    // The stream's `after` is the client's ACKNOWLEDGEMENT CURSOR and is the only thing it may tell
+    // the server about the state of the world (FR21). Everything else — phase, remaining budget,
+    // completed steps — is read from the run and arrives in the stream's own `state` frame.
+    conversationStream: (conversationId: string, after: number) =>
+      `/api/v1/conversation-stream?conversation_id=${encode(conversationId)}&after=${encode(String(after))}`,
+
     // P29 §7.2 — link coverage, OUTSIDE the billing view. It needs no plan, no account and no invoice:
     // it is the one number a link certainly produces, and it was unreadable for exactly as long as it
     // lived inside `BillingView`.

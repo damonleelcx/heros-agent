@@ -65,7 +65,81 @@ const (
 	// StopSingleShot — the identity strategy, which runs exactly one turn by definition. Its own reason
 	// rather than StopCeiling: reaching a ceiling of one is not running out of budget.
 	StopSingleShot StopReason = "single-shot"
+
+	// ── P31 · the conversational turn's budget envelope (design.md D8, PRD FR17/FR18) ─────────────
+	//
+	// 🔴 EXTENDED HERE RATHER THAN FORKED, and that is the whole of task 1.7. A conversation that ran
+	// out of tokens and a node loop that ran out of turns are the SAME CONCEPT — "this stopped because
+	// it hit a limit, not because it was done" — and giving them two vocabularies means a surface
+	// showing both has to translate between them, which is where one of the two eventually gets
+	// rendered as a success.
+	//
+	// 🔴 THE EXTENSION IS EXPAND-ONLY. This is a closed set whose members are hashed into a
+	// configuration's `version_id`, so a RENAMED or REMOVED member silently re-identifies every
+	// configuration that referenced it: the same scaffold acquires a new address, historical runs stop
+	// joining to it, and nothing errors. P34 carries the identical hazard for the loop/graph split and
+	// records the same rule. Adding a member is safe (nothing previously hashed named it); changing one
+	// is not. Add, never edit.
+	//
+	// PRD FR17's envelope is four limits, and each is separately attributable (spec: "Each limit is
+	// separately attributable"). The TURN CEILING is `StopCeiling` above — it already means exactly
+	// that — so only three new members are needed, plus cancellation.
+
+	// StopTokenBudget — the turn exhausted the token budget its `plan` declared. 🔴 Distinct from
+	// StopCeiling: an operator reading "ceiling" would go and look at max_turns, which is not what ran
+	// out, and would find it untouched.
+	StopTokenBudget StopReason = "token-budget"
+	// StopToolCallCeiling — the turn made as many tool calls as its `plan` declared it might.
+	StopToolCallCeiling StopReason = "tool-call-ceiling"
+	// StopWallClock — the turn reached its declared wall-clock ceiling. Its own reason because it is
+	// the only limit that can fire while nothing is being spent: a turn blocked on a slow upstream
+	// stops here with tokens and tool calls to spare, and reporting that as a budget exhaustion would
+	// send somebody to raise the wrong number.
+	StopWallClock StopReason = "wall-clock"
+	// StopCancelled — a person explicitly cancelled the run (PRD FR7). Not a limit and not a success;
+	// its own member because a terminal message must always name a stop reason (task 4.13) and neither
+	// `satisfied` nor any ceiling is honest about a run somebody stopped on purpose.
+	StopCancelled StopReason = "cancelled"
 )
+
+// stopReasons is the closure. 🔴 Append-only, for the version_id reason recorded on the P31 block above.
+var stopReasons = []StopReason{
+	StopSatisfied, StopCeiling, StopSingleShot,
+	StopTokenBudget, StopToolCallCeiling, StopWallClock, StopCancelled,
+}
+
+// StopReasons returns the closed vocabulary. A copy, so no caller can widen it.
+//
+// It exists so a consumer in another package — P31's conversational turn is the first — can assert its
+// own terminal messages against THIS set rather than declaring a parallel one. The spec scenario "The
+// stop vocabulary is not duplicated" is checked against exactly this function.
+func StopReasons() []StopReason { return append([]StopReason(nil), stopReasons...) }
+
+// Valid reports membership. An empty reason is invalid rather than defaulted: a terminal message whose
+// stop reason nobody recorded must not be renderable as "finished".
+func (r StopReason) Valid() bool {
+	for _, v := range stopReasons {
+		if v == r {
+			return true
+		}
+	}
+	return false
+}
+
+// String makes StopReason printable in an error without a conversion at every call site.
+func (r StopReason) String() string { return string(r) }
+
+// Limit reports whether this reason means the run hit a bound rather than finished or was stopped by a
+// person. 🔴 The predicate a surface uses to decide whether a run may be rendered as COMPLETE — and the
+// reason `satisfied` is the only member that returns false while still being terminal.
+func (r StopReason) Limit() bool {
+	switch r {
+	case StopCeiling, StopTokenBudget, StopToolCallCeiling, StopWallClock:
+		return true
+	default:
+		return false
+	}
+}
 
 // Message is one turn's message, in the only shape this runtime needs: who said it and what they said.
 // Deliberately minimal — the runtime never interprets a message beyond reading an answer's text against a
