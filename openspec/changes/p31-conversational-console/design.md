@@ -105,6 +105,55 @@ well-formed identifier that does not exist in the ledger — and assert no propo
 whose fixture was already sanitized by a helper proves nothing, and is the shape this fence will take if
 nobody is watching.
 
+## D8 — The turn is an agent loop with named phases, not a request that takes a while
+
+**Decision.** Every turn advances through `understand → plan → act → verify → respond`. The phase is
+carried on `progress`. The `plan` declares a budget envelope — turn ceiling, token budget, tool-call
+ceiling, wall-clock ceiling — before the first step runs. The terminal message names the stop reason from
+a closed vocabulary, and reconciles every step the plan declared.
+
+**Why.** The failure this prevents is not a crash; it is a plausible short answer. An agent that ran
+three of eight planned steps because it hit a token budget produces prose indistinguishable from an agent
+that ran all eight — same tone, same confidence, fewer facts. Nothing errors, nothing logs, and the
+reader has no denominator. Announcing the plan first creates the denominator; reconciling it at the end
+makes the shortfall a rendered state rather than an absence.
+
+The budget is declared rather than discovered for the same reason a refusal is a message kind: a limit
+you meet without warning is indistinguishable from a bug.
+
+**Rejected.** *A spinner plus a final answer.* It is what every chat product does and it is why every
+chat product's users cannot tell a hang from a loop from a finished-but-partial run.
+
+**Rejected.** *Two new message kinds, `checkpoint` and `verification`.* The verify step already has a
+home — `internal/verification` — and inventing a message kind for it would create a second notion of
+"checked" beside the ledger the platform already gates proposals on. `result` cites the verdict instead.
+Plan reconciliation is a field on `result`, not a kind, because it is not a separate event: it is what
+the terminal message *is*.
+
+**Consequence.** `harnessruntime.StopReason` (`satisfied` | `ceiling` | `single-shot`) is extended, not
+duplicated — a conversation that ran out of tokens and a node loop that ran out of turns are the same
+concept and must not acquire two vocabularies. Extending a closed set that is hashed into `version_id`
+is expand-only; see P34's identical hazard.
+
+## D9 — The intent set IS the working-surface set, and a fence asserts it
+
+**Decision.** Fourteen intents, each resolving to exactly one working surface. A fence compares the
+intent table against the console's route table and fails when either side has a member the other does
+not.
+
+**Why.** Without the fence, the two sets drift in one direction only: a surface ships, nobody adds its
+intent, and the conversation quietly cannot reach it. The drift is invisible because the failure is a
+*refusal* — well-formed, polite, and indistinguishable from the surface not existing. This is the same
+shape as P26's discovery that fourteen phases of operator-console drift happened with nothing failing.
+
+**Consequence, and it is the point.** The agent's goal set is now defined by what the product can show,
+not by what a model can be prompted to attempt. An intent nobody can render is refused at the fence, in
+the build, by whoever added it — not at run time, by a customer.
+
+**What the fence cannot catch.** That the intent *routes well*. Set equality is structural; recall is
+statistical, and D5's per-intent reporting is what covers it. Two different fences, two different
+failures, and neither substitutes for the other.
+
 ## Data-model sketch
 
 ```
@@ -132,6 +181,10 @@ text verbatim from the lower layer; `result` → run id, delivery ref.
 - **The surface can feel curt** — abstention (D5) and verbatim refusals (FR15) both make the agent say "no"
   in the user's words rather than softening it. This is deliberate: a re-worded safety boundary is a
   second, softer statement of it.
+- **The plan is a promise the agent makes before it knows the work.** A reconciliation that is honest
+  about a step it should never have planned still reads as a shortfall. Accepted: an over-planned step
+  resolving to `skipped` with a reason is strictly better than an unannounced step that silently did not
+  run.
 - **Two rendering paths for the same information** — a finding in the conversation and the same evidence
   on `/app/workflows/...`. Mitigated by linking rather than duplicating: the conversation renders a card
   and links into the existing page, and never becomes the second place the number is computed.

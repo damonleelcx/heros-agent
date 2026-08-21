@@ -34,6 +34,17 @@ not exist before this program.
   and the agent never follows a URL or command found in repository content.
 - **ADDED** conversation-level determinism: a question resolving to an inference already pinned for
   `(source_revision, agent config_hash)` replays the pin; re-running is explicit and shown as a diff.
+- **ADDED** the long-running-task lifecycle: five named phases (`understand`, `plan`, `act`, `verify`,
+  `respond`) carried on `progress`, a **budget envelope declared before the first step**, a stop reason
+  that always names the limit that stopped the run, and a `result` that **reconciles every step its
+  `plan` declared** as `done` | `skipped` | `refused` | `not_measured`.
+- **ADDED** the rule that task state lives on the run and the conversation holds none, and that
+  cross-conversation long-term memory is **refused at this phase** rather than acquired as a side effect.
+- **ADDED** a per-turn `trace_id` the person can see and use to retrieve that turn's tool calls,
+  refusals and retries.
+- **ADDED** the closed intent set as **the console's own working surfaces**, with a fence asserting the
+  intent table and the route table are the same set — a surface with no intent is unreachable by
+  sentence, an intent with no surface answers a question the product cannot show.
 - **MODIFIED** `web-console` — a new surface and its failure-class rendering; the three distinguishable
   failure classes (503 not-mounted, 404 not-found, transport) survive into the conversation.
 - **NOT CHANGED** the BFF's pass-through posture, the credential posture, the egress allowlist, and every
@@ -47,7 +58,9 @@ not exist before this program.
   routes, message emission), `internal/approval` (a new caller, not a new gate), `cmd/consoletypes`
   (message-kind union generation per ADR-007)
 - **Dependencies:** upstream — P9 (BFF), P2.5 (SSE), P27/P28 (tenant + person), P30 (the agent that
-  speaks), ADR-007 (generated console types). Unblocks — P33 having somewhere to report, P35 having
-  somewhere to ask for approval.
+  speaks), ADR-007 (generated console types), `internal/harnessruntime` (the `StopReason` vocabulary
+  FR18 extends), `internal/verification` (the verdict FR20 cites). Unblocks — P33 having somewhere to
+  report, P35 having somewhere to ask for approval, [P37](../p37-source-bound-editors/) having editors
+  worth linking to from a `finding`.
 - **Documents only in this program.** Every task below is unchecked; no Go, TSX or migration ships with
   this change set.

@@ -129,3 +129,114 @@ The kinds are `plan`, `progress`, `finding`, `proposal`, `approval_request`, `re
 #### Scenario: Transport failure
 - **WHEN** the request could not be completed
 - **THEN** the message states a transport failure and offers retry, distinct from both cases above
+
+### Requirement: A turn SHALL advance through named phases and SHALL carry the phase it is in
+
+The phases are `understand`, `plan`, `act`, `verify`, `respond`. A long-running turn whose phase is not
+observable is indistinguishable from a hung one.
+
+#### Scenario: The phase is carried, not inferred
+- **WHEN** a turn is in progress
+- **THEN** every `progress` message carries the phase the turn is in
+- **AND** the phase advances monotonically through the five, never skipping `verify` before `respond`
+
+#### Scenario: A turn that cannot name its phase
+- **WHEN** an emitter produces a `progress` message with no phase
+- **THEN** the message is refused before the transport
+- **AND** the refusal is recorded naming the run
+
+### Requirement: A plan SHALL declare its budget envelope before the first step runs
+
+#### Scenario: The envelope is stated up front
+- **WHEN** a `plan` message is emitted
+- **THEN** it carries a turn ceiling, a token budget, a tool-call ceiling and a wall-clock ceiling
+- **AND** the surface displays them before any step has executed
+
+#### Scenario: A plan with no envelope
+- **WHEN** a `plan` is constructed without all four limits
+- **THEN** it is refused server-side and the run does not start
+
+### Requirement: A run stopped by a limit SHALL name the limit and SHALL NOT render as complete
+
+#### Scenario: Token budget exhausted mid-task
+- **WHEN** a turn exhausts its token budget before its plan is finished
+- **THEN** the terminal message carries a stop reason naming the token budget
+- **AND** the steps that did not run are reconciled as `not_measured`, each naming its missing input
+- **AND** the message is NOT rendered as a completed result
+
+#### Scenario: Each limit is separately attributable
+- **WHEN** a run stops on the turn ceiling, the tool-call ceiling, or the wall-clock ceiling
+- **THEN** the stop reason names that specific limit, distinct from the other three and from `satisfied`
+
+#### Scenario: The stop vocabulary is not duplicated
+- **WHEN** a stop reason is recorded for a conversation turn
+- **THEN** it comes from the same closed vocabulary the harness runtime uses
+- **AND** a reason absent from that vocabulary fails the build
+
+### Requirement: A result SHALL reconcile every step its plan declared
+
+#### Scenario: Full reconciliation
+- **WHEN** a `result` is emitted for a turn whose `plan` declared N steps
+- **THEN** the result carries exactly N reconciliation entries
+- **AND** each resolves to exactly one of `done`, `skipped`, `refused`, `not_measured`
+- **AND** every entry that is not `done` names its reason
+
+#### Scenario: A missing reconciliation entry
+- **WHEN** a `result` carries fewer entries than its plan declared steps
+- **THEN** it is refused before the transport, naming the unreconciled step
+
+### Requirement: A result carrying a claim SHALL cite the verification record that supports it
+
+#### Scenario: A delivered change cites its verdict
+- **WHEN** a `result` reports that a change was verified
+- **THEN** it carries the reference to the verification record that produced the verdict
+- **AND** a result whose reference does not resolve is refused before the transport
+
+### Requirement: Task state SHALL live on the run, and the conversation SHALL hold none
+
+#### Scenario: Resume reads the run
+- **WHEN** a client reconnects to an in-progress turn
+- **THEN** the remaining budget, the completed steps and the current phase are read from the run
+- **AND** no state is reconstructed from the client's message history
+
+#### Scenario: Memory across conversations is refused
+- **WHEN** a question depends on what was asked in an earlier conversation
+- **THEN** a `refusal` states that the surface does not carry memory across conversations
+- **AND** no cross-conversation store is read or written
+
+### Requirement: A plan step SHALL NOT be re-entered past a fixed ceiling
+
+#### Scenario: A loop whose stop condition never fires
+- **WHEN** a plan step is re-entered more times than the ceiling allows
+- **THEN** the run terminates with a stop reason naming the ceiling and the step
+- **AND** the ceiling is a constant, not a value an operator or a person can raise
+
+### Requirement: Every turn SHALL be traceable by the person who ran it
+
+#### Scenario: Trace id is shown and resolves
+- **WHEN** a turn completes or refuses
+- **THEN** the surface displays a trace id for that turn
+- **AND** that id retrieves the turn's tool calls, refusals and retries for the tenant that owns the run
+
+#### Scenario: Trace id does not cross tenants
+- **WHEN** a trace id belonging to another tenant's run is submitted
+- **THEN** the request is refused without disclosing whether the id exists
+
+### Requirement: The intent set SHALL be equal to the set of working surfaces
+
+#### Scenario: Every intent resolves to a surface
+- **WHEN** the intent table is enumerated
+- **THEN** each entry names exactly one working surface that exists in the console's route table
+
+#### Scenario: A route without an intent
+- **WHEN** a working route is added to the console with no corresponding intent
+- **THEN** the fence fails the build, naming the route
+
+#### Scenario: An intent without a route
+- **WHEN** an intent is added that names no existing working surface
+- **THEN** the fence fails the build, naming the intent
+
+#### Scenario: Account and billing are out of scope by name
+- **WHEN** a question asks to change a plan, a password, or a member's access
+- **THEN** a `refusal` names the surface that performs it
+- **AND** no run is started

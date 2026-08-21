@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Phase** | P33 |
-| **Program** | [Graph Engineering Harness Agent (GEHA)](P31-P36-graph-engineering-agent-program.md) |
+| **Program** | [Graph Engineering Harness Agent (GEHA)](P31-P38-graph-engineering-agent-program.md) |
 | **OpenSpec change** | [`p33-surface-assessment`](../../openspec/changes/p33-surface-assessment/) |
 | **Lead roles** | AI Engineer + Product Designer |
 | **Support roles** | System Designer, Backend Dev, Frontend Dev, QA, DevOps, Sales Operations |

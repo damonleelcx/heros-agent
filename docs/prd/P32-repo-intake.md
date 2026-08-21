@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Phase** | P32 |
-| **Program** | [Graph Engineering Harness Agent (GEHA)](P31-P36-graph-engineering-agent-program.md) |
+| **Program** | [Graph Engineering Harness Agent (GEHA)](P31-P38-graph-engineering-agent-program.md) |
 | **OpenSpec change** | [`p32-repo-intake`](../../openspec/changes/p32-repo-intake/) |
 | **Lead roles** | Backend Dev + DevOps |
 | **Support roles** | System Designer, Product Designer, Frontend Dev, QA, AI Engineer, Sales Operations |
