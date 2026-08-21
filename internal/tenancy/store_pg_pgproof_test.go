@@ -46,14 +46,22 @@ func openPG(t *testing.T, schema string) *sql.DB {
 	return db
 }
 
-// truncate empties the identity tables between suite cases. Order matters: children first.
+// truncate empties the identity domain between suite cases.
+//
+// # 🔴 It names the ROOTS, not the order
+//
+// This used to be a hand-written list, correctly ordered children-first for the tables it knew about —
+// and it went red because migration 0041 (P28) gave `platform_user` two children it did not know about,
+// `user_password` and `identity_token`. The list was not in the wrong order. It was INCOMPLETE, and a
+// list that has to be extended whenever a migration adds a child is a list that will be incomplete
+// again.
+//
+// `pgtest.Clear` reads the foreign keys from `pg_constraint` and derives both the set and the order, so
+// the next migration is picked up with nothing to remember. The two names below are the roots of the
+// identity domain; everything that references them is found rather than listed.
 func truncate(t *testing.T, db *sql.DB) {
 	t.Helper()
-	for _, table := range []string{"device_authorization", "console_session", "api_credential", "invitation", "membership", "platform_user", "tenant"} {
-		if _, err := db.Exec(`DELETE FROM ` + table); err != nil {
-			t.Fatalf("clear %s: %v", table, err)
-		}
-	}
+	pgtest.Clear(t, db, "platform_user", "tenant")
 }
 
 func TestPGStoreSatisfiesTheStoreContract(t *testing.T) {

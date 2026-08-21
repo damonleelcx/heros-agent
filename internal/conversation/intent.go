@@ -187,6 +187,23 @@ var outOfScope = []OutOfScopeTopic{
 	{"access", "/app/settings/members", "who is in this organization and what they may do"},
 	{"api key", "/app/settings/members", "credentials for this organization"},
 	{"credential", "/app/settings/members", "credentials for this organization"},
+	// P32 · repository intake. 🔴 OUT OF SCOPE ON PURPOSE, and this is the one entry here whose reason
+	// is not "that is administration rather than analysis".
+	//
+	// Connecting a repository creates a STANDING READ GRANT — a credential the platform uses when the
+	// customer is not present — and FR10 requires the disclosure be DISPLAYED before authorization can
+	// complete. An agent that could act on "connect my repo" would be creating that grant from a
+	// sentence, which is exactly the path around the consent screen the requirement exists to close.
+	// So the agent names the surface and stops.
+	//
+	// Revoking is here too, and the asymmetry is deliberate: revoking is safe to want and destructive
+	// to get wrong (it deletes the derived trees), and its confirmation states what will be deleted.
+	// A conversational shortcut past that confirmation is the same class of mistake in the other
+	// direction.
+	{"connect a repository", "/app/connections", "connecting a repository, and revoking a connection"},
+	{"repository access", "/app/connections", "what this platform may read from your repositories, and when it last did"},
+	{"revoke", "/app/connections", "revoking a repository connection and deleting the trees derived from it"},
+	{"pair", "/app/connections", "reading a repository in place on your own machine"},
 }
 
 // OutOfScope returns the enumerated redirections. A copy.

@@ -942,6 +942,113 @@
       ],
       "type": "object"
     },
+    "CloneCause": {
+      "description": "The four reasons a clone failed. A rotated token and a renamed default branch are different people's problems on different days; one message sends both to the same wrong place.",
+      "enum": [
+        "credential_rejected",
+        "network",
+        "repository_not_found",
+        "revision_not_found"
+      ],
+      "type": "string"
+    },
+    "CloneLedgerView": {
+      "description": "Response of GET /api/v1/repo-connection-reads",
+      "properties": {
+        "connection_id": {
+          "type": "string"
+        },
+        "records": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/CloneRecordView"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "connection_id",
+        "records"
+      ],
+      "type": "object"
+    },
+    "CloneOutcome": {
+      "description": "What one entry in the read ledger records: a success, or one of the four causes. FIVE members, because an outcome the browser does not recognise renders as nothing, which in a list of reads is indistinguishable from a read that succeeded.",
+      "enum": [
+        "credential_rejected",
+        "network",
+        "repository_not_found",
+        "revision_not_found",
+        "succeeded"
+      ],
+      "type": "string"
+    },
+    "CloneRecordView": {
+      "properties": {
+        "actor": {
+          "enum": [
+            "person",
+            "scheduled"
+          ],
+          "type": "string"
+        },
+        "actor_id": {
+          "type": "string"
+        },
+        "at_ms": {
+          "type": "integer"
+        },
+        "bytes": {
+          "type": "integer"
+        },
+        "duration_ms": {
+          "type": "integer"
+        },
+        "entries": {
+          "type": "integer"
+        },
+        "outcome": {
+          "enum": [
+            "credential_rejected",
+            "network",
+            "repository_not_found",
+            "revision_not_found",
+            "succeeded"
+          ],
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "record_id": {
+          "type": "string"
+        },
+        "repository": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "actor",
+        "at_ms",
+        "bytes",
+        "duration_ms",
+        "entries",
+        "outcome",
+        "record_id",
+        "repository",
+        "revision"
+      ],
+      "type": "object"
+    },
     "ClusterRow": {
       "properties": {
         "label": {
@@ -1137,6 +1244,151 @@
         "regions",
         "state",
         "title"
+      ],
+      "type": "object"
+    },
+    "ConnectionView": {
+      "properties": {
+        "connection_id": {
+          "type": "string"
+        },
+        "created_at_ms": {
+          "type": "integer"
+        },
+        "created_by": {
+          "type": "string"
+        },
+        "forge": {
+          "enum": [
+            "bitbucket",
+            "github",
+            "gitlab"
+          ],
+          "type": "string"
+        },
+        "grant_kind": {
+          "enum": [
+            "app_installation",
+            "access_token"
+          ],
+          "type": "string"
+        },
+        "grant_label": {
+          "type": "string"
+        },
+        "last_actor": {
+          "enum": [
+            "person",
+            "scheduled"
+          ],
+          "type": "string"
+        },
+        "last_failure_at_ms": {
+          "type": "integer"
+        },
+        "last_failure_cause": {
+          "enum": [
+            "credential_rejected",
+            "network",
+            "repository_not_found",
+            "revision_not_found"
+          ],
+          "type": "string"
+        },
+        "last_success_at_ms": {
+          "type": "integer"
+        },
+        "last_success_revision": {
+          "type": "string"
+        },
+        "mode": {
+          "enum": [
+            "bundle",
+            "connected",
+            "local"
+          ],
+          "type": "string"
+        },
+        "repository": {
+          "type": "string"
+        },
+        "revoke_hint": {
+          "type": "string"
+        },
+        "sub_path": {
+          "type": "string"
+        },
+        "workflow_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "connection_id",
+        "created_at_ms",
+        "created_by",
+        "forge",
+        "grant_kind",
+        "grant_label",
+        "last_failure_at_ms",
+        "last_success_at_ms",
+        "mode",
+        "repository",
+        "revoke_hint",
+        "workflow_id"
+      ],
+      "type": "object"
+    },
+    "ConnectionsView": {
+      "description": "Response of GET /api/v1/repo-connections",
+      "properties": {
+        "connections": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/ConnectionView"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "forges": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/ForgeDescription"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "local_mode_deployments": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "retention_hours": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "connections",
+        "forges",
+        "local_mode_deployments",
+        "retention_hours"
       ],
       "type": "object"
     },
@@ -2463,6 +2715,46 @@
       ],
       "type": "object"
     },
+    "ForgeDescription": {
+      "properties": {
+        "forge": {
+          "enum": [
+            "bitbucket",
+            "github",
+            "gitlab"
+          ],
+          "type": "string"
+        },
+        "grant_kind": {
+          "enum": [
+            "app_installation",
+            "access_token"
+          ],
+          "type": "string"
+        },
+        "grant_label": {
+          "type": "string"
+        },
+        "host": {
+          "type": "string"
+        },
+        "permission": {
+          "type": "string"
+        },
+        "revoke_hint": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "forge",
+        "grant_kind",
+        "grant_label",
+        "host",
+        "permission",
+        "revoke_hint"
+      ],
+      "type": "object"
+    },
     "GraphView": {
       "description": "Response of GET /api/v1/workflows/{workflow_id}/pattern-graph",
       "properties": {
@@ -2857,6 +3149,64 @@
       ],
       "type": "object"
     },
+    "LocalModeAvailability": {
+      "properties": {
+        "available": {
+          "type": "boolean"
+        },
+        "deployments": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "why": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "available",
+        "deployments"
+      ],
+      "type": "object"
+    },
+    "LocalPairingsView": {
+      "description": "Response of GET /api/v1/local-pairings",
+      "properties": {
+        "availability": {
+          "$ref": "#/$defs/LocalModeAvailability"
+        },
+        "command": {
+          "type": "string"
+        },
+        "pairings": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/PairingView"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "availability",
+        "command",
+        "pairings"
+      ],
+      "type": "object"
+    },
     "MeterView": {
       "properties": {
         "allowed": {
@@ -3068,6 +3418,59 @@
         "proposal_id",
         "rollback",
         "url"
+      ],
+      "type": "object"
+    },
+    "PairingState": {
+      "description": "Where a local-mode pairing is. `expired` is a distinct state rather than a deletion, because \"your code expired\" and \"no such code\" send a person to two different places.",
+      "enum": [
+        "expired",
+        "paired",
+        "pending"
+      ],
+      "type": "string"
+    },
+    "PairingView": {
+      "properties": {
+        "claimed_at_ms": {
+          "type": "integer"
+        },
+        "created_at_ms": {
+          "type": "integer"
+        },
+        "expires_at_ms": {
+          "type": "integer"
+        },
+        "machine_name": {
+          "type": "string"
+        },
+        "pairing_id": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "expired",
+            "paired",
+            "pending"
+          ],
+          "type": "string"
+        },
+        "user_code": {
+          "type": "string"
+        },
+        "workflow_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "created_at_ms",
+        "expires_at_ms",
+        "pairing_id",
+        "state",
+        "workflow_id"
       ],
       "type": "object"
     },
@@ -3812,6 +4215,22 @@
       ],
       "type": "object"
     },
+    "RevocationView": {
+      "description": "Response of POST /api/v1/repo-connection-revocations",
+      "properties": {
+        "connection_id": {
+          "type": "string"
+        },
+        "snapshots_deleted": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "connection_id",
+        "snapshots_deleted"
+      ],
+      "type": "object"
+    },
     "RouteConditionView": {
       "properties": {
         "detail": {
@@ -4353,6 +4772,40 @@
         "workflow_id"
       ],
       "type": "object"
+    },
+    "SourceActor": {
+      "description": "Whether a person was present for a read. The distinction the whole disclosure exists for: a connection is usable when the customer is not there.",
+      "enum": [
+        "person",
+        "scheduled"
+      ],
+      "type": "string"
+    },
+    "SourceForge": {
+      "description": "The three code hosts a repository can be connected from. Each expresses its narrowest grant differently (PRD §14 A2).",
+      "enum": [
+        "bitbucket",
+        "github",
+        "gitlab"
+      ],
+      "type": "string"
+    },
+    "SourceGrantKind": {
+      "description": "How the forge issued the read grant. Per forge, per PRD §14 A2 — an App where one exists, a repository-scoped token where it does not.",
+      "enum": [
+        "app_installation",
+        "access_token"
+      ],
+      "type": "string"
+    },
+    "SourceMode": {
+      "description": "How a workflow's source arrives: a pushed bundle (the default), a connected repository, or a local path. No feature is gated on any of them.",
+      "enum": [
+        "bundle",
+        "connected",
+        "local"
+      ],
+      "type": "string"
     },
     "SpecError": {
       "description": "Response of POST /api/v1/specs/{resolve,submit} (rejection)",
@@ -5023,6 +5476,12 @@
     "CheckoutView": {
       "$ref": "#/$defs/CheckoutView"
     },
+    "CloneLedgerView": {
+      "$ref": "#/$defs/CloneLedgerView"
+    },
+    "ConnectionsView": {
+      "$ref": "#/$defs/ConnectionsView"
+    },
     "ConversationMessage": {
       "$ref": "#/$defs/ConversationMessage"
     },
@@ -5050,6 +5509,9 @@
     "LinkedRunView": {
       "$ref": "#/$defs/LinkedRunView"
     },
+    "LocalPairingsView": {
+      "$ref": "#/$defs/LocalPairingsView"
+    },
     "PRResult": {
       "$ref": "#/$defs/PRResult"
     },
@@ -5064,6 +5526,9 @@
     },
     "ReportedTransformView": {
       "$ref": "#/$defs/ReportedTransformView"
+    },
+    "RevocationView": {
+      "$ref": "#/$defs/RevocationView"
     },
     "RunMonitor": {
       "$ref": "#/$defs/RunMonitor"

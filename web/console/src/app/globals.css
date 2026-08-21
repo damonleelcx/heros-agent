@@ -1530,6 +1530,184 @@
   .docsearch__result-context {
     @apply text-xs leading-relaxed text-muted-foreground;
   }
+
+  /* ── P32 · repository intake ───────────────────────────────────────────────
+   *
+   * Every value here is a TOKEN. `scan-tokens.mjs` fails the build on a colour, a spacing length, a
+   * type size, a radius or a duration literal anywhere outside `tokens.customer.css`, and a surface
+   * about grants and revocation is exactly where a "just here" accent would otherwise appear.
+   *
+   * 🔴 THE HAZARD PALETTE APPEARS IN ONE RULE: `.conn__revoke`. It is now the third place `--bad` is
+   * used in this console, and it earns it on the same test the other two pass — revoking is a
+   * destructive, one-way action that deletes the customer's derived trees. A failed CLONE is NOT a
+   * hazard: it is an ANSWER about a read that did not happen, it renders in `.state--*` like every
+   * other reported state, and spending the hazard colour on it would teach a reader to discount the
+   * palette exactly where it has to mean something.
+   */
+
+  .conn {
+    @apply flex flex-col;
+    gap: --spacing(4);
+  }
+
+  .conn__card {
+    @apply flex flex-col rounded-xl border border-border bg-card;
+    gap: --spacing(3);
+    padding: --spacing(5);
+  }
+
+  .conn__head {
+    @apply flex flex-wrap items-baseline justify-between;
+    gap: --spacing(3);
+  }
+
+  .conn__repo {
+    @apply font-mono font-medium text-foreground;
+    font-size: var(--type-section);
+  }
+
+  .conn__facts {
+    @apply grid;
+    gap: --spacing(4);
+    grid-template-columns: repeat(auto-fit, minmax(var(--measure-field), 1fr));
+  }
+
+  .conn__fact {
+    @apply flex flex-col;
+    gap: --spacing(1);
+  }
+
+  /* The grant disclosure. Bordered rather than tinted: it is a STATEMENT the reader must be able to
+     take in, and a coloured panel reads as a status about something that has already happened. */
+  .conn__grant {
+    @apply flex flex-col rounded-lg border border-border;
+    gap: --spacing(2);
+    padding: --spacing(4);
+    background-color: var(--muted);
+  }
+
+  .conn__grant-title {
+    @apply font-medium text-foreground;
+    font-size: var(--type-section);
+  }
+
+  .conn__grant-list {
+    @apply flex flex-col;
+    gap: --spacing(2);
+    padding-left: --spacing(5);
+  }
+
+  /* 🔴 The unattended-use line. It is the one sentence in the whole flow the customer is least likely
+     to have expected, so it is given its own weight rather than being the fourth bullet — see §8.2. */
+  .conn__unattended {
+    @apply flex items-start rounded-lg border font-medium;
+    gap: --spacing(2);
+    padding: --spacing(3);
+    border-color: color-mix(in oklab, var(--warn) 35%, transparent);
+    background-color: color-mix(in oklab, var(--warn) 8%, transparent);
+    color: var(--foreground);
+  }
+
+  .conn__form {
+    @apply flex flex-col;
+    gap: --spacing(3);
+    max-width: var(--measure-form);
+  }
+
+  .conn__label {
+    @apply flex flex-col;
+    gap: --spacing(1);
+    font-size: var(--type-label);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted-foreground);
+  }
+
+  .conn__input,
+  .conn__select {
+    @apply w-full rounded-lg border border-border text-sm text-foreground;
+    padding: --spacing(2) --spacing(3);
+    background-color: var(--input-background);
+    font-weight: 400;
+    letter-spacing: normal;
+    text-transform: none;
+  }
+
+  .conn__actions {
+    @apply flex flex-wrap items-center;
+    gap: --spacing(3);
+  }
+
+  .conn__submit {
+    @apply inline-flex items-center rounded-lg text-sm font-medium;
+    gap: --spacing(2);
+    padding: --spacing(2) --spacing(4);
+    background-color: var(--primary);
+    color: var(--primary-foreground);
+    transition-duration: var(--motion-fast);
+  }
+
+  .conn__submit:disabled {
+    @apply cursor-not-allowed opacity-60;
+  }
+
+  /* 🔴 THE HAZARD. Revoking deletes the derived trees; it is not undoable and it is not a preference. */
+  .conn__revoke {
+    @apply inline-flex items-center rounded-lg text-sm font-medium;
+    gap: --spacing(2);
+    padding: --spacing(2) --spacing(4);
+    background-color: var(--bad);
+    color: var(--primary-foreground);
+    transition-duration: var(--motion-fast);
+  }
+
+  .conn__revoke:disabled {
+    @apply cursor-not-allowed opacity-60;
+  }
+
+  /* The armed confirmation. It states what will be deleted, in the hazard palette, and it is a second
+     press — an arming step, not a browser confirm(), because a confirm() cannot say how many trees. */
+  .conn__confirm {
+    @apply flex flex-col rounded-lg border;
+    gap: --spacing(3);
+    padding: --spacing(4);
+    border-color: color-mix(in oklab, var(--bad) 35%, transparent);
+    background-color: color-mix(in oklab, var(--bad) 6%, transparent);
+  }
+
+  .conn__cancel {
+    @apply inline-flex items-center rounded-lg border border-border text-sm font-medium text-foreground;
+    gap: --spacing(2);
+    padding: --spacing(2) --spacing(4);
+    transition-duration: var(--motion-fast);
+  }
+
+  /* The pairing code. Large, monospaced and letter-spaced, because it is READ OFF A SCREEN and typed
+     into another window — the one piece of text in this console whose job is to be transcribed. */
+  .conn__code {
+    @apply rounded-lg border border-border text-center font-mono font-semibold text-foreground;
+    padding: --spacing(4);
+    background-color: var(--muted);
+    font-size: var(--type-stat-sm);
+    letter-spacing: 0.25em;
+  }
+
+  .conn__ledger {
+    @apply w-full border-collapse text-sm;
+  }
+
+  .conn__ledger th {
+    @apply text-left font-medium text-muted-foreground;
+    padding: --spacing(2) --spacing(3);
+    font-size: var(--type-label);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .conn__ledger td {
+    @apply border-t border-border align-top text-foreground;
+    padding: --spacing(2) --spacing(3);
+  }
 }
 
 /*

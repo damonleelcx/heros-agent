@@ -270,6 +270,29 @@ heros login --email you@example.com
 | `--org` | string | *unset* | `HEROS_ORG` | organization to sign in to, when you are a member of more than one (login). Absent picks the one you joined first, and the sign-in lists them all |
 | `--token` | string | *unset* | `HEROS_TOKEN` | platform token (login) — the MACHINE path: a credential naming nobody, which survives the offboarding of whoever created it |
 
+### pair
+
+pair THIS machine with the console so a repository is read here and never transmitted.
+
+**Needs the network and a platform account.**
+
+**Before this runs:** a pairing code from the console, and a git repository with at least one commit — the commit id is the only fact about your tree that crosses
+
+```bash
+heros pair --code ACDE-FGHJ --repo .
+```
+
+**On success:** the workflow this machine is now paired for, and the three values that crossed: the code, this machine's name and the commit id. The repository itself is NOT transmitted. Exit code `0`.
+
+**When this build does not include it:** the command exits `2` and prints `pair is a platform command and is unavailable in this build`. That is an operational outcome, not a malformed invocation — you have not typed anything wrong.
+
+| Flag | Type | Default | Environment | Meaning |
+|---|---|---|---|---|
+| `--code` | string | *unset* | `HEROS_CODE` | the pairing code shown in the console (pair). Case and dashes do not matter, and the alphabet excludes O/0 and I/1 so a mistyped character is unlikely |
+| `--commit` | string | *unset* | `HEROS_COMMIT` | source revision (default: derived from .git) |
+| `--machine` | string | *unset* | `HEROS_MACHINE` | what to call this machine in the console (pair). Defaults to this host's name, which is transmitted — set this if you would rather it were not |
+| `--repo` | path | `.` | `HEROS_REPO` | the target repository |
+
 ### push-source
 
 send a source snapshot so the platform can discover and classify this workflow itself.

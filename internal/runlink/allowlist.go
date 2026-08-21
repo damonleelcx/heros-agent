@@ -193,7 +193,15 @@ var PlatformPaths = []string{
 	"/api/v1/device/authorize",     // P27 · the terminal asks for a code, holding no credential
 	"/api/v1/device/token",         // P27 · the terminal polls for the approval
 	"/api/v1/auth/password/signin", // P28 · `heros login` with an email and a password
+	LocalPairingClaimPath,          // P32 · `heros pair` claims a code the console issued
 }
+
+// LocalPairingClaimPath is where `heros pair` claims a pairing code (P32 §4).
+//
+// Declared here beside the other paths rather than in the transport file that uses it, so this list
+// stays the complete, readable set of things the CLI can reach — which is the claim the comment on
+// PlatformPaths makes and which has been false twice.
+const LocalPairingClaimPath = "/api/v1/local-pairing-claims"
 
 // IsLinkTarget reports whether rawURL is on the one permitted linking origin and addresses a declared
 // platform path. The ORIGIN is the pin — scheme, host and port must equal PlatformBaseURL's, so a wrong

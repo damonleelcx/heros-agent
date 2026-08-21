@@ -42,11 +42,11 @@ func openPG(t *testing.T, schema string) *sql.DB {
 	if _, err := pgmigrate.Apply(t.Context(), db); err != nil {
 		t.Fatalf("apply migrations: %v", err)
 	}
-	for _, table := range []string{"console_session", "api_credential", "invitation", "membership", "platform_user", "account", "tenant"} {
-		if _, err := db.Exec(`DELETE FROM ` + table); err != nil {
-			t.Fatalf("clear %s: %v", table, err)
-		}
-	}
+	// 🔴 The ROOTS are named and the rest is derived — see `pgtest.Clear`. The hand-written list this
+	// replaces was missing FOUR children: three of `platform_user` (`device_authorization`,
+	// `identity_token`, `user_password`) and all three of `account` (`billable_savings`,
+	// `billing_event`, `usage_record`). It was green only because nothing here writes one yet.
+	pgtest.Clear(t, db, "platform_user", "account", "tenant")
 	return db
 }
 

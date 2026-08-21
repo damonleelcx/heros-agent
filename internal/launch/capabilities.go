@@ -675,10 +675,102 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 		if err != nil {
 			return nil, nil, fmt.Errorf("source scratch: %w", err)
 		}
+		// ── P32 · repository connections, and the ONE constructor call that selects the source ────
+		//
+		// 🔴 This block is the whole of "the mode is invisible downstream" (design D1). Below it,
+		// `discoverySource` is a `sourceingest.Source` and nothing — not the runner, not the editor,
+		// not the analysis — can tell which implementation it holds. That is deliberate and it is the
+		// alternative to a branch threaded through the pipeline, which would multiply every downstream
+		// path by three and put mode-awareness in components with no business having an opinion.
+		//
+		// The GitSource is mounted only when this deployment has a forge-credential store. A
+		// deployment without one is Mode 1 exactly as it shipped: connections are not offered, the
+		// routes answer 503, and every other surface behaves identically. That is the FR12 property
+		// made structural — no feature is gated on a connection, because the connection is not a
+		// dependency of anything below.
+		snapshotStore, err := sourceingest.NewPGSnapshotStore(bundleStore)
+		if err != nil {
+			return nil, nil, fmt.Errorf("source snapshot store: %w", err)
+		}
+		connStore, err := sourceingest.NewPGConnectionStore(pg)
+		if err != nil {
+			return nil, nil, fmt.Errorf("source connection store: %w", err)
+		}
+		// The forge-credential store. In-process today, and /readyz says so honestly — an operator
+		// seeing `memory-forge` in a cluster is seeing a real finding, because a restart loses every
+		// connection's credential. A deployment supplying a durable implementation of the same four
+		// methods replaces this one line.
+		forgeSecrets := providergateway.NewMemForgeSecrets()
+		ingestMetrics := sourceingest.NewIngestMetrics()
+
+		var discoverySource sourceingest.Source = bundleSource
+		if gitSource, gerr := sourceingest.NewGitSource(sourceingest.GitConfig{
+			Connections: connStore,
+			Snapshots:   snapshotStore,
+			Secrets:     forgeSecrets,
+			Bundles:     bundleSource,
+			Scratch:     filepath.Join(dataDir, "clone-scratch"),
+			Metrics:     ingestMetrics,
+			NowMS:       func() int64 { return time.Now().UnixMilli() },
+		}); gerr != nil {
+			// Logged, not fatal. A deployment that cannot clone must still serve every Mode 1
+			// surface — refusing to start would make an OPT-IN upgrade a startup dependency, which
+			// is the opposite of what ADR-013 decided.
+			log.Printf("repository connections: NOT wired — %v. Pushed bundles are unaffected", gerr)
+		} else {
+			discoverySource = sourceingest.NewModeRouter(connStore, bundleSource, gitSource)
+			if svc, serr := sourceingest.NewService(sourceingest.ServiceConfig{
+				Connections: connStore,
+				Snapshots:   snapshotStore,
+				Secrets:     forgeSecrets,
+				NowMS:       func() int64 { return time.Now().UnixMilli() },
+			}); serr != nil {
+				log.Printf("repository connections: the lifecycle could not be built — %v. Cloning still works "+
+					"for connections that already exist; no new one can be created", serr)
+			} else {
+				h.MountConnections(svc)
+				served("p32_repo_connections (per-repository read grants; revocation cascades to derived trees)")
+			}
+			// The retention sweep runs whether or not anything else does (FR17), and publishes its
+			// last successful run on /readyz. Started here rather than on first use for the reason
+			// FR17 gives: retention triggered by a read never happens for a workflow nobody reads,
+			// which is exactly the workflow whose snapshot nobody wants us still holding.
+			retention := sourceingest.NewRetentionJob(sourceingest.RetentionConfig{
+				Snapshots: snapshotStore,
+				NowMS:     func() int64 { return time.Now().UnixMilli() },
+			})
+			retention.Start(context.Background())
+			h.SetSourceIngestHealth(ingestMetrics, retention)
+			served("p32_ingest_health (per-forge ingest outcomes and the retention job's last success, on /readyz)")
+		}
+
+		// P32 §4 · Mode 3, the local-repository bridge.
+		//
+		// Mounted INDEPENDENTLY of the clone path above. They are two different offers with two
+		// different postures — one is a standing read grant, the other reads nothing at all — and a
+		// deployment that declines the first has no reason to lose the second. The store is the same
+		// `connStore` because both live in migration 0049; the SERVICE is separate.
+		if pairSvc, perr := sourceingest.NewPairingService(sourceingest.PairingConfig{
+			Store: connStore,
+			NowMS: func() int64 { return time.Now().UnixMilli() },
+		}); perr != nil {
+			log.Printf("local-repository bridge: NOT wired — %v. Bundles and connections are unaffected", perr)
+		} else {
+			// 🔴 The deployment's own public address, so the console can state BEFORE the flow starts
+			// which deployments the bridge works against (FR15). Absent when unset, which
+			// `sourceingest.Availability` reports as unavailable-with-a-reason rather than assuming a
+			// match — a deployment that does not know its own address cannot know whether the pinned
+			// CLI can reach it, and guessing yes is exactly the "fails at the last step" outcome
+			// FR15 exists to prevent.
+			h.SetDeploymentURL(os.Getenv("HEROS_PUBLIC_URL"))
+			h.MountLocalPairing(pairSvc)
+			served("p32_local_pairing (console↔agent pairing; the repository is read in place and never transmitted)")
+		}
+
 		// reg is the SAME registry.Store mounted as the prompt registry above. Deliberately shared: the
 		// classifier must resolve tool bindings against the registry this deployment actually serves,
 		// and a second store pointed at the same tables would be a second answer to one question.
-		runner, err := hostdiscovery.NewRunner(bundleSource, hostdiscovery.RegistrySkills(reg), graphStore)
+		runner, err := hostdiscovery.NewRunner(discoverySource, hostdiscovery.RegistrySkills(reg), graphStore)
 		if err != nil {
 			return nil, nil, fmt.Errorf("discovery runner: %w", err)
 		}

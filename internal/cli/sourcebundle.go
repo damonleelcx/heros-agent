@@ -131,7 +131,12 @@ func ResolveRevision(ctx context.Context, repo, revision string) (string, error)
 	cmd.Stdout = &out
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("push-source: cannot resolve %q in %s: %w: %s",
+		// 🔴 The message names no COMMAND. It used to say `push-source:`, and this helper now has two
+		// callers — `heros pair` resolves a revision too — so a `pair` failure was telling the person
+		// to look at a command they had not run. A shared helper's error must describe the OPERATION
+		// (resolving a revision) and let the caller's own wrapper name the command.
+		return "", fmt.Errorf("cannot resolve revision %q in %s: %w: %s — this needs a git checkout "+
+			"with at least one commit",
 			revision, repo, err, strings.TrimSpace(stderr.String()))
 	}
 	return strings.TrimSpace(out.String()), nil

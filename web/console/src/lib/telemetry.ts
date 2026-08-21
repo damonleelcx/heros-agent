@@ -80,6 +80,17 @@ const PATH_TEMPLATES: Array<[RegExp, string]> = [
   [/^\/api\/v1\/variants$/, "/api/v1/variants"],
   [/^\/api\/v1\/transforms$/, "/api/v1/transforms"],
   [/^\/api\/v1\/link-coverage$/, "/api/v1/link-coverage"],
+  // P32 — the source surface. Listed so its latency and error rates are queryable, and one of the
+  // three matters more than the other two: `repo-connections` is the POST that creates a STANDING READ
+  // GRANT, so "how often does this refuse, and how long does it take" is a question somebody will ask
+  // during a security review rather than during an incident. An unlisted route answers it with
+  // `/unknown`.
+  [/^\/api\/v1\/repo-connections$/, "/api/v1/repo-connections"],
+  // Anchored to the bare path: `scope.ts` appends `?connection_id=…`, and `template()` strips the
+  // query before matching, so the anchor is safe and keeps this from shadowing anything.
+  [/^\/api\/v1\/repo-connection-reads$/, "/api/v1/repo-connection-reads"],
+  [/^\/api\/v1\/repo-connection-revocations$/, "/api/v1/repo-connection-revocations"],
+  [/^\/api\/v1\/local-pairings$/, "/api/v1/local-pairings"],
   // P31 — the conversational console. Five FLAT routes, five matchers.
   //
   // 🔴 `conversation-stream` matters most of the five and is the one an unlisted entry would hurt worst:

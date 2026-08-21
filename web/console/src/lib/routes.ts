@@ -46,6 +46,11 @@ export const routes = {
   wiring: () => "/app/wiring",
   harness: () => "/app/harness",
   coverage: () => "/app/coverage",
+  // P32. Where a workflow's SOURCE comes from — a pushed bundle, a connected repository, or a local
+  // machine. Its own surface rather than a tab on Workflows because the question it answers is about
+  // the GRANT ("what may the platform read, and when did it") rather than about a workflow, and a
+  // person revoking access after an incident must be able to find it without knowing which workflow.
+  connections: () => "/app/connections",
   account: () => "/app/account",
   members: () => "/app/settings/members",
   // Where a person approves a terminal login. The path is also compiled into the platform's device
@@ -106,6 +111,14 @@ export const OUT_OF_SCOPE_SURFACES: readonly string[] = [
   "/app/billing",
   "/app/account",
   "/app/settings/members",
+  // P32 · the source surface. 🔴 Out of scope for a reason that is NOT "this is administration":
+  // connecting a repository creates a standing read grant, and FR10 requires the disclosure be
+  // DISPLAYED before authorization can complete. An agent acting on "connect my repo" would create
+  // that grant from a sentence — the exact path around the consent screen the requirement closes.
+  // Revoking is out of scope for the mirror reason: its confirmation states what will be deleted, and
+  // a conversational shortcut past a destructive confirmation is the same mistake pointed the other
+  // way. The agent names the surface and stops.
+  "/app/connections",
 ];
 
 /**

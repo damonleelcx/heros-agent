@@ -548,6 +548,48 @@
       "unavailable": "login is a platform command and is unavailable in this build"
     },
     {
+      "name": "pair",
+      "summary": "pair THIS machine with the console so a repository is read here and never transmitted",
+      "availability": "network",
+      "offline": false,
+      "needs_account": true,
+      "flags": [
+        {
+          "name": "code",
+          "type": "string",
+          "default": "",
+          "env": "HEROS_CODE",
+          "summary": "the pairing code shown in the console (pair). Case and dashes do not matter, and the alphabet excludes O/0 and I/1 so a mistyped character is unlikely"
+        },
+        {
+          "name": "commit",
+          "type": "string",
+          "default": "",
+          "env": "HEROS_COMMIT",
+          "summary": "source revision (default: derived from .git)"
+        },
+        {
+          "name": "machine",
+          "type": "string",
+          "default": "",
+          "env": "HEROS_MACHINE",
+          "summary": "what to call this machine in the console (pair). Defaults to this host's name, which is transmitted — set this if you would rather it were not"
+        },
+        {
+          "name": "repo",
+          "type": "path",
+          "default": ".",
+          "env": "HEROS_REPO",
+          "summary": "the target repository"
+        }
+      ],
+      "example": "heros pair --code ACDE-FGHJ --repo .",
+      "success": "the workflow this machine is now paired for, and the three values that crossed: the code, this machine's name and the commit id. The repository itself is NOT transmitted.",
+      "success_exit": 0,
+      "prerequisite": "a pairing code from the console, and a git repository with at least one commit — the commit id is the only fact about your tree that crosses",
+      "unavailable": "pair is a platform command and is unavailable in this build"
+    },
+    {
       "name": "push-source",
       "summary": "send a source snapshot so the platform can discover and classify this workflow itself",
       "availability": "network",

@@ -120,11 +120,12 @@ func newLiveSurface(t *testing.T) (*Server, *liveSurface, *sql.DB) {
 	}
 	// A clean identity domain per test: these tables are shared within the package's schema, and a test
 	// that inherited another's memberships would measure the fixture rather than the behaviour.
-	for _, tbl := range []string{"console_session", "api_credential", "invitation", "membership", "platform_user", "tenant"} {
-		if _, err := db.Exec(`DELETE FROM ` + tbl); err != nil {
-			t.Fatalf("clear %s: %v", tbl, err)
-		}
-	}
+	//
+	// 🔴 The ROOTS are named and the rest is derived. The hand-written list this replaces was missing
+	// three children of `platform_user` — `device_authorization`, `identity_token` and `user_password` —
+	// and was green only because nothing here writes one YET. It would have gone red on the day somebody
+	// added a password to a fixture, with no apparent connection to the change that triggered it.
+	pgtest.Clear(t, db, "platform_user", "tenant")
 	store, err := tenancy.NewPGStore(db)
 	if err != nil {
 		t.Fatalf("identity store: %v", err)

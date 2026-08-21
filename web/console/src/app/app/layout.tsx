@@ -4,6 +4,7 @@ import {
   CreditCard,
   FileCode,
   FlaskConical,
+  FolderGit2,
   GitBranch,
   GitPullRequest,
   Grid3x3,
@@ -61,6 +62,11 @@ const SURFACES: Surface[] = [
   // which is the reader who needs it least.
   { href: "/app/ask", label: "Ask", icon: <MessageSquareText /> },
   { href: "/app/workflows", label: "Workflows", icon: <GitBranch /> },
+  // P32. Directly under Workflows, because it answers the question a reader has the moment a workflow
+  // has nothing to show: WHERE does its source come from. It is also where a person goes to revoke a
+  // repository grant after an incident, and that is not a page anybody should have to hunt for — which
+  // is why it is in the primary rail rather than under Settings beside Billing.
+  { href: "/app/connections", label: "Source", icon: <FolderGit2 /> },
   { href: "/app/runs", label: "Runs", icon: <Play /> },
   { href: "/app/variants", label: "Variants", icon: <Layers /> },
   { href: "/app/transforms", label: "Transforms", icon: <FileCode /> },
@@ -124,6 +130,14 @@ export default async function ConsoleLayout({ children }: { children: React.Reac
     { id: "s:ask", group: "Surface", label: "Ask a question", href: routes.ask() },
     { id: "s:configure", group: "Surface", label: "Configure a variant", href: routes.configure() },
     { id: "s:workflows", group: "Surface", label: "Workflows", href: "/app/workflows" },
+    {
+      id: "s:connections",
+      group: "Surface",
+      // Three phrasings in one label, because a person reaches this page from three different
+      // questions and the palette matches on the whole string.
+      label: "Source — connect a repository, read one in place, or revoke a connection",
+      href: routes.connections(),
+    },
     { id: "s:runs", group: "Surface", label: "Runs", href: "/app/runs" },
     { id: "s:transforms", group: "Surface", label: "Transforms", href: "/app/transforms" },
     { id: "s:delivery", group: "Surface", label: "Delivery", href: "/app/delivery" },

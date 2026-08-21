@@ -156,6 +156,20 @@ degraded answer is most likely to be believed.
   refused here on the record, so a later phase proposing it is proposing a change to this ADR rather than
   an extension of it.
 
+### 🔴 Option B — the refusal, and where it is enforced (P32 §1.5)
+
+The refusal is not a default that a configuration key can move. It is enforced in three places, and all
+three have to be edited by anyone who wants to change it — which is the point:
+
+| Where | What it does | Fence |
+|---|---|---|
+| `sourceingest.Connection` | Has **no field** that can express a scope wider than one repository. Not "defaults to one" — there is nothing to widen. | `TestConnectionHasNoFieldThatCanExpressWriteOrBreadth` reads the struct by reflection, so a field added later is caught by the fence and not by review |
+| `ConnectionStore.Create` | Refuses at connect any authorization whose **resulting grant** would cover a repository the customer did not name, per forge | `TestConnectRefusesAGrantBroaderThanOneRepository` — one case per forge |
+| This ADR | Records the refusal so a later phase has an address to amend | — |
+
+**A later phase that wants organization-wide scope must amend this ADR.** It cannot arrive as a
+`scope: "org"` string, because there is no field it could arrive in.
+
 ## Terminology
 
 | Term | Meaning here |
