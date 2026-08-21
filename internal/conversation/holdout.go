@@ -232,14 +232,14 @@ func (r Report) Table() string {
 		if row.NearMissLabelled > 0 {
 			near = fmt.Sprintf("%4d/%-4d", row.NearMissCorrect, row.NearMissLabelled)
 		}
-		b.WriteString(fmt.Sprintf("%-15s %8d  %7d  %9d  %9d  %s   %s\n",
-			row.Intent, row.Labelled, row.Correct, row.Misrouted, row.Abstained, recall, near))
+		fmt.Fprintf(&b, "%-15s %8d  %7d  %9d  %9d  %s   %s\n",
+			row.Intent, row.Labelled, row.Correct, row.Misrouted, row.Abstained, recall, near)
 	}
 	b.WriteString("\n")
-	b.WriteString(fmt.Sprintf("abstention precision   %s   (%d of %d abstentions were correct)\n",
-		pct(r.AbstentionPrecision()), r.AbstainCorrect, r.AbstainTotal))
-	b.WriteString(fmt.Sprintf("redirection recall     %s   (%d of %d out-of-scope questions named their surface)\n",
-		pct(r.RedirectionRecall()), r.OutOfScopeNamed, r.OutOfScopeLabelled))
+	fmt.Fprintf(&b, "abstention precision   %s   (%d of %d abstentions were correct)\n",
+		pct(r.AbstentionPrecision()), r.AbstainCorrect, r.AbstainTotal)
+	fmt.Fprintf(&b, "redirection recall     %s   (%d of %d out-of-scope questions named their surface)\n",
+		pct(r.RedirectionRecall()), r.OutOfScopeNamed, r.OutOfScopeLabelled)
 	b.WriteString("\n🚫 There is deliberately no overall accuracy figure. A mean over fourteen intents can\n" +
 		"   sit at 93% while one of them is broken, and the mean is the number people stop reading at.\n")
 	if len(r.Misroutes) > 0 {
@@ -249,7 +249,7 @@ func (r Report) Table() string {
 			if m.NearMiss != "" {
 				near = "   [near-miss vs " + m.NearMiss + "]"
 			}
-			b.WriteString(fmt.Sprintf("  want %-14s got %-14s %q%s\n", m.Want, m.Got, m.Question, near))
+			fmt.Fprintf(&b, "  want %-14s got %-14s %q%s\n", m.Want, m.Got, m.Question, near)
 		}
 	}
 	return b.String()

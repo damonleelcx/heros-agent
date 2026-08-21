@@ -53,14 +53,6 @@ func (r *recorder) Append(m Message) (Message, error) {
 	return m, nil
 }
 
-func (r *recorder) kinds() []Kind {
-	out := make([]Kind, 0, len(r.msgs))
-	for _, m := range r.msgs {
-		out = append(out, m.Kind)
-	}
-	return out
-}
-
 // quietLogger keeps a refusal's WARN out of the test output while still exercising the log path — the
 // path is where `request_id` / `trace_id` / `span_id` are attached, so it must not be skipped.
 func quietLogger() *slog.Logger {
