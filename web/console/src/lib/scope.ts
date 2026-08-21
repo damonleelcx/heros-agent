@@ -70,6 +70,17 @@ export function scoped(session: Session) {
     studioRun: () => `/api/v1/studio/run`,
     studioBind: () => `/api/v1/studio/bind`,
 
+    // ── P32 · repository intake ───────────────────────────────────────────
+    // The connection list carries the forge descriptions and the local-mode availability with it, so
+    // the consent screen and the local-mode notice need no second round trip — and so their copy comes
+    // from the forge adapter that builds the grant rather than from a string in a TSX file.
+    repoConnections: () => `/api/v1/repo-connections`,
+    // The read LEDGER for one connection. `connection_id` is a SUBJECT, not an authority: the platform
+    // scopes it to this tenant and answers 404 when it is not theirs.
+    repoConnectionReads: (connectionId: string) =>
+      `/api/v1/repo-connection-reads?connection_id=${encode(connectionId)}`,
+    localPairings: () => `/api/v1/local-pairings`,
+
     // ── P11 · a run the CLI transmitted, read back ────────────────────────
     // Distinct from `run` above on purpose. That one reads the EXECUTOR's record — attempt groups and
     // per-node I/O from a sandboxed run. A LINKED run is an allowlisted summary the developer's own

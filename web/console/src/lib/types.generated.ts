@@ -73,6 +73,33 @@ export type ConversationIntent =
   | "improve"
 ;
 
+/** The four reasons a clone failed. A rotated token and a renamed default branch are different people's problems on different days; one message sends both to the same wrong place. */
+export type CloneCause = "credential_rejected" | "network" | "repository_not_found" | "revision_not_found";
+
+/** The three code hosts a repository can be connected from. Each expresses its narrowest grant differently (PRD §14 A2). */
+export type SourceForge = "bitbucket" | "github" | "gitlab";
+
+/** What one entry in the read ledger records: a success, or one of the four causes. FIVE members, because an outcome the browser does not recognise renders as nothing, which in a list of reads is indistinguishable from a read that succeeded. */
+export type CloneOutcome =
+    "credential_rejected"
+  | "network"
+  | "repository_not_found"
+  | "revision_not_found"
+  | "succeeded"
+;
+
+/** Whether a person was present for a read. The distinction the whole disclosure exists for: a connection is usable when the customer is not there. */
+export type SourceActor = "person" | "scheduled";
+
+/** How the forge issued the read grant. Per forge, per PRD §14 A2 — an App where one exists, a repository-scoped token where it does not. */
+export type SourceGrantKind = "app_installation" | "access_token";
+
+/** Where a local-mode pairing is. `expired` is a distinct state rather than a deletion, because "your code expired" and "no such code" send a person to two different places. */
+export type PairingState = "expired" | "paired" | "pending";
+
+/** How a workflow's source arrives: a pushed bundle (the default), a connected repository, or a local path. No feature is gated on any of them. */
+export type SourceMode = "bundle" | "connected" | "local";
+
 /** Response of `GET /api/v1/runs/{run_id}`. */
 export interface RunView {
   run_id: string;
@@ -1050,6 +1077,93 @@ export interface ChannelView {
   upgrade: string;
   uninstall: string;
   pin: string;
+}
+
+/** Response of `GET /api/v1/repo-connections`. */
+export interface ConnectionsView {
+  connections: ConnectionView[] | null;
+  forges: ForgeDescription[] | null;
+  local_mode_deployments: string[] | null;
+  retention_hours: number;
+}
+
+export interface ConnectionView {
+  connection_id: string;
+  workflow_id: string;
+  mode: SourceMode;
+  forge: SourceForge;
+  repository: string;
+  sub_path?: string;
+  grant_kind: SourceGrantKind;
+  grant_label: string;
+  revoke_hint: string;
+  created_by: string;
+  created_at_ms: number;
+  last_success_at_ms: number;
+  last_success_revision?: string;
+  last_failure_at_ms: number;
+  last_failure_cause?: CloneCause;
+  last_actor?: SourceActor;
+}
+
+export interface ForgeDescription {
+  forge: SourceForge;
+  host: string;
+  grant_kind: SourceGrantKind;
+  grant_label: string;
+  permission: string;
+  revoke_hint: string;
+}
+
+/** Response of `GET /api/v1/repo-connection-reads`. */
+export interface CloneLedgerView {
+  connection_id: string;
+  records: CloneRecordView[] | null;
+}
+
+export interface CloneRecordView {
+  record_id: string;
+  repository: string;
+  revision: string;
+  actor: SourceActor;
+  actor_id?: string;
+  reason?: string;
+  outcome: CloneOutcome;
+  bytes: number;
+  entries: number;
+  duration_ms: number;
+  at_ms: number;
+}
+
+/** Response of `POST /api/v1/repo-connection-revocations`. */
+export interface RevocationView {
+  connection_id: string;
+  snapshots_deleted: number;
+}
+
+/** Response of `GET /api/v1/local-pairings`. */
+export interface LocalPairingsView {
+  pairings: PairingView[] | null;
+  availability: LocalModeAvailability;
+  command: string;
+}
+
+export interface PairingView {
+  pairing_id: string;
+  workflow_id: string;
+  state: PairingState;
+  user_code?: string;
+  machine_name?: string;
+  revision?: string;
+  created_at_ms: number;
+  claimed_at_ms?: number;
+  expires_at_ms: number;
+}
+
+export interface LocalModeAvailability {
+  deployments: string[] | null;
+  available: boolean;
+  why?: string;
 }
 
 /** Response of `POST /api/v1/conversations`. */

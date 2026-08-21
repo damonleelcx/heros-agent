@@ -63,6 +63,36 @@ const (
 	// message. The signal that distinguishes "the stream is fine" from "the stream dies every ninety
 	// seconds and the client hides it", which are indistinguishable from the user's side.
 	ConversationStreamResumed Name = "console.conversation.stream_resumed"
+
+	// ── agentd · source ingest (P32) ─────────────────────────────────────────
+	//
+	// The points an operator and a customer actually ask about repository intake. Note what is NOT
+	// here: nothing named per forge, per tenant or per repository. Those are ATTRIBUTES on the event,
+	// where cardinality is bounded and a scrubber can reach them — a name interpolating a repository
+	// would put a customer's private repository name into every log index that ever sees it.
+
+	// IngestConnectionCreated — a customer authorized the platform to read one repository.
+	IngestConnectionCreated Name = "agentd.ingest.connection_created"
+	// IngestConnectionRefused — an authorization was refused at connect, most importantly because the
+	// resulting grant was broader than the one repository named. 🔴 One name for every refusal reason,
+	// with the reason as an attribute: a separate name per reason would make "how often do we refuse a
+	// connection" a question requiring an operator to know the list in advance.
+	IngestConnectionRefused Name = "agentd.ingest.connection_refused"
+	// IngestConnectionRevoked — a grant, its credential and every tree derived from it were deleted.
+	// Emitted AFTER all three succeed, never before: an event on the way in would count intent rather
+	// than effect, and the whole point of the cascade is that its second half actually happened.
+	IngestConnectionRevoked Name = "agentd.ingest.connection_revoked"
+	// IngestCloneSucceeded — a repository was read at a revision.
+	IngestCloneSucceeded Name = "agentd.ingest.clone_succeeded"
+	// IngestCloneFailed — a read failed. The CAUSE is an attribute drawn from the four-member closed
+	// set, so "which failure class is rising" is a group-by rather than four separate counters.
+	IngestCloneFailed Name = "agentd.ingest.clone_failed"
+	// IngestRetentionSwept — the retention sweep completed. Emitted on EVERY completed run including
+	// the zero-deletion one, because "the job is alive" and "the job found nothing" must not produce
+	// identical output.
+	IngestRetentionSwept Name = "agentd.ingest.retention_swept"
+	// IngestRetentionFailed — the sweep could not complete. Consecutive occurrences escalate.
+	IngestRetentionFailed Name = "agentd.ingest.retention_failed"
 )
 
 // names is the closure. Sorted output is produced by Names(); the declaration order here groups by
@@ -72,6 +102,13 @@ var names = []Name{
 	ConversationRefused,
 	ConversationApprovalRecorded,
 	ConversationStreamResumed,
+	IngestConnectionCreated,
+	IngestConnectionRefused,
+	IngestConnectionRevoked,
+	IngestCloneSucceeded,
+	IngestCloneFailed,
+	IngestRetentionSwept,
+	IngestRetentionFailed,
 }
 
 // Names returns every event name, sorted. A copy, so no caller can widen the enum.

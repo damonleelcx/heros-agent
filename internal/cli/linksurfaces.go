@@ -100,6 +100,17 @@ func LinkSurfaces() []LinkSurface {
 		{"settings", "/app/settings", FillNotByLinking, "not a data surface — it is your organization's settings"},
 		{"device", "/app/device", FillNotByLinking, "not a data surface — it approves a terminal's sign-in"},
 		{"join", "/app/join", FillNotByLinking, "not a data surface — it accepts an invitation"},
+		// P32 · the source surface. 🔴 `FillNotByLinking`, and the sentence has to be careful, because
+		// this is the one page where "linking cannot fill it" would be read as a criticism of linking.
+		//
+		// It is not. This page is where a reader chooses HOW source reaches the platform — and pushing
+		// a bundle, which is the default it recommends, is a sibling command rather than a linking
+		// mechanism. Naming `push-source` here would be wrong in the other direction: `link` fills
+		// surfaces, and this surface is about the choice, not about data a link carries.
+		{"connections", "/app/connections", FillNotByLinking,
+			"nothing linking can do — this page is where you choose how source reaches the platform " +
+				"(push a bundle with `heros push-source`, connect a repository, or pair this machine " +
+				"with `heros pair`). Linking reports a run; it does not send source"},
 	}
 }
 

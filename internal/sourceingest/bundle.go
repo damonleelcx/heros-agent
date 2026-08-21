@@ -4,11 +4,11 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 // bundle.go implements Source over a customer-pushed source bundle: a gzipped tar the customer uploads
@@ -28,33 +28,16 @@ import (
 // # An uploaded archive is hostile input
 //
 // This extractor takes bytes from outside the trust boundary and writes files to the platform's disk.
-// Every unpacker that has ever been written has had to learn the same list, so the list is enforced here
-// rather than assumed: no absolute paths, no `..` escape, no symlinks or hardlinks, no device nodes, and
-// hard caps on entry count, per-file size and total uncompressed bytes so a 2 KiB upload cannot become a
-// full disk. Each rule has a test in bundle_test.go that constructs the malicious archive and asserts the
-// refusal — the rules are load-bearing, so they are exercised, not documented.
+// Every unpacker that has ever been written has had to learn the same list — no absolute paths, no
+// `..` escape, no symlinks or hardlinks, no device nodes, and hard caps on entry count, per-file size
+// and total uncompressed bytes so a 2 KiB upload cannot become a full disk.
 //
-// 🔴 The symlink rule is a REFUSAL, not a sanitization. A tempting alternative is to accept symlinks and
-// resolve them inside the extraction root, which sounds equivalent and is not: discovery walks the tree
-// afterwards, and a link that resolves safely at extraction time can be made to resolve elsewhere by a
-// later entry in the same archive that replaces a parent directory. Refusing the entry outright removes
-// the ordering question entirely. A source tree that genuinely needs a symlink to be discovered is a case
-// we have never seen and would rather hear about than silently mishandle.
-
-// Extraction limits. Deliberately generous for real repositories and still far below "fills the disk".
-// They are constants rather than configuration because a per-tenant override is a way for the limit to be
-// raised to whatever the incident needed, one tenant at a time, until it protects nobody.
-const (
-	// MaxBundleEntries caps files+directories in one bundle.
-	MaxBundleEntries = 200_000
-	// MaxBundleFileBytes caps a single extracted file at 64 MiB. Source files are kilobytes; anything
-	// this large is a vendored binary or an attack, and neither is discoverable.
-	MaxBundleFileBytes = 64 << 20
-	// MaxBundleTotalBytes caps total uncompressed bytes at 2 GiB — the decompression-bomb ceiling.
-	MaxBundleTotalBytes = 2 << 30
-	// MaxBundlePathLength caps a single entry's path.
-	MaxBundlePathLength = 4096
-)
+// 🔴 That list NO LONGER LIVES HERE. It is `TreeGuard` in treeguard.go, and the clone path runs the
+// same one — because the defences exist because a *tree* can be malicious, not because an *upload*
+// can (P32 design D2). What remains in this file is tar-specific: gzip framing, the pax-header
+// classification, and the exact-count copy. Every rule has a test in bundle_test.go that constructs the
+// malicious archive and asserts the refusal, and that suite is the characterization fence the
+// extraction was moved under — it passes unchanged before and after.
 
 // BundleStore holds the pushed bundles. Reads return ErrNoSource when the snapshot is absent, so the
 // distinction between "not opted in" and "store failure" survives all the way from SQL to the console.
@@ -119,7 +102,11 @@ func (b *BundleSource) Materialize(ctx context.Context, ref Ref) (Materialized, 
 	return Materialized{Dir: dir, Release: release}, nil
 }
 
-// extractTarGz unpacks a gzipped tar into dest, enforcing every rule in this file's header comment.
+// extractTarGz unpacks a gzipped tar into dest, running every entry past the shared TreeGuard.
+//
+// What is left here after the guard was factored out is exactly the tar-specific half: gzip framing,
+// the typeflag→EntryKind classification, and the exact-count copy. The refusals themselves are in
+// treeguard.go and the clone path runs the same ones.
 func extractTarGz(ctx context.Context, r io.Reader, dest string) error {
 	zr, err := gzip.NewReader(r)
 	if err != nil {
@@ -127,16 +114,12 @@ func extractTarGz(ctx context.Context, r io.Reader, dest string) error {
 	}
 	defer func() { _ = zr.Close() }()
 
-	// The extraction root, resolved. Compared against every destination path so that a rule can be
-	// stated in terms of the real filesystem rather than in terms of string prefixes.
-	root, err := filepath.Abs(dest)
+	adm, err := NewTreeGuard().Admit(dest)
 	if err != nil {
-		return fmt.Errorf("resolve dest: %w", err)
+		return err
 	}
 
 	tr := tar.NewReader(zr)
-	var entries int
-	var total int64
 	for {
 		// An upload is attacker-controlled work; a cancelled request must stop doing it.
 		if err := ctx.Err(); err != nil {
@@ -150,26 +133,10 @@ func extractTarGz(ctx context.Context, r io.Reader, dest string) error {
 			return fmt.Errorf("tar: %w", err)
 		}
 
-		entries++
-		if entries > MaxBundleEntries {
-			return fmt.Errorf("bundle has more than %d entries", MaxBundleEntries)
-		}
-		if len(hdr.Name) > MaxBundlePathLength {
-			return fmt.Errorf("entry path exceeds %d bytes", MaxBundlePathLength)
-		}
-
-		// 🔴 A pax header is METADATA, not a filesystem entry, and it is skipped before anything treats
-		// its name as a path. `git archive` writes `pax_global_header` (typeflag 'g') at the head of every
-		// archive of a repository that has a commit — so without this, `push-source` failed on EVERY
-		// repository, with `entry pax_global_header has unsupported type "g"`: the default branch below
-		// classifying a comment as a device node. Skipping it writes nothing and relaxes no rule; the
-		// extended-header form ('x') carries per-entry metadata Go's tar reader has already folded into
-		// the NEXT header by the time it is returned, so it is likewise nothing to unpack.
-		if hdr.Typeflag == tar.TypeXGlobalHeader || hdr.Typeflag == tar.TypeXHeader {
+		target, err := adm.Entry(tarEntryOf(hdr))
+		if errors.Is(err, ErrSkipEntry) {
 			continue
 		}
-
-		target, err := safeJoin(root, hdr.Name)
 		if err != nil {
 			return err
 		}
@@ -181,54 +148,50 @@ func extractTarGz(ctx context.Context, r io.Reader, dest string) error {
 			}
 
 		case tar.TypeReg:
-			if hdr.Size > MaxBundleFileBytes {
-				return fmt.Errorf("entry %s is %d bytes, over the %d limit", hdr.Name, hdr.Size, MaxBundleFileBytes)
-			}
-			if total+hdr.Size > MaxBundleTotalBytes {
-				return fmt.Errorf("bundle exceeds %d uncompressed bytes", MaxBundleTotalBytes)
-			}
 			if err := os.MkdirAll(filepath.Dir(target), 0o750); err != nil {
 				return fmt.Errorf("mkdir for %s: %w", hdr.Name, err)
 			}
-			n, err := writeFile(target, tr, hdr.Size)
-			if err != nil {
+			if _, err := writeFile(target, tr, hdr.Size); err != nil {
 				return fmt.Errorf("write %s: %w", hdr.Name, err)
 			}
-			total += n
-
-		case tar.TypeSymlink, tar.TypeLink:
-			// Refused outright — see this file's header comment for why resolving them is not equivalent.
-			return fmt.Errorf("entry %s is a link (%q); bundles may not contain links", hdr.Name, hdr.Linkname)
 
 		default:
-			// Char devices, block devices, FIFOs, sockets. Nothing discoverable is any of these, and an
-			// unpacker that skips unknown types quietly is how one of them eventually gets written.
+			// Unreachable: adm.Entry refuses or skips every other typeflag. It is a `default` rather
+			// than the absent arm of an exhaustive switch because "unreachable" is a claim about the
+			// guard, and a guard that is later relaxed must not silently start writing here.
 			return fmt.Errorf("entry %s has unsupported type %q", hdr.Name, string(rune(hdr.Typeflag)))
 		}
 	}
 }
 
-// safeJoin resolves name under root and refuses anything that would land outside it.
+// tarEntryOf classifies one tar header into the guard's vocabulary.
 //
-// Both classic escapes are covered: an absolute path ("/etc/passwd") and a relative climb ("../../x").
-// The check is on the CLEANED, joined result rather than on the input string — "a/../../b" contains no
-// leading ".." and still escapes, so inspecting the raw name is not enough.
-func safeJoin(root, name string) (string, error) {
-	if name == "" {
-		return "", fmt.Errorf("entry has an empty path")
+// 🔴 A pax header is METADATA, not a filesystem entry. `git archive` writes `pax_global_header`
+// (typeflag 'g') at the head of every archive of a repository that has a commit — so without this,
+// `push-source` failed on EVERY repository, with `entry pax_global_header has unsupported type "g"`:
+// the default arm classifying a comment as a device node. Classifying it as EntryMetadata writes
+// nothing and relaxes no rule; the extended-header form ('x') carries per-entry metadata Go's tar
+// reader has already folded into the NEXT header by the time it is returned, so it is likewise nothing
+// to unpack.
+func tarEntryOf(hdr *tar.Header) Entry {
+	e := Entry{Path: hdr.Name, RawKind: string(rune(hdr.Typeflag))}
+	switch hdr.Typeflag {
+	case tar.TypeXGlobalHeader, tar.TypeXHeader:
+		e.Kind = EntryMetadata
+	case tar.TypeDir:
+		e.Kind = EntryDir
+	case tar.TypeReg:
+		e.Kind = EntryFile
+		e.Size = hdr.Size
+	case tar.TypeSymlink, tar.TypeLink:
+		e.Kind = EntryLink
+		e.LinkTarget = hdr.Linkname
+	default:
+		// Char devices, block devices, FIFOs, sockets — EntryOther is the zero value, so this arm is
+		// the explicit statement of what the zero value means rather than a silent fallthrough.
+		e.Kind = EntryOther
 	}
-	if filepath.IsAbs(name) || strings.HasPrefix(name, "/") {
-		return "", fmt.Errorf("entry %s is an absolute path", name)
-	}
-	// Windows-style volume/backslash paths, which filepath.IsAbs does not catch on unix hosts.
-	if strings.Contains(name, `\`) || strings.Contains(name, ":") {
-		return "", fmt.Errorf("entry %s contains a volume or backslash separator", name)
-	}
-	target := filepath.Join(root, filepath.Clean(name))
-	if target != root && !strings.HasPrefix(target, root+string(os.PathSeparator)) {
-		return "", fmt.Errorf("entry %s escapes the extraction root", name)
-	}
-	return target, nil
+	return e
 }
 
 // writeFile writes exactly size bytes from r to path.

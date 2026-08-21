@@ -169,6 +169,7 @@
         "init",
         "link",
         "login",
+        "pair",
         "push-source",
         "report-verdict",
         "status",

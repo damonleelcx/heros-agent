@@ -29,7 +29,7 @@ PARITY_DIR ?= .parity
         sandbox-proof sandbox-proof-redcheck \
         classifier-calibration demo-patterngraph demo-proposals demo-billing demo-billing-states \
         release-rehearse release-rehearse-redcheck readme-install packaging-proof install-smoke install-smoke-refusals \
-        agent-rehearse agent-status \
+        agent-rehearse agent-status repo-intake-hermes \
         intent-holdout intent-holdout-strict p31-fence-redcheck console-edge-proof
 
 ## ci: the locally-provable gate (go + schema + console-types + discovery-ci + intent-holdout). Lint/db-proof run as their own CI jobs.
@@ -170,6 +170,20 @@ console-test: console-tokens
 # a gate nobody can see pass, and the day it stops running nothing goes red.
 operator-ledger:
 	cd web/admin-console && npm run scan:ledger
+
+## repo-intake-hermes: run P32's whole intake pipeline against a REAL repository over the REAL network.
+##
+## Every P32 fence is green, and green fences prove the parts. This proves the WALK a customer performs
+## — connect, clone from github.com, guard, archive, store, extract, discover, read the ledger, revoke,
+## and prove the tree is gone — against `nousresearch/hermes-agent`, a repository nobody here wrote.
+##
+## It stands up an ephemeral Postgres so the grant, the snapshot and the ledger are real rows.
+##
+## 🔴 The one thing NOT real is the credential: hermes-agent is public and GitHub serves it to any
+## basic-auth pair, so the run uses a placeholder and says so in its own output. A private repository
+## needs a grant a customer creates.
+repo-intake-hermes:
+	bash db/migrations/postgres/run_pg_docker.sh $(GO) run ./cmd/proof/repointake
 
 ## operator-hermes: run P26's operator surfaces against a REAL repository (nousresearch/hermes-agent).
 #
@@ -368,7 +382,7 @@ db-proof:
 ##           These tests are behind the `pgproof` build tag, so `make go` does not compile them; with
 ##           no database they FAIL rather than skip.
 pg-proof:
-	bash db/migrations/postgres/run_pg_docker.sh $(GO) test -tags pgproof -count=1 ./internal/pgmigrate/ ./internal/launch/ ./internal/billing/ ./internal/proposalstore/ ./internal/registry/ ./internal/variantspec/ ./internal/worktree/ ./internal/executor/ ./internal/runqueue/ ./internal/submit/ ./internal/e2e/ ./internal/telemetry/ ./internal/evalrun/ ./internal/metering/ ./internal/legal/ ./internal/api/ ./internal/tenancy/ ./internal/signup/ ./internal/herosagent/
+	bash db/migrations/postgres/run_pg_docker.sh $(GO) test -tags pgproof -count=1 ./internal/pgmigrate/ ./internal/launch/ ./internal/billing/ ./internal/proposalstore/ ./internal/registry/ ./internal/variantspec/ ./internal/worktree/ ./internal/executor/ ./internal/runqueue/ ./internal/submit/ ./internal/e2e/ ./internal/telemetry/ ./internal/evalrun/ ./internal/metering/ ./internal/legal/ ./internal/api/ ./internal/tenancy/ ./internal/signup/ ./internal/herosagent/ ./internal/sourceingest/
 
 ## demo-evalboard: stand up the P4 eval board against a live fan-out with a stubbed provider.
 ##                Everything between the queue and the pixel is the shipped path: the eval set comes

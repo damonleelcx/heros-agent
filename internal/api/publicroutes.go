@@ -135,6 +135,48 @@ var routeExposure = RouteExposure{
 	// asserts that reflectively rather than by reading the struct.
 	"/api/v1/agent-definition": ExposurePublic,
 
+	// ── P32 · the repository-connection surface ───────────────────────────────────────────────────
+	//
+	// 🔴 INTERNAL, and this is a DEVIATION from task 2.11's literal wording — recorded here rather
+	// than resolved silently, because the task and the PRD's own posture disagree and one of them has
+	// to lose.
+	//
+	// Task 2.11 says "connection routes on the API, added to the P19 ingress as `Exact` paths". The
+	// `Exact` half is honoured structurally: all four routes are FLAT (`/api/v1/repo-connections`,
+	// not `/api/v1/workflows/{id}/connection`), so publishing any of them later is a one-line rule
+	// and never needs a `Prefix` — which is the failure that half of the task exists to prevent.
+	//
+	// The PUBLISHING half is refused, on §7.1's own terms. `POST /api/v1/repo-connections` carries the
+	// forge credential in its body. It is the single most consequential unsolicited-traffic surface
+	// this phase could create, no CLI addresses it (the flow is a browser redirect from the forge back
+	// to the CONSOLE, which posts inside the cluster), and publishing a route nothing calls is exactly
+	// the review this file asks somebody to have: "should this be on the internet?" has a wrong answer
+	// here, and the wrong answer is yes.
+	//
+	// This is the same shape as `/api/v1/device/approve` above — a step that handles credential
+	// material, reached console→agentd, and deliberately absent from the manifest. If a future phase
+	// gives the CLI a `heros connect`, it changes ONE word here and adds four ingress rules, and
+	// `ingress_fence_test.go` will already be watching.
+	"/api/v1/repo-connections":            ExposureInternal,
+	"/api/v1/repo-connection-revocations": ExposureInternal,
+	"/api/v1/repo-connection-reads":       ExposureInternal,
+
+	// ── P32 §4 · the local-mode pairing ───────────────────────────────────────────────────────────
+	//
+	// SPLIT, and the split is the point. The two console routes are reached by the BFF inside the
+	// cluster and are `Internal`. The CLAIM is `Public`, because it is called by `heros pair` from the
+	// customer's own laptop — the same reason `/api/v1/device/token` is public, and the same shape:
+	// a machine outside the cluster completing a flow a person started in a browser.
+	//
+	// 🔴 Publishing the claim is safe for a reason worth stating rather than assuming. It requires an
+	// authenticated credential; it grants NOTHING (a pairing authorizes no read — it attributes a
+	// machine's transmissions to a workflow, and expires); its payload has three fields and refuses a
+	// fourth; and the code is 40 bits over a ten-minute window from `crypto/rand`. The worst outcome
+	// of a guessed code is a wrong machine name in the console's ledger, which is visible to the
+	// customer on the surface the pairing exists to populate.
+	"/api/v1/local-pairings":       ExposureInternal,
+	"/api/v1/local-pairing-claims": ExposurePublic,
+
 	// The parameterised originals. EXPAND-CONTRACT: they stay registered for one release so a CLI built
 	// before this change still works from INSIDE a cluster, and they are never published — which is the
 	// status quo, stated rather than inherited. They are removed when the CLI floor moves.

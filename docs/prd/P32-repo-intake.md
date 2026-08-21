@@ -154,7 +154,11 @@ tenant and workflow already filled in.
 ### 6.3 Mode 2 — per-repository read grant
 
 **FR6** — A connection authorizes **one repository**. An authorization flow that would grant access to
-repositories the customer did not name is refused, on every forge.
+repositories the customer did not name is refused, on every forge. The grant kind is per forge (§14 A2):
+a GitHub App installation with one selected repository; a GitLab project access token; a Bitbucket
+repository access token. A workflow may declare a **sub-path** within the connected repository, and the
+snapshot is rooted there (§14 A3) — the grant stays repository-scoped because no forge issues a narrower
+one. Organization-wide scope is refused on the record (§14 A5, ADR-013 Option B).
 
 **FR7** — The grant is **read-only**. No scope that can write a ref, open a pull request, or change a
 setting. Where the same customer also runs the ADR-005 hosted Git App, that is a **second, separate**
@@ -176,16 +180,18 @@ rejected, repository not found, revision not found, or network — four causes, 
 
 **FR13** — A local repository is read on the customer's machine by the existing bridge and **its contents
 are not transmitted**. **FR14** — The console pairs with a local agent; the affordance is a pairing flow,
-not a file picker that ships a tree. **FR15** — Mode 3's availability against a self-hosted deployment is
-determined by §14 Q1, and until that is answered the console SHALL state which deployments it works
-against rather than failing at the end of the flow.
+not a file picker that ships a tree. **FR15** — Mode 3 ships for the **hosted service only** (§14 A1), and the console SHALL state which
+deployments it works against **before** the pairing flow starts, rather than failing at the end of it. A
+self-hosted endpoint stays unnameable; naming one is a separate ADR.
 
 ### 6.5 Retention
 
-**FR16** — A snapshot obtained by clone inherits the bundle's retention rule exactly. A clone is not a
-licence to keep a tree longer than a push would have been. **FR17** — Retention is enforced on a schedule
-that runs whether or not anything else does, and its last successful run is readable from a health
-endpoint.
+**FR16** — A snapshot obtained by clone is retained for **72 hours** and then removed; a pushed bundle is
+retained until the customer deletes it. Both figures, and why they differ, are §14 A4 — a clone is not a
+licence to keep a tree longer than a push would have been, and 72 h is shorter than unbounded in the
+direction this requirement was written to protect. The **extracted tree** is released at the end of the
+operation in both modes and has no window at all. **FR17** — Retention is enforced on a schedule that runs
+whether or not anything else does, and its last successful run is readable from a health endpoint.
 
 ---
 
@@ -404,7 +410,134 @@ customer's ability to be assessed.
 
 ---
 
-## 14. Open questions
+## 14. Open questions — ANSWERED
+
+**Status: closed 2026-08-21 (P32 §1, System Designer).** All five are answered below and folded into the
+requirements they touch. The table of questions is kept underneath the answers rather than deleted,
+because a phase that later wants a different answer needs to read the question that was asked.
+
+### A1 — Mode 3 ships for the **hosted service only**, and the console says so before the flow starts
+
+**Answer.** Mode 3 is offered against `https://heros-agent.space` and no other endpoint. A self-hosted
+deployment is **out of scope for this phase** and the console states that as a precondition of the
+pairing flow, not as its final error.
+
+**Why.** `heros link` is pinned to one host and the pin is enforced twice
+([`runlink.IsLinkTarget`](../../internal/runlink), and `transport.assertLinkTarget` re-checking
+immediately before the request goes out). Naming a self-hosted endpoint means deciding what makes a
+destination nameable — which is a boundary decision about where a customer's run payload may be
+carried, and it is a **one-way door**: once an endpoint can be named by a flag, an environment variable
+or a config key, every future release has to keep it nameable. That decision earns its own ADR and its
+own review; smuggling it in as a P32 wiring detail would be the exact shape of change this repository's
+posture exists to refuse.
+
+**What is built instead.** FR15 becomes a *rendered precondition*: the console names the deployments
+Mode 3 works against **before** authorization can begin (§3, task 4.3). A customer on a self-hosted
+deployment is told at step zero, which is the difference between a limitation and a broken feature.
+
+**Carried, not closed.** A self-hosted Mode 3 remains a real product gap. It is recorded here and owned
+by a future ADR — *not* by a `TODO` in the pairing code.
+
+### A2 — **App where the forge issues one; repository access token where it does not** — per forge, stated
+
+| Forge | Grant kind | The narrowest form that forge actually supports | Why not the other |
+|---|---|---|---|
+| **GitHub** | `app_installation` | A GitHub App installation with **selected repositories** (exactly one), permissions `contents: read` + `metadata: read` | A PAT — even fine-grained — is a secret the customer pastes to us in plaintext, and it is revocable on their side only by deleting it |
+| **GitLab** | `access_token` | A **project access token** scoped to one project with `read_repository` | GitLab's App/OAuth equivalents are *user*- or *instance*-scoped. An instance-wide grant is Option B of ADR-013 wearing a different name, and it is refused (A5) |
+| **Bitbucket** | `access_token` | A **repository access token** with `repository:read` | Bitbucket's OAuth consumer is workspace-scoped — same objection as GitLab's |
+
+**Why the split rather than one rule.** The rule "always an App" is unimplementable on two of three
+forges, and a rule that cannot be implemented gets satisfied by pretending — a workspace grant recorded
+as if it were repository-scoped. Naming the grant kind **per forge, in the store**, makes the difference
+visible in the data rather than lost in an adapter.
+
+**What must be true of both kinds.** The value never appears in a request body, a config file, a log
+line, or an audit record (§7.1, task 3.3). `GrantKind` carries no scope field capable of expressing
+write (§6.3 FR7). Rotation and revocation are lifecycle operations with tests (task 3.2).
+
+### A3 — A connection covers the **whole repository**; a **workflow** names a sub-path
+
+**Answer.** The *grant* is repository-scoped. The *ingest* is sub-path-scoped: a workflow may declare a
+sub-path within a connected repository, and the snapshot materialized for that workflow is rooted there.
+A monorepo with forty services is one connection and forty workflows.
+
+**Why not a sub-path-scoped grant.** No forge issues one. GitHub scopes an installation to a repository,
+GitLab to a project, Bitbucket to a repository — none of them to a directory. A `Connection` row
+claiming sub-path scope would be a claim about a credential's reach that the credential does not honour,
+and the first person to read that row would believe it.
+
+**Why not "one connection per workflow, whole repository each".** Cloning 30,500 files to assess one
+directory is disproportionate, and it makes the entry ceilings (`MaxBundleEntries`) fire on repositories
+that are not attacking anything.
+
+**Consequence, stated.** What the platform *could* read (the repository) is wider than what it *does*
+read (the sub-path). That gap is honest and it is recorded per use: `CloneRecord` names the revision and
+the run that caused the read, so "what did you actually take" is answerable from the ledger rather than
+inferred from the grant.
+
+### A4 — **72 hours** for a cloned snapshot; a pushed bundle is held **until the customer deletes it**
+
+**The number: 72 hours (259 200 s) from the clone.** After it, the retention job removes the stored tree
+regardless of whether anything referenced it.
+
+**The bundle's rule, written down for the first time.** It was genuinely unwritten, and this question was
+right to say so. Two rules were conflated under one phrase:
+
+1. The **extracted tree** — released at the end of the operation that needed it, both modes. Already
+   enforced (`Materialized.Release`, deferred by `hostdiscovery`, asserted by
+   `TestRunReleasesTheSourceTree`). No window; it does not outlive the request.
+2. The **stored snapshot** — a pushed bundle is retained **until the customer deletes it** through
+   `DELETE /api/v1/workflow-source`. Unbounded, and correctly so: it exists because the customer ran a
+   command naming a revision, and expiring it would delete an artifact they chose to hand over and would
+   have to hand over again.
+
+**Why the clone is finite when the bundle is not — and why this is not a violation of FR16.** FR16's
+sentence is *"a clone is not a licence to keep a tree longer than a push would have been."* 72 h is
+shorter than unbounded, so the requirement is satisfied in the direction it was written to protect.
+Reading it as *"exactly the same number"* would mean holding a cloned tree forever, which inverts the
+requirement: the bundle's unbounded hold is backed by a customer **act** per revision, and a clone has
+no act behind it at all. An unbounded hold with no act is the standing capability ADR-013 spent its
+argument bounding.
+
+**Why 72 and not 24 or 168.** 24 h expires a snapshot across a weekend, so a Monday re-run silently
+re-clones — which spends the grant, and spending a grant unnecessarily is the cost this phase is
+measuring. 168 h means a connection revoked and forgotten on a Friday can leave a tree on our disk into
+the following week. 72 h spans a weekend, does not span a holiday, and is short enough that the worst
+case is bounded in days rather than in "until somebody notices."
+
+**Independent of retention: revocation deletes immediately** (D3, FR8). Retention is the floor, not the
+mechanism — a customer revoking after an incident is not asking for a faster cache expiry.
+
+### A5 — Organization-wide scope is **refused on the record** (ADR-013 Option B)
+
+No grant that covers a repository the customer did not name may be created, on any forge. This is not a
+default; there is no field in `Connection` that can express it and the connect path refuses an
+authorization whose resulting grant is broader than the single named repository (task 2.6), per forge,
+with a fence that can go red (task 7.4).
+
+**A later phase proposing organization-wide scope is amending [ADR-013](../adr/ADR-013-source-acquisition-posture.md),
+not extending P32.** That is the whole point of writing it here: the refusal has an address.
+
+### A6 — An unattended clone needs **no separate entitlement** in this phase
+
+**Answer.** `CloneRecord.Actor` distinguishes a person-initiated read from a scheduled or autonomous one
+(FR9), and that distinction is a **record**, not a gate. There is no plan tier, no toggle and no
+entitlement check keyed on it in P32.
+
+**Why not.** Two reasons at different levels of the ladder. *Level 5/6:* an entitlement axis is a pricing
+and packaging surface, and a pricing surface is a one-way door — it is far easier to add a tier later
+than to remove one customers have bought. *Level 3:* the control the customer actually asked for already
+exists and is simpler — revoking the connection stops every read, attended or not, and it is one button.
+
+**What would change the answer.** A customer who wants attended-only reads has a real requirement, and it
+is not served by revocation (they would have to re-authorize per use, which is Option D of ADR-013 and
+was rejected for forbidding automation). If that demand appears, the next phase adds a per-connection
+`unattended: allow|deny` flag — which is a field on an existing row, not a new table and not a new tier.
+Recorded so the cheap version is the one that gets built.
+
+---
+
+### The questions, as they were asked
 
 | # | Question | Why it is open |
 |---|---|---|

@@ -40,7 +40,8 @@
     "scan:legal": "node scripts/scan-legal.mjs",
     "scan:origins": "node ../design-system/scan-origins.mjs",
     "release:sourcemaps": "node scripts/upload-sourcemaps.mjs",
-    "scan:events": "node ../design-system/scan-events.mjs"
+    "scan:events": "node ../design-system/scan-events.mjs",
+    "dev:connections": "node scripts/dev-connections.mjs"
   },
   "dependencies": {
     "@tailwindcss/postcss": "4.1.12",

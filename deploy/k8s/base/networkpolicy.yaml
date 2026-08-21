@@ -110,6 +110,29 @@ spec:
     # excluded so this rule cannot be a backdoor to another in-cluster service). This is the ONE place
     # the platform's model-call egress lives. The airgapped overlay REPLACES this with the on-prem
     # gateway's address and removes public egress entirely.
+    #
+    # 🔴 P32 · CLONING A CUSTOMER'S REPOSITORY EGRESSES THROUGH THIS SAME RULE, and that is worth
+    # saying out loud rather than leaving to be discovered:
+    #
+    #   github.com   gitlab.com   bitbucket.org        (sourceingest.CloneHosts())
+    #
+    # It is a NEW EGRESS CLASS. It is not implicitly permitted because it is git, and it is not
+    # implicitly permitted because a rule for `443 to the public internet` already existed. The two
+    # are different things: a model call sends a prompt to a vendor the operator chose, and a clone
+    # PULLS a customer's source under a standing credential. An operator reading this file must be
+    # able to see that the platform reaches code hosts, because that is a question a customer's
+    # security review asks and the answer used to be invisible here.
+    #
+    # ⚠️ The rule below is an ipBlock, so it cannot NAME those hosts — L3/L4 policy has no DNS. That
+    # is a real limitation and the honest consequence is: **this policy does not restrict WHICH
+    # external hosts agentd reaches; the application does.** `sourceingest.CloneHosts()` is the
+    # restriction, `forge.go` is where it lives, and `TestForgeHostsAreOnTheEgressAllowlist` checks
+    # that this comment and that function name the same three hosts — so a fourth forge added in Go
+    # makes this file go red instead of silently widening what the platform pulls.
+    #
+    # An airgapped or egress-restricted deployment that wants a REAL host restriction replaces this
+    # rule with an egress proxy and allowlists the three names there. That is a deployment decision,
+    # it is not made here, and pretending an ipBlock made it would be worse than saying so.
     - to:
         - ipBlock:
             cidr: 0.0.0.0/0

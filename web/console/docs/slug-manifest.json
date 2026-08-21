@@ -144,7 +144,7 @@
     {
       "route": "/docs/reference/cli",
       "source": "docs/en/reference/cli.md",
-      "content_hash": "7e1b01caad5ea2dfdee487be655da3935a8592187258a82f59224035cb64eb18",
+      "content_hash": "353992094b4cb4cb25a70595fffcba1219ae63842fb95ab6b59153231f9d01f3",
       "anchors": [
         "exit-codes",
         "configuration-and-which-source-wins",
@@ -160,6 +160,7 @@
         "init",
         "link",
         "login",
+        "pair",
         "push-source",
         "report-verdict",
         "status",
@@ -192,7 +193,7 @@
     {
       "route": "/docs/reference/schemas",
       "source": "docs/en/reference/schemas.md",
-      "content_hash": "ce0ad8e35182b7de9ef1f2136cf52355c2ae7aaa7413b3020eeac6bf437179df",
+      "content_hash": "2ce27fca1d280f5137c0661c2a591c78cc7fdb8b9139017a2fcbf9d7c8accace",
       "anchors": [
         "console-view",
         "metric-event",

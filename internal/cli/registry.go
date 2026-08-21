@@ -107,6 +107,8 @@ var flags = map[string]Flag{
 	"dry-run":              {Name: "dry-run", Type: "bool", Default: "false", Env: EnvPrefix + "DRY_RUN", Summary: "show exactly what would be transmitted, and transmit nothing (link: the payload itself; push-source: the snapshot's revision, file count and size)"},
 	"with-ir":              {Name: "with-ir", Type: "path", Default: "", Env: EnvPrefix + "WITH_IR", Summary: "ALSO transmit this workflow's structure (symbols, files, line spans, models, tool counts) as a second, opt-in payload — never prompt text or source (link)"},
 	"force":                {Name: "force", Type: "bool", Default: "false", Env: EnvPrefix + "FORCE", Summary: "overwrite an existing config"},
+	"code":                 {Name: "code", Type: "string", Default: "", Env: EnvPrefix + "CODE", Summary: "the pairing code shown in the console (pair). Case and dashes do not matter, and the alphabet excludes O/0 and I/1 so a mistyped character is unlikely"},
+	"machine":              {Name: "machine", Type: "string", Default: "", Env: EnvPrefix + "MACHINE", Summary: "what to call this machine in the console (pair). Defaults to this host's name, which is transmitted — set this if you would rather it were not"},
 	"proposal":             {Name: "proposal", Type: "string", Default: "", Env: EnvPrefix + "PROPOSAL", Summary: "the platform-issued proposal id a verdict measures (report-verdict). Taken from the flag, never from the verdict file: where the two disagree the command refuses rather than attaching a measurement to the wrong change"},
 	"from":                 {Name: "from", Type: "string", Default: "", Env: EnvPrefix + "FROM", Summary: "path to the verdict your verification run produced, or `-` for stdin (report-verdict). Its case ids and free-text reason are NOT transmitted"},
 	"revision":             {Name: "revision", Type: "string", Default: "", Env: EnvPrefix + "REVISION", Summary: "the commit the verification ran at (report-verdict) — a revision id, never the code at it"},
@@ -243,6 +245,19 @@ var commands = []Command{
 		SuccessExit:  0,
 		Prerequisite: "a git repository with at least one commit — the snapshot is `git archive` of a revision, never the working directory",
 		Unavailable:  "push-source is a platform command and is unavailable in this build",
+	},
+	{
+		Name: "pair", Summary: "pair THIS machine with the console so a repository is read here and never transmitted", Avail: AvailNetwork,
+		Flags:   []string{"code", "repo", "commit", "machine"},
+		Example: "heros pair --code ACDE-FGHJ --repo .",
+		// 🔴 The success line names what CROSSED, exhaustively, and it is the shortest such line in
+		// this registry on purpose: the whole property of this mode is that the repository stays here,
+		// and a summary that described the pairing without saying what was sent would leave the reader
+		// to assume. Three values, named.
+		Success:      "the workflow this machine is now paired for, and the three values that crossed: the code, this machine's name and the commit id. The repository itself is NOT transmitted.",
+		SuccessExit:  0,
+		Prerequisite: "a pairing code from the console, and a git repository with at least one commit — the commit id is the only fact about your tree that crosses",
+		Unavailable:  "pair is a platform command and is unavailable in this build",
 	},
 	{
 		Name: "analyse", Summary: "run the platform's analysis agent HERE, under your own provider credential, and submit what it found", Avail: AvailNetwork,

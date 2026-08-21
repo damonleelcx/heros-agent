@@ -25,6 +25,7 @@ import (
 	"github.com/heros-foreal/agentd/internal/linkingest"
 	"github.com/heros-foreal/agentd/internal/mailer"
 	"github.com/heros-foreal/agentd/internal/providergateway"
+	"github.com/heros-foreal/agentd/internal/sourceingest"
 	"github.com/heros-foreal/agentd/internal/tenancy"
 )
 
@@ -228,6 +229,20 @@ type Server struct {
 	// p12 is the P12 forge-delivery surface (console delivery read model + CI-mediated fetch/report),
 	// mounted by MountForgeDelivery when available. It holds no forge credential.
 	forgeDelivery ForgeDeliverySource
+	// connections is the P32 repository-connection surface, mounted by MountConnections. Nil on a
+	// deployment that does not offer connections — the routes then answer 503, which is a policy
+	// answer a customer can read where a 404 would read as a broken URL.
+	connections ConnectionSource
+	// ingestMetrics and ingestRetention are the P32 source-ingest health signals, reported by
+	// /readyz. Both nil on a deployment that does not clone.
+	ingestMetrics   IngestMetricsSource
+	ingestRetention RetentionHealthSource
+	// pairings is the P32 §4 local-mode bridge, mounted by MountLocalPairing.
+	pairings PairingSource
+	// deploymentURL is this deployment's own public address, or "" when it has not been told. Read
+	// only by the local-mode availability answer — see SetDeploymentURL for why "" is reported as
+	// unavailable rather than assumed to match.
+	deploymentURL string
 
 	// conversations is P31's conversational surface, mounted by MountConversations. Nil means this
 	// deployment ships no conversational console and the five routes are NOT REGISTERED — a 404 for a
@@ -532,6 +547,36 @@ func New(db *sql.DB, cfg config.Config) *Server {
 	return s
 }
 
+// IngestMetricsSource publishes per-forge ingest outcomes. One method rather than an import of the
+// ingest package's type: /readyz needs the ANSWER, not the type.
+type IngestMetricsSource interface {
+	Health() sourceingest.IngestHealth
+}
+
+// RetentionHealthSource publishes the retention job's last successful run.
+type RetentionHealthSource interface {
+	Health() sourceingest.RetentionHealth
+}
+
+// SetSourceIngestHealth wires the P32 signals into /readyz (tasks 5.2, 5.4).
+//
+// # 🔴 Why these are NOT in `components`
+//
+// Every entry in the `components` map is a GATE: a degraded one makes the whole signal not-ready and
+// pulls the process out of its Service endpoints. Neither of these may do that.
+//
+// A forge whose adapter is failing is a real problem for the customers using that forge and is not a
+// reason to take the platform down for everyone else — Mode 1 is unaffected, and the whole posture of
+// this phase is that no feature is gated on a connection. A retention sweep that has not run yet is
+// likewise not an outage; it is a job that needs looking at.
+//
+// So both are reported at the TOP LEVEL beside `secrets_source`, where a monitor can alert on them
+// specifically. `escalated` is the field to page on, and it is a value rather than a log-line regex.
+func (s *Server) SetSourceIngestHealth(metrics IngestMetricsSource, retention RetentionHealthSource) {
+	s.ingestMetrics = metrics
+	s.ingestRetention = retention
+}
+
 // handleHealthz reports liveness — the process is up and serving.
 func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
@@ -615,6 +660,18 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 	// task 5.3 names, and the one where a box reports unhealthy for a reason unrelated to its health.
 	if s.conversations != nil && s.conversations.streams != nil {
 		body["conversation_streams"] = s.conversations.streams.Health()
+	}
+	if s.ingestMetrics != nil {
+		// P32 task 5.4 · clone duration, bytes and failure cause, BROKEN OUT PER FORGE. The aggregate
+		// is present as `total` and is never the only figure available: three forges behind one
+		// success rate is the shape where a completely broken adapter reads as 96% overall.
+		body["source_ingest"] = s.ingestMetrics.Health()
+	}
+	if s.ingestRetention != nil {
+		// P32 task 5.2 · the retention job's last SUCCESSFUL run. Zero deletions is the normal
+		// result, so "did it delete anything" cannot be the signal — "when did it last complete" is,
+		// and only the job can publish it.
+		body["source_retention"] = s.ingestRetention.Health()
 	}
 	body["error_reporting"] = s.errorReporterState()
 	if s.agentReadiness != nil {

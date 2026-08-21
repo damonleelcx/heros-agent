@@ -46,6 +46,11 @@ type NetCommands interface {
 	// from Link, not a flag on it: sending a run's numbers and sending the repository are different
 	// things to agree to, and a reviewer must be able to point at the one entry point that sends source.
 	PushSource(cfg Config, s Streams) error
+	// Pair claims a pairing code the console issued, so the console can say WHICH machine reads a
+	// workflow in place (P32 §4). Its own method for the reason every other one here has one — and
+	// this is the one that sends the LEAST: a code, this machine's name, and a commit id. It is the
+	// entry point for Mode 3, whose whole property is that the repository is never transmitted.
+	Pair(cfg Config, s Streams) error
 	// ReportVerdict transmits a verification VERDICT the CI measured for one platform-issued proposal.
 	// Its own method for the same reason PushSource is: a run link, a source snapshot and a measurement
 	// that decides whether a change may be delivered are three different things to agree to, and a
@@ -128,6 +133,11 @@ func Main(args []string, s Streams, env func(string) (string, bool), net NetComm
 			return report(operational("push-source is a platform command and is unavailable in this build", nil), s, cmd)
 		}
 		return codeOf(net.PushSource(cfg, s), s, cmd)
+	case "pair":
+		if net == nil {
+			return report(operational("pair is a platform command and is unavailable in this build", nil), s, cmd)
+		}
+		return codeOf(net.Pair(cfg, s), s, cmd)
 	case "report-verdict":
 		if net == nil {
 			return report(operational("report-verdict is a platform command and is unavailable in this build", nil), s, cmd)
@@ -175,6 +185,9 @@ func parse(cmd string, args []string, env func(string) (string, bool), s Streams
 	email := fs.String("email", "", "email address to sign in as (login)")
 	device := fs.Bool("device", false, "approve this terminal from a browser instead of typing a password (login)")
 	org := fs.String("org", "", "organization to sign in to, when you belong to more than one (login)")
+	// P32 §4 · `heros pair`. The code the console issued, and what this machine calls itself.
+	pairCode := fs.String("code", "", "the pairing code shown in the console (pair)")
+	pairMachine := fs.String("machine", "", "what to call this machine in the console (pair; default: this host's name)")
 	// 🔴 `--with-ir` takes an OPTIONAL value (P29 §2.5). Both forms are kept, on purpose:
 	//
 	//	--with-ir            discover the structure in place from --repo, and transmit it
@@ -239,6 +252,7 @@ func parse(cmd string, args []string, env func(string) (string, bool), s Streams
 		"force": "false", "manifest": "", "sig": "", "asset": "",
 		"node": "", "model": "", "prompt": "", "context-policy": "", "skills": "", "tools": "",
 		"apply-mode": "", "drop-tolerance": "", "clear-drop-tolerance": "false", "apply": "false",
+		"code": "", "machine": "",
 	}
 	r := NewResolver(defaults)
 	r.LoadEnv(env)
@@ -280,6 +294,8 @@ func parse(cmd string, args []string, env func(string) (string, bool), s Streams
 	put("report", *report)
 	put("spec", *spec)
 	put("commit", *commit)
+	put("code", *pairCode)
+	put("machine", *pairMachine)
 	put("repo-url", *repoURL)
 	put("workflow-id", *workflowID)
 	put("seeds", strconv.Itoa(*seeds))
@@ -411,6 +427,10 @@ Platform commands (explicit, authenticated; transmit only to https://heros-agent
              graph carry real labels rather than unclassified dots. The largest thing this
              CLI ever sends; --dry-run reports exactly what it contains and sends nothing,
              and --forget deletes a snapshot the platform is holding.
+  pair       pair THIS machine with the console, so a repository is read HERE and never sent.
+             The console shows a code; you type it in a terminal that is already on the machine
+             holding the repository. Exactly three values cross: the code, this machine's name
+             and the commit id. The repository itself is not transmitted, on any flag.
   analyse    run the platform's analysis agent on THIS machine, against the gap in an IR you
              already discovered, spending YOUR provider credential — and submit what it found
              through the same opt-in ingest that link --with-ir uses. For organizations an

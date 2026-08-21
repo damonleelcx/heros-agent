@@ -184,7 +184,24 @@ fi
 # `TestEveryStreamPathIsPublishedAndUnbuffered` asserts both directions.
 PLATFORM_STREAM_PATHS="/api/v1/conversation-stream"
 
-PLATFORM_PUBLIC_PATHS="/api/v1/whoami /api/v1/run-links /billing/webhook /api/v1/device/authorize /api/v1/device/token /api/v1/auth/password/signin /api/v1/workflow-ir /api/v1/workflow-source /api/v1/workflow-source-discovery /api/v1/proposal-verdicts /api/v1/transform-receipts /api/v1/proposal-generations /api/v1/agent-definition /api/v1/conversations /api/v1/conversation-turns /api/v1/conversation-stream /api/v1/conversation-approvals /api/v1/conversation-trace"
+PLATFORM_PUBLIC_PATHS="/api/v1/whoami /api/v1/run-links /billing/webhook /api/v1/device/authorize /api/v1/device/token /api/v1/auth/password/signin /api/v1/workflow-ir /api/v1/workflow-source /api/v1/workflow-source-discovery /api/v1/proposal-verdicts /api/v1/transform-receipts /api/v1/proposal-generations /api/v1/agent-definition /api/v1/local-pairing-claims /api/v1/conversations /api/v1/conversation-turns /api/v1/conversation-stream /api/v1/conversation-approvals /api/v1/conversation-trace"
+
+# ── 🔴 P32 · OUTBOUND: THE PLATFORM CLONES CUSTOMER REPOSITORIES ─────────────────────────────────
+#
+# This box makes OUTBOUND HTTPS connections to code hosts. That is a new egress class as of P32, it is
+# not implicitly permitted because it is git, and an operator who firewalls outbound traffic has to
+# know about it or repository connections fail with `network` and nothing says why.
+#
+#   github.com   gitlab.com   bitbucket.org
+#
+# These are the complete set, they come from `sourceingest.CloneHosts()`, and
+# `TestForgeHostsAreOnTheEgressAllowlist` checks this list against that function — so a fourth forge
+# added in Go makes this script go red rather than silently widening what the box pulls.
+#
+# ⚠️ A deployment that does NOT want the platform reaching code hosts simply does not create any
+# repository connection: the routes stay mounted, no grant exists, and every workflow reads through a
+# pushed bundle exactly as before. No feature is gated on a connection.
+PLATFORM_CLONE_HOSTS="github.com gitlab.com bitbucket.org"
 
 # ── 🔴 P31 · THE STREAM MUST NOT BE BUFFERED, and a buffering hop fails SILENTLY ─────────────────
 #

@@ -217,6 +217,21 @@ spec:
           - path: /api/v1/agent-definition
             pathType: Exact
             backend: { service: { name: agentd, port: { number: 4321 } } }
+          # P32 §4 · `heros pair` CLAIMS a code the person started in the console, from the machine
+          # that already holds the repository.
+          #
+          # 🔴 One route of three. The two console-side pairing routes (`POST`/`GET
+          # /api/v1/local-pairings`) are reached by the BFF inside the cluster and are deliberately
+          # ABSENT — the same shape as `/api/v1/device/approve`. This one is here for the same reason
+          # `/api/v1/device/token` is: a machine outside the cluster completes a flow a person started
+          # in a browser, and it cannot be reached through the console.
+          #
+          # 🚫 Nothing from the customer's tree crosses here. The payload has three fields — the code,
+          # the machine's name and a commit id — and the handler refuses a fourth. A pairing grants no
+          # read: it attributes what an already-authenticated agent sends to a workflow, and expires.
+          - path: /api/v1/local-pairing-claims
+            pathType: Exact
+            backend: { service: { name: agentd, port: { number: 4321 } } }
           # P31 §2 · the conversational console. Five FLAT routes, five Exact rules.
           #
           # ⚠️ The flatness is not a style choice. The natural shapes carry `{id}` segments, an Exact rule

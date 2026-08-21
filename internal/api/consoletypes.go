@@ -6,6 +6,7 @@ import (
 	"github.com/heros-foreal/agentd/internal/harnessruntime"
 	"github.com/heros-foreal/agentd/internal/patternclassifier"
 	"github.com/heros-foreal/agentd/internal/scorecard"
+	"github.com/heros-foreal/agentd/internal/sourceingest"
 	"github.com/heros-foreal/agentd/internal/telemetry"
 )
 
@@ -126,6 +127,54 @@ func ConsoleEnums() []ConsoleEnum {
 			Members: intentNames(),
 			Doc:     "The fourteen things this surface can be asked. Equal, by fence, to the set of working surfaces.",
 		},
+		// ── P32 · the three vocabularies the connection surface switches on ─────────────────────
+		//
+		// 🔴 `CloneCause` is the one that matters most. FR11 says four causes render as four messages,
+		// never one — and the failure a generated union prevents is precisely the one that would break
+		// it: a fifth cause added in Go and absent from the browser's union lands in a `default:` arm
+		// and renders as NOTHING, which in a failure list is indistinguishable from a read that
+		// succeeded.
+		{
+			Name: "CloneCause", Sample: sourceingest.CloneCause(""),
+			Members: stringsOf(sourceingest.CloneCauses()),
+			Doc: "The four reasons a clone failed. A rotated token and a renamed default branch are " +
+				"different people's problems on different days; one message sends both to the same wrong place.",
+		},
+		{
+			Name: "SourceForge", Sample: sourceingest.Forge(""),
+			Members: stringsOf(sourceingest.Forges()),
+			Doc:     "The three code hosts a repository can be connected from. Each expresses its narrowest grant differently (PRD §14 A2).",
+		},
+		{
+			Name: "CloneOutcome", Sample: sourceingest.Outcome(""),
+			Members: stringsOf(sourceingest.Outcomes()),
+			Doc: "What one entry in the read ledger records: a success, or one of the four causes. FIVE " +
+				"members, because an outcome the browser does not recognise renders as nothing, which in a " +
+				"list of reads is indistinguishable from a read that succeeded.",
+		},
+		{
+			Name: "SourceActor", Sample: sourceingest.Actor(""),
+			Members: stringsOf([]sourceingest.Actor{sourceingest.ActorPerson, sourceingest.ActorScheduled}),
+			Doc: "Whether a person was present for a read. The distinction the whole disclosure exists " +
+				"for: a connection is usable when the customer is not there.",
+		},
+		{
+			Name: "SourceGrantKind", Sample: sourceingest.GrantKind(""),
+			Members: []string{string(sourceingest.GrantAppInstallation), string(sourceingest.GrantAccessToken)},
+			Doc:     "How the forge issued the read grant. Per forge, per PRD §14 A2 — an App where one exists, a repository-scoped token where it does not.",
+		},
+		{
+			Name: "PairingState", Sample: sourceingest.PairingState(""),
+			Members: stringsOf(sourceingest.PairingStates()),
+			Doc: "Where a local-mode pairing is. `expired` is a distinct state rather than a deletion, " +
+				"because \"your code expired\" and \"no such code\" send a person to two different places.",
+		},
+		{
+			Name: "SourceMode", Sample: sourceingest.Mode(""),
+			Members: stringsOf(sourceingest.Modes()),
+			Doc: "How a workflow's source arrives: a pushed bundle (the default), a connected " +
+				"repository, or a local path. No feature is gated on any of them.",
+		},
 	}
 }
 
@@ -202,6 +251,25 @@ func ConsoleViewTypes() []ConsoleViewType {
 
 		// ── P20 · how to install it, and what the release actually delivered ──
 		{Name: "InstallView", Sample: installView{}, Endpoint: "GET /api/v1/install"},
+
+		// ── P32 · repository connections ───────────────────────────────────────────────────────
+		//
+		// Four types rather than one, because the console has four questions and they have different
+		// lifetimes: what is connected (a list, re-read on every page load), what a grant permits
+		// (build-time facts from the forge adapters, carried on the list so the consent screen needs
+		// no second round trip), what was actually read (a ledger, opened per connection), and what a
+		// revocation removed (a receipt shown once).
+		{Name: "ConnectionsView", Sample: ConnectionsView{}, Endpoint: "GET /api/v1/repo-connections"},
+		{Name: "ConnectionView", Sample: ConnectionView{}, Endpoint: "POST /api/v1/repo-connections"},
+		{Name: "CloneLedgerView", Sample: CloneLedgerView{}, Endpoint: "GET /api/v1/repo-connection-reads"},
+		{Name: "RevocationView", Sample: RevocationView{}, Endpoint: "POST /api/v1/repo-connection-revocations"},
+
+		// P32 §4 · Mode 3. `LocalPairingsView` carries the AVAILABILITY answer as well as the pairings,
+		// because FR15's requirement is that the console states which deployments the bridge works
+		// against BEFORE the flow starts — and a second round trip for that is a round trip a page can
+		// render without.
+		{Name: "LocalPairingsView", Sample: LocalPairingsView{}, Endpoint: "GET /api/v1/local-pairings"},
+		{Name: "PairingView", Sample: PairingView{}, Endpoint: "POST /api/v1/local-pairings"},
 
 		// ── P31 · the conversational console ─────────────────────────────────
 		//
