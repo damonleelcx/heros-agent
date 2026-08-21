@@ -30,8 +30,26 @@ customer.
 not run node X"* — it is a task. The whole difference between a report someone acts on and one they
 discount is in that string, which is why it is a requirement and not a nicety.
 
-**Open.** PRD §14 Q1 asks whether readers will actually hold `observed` and `measured` apart. Worth
-validating with real readers before stage 3 rather than after.
+**Answered (PRD §14 A1).** Four states stay. The distinction is carried by the SENTENCE rather than by
+a badge: an `observed` finding says what the code *is* (present tense, no number); a `measured` finding
+says what a run *scored* (a number, its interval, the size of the set). A badge is a legend a reader has
+to learn, and §9.4's warning is precisely that the matrix erodes where two states differ only in
+styling.
+
+🔴 The reader validation the question asked for has **not** been run. It is a **stage-3 entry gate**:
+five engineers who have not read the PRD are shown eight findings with the state labels removed and
+asked *"could you check this yourself by opening your editor?"* — pass at ≥ 7 of 8. Below that, the copy
+is wrong and the states are re-argued, not the readers.
+
+**A second enum, deliberately.** `conversation.FindingState` (P31) is `measured | not_measured |
+refused | stale`; `assessment.State` is `measured | observed | not_measured | refused`. P31's own
+comment claims P33 would import it, and that claim is now false — corrected in place. The rule P31
+states is the one being followed: *"the single-truth-source rule applies to the vocabulary even though
+it does not apply to the enum boundary."* `stale` is a fact about a pin answering a question about a
+NEWER revision, and an assessment is *of* one revision, so nothing in it can be stale with respect to
+itself. `observed` is a distinction a conversation never had to draw because it never reported a
+structural extraction. The three shared spellings are asserted byte-identical in both directions by
+`TestTheThreeSharedStateSpellingsAreIdentical`.
 
 ## D2 — Structural before inferred, always
 

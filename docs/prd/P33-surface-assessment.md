@@ -9,7 +9,7 @@
 | **Support roles** | System Designer, Backend Dev, Frontend Dev, QA, DevOps, Sales Operations |
 | **Upstream** | [P32](P32-repo-intake.md) (source) · [P31](P31-conversational-console.md) (somewhere to report) · P1 (IR) · P3.5 (pattern classifier) · P4 (evalgen, harness, stats) · P29 (the `not reported` vocabulary) · P30 (HEROS, pinned inference) |
 | **Unblocks** | [P35](P35-autonomous-improvement-run.md) — nothing can be proposed without a finding to propose against |
-| **Status** | Proposed — awaiting sign-off on §14 |
+| **Status** | In implementation — §14 Q1–Q5 answered and folded in (2026-08-21) |
 
 ---
 
@@ -438,7 +438,133 @@ in axis count.
 
 ---
 
-## 14. Open questions
+## 14. Open questions — ANSWERED
+
+**Status: closed 2026-08-21 (P33 §1, System Designer).** All five are answered below and folded into the
+requirements they touch. The table of questions is kept underneath the answers rather than deleted,
+because a phase that later wants a different answer needs to read the question that was asked.
+
+### A1 — **Keep four states**, and the distinction is carried by the VERB, not by a shade
+
+**Answer.** `observed` and `measured` stay separate. What changes is that the difference stops being a
+label a reader has to interpret and becomes the sentence itself: an `observed` finding says what the
+code **is**, a `measured` finding says what a run **scored**.
+
+| State | The sentence's shape | Worked example |
+|---|---|---|
+| `observed` | present tense, no number, no interval | *"all four call sites name `gpt-4o-mini` with temperature 0.2"* |
+| `measured` | a number, its interval, and the size of the set behind it | *"the extraction suite scores 0.81 (0.74–0.88) over 5 seeds, 3 cases"* |
+
+**Why keep four.** Collapsing them conflates *true by construction* with *true by experiment*. They
+support different actions: an engineer checks an observation against their own code in thirty seconds
+and cannot check a measurement at all without the board behind it. And the collapse is one-way — once
+one state carries both meanings, nothing in a stored finding can separate them again.
+
+**Why the verb rather than a badge.** A badge is a legend a reader has to learn, and §9.4's whole
+warning is that the render matrix erodes where two states differ only in styling. A sentence that
+cannot be written the other way needs no legend.
+
+**🔴 What is NOT done, and it is a real gap.** The question asked for validation *with real readers*,
+and no reader study has been run. What exists instead is:
+
+- the copy rule above, applied to every string the console ships (§8.1, task 8.1);
+- a **stage-3 entry gate**: before any measured finding reaches a customer, five engineers who have not
+  read this PRD are shown eight findings with the state labels removed and asked, for each, *"could you
+  check this yourself by opening your editor?"* The gate passes at **≥ 7 of 8 correctly separated**.
+  Below that, the copy is wrong and the states are re-argued — not the readers.
+
+Recorded here rather than as a `TODO`, because the gate belongs to a rollout stage that has not started.
+
+### A2 — **Inference is the platform's spend; measurement is the customer's key.** The origin split IS the billing boundary
+
+**Answer.** The two kinds of provider call in an assessment sit on opposite sides of P7's line, and
+which side a call is on is exactly the finding's `origin`:
+
+| Producing | Whose provider account | Whose money | Bounded by |
+|---|---|---|---|
+| `origin: structural` | none — no provider call happens | nobody's | n/a |
+| `origin: inferred` | **the platform's** | **the platform's** | the per-assessment cap (§7.3) *and* the existing per-tenant and fleet ceilings in `internal/herosagent/caps.go` |
+| `state: measured` | **the customer's**, exactly as every other eval run in the product | the customer's | their own provider account |
+
+**Why this line and not another.** P7 G9 is that *"the platform never resells provider tokens"*, and
+`billing.ErrResoldTokens` enforces it on the invoice. An inference is HEROS reading the customer's
+source to answer a question the platform asked itself — it is the platform's own analysis and the
+platform pays for it. An eval run is the customer's program executing against the customer's provider;
+billing it any other way would make the platform a reseller of exactly the kind that error refuses.
+
+**What this changes.** Nothing in billing. The per-assessment cap is a *containment* control, not a
+charge: it exists so one repository cannot consume the tenant's whole ceiling, and exhausting it
+degrades to `not_measured` with `budget_exhausted`. Spend is **attributed** to the tenant for visibility
+and rate-limiting (task 6.4), and no invoice line represents it.
+
+**Carried, not closed.** If a tenant ever wants inference on *their* key — for a data-residency reason,
+say — that is a new grant shape and it earns its own decision. It is not reachable by widening a field
+here, because there is no field here that could express it.
+
+### A3 — Absence is `observed`; the opinion about absence is P35's
+
+**Answer.** *"No memory reads or writes were found across twelve nodes"* is an **`observed`** finding,
+because a total scan of the IR found none. *"This repository should have a memory strategy"* is a
+**proposal** and belongs to [P35](P35-autonomous-improvement-run.md), where verification can decide it.
+
+**Why the split.** An absence found by exhaustive extraction is checkable — the reader can grep. The
+judgement that the absence is a defect is useful and unfalsifiable, which is exactly the combination
+this phase's whole design refuses to put in the result position. Ruling R4 is about a number; this is
+the same rule applied to a sentence.
+
+**Where it is enforced.** `assessment.Observed`'s doc states the rule, and the wording is a copy
+requirement: an observation describes the code, never what the code *ought* to be.
+
+### A4 — An assessment is retained for the life of its **workflow**, and it is exportable as its own JSON
+
+**Answer.**
+
+1. **Retention.** An assessment lives until the workflow it describes is deleted, or the tenant is.
+   There is no timer.
+2. **Export.** `schemas/assessment.schema.json` **is** the export format. The console downloads
+   precisely that document — not a PDF, not a rendering.
+3. **Revocation.** Revoking a P32 connection deletes the snapshots derived from it and **does not**
+   delete assessments derived from those snapshots.
+
+**Why no timer, when a cloned snapshot expires in 72 hours (P32 A4).** They are different objects. A
+snapshot is **the customer's source on our disks** — the thing a 72-hour rule exists to bound. An
+assessment carries no source: §7.4 already forbids storing prompt text or source, and every finding is
+a claim plus a reference into a surface the platform already holds. Expiring it would delete the
+customer's own report of their own repository on a schedule nobody asked for, and the report is the
+product.
+
+**Why revocation does not cascade, stated explicitly because it is the uncomfortable half.** The
+cascade P32 built exists so that *"which of the customer's repositories are we holding"* has one
+answer. An assessment is not an answer to that question — it is a set of sentences about code we no
+longer hold. Deleting the report when the grant ends would mean a customer loses the analysis they
+paid for by tidying up an access grant, which is a trap. **A customer who wants the assessments gone
+deletes the workflow**, and that is stated in the revocation copy rather than discovered.
+
+**🔴 A row for P23's data inventory.** *Assessment — derived claims about customer source; no source
+text; retained until workflow deletion; exportable by the tenant; not shared cross-tenant.* This PRD
+does not write into P23; the row is stated here so the phase that maintains that inventory has the text.
+
+### A5 — **On request only.** Scheduled assessment is deferred, and named
+
+**Answer.** In P33 an assessment runs when a person asks for one. There is no schedule, no cron
+surface, and no configuration field that could hold one.
+
+**Why.** A scheduled assessment composes *two* unattended spends: an unattended clone (P32 A5 — where
+the ledger's `scheduled` actor exists precisely to make it visible) and unattended provider tokens on
+the platform's own account. Composing two entitlements is a decision about what the platform may do
+while nobody is watching, and it is the kind that is easy to add and impossible to withdraw.
+
+**What P33 does instead.** Assessments are reproducible (FR15) and pinned, so *re-running* one on an
+unchanged revision costs nothing and returns byte-identical findings. That removes the strongest
+argument for a schedule — "we want a fresh one" — and leaves only the trend surface, which no phase
+owns yet.
+
+**Carried, not closed.** A trend over assessments is a real product want. It is owned by whichever
+phase builds the trend, and it inherits both entitlements explicitly rather than by default.
+
+---
+
+### The questions as they were asked
 
 | # | Question | Why it is open |
 |---|---|---|

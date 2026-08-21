@@ -125,9 +125,14 @@ func TestEveryIntentIsBackedByExactlyOneThing(t *testing.T) {
 			t.Errorf("%s has backing %q, which is neither", spec.Intent, spec.Backing)
 		}
 	}
-	// The two capability-backed intents are P33's and P35's, by name. Written out so that adding a third
-	// is a decision somebody records rather than one they inherit.
-	want := []string{"autonomous-improvement-run", "surface-assessment"}
+	// The capability-backed intents, by name. Written out so that adding one — or REMOVING one — is a
+	// decision somebody records rather than one they inherit.
+	//
+	// 🔴 `surface-assessment` was here until P33 shipped `/app/assess`. Its removal is the intended
+	// direction of travel for this list: a capability with nowhere to render is a promise, and the day
+	// it gets a surface it becomes route-backed and the set-equality fence starts guarding it. A list
+	// that only ever grows would be a list of promises nobody retired.
+	want := []string{"autonomous-improvement-run"}
 	got := Capabilities()
 	if len(got) != len(want) {
 		t.Fatalf("the intent table reaches %d capabilities: %v", len(got), got)

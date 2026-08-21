@@ -116,6 +116,170 @@
       ],
       "type": "object"
     },
+    "AssessmentAxis": {
+      "description": "The nine surfaces an assessment reports on, in report order. The seven that are also configuration dimensions are READ from variantspec, so the console, the CLI and the report cannot name a surface differently.",
+      "enum": [
+        "model",
+        "prompt",
+        "skills",
+        "context",
+        "tools",
+        "memory",
+        "harness",
+        "loop",
+        "graph"
+      ],
+      "type": "string"
+    },
+    "AssessmentDiffCause": {
+      "description": "Which input moved when a re-inference changed a finding: the source, our configuration, or the provider's model. Only the first is a fact about the customer — and `unattributable` is not a leftover bucket, it is FR15's determinism guarantee failing.",
+      "enum": [
+        "source",
+        "agent_config",
+        "provider_model",
+        "unattributable"
+      ],
+      "type": "string"
+    },
+    "AssessmentEvidenceSurface": {
+      "description": "The three existing read models a finding's evidence points into. The assessment is an index over evidence the platform already holds, never a second place a number is computed.",
+      "enum": [
+        "graph",
+        "board",
+        "scorecard"
+      ],
+      "type": "string"
+    },
+    "AssessmentMissingInput": {
+      "description": "The closed set of things a `not_measured` finding can name. Closed rather than free text because health is grouped by it and because four of these must render four distinct messages — a console cannot hold distinct messages against an open set.",
+      "enum": [
+        "no_runnable_entry_point",
+        "missing_credential",
+        "sandbox_refusal",
+        "unsupported_language",
+        "frontend_emits_no_edges",
+        "unresolved_in_ir",
+        "no_source_snapshot",
+        "no_call_sites_discovered",
+        "not_visible_in_static_ir",
+        "budget_exhausted",
+        "inference_abstained"
+      ],
+      "type": "string"
+    },
+    "AssessmentOrigin": {
+      "description": "What produced a finding. `inferred` must be visible without hovering: a reader scanning the report has to be able to see how much of it a model wrote.",
+      "enum": [
+        "structural",
+        "inferred"
+      ],
+      "type": "string"
+    },
+    "AssessmentRefusalCause": {
+      "description": "Which of exactly three things this build lacks. Never a generic \"unsupported\": the three send a reader to three different places and only one is the customer's problem.",
+      "enum": [
+        "frontend",
+        "analysis",
+        "language"
+      ],
+      "type": "string"
+    },
+    "AssessmentState": {
+      "description": "How a finding's claim was established. Four, in evidence-strength order. `not_measured` is a different message from `observed`, not a dimmer one — a component that renders three states, or renders the fourth greyed out, is wrong.",
+      "enum": [
+        "measured",
+        "observed",
+        "not_measured",
+        "refused"
+      ],
+      "type": "string"
+    },
+    "AssessmentView": {
+      "description": "Response of GET /api/v1/assessments?workflow_id={id} and POST /api/v1/assessments",
+      "properties": {
+        "agent_config_hash": {
+          "type": "string"
+        },
+        "agent_config_hash_short": {
+          "type": "string"
+        },
+        "all_not_measured": {
+          "type": "boolean"
+        },
+        "assessment_id": {
+          "type": "string"
+        },
+        "completed_at_ms": {
+          "type": "integer"
+        },
+        "diff": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/AxisDiff"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "findings": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/FindingView"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "partial": {
+          "type": "boolean"
+        },
+        "reinferred": {
+          "type": "boolean"
+        },
+        "source_revision": {
+          "type": "string"
+        },
+        "spend_cap_usd": {
+          "type": "number"
+        },
+        "spend_usd": {
+          "type": "number"
+        },
+        "started_at_ms": {
+          "type": "integer"
+        },
+        "tally": {
+          "$ref": "#/$defs/Tally"
+        },
+        "workflow_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "agent_config_hash",
+        "agent_config_hash_short",
+        "all_not_measured",
+        "assessment_id",
+        "completed_at_ms",
+        "findings",
+        "partial",
+        "source_revision",
+        "spend_cap_usd",
+        "spend_usd",
+        "started_at_ms",
+        "tally",
+        "workflow_id"
+      ],
+      "type": "object"
+    },
     "AxisCoverageView": {
       "description": "Response of GET /api/v1/coverage",
       "properties": {
@@ -181,6 +345,92 @@
         "cells",
         "languages",
         "version"
+      ],
+      "type": "object"
+    },
+    "AxisDiff": {
+      "properties": {
+        "after_claim": {
+          "type": "string"
+        },
+        "after_origin": {
+          "enum": [
+            "structural",
+            "inferred"
+          ],
+          "type": "string"
+        },
+        "after_provider_model_version": {
+          "type": "string"
+        },
+        "after_state": {
+          "enum": [
+            "measured",
+            "observed",
+            "not_measured",
+            "refused"
+          ],
+          "type": "string"
+        },
+        "axis": {
+          "enum": [
+            "model",
+            "prompt",
+            "skills",
+            "context",
+            "tools",
+            "memory",
+            "harness",
+            "loop",
+            "graph"
+          ],
+          "type": "string"
+        },
+        "before_claim": {
+          "type": "string"
+        },
+        "before_origin": {
+          "enum": [
+            "structural",
+            "inferred"
+          ],
+          "type": "string"
+        },
+        "before_provider_model_version": {
+          "type": "string"
+        },
+        "before_state": {
+          "enum": [
+            "measured",
+            "observed",
+            "not_measured",
+            "refused"
+          ],
+          "type": "string"
+        },
+        "cause": {
+          "enum": [
+            "source",
+            "agent_config",
+            "provider_model",
+            "unattributable"
+          ],
+          "type": "string"
+        },
+        "why": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "after_claim",
+        "after_origin",
+        "after_state",
+        "axis",
+        "before_claim",
+        "before_origin",
+        "before_state",
+        "cause",
+        "why"
       ],
       "type": "object"
     },
@@ -742,6 +992,24 @@
         "source_diff",
         "spec_diff",
         "state"
+      ],
+      "type": "object"
+    },
+    "CaseView": {
+      "properties": {
+        "case_id": {
+          "type": "string"
+        },
+        "oracle": {
+          "$ref": "#/$defs/OracleVerdict"
+        },
+        "suite": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "case_id",
+        "oracle"
       ],
       "type": "object"
     },
@@ -2480,6 +2748,64 @@
       ],
       "type": "object"
     },
+    "EvalSetReport": {
+      "properties": {
+        "cases": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/CaseView"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "coverage_measured": {
+          "type": "boolean"
+        },
+        "eval_set_hash": {
+          "type": "string"
+        },
+        "n_cases": {
+          "type": "integer"
+        },
+        "n_indecisive": {
+          "type": "integer"
+        },
+        "oracle_coverage": {
+          "type": "number"
+        },
+        "score": {
+          "$ref": "#/$defs/Interval"
+        },
+        "vacuous_dimensions": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "cases",
+        "coverage_measured",
+        "eval_set_hash",
+        "n_cases",
+        "n_indecisive",
+        "oracle_coverage",
+        "score"
+      ],
+      "type": "object"
+    },
     "EvalSetView": {
       "description": "Response of GET /api/v1/workflows/{workflow_id}/eval-set",
       "properties": {
@@ -2715,6 +3041,114 @@
       ],
       "type": "object"
     },
+    "FindingView": {
+      "properties": {
+        "axis": {
+          "enum": [
+            "model",
+            "prompt",
+            "skills",
+            "context",
+            "tools",
+            "memory",
+            "harness",
+            "loop",
+            "graph"
+          ],
+          "type": "string"
+        },
+        "claim": {
+          "type": "string"
+        },
+        "eval_set": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EvalSetReport"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "eval_set_cannot_fail": {
+          "type": "boolean"
+        },
+        "evidence_locator": {
+          "type": "string"
+        },
+        "evidence_path": {
+          "type": "string"
+        },
+        "evidence_surface": {
+          "enum": [
+            "graph",
+            "board",
+            "scorecard"
+          ],
+          "type": "string"
+        },
+        "inference_address": {
+          "type": "string"
+        },
+        "missing_input": {
+          "enum": [
+            "no_runnable_entry_point",
+            "missing_credential",
+            "sandbox_refusal",
+            "unsupported_language",
+            "frontend_emits_no_edges",
+            "unresolved_in_ir",
+            "no_source_snapshot",
+            "no_call_sites_discovered",
+            "not_visible_in_static_ir",
+            "budget_exhausted",
+            "inference_abstained"
+          ],
+          "type": "string"
+        },
+        "origin": {
+          "enum": [
+            "structural",
+            "inferred"
+          ],
+          "type": "string"
+        },
+        "provider_model_version": {
+          "type": "string"
+        },
+        "rank": {
+          "type": "integer"
+        },
+        "refusal_cause": {
+          "enum": [
+            "frontend",
+            "analysis",
+            "language"
+          ],
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "measured",
+            "observed",
+            "not_measured",
+            "refused"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "axis",
+        "claim",
+        "evidence_locator",
+        "evidence_path",
+        "evidence_surface",
+        "origin",
+        "rank",
+        "state"
+      ],
+      "type": "object"
+    },
     "ForgeDescription": {
       "properties": {
         "forge": {
@@ -2931,6 +3365,29 @@
         "matrix_version",
         "ratified_posture",
         "targets"
+      ],
+      "type": "object"
+    },
+    "Interval": {
+      "properties": {
+        "ci_high": {
+          "type": "number"
+        },
+        "ci_low": {
+          "type": "number"
+        },
+        "mean": {
+          "type": "number"
+        },
+        "n_seeds": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "ci_high",
+        "ci_low",
+        "mean",
+        "n_seeds"
       ],
       "type": "object"
     },
@@ -3363,6 +3820,24 @@
         "idempotency_key",
         "node_id",
         "status"
+      ],
+      "type": "object"
+    },
+    "OracleVerdict": {
+      "properties": {
+        "decisive": {
+          "type": "boolean"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "decisive",
+        "kind"
       ],
       "type": "object"
     },
@@ -4929,6 +5404,33 @@
       ],
       "type": "object"
     },
+    "Tally": {
+      "properties": {
+        "inferred": {
+          "type": "integer"
+        },
+        "measured": {
+          "type": "integer"
+        },
+        "not_measured": {
+          "type": "integer"
+        },
+        "observed": {
+          "type": "integer"
+        },
+        "refused": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "inferred",
+        "measured",
+        "not_measured",
+        "observed",
+        "refused"
+      ],
+      "type": "object"
+    },
     "TargetView": {
       "properties": {
         "answer": {
@@ -5461,6 +5963,9 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "Generated by cmd/consoletypes from the Go view structs the P9 console renders. DO NOT EDIT.",
   "properties": {
+    "AssessmentView": {
+      "$ref": "#/$defs/AssessmentView"
+    },
     "AxisCoverageView": {
       "$ref": "#/$defs/AxisCoverageView"
     },

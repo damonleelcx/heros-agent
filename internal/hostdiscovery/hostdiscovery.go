@@ -210,6 +210,32 @@ func (r *Runner) IR(ctx context.Context, ref sourceingest.Ref) (*discovery.IR, e
 	return ir, err
 }
 
+// Analyse derives a workflow's IR AND the discovery run report from the pushed snapshot.
+//
+// 🔴 It exists because `IR` above deliberately drops the report, and P33's assessment cannot work
+// without it. The report is the ONLY thing that can answer "why does this graph have no edges" — which
+// frontend ran and whether that frontend can emit edges at all is not recoverable from the IR — and an
+// assessment that could not answer it would report a syntactic frontend's empty edge list as the
+// repository having a flat graph. That is design D6's inversion, stating a property of the TOOL as a
+// property of the SUBJECT, and it is the specific defect P30 shipped and P33 exists partly to prevent.
+//
+// A separate method rather than a second return value on `IR`: `IR` has callers that want exactly the
+// shape, and widening its signature would make every one of them handle a value they discard.
+func (r *Runner) Analyse(ctx context.Context, ref sourceingest.Ref) (*discovery.IR, discovery.DiscoveryReport, error) {
+	if err := ref.Validate(); err != nil {
+		return nil, discovery.DiscoveryReport{}, err
+	}
+	mat, err := r.source.Materialize(ctx, ref)
+	if err != nil {
+		if errors.Is(err, sourceingest.ErrNoSource) {
+			return nil, discovery.DiscoveryReport{}, err // preserved for errors.Is at the call site
+		}
+		return nil, discovery.DiscoveryReport{}, fmt.Errorf("hostdiscovery: materialize %s: %w", ref, err)
+	}
+	defer mat.Release()
+	return r.discover(ctx, mat.Dir, ref)
+}
+
 // WithSource materializes the snapshot, derives its IR, and hands BOTH to fn for the lifetime of the
 // extracted tree.
 //

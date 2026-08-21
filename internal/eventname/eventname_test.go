@@ -2,6 +2,7 @@ package eventname
 
 import (
 	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -86,6 +87,7 @@ func TestEveryPhaseOwnsItsNames(t *testing.T) {
 	owners := map[string]string{
 		"console.conversation.": "P31 — the conversational console",
 		"agentd.ingest.":        "P32 — repository intake",
+		"agentd.assessment.":    "P33 — surface assessment",
 	}
 	for _, n := range Names() {
 		owned := false
@@ -109,6 +111,34 @@ func TestEveryPhaseOwnsItsNames(t *testing.T) {
 // `ingest.clone.succeeded`, `.failed`); the three extras — the refusal and the two retention states —
 // are named here because they are emitted, and an emitted name that no test knows about is exactly the
 // free-text field this enum exists to make impossible.
+func TestP33NamesAreTheFiveTheContractPromises(t *testing.T) {
+	// Written out for P31's and P32's reason: a test that ranged over the enum would pass for any set.
+	// PRD §9.3 names four; `budget_exhausted` is the fifth because §7.3 makes budget refusal a
+	// first-class OUTCOME rather than an error, and an outcome nothing emits is an outcome no
+	// operator can see coming.
+	want := []Name{
+		AssessmentAxisNotMeasured,
+		AssessmentBudgetExhausted,
+		AssessmentInferencePinned,
+		AssessmentInferenceReplayed,
+		AssessmentRunStarted,
+	}
+	var got []Name
+	for _, n := range Names() {
+		if strings.HasPrefix(string(n), "agentd.assessment.") {
+			got = append(got, n)
+		}
+	}
+	if len(got) != len(want) {
+		t.Fatalf("the assessment names are %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("assessment name %d is %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
 func TestP32NamesAreTheSevenTheContractPromises(t *testing.T) {
 	want := []Name{
 		IngestCloneFailed,

@@ -8,6 +8,7 @@ import {
   GitBranch,
   GitPullRequest,
   Grid3x3,
+  ScanSearch,
   BookOpen,
   HardDriveDownload,
   Home,
@@ -86,6 +87,12 @@ const SURFACES: Surface[] = [
   // Coverage sits last in the primary group because it is the surface a reader reaches WHEN an axis
   // declines — it explains the boundary the other surfaces enforce, rather than being a place to work.
   { href: "/app/coverage", label: "Coverage", icon: <Grid3x3 /> },
+  // P33. LAST in the primary rail, and the position is the argument. It is the surface a reader goes
+  // to when they do not know what to look at — "what is weak here?" — so it sits after the surfaces
+  // that answer a question they already have. It is also the only page whose product is reporting
+  // ABSENCE, and putting it above the axes it reports on would invite reading nine rows as a summary
+  // of them rather than as an index into them.
+  { href: "/app/assess", label: "Assess", icon: <ScanSearch /> },
 ];
 
 const SETTINGS: Surface[] = [
@@ -149,6 +156,14 @@ export default async function ConsoleLayout({ children }: { children: React.Reac
     { id: "s:memory", group: "Surface", label: "Memory strategy", href: "/app/memory" },
     { id: "s:harness", group: "Surface", label: "Harness strategy", href: "/app/harness" },
     { id: "s:coverage", group: "Surface", label: "Coverage — what applies where", href: "/app/coverage" },
+    {
+      id: "s:assess",
+      group: "Surface",
+      // Three phrasings in one label, because a person reaches this page from three different
+      // questions and the palette matches on the whole string.
+      label: "Assess — what is weak in this repository, what we measured, and what we could not",
+      href: routes.assess(),
+    },
     { id: "s:install", group: "Surface", label: "Install the CLI — channels, platforms, trust", href: "/install" },
     { id: "s:account", group: "Surface", label: "Plan and spend", href: routes.account() },
     { id: "s:billing", group: "Surface", label: "Billing and payment method", href: routes.billing() },
