@@ -1,7 +1,7 @@
 # ADR-013 — Source acquisition: the bundle stays the default; a per-repository read grant is the opt-in upgrade
 
 - **Status:** Proposed (2026-08-18) — ruling R1 of the
-  [GEHA program](../prd/P31-P36-graph-engineering-agent-program.md) is taken; this ADR records what it costs
+  [GEHA program](../prd/P31-P38-graph-engineering-agent-program.md) is taken; this ADR records what it costs
 - **Deciders:** System Design + Product (proposed) + User (ratified R1)
 - **Resolves:** the implementation `internal/sourceingest` names and declines to build —
   [`source.go:32-34`](../../internal/sourceingest/source.go): *"A GitSource that clones from a registered

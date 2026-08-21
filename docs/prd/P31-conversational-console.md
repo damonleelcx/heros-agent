@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Phase** | P31 |
-| **Program** | [Graph Engineering Harness Agent (GEHA)](P31-P36-graph-engineering-agent-program.md) |
+| **Program** | [Graph Engineering Harness Agent (GEHA)](P31-P38-graph-engineering-agent-program.md) |
 | **OpenSpec change** | [`p31-conversational-console`](../../openspec/changes/p31-conversational-console/) |
 | **Lead roles** | Frontend Dev + Product Designer |
 | **Support roles** | Backend Dev, System Designer, AI Engineer, QA, DevOps, Sales Operations |
@@ -31,6 +31,15 @@ browser. It sends typed messages from a closed set, and the console renders each
 carries the evidence reference that supports it. A proposal carries a `proposal_id`. A refusal carries
 the axis and the node it refused and why. The conversational feel comes from sequencing and streaming;
 it does not come from letting a model write the UI.
+
+The third constraint is what a conversation is *for* here. The questions this surface takes are not
+one-shot lookups; they are tasks that read a repository, measure, propose, wait for a person and deliver,
+over minutes and at a cost. A chat surface renders that as a spinner by default, and a spinner cannot be
+told apart from a hang, a loop, an exhausted budget or a silent partial answer. So the turn is built as
+an agent loop with named phases — *understand → plan → act → verify → respond* — a declared budget, a
+stop reason that is always named, and a terminal message that **reconciles the plan it announced**
+(§6.6). Without that reconciliation, an agent that quietly did three of eight steps writes prose that
+reads exactly like an agent that did eight.
 
 The second thing P31 must carry is new to this codebase and not optional. Once an agent reads a
 customer's repository *and* can open a pull request, the repository's contents are **untrusted input to
@@ -79,7 +88,8 @@ Every requirement in §6 is shaped by preventing that specific output.
 ### Goals
 
 1. **G1** — A person with a tenant session can open one surface, type a question in English, and reach
-   every capability P33 and P35 expose, without knowing the words "variant", "config_hash" or "axis".
+   every capability P33 and P35 expose **and every working surface the console has** (§6.7), without
+   knowing the words "variant", "config_hash" or "axis".
 2. **G2** — Every agent message is one of a closed set of kinds, and every kind that makes a claim
    carries the reference that supports the claim.
 3. **G3** — Progress streams. A run that takes four minutes shows what it is doing throughout, over the
@@ -91,13 +101,21 @@ Every requirement in §6 is shaped by preventing that specific output.
 6. **G6** — Re-asking the same question against the same `(source_revision, config_hash)` returns the
    same findings, because the inference behind them is pinned.
 7. **G7** — Repository content cannot instruct the agent. §7.3.
+8. **G8** — A task that runs for minutes is legible while it runs: the phase it is in, the budget it
+   declared, the steps it has finished, and — when it stops — **which limit stopped it** (§6.6).
+9. **G9** — A finished task reconciles its own plan. Every step it announced resolves to `done`,
+   `skipped`, `refused` or `not_measured`, so a partial run cannot read as a complete one.
 
 ### Non-goals (with the phase that owns them)
 
 - **Deciding what the agent finds** — [P33](P33-surface-assessment.md).
 - **Doing the work the conversation asks for** — [P35](P35-autonomous-improvement-run.md).
 - **Getting the repository in** — [P32](P32-repo-intake.md).
-- **Configuring the agent that speaks** — [P36](P36-agent-self-configuration.md).
+- **Configuring the agent that speaks** — [P36](P36-agent-self-configuration.md) for its shape as a
+  graph, [P38](P38-agent-contract.md) for the twenty dimensions an operator configures.
+- **Editing the customer's own axes** — [P37](P37-source-bound-editors.md). The conversation *links to*
+  an editor; it is not one. A chat box that edits configuration is a second authoring path, and the
+  second path is where the validation is missing.
 - **A general-purpose assistant.** P31 is a surface over this platform's capabilities. A question it
   cannot route is answered with a refusal naming what it can do, not with a model's best effort.
 - **Voice, mobile, multiplayer.** Not refused on principle; simply not this phase.
@@ -192,6 +210,100 @@ pinned inference and which were generated in this turn.
 refusal from a lower layer (`ErrUnsafeRewrite`, an axis refusal, a coverage refusal) is surfaced with its
 own cause text, **not** re-worded by a model. A re-worded refusal is a second, softer statement of a
 safety boundary.
+
+### 6.6 The long-running task lifecycle
+
+A question like *"why is my extraction node inconsistent, and fix it"* is not a request for a paragraph.
+It is a task that reads a repository, measures nine axes, proposes a change, waits for a person, and
+delivers. It runs for minutes, it costs money, and it can stop for six different reasons. The reason
+this section exists is that **a chat surface makes all of that invisible by default**: the natural
+rendering of a long task is a spinner, and a spinner is indistinguishable from a hang, from a loop, from
+a budget exhaustion, and from a silent partial answer.
+
+So the lifecycle is not internal structure. It is the product.
+
+**FR16 — Every turn advances through five named phases, and the phase is observable.**
+`understand → plan → act → verify → respond`. The phase is carried on `progress`; a turn that cannot
+name its phase is a defect, not a slow turn.
+
+| Phase | What happens | The message that proves it happened |
+|---|---|---|
+| `understand` | the question is routed to one intent (§6.7), or abstains | `plan` — or `refusal` on abstention |
+| `plan` | the ordered steps, the surfaces they will read, and the **budget envelope** | `plan` |
+| `act` | the steps run; each emits its own evidence | `progress`, `finding` |
+| `verify` | every claim is checked against the artifact that supports it | reconciliation carried on `result` |
+| `respond` | the terminal message, with each planned step reconciled | `result`, or `refusal` |
+
+**FR17 — A `plan` SHALL declare its budget envelope before the first step runs.** Four numbers: turn
+ceiling, token budget, tool-call ceiling, wall-clock ceiling. They are declared because the alternative
+is a user discovering the ceiling by hitting it, at which point the honest message ("I stopped") is
+indistinguishable from a bug.
+
+**FR18 — A run that stops on a limit SHALL name the limit.** The terminal message carries the stop
+reason from the existing closed vocabulary (`internal/harnessruntime`'s `StopReason` —
+`satisfied` | `ceiling` | `single-shot`, extended for budget and wall-clock) and never renders a
+budget-exhausted run as a completed one. Where a step could not finish, its findings degrade to
+`not_measured` with the named missing input — **never** to a shorter answer presented as the whole one.
+This is P33's rule for assessments, applied to a conversation.
+
+**FR19 — A `result` SHALL reconcile every step the `plan` declared.** Each planned step resolves to
+exactly one of `done` | `skipped` | `refused` | `not_measured`, and a skipped step names why. The plan is
+what makes this checkable: without it, "I looked at your repository" has no denominator, and an agent
+that quietly did three of eight steps produces prose that reads exactly like an agent that did eight.
+
+**FR20 — A `result` carrying a claim SHALL cite the verdict that supports it.** `finding` cites evidence
+(FR2); `result` cites the verification record. This is *diagnosis proposes, verification decides* stated
+as a message rule, and it is the whole of the principle's **verify** step — the platform already has a
+verification ledger, so the conversation cites it rather than inventing a second notion of "checked".
+
+**FR21 — The run holds the task state; the conversation holds none.** Short-term task state (which step,
+what has been read, what budget remains) lives on the run and is what resume replays. Conversation
+history is the run's message log. **Long-term memory across conversations is refused at this phase**, and
+the surface says so — a "the agent remembers you" behaviour is a new data class about a person, and it is
+Q1's decision to make, not a side effect of building a chat box.
+
+**FR22 — A step SHALL NOT be re-entered indefinitely.** A plan step that has been attempted and returned
+to more than a fixed number of times terminates the run with `ceiling` and names the step. Infinite loops
+in agents are not exotic; they are the default failure of a loop whose stop condition depends on model
+output.
+
+**FR23 — Every turn is traceable by the person who ran it.** The turn carries a `trace_id` the surface
+displays, and the tool calls, refusals and retries of that turn are retrievable by it. An agent whose
+reasoning is unobservable cannot be debugged by the customer, and "contact support" is not an
+observability strategy for a product the customer runs against their own source.
+
+### 6.7 The goal set is the console's own working surfaces
+
+**FR24 — The closed intent set is the set of working surfaces, and the two sets are asserted equal.**
+Every intent resolves to exactly one surface, and every working surface is reachable by at least one
+intent. A surface with no intent is unreachable by sentence; an intent with no surface answers a question
+the product cannot show. Both are defects, and a fence over the route table and the intent table is what
+notices.
+
+| Intent | Surface | The question, as a person asks it |
+|---|---|---|
+| `graph` | `/app/workflows` | "what does my agent actually do, step by step?" |
+| `run_history` | `/app/runs` | "what happened in that run?" |
+| `compare` | `/app/variants` | "is this version better than the last one?" |
+| `preview_change` | `/app/transforms` | "what exactly would you write into my source?" |
+| `deliver` | `/app/delivery` | "how does an approved change reach my repository?" |
+| `prompt_model` | `/app/studio` | "change the instruction / change the model" |
+| `author` | `/app/authoring` | "change something on an axis and show me the diff" |
+| `graph_order` | `/app/wiring` | "should these nodes run in this order?" |
+| `context` | `/app/context` | "what conversation history does this node get?" |
+| `memory` | `/app/memory` | "what does this node remember between calls?" |
+| `harness` | `/app/harness` | "how many turns does it take, and in what loop?" |
+| `coverage` | `/app/coverage` | "what did you measure, and what did you not?" |
+| `assess` | the assessment (P33) | "look at my repository and tell me what is weak" |
+| `improve` | the improvement run (P35) | "fix it, and open a pull request" |
+
+**FR25 — An answer links to its surface; it does not restate it.** A `finding` about context renders a
+card and links to `/app/context` for that node. The conversation never becomes the second place a number
+is computed, and never the second place it is *formatted* — one source, one rendering, one link.
+
+**FR26 — Account, billing and identity are out of scope and refuse by name.** They are surfaces, they are
+not agent goals, and an agent that offers to change a plan or a password has crossed from *answering
+about a system* to *administering an account*. The refusal names the surface that does it.
 
 ---
 
@@ -300,8 +412,15 @@ reduce with it is **`not_measured`**. A conversational surface makes absence fee
 silence about a surface reads as "nothing wrong with it". So `not_measured` is a rendered state with its
 own copy, not an omission, exactly as P29 made `not reported` a rendered state.
 
-Scope fidelity: this phase adds a surface. It does not redesign `/app/workflows`, and any tempting
-"while we're here" consolidation of the existing dashboards is a separate decision the user has not made.
+The second reduction is **the spinner**. A four-minute task rendered as an animation asks the reader to
+supply, from nothing, the four facts they actually need: what is it doing, how long may it take, is it
+stuck, and did it finish everything it said it would. §6.6 answers all four with artifacts the reader can
+see rather than infer — phase, budget, stop reason, plan reconciliation. This is the same instinct as
+`not_measured`: the state that feels like nothing is the state that must be drawn.
+
+Scope fidelity: this phase adds a surface. It does not redesign `/app/workflows` — that redesign is now
+[P37](P37-source-bound-editors.md), decided separately and deliberately, not folded in here as a
+"while we're here".
 
 ### 9.2 Senior System Designer — *arbitrate by level; do not open a one-way door*
 
@@ -340,6 +459,13 @@ different question. Report per-intent recall, not a mean.
 
 The router is a change to a parse-and-infer chain, so it is subject to the discipline the AI lens
 imposes: a spike with a holdout set before it lands, and no "pure refactor" exemption afterwards.
+
+The intent set is now fourteen (§6.7), and that number is the argument. A single accuracy figure over
+fourteen intents can sit at 93% while `coverage` — the intent that answers "what did you *not* measure" —
+is routed correctly one time in three, and nothing in the number says so. Report per-intent recall and
+abstention precision, always as fourteen rows. The same rule applies to the lifecycle: report stop
+reasons broken out by cause, never as a single "completion rate", because a run stopped by its token
+budget and a run that answered the question are both "not an error".
 
 ### 9.6 Senior DevOps Engineer — *blast radius, reversible, observable, least privilege*
 
@@ -423,6 +549,11 @@ Entitlement-gated per tenant throughout, so stage 3 does not reach a tenant that
 | A7 | Injection fixture takes no action and raises a `finding` | adversarial corpus |
 | A8 | A Go message kind absent from the TSX union fails the build | type-generation fence |
 | A9 | 503 / 404 / transport render as three distinct messages | one case each |
+| A10 | A run stopped by its budget renders as stopped, naming the limit — never as complete | force each limit (turns, tokens, tool calls, wall clock) and assert the terminal message names it |
+| A11 | Every step a `plan` declared is reconciled in the `result` | fence: a plan step with no reconciliation entry fails emission, mutation-verified |
+| A12 | The intent set and the working-surface set are equal | fence over the route table and the intent table; adding a route without an intent fails the build |
+| A13 | A step re-entered past its ceiling terminates and names the step | loop fixture whose stop condition never fires |
+| A14 | The `trace_id` shown to the person retrieves that turn's tool calls, refusals and retries | live turn, then read back by the displayed id |
 
 ---
 
@@ -435,3 +566,5 @@ Entitlement-gated per tenant throughout, so stage 3 does not reach a tenant that
 | **Q3** | Does the agent ever ask a clarifying question, or does it always route-or-refuse? | Clarification is better UX and is also a channel through which an ambiguous intent becomes a confident wrong one. **Recommendation: at most one clarification, from a closed set of disambiguations, never free-form.** |
 | **Q4** | Is the conversation per-person or per-tenant? | Per-tenant makes a team's runs legible to each other; it also shows one member what another asked about which repository. |
 | **Q5** | What happens to an in-flight run when the person's session expires mid-conversation? | Cancelling loses work; continuing means a run outlives its authorization. **Recommendation: the run continues (it was authorized when started) and its result is retrievable by the tenant, not by the expired session.** |
+| **Q6** | Does the budget envelope in FR17 come from the tenant's plan, from a per-conversation default, or is it authorable by the person? | An authorable budget is better UX and is also how one question spends a month's allowance. **Recommendation: derived from the tenant's entitlement, displayed, not editable in the conversation.** |
+| **Q7** | FR22 bounds step re-entry with "a fixed number of times". What number, and is it per step or per run? | `harnessruntime`'s `TurnCeiling = 16` is the precedent and is deliberately a constant, not configuration. **Recommendation: reuse the constant, per step, and record the reason in the same place.** |

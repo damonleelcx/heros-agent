@@ -1,12 +1,12 @@
-# Program — Graph Engineering Harness Agent (GEHA), P31 → P36
+# Program — Graph Engineering Harness Agent (GEHA), P31 → P38
 
 | | |
 |---|---|
 | **Program** | Graph Engineering Harness Agent (GEHA) |
-| **Phases** | [P31](P31-conversational-console.md) · [P32](P32-repo-intake.md) · [P33](P33-surface-assessment.md) · [P34](P34-harness-loop-graph-split.md) · [P35](P35-autonomous-improvement-run.md) · [P36](P36-agent-self-configuration.md) |
+| **Phases** | [P31](P31-conversational-console.md) · [P32](P32-repo-intake.md) · [P33](P33-surface-assessment.md) · [P34](P34-harness-loop-graph-split.md) · [P35](P35-autonomous-improvement-run.md) · [P36](P36-agent-self-configuration.md) · [P37](P37-source-bound-editors.md) · [P38](P38-agent-contract.md) |
 | **ADRs opened** | [ADR-013](../adr/ADR-013-source-acquisition-posture.md) · [ADR-014](../adr/ADR-014-harness-loop-graph-axis-split.md) |
 | **Upstream** | P1 (discovery) · P2 (config/runtime) · P4 (eval harness) · P5 (typed contracts, re-arrangement) · P5.5 (verification) · P6 (optimizer) · P12 (forge delivery) · P13–P18 (the six axes) · P29 (linked-run fan-out) · P30 (HEROS, the platform agent) |
-| **Status** | Proposed — the four rulings in §3 are taken; the split line in §5.3 and the open questions in §8 are not |
+| **Status** | Proposed — the six rulings in §3 are taken; the split line in §5.3 and the open questions in §8 are not |
 
 ---
 
@@ -74,10 +74,11 @@ apply path is a second place for every safety gate to be wrong, and the gates ar
 
 ---
 
-## 3. The four rulings this program is built on
+## 3. The rulings this program is built on
 
-These were decided before authoring, because each one changes the shape of most documents downstream.
-They are recorded here so a reader in six months can see what was chosen *and what it cost*.
+R1–R4 were decided before authoring, because each one changes the shape of most documents downstream.
+R5 and R6 (§3.1) came back from reading the two consoles against the first six phases. They are all
+recorded here so a reader in six months can see what was chosen *and what it cost*.
 
 | # | Question | Ruling | What it costs |
 |---|---|---|---|
@@ -93,6 +94,33 @@ the platform's founding principle — *diagnosis proposes, verification decides*
 keep an unverified model judgement from being rendered as a result. P33 therefore reports **findings
 with their evidence, and `not measured` where there is none**, and improvements still prove themselves
 through the existing P5.5 gate.
+
+### 3.1 Two rulings added after the first authoring round (P37, P38)
+
+The program's first six phases were authored, and then the consoles were read against them. Two findings
+came back, both measurable in the tree, and both outside what P31–P36 covered. They are recorded here in
+the same form as R1–R4 because each one is a phase.
+
+| # | Finding, with its evidence | Ruling | What it costs |
+|---|---|---|---|
+| **R5** | The customer console carries **31,628 words** across `web/console/src/app/app/**` — `/app/context` alone carries 1,995 and lets the reader change nothing. Its coverage table is transcribed from Go by hand; its diff is a fixture; `/app/memory` binds its editor to `const NODE_ID = "recall"`, a demonstration node belonging to nobody. Each page says why in its own header: they were written when the engine existed and the reader's repository did not. | **The working surfaces become editors bound to the reader's own imported source, and the explanation moves — not deleted — to the reading surface P23 already built.** [P37](P37-source-bound-editors.md). | A large, simultaneous rewrite of six customer-facing surfaces, and a modification to P29's requirement that worked examples be retained *on the same page*. The protection P29 wrote is kept; its unit changes from *the same page* to *a named destination*. |
+| **R6** | [`openspec/specs/operator-agent-authoring/spec.md`](../../openspec/specs/operator-agent-authoring/spec.md) — **folded**, meaning true today — requires *"Each axis SHALL be edited against its existing vocabulary and never as free text"*. [`internal/herosagent/axiseditor.go`](../../internal/herosagent/axiseditor.go) implements exactly that and has **zero non-test callers**. The console ships **eight free-text inputs** for pasting 64-character version ids. | **The operator surface becomes the agent's whole contract — twenty dimensions, each `authorable`, `observable` or `fixed` — and the already-written editor core is wired rather than rewritten.** [P38](P38-agent-contract.md). | A deliberate, stated refusal of part of the ask: guardrails, validation and three ceilings get surfaces, not editors. A console that can weaken them is a level-1 risk bought with a level-3 feature. |
+
+**Why R6's gap survived, and this is the part that generalises.** The operator console has a fence —
+`openspec/operator-surface-ledger.md`, whose own header records that *"fourteen phases of operator-console
+drift happened with nothing failing"*. Its row for this capability reads
+`| operator-agent-authoring | surface | /agent#publish, /agent |`, and that row is **true**: the
+destination exists. **The fence asserts presence, not conformance.** Eight text boxes at a URL satisfy it
+exactly as well as eight editors would, so a capability can be folded into `openspec/specs/` — declared
+true — while nothing on the surface exercises it. P38 adds a conformance assertion for **one row** and
+states the general hole rather than closing it, because rewriting a fence fourteen phases depend on is
+its own decision. See [P38](P38-agent-contract.md) §2.3.
+
+**What R5 and R6 have in common.** Both are pages that explain a capability instead of exposing it, and
+both arrived honestly: each was built in a phase where the thing it would have edited did not yet exist.
+The lesson worth carrying into the remaining phases is that *a surface built as an explanation does not
+convert itself when its input lands* — nothing fails, nobody is paged, and the page keeps being read as
+the product's shape.
 
 ---
 
@@ -188,11 +216,14 @@ the axis cannot give a good answer to any of them.
 ## 6. Sequencing and the critical path
 
 ```
-        ADR-013 ────▶ P32 (intake) ─────┐
+        ADR-013 ────▶ P32 (intake) ─────┬──▶ P37 (source-bound editors)
+                                        │
                                         ├──▶ P33 (assessment) ──▶ P35 (run + delivery)
         P31 (conversation) ─────────────┘                              │
                                                                        │
         ADR-014 ────▶ P34 (axis split) ───────────────────────────────┴──▶ P36 (agent is a graph)
+
+        P30 (HEROS) ────▶ P38 (agent contract) ◀──── P36 supplies loop + graph
 ```
 
 - **P31 and P32 are independent** and can be built in parallel; P31 has a fixture-driven path that does
@@ -202,7 +233,15 @@ the axis cannot give a good answer to any of them.
 - **P34 is on nobody's blocking path until P36**, but it must land before P33 reports on a "loop" or
   "graph" surface, or the report names axes the configuration layer does not have. That is the
   ordering constraint people will get wrong.
-- **P36 is last** and is the point of the program.
+- **P36 is last on the customer-facing path** and is the point of the program.
+- **P37 depends only on P32.** It is the phase that makes the console's working surfaces editable against
+  the reader's own source; it needs a repository and nothing else, and it can be built in parallel with
+  P33 and P35.
+- **P38 depends only on P30** and is off the critical path entirely. It is the operator's side of the same
+  complaint P37 answers for the customer, and most of its work is connecting an editor core that already
+  exists. It renders the loop and graph dimensions as `fixed` until P36 lands.
+- **The ordering constraint people will get wrong, restated:** P34 before P33 reports on a "loop" or
+  "graph" surface, and P37's reading-surface destinations before the text that moves into them.
 
 ## 7. Staged plan
 
@@ -216,7 +255,10 @@ Authoring order, so this program can be picked up mid-way in a later session:
 - [ ] **S4** — P34 PRD + `openspec/changes/p34-harness-loop-graph-split/`
 - [ ] **S5** — P35 PRD + `openspec/changes/p35-autonomous-improvement-run/`
 - [ ] **S6** — P36 PRD + `openspec/changes/p36-agent-self-configuration/`
-- [ ] **S7** — fold the program into [`docs/prd/README.md`](README.md) and the implementation timeline
+- [x] **S7** — P37 PRD + `openspec/changes/p37-source-bound-editors/` **and** P38 PRD +
+      `openspec/changes/p38-agent-contract/`, plus the P31 amendments in §3.1. Added after the program's
+      first authoring round, on the two findings in §3.1.
+- [ ] **S8** — fold the program into [`docs/prd/README.md`](README.md) and the implementation timeline
 
 **This program is documents only.** No Go code, no console code, and no migration ships with it — the
 same scope the OAX program (P13–P18) was authored under. Every phase's `tasks.md` carries its
@@ -230,4 +272,6 @@ implementation as unchecked tasks.
 | **Q2** | Does the graph axis get a `Dimension`, or does it stay spec-level like `arrangements` does today? | A `Dimension` is *per node*; topology is *between* nodes. Making graph a `Dimension` would be the first member of that enum that is not a property of one node. My recommendation: **spec-level**, hashed into `config_hash` as a sibling of `ordering`. |
 | **Q3** | When a console customer enables the hosted Git App (R3), does the agent push to a **branch on their repository** or to a **fork the platform owns**? | ADR-005 listed the fork as option B and never decided it. Pushing a branch needs write on their repo; a fork needs none but produces a cross-repository PR many CI setups will not run. |
 | **Q4** | Does the conversation persist? A thread that survives a page reload is a durable store of the customer's questions — which may quote their source. | P23's data inventory would need a new row. My recommendation: persist the **run** and its evidence; keep the **turns** ephemeral until Q4 is answered. |
+| **Q6** | P37 moves ~9,000 words of explanation off the working surfaces onto the reading surface. Does the reading surface's scope stretch to product explanation, or is it legal/developer docs only? | P23 built it as a document composition holding no session. Product explanation is the same *shape* and a different *audience*. My recommendation: it stretches; the alternative is a second document composition, which is a second place to keep the noun dictionary. |
+| **Q7** | P38 renders guardrails and validation as read-only, refusing part of the request as stated. Is that refusal accepted? | The request was editors for every dimension. Two of them are what stops the agent doing harm, and an operator console that can weaken them is a level-1 risk bought with a level-3 feature. Recorded as a refusal rather than delivered quietly as ten disabled controls. |
 | **Q5** | R4 forbids a composite score. Does Sales Operations accept a first-touch surface with no headline number, and if not, what is the honest substitute? | Discipline 1 of the sales-ops lens is *only promise what shipped*; a number that cannot be defended is the exact failure it names. |

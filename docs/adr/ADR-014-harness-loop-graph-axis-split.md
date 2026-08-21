@@ -1,7 +1,7 @@
 # ADR-014 — Harness, loop and graph are three axes; the split is expand-only and the contract half is refused
 
 - **Status:** Proposed (2026-08-18) — ruling R2 of the
-  [GEHA program](../prd/P31-P36-graph-engineering-agent-program.md) is taken; the split line is §3 and is
+  [GEHA program](../prd/P31-P38-graph-engineering-agent-program.md) is taken; the split line is §3 and is
   what [P34](../prd/P34-harness-loop-graph-split.md) §14 asks to be signed off
 - **Deciders:** System Design + AI Engineering (proposed) + User (ratified R2)
 - **Resolves:** `DimHarness`'s own doc comment, which defines one dimension as two things —
