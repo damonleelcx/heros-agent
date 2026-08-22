@@ -195,6 +195,9 @@ func TestPreflightPayloadCarriesNoContent(t *testing.T) {
 		// `max_turns`, which is the COST — live in the sealed entry the ref addresses. A field that held
 		// `{"max_turns":9}` inline would let a draft carry a bill nobody registered.
 		"HarnessRef": true,
+		// P34: the iteration policy, a loop-registry version_id. A ref, not a body — the strategy params
+		// live in the sealed entry, exactly as every other ref's do.
+		"LoopRef": true,
 	}
 	for i := 0; i < rt.NumField(); i++ {
 		name := rt.Field(i).Name

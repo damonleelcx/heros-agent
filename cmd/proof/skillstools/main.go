@@ -457,6 +457,12 @@ func (emptyRegistries) ResolveHarness(context.Context, string) (*registry.Harnes
 	return nil, registry.ErrNotFound
 }
 
+// ResolveLoop answers for P34's loop registry. This fixture publishes no loop entries, so every
+// loop_ref misses — which is the fail-closed answer, not an empty one.
+func (emptyRegistries) ResolveLoop(context.Context, string) (*registry.LoopEntry, error) {
+	return nil, registry.ErrNotFound
+}
+
 type skillRegistries struct {
 	entries map[string]*registry.SkillEntry
 }
@@ -482,6 +488,12 @@ func (s skillRegistries) ResolveMemory(context.Context, string) (*registry.Memor
 }
 
 func (s skillRegistries) ResolveHarness(context.Context, string) (*registry.HarnessEntry, error) {
+	return nil, registry.ErrNotFound
+}
+
+// ResolveLoop answers for P34's loop registry. This fixture publishes no loop entries, so every
+// loop_ref misses — which is the fail-closed answer, not an empty one.
+func (s skillRegistries) ResolveLoop(context.Context, string) (*registry.LoopEntry, error) {
 	return nil, registry.ErrNotFound
 }
 

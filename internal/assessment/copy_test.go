@@ -275,6 +275,21 @@ func TestEveryRefusalCauseHasAProducerOrIsRecordedAsHavingNone(t *testing.T) {
 	withoutProducer := map[RefusalCause]string{
 		RefusalFrontend: "design D6 routes a frontend limitation to not_measured with a named missing " +
 			"input instead, because an axis our parser cannot read may still be present in the code",
+		// 🔴 P34 is what emptied this one, and the emptying is the phase's whole point rather than a
+		// regression. `analysis` had exactly two producers — the `loop` and `graph` extractors, refused
+		// because their CONFIGURATION did not exist ("P33 may report on them only once P34 has landed,
+		// or it names axes the configuration layer does not have"). P34 gave both a configuration, both
+		// now report, and no other axis in this build is missing its analysis.
+		//
+		// It is kept in the closed vocabulary rather than removed, and that is a decision rather than an
+		// oversight: `analysis` is the only honest cause for the NEXT axis that arrives ahead of the
+		// configuration layer, and P33 built the two-function gate pattern (`extractGraph` wrapping
+		// `extractGraphTopology`) specifically so that such an axis can ship its analysis behind a
+		// refusal and lift it later. Deleting the cause would delete the landing site for that pattern.
+		RefusalAnalysis: "P34 gave `loop` and `graph` their configuration, so this build's only two " +
+			"producers of `analysis` now report instead of refusing. It is retained for the next axis " +
+			"that ships its analysis ahead of its configuration layer — the pattern `extractGraph` " +
+			"still demonstrates",
 	}
 
 	for _, cause := range RefusalCauses() {

@@ -205,17 +205,20 @@ func TestPartialIsCarriedByTheReport(t *testing.T) {
 	}
 }
 
-// TestTheTwoP34AxesAreNamedRatherThanDiscovered is task 9.2. The deferral has to be a fact the code
-// can be asked about, so the day P34 lands it is removed in one place.
-func TestTheTwoP34AxesAreNamedRatherThanDiscovered(t *testing.T) {
+// TestNoAxisIsStillAwaitingP34 is task 9.2, read after the fact. The deferral was a fact the code could
+// be asked about precisely so that the day P34 landed it came off in ONE place — and this asserts that
+// it came off everywhere rather than in the one file somebody remembered.
+func TestNoAxisIsStillAwaitingP34(t *testing.T) {
 	pending := map[Axis]bool{}
 	for _, a := range Axes() {
 		if a.P34Pending() {
 			pending[a] = true
 		}
 	}
-	if len(pending) != 2 || !pending[AxisLoop] || !pending[AxisGraph] {
-		t.Fatalf("the axes awaiting P34 are %v, want exactly loop and graph", pending)
+	if len(pending) != 0 {
+		t.Fatalf("axes %v still report themselves as awaiting P34, which has landed: loop is a "+
+			"variantspec.Dimension with a registry.KindLoop behind it, and graph is spec-level topology "+
+			"with concurrency, predicates and merge", pending)
 	}
 }
 

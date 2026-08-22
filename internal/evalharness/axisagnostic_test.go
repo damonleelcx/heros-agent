@@ -59,3 +59,65 @@ func assertNoAxisField(t *testing.T, typ reflect.Type, visited map[reflect.Type]
 		}
 	}
 }
+
+// ── P34 task 6.5 / G6 — the split added no eval, scorer, oracle or metric ───────────────────────
+
+// TestP34AddedNoEvalSurface is task 6.5, and it is a fence rather than a sentence in a document.
+//
+// PRD G6 says the eval harness must not learn that `loop`, `harness` or `graph` exist, and §7.4 gives
+// the reason in one line: **an axis needing a bespoke oracle is designed wrong.** A metric that scored
+// "loop-ness" would be a number only comparable to itself, so a loop change and a prompt change could
+// never be ranked against each other — which is the whole job of having one harness.
+//
+// The way this requirement fails is not a decision anybody records. It is a `MetricLoopTurns` added one
+// afternoon because the number was easy to compute and somebody wanted it on a dashboard. So the ban is
+// on the VOCABULARY, and it is checked against the shipped metric family and the shipped oracle set.
+func TestP34AddedNoEvalSurface(t *testing.T) {
+	// The three axis names, plus the words that would carry them into a metric under another spelling.
+	banned := []string{
+		"loop", "harness", "graph", "topology", "concurrent", "concurrency",
+		"scaffold", "turn_count", "max_turns", "predicate", "fan_in", "envelope",
+	}
+	for _, m := range StandardFamily {
+		low := strings.ToLower(m)
+		for _, b := range banned {
+			if strings.Contains(low, b) {
+				t.Errorf("standard metric %q names the P34 concept %q. G6: the eval harness does not learn "+
+					"that these axes exist, and §7.4 says why — an axis needing a bespoke oracle is designed "+
+					"wrong, and a metric only comparable to itself makes a loop change and a prompt change "+
+					"unrankable against each other.", m, b)
+			}
+		}
+	}
+
+	// 🔴 The reduction a loop or topology change produces must show up in the metrics that ALREADY
+	// exist. If these three ever stop being in the family, P34's claim that its wins are visible in the
+	// existing metric family stops being true and nothing else would say so.
+	for _, want := range []string{MetricTaskSuccess} {
+		found := false
+		for _, m := range StandardFamily {
+			if m == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("%q is not in StandardFamily; P34 reports its wins through the existing metrics, and "+
+				"this is one of them", want)
+		}
+	}
+}
+
+// TestP34AddedNoOracle — the same ban, applied to the oracle set. An oracle is where a bespoke scorer
+// would actually live, and one named for an axis is the shape §7.4 rejects.
+func TestP34AddedNoOracle(t *testing.T) {
+	for _, e := range Builtins() {
+		name := e.Name()
+		low := strings.ToLower(name + " " + e.Metric())
+		for _, b := range []string{"loop", "harness", "graph", "topology", "concurrent", "scaffold"} {
+			if strings.Contains(low, b) {
+				t.Errorf("oracle %q names the P34 concept %q; an axis needing a bespoke oracle is designed "+
+					"wrong (§7.4)", name, b)
+			}
+		}
+	}
+}

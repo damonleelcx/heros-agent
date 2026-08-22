@@ -85,6 +85,17 @@ type Edit struct {
 	// happen at all, while those two describe what one call carries and what survives between calls; one
 	// field meaning two of them would let a scaffold change resolve through another dimension's path.
 	HarnessRef *string `json:"harness_ref,omitempty"`
+	// LoopRef sets or clears the node's ITERATION POLICY — which control loop runs, what stops it, how
+	// many turns the author chose (P34 task 3.7). Nil leaves the dimension alone; `""` clears the
+	// override; a ref sets it.
+	//
+	// 🔴 Its own field, and the one that makes task 3.7 mechanical: `HarnessRef` above now writes an
+	// EXECUTION ENVELOPE, and this writes the loop. A new authoring surface therefore cannot create a
+	// loop-bearing harness entry by accident — there is no control on any surface that would produce one,
+	// because the two intents have two fields and the strategy vocabularies behind them are disjoint at
+	// the point of authoring (`HarnessStrategyOptions` offers the loop set, `EnvelopeOptions` the
+	// envelope). Legacy loop-bearing entries stay resolvable; they are simply no longer authorable.
+	LoopRef *string `json:"loop_ref,omitempty"`
 }
 
 // Dimensions names which dimensions this edit touches, in the closed enum's stable order. It is what
@@ -108,6 +119,9 @@ func (e Edit) Dimensions() []variantspec.Dimension {
 	}
 	if e.HarnessRef != nil {
 		dims = append(dims, variantspec.DimHarness)
+	}
+	if e.LoopRef != nil {
+		dims = append(dims, variantspec.DimLoop)
 	}
 	if e.MemoryRef != nil {
 		dims = append(dims, variantspec.DimMemory)
@@ -263,6 +277,12 @@ func applyEdit(o variantspec.NodeOverride, e Edit) variantspec.NodeOverride {
 		// the empty string emits no key, so a select-then-clear returns to the pre-selection bytes and the
 		// pre-selection config_hash (FR43). One assignment for both paths, so they cannot drift.
 		o.HarnessRef = *e.HarnessRef
+	}
+	if e.LoopRef != nil {
+		// Setting "" CLEARS the loop, on exactly the same terms: `omitempty` means the empty string emits
+		// no key, so a select-then-clear returns to the pre-selection bytes and the pre-selection
+		// config_hash. One assignment for both paths, so they cannot drift.
+		o.LoopRef = *e.LoopRef
 	}
 	return o
 }

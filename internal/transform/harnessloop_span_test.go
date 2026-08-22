@@ -255,7 +255,7 @@ func TestGoHarnessIdentityOnlyAndRefusalIsPermanent(t *testing.T) {
 		t.Errorf("cause = %q, want %q — there is nothing to build: a generated Go module cannot read a "+
 			"field off the customer's SDK type without importing their SDK", re.Cause, CauseNotAtCallSite)
 	}
-	for _, c := range CoverageFor(string(variantspec.DimHarness)) {
+	for _, c := range CoverageFor(string(variantspec.DimLoop)) {
 		if c.Language != "go" || c.Form != "reflexion" {
 			continue
 		}
@@ -270,7 +270,7 @@ func TestGoHarnessIdentityOnlyAndRefusalIsPermanent(t *testing.T) {
 // the materializer table, so the claim and the behaviour cannot disagree.
 func TestHarnessCoverageReflectsMaterializers(t *testing.T) {
 	got := map[string]map[string]CoverageStatus{}
-	for _, c := range CoverageFor(string(variantspec.DimHarness)) {
+	for _, c := range CoverageFor(string(variantspec.DimLoop)) {
 		if got[c.Language] == nil {
 			got[c.Language] = map[string]CoverageStatus{}
 		}
@@ -444,9 +444,9 @@ func TestHarnessArtifactRegeneratesByteIdentically(t *testing.T) {
 // registry happily seals.
 func TestHarnessModuleImplementsEverySealedStrategy(t *testing.T) {
 	got := harnessStrategyNamesInModule()
-	want := registry.HarnessStrategyNames()
+	want := registry.LoopStrategyNames()
 	if strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Fatalf("the emitted module implements %v but the sealed vocabulary is %v; a strategy the "+
+		t.Fatalf("the emitted module implements %v but the sealed LOOP vocabulary is %v; a strategy the "+
 			"registry seals and the module does not implement raises in the customer's process", got, want)
 	}
 }

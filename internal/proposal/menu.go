@@ -23,6 +23,57 @@ type Menu struct {
 	// Its own slice for the same reason MemoryStrategies is: a harness ref and a memory ref resolve in
 	// different registries, and one pasted into the other's dimension fails closed.
 	HarnessStrategies []HarnessChoice
+	// LoopStrategies are the sealed LOOP-registry entries OpLoopStrategy may select from (P34).
+	//
+	// 🔴 Its own slice, and NOT a rename of HarnessStrategies. After ADR-014's split the two registries
+	// hold different things — a harness entry is an execution ENVELOPE, a loop entry is an ITERATION
+	// POLICY — and one slice holding both would let an operator write an envelope ref into `loop_ref`,
+	// which fails closed at resolve but only after a candidate has been built, hashed and queued.
+	//
+	// 🚫 A menu that carries no loop entries makes OpLoopStrategy emit nothing, which is correct: an
+	// operator with an empty menu has nothing admissible to offer, and that is not an error.
+	LoopStrategies []LoopChoice
+}
+
+// LoopChoice is one loop registry entry available for an iteration-policy swap (P34).
+//
+// It mirrors HarnessChoice field for field, and the duplication is deliberate rather than lazy: the two
+// menus feed two operators writing two different refs into two different dimensions, and a shared type
+// would be one edit away from letting either write the other's ref.
+type LoopChoice struct {
+	Ref      string // loop registry version_id (64-hex content address)
+	Strategy string // "single-shot" | "react-loop" | "plan-execute" | "reflexion" | "critic-loop"
+	Title    string
+	// MaxTurns is the entry's CHOSEN turn count; 1 for the identity. Platform metadata, never hashed.
+	//
+	// 🔴 It is what makes one candidate HEAVIER than another, which is the only input the cost/quality
+	// admissibility gate needs beyond the measurements — and post-split it is a property of the LOOP
+	// rather than of the envelope, so it is read from here.
+	MaxTurns int
+}
+
+// loopStrategiesExcept returns the menu's loop entries other than the one the node already binds, in a
+// deterministic order.
+//
+// 🔴 The identity's treatment is harnessStrategiesExcept's, unchanged and for its reasons: proposing
+// `single-shot` against a scaffold mismatch is a real and often correct answer — a node running a
+// five-turn loop its cases never needed is burning money — but proposing it at a node that ALREADY runs
+// the identity is proposing NOTHING, because the candidate resolves to the baseline's own config_hash
+// and would occupy a verification slot measuring a configuration against itself.
+func (m Menu) loopStrategiesExcept(currentRef string) []LoopChoice {
+	currentIsIdentity := currentRef == ""
+	var out []LoopChoice
+	for _, c := range m.LoopStrategies {
+		if c.Ref == currentRef {
+			continue
+		}
+		if currentIsIdentity && c.Strategy == harnessStrategySingleShot {
+			continue
+		}
+		out = append(out, c)
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Ref < out[j].Ref })
+	return out
 }
 
 // HarnessChoice is one harness registry entry available for a scaffold swap (P18).

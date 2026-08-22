@@ -1,3 +1,22 @@
+> ⚠️ **RECONCILIATION REQUIRED BEFORE THIS CHANGE FOLDS — see
+> [P34 D-34.6](../p34-harness-loop-graph-split/decisions.md#d-346--p18-is-reconciled-at-fold-time-by-this-changes-spec-text-tasksmd-26).**
+>
+> This change defines the **harness** axis as carrying both the execution scaffold **and** the control
+> loop. [`p34-harness-loop-graph-split`](../p34-harness-loop-graph-split/) **splits** them: `harness`
+> narrows to the execution envelope (sandbox posture, host-service provision, ceilings, retries, timeouts,
+> concurrency limit, guardrail and approval-gate bindings) and a new `loop` axis carries the iteration
+> policy (strategy, stop condition, `max_turns`, reflection prompt, critic binding).
+>
+> **Folding this change unchanged after P34 would restore the conflation P34 exists to end.** Before this
+> folds, every requirement below that places the *control loop* on the harness axis must be rewritten to
+> place it on the **loop** axis, and the `agent-loop` capability folds under `loop-strategy`. The
+> `harness-runtime`, `harness-delivery` and `harness-materialization` capabilities fold **unchanged** —
+> they describe *executing* a loop, which is not what the split moves.
+>
+> Nothing here is withdrawn: P34 is expand-only, the five strategies and four stop conditions are
+> **relocated rather than extended**, and every entry sealed under this change stays resolvable
+> indefinitely (P34 D1 / D-34.5).
+
 ## Why
 
 Every optimization axis the platform ships tunes what happens **inside one model call** — model, prompt,

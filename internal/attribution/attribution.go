@@ -127,6 +127,22 @@ type PerNodeContribution struct {
 	// TopologyProvenance is the strongest edge provenance that constrained ordering ("" when ordering
 	// fell back to flat trace-order). Surfaced so a reader knows how the topology was recovered.
 	TopologyProvenance linkage.Provenance `json:"topology_provenance,omitempty"`
+	// OverlappingSpans is true when any two node spans in any attributed case overlapped in wall-clock
+	// time — the shape P34 concurrency makes ordinary (task 6.4).
+	//
+	// 🔴 It is reported rather than merely handled, because it changes what a localization MEANS. When
+	// spans overlap, "which node diverged first" is not a reading of the trace's timing: the timing is
+	// partly the scheduler's choice. A consumer that renders a first-divergence node without knowing
+	// this is presenting a scheduling artifact as a finding.
+	OverlappingSpans bool `json:"overlapping_spans,omitempty"`
+	// OrderedByDeclaration is true when the spec's DECLARED order (P34 design D4) constrained the walk.
+	// It is the answer to the question OverlappingSpans raises: overlapping spans ordered by the
+	// declaration are replay-consistent; overlapping spans ordered by start time are not.
+	//
+	// 🚫 The pair is deliberately two booleans rather than one enum. `OverlappingSpans && !
+	// OrderedByDeclaration` is a real and reachable state — a caller that has no spec to hand — and it
+	// is precisely the state a reader must be able to see, so it must be expressible.
+	OrderedByDeclaration bool `json:"ordered_by_declaration,omitempty"`
 }
 
 // Attribute decomposes end-to-end failure / cost / latency to individual nodes for a set of failing
@@ -144,12 +160,32 @@ func Attribute(ir *discovery.IR, v Variant, cases []FailingCase) PerNodeContribu
 	return AttributeWithTopology(ir, v, cases, linkage.Topology{Edges: linkage.FromIR(ir)})
 }
 
+// AttributeWithOrder is Attribute with the spec's DECLARED node order supplied (P34 task 6.4).
+//
+// 🔴 This is the entry point a caller holding a Variant Spec should use, and after P34 that is most of
+// them. When a run overlapped two nodes' spans, start time stops being evidence of sequence — the
+// scheduler chose it — so first-divergence walks the DECLARED order instead. Design D4 keeps `Order` as
+// a linear sequence containing every node precisely so a replay has one, and using it here makes the
+// localization a reader sees the one a replay would produce.
+//
+// 🚫 The declaration does not override a recovered TOPOLOGY. Topology is a claim about data dependency
+// and outranks both: a consumer genuinely runs after its producer, however the two were declared. The
+// declaration only replaces the start-time fallback, which is the part concurrency invalidated.
+func AttributeWithOrder(ir *discovery.IR, v Variant, cases []FailingCase, topo linkage.Topology, declaredOrder []string) PerNodeContribution {
+	return attribute(ir, v, cases, topo, declaredOrder)
+}
+
 // AttributeWithTopology is Attribute with an explicit recovered topology (task 13.3): first-divergence
 // orders by, and a downstream ablation scopes "hold every upstream node fixed" by, the highest-
 // provenance edge set in `topo`, falling back to raw span start-time only when no edge links a case's
 // nodes. The topology is a reconciled set (framework + inferred_static + inferred_dynamic) built by the
 // caller (see internal/linkage); an inferred edge is a hypothesis, never rendered as framework-certain.
 func AttributeWithTopology(ir *discovery.IR, v Variant, cases []FailingCase, topo linkage.Topology) PerNodeContribution {
+	return attribute(ir, v, cases, topo, nil)
+}
+
+// attribute is the one implementation. `declaredOrder` is the spec's node order, or nil.
+func attribute(ir *discovery.IR, v Variant, cases []FailingCase, topo linkage.Topology, declaredOrder []string) PerNodeContribution {
 	out := PerNodeContribution{Variant: v, NFailing: len(cases)}
 
 	type nodeAgg struct {
@@ -175,7 +211,19 @@ func AttributeWithTopology(ir *discovery.IR, v Variant, cases []FailingCase, top
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Case.CaseID < sorted[j].Case.CaseID })
 
 	for _, fc := range sorted {
-		startOrder := executionOrder(fc.Trace)
+		// 🔴 The base walk. Under overlapping spans the start-time order is partly the scheduler's
+		// choice, so the DECLARED order replaces it when the caller supplied one — see
+		// executionOrderDeclared, and p34_overlap_holdout_test.go, which measured the failure this
+		// prevents. The declaration is used unconditionally rather than only on overlap: a spec's order
+		// is the replay sequence, and switching ordering rules mid-run would make a localization depend
+		// on whether this particular execution happened to interleave.
+		startOrder := executionOrderDeclared(fc.Trace, declaredOrder)
+		if spansOverlap(fc.Trace) {
+			out.OverlappingSpans = true
+		}
+		if len(declaredOrder) > 0 {
+			out.OrderedByDeclaration = true
+		}
 		order := startOrder
 		if o, constrained := topo.Order(startOrder, startOrder); constrained {
 			order = o

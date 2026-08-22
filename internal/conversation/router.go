@@ -149,9 +149,22 @@ var intentTerms = map[Intent]map[string]float64{
 		"remember": 4, "memory": 3.5, "between calls": 2.5, "recall": 3,
 		"persist": 3, "forget": 3.5, "across runs": 3, "stored": 2,
 	},
+	// 🔴 P34 split these two, and the split is the hardest routing decision in the table because the two
+	// questions SHARE THEIR NOUNS. "How many turns does it take" is the loop; "how many turns is it
+	// ALLOWED to take" is the envelope, and one word apart is the whole difference.
+	//
+	// The weights encode that: `loop` owns the verbs of doing (reflect, retry, iterate) and `harness`
+	// owns the verbs of permission (allowed, may, ceiling, limit, sandbox, spend). "turns" alone is
+	// deliberately weak on both — a question containing only that word has not yet said which it means,
+	// and a router confident about it would be confident about a coin flip.
+	IntentLoop: {
+		"how many turns": 4, "loop": 3.5, "retry": 3, "reflect": 3,
+		"scaffold": 3, "iterations": 3, "iterate": 3, "turns": 2,
+	},
 	IntentHarness: {
-		"how many turns": 4, "loop": 3.5, "turns": 3, "retry": 3, "reflect": 3,
-		"harness": 3.5, "scaffold": 3, "iterations": 3,
+		"allowed to": 4, "sandbox": 4, "spend": 3.5, "ceiling": 3.5, "envelope": 3.5,
+		"harness": 3.5, "reach the network": 4, "budget": 3, "limit": 3, "guardrail": 3.5,
+		"approval gate": 3.5, "how much can it spend": 4, "turns": 2,
 	},
 	IntentCoverage: {
 		"what did you measure": 4, "what did you not": 4, "coverage": 3.5,

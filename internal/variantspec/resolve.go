@@ -27,6 +27,16 @@ type Registries interface {
 	// either would let a scaffold resolve through a memory path — the exact cross-dimension confusion the
 	// Kind is hashed into the version_id to prevent.
 	ResolveHarness(ctx context.Context, versionID string) (*registry.HarnessEntry, error)
+	// ResolveLoop resolves a loop-registry version_id (P34 task 3.1). Its OWN method for the reason
+	// ResolveHarness is, and this time the confusion it prevents is the one ADR-014 split the axes over:
+	// after P34 a harness entry names an EXECUTION ENVELOPE and a loop entry names an ITERATION POLICY,
+	// and one method returning either would let a policy resolve through an envelope's path.
+	//
+	// 🔴 Adding a method here is the exhaustiveness fence for CONSUMERS (task 3.3): every implementer of
+	// Registries — the store, every fake in every test — fails to build until it answers for the new
+	// kind. That is a build failure, which is what makes "a consumer that would silently mis-seal a loop"
+	// impossible rather than unlikely.
+	ResolveLoop(ctx context.Context, versionID string) (*registry.LoopEntry, error)
 }
 
 // Resolved is a spec resolved against the IR and the registries: the hashed configuration plus the
@@ -79,6 +89,18 @@ type Resolved struct {
 	// transform can name the exact edge set it is refusing (P18 task 5.3). Nil when the spec declares
 	// none, which is the common case.
 	HarnessGroups []ResolvedGroupOverride
+	// MergeAdapters are the adapters the fan-in contract check inserted to bridge a merge whose combined
+	// output did not satisfy the downstream node's input contract (P34 task 5.7).
+	//
+	// 🔴 They are carried BESIDE the hashed projection, not inside it, exactly as HarnessGroups above
+	// are: the transform needs to name the exact edge it is materialising or refusing, and the hash
+	// needs the topology rather than the bridging. Nil when the merge was coherent as-is, which is the
+	// common case.
+	//
+	// 🚫 An adapter is never a hidden runtime coercion. Each one is an EXPLICIT node carrying its own
+	// io_contract (P5 Decision 3), so it appears in the diff against the parent and the transform
+	// materialises it as generated source.
+	MergeAdapters []InsertedAdapter
 }
 
 // ResolvedGroupOverride is one group harness as the transform sees it: the registry entry the author
@@ -168,6 +190,17 @@ type ResolvedOverride struct {
 	// strategy is either materialized or refused. Collapsing them would either refuse `single-shot` (wrong
 	// — one turn is exactly the un-rewritten call site) or skip the decision entirely.
 	Harness *registry.HarnessEntry
+	// Loop is the resolved ITERATION POLICY — which control loop this node's call runs (P34 task 3.1).
+	// Nil means the node did not override the loop; non-nil means it did, INCLUDING when the strategy it
+	// selected is `single-shot`, for the reason Harness carries the same distinction.
+	Loop *registry.LoopEntry
+	// Envelope is the resolved EXECUTION ENVELOPE, decoded, when the node's harness_ref names one
+	// (P34 task 4.1). Nil when the node bound no harness, or bound a LEGACY loop-bearing one.
+	//
+	// 🔴 It is carried DECODED rather than re-decoded by each consumer. The ceiling check, the
+	// host-service check, the concurrency check and the sandbox all ask this entry questions, and four
+	// decodes would be four chances for one of them to read an absent field as a permissive default.
+	Envelope *registry.Envelope
 }
 
 // Dimensions returns the dimensions this override actually sets, in a stable order. The Transform
@@ -201,6 +234,12 @@ func (o ResolvedOverride) Dimensions() []Dimension {
 	// "the identity strategy", because one is never dispatched and the other is a no-op it applies.
 	if o.Harness != nil {
 		out = append(out, DimHarness)
+	}
+	// Loop is reported iff the node OVERRODE it — including an override that selects `single-shot`, for
+	// the reason Harness carries the same distinction: the transform must be able to tell "no override"
+	// from "the identity policy", because one is never dispatched and the other is a no-op it applies.
+	if o.Loop != nil {
+		out = append(out, DimLoop)
 	}
 	return out
 }
@@ -294,12 +333,63 @@ func Resolve(ctx context.Context, spec *VariantSpec, ir *discovery.IR, regs Regi
 		out.HarnessGroups = append(out.HarnessGroups, ResolvedGroupOverride{Entry: entry, Edges: rg.Edges})
 	}
 
+	// Graph topology (P34 §5). Resolved after the nodes and the harness groups, so a group naming a node
+	// that failed to resolve never reaches here — and BEFORE the hash, because the topology is part of
+	// the configuration a config_hash denotes.
+	//
+	// 🔴 It is also before any codemod exists, which is FR15: every new topology form is gated by
+	// `internal/typedcontract`, unchanged, rather than discovered at apply time.
+	graphGroups, graphAdapters, err := resolveGraph(ctx, spec, ir, nil)
+	if err != nil {
+		return nil, err
+	}
+	out.Config.GraphGroups = graphGroups
+	// An adapter inserted to bridge a fan-in is an EXPLICIT node in the spec, recorded exactly as a
+	// re-arrangement's adapter is (P5 Decision 3) — never a hidden runtime coercion. It rides on the
+	// Resolved so the compare view and the transform engine both see what was bridged; the SPEC's own
+	// InsertedAdapters (from a re-arrangement) are carried alongside rather than replaced, because a
+	// spec may legitimately have both.
+	out.MergeAdapters = graphAdapters
+
+	// P34 task 4.4 / FR5, the resolve-time half: a concurrent group wider than the envelope's limit.
+	//
+	// 🔴 The envelope read is the WIDEST any node in the spec declares, not a per-node one, because a
+	// group spans nodes and a limit that only bound the node that happened to carry the envelope would
+	// be trivially bypassed by declaring the group from a different node.
+	if width, gi := spec.GraphWidth(); width > 0 {
+		if err := checkConcurrencyLimit(gi, width, narrowestConcurrencyLimit(out.Overrides)); err != nil {
+			return nil, err
+		}
+	}
+
 	hash, err := out.Config.Hash()
 	if err != nil {
 		return nil, err
 	}
 	out.ConfigHash = hash
 	return out, nil
+}
+
+// narrowestConcurrencyLimit returns the tightest concurrency limit any of this spec's envelopes
+// imposes, or nil when none does.
+//
+// 🔴 The TIGHTEST rather than the one belonging to some particular node. A concurrent group spans
+// nodes, so "which envelope's limit applies" has no single answer — and taking the loosest, or the
+// first, would let an author widen a group by attaching a permissive envelope to any one node in it.
+// Taking the tightest means adding an envelope can only ever narrow, which is the direction a policy
+// is allowed to move without review.
+func narrowestConcurrencyLimit(overrides map[string]ResolvedOverride) *registry.Envelope {
+	var out *registry.Envelope
+	for _, id := range sortedKeys(overrides) {
+		env := overrides[id].Envelope
+		if env == nil || env.ConcurrencyLimit == nil {
+			continue
+		}
+		if out == nil || *env.ConcurrencyLimit < *out.ConcurrencyLimit {
+			out = env
+		}
+	}
+	return out
 }
 
 // resolveNode produces one node's resolved_config entry by laying the spec's overrides over what the
@@ -488,11 +578,89 @@ func resolveNode(ctx context.Context, nodeID string, o NodeOverride, irNode *dis
 		if !entry.IsSingleShot() || len(params) > 0 {
 			node.Harness = &ResolvedHarness{Strategy: entry.Spec.Strategy, Params: params}
 		}
+		// P34 task 4.1: when the entry names an EXECUTION ENVELOPE, decode it once and carry it. Every
+		// downstream gate — the ceiling, the host services, the concurrency limit, the sandbox — asks this
+		// entry questions, and decoding it per consumer would be one chance per consumer to read an absent
+		// field as a permissive default.
+		//
+		// 🔴 A decode failure is a REFUSAL, not a zero envelope. A zero envelope provides no host service
+		// and imposes no ceiling, which is the most permissive policy available, arrived at by accident.
+		if env, isEnv, derr := registry.EnvelopeOf(entry); isEnv {
+			if derr != nil {
+				return ro, node, specErr(nodeID, DimHarness, ErrUnresolvedRef,
+					"harness entry %s names the %q strategy but its params do not decode: %v",
+					entry.VersionID, registry.StrategyEnvelope, derr)
+			}
+			ro.Envelope = &env
+		}
 	} else if base := irNode.HarnessDefault(); base != registry.StrategySingleShot {
 		// The discovered default, pinned by source_revision like any other un-overridden dimension. No
 		// params: the IR records WHICH scaffold a call site already implements, not how it is tuned —
 		// inventing params here would be this layer guessing at a configuration nobody wrote.
 		node.Harness = &ResolvedHarness{Strategy: base, Params: map[string]any{}}
+	}
+
+	// ── loop (P34 tasks 3.1/3.4/3.6, 4.2/4.3; decisions.md D-34.1) ─────────────────────────────────
+	//
+	// Everything the axis split refuses happens HERE, at resolve, before any diff, worktree, build or
+	// provider call exists. Four refusals, in the order a reader would ask them:
+	//
+	//  1. AMBIGUITY  — a loop-bearing harness_ref AND a loop_ref: two iteration policies for one node.
+	//  2. RESOLUTION — a loop_ref that names nothing, or names a strategy this build does not implement.
+	//  3. CEILING    — max_turns above what the envelope imposes, naming BOTH numbers.
+	//  4. HOST       — a loop needing a second actor the envelope does not provide.
+	//
+	// 🔴 (3) and (4) are P34's "moved left". They were previously answered when a RUN reached the node.
+	// A preflight answer is worth having because the alternative is discovering at execution that a
+	// configuration was never runnable — after the codemod was generated and applied.
+	//
+	// 🚫 What does NOT happen here is anything to the LEGACY path. A spec carrying only a loop-bearing
+	// harness_ref resolves exactly as it did before P34 and produces exactly the bytes it produced before
+	// P34. Adding a resolve-time gate to that path would make specs authored years ago stop resolving,
+	// which is the failure ADR-014 spent its whole argument preventing.
+	if o.LoopRef != "" {
+		// Defense in depth against a caller that assembled a Resolve by hand and skipped Validate.
+		if inlinesDefinition(o.LoopRef) {
+			return ro, node, &SpecError{NodeID: nodeID, Dim: DimLoop, Ref: o.LoopRef, Err: ErrInlineDefinition,
+				Detail: "loop_ref carries an inline strategy definition; it must be a loop-registry " +
+					"version_id, so the configuration is resolvable back from a config_hash"}
+		}
+		// (1) Ambiguity, checked BEFORE the loop is resolved. A spec that stated its iteration policy
+		// twice is refused whether or not both refs happen to resolve — resolving them first would make
+		// the error a reader sees depend on which of the two was broken.
+		if ro.Harness != nil && ro.Harness.IsLoopBearing() {
+			return ro, node, &SpecError{NodeID: nodeID, Dim: DimLoop, Ref: o.LoopRef, Err: ErrAmbiguousAxis,
+				Detail: fmt.Sprintf("harness_ref %s is a LEGACY loop-bearing entry (strategy %q) and "+
+					"loop_ref %s is an iteration policy. Both say how many turns this node takes and what "+
+					"stops it, and they may disagree — so this is refused rather than resolved by preferring "+
+					"one. Keep the loop_ref and repoint harness_ref at an %q entry, or drop the loop_ref.",
+					ro.Harness.VersionID, ro.Harness.Spec.Strategy, o.LoopRef, registry.StrategyEnvelope)}
+		}
+		// (2) Resolution. An entry naming a strategy this build does not implement fails HERE rather
+		// than falling back to `single-shot` — see registry.bindLoopStrategy for why.
+		entry, err := regs.ResolveLoop(ctx, o.LoopRef)
+		if err != nil {
+			return ro, node, refError(nodeID, DimLoop, o.LoopRef, err)
+		}
+		ro.Loop = entry
+		params, err := decodeParams(entry.Spec.Params)
+		if err != nil {
+			return ro, node, specErr(nodeID, DimLoop, ErrUnresolvedRef,
+				"loop entry %s has params that are not a JSON object: %v", entry.VersionID, err)
+		}
+		// (3) and (4). Both read the ENVELOPE, so both are skipped when the node bound none — with the
+		// platform ceiling still standing behind them, because MaxTurnsCeiling is enforced by the loop
+		// schema at seal and cannot be exceeded by any entry that exists.
+		if err := checkEnvelopeAdmits(nodeID, entry, ro.Envelope); err != nil {
+			return ro, node, err
+		}
+		// `single-shot` with no params ≡ absent (D-8 applied to the new axis): the identity policy emits
+		// NO loop key, so an explicitly-single-shot node canonicalizes byte-identically to a node that
+		// never mentioned a loop. The override is still recorded on `ro` — the transform must be able to
+		// see that the author asked for something, even when what they asked for changes nothing.
+		if !entry.IsSingleShot() || len(params) > 0 {
+			node.Loop = &ResolvedLoop{Strategy: entry.Spec.Strategy, Params: params}
+		}
 	}
 
 	// ── tools (P14 task 5.3, decisions.md D-14.2) ──────────────────────────────────────────────────

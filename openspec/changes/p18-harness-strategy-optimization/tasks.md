@@ -47,7 +47,9 @@ passes.
       resolution. → `internal/registry/harness.go` (Test: `TestHarnessParamsValidatedAtSeal`).
 - [x] 2.4 Seed the five builtin strategies (`single-shot`, `react-loop`, `plan-execute`, `reflexion`,
       `critic-loop`); `critic-loop` carries a **separate** critic model ref. →
-      `internal/registry/harness_builtins.go` (Test: `TestFiveBuiltinStrategiesRegister`).
+      `internal/registry/harness_builtins.go` (Test: `TestBuiltinHarnessStrategiesRegister`; renamed from
+      `TestFiveBuiltinStrategiesRegister` when P34 added the sixth strategy, `envelope`, and bumped
+      `HarnessStrategySetVersion` 1.0.0 → 2.0.0 — the cardinality assertion working, not being loosened).
 - [x] 2.5 🔴 Enforce cross-registry uniqueness: a `harness` ref used in a non-harness dimension (or vice
       versa) fails closed. → `internal/registry/registry.go` (Test: `TestHarnessRefFailsClosedCrossKind`).
 
@@ -128,7 +130,9 @@ passes.
       (`harnessStrategyOp`, `setHarness`) + `menu.go` (`HarnessChoice`) + `gain.go` (prior 0.35, the
       highest in the table; order hint 6, the most expensive to verify — a heavier scaffold pays
       `max_turns` model calls per case)
-      (Test: `TestOpHarnessStrategyInCatalog`, `TestHarnessProposeSetsOnlyTheHarnessRef`).
+      (Test: `TestOpLoopStrategyInCatalog`; renamed and re-aimed by P34, which moved this
+      operator to the `loop` axis (ADR-014) and reserved `OpHarnessStrategy` as a wire value nothing
+      emits — the test now asserts BOTH halves of that succession, `TestHarnessProposeSetsOnlyTheHarnessRef`).
 
       🔴 **A defect found in P17's code and fixed here.** `cloneOverride` silently DROPPED `MemoryRef`,
       so any proposal derived from a baseline that bound a memory strategy also **un-bound** it — the
@@ -411,7 +415,7 @@ would occupy a verification slot measuring a configuration against itself, and w
 a tie) would be recorded as evidence about a change never made. `harnessStrategiesExcept` now excludes
 the identity **only where it is already in force**; proposing `single-shot` to a node running a six-turn
 loop is still offered, because that is often the cheapest correct answer
-(Test: `TestHarnessOperatorNeverProposesTheBaseline`). 5 candidates now.
+(Test: `TestLoopOperatorNeverProposesTheBaseline`; renamed by P34 with the operator). 5 candidates now.
 
 Also verified live on the real tree: `single-shot` ≡ absent (byte-identical canonical bytes and hash);
 two `reflexion` entries differing only in `max_turns` hash differently; the coverage table's claim

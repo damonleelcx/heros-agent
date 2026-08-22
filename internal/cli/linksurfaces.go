@@ -67,9 +67,15 @@ func LinkSurfaces() []LinkSurface {
 		{"coverage", "/app/coverage", FillByStructure,
 			"re-run with --with-ir (the table itself is a build fact and always renders; --with-ir is what " +
 				"crosses it with YOUR nodes)"},
-		{"wiring", "/app/wiring", FillByStructure, "re-run with --with-ir"},
+		{"graph", "/app/graph", FillByStructure, "re-run with --with-ir"},
+		// P34 renamed this page to `/app/graph`. The old path still SERVES — it redirects — so it is
+		// listed rather than omitted: the fence reads the pages the console serves, and a served page
+		// missing from this report is what produced the empty console this whole mechanism is fixing.
+		{"wiring", "/app/wiring", FillByStructure,
+			"nothing — this page moved to Graph and this link redirects there"},
 		{"context", "/app/context", FillByStructure, "re-run with --with-ir"},
 		{"memory", "/app/memory", FillByStructure, "re-run with --with-ir"},
+		{"loop", "/app/loop", FillByStructure, "re-run with --with-ir"},
 		{"harness", "/app/harness", FillByStructure, "re-run with --with-ir"},
 		{"delivery", "/app/delivery", FillByStructure, "re-run with --with-ir"},
 		{"studio", "/app/studio", FillByStructure,

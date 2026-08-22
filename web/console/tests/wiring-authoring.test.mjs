@@ -23,8 +23,8 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (rel) => readFile(join(root, rel), "utf8");
 const flat = async (rel) => (await read(rel)).replace(/\s+/g, " ");
 
-const EDITOR = "src/app/app/wiring/editor.tsx";
-const WIRING_PAGE = "src/app/app/wiring/page.tsx";
+const EDITOR = "src/app/app/graph/editor.tsx";
+const WIRING_PAGE = "src/app/app/graph/page.tsx";
 
 // ── 19.10 a verdict per gesture, not on submit ──────────────────────────────────────────────────
 

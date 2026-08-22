@@ -375,11 +375,17 @@ def describe(node_id):
 `
 
 // harnessStrategyNamesInModule is the strategy set the emitted module implements a loop for. Read by the
-// conformance test that pins it against the sealed vocabulary, so a sixth strategy cannot land with the
-// module silently missing it.
+// conformance test that pins it against the sealed vocabulary, so a strategy cannot land with the module
+// silently missing it.
+//
+// 🔴 It iterates the LOOP vocabulary since P34, not the harness one. The emitted module runs an ITERATION
+// POLICY — it decides whether to take another turn — and after ADR-014's split the harness vocabulary also
+// contains `envelope`, which does not iterate: it is sandbox posture and ceilings, imposed on whatever
+// does. Demanding a module implementation for it would demand a loop for a thing with no turns, and the
+// only way to satisfy that is to emit one that lies.
 func harnessStrategyNamesInModule() []string {
-	out := make([]string, 0, registry.HarnessStrategySetSize)
-	for _, st := range registry.BuiltinHarnessStrategies() {
+	out := make([]string, 0, registry.LoopStrategySetSize)
+	for _, st := range registry.BuiltinLoopStrategies() {
 		name := st.Name()
 		if name == registry.StrategySingleShot {
 			// The identity is implemented by `_ceiling` returning 1, not by a `_continue` branch.

@@ -20,6 +20,7 @@ type fakeRegistries struct {
 	contexts  map[string]*registry.ContextEntry
 	memories  map[string]*registry.MemoryEntry
 	harnesses map[string]*registry.HarnessEntry
+	loops     map[string]*registry.LoopEntry
 	// calls counts lookups, so a test can prove resolution ABORTED rather than carried on.
 	calls int
 }
@@ -32,6 +33,7 @@ func newFakeRegistries() *fakeRegistries {
 		contexts:  map[string]*registry.ContextEntry{},
 		memories:  map[string]*registry.MemoryEntry{},
 		harnesses: map[string]*registry.HarnessEntry{},
+		loops:     map[string]*registry.LoopEntry{},
 	}
 }
 
@@ -84,6 +86,47 @@ func (f *fakeRegistries) ResolveHarness(_ context.Context, id string) (*registry
 		return e, nil
 	}
 	return nil, registry.ErrNotFound
+}
+
+// ResolveLoop looks up ONLY the loop map (P34), for the same reason ResolveHarness looks up only its
+// own: after ADR-014's split a harness entry names an EXECUTION ENVELOPE and a loop entry names an
+// ITERATION POLICY, so a harness ref handed here must miss — exactly as it would against the real store,
+// where the Kind is part of the content address.
+func (f *fakeRegistries) ResolveLoop(_ context.Context, id string) (*registry.LoopEntry, error) {
+	f.calls++
+	if e, ok := f.loops[id]; ok {
+		return e, nil
+	}
+	return nil, registry.ErrNotFound
+}
+
+// addLoop puts a real loop entry in the fake registry — built from the builtin strategy set, so a test
+// cannot resolve a strategy the product does not implement.
+func (f *fakeRegistries) addLoop(t *testing.T, ref, name, strategy, params string) *registry.LoopEntry {
+	t.Helper()
+	st := registry.LoopStrategyNamed(strategy)
+	if st == nil {
+		t.Fatalf("addLoop: %q is not a builtin loop strategy", strategy)
+	}
+	if params == "" {
+		params = "{}"
+	}
+	e := &registry.LoopEntry{
+		VersionID: ref, Name: name, Strategy: st,
+		Spec: registry.LoopSpec{Strategy: strategy, Params: json.RawMessage(params)},
+	}
+	if f.loops == nil {
+		f.loops = map[string]*registry.LoopEntry{}
+	}
+	f.loops[ref] = e
+	return e
+}
+
+// addEnvelope puts an EXECUTION-ENVELOPE harness entry in the fake registry (P34 task 4.1) — the
+// post-split shape of the harness axis, as opposed to addHarness's legacy loop-bearing one.
+func (f *fakeRegistries) addEnvelope(t *testing.T, ref, name, params string) *registry.HarnessEntry {
+	t.Helper()
+	return f.addHarness(t, ref, name, registry.StrategyEnvelope, params)
 }
 
 // addHarness seals a real harness entry into the fake registry — sealed, not hand-built, so the

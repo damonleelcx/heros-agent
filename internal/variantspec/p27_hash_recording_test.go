@@ -222,6 +222,12 @@ func (r recStore) ResolveHarness(_ context.Context, _ string) (*registry.Harness
 	return nil, registry.ErrNotFound
 }
 
+// ResolveLoop answers for P34's loop registry. This fixture publishes no loop entries, so every
+// loop_ref misses — which is the fail-closed answer, not an empty one.
+func (r recStore) ResolveLoop(context.Context, string) (*registry.LoopEntry, error) {
+	return nil, registry.ErrNotFound
+}
+
 // ── 1. the recording ─────────────────────────────────────────────────────────────────────────────────
 
 func TestPreP27ConfigHashesAreReproducedExactly(t *testing.T) {

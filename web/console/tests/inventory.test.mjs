@@ -35,7 +35,7 @@ const SRC = {
   // P15's declined-change card. It is its own file because the submit path and /preview/wiring render the
   // SAME element — a preview of a re-implementation would check a page no customer sees.
   axisRefusal: "src/components/axisRefusal.tsx",
-  wiring: "src/app/app/wiring/page.tsx",
+  wiring: "src/app/app/graph/page.tsx",
   shell: "src/app/app/layout.tsx",
   transform: "src/app/app/transforms/[configHash]/[sourceRevision]/page.tsx",
   run: "src/app/app/runs/[runId]/page.tsx",
@@ -183,8 +183,12 @@ item("P15-3", "the wiring axis explains why a rearrangement is declined rather t
   "AXIS_NOTE", "wiring", /no-op/);
 item("P15-4", "an axis with no console note still renders the platform's own sentence", "axisRefusal",
   /note \? <p>\{note\}<\/p> : null/, "verbatim");
+// P34 re-cut this surface: `/app/wiring` became `/app/graph`, which carries the wiring axis AND
+// topology. The old path still resolves — it redirects — so the inventory item is satisfied by the new
+// rail entry, not by the old one. Asserting the old href would pin a link that is deliberately a
+// redirect now.
 item("P15-5", "the wiring axis has a surface in the console app, reachable from the navigation", "shell",
-  '{ href: "/app/wiring", label: "Wiring"', '"s:wiring"');
+  '{ href: "/app/graph", label: "Graph"', '"s:graph"');
 item("P15-6", "the wiring surface splits its sections into a real tablist, not a stack", "wiring",
   /<Tabs tabs=\{tabs\}/, /id: "axis"/, /EXAMPLES\.map/);
 item("P15-7", "the wiring surface renders the SAME refusal card the submit path renders", "wiring",

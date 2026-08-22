@@ -29,8 +29,8 @@ PARITY_DIR ?= .parity
         sandbox-proof sandbox-proof-redcheck \
         classifier-calibration demo-patterngraph demo-proposals demo-billing demo-billing-states \
         release-rehearse release-rehearse-redcheck readme-install packaging-proof install-smoke install-smoke-refusals \
-        agent-rehearse agent-status repo-intake-hermes assessment-hermes \
-        intent-holdout intent-holdout-strict p31-fence-redcheck p33-fence-redcheck console-edge-proof assessment-holdout
+        agent-rehearse agent-status repo-intake-hermes assessment-hermes axissplit-hermes \
+        intent-holdout intent-holdout-strict attribution-holdout p31-fence-redcheck p33-fence-redcheck p34-fence-redcheck console-edge-proof assessment-holdout
 
 ## ci: the locally-provable gate (go + schema + console-types + discovery-ci + intent-holdout). Lint/db-proof run as their own CI jobs.
 ci: go schema console-types-check docs-facts-check discovery-ci intent-holdout-strict
@@ -197,10 +197,47 @@ repo-intake-hermes:
 ##
 ## 🚫 Every finding it produces is STRUCTURAL. Inference is gated on a holdout run that has not
 ## happened and measurement needs the sandbox to execute customer code, so no provider is called and
-## nothing costs money. `memory` and `harness` will report not_measured, and `loop` and `graph` will
-## report refused naming P34 — all four are the correct answers, not defects.
+## nothing costs money.
+##
+## 🔴 P34 CHANGED WHAT THIS PRINTS, and the change is the phase's end-to-end proof. `loop` and `graph`
+## used to report `refused` naming P34 — the configuration layer had no such axes. They now REPORT:
+## `loop` reads the discovered control loop, and `graph` names which of the frontend, the analysis or
+## the language support is missing (FR18) rather than a generic unsupported state. `harness` narrowed to
+## the EXECUTION ENVELOPE, which a source snapshot structurally cannot contain, so it is `not_measured`
+## with that reason rather than `observed`.
+##
+## So against hermes-agent the tally is now `0 measured · 4 observed · 5 not_measured · 0 REFUSED`.
+## Zero refusals is the correct answer, not a suppressed one: `Axis.P34Pending()` returns false for
+## every axis because both configurations now exist.
 assessment-hermes:
 	bash db/migrations/postgres/run_pg_docker.sh $(GO) run ./cmd/proof/assessment
+
+## axissplit-hermes: run P34's three axes against a REAL repository's own call sites.
+##
+## Every P34 fence is green and all fourteen have been drilled red (`make p34-fence-redcheck`). Green
+## fences prove the parts, against a two-node fixture this repository wrote with hand-built io_contracts
+## chosen to make the assertion clean. That is the right shape for a fence and it is not evidence about
+## a customer.
+##
+## This proves the WALK: it discovers `nousresearch/hermes-agent`'s actual call sites and authors P34
+## configurations against the node ids that come out, so every refusal it prints names a symbol somebody
+## else wrote. Eight gates: the turn ceiling naming both numbers, a loop that fits, the host-service
+## refusal moved left, the ambiguity refusal naming both refs, the legacy path still resolving, a fan-in
+## with no merge refused at validate, the same fan-in refused at transform by name, and each axis's
+## declared coverage for the repository's language.
+##
+## 🚫 It calls NO provider and costs nothing. Every P34 gate is a resolve-time gate by construction —
+## that is the phase's central claim — so proving them needs no run, no sandbox and no credential.
+##
+## It needs a checkout; clone it first (a public repository needs no token):
+##
+##	git clone --depth 1 https://github.com/nousresearch/hermes-agent /tmp/hermes-agent
+##	make axissplit-hermes
+HERMES ?= /tmp/hermes-agent
+axissplit-hermes:
+	@test -d "$(HERMES)" || { echo "axissplit-hermes: no checkout at $(HERMES)"; \
+		echo "  git clone --depth 1 https://github.com/nousresearch/hermes-agent $(HERMES)"; exit 2; }
+	GOWORK=off $(GO) run ./cmd/proof/axissplit -local $(HERMES)
 
 ## operator-hermes: run P26's operator surfaces against a REAL repository (nousresearch/hermes-agent).
 #
@@ -529,7 +566,29 @@ mail-proof:
 p33-fence-redcheck:
 	$(PYTHON) scripts/p33_fence_redcheck.py
 
-## assessment-holdout: score P33's inference against the holdout set (§3.4, §3.5).
+## p34-fence-redcheck: P34 §9 — prove the twelve QA fences can actually FAIL.
+##
+## 🔴 §9 is titled "fences that can go red", and the title is the requirement. Every rule this phase adds
+## is a few lines; weakening one leaves the whole suite green except the test that names it. The drill
+## breaks each rule, asserts the package STILL COMPILES (a mutation that does not build exits non-zero
+## for a reason that has nothing to do with the fence), and asserts the test goes red.
+##
+## 9.10 is inverted and runs separately: its claim is that a missing Kind case fails to BUILD, so there
+## a successful compile is the failure.
+p34-fence-redcheck:
+	$(PYTHON) scripts/p34_fence_redcheck.py
+
+## ## attribution-holdout: P34 §6.4 — attribution under OVERLAPPING spans, measured on a holdout.
+##
+## 🔴 PRD §9.5 requires this proved BEFORE concurrency ships, with no pure-refactor exemption. It prints
+## three lines: the sequential baseline, the same cases with the spans overlapping and ordered by START
+## TIME (the defect — the answer flips on a nanosecond of scheduling), and the same cases ordered by the
+## SPEC'''s DECLARED order (the fix, which is replay-consistent). A run whose middle line stopped flipping
+## would mean the comparison no longer demonstrates anything, and the test says so.
+attribution-holdout:
+	GOWORK=off $(GO) test -count=1 -v -run "TestAttributionDoesNotDegradeUnderOverlappingSpans|TestBothNodesDivergingIsWhereOrderActuallyDecides|TestTheOverlapHoldoutCanActuallyFail" ./internal/attribution/
+
+assessment-holdout: score P33's inference against the holdout set (§3.4, §3.5).
 ##
 ## 🔴 IT NEEDS A REAL PROVIDER. Without one there is nothing to measure: the suite that runs in `make
 ## go` uses a SCRIPTED analyst and therefore measures the harness — that abstention counts as a

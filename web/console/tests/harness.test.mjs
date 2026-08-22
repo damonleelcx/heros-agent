@@ -25,9 +25,13 @@ const repo = join(root, "..", "..");
 const read = (rel) => readFile(join(root, rel), "utf8");
 const readRepo = (rel) => readFile(join(repo, rel), "utf8");
 
+// 🔴 TWO pages since P34 split the axis. LOOP_PAGE is where the strategies, the ceiling and the
+// containment argument live; PAGE is the execution envelope. A test that kept reading one file for both
+// would have gone green the moment either page lost its half.
+const LOOP_PAGE = "src/app/app/loop/page.tsx";
 const PAGE = "src/app/app/harness/page.tsx";
-const AUTHORING = "src/app/app/harness/authoring.tsx";
-const MIRROR = "src/app/app/harness/strategies.ts";
+const AUTHORING = "src/app/app/loop/authoring.tsx";
+const MIRROR = "src/app/app/loop/strategies.ts";
 const LAYOUT = "src/app/app/layout.tsx";
 const BUILTINS = "internal/registry/harness_builtins.go";
 const ENGINE_REFUSAL = "internal/transform/harnessmaterialize_span.go";
@@ -226,20 +230,27 @@ test("an authored change claims nothing until the harness has run (FR45)", async
   }
 });
 
-test("the boundary tab keeps the axis distinct from context and memory", async () => {
-  const page = await read(PAGE);
-  for (const axis of ["Context", "Memory", "Harness"]) {
+test("the boundary tab keeps the axis distinct from context, memory and the envelope", async () => {
+  const page = await read(LOOP_PAGE);
+  // 🔴 FOUR rows since P34, not three. The table exists because readers conflate these axes, and the
+  // split created a fourth thing to conflate — so it grew rather than moving to whichever page won.
+  for (const axis of ["Context", "Memory", "Loop", "Harness"]) {
     assert.ok(page.includes(`axis: "${axis}"`), `the boundary table omits the ${axis} row`);
   }
   assert.ok(
     /AROUND the call/.test(page),
-    "the harness row does not say the axis wraps the call; without it a reader has no way to tell it " +
+    "the loop row does not say the axis wraps the call; without it a reader has no way to tell it " +
       "from the two rows above",
+  );
+  assert.ok(
+    /AROUND the loop/.test(page),
+    "the harness row does not distinguish itself from the loop row. They are adjacent on purpose and " +
+      "one word apart in scope: the loop wraps the CALL, the envelope wraps the LOOP.",
   );
 });
 
 test("bounded autonomy and containment are stated on the surface, not only in the engine", async () => {
-  const page = await read(PAGE);
+  const page = await read(LOOP_PAGE);
   assert.ok(
     /unbounded loop/i.test(page),
     "the surface never says that no strategy can express an unbounded loop; that is the containment a " +
@@ -271,6 +282,12 @@ test("the runtime and the surface name the same strategies", async () => {
 
 test("the harness surface is registered in the shell and reachable", async () => {
   const layout = await read(LAYOUT);
+  // P34: the split produced two rail entries, and BOTH must be reachable. A reader sent to the loop page
+  // for a spend-ceiling question is as lost as one sent nowhere.
+  assert.ok(
+    layout.includes('href: "/app/loop"'),
+    "the loop surface is not in the navigation; it carries the strategies this whole file tests",
+  );
   assert.ok(
     layout.includes('href: "/app/harness"'),
     "the harness surface has no nav entry; a page nothing links to is a page nobody finds",

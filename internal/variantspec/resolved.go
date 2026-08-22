@@ -49,6 +49,50 @@ type ResolvedConfig struct {
 	// multi-node fact on one of those nodes would make the group's identity depend on which node was
 	// picked to carry it.
 	HarnessGroups []ResolvedHarnessGroup `json:"harness_groups,omitempty"`
+	// GraphGroups are the resolved topology units — which nodes may overlap, and how a fan-in combines
+	// (P34 FR12/FR14/FR17). ADDITIVE and omitempty with a nil-when-empty slice: a configuration that
+	// declares none emits NO `graph_groups` key, so its canonical bytes are byte-identical to a pre-P34
+	// configuration and the frozen golden vectors keep reproducing.
+	//
+	// It sits at the CONFIG level rather than on a node for the reason HarnessGroups does: its scope is
+	// a set of nodes, and putting a multi-node fact on one of them would make the group's identity
+	// depend on which node was picked to carry it.
+	//
+	// 🔴 It IS hashed. Two specs identical in every node but one declaring two calls concurrent and
+	// merged are different computations — different cost, different latency, different failure
+	// behaviour — and a hash that ignored the topology would score them as one configuration.
+	GraphGroups []ResolvedGraphGroup `json:"graph_groups,omitempty"`
+}
+
+// ResolvedGraphGroup is one resolved topology unit: the nodes, whether they may overlap, and the merge
+// declaration when they converge.
+//
+// 🚫 It carries no adapter and no schema. An adapter inserted to bridge a merge is an EXPLICIT NODE in
+// the spec (P5 Decision 3, applied to a fan-in), so it appears in `nodes` and in `order` like any other
+// node — never as a hidden field on the group that produced it. A reader inspecting the topology sees
+// the same nodes the executor walks.
+type ResolvedGraphGroup struct {
+	// Nodes are the group's constituents, in the spec's declared order. NOT sorted: the declared order
+	// is the order `Order` walks them in, which is the replay sequence, and sorting would fork one
+	// configuration into two hashes on a formatting difference — or worse, claim two different replay
+	// sequences are the same.
+	//
+	// 🔴 The wire name is `nodes`, not `members`; see GraphGroup.Nodes in graph.go for why (the
+	// ownership-vocabulary fence in p27_hash_recording_test.go bans `member` from anything hashed).
+	Nodes []string `json:"nodes"`
+	// Concurrent is whether they may overlap.
+	Concurrent bool `json:"concurrent,omitempty"`
+	// Merge is the fan-in declaration, absent when the nodes converge on nothing.
+	Merge *ResolvedMerge `json:"merge,omitempty"`
+}
+
+// ResolvedMerge is a fan-in's hashed declaration: where it converges, how the inputs combine, and what
+// happens when one of the group's nodes fails. All three participate in config_hash — a group that
+// answers with partials is a different computation from one that aborts, and they cost differently too.
+type ResolvedMerge struct {
+	Into          string `json:"into"`
+	Strategy      string `json:"strategy"`
+	OnNodeFailure string `json:"on_node_failure"`
 }
 
 // ResolvedHarnessGroup is one resolved group harness: the strategy projection and the ordered edge set it
@@ -148,6 +192,40 @@ type ResolvedNode struct {
 	// same strategy with the same params describe ONE computation and must share a hash. A version_id here
 	// would fork one configuration per entry, permanently, and a hash is not revisable once rows key on it.
 	Harness *ResolvedHarness `json:"harness,omitempty"`
+	// Loop is the node's resolved ITERATION POLICY — which control loop runs, what stops it, and how many
+	// turns the author chose (P34 task 3.1, decisions.md D-34.1). ADDITIVE and omitempty with a
+	// NIL-when-absent pointer: a node with no loop emits NO `loop` key, so its canonical bytes are
+	// byte-identical to a pre-P34 node and the frozen golden vectors keep reproducing — the sixth
+	// application of the discipline Bindings, ToolSelection, ContextDropTolerance, Memory and Harness
+	// above follow. testdata/p34-pre-confighash.json is the fence.
+	//
+	// 🔴 `single-shot` with no params ≡ ABSENT, exactly as it is for Harness (D-8 applied to the new
+	// axis). A node that explicitly selects the identity loop and a node that never mentioned one produce
+	// the same bytes and the same config_hash, which is what lets a user back out of an authored loop
+	// change with no residue in the hash.
+	//
+	// 🔴 It is a PROJECTION — `{strategy, params}` — and NOT the loop registry's version_id, for the
+	// reason ResolvedNode's doc comment gives about Harness: config_hash denotes a CONFIGURATION, not a
+	// set of registry rows, so two specs pinning different loop entries that spell the same strategy with
+	// the same params describe ONE computation and must share a hash.
+	//
+	// 🚫 A LEGACY loop-bearing harness entry does NOT project here. It keeps projecting into `harness`,
+	// exactly as it did before P34, because moving it would change the canonical bytes of every spec that
+	// references one — ADR-014's orphaning chain, arriving through the projection instead of the seal.
+	// That is why the compatibility fixture's loop-bearing rows still carry `reflection_prompt` under
+	// `harness`, and why they must keep doing so forever.
+	Loop *ResolvedLoop `json:"loop,omitempty"`
+}
+
+// ResolvedLoop is a node's resolved iteration policy: which strategy, and the params it runs with. The
+// hashed projection of a loop registry entry — the strategy NAME and the params, never the version_id.
+//
+// 🚫 It carries no turn COUNT that was actually taken, no stop reason and no trace. Those are properties
+// of a RUN, and hashing one would give a single configuration as many hashes as it had outcomes. What it
+// does carry is `max_turns`, which is the count the author CHOSE — a property of the configuration.
+type ResolvedLoop struct {
+	Strategy string         `json:"strategy"`
+	Params   map[string]any `json:"params"`
 }
 
 // ResolvedHarness is a node's resolved harness strategy: which strategy, and the params it runs with. The
@@ -181,7 +259,16 @@ type ResolvedBinding struct {
 type ResolvedEdge struct {
 	FromNodeID string `json:"from_node_id"`
 	ToNodeID   string `json:"to_node_id"`
-	Kind       string `json:"kind"` // "data" | "control"
+	// Kind is "data" | "control" | "predicate" (P34 FR13).
+	Kind string `json:"kind"`
+	// Predicate is the condition on a `predicate` edge (P34 FR13). ADDITIVE and omitempty: an edge that
+	// declares none emits NO `predicate` key, so its canonical bytes are byte-identical to a pre-P34
+	// edge and the frozen golden vectors keep reproducing.
+	//
+	// 🔴 It IS hashed when present, and it must be: two specs whose graphs differ only in which
+	// condition routes an edge are different computations, and a hash that ignored the condition would
+	// claim they were one.
+	Predicate string `json:"predicate,omitempty"`
 }
 
 // Canonical returns the exact bytes config_hash is computed over: RFC 8785 canonical JSON.
@@ -238,6 +325,10 @@ func (rc ResolvedConfig) normalized() ResolvedConfig {
 	// golden bytes — this field is new, so its ABSENCE is what must stay byte-compatible, and absence is
 	// achieved by leaving it nil (omitempty), never by an empty array.
 	out.HarnessGroups = rc.HarnessGroups
+	// 🔴 NOT normalized to an empty slice, for the same reason HarnessGroups above is not: this field is
+	// new, so its ABSENCE is what must stay byte-compatible, and absence is achieved by leaving it nil
+	// (omitempty), never by an empty array.
+	out.GraphGroups = rc.GraphGroups
 	return out
 }
 

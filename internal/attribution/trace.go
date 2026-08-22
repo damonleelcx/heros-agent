@@ -17,6 +17,11 @@ import (
 // executionOrder returns the distinct node ids of a trace in execution (start-time) order. Ties on
 // start time break by node id so the order is total and deterministic: the same trace must yield the
 // same order every run, or first-divergence would move under nothing but map iteration.
+//
+// 🔴 Start time is only evidence of SEQUENCE when the spans do not overlap. Under P34 concurrency two
+// nodes run at once and their start times differ by whatever the scheduler chose — see
+// executionOrderDeclared and spansOverlap, and p34_overlap_holdout_test.go, which measured exactly that
+// failure before it was fixed.
 func executionOrder(tr evalharness.Trace) []string {
 	type ne struct {
 		id    string
@@ -159,4 +164,105 @@ func attrFloat(attrs map[string]any, key string) float64 {
 		return float64(v)
 	}
 	return 0
+}
+
+// ORDERING UNDER CONCURRENCY (P34 task 6.4)
+// ─────────────────────────────────────────
+//
+// # What the holdout found
+//
+// `executionOrder` above orders nodes by span start time. `firstDivergenceOrdered` then returns the
+// FIRST node in that walk whose output violates its contract. When two nodes run concurrently and BOTH
+// diverge, "first" becomes a statement about which goroutine the scheduler started first — so the same
+// two contract violations, the same durations and the same outputs localized to different nodes
+// depending on a nanosecond. `TestBothNodesDivergingIsWhereOrderActuallyDecides` measured it: alpha when
+// alpha's span started first, beta when beta's did.
+//
+// 🔴 A one-guilty-node holdout cannot see this, and the first version of that file did not. With a
+// single violating node the walk finds it in any order, reports 100% under overlap, and proves nothing.
+// The shape where order decides is the shape that had to be built.
+//
+// # The fix, and why it is the DECLARED order
+//
+// P34 design D4 keeps `Order` as a linear sequence containing every node precisely so that "a replay
+// visits nodes in that sequence even when the live run overlapped them". That sequence is the answer:
+// it is authored, it is part of `config_hash`, and it does not move between runs. Ordering overlapping
+// nodes by it makes attribution REPLAY-CONSISTENT — the localization a reader sees is the one a replay
+// would produce — which is the property the whole axis promises.
+//
+// 🚫 It is NOT "pick the alphabetically-first node". That is deterministic and arbitrary, which would
+// convert an unstable answer into a stably wrong one. Determinism is not the goal; agreeing with the
+// declared sequence is.
+
+// spansOverlap reports whether any two NODE spans in the trace overlap in wall-clock time.
+//
+// It is the trigger rather than "did the spec declare a group", because the two can disagree: a run may
+// overlap spans the spec never declared concurrent (a framework doing its own thing), and a spec may
+// declare a group whose members happened not to overlap on this run. What matters for reading the trace
+// is what the trace DID.
+func spansOverlap(tr evalharness.Trace) bool {
+	type iv struct{ start, end int64 }
+	byNode := map[string]iv{}
+	for _, sp := range tr.NodeSpans() {
+		id := attrString(sp.Attributes, telemetry.AttrNodeID)
+		if id == "" {
+			id = sp.Name
+		}
+		s, e := sp.StartTime.UnixNano(), sp.EndTime.UnixNano()
+		if cur, ok := byNode[id]; ok {
+			if s < cur.start {
+				cur.start = s
+			}
+			if e > cur.end {
+				cur.end = e
+			}
+			byNode[id] = cur
+			continue
+		}
+		byNode[id] = iv{s, e}
+	}
+	ivs := make([]iv, 0, len(byNode))
+	for _, v := range byNode {
+		ivs = append(ivs, v)
+	}
+	sort.Slice(ivs, func(i, j int) bool { return ivs[i].start < ivs[j].start })
+	for i := 1; i < len(ivs); i++ {
+		// Strictly after: two spans that merely touch at a boundary are sequential, not concurrent.
+		if ivs[i].start < ivs[i-1].end {
+			return true
+		}
+	}
+	return false
+}
+
+// executionOrderDeclared returns the trace's executed nodes ordered by the spec's DECLARED order, with
+// start-time order for any executed node the declaration does not list.
+//
+// A node the declaration does not contain is appended in start-time order rather than dropped: a trace
+// may legitimately contain a node the spec never named (a framework's own step), and dropping it would
+// remove a candidate for first-divergence — silently moving the localization to the next node along.
+func executionOrderDeclared(tr evalharness.Trace, declared []string) []string {
+	byStart := executionOrder(tr)
+	if len(declared) == 0 {
+		return byStart
+	}
+	executed := map[string]bool{}
+	for _, id := range byStart {
+		executed[id] = true
+	}
+	seen := map[string]bool{}
+	out := make([]string, 0, len(byStart))
+	for _, id := range declared {
+		if executed[id] && !seen[id] {
+			seen[id] = true
+			out = append(out, id)
+		}
+	}
+	for _, id := range byStart {
+		if !seen[id] {
+			seen[id] = true
+			out = append(out, id)
+		}
+	}
+	return out
 }

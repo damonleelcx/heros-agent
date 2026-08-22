@@ -43,7 +43,14 @@ export const routes = {
   scorecard: (variantId: string) => `/app/variants/${encodeURIComponent(variantId)}/scorecard`,
   studio: () => "/app/studio",
   authoring: () => "/app/authoring",
-  wiring: () => "/app/wiring",
+  // P34: `/app/wiring` became `/app/graph`, which carries the wiring axis AND topology. The old path
+  // still resolves (it redirects), and it is kept here so a caller holding a stored link is not broken.
+  wiring: () => "/app/graph",
+  // 🚫 NOT named `graph`: that key is already taken by a WORKFLOW's own graph view
+  // (`/app/workflows/{id}/graph`), which is a different thing — one workflow's discovered shape, versus
+  // the axis surface that explains what the platform can change about any shape. Two routes, two names.
+  graphAxis: () => "/app/graph",
+  loop: () => "/app/loop",
   harness: () => "/app/harness",
   coverage: () => "/app/coverage",
   // P33. The nine-axis assessment of one workflow: what the repository does on each surface, what
@@ -101,9 +108,10 @@ export const WORKING_SURFACES: readonly string[] = [
   "/app/delivery",
   "/app/studio",
   "/app/authoring",
-  "/app/wiring",
+  "/app/graph",
   "/app/context",
   "/app/memory",
+  "/app/loop",
   "/app/harness",
   "/app/coverage",
   // P33. A person can absolutely ask for this: it is the sentence the whole conversational surface was

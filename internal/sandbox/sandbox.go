@@ -183,6 +183,15 @@ type Spec struct {
 	// step that legitimately needs neither is not forced through an enforcer that cannot run on this box.
 	RequireNetworkIsolation bool
 	RequireFilesystemScope  bool
+	// Concurrency names the declared concurrent group this isolate belongs to, and how wide the SPEC
+	// said it may be (P34 task 4.4). The zero key means "not part of a group": such an isolate takes no
+	// slot, because a node that is not declared concurrent with anything is not competing with anything.
+	//
+	// 🔴 ConcurrencyLimit is what the spec DECLARED, and the sandbox does not trust it. The number
+	// actually enforced is the minimum of this and SandboxConcurrencyCeiling — see concurrency.go for
+	// why there have to be two gates, and why this one is the one that holds.
+	Concurrency      ConcurrencyKey
+	ConcurrencyLimit int
 }
 
 // Tool is the untrusted unit executed inside the isolate: an external command (the repo's tool code).
@@ -225,6 +234,10 @@ type Sandbox struct {
 	enforcer Enforcer
 	audit    AuditSink
 	pool     *warmPool
+	// concurrency is the sandbox's OWN admission gate for declared concurrent groups (P34 task 4.4).
+	// Always present — a nil gate would be an unbounded one, and the whole point is that this limit
+	// holds when the resolve-time one was bypassed. See concurrency.go.
+	concurrency *concurrencyGate
 }
 
 // Option configures a Sandbox.
@@ -246,7 +259,7 @@ func WithWarmPool(n int) Option {
 // not pick one for you because "which isolation this host can provide" is a deployment fact the caller
 // owns (production wires the OS enforcer; tests wire a controllable one).
 func New(e Enforcer, opts ...Option) *Sandbox {
-	s := &Sandbox{enforcer: e}
+	s := &Sandbox{enforcer: e, concurrency: newConcurrencyGate()}
 	for _, o := range opts {
 		o(s)
 	}
@@ -277,6 +290,18 @@ func (s *Sandbox) Run(ctx context.Context, spec Spec, tool Tool) (*Result, error
 			Reason: "cannot scrub ambient credentials from the isolate environment"})
 		return nil, fmt.Errorf("%w: no credential scrub", ErrIsolateUnavailable)
 	}
+
+	// The concurrency gate, taken BEFORE the isolate is created and released after it is destroyed
+	// (P34 task 4.4). Before creation because the resource an isolate occupies is occupied from the
+	// moment it exists, not from the moment its tool starts — admitting the fifth isolate and then
+	// making it wait would have already multiplied the address space by five.
+	releaseSlot, err := s.concurrency.acquire(ctx, spec.Concurrency, spec.ConcurrencyLimit)
+	if err != nil {
+		s.record(Event{Kind: EventLifecycle, NodeID: spec.NodeID, RunID: spec.RunID, Phase: PhaseCreateFailed,
+			Reason: "concurrency slot unavailable: " + err.Error()})
+		return nil, err
+	}
+	defer releaseSlot()
 
 	s.record(Event{Kind: EventLifecycle, NodeID: spec.NodeID, RunID: spec.RunID, Phase: PhaseCreated})
 

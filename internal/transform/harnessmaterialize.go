@@ -44,6 +44,18 @@ func materializeHarness(site discovery.GoCallSite, _ []byte, o variantspec.Resol
 	}
 	strategy := o.Harness.Spec.Strategy
 
+	// 🔴 P34: an EXECUTION ENVELOPE reaches no rewriter. It is not a loop and there is nothing to wrap —
+	// its ceilings and host-service provision are checked at RESOLVE (variantspec/envelope.go) and by the
+	// sandbox at execution, both of which happen without a codemod.
+	//
+	// 🚫 It returns (nil, nil) — the no-op — rather than a refusal, and the distinction matters. A refusal
+	// would tell the author that binding an envelope failed, when it succeeded completely: it resolved,
+	// it hashed, it gated their loop. There is simply no source to change, which is the same answer the
+	// identity strategy gets one branch above and for the same reason.
+	if strategy == registry.StrategyEnvelope {
+		return nil, nil
+	}
+
 	// A strategy needing a host service is refused first and identically in every language, because the
 	// reason is not about Go: a call site offers no injection point for a tool executor, a planner, or a
 	// critic (decisions.md D-10). Asking the language question first would tell a `react-loop` user to
@@ -70,6 +82,17 @@ func materializeHarness(site discovery.GoCallSite, _ []byte, o variantspec.Resol
 func HarnessStrategyMaterializesIn(language, strategy string) bool {
 	if strategy == registry.StrategySingleShot {
 		return true
+	}
+	// 🔴 P34: an EXECUTION ENVELOPE is never materialized at a call site, in any language, and this guard
+	// is what stops the loop dispatch from trying. Without it the envelope reaches the branches below,
+	// passes them (it needs no host service, and Python has a materializer), and this function claims a
+	// call-site rewrite exists for a thing that has no turns to wrap — so the engine would attempt to
+	// wrap the call in a loop driven by params that describe a sandbox.
+	//
+	// The envelope's own coverage cell says the same thing on the harness axis, with the reason; see
+	// harnessCoverage.
+	if strategy == registry.StrategyEnvelope {
+		return false
 	}
 	if harnessHostService(strategy) != "" {
 		return false // needs an injection point no call site has, in any language

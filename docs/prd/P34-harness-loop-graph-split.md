@@ -9,7 +9,7 @@
 | **Support roles** | Backend Dev, Frontend Dev, QA, DevOps, Product Designer, Sales Operations |
 | **Upstream** | P0 (config_hash, golden vectors) · P2 (registries) · P5 (typed contracts, re-arrangement) · P15 (wiring) · P18 (harness) · [ADR-004](../adr/ADR-004-runtime-config-binding.md) · [ADR-014](../adr/ADR-014-harness-loop-graph-axis-split.md) |
 | **Unblocks** | [P33](P33-surface-assessment.md) reporting on `loop` and `graph` · [P36](P36-agent-self-configuration.md), the point of the program |
-| **Status** | Proposed — awaiting sign-off on §14, which ADR-014 defers here |
+| **Status** | In implementation — §14 Q1–Q5 answered and folded in (see [`decisions.md`](../../openspec/changes/p34-harness-loop-graph-split/decisions.md)) |
 
 ---
 
@@ -422,12 +422,37 @@ migration.
 
 ---
 
-## 14. Open questions — ADR-014 defers these here
+## 14. Open questions — ADR-014 deferred these here; all five are now ANSWERED
 
-| # | Question | Why it is open |
+**Status: settled.** Every answer is recorded, with its rejected alternatives and the level each was
+rejected on, in [`decisions.md`](../../openspec/changes/p34-harness-loop-graph-split/decisions.md). The
+table below is the summary; that file is the contract of record.
+
+| # | Question | **Answer** | Recorded as |
+|---|---|---|---|
+| **Q1** | Do **spend** ceilings sit with harness, or with loop? | **Harness.** The split line is *imposed vs chosen*, not *who consumes it* — by the consumption test the turn ceiling would belong to the loop too, and §2.3 already rejected that reading. Spend is inexpressible on a loop entry. Exhaustion is reported as a named **stopping condition**, not an error. | D-34.1 |
+| **Q2** | Is a predicate restricted to the `expr` grammar, or does it get a narrower one? | **Reuse `expr`.** A second grammar is a second scope validator, and the looser one becomes the way in. One grammar means one place to narrow it if `expr` proves too permissive — which is only possible because there is one place. | D-34.2 |
+| **Q3** | What is a concurrent group's failure semantics — fail fast, or run all and merge partials? | **Declared on the merge, required, from a closed set** `{fail-fast, collect-partial}`. No default, no global rule. 🔴 A `collect-partial` merge whose downstream input contract makes every member required is **refused at validate** — otherwise it is a promise the type system does not keep. | D-34.3 |
+| **Q4** | Do `/app/harness` and `/app/wiring` become three pages, or one axis page with three sections? | **Three sibling axis pages** — `/app/harness` (envelope), `/app/loop` (new), `/app/graph` (supersedes `/app/wiring`, which redirects rather than 404s). Confirmed with the user, together with §7.2's rule: carry everything, ask before removing anything. | D-34.4 |
+| **Q5** | Does the legacy loop-bearing harness path get an end-of-life **date**, or is it genuinely permanent? | **Permanent. No date.** A date does not shorten ADR-014's orphaning chain, it hands it to somebody else on a day when the reasoning has been forgotten. Removal is an **amendment to ADR-014**, re-confirmed at the end of the phase by task 11.2. | D-34.5 |
+
+Two further contracts were settled at the same time and are recorded beside them, because neither was
+safe to leave to whoever got there first:
+
+| # | Question | **Answer** |
+|---|---|---|
+| **D-34.6** | How is the still-open P18 change reconciled with this one? | P18 defines the harness axis as carrying **both** the scaffold and the control loop. Folding it unchanged after this change would restore the conflation. Whichever change folds second reconciles; both changes now carry the instruction, and `tasks.md` §2.6 owns it. |
+| **D-34.7** | What does each of the three axes declare about its own coverage? | `EXISTS`/`PARTIAL`/`ABSENT` per language through `transform.StatusFor`, **derived from the table each rewriter dispatches on** — never hand-declared. `graph`'s refusal names which of the frontend, the analysis or the language support is missing (FR18), never a generic unsupported state. |
+
+<details>
+<summary>The original framing of each question, kept for the record</summary>
+
+| # | Question | Why it was open |
 |---|---|---|
 | **Q1** | Do **spend** ceilings sit with harness, or with loop? | §2.3 settles *turn* ceilings by `boundedCeiling`'s own argument. Spend is less obvious: a spend cap is a blast-radius policy (harness) but is consumed almost entirely by loop iterations. **Recommendation: harness**, for the same reason as turns — it is imposed, not chosen. |
 | **Q2** | Is a predicate restricted to the `expr` grammar, or does it get a narrower one? | `expr` was designed for a value binding, not a control-flow decision. A narrower grammar is safer and is a second grammar. **Recommendation: reuse `expr`, and if it proves too permissive, narrow it in one place.** |
 | **Q3** | What is a concurrent group's failure semantics — fail fast, or run all and merge partials? | This is a semantic choice that must not be defaulted (D6's reasoning applied to failure). It probably belongs in the merge declaration rather than as a global rule. |
 | **Q4** | Do `/app/harness` and `/app/wiring` become three pages, or one axis page with three sections? | §9.4's real risk is content loss in the re-cut; the answer decides how large that re-cut is. |
 | **Q5** | Does the legacy loop-bearing harness path get an end-of-life **date**, or is it genuinely permanent? | ADR-014 says permanent. A date would be more honest to maintainers and would re-open the orphaning problem on that date, which is the argument for having none. |
+
+</details>

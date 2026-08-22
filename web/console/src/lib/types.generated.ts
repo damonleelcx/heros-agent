@@ -53,6 +53,7 @@ export type StopReason =
   | "tool-call-ceiling"
   | "wall-clock"
   | "cancelled"
+  | "spend-ceiling"
 ;
 
 /** The fourteen things this surface can be asked. Equal, by fence, to the set of working surfaces. */
@@ -67,6 +68,7 @@ export type ConversationIntent =
   | "graph_order"
   | "context"
   | "memory"
+  | "loop"
   | "harness"
   | "coverage"
   | "assess"

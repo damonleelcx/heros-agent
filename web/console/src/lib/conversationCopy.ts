@@ -141,6 +141,19 @@ export const STOP_COPY: Record<StopReason, { label: string; body: string; next: 
     body: "You stopped this run.",
     next: "Anything it had already found is above and stays there.",
   },
+  // 🔴 P34. The NODE's money ceiling, imposed by its execution envelope — deliberately worded so it is
+  // not confused with `token-budget` above, which is a TURN's own token allowance. A reader who
+  // conflated them would go and raise a per-turn number that is not what ran out, and the two `next`
+  // lines are therefore two different actions in two different places.
+  //
+  // 🚫 The register is a STATE WITH A NEXT ACTION, not a failure: a run that stopped on budget produced
+  // a real, partial answer under a known configuration, and calling it an error would file it beside
+  // "the provider was down".
+  "spend-ceiling": {
+    label: "Stopped at the spend ceiling",
+    body: "This node reached the amount its execution envelope allows it to spend in one run. What it had already produced is kept.",
+    next: "The answer above is partial and says where it stopped. Raising the ceiling is a change to this node's envelope, which is set on the Harness surface — not something this question can ask for.",
+  },
 };
 
 /**

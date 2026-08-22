@@ -268,6 +268,18 @@ func (a Assessment) Tally() Tally {
 // completed, it returned 200, it persisted nine rows — and it is also the earliest evidence that a
 // language frontend or the sandbox has broken. A rate that is invisible in a success rate has to be
 // its own named quantity or nobody will ever look at it.
+//
+// 🔴 P34 is when this predicate started being SATISFIABLE by a produced assessment, and that was always
+// the plan rather than a side effect. Before the axis split, `loop` and `graph` were `refused` on every
+// assessment pending their configuration, so an unreadable repository produced seven absences and two
+// refusals and could never reach nine. P33's own health test says so in as many words — it builds the
+// nine-absence case by hand "because producing it needs a build in which the two P34 axes are no longer
+// refused, WHICH IS THE WORLD THIS ALARM HAS TO KEEP WORKING IN."
+//
+// That world is this one. An assessment of a repository this build cannot read now counts, and that is
+// the alarm working: `no_call_sites_discovered` on all nine axes is precisely what a broken frontend or
+// a broken sandbox looks like from the outside, and suppressing it as "expected for an unreadable
+// repository" would suppress the signal the counter exists for.
 func (a Assessment) AllNotMeasured() bool {
 	if len(a.Findings) != len(Axes()) {
 		return false

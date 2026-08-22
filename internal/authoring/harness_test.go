@@ -18,11 +18,16 @@ import (
 
 // engineCoverage adapts the transform engine's table — the SAME adapter the BFF uses, so these tests read
 // the boundary from where the console reads it.
+//
+// 🔴 It reads the LOOP axis since P34. This surface is a control-loop picker that states each strategy's
+// turn multiplier before a user chooses it, and after ADR-014's split the strategies live on `loop`. The
+// `harness` axis now answers for the EXECUTION ENVELOPE, whose one cell refuses in every language for a
+// reason that has nothing to do with any strategy.
 type engineCoverage struct{}
 
 func (engineCoverage) HarnessCoverage(language string) []HarnessCoverageCell {
 	var out []HarnessCoverageCell
-	for _, c := range transform.CoverageFor(string(variantspec.DimHarness)) {
+	for _, c := range transform.CoverageFor(string(variantspec.DimLoop)) {
 		if !strings.EqualFold(c.Language, language) {
 			continue
 		}
@@ -42,9 +47,9 @@ func (engineCoverage) HarnessCoverage(language string) []HarnessCoverageCell {
 // choice that fails at seal.
 func TestHarnessStrategyOptionsAreTheClosedSet(t *testing.T) {
 	opts := HarnessStrategyOptions()
-	if len(opts) != registry.HarnessStrategySetSize {
-		t.Fatalf("the surface offers %d strategies but the sealed vocabulary has %d",
-			len(opts), registry.HarnessStrategySetSize)
+	if len(opts) != registry.LoopStrategySetSize {
+		t.Fatalf("the surface offers %d strategies but the sealed LOOP vocabulary has %d",
+			len(opts), registry.LoopStrategySetSize)
 	}
 	if !opts[0].Identity || opts[0].Strategy != registry.StrategySingleShot {
 		t.Errorf("the identity is not first; it is the baseline a user compares the others against")
