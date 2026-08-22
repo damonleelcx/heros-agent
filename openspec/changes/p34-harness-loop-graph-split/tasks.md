@@ -345,9 +345,27 @@
 
 ## 10. Sales Operations
 
-- [ ] 10.1 Sayable on ship: three named axes; parallel steps and conditional routing configurable and verifiable for the first time.
-- [ ] 10.2 Not sayable: that the platform "orchestrates" anything. It configures and verifies the customer's own graph.
-- [ ] 10.3 State the compatibility promise out loud — specs authored before this change keep working and keep their measurements — and the honest half, that a legacy path exists permanently as its price.
+- [x] 10.1 Sayable on ship: three named axes; parallel steps and conditional routing configurable and verifiable for the first time.
+      → [`docs/sales/P34-harness-loop-graph-claims.md`](../../../docs/sales/P34-harness-loop-graph-claims.md) §2,
+      plus two `shipped: true` entries in the console's capability manifest (`axis-split`,
+      `envelope-ceilings`) — which is what makes the claim renderable at all, since `scan-claims.mjs`
+      fails the BUILD on a claim that is unlisted.
+      🔴 Topology materialization is deliberately ABSENT from the manifest, so the public surface
+      physically cannot say the platform applies a concurrent group. That is the gate working, not an
+      oversight, and §5 of the doc tells a seller to say it before a demo rather than after.
+
+- [x] 10.2 Not sayable: that the platform "orchestrates" anything. It configures and verifies the customer's own graph.
+      → §3, with the specific words: an orchestrator is a DEPENDENCY — in the customer's request path, a
+      reason their product can be down at 3am, and a procurement conversation about lock-in. This is a
+      tool that reads a repository, proposes a change and proves whether it was better; the change runs
+      on their infrastructure whether we exist or not. Four do-not-say / say-instead pairs.
+
+- [x] 10.3 State the compatibility promise out loud — specs authored before this change keep working and keep their measurements — and the honest half, that a legacy path exists permanently as its price.
+      → §4, both halves in one breath. The promise — specs authored before this change keep working and
+      keep their measurements — is stronger than most vendors can make, and the price is a legacy path
+      with **no deprecation date**. The answer to *"when does the old way stop working?"* is **"it
+      doesn't"**, and that is the good answer: a date would hand the orphaning problem to somebody else
+      on a day when the reasoning has been forgotten.
 
 ## 11. Sign-off
 

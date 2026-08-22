@@ -184,6 +184,38 @@ export const CAPABILITIES: Capability[] = [
     boundary:
       "Gainshare requires recorded, revocable consent. Without it, it is not charged.",
   },
+  // ── P34 · the axis split (ADR-014) ──────────────────────────────────────────────────────────
+  {
+    id: "axis-split",
+    claim:
+      "Separates what a node's control loop does from what that node is allowed to do, so a policy and a choice are reviewed apart",
+    phase: "P34 — Harness / loop / graph",
+    shipped: true,
+    evidence:
+      "variantspec.DimLoop and DimHarness; registry.KindLoop and registry.StrategyEnvelope; docs/adr/ADR-014",
+    boundary:
+      "It configures and verifies your graph; it does not orchestrate anything. Your workflow runs on your infrastructure, in code delivered to your repository as a reviewable diff.",
+  },
+  {
+    id: "envelope-ceilings",
+    claim:
+      "Refuses a configuration whose loop asks for more turns or more spend than its execution envelope allows, naming both numbers",
+    phase: "P34 — Harness / loop / graph",
+    shipped: true,
+    evidence:
+      "variantspec.checkTurnCeiling / checkHostServices, refused at resolve; sandbox.SandboxConcurrencyCeiling enforces the concurrency limit a second time at execution",
+    boundary:
+      "The ceiling is checked before anything is generated and again where it executes. The sandbox that enforces it at run time is yours; what this platform guarantees is that a configuration exceeding your declared envelope never becomes a change you can apply.",
+  },
+  // 🚫 THERE IS DELIBERATELY NO ENTRY FOR TOPOLOGY MATERIALIZATION.
+  //
+  // P34 ships concurrency, conditional routing and merge as things a spec can DECLARE — resolved,
+  // hashed, validated against the customer's typed I/O contracts, comparable, proposable. No language
+  // has a rewriter that writes any of them into source, so the public surface may not say the platform
+  // applies them, and `scan-claims.mjs` is what makes that structural rather than a matter of somebody
+  // remembering during a launch week.
+  //
+  // The day a topology rewriter lands, this is where its claim goes — with its boundary beside it.
 ];
 
 /** shipped returns the manifest entries the public surface may claim. */
