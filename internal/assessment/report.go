@@ -143,13 +143,14 @@ func (a Assessment) MarshalJSON() ([]byte, error) {
 	sort.SliceStable(ordered, func(i, j int) bool {
 		return index[ordered[i].Axis()] < index[ordered[j].Axis()]
 	})
-	return json.Marshal(assessmentWire{
-		AssessmentID: a.AssessmentID, TenantID: a.TenantID, WorkflowID: a.WorkflowID,
-		SourceRevision: a.SourceRevision, AgentConfigHash: a.AgentConfigHash,
-		StartedAtMS: a.StartedAtMS, CompletedAtMS: a.CompletedAtMS,
-		SpendUSD: a.SpendUSD, SpendCapUSD: a.SpendCapUSD,
-		Findings: ordered,
-	})
+	// 🔴 A CONVERSION, not a field-by-field literal, and the two are not equivalent in the way that
+	// matters here. `Assessment` and `assessmentWire` differ only in struct tags, so `assessmentWire(a)`
+	// is legal — and a field added to one and not the other becomes a COMPILE ERROR. A literal would
+	// silently zero it, which on this type means a report that ships with its spend cap or its config
+	// hash missing and nothing anywhere saying so.
+	w := assessmentWire(a)
+	w.Findings = ordered
+	return json.Marshal(w)
 }
 
 // UnmarshalJSON reads the wire form. It does NOT re-sort: the document is already canonical, and a
@@ -159,13 +160,9 @@ func (a *Assessment) UnmarshalJSON(b []byte) error {
 	if err := json.Unmarshal(b, &w); err != nil {
 		return fmt.Errorf("assessment: decoding an assessment: %w", err)
 	}
-	*a = Assessment{
-		AssessmentID: w.AssessmentID, TenantID: w.TenantID, WorkflowID: w.WorkflowID,
-		SourceRevision: w.SourceRevision, AgentConfigHash: w.AgentConfigHash,
-		StartedAtMS: w.StartedAtMS, CompletedAtMS: w.CompletedAtMS,
-		SpendUSD: w.SpendUSD, SpendCapUSD: w.SpendCapUSD,
-		Findings: w.Findings,
-	}
+	// The same conversion, in the other direction and for the same reason: a field added to one side
+	// and forgotten on the other fails to compile rather than arriving as a zero value.
+	*a = Assessment(w)
 	return nil
 }
 

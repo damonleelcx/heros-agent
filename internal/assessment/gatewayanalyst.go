@@ -140,8 +140,8 @@ func (a *GatewayAnalyst) instruction(axis Axis) string {
 	b.WriteString("ABSTAINING IS A CORRECT ANSWER. If the facts you are given cannot support a claim, ")
 	b.WriteString(`set "abstain": true and put the specific missing input in "reason" — for example `)
 	b.WriteString(`"the tool list is assembled at runtime, so what the model is offered is not in the source". `)
-	b.WriteString(fmt.Sprintf("Abstain rather than answering below %.2f confidence. A wrong claim is worse "+
-		"than no claim, because the reader cannot tell it is wrong.\n\n", a.floor))
+	fmt.Fprintf(&b, "Abstain rather than answering below %.2f confidence. A wrong claim is worse "+
+		"than no claim, because the reader cannot tell it is wrong.\n\n", a.floor)
 
 	b.WriteString("Some facts are marked `ir_floor`. A floor is what the analyser emits for EVERY repository ")
 	b.WriteString("when it cannot see the thing at all. It is the absence of evidence, never evidence of ")

@@ -325,7 +325,7 @@ func TestNoViewFieldCanCarryAComposite(t *testing.T) {
 	var walk func(t reflect.Type, path string)
 	seen := map[reflect.Type]bool{}
 	walk = func(rt reflect.Type, path string) {
-		for rt.Kind() == reflect.Ptr || rt.Kind() == reflect.Slice {
+		for rt.Kind() == reflect.Pointer || rt.Kind() == reflect.Slice {
 			rt = rt.Elem()
 		}
 		if rt.Kind() != reflect.Struct || seen[rt] {

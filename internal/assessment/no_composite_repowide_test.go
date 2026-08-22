@@ -112,16 +112,14 @@ func scanTargets(t *testing.T) []string {
 
 	// The screen. Every file the assessment surface is made of.
 	console := filepath.Join(root, "web", "console", "src")
-	for _, p := range []string{
+	out = append(out, []string{
 		filepath.Join(console, "components", "assessment.tsx"),
 		filepath.Join(console, "lib", "assessment.ts"),
 		filepath.Join(console, "app", "app", "assess", "page.tsx"),
 		filepath.Join(console, "app", "app", "assess", "controls.tsx"),
 		filepath.Join(console, "app", "app", "assess", "data.ts"),
-		filepath.Join(root, "web", "console", "src", "app", "api", "console", "assessments", "route.ts"),
-	} {
-		out = append(out, p)
-	}
+		filepath.Join(console, "app", "api", "console", "assessments", "route.ts"),
+	}...)
 	return out
 }
 
