@@ -369,5 +369,20 @@
 
 ## 11. Sign-off
 
-- [ ] 11.1 PRD §14 Q1–Q5 answered and folded in.
-- [ ] 11.2 ADR-014's refusal of the contract half re-confirmed at the end of the phase, when the residue is visible and the temptation to "finish the job" is highest.
+- [x] 11.1 PRD §14 Q1–Q5 answered and folded in.
+      → → [`decisions.md`](decisions.md) D-34.1–D-34.5, folded into PRD §14 (whose header now reads
+      **answered**), plus D-34.6/D-34.7 settled beside them. Summarised in
+      [`sign-off.md`](sign-off.md) §11.1.
+
+- [x] 11.2 ADR-014's refusal of the contract half re-confirmed at the end of the phase, when the residue is visible and the temptation to "finish the job" is highest.
+      → → [`sign-off.md`](sign-off.md) §11.2, written as a re-examination rather than a signature, with the
+      residue **counted from the code**: 10 call sites across 7 files, no data migration.
+      🔴 One thing changed the calculus, in the refusal's favour: the envelope shipped as a sixth
+      STRATEGY in the existing harness vocabulary, so `internal/registry/harness.go` — the file defining
+      `HarnessSpec` and its seal path — is byte-for-byte unchanged by this phase. The residue is smaller
+      than the ADR predicted.
+      🔴 And one reason to refuse that did not exist when the ADR was written: the ambiguity refusal is
+      now the only rule covering a loop-bearing entry restored from a backup or an older binary.
+      Removing the legacy shape would delete a check whose subject still exists.
+      **Re-confirmed.**
+
