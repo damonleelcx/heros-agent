@@ -1,5 +1,5 @@
 import { PageFrame } from "@/components/primitives";
-import { HarnessAuthoring } from "@/app/app/harness/authoring";
+import { HarnessAuthoring } from "@/app/app/loop/authoring";
 
 /**
  * A self-contained preview of the P18 harness picker (task 12.3).
@@ -20,7 +20,7 @@ import { HarnessAuthoring } from "@/app/app/harness/authoring";
  *
  * # What is shared with the real surface
  *
- * `HarnessAuthoring` is imported from `/app/harness`, not reimplemented. A copy would drift the first
+ * `HarnessAuthoring` is imported from `/app/loop` (it was `/app/harness` until P34 split the axis), not reimplemented. A copy would drift the first
  * time the picker changed, and then this page would be a picture of a surface rather than the surface.
  */
 export const dynamic = "force-dynamic";

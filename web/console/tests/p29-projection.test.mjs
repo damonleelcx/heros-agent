@@ -8,12 +8,16 @@ import path from "node:path";
 const ROOT = path.join(import.meta.dirname, "..");
 const read = (p) => readFileSync(path.join(ROOT, p), "utf8");
 
-// The seven surfaces the projection panel must appear on.
+// The surfaces the projection panel must appear on.
+// 🔴 EIGHT since P34 split the harness axis: `/app/loop` is a new surface and needs the panel for the
+// same reason every other axis does — its table is a total build fact and says nothing about the
+// reader's own nodes.
 const AXIS_SURFACES = [
-  "src/app/app/wiring/page.tsx",
+  "src/app/app/graph/page.tsx",
   "src/app/app/context/page.tsx",
   "src/app/app/memory/page.tsx",
   "src/app/app/harness/page.tsx",
+  "src/app/app/loop/page.tsx",
   "src/app/app/coverage/page.tsx",
   "src/app/app/authoring/page.tsx",
   "src/app/app/delivery/page.tsx",
@@ -43,10 +47,13 @@ test("§5.10 the worked examples are still there beside the projection", () => {
   // through the shared refusal card, and a fence that only knew about the card would have "passed" on
   // those two by never looking.
   const withExamples = {
-    "src/app/app/wiring/page.tsx": /AxisRefusal|AxisApplied/,
+    "src/app/app/graph/page.tsx": /AxisRefusal|AxisApplied/,
     "src/app/app/context/page.tsx": /AxisRefusal|AxisApplied/,
     "src/app/app/memory/page.tsx": /STRATEGIES|BOUNDARY/,
-    "src/app/app/harness/page.tsx": /HARNESS_STRATEGIES|HARNESS_BOUNDARY/,
+    // P34: the strategy vocabulary moved to `/app/loop` with the axis. `/app/harness` carries the
+    // ENVELOPE's vocabulary instead — same discipline, different data.
+    "src/app/app/loop/page.tsx": /HARNESS_STRATEGIES|HARNESS_BOUNDARY/,
+    "src/app/app/harness/page.tsx": /ENVELOPE_FIELDS|ENVELOPE_BOUNDARY/,
   };
   for (const [page, pattern] of Object.entries(withExamples)) {
     assert.match(

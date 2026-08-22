@@ -220,7 +220,7 @@ test("the applied card's invariant is supplied by the caller, never asserted by 
   assert.match(src, /invariant: ReactNode/, "the invariant must be a REQUIRED prop, so it cannot be omitted");
 
   // And each caller states the property that actually holds for its own change.
-  const wiring = await read("src/app/app/wiring/page.tsx");
+  const wiring = await read("src/app/app/graph/page.tsx");
   assert.match(wiring, /Same line\s+count, same lines/, "the wiring page must keep its transposition invariant");
   const context = await read(PAGE);
   assert.match(

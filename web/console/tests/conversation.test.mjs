@@ -330,18 +330,22 @@ test("§7.2 an un-approvable request with no reason says so rather than inventin
 
 // ── §7.7 · the surface states what it can be asked ───────────────────────────────────────────────
 
-test("§7.7 the fourteen questions come from the intent table, not from console copy", async () => {
+test("§7.7 every intent's question comes from the intent table, not from console copy", async () => {
   const src = await readFile(join(REPO_ROOT, "internal", "conversation", "intent.go"), "utf8");
   const start = src.indexOf("var intents = []IntentSpec{");
   const block = src.slice(start, src.indexOf("\n}", start));
-  // The LAST string of each row, not "every string containing a question mark": four of the fourteen
-  // are imperatives ("fix it, and open a pull request"), and a scan keyed on punctuation would have
-  // counted ten and called that fine — a fence that measures the easy subset of what it claims to.
+  // The LAST string of each row, not "every string containing a question mark": several are imperatives
+  // ("fix it, and open a pull request"), and a scan keyed on punctuation would have counted ten and
+  // called that fine — a fence that measures the easy subset of what it claims to.
+  //
+  // 🔴 FIFTEEN since P34 split `harness` into loop (how many turns it takes) and harness (what it is
+  // allowed to do). The count is bumped rather than replaced with "every row has one", because the
+  // failure this catches is a row added WITHOUT a question — and `>= 1 per row` would pass on that.
   const questions = [...block.matchAll(/"([^"]*)"\},/g)].map(([, q]) => q);
   assert.equal(
     questions.length,
-    14,
-    `the intent table carries ${questions.length} questions; there are fourteen intents. The refusal ` +
+    15,
+    `the intent table carries ${questions.length} questions; there are fifteen intents. The refusal ` +
       "renders this list, so a missing question is a boundary the user is not shown.",
   );
 

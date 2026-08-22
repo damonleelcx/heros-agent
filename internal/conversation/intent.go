@@ -24,7 +24,7 @@ import "sort"
 //
 // # Why two backings and not one
 //
-// Twelve intents name a console ROUTE that exists today. Two — `assess` and `improve` — name a
+// Thirteen intents name a console ROUTE that exists today. Two — `assess` and `improve` — name a
 // CAPABILITY (P33's assessment, P35's improvement run) that is mounted or not per deployment. Both are
 // working surfaces in FR24's sense; they differ in what "exists" means, and collapsing them would force
 // either a fake route for a capability or an exemption in the fence. An exemption in a fence is how a
@@ -45,9 +45,17 @@ const (
 	IntentContext       Intent = "context"
 	IntentMemory        Intent = "memory"
 	IntentHarness       Intent = "harness"
-	IntentCoverage      Intent = "coverage"
-	IntentAssess        Intent = "assess"
-	IntentImprove       Intent = "improve"
+	// IntentLoop is P34's split half. `harness` above kept its wire value and narrowed its MEANING — it
+	// is now the execution envelope — and the iteration policy is its own intent.
+	//
+	// 🔴 The wire values do NOT move. `harness` is stored on conversation rows and read by the recall
+	// evaluation; renaming it to make room for a better-named `envelope` would re-identify every row
+	// already written and silently reset the per-intent recall history the fence above says is the only
+	// thing that catches bad routing. Add, never edit.
+	IntentLoop     Intent = "loop"
+	IntentCoverage Intent = "coverage"
+	IntentAssess   Intent = "assess"
+	IntentImprove  Intent = "improve"
 )
 
 // Backing says what an intent resolves to.
@@ -78,7 +86,7 @@ type IntentSpec struct {
 	Question string
 }
 
-// intents is the closed set. 🔴 Fourteen, in PRD §6.7's order.
+// intents is the closed set. 🔴 Fifteen since P34 split `harness`, in PRD §6.7's order.
 var intents = []IntentSpec{
 	{IntentGraph, BackedByRoute, "/app/workflows", "", "what does my agent actually do, step by step?"},
 	{IntentRunHistory, BackedByRoute, "/app/runs", "", "what happened in that run?"},
@@ -87,10 +95,17 @@ var intents = []IntentSpec{
 	{IntentDeliver, BackedByRoute, "/app/delivery", "", "how does an approved change reach my repository?"},
 	{IntentPromptModel, BackedByRoute, "/app/studio", "", "change the instruction / change the model"},
 	{IntentAuthor, BackedByRoute, "/app/authoring", "", "change something on an axis and show me the diff"},
-	{IntentGraphOrder, BackedByRoute, "/app/wiring", "", "should these nodes run in this order?"},
+	{IntentGraphOrder, BackedByRoute, "/app/graph", "", "should these nodes run in this order?"},
 	{IntentContext, BackedByRoute, "/app/context", "", "what conversation history does this node get?"},
 	{IntentMemory, BackedByRoute, "/app/memory", "", "what does this node remember between calls?"},
-	{IntentHarness, BackedByRoute, "/app/harness", "", "how many turns does it take, and in what loop?"},
+	// 🔴 P34 split the question this row used to ask. "How many turns" is the LOOP; "what is it allowed
+	// to do" is the harness envelope. One row asking both would route a spend-ceiling question to a page
+	// about reflection prompts, which is precisely the conflation ADR-014 exists to end — and the
+	// conversational surface is where a reader is least equipped to notice they were sent to the wrong
+	// place.
+	{IntentLoop, BackedByRoute, "/app/loop", "", "how many turns does it take, and in what loop?"},
+	{IntentHarness, BackedByRoute, "/app/harness", "",
+		"what is this node allowed to do — what can it reach, and what can it spend?"},
 	{IntentCoverage, BackedByRoute, "/app/coverage", "", "what did you measure, and what did you not?"},
 	// 🔴 ROUTE-BACKED SINCE P33 SHIPPED THE SURFACE. It was capability-backed while `surface-assessment`
 	// was a capability with nowhere to render, and flipping it is not a reclassification for tidiness —

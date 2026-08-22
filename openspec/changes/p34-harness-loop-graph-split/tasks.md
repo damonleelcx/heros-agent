@@ -217,11 +217,37 @@
 
 ## 7. Frontend Dev
 
-- [ ] 7.1 Per PRD §14 Q4, re-cut `/app/harness` and `/app/wiring` into the agreed shape.
-- [ ] 7.2 **Inventory the existing pages first.** Every item either has a named destination or is deliberately removed with the user's agreement; nothing evaporates in the re-cut.
-- [ ] 7.3 An axis unavailable in this build renders read-only **with its reason** — a hidden axis is indistinguishable from one that does not exist.
-- [ ] 7.4 Refusals render with the axis and node they name, verbatim.
-- [ ] 7.5 Reuse the existing axis-page structure; no improvised styling, `scan:tokens` stays green.
+- [x] 7.1 Per PRD §14 Q4, re-cut `/app/harness` and `/app/wiring` into the agreed shape.
+      → three sibling pages, per D-34.4. `/app/harness` (envelope), `/app/loop` (new, carrying P18's
+      strategy picker unchanged), `/app/graph` (supersedes `/app/wiring`). 🔴 `/app/wiring` REDIRECTS
+      rather than 404s — a bookmark that stops working is indistinguishable from a feature that was
+      withdrawn, and the reader most likely to have saved that link saved it while trying to understand
+      a refusal. Nav, `routes.ts`, the conversational intent table and `heros link`'s surface report all
+      updated. Verified in Chrome at desktop and mobile width; no console errors.
+
+- [x] 7.2 **Inventory the existing pages first.** Every item either has a named destination or is deliberately removed with the user's agreement; nothing evaporates in the re-cut.
+      → [`frontend-inventory.md`](frontend-inventory.md). 17 items, every one with a named destination;
+      **Removals: none**. Two findings the inventory existed to catch: the Context/Memory/Harness
+      boundary table had to GROW to four rows rather than move (P34 created a fourth thing to conflate),
+      and `Parallelize`/`Merge` mean OPPOSITE things on the wiring axis and the graph axis — so
+      `/app/graph` states the collision rather than leaving a reader to meet it in a refusal.
+
+- [x] 7.3 An axis unavailable in this build renders read-only **with its reason** — a hidden axis is indistinguishable from one that does not exist.
+      → `/app/graph`'s Topology tab LEADS and opens with the reason: declarable, resolvable, hashed,
+      validated — and written into source in no language, with the missing artifact named per form.
+      `/app/harness` does the same for an axis that is refused at every call site **permanently**, and
+      says in the same breath that refused is not unenforced, because a reader who drew that conclusion
+      would be wrong about their own blast radius.
+
+- [x] 7.4 Refusals render with the axis and node they name, verbatim.
+      → the existing `AxisRefusal` / `AxisApplied` components, unchanged, still carry the engine's verbatim
+      sentences on `/app/graph`. The topology forms name the axis and the form; the engine's own refusal
+      names the axis, the anchor node and the form (§5.8).
+
+- [x] 7.5 Reuse the existing axis-page structure; no improvised styling, `scan:tokens` stays green.
+      → `PageFrame` + `Tabs` + `DataTable` + `Banner` + `Chip` + `AxisProjectionPanel` on all three, the
+      same structure every other axis page uses. `npm run scan:tokens` green (232 files, no literal).
+      `npm test` 693/693. Production build clean; bundle scan under ceiling.
 
 ## 8. DevOps
 

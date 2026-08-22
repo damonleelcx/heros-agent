@@ -69,10 +69,16 @@
     { "text": "does the summariser forget everything each time?", "intent": "memory" },
     { "text": "what is stored in memory for this node", "intent": "memory", "near_miss": "context" },
 
-    { "text": "how many turns does it take, and in what loop?", "intent": "harness" },
-    { "text": "how many turns is this scaffold allowed?", "intent": "harness" },
-    { "text": "does it reflect between iterations?", "intent": "harness" },
-    { "text": "what is the retry loop on this node?", "intent": "harness" },
+    { "text": "how many turns does it take, and in what loop?", "intent": "loop" },
+    { "text": "how many turns is this scaffold allowed?", "intent": "loop" },
+    { "text": "does it reflect between iterations?", "intent": "loop" },
+    { "text": "what is the retry loop on this node?", "intent": "loop" },
+
+    { "text": "what is this node allowed to do?", "intent": "harness" },
+    { "text": "can this node reach the network?", "intent": "harness" },
+    { "text": "how much is this node allowed to spend?", "intent": "harness" },
+    { "text": "what is the sandbox posture on this node?", "intent": "harness" },
+    { "text": "how many turns is this node allowed to take at most", "intent": "harness", "near_miss": "loop" },
 
     { "text": "what did you measure, and what did you not?", "intent": "coverage" },
     { "text": "what did you not measure here?", "intent": "coverage" },

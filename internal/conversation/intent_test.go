@@ -93,8 +93,8 @@ func TestEveryOutOfScopeRedirectionNamesARealSurface(t *testing.T) {
 // above — the fence reads route-backed intents only — so an intent could be added, be unreachable, and
 // pass. This is the check that closes that.
 func TestEveryIntentIsBackedByExactlyOneThing(t *testing.T) {
-	if len(Intents()) != 14 {
-		t.Fatalf("the intent set has %d members; PRD §6.7 declares fourteen", len(Intents()))
+	if len(Intents()) != 15 {
+		t.Fatalf("the intent set has %d members; PRD §6.7 declared fourteen; P34 split `harness` into loop+envelope for fifteen", len(Intents()))
 	}
 	for _, spec := range Intents() {
 		if spec.Surface == "" {

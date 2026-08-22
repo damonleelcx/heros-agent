@@ -68,6 +68,7 @@ export type ConversationIntent =
   | "graph_order"
   | "context"
   | "memory"
+  | "loop"
   | "harness"
   | "coverage"
   | "assess"
