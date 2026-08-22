@@ -100,12 +100,31 @@ const (
 	// its own member because a terminal message must always name a stop reason (task 4.13) and neither
 	// `satisfied` nor any ceiling is honest about a run somebody stopped on purpose.
 	StopCancelled StopReason = "cancelled"
+
+	// ── P34 · the execution envelope's spend ceiling (harness-envelope spec, decisions.md D-34.1) ──
+
+	// StopSpendCeiling — the run reached the envelope's spend ceiling and the NEXT turn was not taken.
+	//
+	// 🔴 A STOPPING CONDITION, not an error, and the spec requires it in those words. A run that stopped
+	// on budget produced a real, partial answer under a known configuration; filing it as an error would
+	// put it beside "the provider was down", and those two need different responses from whoever reads
+	// them. `Limit()` returns true for it, so no surface may render it as complete.
+	//
+	// 🔴 Distinct from StopTokenBudget. That one is a TURN's own token allowance, declared per turn;
+	// this one is the NODE's money ceiling, imposed by the envelope an operator owns. An operator
+	// reading "token-budget" would go and raise a per-turn allowance, which is not what ran out.
+	//
+	// Appended, never edited — the P31 block above records why: these members are hashed into a
+	// configuration's version_id, so a renamed member silently re-identifies every configuration that
+	// referenced it.
+	StopSpendCeiling StopReason = "spend-ceiling"
 )
 
 // stopReasons is the closure. 🔴 Append-only, for the version_id reason recorded on the P31 block above.
 var stopReasons = []StopReason{
 	StopSatisfied, StopCeiling, StopSingleShot,
 	StopTokenBudget, StopToolCallCeiling, StopWallClock, StopCancelled,
+	StopSpendCeiling,
 }
 
 // StopReasons returns the closed vocabulary. A copy, so no caller can widen it.
@@ -134,7 +153,7 @@ func (r StopReason) String() string { return string(r) }
 // reason `satisfied` is the only member that returns false while still being terminal.
 func (r StopReason) Limit() bool {
 	switch r {
-	case StopCeiling, StopTokenBudget, StopToolCallCeiling, StopWallClock:
+	case StopCeiling, StopTokenBudget, StopToolCallCeiling, StopWallClock, StopSpendCeiling:
 		return true
 	default:
 		return false
@@ -183,6 +202,15 @@ type Result struct {
 type Config struct {
 	Strategy string
 	Params   Params
+	// SpendCeilingUSD is the ENVELOPE's money bound on this node, or nil when the caller declared none
+	// (P34, harness-envelope spec). It is not a loop param and never will be: a ceiling is IMPOSED by
+	// whoever owns the envelope, a turn count is CHOSEN by whoever authors the loop, and the whole of
+	// ADR-014's split is that those are different acts under different review.
+	//
+	// 🔴 A ceiling with no SpendMeter is REFUSED at Run, before the first turn. A declared bound that
+	// nothing can measure is not a bound — it is a policy an operator believes is in force and is not,
+	// which is worse than having none, because it stops them looking.
+	SpendCeilingUSD *float64
 }
 
 // Invoke performs ONE turn: it is handed the message list for this turn and returns the answer.
@@ -212,6 +240,15 @@ func Run(cfg Config, hosts Hosts, messages []Message, invoke Invoke) (Result, er
 	if err := hosts.require(st.hostService()); err != nil {
 		return Result{}, err
 	}
+	// 🔴 A declared spend ceiling with nothing to measure spending is refused HERE, with the other
+	// preflight checks, so a run that cannot honour its own budget never spends a call. Silently
+	// ignoring it would leave an operator believing a bound is in force that is not.
+	if cfg.SpendCeilingUSD != nil && hosts.SpendMeter == nil {
+		return Result{}, fmt.Errorf("%w: a spend ceiling of $%.2f was declared and no spend meter was "+
+			"supplied. 🚫 The ceiling is not ignored: a bound nothing can measure is a policy an operator "+
+			"believes is in force and is not, which is worse than having none because it stops them "+
+			"looking", ErrMissingHostService, *cfg.SpendCeilingUSD)
+	}
 
 	// 🔴 The bound. `turn <= ceiling` is a `for` bound rather than a break inside the body, so there is no
 	// path through this function that runs more turns than the ceiling — including one where a strategy's
@@ -219,6 +256,17 @@ func Run(cfg Config, hosts Hosts, messages []Message, invoke Invoke) (Result, er
 	out := Result{Trace: make([]TurnRecord, 0, ceiling)}
 	turnMsgs := append([]Message(nil), messages...)
 	for turn := 1; turn <= ceiling; turn++ {
+		// 🔴 BEFORE the call, which is what the spec asks for in those words. Checking afterwards would
+		// mean the ceiling is enforced by having already exceeded it — and on the turn that matters,
+		// that is the difference between a bound and a report.
+		//
+		// It stops rather than erroring, and the trace records WHICH turn was not taken, so "we stopped
+		// at three of six because the money ran out" is legible without joining to a billing table.
+		if exhausted(cfg, hosts) {
+			out.Stop = StopSpendCeiling
+			out.Trace = append(out.Trace, TurnRecord{Turn: turn, Reason: StopSpendCeiling})
+			return out, nil
+		}
 		answer, err := invoke(turnMsgs)
 		if err != nil {
 			return out, fmt.Errorf("%w: turn %d: %v", ErrTurnFailed, turn, err)

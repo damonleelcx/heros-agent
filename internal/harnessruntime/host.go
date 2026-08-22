@@ -44,6 +44,22 @@ type Hosts struct {
 	ToolInvoker ToolInvoker
 	Planner     Planner
 	Critic      Critic
+	// SpendMeter reports what this run has spent so far, for the envelope's spend ceiling (P34).
+	//
+	// 🔴 A HOST service like the three above, and for the same reason: only the host knows what a call
+	// cost. This runtime makes no provider call, so it has no way to price one, and a runtime that
+	// estimated spend would be publishing a number nobody can reconcile against a bill.
+	SpendMeter SpendMeter
+}
+
+// SpendMeter reports the running cost of the current node, in USD. Supplied by a host that owns the
+// metering path; never implemented in this package or in a generated artifact.
+//
+// 🚫 It reports SPENT, not REMAINING. The ceiling is the envelope's and belongs to whoever owns the
+// envelope; a meter that returned "remaining" would be a second place the ceiling lives, and the two
+// could disagree about a policy at exactly the moment it is being enforced.
+type SpendMeter interface {
+	SpentUSD() float64
 }
 
 // require refuses when the strategy's service was not supplied.
@@ -78,4 +94,17 @@ func (h Hosts) require(svc HostService) error {
 		}
 	}
 	return nil
+}
+
+// exhausted reports whether the envelope's spend ceiling has been reached, so the next turn must not be
+// taken. False when no ceiling was declared — an absent ceiling is not a ceiling of zero.
+//
+// 🔴 `>=`, not `>`. A ceiling of one dollar means a run may spend up to a dollar; a run that has already
+// spent exactly a dollar has used its budget, and admitting one more turn on the strength of an
+// equality would make every declared ceiling one turn looser than it reads.
+func exhausted(cfg Config, hosts Hosts) bool {
+	if cfg.SpendCeilingUSD == nil || hosts.SpendMeter == nil {
+		return false
+	}
+	return hosts.SpendMeter.SpentUSD() >= *cfg.SpendCeilingUSD
 }

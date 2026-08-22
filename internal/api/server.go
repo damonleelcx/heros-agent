@@ -26,6 +26,7 @@ import (
 	"github.com/heros-foreal/agentd/internal/linkingest"
 	"github.com/heros-foreal/agentd/internal/mailer"
 	"github.com/heros-foreal/agentd/internal/providergateway"
+	"github.com/heros-foreal/agentd/internal/sandbox"
 	"github.com/heros-foreal/agentd/internal/sourceingest"
 	"github.com/heros-foreal/agentd/internal/tenancy"
 )
@@ -69,6 +70,8 @@ type Server struct {
 	assessments AssessmentRunner
 	// assessmentHealth publishes the P33 per-axis, per-state health document on /readyz.
 	assessmentHealth AssessmentHealthSource
+	// sandboxConcurrency publishes the P34 isolate-concurrency gauge on /readyz (task 8.3).
+	sandboxConcurrency SandboxConcurrencySource
 
 	// p5 is the P5 interactive-graph-editor read+validate model, mounted by MountGraphEditor when available.
 	graphEditor GraphEditorSource
@@ -587,6 +590,37 @@ type AssessmentHealthSource interface {
 // down, rather than a condition a dashboard re-derives from two counters.
 func (s *Server) SetAssessmentHealth(src AssessmentHealthSource) { s.assessmentHealth = src }
 
+// SandboxConcurrencySource publishes the isolate-concurrency gauge (P34 task 8.3).
+type SandboxConcurrencySource interface {
+	Concurrency() sandbox.ConcurrencyHealth
+}
+
+// SetSandboxConcurrency wires P34's concurrency gauge into /readyz (task 8.3).
+//
+// # 🔴 Why this has to be READABLE rather than logged
+//
+// P34 lets a spec declare that members of a group may run concurrently, and concurrency multiplies a
+// run's PEAK resource use by the group's width — one isolate's bounds are per-isolate, so four
+// overlapping isolates is four times the address space and four times the PIDs. That makes the width a
+// blast-radius statement, and a blast-radius statement nobody can read is a policy nobody can audit.
+//
+// Two of the four fields are the ones worth an operator's attention:
+//
+//   - `peak` and `peak_group_width` answer "how loaded did this box actually get", which a CURRENT
+//     gauge structurally cannot: by the time anybody looks, the moment has passed.
+//   - `capped` is the interesting one. A non-zero value means a spec reached EXECUTION asking for a
+//     wider group than the sandbox allows — and a spec that had been resolved would have been refused
+//     before it got there, against its envelope's limit. So `capped > 0` is the signal that the
+//     resolve-time gate was bypassed, which is invisible in every aggregate: nothing errors, nothing
+//     retries, the work simply runs narrower than it asked to.
+//
+// # 🔴 Why this is NOT in `components`
+//
+// The same argument SetAssessmentHealth makes: every entry in that map is a GATE, and a box whose
+// isolates are merely busy is not a box that should be pulled out of its Service endpoints. Busy is the
+// normal state of a working sandbox.
+func (s *Server) SetSandboxConcurrency(src SandboxConcurrencySource) { s.sandboxConcurrency = src }
+
 // SetSourceIngestHealth wires the P32 signals into /readyz (tasks 5.2, 5.4).
 //
 // # 🔴 Why these are NOT in `components`
@@ -711,6 +745,13 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 		// language frontend or the sandbox has broken. There is no conventional metric that goes the
 		// wrong way when the product silently stops saying anything.
 		body["assessment"] = s.assessmentHealth.Health()
+	}
+	if s.sandboxConcurrency != nil {
+		// P34 task 8.3 · overlapping isolates, as counts. `sandbox_concurrency.capped` is the field worth
+		// an alert: it is non-zero only when a spec reached execution asking for a wider concurrent group
+		// than the sandbox allows, which means the resolve-time gate was bypassed. See
+		// SetSandboxConcurrency.
+		body["sandbox_concurrency"] = s.sandboxConcurrency.Concurrency()
 	}
 	body["error_reporting"] = s.errorReporterState()
 	if s.agentReadiness != nil {

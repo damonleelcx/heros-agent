@@ -1934,7 +1934,8 @@
             "token-budget",
             "tool-call-ceiling",
             "wall-clock",
-            "cancelled"
+            "cancelled",
+            "spend-ceiling"
           ],
           "type": "string"
         },
@@ -4489,7 +4490,8 @@
             "token-budget",
             "tool-call-ceiling",
             "wall-clock",
-            "cancelled"
+            "cancelled",
+            "spend-ceiling"
           ],
           "type": "string"
         },
@@ -4656,7 +4658,8 @@
             "token-budget",
             "tool-call-ceiling",
             "wall-clock",
-            "cancelled"
+            "cancelled",
+            "spend-ceiling"
           ],
           "type": "string"
         },
@@ -5358,7 +5361,8 @@
         "token-budget",
         "tool-call-ceiling",
         "wall-clock",
-        "cancelled"
+        "cancelled",
+        "spend-ceiling"
       ],
       "type": "string"
     },

@@ -162,14 +162,26 @@ func TestFailureClassesStayThree(t *testing.T) {
 // afternoon because importing harnessruntime felt heavy, after which two vocabularies exist and a
 // surface showing both has to translate.
 func TestConversationUsesTheHarnessStopVocabulary(t *testing.T) {
+	//
+	// 🔴 The count moved 7 → 8 when P34 appended `spend-ceiling`, and that is the vocabulary's own rule
+	// working rather than being loosened: harnessruntime's block says these members are hashed into a
+	// configuration's version_id, so ADDING one is safe (nothing previously hashed named it) while
+	// renaming or removing one silently re-identifies every configuration that referenced it. Add, never
+	// edit. Bumping the number here is the deliberate act; replacing it with `len(reasons)` would make
+	// this permanently green and would be the same test in name only.
 	reasons := harnessruntime.StopReasons()
-	if len(reasons) != 7 {
-		t.Fatalf("the stop vocabulary has %d members; P31 extended it to seven: %v", len(reasons), reasons)
+	if len(reasons) != 8 {
+		t.Fatalf("the stop vocabulary has %d members; P31 extended it to seven and P34 appended "+
+			"spend-ceiling for eight: %v", len(reasons), reasons)
 	}
 	for _, want := range []harnessruntime.StopReason{
 		harnessruntime.StopSatisfied, harnessruntime.StopCeiling, harnessruntime.StopSingleShot,
 		harnessruntime.StopTokenBudget, harnessruntime.StopToolCallCeiling,
 		harnessruntime.StopWallClock, harnessruntime.StopCancelled,
+		// P34: the execution envelope's money bound. Distinct from StopTokenBudget, which is a TURN's
+		// token allowance — an operator reading "token-budget" would raise a per-turn number that is not
+		// what ran out.
+		harnessruntime.StopSpendCeiling,
 	} {
 		if !want.Valid() {
 			t.Errorf("%q is not a member of its own vocabulary", want)
@@ -191,21 +203,24 @@ func TestOnlyLimitsReportThemselvesAsLimits(t *testing.T) {
 		harnessruntime.StopTokenBudget:     true,
 		harnessruntime.StopToolCallCeiling: true,
 		harnessruntime.StopWallClock:       true,
+		// P34. A limit, so no surface may render a run that ran out of money as COMPLETE.
+		harnessruntime.StopSpendCeiling: true,
 	}
 	for reason, want := range limits {
 		if reason.Limit() != want {
 			t.Errorf("%s.Limit() = %v, want %v", reason, reason.Limit(), want)
 		}
 	}
-	// FR17's four limits, counted. A fifth limit added without a fence entry would slip through the
-	// map above, so the count is asserted separately.
+	// The limits, counted. A limit added without a fence entry would slip through the map above, so the
+	// count is asserted separately — FR17's envelope of four, plus P34's spend ceiling.
 	n := 0
 	for _, r := range harnessruntime.StopReasons() {
 		if r.Limit() {
 			n++
 		}
 	}
-	if n != 4 {
-		t.Errorf("%d stop reasons are limits; FR17 declares an envelope of four", n)
+	if n != 5 {
+		t.Errorf("%d stop reasons are limits; FR17 declares an envelope of four and P34 adds the "+
+			"envelope's spend ceiling, for five", n)
 	}
 }

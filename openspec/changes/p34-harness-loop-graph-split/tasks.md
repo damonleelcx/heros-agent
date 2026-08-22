@@ -97,10 +97,37 @@
 
 ## 4. Backend Dev — the harness envelope
 
-- [ ] 4.1 Re-scope `DimHarness` to sandbox posture, host-service provision, turn ceiling, spend ceiling, retries, timeouts, concurrency limit, guardrail and approval-gate bindings.
-- [ ] 4.2 `max_turns` above the envelope ceiling refused at resolve, naming both values.
-- [ ] 4.3 Host-service refusal moved **left**: `react-loop` without a tool executor, `plan-execute` without a planner, `critic-loop` without a critic — all refused at resolve, not at run.
-- [ ] 4.4 Concurrency limit enforced by the sandbox at execution, independently of what the spec declared.
+- [x] 4.1 Re-scope `DimHarness` to sandbox posture, host-service provision, turn ceiling, spend ceiling, retries, timeouts, concurrency limit, guardrail and approval-gate bindings.
+      → `registry.EnvelopeHarness` (`internal/registry/harness_envelope.go`) — a sixth HARNESS strategy,
+      not a new field and not a new Kind, because either of those would have moved existing entries'
+      `version_id`s. Its schema REQUIRES sandbox posture, turn ceiling and spend ceiling: an omitted
+      ceiling reads as "unbounded" to a person and has to be read as some number by the code, and those
+      two readings differing is how a policy stops being one. Decoded once onto
+      `ResolvedOverride.Envelope`, because four consumers decoding it is four chances to read an absent
+      field as permissive. Surface: `internal/authoring/loop.go` `EnvelopeOptions`.
+
+- [x] 4.2 `max_turns` above the envelope ceiling refused at resolve, naming both values.
+      → `internal/variantspec/envelope.go` `checkTurnCeiling` → `ErrCeilingExceeded`, naming both numbers.
+      `TestMaxTurnsAboveTheEnvelopeCeilingIsRefused`, plus `TestMaxTurnsAtTheCeilingIsAdmitted` so an
+      off-by-one cannot make every declared policy one turn tighter than it reads.
+
+- [x] 4.3 Host-service refusal moved **left**: `react-loop` without a tool executor, `plan-execute` without a planner, `critic-loop` without a critic — all refused at resolve, not at run.
+      → `checkHostServices` → `ErrMissingHostService` at RESOLVE.
+      `TestMissingHostServiceIsRefusedAtResolve` drives all three strategies against an envelope that
+      grants ONE service, so the check is proved to read the set rather than its emptiness. Deliberately
+      asymmetric with 4.2: a missing ceiling leaves the platform ceiling standing, a missing second actor
+      has no fallback at all. The run-time refusal stays where it is — this is a second gate in front of
+      it, not a replacement.
+
+- [x] 4.4 Concurrency limit enforced by the sandbox at execution, independently of what the spec declared.
+      → `internal/sandbox/concurrency.go`. The sandbox does NOT trust the width it is handed: the number
+      enforced is `min(declared, SandboxConcurrencyCeiling)`, keyed by (run, group) so two tenants do not
+      contend. `ConcurrencyHealth.Capped` publishes narrowings, which is the signal that the resolve-time
+      gate was bypassed. Blocks rather than refuses — a node that failed because its siblings were still
+      running would be a flake with a plausible error message.
+      Also: the ENVELOPE's spend ceiling is checked BEFORE each provider call
+      (`internal/harnessruntime`), reported as the named stopping condition `StopSpendCeiling` rather
+      than as an error, and a declared ceiling with no meter is refused at preflight.
 
 ## 5. Backend Dev — graph topology
 
