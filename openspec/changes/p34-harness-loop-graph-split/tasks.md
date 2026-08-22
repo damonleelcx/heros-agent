@@ -251,10 +251,36 @@
 
 ## 8. DevOps
 
-- [ ] 8.1 Migration adds a kind and `omitempty` fields; it adds no column to a deployed table for the legacy path. Repeatable, returns success on a second run, and the commit body names the idempotency guard.
-- [ ] 8.2 Migration runs only for the components the edition actually deploys.
-- [ ] 8.3 Sandbox concurrency limit enforced and observable; peak resource use per run exposed on a readable health endpoint.
-- [ ] 8.4 Rollback needs no migration, because nothing is removed — assert this rather than assume it.
+- [x] 8.1 Migration adds a kind and `omitempty` fields; it adds no column to a deployed table for the legacy path. Repeatable, returns success on a second run, and the commit body names the idempotency guard.
+      → `db/migrations/postgres/0051_p34_loop_registry.{up,down}.sql`. **Idempotency guards, named:**
+      `CREATE TABLE IF NOT EXISTS`; `DROP TRIGGER IF EXISTS` + `CREATE TRIGGER` (not
+      `CREATE OR REPLACE TRIGGER`, which is PG14+ and this targets 11+); `INSERT ... ON CONFLICT (id)
+      DO NOTHING`. **No `ALTER TABLE` anywhere and `harness_entry` is not named** — altering it would be
+      ADR-014's orphaning chain arriving through the database instead of the seal path.
+      `internal/pgmigrate/p34_loop_registry_test.go` asserts all of it; drilled both ways.
+
+- [x] 8.2 Migration runs only for the components the edition actually deploys.
+      → enforced by a **dependency**, not a list: the migration attaches 0002's
+      `registry_verify_envelope` / `registry_reject_mutation`, so a component that never ran 0002 cannot
+      run this one and fails loudly rather than creating a table nobody uses. A hand-maintained
+      edition list would be a second source of truth about deployment topology, and the copy goes stale.
+      The file also states its scope in prose, so a deployment planner need not reverse-engineer the DDL.
+
+- [x] 8.3 Sandbox concurrency limit enforced and observable; peak resource use per run exposed on a readable health endpoint.
+      → `sandbox.ConcurrencyHealth` on `/readyz` as `sandbox_concurrency`: `active`, **`peak`**,
+      `peak_group_width`, `ceiling`, `capped`. Peak because a current gauge structurally cannot answer
+      "how loaded did this get" — by the time anybody looks the moment has passed. 🔴 `capped` is the
+      field worth an alert: non-zero means a spec reached execution asking for a wider group than the
+      sandbox allows, i.e. the resolve-time gate was bypassed — invisible in every aggregate, because
+      nothing errors and the work simply runs narrower than it asked to.
+
+- [x] 8.4 Rollback needs no migration, because nothing is removed — assert this rather than assume it.
+      → `TestRollbackNeedsNoMigration`, which is the task's own wording (*"assert this rather than
+      assume it"*) taken literally. Reverting the BINARY needs nothing from the database: a `loop_entry`
+      the previous binary never reads is inert, exactly as `harness_entry` was before P18's code was
+      enabled. The down-migration exists, states that it is the more destructive option, states what it
+      costs (specs pinning a `loop_ref` stop resolving — loudly, at resolve), and does not touch
+      `harness_entry` in either direction.
 
 ## 9. QA — fences that can go red
 
