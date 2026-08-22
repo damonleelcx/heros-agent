@@ -131,14 +131,47 @@
 
 ## 5. Backend Dev — graph topology
 
-- [ ] 5.1 `GraphGroup` on the spec, `omitempty`; members must all appear in `Order`.
-- [ ] 5.2 Concurrency declared **over** `Order`; `Order` still contains every node and replay follows it.
-- [ ] 5.3 Predicate edge kind; predicates validated through the ADR-004 `expr` path — one grammar, one validator.
-- [ ] 5.4 Merge declaration required on a fan-in; refused at validate when absent, never defaulted.
-- [ ] 5.5 Merge validated against the downstream node's typed input contract.
-- [ ] 5.6 Every new form gated by `internal/typedcontract`, unchanged, before any codemod is generated.
-- [ ] 5.7 An adaptable mismatch previews the adapter **and** the source diff; the adapter is an explicit node in the spec.
-- [ ] 5.8 Where a language's transform cannot carry a form, refuse with a typed `unsafeRewrite` naming node and axis. Assert the override is **not** silently dropped.
+- [x] 5.1 `GraphGroup` on the spec, `omitempty`; members must all appear in `Order`.
+      → `internal/variantspec/graph.go` `GraphGroup` (`graph_groups,omitempty`) + `validateGraph`.
+      🔴 The wire name is `nodes`, not `members`: P27's ownership-vocabulary fence bans `member` from
+      anything hashed, and the graph axis yielded rather than narrowing a fence built to catch unwritten
+      fields (recorded in `decisions.md` D-34.3).
+
+- [x] 5.2 Concurrency declared **over** `Order`; `Order` still contains every node and replay follows it.
+      → `Order` is untouched. `TestAWellFormedFanInResolves` asserts all four nodes stay in the walk, in
+      sequence, with a group declared over two of them — which is the replay determinism design D4 keeps.
+
+- [x] 5.3 Predicate edge kind; predicates validated through the ADR-004 `expr` path — one grammar, one validator.
+      → `Edge.Kind == "predicate"` + `Edge.Predicate`; `validatePredicates` in `graphresolve.go` calls
+      `CallSite.HasInScope` — the SAME method `validateBindings` calls for a `BindExpr` — and reports the
+      SAME sentinel `ErrBindingOutOfScope` naming the symbol. The scope checked is the PRODUCER's,
+      because the edge is taken after it runs. An IR with no recorded scope DEFERS rather than refusing.
+
+- [x] 5.4 Merge declaration required on a fan-in; refused at validate when absent, never defaulted.
+      → Refused at `Validate`, reachable with no IR and no registry, so a surface can refuse a draft on a
+      keystroke. The refusal offers the closed vocabulary — an author told only that something is missing
+      has to read the source to learn what to type.
+
+- [x] 5.5 Merge validated against the downstream node's typed input contract.
+      → `checkMerge`: collision under `all-fields` refused (precedence would be the platform choosing
+      which of the author's two values is real, and under concurrency it would depend on scheduling);
+      `collect-partial` against a REQUIRED field refused (D-34.3's enforced consequence); then
+      satisfaction against the downstream input contract.
+
+- [x] 5.6 Every new form gated by `internal/typedcontract`, unchanged, before any codemod is generated.
+      → `typedcontract.Satisfies` and `Catalog.FindAdapter`, **unchanged**, called from `Resolve` — which
+      is before any codemod exists by construction, since `Generate` takes a `*Resolved`.
+
+- [x] 5.7 An adaptable mismatch previews the adapter **and** the source diff; the adapter is an explicit node in the spec.
+      → An adaptable mismatch produces an `InsertedAdapter` on `Resolved.MergeAdapters`, with its own
+      `io_contract` and a deterministic node id — the same explicit-node mechanism a re-arrangement's
+      adapter uses (P5 Decision 3), never a hidden runtime coercion.
+
+- [x] 5.8 Where a language's transform cannot carry a form, refuse with a typed `unsafeRewrite` naming node and axis. Assert the override is **not** silently dropped.
+      → `internal/transform/graphrefuse.go` `checkGraphTopology`, dispatched from `Generate` before any
+      file is read. `TestEveryLanguageRefusesTopologyByName` runs all 7 languages × 3 forms and asserts
+      the axis, the anchor node, the form, `CauseNoMaterializer`, and the words **"not dropped"**.
+      Drilled: removing the check turns 10 assertions red.
 
 ## 6. AI Engineer — operators and attribution
 

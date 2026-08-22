@@ -102,7 +102,7 @@ the platform deciding what the customer's code means.
 
 **D6 extends to failure semantics, and that is now settled too**
 ([D-34.3](decisions.md#d-343--a-concurrent-groups-failure-semantics-are-declared-on-the-merge-required-from-a-closed-set-prd-14-q3)).
-`on_member_failure` is a **required** field on the merge, from the closed set `{fail-fast, collect-partial}`
+`on_node_failure` is a **required** field on the merge, from the closed set `{fail-fast, collect-partial}`
 — no default and no global rule. 🔴 With one enforced consequence: a `collect-partial` merge may deliver
 fewer inputs than the group has members, so a downstream input contract that makes every member's field
 *required* is refused at validate, through `internal/typedcontract`. Without that check, `collect-partial`
@@ -149,7 +149,7 @@ type VariantSpec struct {
 }
 
 type GraphGroup struct {
-    Members     []string `json:"members"`               // must all appear in Order
+    Nodes       []string `json:"nodes"`                 // must all appear in Order
     Concurrent  bool     `json:"concurrent,omitempty"`
     Merge       *Merge   `json:"merge,omitempty"`       // required on a fan-in (D6)
 }
@@ -157,7 +157,7 @@ type GraphGroup struct {
 type Merge struct {
     Into            string `json:"into"`               // the downstream node the members converge on
     Strategy        string `json:"strategy"`           // how the inputs combine — closed set, never defaulted
-    OnMemberFailure string `json:"on_member_failure"`  // fail-fast | collect-partial — REQUIRED (D-34.3)
+    OnNodeFailure   string `json:"on_node_failure"`   // fail-fast | collect-partial — REQUIRED (D-34.3)  // fail-fast | collect-partial — REQUIRED (D-34.3)
 }
 ```
 

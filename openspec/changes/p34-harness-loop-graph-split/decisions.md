@@ -94,18 +94,18 @@ D6 has already refused to let the platform pick a default for the *combination* 
 same reasoning applies to its failures — but D6 did not say **where** the declaration lives, and PRD §14 Q3
 explicitly says not to default it.
 
-**Decision.** Failure semantics are a **required field on the merge declaration**, `on_member_failure`, from
+**Decision.** Failure semantics are a **required field on the merge declaration**, `on_node_failure`, from
 a closed two-value set:
 
 | value | meaning |
 |---|---|
-| `fail-fast` | the first member failure aborts the group; the downstream node is not entered |
-| `collect-partial` | every member runs to completion; the merge receives only the members that succeeded |
+| `fail-fast` | the first node failure aborts the group; the downstream node is not entered |
+| `collect-partial` | every node runs to completion; the merge receives only the nodes that succeeded |
 
 A merge that omits it is refused at validate, naming the group. There is **no default and no global rule**.
 
 🔴 **`collect-partial` carries a typed consequence, and it is enforced rather than documented.** If the merge
-may deliver fewer inputs than the group has members, the downstream node's input contract must admit that
+may deliver fewer inputs than the group has nodes, the downstream node's input contract must admit that
 absence — so a `collect-partial` merge whose downstream contract makes every member's field *required* is
 refused at validate, through `internal/typedcontract`, unchanged. Without that rule `collect-partial` would
 be a promise the type system does not keep, discovered at run time by whoever was unlucky.
@@ -125,6 +125,15 @@ where "what arrives at the downstream node" is declared, and failure is a statem
   convenient — the same argument D6 makes for the merge itself.
 - *A field on `GraphGroup` rather than on `Merge`.* Rejected on **L7 维护**: it would put two halves of one
   semantic decision in two structures, so a reader would have to hold both to know what a fan-in does.
+
+🔴 **The wire name is `nodes`/`on_node_failure`, not `members`/`on_member_failure`, and the rename happened
+at implementation time for a reason worth recording.** `p27_hash_recording_test.go` bans the OWNERSHIP
+vocabulary — tenant, owner, account, **member**, seat — from every field that reaches `config_hash`,
+because a hashed field naming WHO forks one configuration per organization and orphans every result filed
+under the old hash. The ban is deliberately on the *vocabulary* rather than on a list of known fields,
+"because the thing being prevented is a field nobody has written yet" — so it fired on `members` in a
+completely different sense of the word. The graph axis yielded: narrowing a fence built to catch unwritten
+fields, in order to admit one written today, spends the fence to save a synonym.
 
 **Effect.** One required, closed, hashed field. A group with no merge is refused; a merge with no failure
 semantics is refused; a `collect-partial` merge whose downstream contract cannot admit absence is refused.

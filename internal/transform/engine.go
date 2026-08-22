@@ -104,6 +104,13 @@ func generate(r *variantspec.Resolved, spec *variantspec.VariantSpec, root strin
 	if err := checkGroupHarness(r); err != nil {
 		return nil, err
 	}
+	// 🔴 P34 task 5.8 — the TOPOLOGY decision, here for the same reason and with the same consequence:
+	// a graph declaration is already part of this configuration's config_hash, so applying it as a no-op
+	// would let that hash be scored against source that was never rewired. Refused by name, with the
+	// axis and the forms, before any file is read.
+	if err := checkGraphTopology(r); err != nil {
+		return nil, err
+	}
 
 	// Per-file edits, and the call-site line ranges the minimality gate will allow them in.
 	editsByFile := map[string][]edit{}

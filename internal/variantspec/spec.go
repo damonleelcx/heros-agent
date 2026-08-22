@@ -420,7 +420,21 @@ func (o NodeOverride) SelectedTools() []string {
 type Edge struct {
 	FromNodeID string `json:"from_node_id"`
 	ToNodeID   string `json:"to_node_id"`
-	Kind       string `json:"kind"` // "data" | "control"
+	// Kind is "data" | "control" | "predicate" (P34 FR13). See EdgeKinds().
+	Kind string `json:"kind"`
+	// Predicate is the condition on a `predicate` edge: the edge is taken when it holds (P34 FR13,
+	// design D5, decisions.md D-34.2).
+	//
+	// 🔴 Additive and `omitempty`: an edge that declares none emits NO `predicate` key, so it serialises
+	// byte-identically to a pre-P34 edge and the frozen golden vectors keep reproducing.
+	//
+	// 🔴 It is an `expr` BINDING, validated at resolve by the SAME check that validates a prompt slot's
+	// `expr`: the symbol must be recorded as in scope at the PRODUCING call site, or the spec is refused
+	// naming the symbol. A second, narrower predicate grammar would be a second scope-validation
+	// implementation, and the scope check is the thing standing between a predicate and a name that does
+	// not exist at that call site. One grammar, one validator — and narrowing it later is only possible
+	// because there is one place to narrow.
+	Predicate string `json:"predicate,omitempty"`
 }
 
 // InsertedAdapter is one catalog adapter the ordering-coherence validator inserted on a mismatching
@@ -494,6 +508,18 @@ type VariantSpec struct {
 	// HarnessGroups are harnesses that wrap an ordered edge set rather than a single node (P18 FR15).
 	// Additive and omitempty: a spec that declares none serialises byte-identically to a pre-P18 spec.
 	HarnessGroups []HarnessGroup `json:"harness_groups,omitempty"`
+	// GraphGroups are the topology units this spec declares: which nodes may run concurrently, and
+	// where they converge, how their results combine (P34 FR12/FR14, design D3–D6).
+	//
+	// 🔴 Additive and omitempty, following exactly the precedent HarnessGroups set: a spec that declares
+	// none serialises byte-identically to a pre-P34 spec. That is the first line of the compatibility
+	// argument and testdata/p34-pre-confighash.json is the fence on it.
+	//
+	// 🔴 Declared OVER `Order`, never instead of it (design D4). Order still lists every node in a
+	// defined sequence, so a replay visits them in that sequence even when the live run overlapped them.
+	// Replacing Order with a DAG would be the honest data model and would change the serialization of
+	// every spec in existence.
+	GraphGroups []GraphGroup `json:"graph_groups,omitempty"`
 }
 
 // Validate checks the spec's internal structure — everything checkable without touching the IR or
@@ -644,13 +670,30 @@ func (s *VariantSpec) Validate() error {
 		if !seen[e.ToNodeID] {
 			return specErr(e.ToNodeID, "", ErrInvalidSpec, "edges[%d] ends at a node that is not in order", i)
 		}
-		switch e.Kind {
-		case "data", "control":
-		default:
-			return specErr("", "", ErrInvalidSpec, "edges[%d].kind is %q, want data or control", i, e.Kind)
+		// P34 FR13: `predicate` joins the closed set. Read from EdgeKinds() rather than re-listed, so the
+		// validator, the hashed projection and the console cannot disagree about what an edge may be.
+		if !validEdgeKind(e.Kind) {
+			return specErr("", "", ErrInvalidSpec, "edges[%d].kind is %q, want one of %s",
+				i, e.Kind, strings.Join(EdgeKinds(), ", "))
 		}
 	}
+
+	// P34 §5 — the topology half. Everything checkable without the IR; the predicate's lexical scope and
+	// the merge's typed contract need it and live in Resolve.
+	if err := s.validateGraph(seen); err != nil {
+		return err
+	}
 	return nil
+}
+
+// validEdgeKind reports membership in the closed set.
+func validEdgeKind(kind string) bool {
+	for _, k := range EdgeKinds() {
+		if k == kind {
+			return true
+		}
+	}
+	return false
 }
 
 // Refs returns every registry version_id the spec references, deduplicated and sorted. Used by

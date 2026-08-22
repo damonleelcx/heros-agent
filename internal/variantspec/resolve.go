@@ -89,6 +89,18 @@ type Resolved struct {
 	// transform can name the exact edge set it is refusing (P18 task 5.3). Nil when the spec declares
 	// none, which is the common case.
 	HarnessGroups []ResolvedGroupOverride
+	// MergeAdapters are the adapters the fan-in contract check inserted to bridge a merge whose combined
+	// output did not satisfy the downstream node's input contract (P34 task 5.7).
+	//
+	// 🔴 They are carried BESIDE the hashed projection, not inside it, exactly as HarnessGroups above
+	// are: the transform needs to name the exact edge it is materialising or refusing, and the hash
+	// needs the topology rather than the bridging. Nil when the merge was coherent as-is, which is the
+	// common case.
+	//
+	// 🚫 An adapter is never a hidden runtime coercion. Each one is an EXPLICIT node carrying its own
+	// io_contract (P5 Decision 3), so it appears in the diff against the parent and the transform
+	// materialises it as generated source.
+	MergeAdapters []InsertedAdapter
 }
 
 // ResolvedGroupOverride is one group harness as the transform sees it: the registry entry the author
@@ -321,12 +333,63 @@ func Resolve(ctx context.Context, spec *VariantSpec, ir *discovery.IR, regs Regi
 		out.HarnessGroups = append(out.HarnessGroups, ResolvedGroupOverride{Entry: entry, Edges: rg.Edges})
 	}
 
+	// Graph topology (P34 §5). Resolved after the nodes and the harness groups, so a group naming a node
+	// that failed to resolve never reaches here — and BEFORE the hash, because the topology is part of
+	// the configuration a config_hash denotes.
+	//
+	// 🔴 It is also before any codemod exists, which is FR15: every new topology form is gated by
+	// `internal/typedcontract`, unchanged, rather than discovered at apply time.
+	graphGroups, graphAdapters, err := resolveGraph(ctx, spec, ir, nil)
+	if err != nil {
+		return nil, err
+	}
+	out.Config.GraphGroups = graphGroups
+	// An adapter inserted to bridge a fan-in is an EXPLICIT node in the spec, recorded exactly as a
+	// re-arrangement's adapter is (P5 Decision 3) — never a hidden runtime coercion. It rides on the
+	// Resolved so the compare view and the transform engine both see what was bridged; the SPEC's own
+	// InsertedAdapters (from a re-arrangement) are carried alongside rather than replaced, because a
+	// spec may legitimately have both.
+	out.MergeAdapters = graphAdapters
+
+	// P34 task 4.4 / FR5, the resolve-time half: a concurrent group wider than the envelope's limit.
+	//
+	// 🔴 The envelope read is the WIDEST any node in the spec declares, not a per-node one, because a
+	// group spans nodes and a limit that only bound the node that happened to carry the envelope would
+	// be trivially bypassed by declaring the group from a different node.
+	if width, gi := spec.GraphWidth(); width > 0 {
+		if err := checkConcurrencyLimit(gi, width, narrowestConcurrencyLimit(out.Overrides)); err != nil {
+			return nil, err
+		}
+	}
+
 	hash, err := out.Config.Hash()
 	if err != nil {
 		return nil, err
 	}
 	out.ConfigHash = hash
 	return out, nil
+}
+
+// narrowestConcurrencyLimit returns the tightest concurrency limit any of this spec's envelopes
+// imposes, or nil when none does.
+//
+// 🔴 The TIGHTEST rather than the one belonging to some particular node. A concurrent group spans
+// nodes, so "which envelope's limit applies" has no single answer — and taking the loosest, or the
+// first, would let an author widen a group by attaching a permissive envelope to any one node in it.
+// Taking the tightest means adding an envelope can only ever narrow, which is the direction a policy
+// is allowed to move without review.
+func narrowestConcurrencyLimit(overrides map[string]ResolvedOverride) *registry.Envelope {
+	var out *registry.Envelope
+	for _, id := range sortedKeys(overrides) {
+		env := overrides[id].Envelope
+		if env == nil || env.ConcurrencyLimit == nil {
+			continue
+		}
+		if out == nil || *env.ConcurrencyLimit < *out.ConcurrencyLimit {
+			out = env
+		}
+	}
+	return out
 }
 
 // resolveNode produces one node's resolved_config entry by laying the spec's overrides over what the

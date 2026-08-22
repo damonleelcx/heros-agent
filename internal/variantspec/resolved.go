@@ -49,6 +49,50 @@ type ResolvedConfig struct {
 	// multi-node fact on one of those nodes would make the group's identity depend on which node was
 	// picked to carry it.
 	HarnessGroups []ResolvedHarnessGroup `json:"harness_groups,omitempty"`
+	// GraphGroups are the resolved topology units — which nodes may overlap, and how a fan-in combines
+	// (P34 FR12/FR14/FR17). ADDITIVE and omitempty with a nil-when-empty slice: a configuration that
+	// declares none emits NO `graph_groups` key, so its canonical bytes are byte-identical to a pre-P34
+	// configuration and the frozen golden vectors keep reproducing.
+	//
+	// It sits at the CONFIG level rather than on a node for the reason HarnessGroups does: its scope is
+	// a set of nodes, and putting a multi-node fact on one of them would make the group's identity
+	// depend on which node was picked to carry it.
+	//
+	// 🔴 It IS hashed. Two specs identical in every node but one declaring two calls concurrent and
+	// merged are different computations — different cost, different latency, different failure
+	// behaviour — and a hash that ignored the topology would score them as one configuration.
+	GraphGroups []ResolvedGraphGroup `json:"graph_groups,omitempty"`
+}
+
+// ResolvedGraphGroup is one resolved topology unit: the nodes, whether they may overlap, and the merge
+// declaration when they converge.
+//
+// 🚫 It carries no adapter and no schema. An adapter inserted to bridge a merge is an EXPLICIT NODE in
+// the spec (P5 Decision 3, applied to a fan-in), so it appears in `nodes` and in `order` like any other
+// node — never as a hidden field on the group that produced it. A reader inspecting the topology sees
+// the same nodes the executor walks.
+type ResolvedGraphGroup struct {
+	// Nodes are the group's constituents, in the spec's declared order. NOT sorted: the declared order
+	// is the order `Order` walks them in, which is the replay sequence, and sorting would fork one
+	// configuration into two hashes on a formatting difference — or worse, claim two different replay
+	// sequences are the same.
+	//
+	// 🔴 The wire name is `nodes`, not `members`; see GraphGroup.Nodes in graph.go for why (the
+	// ownership-vocabulary fence in p27_hash_recording_test.go bans `member` from anything hashed).
+	Nodes []string `json:"nodes"`
+	// Concurrent is whether they may overlap.
+	Concurrent bool `json:"concurrent,omitempty"`
+	// Merge is the fan-in declaration, absent when the nodes converge on nothing.
+	Merge *ResolvedMerge `json:"merge,omitempty"`
+}
+
+// ResolvedMerge is a fan-in's hashed declaration: where it converges, how the inputs combine, and what
+// happens when one of the group's nodes fails. All three participate in config_hash — a group that
+// answers with partials is a different computation from one that aborts, and they cost differently too.
+type ResolvedMerge struct {
+	Into          string `json:"into"`
+	Strategy      string `json:"strategy"`
+	OnNodeFailure string `json:"on_node_failure"`
 }
 
 // ResolvedHarnessGroup is one resolved group harness: the strategy projection and the ordered edge set it
@@ -215,7 +259,16 @@ type ResolvedBinding struct {
 type ResolvedEdge struct {
 	FromNodeID string `json:"from_node_id"`
 	ToNodeID   string `json:"to_node_id"`
-	Kind       string `json:"kind"` // "data" | "control"
+	// Kind is "data" | "control" | "predicate" (P34 FR13).
+	Kind string `json:"kind"`
+	// Predicate is the condition on a `predicate` edge (P34 FR13). ADDITIVE and omitempty: an edge that
+	// declares none emits NO `predicate` key, so its canonical bytes are byte-identical to a pre-P34
+	// edge and the frozen golden vectors keep reproducing.
+	//
+	// 🔴 It IS hashed when present, and it must be: two specs whose graphs differ only in which
+	// condition routes an edge are different computations, and a hash that ignored the condition would
+	// claim they were one.
+	Predicate string `json:"predicate,omitempty"`
 }
 
 // Canonical returns the exact bytes config_hash is computed over: RFC 8785 canonical JSON.
@@ -272,6 +325,10 @@ func (rc ResolvedConfig) normalized() ResolvedConfig {
 	// golden bytes — this field is new, so its ABSENCE is what must stay byte-compatible, and absence is
 	// achieved by leaving it nil (omitempty), never by an empty array.
 	out.HarnessGroups = rc.HarnessGroups
+	// 🔴 NOT normalized to an empty slice, for the same reason HarnessGroups above is not: this field is
+	// new, so its ABSENCE is what must stay byte-compatible, and absence is achieved by leaving it nil
+	// (omitempty), never by an empty array.
+	out.GraphGroups = rc.GraphGroups
 	return out
 }
 
