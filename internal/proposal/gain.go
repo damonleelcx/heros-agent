@@ -50,6 +50,19 @@ var operatorPrior = map[OperatorKind]float64{
 	// more: applicability is the transform's answer and cost is the admissibility gate's, and bending one
 	// number to carry three facts is how a ranking silently stops meaning what it says.
 	OpHarnessStrategy: 0.35,
+	// P34. The loop operator INHERITS the harness operator's prior unchanged, because it is the same
+	// hypothesis on the axis ADR-014 moved it to — lowering it would encode "we split an axis" as "we
+	// expect less lift", which is two different facts in one number.
+	OpLoopStrategy: 0.35,
+	// Topology. The lowest prior in the table, and the number states a belief: declaring two independent
+	// calls concurrent cannot change what any of them ANSWERS, so its expected lift on `task_success` is
+	// zero by construction. What it can buy is wall-clock — which the ranking layer reads from
+	// `eval_latency_ms` — and what it costs is peak resource use.
+	//
+	// 🔴 A prior encodes expected lift IF APPLIED. It is deliberately not raised to reflect that latency
+	// wins are valuable: value is the ranking layer's question, and bending this number to carry it is
+	// how a ranking silently stops meaning what it says.
+	OpGraphTopology: 0.05,
 }
 
 // verifyOrderHint ranks operators cheapest-first for verification ordering (design 5.1): a single
@@ -91,6 +104,13 @@ var verifyOrderHint = map[OperatorKind]int{
 	// its value (the prior says the opposite) — it is the cheapest-first rule applied to the operator
 	// that is genuinely the least cheap.
 	OpHarnessStrategy: 6,
+	// P34. The loop operator inherits the harness operator's slot: same cost class, same axis, one
+	// candidate per alternative strategy.
+	OpLoopStrategy: 6,
+	// Topology sits at 1, beside merge and reorder: it emits ONE candidate and changes no node's
+	// contents, so its diff is as narrow as a rearrangement's. Verifying it early is the cheapest-first
+	// rule working — it is quick to disprove, and disproving it costs one eval pass.
+	OpGraphTopology: 1,
 }
 
 // VerifyOrderHint returns the cheapest-operator-first verification order hint for an operator, for the

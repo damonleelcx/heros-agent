@@ -102,7 +102,20 @@ const (
 	// heavier scaffold almost always raises task_success SOMEWHERE while multiplying eval_cost_usd and
 	// eval_latency_ms, so "it scored higher" is not sufficient to ship it — see harness_op.go, which is
 	// the gate, and decisions.md D-6, which is why the gate exists.
+	// 🔴 RESERVED since P34, and emitted by nothing. ADR-014 split the axis: what this operator proposed
+	// — a control loop — now lives on `loop`, and writing a loop strategy into `harness_ref` is the legacy
+	// shape FR9 forbids new authoring from creating. `OpLoopStrategy` (p34_operators.go) is its successor.
+	//
+	// 🚫 It is NOT deleted. It is stored on proposal rows, and removing a member of a persisted
+	// vocabulary re-identifies every row that named it: the compare view, the verified-delta ledger and a
+	// re-run months later all read that word. Reserved costs one constant; removing it costs the history.
 	OpHarnessStrategy OperatorKind = "harness_strategy_switch"
+
+	// ── P34 axis split (ADR-014) ────────────────────────────────────────────────────────────────────
+	//
+	// See p34_operators.go for both, including why OpGraphTopology is emphatically not OpMerge: one
+	// FUSES two redundant nodes (the node set shrinks), the other declares two nodes CONCURRENT (every
+	// call still happens and only WHEN changes).
 )
 
 // Signal is a structural driver that is NOT expressible as a P4.5 taxonomy code but still maps to a
@@ -136,6 +149,8 @@ const (
 	// would put a cross-turn observation into a per-case vocabulary.
 	SignalStaleMemory         Signal = "stale_read"           // → memory-policy switch
 	SignalContradictoryMemory Signal = "contradictory_memory" // → memory-policy switch
+
+	// SignalLatencyBottleneck (P34) is declared in p34_operators.go beside the operator it drives.
 
 	// ── P18 scaffold mismatch ───────────────────────────────────────────────────────────────────────
 	//

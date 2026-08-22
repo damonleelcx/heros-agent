@@ -51,7 +51,12 @@ func DefaultCatalog() []Operator {
 		// P18 (18b): the harness axis. ONE row, because one Signal drives it — the node's cases needed
 		// more than one turn and the node runs one. It also handles Reflection's own non-convergence code,
 		// which is the diagnosis-driven half of the same question.
-		harnessStrategyOp{},
+		// 🔴 P34 replaced harnessStrategyOp with loopStrategyOp. `harnessStrategyOp` wrote a LOOP strategy
+		// into `harness_ref`, which is exactly the legacy shape FR9 forbids new authoring from creating —
+		// and a proposal IS new authoring. `OpHarnessStrategy` stays in the enum as a reserved wire value
+		// so stored rows keep decoding; nothing emits it.
+		loopStrategyOp{},
+		graphTopologyOp{},
 	}
 }
 

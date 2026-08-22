@@ -30,7 +30,7 @@ PARITY_DIR ?= .parity
         classifier-calibration demo-patterngraph demo-proposals demo-billing demo-billing-states \
         release-rehearse release-rehearse-redcheck readme-install packaging-proof install-smoke install-smoke-refusals \
         agent-rehearse agent-status repo-intake-hermes assessment-hermes \
-        intent-holdout intent-holdout-strict p31-fence-redcheck p33-fence-redcheck console-edge-proof assessment-holdout
+        intent-holdout intent-holdout-strict attribution-holdout p31-fence-redcheck p33-fence-redcheck console-edge-proof assessment-holdout
 
 ## ci: the locally-provable gate (go + schema + console-types + discovery-ci + intent-holdout). Lint/db-proof run as their own CI jobs.
 ci: go schema console-types-check docs-facts-check discovery-ci intent-holdout-strict
@@ -529,7 +529,17 @@ mail-proof:
 p33-fence-redcheck:
 	$(PYTHON) scripts/p33_fence_redcheck.py
 
-## assessment-holdout: score P33's inference against the holdout set (§3.4, §3.5).
+## ## attribution-holdout: P34 §6.4 — attribution under OVERLAPPING spans, measured on a holdout.
+##
+## 🔴 PRD §9.5 requires this proved BEFORE concurrency ships, with no pure-refactor exemption. It prints
+## three lines: the sequential baseline, the same cases with the spans overlapping and ordered by START
+## TIME (the defect — the answer flips on a nanosecond of scheduling), and the same cases ordered by the
+## SPEC'''s DECLARED order (the fix, which is replay-consistent). A run whose middle line stopped flipping
+## would mean the comparison no longer demonstrates anything, and the test says so.
+attribution-holdout:
+	GOWORK=off $(GO) test -count=1 -v -run "TestAttributionDoesNotDegradeUnderOverlappingSpans|TestBothNodesDivergingIsWhereOrderActuallyDecides|TestTheOverlapHoldoutCanActuallyFail" ./internal/attribution/
+
+assessment-holdout: score P33's inference against the holdout set (§3.4, §3.5).
 ##
 ## 🔴 IT NEEDS A REAL PROVIDER. Without one there is nothing to measure: the suite that runs in `make
 ## go` uses a SCRIPTED analyst and therefore measures the harness — that abstention counts as a

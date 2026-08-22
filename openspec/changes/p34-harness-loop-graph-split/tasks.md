@@ -175,11 +175,45 @@
 
 ## 6. AI Engineer — operators and attribution
 
-- [ ] 6.1 Proposal operator for the loop axis.
-- [ ] 6.2 Proposal operator for the graph axis, including the reserved-and-unimplemented `OpMerge`.
-- [ ] 6.3 Measure each operator by **per-axis** pass rate through the P5.5 verification gate. No mean across axes — it would hide an operator that is not working.
-- [ ] 6.4 Prove on a holdout that attribution does not degrade under overlapping spans, **before** concurrency ships. No pure-refactor exemption.
-- [ ] 6.5 Confirm no eval, scorer, oracle or metric change is needed. An axis needing a bespoke oracle is designed wrong.
+- [x] 6.1 Proposal operator for the loop axis.
+      → `internal/proposal/p34_operators.go` `OpLoopStrategy` + `loopStrategyOp`, writing `loop_ref`.
+      🔴 It SUPERSEDES `harnessStrategyOp` rather than joining it: that operator wrote a loop strategy
+      into `harness_ref`, which is the legacy shape FR9 forbids — and a proposal IS new authoring.
+      `OpHarnessStrategy` stays in the enum as a reserved wire value so stored rows keep decoding;
+      nothing emits it, asserted by `TestOpLoopStrategyInCatalog`.
+
+- [x] 6.2 Proposal operator for the graph axis, including the reserved-and-unimplemented `OpMerge`.
+      → `OpGraphTopology` + `graphTopologyOp`: declares an independent sibling pair concurrent.
+      Eligibility is narrow on purpose — no path in either direction **transitively** (a two-hop
+      dependency is the one a direct-edge check misses and that only shows up under load), and a shared
+      predecessor. 🚫 It never declares a merge: how a fan-in combines is the author's decision (D6).
+      🔴 **`OpMerge` turned out to be implemented, not reserved** — P15 landed it as node FUSION. That is
+      the opposite operation from P34's `Merge` (fan-in combination), and
+      `TestTheGraphOperatorNeverFusesNodes` is the fence keeping the two apart.
+
+- [x] 6.3 Measure each operator by **per-axis** pass rate through the P5.5 verification gate. No mean across axes — it would hide an operator that is not working.
+      → `internal/proposal/axis_passrate.go`. `PassRatesByAxis` publishes rate AND denominator per axis;
+      there is deliberately no `Overall()`, and `TestThereIsNoAggregatePassRate` bans the vocabulary.
+      `TestPassRatesAreReportedPerAxis` builds the exact shape PRD §9.5 warns about and logs it: a 61%
+      aggregate that looks healthy while the graph axis sits at 5%.
+
+- [x] 6.4 Prove on a holdout that attribution does not degrade under overlapping spans, **before** concurrency ships. No pure-refactor exemption.
+      🔴 **The holdout found a real defect.** With one guilty node per case attribution scored 60/60 under
+      overlap and proved nothing — walk order cannot matter when there is only one node to find. The arm
+      that can catch it is BOTH concurrent nodes diverging: there, `executionOrder`'s start-time walk
+      localized to alpha or beta depending on a **nanosecond of scheduling**.
+      Fixed at the cause: `AttributeWithOrder` walks the spec's DECLARED order (design D4 keeps `Order`
+      precisely so a replay has one), and `PerNodeContribution` now reports `OverlappingSpans` /
+      `OrderedByDeclaration` so a consumer can tell a replay-consistent localization from a scheduling
+      artifact. `make attribution-holdout` prints defect and fix side by side; the test asserts the
+      defect still reproduces on the clock path, or the fix would be unfalsifiable.
+
+- [x] 6.5 Confirm no eval, scorer, oracle or metric change is needed. An axis needing a bespoke oracle is designed wrong.
+      → `internal/evalharness/axisagnostic_test.go` `TestP34AddedNoEvalSurface` / `TestP34AddedNoOracle`.
+      A VOCABULARY ban (loop, harness, graph, topology, concurrent, scaffold, max_turns, predicate,
+      fan_in, envelope) over the shipped metric family and the shipped oracle set, because this
+      requirement fails as a `MetricLoopTurns` added one afternoon for a dashboard, not as a recorded
+      decision. No eval, scorer, oracle or metric changed.
 
 ## 7. Frontend Dev
 

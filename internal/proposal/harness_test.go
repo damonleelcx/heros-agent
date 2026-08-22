@@ -25,9 +25,12 @@ const (
 	refHarnessPlanExe = "e555555555555555555555555555555555555555555555555555555555555555"
 )
 
+// 🔴 The menu is the LOOP registry's since P34. The five strategies are the same five — ADR-014
+// RELOCATED the vocabulary rather than extending it — but they are sealed under `KindLoop` now, and a
+// harness ref pasted into `loop_ref` fails closed at resolve.
 func harnessMenu() Menu {
 	return Menu{
-		HarnessStrategies: []HarnessChoice{
+		LoopStrategies: []LoopChoice{
 			{Ref: refHarnessSingle, Strategy: "single-shot", Title: "Single shot", MaxTurns: 1},
 			{Ref: refHarnessReflex, Strategy: "reflexion", Title: "Answer and revise", MaxTurns: 3},
 			{Ref: refHarnessReact, Strategy: "react-loop", Title: "Reason and act", MaxTurns: 6},
@@ -42,7 +45,7 @@ func harnessBase() *variantspec.VariantSpec {
 		WorkflowID: "wf-harness", SourceRevision: "rev1",
 		Order: []string{"solve", "check"},
 		Nodes: map[string]variantspec.NodeOverride{
-			"solve": {HarnessRef: refHarnessSingle},
+			"solve": {LoopRef: refHarnessSingle},
 		},
 	}
 }
@@ -58,72 +61,101 @@ func harnessInput() OperatorInput {
 	}
 }
 
-// TestOpHarnessStrategyInCatalog — task 6.1. A reserved constant with no catalog row is a vocabulary
-// entry nothing can ever emit; a kind that shares a spelling with another operator is a proposal row
-// nobody can attribute.
-func TestOpHarnessStrategyInCatalog(t *testing.T) {
-	if OpHarnessStrategy != "harness_strategy_switch" {
-		t.Fatalf("OpHarnessStrategy = %q, want harness_strategy_switch: the kind is stored on proposal "+
-			"rows, so a rename orphans every row already written", OpHarnessStrategy)
+// TestOpLoopStrategyInCatalog — P18 task 6.1, re-aimed at the axis P34 moved it to. A constant with no
+// catalog row is a vocabulary entry nothing can ever emit; a kind that shares a spelling with another
+// operator is a proposal row nobody can attribute.
+//
+// 🔴 It also asserts the shape of the SUCCESSION, which is the part that could go quietly wrong.
+// `OpHarnessStrategy` keeps its wire value and loses its row: the value stays because it is stored on
+// proposal rows and removing a member of a persisted vocabulary re-identifies every row that named it;
+// the row goes because that operator wrote a LOOP strategy into `harness_ref`, which is exactly the
+// legacy shape FR9 forbids new authoring from creating — and a proposal IS new authoring.
+func TestOpLoopStrategyInCatalog(t *testing.T) {
+	if OpLoopStrategy != "loop_strategy_switch" {
+		t.Fatalf("OpLoopStrategy = %q: the kind is stored on proposal rows, so a rename orphans every row "+
+			"already written", OpLoopStrategy)
 	}
-	for _, other := range []OperatorKind{OpMemoryPolicy, OpContextPolicy, OpReorder, OpMerge} {
-		if OpHarnessStrategy == other {
-			t.Fatalf("the harness operator shares a kind with %s; a consumer could not tell a scaffold "+
-				"change from it", other)
+	if OpHarnessStrategy != "harness_strategy_switch" {
+		t.Fatalf("OpHarnessStrategy = %q; the RESERVED value must not move, or every row already written "+
+			"under it becomes unattributable", OpHarnessStrategy)
+	}
+	for _, other := range []OperatorKind{OpMemoryPolicy, OpContextPolicy, OpReorder, OpMerge, OpHarnessStrategy, OpGraphTopology} {
+		if OpLoopStrategy == other {
+			t.Fatalf("the loop operator shares a kind with %s; a consumer could not tell an iteration "+
+				"policy change from it", other)
 		}
 	}
 
-	var rows []Operator
+	var loopRows, harnessRows []Operator
 	for _, op := range DefaultCatalog() {
-		if op.Kind() == OpHarnessStrategy {
-			rows = append(rows, op)
+		switch op.Kind() {
+		case OpLoopStrategy:
+			loopRows = append(loopRows, op)
+		case OpHarnessStrategy:
+			harnessRows = append(harnessRows, op)
 		}
 	}
-	if len(rows) != 1 {
-		t.Fatalf("DefaultCatalog() has %d harness rows, want 1; a constant with no row can never emit a "+
-			"candidate, which would make the whole operator decorative", len(rows))
+	if len(loopRows) != 1 {
+		t.Fatalf("DefaultCatalog() has %d loop rows, want 1; a constant with no row can never emit a "+
+			"candidate, which would make the whole operator decorative", len(loopRows))
+	}
+	// 🚫 And the retired one emits NOTHING. A row here would mean the proposal engine still authors the
+	// legacy loop-bearing shape, which no surface can create and FR9 forbids.
+	if len(harnessRows) != 0 {
+		t.Fatalf("DefaultCatalog() still has %d harness-strategy row(s). That operator writes a loop "+
+			"strategy into harness_ref — the legacy shape new authoring may not create (FR9)", len(harnessRows))
 	}
 
 	// A prior and an order hint, or the candidate cannot be ranked or scheduled.
-	if operatorPrior[OpHarnessStrategy] <= 0 {
-		t.Error("the harness operator has no prior; it would rank below every operator that has one")
+	if operatorPrior[OpLoopStrategy] <= 0 {
+		t.Error("the loop operator has no prior; it would rank below every operator that has one")
 	}
-	if VerifyOrderHint(OpHarnessStrategy) >= 99 {
-		t.Error("the harness operator has no verify-order hint; it would sort last by accident rather " +
+	if VerifyOrderHint(OpLoopStrategy) >= 99 {
+		t.Error("the loop operator has no verify-order hint; it would sort last by accident rather " +
 			"than by the cheapest-first rule")
 	}
 
-	// 🚫 It never claims a reorder. The dimensions it declares must be exactly [harness].
-	got, err := rows[0].Propose(harnessInput())
+	// 🚫 It never claims a reorder or an envelope change. The dimensions it declares must be exactly [loop].
+	got, err := loopRows[0].Propose(harnessInput())
 	if err != nil {
 		t.Fatalf("Propose: %v", err)
 	}
 	if len(got) == 0 {
-		t.Fatal("the harness operator emitted no candidates from a menu with four alternatives")
+		t.Fatal("the loop operator emitted no candidates from a menu with four alternatives")
 	}
 	for _, c := range got {
-		if len(c.Dimensions) != 1 || c.Dimensions[0] != string(variantspec.DimHarness) {
-			t.Errorf("candidate declares dimensions %v, want exactly [harness]", c.Dimensions)
+		if len(c.Dimensions) != 1 || c.Dimensions[0] != string(variantspec.DimLoop) {
+			t.Errorf("candidate declares dimensions %v, want exactly [loop]", c.Dimensions)
 		}
 	}
 }
 
-// TestHarnessProposeSetsOnlyTheHarnessRef — the per-dimension independence FR2 makes mechanical. A
-// scaffold swap that also moved a node would produce a candidate whose config_hash records two changes
-// and whose rationale describes one.
-func TestHarnessProposeSetsOnlyTheHarnessRef(t *testing.T) {
+// TestLoopProposeSetsOnlyTheLoopRef — the per-dimension independence FR2 makes mechanical. A policy swap
+// that also moved a node would produce a candidate whose config_hash records two changes and whose
+// rationale describes one.
+//
+// 🔴 Post-P34 the baseline carries an ENVELOPE on `harness_ref` beside its loop, which makes this the
+// test that would catch the split's worst mechanical failure: an operator that wrote a loop strategy
+// into `harness_ref` would both destroy the envelope and author the legacy shape FR9 forbids.
+func TestLoopProposeSetsOnlyTheLoopRef(t *testing.T) {
+	const envelopeRef = "f666666666666666666666666666666666666666666666666666666666666666"
 	in := harnessInput()
 	in.Base.Nodes["solve"] = variantspec.NodeOverride{
-		HarnessRef: refHarnessSingle, ModelRef: "m1", MemoryRef: "mem1",
+		LoopRef: refHarnessSingle, HarnessRef: envelopeRef, ModelRef: "m1", MemoryRef: "mem1",
 	}
-	got, err := harnessStrategyOp{}.Propose(in)
+	got, err := loopStrategyOp{}.Propose(in)
 	if err != nil {
 		t.Fatalf("Propose: %v", err)
 	}
 	for _, c := range got {
 		o := c.Spec.Nodes["solve"]
-		if o.HarnessRef == refHarnessSingle || o.HarnessRef == "" {
-			t.Errorf("the candidate did not change the harness ref (%q)", o.HarnessRef)
+		if o.LoopRef == refHarnessSingle || o.LoopRef == "" {
+			t.Errorf("the candidate did not change the loop ref (%q)", o.LoopRef)
+		}
+		if o.HarnessRef != envelopeRef {
+			t.Errorf("the candidate disturbed the execution envelope (%q → %q). A loop swap that rewrote "+
+				"harness_ref would both discard the node's ceilings and author the legacy loop-bearing "+
+				"shape FR9 forbids", envelopeRef, o.HarnessRef)
 		}
 		if o.ModelRef != "m1" || o.MemoryRef != "mem1" {
 			t.Errorf("the candidate disturbed another dimension: model=%q memory=%q", o.ModelRef, o.MemoryRef)
@@ -141,9 +173,12 @@ func TestHarnessProposeSetsOnlyTheHarnessRef(t *testing.T) {
 			t.Error("a node-scoped swap emitted a group harness")
 		}
 	}
-	// And the baseline was never mutated.
-	if in.Base.Nodes["solve"].HarnessRef != refHarnessSingle {
-		t.Error("Propose mutated the baseline spec")
+	// And the baseline was never mutated — on BOTH refs, because the split gave this node two.
+	if in.Base.Nodes["solve"].LoopRef != refHarnessSingle {
+		t.Error("Propose mutated the baseline spec's loop ref")
+	}
+	if in.Base.Nodes["solve"].HarnessRef != envelopeRef {
+		t.Error("Propose mutated the baseline spec's envelope ref")
 	}
 }
 
@@ -516,7 +551,7 @@ func TestAdmissibilitySuite(t *testing.T) {
 // 🚫 The identity is not excluded wholesale, and that asymmetry is the point: proposing `single-shot`
 // against a node that runs a five-turn loop is often the correct and cheapest answer. It is excluded only
 // where it is ALREADY IN FORCE.
-func TestHarnessOperatorNeverProposesTheBaseline(t *testing.T) {
+func TestLoopOperatorNeverProposesTheBaseline(t *testing.T) {
 	if harnessStrategySingleShot != registry.StrategySingleShot {
 		t.Fatalf("harnessStrategySingleShot = %q but registry.StrategySingleShot = %q; the exclusion rule "+
 			"would stop firing", harnessStrategySingleShot, registry.StrategySingleShot)
@@ -525,7 +560,7 @@ func TestHarnessOperatorNeverProposesTheBaseline(t *testing.T) {
 	t.Run("a node with no harness gets no identity candidate", func(t *testing.T) {
 		in := harnessInput()
 		in.Base.Nodes["solve"] = variantspec.NodeOverride{} // implicitly single-shot, like every real node
-		got, err := harnessStrategyOp{}.Propose(in)
+		got, err := loopStrategyOp{}.Propose(in)
 		if err != nil {
 			t.Fatalf("Propose: %v", err)
 		}
@@ -533,28 +568,28 @@ func TestHarnessOperatorNeverProposesTheBaseline(t *testing.T) {
 			t.Fatal("the operator emitted nothing at all; excluding the no-op must not exclude the rest")
 		}
 		for _, c := range got {
-			ref := c.Spec.Nodes["solve"].HarnessRef
+			ref := c.Spec.Nodes["solve"].LoopRef
 			if ref == refHarnessSingle {
 				t.Error("the operator proposed the identity at a node that already runs it. That candidate " +
 					"resolves to the baseline's own config_hash, so it is a proposal of nothing — and its " +
 					"verdict, necessarily a tie, would be recorded as evidence about a change never made")
 			}
 			if ref == "" {
-				t.Error("the operator emitted a candidate that clears the harness rather than setting one")
+				t.Error("the operator emitted a candidate that clears the loop rather than setting one")
 			}
 		}
 	})
 
 	t.Run("a node running a loop DOES get an identity candidate", func(t *testing.T) {
 		in := harnessInput()
-		in.Base.Nodes["solve"] = variantspec.NodeOverride{HarnessRef: refHarnessReact}
-		got, err := harnessStrategyOp{}.Propose(in)
+		in.Base.Nodes["solve"] = variantspec.NodeOverride{LoopRef: refHarnessReact}
+		got, err := loopStrategyOp{}.Propose(in)
 		if err != nil {
 			t.Fatalf("Propose: %v", err)
 		}
 		found := false
 		for _, c := range got {
-			if c.Spec.Nodes["solve"].HarnessRef == refHarnessSingle {
+			if c.Spec.Nodes["solve"].LoopRef == refHarnessSingle {
 				found = true
 			}
 		}
