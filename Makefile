@@ -29,7 +29,7 @@ PARITY_DIR ?= .parity
         sandbox-proof sandbox-proof-redcheck \
         classifier-calibration demo-patterngraph demo-proposals demo-billing demo-billing-states \
         release-rehearse release-rehearse-redcheck readme-install packaging-proof install-smoke install-smoke-refusals \
-        agent-rehearse agent-status repo-intake-hermes assessment-hermes \
+        agent-rehearse agent-status repo-intake-hermes assessment-hermes axissplit-hermes \
         intent-holdout intent-holdout-strict attribution-holdout p31-fence-redcheck p33-fence-redcheck p34-fence-redcheck console-edge-proof assessment-holdout
 
 ## ci: the locally-provable gate (go + schema + console-types + discovery-ci + intent-holdout). Lint/db-proof run as their own CI jobs.
@@ -197,10 +197,47 @@ repo-intake-hermes:
 ##
 ## 🚫 Every finding it produces is STRUCTURAL. Inference is gated on a holdout run that has not
 ## happened and measurement needs the sandbox to execute customer code, so no provider is called and
-## nothing costs money. `memory` and `harness` will report not_measured, and `loop` and `graph` will
-## report refused naming P34 — all four are the correct answers, not defects.
+## nothing costs money.
+##
+## 🔴 P34 CHANGED WHAT THIS PRINTS, and the change is the phase's end-to-end proof. `loop` and `graph`
+## used to report `refused` naming P34 — the configuration layer had no such axes. They now REPORT:
+## `loop` reads the discovered control loop, and `graph` names which of the frontend, the analysis or
+## the language support is missing (FR18) rather than a generic unsupported state. `harness` narrowed to
+## the EXECUTION ENVELOPE, which a source snapshot structurally cannot contain, so it is `not_measured`
+## with that reason rather than `observed`.
+##
+## So against hermes-agent the tally is now `0 measured · 4 observed · 5 not_measured · 0 REFUSED`.
+## Zero refusals is the correct answer, not a suppressed one: `Axis.P34Pending()` returns false for
+## every axis because both configurations now exist.
 assessment-hermes:
 	bash db/migrations/postgres/run_pg_docker.sh $(GO) run ./cmd/proof/assessment
+
+## axissplit-hermes: run P34's three axes against a REAL repository's own call sites.
+##
+## Every P34 fence is green and all fourteen have been drilled red (`make p34-fence-redcheck`). Green
+## fences prove the parts, against a two-node fixture this repository wrote with hand-built io_contracts
+## chosen to make the assertion clean. That is the right shape for a fence and it is not evidence about
+## a customer.
+##
+## This proves the WALK: it discovers `nousresearch/hermes-agent`'s actual call sites and authors P34
+## configurations against the node ids that come out, so every refusal it prints names a symbol somebody
+## else wrote. Eight gates: the turn ceiling naming both numbers, a loop that fits, the host-service
+## refusal moved left, the ambiguity refusal naming both refs, the legacy path still resolving, a fan-in
+## with no merge refused at validate, the same fan-in refused at transform by name, and each axis's
+## declared coverage for the repository's language.
+##
+## 🚫 It calls NO provider and costs nothing. Every P34 gate is a resolve-time gate by construction —
+## that is the phase's central claim — so proving them needs no run, no sandbox and no credential.
+##
+## It needs a checkout; clone it first (a public repository needs no token):
+##
+##	git clone --depth 1 https://github.com/nousresearch/hermes-agent /tmp/hermes-agent
+##	make axissplit-hermes
+HERMES ?= /tmp/hermes-agent
+axissplit-hermes:
+	@test -d "$(HERMES)" || { echo "axissplit-hermes: no checkout at $(HERMES)"; \
+		echo "  git clone --depth 1 https://github.com/nousresearch/hermes-agent $(HERMES)"; exit 2; }
+	GOWORK=off $(GO) run ./cmd/proof/axissplit -local $(HERMES)
 
 ## operator-hermes: run P26's operator surfaces against a REAL repository (nousresearch/hermes-agent).
 #
