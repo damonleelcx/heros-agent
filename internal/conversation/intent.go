@@ -92,7 +92,16 @@ var intents = []IntentSpec{
 	{IntentMemory, BackedByRoute, "/app/memory", "", "what does this node remember between calls?"},
 	{IntentHarness, BackedByRoute, "/app/harness", "", "how many turns does it take, and in what loop?"},
 	{IntentCoverage, BackedByRoute, "/app/coverage", "", "what did you measure, and what did you not?"},
-	{IntentAssess, BackedByCapability, "surface-assessment", "surface-assessment",
+	// 🔴 ROUTE-BACKED SINCE P33 SHIPPED THE SURFACE. It was capability-backed while `surface-assessment`
+	// was a capability with nowhere to render, and flipping it is not a reclassification for tidiness —
+	// it is the event the classification was waiting for.
+	//
+	// The 503-versus-404 distinction that made it capability-backed is PRESERVED and improved. A
+	// deployment that does not mount the capability now answers `/api/v1/assessments` with 503, and
+	// `/app/assess` renders that as the `not-mounted` failure class with the reason on the page. Before,
+	// the same deployment gave a person a conversational refusal — well-formed, polite, and
+	// indistinguishable from the surface not existing.
+	{IntentAssess, BackedByRoute, "/app/assess", "",
 		"look at my repository and tell me what is weak"},
 	{IntentImprove, BackedByCapability, "autonomous-improvement-run", "autonomous-improvement-run",
 		"fix it, and open a pull request"},

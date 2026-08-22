@@ -46,6 +46,14 @@ export const routes = {
   wiring: () => "/app/wiring",
   harness: () => "/app/harness",
   coverage: () => "/app/coverage",
+  // P33. The nine-axis assessment of one workflow: what the repository does on each surface, what
+  // evidence says so, and — where there is none — that there is none.
+  //
+  // 🔴 Its own surface rather than a tab on Workflows, because the reader's question is about the
+  // REPOSITORY ("what is weak here?") rather than about a workflow's runs, and because it is the one
+  // page whose product is reporting ABSENCE: nine rows, always nine, and the ones that say "we could
+  // not" are the ones with the most to read.
+  assess: () => "/app/assess",
   // P32. Where a workflow's SOURCE comes from — a pushed bundle, a connected repository, or a local
   // machine. Its own surface rather than a tab on Workflows because the question it answers is about
   // the GRANT ("what may the platform read, and when did it") rather than about a workflow, and a
@@ -98,6 +106,11 @@ export const WORKING_SURFACES: readonly string[] = [
   "/app/memory",
   "/app/harness",
   "/app/coverage",
+  // P33. A person can absolutely ask for this: it is the sentence the whole conversational surface was
+  // built around — look at my repository and tell me what is weak — so it is a WORKING surface rather
+  // than a shell one. (No quotation marks in this comment: the Go-side fence reads every quoted string
+  // out of the array block, so a quoted phrase here would arrive as a fourteenth surface.)
+  "/app/assess",
 ];
 
 /**

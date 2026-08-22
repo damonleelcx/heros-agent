@@ -193,8 +193,9 @@
     {
       "route": "/docs/reference/schemas",
       "source": "docs/en/reference/schemas.md",
-      "content_hash": "2ce27fca1d280f5137c0661c2a591c78cc7fdb8b9139017a2fcbf9d7c8accace",
+      "content_hash": "d003cac07275ef7c2816c0c72be60ee43c82a04417c926463e37e8f1cba5bafc",
       "anchors": [
+        "assessment",
         "console-view",
         "metric-event",
         "runtime-invocation",

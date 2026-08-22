@@ -91,6 +91,15 @@ const PATH_TEMPLATES: Array<[RegExp, string]> = [
   [/^\/api\/v1\/repo-connection-reads$/, "/api/v1/repo-connection-reads"],
   [/^\/api\/v1\/repo-connection-revocations$/, "/api/v1/repo-connection-revocations"],
   [/^\/api\/v1\/local-pairings$/, "/api/v1/local-pairings"],
+  // P33 — the assessment. ONE template for both methods, because the path is one path: `GET` reads the
+  // latest report and `POST` runs one. Anchored to the bare path; `scope.ts` appends `?workflow_id=…`
+  // and `template()` strips the query before matching.
+  //
+  // 🔴 This is the matcher that matters most in the file, and for a reason none of the others has: the
+  // POST SPENDS the platform's own provider money. "How often is this called, how long does it take,
+  // and how often does it refuse" is a question somebody asks while looking at a provider bill, and an
+  // unlisted route answers it with `/unknown`.
+  [/^\/api\/v1\/assessments$/, "/api/v1/assessments"],
   // P31 — the conversational console. Five FLAT routes, five matchers.
   //
   // 🔴 `conversation-stream` matters most of the five and is the one an unlisted entry would hurt worst:

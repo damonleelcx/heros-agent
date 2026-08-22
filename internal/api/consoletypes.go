@@ -1,6 +1,7 @@
 package api
 
 import (
+	"github.com/heros-foreal/agentd/internal/assessment"
 	"github.com/heros-foreal/agentd/internal/conversation"
 	"github.com/heros-foreal/agentd/internal/evalboard"
 	"github.com/heros-foreal/agentd/internal/harnessruntime"
@@ -169,6 +170,59 @@ func ConsoleEnums() []ConsoleEnum {
 			Doc: "Where a local-mode pairing is. `expired` is a distinct state rather than a deletion, " +
 				"because \"your code expired\" and \"no such code\" send a person to two different places.",
 		},
+		// ── P33 · the four vocabularies the assessment surface switches on ──────────────────────
+		//
+		// 🔴 `AssessmentState` is the one that matters most. Task 5.1 says nine axes × four states is
+		// thirty-six render cells and every one has a design — and the failure a generated union
+		// prevents is exactly how that erodes: a fifth state added in Go and absent from the browser's
+		// union lands in a `default:` arm and renders as NOTHING, which in a report whose PRODUCT is
+		// reporting absence is indistinguishable from an axis that was fine.
+		{
+			Name: "AssessmentAxis", Sample: assessment.Axis(""),
+			Members: stringsOf(assessment.Axes()),
+			Doc: "The nine surfaces an assessment reports on, in report order. The seven that are also " +
+				"configuration dimensions are READ from variantspec, so the console, the CLI and the " +
+				"report cannot name a surface differently.",
+		},
+		{
+			Name: "AssessmentState", Sample: assessment.State(""),
+			Members: stringsOf(assessment.States()),
+			Doc: "How a finding's claim was established. Four, in evidence-strength order. `not_measured` " +
+				"is a different message from `observed`, not a dimmer one — a component that renders " +
+				"three states, or renders the fourth greyed out, is wrong.",
+		},
+		{
+			Name: "AssessmentOrigin", Sample: assessment.Origin(""),
+			Members: stringsOf(assessment.Origins()),
+			Doc: "What produced a finding. `inferred` must be visible without hovering: a reader scanning " +
+				"the report has to be able to see how much of it a model wrote.",
+		},
+		{
+			Name: "AssessmentMissingInput", Sample: assessment.MissingInput(""),
+			Members: stringsOf(assessment.MissingInputs()),
+			Doc: "The closed set of things a `not_measured` finding can name. Closed rather than free " +
+				"text because health is grouped by it and because four of these must render four " +
+				"distinct messages — a console cannot hold distinct messages against an open set.",
+		},
+		{
+			Name: "AssessmentRefusalCause", Sample: assessment.RefusalCause(""),
+			Members: stringsOf(assessment.RefusalCauses()),
+			Doc: "Which of exactly three things this build lacks. Never a generic \"unsupported\": the " +
+				"three send a reader to three different places and only one is the customer's problem.",
+		},
+		{
+			Name: "AssessmentDiffCause", Sample: assessment.Cause(""),
+			Members: stringsOf(assessment.Causes()),
+			Doc: "Which input moved when a re-inference changed a finding: the source, our configuration, " +
+				"or the provider's model. Only the first is a fact about the customer — and `unattributable` " +
+				"is not a leftover bucket, it is FR15's determinism guarantee failing.",
+		},
+		{
+			Name: "AssessmentEvidenceSurface", Sample: assessment.Surface(""),
+			Members: stringsOf(assessment.Surfaces()),
+			Doc: "The three existing read models a finding's evidence points into. The assessment is an " +
+				"index over evidence the platform already holds, never a second place a number is computed.",
+		},
 		{
 			Name: "SourceMode", Sample: sourceingest.Mode(""),
 			Members: stringsOf(sourceingest.Modes()),
@@ -270,6 +324,14 @@ func ConsoleViewTypes() []ConsoleViewType {
 		// render without.
 		{Name: "LocalPairingsView", Sample: LocalPairingsView{}, Endpoint: "GET /api/v1/local-pairings"},
 		{Name: "PairingView", Sample: PairingView{}, Endpoint: "POST /api/v1/local-pairings"},
+
+		// ── P33 · the surface assessment ───────────────────────────────────────────────────────
+		//
+		// ONE type, not two. `FindingView` is reachable only through `AssessmentView.findings`, and
+		// registering it separately would suggest a route serves a finding on its own — which is
+		// exactly the route `assessments.go` refuses, because an axis read out of its report has lost
+		// the `partial` flag and the tally that say how to read it.
+		{Name: "AssessmentView", Sample: AssessmentView{}, Endpoint: "GET /api/v1/assessments?workflow_id={id} and POST /api/v1/assessments"},
 
 		// ── P31 · the conversational console ─────────────────────────────────
 		//

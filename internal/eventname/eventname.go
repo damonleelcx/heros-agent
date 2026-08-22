@@ -93,6 +93,37 @@ const (
 	IngestRetentionSwept Name = "agentd.ingest.retention_swept"
 	// IngestRetentionFailed — the sweep could not complete. Consecutive occurrences escalate.
 	IngestRetentionFailed Name = "agentd.ingest.retention_failed"
+
+	// ── agentd · surface assessment (P33) ────────────────────────────────────
+	//
+	// Five names, and the set is chosen so that the two questions an operator actually asks are
+	// group-bys rather than counters somebody has to think to add: "is assessment working" and "how
+	// much of what we return is absence". Note what is NOT here: nothing per axis and nothing per
+	// state. Those are ATTRIBUTES — nine axes × four states as thirty-six event names would make
+	// "which axis is failing" a question requiring an operator to know the matrix in advance, and
+	// would put a closed vocabulary into a place a scrubber cannot reach.
+
+	// AssessmentRunStarted — an assessment began. Carries the tenant, the workflow and the revision
+	// as attributes, and the spend cap it will be held to.
+	AssessmentRunStarted Name = "agentd.assessment.run_started"
+	// AssessmentAxisNotMeasured — one axis returned `not_measured`. 🔴 Emitted for EVERY such finding,
+	// with the named missing input as an attribute, because the logging rule's target is exactly this
+	// shape: a code path that falls back to a default without saying so. Here the "default" is
+	// absence, and absence is the phase's most common answer — so this is the highest-volume event in
+	// the set by design, and the one that makes the volume itself the signal.
+	AssessmentAxisNotMeasured Name = "agentd.assessment.axis_not_measured"
+	// AssessmentInferencePinned — an inference ran and its result was pinned against
+	// `(source_revision, agent config_hash)`. Emitted when a PROVIDER CALL happened.
+	AssessmentInferencePinned Name = "agentd.assessment.inference_pinned"
+	// AssessmentInferenceReplayed — a pinned inference answered without a provider call. 🔴 The pair
+	// with the one above is what makes FR15's determinism observable rather than merely asserted: a
+	// deployment where `pinned` keeps pace with `replayed` has a pin key that is not stable, and
+	// nothing else would ever say so.
+	AssessmentInferenceReplayed Name = "agentd.assessment.inference_replayed"
+	// AssessmentBudgetExhausted — the spend cap stopped an assessment before every axis was reached.
+	// A first-class outcome, not an error: the report degrades to `not_measured` with
+	// `budget_exhausted` and says it is partial.
+	AssessmentBudgetExhausted Name = "agentd.assessment.budget_exhausted"
 )
 
 // names is the closure. Sorted output is produced by Names(); the declaration order here groups by
@@ -109,6 +140,11 @@ var names = []Name{
 	IngestCloneFailed,
 	IngestRetentionSwept,
 	IngestRetentionFailed,
+	AssessmentRunStarted,
+	AssessmentAxisNotMeasured,
+	AssessmentInferencePinned,
+	AssessmentInferenceReplayed,
+	AssessmentBudgetExhausted,
 }
 
 // Names returns every event name, sorted. A copy, so no caller can widen the enum.

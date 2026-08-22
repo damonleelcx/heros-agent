@@ -177,6 +177,39 @@ var routeExposure = RouteExposure{
 	"/api/v1/repo-connection-revocations": ExposurePublic,
 	"/api/v1/repo-connection-reads":       ExposurePublic,
 
+	// ── P33 · surface assessment ──────────────────────────────────────────────────────────────────
+	//
+	// TWO FLAT ROUTES, ONE PATH, TWO METHODS. `POST` starts an assessment; `GET` reads the latest one
+	// for a workflow. They share a path, which is why this map is keyed by path and not by
+	// "METHOD PATH": an ingress rule matches a path and knows nothing about methods, so publishing
+	// the read necessarily publishes the write and pretending otherwise would be the exact
+	// self-deception that keying by method invites.
+	//
+	// 🔴 PUBLIC, and the argument is `/api/v1/proposal-generations`' argument almost word for word.
+	// An assessment is a MACHINE action a customer's CI has every reason to take — after a merge, on
+	// a nightly, before a release — and today's only caller being the console's BFF is not a reason
+	// to leave it unpublished. Leaving it Internal is how a route becomes externally addressable
+	// later and gets patched into a running cluster by hand, which the next `kubectl apply` deletes.
+	//
+	// What makes it safe to publish is what makes the generation route safe:
+	//
+	//   - it REQUIRES an authenticated principal; there is no credential-free path to it;
+	//   - the tenant comes from that principal and the payload has NO tenant field, so the request
+	//     cannot widen its own scope;
+	//   - `DisallowUnknownFields` refuses a key nobody ratified — and on THIS endpoint the field a
+	//     future client would add is `axes: [...]`, a request to assess a subset, which would
+	//     silently produce a report with fewer than nine findings and defeat FR1;
+	//   - the body is capped at 8 KiB and carries one string.
+	//
+	// ⚠️ What publishing genuinely changes, stated rather than assumed: `POST` here SPENDS MONEY on
+	// the platform's own provider account (PRD §14 A2 — an inference is the platform's spend). So an
+	// unauthenticated caller hammering this route would be spending our money, and the only thing
+	// between them and it is the auth gate plus the per-assessment cap plus the per-tenant ceiling in
+	// `herosagent.CapStore`. That is three controls deep, each of which fails closed, and
+	// `TestTheAssessmentRoutesRefuseAnUnauthenticatedRequest` is the fence that keeps the first one
+	// true from here on.
+	"/api/v1/assessments": ExposurePublic,
+
 	// ── P32 §4 · the local-mode pairing ───────────────────────────────────────────────────────────
 	//
 	// SPLIT, and the split is the point. The two console routes are reached by the BFF inside the

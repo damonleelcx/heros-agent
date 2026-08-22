@@ -232,8 +232,20 @@ func (p Phase) After(other Phase) bool {
 //
 // What IS shared is the spelling, deliberately: `not_measured` and `refused` are spelled identically in
 // both so a reader who learns them once has learned them, and so a UI can use one copy string for each.
-// P33 imports FindingState from this package rather than declaring its own — the single-truth-source
-// rule applies to the vocabulary even though it does not apply to the enum boundary.
+// The single-truth-source rule applies to the VOCABULARY even though it does not apply to the enum
+// boundary.
+//
+// 🔴 CORRECTED 2026-08-21 (P33 §1). This comment used to end "P33 imports FindingState from this package
+// rather than declaring its own", and that turned out to be wrong for the same reason StepState is a
+// second enum: `assessment.State` is `measured | observed | not_measured | refused` — it has `observed`,
+// which a conversation never needed because it never reported a structural extraction, and it does NOT
+// have `stale`, because an assessment is *of* one revision and so nothing in it can be stale with respect
+// to itself. Importing would have produced a five-member enum with two members illegal in each position,
+// which is exactly the shape argued against three paragraphs up.
+//
+// The three shared spellings are asserted byte-identical in BOTH directions by
+// `assessment.TestTheThreeSharedStateSpellingsAreIdentical`, so the vocabulary stays single-source even
+// though the enums are two.
 type StepState string
 
 const (

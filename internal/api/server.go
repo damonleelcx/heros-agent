@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/heros-foreal/agentd/internal/adminidentity"
+	"github.com/heros-foreal/agentd/internal/assessment"
 	"github.com/heros-foreal/agentd/internal/auth"
 	"github.com/heros-foreal/agentd/internal/config"
 	"github.com/heros-foreal/agentd/internal/erroreport"
@@ -60,6 +61,14 @@ type Server struct {
 
 	// p45 is the P4.5 read-only scorecard read model, mounted by MountScorecard when available.
 	scorecard ScorecardSource
+
+	// assessments is the P33 surface-assessment runner, mounted by MountAssessments when available.
+	// nil is a deployment that does not ship it, and every route answers 503 rather than 404 — the
+	// distinction P9 draws throughout: "mount the subsystem" and "check the identifier" are two
+	// different people's next actions.
+	assessments AssessmentRunner
+	// assessmentHealth publishes the P33 per-axis, per-state health document on /readyz.
+	assessmentHealth AssessmentHealthSource
 
 	// p5 is the P5 interactive-graph-editor read+validate model, mounted by MountGraphEditor when available.
 	graphEditor GraphEditorSource
@@ -558,6 +567,26 @@ type RetentionHealthSource interface {
 	Health() sourceingest.RetentionHealth
 }
 
+// AssessmentHealthSource publishes the P33 assessment signal.
+type AssessmentHealthSource interface {
+	Health() assessment.Health
+}
+
+// SetAssessmentHealth wires the P33 signal into /readyz (task 6.1).
+//
+// # 🔴 Why this is NOT in `components`
+//
+// The same argument `SetSourceIngestHealth` makes below, with one addition that is specific to this
+// signal and worth stating: an assessment returning nine `not_measured` findings is a SUCCESSFUL run
+// by every conventional measure — it completed, it answered 201, it wrote nine rows. Nothing about it
+// is an outage, and pulling the process out of its Service endpoints because a language frontend stopped
+// emitting nodes would take the platform down for every customer who is not affected.
+//
+// So it is reported at the TOP LEVEL, where a monitor can alert on `assessment.alerting` specifically.
+// That field is the one to page on: it is a VALUE, computed where the threshold's reasoning is written
+// down, rather than a condition a dashboard re-derives from two counters.
+func (s *Server) SetAssessmentHealth(src AssessmentHealthSource) { s.assessmentHealth = src }
+
 // SetSourceIngestHealth wires the P32 signals into /readyz (tasks 5.2, 5.4).
 //
 // # 🔴 Why these are NOT in `components`
@@ -672,6 +701,16 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 		// result, so "did it delete anything" cannot be the signal — "when did it last complete" is,
 		// and only the job can publish it.
 		body["source_retention"] = s.ingestRetention.Health()
+	}
+	if s.assessmentHealth != nil {
+		// P33 task 6.1 · assessments started/completed/refused, PER AXIS AND PER STATE.
+		//
+		// 🔴 `assessment.alerting` is the field to page on, and the reason is task 6.2: an assessment
+		// that returns nine `not_measured` findings is a success by every aggregate measure — it
+		// completed, it answered 201, it wrote nine rows — and it is the earliest evidence that a
+		// language frontend or the sandbox has broken. There is no conventional metric that goes the
+		// wrong way when the product silently stops saying anything.
+		body["assessment"] = s.assessmentHealth.Health()
 	}
 	body["error_reporting"] = s.errorReporterState()
 	if s.agentReadiness != nil {

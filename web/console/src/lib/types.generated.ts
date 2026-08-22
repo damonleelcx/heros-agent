@@ -97,6 +97,49 @@ export type SourceGrantKind = "app_installation" | "access_token";
 /** Where a local-mode pairing is. `expired` is a distinct state rather than a deletion, because "your code expired" and "no such code" send a person to two different places. */
 export type PairingState = "expired" | "paired" | "pending";
 
+/** The nine surfaces an assessment reports on, in report order. The seven that are also configuration dimensions are READ from variantspec, so the console, the CLI and the report cannot name a surface differently. */
+export type AssessmentAxis =
+    "model"
+  | "prompt"
+  | "skills"
+  | "context"
+  | "tools"
+  | "memory"
+  | "harness"
+  | "loop"
+  | "graph"
+;
+
+/** How a finding's claim was established. Four, in evidence-strength order. `not_measured` is a different message from `observed`, not a dimmer one — a component that renders three states, or renders the fourth greyed out, is wrong. */
+export type AssessmentState = "measured" | "observed" | "not_measured" | "refused";
+
+/** What produced a finding. `inferred` must be visible without hovering: a reader scanning the report has to be able to see how much of it a model wrote. */
+export type AssessmentOrigin = "structural" | "inferred";
+
+/** The closed set of things a `not_measured` finding can name. Closed rather than free text because health is grouped by it and because four of these must render four distinct messages — a console cannot hold distinct messages against an open set. */
+export type AssessmentMissingInput =
+    "no_runnable_entry_point"
+  | "missing_credential"
+  | "sandbox_refusal"
+  | "unsupported_language"
+  | "frontend_emits_no_edges"
+  | "unresolved_in_ir"
+  | "no_source_snapshot"
+  | "no_call_sites_discovered"
+  | "not_visible_in_static_ir"
+  | "budget_exhausted"
+  | "inference_abstained"
+;
+
+/** Which of exactly three things this build lacks. Never a generic "unsupported": the three send a reader to three different places and only one is the customer's problem. */
+export type AssessmentRefusalCause = "frontend" | "analysis" | "language";
+
+/** Which input moved when a re-inference changed a finding: the source, our configuration, or the provider's model. Only the first is a fact about the customer — and `unattributable` is not a leftover bucket, it is FR15's determinism guarantee failing. */
+export type AssessmentDiffCause = "source" | "agent_config" | "provider_model" | "unattributable";
+
+/** The three existing read models a finding's evidence points into. The assessment is an index over evidence the platform already holds, never a second place a number is computed. */
+export type AssessmentEvidenceSurface = "graph" | "board" | "scorecard";
+
 /** How a workflow's source arrives: a pushed bundle (the default), a connected repository, or a local path. No feature is gated on any of them. */
 export type SourceMode = "bundle" | "connected" | "local";
 
@@ -1164,6 +1207,94 @@ export interface LocalModeAvailability {
   deployments: string[] | null;
   available: boolean;
   why?: string;
+}
+
+/** Response of `GET /api/v1/assessments?workflow_id={id} and POST /api/v1/assessments`. */
+export interface AssessmentView {
+  assessment_id: string;
+  workflow_id: string;
+  source_revision: string;
+  agent_config_hash: string;
+  agent_config_hash_short: string;
+  started_at_ms: number;
+  completed_at_ms: number;
+  spend_usd: number;
+  spend_cap_usd: number;
+  findings: FindingView[] | null;
+  tally: Tally;
+  partial: boolean;
+  all_not_measured: boolean;
+  reinferred?: boolean;
+  diff?: AxisDiff[] | null;
+}
+
+export interface FindingView {
+  axis: AssessmentAxis;
+  state: AssessmentState;
+  origin: AssessmentOrigin;
+  claim: string;
+  rank: number;
+  evidence_surface: AssessmentEvidenceSurface;
+  evidence_locator: string;
+  evidence_path: string;
+  missing_input?: AssessmentMissingInput;
+  refusal_cause?: AssessmentRefusalCause;
+  provider_model_version?: string;
+  inference_address?: string;
+  eval_set?: EvalSetReport | null;
+  eval_set_cannot_fail?: boolean;
+}
+
+export interface EvalSetReport {
+  eval_set_hash: string;
+  score: Interval;
+  n_cases: number;
+  oracle_coverage: number;
+  n_indecisive: number;
+  coverage_measured: boolean;
+  vacuous_dimensions?: string[] | null;
+  cases: CaseView[] | null;
+}
+
+export interface Interval {
+  mean: number;
+  ci_low: number;
+  ci_high: number;
+  n_seeds: number;
+}
+
+export interface CaseView {
+  case_id: string;
+  suite?: string;
+  oracle: OracleVerdict;
+}
+
+export interface OracleVerdict {
+  decisive: boolean;
+  kind: string;
+  reason?: string;
+}
+
+export interface Tally {
+  measured: number;
+  observed: number;
+  not_measured: number;
+  refused: number;
+  inferred: number;
+}
+
+export interface AxisDiff {
+  axis: AssessmentAxis;
+  before_state: AssessmentState;
+  after_state: AssessmentState;
+  before_origin: AssessmentOrigin;
+  after_origin: AssessmentOrigin;
+  before_claim: string;
+  after_claim: string;
+  before_provider_model_version?: string;
+  after_provider_model_version?: string;
+  cause: AssessmentDiffCause;
+  why: string;
 }
 
 /** Response of `POST /api/v1/conversations`. */

@@ -16,6 +16,7 @@ import (
 	"github.com/heros-foreal/agentd/internal/account"
 	"github.com/heros-foreal/agentd/internal/adminlaunch"
 	"github.com/heros-foreal/agentd/internal/api"
+	"github.com/heros-foreal/agentd/internal/assessment"
 	"github.com/heros-foreal/agentd/internal/billing"
 	"github.com/heros-foreal/agentd/internal/billingview"
 	"github.com/heros-foreal/agentd/internal/deliveryrecord"
@@ -140,7 +141,14 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 	mountedProposals := false
 	mountedForgeDelivery := false
 	mountedProposalCompile := false
+	mountedAssessments := false
 	mountedPayments := false
+	// The two evidence surfaces P33 checks a finding's reference against. They are mounted in an
+	// EARLIER block than the assessment itself (the board needs only the linked-run store; the
+	// assessment additionally needs discovery), so they are carried forward rather than rebuilt —
+	// see assessmentEvidence for why a second instance would be a second answer.
+	var assessmentBoardSource api.BoardSource
+	var assessmentScorecardSource api.ScorecardSource
 	// collectionWhy is the served() line when collection IS mounted; why is the absent() reason.
 	collectionWhy := ""
 	// Assembled inside the database block below; nil when this deployment cannot serve billing.
@@ -381,6 +389,10 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 		}
 
 		boardSource := hostedboard.NewSource(linkStore)
+		// Held in a variable rather than passed inline for one reason: P33's evidence resolver must ask
+		// the SAME source this route serves. A resolver over a second store would certify a reference
+		// that the reader's own request then 404s on, which is worse than not checking.
+		assessmentBoardSource = boardSource
 		h.MountEvalBoard(boardSource)
 		served("p4_eval_board (assembled from linked runs; no tie detection — replicates do not cross)")
 		mountedEvalBoard = true
@@ -390,7 +402,9 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 		h.MountEvalSet(boardSource)
 		served("p30_eval_set (the board's denominator, its family split and its indecisive count; the " +
 			"cases themselves do not cross)")
-		h.MountScorecard(hostedscorecard.NewSource(linkStore))
+		scorecardSource := hostedscorecard.NewSource(linkStore)
+		assessmentScorecardSource = scorecardSource
+		h.MountScorecard(scorecardSource)
 		served("p45_scorecard (cost/latency attribution from linked runs; failure attribution stays local)")
 		mountedScorecard = true
 
@@ -822,6 +836,66 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 		served("p5_graph_editor (IR re-derived from the pushed snapshot; needs source, not just a graph)")
 		mountedGraphEditor = true
 
+		// ── P33 · the surface assessment ─────────────────────────────────────────────────────────
+		//
+		// 🔴 `inference` is deliberately NIL here, and that is rollout stage 1 rather than an omission
+		// (PRD §12: "Structural only. Seven axes, `observed` and `not_measured` states, no inference,
+		// no eval. Fully deterministic, and every claim checkable against the tree."). A deployment in
+		// this state reports every axis structural extraction cannot answer as `not_measured` with its
+		// own named missing input — which is the honest report for that stage, not a degraded one.
+		//
+		// 🔴 THE GATE ON WIRING IT, stated here because this is the line somebody will change.
+		// `assessment.NewGatewayAnalyst` exists and works; what has NOT happened is stage 2's
+		// precondition: *"Per-axis precision and abstention measured against a holdout before any
+		// customer sees it."* `make assessment-holdout` is that measurement and it has never been run
+		// against a real provider — the suite in `make go` uses a scripted analyst and measures the
+		// harness, not a model. Passing an analyst here before that run would put a model's readings
+		// in front of customers with its precision unknown, which is the one thing §9.5 is about.
+		//
+		// The spend cap is therefore not yet load-bearing, and it is set anyway: `NewRunner` refuses a
+		// zero cap, and a ceiling that only appears when the thing it bounds is switched on is a
+		// ceiling nobody has ever seen work.
+		assessmentStore, aserr := assessment.NewPGStore(pg)
+		if aserr != nil {
+			return nil, nil, fmt.Errorf("assessment store: %w", aserr)
+		}
+		assessmentRunner, arerr := assessment.NewRunner(
+			assessmentStore,
+			assessmentEvidence{graphs: graphStore, board: assessmentBoardSource, scorecard: assessmentScorecardSource},
+			nil,
+			func() int64 { return time.Now().UnixMilli() },
+			nil,
+		)
+		if arerr != nil {
+			return nil, nil, fmt.Errorf("assessment runner: %w", arerr)
+		}
+		// The health accumulator, wired before the service so nothing can run unobserved. 🔴 It is
+		// published on `/readyz` rather than gating readiness: an assessment returning nine absences is
+		// a successful run by every conventional measure, and it must not pull this process out of its
+		// Service endpoints — see `SetAssessmentHealth`.
+		assessmentMetrics := assessment.NewMetrics()
+		assessmentRunner = assessmentRunner.WithMetrics(assessmentMetrics)
+		h.SetAssessmentHealth(assessmentMetrics)
+		if assessmentSvc, aserr := assessment.NewService(assessment.ServiceConfig{
+			Runner:      assessmentRunner,
+			Store:       assessmentStore,
+			Source:      assessmentSource{graphs: graphStore, discove: runner},
+			NewID:       newAssessmentID,
+			ConfigHash:  agentConfigHash(versionStore),
+			SpendCapUSD: assessment.DefaultSpendCapUSD,
+		}); aserr != nil {
+			log.Printf("surface assessment: NOT wired — %v. Every other surface is unaffected", aserr)
+		} else {
+			h.MountAssessments(assessmentSvc)
+			served("p33_surface_assessment (nine axes, four states, no composite; structural only until " +
+				"inference is wired — every axis it cannot read reports not_measured with a named missing input)")
+			served("p33_assessment_health (not a route — one document on GET /readyz, broken out PER AXIS " +
+				"AND PER STATE. Alert on `assessment.alerting`: an assessment returning nine not_measured " +
+				"findings is a SUCCESS by every aggregate measure and is the earliest signal that a " +
+				"language frontend or the sandbox broke)")
+			mountedAssessments = true
+		}
+
 		// The CODEMOD. It turns a stored proposal into the reviewable diff ADR-001 makes the product's
 		// output, using the retained snapshot, the re-derived IR and the same registries every other
 		// resolve goes through.
@@ -973,6 +1047,15 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 	if !mountedGraphEditor {
 		h.MountGraphEditor(nil)
 		absent("p5_graph_editor", noAdapter)
+	}
+	if !mountedAssessments {
+		// Mounted with a NIL runner rather than left unmounted, for the reason stated at
+		// `p30_heros_agent` below: an unmounted route answers 404, which a console classifies as "no
+		// such workflow" and renders over a workflow that plainly exists.
+		h.MountAssessments(nil)
+		absent("p33_surface_assessment", "this deployment declares no platform database (DATABASE_URL is "+
+			"unset), so there is nowhere to persist an assessment and no stored graph to resolve a "+
+			"workflow to a revision")
 	}
 	if !mountedProposals {
 		h.MountProposals(nil)

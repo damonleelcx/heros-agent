@@ -81,6 +81,20 @@ export function scoped(session: Session) {
       `/api/v1/repo-connection-reads?connection_id=${encode(connectionId)}`,
     localPairings: () => `/api/v1/local-pairings`,
 
+    // ── P33 · the nine-axis surface assessment ────────────────────────────
+    //
+    // One path, two methods. `GET` reads the latest assessment of a workflow; `POST` runs one, and a
+    // `reinfer: true` body ignores the pin and SPENDS provider money — which is why the console's
+    // re-assess control is an explicit button with its own copy rather than something a page load
+    // triggers.
+    //
+    // 🔴 `workflow_id` is a query parameter rather than a path segment because the platform route is
+    // FLAT: an `Exact` ingress rule cannot match a variable segment, and a `Prefix` rule under
+    // `/api/v1/workflows/` would publish every sibling anybody adds there. Same shape as the
+    // conversation routes, same reason.
+    assessments: (workflowId: string) => `/api/v1/assessments?workflow_id=${encode(workflowId)}`,
+    runAssessment: () => `/api/v1/assessments`,
+
     // ── P11 · a run the CLI transmitted, read back ────────────────────────
     // Distinct from `run` above on purpose. That one reads the EXECUTOR's record — attempt groups and
     // per-node I/O from a sandboxed run. A LINKED run is an allowlisted summary the developer's own

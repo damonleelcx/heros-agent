@@ -207,6 +207,7 @@
       "section": "Reference",
       "summary": "The JSON Schemas that ship with the platform, and what each one is the contract for.",
       "headings": [
+        "assessment",
         "console-view",
         "metric-event",
         "runtime-invocation",

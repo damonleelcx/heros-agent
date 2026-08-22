@@ -47,6 +47,28 @@ CASES = [
         ["samples/runtime-invocation.valid.json"],
         [],
     ),
+    (
+        # P33 task 1.2's schema half. The four conditional requirements are the reason each of these
+        # invalid fixtures exists: a `not_measured` finding with no missing input, an inference with
+        # half its attribution, a report that dropped an axis, and a composite stapled on top are the
+        # four ways this shape is actually broken in practice, not four ways of being malformed.
+        #
+        # The VALID sample is generated from the Go types
+        # (P33_WRITE_SAMPLE=1 go test ./internal/assessment -run TestTheSampleIsAProductOfTheGoTypes),
+        # so a green run here means "what the product emits validates", not "a hand-written document
+        # agrees with a hand-written schema".
+        "assessment.schema.json",
+        ["samples/assessment.valid.json"],
+        [
+            "samples/assessment.invalid-not-measured-without-missing-input.json",
+            "samples/assessment.invalid-inferred-without-model-version.json",
+            "samples/assessment.invalid-eight-axes.json",
+            "samples/assessment.invalid-composite-score.json",
+            "samples/assessment.invalid-measured-without-decisiveness.json",
+            "samples/assessment.invalid-indecisive-oracle-without-reason.json",
+            "samples/assessment.invalid-refused-with-missing-input.json",
+        ],
+    ),
 ]
 
 

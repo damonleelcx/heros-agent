@@ -1,0 +1,110 @@
+{
+  "assessment_id": "as-2026-08-21-0001",
+  "tenant_id": "tn-nousresearch",
+  "workflow_id": "wf-checkout-agent",
+  "source_revision": "9f2c1ab4c6d1f0e3a5b7c9d1e3f5a7b9c1d3e5f7",
+  "agent_config_hash": "cfg-3d9a7f21",
+  "started_at_ms": 1755734400000,
+  "completed_at_ms": 1755734462000,
+  "spend_usd": 0.42,
+  "spend_cap_usd": 1,
+  "findings": [
+    {
+      "axis": "model",
+      "state": "observed",
+      "origin": "structural",
+      "claim": "all four call sites name gpt-4o-mini with temperature 0.2",
+      "evidence_ref": {
+        "surface": "graph",
+        "locator": "wf-checkout-agent"
+      }
+    },
+    {
+      "axis": "prompt",
+      "state": "measured",
+      "origin": "structural",
+      "claim": "the extraction suite scores 0.81 across five seeds",
+      "evidence_ref": {
+        "surface": "board",
+        "locator": "wf-checkout-agent",
+        "fragment": "set-4f1c"
+      }
+    },
+    {
+      "axis": "skills",
+      "state": "observed",
+      "origin": "structural",
+      "claim": "no skills are bound at any call site",
+      "evidence_ref": {
+        "surface": "graph",
+        "locator": "wf-checkout-agent"
+      }
+    },
+    {
+      "axis": "context",
+      "state": "observed",
+      "origin": "structural",
+      "claim": "each call assembles system + last-three-turns",
+      "evidence_ref": {
+        "surface": "graph",
+        "locator": "wf-checkout-agent"
+      }
+    },
+    {
+      "axis": "tools",
+      "state": "not_measured",
+      "origin": "structural",
+      "claim": "the tool list is built at runtime from a value discovery could not resolve; the Python frontend is syntactic and cannot follow it across a statement",
+      "evidence_ref": {
+        "surface": "graph",
+        "locator": "wf-checkout-agent"
+      },
+      "missing_input": "unresolved_in_ir"
+    },
+    {
+      "axis": "memory",
+      "state": "observed",
+      "origin": "inferred",
+      "claim": "a per-session dictionary written on every turn and never pruned",
+      "evidence_ref": {
+        "surface": "graph",
+        "locator": "wf-checkout-agent"
+      },
+      "provider_model_version": "claude-opus-5-20260501",
+      "inference_address": "sha256:b1946ac92492d2347c6235b4d2611184"
+    },
+    {
+      "axis": "harness",
+      "state": "not_measured",
+      "origin": "structural",
+      "claim": "the assessment reached its $1.00 cap before this axis was inferred; re-run with a higher cap to get an answer",
+      "evidence_ref": {
+        "surface": "graph",
+        "locator": "wf-checkout-agent"
+      },
+      "missing_input": "budget_exhausted"
+    },
+    {
+      "axis": "loop",
+      "state": "refused",
+      "origin": "structural",
+      "claim": "this build does not assess control loops as a configuration axis yet; the analysis lands with P34",
+      "evidence_ref": {
+        "surface": "graph",
+        "locator": "wf-checkout-agent"
+      },
+      "refusal_cause": "analysis"
+    },
+    {
+      "axis": "graph",
+      "state": "refused",
+      "origin": "structural",
+      "claim": "this build does not report topology as an assessment axis yet; the analysis exists and `graph` becomes a surface you can configure with P34",
+      "evidence_ref": {
+        "surface": "graph",
+        "locator": "wf-checkout-agent"
+      },
+      "refusal_cause": "analysis"
+    }
+  ]
+}

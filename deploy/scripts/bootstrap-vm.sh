@@ -184,7 +184,7 @@ fi
 # `TestEveryStreamPathIsPublishedAndUnbuffered` asserts both directions.
 PLATFORM_STREAM_PATHS="/api/v1/conversation-stream"
 
-PLATFORM_PUBLIC_PATHS="/api/v1/whoami /api/v1/run-links /billing/webhook /api/v1/device/authorize /api/v1/device/token /api/v1/auth/password/signin /api/v1/workflow-ir /api/v1/workflow-source /api/v1/workflow-source-discovery /api/v1/proposal-verdicts /api/v1/transform-receipts /api/v1/proposal-generations /api/v1/agent-definition /api/v1/repo-connections /api/v1/repo-connection-revocations /api/v1/repo-connection-reads /api/v1/local-pairing-claims /api/v1/conversations /api/v1/conversation-turns /api/v1/conversation-stream /api/v1/conversation-approvals /api/v1/conversation-trace"
+PLATFORM_PUBLIC_PATHS="/api/v1/whoami /api/v1/run-links /billing/webhook /api/v1/device/authorize /api/v1/device/token /api/v1/auth/password/signin /api/v1/workflow-ir /api/v1/workflow-source /api/v1/workflow-source-discovery /api/v1/proposal-verdicts /api/v1/transform-receipts /api/v1/proposal-generations /api/v1/agent-definition /api/v1/repo-connections /api/v1/repo-connection-revocations /api/v1/repo-connection-reads /api/v1/assessments /api/v1/local-pairing-claims /api/v1/conversations /api/v1/conversation-turns /api/v1/conversation-stream /api/v1/conversation-approvals /api/v1/conversation-trace"
 
 # ── 🔴 P32 · OUTBOUND: THE PLATFORM CLONES CUSTOMER REPOSITORIES ─────────────────────────────────
 #

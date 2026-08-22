@@ -244,6 +244,23 @@ spec:
           - path: /api/v1/repo-connection-reads
             pathType: Exact
             backend: { service: { name: agentd, port: { number: 4321 } } }
+          # P33 · surface assessment. ONE `Exact` rule covering two methods.
+          #
+          # 🔴 `POST` here SPENDS MONEY on the platform's own provider account — an inference is the
+          # platform's spend (PRD §14 A2), not the customer's. Publishing it therefore puts a paid
+          # operation on the public edge, and that is a decision rather than a routing detail. It is
+          # safe on three controls, each failing closed: the route refuses an unauthenticated
+          # request; every assessment is bounded by a per-assessment spend cap that is enforced
+          # BEFORE each provider call; and the tenant's own ceiling in `herosagent.CapStore` bounds
+          # the sum across assessments. Exhausting any of them degrades findings to `not_measured`
+          # with `budget_exhausted` — a first-class outcome, never an error page.
+          #
+          # 🚫 ONE `Exact` RULE, NOT A `/api/v1/assessment` PREFIX. A prefix would publish every
+          # route anybody adds under that head from now on, which is the failure the four workflow
+          # rules above exist to record.
+          - path: /api/v1/assessments
+            pathType: Exact
+            backend: { service: { name: agentd, port: { number: 4321 } } }
           # P32 §4 · `heros pair` CLAIMS a code the person started in the console, from the machine
           # that already holds the repository.
           #

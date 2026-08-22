@@ -132,6 +132,13 @@ func TestTheRestOfThoseFamiliesStaysGated(t *testing.T) {
 		{http.MethodGet, "/api/v1/repo-connections", "it lists which repositories a tenant has granted us"},
 		{http.MethodPost, "/api/v1/repo-connection-revocations", "it DELETES a grant, a credential and every tree derived from it"},
 		{http.MethodGet, "/api/v1/repo-connection-reads", "it reads the ledger of when a customer's repository was read"},
+		// 🔴 P33 · the assessment routes, added the day they were PUBLISHED on the ingress, and for a
+		// reason the connection routes do not have: `POST /api/v1/assessments` SPENDS MONEY on the
+		// PLATFORM's own provider account (PRD §14 A2 — an inference is the platform's spend, not the
+		// customer's). An unauthenticated caller reaching it would be spending our money, and the auth
+		// gate is the first of the three controls between them and it.
+		{http.MethodPost, "/api/v1/assessments", "it spends the PLATFORM's provider tokens and writes a durable report"},
+		{http.MethodGet, "/api/v1/assessments", "it reads what we concluded about a customer's repository"},
 		// P32 §4 · the console half of the pairing flow. The CLAIM is credential-free by design and is
 		// in the list above; these two are not, and publishing the claim must not have widened them.
 		{http.MethodPost, "/api/v1/local-pairings", "it issues a pairing code against the caller's tenant"},

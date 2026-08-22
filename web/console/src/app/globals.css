@@ -1651,6 +1651,44 @@
     @apply cursor-not-allowed opacity-60;
   }
 
+  /* ── P33 · the assessment surface ─────────────────────────────────────────
+     Two controls and one panel. The two buttons differ in WEIGHT rather than in hue, because they do
+     the same kind of thing at two different costs — a hazard palette here would be wrong: nothing on
+     this surface destroys anything, and reserving the hazard colours keeps them legible where they
+     mean something (see .conn__revoke, immediately below). */
+  .assess__run {
+    @apply inline-flex items-center rounded-lg text-sm font-medium;
+    gap: --spacing(2);
+    padding: --spacing(2) --spacing(4);
+    background-color: var(--primary);
+    color: var(--primary-foreground);
+    transition-duration: var(--motion-fast);
+  }
+
+  .assess__run:disabled,
+  .assess__reinfer:disabled {
+    @apply cursor-not-allowed opacity-60;
+  }
+
+  /* The spending control. A BORDER rather than a fill: it is the secondary act on the page, and a
+     second filled button would make the free one and the paid one look equally routine. */
+  .assess__reinfer {
+    @apply inline-flex items-center rounded-lg border border-border text-sm font-medium text-foreground;
+    gap: --spacing(2);
+    padding: --spacing(2) --spacing(4);
+    transition-duration: var(--motion-fast);
+  }
+
+  /* Decisiveness sits INSIDE the finding that carries the score, in a recessed panel, because design
+     D4 requires it to be visible at the same time as the number — not behind a link, where it is read
+     only by the people who already suspected the number. */
+  .assess__decisive {
+    @apply flex flex-col rounded-lg border border-border;
+    gap: --spacing(2);
+    padding: --spacing(3);
+    background-color: color-mix(in oklab, var(--muted) 55%, transparent);
+  }
+
   /* 🔴 THE HAZARD. Revoking deletes the derived trees; it is not undoable and it is not a preference. */
   .conn__revoke {
     @apply inline-flex items-center rounded-lg text-sm font-medium;

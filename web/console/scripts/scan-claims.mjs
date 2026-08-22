@@ -56,6 +56,23 @@ const BANNED_PHRASES = [
   { phrase: "guaranteed not to be charged", say: "state the idempotency guarantee: a retry produces one charge" },
   { phrase: "your data will be deleted", say: "nothing is deleted — a plan change is audited and reversible" },
   /*
+   * P33 task 8.3. The product assesses nine surfaces and reports evidence. It does NOT grade, audit,
+   * score or rate a repository — program ruling R4 refuses a composite because no held-out set exists
+   * that would make one true, and a word that implies one re-introduces the claim the design removed.
+   *
+   * 🔴 `audit` is on the list for a second reason, and it is the one a security review will care
+   * about: an audit implies a STANDARD being certified against and a COMPLETENESS we do not claim. An
+   * assessment of a repository we have just met is mostly absence, and calling that an audit is the
+   * one over-claim that gets quoted back during an incident.
+   */
+  { phrase: "grade your repository", say: "assess nine surfaces and report the evidence" },
+  { phrase: "grades your repository", say: "assesses nine surfaces and reports the evidence" },
+  { phrase: "audit your repository", say: "assess it — an audit implies a standard and a completeness we do not claim" },
+  { phrase: "audits your repository", say: "assesses it" },
+  { phrase: "repository score", say: "the nine findings, and the tally of what we could and could not establish" },
+  { phrase: "repository health score", say: "the nine findings, and the tally" },
+  { phrase: "maturity level", say: "the state of each surface — a level is a composite with extra steps" },
+  /*
    * P24 task 7.3. These four were TRUE when they were written and the configuration now contradicts
    * them, which is the most dangerous kind of shipped claim: nobody edits a sentence that used to be
    * right, and a customer holds us to it.

@@ -117,7 +117,17 @@ func unsupportedLanguageDiagnostics(repo string, frontends []LanguageFrontend) [
 		out = append(out, Diagnostic{
 			Code:     CodeLanguageUnsupported,
 			Severity: SeverityWarn,
-			Message:  l + " source is present but no frontend for it is registered — 0 nodes extracted for that language (add a " + l + " frontend + registry rows)",
+			// 🔴 The LANGUAGE, in a field, as well as in the sentence. It was in the sentence only, and
+			// the first consumer that needed it — P33's assessment, which reports "this build has no
+			// frontend for ruby" as a refusal a customer cannot act on — would have had to take the
+			// first word of a human message. A regex over prose is a contract nobody declared: it
+			// breaks the day somebody improves the wording, silently, and the symptom is a refusal that
+			// names no language.
+			//
+			// `Symbol` is the right field rather than a new one: it is what this diagnostic is ABOUT,
+			// which for a parse error is a function and here is a language.
+			Symbol:  l,
+			Message: l + " source is present but no frontend for it is registered — 0 nodes extracted for that language (add a " + l + " frontend + registry rows)",
 		})
 	}
 	return out

@@ -75,6 +75,16 @@ func LinkSurfaces() []LinkSurface {
 		{"studio", "/app/studio", FillByStructure,
 			"re-run with --with-ir (the matrix's columns are your nodes)"},
 
+		// P33. 🔴 NOT `--with-ir`, and the distinction is the whole reason this entry needs its own
+		// sentence. Every surface above fills from the SHAPE a link can carry: nodes, edges, axes. An
+		// assessment reads the SOURCE — a memory strategy is a store read between turns, and no
+		// structure payload carries that — so it needs a snapshot the platform holds, which arrives by
+		// `heros push` or by connecting the repository. A reader told to re-run with `--with-ir` would
+		// get a fuller graph and an assessment page that still says it has never seen their code.
+		{"assess", "/app/assess", FillNotByLinking,
+			"linking cannot fill this one: an assessment reads your SOURCE, not the shape a link carries. " +
+				"Push a snapshot (`heros push`) or connect the repository under Source, then press Assess"},
+
 		{"transforms", "/app/transforms", FillByReceipt,
 			"run `heros apply --link-receipt` (a transform is generated on your machine; the receipt is " +
 				"what tells the platform it happened)"},
