@@ -30,7 +30,7 @@ PARITY_DIR ?= .parity
         classifier-calibration demo-patterngraph demo-proposals demo-billing demo-billing-states \
         release-rehearse release-rehearse-redcheck readme-install packaging-proof install-smoke install-smoke-refusals \
         agent-rehearse agent-status repo-intake-hermes assessment-hermes \
-        intent-holdout intent-holdout-strict attribution-holdout p31-fence-redcheck p33-fence-redcheck console-edge-proof assessment-holdout
+        intent-holdout intent-holdout-strict attribution-holdout p31-fence-redcheck p33-fence-redcheck p34-fence-redcheck console-edge-proof assessment-holdout
 
 ## ci: the locally-provable gate (go + schema + console-types + discovery-ci + intent-holdout). Lint/db-proof run as their own CI jobs.
 ci: go schema console-types-check docs-facts-check discovery-ci intent-holdout-strict
@@ -528,6 +528,18 @@ mail-proof:
 # was never run.
 p33-fence-redcheck:
 	$(PYTHON) scripts/p33_fence_redcheck.py
+
+## p34-fence-redcheck: P34 §9 — prove the twelve QA fences can actually FAIL.
+##
+## 🔴 §9 is titled "fences that can go red", and the title is the requirement. Every rule this phase adds
+## is a few lines; weakening one leaves the whole suite green except the test that names it. The drill
+## breaks each rule, asserts the package STILL COMPILES (a mutation that does not build exits non-zero
+## for a reason that has nothing to do with the fence), and asserts the test goes red.
+##
+## 9.10 is inverted and runs separately: its claim is that a missing Kind case fails to BUILD, so there
+## a successful compile is the failure.
+p34-fence-redcheck:
+	$(PYTHON) scripts/p34_fence_redcheck.py
 
 ## ## attribution-holdout: P34 §6.4 — attribution under OVERLAPPING spans, measured on a holdout.
 ##

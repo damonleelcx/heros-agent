@@ -284,18 +284,64 @@
 
 ## 9. QA — fences that can go red
 
-- [ ] 9.1 Golden vectors unchanged (1.1). The most important fence in the phase.
-- [ ] 9.2 Byte-identical serialisation for a no-override spec (1.2).
-- [ ] 9.3 Pre-P34 loop-bearing spec resolves and reproduces its `config_hash` (1.3).
-- [ ] 9.4 Both refs set → refused, naming both.
-- [ ] 9.5 `max_turns` above ceiling → refused, naming both values.
-- [ ] 9.6 Missing host service → refused at **resolve**, not at run.
-- [ ] 9.7 Fan-in without merge → refused at validate.
-- [ ] 9.8 Out-of-scope predicate → refused via the ADR-004 path, naming the symbol.
-- [ ] 9.9 Unsupported language → typed `unsafeRewrite`; assert the override was not dropped.
-- [ ] 9.10 `registry.Kind` switch missing the new case → build fails.
-- [ ] 9.11 Attribution under overlapping spans does not degrade (holdout).
-- [ ] 9.12 Concurrent group wider than the envelope limit → refused at resolve, **and** capped by the sandbox at execution. Both, because the second is what holds when the first is bypassed.
+> **`make p34-fence-redcheck` — 14 mutations, all proven.** Each breaks a rule, asserts the package still
+> COMPILES (a mutation that does not build exits non-zero for a reason that has nothing to do with the
+> fence), and asserts the named test goes red. It refuses to run on a dirty tree and restores in a
+> `finally`, because a weakened compatibility check left in the working tree is worse than the failure
+> it prevents.
+>
+> 🔴 It caught one of its own mutations as non-compiling on the first run — the harness working before
+> the fences did.
+
+
+- [x] 9.1 Golden vectors unchanged (1.1). The most important fence in the phase.
+      → `TestP34_GoldenVectorsUnchanged` · drilled: removing `omitempty` from the predicate field turns it red.
+
+- [x] 9.2 Byte-identical serialisation for a no-override spec (1.2).
+      → `TestPreP34ConfigHashesAreReproducedExactly` (row `no-scaffold-at-all`) · drilled: an always-present
+      `graph_groups` key turns it red. **This is the mutation the phase is most exposed to — it is one word.**
+
+- [x] 9.3 Pre-P34 loop-bearing spec resolves and reproduces its `config_hash` (1.3).
+      → same recording, rows `legacy-loop-bearing-*`, captured by the pre-change tree · plus
+      `TestLegacyLoopBearingHarnessAloneStillResolves` at the value level.
+
+- [x] 9.4 Both refs set → refused, naming both.
+      → `TestBothRefsSetIsRefusedNamingBoth` · drilled: dropping the harness ref from the message turns it red.
+
+- [x] 9.5 `max_turns` above ceiling → refused, naming both values.
+      → `TestMaxTurnsAboveTheEnvelopeCeilingIsRefused` · drilled: clamping instead of refusing turns it red.
+
+- [x] 9.6 Missing host service → refused at **resolve**, not at run.
+      → `TestMissingHostServiceIsRefusedAtResolve` · drilled: moving the check back to run time turns it red.
+
+- [x] 9.7 Fan-in without merge → refused at validate.
+      → `TestAFanInWithNoMergeIsRefusedAtValidate` and `TestCollectPartialAgainstARequiredFieldIsRefused` ·
+      both drilled.
+
+- [x] 9.8 Out-of-scope predicate → refused via the ADR-004 path, naming the symbol.
+      → `TestAnOutOfScopePredicateIsRefusedNamingTheSymbol` · 🔴 drilled by ADDING A SECOND, LOOSER RULE
+      rather than deleting the check, because that is how this actually fails: nobody deletes a scope
+      check, somebody adds "…or it looks like a literal", and the second grammar is born.
+
+- [x] 9.9 Unsupported language → typed `unsafeRewrite`; assert the override was not dropped.
+      → `TestEveryLanguageRefusesTopologyByName` (7 languages × 3 forms) · drilled: dropping the topology
+      check turns 10 assertions red. Asserts the words **"not dropped"** appear in the refusal.
+
+- [x] 9.10 `registry.Kind` switch missing the new case → build fails.
+      → 🔴 **INVERTED, and run separately.** Its claim is that a missing case fails to BUILD, so a
+      successful compile is the failure. Expressing it in the mutation table would make the table's own
+      compile-check mean the opposite thing for one row, which is how a harness starts lying. Drilled:
+      an eighth Kind produces `not enough arguments in call to kindAnswers`.
+
+- [x] 9.11 Attribution under overlapping spans does not degrade (holdout).
+      → `TestBothNodesDivergingIsWhereOrderActuallyDecides` · drilled by reverting to clock ordering, which
+      is the pre-fix behaviour — so if the defect ever stops reproducing, the fix becomes unfalsifiable
+      and the drill says so.
+
+- [x] 9.12 Concurrent group wider than the envelope limit → refused at resolve, **and** capped by the sandbox at execution. Both, because the second is what holds when the first is bypassed.
+      → **BOTH gates drilled separately.** `TestAGroupWiderThanTheEnvelopeLimitIsRefused` (resolve) and
+      `TestTheSandboxCapsEvenWhenTheSpecAsksForMoreThanTheCeiling` (sandbox). The second is the one that
+      holds when the first is bypassed, so proving them together would prove neither.
 
 ## 10. Sales Operations
 
