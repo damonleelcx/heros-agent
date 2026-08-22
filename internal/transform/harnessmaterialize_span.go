@@ -2,6 +2,7 @@ package transform
 
 import (
 	"github.com/heros-foreal/agentd/internal/discovery"
+	"github.com/heros-foreal/agentd/internal/registry"
 	"github.com/heros-foreal/agentd/internal/variantspec"
 )
 
@@ -27,6 +28,13 @@ func spanMaterializeHarness(site discovery.SpanCallSite, src []byte, o variantsp
 		return nil, nil // the identity; see materializeHarness
 	}
 	strategy := o.Harness.Spec.Strategy
+
+	// 🔴 P34: an EXECUTION ENVELOPE reaches no rewriter, in any language. It is not a loop, so there is
+	// nothing to wrap; its ceilings and host-service provision are checked at resolve and by the sandbox.
+	// The no-op rather than a refusal, for the reason materializeHarness gives.
+	if strategy == registry.StrategyEnvelope {
+		return nil, nil
+	}
 
 	if svc := harnessHostService(strategy); svc != "" {
 		return nil, refuseHostService(site.NodeID, dim, strategy, svc)

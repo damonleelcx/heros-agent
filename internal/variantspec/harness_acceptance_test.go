@@ -175,21 +175,51 @@ func TestHarnessComposesWithWiringNoReorder(t *testing.T) {
 
 // TestP18AddsExactlyOneDimension pins the one-way door. The enum is closed; P18 opens it by exactly one,
 // deliberately, through the eight-step checklist — and a second member would mean something else got in.
+//
+// 🔴 P34 appended a second, `loop`, with its own decision record (ADR-014, decisions.md D-34.1). So the
+// assertion is now about the PREFIX and the POSITION rather than about the total: P18's contribution is
+// that `harness` is the seventh member and that nothing before it moved. Asserting the total instead
+// would make every later phase's decision record read as "P18 broke", which is the opposite of what this
+// test is for.
+//
+// 🚫 It is not relaxed to "harness is somewhere in the list". Position seven is the claim: `Dimensions()`
+// is APPENDED to, never reordered, because a consumer that stored an ordinal — and P0's frozen shape is
+// full of ordered arrays — would silently re-read one dimension as another.
 func TestP18AddsExactlyOneDimension(t *testing.T) {
 	before := []Dimension{DimModel, DimPrompt, DimSkills, DimContext, DimTools, DimMemory}
 	got := Dimensions()
-	if len(got) != len(before)+1 {
-		t.Fatalf("the dimension enum has %d members (%v); P18 adds exactly one (harness) to the %d that "+
-			"existed. A different count means either the addition was missed or something else was added "+
-			"without a decision record.", len(got), got, len(before))
+	if len(got) < len(before)+1 {
+		t.Fatalf("the dimension enum has %d members (%v); P18 adds one (harness) to the %d that existed, "+
+			"so anything shorter means the addition was reverted", len(got), got, len(before))
 	}
 	for i, want := range before {
 		if got[i] != want {
 			t.Errorf("dimension %d is %q, want %q — P18 appends, it does not reorder", i, got[i], want)
 		}
 	}
-	if got[len(got)-1] != DimHarness {
-		t.Errorf("the last dimension is %q, want harness", got[len(got)-1])
+	if got[len(before)] != DimHarness {
+		t.Errorf("dimension %d is %q, want harness — P18's member must stay where it was appended, because "+
+			"a later phase appending its own must not shift it", len(before), got[len(before)])
+	}
+}
+
+// TestP34AppendsLoopAfterHarness is the same door, opened once more, asserted on its own terms.
+//
+// 🔴 P34 is the phase that SPLIT the axis P18 created, so the relationship between these two dimensions
+// is the phase's whole subject: `harness` narrows to the execution envelope and `loop` takes the
+// iteration policy. They are adjacent in the enum because that is the order they were appended in, and
+// `loop` is LAST because appending is the only safe way to grow a hashed, ordered vocabulary.
+func TestP34AppendsLoopAfterHarness(t *testing.T) {
+	got := Dimensions()
+	if got[len(got)-1] != DimLoop {
+		t.Fatalf("the last dimension is %q, want loop — P34 appends", got[len(got)-1])
+	}
+	if got[len(got)-2] != DimHarness {
+		t.Fatalf("the second-to-last dimension is %q, want harness", got[len(got)-2])
+	}
+	if DimLoop != "loop" {
+		t.Fatalf("DimLoop = %q, want \"loop\": the wire value is recorded on error records and spec rows, "+
+			"so it cannot drift (task 3.1)", DimLoop)
 	}
 }
 

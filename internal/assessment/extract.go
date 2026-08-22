@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/heros-foreal/agentd/internal/discovery"
+	"github.com/heros-foreal/agentd/internal/registry"
 )
 
 // extract.go is the structural pass (task 2.1): one extractor per axis, over the IR and the discovery
@@ -340,44 +341,65 @@ func extractMemory(s Subject) (Finding, error) {
 
 // ── harness ──────────────────────────────────────────────────────────────────────────────────────
 
-// extractHarness has memory's shape and memory's reason. `discovery` emits `single-shot` for every
-// node and its comment names the trap precisely: `InvocationSemantics` records `loop` when a call sits
-// inside one, and *"a `for` loop over a list of tickets fires the node many times with no scaffold at
-// all, while an agent loop is the MODEL deciding to take another turn; the two are indistinguishable
-// from loop depth."*
+// extractHarness reports the EXECUTION ENVELOPE — what a node is allowed to do and inside what walls
+// (P34 FR5). Since the axis split it no longer reports the control loop; that moved next door to
+// `extractLoop`, which is where the `HarnessDefault()` read this function used to do now lives.
 //
-// 🚫 Do not read `InvocationSemantics.Type` here. It is the tempting signal and it is the wrong one.
+// 🔴 The envelope is `not_measured` in every repository, and that is a permanent property rather than a
+// gap someone will close. Sandbox posture, spend ceilings, timeouts, guardrail bindings and approval
+// gates are facts about how a node is DEPLOYED — they are not written at a call site in any language,
+// so there is nothing in a source snapshot for a static reader to find. A finding here that said
+// anything else would be inventing a policy the repository never states.
+//
+// 🚫 It is `not_measured`, not `refused`. "We could not" and "this build cannot" have different owners
+// (D1), and this is neither: the subject genuinely is not in the source. `MissingNotVisibleStatically`
+// is the cause that says so.
 func extractHarness(s Subject) (Finding, error) {
 	if f := precondition(AxisHarness, s); f != nil {
 		return *f, nil
 	}
-	strategies := map[string]int{}
-	for _, n := range s.IR.Nodes {
-		if v := n.HarnessDefault(); v != "single-shot" {
-			strategies[v]++
-		}
-	}
-	if len(strategies) > 0 {
-		return Observed(AxisHarness, fmt.Sprintf(
-			"the discovered call sites run inside: %s", phrase(keysOf(strategies))), s.Evidence())
-	}
 	return NotMeasured(AxisHarness, MissingNotVisibleStatically,
-		"the scaffold around a call — how many turns it runs and under what stop condition — is a "+
-			"property of the loop that drives it, not of the call; a source loop around a call site is "+
-			"not evidence of an agent loop, so this build declines to read one as the other", s.Evidence())
+		"the execution envelope — where this node may reach on the network, what it may spend, how long "+
+			"it may run, which guardrail and approval gate it answers to — is a property of how the node "+
+			"is DEPLOYED, not of the call your source writes. A snapshot of the code cannot contain it, so "+
+			"this is a limit of static reading rather than a gap in your repository or in our frontend",
+		s.Evidence())
 }
 
 // ── loop ─────────────────────────────────────────────────────────────────────────────────────────
 
-// extractLoop is refused until P34 lands (task 9.2). The refusal is `analysis`: nothing about the
-// language or its frontend is missing — the ANALYSIS does not exist in this build, because `loop` is
-// not yet a configuration axis at all. `DimHarness`'s own doc defines it as two things, "how many
-// turns it runs and in what control loop", and P34 is the change that splits them.
+// extractLoop reports the ITERATION POLICY: which control loop a node runs, and what stops it.
+//
+// 🔴 This is the read `extractHarness` used to do, moved rather than duplicated. P34 split one axis into
+// two and the DISCOVERED fact — `HarnessDefault()`, the scaffold a call site already implements — is an
+// iteration policy, so it belongs here. Leaving a copy behind would have given the report two rows
+// making the same claim, which is worse than either row alone.
+//
+// It has memory's shape and memory's reason. `discovery` emits `single-shot` for every node, and its
+// comment names the trap precisely: `InvocationSemantics` records `loop` when a call sits inside one,
+// and *"a `for` loop over a list of tickets fires the node many times with no scaffold at all, while an
+// agent loop is the MODEL deciding to take another turn; the two are indistinguishable from loop
+// depth."*
+//
+// 🚫 Do not read `InvocationSemantics.Type` here. It is the tempting signal and it is the wrong one.
 func extractLoop(s Subject) (Finding, error) {
-	return Refused(AxisLoop, RefusalAnalysis,
-		"this build does not assess the control loop as its own surface. It is part of the harness "+
-			"scaffold today and becomes a separate axis with P34; until then there is no loop "+
-			"configuration for a finding to describe", s.Evidence())
+	if f := precondition(AxisLoop, s); f != nil {
+		return *f, nil
+	}
+	strategies := map[string]int{}
+	for _, n := range s.IR.Nodes {
+		if v := n.HarnessDefault(); v != registry.StrategySingleShot {
+			strategies[v]++
+		}
+	}
+	if len(strategies) > 0 {
+		return Observed(AxisLoop, fmt.Sprintf(
+			"the discovered call sites run inside: %s", phrase(keysOf(strategies))), s.Evidence())
+	}
+	return NotMeasured(AxisLoop, MissingNotVisibleStatically,
+		"the control loop around a call — how many turns it runs and under what stop condition — is a "+
+			"property of the loop that drives it, not of the call; a source loop around a call site is "+
+			"not evidence of an agent loop, so this build declines to read one as the other", s.Evidence())
 }
 
 // ── graph ────────────────────────────────────────────────────────────────────────────────────────
@@ -394,6 +416,11 @@ func extractLoop(s Subject) (Finding, error) {
 //
 // `TestTheGatedGraphExtractorStillWorks` runs the inner one directly, so the day `P34Pending` returns
 // false the analysis behind it has been exercised the whole time.
+// 🔴 The gate this function applied is now open. P33 wrote it as TWO functions on purpose — "folding the
+// gate into it would make those tests unreachable, which is how a gate comes to hide a broken extractor
+// for two quarters and then lifts onto one nobody has run" — and `TestTheGatedGraphExtractorStillWorks`
+// exercised the inner one the whole time, so the day it opened the analysis behind it was already run.
+// The wrapper is kept rather than inlined so that the seam, and the reason for it, survive the lifting.
 func extractGraph(s Subject) (Finding, error) {
 	if AxisGraph.P34Pending() {
 		return Refused(AxisGraph, RefusalAnalysis,

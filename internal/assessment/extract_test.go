@@ -280,29 +280,51 @@ func TestMemoryAndHarnessRefuseTheFloor(t *testing.T) {
 	}
 }
 
-// TestBothP34AxesAreRefusedAndSaySo is task 9.2: **stated rather than discovered.**
+// TestBothP34AxesNowReportRatherThanRefuse is P33 task 9.2 AFTER the gate opened.
 //
-// 🔴 BOTH axes, and on EVERY subject. PRD §3 puts loop and graph behind P34 — "P33 may report on them
-// only once P34 has landed, or it names axes the configuration layer does not have" — and a report that
-// answered on one of them would be doing exactly that.
-func TestBothP34AxesAreRefusedAndSaySo(t *testing.T) {
+// 🔴 It is the same test, inverted, and inverting it rather than deleting it is the point. P33 refused
+// `loop` and `graph` because "P33 may report on them only once P34 has landed, or it names axes the
+// configuration layer does not have" (PRD §3). P34 landed both — `variantspec.DimLoop` and
+// `registry.KindLoop` for the first, spec-level `GraphGroup`/predicate/merge for the second — so the
+// condition the refusal was contingent on is gone, and a build that kept refusing would be withholding
+// an answer it now has.
+//
+// What this asserts is that they report a REAL finding on every fixture, and specifically that neither
+// has quietly become the other kind of silence: `refused` means "this build cannot", and after P34
+// neither of these axes may say that.
+func TestBothP34AxesNowReportRatherThanRefuse(t *testing.T) {
 	for _, fixture := range []string{"python", "typescript", "java", "rust"} {
 		s := subjectFor(t, fixture)
 		for _, axis := range []Axis{AxisLoop, AxisGraph} {
 			f := findingFor(t, s, axis)
-			if f.State() != StateRefused {
-				t.Fatalf("%s/%s is %s, want refused until P34 lands.\n  claim: %s",
-					fixture, axis, f.State(), f.Claim())
+			if f.State() == StateRefused {
+				t.Fatalf("%s/%s is still refused after P34 landed its configuration. The deferral was "+
+					"contingent on the axis not existing, and it exists.\n  claim: %s",
+					fixture, axis, f.Claim())
 			}
-			if f.RefusalCause() != RefusalAnalysis {
-				t.Fatalf("%s names %q, want %q — nothing about the language or its frontend is missing; "+
-					"the ANALYSIS does not exist as an axis in this build", axis, f.RefusalCause(), RefusalAnalysis)
+			if f.Claim() == "" {
+				t.Fatalf("%s/%s produced an empty claim", fixture, axis)
 			}
-			// STATED. A refusal that does not name the phase that lifts it is a dead end, and a reader
-			// has no way to tell "coming" from "never".
-			if !strings.Contains(f.Claim(), "P34") {
-				t.Fatalf("%s's refusal does not name the phase that lifts it: %q", axis, f.Claim())
-			}
+		}
+		// And the axis these two were carved out of must no longer report an ITERATION POLICY: that read
+		// moved to `loop`, and a copy left behind would give the report two rows making one claim.
+		h := findingFor(t, s, AxisHarness)
+		if h.State() == StateObserved {
+			t.Fatalf("%s/harness reports an observation. Post-split the harness axis is the EXECUTION "+
+				"ENVELOPE — deployment facts a source snapshot cannot contain — so an observation here is "+
+				"the loop's read left behind.\n  claim: %s", fixture, h.Claim())
+		}
+	}
+}
+
+// TestThePendingPredicateIsRetiredRatherThanDeleted — `P34Pending` now answers false for every axis,
+// and the function survives. Deleting it along with its call sites would delete the RECORD that two
+// axes were once refused for a reason, and the next axis to arrive ahead of its configuration would
+// have to rediscover the pattern rather than copy it.
+func TestThePendingPredicateIsRetiredRatherThanDeleted(t *testing.T) {
+	for _, a := range Axes() {
+		if a.P34Pending() {
+			t.Errorf("axis %q still reports itself as awaiting P34, which has landed", a)
 		}
 	}
 }

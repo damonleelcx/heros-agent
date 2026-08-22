@@ -19,6 +19,11 @@ import (
 
 // defaultHarnessParams are schema-valid params per strategy. Empty params are not a simpler fixture — the
 // registry rejects them, so an empty-params fixture would test the rejection rather than the refusal.
+//
+// 🔴 These are the five LOOP strategies. Since P34 the harness vocabulary also contains `envelope`, which
+// this file's subjects never cover on purpose: every test here is about MATERIALIZING A LOOP at a call
+// site, and an envelope is not materialized at a call site at all — it is a deployment policy checked at
+// resolve. Its own coverage and refusals live beside `loopCoverage` in coverage.go.
 var defaultHarnessParams = map[string]string{
 	"single-shot":  `{}`,
 	"react-loop":   `{"max_turns":6,"stop_condition":"no-tool-call"}`,
@@ -54,7 +59,7 @@ func harnessOverride(t *testing.T, strategy string) variantspec.ResolvedOverride
 func multiTurnStrategies(t *testing.T) []string {
 	t.Helper()
 	var out []string
-	for _, st := range registry.BuiltinHarnessStrategies() {
+	for _, st := range registry.BuiltinLoopStrategies() {
 		if st.Name() != registry.StrategySingleShot {
 			out = append(out, st.Name())
 		}
@@ -260,7 +265,7 @@ func TestGroupHarnessRefusedNamingEdgeSet(t *testing.T) {
 // cause class. The canary is the whole guarantee: a coverage table that claimed a cell works while the
 // engine refuses it — or the reverse — is the drift the derived read exists to prevent.
 func TestHarnessRefusalTotalityCanary(t *testing.T) {
-	cells := CoverageFor(string(variantspec.DimHarness))
+	cells := CoverageFor(string(variantspec.DimLoop))
 	if len(cells) == 0 {
 		t.Fatal("the harness axis reports no coverage cells at all; the totality read would assert nothing")
 	}
@@ -306,9 +311,9 @@ func TestHarnessRefusalTotalityCanary(t *testing.T) {
 				"surface, which is a claim about the customer's code", lang)
 		}
 	}
-	for _, st := range registry.BuiltinHarnessStrategies() {
+	for _, st := range registry.BuiltinLoopStrategies() {
 		if !strategies[st.Name()] {
-			t.Errorf("the harness axis has no cell for strategy %s", st.Name())
+			t.Errorf("the loop axis has no cell for strategy %s", st.Name())
 		}
 	}
 
@@ -334,7 +339,7 @@ func TestHostServiceStrategiesRefusedByName(t *testing.T) {
 				t.Errorf("%s reports %s as materializable; a call site offers no injection point for a tool "+
 					"executor, a planner or a critic in ANY language", lang, strategy)
 			}
-			for _, c := range CoverageFor(string(variantspec.DimHarness)) {
+			for _, c := range CoverageFor(string(variantspec.DimLoop)) {
 				if c.Language != lang || c.Form != strategy {
 					continue
 				}
@@ -434,7 +439,7 @@ func TestHarnessMaterializationSuite(t *testing.T) {
 	goRoot := newTarget(t)
 	goNode := nodeIDs(t, goRoot)["summarize"]
 
-	for _, st := range registry.BuiltinHarnessStrategies() {
+	for _, st := range registry.BuiltinLoopStrategies() {
 		for _, c := range []struct {
 			lang, root, node string
 			resolved         func(map[string]variantspec.ResolvedOverride) *variantspec.Resolved
@@ -501,7 +506,7 @@ func TestHarnessCoverageAgreesWithEngine(t *testing.T) {
 	pyNode := onlyNode(t, pyRoot, "python")
 
 	checked := 0
-	for _, c := range CoverageFor(string(variantspec.DimHarness)) {
+	for _, c := range CoverageFor(string(variantspec.DimLoop)) {
 		if c.Language != "python" {
 			continue // the engine can only be RUN for the languages this fixture is written in
 		}
@@ -516,8 +521,8 @@ func TestHarnessCoverageAgreesWithEngine(t *testing.T) {
 			t.Errorf("coverage says python/%s refuses and the engine emitted a patch", c.Form)
 		}
 	}
-	if checked != registry.HarnessStrategySetSize {
+	if checked != registry.LoopStrategySetSize {
 		t.Fatalf("checked %d cell(s), want %d — the read has drifted and this test is no longer reading it",
-			checked, registry.HarnessStrategySetSize)
+			checked, registry.LoopStrategySetSize)
 	}
 }

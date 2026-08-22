@@ -274,6 +274,12 @@ func (noopRegistries) ResolveHarness(context.Context, string) (*registry.Harness
 	return nil, registry.ErrNotFound
 }
 
+// ResolveLoop answers for P34's loop registry. This fixture publishes no loop entries, so every
+// loop_ref misses — which is the fail-closed answer, not an empty one.
+func (noopRegistries) ResolveLoop(context.Context, string) (*registry.LoopEntry, error) {
+	return nil, registry.ErrNotFound
+}
+
 // sendReceipt transmits a transform receipt when — and only when — `--link-receipt` was given.
 //
 // 🔴 Read the guard order. The flag is checked FIRST, before anything about the network is considered, so

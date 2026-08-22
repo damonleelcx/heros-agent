@@ -365,7 +365,7 @@ func transformOutcome(ir *discovery.IR, base *variantspec.VariantSpec, regs *har
 
 	// 🔴 And the coverage read agrees with what just happened, cell for cell.
 	fmt.Println("  the coverage table's claim for this language, checked against the run above:")
-	for _, c := range transform.CoverageFor(string(variantspec.DimHarness)) {
+	for _, c := range transform.CoverageFor(string(variantspec.DimLoop)) {
 		if !strings.EqualFold(c.Language, ir.Workflow.Language) {
 			continue
 		}
@@ -700,13 +700,20 @@ func (m *harnessRegs) ResolveHarness(_ context.Context, id string) (*registry.Ha
 	return nil, registry.ErrNotFound
 }
 
+// ResolveLoop answers for P34's loop registry. This proof exercises the LEGACY loop-bearing harness
+// path, which P34 keeps resolvable indefinitely — so it publishes no loop entries and every loop_ref
+// misses, which is the fail-closed answer rather than an empty one.
+func (m *harnessRegs) ResolveLoop(context.Context, string) (*registry.LoopEntry, error) {
+	return nil, registry.ErrNotFound
+}
+
 // harnessCoverageReader adapts the transform engine's table for the authoring boundary — the same
 // adapter the BFF uses, so this run reads the boundary from where the console reads it.
 type harnessCoverageReader struct{}
 
 func (harnessCoverageReader) HarnessCoverage(language string) []authoring.HarnessCoverageCell {
 	var out []authoring.HarnessCoverageCell
-	for _, c := range transform.CoverageFor(string(variantspec.DimHarness)) {
+	for _, c := range transform.CoverageFor(string(variantspec.DimLoop)) {
 		if !strings.EqualFold(c.Language, language) {
 			continue
 		}

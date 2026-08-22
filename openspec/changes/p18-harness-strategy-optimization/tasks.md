@@ -47,7 +47,9 @@ passes.
       resolution. → `internal/registry/harness.go` (Test: `TestHarnessParamsValidatedAtSeal`).
 - [x] 2.4 Seed the five builtin strategies (`single-shot`, `react-loop`, `plan-execute`, `reflexion`,
       `critic-loop`); `critic-loop` carries a **separate** critic model ref. →
-      `internal/registry/harness_builtins.go` (Test: `TestFiveBuiltinStrategiesRegister`).
+      `internal/registry/harness_builtins.go` (Test: `TestBuiltinHarnessStrategiesRegister`; renamed from
+      `TestFiveBuiltinStrategiesRegister` when P34 added the sixth strategy, `envelope`, and bumped
+      `HarnessStrategySetVersion` 1.0.0 → 2.0.0 — the cardinality assertion working, not being loosened).
 - [x] 2.5 🔴 Enforce cross-registry uniqueness: a `harness` ref used in a non-harness dimension (or vice
       versa) fails closed. → `internal/registry/registry.go` (Test: `TestHarnessRefFailsClosedCrossKind`).
 

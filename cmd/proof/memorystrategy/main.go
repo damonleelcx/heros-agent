@@ -608,6 +608,12 @@ func (m *memRegs) ResolveHarness(context.Context, string) (*registry.HarnessEntr
 	return nil, registry.ErrNotFound
 }
 
+// ResolveLoop answers for P34's loop registry. This fixture publishes no loop entries, so every
+// loop_ref misses — which is the fail-closed answer, not an empty one.
+func (m *memRegs) ResolveLoop(context.Context, string) (*registry.LoopEntry, error) {
+	return nil, registry.ErrNotFound
+}
+
 // coverageReader adapts the transform engine's table for the authoring boundary — the same adapter the
 // BFF uses, so this run reads the boundary from where the console reads it.
 type coverageReader struct{}

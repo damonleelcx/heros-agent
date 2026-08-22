@@ -1,7 +1,9 @@
 # Design — P34: Harness / Loop / Graph
 
 The arbitration lives in [ADR-014](../../../docs/adr/ADR-014-harness-loop-graph-axis-split.md). This document
-is the mechanism and the compatibility argument.
+is the mechanism and the compatibility argument. The seven things that had to be **settled** before any of
+it shipped — PRD §14 Q1–Q5, the P18 reconciliation, and the per-axis coverage contract — are recorded with
+their rejected alternatives in [`decisions.md`](decisions.md).
 
 ## D1 — Expand only; the contract half is refused
 
@@ -39,8 +41,11 @@ requirements, and putting them on one axis is what makes the current model unrev
 entry's `version_id`. If it did, a policy change would silently re-hash every configuration under it —
 which is the same orphaning failure as D1, arriving by a different door.
 
-**Open.** PRD §14 Q1 asks whether *spend* follows turns. It is less obvious, because a spend cap is
-consumed almost entirely by loop iterations even though it is imposed like a policy.
+**Settled ([D-34.1](decisions.md#d-341--the-spend-ceiling-sits-with-the-harness-envelope-prd-14-q1)).**
+PRD §14 Q1 asked whether *spend* follows turns. It does: the split line is **imposed vs chosen**, not *who
+consumes it* — by the consumption test the turn ceiling would belong to the loop as well, and §2.3 already
+rejected that reading. Spend is inexpressible on a loop entry, and exhaustion is reported as a named
+stopping condition rather than as an error.
 
 ## D3 — Graph is spec-level, not a `Dimension`
 
@@ -83,7 +88,9 @@ grammar is a second scope-validation implementation, and the scope check is the 
 predicate and a name that does not exist at that call site. One grammar, one validator.
 
 **If `expr` proves too permissive**, narrow it in one place — which is only possible because there is one
-place.
+place. Recorded as [D-34.2](decisions.md#d-342--a-predicate-is-an-expr-binding-validated-by-the-adr-004-path-prd-14-q2),
+together with the standing note that the predicate is this phase's **second one-way door**: every future
+question about what a predicate may reference traces back to the grammar chosen here.
 
 ## D6 — A fan-in without a merge is invalid, not defaulted
 
@@ -91,9 +98,15 @@ place.
 
 **Why.** The available defaults — first result wins, concatenate, last writer — are all semantic choices
 about the author's program, and none of them is more obviously right than the others. A default here is
-the platform deciding what the customer's code means. D6 also extends to failure semantics (PRD §14 Q3):
-what happens when one member of a concurrent group fails is a choice, and it probably belongs in the merge
-declaration rather than as a global rule.
+the platform deciding what the customer's code means.
+
+**D6 extends to failure semantics, and that is now settled too**
+([D-34.3](decisions.md#d-343--a-concurrent-groups-failure-semantics-are-declared-on-the-merge-required-from-a-closed-set-prd-14-q3)).
+`on_member_failure` is a **required** field on the merge, from the closed set `{fail-fast, collect-partial}`
+— no default and no global rule. 🔴 With one enforced consequence: a `collect-partial` merge may deliver
+fewer inputs than the group has members, so a downstream input contract that makes every member's field
+*required* is refused at validate, through `internal/typedcontract`. Without that check, `collect-partial`
+would be a promise the type system does not keep.
 
 ## Compatibility argument, stated as the thing to test
 
@@ -139,6 +152,12 @@ type GraphGroup struct {
     Members     []string `json:"members"`               // must all appear in Order
     Concurrent  bool     `json:"concurrent,omitempty"`
     Merge       *Merge   `json:"merge,omitempty"`       // required on a fan-in (D6)
+}
+
+type Merge struct {
+    Into            string `json:"into"`               // the downstream node the members converge on
+    Strategy        string `json:"strategy"`           // how the inputs combine — closed set, never defaulted
+    OnMemberFailure string `json:"on_member_failure"`  // fail-fast | collect-partial — REQUIRED (D-34.3)
 }
 ```
 

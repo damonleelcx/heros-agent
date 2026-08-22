@@ -36,6 +36,13 @@ type Store struct {
 	// different dimensions, and one map keyed by name would let a same-named entry in either shadow the
 	// other — silently binding a scaffold where a memory was asked for.
 	harnesses map[string]HarnessStrategy
+
+	// loops are the loop-strategy implementations RegisterLoop will accept (P34). Its OWN map, for the
+	// reason `harnesses` is its own: after ADR-014's split a harness entry names an EXECUTION ENVELOPE
+	// and a loop entry names an ITERATION POLICY, and one map keyed by name would let a same-named entry
+	// in either shadow the other — silently binding an envelope where an iteration policy was asked for,
+	// which is precisely the confusion the Kind is hashed into the version_id to prevent.
+	loops map[string]LoopStrategy
 }
 
 // NewStore returns a Store over an open Postgres handle and a blob store for prompt bodies.
@@ -43,7 +50,8 @@ type Store struct {
 // are registered; see AddMemoryStrategy.
 func NewStore(db *sql.DB, blobs BlobStore) *Store {
 	s := &Store{db: db, blobs: blobs, policies: map[string]Policy{},
-		strategies: map[string]MemoryStrategy{}, harnesses: map[string]HarnessStrategy{}}
+		strategies: map[string]MemoryStrategy{}, harnesses: map[string]HarnessStrategy{},
+		loops: map[string]LoopStrategy{}}
 	for _, p := range BuiltinPolicies() {
 		s.policies[p.Name()] = p
 	}
@@ -52,6 +60,9 @@ func NewStore(db *sql.DB, blobs BlobStore) *Store {
 	}
 	for _, st := range BuiltinHarnessStrategies() {
 		s.harnesses[st.Name()] = st
+	}
+	for _, st := range BuiltinLoopStrategies() {
+		s.loops[st.Name()] = st
 	}
 	return s
 }

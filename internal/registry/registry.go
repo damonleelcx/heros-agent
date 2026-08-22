@@ -74,6 +74,26 @@ const (
 	// (context) nor what it remembers (memory); it is how many calls happen and in what loop. Three
 	// dimensions sharing one id namespace could collide on a single id, and the failure would be silent.
 	KindHarness Kind = "harness"
+	// KindLoop holds versioned LOOP strategies — the ITERATION POLICY a node's call runs under: which
+	// control loop, its stop condition, `max_turns` as a chosen value, the reflection prompt, the critic
+	// binding (P34, decisions.md D-34.1; ADR-014).
+	//
+	// A seventh Kind for the reason there is a sixth: the Kind is hashed into the version_id, so a loop
+	// ref pasted into the harness dimension fails CLOSED rather than resolving and silently binding an
+	// envelope where an iteration policy was asked for. That fail-closed property is the entire reason
+	// this is a Kind and not a discriminator, and it costs one table.
+	//
+	// 🚫 It does NOT replace KindHarness, and KindHarness loses nothing. ADR-014 refuses the contract half
+	// of expand-contract on the record: removing the loop fields from HarnessSpec would change the
+	// version_id of every loop-bearing harness entry, which would change the config_hash of every spec
+	// referencing it, which would make every measurement taken on a multi-turn node unreachable from any
+	// spec anyone can construct. So legacy loop-bearing harness entries stay resolvable INDEFINITELY;
+	// new authoring writes a loop entry; a spec setting both is refused at resolve, naming both refs.
+	//
+	// 🚫 The vocabulary is RELOCATED, not extended. The same five strategies and the same four stop
+	// conditions — see loop_builtins.go, and LoopStrategyNames()/HarnessLoopStrategyNames(), which a test
+	// asserts name the same set.
+	KindLoop Kind = "loop"
 )
 
 // Table names. A closed set of package constants — never caller input — because they are formatted
@@ -85,6 +105,7 @@ const (
 	tableContext = "context_entry"
 	tableMemory  = "memory_entry"
 	tableHarness = "harness_entry"
+	tableLoop    = "loop_entry"
 )
 
 // Sentinel errors. The P2 Loader (task 3.1) must fail closed on an unresolved ref and distinguish

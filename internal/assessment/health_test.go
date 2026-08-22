@@ -58,15 +58,24 @@ func TestHealthIsBrokenOutPerAxisAndPerState(t *testing.T) {
 // TestTheAlertFiresWhenTheProductSilentlyStopsSayingAnything is §6.2, and it is the fence that has to
 // be able to go red.
 //
-// The scenario: a repository with no discoverable call sites. Every axis but `loop` comes back
-// `not_measured`... which is NOT the alarm condition, and the second half of this test is why that
-// distinction is load-bearing.
+// 🔴 P34 changed what the FIRST half of this test asserts, and the change is the alarm arriving rather
+// than the alarm breaking. Before the axis split, an unreadable repository produced seven absences and
+// two refusals — `loop` and `graph` were refused pending their configuration — so it could never reach
+// nine and the counter stayed at zero. That was a property of the pre-P34 build, and this test said so
+// in its own second half: the nine-absence case had to be built by hand "because producing it needs a
+// build in which the two P34 axes are no longer refused, WHICH IS THE WORLD THIS ALARM HAS TO KEEP
+// WORKING IN."
+//
+// This is that world. A repository with no discoverable call sites now produces nine absences and DOES
+// count — which is the counter doing its job, because `no_call_sites_discovered` on all nine axes is
+// exactly what a broken frontend or a broken sandbox looks like from outside. Suppressing it as
+// "expected for an unreadable repository" would suppress the signal the counter exists for.
+//
+// What still must NOT alert is one such assessment on its own: the threshold is a RATE, and the second
+// half below is what proves the rate is what fires rather than the count.
 func TestTheAlertFiresWhenTheProductSilentlyStopsSayingAnything(t *testing.T) {
 	r, m := healthRunner(t)
 
-	// An assessment where the two P34 axes are `refused` and the other seven are absent. This is what
-	// EVERY assessment of an unreadable repository looks like today, and it must NOT alert — otherwise
-	// the alarm is on from the day it ships and is muted by the second week.
 	empty := Subject{WorkflowID: "wf-empty", IR: &discovery.IR{}}
 	c := cfg()
 	c.AssessmentID = "as-empty"
@@ -74,26 +83,36 @@ func TestTheAlertFiresWhenTheProductSilentlyStopsSayingAnything(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 	h := m.Health()
-	if h.AllNotMeasured != 0 {
-		t.Fatalf("an assessment with two legitimate refusals counted as all-not-measured (%d). Loop and "+
-			"graph are `refused` on every assessment until P34 lands, so counting them would make the "+
-			"alarm fire on every deployment from the day it ships", h.AllNotMeasured)
+	if h.AllNotMeasured != 1 {
+		t.Fatalf("all-not-measured is %d, want 1. Post-P34 every axis answers through `precondition` on "+
+			"an unreadable repository, so nine absences is the produced shape — and it is the shape a "+
+			"broken frontend produces too, which is what this counter is for", h.AllNotMeasured)
 	}
-	if h.Alerting {
-		t.Fatal("the alert fired on the ordinary case")
+	// 🔴 Every finding must carry a REASON. Nine absences with no named missing input would be the
+	// counter firing on a report that says nothing about why, which is not a signal anyone can act on.
+	got, err := r.Run(context.Background(), func() Config { c := cfg(); c.AssessmentID = "as-empty-2"; return c }(), empty)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	for _, f := range got.Findings {
+		if f.MissingInput() == "" {
+			t.Errorf("axis %s is not_measured with no named missing input", f.Axis())
+		}
 	}
 
-	// Now the real condition: nine findings, all `not_measured`. Built directly rather than produced,
-	// because producing it needs a build in which the two P34 axes are no longer refused — which is
-	// the world this alarm has to keep working in.
+	// Now the rate. Three more nine-absence assessments on top of the two produced above, so the rate
+	// reaches 1.0 and crosses the threshold. Built directly as well as produced, because the counter
+	// has to work on a hand-built report too — that is the shape the store replays.
 	nine := nine(t, nil)
 	for i := 0; i < 3; i++ {
 		nine.AssessmentID = "as-nm"
 		m.Completed(nine)
 	}
 	h = m.Health()
-	if h.AllNotMeasured != 3 {
-		t.Fatalf("counted %d nine-absence assessments, want 3", h.AllNotMeasured)
+	const producedAbove = 2
+	if h.AllNotMeasured != 3+producedAbove {
+		t.Fatalf("counted %d nine-absence assessments, want %d (%d produced by Run above, 3 recorded "+
+			"directly)", h.AllNotMeasured, 3+producedAbove, producedAbove)
 	}
 	if !h.Alerting {
 		t.Fatalf("the alert did NOT fire at a rate of %.2f (threshold %.2f). This is the single best "+

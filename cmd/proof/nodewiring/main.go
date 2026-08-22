@@ -654,6 +654,12 @@ func (emptyRegistries) ResolveHarness(context.Context, string) (*registry.Harnes
 	return nil, registry.ErrNotFound
 }
 
+// ResolveLoop answers for P34's loop registry. This fixture publishes no loop entries, so every
+// loop_ref misses — which is the fail-closed answer, not an empty one.
+func (emptyRegistries) ResolveLoop(context.Context, string) (*registry.LoopEntry, error) {
+	return nil, registry.ErrNotFound
+}
+
 func siteOf(ir *discovery.IR, id string) string {
 	for _, n := range ir.Nodes {
 		if n.NodeID == id {

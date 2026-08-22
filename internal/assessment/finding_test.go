@@ -270,15 +270,24 @@ func TestFindingRoundTrips(t *testing.T) {
 
 // ── The vocabulary fence (doc.go's claim, asserted) ──────────────────────────────────────────────
 
-// TestTheSevenSharedAxesAreExactlyTheSevenDimensions keeps the noun dictionary single-source
-// (task 8.4). An eighth `variantspec.Dimension` added by a later phase must not give the platform a
-// configuration axis nothing ever assesses.
-func TestTheSevenSharedAxesAreExactlyTheSevenDimensions(t *testing.T) {
+// TestTheSharedAxesAreExactlyTheDimensions keeps the noun dictionary single-source (task 8.4). A
+// `variantspec.Dimension` added by a later phase must not give the platform a configuration axis
+// nothing ever assesses.
+//
+// 🔴 This is the fence that caught P34. `DimLoop` joined `Dimensions()`, the derived list grew from
+// seven to eight, and `Axes()` — which appended a hand-written `AxisLoop` as well — started naming
+// `loop` twice. Nothing about that is visible in a passing report; it showed up here, as an arithmetic
+// mismatch, which is what a single-source fence is for.
+//
+// The `+1` is `graph`, and it is one rather than two BY DESIGN rather than by accident: topology is a
+// property BETWEEN nodes, so P34 design D3 keeps it off the `Dimension` enum permanently. If a later
+// phase makes it a Dimension, this fence goes red and that decision gets re-argued.
+func TestTheSharedAxesAreExactlyTheDimensions(t *testing.T) {
 	dims := variantspec.Dimensions()
 	axes := Axes()
-	if len(axes) != len(dims)+2 {
-		t.Fatalf("there are %d axes and %d dimensions; the assessment reports the seven dimensions "+
-			"plus loop and graph, so a new dimension needs an axis and a decision", len(axes), len(dims))
+	if len(axes) != len(dims)+1 {
+		t.Fatalf("there are %d axes and %d dimensions; the assessment reports every dimension plus "+
+			"graph, so a new dimension needs an axis and a decision", len(axes), len(dims))
 	}
 	for i, d := range dims {
 		if string(axes[i]) != string(d) {
@@ -286,8 +295,21 @@ func TestTheSevenSharedAxesAreExactlyTheSevenDimensions(t *testing.T) {
 				"name a surface identically", i, axes[i], i, d)
 		}
 	}
-	if axes[len(dims)] != AxisLoop || axes[len(dims)+1] != AxisGraph {
-		t.Fatalf("the two P34 axes are not the last two: %v", axes)
+	if axes[len(dims)] != AxisGraph {
+		t.Fatalf("graph is not the last axis: %v", axes)
+	}
+	// And `loop` arrives exactly once, through the dimension list. Twice is what the duplicate const
+	// produced, and a report naming an axis twice fails validation with a message about the axis rather
+	// than about the enum that produced it.
+	seen := 0
+	for _, a := range axes {
+		if a == AxisLoop {
+			seen++
+		}
+	}
+	if seen != 1 {
+		t.Fatalf("loop appears %d times in Axes(); it is a Dimension now, so appending it as well "+
+			"duplicates it", seen)
 	}
 }
 

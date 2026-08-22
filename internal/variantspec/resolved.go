@@ -148,6 +148,40 @@ type ResolvedNode struct {
 	// same strategy with the same params describe ONE computation and must share a hash. A version_id here
 	// would fork one configuration per entry, permanently, and a hash is not revisable once rows key on it.
 	Harness *ResolvedHarness `json:"harness,omitempty"`
+	// Loop is the node's resolved ITERATION POLICY — which control loop runs, what stops it, and how many
+	// turns the author chose (P34 task 3.1, decisions.md D-34.1). ADDITIVE and omitempty with a
+	// NIL-when-absent pointer: a node with no loop emits NO `loop` key, so its canonical bytes are
+	// byte-identical to a pre-P34 node and the frozen golden vectors keep reproducing — the sixth
+	// application of the discipline Bindings, ToolSelection, ContextDropTolerance, Memory and Harness
+	// above follow. testdata/p34-pre-confighash.json is the fence.
+	//
+	// 🔴 `single-shot` with no params ≡ ABSENT, exactly as it is for Harness (D-8 applied to the new
+	// axis). A node that explicitly selects the identity loop and a node that never mentioned one produce
+	// the same bytes and the same config_hash, which is what lets a user back out of an authored loop
+	// change with no residue in the hash.
+	//
+	// 🔴 It is a PROJECTION — `{strategy, params}` — and NOT the loop registry's version_id, for the
+	// reason ResolvedNode's doc comment gives about Harness: config_hash denotes a CONFIGURATION, not a
+	// set of registry rows, so two specs pinning different loop entries that spell the same strategy with
+	// the same params describe ONE computation and must share a hash.
+	//
+	// 🚫 A LEGACY loop-bearing harness entry does NOT project here. It keeps projecting into `harness`,
+	// exactly as it did before P34, because moving it would change the canonical bytes of every spec that
+	// references one — ADR-014's orphaning chain, arriving through the projection instead of the seal.
+	// That is why the compatibility fixture's loop-bearing rows still carry `reflection_prompt` under
+	// `harness`, and why they must keep doing so forever.
+	Loop *ResolvedLoop `json:"loop,omitempty"`
+}
+
+// ResolvedLoop is a node's resolved iteration policy: which strategy, and the params it runs with. The
+// hashed projection of a loop registry entry — the strategy NAME and the params, never the version_id.
+//
+// 🚫 It carries no turn COUNT that was actually taken, no stop reason and no trace. Those are properties
+// of a RUN, and hashing one would give a single configuration as many hashes as it had outcomes. What it
+// does carry is `max_turns`, which is the count the author CHOSE — a property of the configuration.
+type ResolvedLoop struct {
+	Strategy string         `json:"strategy"`
+	Params   map[string]any `json:"params"`
 }
 
 // ResolvedHarness is a node's resolved harness strategy: which strategy, and the params it runs with. The

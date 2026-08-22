@@ -83,12 +83,36 @@ const (
 	// call-site identity to reuse. The Kind is hashed into the version_id, which is what makes a harness
 	// ref pasted into another dimension fail closed instead of silently resolving.
 	DimHarness Dimension = "harness"
+	// DimLoop is the ITERATION POLICY — which control loop runs, what stops it, how many turns the
+	// AUTHOR chose, the reflection prompt, the critic binding (P34, decisions.md D-34.1; ADR-014).
+	//
+	// It is an eighth member of the closed enum, and it is deliberately NOT a mode of DimHarness. Before
+	// P34 those were one axis, and DimHarness's own doc comment above still shows the seam: it defines
+	// itself as "how many turns it runs AND in what control loop" — two things. An operator tightening a
+	// spend ceiling and an engineer changing a reflection prompt were editing the same registry kind and
+	// producing the same class of config_hash change, with nothing in the axis to tell them apart.
+	//
+	// The split line is IMPOSED vs CHOSEN. A ceiling is a policy about blast radius, imposed on an author;
+	// a turn count is a value chosen by one. `boundedCeiling` already argued it for turns — "the ceiling
+	// is a policy about how much autonomous tool-calling one node may do" — and P34 applies the same test
+	// to spend (decisions.md D-34.1) rather than a second test that would put a seam inside the boundary.
+	//
+	// 🔴 Like DimMemory and DimHarness, it has a registry Kind behind it (registry.KindLoop): a loop is a
+	// (strategy, params) pair authored independently of any call site, so it has no call-site identity to
+	// reuse. The Kind is hashed into the version_id, which is what makes a loop ref pasted into the
+	// harness dimension fail closed instead of silently binding an envelope.
+	//
+	// 🚫 It REPLACES nothing. Legacy loop-bearing harness entries stay resolvable indefinitely (ADR-014
+	// D1, decisions.md D-34.5) — removing them would change every such entry's version_id and orphan
+	// every measurement taken on a multi-turn node. New authoring writes a loop entry; a spec setting
+	// both is refused at resolve, naming both refs (ErrAmbiguousAxis).
+	DimLoop Dimension = "loop"
 )
 
 // Dimensions is the closed enum, in a stable order. Exported so a consumer iterating dimensions cannot
 // silently miss one that was added — the alternative is a hand-written list somewhere else that drifts.
 func Dimensions() []Dimension {
-	return []Dimension{DimModel, DimPrompt, DimSkills, DimContext, DimTools, DimMemory, DimHarness}
+	return []Dimension{DimModel, DimPrompt, DimSkills, DimContext, DimTools, DimMemory, DimHarness, DimLoop}
 }
 
 // Sentinel errors. Typed so the Loader, the UI, and P4 can tell "you asked for something that does
@@ -142,6 +166,33 @@ var (
 	// It is its OWN sentinel and not ErrUnresolvedRef: a tool is not a registry entry, so "this ref does
 	// not resolve" would send the reader to look up a version_id that was never supposed to exist.
 	ErrToolNotDiscovered = errors.New("variantspec: tool selection names a tool this node does not offer")
+
+	// ── P34 axis-split failure classes (ADR-014, decisions.md D-34.1) ───────────────────────────────
+
+	// ErrAmbiguousAxis (P34 FR10, task 3.6): a node sets BOTH a loop-bearing `harness_ref` and a
+	// `loop_ref`. Those are two iteration policies for one node and the resolver has no basis to prefer
+	// either — so it refuses, naming both refs, rather than guessing.
+	//
+	// 🔴 It is its OWN sentinel and not ErrInvalidSpec: the spec is structurally fine and both refs
+	// resolve. What is wrong is the COMBINATION, and a reader sent to look for a malformed field would
+	// find nothing wrong with either one.
+	ErrAmbiguousAxis = errors.New("variantspec: node states its iteration policy twice, on two axes")
+
+	// ErrCeilingExceeded (P34 FR6, task 4.2): a loop's chosen `max_turns` is above the ceiling its
+	// envelope imposes. Refused at resolve naming BOTH values, because "too many turns" without the two
+	// numbers leaves the author unable to tell whether to lower their value or ask for a higher policy —
+	// and those are requests to two different people.
+	ErrCeilingExceeded = errors.New("variantspec: the loop asks for more than the envelope's ceiling allows")
+
+	// ErrMissingHostService (P34 FR7, task 4.3): a loop needs a second actor — `react-loop` a tool
+	// executor, `plan-execute` a planner, `critic-loop` a critic — and the envelope provides none.
+	//
+	// 🔴 Refused at RESOLVE rather than at run. Today the equivalent check lives in
+	// internal/harnessruntime and fires when a run reaches the node; moving it left makes it a preflight
+	// answer, before any diff, worktree, build or provider call exists. The run-time refusal stays where
+	// it is — it is the check that holds when a host is assembled by some path that never resolved a
+	// spec — so this is a second gate in front of it rather than a replacement for it.
+	ErrMissingHostService = errors.New("variantspec: the loop needs a host service the envelope does not provide")
 )
 
 // BindingKind is the source of a prompt-slot binding (P10 task 3.1). The kind is recorded EXPLICITLY,
@@ -316,6 +367,21 @@ type NodeOverride struct {
 	// 🚫 It never reorders anything. A harness wraps a node or consumes an ordered edge set P15 defined;
 	// the wiring says what the edges ARE, the harness says what loop runs over them (decisions.md D-5).
 	HarnessRef string `json:"harness_ref,omitempty"`
+	// LoopRef is a loop-registry version_id naming a sealed (strategy, params) entry — the ITERATION
+	// POLICY this node's call runs under (P34 task 3.1, decisions.md D-34.1).
+	//
+	// 🔴 Additive and `omitempty`: a node that binds no loop emits NO `loop_ref` key, so it serialises
+	// byte-identically to a pre-P34 override and every frozen config_hash golden vector keeps reproducing.
+	// This is the sixth application of the discipline Bindings, ToolSelection, ContextDropTolerance,
+	// MemoryRef and HarnessRef above follow — an always-present field would move the canonical bytes of
+	// EVERY existing node and orphan every keyed row. testdata/p34-pre-confighash.json is the fence.
+	//
+	// 🚫 A spec may not set this AND a loop-bearing `harness_ref`. The two would be two iteration policies
+	// for one node, and the resolver has no basis to prefer either — so it is refused at resolve with
+	// ErrAmbiguousAxis, naming both refs, rather than guessed at (P34 FR10, task 3.6).
+	//
+	// 🚫 It is a version_id and nothing else, on exactly the terms every other ref is.
+	LoopRef string `json:"loop_ref,omitempty"`
 }
 
 // isEmpty reports whether this override sets nothing. A node listed in the ordering with no
@@ -323,7 +389,7 @@ type NodeOverride struct {
 func (o NodeOverride) isEmpty() bool {
 	return o.ModelRef == "" && o.PromptRef == "" && len(o.SkillRefs) == 0 && o.ContextPolicy == "" &&
 		len(o.Bindings) == 0 && len(o.ToolSelection) == 0 && o.ContextDropTolerance == nil &&
-		o.MemoryRef == "" && o.HarnessRef == ""
+		o.MemoryRef == "" && o.HarnessRef == "" && o.LoopRef == ""
 }
 
 // SelectedTools returns the kept tool set in canonical (sorted, de-duplicated) order — the same order
@@ -511,6 +577,13 @@ func (s *VariantSpec) Validate() error {
 				Detail: "harness_ref carries an inline strategy definition; it must be a harness-registry " +
 					"version_id, so the configuration is resolvable back from a config_hash"}
 		}
+		// Loop ref — the same one thing checkable without the registry (P34 task 3.1). Same helper, so
+		// there is one inline-vs-reference rule in the package rather than a third that can disagree.
+		if inlinesDefinition(o.LoopRef) {
+			return &SpecError{NodeID: id, Dim: DimLoop, Ref: o.LoopRef, Err: ErrInlineDefinition,
+				Detail: "loop_ref carries an inline strategy definition; it must be a loop-registry " +
+					"version_id, so the configuration is resolvable back from a config_hash"}
+		}
 		// Binding structure — everything checkable without the IR or registries (kind is in the set; a
 		// non-literal binding names something). The scope/declared/contract checks and the exactly-once
 		// satisfaction rule need the IR and the resolved prompt, so they live in Resolve (task 3.2/3.4).
@@ -589,7 +662,7 @@ func (s *VariantSpec) Validate() error {
 func (s *VariantSpec) Refs() []string {
 	set := map[string]bool{}
 	for _, o := range s.Nodes {
-		for _, r := range []string{o.ModelRef, o.PromptRef, o.ContextPolicy, o.MemoryRef, o.HarnessRef} {
+		for _, r := range []string{o.ModelRef, o.PromptRef, o.ContextPolicy, o.MemoryRef, o.HarnessRef, o.LoopRef} {
 			if r != "" {
 				set[r] = true
 			}

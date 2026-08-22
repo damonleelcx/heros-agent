@@ -152,17 +152,44 @@ func TestLoopDeterministic(t *testing.T) {
 // TestEveryBuiltinStrategyHasALoopDefinition — task 10.2 / FR22. A strategy in the sealed vocabulary with
 // no loop here would fail LOUDLY at Run rather than silently running one turn; this test is what keeps
 // that loud failure from ever being reached in production.
+//
+// 🔴 It reads the LOOP vocabulary since P34, not the harness one, and the change is the axis split
+// arriving rather than the fence being loosened. This runtime executes ITERATION POLICIES — it decides
+// whether to take another turn. After ADR-014 the harness vocabulary also contains `envelope`, which is
+// not an iteration policy at all: it is sandbox posture and ceilings, and there is no loop for it to
+// have. Pinning the runtime against the harness set would have demanded a loop definition for a thing
+// that does not iterate, and the only way to satisfy that demand is to invent one.
+//
+// The pairing that matters — every strategy a spec can SELECT as its loop has a definition here — is
+// exactly what this now asserts.
 func TestEveryBuiltinStrategyHasALoopDefinition(t *testing.T) {
-	sealed := registry.HarnessStrategyNames()
+	sealed := registry.LoopStrategyNames()
 	defined := StrategyNames()
 	if !reflect.DeepEqual(sealed, defined) {
 		t.Fatalf("the sealed vocabulary and the runtime name different sets:\n sealed: %v\nruntime: %v\n"+
 			"The dispatch is keyed by NAME precisely so the two can be pinned without an import; if they "+
 			"drift, a sealed strategy either has no loop or the runtime has one nothing can select", sealed, defined)
 	}
-	if len(sealed) != registry.HarnessStrategySetSize {
-		t.Fatalf("the vocabulary has %d strategies but HarnessStrategySetSize is %d",
-			len(sealed), registry.HarnessStrategySetSize)
+	if len(sealed) != registry.LoopStrategySetSize {
+		t.Fatalf("the vocabulary has %d strategies but LoopStrategySetSize is %d",
+			len(sealed), registry.LoopStrategySetSize)
+	}
+	// 🔴 And the LEGACY harness vocabulary must still be covered, because P34 keeps loop-bearing harness
+	// entries resolvable indefinitely (ADR-014 D1) and a run reaching one of those still needs a loop
+	// definition here. Every harness strategy except the envelope must therefore have one.
+	for _, name := range registry.HarnessStrategyNames() {
+		if name == registry.StrategyEnvelope {
+			continue
+		}
+		if _, ok := strategyFor(name); !ok {
+			t.Errorf("legacy harness strategy %q has no loop definition; a pre-P34 spec that pinned it "+
+				"still resolves, so a run can still reach it", name)
+		}
+	}
+	if _, ok := strategyFor(registry.StrategyEnvelope); ok {
+		t.Error("the runtime defines a loop for the envelope strategy. An envelope does not iterate — it " +
+			"imposes ceilings on something that does — so a loop for it would be a fabricated iteration " +
+			"policy that a spec could select")
 	}
 	// And the ceiling is one constant, not two that can drift.
 	if TurnCeiling != registry.MaxTurnsCeiling {
@@ -171,7 +198,7 @@ func TestEveryBuiltinStrategyHasALoopDefinition(t *testing.T) {
 	}
 	// And the stop-condition vocabulary matches what the schemas actually enumerate, so a rename cannot
 	// silently stop a loop from ever stopping.
-	for _, st := range registry.BuiltinHarnessStrategies() {
+	for _, st := range registry.BuiltinLoopStrategies() {
 		schema := string(st.ParamsSchema())
 		for _, cond := range StopConditions() {
 			if !strings.Contains(schema, `"`+cond+`"`) {

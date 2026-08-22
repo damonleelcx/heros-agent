@@ -13,13 +13,16 @@ import "encoding/json"
 // could not be validated at all — a malformed strategy would be discovered when a run reached the node,
 // by whoever was unlucky, instead of at seal.
 //
-// So: exactly five strategies per strategy-set version, each declaring a ParamsSchema, and a cardinality
-// assertion (HarnessStrategySetSize) that fails LOUDLY if a sixth is added without a version bump.
+// So: a fixed number of strategies per strategy-set version, each declaring a ParamsSchema, and a
+// cardinality assertion (HarnessStrategySetSize) that fails LOUDLY if one is added without a version
+// bump. P34 added `envelope` and bumped both, which is that mechanism working rather than being skipped.
 //
-// # Why these five
+// # Why these six
 //
-// A deliberate spread across the scaffold design space — they are the HYPOTHESES the eval harness will
-// adjudicate, which is the whole reason harness becomes a Dimension:
+// The first five are a deliberate spread across the scaffold design space — the HYPOTHESES the eval
+// harness adjudicates. 🔴 After P34 they are the LEGACY loop-bearing shape: still resolvable
+// indefinitely, no longer authorable, and superseded on the loop axis by an identically-named set (see
+// loop_builtins.go). The sixth is what this axis narrows to.
 //
 //	single-shot   the identity. One call, today's implicit default made explicit — the baseline.
 //	react-loop    reason and act: alternate model turns with tool calls until the task is done.
@@ -27,6 +30,9 @@ import "encoding/json"
 //	reflexion     answer, then re-answer against a declared reflection instruction until satisfied.
 //	critic-loop   a generator paired with a SEPARATE critic model (the salvaged pattern from the
 //	              removed runtime harness, carried as data rather than resurrected as code).
+//	envelope      P34: the EXECUTION ENVELOPE — sandbox posture, host-service provision, ceilings,
+//	              retries, timeouts, concurrency limit, guardrail and approval-gate bindings. The only
+//	              member a new authoring surface may create.
 //
 // 🚫 None of these is a running service, and this file makes no claim that one is. A strategy here is a
 // DESCRIPTION — a name plus validated params that a `config_hash` can pin. What EXECUTES the loop is
@@ -42,12 +48,16 @@ import "encoding/json"
 // HarnessStrategySetVersion is the version of the builtin strategy vocabulary. A stored harness entry's
 // strategy name is interpretable only against this version — bump it when the set changes, exactly as
 // MemoryStrategySetVersion is bumped when the memory vocabulary changes.
-const HarnessStrategySetVersion = "1.0.0"
+// 🔴 Bumped to 2.0.0 by P34: the set gained `envelope`, the execution-envelope strategy ADR-014's split
+// narrows this axis to. The bump changes no stored entry — the strategy SET is not hashed into an entry,
+// only (Kind, Name, Spec) is — but a stored strategy name is interpretable only against the vocabulary it
+// was written under, and this vocabulary now means something narrower than it did.
+const HarnessStrategySetVersion = "2.0.0"
 
 // HarnessStrategySetSize is the fixed cardinality of the vocabulary at HarnessStrategySetVersion. It is
 // asserted against len(BuiltinHarnessStrategies()) in a test: a sixth strategy added without a version
 // bump fails loudly rather than silently changing what a stored strategy name means.
-const HarnessStrategySetSize = 5
+const HarnessStrategySetSize = 6
 
 // StrategySingleShot is the identity strategy. A node whose strategy is `single-shot` runs exactly one
 // call — what every node already does — and its resolved projection is EMPTY, byte-identical to a node
@@ -105,6 +115,10 @@ func BuiltinHarnessStrategies() []HarnessStrategy {
 		PlanExecuteHarness{},
 		ReflexionHarness{},
 		CriticLoopHarness{},
+		// 🔴 P34: the sixth. The five above are the LEGACY loop-bearing shape, kept resolvable
+		// indefinitely (ADR-014 D1) and no longer authorable through any new surface; this one is what
+		// the harness axis narrows to. See harness_envelope.go.
+		EnvelopeHarness{},
 	}
 }
 

@@ -76,7 +76,15 @@ type HarnessStrategyOption struct {
 // set cannot resolve, so offering one would be offering a choice that fails at seal. What a user tunes is
 // the PARAMS, which the schema bounds — including `max_turns`, which the schema caps.
 func HarnessStrategyOptions() []HarnessStrategyOption {
-	strategies := registry.BuiltinHarnessStrategies()
+	// 🔴 The LOOP vocabulary since P34, not the harness one. This picker exists to state a scaffold's
+	// COST before a user chooses it, and the cost it states is a turn multiplier — which only an
+	// iteration policy has. After ADR-014's split the harness vocabulary also contains `envelope`, whose
+	// ceiling is 1 and whose cost warning is therefore empty; offering it here would put a row in a cost
+	// picker that has no cost, and a user selecting it would be choosing an execution envelope from a
+	// list of control loops.
+	//
+	// The envelope is authored on its own surface. See EnvelopeOptions.
+	strategies := registry.BuiltinLoopStrategies()
 	out := make([]HarnessStrategyOption, 0, len(strategies))
 	for _, st := range strategies {
 		identity := st.Name() == registry.StrategySingleShot

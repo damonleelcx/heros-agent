@@ -111,7 +111,15 @@ func CoverageAxes() []string {
 		string(variantspec.DimContext),
 		string(variantspec.DimMemory),
 		string(variantspec.DimHarness),
+		// P34: the axis split. `harness` above now answers for the EXECUTION ENVELOPE and `loop` answers
+		// for the ITERATION POLICY — the strategies that used to be reported under `harness`.
+		string(variantspec.DimLoop),
 		wiringRefusalDim,
+		// P34: topology. Like `wiring` it is not a `Dimension` — design D3 keeps it spec-level, because
+		// every Dimension is a property of ONE node and topology is a property BETWEEN nodes — but it is
+		// an axis a user can request, so it must have an answer in every language or it renders as "not
+		// applicable", which is a claim about the customer's code.
+		graphRefusalDim,
 	}
 }
 
@@ -141,7 +149,9 @@ func AxisCoverage() []CoverageCell {
 		out = append(out, contextCoverage(lang)...)
 		out = append(out, memoryCoverage(lang)...)
 		out = append(out, harnessCoverage(lang)...)
+		out = append(out, loopCoverage(lang)...)
 		out = append(out, wiringCoverage(lang)...)
+		out = append(out, graphCoverage(lang)...)
 	}
 	sortCoverage(out)
 	return out
@@ -460,8 +470,12 @@ func goProviderCaveat(lang string) string {
 		"message are different static types"
 }
 
-// harnessCoverage reads the builtin strategy set and the MATERIALIZER TABLE, and answers for every
-// (language, strategy) cell (P18 §5, narrowed per-cell by §11).
+// loopCoverage reads the builtin LOOP strategy set and the MATERIALIZER TABLE, and answers for every
+// (language, strategy) cell (P34 task 2.7 / decisions.md D-34.7; formerly harnessCoverage, P18 §5).
+//
+// 🔴 This function did not change what it computes — it changed what AXIS it files the answer under. The
+// strategies it reports are iteration policies, and after ADR-014 those live on `loop`. Filing them under
+// `harness` would leave the split invisible on every surface that reads coverage, which is most of them.
 //
 // It derives from HasHarnessMaterializer and harnessHostService — the same two functions the rewriters
 // dispatch on — so the claim and the behaviour cannot disagree. A hand-written copy would be the drift
@@ -480,12 +494,11 @@ func goProviderCaveat(lang string) string {
 //
 // 🚫 A `materializes` cell is a claim about the (language, strategy) PAIR, not a promise about every call
 // site in it: the loop needs a re-invocable call whose answer is readable, and a call site without one is
-// refused by shape. That is the same granularity memoryCoverage uses, and the Note says so rather than
-// leaving a reader to discover it at apply time.
-func harnessCoverage(lang string) []CoverageCell {
-	const axis = string(variantspec.DimHarness)
+// refused by shape. The Note says so rather than leaving a reader to discover it at apply time.
+func loopCoverage(lang string) []CoverageCell {
+	const axis = string(variantspec.DimLoop)
 	var out []CoverageCell
-	for _, st := range registry.BuiltinHarnessStrategies() {
+	for _, st := range registry.BuiltinLoopStrategies() {
 		cell := CoverageCell{Axis: axis, Language: lang, Form: st.Name()}
 		switch {
 		case st.Name() == registry.StrategySingleShot:
@@ -495,7 +508,7 @@ func harnessCoverage(lang string) []CoverageCell {
 		case harnessHostService(st.Name()) != "":
 			// 🔴 Not our backlog, and permanently so. CauseNotAtCallSite carries NO missing artifact: there
 			// is nothing to build, because a call site has nowhere to inject a tool executor, a planner or
-			// a critic, and the generated module may not reach a provider (decisions.md D-10).
+			// a critic, and the generated module may not reach a provider (P18 decisions.md D-10).
 			cell.Status = CoverageRefuses
 			cell.Cause = CauseNotAtCallSite
 			cell.Note = "this strategy needs " + harnessHostService(st.Name()) +
@@ -519,14 +532,51 @@ func harnessCoverage(lang string) []CoverageCell {
 		default:
 			cell.Status = CoverageRefuses
 			cell.Cause = CauseNoMaterializer
-			cell.MissingArtifact = "a " + lang + " harness module and its call-site rewriter (harnessMaterializers)"
-			cell.Note = "the harness runtime is shared and has landed; what is missing for this language is " +
+			cell.MissingArtifact = "a " + lang + " loop module and its call-site rewriter (harnessMaterializers)"
+			cell.Note = "the loop runtime is shared and has landed; what is missing for this language is " +
 				"the emitted module a rewritten call site would drive, and the rewriter that emits it " +
 				"(covered today: " + harnessMaterializerDisplay() + ")"
 		}
 		out = append(out, cell)
 	}
 	return out
+}
+
+// harnessCoverage answers for the EXECUTION ENVELOPE — what the harness axis narrows to after P34's
+// split (FR5, decisions.md D-34.7).
+//
+// 🔴 One cell per language, and it REFUSES in every one, permanently, with `CauseNotAtCallSite` and NO
+// missing artifact. That is not a gap anybody is going to close, and saying so plainly is the point of
+// the cause taxonomy: an envelope is sandbox posture, a spend ceiling, a timeout, a guardrail binding —
+// facts about how a node is DEPLOYED. None of them is written at a call site in any language, so there
+// is no rewriter that could ever emit one, and labelling this `CauseNoMaterializer` would tell every
+// reader to wait for something that is not coming.
+//
+// 🚫 The envelope is NOT unenforced because it is unmaterialized, and the Note says so. It is checked at
+// RESOLVE — the turn ceiling against the loop's chosen value, the host services against what the loop
+// needs, the concurrency limit against a declared group — and again by the sandbox at execution. A
+// reader who took "refuses" to mean "ignored" would draw exactly the wrong conclusion about their own
+// blast radius, which is the one misreading this Note exists to prevent.
+func harnessCoverage(lang string) []CoverageCell {
+	return []CoverageCell{{
+		Axis:     string(variantspec.DimHarness),
+		Language: lang,
+		Form:     registry.StrategyEnvelope,
+		Status:   CoverageRefuses,
+		Cause:    CauseNotAtCallSite,
+		// 🔴 The wording here is load-bearing and is checked by a fence in internal/changedelivery: this
+		// Note is read verbatim into a delivery refusal, and a delivery refusal that mentioned a "host
+		// service" would send an operator to look at a process when the answer is that no source changed.
+		// TestHostAbsentAndNotRuntimeResolvableAreDistinct caught exactly that in an earlier draft. Say
+		// what the envelope PROVIDES without naming the runtime concept.
+		Note: "an execution envelope — where a node may reach on the network, what it may spend, how long " +
+			"it may run, how many of its steps may overlap, which guardrail and approval gate it answers " +
+			"to — is a property of how the node is DEPLOYED, so there is nothing to write into your source " +
+			"in any language. 🔴 That is not the same as unenforced: the envelope is checked at RESOLVE " +
+			"(a loop's chosen turn count against the ceiling, a loop's required second actors against the " +
+			"ones the envelope grants, a concurrent group against the concurrency limit) and again by the " +
+			"sandbox at execution",
+	}}
 }
 
 func sortedPolicyNames() []string {
@@ -551,6 +601,96 @@ func wiringCoverage(lang string) []CoverageCell {
 	cell.MissingArtifact = "a " + lang + " statement resolver (statementResolvers)"
 	cell.Note = "the plan, the edge check, the coherence gate and the permutation invariant are language-neutral; what is missing is this language's statement boundaries"
 	return []CoverageCell{cell}
+}
+
+// ── graph topology (P34 §5, FR12–FR18) ──────────────────────────────────────────────────────────
+
+// graphRefusalDim is the axis label for topology. Like wiringRefusalDim it is a string rather than a
+// `variantspec.Dimension`, and that is design D3 rather than an omission: every Dimension is a property
+// of ONE node, and topology is a property BETWEEN nodes, so graph lives at the spec level beside `order`
+// and `edges`. It is still an axis a user can request, so it must answer in every language.
+const graphRefusalDim = "graph"
+
+// GraphForms are the three shapes a spec can declare on the graph axis. They are FORMS rather than one
+// cell because they fail independently: a language may be able to route conditionally and be unable to
+// run two calls concurrently, and one verdict for the axis would be wrong in one direction or the other.
+func GraphForms() []string {
+	return []string{"concurrent group", "conditional edge", "merge"}
+}
+
+// graphCoverage answers for every (language, form) cell on the topology axis.
+//
+// 🔴 FR18 requires a refusal to name WHICH of three things is missing — the frontend, the analysis, or
+// the language support — and never a generic unsupported state. Graph is the first axis where those come
+// apart, so the read distinguishes them rather than collapsing them:
+//
+//	frontend missing   discovery has no analyser for this language at all, so there is no IR to declare
+//	                   topology over. Nothing the customer writes changes it and no topology rewriter
+//	                   would help. (CauseNoMaterializer, artifact: a frontend.)
+//	analysis missing   there IS a frontend, but a SYNTACTIC one: `discovery.AnalysisSyntactic`'s own doc
+//	                   says it "emits NODES AND NO EDGES". A spec can declare a concurrent group over
+//	                   nodes, but a merge or a predicate has to be validated against edges and typed
+//	                   contracts this analysis never produced. (CauseNoMaterializer, artifact: a typed
+//	                   analysis.)
+//	support missing    frontend and typed analysis both exist; what is absent is this language's
+//	                   topology rewriter. (CauseNoMaterializer, artifact: the rewriter.)
+//
+// 🚫 None of the three is CauseNotAtCallSite. Concurrency and conditional routing ARE expressible at a
+// call site — that is what makes them a codemod rather than a policy — so claiming otherwise would tell a
+// reader that a thing which is merely unbuilt can never be built. That is the one label the taxonomy
+// reserves for permanence, and borrowing it here would spend the taxonomy's only irreversible word.
+func graphCoverage(lang string) []CoverageCell {
+	var out []CoverageCell
+	missing, artifact, note := graphGap(lang)
+	for _, form := range GraphForms() {
+		cell := CoverageCell{Axis: graphRefusalDim, Language: lang, Form: form}
+		if missing == "" && GraphFormMaterializesIn(lang, form) {
+			cell.Status = CoverageMaterializes
+			cell.Note = "declared over the existing order and validated through the typed-contract gate " +
+				"before any codemod is generated"
+			out = append(out, cell)
+			continue
+		}
+		cell.Status = CoverageRefuses
+		cell.Cause = CauseNoMaterializer
+		cell.MissingArtifact = artifact
+		cell.Note = note
+		if missing == "" {
+			cell.MissingArtifact = "a " + lang + " topology rewriter for a " + form + " (graphMaterializers)"
+			cell.Note = "the declaration, the typed-contract gate and the merge validation are " +
+				"language-neutral and have landed; what is missing for this language is the rewriter that " +
+				"writes this form into source (covered today: " + graphMaterializerDisplay() + ")"
+		}
+		out = append(out, cell)
+	}
+	return out
+}
+
+// graphGap names which of the frontend or the analysis is missing for a language, or "" when neither is
+// — in which case what is missing is the rewriter, and the caller says so.
+//
+// It reads `discovery`'s own frontend registry rather than a list here, for the reason every other read
+// in this file does: a hand-written copy is the optimistic one.
+func graphGap(lang string) (missing, artifact, note string) {
+	for _, fe := range discovery.DefaultFrontends() {
+		if !strings.EqualFold(fe.Language(), lang) {
+			continue
+		}
+		if fe.AnalysisKind() == discovery.AnalysisSyntactic {
+			return "analysis",
+				"a typed " + lang + " analysis that emits edges and io_contracts (today it is syntactic)",
+				"this build's " + languageDisplay(lang) + " frontend is a SYNTACTIC analyser: it enumerates " +
+					"call sites and emits no edges at all. A topology declaration has to be validated " +
+					"against edges and typed I/O contracts, and there are none to validate against — so " +
+					"what is missing is the ANALYSIS, not the rewriter and not anything in your repository"
+		}
+		return "", "", ""
+	}
+	return "frontend",
+		"a " + lang + " discovery frontend",
+		"this build has no frontend for " + languageDisplay(lang) + ", so nothing is read from a " +
+			"repository in this language and there is no graph to declare topology over. What is missing " +
+			"is the FRONTEND — the language support itself — rather than a topology rewriter"
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────────

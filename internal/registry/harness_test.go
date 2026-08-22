@@ -86,10 +86,14 @@ func TestHarnessRefFailsClosedCrossKind(t *testing.T) {
 	}
 }
 
-// TestFiveBuiltinStrategiesRegister — task 2.4. The cardinality assertion exists so a sixth strategy
-// cannot be added without a version bump; a stored strategy name is only interpretable against the
-// vocabulary version it was written under.
-func TestFiveBuiltinStrategiesRegister(t *testing.T) {
+// TestBuiltinHarnessStrategiesRegister — task 2.4, and the fence that P34 had to walk past deliberately.
+//
+// 🔴 This test went RED when P34 added `envelope`, which is the cardinality assertion working exactly as
+// intended: a strategy cannot join the vocabulary without a version bump, because a stored strategy name
+// is only interpretable against the version it was written under. `HarnessStrategySetVersion` moved
+// 1.0.0 → 2.0.0 in the same change, and the expected set below grew by one. Adding the name here WITHOUT
+// the version bump is the thing this test exists to stop, and it still stops it.
+func TestBuiltinHarnessStrategiesRegister(t *testing.T) {
 	got := BuiltinHarnessStrategies()
 	if len(got) != HarnessStrategySetSize {
 		t.Fatalf("BuiltinHarnessStrategies() has %d entries but HarnessStrategySetSize is %d; adding a "+
@@ -99,6 +103,9 @@ func TestFiveBuiltinStrategiesRegister(t *testing.T) {
 	want := map[string]bool{
 		"single-shot": true, "react-loop": true, "plan-execute": true,
 		"reflexion": true, "critic-loop": true,
+		// P34: the execution envelope. The five above are now the LEGACY loop-bearing shape — still
+		// resolvable indefinitely (ADR-014 D1), no longer authorable through any new surface.
+		StrategyEnvelope: true,
 	}
 	s := NewStore(nil, nil)
 	for _, st := range got {
