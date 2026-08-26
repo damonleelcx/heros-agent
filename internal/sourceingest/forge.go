@@ -37,8 +37,20 @@ type forgeAdapter struct {
 	grant GrantKind
 	// grantLabel is the customer-facing name of that object, for the consent screen.
 	grantLabel string
-	// permission is the forge's own name for the read permission the grant carries.
+	// permission is the forge's own name for the read permission the grant carries, as PROSE for the
+	// consent screen.
 	permission string
+	// readOnlyScopes is the same fact in MACHINE form: every scope spelling this forge's narrowest
+	// grant actually carries. It is the ALLOWLIST `Authorization.Validate` admits against.
+	//
+	// 🔴 Two fields for one fact, and the split is deliberate rather than duplication. `permission` is
+	// read by a person on a consent screen and its exact prose is asserted by the console
+	// (`web/console/tests/connections.test.mjs`); this is compared against a wire value. Deriving one
+	// from the other would force a formatting decision — `contents: read` against `contents:read` —
+	// into a security control. `TestTheDeclaredReadScopesAreWhatTheConsentScreenStates` asserts they
+	// agree once normalised, so the drift that matters (a scope enforced but not disclosed, or
+	// disclosed but not enforced) is a red build.
+	readOnlyScopes []string
 	// revokeHint tells a customer where to revoke it on THEIR side. A revocation that only works on
 	// our side is half a revocation, and the half they cannot verify.
 	revokeHint string
@@ -50,22 +62,24 @@ type forgeAdapter struct {
 
 var forgeAdapters = map[Forge]forgeAdapter{
 	ForgeGitHub: {
-		forge:      ForgeGitHub,
-		host:       "github.com",
-		grant:      GrantAppInstallation,
-		grantLabel: "a GitHub App installation limited to this one repository",
-		permission: "contents: read, metadata: read",
-		revokeHint: "GitHub → Settings → Applications → Installed GitHub Apps → Configure → Uninstall",
+		forge:          ForgeGitHub,
+		host:           "github.com",
+		grant:          GrantAppInstallation,
+		grantLabel:     "a GitHub App installation limited to this one repository",
+		permission:     "contents: read, metadata: read",
+		readOnlyScopes: []string{"contents:read", "metadata:read"},
+		revokeHint:     "GitHub → Settings → Applications → Installed GitHub Apps → Configure → Uninstall",
 		// GitHub's installation-token basic auth uses the literal `x-access-token` as the user.
 		credentialUser: func(string) string { return "x-access-token" },
 	},
 	ForgeGitLab: {
-		forge:      ForgeGitLab,
-		host:       "gitlab.com",
-		grant:      GrantAccessToken,
-		grantLabel: "a GitLab project access token scoped to this one project",
-		permission: "read_repository",
-		revokeHint: "GitLab → Project → Settings → Access Tokens → Revoke",
+		forge:          ForgeGitLab,
+		host:           "gitlab.com",
+		grant:          GrantAccessToken,
+		grantLabel:     "a GitLab project access token scoped to this one project",
+		permission:     "read_repository",
+		readOnlyScopes: []string{"read_repository"},
+		revokeHint:     "GitLab → Project → Settings → Access Tokens → Revoke",
 		// GitLab project access tokens authenticate over HTTPS as any non-empty user with the token
 		// as the password; the conventional literal is used so the request is recognisable in a log.
 		credentialUser: func(string) string { return "project-access-token" },
@@ -76,6 +90,7 @@ var forgeAdapters = map[Forge]forgeAdapter{
 		grant:          GrantAccessToken,
 		grantLabel:     "a Bitbucket repository access token scoped to this one repository",
 		permission:     "repository:read",
+		readOnlyScopes: []string{"repository:read"},
 		revokeHint:     "Bitbucket → Repository settings → Access tokens → Revoke",
 		credentialUser: func(string) string { return "x-token-auth" },
 	},
@@ -142,6 +157,44 @@ func CloneHosts() []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// ReadOnlyScopesFor reports every scope spelling this forge's narrowest grant carries — the set
+// `Authorization.Validate` admits against.
+//
+// # 🔴 Why this is an ALLOWLIST, and what the denylist it replaced could not do
+//
+// The check used to refuse a scope containing a write VERB — `write`, `push`, `admin`, `delete`,
+// `maintain`, `manage`, `create` — and its own comment named the weakness it was accepting: *"a table
+// of exact names is a table that is missing the one the forge shipped last month."* That was right
+// about the risk and wrong about which table has it. A denylist of dangerous spellings is the one that
+// goes stale; an allowlist of the spellings we ask for cannot, because it is a fact about OUR request
+// rather than about a forge's evolving vocabulary.
+//
+// The gap that proved it: **GitHub's classic `repo` scope grants full read AND write** and contains no
+// verb, so it passed. It is not alone — `public_repo` (write to public repositories) and GitLab's `api`
+// (complete read/write API access) are the same shape: NOUNS that confer every verb. A denylist would
+// have needed all three added, and would still be missing the fourth.
+//
+// The denylist also refused things it should not have: a GitHub App's `administration:read` is
+// read-only metadata and contains `admin`.
+//
+// # What "read-only" means here, precisely
+//
+// Not "any scope that cannot write" — **the scopes the platform's own narrowest grant carries.** That
+// is the same rule `Validate` already applies to repositories: a grant covering a repository we did not
+// name is refused even though it is a perfectly ordinary grant. Broader than asked for is refused,
+// whether the excess is a repository or a permission.
+//
+// 🚫 It is deliberately PER FORGE. A GitHub grant reporting GitLab's `read_repository` is not a
+// harmless spelling difference — it is evidence that whatever built the authorization is confused about
+// which forge it is talking to, and admitting it would record that confusion as a connection.
+func ReadOnlyScopesFor(f Forge) ([]string, error) {
+	a, ok := forgeAdapters[f]
+	if !ok {
+		return nil, fmt.Errorf("sourceingest: %q is not a supported forge", f)
+	}
+	return append([]string(nil), a.readOnlyScopes...), nil
 }
 
 // ExpectedGrantKind reports the grant kind this forge issues at repository scope.

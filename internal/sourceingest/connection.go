@@ -204,20 +204,96 @@ type Authorization struct {
 	// Token is the credential the forge issued. It is handed to the secret store and then dropped; it
 	// is never stored on a Connection, never logged, and never returned by any read path.
 	Token string
-	// Scopes is what the forge says the grant permits, for the read-only assertion. Refused if it
-	// contains anything that can write.
+	// Scopes is what the forge says the grant permits, for the read-only assertion. Every entry must be
+	// one this forge's narrowest grant carries (`ReadOnlyScopesFor`); anything else is refused.
+	//
+	// ⚠️ An EMPTY list is admitted, and the limit is stated rather than left to be discovered: not every
+	// forge reports scopes on every grant kind, so an absent list is "the forge said nothing" rather
+	// than "the grant permits nothing". What bounds a grant's reach regardless is `Covers` /
+	// `AccountWide`, and both of those refuse an empty value.
 	Scopes []string
 }
 
-// writeCapableScopeSubstrings are the scope fragments that mean "can change something".
+// ── The scope check: an allowlist decides, and a denylist only explains ──────────────────────────
 //
-// Substrings rather than exact names because the three forges spell the same power differently
-// (`contents:write`, `write_repository`, `repository:write`, `repo`), and a table of exact names is a
-// table that is missing the one the forge shipped last month. Matching on the VERB fails toward
-// refusal, which is the correct direction for a control whose failure mode is a write grant admitted
-// as a read one.
+// # 🔴 What changed here, and why the direction matters more than the entries
+//
+// This USED to be a denylist: refuse a scope containing a write verb. Its own comment named the
+// weakness it was accepting — *"a table of exact names is a table that is missing the one the forge
+// shipped last month"* — and then accepted it anyway, on the reasoning that matching the VERB fails
+// toward refusal.
+//
+// The reasoning was right about the direction and wrong about which table carries the risk. **GitHub's
+// classic `repo` scope grants full read AND write and contains no verb**, so it passed a check designed
+// to catch verbs. It is a NOUN that confers every one of them, and it is not alone: `public_repo`
+// grants write to public repositories, and GitLab's `api` grants complete read/write API access.
+// Adding all three would leave the list missing the fourth.
+//
+// So the DECISION is now an allowlist — `ReadOnlyScopesFor`, the scopes this forge's narrowest grant
+// actually carries — and it cannot go stale in the dangerous direction, because it is a fact about what
+// this platform ASKS FOR rather than about a forge's evolving vocabulary. A spelling nobody has seen
+// before is refused by construction.
+//
+// # Why the verb list survives, and what it is now allowed to do
+//
+// It DECIDES NOTHING. It picks a better sentence for a scope the allowlist has already refused:
+// *"`repo` grants write access"* is actionable where *"`repo` is not a scope this grant carries"* is
+// merely true. A customer pasting a classic personal access token needs the first one.
+//
+// 🔴 The safety argument for keeping two lists at all is that they cannot disagree in a way that
+// matters: if this one goes stale, a refusal is less informative. It can never admit anything, and
+// `TestTheExplainerDecidesNothing` asserts exactly that by refusing a scope the explainer does not know.
+
+// writeCapableScopeSubstrings are the scope fragments that mean "can change something". Diagnostic
+// only — see the block comment above.
 var writeCapableScopeSubstrings = []string{
 	"write", "push", "admin", "delete", "maintain", "manage", "create",
+}
+
+// fullAccessScopes are the spellings that confer write WITHOUT containing a verb — the shape that
+// defeated the denylist. Diagnostic only, and each maps to the sentence a customer can act on.
+//
+// 🚫 This is not the security control and must never become one. It is here so the three known
+// instances are written down where the next reader of this file meets them, rather than living only in
+// a finding nobody opens.
+var fullAccessScopes = map[string]string{
+	"repo":        "GitHub's classic `repo` scope grants full control of a repository, including write",
+	"public_repo": "GitHub's classic `public_repo` scope grants write access to public repositories",
+	"api":         "GitLab's `api` scope grants complete read and write API access",
+}
+
+// explainScope returns why a scope is write-capable, or "" when this list does not recognise it.
+//
+// The noun table is consulted before the verb substrings because it is exact and they are fuzzy: a
+// scope literally named `api` should get its own sentence rather than matching nothing and falling
+// through to the generic one.
+func explainScope(scope string) string {
+	low := strings.ToLower(strings.TrimSpace(scope))
+	if why, ok := fullAccessScopes[low]; ok {
+		return why
+	}
+	for _, verb := range writeCapableScopeSubstrings {
+		if strings.Contains(low, verb) {
+			return fmt.Sprintf("it carries the verb %q, so it can %s", verb, verb)
+		}
+	}
+	return ""
+}
+
+// scopeAdmitted reports whether a declared scope is one the forge's narrowest grant carries.
+//
+// Compared case-insensitively and with surrounding space trimmed, because a forge that returns
+// `Contents:Read` or a leading space has reported the same permission. 🚫 No other normalisation: a
+// check that stripped punctuation would make `contents:write` and `contents-write` and `contentswrite`
+// one value, and the whole point is that the spelling is the claim.
+func scopeAdmitted(scope string, allowed []string) bool {
+	got := strings.ToLower(strings.TrimSpace(scope))
+	for _, ok := range allowed {
+		if got == strings.ToLower(ok) {
+			return true
+		}
+	}
+	return false
 }
 
 // Validate refuses an authorization that is broader than the one repository the customer named, or
@@ -238,13 +314,32 @@ func (a Authorization) Validate(repository string) error {
 	if a.Token == "" {
 		return fmt.Errorf("sourceingest: the forge returned no credential for %s", repository)
 	}
-	for _, s := range a.Scopes {
-		low := strings.ToLower(s)
-		for _, bad := range writeCapableScopeSubstrings {
-			if strings.Contains(low, bad) {
-				return fmt.Errorf("sourceingest: refusing scope %q — a read connection may not carry a scope that can %s", s, bad)
-			}
+	// The scope allowlist. 🔴 Every declared scope must be one this forge's narrowest grant carries;
+	// anything else is broader than what was asked for, which is the same rule the `Covers` check below
+	// applies to repositories.
+	//
+	// ⚠️ AN EMPTY `Scopes` STILL PASSES, and that is unchanged rather than overlooked. Not every forge
+	// reports a scope list on every grant kind, and the control that actually bounds a grant's REACH is
+	// `Covers` / `AccountWide` below — both of which refuse an empty value. Refusing an absent scope
+	// list here would reject connections that work today on all three forges, for a claim the forge
+	// never made. It is a residual limit and it is named in the doc comment on `Scopes`.
+	allowed, err := ReadOnlyScopesFor(a.Forge)
+	if err != nil {
+		return err
+	}
+	for _, scope := range a.Scopes {
+		if scopeAdmitted(scope, allowed) {
+			continue
 		}
+		if why := explainScope(scope); why != "" {
+			return fmt.Errorf("sourceingest: refusing scope %q on %s — a read connection may not carry a "+
+				"scope that can write, and %s. The narrowest grant this platform asks for carries %s",
+				scope, a.Forge, why, strings.Join(allowed, ", "))
+		}
+		return fmt.Errorf("sourceingest: refusing scope %q on %s — it is not one of the scopes this "+
+			"platform's read grant carries (%s). A scope nobody here recognises is refused rather than "+
+			"admitted: what it permits cannot be checked",
+			scope, a.Forge, strings.Join(allowed, ", "))
 	}
 	if a.AccountWide {
 		return fmt.Errorf("%w: the %s grant is account-wide, which reaches repositories that do not exist yet", ErrGrantTooBroad, a.Forge)
