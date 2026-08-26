@@ -30,7 +30,7 @@ PARITY_DIR ?= .parity
         classifier-calibration demo-patterngraph demo-proposals demo-billing demo-billing-states \
         release-rehearse release-rehearse-redcheck readme-install packaging-proof install-smoke install-smoke-refusals \
         agent-rehearse agent-status repo-intake-hermes assessment-hermes axissplit-hermes \
-        intent-holdout intent-holdout-strict attribution-holdout p31-fence-redcheck p33-fence-redcheck p34-fence-redcheck console-edge-proof assessment-holdout
+        intent-holdout intent-holdout-strict attribution-holdout p31-fence-redcheck p33-fence-redcheck p34-fence-redcheck p35-fence-redcheck console-edge-proof assessment-holdout p35-live-four-step improve-hermes
 
 ## ci: the locally-provable gate (go + schema + console-types + discovery-ci + intent-holdout). Lint/db-proof run as their own CI jobs.
 ci: go schema console-types-check docs-facts-check discovery-ci intent-holdout-strict
@@ -674,3 +674,58 @@ agent-acceptance:
 	@GOWORK=off $(PYTHON) scripts/agent_acceptance.py \
 		--tenant "$(TENANT)" --workflow "$(WORKFLOW)" \
 		$(if $(API),--api "$(API)",) $(if $(CONSOLE),--console "$(CONSOLE)",)
+
+## p35-live-four-step: P35 7.14 / A13 — approve → approval row → delivery record → THE PULL REQUEST.
+##
+## 🔴 §9.3 in one line: a 200 is not evidence of a write. Every other P35 fence proves the platform
+## CALLED something correctly; none of them proves a pull request exists. A delivery that returns 200
+## has not necessarily produced one, and a pull request existing is not a delivery record — the two can
+## each be true with the other false. Only step 4 talks to a forge.
+##
+## ⚠️ IT OPENS A REAL PULL REQUEST on the repository you name, and leaves it open. It never merges one.
+##
+##   HEROS_LIVE_FORGE_TOKEN=...  a token with pull_requests:write and contents:write
+##   HEROS_LIVE_FORGE_REPO=owner/repo
+##   HEROS_LIVE_FORGE_BASE=main  (optional)
+p35-live-four-step:
+	GOWORK=off $(GO) test -count=1 -v -tags live -run TestLiveFourStep ./internal/improvementrun/
+
+## p35-fence-redcheck: P35 §7 — prove the gate fences can actually FAIL.
+##
+## 🔴 §9.7 is titled "green is worth having only if green can be red", and the title is the requirement.
+## Every gate P35 must not bypass is a few lines at a call site; deleting one leaves the whole suite
+## green except the fence that names it. The drill breaks each gate, asserts the package STILL COMPILES
+## (a mutation that does not build exits non-zero for a reason unrelated to the fence), and asserts the
+## named fence goes red.
+p35-fence-redcheck:
+	$(PYTHON) scripts/p35_fence_redcheck.py
+
+## improve-hermes: run P35's improvement run against a REAL repository's own call sites.
+##
+## Every P35 fence is green and all twenty gates have been drilled red (`make p35-fence-redcheck`).
+## Green fences prove the parts, against fixtures this repository wrote, with node ids and deltas chosen
+## to make the assertion clean. That is the right shape for a fence and it is NOT evidence about a
+## customer's repository.
+##
+## This proves the WALK. It discovers `nousresearch/hermes-agent`'s actual call sites, reads the source
+## revision out of the checkout, builds a bounded plan against the ids that come out, drives the SHIPPED
+## `optimizer.Controller` under that plan's bounds, and prints every refusal naming a symbol somebody
+## else wrote.
+##
+## 🔴 WHAT IS NOT REAL, printed by the command itself in its first four lines: the VERDICTS. Verification
+## runs the customer's eval harness on the customer's machine against the customer's eval set, and this
+## command has none of the three. Every delta it shows is labelled DECLARED.
+##
+## 🚫 IT OPENS NO PULL REQUEST. hermes-agent is somebody else's repository. `make p35-live-four-step` is
+## the one that talks to a forge, against a repository whoever runs it chose.
+##
+## 🚫 It calls NO provider and costs nothing.
+##
+## It needs a checkout; clone it first (a public repository needs no token):
+##
+##	git clone --depth 1 https://github.com/nousresearch/hermes-agent $(HERMES)
+##	make improve-hermes
+improve-hermes:
+	@test -d "$(HERMES)" || { echo "improve-hermes: no checkout at $(HERMES)"; \
+		echo "  git clone --depth 1 https://github.com/nousresearch/hermes-agent $(HERMES)"; exit 2; }
+	GOWORK=off $(GO) run ./cmd/proof/improvehermes -local $(HERMES)

@@ -91,6 +91,22 @@ func LinkSurfaces() []LinkSurface {
 			"linking cannot fill this one: an assessment reads your SOURCE, not the shape a link carries. " +
 				"Push a snapshot (`heros push`) or connect the repository under Source, then press Assess"},
 
+		// P35. 🔴 The one page on this list that is empty for a reason NOTHING a customer types can fix,
+		// and saying so is the entry's whole job.
+		//
+		// An improvement run needs everything `assess` needs — the SOURCE, which arrives by `heros push`
+		// or a connection — AND a verification gate that runs the eval harness, which by design executes
+		// on the customer's machine and not on the platform. So a hosted deployment can produce a PLAN
+		// for this page and cannot execute one, and it says so in a 503 naming exactly that.
+		//
+		// A reader told to "re-run with --with-ir" would push a fuller graph and find the page still
+		// unable to run anything, with no clue why. This sentence is what stops that hour.
+		{"improve", "/app/improve", FillNotByLinking,
+			"linking cannot fill this one either, and neither can pushing source on its own: a run needs " +
+				"your SOURCE (`heros push`, or connect the repository under Source) AND a verification " +
+				"gate that runs your eval harness on your machine. Ask for a plan — that part works, " +
+				"costs nothing, and shows you what a run would touch and spend"},
+
 		{"transforms", "/app/transforms", FillByReceipt,
 			"run `heros apply --link-receipt` (a transform is generated on your machine; the receipt is " +
 				"what tells the platform it happened)"},

@@ -23,6 +23,7 @@ import (
 	"github.com/heros-foreal/agentd/internal/config"
 	"github.com/heros-foreal/agentd/internal/erroreport"
 	"github.com/heros-foreal/agentd/internal/herosagent"
+	"github.com/heros-foreal/agentd/internal/improvementrun"
 	"github.com/heros-foreal/agentd/internal/linkingest"
 	"github.com/heros-foreal/agentd/internal/mailer"
 	"github.com/heros-foreal/agentd/internal/providergateway"
@@ -68,6 +69,12 @@ type Server struct {
 	// distinction P9 draws throughout: "mount the subsystem" and "check the identifier" are two
 	// different people's next actions.
 	assessments AssessmentRunner
+	// improvementRuns is the P35 improvement-run surface, mounted by MountImprovementRuns when
+	// available. Nil in a deployment that does not run improvements, which answers 503 with a reason
+	// rather than 404 — a customer told "not found" goes and checks an identifier that is correct.
+	improvementRuns ImprovementRunner
+	// improvementHealth publishes the P35 run/proposal/delivery counters on /readyz (task 9.1).
+	improvementHealth ImprovementHealthSource
 	// assessmentHealth publishes the P33 per-axis, per-state health document on /readyz.
 	assessmentHealth AssessmentHealthSource
 	// sandboxConcurrency publishes the P34 isolate-concurrency gauge on /readyz (task 8.3).
@@ -575,6 +582,24 @@ type AssessmentHealthSource interface {
 	Health() assessment.Health
 }
 
+// ImprovementHealthSource publishes the P35 signal.
+type ImprovementHealthSource interface {
+	Health() improvementrun.Health
+}
+
+// SetImprovementHealth wires the P35 signal into /readyz (task 9.1).
+//
+// 🔴 Reported at the TOP LEVEL beside `assessment`, not inside `components`, and for the same reason:
+// every entry in `components` is a GATE, and none of the improvement run's states may take a
+// deployment down. A run that stopped on its budget is the product working.
+//
+// The field to page on is `improvement_run.alerting`, and the reason is task 9.1's own: a DASHBOARD
+// reads historical aggregates and can look completely healthy while the pipeline is broken. The signal
+// underneath it is the withdrawal rate — a withdrawal is a change that failed to reproduce its verified
+// delta and was stopped before it reached a customer's repository, so every conventional metric goes
+// the RIGHT way while it happens: the run completed, the API returned 201, nothing errored.
+func (s *Server) SetImprovementHealth(src ImprovementHealthSource) { s.improvementHealth = src }
+
 // SetAssessmentHealth wires the P33 signal into /readyz (task 6.1).
 //
 // # 🔴 Why this is NOT in `components`
@@ -735,6 +760,14 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 		// result, so "did it delete anything" cannot be the signal — "when did it last complete" is,
 		// and only the job can publish it.
 		body["source_retention"] = s.ingestRetention.Health()
+	}
+	if s.improvementHealth != nil {
+		// P35 task 9.1 · runs started / bounded-out / cancelled, proposals generated / verified /
+		// approved / delivered, deliveries deduplicated — PER AXIS and PER BOUND.
+		//
+		// 🔴 `improvement_run.alerting` is the field to page on. See SetImprovementHealth for why the
+		// signal underneath it (the withdrawal rate) is invisible to every conventional metric.
+		body["improvement_run"] = s.improvementHealth.Health()
 	}
 	if s.assessmentHealth != nil {
 		// P33 task 6.1 · assessments started/completed/refused, PER AXIS AND PER STATE.

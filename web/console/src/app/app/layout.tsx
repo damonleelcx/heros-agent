@@ -9,6 +9,7 @@ import {
   GitPullRequest,
   Grid3x3,
   ScanSearch,
+  Wand2,
   BookOpen,
   HardDriveDownload,
   Home,
@@ -101,6 +102,11 @@ const SURFACES: Surface[] = [
   // ABSENCE, and putting it above the axes it reports on would invite reading nine rows as a summary
   // of them rather than as an index into them.
   { href: "/app/assess", label: "Assess", icon: <ScanSearch /> },
+  // P35. AFTER Assess, and the order is the argument: Assess answers "what is weak here?" and Improve
+  // answers "fix it". A reader arrives at the first without knowing what they want and at the second
+  // having decided. Putting Improve above it would offer a paid, repository-writing act to somebody who
+  // has not yet been told what their repository does.
+  { href: "/app/improve", label: "Improve", icon: <Wand2 /> },
 ];
 
 const SETTINGS: Surface[] = [

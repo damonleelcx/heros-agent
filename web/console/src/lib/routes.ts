@@ -61,6 +61,14 @@ export const routes = {
   // page whose product is reporting ABSENCE: nine rows, always nine, and the ones that say "we could
   // not" are the ones with the most to read.
   assess: () => "/app/assess",
+  // P35. Where a question becomes a bounded plan, a set of verified proposals, and — one approval at a
+  // time — a pull request.
+  //
+  // 🔴 Its own surface rather than a tab on Assess, because the reader's question changes: Assess
+  // answers "what is weak here?" and this answers "fix it". They are read at different moments by
+  // people in different states, and the second one SPENDS MONEY and authorizes a write to a
+  // repository. A tab would put a paid, consequential act one keystroke from a free, read-only report.
+  improve: () => "/app/improve",
   // P32. Where a workflow's SOURCE comes from — a pushed bundle, a connected repository, or a local
   // machine. Its own surface rather than a tab on Workflows because the question it answers is about
   // the GRANT ("what may the platform read, and when did it") rather than about a workflow, and a
@@ -119,6 +127,11 @@ export const WORKING_SURFACES: readonly string[] = [
   // than a shell one. (No quotation marks in this comment: the Go-side fence reads every quoted string
   // out of the array block, so a quoted phrase here would arrive as a fourteenth surface.)
   "/app/assess",
+  // P35. The sentence the whole program was built around ends here: fix it, and open a pull request.
+  // It was the one intent backed by a CAPABILITY rather than a route, because the capability had
+  // nowhere to render. It has somewhere now, and flipping it is the event that classification was
+  // waiting for rather than a tidy-up.
+  "/app/improve",
 ];
 
 /**

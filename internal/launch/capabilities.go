@@ -16,6 +16,7 @@ import (
 	"github.com/heros-foreal/agentd/internal/account"
 	"github.com/heros-foreal/agentd/internal/adminlaunch"
 	"github.com/heros-foreal/agentd/internal/api"
+	"github.com/heros-foreal/agentd/internal/approval"
 	"github.com/heros-foreal/agentd/internal/assessment"
 	"github.com/heros-foreal/agentd/internal/billing"
 	"github.com/heros-foreal/agentd/internal/billingview"
@@ -31,6 +32,7 @@ import (
 	"github.com/heros-foreal/agentd/internal/hostedcompile"
 	"github.com/heros-foreal/agentd/internal/hostedproposals"
 	"github.com/heros-foreal/agentd/internal/hostedscorecard"
+	"github.com/heros-foreal/agentd/internal/improvementrun"
 	"github.com/heros-foreal/agentd/internal/legal"
 	"github.com/heros-foreal/agentd/internal/linkingest"
 	"github.com/heros-foreal/agentd/internal/metering"
@@ -142,6 +144,7 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 	mountedForgeDelivery := false
 	mountedProposalCompile := false
 	mountedAssessments := false
+	mountedImprovementRuns := false
 	mountedPayments := false
 	// The two evidence surfaces P33 checks a finding's reference against. They are mounted in an
 	// EARLIER block than the assessment itself (the board needs only the linked-run store; the
@@ -896,6 +899,81 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 			mountedAssessments = true
 		}
 
+		// ── P35 · the improvement run ─────────────────────────────────────────────────────────────
+		//
+		// 🔴 MOUNTED AT PRD §12 STAGE 1 — "plan only" — and that is a stated limit rather than a
+		// half-finished wiring. The reason is structural and is `internal/proposalgen`'s own: the P5.5
+		// verification gate runs the EVAL HARNESS, which lives on the customer's machine by design, so a
+		// hosted deployment holds nothing to verify a candidate with. A service wired with a verifier it
+		// does not have would surface UNVERIFIED candidates, which FR8 forbids and which is the single
+		// worst thing this phase could ship.
+		//
+		// So what is mounted here answers:
+		//
+		//	POST /api/v1/improvement-plans   a question becomes a bounded plan, or is refused by name.
+		//	                                 Spends nothing. This is the whole of stage 1.
+		//	POST /api/v1/improvement-runs    503 with a named reason, from `Service.check`.
+		//	GET  /api/v1/improvement-runs    reads a run back from the append-only ledger.
+		//
+		// ⚠️ The 503 says "this deployment can produce a plan but cannot execute one" and names what is
+		// missing. It does NOT say "not found": a console told 404 sends somebody to check an identifier
+		// that is correct, which is the miscategorisation this whole convention exists to prevent.
+		improvementLedger := improvementrun.NewMemLedger()
+		improvementMetrics := improvementrun.NewMetrics()
+		h.SetImprovementHealth(improvementMetrics)
+		improvementSvc := &improvementrun.Service{
+			Bounds: improvementrun.EntitlementBounds{
+				Gate:   entGate,
+				ByPlan: improvementPlanBounds(),
+				Subject: func(ctx context.Context, tenantID string) (string, string, error) {
+					return improvementSubject(ctx, irStore, graphStore, tenantID)
+				},
+			},
+			Acks:   improvementrun.NewMemAckStore(),
+			Ledger: improvementLedger,
+			// 🔴 The approval gate and the subject resolver ARE wired, because they exist. Only the
+			// RE-MEASURER is missing, and `Service.checkApprove` refuses the whole decision path on it
+			// rather than recording a consent it could not act on — an approval banked against a
+			// re-measurement that will never run is consent for a change nobody can finish.
+			Approvals: improvementrun.SQLApprovalGate{
+				Store: approvalStore{db: pg},
+				// The improvement run's proposals are configuration changes at a node, which is exactly
+				// what `prompt_engineering` and its siblings partition. `LayerTooling` is the one that
+				// covers a model/skill/tool swap, and a proposal filed under the wrong layer is invisible
+				// to the person who reviews that layer.
+				Layer: approval.LayerTooling,
+			},
+			Subject: improvementBinding(irStore, graphStore),
+			Metrics: improvementMetrics,
+			Now:     time.Now,
+		}
+		h.MountImprovementRuns(improvementSvc)
+
+		// 🚫 The reconciliation pass is NOT started, and the reason is the same one the 503 gives: this
+		// deployment cannot execute a run, so it has no interrupted deliveries to complete. A pass
+		// ticking every five minutes to discover that would write a fresh last-success timestamp over a
+		// pass that examined nothing — which makes `improvement_run.reconcile_last_success_ms` lie in
+		// the one direction that matters, by reporting health for a repair path that has never repaired
+		// anything. `startImprovementReconciler` is called by the phase that wires a verifier.
+		absent("p35_improvement_reconciliation", "the reconciliation pass completes deliveries that were "+
+			"interrupted between applying a change and opening its pull request; this deployment cannot "+
+			"execute a run at all, so there is nothing for it to complete and starting it would publish "+
+			"a health timestamp for a pass that examined nothing")
+
+		served("p35_improvement_plan (PRD §12 stage 1 — a question becomes a bounded plan with a scope, " +
+			"a candidate cap, a spend budget and a stopping condition, shown BEFORE anything spends; a " +
+			"question that cannot be bounded is REFUSED by name rather than run with defaults)")
+		absent("p35_improvement_run_execution", "the P5.5 verification gate runs the customer's eval "+
+			"harness, which does not execute on the platform (see internal/proposalgen). POST "+
+			"/api/v1/improvement-runs answers 503 naming what is missing — a run that could not verify "+
+			"would surface unverified candidates, which FR8 forbids")
+		served("p35_improvement_health (not a route — one document on GET /readyz, broken out PER AXIS " +
+			"AND PER BOUND. Alert on `improvement_run.alerting`: the signal underneath it is the " +
+			"WITHDRAWAL rate, and a withdrawal is a change that failed to reproduce its verified delta " +
+			"and was stopped before reaching a repository — every conventional metric goes the RIGHT " +
+			"way while it happens)")
+		mountedImprovementRuns = true
+
 		// The CODEMOD. It turns a stored proposal into the reviewable diff ADR-001 makes the product's
 		// output, using the retained snapshot, the re-derived IR and the same registries every other
 		// resolve goes through.
@@ -1047,6 +1125,15 @@ func mountCapabilities(h *api.Server, pg *sql.DB, dataDir, consoleHealthURL stri
 	if !mountedGraphEditor {
 		h.MountGraphEditor(nil)
 		absent("p5_graph_editor", noAdapter)
+	}
+	if !mountedImprovementRuns {
+		// Mounted with a NIL runner rather than left unmounted, for the reason stated throughout this
+		// file: an unmounted route answers 404, which a console classifies as "no such workflow" and
+		// renders over a workflow that plainly exists.
+		h.MountImprovementRuns(nil)
+		absent("p35_improvement_run", "this deployment declares no platform database (DATABASE_URL is "+
+			"unset), so there is no stored graph to resolve a workflow to a revision and nothing to "+
+			"pin a run to")
 	}
 	if !mountedAssessments {
 		// Mounted with a NIL runner rather than left unmounted, for the reason stated at

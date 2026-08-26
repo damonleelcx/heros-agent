@@ -88,6 +88,8 @@ func TestEveryPhaseOwnsItsNames(t *testing.T) {
 		"console.conversation.": "P31 — the conversational console",
 		"agentd.ingest.":        "P32 — repository intake",
 		"agentd.assessment.":    "P33 — surface assessment",
+		"agentd.run.":           "P35 — the improvement run",
+		"agentd.delivery.":      "P35 — the improvement run (delivery half; P12 owns the mechanism)",
 	}
 	for _, n := range Names() {
 		owned := false
@@ -111,6 +113,47 @@ func TestEveryPhaseOwnsItsNames(t *testing.T) {
 // `ingest.clone.succeeded`, `.failed`); the three extras — the refusal and the two retention states —
 // are named here because they are emitted, and an emitted name that no test knows about is exactly the
 // free-text field this enum exists to make impossible.
+// TestP35NamesAreTheFiveTaskFiveNinePromises is `tasks.md` 5.9, written out for P31's, P32's and P33's
+// reason: a test that ranged over the enum would pass for any set.
+//
+// 🔴 Five, and the run's own ledger has FOURTEEN entry kinds. That is not a gap. The ledger is the
+// reconciliation pass's input and has to record every act; an event stream is what a dashboard reads.
+// Emitting fourteen names would be a second, worse copy of the ledger in a log index — worse because a
+// log index drops entries and a ledger may not.
+func TestP35NamesAreTheFiveTaskFiveNinePromises(t *testing.T) {
+	want := []Name{
+		DeliveryDeduplicated,
+		DeliveryPROpened,
+		RunCandidateVerified,
+		RunChangeWithdrawn,
+		RunPlanCreated,
+	}
+	for _, n := range want {
+		if !n.Valid() {
+			t.Errorf("%q is not in the enum, so nothing may emit it", n)
+		}
+	}
+	var got []Name
+	for _, n := range Names() {
+		s := string(n)
+		if len(s) > len("agentd.run.") && s[:len("agentd.run.")] == "agentd.run." {
+			got = append(got, n)
+			continue
+		}
+		if len(s) > len("agentd.delivery.") && s[:len("agentd.delivery.")] == "agentd.delivery." {
+			got = append(got, n)
+		}
+	}
+	if len(got) != len(want) {
+		t.Fatalf("P35 owns %d names and the contract promises %d: %v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("P35 name %d is %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
 func TestP33NamesAreTheFiveTheContractPromises(t *testing.T) {
 	// Written out for P31's and P32's reason: a test that ranged over the enum would pass for any set.
 	// PRD §9.3 names four; `budget_exhausted` is the fifth because §7.3 makes budget refusal a

@@ -115,6 +115,23 @@ export type PlatformOutcome<T> =
        * the decision in two places and let a copy edit change behaviour.
        */
       reasonCode?: string;
+      /**
+       * nextAction is what the person can DO about this failure, in the platform's own words.
+       *
+       * # Why this is carried for every kind, like `reasonCode` and unlike `denial`
+       *
+       * A refusal that names no next action is the shape of refusal that teaches a reader nothing. P35's
+       * improvement run is where that costs the most: an unboundable question, a workflow with no
+       * resolved revision and an organization with no run budget are three different refusals with three
+       * different steps — pick a workflow, push source, ask your account owner — and the platform is the
+       * only thing that knows which. Flattening them to one sentence deletes the only part a person can
+       * act on, and the entire argument for REFUSING rather than running with defaults is that the
+       * person can act on the refusal.
+       *
+       * 🚫 It is never invented here. It is present when the platform sent one and absent otherwise, so
+       * a console cannot manufacture a step for a failure the platform had no advice about.
+       */
+      nextAction?: string;
       traceId?: string;
     };
 
@@ -224,6 +241,9 @@ export async function platformFetch<T>(path: string, options: FetchOptions): Pro
       detail?: string;
       trace_id?: string;
       reason_code?: string;
+      // The platform's own advice about what to do, on the refusals that carry one. See `nextAction`
+      // on PlatformFailure for why it travels for every kind rather than only for `gated`.
+      next_action?: string;
     } & Denial;
     // The platform's own words, not ours. `p35graph.html`'s error copy — "no such workflow (distinct
     // from a workflow that exists but is unclassified)" — is the product; inventing a generic message
@@ -263,6 +283,9 @@ export async function platformFetch<T>(path: string, options: FetchOptions): Pro
       error: message,
       denial,
       reasonCode: body.reason_code,
+      // 🚫 Read, never invented. Absent when the platform sent none — a console that manufactured a
+      // step for a failure the platform had no advice about would be guessing at somebody's next act.
+      nextAction: body.next_action,
       traceId: traceId ?? body.trace_id,
     };
   }

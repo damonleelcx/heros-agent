@@ -210,6 +210,51 @@ var routeExposure = RouteExposure{
 	// true from here on.
 	"/api/v1/assessments": ExposurePublic,
 
+	// ── P35 · the improvement run ─────────────────────────────────────────────────────────────────
+	//
+	// THREE FLAT ROUTES. `/api/v1/improvement-runs` carries two methods on one path, which is why this
+	// map is keyed by path and not by "METHOD PATH": an ingress rule matches a path and knows nothing
+	// about methods, so publishing the read necessarily publishes the write, and pretending otherwise
+	// would be the self-deception that keying by method invites.
+	//
+	// 🔴 PUBLIC, and the argument is `/api/v1/assessments`' argument with one addition. An improvement
+	// run is a MACHINE action a customer's CI has every reason to take — after a merge, on a nightly,
+	// before a release — and today's only caller being the console's BFF is not a reason to leave it
+	// unpublished. P30's finding is the cost of getting this wrong: a route mounted, buttonless and
+	// unpublished 404s in production behind an entirely green build.
+	//
+	// What makes it safe to publish:
+	//
+	//   - both REQUIRE an authenticated principal; there is no credential-free path;
+	//   - the tenant comes from that principal, and neither payload has a tenant field, so a request
+	//     cannot widen its own scope;
+	//   - `DisallowUnknownFields` refuses a key nobody ratified — and on THESE endpoints the fields a
+	//     future client would add are `budget`, `axes` and `origin`, every one of which would let a
+	//     caller widen its own bound or select the write-credential delivery path;
+	//   - the ORIGIN is read from the transport, never from the body, so a CLI caller cannot claim the
+	//     console's hosted-App delivery default (`originFor`);
+	//   - both bodies are capped at 8 KiB.
+	//
+	// ⚠️ What publishing genuinely changes, stated rather than assumed: `POST /api/v1/improvement-runs`
+	// SPENDS MONEY on the platform's own provider account, and it can spend more of it than an
+	// assessment can. Three controls stand between a caller and that, each failing closed: the auth
+	// gate; the plan's spend budget, which comes from the tenant's entitlement and cannot be set by a
+	// request; and the disclosure threshold, above which the run is WITHHELD until a person has
+	// acknowledged the plan. `TestTheImprovementRoutesRefuseAnUnauthenticatedRequest` keeps the first
+	// one true from here on.
+	//
+	// 🚫 `POST /api/v1/improvement-plans` is published beside them and spends NOTHING. It is the route
+	// that makes the plan reviewable before the run, and leaving it internal while publishing the run
+	// would publish the expensive half of a two-step flow and not the half that bounds it.
+	// 🔴 `/api/v1/improvement-decisions` is PUBLIC and it is the one here that authorizes a write to a
+	// customer's repository. It is safe on a control the other two do not need: the handler refuses a
+	// credential that names no PERSON, because approving a change is a person's act. A machine
+	// credential — the kind a CI job holds — cannot approve, which means publishing this adds no path a
+	// machine can walk to a pull request.
+	"/api/v1/improvement-plans":     ExposurePublic,
+	"/api/v1/improvement-runs":      ExposurePublic,
+	"/api/v1/improvement-decisions": ExposurePublic,
+
 	// ── P32 §4 · the local-mode pairing ───────────────────────────────────────────────────────────
 	//
 	// SPLIT, and the split is the point. The two console routes are reached by the BFF inside the

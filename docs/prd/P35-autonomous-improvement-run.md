@@ -9,7 +9,7 @@
 | **Support roles** | System Designer, DevOps, Product Designer, Frontend Dev, QA, Sales Operations |
 | **Upstream** | [P31](P31-conversational-console.md) · [P32](P32-repo-intake.md) · [P33](P33-surface-assessment.md) · P5.5 (verification) · P6 (optimizer) · P12 (forge delivery) · P7 (entitlements) · [ADR-001](../adr/ADR-001-source-transformation-apply-model.md) · [ADR-005](../adr/ADR-005-forge-delivery-and-credential-posture.md) |
 | **Unblocks** | the program's user-facing promise: one question, one pull request |
-| **Status** | Proposed — awaiting sign-off on §14 |
+| **Status** | Ratified — §14 Q1–Q5 answered in [`decisions.md`](../../openspec/changes/p35-autonomous-improvement-run/decisions.md) |
 
 ---
 
@@ -453,12 +453,23 @@ Rollback at every stage is disabling the newest step; every earlier stage remain
 
 ---
 
-## 14. Open questions
+## 14. Open questions — **answered**
 
-| # | Question | Why it is open |
-|---|---|---|
-| **Q1** | Does the console default to the hosted App, or offer both with the App preselected? | R3 says default. A preselected choice is nearly as good for UX and keeps the customer's decision explicit, which matters for a write credential. **Recommendation: offer both, App preselected, and record the choice per repository.** |
-| **Q2** | Who is the commit author — the platform's bot, or the approving person? | The bot is honest about what happened; the person is what most review tooling and CODEOWNERS expect. **Recommendation: bot as author, approving person as `Co-authored-by`, so both facts are on the record.** |
-| **Q3** | May a run be scheduled (unattended), and if so how does per-proposal approval work? | Unattended runs are the input to any trend surface, and they compose with P32 §14 Q5's unattended clone. Per-proposal approval is incompatible with unattended delivery below Autonomous — so either scheduled runs stop at proposals, or they need Autonomous. |
-| **Q4** | Does a withdrawn change (FR16) count against the tenant's budget, and is it billable? | It consumed provider spend and produced no delivery. P7 bills only merged-PR deltas, so it is not billable — but "not billable" and "not charged for compute" are different claims and only one is currently true. |
-| **Q5** | What is the retry policy when the forge is down between commit and pull-request creation? | §7.4 requires reconciliation from the append-only record; the open part is how long it retries before the run reports partial delivery, and what the conversation says in the meantime. |
+All five are settled. The reasoning, the alternatives and the cost-and-complexity level each was
+rejected on live in
+[`openspec/changes/p35-autonomous-improvement-run/decisions.md`](../../openspec/changes/p35-autonomous-improvement-run/decisions.md);
+this table is the answer, so a reader of the PRD is not sent somewhere else to learn what was decided.
+
+| # | Question | **Answer** | Record |
+|---|---|---|---|
+| **Q1** | Does the console default to the hosted App, or offer both with the App preselected? | **Offer both, App preselected, choice recorded per repository.** The App is the default *mode*; installing it stays an act the customer performs, and the record names the repository they performed it for. A hard default would leave a write credential whose only provenance is a design decision. | D-35.1 |
+| **Q2** | Who is the commit author — the platform's bot, or the approving person? | **Bot as author, approving person as `Co-authored-by`.** Two claims, both true, both on the commit. 🔴 The person is read from the approval row, never from the request, so the trailer and the audit trail cannot disagree. | D-35.2 |
+| **Q3** | May a run be scheduled (unattended), and how does per-proposal approval work? | **Scheduled runs stop at proposals.** They do not deliver at *any* automation level, including Autonomous. Making Autonomous the price of scheduling would mean the only way to get the safer thing is to buy the more dangerous one. 🚫 P35 ships no scheduler; this binds the phase that adds one. | D-35.3 |
+| **Q4** | Does a withdrawn change count against the budget, and is it billable? | **Charged for compute, not billable.** Two ledgers, two answers: the tokens were spent, so the run's spend bound counts them; nothing merged, so P7 bills nothing. The withdrawal's spend is reported as its **own** figure, not only inside the total. | D-35.4 |
+| **Q5** | What is the retry policy when the forge is down between commit and pull-request creation? | **Three attempts in-run against a bounded window, then the delivery is recorded `pending_forge` and the reconciliation pass — which runs every cycle anyway — completes it.** The conversation states the condition, names no action for the person, and 🚫 offers no retry button. | D-35.5 |
+
+### One question the phase found rather than inherited
+
+| # | Question | **Answer** | Record |
+|---|---|---|---|
+| **Q6** | FR28 requires cancellation to leave no branch; P12's `StaleBranchPolicy` forbids the platform from ever deleting one, enforced by the absence of a method. Which moves? | **Neither.** The push is made the last step and the cancellation check sits immediately before it, so a cancelled run never pushed and there is nothing to delete. 🚫 No delete capability is added to `ForgeWriter`. The fence asserts the forge received **no `EnsureBranch` call**, which is stronger and more directly observable than "no branch remains". | D-35.6 |

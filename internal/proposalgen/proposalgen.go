@@ -77,6 +77,52 @@ const (
 	StateRevisionMismatch State = "revision_mismatch"
 )
 
+// states is the closure. 🔴 EIGHT: `generated`, plus the seven ways a pass can find nothing.
+//
+// It is declared here, beside the constants, and read by every consumer through `States()` rather than
+// retyped. A retyped closed set is a second copy and the copy is what goes stale — P35's surface has to
+// render one sentence per state (its FR7), and a state added here without a sentence there must be a
+// red build rather than a card that renders nothing.
+//
+// ⚠️ P30 and the P35 PRD both describe this set as FIVE, and it is seven-plus-one. The two extra —
+// `no_model_menu` and `revision_mismatch` — arrived after that sentence was written. The count in prose
+// is what went stale, which is the reason the set is read from here.
+var states = []State{
+	StateGenerated,
+	StateNoRuns,
+	StateNoPerNode,
+	StateNoGraph,
+	StateNoMenu,
+	StateNoBottleneck,
+	StateNoCandidates,
+	StateRevisionMismatch,
+}
+
+// States returns every state, in the declaration order above (which is roughly the order a pass reaches
+// them). A copy, so no caller can widen the enum.
+func States() []State { return append([]State(nil), states...) }
+
+// Valid reports membership. 🔴 The empty state is invalid rather than defaulted: a pass that reported no
+// state is a pass whose reason was discarded, which is exactly the P30 defect this enum exists to end.
+func (s State) Valid() bool {
+	for _, v := range states {
+		if v == s {
+			return true
+		}
+	}
+	return false
+}
+
+// FoundNothing reports whether this state is one of the seven "nothing to propose" answers.
+//
+// A predicate rather than a list at each call site, for `assessment.Axis.P34Pending`'s reason: a
+// surface asking "should I render the empty-state copy" must be able to ASK, so that a state added
+// later is classified in one place.
+func (s State) FoundNothing() bool { return s.Valid() && s != StateGenerated }
+
+// String makes State printable without a conversion at every call site.
+func (s State) String() string { return string(s) }
+
 // Result is one generation pass.
 type Result struct {
 	TenantID   string `json:"tenant_id"`

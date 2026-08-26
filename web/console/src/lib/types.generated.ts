@@ -1299,6 +1299,139 @@ export interface AxisDiff {
   why: string;
 }
 
+/** Response of `POST /api/v1/improvement-plans`. */
+export interface ImprovementPlanView {
+  plan_id: string;
+  origin: string;
+  question: string;
+  workflow_id: string;
+  source_revision: string;
+  source_revision_short: string;
+  axes: string[] | null;
+  candidate_cap: number;
+  spend_budget_usd: number;
+  projected_spend_usd: number;
+  disclosure_threshold_usd: number;
+  requires_acknowledgement: boolean;
+  min_improvement: number;
+  stopping_label: string;
+  created_at_ms: number;
+}
+
+/** Response of `POST /api/v1/improvement-runs and GET /api/v1/improvement-runs?run_id={id}`. */
+export interface ImprovementRunView {
+  run_id: string;
+  plan: ImprovementPlanView;
+  bound: string;
+  bound_sentence: string;
+  fault?: string;
+  proposals: ImprovementProposalView[] | null;
+  decisions: Record<string, ImprovementDecisionSummary>;
+  withdrawals: ImprovementWithdrawalView[] | null;
+  deliveries: ImprovementDeliveryView[] | null;
+  empty?: ImprovementEmptyView | null;
+  per_axis: AxisStageView[] | null;
+  spend_usd: number;
+  withdrawn_spend_usd: number;
+  started_at_ms: number;
+  finished_at_ms: number;
+}
+
+export interface ImprovementProposalView {
+  proposal_id: string;
+  axis: string;
+  node: string;
+  operator: string;
+  rationale: string;
+  config_hash: string;
+  config_hash_short: string;
+  source_revision: string;
+  delta_label: string;
+  delta_mean: number;
+  delta_ci_low: number;
+  delta_ci_high: number;
+  n_seeds: number;
+  n_cases: number;
+  significant: boolean;
+  held_out: boolean;
+  eval_set_cannot_fail: boolean;
+  cost_delta: number;
+  latency_delta: number;
+  diff_ref: string;
+  diff_stat: string;
+  provider_model_version: string;
+}
+
+export interface ImprovementDecisionSummary {
+  state: string;
+  by?: string;
+  at_ms?: number;
+  sentence: string;
+  void_reason?: string;
+}
+
+export interface ImprovementWithdrawalView {
+  proposal_id: string;
+  axis: string;
+  reason: string;
+  about_the_change: boolean;
+  verified_label: string;
+  remeasured_label: string;
+  sentence: string;
+  spend_usd: number;
+  at_ms: number;
+}
+
+export interface ImprovementDeliveryView {
+  proposal_id: string;
+  axis: string;
+  delivery_id?: string;
+  pull_request_url?: string;
+  pull_request_ref?: string;
+  mode: string;
+  deduplicated: boolean;
+  withheld_kind?: string;
+  withheld_detail?: string;
+  withheld_next_action?: string;
+  at_ms: number;
+}
+
+export interface ImprovementEmptyView {
+  state: string;
+  headline: string;
+  detail: string;
+  next_action?: string;
+  healthy: boolean;
+}
+
+export interface AxisStageView {
+  axis: string;
+  in_scope: boolean;
+  generated: number;
+  verified: number;
+  approved: number;
+  delivered: number;
+  withdrawn: number;
+}
+
+/** Response of `422 from POST /api/v1/improvement-plans and POST /api/v1/improvement-runs`. */
+export interface ImprovementRefusalView {
+  cause: string;
+  detail: string;
+  next_action: string;
+}
+
+/** Response of `POST /api/v1/improvement-decisions (200, and 409 when an approval is void)`. */
+export interface ImprovementDecisionView {
+  proposal_id: string;
+  state: string;
+  by?: string;
+  at_ms?: number;
+  sentence: string;
+  void_reason?: string;
+  run: ImprovementRunView;
+}
+
 /** Response of `POST /api/v1/conversations`. */
 export interface ConversationView {
   conversation_id: string;

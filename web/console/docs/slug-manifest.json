@@ -193,7 +193,7 @@
     {
       "route": "/docs/reference/schemas",
       "source": "docs/en/reference/schemas.md",
-      "content_hash": "d003cac07275ef7c2816c0c72be60ee43c82a04417c926463e37e8f1cba5bafc",
+      "content_hash": "dc9f3d0ed0b5e55c8ecd49befae449db7889be36a37d51819ecf6fa35cb49b0a",
       "anchors": [
         "assessment",
         "console-view",

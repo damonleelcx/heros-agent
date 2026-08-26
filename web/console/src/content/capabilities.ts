@@ -207,6 +207,63 @@ export const CAPABILITIES: Capability[] = [
     boundary:
       "The ceiling is checked before anything is generated and again where it executes. The sandbox that enforces it at run time is yours; what this platform guarantees is that a configuration exceeding your declared envelope never becomes a change you can apply.",
   },
+  // ── P35 · the improvement run ───────────────────────────────────────────────────────────────
+  {
+    id: "improvement-run",
+    claim:
+      "Turns a question into a bounded plan — what it will look at, what it may spend, and when it stops — and shows you the plan before anything runs",
+    phase: "P35 — The improvement run",
+    shipped: true,
+    evidence:
+      "improvementrun.Translate and Plan; POST /api/v1/improvement-plans spends nothing and is a separate call from the run; a question that cannot be bounded is refused with one of six named causes",
+    boundary:
+      "A question that cannot be turned into a plan with a budget and a stopping condition is refused rather than run with bounds nobody chose. On a hosted deployment today the run produces a plan and cannot execute one: the verification gate runs your eval harness, which by design runs on your machine.",
+  },
+  {
+    id: "verified-proposal",
+    claim:
+      "Offers each change on its own, with the delta it measured on held-out data, its confidence interval, and the number of cases behind it",
+    phase: "P35 — The improvement run",
+    shipped: true,
+    evidence:
+      "improvementrun.NewVerifiedProposal refuses a candidate the P5.5 gate did not pass and one whose delta names no seed or case count; a high scorer that fails a gate is not offered, however high its score",
+    boundary:
+      "Each change is approved individually. There is no control that accepts several at once, and that is deliberate: a bundle approval is one click that means several things, and the first item is the one that gets read.",
+  },
+  {
+    id: "withdrawn-after-approval",
+    claim:
+      "Measures an approved change a second time after applying it, and withdraws it before it reaches your repository when the second measurement disagrees — showing you both numbers",
+    phase: "P35 — The improvement run",
+    shipped: true,
+    evidence:
+      "improvementrun.Reconcile; the comparison is evalstats.Interval.Overlaps, the platform's own tie predicate, and a provider that moved between the two measurements is reported as such rather than blamed on the change",
+    boundary:
+      "This reads like a failure and is the product working. A check that can only confirm is theatre; the second measurement is allowed to disagree, and when it does you get both numbers rather than a verdict.",
+  },
+  {
+    id: "console-write-credential",
+    claim:
+      "Opens the pull request itself on the console path, using a credential scoped to that one repository",
+    phase: "P35 — The improvement run",
+    shipped: true,
+    evidence:
+      "forgedelivery.DefaultModeFor (program ruling R3, amending ADR-005 for one surface); the installation names the repositories it covers and org-wide is not expressible; revocation stops pushes on the next call rather than at the next token refresh",
+    boundary:
+      "It is per-repository, least-privilege, revocable by you at any time and effective immediately, used only after a person approved a specific change, and it is a separate grant from the one that reads your source — revoking either leaves the other intact. On the CLI and CI paths the platform holds no forge credential at all.",
+  },
+  // 🚫 THERE IS DELIBERATELY NO ENTRY CLAIMING THE PLATFORM MERGES.
+  //
+  // P35 opens pull requests. Auto-merge is P6's Autonomous level and is Enterprise-only, and below it
+  // the platform never merges whatever the forge would permit. A `merges-your-changes` id would be a
+  // sentence this build cannot honour on any plan a console customer is on — and the public surface is
+  // exactly where that sentence would be quoted back.
+  //
+  // 🚫 AND NONE CLAIMING SCHEDULED OR UNATTENDED RUNS. There is no scheduler in this phase, and the
+  // decision recorded for the one that arrives is that a scheduled run stops at PROPOSALS. Listing it
+  // here would let the page describe the roadmap in the present tense, which is the drift this whole
+  // manifest exists to catch.
+
   // 🚫 THERE IS DELIBERATELY NO ENTRY FOR TOPOLOGY MATERIALIZATION.
   //
   // P34 ships concurrency, conditional routing and merge as things a spec can DECLARE — resolved,

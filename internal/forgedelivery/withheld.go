@@ -57,6 +57,24 @@ const (
 	WithheldBoundReached WithheldKind = "bound_reached"
 	// WithheldNoRoute: no route is configured for this target.
 	WithheldNoRoute WithheldKind = "no_route"
+	// WithheldNoInstallation: the run originated in the CONSOLE, whose default mode is the hosted Git
+	// App (R3), and no installation covers this repository.
+	//
+	// 🔴 A DISTINCT kind from `no_route`, and the distinction is the whole of P35 spec scenario "A
+	// console-driven run with no installation". A route can exist and be perfectly well-formed while
+	// the installation behind it does not — the customer configured delivery and then never installed
+	// the App, or revoked it. Collapsing the two would tell somebody to configure a route they already
+	// have.
+	//
+	// 🚫 It is NOT a reason to fall back to CI-mediated delivery. That mode requires a CI integration a
+	// console customer does not have, so falling back would replace a stated condition with a silent
+	// one that never completes.
+	WithheldNoInstallation WithheldKind = "no_installation"
+	// WithheldInstallationRevoked: an installation existed and the customer revoked it. Distinct from
+	// `no_installation` because the next action is different — one is "install it", the other is
+	// "you removed this, and that worked" — and because a revocation mid-run is a state the customer
+	// caused deliberately and should see reflected rather than reported as a missing setup step.
+	WithheldInstallationRevoked WithheldKind = "installation_revoked"
 	// WithheldForgeNotImplemented: the route names a forge P12 declares but has not built.
 	WithheldForgeNotImplemented WithheldKind = "forge_not_implemented"
 	// WithheldRouteInvalid: the route cannot be used — a row no route store would have written.
@@ -93,6 +111,16 @@ type WithheldEntitlement struct {
 	Reason          string `json:"reason,omitempty"`
 	PlanName        string `json:"plan_name,omitempty"`
 	UpgradePlanName string `json:"upgrade_plan_name,omitempty"`
+}
+
+// ClassifyWithheld turns a delivery refusal into a reported condition, for a caller outside this
+// package that holds an error and must render it as a state with a next action.
+//
+// 🔴 Exported for ONE caller — `internal/improvementrun`, which is P35's new delivery caller and must
+// render the same conditions this package's own `Service.Pending` does. The alternative is a second
+// classifier there, and a second classifier is the thing this function's own comment says drifts.
+func ClassifyWithheld(proposalID string, err error) Withheld {
+	return classifyWithheld(proposalID, err)
 }
 
 // classifyWithheld turns a Prepare refusal into a reported condition.
@@ -165,6 +193,22 @@ func classifyWithheld(proposalID string, err error) Withheld {
 		w.Detail = "This repository's delivery route is not usable — it is missing something a pull " +
 			"request cannot be opened without."
 		w.NextAction = "Reconfigure the delivery route for this repository."
+
+	case errors.Is(err, ErrNoInstallation):
+		w.Kind = WithheldNoInstallation
+		w.Detail = "This run started in the console, where the platform opens the pull request itself, " +
+			"and no hosted Git App installation covers this repository. The verified change and its " +
+			"evidence are kept; only the pull request is withheld."
+		w.NextAction = "Install the hosted Git App for this repository. It is per-repository, it may " +
+			"open and update pull requests and nothing else, and you can revoke it at any time."
+
+	case errors.Is(err, ErrInstallationRevoked):
+		w.Kind = WithheldInstallationRevoked
+		w.Detail = "The hosted Git App installation for this repository was revoked, so the platform " +
+			"can no longer push to it. That is the revocation working. The verified change and its " +
+			"evidence are kept."
+		w.NextAction = "Re-install the hosted Git App for this repository if you want the platform to " +
+			"open pull requests again."
 
 	case errors.Is(err, ErrNoRoute):
 		w.Kind = WithheldNoRoute

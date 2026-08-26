@@ -333,6 +333,31 @@ func ConsoleViewTypes() []ConsoleViewType {
 		// the `partial` flag and the tally that say how to read it.
 		{Name: "AssessmentView", Sample: AssessmentView{}, Endpoint: "GET /api/v1/assessments?workflow_id={id} and POST /api/v1/assessments"},
 
+		// ── P35 · the improvement run ─────────────────────────────────────────────────────────
+		//
+		// THREE types, and the split is the phase's two-step flow rather than a decomposition for
+		// tidiness. `ImprovementPlanView` is what a person sees BEFORE anything spends and may decline;
+		// `ImprovementRunView` is what happened. Registering one type for both would let a renderer show
+		// a plan and a receipt with the same component, which is exactly the confusion FR1/FR2 exist to
+		// prevent — the plan's value is that it exists before the money.
+		//
+		// `ImprovementRefusalView` is the third because a refusal here carries a CAUSE from a closed set
+		// and a NEXT ACTION, and a console that received `{"error": "…"}` could only render an apology.
+		// The entire argument for refusing an unboundable question rather than defaulting is that the
+		// person can act on the refusal.
+		//
+		// 🚫 `ImprovementProposalView`, `AxisStageView` and `ImprovementEmptyView` are NOT registered
+		// separately: each is reachable only through `ImprovementRunView`, and registering one would
+		// suggest a route serves it on its own — which is the route `improvementruns.go` refuses,
+		// because a proposal read out of its run has lost the run's bound and its per-axis breakdown.
+		{Name: "ImprovementPlanView", Sample: ImprovementPlanView{}, Endpoint: "POST /api/v1/improvement-plans"},
+		{Name: "ImprovementRunView", Sample: ImprovementRunView{}, Endpoint: "POST /api/v1/improvement-runs and GET /api/v1/improvement-runs?run_id={id}"},
+		{Name: "ImprovementRefusalView", Sample: ImprovementRefusalView{}, Endpoint: "422 from POST /api/v1/improvement-plans and POST /api/v1/improvement-runs"},
+		// 🔴 The DECISION view is registered because it carries the run, and the run is what changed:
+		// approving applies and re-measures, so the same call may produce a withdrawal. A console typed
+		// only against `ImprovementRunView` would have no type for the 409 a void approval answers with.
+		{Name: "ImprovementDecisionView", Sample: ImprovementDecisionView{}, Endpoint: "POST /api/v1/improvement-decisions (200, and 409 when an approval is void)"},
+
 		// ── P31 · the conversational console ─────────────────────────────────
 		//
 		// 🔴 `ConversationMessage` is a DISCRIMINATED UNION on the wire: `kind` names which of the eight
