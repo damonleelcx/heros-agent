@@ -709,7 +709,14 @@ func (s *Service) Approve(ctx context.Context, run *Run, proposalID, approvedBy 
 			ProposalID: proposalID, Axis: p.Axis, State: DecisionVoid, By: approvedBy,
 			AtMS: s.nowMS(), Binding: want, VoidReason: voidReasonFor(want, current),
 		}
-		s.recordDecision(ctx, run, d, KindProposalDeclined)
+		// 🔴 A ledger failure ABORTS here; it does not fall through to the void. Serving a clean 409
+		// over a row the ledger did not take is the one shape this path exists to prevent: the console
+		// would render "this was re-requested" while the run read back FROM THE LEDGER still shows the
+		// approval pending, and the ledger is the record. Same treatment as the approved and declined
+		// paths below — `recordDecision`'s own error says it: not recorded, so not acted on.
+		if err := s.recordDecision(ctx, run, d, KindProposalDeclined); err != nil {
+			return Decision{}, err
+		}
 		run.setDecision(d)
 		return d, fmt.Errorf("%w: %s", ErrApprovalVoid, d.VoidReason)
 	}

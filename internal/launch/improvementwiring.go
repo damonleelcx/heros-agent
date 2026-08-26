@@ -174,6 +174,8 @@ var _ improvementrun.OperatorBrake = (*adminops.KillSwitchService)(nil)
 // will be. 🔴 A constant rather than configuration, for `AlertWithdrawalRateAbove`'s reason: an
 // interval an operator can lengthen is one that gets lengthened during the incident it was meant to
 // shorten.
+//
+//nolint:unused // dormant by design — see capabilities.go's absent("p35_improvement_reconciliation")
 const reconcileInterval = 5 * time.Minute
 
 // startImprovementReconciler runs the reconciliation pass on a timer (task 9.4).
@@ -188,6 +190,8 @@ const reconcileInterval = 5 * time.Minute
 // 🚫 It is deliberately NOT started when the service cannot deliver. A pass that ran every five minutes
 // to discover it has no deliverer would write a fresh last-success timestamp over a pass that examined
 // nothing — which makes the staleness signal lie in the one direction that matters.
+//
+//nolint:unused // dormant by design — see capabilities.go's absent("p35_improvement_reconciliation")
 func startImprovementReconciler(svc *improvementrun.Service, tenants func() []string) {
 	if svc == nil || tenants == nil {
 		return

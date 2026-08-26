@@ -154,6 +154,41 @@ func TestConversationalRun_ApprovalVoidWhenRevisionMoves(t *testing.T) {
 	}
 }
 
+// TestAVoidApprovalIsNotServedOverALedgerThatRefusedTheRow is the fence for a silent drop: the void
+// branch called `recordDecision` and threw its error away, so a ledger that refused the row still
+// produced a clean `ErrApprovalVoid` — 409 at the surface, with the console rendering "this was
+// re-requested" while the run read back FROM THE LEDGER still shows the approval pending. The ledger is
+// the record, and the approved and declined paths have always aborted on the same failure; only this
+// one did not.
+//
+// 🔴 It asserts the error is NOT `ErrApprovalVoid`, not merely that some error came back. The old code
+// also returned an error — the WRONG one — and a test that only checked `err != nil` would have passed
+// against the defect. The decision must come back zero for the same reason: a `DecisionVoid` handed to
+// a caller is one the surface will render as a recorded fact.
+func TestAVoidApprovalIsNotServedOverALedgerThatRefusedTheRow(t *testing.T) {
+	f, run, rem, _ := approvable(t)
+	f.svc.Subject = func(context.Context, Plan, VerifiedProposal) (Binding, error) {
+		return Binding{ConfigHash: "cfg_good", SourceRevision: "MOVED_ffffff"}, nil
+	}
+	f.ledger.SetDown(true)
+
+	d, err := f.svc.Approve(context.Background(), run, run.Proposals[0].ProposalID, "person@example.com")
+	if err == nil {
+		t.Fatal("a void approval was returned over a ledger that took no row")
+	}
+	if errors.Is(err, ErrApprovalVoid) {
+		t.Fatalf("the caller was told the approval is void (%v) over a ledger that refused the row. That "+
+			"reaches the surface as a 409 for a decision no ledger read will ever show", err)
+	}
+	if d.State != "" {
+		t.Fatalf("an unrecorded decision came back as %q; a surface handed a decision renders it as a "+
+			"recorded fact", d.State)
+	}
+	if len(rem.calls) != 0 {
+		t.Fatalf("the change was re-measured (%v) for an approval that was never recorded", rem.calls)
+	}
+}
+
 func TestAVoidApprovalIsNotTheSameAsPending(t *testing.T) {
 	seen := map[string]DecisionState{}
 	for _, st := range DecisionStates() {
