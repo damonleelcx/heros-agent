@@ -261,6 +261,41 @@ spec:
           - path: /api/v1/assessments
             pathType: Exact
             backend: { service: { name: agentd, port: { number: 4321 } } }
+          # P35 · the improvement run. TWO `Exact` rules; the second covers two methods.
+          #
+          # 🔴 P30's warning, obeyed in the same change that mounts the handler: it found the proposal
+          # generate route mounted, buttonless and NOT PUBLISHED — a 404 in production behind an
+          # entirely green build, invisible to code review because the two halves live in different
+          # languages in different directories. `TestEveryImprovementRunRouteIsPublishedExact` compares
+          # this file against `publicroutes.go` so the next one is a red build.
+          #
+          # 🔴 `POST /api/v1/improvement-runs` SPENDS MONEY on the platform's own provider account, and
+          # more of it than an assessment can. Publishing it therefore puts a paid operation on the
+          # public edge, which is a decision rather than a routing detail. It is safe on three controls,
+          # each failing closed: the route refuses an unauthenticated request; the plan's spend budget
+          # comes from the tenant's entitlement and cannot be set by a request body; and above the
+          # disclosure threshold the run is WITHHELD until a person has acknowledged the plan.
+          #
+          # 🚫 `/api/v1/improvement-plans` spends NOTHING and is published beside it deliberately —
+          # publishing the expensive half of a two-step flow without the half that bounds it would make
+          # the bound reachable only from a browser.
+          #
+          # 🚫 ONE `Exact` RULE EACH, NOT A `/api/v1/improvement` PREFIX. A prefix would publish every
+          # route anybody adds under that head from now on — the failure the four workflow rules above
+          # exist to record.
+          - path: /api/v1/improvement-plans
+            pathType: Exact
+            backend: { service: { name: agentd, port: { number: 4321 } } }
+          - path: /api/v1/improvement-runs
+            pathType: Exact
+            backend: { service: { name: agentd, port: { number: 4321 } } }
+          # 🔴 The decision route is the one that authorizes a write to a customer's repository, and it
+          # is published on a control the other two do not need: the handler refuses a credential that
+          # names no PERSON. A machine credential — the kind a CI job holds — cannot approve, so
+          # publishing this adds no path a machine can walk to a pull request.
+          - path: /api/v1/improvement-decisions
+            pathType: Exact
+            backend: { service: { name: agentd, port: { number: 4321 } } }
           # P32 §4 · `heros pair` CLAIMS a code the person started in the console, from the machine
           # that already holds the repository.
           #

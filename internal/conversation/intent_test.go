@@ -128,14 +128,21 @@ func TestEveryIntentIsBackedByExactlyOneThing(t *testing.T) {
 	// The capability-backed intents, by name. Written out so that adding one — or REMOVING one — is a
 	// decision somebody records rather than one they inherit.
 	//
-	// 🔴 `surface-assessment` was here until P33 shipped `/app/assess`. Its removal is the intended
-	// direction of travel for this list: a capability with nowhere to render is a promise, and the day
-	// it gets a surface it becomes route-backed and the set-equality fence starts guarding it. A list
-	// that only ever grows would be a list of promises nobody retired.
-	want := []string{"autonomous-improvement-run"}
+	// 🔴 `surface-assessment` was here until P33 shipped `/app/assess`, and `autonomous-improvement-run`
+	// until P35 shipped `/app/improve`. Both removals are the intended direction of travel for this
+	// list: a capability with nowhere to render is a PROMISE, and the day it gets a surface it becomes
+	// route-backed and the set-equality fence starts guarding it. A list that only ever grew would be a
+	// list of promises nobody retired.
+	//
+	// ⚠️ It is EMPTY now, and that is the correct answer to "which intents have no page" rather than
+	// evidence the question stopped mattering. `Backing` keeps both members: the next phase to ship a
+	// capability ahead of its page needs the classification to still exist rather than to rediscover
+	// why it was needed. An empty list here is a state to be pleased about, not one to delete.
+	want := []string{}
 	got := Capabilities()
 	if len(got) != len(want) {
-		t.Fatalf("the intent table reaches %d capabilities: %v", len(got), got)
+		t.Fatalf("the intent table reaches %d capabilities and the contract names %d: %v",
+			len(got), len(want), got)
 	}
 	for i := range want {
 		if got[i] != want[i] {

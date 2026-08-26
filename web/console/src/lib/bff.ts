@@ -70,7 +70,13 @@ export function respond<T>(outcome: PlatformOutcome<T>): Response {
     return Response.json(outcome.data, { status: 200, headers });
   }
   const status = outcome.kind === "transport" ? 502 : outcome.status;
-  return Response.json({ error: outcome.error, kind: outcome.kind }, { status, headers });
+  // 🔴 `next_action` travels when the platform sent one. A refusal that names no next action is the
+  // shape of refusal that teaches a reader nothing, and on the routes that REFUSE rather than default —
+  // P35's improvement run most of all — the step is the whole point of refusing. Omitted, not empty,
+  // when there is none: a present-but-blank field invites a renderer to draw an empty row.
+  const body: Record<string, unknown> = { error: outcome.error, kind: outcome.kind };
+  if (outcome.nextAction) body.next_action = outcome.nextAction;
+  return Response.json(body, { status, headers });
 }
 
 /** forward is the whole body of a read route: scope, fetch, respond. Nothing in between. */

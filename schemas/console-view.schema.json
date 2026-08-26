@@ -434,6 +434,41 @@
       ],
       "type": "object"
     },
+    "AxisStageView": {
+      "properties": {
+        "approved": {
+          "type": "integer"
+        },
+        "axis": {
+          "type": "string"
+        },
+        "delivered": {
+          "type": "integer"
+        },
+        "generated": {
+          "type": "integer"
+        },
+        "in_scope": {
+          "type": "boolean"
+        },
+        "verified": {
+          "type": "integer"
+        },
+        "withdrawn": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "approved",
+        "axis",
+        "delivered",
+        "generated",
+        "in_scope",
+        "verified",
+        "withdrawn"
+      ],
+      "type": "object"
+    },
     "BillingStateView": {
       "properties": {
         "guidance": {
@@ -3313,6 +3348,486 @@
       ],
       "type": "object"
     },
+    "ImprovementDecisionSummary": {
+      "properties": {
+        "at_ms": {
+          "type": "integer"
+        },
+        "by": {
+          "type": "string"
+        },
+        "sentence": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "void_reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sentence",
+        "state"
+      ],
+      "type": "object"
+    },
+    "ImprovementDecisionView": {
+      "description": "Response of POST /api/v1/improvement-decisions (200, and 409 when an approval is void)",
+      "properties": {
+        "at_ms": {
+          "type": "integer"
+        },
+        "by": {
+          "type": "string"
+        },
+        "proposal_id": {
+          "type": "string"
+        },
+        "run": {
+          "$ref": "#/$defs/ImprovementRunView"
+        },
+        "sentence": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "void_reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "proposal_id",
+        "run",
+        "sentence",
+        "state"
+      ],
+      "type": "object"
+    },
+    "ImprovementDeliveryView": {
+      "properties": {
+        "at_ms": {
+          "type": "integer"
+        },
+        "axis": {
+          "type": "string"
+        },
+        "deduplicated": {
+          "type": "boolean"
+        },
+        "delivery_id": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "proposal_id": {
+          "type": "string"
+        },
+        "pull_request_ref": {
+          "type": "string"
+        },
+        "pull_request_url": {
+          "type": "string"
+        },
+        "withheld_detail": {
+          "type": "string"
+        },
+        "withheld_kind": {
+          "type": "string"
+        },
+        "withheld_next_action": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "at_ms",
+        "axis",
+        "deduplicated",
+        "mode",
+        "proposal_id"
+      ],
+      "type": "object"
+    },
+    "ImprovementEmptyView": {
+      "properties": {
+        "detail": {
+          "type": "string"
+        },
+        "headline": {
+          "type": "string"
+        },
+        "healthy": {
+          "type": "boolean"
+        },
+        "next_action": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "detail",
+        "headline",
+        "healthy",
+        "state"
+      ],
+      "type": "object"
+    },
+    "ImprovementPlanView": {
+      "description": "Response of POST /api/v1/improvement-plans",
+      "properties": {
+        "axes": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "candidate_cap": {
+          "type": "integer"
+        },
+        "created_at_ms": {
+          "type": "integer"
+        },
+        "disclosure_threshold_usd": {
+          "type": "number"
+        },
+        "min_improvement": {
+          "type": "number"
+        },
+        "origin": {
+          "type": "string"
+        },
+        "plan_id": {
+          "type": "string"
+        },
+        "projected_spend_usd": {
+          "type": "number"
+        },
+        "question": {
+          "type": "string"
+        },
+        "requires_acknowledgement": {
+          "type": "boolean"
+        },
+        "source_revision": {
+          "type": "string"
+        },
+        "source_revision_short": {
+          "type": "string"
+        },
+        "spend_budget_usd": {
+          "type": "number"
+        },
+        "stopping_label": {
+          "type": "string"
+        },
+        "workflow_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "axes",
+        "candidate_cap",
+        "created_at_ms",
+        "disclosure_threshold_usd",
+        "min_improvement",
+        "origin",
+        "plan_id",
+        "projected_spend_usd",
+        "question",
+        "requires_acknowledgement",
+        "source_revision",
+        "source_revision_short",
+        "spend_budget_usd",
+        "stopping_label",
+        "workflow_id"
+      ],
+      "type": "object"
+    },
+    "ImprovementProposalView": {
+      "properties": {
+        "axis": {
+          "type": "string"
+        },
+        "config_hash": {
+          "type": "string"
+        },
+        "config_hash_short": {
+          "type": "string"
+        },
+        "cost_delta": {
+          "type": "number"
+        },
+        "delta_ci_high": {
+          "type": "number"
+        },
+        "delta_ci_low": {
+          "type": "number"
+        },
+        "delta_label": {
+          "type": "string"
+        },
+        "delta_mean": {
+          "type": "number"
+        },
+        "diff_ref": {
+          "type": "string"
+        },
+        "diff_stat": {
+          "type": "string"
+        },
+        "eval_set_cannot_fail": {
+          "type": "boolean"
+        },
+        "held_out": {
+          "type": "boolean"
+        },
+        "latency_delta": {
+          "type": "number"
+        },
+        "n_cases": {
+          "type": "integer"
+        },
+        "n_seeds": {
+          "type": "integer"
+        },
+        "node": {
+          "type": "string"
+        },
+        "operator": {
+          "type": "string"
+        },
+        "proposal_id": {
+          "type": "string"
+        },
+        "provider_model_version": {
+          "type": "string"
+        },
+        "rationale": {
+          "type": "string"
+        },
+        "significant": {
+          "type": "boolean"
+        },
+        "source_revision": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "axis",
+        "config_hash",
+        "config_hash_short",
+        "cost_delta",
+        "delta_ci_high",
+        "delta_ci_low",
+        "delta_label",
+        "delta_mean",
+        "diff_ref",
+        "diff_stat",
+        "eval_set_cannot_fail",
+        "held_out",
+        "latency_delta",
+        "n_cases",
+        "n_seeds",
+        "node",
+        "operator",
+        "proposal_id",
+        "provider_model_version",
+        "rationale",
+        "significant",
+        "source_revision"
+      ],
+      "type": "object"
+    },
+    "ImprovementRefusalView": {
+      "description": "Response of 422 from POST /api/v1/improvement-plans and POST /api/v1/improvement-runs",
+      "properties": {
+        "cause": {
+          "type": "string"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "next_action": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "cause",
+        "detail",
+        "next_action"
+      ],
+      "type": "object"
+    },
+    "ImprovementRunView": {
+      "description": "Response of POST /api/v1/improvement-runs and GET /api/v1/improvement-runs?run_id={id}",
+      "properties": {
+        "bound": {
+          "type": "string"
+        },
+        "bound_sentence": {
+          "type": "string"
+        },
+        "decisions": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ImprovementDecisionSummary"
+          },
+          "type": "object"
+        },
+        "deliveries": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/ImprovementDeliveryView"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "empty": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ImprovementEmptyView"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fault": {
+          "type": "string"
+        },
+        "finished_at_ms": {
+          "type": "integer"
+        },
+        "per_axis": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/AxisStageView"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "plan": {
+          "$ref": "#/$defs/ImprovementPlanView"
+        },
+        "proposals": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/ImprovementProposalView"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "spend_usd": {
+          "type": "number"
+        },
+        "started_at_ms": {
+          "type": "integer"
+        },
+        "withdrawals": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/ImprovementWithdrawalView"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "withdrawn_spend_usd": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "bound",
+        "bound_sentence",
+        "decisions",
+        "deliveries",
+        "finished_at_ms",
+        "per_axis",
+        "plan",
+        "proposals",
+        "run_id",
+        "spend_usd",
+        "started_at_ms",
+        "withdrawals",
+        "withdrawn_spend_usd"
+      ],
+      "type": "object"
+    },
+    "ImprovementWithdrawalView": {
+      "properties": {
+        "about_the_change": {
+          "type": "boolean"
+        },
+        "at_ms": {
+          "type": "integer"
+        },
+        "axis": {
+          "type": "string"
+        },
+        "proposal_id": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "remeasured_label": {
+          "type": "string"
+        },
+        "sentence": {
+          "type": "string"
+        },
+        "spend_usd": {
+          "type": "number"
+        },
+        "verified_label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "about_the_change",
+        "at_ms",
+        "axis",
+        "proposal_id",
+        "reason",
+        "remeasured_label",
+        "sentence",
+        "spend_usd",
+        "verified_label"
+      ],
+      "type": "object"
+    },
     "InstallView": {
       "description": "Response of GET /api/v1/install",
       "properties": {
@@ -6014,6 +6529,18 @@
     },
     "GraphView": {
       "$ref": "#/$defs/GraphView"
+    },
+    "ImprovementDecisionView": {
+      "$ref": "#/$defs/ImprovementDecisionView"
+    },
+    "ImprovementPlanView": {
+      "$ref": "#/$defs/ImprovementPlanView"
+    },
+    "ImprovementRefusalView": {
+      "$ref": "#/$defs/ImprovementRefusalView"
+    },
+    "ImprovementRunView": {
+      "$ref": "#/$defs/ImprovementRunView"
     },
     "InstallView": {
       "$ref": "#/$defs/InstallView"

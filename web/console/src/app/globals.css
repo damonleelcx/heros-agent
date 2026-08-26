@@ -1689,6 +1689,162 @@
     background-color: color-mix(in oklab, var(--muted) 55%, transparent);
   }
 
+  /* ── P35 · the improvement run ────────────────────────────────────────────
+     The surface where a person spends money and authorizes a write to their repository. Three shapes,
+     and the differences between them are the argument.
+
+     🔴 THE PLAN PANEL is drawn as a QUOTE, not as a card. Every other card here reports something that
+     happened; this one reports something that has NOT happened yet and can be declined. Giving it the
+     same treatment as a result would put a proposal and a projection on the same visual footing, which
+     is exactly the confusion FR1/FR2 exist to prevent — the whole value of a plan is that it exists
+     before the money. */
+  .improve__plan {
+    @apply flex flex-col rounded-lg border;
+    gap: --spacing(4);
+    padding: --spacing(5);
+    border-color: color-mix(in oklab, var(--primary) 30%, transparent);
+    background-color: color-mix(in oklab, var(--primary) 5%, transparent);
+    border-left-width: 3px;
+  }
+
+  /* The four bounds, side by side. A row rather than a list because a reader compares them — "eight
+     candidates for four dollars" is one thought, and a bulleted list makes it three. */
+  .improve__bounds {
+    @apply grid;
+    gap: --spacing(4);
+    grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  }
+
+  /* The acknowledgement. It is NOT in the hazard palette: nothing here is destructive and nothing is
+     irreversible — it spends, which is a different category, and borrowing the hazard hue for it would
+     spend the palette's meaning on the wrong thing (FR31 reserves those hues, and .conn__revoke below
+     is what they are reserved FOR). It is drawn as the primary act because it is the one the reader
+     came to take. */
+  .improve__run {
+    @apply inline-flex items-center rounded-lg text-sm font-medium;
+    gap: --spacing(2);
+    padding: --spacing(2) --spacing(4);
+    background-color: var(--primary);
+    color: var(--primary-foreground);
+    transition-duration: var(--motion-fast);
+  }
+
+  .improve__run:disabled,
+  .improve__ask:disabled,
+  .improve__approve:disabled,
+  .improve__decline:disabled {
+    @apply cursor-not-allowed opacity-60;
+  }
+
+  .improve__ask {
+    @apply inline-flex items-center rounded-lg border border-border text-sm font-medium text-foreground;
+    gap: --spacing(2);
+    padding: --spacing(2) --spacing(4);
+    transition-duration: var(--motion-fast);
+  }
+
+  /* The question box. Wide and quiet: the person is writing a sentence, not filling a field. */
+  .improve__question {
+    @apply w-full rounded-lg border border-border bg-background text-sm text-foreground;
+    padding: --spacing(3);
+    transition-duration: var(--motion-fast);
+  }
+
+  /* ONE CARD PER PROPOSAL. 🚫 There is deliberately no bulk container and no "approve all" — design D4
+     names that as the most predictable and most dangerous request of this phase, and the layout is
+     part of the refusal: a proposal is a card with its own two buttons, and a person deciding on five
+     of them presses ten times and reads five diffs. */
+  .improve__proposal {
+    @apply flex flex-col rounded-lg border border-border;
+    gap: --spacing(4);
+    padding: --spacing(5);
+    background-color: var(--card);
+  }
+
+  /* A DECIDED proposal stays on the page and is drawn recessed rather than removed (FR12): a proposal
+     that disappeared when it was declined looks exactly like one that was never made. */
+  .improve__proposal--decided {
+    background-color: color-mix(in oklab, var(--muted) 45%, transparent);
+  }
+
+  /* The two decisions. Approve is filled because it is the act the reader came for; decline is a
+     border because it is equally available and not equally consequential. 🚫 Neither is in the hazard
+     palette: declining destroys nothing, and approving opens a pull request a person reviews — the
+     blast radius is a PR and its reversal is one command, which is the property that makes this whole
+     phase acceptable. */
+  .improve__approve {
+    @apply inline-flex items-center rounded-lg text-sm font-medium;
+    gap: --spacing(2);
+    padding: --spacing(2) --spacing(4);
+    background-color: var(--primary);
+    color: var(--primary-foreground);
+    transition-duration: var(--motion-fast);
+  }
+
+  .improve__decline {
+    @apply inline-flex items-center rounded-lg border border-border text-sm font-medium text-foreground;
+    gap: --spacing(2);
+    padding: --spacing(2) --spacing(4);
+    transition-duration: var(--motion-fast);
+  }
+
+  /* 🔴 THE WITHDRAWAL. A change that was approved, applied and then withdrawn is the sequence §9.4 says
+     the UI must be able to TELL — otherwise it reads as a failure rather than as the system working.
+     So it gets its own treatment, and it is the WARN hue rather than the danger hue: nothing is broken
+     and nothing was lost, a second measurement disagreed with the first and the change was stopped
+     before it reached the repository. Danger here would say something untrue. */
+  .improve__withdrawn {
+    @apply flex flex-col rounded-lg border;
+    gap: --spacing(3);
+    padding: --spacing(4);
+    border-color: color-mix(in oklab, var(--warn) 35%, transparent);
+    background-color: color-mix(in oklab, var(--warn) 7%, transparent);
+  }
+
+  /* The two measurements, side by side and equally weighted. 🔴 The equality is the design: a
+     withdrawal with one number looks like a bug, and with two it is a finding — "this looked like +8%
+     and measured +1% ± 4%" is information about the eval set as much as about the change. Drawing the
+     first one smaller would restore exactly the asymmetry FR16 removes. */
+  .improve__measurements {
+    @apply grid items-start;
+    gap: --spacing(4);
+    grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  }
+
+  /* The delivery result. The pull request URL is the end of the run and the start of a review, so it is
+     drawn as a destination rather than as a status line. */
+  .improve__delivered {
+    @apply flex flex-col rounded-lg border;
+    gap: --spacing(2);
+    padding: --spacing(4);
+    border-color: color-mix(in oklab, var(--good) 30%, transparent);
+    background-color: color-mix(in oklab, var(--good) 6%, transparent);
+  }
+
+  /* The per-axis breakdown. A table, because the reader's question is comparative — which axis produced
+     nothing — and §9.5's whole point is that the aggregate hides the answer. */
+  .improve__axes {
+    @apply w-full text-sm;
+    border-collapse: collapse;
+  }
+
+  .improve__axes th,
+  .improve__axes td {
+    @apply border-b border-border text-left;
+    padding: --spacing(2) --spacing(3);
+  }
+
+  .improve__axes th {
+    @apply text-xs font-medium uppercase text-muted-foreground;
+    letter-spacing: 0.04em;
+  }
+
+  /* An axis the plan EXCLUDED is drawn differently from one that produced nothing, because they are
+     opposite findings and a bare zero cannot tell them apart. */
+  .improve__axes tr[data-out-of-scope="true"] {
+    @apply text-muted-foreground;
+  }
+
   /* 🔴 THE HAZARD. Revoking deletes the derived trees; it is not undoable and it is not a preference. */
   .conn__revoke {
     @apply inline-flex items-center rounded-lg text-sm font-medium;

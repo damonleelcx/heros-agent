@@ -124,6 +124,42 @@ const (
 	// A first-class outcome, not an error: the report degrades to `not_measured` with
 	// `budget_exhausted` and says it is partial.
 	AssessmentBudgetExhausted Name = "agentd.assessment.budget_exhausted"
+
+	// ── agentd · improvement run (P35) ───────────────────────────────────────
+	//
+	// The five `tasks.md` 5.9 names, and no more. Each answers a question an operator actually asks
+	// about this capability, and the set is deliberately narrower than the run's own ledger — the
+	// ledger has fourteen entry kinds because the RECONCILIATION PASS reads it, and an event stream is
+	// not a reconciliation input. Five names is what a dashboard needs; fourteen would be a second,
+	// worse copy of the ledger in a log index.
+	//
+	// 🚫 Nothing here is named per axis, per tenant, per workflow or per repository. Those are
+	// ATTRIBUTES, where cardinality is bounded and a scrubber can reach them. `run.candidate.verified`
+	// carries `axis` as a field; a name interpolating it would put nine names in the enum today and
+	// however many P36 adds tomorrow.
+
+	// RunPlanCreated — a question became a bounded plan. 🔴 Emitted BEFORE anything spends, so
+	// "how many runs were planned" and "how many ran" are separately answerable — a deployment where
+	// those diverge is one where the disclosure threshold is stopping people, which is a product signal
+	// and is invisible if only started runs are counted.
+	RunPlanCreated Name = "agentd.run.plan_created"
+	// RunCandidateVerified — a candidate passed the P5.5 held-out gate and was surfaced. The
+	// denominator for per-axis verification pass rate (§9.5); the axis rides as an attribute.
+	RunCandidateVerified Name = "agentd.run.candidate_verified"
+	// RunChangeWithdrawn — an approved, applied change failed to reproduce its verified delta and was
+	// withdrawn before delivery (FR16). 🔴 The single most important name here: a withdrawal is the
+	// product working, and a rate that climbs means the eval set has become noisy — which no
+	// conventional metric moves for, because every withdrawn run completed successfully.
+	RunChangeWithdrawn Name = "agentd.run.change_withdrawn"
+	// DeliveryPROpened — a pull request exists at a recorded URL. Emitted AFTER the forge confirms,
+	// never before: an event emitted on the way in counts intent rather than effect, and a 200 is not
+	// evidence of a write.
+	DeliveryPROpened Name = "agentd.delivery.pr_opened"
+	// DeliveryDeduplicated — a second delivery of the same (config_hash, source_revision, target)
+	// returned the FIRST delivery rather than opening another (FR20). Counted because a deduplication
+	// rate of zero over a busy deployment means the idempotency path is never exercised, and an
+	// unexercised idempotency path is one nobody knows is broken.
+	DeliveryDeduplicated Name = "agentd.delivery.deduplicated"
 )
 
 // names is the closure. Sorted output is produced by Names(); the declaration order here groups by
@@ -145,6 +181,11 @@ var names = []Name{
 	AssessmentInferencePinned,
 	AssessmentInferenceReplayed,
 	AssessmentBudgetExhausted,
+	RunPlanCreated,
+	RunCandidateVerified,
+	RunChangeWithdrawn,
+	DeliveryPROpened,
+	DeliveryDeduplicated,
 }
 
 // Names returns every event name, sorted. A copy, so no caller can widen the enum.

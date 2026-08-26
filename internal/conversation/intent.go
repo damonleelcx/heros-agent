@@ -118,7 +118,25 @@ var intents = []IntentSpec{
 	// indistinguishable from the surface not existing.
 	{IntentAssess, BackedByRoute, "/app/assess", "",
 		"look at my repository and tell me what is weak"},
-	{IntentImprove, BackedByCapability, "autonomous-improvement-run", "autonomous-improvement-run",
+	// 🔴 ROUTE-BACKED SINCE P35 SHIPPED THE SURFACE. It was the LAST capability-backed intent, and it
+	// was capability-backed for the honest reason: `autonomous-improvement-run` was a capability with
+	// nowhere to render, so a deployment either mounted it or did not and the conversation had no page
+	// to send anybody to.
+	//
+	// P35 gives it `/app/improve`, and the 503-versus-404 distinction that made it capability-backed is
+	// PRESERVED rather than lost: a deployment that does not mount the run answers
+	// `/api/v1/improvement-runs` with 503 naming what is missing — today, on every hosted deployment,
+	// that the P5.5 gate runs the customer's eval harness, which does not execute on the platform — and
+	// the page renders that as a stated condition with the reason on it. Before, the same deployment
+	// gave a person a conversational refusal: well-formed, polite, and indistinguishable from the
+	// surface not existing.
+	//
+	// ⚠️ `Backing` now has ONE member and no route-less intent. That is not an argument for deleting
+	// the distinction: it records that "a capability a deployment mounts or does not" is a real kind of
+	// surface, and the next phase to ship a capability ahead of its page needs the classification to
+	// still exist rather than to rediscover it. `Capabilities()` returning empty is the correct answer
+	// to "which intents have no page", not evidence that the question is meaningless.
+	{IntentImprove, BackedByRoute, "/app/improve", "",
 		"fix it, and open a pull request"},
 }
 

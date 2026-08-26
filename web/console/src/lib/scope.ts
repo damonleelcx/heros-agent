@@ -94,6 +94,13 @@ export function scoped(session: Session) {
     // conversation routes, same reason.
     assessments: (workflowId: string) => `/api/v1/assessments?workflow_id=${encode(workflowId)}`,
     runAssessment: () => `/api/v1/assessments`,
+    // P35 · the improvement run. THREE flat paths, and the split between the first two is FR1/FR2
+    // rather than API taste: the plan is the artifact a person may DECLINE, so it has to be obtainable
+    // without starting anything. A single path that planned-and-ran would make the plan a receipt.
+    improvementPlan: () => `/api/v1/improvement-plans`,
+    improvementRun: (runId: string) => `/api/v1/improvement-runs?run_id=${encode(runId)}`,
+    runImprovement: () => `/api/v1/improvement-runs`,
+    improvementDecision: () => `/api/v1/improvement-decisions`,
 
     // ── P11 · a run the CLI transmitted, read back ────────────────────────
     // Distinct from `run` above on purpose. That one reads the EXECUTOR's record — attempt groups and

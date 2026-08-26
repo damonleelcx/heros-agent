@@ -100,6 +100,22 @@ const PATH_TEMPLATES: Array<[RegExp, string]> = [
   // and how often does it refuse" is a question somebody asks while looking at a provider bill, and an
   // unlisted route answers it with `/unknown`.
   [/^\/api\/v1\/assessments$/, "/api/v1/assessments"],
+  // P35 — the improvement run. THREE flat routes, three matchers, and the reason each is here differs.
+  //
+  // 🔴 `/api/v1/improvement-runs` is the one an unlisted entry would hurt worst, for the assessment
+  // route's reason with more money behind it: the POST runs a bounded search that can spend several
+  // dollars of the platform's own provider budget, and it is also the slowest call this console makes.
+  // "How long does a run take and how often does it refuse" is asked while looking at a bill.
+  //
+  // `/api/v1/improvement-plans` is FREE, and that is exactly why it is measured separately. Plans
+  // created versus runs started is the product signal that says whether the disclosure threshold is
+  // stopping people — a divergence between the two is invisible if only the expensive call is counted.
+  //
+  // `/api/v1/improvement-decisions` is the one that authorizes a WRITE to a customer's repository. Its
+  // refusal rate is a security signal, not a performance one.
+  [/^\/api\/v1\/improvement-plans$/, "/api/v1/improvement-plans"],
+  [/^\/api\/v1\/improvement-runs$/, "/api/v1/improvement-runs"],
+  [/^\/api\/v1\/improvement-decisions$/, "/api/v1/improvement-decisions"],
   // P31 — the conversational console. Five FLAT routes, five matchers.
   //
   // 🔴 `conversation-stream` matters most of the five and is the one an unlisted entry would hurt worst:
