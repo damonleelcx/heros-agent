@@ -8,6 +8,28 @@ import (
 // placement.go is task 7.5: which host may run a tenant's inference, answered in ONE function that both
 // runners call and neither can skip.
 //
+// ── 🔴 P36 REVIEWED THIS FILE AND CHANGED NOTHING. That is a decision, not an omission. ──────────
+//
+// P36 task 3.1 moves every file carrying a shape assumption about the agent — `definition.go`,
+// `axiseditor.go`, `inferencestore.go`, `placement.go`, `caps.go` and the fences — TOGETHER, because
+// the type system will not catch a package that is half-moved. This file's shape assumption turned out
+// to be one worth keeping, so it is recorded here rather than left to the next reader to re-derive.
+//
+// PRD §14 Q3 asked whether `placement` should be PER NODE: a definition could run cheap extraction
+// customer-side and expensive analysis platform-side. The answer is NO (decisions.md D-36.3).
+//
+// The reason is the paragraph immediately below. `MayRun` is a gate both runners call and neither can
+// skip — "there is no path to a provider that does not pass through it". Per node, the FUNCTION would
+// survive and the PROPERTY would not: today "may this run here" is answered once, before anything, for
+// the whole assessment. Per node it is answered N times, and a definition whose node 3 is
+// platform-placed and node 4 customer-placed is an assessment whose data crosses a security boundary
+// mid-run. That is not a placement any more; it is a distributed execution with a boundary inside it.
+//
+// 🚫 What is genuinely lost is stated rather than glossed: cheap extraction customer-side and expensive
+// analysis platform-side is a real capability, and it is DEFERRED rather than refused. It needs a
+// data-crossing story — what leaves the customer's machine, under whose consent, recorded where — and
+// inventing one as a side effect of a topology change is how a boundary gets moved by accident.
+//
 // # Why this is a gate on the runner and not a check at the call site
 //
 // Nothing wires platform-side inference yet — §9 does. So a placement check written "where inference is

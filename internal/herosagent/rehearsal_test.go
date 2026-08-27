@@ -51,7 +51,7 @@ type scriptedAnalyser struct {
 	err               error
 }
 
-func (s scriptedAnalyser) Infer(_ context.Context, in Input, _ string, _ Placement) (Result, error) {
+func (s scriptedAnalyser) Infer(_ context.Context, in Input, _ AssessmentBinding, _ Placement) (Result, error) {
 	if s.err != nil {
 		return Result{Code: CodeProviderFailed}, s.err
 	}
@@ -171,7 +171,7 @@ func TestAnUnloadableOrEmptyFixtureSetFailsTheRehearsal(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		rep, rerr := r.Run(context.Background(), "cfg1")
+		rep, rerr := r.Run(context.Background(), BindHash("cfg1"))
 		if rerr == nil {
 			t.Fatal("a rehearsal whose fixtures could not be loaded returned no error")
 		}
@@ -184,7 +184,7 @@ func TestAnUnloadableOrEmptyFixtureSetFailsTheRehearsal(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		rep, rerr := r.Run(context.Background(), "cfg1")
+		rep, rerr := r.Run(context.Background(), BindHash("cfg1"))
 		if rerr == nil || rep.Passed {
 			t.Error("an EMPTY calibration set passed every threshold vacuously — which is a gate that " +
 				"reports success for an agent nothing measured")
@@ -209,7 +209,7 @@ func TestAnAgentThatConnectsEverythingFailsTheNearMisses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rep, rerr := r.Run(context.Background(), "cfg1")
+	rep, rerr := r.Run(context.Background(), BindHash("cfg1"))
 	if rerr == nil && rep.Passed {
 		t.Fatal("an agent that emits an edge for EVERY candidate pair passed the gate. It has no " +
 			"discriminative power at all, and the near-misses exist precisely to catch it.")
@@ -230,7 +230,7 @@ func TestAnAgentThatConnectsEverythingFailsTheNearMisses(t *testing.T) {
 // rather than only what came back.
 type recordingAnalyser struct{ seen map[string]Input }
 
-func (r recordingAnalyser) Infer(_ context.Context, in Input, _ string, _ Placement) (Result, error) {
+func (r recordingAnalyser) Infer(_ context.Context, in Input, _ AssessmentBinding, _ Placement) (Result, error) {
 	r.seen[in.WorkflowID] = in
 	return Result{}, nil
 }
@@ -256,7 +256,7 @@ func TestThePreviewShowsExactlyWhatTheRunWouldSend(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Preview: %v", err)
 	}
-	if _, err := r.Run(context.Background(), "cfg"); err != nil {
+	if _, err := r.Run(context.Background(), BindHash("cfg")); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if len(previews) == 0 || len(previews) != len(rec.seen) {
@@ -391,7 +391,7 @@ func TestTheRehearsalReportIsStoredEvenOnFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, gerr := r.GateActivation(ctx, store, "cfg1"); gerr == nil {
+	if _, gerr := r.GateActivation(ctx, store, BindHash("cfg1")); gerr == nil {
 		t.Fatal("a failing rehearsal gated nothing")
 	}
 	v, _, _ := store.Get(ctx, "cfg1")
@@ -428,7 +428,7 @@ func TestAPerfectAgentPassesAndCanBeActivated(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rep, rerr := r.Run(context.Background(), "cfg1")
+	rep, rerr := r.Run(context.Background(), BindHash("cfg1"))
 	if rerr != nil {
 		t.Fatal(rerr)
 	}
@@ -524,7 +524,7 @@ func TestTheReportSaysWhatWasHeldOut(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rep, rerr := r.Run(context.Background(), "cfg1")
+	rep, rerr := r.Run(context.Background(), BindHash("cfg1"))
 	if rerr != nil {
 		t.Fatal(rerr)
 	}
@@ -587,7 +587,7 @@ func TestTheSetCanMeasureEdgeFinding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rep, _ := r.Run(context.Background(), "cfg1")
+	rep, _ := r.Run(context.Background(), BindHash("cfg1"))
 	if rep.Passed {
 		t.Errorf("an agent that emits NOTHING passed the gate. Fixtures with a non-empty truth: %v — "+
 			"they are not doing their job.", withEdges)

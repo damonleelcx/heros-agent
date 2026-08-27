@@ -267,6 +267,30 @@ type Runner struct {
 	// and a runner that refused to start without an event sink would make an observability dependency
 	// into an availability one.
 	emit func(Event, map[string]any)
+	// nodeModel resolves the Model for ONE node of a graph — each node binds its own prompt, model and
+	// credential (decisions.md D-36.1), so one Model cannot serve them all.
+	//
+	// 🔴 Nil is legal for a SINGLE-node definition and FATAL for a graph. A runner that fell back to
+	// `model` for every node would run five nodes against one model while the `config_hash` named five
+	// different ones — a configuration nobody authored, reported under the identity of one somebody
+	// did. `Infer` refuses a multi-node binding when this is nil.
+	nodeModel func(Node) (Model, error)
+	// health receives per-node observations. Nil drops them, on the same terms as `emit`.
+	health func(NodeRun)
+}
+
+// WithNodeModels wires per-node model resolution, which a multi-node definition requires.
+//
+// 🔴 An OPTION rather than a constructor argument, because every single-node deployment is correct
+// without one and a required parameter would make them all pass nil to say so. The asymmetry is made
+// safe by the refusal rather than by the caller's care: `Infer` refuses a graph when this is unset.
+func WithNodeModels(resolve func(Node) (Model, error)) RunnerOption {
+	return func(r *Runner) { r.nodeModel = resolve }
+}
+
+// WithNodeHealth wires the per-node observation sink read by the health endpoint (task 8.1).
+func WithNodeHealth(observe func(NodeRun)) RunnerOption {
+	return func(r *Runner) { r.health = observe }
 }
 
 // RunnerOption configures a Runner.
@@ -350,7 +374,12 @@ func (r *Runner) Host() Host { return r.host }
 // stores; every later request READS. "The same revision always shows you the same graph" is therefore a
 // property of the store, provable by a test that counts provider calls — and it survives changing
 // vendors, which temperature-0-and-a-seed does not.
-func (r *Runner) Infer(ctx context.Context, in Input, agentConfigHash string, placement Placement) (Result, error) {
+// 🔴 P36 — the third argument is an `AssessmentBinding` rather than a bare hash, and that IS PRD §14
+// Q4's answer (decisions.md D-36.4). The definition is resolved ONCE and travels with the run as a
+// value, so an activation mid-assessment cannot change what this run is executing: there is no read of
+// "the active definition" inside a run that could return a different answer.
+func (r *Runner) Infer(ctx context.Context, in Input, binding AssessmentBinding, placement Placement) (Result, error) {
+	agentConfigHash := binding.ConfigHash
 	// 🔴 TASK 7.5, AND IT IS FIRST — before the budget, before the cache read, before the residue.
 	//
 	// Ahead of the cache specifically: a `customer`-placed tenant whose answer is already stored
@@ -426,6 +455,13 @@ func (r *Runner) Infer(ctx context.Context, in Input, agentConfigHash string, pl
 	// The definition travels with the input, so the model layer can name WHICH definition this call is
 	// for — see Input.AgentConfigHash for what went wrong when it could not.
 	in.AgentConfigHash = agentConfigHash
+
+	// 🔴 A GRAPH takes the other path. Everything above — the placement gate, the budget, the cache
+	// read, the ceiling, the residue — is shape-independent and runs once for the whole assessment,
+	// which is D6/D-36.6 exactly: the ceiling is per ASSESSMENT, so adding a node cannot raise it.
+	if binding.Graph() {
+		return r.inferGraph(ctx, in, binding, placement)
+	}
 	raw, usage, err := r.model.Infer(ctx, in)
 	res := Result{Code: CodeOK, ProviderCalls: 1, Usage: usage}
 	if err != nil {
@@ -450,6 +486,27 @@ func (r *Runner) Infer(ctx context.Context, in Input, agentConfigHash string, pl
 
 	res.Edges, res.Labels, res.Abstentions, res.Narrative = r.validate(in, raw)
 
+	// 🔴 TASK 3.8 — per-node attribution on EVERY inference, including a single-node one.
+	//
+	// 🚫 Only when the binding carries a definition. The customer-side runner binds a hash alone
+	// (`BindHash`), because the producing node is operator-side only and a node id has no business on
+	// that wire — so its record stays ABSENT, which is the honest value: nobody observed which node
+	// produced those edges on that machine. NULL means NOT RECORDED, and a stamped `heros_analyst`
+	// would be this platform asserting a provenance it did not witness.
+	var nodeRuns []NodeRun
+	if n := binding.Definition.Primary(); n.NodeID != "" {
+		for i := range res.Edges {
+			res.Edges[i].ProducedByNode = n.NodeID
+		}
+		run := NodeRun{
+			NodeID: n.NodeID, ProviderCalls: 1,
+			TokensIn: usage.InputTokens, TokensOut: usage.OutputTokens,
+			Edges: len(res.Edges), Labels: len(res.Labels), Abstentions: len(res.Abstentions),
+		}
+		nodeRuns = []NodeRun{run}
+		r.observe(run)
+	}
+
 	stored := Stored{
 		InferenceID:     r.newID(in.WorkflowID, in.SourceRevision, agentConfigHash),
 		TenantID:        in.TenantID,
@@ -465,6 +522,7 @@ func (r *Runner) Infer(ctx context.Context, in Input, agentConfigHash string, pl
 		Narrative: res.Narrative,
 		TokensIn:  usage.InputTokens, TokensOut: usage.OutputTokens,
 		CreatedAtMS: r.nowMS(),
+		Nodes:       nodeRuns,
 	}
 	if err := r.store.Put(ctx, stored); err != nil {
 		return Result{Code: CodeProviderFailed, ProviderCalls: 1, Usage: usage,
@@ -631,3 +689,182 @@ func shortHash(s string) string {
 // 🚫 It is a FUNCTION rather than a field an assembler fills in, so there is one place the scope is
 // decided and no call site can widen it.
 func MemorySessionID(inferenceID string) string { return inferenceID }
+
+// observe forwards one node's numbers to the health sink when one is wired.
+func (r *Runner) observe(run NodeRun) {
+	if r.health != nil {
+		r.health(run)
+	}
+}
+
+// inferGraph runs a MULTI-NODE definition (P36 §4).
+//
+// It is reached only from `Infer`, after the placement gate, the budget check, the cache read, the
+// ceiling and the residue — all of which are properties of the ASSESSMENT and run once for it. That
+// ordering is D-36.6: adding a node does not raise the budget, because the budget was never per node.
+//
+// 🔴 What this function does NOT do is as important as what it does. It never appends a node's
+// contribution to a shared slice, never merges in completion order, and never reads "the active
+// definition". The result is a pure function of (binding, per-node outputs), and the per-node outputs
+// are a pure function of each node's own call.
+func (r *Runner) inferGraph(ctx context.Context, in Input, binding AssessmentBinding, _ Placement) (Result, error) {
+	d := binding.Definition
+	if r.nodeModel == nil {
+		// 🚫 REFUSED, never fallen back to `r.model`. Running five nodes against one model while the
+		// config_hash names five different ones is a configuration nobody authored, reported under the
+		// identity of one somebody did — and every number taken from it would be filed against the wrong
+		// definition.
+		err := fmt.Errorf("%w: this definition declares %d nodes and this runner resolves no per-node "+
+			"model. Each node binds its own prompt, model and credential, so one model cannot serve them "+
+			"all — and falling back to one would run a configuration the config_hash does not name",
+			ErrInvalidDefinition, len(d.Nodes))
+		return Result{Code: CodeProviderFailed, ProviderCalls: 0, Cause: err.Error()}, err
+	}
+
+	preds := incomingPredicates(d)
+	outputs := map[string]NodeOutput{}
+	res := Result{Code: CodeOK}
+	var totalUsage providercall.Usage
+
+	for _, id := range d.Ordering() {
+		node, ok := d.NodeByID(id)
+		if !ok {
+			// Unreachable for a validated definition — `Validate` refuses an ordering naming an
+			// undeclared node — and refused rather than skipped, because a silent skip here is a node an
+			// operator believes ran.
+			err := fmt.Errorf("%w: the ordering names %q, which the definition does not declare",
+				ErrInvalidDefinition, id)
+			return Result{Code: CodeProviderFailed, ProviderCalls: res.ProviderCalls, Cause: err.Error()}, err
+		}
+		if enter, why := shouldEnter(id, preds, outputs); !enter {
+			// 🚫 A skipped node is RECORDED with its reason. A node absent from the record is
+			// indistinguishable from one that ran and found nothing.
+			out := NodeOutput{NodeID: id, Skipped: true, SkipReason: why}
+			outputs[id] = out
+			r.observe(out.run())
+			continue
+		}
+
+		// 🔴 THE CEILING, BEFORE EVERY PROVIDER CALL ON EVERY NODE (task 5.2).
+		//
+		// Re-checked per node rather than once for the assessment, and the two are not the same check:
+		// the first node's spend is recorded before the second node's check reads it, so a definition
+		// that would blow the ceiling stops AT the node that crosses it instead of after the last one.
+		// A cap enforced once at the top is an accounting record for every node after the first.
+		if r.caps != nil {
+			verdict, cerr := r.caps.Check(ctx, in.TenantID)
+			if cerr != nil {
+				return Result{Code: CodeProviderFailed, ProviderCalls: res.ProviderCalls,
+					Cause: "the token ceiling could not be read"}, cerr
+			}
+			if !verdict.Allowed {
+				capErr := verdict.CapError()
+				r.event(EventCapReached, map[string]any{
+					"tenant_id": in.TenantID, "scope": verdict.Scope,
+					"limit": verdict.Limit, "spent": verdict.Spent, "node_id": id,
+				})
+				// 🔴 `not_measured` with `budget exhausted` — the state P33 already defines (D6) — and it
+				// NAMES THE NODE it stopped at. "The assessment ran out of budget" is not actionable;
+				// "it ran out at the critic, having completed the analyst" is.
+				return Result{
+					Code: CodeCapReached, ProviderCalls: res.ProviderCalls, Usage: totalUsage,
+					Cause: fmt.Sprintf("%s The assessment stopped at node %q, after %d of %d nodes; "+
+						"nothing was written.", capErr.Error(), id, len(outputs), len(d.Nodes)),
+				}, capErr
+			}
+		}
+
+		out := r.runNode(ctx, in, node)
+		outputs[id] = out
+		res.ProviderCalls += out.Calls
+		totalUsage.InputTokens += out.Usage.InputTokens
+		totalUsage.OutputTokens += out.Usage.OutputTokens
+		r.observe(out.run())
+
+		// 🔴 A node that spent past the assessment's ceiling aborts and WRITES NO PARTIAL IR, exactly as
+		// the single-node path does: a half-applied inference is a graph nobody can reproduce from its key.
+		if spent := totalUsage.InputTokens + totalUsage.OutputTokens; spent > in.Budget.MaxTokens {
+			return Result{
+				Code: CodeBudgetExceeded, ProviderCalls: res.ProviderCalls, Usage: totalUsage,
+				Cause: fmt.Sprintf("the assessment spent %d tokens against a ceiling of %d, at node %q; "+
+					"nothing was written. The ceiling is per ASSESSMENT rather than per node, so adding a "+
+					"node does not raise it", spent, in.Budget.MaxTokens, id),
+			}, nil
+		}
+	}
+
+	edges, labels, abstentions, narrative, runs := mergeOutputs(d, outputs)
+	res.Edges, res.Labels, res.Abstentions, res.Narrative = edges, labels, abstentions, narrative
+	res.Usage = totalUsage
+
+	stored := Stored{
+		InferenceID:     r.newID(in.WorkflowID, in.SourceRevision, binding.ConfigHash),
+		TenantID:        in.TenantID,
+		WorkflowID:      in.WorkflowID,
+		SourceRevision:  in.SourceRevision,
+		AgentConfigHash: binding.ConfigHash,
+		Placement:       r.host.PlacementOf(),
+		Edges:           edges, Labels: labels, Abstentions: abstentions,
+		Narrative:   narrative,
+		TokensIn:    totalUsage.InputTokens,
+		TokensOut:   totalUsage.OutputTokens,
+		CreatedAtMS: r.nowMS(),
+		Nodes:       runs,
+	}
+	if err := r.store.Put(ctx, stored); err != nil {
+		return Result{Code: CodeProviderFailed, ProviderCalls: res.ProviderCalls, Usage: totalUsage,
+			Cause: "the inference completed and could not be stored"}, err
+	}
+	res.InferenceID = stored.InferenceID
+
+	if r.meter != nil {
+		if err := r.meter.Record(ctx, Spend{
+			TenantID: in.TenantID, InferenceID: stored.InferenceID,
+			TokensIn: int64(totalUsage.InputTokens), TokensOut: int64(totalUsage.OutputTokens),
+			CreatedAtMS: stored.CreatedAtMS,
+		}); err != nil {
+			r.event(EventInferenceStored, map[string]any{
+				"inference_id": stored.InferenceID, "meter_write_failed": err.Error(),
+			})
+		}
+	}
+	r.event(EventInferenceStored, map[string]any{
+		"inference_id": stored.InferenceID, "nodes": len(runs),
+	})
+	return res, nil
+}
+
+// runNode makes ONE node's provider call and validates its answer.
+//
+// 🔴 The validation is `r.validate` — the SAME function the single-node path uses. A second validator
+// for a graph's nodes is where the confidence floor quietly becomes two floors, and the floor is the
+// thing standing between a guess and a stored fact.
+func (r *Runner) runNode(ctx context.Context, in Input, node Node) NodeOutput {
+	out := NodeOutput{NodeID: node.NodeID}
+	started := r.nowMS()
+
+	model, err := r.nodeModel(node)
+	if err != nil {
+		out.Failed, out.Cause = true, fmt.Sprintf("this node's model could not be resolved: %v", err)
+		out.LatencyMS = r.nowMS() - started
+		return out
+	}
+	out.Calls = 1
+	raw, usage, err := model.Infer(ctx, in)
+	out.Usage = usage
+	out.LatencyMS = r.nowMS() - started
+	if err != nil {
+		// Task 4.10 — the cause travels. 🚫 Never an empty contribution: a caller that folded one in
+		// would be reporting a provider outage as a finding about the customer's workflow.
+		out.Failed, out.Cause = true, err.Error()
+		return out
+	}
+	out.Edges, out.Labels, out.Abstentions, out.Narrative = r.validate(in, raw)
+	// 🔴 Stamp the producing node on every edge, HERE, where the producer is known. Doing it in the
+	// merge would mean the merge had to be told, and a merge that is told its inputs' provenance is a
+	// merge that can be told the wrong one.
+	for i := range out.Edges {
+		out.Edges[i].ProducedByNode = node.NodeID
+	}
+	return out
+}

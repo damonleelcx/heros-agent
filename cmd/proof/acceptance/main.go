@@ -172,7 +172,7 @@ func main() {
 		must(herr, "rehearsal")
 
 		log.Printf("acceptance: running the rehearsal gate against the calibration set (LIVE MODEL)…")
-		report, gerr := reh.Run(ctx, res.ConfigHash)
+		report, gerr := reh.Run(ctx, herosagent.BindDefinition(res.ConfigHash, def))
 		must(gerr, "rehearsal run")
 
 		blob, _ := json.MarshalIndent(report, "", "  ")

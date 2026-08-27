@@ -44,15 +44,42 @@
 
 ## 3. Backend Dev — the definition
 
-- [ ] 3.1 `NodeID` from package constant to data; move `definition.go`, `axiseditor.go`, `inferencestore.go`, `placement.go`, `caps.go` and the fences **together**.
-- [ ] 3.2 `AuthorableAxes()` returns nine; `loop` and `graph` are registry references, never inlined.
-- [ ] 3.3 Extend the **reflective credential fence** to every new field. A fence enumerating the old shape passes vacuously on the new one — add a key-shaped field to the new struct and require the fence to fail.
-- [ ] 3.4 `ErrWiringOverride` narrows: still refused for a single-node definition, authorable for multi-node.
-- [ ] 3.5 `ErrHostServiceMissing` extends to the loop axis, refusing at **publish** rather than at run.
-- [ ] 3.6 Loop turns validated against the node's harness envelope ceiling at publish, naming both values.
-- [ ] 3.7 `ErrNoChange` still refuses to mint a duplicate version.
-- [ ] 3.8 Per-node attribution on every inference: node id and definition version.
-- [ ] 3.9 Migration for the definition store: repeatable, success on a second run, idempotency guard named in the commit body, and existing single-node rows read back byte-identically (1.1).
+- [x] 3.1 `NodeID` from package constant to data; move `definition.go`, `axiseditor.go`, `inferencestore.go`, `placement.go`, `caps.go` and the fences **together**.
+      → `DefaultNodeID` is now only the DEFAULT a single-node definition gets; identity is `Node.NodeID`.
+      All five moved: `definition.go` (the shape), `axiseditor.go` (loop params + `NodeLabel`), `inferencestore.go`
+      (`nodes_json`), and `placement.go` / `caps.go` — which were **reviewed and deliberately unchanged**, with the
+      reason recorded in each file's header (D-36.3, D-36.6) rather than left for the next reader to re-derive.
+- [x] 3.2 `AuthorableAxes()` returns nine; `loop` and `graph` are registry references, never inlined.
+      → derived from `variantspec.Dimensions()` + `graph`, so it cannot silently miss one.
+      `TestAuthorableAxesAreTheProductsNine`, `TestLoopAndGraphAreReferencesNeverInlined`.
+- [x] 3.3 Extend the **reflective credential fence** to every new field. A fence enumerating the old shape passes vacuously on the new one — add a key-shaped field to the new struct and require the fence to fail.
+      → the walk is extracted to `keyShapedOffenders` so the fence and the drill run the SAME code;
+      `TestTheCredentialFenceFiresOnAKeyAddedToTheNewShape` adds `APIKey` to a mirror of `Node` — at top level AND
+      nested inside a definition — and requires it to fire. Anti-vacuity floor raised 20 → 60 fields, plus a
+      by-name assertion that `Node`, `NodeEdit`, `TopologyEdit` and `canonicalNode` were actually reached.
+- [x] 3.4 `ErrWiringOverride` narrows: still refused for a single-node definition, authorable for multi-node.
+      → `Definition.validateTopologyShape`. `TestTheOrderingRefusalNarrowsRatherThanDisappearing` asserts BOTH
+      halves plus anti-vacuity (a bad multi-node ordering is still refused). The legacy `wiring` SPELLING is
+      refused BY NAME with the rename to `graph` stated, never translated — `TestTheLegacyWiringSpelling…`.
+- [x] 3.5 `ErrHostServiceMissing` extends to the loop axis, refusing at **publish** rather than at run.
+      → `Publisher.checkLoopAxis` / `refuseMissingLoopHosts`, reading `registry.HostServicesForLoop` — the
+      registry's rule, not a second one. A loop bound with NO axis registry wired is refused too, because a loop
+      nobody could validate defers the check to whoever the run reaches.
+      `TestALoopNeedingAnUnavailableHostServiceIsRefusedAtPublish`, `TestALoopIsRefusedWhenNothingCanValidateIt`.
+- [x] 3.6 Loop turns validated against the node's harness envelope ceiling at publish, naming both values.
+      → `refuseOverCeiling` at publish and `ValidateLoopParams` at save. Both name the chosen value AND the
+      ceiling, because "too many turns" sends the reader to guess which of two people to ask.
+      `TestALoopOverItsEnvelopeCeilingIsRefusedNamingBothValues`.
+- [x] 3.7 `ErrNoChange` still refuses to mint a duplicate version.
+      → unchanged, and now asserted for multi-node as well: `TestRepublishingAnIdenticalDefinitionCreatesNoSecondVersion`.
+- [x] 3.8 Per-node attribution on every inference: node id and definition version.
+      → `Stored.Nodes []NodeRun` + `ProvenancedEdge.ProducedByNode`, stamped by `Runner.runNode` where the
+      producer is known. 🚫 NOT stamped on the customer-side path (`BindHash`), because nobody there observed it —
+      absent is the honest value. `TestAnInferenceNamesTheNodeAndTheDefinitionVersionThatProducedIt`.
+- [x] 3.9 Migration for the definition store: repeatable, success on a second run, idempotency guard named in the commit body, and existing single-node rows read back byte-identically (1.1).
+      → `0052_p36_node_attribution` adds ONE nullable column and **does not touch `spec_json`**, because D-36.0
+      establishes no rewrite is needed. Guards: `ADD COLUMN IF NOT EXISTS` + `ON CONFLICT (id) DO NOTHING`.
+      `internal/pgmigrate/p36_node_attribution_test.go` (4 fences), plus the P26 no-new-table ledger entry.
 
 ## 4. Backend Dev — topology
 

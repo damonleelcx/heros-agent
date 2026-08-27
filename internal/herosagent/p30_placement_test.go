@@ -111,7 +111,7 @@ func TestPlatformRunnerRunsNothingForACustomerPlacedTenant(t *testing.T) {
 	m := &recordingModel{result: RawResult{Edges: []RawEdge{{From: "a", To: "c", Kind: "data", Confidence: conf(0.9)}}}}
 	r, _ := testRunner(t, m)
 
-	res, err := r.Infer(context.Background(), inputFor(irWith([]string{"a", "b", "c"})), "cfg1", PlacementCustomer)
+	res, err := r.Infer(context.Background(), inputFor(irWith([]string{"a", "b", "c"})), BindHash("cfg1"), PlacementCustomer)
 	if err == nil {
 		t.Fatal("the platform runner analysed a customer-placed tenant")
 	}
@@ -133,14 +133,14 @@ func TestAStoredAnswerIsNotServedAfterThePlacementMovesAway(t *testing.T) {
 	ctx := context.Background()
 	ir := irWith([]string{"a", "b", "c"})
 
-	if _, err := r.Infer(ctx, inputFor(ir), "cfg1", PlacementPlatform); err != nil {
+	if _, err := r.Infer(ctx, inputFor(ir), BindHash("cfg1"), PlacementPlatform); err != nil {
 		t.Fatal(err)
 	}
 	if store.Len() != 1 {
 		t.Fatalf("nothing was stored, so the test cannot prove the cache was skipped")
 	}
 
-	if _, err := r.Infer(ctx, inputFor(ir), "cfg1", PlacementCustomer); err == nil {
+	if _, err := r.Infer(ctx, inputFor(ir), BindHash("cfg1"), PlacementCustomer); err == nil {
 		t.Error("the platform served a stored answer for a tenant it may no longer analyse — a real row, " +
 			"and an artifact of a placement that has since changed")
 	}
@@ -154,11 +154,11 @@ func TestReInferIsGatedToo(t *testing.T) {
 	ctx := context.Background()
 	ir := irWith([]string{"a", "b", "c"})
 
-	if _, err := r.Infer(ctx, inputFor(ir), "cfg1", PlacementPlatform); err != nil {
+	if _, err := r.Infer(ctx, inputFor(ir), BindHash("cfg1"), PlacementPlatform); err != nil {
 		t.Fatal(err)
 	}
 	before := m.count()
-	if _, _, err := r.ReInfer(ctx, inputFor(ir), "cfg1", PlacementCustomer); err == nil {
+	if _, _, err := r.ReInfer(ctx, inputFor(ir), BindHash("cfg1"), PlacementCustomer); err == nil {
 		t.Error("re-inference ran platform-side for a customer-placed tenant")
 	}
 	if m.count() != before {
@@ -174,7 +174,7 @@ func TestAStoredInferenceCannotClaimAPlacementItsHostCouldNotRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.Infer(context.Background(), inputFor(irWith([]string{"a", "b", "c"})), "cfg1", PlacementCustomer); err != nil {
+	if _, err := r.Infer(context.Background(), inputFor(irWith([]string{"a", "b", "c"})), BindHash("cfg1"), PlacementCustomer); err != nil {
 		t.Fatal(err)
 	}
 	got, ok, _ := store.Get(context.Background(), "wf", "rev1", "cfg1")
@@ -209,10 +209,10 @@ func TestBothHostsAssembleByteIdenticalContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pr.Infer(context.Background(), in, "cfg1", PlacementPlatform); err != nil {
+	if _, err := pr.Infer(context.Background(), in, BindHash("cfg1"), PlacementPlatform); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := cr.Infer(context.Background(), in, "cfg1", PlacementCustomer); err != nil {
+	if _, err := cr.Infer(context.Background(), in, BindHash("cfg1"), PlacementCustomer); err != nil {
 		t.Fatal(err)
 	}
 	if platformSide.seen == nil || customerSide.seen == nil {

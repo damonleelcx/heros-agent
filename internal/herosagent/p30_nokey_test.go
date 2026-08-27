@@ -35,11 +35,14 @@ func typesUnderTest() []any {
 	}
 }
 
-func TestNoTypeInThisPackageHasAFieldThatCouldCarryAKey(t *testing.T) {
-	var offenders []string
-	var scanned int
-	var seen = map[reflect.Type]bool{}
-
+// keyShapedOffenders walks every exported struct reachable from `types` and returns the fields a key
+// could live in, plus how many fields it inspected.
+//
+// 🔴 EXTRACTED so the fence and its DRILL run the SAME code (P36 task 3.3). A drill that re-implemented
+// the walk would prove that the drill's walk fires, which is not the question — the question is whether
+// THE FENCE fires on a shape it has never seen.
+func keyShapedOffenders(types []any) (offenders []string, scanned int) {
+	seen := map[reflect.Type]bool{}
 	var walk func(rt reflect.Type, path string)
 	walk = func(rt reflect.Type, path string) {
 		for rt.Kind() == reflect.Ptr || rt.Kind() == reflect.Slice || rt.Kind() == reflect.Array {
@@ -64,10 +67,15 @@ func TestNoTypeInThisPackageHasAFieldThatCouldCarryAKey(t *testing.T) {
 			walk(f.Type, name)
 		}
 	}
-	for _, v := range typesUnderTest() {
+	for _, v := range types {
 		rt := reflect.TypeOf(v)
 		walk(rt, rt.Name())
 	}
+	return offenders, scanned
+}
+
+func TestNoTypeInThisPackageHasAFieldThatCouldCarryAKey(t *testing.T) {
+	offenders, scanned := keyShapedOffenders(typesUnderTest())
 
 	if len(offenders) > 0 {
 		t.Errorf("these fields could carry a provider key:\n  %s\n\n"+
@@ -77,9 +85,21 @@ func TestNoTypeInThisPackageHasAFieldThatCouldCarryAKey(t *testing.T) {
 			"convenience of a text field.", strings.Join(offenders, "\n  "))
 	}
 	// 🔴 ANTI-VACUITY. A reflection walk that reached nothing would report clean forever.
-	if scanned < 20 {
+	//
+	// 🔴 P36 raises the floor from 20 to 60. The package grew a Node, a NodeEdit, a TopologyEdit, two
+	// canonical projections and two wire projections, and a floor set for the old shape would be met by
+	// a walk that reached only the old types — which is exactly the vacuous pass the whole file is about.
+	if scanned < 60 {
 		t.Errorf("the walk inspected only %d field(s) — it is not reaching the types, so its clean "+
 			"report above means nothing", scanned)
+	}
+	// 🔴 P36 task 3.3 — AND IT MUST REACH THE NEW SHAPE BY NAME. A count can be met by the old types
+	// alone; this asserts the fields P36 added were actually walked.
+	for _, want := range []string{"Node", "NodeEdit", "TopologyEdit", "canonicalNode"} {
+		if !reachedType(want) {
+			t.Errorf("the walk never reached %s. A fence enumerating the old shape passes VACUOUSLY on "+
+				"the new one, and a vacuous pass looks exactly like a real one.", want)
+		}
 	}
 	// And the pattern must be able to FIRE, or its silence says nothing.
 	if !keyShapedField.MatchString("APIKey") || !keyShapedField.MatchString("access_token") {
@@ -90,6 +110,95 @@ func TestNoTypeInThisPackageHasAFieldThatCouldCarryAKey(t *testing.T) {
 	if keyShapedField.MatchString("TokensIn") || keyShapedField.MatchString("tokens_out") {
 		t.Error("the pattern fires on a token COUNT — a fence that flags the fields it exists to permit " +
 			"is a fence that gets deleted")
+	}
+}
+
+// reachedType reports whether a type of this NAME is in typesUnderTest, directly or as a field.
+func reachedType(name string) bool {
+	found := false
+	seen := map[reflect.Type]bool{}
+	var walk func(rt reflect.Type)
+	walk = func(rt reflect.Type) {
+		for rt.Kind() == reflect.Ptr || rt.Kind() == reflect.Slice || rt.Kind() == reflect.Array ||
+			rt.Kind() == reflect.Map {
+			rt = rt.Elem()
+		}
+		if rt.Kind() != reflect.Struct || seen[rt] {
+			return
+		}
+		seen[rt] = true
+		if rt.Name() == name {
+			found = true
+		}
+		for i := 0; i < rt.NumField(); i++ {
+			walk(rt.Field(i).Type)
+		}
+	}
+	for _, v := range typesUnderTest() {
+		walk(reflect.TypeOf(v))
+	}
+	return found
+}
+
+// 🔴 P36 TASK 3.3 — THE DRILL. Add a key-shaped field to the NEW struct and require the fence to fail.
+//
+// This is the assertion the design asks for by name: "The reflective credential fence can pass
+// vacuously on the new shape. Adding a key-shaped field to the new struct must make it fail, and that
+// must be asserted, not assumed."
+//
+// `nodeWithAKey` mirrors `Node` field for field and adds one. It runs through
+// `keyShapedOffenders` — the SAME walk the fence above uses, not a copy — so a pass here is a pass of
+// the real mechanism.
+type nodeWithAKey struct {
+	NodeID              string   `json:"node_id"`
+	PromptRef           string   `json:"prompt_ref"`
+	ModelRef            string   `json:"model_ref"`
+	CredentialRef       string   `json:"credential_ref"`
+	SkillRefs           []string `json:"skill_refs,omitempty"`
+	ToolNames           []string `json:"tool_names,omitempty"`
+	ContextRef          string   `json:"context_ref"`
+	MemoryRef           string   `json:"memory_ref,omitempty"`
+	HarnessRef          string   `json:"harness_ref"`
+	LoopRef             string   `json:"loop_ref,omitempty"`
+	CriticModelRef      string   `json:"critic_model_ref,omitempty"`
+	CriticCredentialRef string   `json:"critic_credential_ref,omitempty"`
+	// The one addition. This is what somebody adds in a hurry when a vendor needs a per-node key.
+	APIKey string `json:"api_key"`
+}
+
+// definitionWithAKeyedNode is the containing shape, so the drill exercises the walk's RECURSION into
+// the node list rather than only its handling of a top-level struct. A fence that inspected Definition
+// and never descended would pass on this.
+type definitionWithAKeyedNode struct {
+	Nodes []nodeWithAKey `json:"nodes"`
+}
+
+func TestTheCredentialFenceFiresOnAKeyAddedToTheNewShape(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		typ  any
+		want string
+	}{
+		{"a key on the node itself", nodeWithAKey{}, "nodeWithAKey.APIKey"},
+		{"a key on a node inside a definition", definitionWithAKeyedNode{},
+			"definitionWithAKeyedNode.Nodes.APIKey"},
+	} {
+		offenders, scanned := keyShapedOffenders([]any{c.typ})
+		if scanned == 0 {
+			t.Fatalf("%s: the walk inspected nothing", c.name)
+		}
+		var hit bool
+		for _, o := range offenders {
+			if strings.HasPrefix(o, c.want) {
+				hit = true
+			}
+		}
+		if !hit {
+			t.Errorf("%s: the fence did NOT fire on %s. It enumerates the old shape and passes "+
+				"VACUOUSLY on the new one — which looks exactly like a real pass, and the field it "+
+				"missed is a provider key in a database column.\n  offenders: %v",
+				c.name, c.want, offenders)
+		}
 	}
 }
 

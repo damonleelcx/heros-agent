@@ -60,7 +60,7 @@ func cappedRunner(t *testing.T, limit int64, alreadySpent int64) (*Runner, *reco
 func TestACapIsEnforcedBeforeTheProviderCall(t *testing.T) {
 	r, m, _ := cappedRunner(t, 100, 150)
 
-	res, err := r.Infer(context.Background(), inputFor(irWith([]string{"a", "b", "c"})), "cfg1", PlacementPlatform)
+	res, err := r.Infer(context.Background(), inputFor(irWith([]string{"a", "b", "c"})), BindHash("cfg1"), PlacementPlatform)
 	if !errors.Is(err, ErrCapReached) {
 		t.Fatalf("err is %v, want ErrCapReached", err)
 	}
@@ -88,7 +88,7 @@ func TestReachingACapEmitsTheEvent(t *testing.T) {
 	var got []Event
 	r.emit = func(e Event, _ map[string]any) { got = append(got, e) }
 
-	if _, err := r.Infer(context.Background(), inputFor(irWith([]string{"a", "b", "c"})), "cfg1", PlacementPlatform); err == nil {
+	if _, err := r.Infer(context.Background(), inputFor(irWith([]string{"a", "b", "c"})), BindHash("cfg1"), PlacementPlatform); err == nil {
 		t.Fatal("the capped run was allowed")
 	}
 	for _, e := range got {
@@ -104,7 +104,7 @@ func TestReachingACapEmitsTheEvent(t *testing.T) {
 func TestARunUnderTheCeilingProceedsAndIsMetered(t *testing.T) {
 	r, m, meter := cappedRunner(t, 100_000, 10)
 
-	if _, err := r.Infer(context.Background(), inputFor(irWith([]string{"a", "b", "c"})), "cfg1", PlacementPlatform); err != nil {
+	if _, err := r.Infer(context.Background(), inputFor(irWith([]string{"a", "b", "c"})), BindHash("cfg1"), PlacementPlatform); err != nil {
 		t.Fatal(err)
 	}
 	if m.count() != 1 {
@@ -140,7 +140,7 @@ func TestACappedTenantStillReadsItsStoredAnswer(t *testing.T) {
 		t.Fatal(err)
 	}
 	ir := irWith([]string{"a", "b", "c"})
-	if _, err := r.Infer(ctx, inputFor(ir), "cfg1", PlacementPlatform); err != nil {
+	if _, err := r.Infer(ctx, inputFor(ir), BindHash("cfg1"), PlacementPlatform); err != nil {
 		t.Fatal(err)
 	}
 
@@ -152,7 +152,7 @@ func TestACappedTenantStillReadsItsStoredAnswer(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := m.count()
-	if _, err := r.Infer(ctx, inputFor(ir), "cfg1", PlacementPlatform); err != nil {
+	if _, err := r.Infer(ctx, inputFor(ir), BindHash("cfg1"), PlacementPlatform); err != nil {
 		t.Errorf("a capped tenant was denied its STORED answer, which costs nothing: %v", err)
 	}
 	if m.count() != before {

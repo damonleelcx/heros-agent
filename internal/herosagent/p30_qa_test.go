@@ -44,7 +44,7 @@ func TestAGoFixtureIRIsByteIdenticalWithTheAgentOnAndOff(t *testing.T) {
 		{From: "c", To: "a", Kind: "data", Confidence: conf(0.99)},
 	}}}
 	r, store := testRunner(t, m)
-	res, err := r.Infer(ctx, inputFor(ir), "cfg1", PlacementPlatform)
+	res, err := r.Infer(ctx, inputFor(ir), BindHash("cfg1"), PlacementPlatform)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,11 +99,11 @@ func TestACacheHitReturnsAByteIdenticalBody(t *testing.T) {
 	}
 	r, _ := testRunner(t, m)
 
-	first, err := r.Infer(ctx, inputFor(ir), "cfg1", PlacementPlatform)
+	first, err := r.Infer(ctx, inputFor(ir), BindHash("cfg1"), PlacementPlatform)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := r.Infer(ctx, inputFor(ir), "cfg1", PlacementPlatform)
+	second, err := r.Infer(ctx, inputFor(ir), BindHash("cfg1"), PlacementPlatform)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +216,7 @@ func TestAFreshlyMigratedDeploymentAnalysesNothing(t *testing.T) {
 		}
 		in := inputFor(irWith([]string{"a", "b", "c"}))
 		in.TenantID = tenant
-		if _, err := r.Infer(ctx, in, "cfg1", tp.Placement); err == nil {
+		if _, err := r.Infer(ctx, in, BindHash("cfg1"), tp.Placement); err == nil {
 			t.Errorf("%s was analysed on a freshly migrated deployment", tenant)
 		}
 	}

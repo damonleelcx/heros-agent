@@ -205,7 +205,7 @@ func newAgentRehearsal(cfg agentRehearsalConfig) (adminops.RehearseFunc, error) 
 		if herr != nil {
 			return herr
 		}
-		_, gaerr := reh.GateActivation(ctx, cfg.Versions, configHash)
+		_, gaerr := reh.GateActivation(ctx, cfg.Versions, herosagent.BindDefinition(configHash, v.Definition))
 		return gaerr
 	}, nil
 }

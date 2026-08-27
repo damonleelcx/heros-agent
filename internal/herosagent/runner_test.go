@@ -116,7 +116,7 @@ func TestAFrontendEdgeIsNeverOverwrittenOrDeleted(t *testing.T) {
 	}}}
 	r, store := testRunner(t, m)
 
-	res, err := r.Infer(context.Background(), inputFor(ir), "cfg1", "platform")
+	res, err := r.Infer(context.Background(), inputFor(ir), BindHash("cfg1"), "platform")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +166,7 @@ func TestOutOfVocabularyOutputIsRejectedNotRepaired(t *testing.T) {
 		},
 	}}
 	r, _ := testRunner(t, m)
-	res, err := r.Infer(context.Background(), inputFor(ir), "cfg1", "platform")
+	res, err := r.Infer(context.Background(), inputFor(ir), BindHash("cfg1"), "platform")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +194,7 @@ func TestBelowFloorBecomesAnAbstentionCarryingItsConfidence(t *testing.T) {
 		{From: "b", To: "a", Kind: "data", Confidence: nil},       // no confidence AT ALL
 	}}}
 	r, _ := testRunner(t, m)
-	res, _ := r.Infer(context.Background(), inputFor(ir), "cfg1", "platform")
+	res, _ := r.Infer(context.Background(), inputFor(ir), BindHash("cfg1"), "platform")
 
 	if len(res.Edges) != 0 {
 		t.Errorf("a below-floor edge was written: %+v", res.Edges)
@@ -228,7 +228,7 @@ func TestASecondRequestIsACacheHitWithZeroProviderCalls(t *testing.T) {
 	r, _ := testRunner(t, m)
 	ctx := context.Background()
 
-	first, err := r.Infer(ctx, inputFor(ir), "cfg1", "platform")
+	first, err := r.Infer(ctx, inputFor(ir), BindHash("cfg1"), "platform")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +236,7 @@ func TestASecondRequestIsACacheHitWithZeroProviderCalls(t *testing.T) {
 		t.Fatalf("the first request made %d provider calls, want 1", first.ProviderCalls)
 	}
 
-	second, err := r.Infer(ctx, inputFor(ir), "cfg1", "platform")
+	second, err := r.Infer(ctx, inputFor(ir), BindHash("cfg1"), "platform")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -254,7 +254,7 @@ func TestASecondRequestIsACacheHitWithZeroProviderCalls(t *testing.T) {
 
 	// A DIFFERENT config_hash is a different key and must infer again — otherwise the cache would
 	// serve one definition's answer under another's identity.
-	third, err := r.Infer(ctx, inputFor(ir), "cfg2", "platform")
+	third, err := r.Infer(ctx, inputFor(ir), BindHash("cfg2"), "platform")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -270,7 +270,7 @@ func TestAFullyCoveredRepositoryMakesZeroProviderCalls(t *testing.T) {
 	m := &recordingModel{}
 	r, _ := testRunner(t, m)
 
-	res, err := r.Infer(context.Background(), inputFor(ir), "cfg1", "platform")
+	res, err := r.Infer(context.Background(), inputFor(ir), BindHash("cfg1"), "platform")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -289,7 +289,7 @@ func TestAProviderFailureCarriesItsCauseAndIsNotAnEmptyGraph(t *testing.T) {
 	m := &recordingModel{err: errors.New("upstream 503: model overloaded")}
 	r, store := testRunner(t, m)
 
-	res, err := r.Infer(context.Background(), inputFor(ir), "cfg1", "platform")
+	res, err := r.Infer(context.Background(), inputFor(ir), BindHash("cfg1"), "platform")
 	if err == nil {
 		t.Fatal("a provider failure returned no error, so a caller would render its empty Edges as a " +
 			"finding about the customer's workflow")
@@ -318,7 +318,7 @@ func TestExceedingTheTokenBudgetWritesNothing(t *testing.T) {
 	in := inputFor(ir)
 	in.Budget.MaxTokens = 1_000
 
-	res, err := r.Infer(context.Background(), in, "cfg1", "platform")
+	res, err := r.Infer(context.Background(), in, BindHash("cfg1"), "platform")
 	if err != nil {
 		t.Fatalf("an over-budget run returned an error rather than a recorded abort: %v", err)
 	}
@@ -341,7 +341,7 @@ func TestAnUnboundedBudgetIsRefused(t *testing.T) {
 	in := inputFor(ir)
 	in.Budget = Budget{}
 
-	if _, err := r.Infer(context.Background(), in, "cfg1", "platform"); err == nil {
+	if _, err := r.Infer(context.Background(), in, BindHash("cfg1"), "platform"); err == nil {
 		t.Fatal("an unbounded run was permitted — `unlimited` spelled as a zero value is a cost nobody chose")
 	}
 	if m.count() != 0 {
@@ -356,7 +356,7 @@ func TestLabelsEnterAsRegionProposalsAuthoredByHEROS(t *testing.T) {
 		{Pattern: "prompt_chaining", NodeIDs: []string{"b", "a"}, Confidence: conf(0.9)},
 	}}}
 	r, _ := testRunner(t, m)
-	res, err := r.Infer(context.Background(), inputFor(ir), "cfg1", "platform")
+	res, err := r.Infer(context.Background(), inputFor(ir), BindHash("cfg1"), "platform")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -405,7 +405,7 @@ func TestAnInjectedInstructionCannotEscapeTheVocabulary(t *testing.T) {
 	in := inputFor(ir)
 	in.Residue.UnlabelledRegions = []string{"sg_1"}
 
-	res, err := r.Infer(context.Background(), in, "cfg1", "platform")
+	res, err := r.Infer(context.Background(), in, BindHash("cfg1"), "platform")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -437,7 +437,7 @@ func TestReInferenceProducesADiffAndDoesNotReplaceUntilConfirmed(t *testing.T) {
 	r, store := testRunner(t, m)
 	ctx := context.Background()
 
-	if _, err := r.Infer(ctx, inputFor(ir), "cfg1", "platform"); err != nil {
+	if _, err := r.Infer(ctx, inputFor(ir), BindHash("cfg1"), "platform"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -450,7 +450,7 @@ func TestReInferenceProducesADiffAndDoesNotReplaceUntilConfirmed(t *testing.T) {
 		},
 		Narrative: "assessed: a routes to b",
 	}
-	diff, fresh, err := r.ReInfer(ctx, inputFor(ir), "cfg1", "platform")
+	diff, fresh, err := r.ReInfer(ctx, inputFor(ir), BindHash("cfg1"), "platform")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -506,10 +506,10 @@ func TestAnIdenticalReInferenceReportsAnEmptyDiff(t *testing.T) {
 	}}
 	r, _ := testRunner(t, m)
 	ctx := context.Background()
-	if _, err := r.Infer(ctx, inputFor(ir), "cfg1", "platform"); err != nil {
+	if _, err := r.Infer(ctx, inputFor(ir), BindHash("cfg1"), "platform"); err != nil {
 		t.Fatal(err)
 	}
-	diff, _, err := r.ReInfer(ctx, inputFor(ir), "cfg1", "platform")
+	diff, _, err := r.ReInfer(ctx, inputFor(ir), BindHash("cfg1"), "platform")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -524,7 +524,7 @@ func TestTheAgentIsNeverShownAnythingOutsideTheResidue(t *testing.T) {
 	ir := irWith([]string{"a", "b", "c"}, [2]string{"a", "b"})
 	m := &recordingModel{}
 	r, _ := testRunner(t, m)
-	if _, err := r.Infer(context.Background(), inputFor(ir), "cfg1", "platform"); err != nil {
+	if _, err := r.Infer(context.Background(), inputFor(ir), BindHash("cfg1"), "platform"); err != nil {
 		t.Fatal(err)
 	}
 	if m.count() != 1 {

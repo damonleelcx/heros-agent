@@ -10,6 +10,26 @@ import (
 
 // caps.go is task 9.2: the token ceiling, checked BEFORE the provider call.
 //
+// ── 🔴 P36: THE CEILING IS PER ASSESSMENT, NOT PER NODE. Adding a node does not raise the budget. ──
+//
+// Design D6 / decisions.md D-36.6, restated in the file it governs because a multi-node definition is
+// the first thing that makes a per-node ceiling look reasonable — and it is the natural next edit.
+//
+// A per-node ceiling means a TOPOLOGY CHANGE SILENTLY CHANGES A BUDGET. That is the least visible way
+// for a system to start spending more money: nobody edited a budget, the number that moved is one
+// nobody was watching, and the change that moved it was about graph shape.
+//
+// 🔴 Nothing in this file is keyed by node, and that absence is the mechanism. `Cap` is per tenant (or
+// fleet); `CapChecker.Check` takes a tenant id and nothing else. There is no node parameter to pass,
+// so a caller who wanted a per-node ceiling would have to add one — which is a visible edit rather than
+// a default that drifted.
+//
+// 🚫 The consequence is accepted rather than mitigated: a definition with many nodes may exhaust its
+// ceiling MID-ASSESSMENT. That is correct. `Runner.inferGraph` re-checks this ceiling before EVERY
+// node's provider call — not because the ceiling is per node, but because the earlier nodes' spend must
+// be visible to the later nodes' check — and exhaustion degrades to `not_measured` with `budget
+// exhausted`, the state P33 already defines, NAMING THE NODE it stopped at.
+//
 // # Why "before" is the whole task
 //
 // A cap enforced after a call is an accounting record, not a cap. The tokens are spent, the bill is

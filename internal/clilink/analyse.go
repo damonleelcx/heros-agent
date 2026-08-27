@@ -229,7 +229,12 @@ func (c Commands) runLocally(ctx context.Context, def runlink.AgentDefinition,
 			MaxTokens: def.MaxTokens,
 			MaxWall:   time.Duration(def.MaxWallSeconds) * time.Second,
 		},
-	}, def.ConfigHash, herosagent.PlacementCustomer)
+		// 🔴 A HASH-ONLY binding, and it is the honest one here (decisions.md D-36.2/D-36.3). This
+		// runner received a `runlink.AgentDefinition` — one prompt, one model, by contract — and never a
+		// node list, because the producing node is operator-side only. So the result carries NO
+		// per-node record: nobody on this machine observed which node produced those edges, and a
+		// stamped node id would be this platform asserting a provenance it did not witness.
+	}, herosagent.BindHash(def.ConfigHash), herosagent.PlacementCustomer)
 	if err != nil {
 		// 🚫 Never an empty graph. The cause travels, exactly as it does platform-side: a provider outage
 		// reported as "we found nothing" is an outage rendered as a finding about the customer's workflow.

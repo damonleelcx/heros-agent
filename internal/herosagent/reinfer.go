@@ -56,7 +56,11 @@ type Diff struct {
 // ReInfer runs the agent again against the same key and returns what WOULD change.
 //
 // 🔴 It does not write. `ConfirmReplace` does, and only with a diff a person has seen.
-func (r *Runner) ReInfer(ctx context.Context, in Input, agentConfigHash string, placement Placement) (Diff, Result, error) {
+// 🔴 P36 — it takes the BINDING, like Infer, and for the same reason: a re-inference of a graph must
+// run the graph, not its first node. Re-running one node of five and presenting the difference as "what
+// changed" would be a diff between two different computations.
+func (r *Runner) ReInfer(ctx context.Context, in Input, binding AssessmentBinding, placement Placement) (Diff, Result, error) {
+	agentConfigHash := binding.ConfigHash
 	// 🔴 The placement gate again, and NOT because it is tidy to repeat it. `ReInfer` calls the model
 	// directly — it deliberately bypasses `Infer`'s cache read, which is the whole point of a
 	// re-inference — so it also bypasses the gate that lives there. A second provider-reaching entry
@@ -83,12 +87,33 @@ func (r *Runner) ReInfer(ctx context.Context, in Input, agentConfigHash string, 
 	if err := in.Budget.Validate(); err != nil {
 		return Diff{}, Result{Code: CodeBudgetExceeded, Cause: err.Error()}, err
 	}
+	// 🔴 A GRAPH is re-run as a graph, through the SAME executor `Infer` uses. Re-running only
+	// `r.model` would re-run the first node and present the difference as "what changed", which is a
+	// diff between two different computations.
+	//
+	// 🚫 The fresh run is NOT stored. Replacing a pinned result is a separate, confirmed operation
+	// (`Replace`), and a re-inference that wrote its own answer would make the diff a report of
+	// something that had already happened.
+	if binding.Graph() {
+		fresh, gerr := r.freshGraph(ctx, in, binding)
+		if gerr != nil {
+			return Diff{}, fresh, gerr
+		}
+		return DiffOf(stored, fresh), fresh, nil
+	}
+
+	in.AgentConfigHash = agentConfigHash
 	raw, usage, err := r.model.Infer(ctx, in)
 	if err != nil {
 		return Diff{}, Result{Code: CodeProviderFailed, ProviderCalls: 1, Cause: err.Error()}, err
 	}
 	fresh := Result{Code: CodeOK, ProviderCalls: 1, Usage: usage}
 	fresh.Edges, fresh.Labels, fresh.Abstentions, fresh.Narrative = r.validate(in, raw)
+	if n := binding.Definition.Primary(); n.NodeID != "" {
+		for i := range fresh.Edges {
+			fresh.Edges[i].ProducedByNode = n.NodeID
+		}
+	}
 
 	return DiffOf(stored, fresh), fresh, nil
 }

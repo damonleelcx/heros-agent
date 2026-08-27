@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/heros-foreal/agentd/internal/registry"
 )
 
 // axiseditor.go is D12: NO AXIS IS A TEXT BOX, and every param validates AT SAVE (§6b).
@@ -437,4 +439,95 @@ func (p ParamSpec) check(policy, name string, v any) error {
 		}
 	}
 	return nil
+}
+
+// ── The loop axis, edited per node (P36 task 3.2 / operator-agent-authoring spec) ────────────────
+//
+// # 🔴 Why the loop axis is not a text box either
+//
+// D12 unchanged, one axis later. A free-text strategy name is a value nothing can interpret the moment
+// the vocabulary moves; a free-text stop condition is worse, because it reads as configuration and is
+// inert. Both bind to the registry's closed sets.
+//
+// # Why this lives here rather than in publish.go
+//
+// The split is the one the whole file draws: these functions take the CANDIDATE and the VOCABULARY and
+// need no database, so a console can run them on every keystroke. `Publisher.checkLoopAxis` is the
+// second gate, for the request that does not come from the console, and it resolves the ref against the
+// registry — a question only a store can answer.
+
+// LoopParams are a loop strategy's parameters, validated at SAVE.
+type LoopParams struct {
+	Strategy string
+	// MaxTurns is REQUIRED for a multi-turn strategy. Zero on a multi-turn strategy is refused rather
+	// than defaulted: a default here is an unbounded loop nobody chose.
+	MaxTurns int
+	// StopCondition is why the loop stops. From the strategy's declared set, never free text.
+	StopCondition string
+	// EnvelopeTurnCeiling is the node's harness envelope ceiling, and 0 means the node binds no
+	// envelope.
+	//
+	// 🔴 A pointer would be more honest about "absent" and is not needed here: `ValidateLoopParams`
+	// treats 0 as "no ceiling declared", which is the same answer `checkTurnCeiling` gives for a nil
+	// envelope — a node with no envelope is bounded by the platform ceiling alone, and refusing every
+	// loop that had no envelope would make the loop axis unusable without also authoring a harness.
+	EnvelopeTurnCeiling int
+}
+
+// ValidateLoopParams enforces the vocabulary, the platform ceiling and the node's envelope ceiling —
+// at save, naming the axis and (via the caller's node label) the node.
+//
+// 🔴 IT NAMES BOTH NUMBERS when the envelope refuses (task 3.6). "Too many turns" leaves an operator
+// unable to tell whether to lower their value or ask for a higher policy, and those are requests to two
+// different people: the ceiling is IMPOSED by whoever owns the envelope, the turn count is CHOSEN by
+// whoever authors the loop.
+func ValidateLoopParams(p LoopParams, where string) error {
+	known := false
+	for _, n := range registry.LoopStrategyNames() {
+		if n == p.Strategy {
+			known = true
+			break
+		}
+	}
+	if !known {
+		return fmt.Errorf("%w: %q is not a loop strategy this deployment knows%s. It is one of %s. A "+
+			"free-text strategy is a value nothing can interpret the moment the vocabulary moves",
+			ErrInvalidDefinition, p.Strategy, where, strings.Join(registry.LoopStrategyNames(), ", "))
+	}
+	multiTurn := p.Strategy != registry.StrategySingleShot
+	switch {
+	case !multiTurn:
+		if p.MaxTurns > 1 {
+			return fmt.Errorf("%w: %q is single-turn and max_turns is %d%s. A turn count on a strategy "+
+				"that takes one turn is a number that does nothing, and a reader would take it for a bound",
+				ErrInvalidDefinition, p.Strategy, p.MaxTurns, where)
+		}
+		return nil
+	case p.MaxTurns <= 0:
+		return fmt.Errorf("%w: %q is multi-turn and max_turns is unset%s. It is REQUIRED rather than "+
+			"defaulted: a default here is an unbounded loop nobody chose, paid for by whoever is billed "+
+			"for the analysis", ErrInvalidDefinition, p.Strategy, where)
+	case p.MaxTurns > MaxTurnsCeiling:
+		return fmt.Errorf("%w: max_turns is %d%s and the platform ceiling is %d. The ceiling is a "+
+			"constant rather than configuration — a ceiling an operator can raise is not a ceiling",
+			ErrInvalidDefinition, p.MaxTurns, where, MaxTurnsCeiling)
+	case p.EnvelopeTurnCeiling > 0 && p.MaxTurns > p.EnvelopeTurnCeiling:
+		return fmt.Errorf("%w: the loop asks for max_turns=%d%s and its harness envelope's turn_ceiling "+
+			"is %d. The ceiling is imposed and the turn count is chosen, so either lower max_turns to %d "+
+			"or less, or ask whoever owns the envelope to raise turn_ceiling",
+			ErrInvalidDefinition, p.MaxTurns, where, p.EnvelopeTurnCeiling, p.EnvelopeTurnCeiling)
+	}
+	return nil
+}
+
+// NodeLabel is the " on node x" suffix an editor refusal carries, exported so a console and this
+// package cannot spell it two ways.
+//
+// Empty for a single-node definition: the pre-P36 sentences stay exactly as they were, and a message
+// that gained a node prefix nobody asked for would be a second thing to re-baseline in every test.
+func NodeLabel(d Definition, nodeID string) string {
+	if !d.MultiNode() {
+		return ""
+	}
+	return " on node " + nodeID
 }

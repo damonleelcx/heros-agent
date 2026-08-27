@@ -149,7 +149,7 @@ type FixtureLoader interface {
 // Analyser runs one inference over a fixture's residue. It is the Runner in production and a fake in
 // tests; the rehearsal does not care which, only that it produces edges.
 type Analyser interface {
-	Infer(ctx context.Context, in Input, agentConfigHash string, placement Placement) (Result, error)
+	Infer(ctx context.Context, in Input, binding AssessmentBinding, placement Placement) (Result, error)
 }
 
 // Discoverer produces a fixture's rule IR. Injected so the rehearsal can run against real trees
@@ -197,8 +197,13 @@ func NewRehearsal(l FixtureLoader, d Discoverer, a Analyser, minPrecision, minRe
 		MinPrecision: minPrecision, MinRecall: minRecall}, nil
 }
 
-// Run executes the calibration set.
-func (r *Rehearsal) Run(ctx context.Context, agentConfigHash string) (RehearsalReport, error) {
+// Run executes the calibration set against ONE definition.
+//
+// 🔴 P36 — it takes the BINDING rather than a bare hash, for the reason `Runner.Infer` does: the
+// definition it measures is the definition it runs, held as a value, so nothing can activate a
+// different one underneath a rehearsal in progress. A gate that measured one configuration and armed
+// another would be worse than no gate.
+func (r *Rehearsal) Run(ctx context.Context, binding AssessmentBinding) (RehearsalReport, error) {
 	rep := RehearsalReport{
 		MinPrecision: r.MinPrecision, MinRecall: r.MinRecall,
 		Scores: []Score{}, Failures: []string{},
@@ -221,7 +226,7 @@ func (r *Rehearsal) Run(ctx context.Context, agentConfigHash string) (RehearsalR
 		if perr != nil {
 			return rep, perr
 		}
-		res, aerr := r.analyse.Infer(ctx, p.input, agentConfigHash, PlacementPlatform)
+		res, aerr := r.analyse.Infer(ctx, p.input, binding, PlacementPlatform)
 		if aerr != nil {
 			return rep, fmt.Errorf("herosagent: fixture %q (%s) could not be analysed: %w",
 				f.Name, f.Language, aerr)
@@ -566,8 +571,9 @@ func scoreEdges(f Fixture, got []ProvenancedEdge, declined []Abstention) Score {
 // leaves an operator with "it did not pass" and nothing to act on.
 func (r *Rehearsal) GateActivation(ctx context.Context, store interface {
 	SetRehearsal(ctx context.Context, configHash string, state RehearsalState, report string) error
-}, agentConfigHash string) (RehearsalReport, error) {
-	rep, err := r.Run(ctx, agentConfigHash)
+}, binding AssessmentBinding) (RehearsalReport, error) {
+	agentConfigHash := binding.ConfigHash
+	rep, err := r.Run(ctx, binding)
 	if err != nil {
 		// The run itself failed — no numbers exist. Recorded as `failed` with the reason, because a
 		// version left `pending` after a rehearsal that errored looks like one nobody has run yet.
