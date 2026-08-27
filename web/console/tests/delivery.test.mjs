@@ -346,6 +346,82 @@ test("23.18 — the ledger is unavailable rather than partial when the platform 
   assert.doesNotMatch(html, /binding document field/, "an unreadable ledger rendered a local fallback table");
 });
 
+// ── An unusable 200 is not a usable one ──────────────────────────────────────
+//
+// # 🔴 Three reads, one class of defect, and two of them took the page down
+//
+// `load()`'s `requires` mechanism exists because "the platform answered 200 and the body is not
+// something I can render" is a FOURTH outcome, distinct from not-mounted, not-found and transport
+// failure. `view.ts` records what happens without it: a view dereferences a nested field, throws during
+// server render, and Next replaces the WHOLE PAGE with its error output — no frame, no heading, no
+// subject.
+//
+// It happened again, three times, and the cases are deliberately kept apart below because they have
+// different severities and different fixes:
+//
+//   · `axis-projection` → `{state:"ok","projection":{}}`   HTTP 500. `ProjectionBody` opens with
+//     `projection.totals.find(...)`, and EVERY axis surface renders that panel.
+//   · `delivery-projection` → `{}`                          HTTP 500. `YourNodesTab` opens with
+//     `p.rows.filter(...)`.
+//   · `change-delivery` → `{}`                              HTTP 200, and WRONG: every dereference in
+//     `deliveryRoutes.tsx` carries a `??`, so a partial body rendered as a COMPLETE answer — an empty
+//     ledger and `read against coverage table undefined`.
+//
+// The third is the one this file's own banner already described: *"Showing a partial answer would be
+// worse than showing none, because a missing row reads as 'not applicable' — a claim about your code
+// that nobody made."* The copy was right and the code implemented it only for a failed fetch.
+
+test("🔴 a partial route ledger is unavailable rather than partial — a 200 is not a usable body", async () => {
+  // The exact shape: a 200 with an empty object. Before the fix this rendered as a complete ledger.
+  platform.set((req, res) => {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify(req.url.startsWith("/api/v1/change-delivery") ? {} : view([])));
+  });
+  const { status, html } = await get("/app/delivery");
+
+  assert.equal(status, 200, "an unusable ledger body took the page down");
+  assert.match(html, /route ledger is unavailable/i, "a partial ledger rendered as a complete one");
+  // 🚫 And specifically NOT the heading that states a version it does not have.
+  assert.doesNotMatch(html, /coverage table undefined/, "the page printed a version the body never carried");
+});
+
+test("🔴 a partial axis projection renders read-failed, and does not take the page down", async () => {
+  // 🔴 The worst of the three: every axis surface renders `AxisProjectionPanel`, so this one 500'd
+  // `/app/context`, `/app/memory`, `/app/harness`, `/app/graph`, `/app/studio`, `/app/authoring`,
+  // `/app/delivery` and `/app/coverage` at once.
+  platform.set((req, res) => {
+    res.writeHead(200, { "content-type": "application/json" });
+    if (req.url.includes("axis-projection")) return res.end(JSON.stringify({ state: "ok", projection: {} }));
+    if (req.url === "/api/v1/workflows") return res.end(JSON.stringify({ workflows: [{ workflow_id: "wf1", nodes: 1 }] }));
+    res.end(JSON.stringify(view([])));
+  });
+
+  for (const route of ["/app/delivery", "/app/coverage"]) {
+    const { status, html } = await get(route);
+    assert.equal(status, 200, `${route} was taken down by an unusable projection body`);
+    // 🚫 NOT `not-reported`. Telling the reader they have reported nothing would be a claim about THEM
+    // drawn from a defect on OUR side, and it names the wrong next action.
+    assert.doesNotMatch(
+      html,
+      /has not been told this organization|reported no workflow structure/i,
+      `${route} rendered our own defect as the customer having reported nothing`,
+    );
+  }
+});
+
+test("🔴 a partial delivery projection renders read-failed, and does not take the page down", async () => {
+  platform.set((req, res) => {
+    res.writeHead(200, { "content-type": "application/json" });
+    if (req.url.includes("delivery-projection")) return res.end(JSON.stringify({}));
+    if (req.url === "/api/v1/workflows") return res.end(JSON.stringify({ workflows: [{ workflow_id: "wf1", nodes: 1 }] }));
+    res.end(JSON.stringify(view([])));
+  });
+  const { status, html } = await get("/app/delivery");
+
+  assert.equal(status, 200, "an unusable delivery-projection body took the page down");
+  assert.match(html, /could not be read/i, "the unusable body was not reported as a read failure");
+});
+
 // ── P14 12.8 · the two tools cells are separate rows ─────────────────────────
 //
 // One row reading "tools are not rollout-eligible" would be true of both cells and useful for neither:
