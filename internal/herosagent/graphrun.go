@@ -257,24 +257,25 @@ func mergeOutputs(d Definition, outputs map[string]NodeOutput) (
 	return edges, labels, abstentions, strings.Join(narratives, "\n\n"), runs
 }
 
-// concurrentGroups indexes which nodes may overlap, by node id.
+// 🚫 THERE IS NO `concurrentGroups` HELPER, AND THE RUNNER DOES NOT OVERLAP NODES.
 //
-// 🔴 It answers "may this node overlap with its group" and NOT "run these in parallel". Whether the
-// runner actually overlaps them is an execution choice; whether the RESULT may depend on that is not,
-// and the merge above already settles it. So this exists to bound the parallelism, not to define the
-// semantics.
-func concurrentGroups(d Definition) map[string]int {
-	out := map[string]int{}
-	for i, g := range d.GraphGroups {
-		if !g.Concurrent {
-			continue
-		}
-		for _, n := range g.Nodes {
-			out[n] = i
-		}
-	}
-	return out
-}
+// One was written and never wired, which the linter caught. Deleting it rather than wiring it is the
+// decision, so here is the reasoning where the next person will look for it.
+//
+// `GraphGroup.Concurrent` says its nodes **MAY** overlap. It does not say they must, and the executor
+// walking `Order` sequentially is a valid execution of "may" — the same way `Order` remaining the
+// replay sequence is what design D4 requires of a live run that DID overlap them.
+//
+// What the declaration actually buys is checked and hashed either way: the group's membership is
+// validated, a fan-in without a merge is refused, every member must appear in the ordering, and the
+// whole topology is part of `config_hash`. What it must never buy is a result that depends on the
+// interleaving — and `mergeOutputs` gets that by construction rather than by scheduling, which is why
+// running the nodes in parallel would change the wall-clock and nothing else.
+//
+// So overlapping is an OPTIMISATION nobody has asked for, and it is the kind that trades a determinism
+// guarantee for latency on the platform's own agent. If it is ever wanted, the thing to add is a bound
+// (`Envelope.ConcurrencyLimit` already exists and the sandbox already enforces it) — not a map of which
+// nodes are allowed to race.
 
 // incomingPredicates indexes the predicate edges INTO each node.
 func incomingPredicates(d Definition) map[string][]variantspec.Edge {

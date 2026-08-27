@@ -187,7 +187,9 @@ func main() {
 		{FromNodeID: "heros_analyst", ToNodeID: "heros_critic",
 			Kind: variantspec.EdgeKindPredicate, Predicate: "analyst_had_a_hunch"},
 	}
-	mustRefusePublish(ctx, pub, badPred, "the predicate out of scope",
+	// The refusal is checked inside `mustRefusePublish`; only the fan-in step below needs the error
+	// VALUE, to compare it against the customer path's. Discarded explicitly rather than ignored.
+	_ = mustRefusePublish(ctx, pub, badPred, "the predicate out of scope",
 		[]string{"analyst_had_a_hunch", "in scope"})
 
 	step(6, "a loop whose host service this deployment does not supply — refused at PUBLISH, not at run")

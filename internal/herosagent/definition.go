@@ -306,10 +306,14 @@ func (d Definition) MarshalJSON() ([]byte, error) {
 	if d.legacyShaped() {
 		return json.Marshal(d.legacy())
 	}
-	return json.Marshal(extendedDefinition{
-		Nodes: d.Nodes, Order: d.Order, Edges: d.Edges,
-		GraphGroups: d.GraphGroups, SetVersions: d.SetVersions,
-	})
+	// 🔴 A CONVERSION, not a struct literal, and it is load-bearing rather than a lint preference.
+	//
+	// `extendedDefinition` exists only to escape this method — marshalling `Definition` from inside its
+	// own `MarshalJSON` recurses — so the two must stay field-identical. A struct literal would keep
+	// compiling if somebody added a field to `Definition` and forgot this line, and the new field would
+	// silently vanish from the wire. The conversion stops compiling instead, which is the outcome worth
+	// having for a type whose bytes are the compatibility guarantee.
+	return json.Marshal(extendedDefinition(d))
 }
 
 // UnmarshalJSON reads BOTH documents, so a `spec_json` written by the previous binary still decodes.
@@ -329,8 +333,9 @@ func (d *Definition) UnmarshalJSON(b []byte) error {
 		if err := json.Unmarshal(b, &ext); err != nil {
 			return fmt.Errorf("herosagent: decoding the definition: %w", err)
 		}
-		*d = Definition{Nodes: ext.Nodes, Order: ext.Order, Edges: ext.Edges,
-			GraphGroups: ext.GraphGroups, SetVersions: ext.SetVersions}
+		// The same conversion in reverse, for the same reason: a field added to one shape and not the
+		// other must break the build rather than be dropped in silence.
+		*d = Definition(ext)
 		return nil
 	}
 	var leg legacyDefinition
