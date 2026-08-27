@@ -252,21 +252,55 @@
 
 ## 9. QA — fences that can go red
 
-- [ ] 9.1 Single-node definition hashes byte-identically to pre-P36 (1.1). **The most important fence in the phase.**
-- [ ] 9.2 Existing pins readable and attributable after the shape change.
-- [ ] 9.3 A definition change does not silently re-run pins; assert no provider call.
-- [ ] 9.4 A stale pin renders stale with its producing configuration named.
-- [ ] 9.5 Credential fence covers new fields: add a key-shaped field; the fence must fail.
-- [ ] 9.6 Single-node definition still refuses an ordering.
-- [ ] 9.7 Fan-in without merge refused at publish.
-- [ ] 9.8 Loop with an unavailable host service refused at publish, not at run.
-- [ ] 9.9 Rehearsal required before activating multi-node.
-- [ ] 9.10 Adding a node does not raise the assessment budget.
-- [ ] 9.11 Repeated pinned inference under concurrency → byte-identical, run repeatedly.
-- [ ] 9.12 P26 build fence covers new axes and node kinds.
-- [ ] 9.13 Agent and customer specs share one validator — assert the code path.
-- [ ] 9.14 No proposal targets the agent's own definition (D5).
-- [ ] 9.15 Rollback to a previous version is one act and requires no re-authoring.
+> 🔴 **The register is in code, not here.** `internal/herosagent/p36_qa_register_test.go` maps each
+> requirement below to the test that is its evidence, and `TestEveryP36FenceInTheRegisterExists` PARSES
+> the tree to assert every entry resolves to a function that actually exists — across Go **and** the
+> console's JavaScript suite.
+>
+> A list of test names in a document rots in the safe direction: a fence is renamed or deleted, the
+> document still names it, nothing points at anything, and the list keeps reading as coverage. A document
+> cannot fail. Drill: renaming one registered fence turns the register red.
+>
+> **Every fence below was drilled** — mutated to make it fail, observed red, restored, observed green.
+
+- [x] 9.1 Single-node definition hashes byte-identically to pre-P36 (1.1). **The most important fence in the phase.**
+      → `TestPreP36ConfigHashesAreReproducedExactly`, against bytes recorded by the PRE-P36 tree.
+- [x] 9.2 Existing pins readable and attributable after the shape change.
+      → `TestAnExistingPinRemainsReadableAndNamesItsProducingConfiguration` and
+      `TestAPreP36StoredDefinitionDecodesAndKeepsItsHash` (a literal pre-P36 `spec_json`, re-encoded to the same bytes).
+- [x] 9.3 A definition change does not silently re-run pins; assert no provider call.
+      → `TestActivatingANewDefinitionRunsNoInference` — counts calls rather than asserting a nil error.
+- [x] 9.4 A stale pin renders stale with its producing configuration named.
+      → `TestAPinFromAnUnauthorableShapeIsStaleAndNamesItsProducer`, over the three-valued `ClassifyPin`.
+- [x] 9.5 Credential fence covers new fields: add a key-shaped field; the fence must fail.
+      → `TestTheCredentialFenceFiresOnAKeyAddedToTheNewShape`, running the SAME walk the fence uses.
+- [x] 9.6 Single-node definition still refuses an ordering.
+      → `TestTheOrderingRefusalNarrowsRatherThanDisappearing`, both halves plus anti-vacuity.
+- [x] 9.7 Fan-in without merge refused at publish.
+      → `TestAFanInWithoutAMergeIsRefusedAtPublish`, including that no version row is written.
+- [x] 9.8 Loop with an unavailable host service refused at publish, not at run.
+      → `TestALoopIsRefusedAtPublishRatherThanReachingTheRunner` asserts the WHERE by counting provider calls:
+      "refused" and "refused after it ran" are indistinguishable from an error value, and the whole reason the
+      check moved left is that nothing is spent and nobody downstream meets it.
+- [x] 9.9 Rehearsal required before activating multi-node.
+      → `TestActivatingAMultiNodeDefinitionRequiresARehearsal`. Its drill found the store's INDEPENDENT gate
+      still refusing — `Activate`'s documented "they fail independently on purpose", observed rather than assumed.
+- [x] 9.10 Adding a node does not raise the assessment budget.
+      → `TestAddingANodeDoesNotRaiseTheAssessmentBudget`, over 1, 4 and 8 nodes.
+- [x] 9.11 Repeated pinned inference under concurrency → byte-identical, run repeatedly.
+      → `TestARepeatedPinnedInferenceUnderConcurrencyIsByteIdentical`, **40 runs**, jittering models.
+- [x] 9.12 P26 build fence covers new axes and node kinds.
+      → the console suite: every one of the nine axes has a surface, the node dimension is rendered, and the
+      `graph` axis appears in both states. Registered here so the cross-surface requirement has ONE register
+      rather than two half-registers that can disagree about what is covered.
+- [x] 9.13 Agent and customer specs share one validator — assert the code path.
+      → `TestTheAgentsTopologyGoesThroughTheCustomersValidator`: the agent's refusal must CONTAIN the
+      customer's verbatim. "Both refuse" is what two independent validators do too.
+- [x] 9.14 No proposal targets the agent's own definition (D5).
+      → `TestNoProposalTargetsTheAgentsOwnDefinition`, on a Generator with NO stores wired — so it proves the
+      refusal fires FIRST, before any read, not merely that it fires.
+- [x] 9.15 Rollback to a previous version is one act and requires no re-authoring.
+      → `TestRollbackIsOneActAndRequiresNoReAuthoring`: no version created, exactly one active afterwards.
 
 ## 10. Sales Operations
 
