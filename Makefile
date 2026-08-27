@@ -29,7 +29,7 @@ PARITY_DIR ?= .parity
         sandbox-proof sandbox-proof-redcheck \
         classifier-calibration demo-patterngraph demo-proposals demo-billing demo-billing-states \
         release-rehearse release-rehearse-redcheck readme-install packaging-proof install-smoke install-smoke-refusals \
-        agent-rehearse agent-status repo-intake-hermes assessment-hermes axissplit-hermes \
+        agent-rehearse agent-status repo-intake-hermes assessment-hermes axissplit-hermes agentgraph-hermes \
         intent-holdout intent-holdout-strict attribution-holdout p31-fence-redcheck p33-fence-redcheck p34-fence-redcheck p35-fence-redcheck console-edge-proof assessment-holdout p35-live-four-step improve-hermes
 
 ## ci: the locally-provable gate (go + schema + console-types + discovery-ci + intent-holdout). Lint/db-proof run as their own CI jobs.
@@ -233,6 +233,34 @@ assessment-hermes:
 ##
 ##	git clone --depth 1 https://github.com/nousresearch/hermes-agent /tmp/hermes-agent
 ##	make axissplit-hermes
+## agentgraph-hermes: run P36's multi-node agent against a REAL repository's own call sites.
+##
+## Every P36 fence is green and every one has been drilled red. Green fences prove the parts, against a
+## definition this repository wrote over a hand-built IR chosen to make the assertion clean. That is the
+## right shape for a fence and it is not evidence about a customer.
+##
+## This proves the WALK. It discovers `nousresearch/hermes-agent`'s actual call sites and runs a
+## THREE-NODE agent over them — a triage, an analyst, and a critic behind a conditional edge — so every
+## node id in the per-node attribution is a symbol somebody else wrote. Fourteen steps: the single-node
+## hash held byte-identical, the fan-in refusal proved to be the CUSTOMER's own sentence from the
+## customer's own function, a predicate out of scope refused by the expression path, a loop refused at
+## publish, activation refused before rehearsal, the walk itself, per-node attribution on the
+## repository's ids, the conditional edge taken BOTH ways, twenty byte-identical repeats, rollback as
+## one act, the pin surviving two activations, and the per-node health document.
+##
+## 🚫 It calls NO provider and costs nothing. The models are a deterministic local stub: every claim is
+## about the SHAPE of the run — which node was entered, which was routed around, what each contributed —
+## and a version that called a real model would be measuring the model instead.
+##
+## It needs a checkout; clone it first (a public repository needs no token):
+##
+##	git clone --depth 1 https://github.com/nousresearch/hermes-agent /tmp/hermes-agent
+##	make agentgraph-hermes
+agentgraph-hermes:
+	@test -d "$(HERMES)" || { echo "agentgraph-hermes: no checkout at $(HERMES)"; \
+		echo "  git clone --depth 1 https://github.com/nousresearch/hermes-agent $(HERMES)"; exit 2; }
+	GOWORK=off $(GO) run ./cmd/proof/agentgraph -local $(HERMES)
+
 HERMES ?= /tmp/hermes-agent
 axissplit-hermes:
 	@test -d "$(HERMES)" || { echo "axissplit-hermes: no checkout at $(HERMES)"; \
