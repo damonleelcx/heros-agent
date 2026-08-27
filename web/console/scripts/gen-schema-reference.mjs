@@ -139,10 +139,34 @@ async function metricPage(version, facts) {
   );
   out.push("");
 
+  /*
+   * 🔴 Every scope the catalogue can carry has a section here, and a scope with no section FAILS THE
+   * BUILD rather than being skipped.
+   *
+   * This list held `call` and `run` only, and `continue`-d past anything else. When nine metrics were
+   * catalogued as `node` and `billing`, all nine vanished from this page — no error, no empty section,
+   * no diff: the generator wrote a reference that silently documented sixteen of twenty-nine metrics.
+   *
+   * That is the same defect the catalogue itself had, one layer out, and it is why the loop below now
+   * refuses an unknown scope. A generator that skips what it does not recognise produces a document
+   * whose omissions are invisible, which is worse than one that will not build.
+   */
   const scopes = [
     ["call", "Per provider call", "Emitted once for every call to a model provider."],
+    ["node", "Per node event", "Emitted when something happens TO a node that is not a provider call — a sandbox denial, an isolate lifecycle transition, a tool or skill failing closed. These carry a real `node_id`, unlike a run-scoped metric, and none of them needs a call to be in flight."],
     ["run", "Per run", "Emitted once per run window. These carry a reserved `node_id` sentinel, because concurrency across a run is not attributable to one node."],
+    ["billing", "Per customer period", "Emitted for a customer's billing period rather than for a run. A customer's spend is not attributable to a run, a node or a case, so these carry the reserved tag sentinels and ride the customer and period as dimensions — never as labels, because a series per customer is a cardinality explosion."],
   ];
+
+  const known = new Set(scopes.map(([scope]) => scope));
+  const unknown = [...new Set(facts.metrics.map((m) => m.scope))].filter((scope) => !known.has(scope));
+  if (unknown.length > 0) {
+    throw new Error(
+      `the metric catalogue carries scope(s) this reference has no section for: ${unknown.join(", ")}. ` +
+        `Add a section above — a metric with no section is dropped from the published reference silently, ` +
+        `which is how a page comes to document some of the taxonomy and say so nowhere.`,
+    );
+  }
 
   for (const [scope, heading, blurb] of scopes) {
     const rows = facts.metrics.filter((m) => m.scope === scope);

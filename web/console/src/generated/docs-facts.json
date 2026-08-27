@@ -902,6 +902,97 @@
       "scope": "run",
       "computation": "Provider calls per second over the run window.",
       "computed_in": "internal/telemetry/monitor.go"
+    },
+    {
+      "name": "context_assembled_tokens",
+      "unit": "tokens",
+      "scope": "call",
+      "computation": "Tokens in the message list the policy actually assembled for this node invocation. It is what the model was given, not what was available to give.",
+      "computed_in": "internal/telemetry/context_assembly.go:EmitContextAssembly"
+    },
+    {
+      "name": "context_source_messages",
+      "unit": "count",
+      "scope": "call",
+      "computation": "How many messages the policy had to select from, before assembly. The denominator the drop ratio is taken against.",
+      "computed_in": "internal/telemetry/context_assembly.go:EmitContextAssembly"
+    },
+    {
+      "name": "context_drop_ratio",
+      "unit": "ratio",
+      "scope": "call",
+      "computation": "The fraction of the source context a LOSSY policy discarded. Emitted only for a lossy policy (summarization, semantic-compaction); a lossless policy emits nothing on this axis rather than a zero, because a zero from a summariser and a zero from a window mean opposite things.",
+      "computed_in": "internal/telemetry/context_assembly.go:EmitContextAssembly"
+    },
+    {
+      "name": "context_retrieved_chunks",
+      "unit": "count",
+      "scope": "call",
+      "computation": "Passages a retrieval policy added. Emitted only when the count is above zero, and recorded as retrieval rather than as loss — augmentation counted as loss would make the drop-tolerance gate reject retrieval for doing exactly what it is for.",
+      "computed_in": "internal/telemetry/context_assembly.go:EmitContextAssembly"
+    },
+    {
+      "name": "sandbox_denial",
+      "unit": "count",
+      "scope": "node",
+      "computation": "1 per action the sandbox denied — egress, credential, filesystem, resource, or a brokered call that was refused. The class rides as the `denial_kind` dimension so a consumer can filter without the value becoming a series label. An ALLOWED brokered call is not counted: it is not an anomaly and would inflate the denial rate.",
+      "computed_in": "internal/sandboxaudit/adapter.go"
+    },
+    {
+      "name": "sandbox_lifecycle",
+      "unit": "count",
+      "scope": "node",
+      "computation": "1 per isolate lifecycle transition, with the transition as the `phase` dimension.",
+      "computed_in": "internal/sandboxaudit/adapter.go"
+    },
+    {
+      "name": "tool_error",
+      "unit": "count",
+      "scope": "node",
+      "computation": "1 when a skill or tool call fails closed, with the contract-error class as `reason` and the skill as `skill_name`. It counts failures that were REFUSED, not failures that were retried.",
+      "computed_in": "internal/sandboxaudit/adapter.go:RecordSkillFailure"
+    },
+    {
+      "name": "revenue_sum_under_management",
+      "unit": "usd",
+      "scope": "billing",
+      "computation": "A customer's derived spend under management for a period.",
+      "computed_in": "internal/metering/observe.go:SUMRecorded"
+    },
+    {
+      "name": "revenue_metered_reported",
+      "unit": "count",
+      "scope": "billing",
+      "computation": "A metered quantity as handed to the billing provider, with the meter as the `meter_name` dimension. It is what we REPORTED, which is the half of a reconciliation that is ours.",
+      "computed_in": "internal/metering/observe.go:UsageReported"
+    },
+    {
+      "name": "revenue_invoice_state",
+      "unit": "count",
+      "scope": "billing",
+      "computation": "1 per observed invoice or subscription state transition, with the state as the `billing_state` dimension. The value is 1 rather than an encoded state, because a state is not a quantity and averaging one is meaningless.",
+      "computed_in": "internal/metering/observe.go:InvoiceState"
+    },
+    {
+      "name": "revenue_charge_failed",
+      "unit": "count",
+      "scope": "billing",
+      "computation": "1 per charge that did not settle, with the kind as the `charge_kind` dimension. It also raises an alert: a failed charge is revenue that silently did not happen.",
+      "computed_in": "internal/metering/observe.go:ChargeFailed"
+    },
+    {
+      "name": "revenue_gainshare_billed",
+      "unit": "usd",
+      "scope": "billing",
+      "computation": "A gainshare charge's billed quantity, over VERIFIED savings only. An unverified change contributes nothing to it.",
+      "computed_in": "internal/metering/observe.go:GainshareBilled"
+    },
+    {
+      "name": "revenue_reconciliation_drift",
+      "unit": "count",
+      "scope": "billing",
+      "computation": "1 per drift finding, with the kind as `drift_kind` and the meter as `meter_name`. It also raises an alert: drift is the meter and the provider disagreeing, which is how month-end becomes a reconstruction.",
+      "computed_in": "internal/metering/observe.go:DriftDetected"
     }
   ],
   "channels": [
