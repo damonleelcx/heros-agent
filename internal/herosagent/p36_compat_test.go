@@ -57,20 +57,20 @@ func p36RecordingDefinitions(t *testing.T) []p36Recorded {
 			"§1.1 — the default definition: one node, no ordering, no edges, no graph declaration, no "+
 				"loop ref. Its bytes are the ones P36 must not move. This is the shape D2 keeps as the "+
 				"default, so it is also the shape the majority of stored pins were produced under.",
-			Definition{
+			SingleNode(Node{
 				PromptRef:     "prompt-v1",
 				ModelRef:      "claude-opus-5",
 				CredentialRef: "anthropic",
 				ContextRef:    "ctx-v1",
 				HarnessRef:    "harness-single-shot-v1",
-			}),
+			})),
 
 		p36Record(t, "single-node-every-axis",
 			"§1.1 — every authorable axis bound, still one node. Catches a compatibility encoding that "+
 				"happens to reproduce the empty case by omitting everything: skill order is "+
 				"identity-bearing and tool order is not, and both of those normalisations have to survive "+
 				"the shape change unchanged.",
-			Definition{
+			withSetVersions(SingleNode(Node{
 				PromptRef:     "prompt-v2",
 				ModelRef:      "claude-opus-5",
 				CredentialRef: "anthropic",
@@ -79,15 +79,14 @@ func p36RecordingDefinitions(t *testing.T) []p36Recorded {
 				ContextRef:    "ctx-v2",
 				MemoryRef:     "mem-scratchpad-v1",
 				HarnessRef:    "harness-reflexion-v1",
-				SetVersions:   map[string]string{"memory": "v3", "harness": "v2"},
-			}),
+			}), map[string]string{"memory": "v3", "harness": "v2"})),
 
 		p36Record(t, "single-node-with-critic",
 			"§1.1 — the critic pair, which is the EXISTING precedent for a second model on one "+
 				"definition (PRD §14 Q1). Whatever P36 decides about per-node credentials, these two "+
 				"fields already exist and already hash, so a definition carrying them must keep its "+
 				"identity across the change.",
-			Definition{
+			SingleNode(Node{
 				PromptRef:           "prompt-v1",
 				ModelRef:            "claude-opus-5",
 				CredentialRef:       "anthropic",
@@ -95,8 +94,15 @@ func p36RecordingDefinitions(t *testing.T) []p36Recorded {
 				HarnessRef:          "harness-critic-loop-v1",
 				CriticModelRef:      "claude-sonnet-5",
 				CriticCredentialRef: "openai",
-			}),
+			})),
 	}
+}
+
+// withSetVersions attaches the definition-level vocabulary versions. A helper because SetVersions is
+// definition-level and every axis binding is per node, so a single literal cannot spell both.
+func withSetVersions(d Definition, sets map[string]string) Definition {
+	d.SetVersions = sets
+	return d
 }
 
 func p36Record(t *testing.T, name, why string, d Definition) p36Recorded {

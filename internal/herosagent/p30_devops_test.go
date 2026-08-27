@@ -190,7 +190,7 @@ func readinessFixture(t *testing.T, placement Placement, resolver CredentialReso
 	versions := NewMemVersionStore()
 	if err := versions.Put(ctx, Version{
 		ConfigHash: "cfg-live", RehearsalState: RehearsalPassed, CreatedAtMS: 1,
-		Definition: Definition{CredentialRef: "anthropic", PromptRef: "p", ModelRef: "m"},
+		Definition: SingleNode(Node{CredentialRef: "anthropic", PromptRef: "p", ModelRef: "m"}),
 	}); err != nil {
 		t.Fatal(err)
 	}

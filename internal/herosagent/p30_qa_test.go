@@ -237,11 +237,11 @@ func TestAFreshlyMigratedDeploymentAnalysesNothing(t *testing.T) {
 // member are the same string naming two different vocabularies — and the stored hash silently starts
 // meaning something else.
 func TestAStoredConfigHashStaysInterpretableAfterASetMovesForward(t *testing.T) {
-	base := Definition{
+	base := SingleNode(Node{
 		PromptRef: "prm-1", ModelRef: "mdl-1", CredentialRef: "anthropic",
 		ContextRef: "ctx-1", HarnessRef: "hrn-1",
-		SetVersions: map[string]string{"harness": "v1", "memory": "v1"},
-	}
+	})
+	base.SetVersions = map[string]string{"harness": "v1", "memory": "v1"}
 	before, err := base.ConfigHash()
 	if err != nil {
 		t.Fatal(err)
@@ -309,7 +309,7 @@ func TestMemoryDoesNotSurviveAnInference(t *testing.T) {
 	}
 
 	store := memoryruntime.NewMemStore()
-	key := memoryruntime.Key{NodeID: NodeID, SessionID: MemorySessionID(first)}
+	key := memoryruntime.Key{NodeID: DefaultNodeID, SessionID: MemorySessionID(first)}
 	if _, err := store.Append(key, memoryruntime.Message{Role: "assistant", Content: "a distinctive marker"}); err != nil {
 		t.Fatal(err)
 	}
@@ -343,7 +343,7 @@ func TestMemoryDoesNotSurviveAnInference(t *testing.T) {
 	// And a SECOND inference for the same workflow and revision starts cold — which is the
 	// customer-visible trade task 6b.8c requires the console to state: a repository analysed twice
 	// starts cold both times.
-	second_entries, err := store.Entries(memoryruntime.Key{NodeID: NodeID, SessionID: MemorySessionID(second)})
+	second_entries, err := store.Entries(memoryruntime.Key{NodeID: DefaultNodeID, SessionID: MemorySessionID(second)})
 	if err != nil {
 		t.Fatal(err)
 	}

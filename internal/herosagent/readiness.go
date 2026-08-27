@@ -140,15 +140,22 @@ func Check(ctx context.Context, in ReadinessInput) Readiness {
 	// 3 · the credential, RESOLVED. Not "a reference is set" — the reference is resolved through the
 	// same source the gateway calls, because a reference pointing at a secret nobody provisioned looks
 	// identical to a working one until the first call.
+	//
+	// 🔴 EVERY node's credential, not the first one's. A graph whose second node binds a provider
+	// nobody provisioned is a deployment that reports ready and fails when the run reaches that node —
+	// which is the state this check exists to make impossible, and a first-node-only read would
+	// reintroduce it for every definition that is not single-node.
 	if in.Credentials != nil {
 		out.CredentialSource = in.Credentials.Describe()
-		if err := in.Credentials.Resolve(ctx, active.Definition.CredentialRef); err != nil {
-			out.State = ReadyCredentialUnresolved
-			out.Detail = fmt.Sprintf("The active definition binds the provider %q and its credential "+
-				"does not resolve from %s. Inference fails closed: zero provider calls, no substitution, "+
-				"and every surface falls back to rule-derived facts. Detail: %v",
-				active.Definition.CredentialRef, out.CredentialSource, err)
-			return out
+		for _, ref := range credentialRefsOf(active.Definition) {
+			if err := in.Credentials.Resolve(ctx, ref); err != nil {
+				out.State = ReadyCredentialUnresolved
+				out.Detail = fmt.Sprintf("The active definition binds the provider %q and its credential "+
+					"does not resolve from %s. Inference fails closed: zero provider calls, no substitution, "+
+					"and every surface falls back to rule-derived facts. Detail: %v",
+					ref, out.CredentialSource, err)
+				return out
+			}
 		}
 	}
 
@@ -197,4 +204,14 @@ func ReadyStates() []ReadyState {
 	return []ReadyState{
 		ReadyDisabled, ReadyReady, ReadyCredentialUnresolved, ReadyCapped, ReadyNoDefinition,
 	}
+}
+
+// credentialRefsOf is every distinct provider name a definition binds, sorted — the node credentials
+// and the critic credentials both, because a critic call is a real call against a real provider.
+func credentialRefsOf(d Definition) []string {
+	refs := make([]string, 0, len(d.Nodes)*2)
+	for _, n := range d.Nodes {
+		refs = append(refs, n.CredentialRef, n.CriticCredentialRef)
+	}
+	return dedupeSorted(refs)
 }

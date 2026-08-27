@@ -80,6 +80,15 @@ type ProvenancedEdge struct {
 	// Kind is validated against the closed set {data, control}. 🚫 Rejected, never repaired.
 	Kind       string  `json:"kind"`
 	Confidence float64 `json:"confidence"`
+	// ProducedByNode names the node whose call produced this edge (P36 task 3.8, spec "an operator can
+	// resolve a customer-visible finding to that node").
+	//
+	// 🔴 Fact-level, and that is the granularity the requirement asks for. A per-INFERENCE attribution
+	// answers "which definition", which `agent_config_hash` already answered; the question a graph
+	// creates is which of five nodes wrote the edge somebody is disputing.
+	//
+	// `omitempty`: an edge stored before P36 carries none and decodes unchanged.
+	ProducedByNode string `json:"produced_by_node,omitempty"`
 }
 
 // Abstention is a subject the agent declined. FR3.4: not knowing is an OUTPUT.
@@ -187,6 +196,48 @@ type Stored struct {
 	// STALE. 🚫 The facts are kept and still attributed — see stale.go for why retention beats deletion.
 	StaleReason StaleReason
 	StaleAtMS   int64
+	// Nodes is what each node of the producing definition did (P36 task 3.8).
+	//
+	// 🔴 Present for a SINGLE-node definition too, carrying one entry. An attribution that appeared
+	// only for graphs would make "which node produced this" a question with two shapes of answer, and
+	// the console would need a branch to ask it — which is where a surface starts rendering one shape
+	// and silently omitting the other.
+	Nodes []NodeRun
+}
+
+// NodeRun is one node's contribution to one inference: what it produced, what it spent, how long it
+// took, and whether it failed.
+//
+// # 🔴 Why per-node and not an aggregate
+//
+// An aggregate over a graph says the agent is slow. It does not say WHICH NODE is slow, and that is
+// the only form of the answer anybody can act on (task 8.1). The same argument applies to spend: a
+// definition whose bill doubled did so at one node, and an aggregate hides which.
+//
+// 🚫 No field here can hold a credential. The node is named by ID; what it spent is a token count.
+type NodeRun struct {
+	NodeID string `json:"node_id"`
+	// ProviderCalls is the COUNT, so a test can assert zero rather than "no error".
+	ProviderCalls int `json:"provider_calls"`
+	TokensIn      int `json:"tokens_in"`
+	TokensOut     int `json:"tokens_out"`
+	// LatencyMS is wall time for this node's call. Measured from an injected clock, like everything
+	// else in this package, so a test asserts on elapsed milliseconds rather than on when it ran.
+	LatencyMS int64 `json:"latency_ms"`
+	// Edges, Labels and Abstentions are what this node CONTRIBUTED, before the merge.
+	Edges       int `json:"edges"`
+	Labels      int `json:"labels"`
+	Abstentions int `json:"abstentions"`
+	// Failed and Cause: a node that did not complete. 🚫 Never an empty contribution silently — a node
+	// that returned nothing because the provider refused is a different fact from a node that found
+	// nothing, and only one of them is a finding about the customer's workflow.
+	Failed bool   `json:"failed"`
+	Cause  string `json:"cause,omitempty"`
+	// Skipped is a node the topology did not enter — a predicate edge that did not hold. It made no
+	// call and produced nothing, which is not a failure and must not read as one.
+	Skipped bool `json:"skipped"`
+	// SkipReason names the predicate that routed around it.
+	SkipReason string `json:"skip_reason,omitempty"`
 }
 
 // Runner performs one inference. It is the ONLY thing in the package that reaches a provider.

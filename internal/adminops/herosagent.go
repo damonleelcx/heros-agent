@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/heros-foreal/agentd/internal/adminaudit"
@@ -56,6 +57,12 @@ const (
 
 // AgentAxisRow is one axis as the console renders it.
 type AgentAxisRow struct {
+	// NodeID is the node this axis belongs to, or "" for the definition-level `graph` axis.
+	//
+	// 🔴 Carried on every row, including a single-node definition's. A field that appeared only when a
+	// definition had two nodes would make the console's row key change shape underneath it, and the one
+	// question this surface exists to answer after P36 is WHICH NODE.
+	NodeID string     `json:"node_id"`
 	Axis   string     `json:"axis"`
 	Status AxisStatus `json:"status"`
 	// Value is the bound reference, or the default's name. Never a secret and never a key.
@@ -190,6 +197,8 @@ type PublishPreview struct {
 
 // AxisChange is one axis moving between two definitions.
 type AxisChange struct {
+	// Node names the node this change is on, or "" for the definition-level `graph` axis.
+	Node string `json:"node_id,omitempty"`
 	Axis string `json:"axis"`
 	From string `json:"from"`
 	To   string `json:"to"`
@@ -470,38 +479,89 @@ func rehearsalFailureSentence(report string) string {
 	}
 }
 
-// axisRows renders every axis with the three-valued status task 6.10 requires.
+// axisRows renders every axis of every node with the three-valued status task 6.10 requires.
 //
 // 🔴 `not_in_effect` ALWAYS carries a reason. An axis that is inert for an unstated reason is a
-// configuration an operator cannot act on — and the two ways to be inert here are quite different: a
-// wiring override that could never apply, and a memory or harness strategy whose host service this
+// configuration an operator cannot act on — and the ways to be inert are quite different: a topology
+// on a definition with nothing to order, and a memory or harness strategy whose host service this
 // runner does not supply.
+//
+// 🔴 EIGHT PER-NODE AXES AND ONE DEFINITION-LEVEL ONE (P36 task 6.2). Collapse, do not omit: every
+// node contributes its eight rows, and `graph` is emitted exactly once because topology is a property
+// BETWEEN nodes. A console that rendered only the first node's axes would be showing a configuration
+// that is not the one running, and nothing on the page would say so.
 func axisRows(d herosagent.Definition, hosts herosagent.RunnerHosts) []AgentAxisRow {
-	row := func(axis herosagent.Axis, value, dflt string) AgentAxisRow {
-		if strings.TrimSpace(value) == "" {
-			return AgentAxisRow{Axis: string(axis), Status: AxisDefaulted, Value: dflt, Editable: true}
+	out := []AgentAxisRow{}
+	nodes := d.Nodes
+	if len(nodes) == 0 {
+		// Nothing published yet. One node's worth of defaulted rows, so the editor has the same shape
+		// before and after the first publish rather than appearing from nowhere.
+		nodes = []herosagent.Node{{NodeID: herosagent.DefaultNodeID}}
+	}
+	for _, n := range nodes {
+		row := func(axis herosagent.Axis, value, dflt string) AgentAxisRow {
+			if strings.TrimSpace(value) == "" {
+				return AgentAxisRow{NodeID: n.NodeID, Axis: string(axis), Status: AxisDefaulted,
+					Value: dflt, Editable: true}
+			}
+			return AgentAxisRow{NodeID: n.NodeID, Axis: string(axis), Status: AxisSet,
+				Value: value, Editable: true}
 		}
-		return AgentAxisRow{Axis: string(axis), Status: AxisSet, Value: value, Editable: true}
+		out = append(out,
+			row(herosagent.AxisPrompt, n.PromptRef, "none — the agent has no instruction"),
+			row(herosagent.AxisModel, n.ModelRef, "none — no model is bound"),
+			row(herosagent.AxisSkills, strings.Join(n.SkillRefs, ", "), "none bound"),
+			row(herosagent.AxisTools, strings.Join(n.ToolNames, ", "), "none bound"),
+			row(herosagent.AxisContext, n.ContextRef, "none — no context policy is bound"),
+			row(herosagent.AxisMemory, n.MemoryRef, "none"),
+			row(herosagent.AxisHarness, n.HarnessRef, "single-shot"),
+			row(herosagent.AxisLoop, n.LoopRef, "none — this node runs one turn"),
+		)
 	}
-	out := []AgentAxisRow{
-		row(herosagent.AxisPrompt, d.PromptRef, "none — the agent has no instruction"),
-		row(herosagent.AxisModel, d.ModelRef, "none — no model is bound"),
-		row(herosagent.AxisSkills, strings.Join(d.SkillRefs, ", "), "none bound"),
-		row(herosagent.AxisTools, strings.Join(d.ToolNames, ", "), "none bound"),
-		row(herosagent.AxisContext, d.ContextRef, "none — no context policy is bound"),
-		row(herosagent.AxisMemory, d.MemoryRef, "none"),
-		row(herosagent.AxisHarness, d.HarnessRef, "single-shot"),
-		{
-			// 🔴 SHOWN, and read-only (tasks 6b.13, 3.2). Hiding it would make it indistinguishable
-			// from an axis that does not exist, and an operator would keep looking for it.
-			Axis: string(herosagent.AxisWiring), Status: AxisNotInEffect, Value: "fixed",
-			Reason: "HEROS is a single node, so there is no ordering to author. A wiring override " +
-				"would hash a configuration nothing can execute, and is refused at publish rather than " +
-				"accepted and ignored.",
-			Editable: false,
-		},
-	}
+	out = append(out, graphAxisRow(d))
 	return out
+}
+
+// graphAxisRow is the definition-level topology axis.
+//
+// 🔴 It is SHOWN in both states, and the single-node reason text is NOT removed merely because
+// multi-node definitions now exist (P36 task 6.3, D3). Hiding it would make it indistinguishable from
+// an axis that does not exist, and an operator would keep looking for it; deleting the reason would
+// discard a correct explanation for what is still the default shape.
+func graphAxisRow(d herosagent.Definition) AgentAxisRow {
+	if !d.MultiNode() {
+		return AgentAxisRow{
+			Axis: string(herosagent.AxisGraph), Status: AxisNotInEffect, Value: "fixed",
+			Reason: "This definition declares one node, so there is no ordering to author. A topology " +
+				"would hash a configuration nothing can execute, and is refused at publish rather than " +
+				"accepted and ignored. Declare a second node to author one.",
+			Editable: false,
+		}
+	}
+	return AgentAxisRow{
+		Axis: string(herosagent.AxisGraph), Status: AxisSet, Value: topologySummary(d), Editable: true,
+	}
+}
+
+// topologySummary is the one-line rendering of a definition's graph.
+func topologySummary(d herosagent.Definition) string {
+	parts := []string{strings.Join(d.Ordering(), " → ")}
+	if n := len(d.Edges); n > 0 {
+		parts = append(parts, fmt.Sprintf("%d edge(s)", n))
+	}
+	for _, g := range d.GraphGroups {
+		what := "group"
+		if g.Concurrent {
+			what = "concurrent group"
+		}
+		if g.Merge != nil {
+			parts = append(parts, fmt.Sprintf("%s [%s] → %s merged %s on %s", what,
+				strings.Join(g.Nodes, ", "), g.Merge.Into, g.Merge.Strategy, g.Merge.OnNodeFailure))
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%s [%s]", what, strings.Join(g.Nodes, ", ")))
+	}
+	return strings.Join(parts, "; ")
 }
 
 // Spend returns the per-tenant meter (task 6.5).
@@ -595,23 +655,74 @@ func (s *AgentService) Preview(ctx context.Context, d herosagent.Definition) (Pu
 }
 
 // diffDefinitions is the resolved, axis-by-axis diff the confirmation renders.
+//
+// 🔴 Keyed by NODE as well as axis (P36). A diff that compared two definitions axis-by-axis without
+// naming the node would report "model: A → B" for a change on one node of five, and an operator would
+// approve a change to the wrong call site believing they had read it.
+//
+// A node that appears on one side only is rendered as an ADDED or REMOVED node rather than as eight
+// axis changes from `none`: adding a node is one act with one consequence, and spelling it as eight
+// unrelated rows buries the only fact that matters.
 func diffDefinitions(from, to herosagent.Definition) []AxisChange {
 	out := []AxisChange{}
-	add := func(axis herosagent.Axis, a, b string) {
-		if a != b {
-			out = append(out, AxisChange{Axis: string(axis), From: orNone(a), To: orNone(b)})
+	fromIDs, toIDs := nodeIDsOf(from), nodeIDsOf(to)
+	for _, id := range union(fromIDs, toIDs) {
+		fn, inFrom := from.NodeByID(id)
+		tn, inTo := to.NodeByID(id)
+		switch {
+		case !inFrom:
+			out = append(out, AxisChange{Node: id, Axis: "node", From: "absent", To: "declared"})
+			continue
+		case !inTo:
+			out = append(out, AxisChange{Node: id, Axis: "node", From: "declared", To: "absent"})
+			continue
+		}
+		add := func(axis herosagent.Axis, a, b string) {
+			if a != b {
+				out = append(out, AxisChange{Node: id, Axis: string(axis), From: orNone(a), To: orNone(b)})
+			}
+		}
+		add(herosagent.AxisPrompt, fn.PromptRef, tn.PromptRef)
+		add(herosagent.AxisModel, fn.ModelRef, tn.ModelRef)
+		add(herosagent.AxisSkills, strings.Join(fn.SkillRefs, ", "), strings.Join(tn.SkillRefs, ", "))
+		add(herosagent.AxisTools, strings.Join(sortedCopy(fn.ToolNames), ", "),
+			strings.Join(sortedCopy(tn.ToolNames), ", "))
+		add(herosagent.AxisContext, fn.ContextRef, tn.ContextRef)
+		add(herosagent.AxisMemory, fn.MemoryRef, tn.MemoryRef)
+		add(herosagent.AxisHarness, fn.HarnessRef, tn.HarnessRef)
+		add(herosagent.AxisLoop, fn.LoopRef, tn.LoopRef)
+		// The credential is an axis-adjacent identity fact and a change to it changes the agent. It is
+		// shown as a change so an operator cannot repoint the credential without seeing that they did.
+		add("credential", fn.CredentialRef, tn.CredentialRef)
+	}
+	// The definition-level topology, once.
+	if a, b := topologySummary(from), topologySummary(to); a != b {
+		out = append(out, AxisChange{Axis: string(herosagent.AxisGraph), From: orNone(a), To: orNone(b)})
+	}
+	return out
+}
+
+func nodeIDsOf(d herosagent.Definition) []string {
+	out := make([]string, 0, len(d.Nodes))
+	for _, n := range d.Nodes {
+		out = append(out, n.NodeID)
+	}
+	return out
+}
+
+// union is the sorted set of node ids across both sides of a diff.
+func union(a, b []string) []string {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, xs := range [][]string{a, b} {
+		for _, x := range xs {
+			if !seen[x] {
+				seen[x] = true
+				out = append(out, x)
+			}
 		}
 	}
-	add(herosagent.AxisPrompt, from.PromptRef, to.PromptRef)
-	add(herosagent.AxisModel, from.ModelRef, to.ModelRef)
-	add(herosagent.AxisSkills, strings.Join(from.SkillRefs, ", "), strings.Join(to.SkillRefs, ", "))
-	add(herosagent.AxisTools, strings.Join(sortedCopy(from.ToolNames), ", "), strings.Join(sortedCopy(to.ToolNames), ", "))
-	add(herosagent.AxisContext, from.ContextRef, to.ContextRef)
-	add(herosagent.AxisMemory, from.MemoryRef, to.MemoryRef)
-	add(herosagent.AxisHarness, from.HarnessRef, to.HarnessRef)
-	// The credential is an axis-adjacent identity fact and a change to it changes the agent. It is
-	// shown as a change so an operator cannot repoint the credential without seeing that they did.
-	add("credential", from.CredentialRef, to.CredentialRef)
+	sort.Strings(out)
 	return out
 }
 
@@ -659,7 +770,10 @@ func (s *AgentService) Publish(ctx context.Context, d herosagent.Definition, rea
 	if _, aerr := s.exec.Audit().Append(adminaudit.Entry{
 		ActorAdminID: sess.AdminID, Target: TargetGlobal, Action: adminaudit.ActionCrossTenantView,
 		Reason: reason, Result: result,
-		Evidence:  map[string]string{"config_hash": res.ConfigHash, "model_ref": d.ModelRef},
+		Evidence: map[string]string{"config_hash": res.ConfigHash,
+			// The DISTINCT set of models this definition binds, not the first node's. An audit row naming
+			// one model for a five-node graph records a change nobody made.
+			"model_ref": herosagent.DenormalisedModelRef(d), "nodes": strconv.Itoa(len(d.Nodes))},
 		CreatedAt: s.exec.Now(),
 	}); aerr != nil {
 		return out, errors.New("adminops: the definition was published and the action could not be logged: " + aerr.Error())

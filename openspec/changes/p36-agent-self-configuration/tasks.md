@@ -1,25 +1,46 @@
 # Tasks — P36: The Agent Is a Graph
 
-> **Nothing here is implemented.** Documents only, as the whole GEHA program is.
-> **Task 1.1 comes before everything.** If a single-node definition cannot be made hash-identical, this is
-> a migration of every pinned inference rather than an additive change, and the phase is a different size.
+> **Task 1.1's finding is recorded in [`decisions.md`](decisions.md) as D-36.0, and it decides the size of
+> the phase.** A nested `nodes` array CANNOT preserve the hash — `confighash` canonicalises key order, not
+> structure — so a compatibility encoding is required and IS implemented. With it the phase is **additive**:
+> no pin is migrated and no `spec_json` row is rewritten.
+>
+> Answers to PRD §14 Q1–Q5 are in [`decisions.md`](decisions.md). Evidence is named per task below.
 
 ## 1. Hash compatibility — establish this first
 
-- [ ] 1.1 Prove that a definition with one node, no `order`, no `edges`, no `graph_groups` and no `loop_ref` marshals to **byte-identical** bytes and produces the same `config_hash` as its pre-P36 form. Establish whether a nested `nodes` array can do this or a compatibility encoding is required, **before building anything else**.
-- [ ] 1.2 Fixture captured from before the change — not reconstructed after it — that resolves and reproduces its hash.
-- [ ] 1.3 An existing pinned inference remains readable and names the `config_hash` that produced it.
-- [ ] 1.4 Activating a new definition does **not** re-run pinned inferences; assert no provider call.
-- [ ] 1.5 A pin whose shape is no longer authorable renders **stale with its producing configuration named** — neither absent nor current.
+- [x] 1.1 Prove that a definition with one node, no `order`, no `edges`, no `graph_groups` and no `loop_ref` marshals to **byte-identical** bytes and produces the same `config_hash` as its pre-P36 form. Establish whether a nested `nodes` array can do this or a compatibility encoding is required, **before building anything else**.
+      **Finding: a nested array cannot; a compatibility encoding is required.** → [`decisions.md` D-36.0](decisions.md).
+      Implemented as `Definition.MarshalJSON` / `canonical()` in `internal/herosagent/definition.go`, asserted by
+      `TestPreP36ConfigHashesAreReproducedExactly`. Mutation drill: forcing `legacyShaped()` false makes 10 assertions red.
+- [x] 1.2 Fixture captured from before the change — not reconstructed after it — that resolves and reproduces its hash.
+      → `internal/herosagent/testdata/p36-pre-confighash.json`, recorded with `P36_RECORD_PRE=1` **by the pre-change tree**
+      (commit `proof(p36): record the pre-P36 definition bytes, before any P36 code exists`), not reconstructed.
+- [x] 1.3 An existing pinned inference remains readable and names the `config_hash` that produced it.
+      → `TestAPreP36StoredDefinitionDecodesAndKeepsItsHash` (a literal pre-P36 `spec_json`, decoded and re-encoded to the
+      same bytes) and `TestAnExistingPinRemainsReadableAndNamesItsProducingConfiguration`.
+- [x] 1.4 Activating a new definition does **not** re-run pinned inferences; assert no provider call.
+      → `TestActivatingANewDefinitionRunsNoInference` counts provider calls rather than asserting a nil error.
+- [x] 1.5 A pin whose shape is no longer authorable renders **stale with its producing configuration named** — neither absent nor current.
+      → `herosagent.ClassifyPin` (three-valued: `current` / `stale` / `unattributable`), asserted by
+      `TestAPinFromAnUnauthorableShapeIsStaleAndNamesItsProducer`.
 
 ## 2. System Designer
 
-- [ ] 2.1 Answer PRD §14 Q1: per-node credentials or one per definition. `CriticModelRef` is the existing precedent for a second model.
-- [ ] 2.2 Answer PRD §14 Q2: is the producing node ever shown to a customer, or operator-side only.
-- [ ] 2.3 Answer PRD §14 Q3: is `placement` per node. Note that this would turn a gate both runners call and neither can skip into a per-node decision.
-- [ ] 2.4 Answer PRD §14 Q4: activation during an in-flight assessment.
-- [ ] 2.5 Answer PRD §14 Q5: does the rehearsal calibration set need to grow to exercise a fan-in and a conditional edge. A rehearsal that cannot fail on the new capability is not a rehearsal of it.
-- [ ] 2.6 Record D5 (no self-modification) where it will be found by whoever proposes it.
+- [x] 2.1 Answer PRD §14 Q1: per-node credentials or one per definition. `CriticModelRef` is the existing precedent for a second model.
+      **Answer: per node.** → [`decisions.md` D-36.1](decisions.md). `Node.CredentialRef`; `Readiness` resolves every node's.
+- [x] 2.2 Answer PRD §14 Q2: is the producing node ever shown to a customer, or operator-side only.
+      **Answer: operator-side only.** → [`decisions.md` D-36.2](decisions.md). Fenced by `TestTheCustomerProjectionCarriesNoNodeAttribution`.
+- [x] 2.3 Answer PRD §14 Q3: is `placement` per node. Note that this would turn a gate both runners call and neither can skip into a per-node decision.
+      **Answer: no — placement stays per tenant.** → [`decisions.md` D-36.3](decisions.md). The multi-node case is REFUSED
+      over the single-node customer link rather than flattened.
+- [x] 2.4 Answer PRD §14 Q4: activation during an in-flight assessment.
+      **Answer: it finishes under the definition it started with, and the report records which.** →
+      [`decisions.md` D-36.4](decisions.md). Made structural by resolving the definition once into an `AssessmentBinding`.
+- [x] 2.5 Answer PRD §14 Q5: does the rehearsal calibration set need to grow to exercise a fan-in and a conditional edge. A rehearsal that cannot fail on the new capability is not a rehearsal of it.
+      **Answer: yes, and the requirement is a REFUSAL rather than a fixture count.** → [`decisions.md` D-36.5](decisions.md).
+- [x] 2.6 Record D5 (no self-modification) where it will be found by whoever proposes it.
+      → [`decisions.md` D-36.8](decisions.md), enforced by `TestNoProposalTargetsTheAgentsOwnDefinition`.
 
 ## 3. Backend Dev — the definition
 

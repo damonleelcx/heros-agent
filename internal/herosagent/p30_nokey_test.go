@@ -29,8 +29,9 @@ var keyShapedField = regexp.MustCompile(`(?i)(^|_)(api_?key|apikey|secret|passwo
 // the compiler keeps it honest: a type that is renamed or removed fails to build here.
 func typesUnderTest() []any {
 	return []any{
-		Definition{}, Version{}, PublishResult{}, Availability{}, RunnerHosts{},
-		canonicalDefinition{}, ListEdit{},
+		Definition{}, Node{}, Version{}, PublishResult{}, Availability{}, RunnerHosts{},
+		canonicalDefinition{}, canonicalNode{}, canonicalGraph{}, legacyDefinition{},
+		extendedDefinition{}, ListEdit{}, NodeEdit{}, TopologyEdit{}, NodeRun{},
 	}
 }
 
@@ -96,8 +97,8 @@ func TestNoTypeInThisPackageHasAFieldThatCouldCarryAKey(t *testing.T) {
 // one; this checks what actually crosses a wire or lands in a column.
 func TestASerialisedDefinitionCarriesNoKeyShapedKey(t *testing.T) {
 	d := goodDefinition()
-	d.CriticModelRef = "claude-sonnet-5"
-	d.CriticCredentialRef = "anthropic"
+	d.Nodes[0].CriticModelRef = "claude-sonnet-5"
+	d.Nodes[0].CriticCredentialRef = "anthropic"
 	b, err := json.Marshal(d)
 	if err != nil {
 		t.Fatal(err)

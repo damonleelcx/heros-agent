@@ -7,7 +7,10 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/heros-foreal/agentd/internal/discovery"
 	"github.com/heros-foreal/agentd/internal/providergateway"
+	"github.com/heros-foreal/agentd/internal/registry"
+	"github.com/heros-foreal/agentd/internal/variantspec"
 )
 
 // publish.go is the ONLY way a definition comes into existence (task 3.3).
@@ -98,6 +101,34 @@ type Publisher struct {
 	store   VersionStore
 	hosts   RunnerHosts
 	nowMS   func() int64
+	// axes resolves the loop and harness registry entries a node binds, so the loop axis can be
+	// refused at PUBLISH rather than at run (task 3.5) and a loop's turn count can be checked against
+	// its node's envelope ceiling (task 3.6).
+	//
+	// 🔴 Optional to WIRE and NOT optional to HAVE. A definition that binds no loop_ref publishes
+	// without one — that is every pre-P36 definition, and requiring a registry to publish them would
+	// break a path that works. A definition that DOES bind one is REFUSED when this is nil, because a
+	// loop nobody could validate is a loop whose host service is discovered by whoever the run reaches.
+	axes AxisRegistry
+}
+
+// AxisRegistry resolves the two P34 axes a node may bind, as this package needs them.
+//
+// A narrow interface over `*registry.Store` rather than the store itself: the publisher needs to
+// resolve two refs, and handing it the whole registry would let a later edit reach for the other five
+// and make this package a second configuration resolver.
+type AxisRegistry interface {
+	ResolveLoop(ctx context.Context, versionID string) (*registry.LoopEntry, error)
+	ResolveHarness(ctx context.Context, versionID string) (*registry.HarnessEntry, error)
+}
+
+// WithAxisRegistry wires the loop and harness resolution the publish-time refusals need.
+//
+// Separate from NewPublisher, like `AgentService.WithRehearsal`: every pre-P36 caller is correct
+// without one, and a required parameter would make them all pass nil to say so.
+func (p *Publisher) WithAxisRegistry(a AxisRegistry) *Publisher {
+	p.axes = a
+	return p
 }
 
 // NewPublisher wires the publisher. Every dependency is REQUIRED, and each refusal names what would go
@@ -140,37 +171,61 @@ type PublishResult struct {
 // Publish validates a definition and records it as an immutable version.
 //
 // The order of the checks is the order in which they are cheap and in which their answers are useful:
-// structure first (no I/O), then the axis refusals (no I/O), then the registry and the secrets source.
+// structure first (no I/O), then the topology (no I/O beyond the definition itself), then the axis
+// refusals, then the registry and the secrets source.
 func (p *Publisher) Publish(ctx context.Context, d Definition) (PublishResult, error) {
 	if err := d.Validate(); err != nil {
+		return PublishResult{}, err
+	}
+	// 🔴 TASK 4.1 / DESIGN D1 — THE AGENT'S TOPOLOGY GOES THROUGH THE CUSTOMER'S VALIDATOR.
+	//
+	// Not a lookalike. `variantspec.ValidateTopology` is the same exported function
+	// `variantspec.Resolve` calls for a customer's Variant Spec, so a fan-in with no merge, a predicate
+	// naming an unavailable symbol and a merge that violates a downstream typed contract are refused
+	// here with the SAME sentinel and the SAME sentence a customer would read.
+	if err := p.validateTopology(ctx, d); err != nil {
 		return PublishResult{}, err
 	}
 	if err := p.refuseUnsuppliedStrategies(d); err != nil {
 		return PublishResult{}, err
 	}
-
-	// Task 3.4 — the model must be REGISTERED. Checked here rather than at run for D11's reason: the
-	// save succeeded, the agent is broken, and nothing in between said so.
-	rec, err := p.model(ctx, d.ModelRef)
-	if err != nil {
+	// Tasks 3.5 and 3.6 — the LOOP axis, refused at PUBLISH rather than at run.
+	if err := p.checkLoopAxis(ctx, d); err != nil {
 		return PublishResult{}, err
 	}
-	if d.CriticModelRef != "" {
-		if _, err := p.model(ctx, d.CriticModelRef); err != nil {
-			return PublishResult{}, fmt.Errorf("the critic model: %w", err)
+
+	// Task 3.4 — every node's model must be REGISTERED. Checked here rather than at run for D11's
+	// reason: the save succeeded, the agent is broken, and nothing in between said so.
+	//
+	// 🔴 PER NODE. A check that read `d.Primary()` would validate the first node and publish a graph
+	// whose second node names a model nothing can resolve — which fails when a run reaches that node,
+	// which is the failure this check exists to move left.
+	deprecated := []string{}
+	for i, n := range d.Nodes {
+		where := d.nodeLabel(n, i)
+		rec, err := p.model(ctx, n.ModelRef)
+		if err != nil {
+			return PublishResult{}, fmt.Errorf("the model%s: %w", where, err)
 		}
-	}
-
-	// Task 3.5/3.6 — the credential must RESOLVE. Fail-closed: `NewSecretsFromEnv` already refuses to
-	// degrade on an unrecognised source, "on the grounds that a deployment believing it is on a secrets
-	// manager and is not is worse than one that will not start". An unresolvable REFERENCE is the same
-	// failure one layer down and gets the same answer.
-	if err := p.resolveCredential(ctx, d.CredentialRef); err != nil {
-		return PublishResult{}, err
-	}
-	if d.CriticCredentialRef != "" {
-		if err := p.resolveCredential(ctx, d.CriticCredentialRef); err != nil {
-			return PublishResult{}, fmt.Errorf("the critic credential: %w", err)
+		if rec.Deprecated {
+			deprecated = append(deprecated, n.ModelRef)
+		}
+		if n.CriticModelRef != "" {
+			if _, err := p.model(ctx, n.CriticModelRef); err != nil {
+				return PublishResult{}, fmt.Errorf("the critic model%s: %w", where, err)
+			}
+		}
+		// The credential must RESOLVE. Fail-closed: `NewSecretsFromEnv` already refuses to degrade on an
+		// unrecognised source, "on the grounds that a deployment believing it is on a secrets manager and
+		// is not is worse than one that will not start". An unresolvable REFERENCE is the same failure one
+		// layer down and gets the same answer.
+		if err := p.resolveCredential(ctx, n.CredentialRef); err != nil {
+			return PublishResult{}, fmt.Errorf("the credential%s: %w", where, err)
+		}
+		if n.CriticCredentialRef != "" {
+			if err := p.resolveCredential(ctx, n.CriticCredentialRef); err != nil {
+				return PublishResult{}, fmt.Errorf("the critic credential%s: %w", where, err)
+			}
 		}
 	}
 
@@ -179,11 +234,13 @@ func (p *Publisher) Publish(ctx context.Context, d Definition) (PublishResult, e
 		return PublishResult{}, err
 	}
 	out := PublishResult{ConfigHash: hash}
-	if rec.Deprecated {
-		out.DeprecatedModel = d.ModelRef
+	if len(deprecated) > 0 {
+		out.DeprecatedModel = strings.Join(dedupeSorted(deprecated), ", ")
 	}
 
-	// Content determines identity: an identical definition is the SAME version.
+	// 🔴 TASK 3.7 / ErrNoChange — content determines identity, so an identical definition is the SAME
+	// version. Unchanged by the shape change, and the fence on it is unchanged too: a duplicate row
+	// would give an operator two identities for one configuration to reason about.
 	if _, exists, err := p.store.Get(ctx, hash); err != nil {
 		return PublishResult{}, fmt.Errorf("herosagent: reading version %s: %w", hash, err)
 	} else if exists {
@@ -194,11 +251,285 @@ func (p *Publisher) Publish(ctx context.Context, d Definition) (PublishResult, e
 	return out, p.store.Put(ctx, Version{
 		ConfigHash:     hash,
 		Definition:     d,
-		ModelRef:       d.ModelRef,
-		CredentialRef:  d.CredentialRef,
+		ModelRef:       DenormalisedModelRef(d),
+		CredentialRef:  DenormalisedCredentialRef(d),
 		RehearsalState: RehearsalPending, // 🔴 Never `passed` on publish. D7's gate is the whole point.
 		CreatedAtMS:    p.nowMS(),
 	})
+}
+
+// DenormalisedModelRef and DenormalisedCredentialRef are what the version row's query columns carry.
+//
+// 🔴 The DISTINCT SET, sorted and comma-joined — not the first node's value. For a single-node
+// definition that is byte-identically the pre-P36 value, so every existing row and every existing
+// query still reads the same. For a graph it is the honest answer to the question the columns exist to
+// serve — "which versions spend the anthropic credential" — which the first node cannot answer, and
+// which a NULL would answer with silence.
+func DenormalisedModelRef(d Definition) string {
+	refs := make([]string, 0, len(d.Nodes))
+	for _, n := range d.Nodes {
+		refs = append(refs, n.ModelRef)
+	}
+	return strings.Join(dedupeSorted(refs), ", ")
+}
+
+// DenormalisedCredentialRef is the credential half. See DenormalisedModelRef.
+func DenormalisedCredentialRef(d Definition) string {
+	refs := make([]string, 0, len(d.Nodes))
+	for _, n := range d.Nodes {
+		refs = append(refs, n.CredentialRef)
+	}
+	return strings.Join(dedupeSorted(refs), ", ")
+}
+
+func dedupeSorted(in []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(in))
+	for _, v := range in {
+		if v == "" || seen[v] {
+			continue
+		}
+		seen[v] = true
+		out = append(out, v)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// validateTopology routes the agent's graph through `variantspec.ValidateTopology` — D1's one code
+// path (task 4.1).
+//
+// A single-node definition declares no topology (its ordering is implicit and `Validate` has already
+// refused one), so there is nothing for the validator to see and it is skipped. That is not a second
+// path: the validator's own answer for a spec with no groups and no edges is "nothing to check", and
+// calling it to receive that answer would only cost an IR nobody needs.
+func (p *Publisher) validateTopology(ctx context.Context, d Definition) error {
+	if !d.MultiNode() {
+		return nil
+	}
+	spec := d.Spec()
+	if _, _, err := variantspec.ValidateTopology(ctx, &spec, AgentIR(d), nil); err != nil {
+		return fmt.Errorf("%w: %s", ErrInvalidDefinition, err.Error())
+	}
+	return nil
+}
+
+// AgentIR is the agent's own nodes expressed as a discovery IR, so the shared topology validator has
+// the same input shape it gets for a customer's workflow.
+//
+// # 🔴 Why the agent needs an IR at all, and why this one is honest
+//
+// `ValidateTopology` answers two questions that are properties of the NODES being wired: is a
+// predicate's symbol in scope at the producing call site, and does a merge satisfy the downstream
+// node's typed input contract. For a customer those come from Discovery reading their source. The
+// agent has no source to read — it IS the analyser — so its contract is the one this package already
+// enforces at runtime: every HEROS node consumes the assessment input and produces edges, labels and a
+// narrative.
+//
+// 🚫 It is NOT an empty or permissive IR. An empty `output_schema` would make every merge trivially
+// satisfiable, which would be the "quietly weaker internal path" D1 exists to prevent — the agent
+// would pass a check a customer fails, on the same declaration.
+func AgentIR(d Definition) *discovery.IR {
+	nodes := make([]discovery.IRNode, 0, len(d.Nodes))
+	for _, n := range d.Nodes {
+		nodes = append(nodes, discovery.IRNode{
+			NodeID: n.NodeID, Kind: "static_definition",
+			CallSite:   discovery.IRCallSite{Symbol: n.NodeID, File: "internal/herosagent/runner.go"},
+			IOContract: agentIOContract(),
+		})
+	}
+	edges := make([]discovery.IREdge, 0, len(d.Edges))
+	for _, e := range d.Edges {
+		edges = append(edges, discovery.IREdge{
+			FromNodeID: e.FromNodeID, ToNodeID: e.ToNodeID, Kind: e.Kind,
+			// 🔴 `operator`, and it is the first thing in the product to write that value.
+			//
+			// The other three are wrong and each in a way worth naming: `frontend` claims a parser read
+			// this out of source, and there is no source — the agent is not discovered, it is authored.
+			// `detector` claims a rule established it from topology, and this IS the topology. `heros`
+			// claims the agent inferred its own shape, which is precisely what D5 refuses.
+			//
+			// A human operator authored this edge in the axis editor and the version row records who.
+			// That is exactly what `AuthorOperator` was reserved for.
+			Author: string(discovery.AuthorOperator),
+		})
+	}
+	return &discovery.IR{Workflow: discovery.IRWorkflow{ID: "heros"}, Nodes: nodes, Edges: edges}
+}
+
+// agentIOContract is what every HEROS node consumes and produces. One contract because every node runs
+// the same kind of call — a different prompt and model over the same assessment input.
+func agentIOContract() discovery.IRIOContract {
+	return discovery.IRIOContract{
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"workflow_id":     map[string]any{"type": "string"},
+				"source_revision": map[string]any{"type": "string"},
+				"residue":         map[string]any{"type": "object"},
+			},
+			"required": []any{"workflow_id", "source_revision"},
+		},
+		OutputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"edges":     map[string]any{"type": "array"},
+				"labels":    map[string]any{"type": "array"},
+				"narrative": map[string]any{"type": "string"},
+			},
+			"required": []any{"edges", "labels"},
+		},
+	}
+}
+
+// checkLoopAxis is tasks 3.5 and 3.6: the loop axis refused at PUBLISH, not at run.
+//
+// # 🔴 Why publish and not run
+//
+// D11's argument, one axis later. A loop whose host service this runner cannot supply, discovered when
+// an analysis reaches the node, is discovered by somebody who did not choose it and cannot tell whether
+// it is a bug or a configuration. The operator who bound it has moved on. `ErrHostServiceMissing`
+// already said this for harness and memory; the loop axis arrives under the same rule rather than
+// under a new one.
+//
+// # 🚫 Both checks are the REGISTRY's, not this package's
+//
+// `registry.HostServicesForLoop` and the envelope's `TurnCeiling` are the same values
+// `variantspec.checkEnvelopeAdmits` reads for a customer's node. This is a second GATE in front of the
+// same rule — earlier — and never a second rule.
+func (p *Publisher) checkLoopAxis(ctx context.Context, d Definition) error {
+	for i, n := range d.Nodes {
+		if strings.TrimSpace(n.LoopRef) == "" {
+			continue
+		}
+		where := d.nodeLabel(n, i)
+		if p.axes == nil {
+			// 🔴 REFUSED, never published-and-hoped. A loop nobody could validate is one whose missing
+			// host service is discovered by whoever the run reaches — which is exactly the failure this
+			// check exists to move left.
+			return fmt.Errorf("%w: a loop_ref is bound%s and this deployment wired no axis registry, so "+
+				"the loop's host services and turn count could not be checked. Publishing it would defer "+
+				"that check to whoever an analysis reaches", ErrHostServiceMissing, where)
+		}
+		loop, err := p.axes.ResolveLoop(ctx, n.LoopRef)
+		if err != nil {
+			return fmt.Errorf("%w: the loop_ref %q%s does not resolve: %s",
+				ErrInvalidDefinition, n.LoopRef, where, err.Error())
+		}
+		var env *registry.Envelope
+		if strings.TrimSpace(n.HarnessRef) != "" {
+			h, herr := p.axes.ResolveHarness(ctx, n.HarnessRef)
+			if herr != nil {
+				return fmt.Errorf("%w: the harness_ref %q%s does not resolve: %s",
+					ErrInvalidDefinition, n.HarnessRef, where, herr.Error())
+			}
+			e, isEnvelope, eerr := registry.EnvelopeOf(h)
+			if eerr != nil {
+				return fmt.Errorf("%w: the envelope%s could not be read: %s",
+					ErrInvalidDefinition, where, eerr.Error())
+			}
+			if isEnvelope {
+				env = &e
+			}
+		}
+		// Task 3.5 — the host services, naming the loop AND what is missing.
+		if err := p.refuseMissingLoopHosts(loop, env, where); err != nil {
+			return err
+		}
+		// Task 3.6 — the turn count against the envelope's ceiling, NAMING BOTH VALUES.
+		if err := refuseOverCeiling(loop, env, where); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// refuseMissingLoopHosts refuses a loop needing a second actor nothing supplies.
+//
+// It reads BOTH sources of a host service and requires both to agree: the node's envelope (what the
+// configuration declares) and `RunnerHosts` (what this deployment's runner actually has). Either one
+// missing is a refusal, because a loop that has a declaration and no runner is as unrunnable as one
+// with a runner and no declaration.
+func (p *Publisher) refuseMissingLoopHosts(loop *registry.LoopEntry, env *registry.Envelope, where string) error {
+	need := registry.HostServicesForLoop(loop.Spec.Strategy)
+	if len(need) == 0 {
+		return nil
+	}
+	var missing []string
+	if env == nil {
+		missing = append(missing, need...)
+	} else {
+		missing = append(missing, env.MissingServices(need...)...)
+	}
+	for _, svc := range need {
+		if !p.hosts.supplies(svc) && !contains(missing, svc) {
+			missing = append(missing, svc)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	sort.Strings(missing)
+	return fmt.Errorf("%w: the %q loop%s needs %s, and this deployment supplies %s. 🚫 It is NOT "+
+		"degraded to a strategy that needs no second actor — a critic-loop without a critic IS reflexion, "+
+		"and running it under critic-loop's config_hash would report one strategy as another. Refused at "+
+		"publish rather than at run, so the operator who chose it is the one who reads this",
+		ErrHostServiceMissing, loop.Spec.Strategy, where,
+		registry.HostServiceDisplay(need), missingDisplay(missing))
+}
+
+func missingDisplay(missing []string) string {
+	return "none of " + registry.HostServiceDisplay(missing)
+}
+
+func contains(xs []string, want string) bool {
+	for _, x := range xs {
+		if x == want {
+			return true
+		}
+	}
+	return false
+}
+
+// supplies maps a registry host-service name onto what this runner actually has.
+//
+// 🔴 A switch over the CLOSED registry vocabulary with no default-true branch. An unknown service name
+// is NOT supplied — a default that answered "yes" for a service nobody has implemented would make every
+// future strategy publishable and unrunnable.
+func (h RunnerHosts) supplies(service string) bool {
+	switch service {
+	case registry.HostServiceToolExecutor:
+		return h.ToolInvoker
+	case registry.HostServicePlanner:
+		return h.Planner
+	case registry.HostServiceCritic:
+		return h.Critic
+	default:
+		return false
+	}
+}
+
+// refuseOverCeiling is task 3.6: a loop asking for more turns than its node's envelope permits, NAMING
+// BOTH VALUES.
+//
+// 🔴 Naming both is the requirement, not a nicety. "Too many turns" leaves an operator unable to tell
+// whether to lower their value or ask for a higher policy — and those are requests to two different
+// people. It is `variantspec.checkTurnCeiling`'s sentence, at publish.
+func refuseOverCeiling(loop *registry.LoopEntry, env *registry.Envelope, where string) error {
+	if env == nil || env.TurnCeiling == nil {
+		return nil
+	}
+	// 🔴 The bool, not a fabricated 1. A loop that CHOSE no turn count (`single-shot`, whose schema
+	// forbids the key) has nothing to compare, and comparing a made-up value would make this check pass
+	// on a shape it never examined.
+	chosen, didChoose := loop.MaxTurns()
+	if !didChoose || chosen <= *env.TurnCeiling {
+		return nil
+	}
+	return fmt.Errorf("%w: the loop%s asks for max_turns=%d and its harness envelope's turn_ceiling is "+
+		"%d. The ceiling is imposed and the turn count is chosen, so either lower max_turns to %d or "+
+		"less, or ask whoever owns the envelope to raise turn_ceiling",
+		ErrInvalidDefinition, where, chosen, *env.TurnCeiling, *env.TurnCeiling)
 }
 
 // model looks one up, refusing an unregistered ref by name.
@@ -246,10 +577,17 @@ func (p *Publisher) resolveCredential(ctx context.Context, ref string) error {
 func (p *Publisher) refuseUnsuppliedStrategies(d Definition) error {
 	// A critic model without critic-loop, or critic-loop without a critic model, are both incoherent —
 	// and the second is the one that costs money silently.
-	if d.CriticModelRef != "" && d.CriticCredentialRef == "" {
-		return fmt.Errorf("%w: a critic model is bound with no credential of its own. A second model is a "+
-			"second cost AND a second credential resolution; binding one without the other publishes a "+
-			"definition that fails at the moment it is used", ErrInvalidDefinition)
+	//
+	// 🔴 PER NODE. The pre-P36 version read one pair off the definition; a graph carries one pair per
+	// node, and a check that read only the first would let a second node bind a critic with no
+	// credential — the exact failure this refusal exists to catch, one node further in.
+	for i, n := range d.Nodes {
+		if n.CriticModelRef != "" && n.CriticCredentialRef == "" {
+			return fmt.Errorf("%w: a critic model is bound with no credential of its own%s. A second "+
+				"model is a second cost AND a second credential resolution; binding one without the other "+
+				"publishes a definition that fails at the moment it is used",
+				ErrInvalidDefinition, d.nodeLabel(n, i))
+		}
 	}
 	return nil
 }

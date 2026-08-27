@@ -140,13 +140,26 @@ func newAgentRehearsal(cfg agentRehearsalConfig) (adminops.RehearseFunc, error) 
 		// different configuration from the one it is about to activate would be measuring nothing —
 		// the whole point of a content-addressed `config_hash` is that the thing measured and the
 		// thing served are the same thing.
-		prompt, ok, perr := cfg.Prompts.Render(ctx, v.Definition.PromptRef)
+		// 🔴 A MULTI-NODE definition is measured PER NODE (P36 task 7.2), which this single-prompt gate
+		// cannot do. It is refused rather than measured on its first node: a rehearsal that graded one
+		// node of five and wrote `passed` on the version row would arm the activation gate for a
+		// configuration four fifths of which was never measured — and D7's whole claim is that a
+		// definition is inactive until it has met the floor.
+		if v.Definition.MultiNode() {
+			return fmt.Errorf("herosagent: %s declares %d nodes and this deployment's rehearsal gate "+
+				"measures one prompt against the calibration set. Measuring its first node would write "+
+				"`passed` for a configuration that was never measured. Wire the per-node rehearsal "+
+				"(`Rehearsal.RunDefinition`) before activating a graph",
+				configHash[:12], len(v.Definition.Nodes))
+		}
+		node := v.Definition.Primary()
+		prompt, ok, perr := cfg.Prompts.Render(ctx, node.PromptRef)
 		if perr != nil {
 			return perr
 		}
 		if !ok {
 			return fmt.Errorf("herosagent: the definition's prompt %q is not published, so this "+
-				"definition cannot be measured or served", v.Definition.PromptRef)
+				"definition cannot be measured or served", node.PromptRef)
 		}
 		resolved, ok, merr := cfg.Models.Resolve(ctx, v.ModelRef)
 		if merr != nil {

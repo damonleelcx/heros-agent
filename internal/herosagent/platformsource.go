@@ -145,14 +145,37 @@ func (p *PlatformSource) ActiveDefinition(ctx context.Context) (runlink.AgentDef
 	if err != nil || !ok {
 		return runlink.AgentDefinition{}, false, err
 	}
-	body, ok, err := p.prompts.Render(ctx, v.Definition.PromptRef)
+	// 🔴 A MULTI-NODE definition is REFUSED over this contract, not flattened to its first node.
+	//
+	// `runlink.AgentDefinition` carries ONE prompt and ONE model — it is the single-node link, and it
+	// predates node identity being data. Serving a graph's first node through it would run a different
+	// configuration from the one the `config_hash` names, on a customer's machine, and submit the result
+	// back under that hash. Every surface would then attribute a one-node answer to a definition that
+	// declares several, and nothing would look wrong.
+	//
+	// 🚫 It is not an ok=false either: "no active definition" is a state a customer's CLI renders as
+	// "this deployment has published none", which is FALSE here — one is published and this link cannot
+	// carry it. Naming that is the difference between a deployment somebody configures and a deployment
+	// somebody debugs.
+	if v.Definition.MultiNode() {
+		return runlink.AgentDefinition{}, false, fmt.Errorf(
+			"%w: the active definition declares %d nodes and the customer-side link contract (v%s) carries "+
+				"one prompt and one model. Serving its first node would run a configuration the config_hash "+
+				"does not name and submit the answer back under that hash. Place this tenant `%s` while the "+
+				"active definition is a graph, or activate a single-node definition",
+			ErrInvalidDefinition, len(v.Definition.Nodes), runlink.AgentDefinitionContractVersion,
+			PlacementPlatform)
+	}
+	node := v.Definition.Primary()
+
+	body, ok, err := p.prompts.Render(ctx, node.PromptRef)
 	if err != nil {
 		return runlink.AgentDefinition{}, false, err
 	}
 	if !ok || body == "" {
 		return runlink.AgentDefinition{}, false, nil
 	}
-	model, ok, err := p.models.Resolve(ctx, v.Definition.ModelRef)
+	model, ok, err := p.models.Resolve(ctx, node.ModelRef)
 	if err != nil {
 		return runlink.AgentDefinition{}, false, err
 	}
@@ -165,12 +188,12 @@ func (p *PlatformSource) ActiveDefinition(ctx context.Context) (runlink.AgentDef
 	// credential is incoherent, and the failure it produces on a customer's machine is a 401 from a
 	// vendor they never configured — which reads as "my key is wrong" and is not. Publishing does not
 	// catch it today: the two axes are validated separately, against different registries.
-	if provider != "" && v.Definition.CredentialRef != "" && provider != v.Definition.CredentialRef {
+	if provider != "" && node.CredentialRef != "" && provider != node.CredentialRef {
 		return runlink.AgentDefinition{}, false, fmt.Errorf(
 			"%w: the active definition binds a model served by %q and a credential reference of %q. "+
 				"Running it would authenticate against one vendor and call another — on a customer's "+
 				"machine that surfaces as a rejected key they did not get wrong",
-			ErrInvalidDefinition, provider, v.Definition.CredentialRef)
+			ErrInvalidDefinition, provider, node.CredentialRef)
 	}
 	return runlink.AgentDefinition{
 		ContractVersion: runlink.AgentDefinitionContractVersion,
@@ -178,7 +201,7 @@ func (p *PlatformSource) ActiveDefinition(ctx context.Context) (runlink.AgentDef
 		Prompt:          body,
 		// 🚫 The CREDENTIAL REFERENCE, which is a provider NAME. Never a key value — the definition has
 		// no field that could hold one (see Definition.CredentialRef) and neither does this response.
-		Provider:        v.Definition.CredentialRef,
+		Provider:        node.CredentialRef,
 		ModelID:         modelID,
 		ConfidenceFloor: p.floor,
 		MaxTokens:       p.budget.MaxTokens,

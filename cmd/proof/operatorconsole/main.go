@@ -323,13 +323,13 @@ func wire(repoDir string) (api.AdminDeps, error) {
 	agentVersions := herosagent.NewMemVersionStore()
 	if err := agentVersions.Put(context.Background(), herosagent.Version{
 		ConfigHash: "b7f2c1d4e9a08e5c3f6b1a2d4e7c9f0b1a2d4e7c9f0b1a2d4e7c9f0b1a2d4e7c",
-		Definition: herosagent.Definition{
+		Definition: herosagent.SingleNode(herosagent.Node{
 			PromptRef: "prompt/heros-residue@3", ModelRef: "claude-opus-5",
 			// A PROVIDER NAME. There is no key here and no field that could hold one.
 			CredentialRef: "anthropic",
 			ContextRef:    "context/residue-only@1",
 			HarnessRef:    "harness/single-shot@1",
-		},
+		}),
 		ModelRef: "claude-opus-5", CredentialRef: "anthropic",
 		RehearsalState: herosagent.RehearsalPending,
 		CreatedAtMS:    now().UnixMilli(),

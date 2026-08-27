@@ -33,6 +33,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/heros-foreal/agentd/internal/attribution"
@@ -75,6 +76,17 @@ const (
 	// StateRevisionMismatch: the newest linked run and the discovered graph are at DIFFERENT revisions,
 	// so the per-node metrics and the workflow's shape describe different code.
 	StateRevisionMismatch State = "revision_mismatch"
+	// StateSelfSubject: the workflow named is the PLATFORM'S OWN AGENT (P36 D5, decisions.md D-36.8).
+	//
+	// 🚫 Refused, never generated. "Diagnosis proposes, verification decides" — and verification is
+	// performed by measurements THIS AGENT PRODUCES. A proposal targeting the agent's own definition is
+	// an evaluator grading its own configuration, and no gate fixes the circularity: whatever gates it
+	// is running on the configuration being judged.
+	//
+	// 🔴 A STATE rather than an error. The pass ran, it read what it was asked to read, and it declines
+	// — which is a fact worth recording, because the request will be made again and "we refuse this, and
+	// here is why" is the answer somebody needs to find without re-deriving the argument.
+	StateSelfSubject State = "self_subject_refused"
 )
 
 // states is the closure. 🔴 EIGHT: `generated`, plus the seven ways a pass can find nothing.
@@ -252,6 +264,26 @@ func (g *Generator) recordPass(ctx context.Context, res Result) error {
 
 func (g *Generator) generate(ctx context.Context, tenantID, workflowID string) (Result, error) {
 	res := Result{TenantID: tenantID, WorkflowID: workflowID}
+
+	// 🚫 P36 D5 / decisions.md D-36.8 — THE AGENT IS NEVER THE SUBJECT OF ITS OWN PROPOSALS.
+	//
+	// FIRST, before any store is read. Not because the reads are expensive but because a refusal that
+	// ran after them would have already loaded the platform's own graph into a code path whose entire
+	// purpose is to propose changes to what it loaded — and the next edit to that path would only have
+	// to forget one `if` to make the proposal.
+	//
+	// The check is on the WORKFLOW ID and is tenant-independent: `heros` reached through a tenant-scoped
+	// path is still the platform's own agent, and a check that trusted the tenant scope would be
+	// bypassed by exactly the request that needed refusing.
+	if isPlatformAgentWorkflow(workflowID) {
+		return res.with(StateSelfSubject,
+			"This is the platform's OWN analysis agent, and it is never the subject of its own "+
+				"proposals. Diagnosis proposes and verification decides — and verification is performed "+
+				"by measurements this agent produces, so a proposal about its own configuration is an "+
+				"evaluator grading itself. No gate fixes that: whatever gates it runs on the "+
+				"configuration being judged. The agent's definition is authored by an operator, through "+
+				"the same nine axes, and rehearsed and version-pinned before activation."), nil
+	}
 
 	runs, err := g.Runs.ForWorkflow(tenantID, workflowID)
 	if err != nil {
@@ -579,4 +611,21 @@ func patternsByNode(view patternclassifier.GraphView) map[string]patternclassifi
 		}
 	}
 	return out
+}
+
+// platformAgentWorkflowID is the workflow id the platform's own agent publishes under.
+//
+// 🔴 A literal here rather than an import of `internal/herosagent`, and the reason is the dependency
+// direction: `herosagent` is a domain package this one does not otherwise touch, and importing it to
+// read one string would couple proposal generation to the agent's whole surface. The string is fenced
+// instead — `TestNoProposalTargetsTheAgentsOwnDefinition` asserts it equals what `Definition.Spec()`
+// actually sets, so the two cannot drift.
+const platformAgentWorkflowID = "heros"
+
+// isPlatformAgentWorkflow reports whether this workflow id names the platform's own agent (D5).
+//
+// 🔴 Case-insensitive and whitespace-trimmed. Not defensive programming: the id arrives from an HTTP
+// path and a CLI argument, and a refusal that `HEROS` walks past is a refusal that is not there.
+func isPlatformAgentWorkflow(workflowID string) bool {
+	return strings.EqualFold(strings.TrimSpace(workflowID), platformAgentWorkflowID)
 }
