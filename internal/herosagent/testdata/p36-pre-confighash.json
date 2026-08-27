@@ -1,0 +1,23 @@
+[
+  {
+    "name": "bare-single-node",
+    "why": "§1.1 — the default definition: one node, no ordering, no edges, no graph declaration, no loop ref. Its bytes are the ones P36 must not move. This is the shape D2 keeps as the default, so it is also the shape the majority of stored pins were produced under.",
+    "wire_json": "{\"prompt_ref\":\"prompt-v1\",\"model_ref\":\"claude-opus-5\",\"credential_ref\":\"anthropic\",\"context_ref\":\"ctx-v1\",\"harness_ref\":\"harness-single-shot-v1\"}",
+    "canonical_json": "{\"prompt_ref\":\"prompt-v1\",\"model_ref\":\"claude-opus-5\",\"credential_ref\":\"anthropic\",\"skill_refs\":[],\"tool_names\":[],\"context_ref\":\"ctx-v1\",\"memory_ref\":\"\",\"harness_ref\":\"harness-single-shot-v1\",\"critic_model_ref\":\"\",\"critic_credential_ref\":\"\",\"set_versions\":[]}",
+    "config_hash": "0db6c67956dcc1bafe0fe1bf40db01acb13b93c854f341d4f9bd729c97cd1e34"
+  },
+  {
+    "name": "single-node-every-axis",
+    "why": "§1.1 — every authorable axis bound, still one node. Catches a compatibility encoding that happens to reproduce the empty case by omitting everything: skill order is identity-bearing and tool order is not, and both of those normalisations have to survive the shape change unchanged.",
+    "wire_json": "{\"prompt_ref\":\"prompt-v2\",\"model_ref\":\"claude-opus-5\",\"credential_ref\":\"anthropic\",\"skill_refs\":[\"skill-b-v1\",\"skill-a-v1\"],\"tool_names\":[\"_global/read\",\"acme/search\"],\"context_ref\":\"ctx-v2\",\"memory_ref\":\"mem-scratchpad-v1\",\"harness_ref\":\"harness-reflexion-v1\",\"set_versions\":{\"harness\":\"v2\",\"memory\":\"v3\"}}",
+    "canonical_json": "{\"prompt_ref\":\"prompt-v2\",\"model_ref\":\"claude-opus-5\",\"credential_ref\":\"anthropic\",\"skill_refs\":[\"skill-b-v1\",\"skill-a-v1\"],\"tool_names\":[\"_global/read\",\"acme/search\"],\"context_ref\":\"ctx-v2\",\"memory_ref\":\"mem-scratchpad-v1\",\"harness_ref\":\"harness-reflexion-v1\",\"critic_model_ref\":\"\",\"critic_credential_ref\":\"\",\"set_versions\":[\"harness=v2\",\"memory=v3\"]}",
+    "config_hash": "df5384121da11b74a7a2c5001ce892bded293977a3ae0ddf418ae07a6576ff67"
+  },
+  {
+    "name": "single-node-with-critic",
+    "why": "§1.1 — the critic pair, which is the EXISTING precedent for a second model on one definition (PRD §14 Q1). Whatever P36 decides about per-node credentials, these two fields already exist and already hash, so a definition carrying them must keep its identity across the change.",
+    "wire_json": "{\"prompt_ref\":\"prompt-v1\",\"model_ref\":\"claude-opus-5\",\"credential_ref\":\"anthropic\",\"context_ref\":\"ctx-v1\",\"harness_ref\":\"harness-critic-loop-v1\",\"critic_model_ref\":\"claude-sonnet-5\",\"critic_credential_ref\":\"openai\"}",
+    "canonical_json": "{\"prompt_ref\":\"prompt-v1\",\"model_ref\":\"claude-opus-5\",\"credential_ref\":\"anthropic\",\"skill_refs\":[],\"tool_names\":[],\"context_ref\":\"ctx-v1\",\"memory_ref\":\"\",\"harness_ref\":\"harness-critic-loop-v1\",\"critic_model_ref\":\"claude-sonnet-5\",\"critic_credential_ref\":\"openai\",\"set_versions\":[]}",
+    "config_hash": "114920a1a1613978f20f2c50c0ebd9d9bf8de4f575e13510fa0903b8878f89c3"
+  }
+]
