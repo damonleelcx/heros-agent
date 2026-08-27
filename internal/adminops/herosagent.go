@@ -441,7 +441,10 @@ func (s *AgentService) Overview(ctx context.Context) (AgentOverview, error) {
 	}
 	out.State, out.Sentence = agentState(hasActive, versions)
 	if hasActive {
-		out.Serving, out.ServingSinceMS = active.ConfigHash, active.ActivatedAtMS
+		// `ActivatedAtOrZero` rather than a dereference: the store has already told us this version is
+		// active (`hasActive`), so the timestamp is there — and the accessor means a future path that
+		// reaches here without that guarantee gets 0 rather than a panic on an operator surface.
+		out.Serving, out.ServingSinceMS = active.ConfigHash, active.ActivatedAtOrZero()
 		out.RehearsalState = string(active.RehearsalState)
 		out.RehearsalReport = active.RehearsalReport
 		out.Axes = axisRows(active.Definition, s.hosts)

@@ -87,12 +87,58 @@ type Version struct {
 	CredentialRef   string
 	RehearsalState  RehearsalState
 	RehearsalReport string
-	ActivatedAtMS   int64
-	CreatedAtMS     int64
+	// ActivatedAtMS is when this version was activated, and NIL WHEN IT NEVER WAS.
+	//
+	// # 🔴 A pointer, because zero is a real instant and the database already says so
+	//
+	// The column is `activated_at_ms BIGINT` — nullable, documented "NULL unless active", with a
+	// partial unique index on `(activated_at_ms IS NOT NULL) WHERE activated_at_ms IS NOT NULL`. The
+	// database has always drawn the distinction; this field used to discard it, because `scanVersion`
+	// read `activated.Int64` and dropped `activated.Valid`.
+	//
+	// What that produced was two halves of one question disagreeing about the same row: SQL selects the
+	// active version `WHERE activated_at_ms IS NOT NULL`, which a 0 satisfies, while `Active()` was
+	// `ActivatedAtMS != 0`, which a 0 fails. `PGVersionStore.Active` would hand back a row that reported
+	// itself as not the thing it was asked for.
+	//
+	// 🚫 The fix is not a wider comparison — `>= 0` or a special case for zero. Those keep the two
+	// predicates as two independent statements that happen to agree today, which is what let them drift
+	// in the first place. A pointer makes "never activated" unrepresentable as a number, so there is
+	// nothing left to disagree about: `Active()` IS `ActivatedAtMS != nil`, which IS `IS NOT NULL`.
+	//
+	// It is the shape this codebase already uses for exactly this problem — `Abstention.Confidence`
+	// ("a decline with NO candidate is a different thing from one at 0.0") and
+	// `registry.Envelope.TurnCeiling` ("a zero spend ceiling and an ABSENT one are different facts").
+	ActivatedAtMS *int64
+	CreatedAtMS   int64
 }
 
 // Active reports whether this version is the one serving inference.
-func (v Version) Active() bool { return v.ActivatedAtMS != 0 }
+//
+// 🔴 It is `!= nil`, which is `activated_at_ms IS NOT NULL` — the SAME predicate the store selects on
+// and the same one the partial unique index is built over. One question, one answer, in both languages.
+func (v Version) Active() bool { return v.ActivatedAtMS != nil }
+
+// ActivatedAt is when this version was activated, and whether it ever was.
+//
+// 🔴 Two returns rather than a bare int64, so a caller cannot render "never activated" as 1 January
+// 1970. `AgentOverview.ServingSinceMS` reads this, and a surface saying a definition is serving
+// without saying since when cannot answer the first question an incident asks.
+func (v Version) ActivatedAt() (int64, bool) {
+	if v.ActivatedAtMS == nil {
+		return 0, false
+	}
+	return *v.ActivatedAtMS, true
+}
+
+// ActivatedAtOrZero is the timestamp for a caller that has already established the version is active.
+//
+// A named accessor rather than letting call sites dereference, so the nil case is handled in one place
+// rather than at every reader — and so a reader who has NOT established it gets 0 with no panic.
+func (v Version) ActivatedAtOrZero() int64 {
+	at, _ := v.ActivatedAt()
+	return at
+}
 
 // Publisher publishes and activates definitions.
 type Publisher struct {

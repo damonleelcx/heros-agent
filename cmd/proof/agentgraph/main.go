@@ -495,20 +495,24 @@ func (s *stub) Infer(_ context.Context, in herosagent.Input) (herosagent.RawResu
 
 func publisher() (*herosagent.Publisher, *herosagent.MemVersionStore) {
 	store := herosagent.NewMemVersionStore()
-	// 🔴 A MONOTONIC, NON-ZERO clock, and the reason is a real finding this proof turned up.
+	// A MONOTONIC clock, and there is a story behind it worth keeping.
 	//
 	// The first version of this passed `func() int64 { return 0 }` — a constant, which is the ordinary
-	// way to make a proof deterministic. Rollback then appeared to do nothing: the version was
-	// activated and `Active()` reported nothing serving.
+	// way to make a proof deterministic. Rollback then appeared to do nothing: the version activated
+	// and `Active()` reported nothing serving.
 	//
-	// `Version.Active()` is `ActivatedAtMS != 0`, so an activation stamped at epoch 0 records itself as
-	// NOT ACTIVE. That is a latent inconsistency in the version store rather than in P36 — Postgres
-	// selects the active row `WHERE activated_at_ms IS NOT NULL`, which a 0 satisfies, so the two
-	// halves disagree about the same row — and it cannot fire in production, where the clock is
-	// `time.Now().UnixMilli()`. It is reported rather than worked around silently, and this comment is
-	// the record of why the clock here is not a constant.
+	// That was a real defect and it was in the version store, not in P36. `Version.Active()` was
+	// `ActivatedAtMS != 0` over a field `scanVersion` filled by discarding `sql.NullInt64.Valid`, while
+	// Postgres selects the active row `WHERE activated_at_ms IS NOT NULL` — which a 0 satisfies. Two
+	// halves of one question, disagreeing about one row.
 	//
-	// Monotonic rather than merely non-zero, so two activations are distinguishable in the store.
+	// 🔴 It is FIXED: `ActivatedAtMS` is a `*int64`, so nil is the only way to say "never activated"
+	// and `Active()` IS the SQL predicate. `TestTheGoAndSQLAnswersToIsThisVersionServingAgree` and
+	// `TestOnARealDatabaseTheGoAndSQLAnswersAgree` are the fences, and a constant-0 clock would work
+	// here now.
+	//
+	// The clock stays monotonic anyway, for its own reason: this proof activates twice and then rolls
+	// back, and two activations sharing a timestamp are two rows a reader cannot order.
 	tick := int64(1_700_000_000_000)
 	p, err := herosagent.NewPublisher(catalogue{}, secrets{}, store, herosagent.RunnerHosts{},
 		func() int64 { tick++; return tick })

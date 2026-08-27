@@ -68,7 +68,14 @@ func scanVersion(sc interface{ Scan(...any) error }) (Version, error) {
 	}
 	v.RehearsalState = RehearsalState(state)
 	v.RehearsalReport = report.String
-	v.ActivatedAtMS = activated.Int64
+	// 🔴 `.Valid` IS the SQL predicate. `PGVersionStore.Active` selects `WHERE activated_at_ms IS NOT
+	// NULL`, so carrying validity here is what makes the Go answer the same question the query asked.
+	// Reading `.Int64` alone collapsed NULL and 0 into one value, and a row stamped 0 then satisfied
+	// the query while failing `Active()`.
+	if activated.Valid {
+		at := activated.Int64
+		v.ActivatedAtMS = &at
+	}
 	return v, nil
 }
 
@@ -237,11 +244,15 @@ func (s *MemVersionStore) Activate(_ context.Context, h string, atMS int64) erro
 	// permitted two would let a test pass on behaviour the database refuses.
 	for k, other := range s.m {
 		if other.Active() && k != h {
-			other.ActivatedAtMS = 0
+			// 🔴 nil, which is the `SET activated_at_ms = NULL` the Postgres store issues. Writing a 0
+			// here would leave the row satisfying the database's own `IS NOT NULL` predicate — two rows
+			// in the state the partial unique index forbids, in the store most tests run against.
+			other.ActivatedAtMS = nil
 			s.m[k] = other
 		}
 	}
-	v.ActivatedAtMS = atMS
+	at := atMS
+	v.ActivatedAtMS = &at
 	s.m[h] = v
 	return nil
 }
