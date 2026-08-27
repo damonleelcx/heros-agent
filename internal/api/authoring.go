@@ -4,10 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/heros-foreal/agentd/internal/auth"
 	"github.com/heros-foreal/agentd/internal/authoring"
+	"github.com/heros-foreal/agentd/internal/errorcode"
+	"github.com/heros-foreal/agentd/internal/eventname"
+	"github.com/heros-foreal/agentd/internal/telemetry"
 	"github.com/heros-foreal/agentd/internal/variantspec"
 )
 
@@ -179,9 +183,21 @@ func (s *Server) handleAuthoringSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 	sub, err := s.authoring.Submit(r.Context(), draft)
 	if err != nil {
+		// 🔴 P37 §5.6 — the refusal is COUNTED, with the cause as an attribute. One name for every
+		// refusal reason (`ConversationRefused`'s argument): a separate name per cause would make "how
+		// often does this surface say no" a question requiring the operator to know the list in advance.
+		axisSaveEvent(r, eventname.ConsoleAxisSaveRefused, slog.LevelWarn,
+			"an axis change was refused at save",
+			"workflow_id", draft.WorkflowID, "cause", err.Error(),
+			"error_code", errorcode.RequestInvalid.String())
 		s.writeAuthoringError(w, err)
 		return
 	}
+	// 🔴 Emitted AFTER the write returns, never before. An event on the way in counts intent rather than
+	// effect, and a 200 is not evidence of a write (P37 §9.3, §6.6 proves the row exists).
+	axisSaveEvent(r, eventname.ConsoleAxisSaved, slog.LevelInfo, "an axis change was written",
+		"workflow_id", draft.WorkflowID, "change_id", sub.ChangeID, "config_hash", sub.ConfigHash,
+		"axis", sub.Entry.Axis, "verification_state", string(sub.Entry.VerificationState))
 	writeJSON(w, http.StatusOK, AuthoringChangeView{
 		ChangeID: sub.ChangeID, ConfigHash: sub.ConfigHash,
 		VerificationState: string(sub.Entry.VerificationState),
@@ -275,4 +291,26 @@ func preflightView(r authoring.Result) AuthoringPreflightView {
 		MissingKind: r.Missing.Kind, MissingSubject: r.Missing.Subject,
 		ConfigHash: r.ConfigHash, Dimensions: r.Dimensions, Nodes: r.Nodes, Adapters: r.Adapters,
 	}
+}
+
+// axisSaveEvent records one save-path event with the three correlation identities P37 §5.5 requires.
+//
+// # Why a helper rather than two call sites
+//
+// The three ids are the whole point, and the failure they prevent is an operator holding a `change_id`
+// with no way to reach the request that produced it. Two hand-written call sites is one chance to omit
+// one, and an omission is invisible: the line still logs, still reads correctly, and only fails when
+// somebody needs it during an incident.
+//
+// 🔴 The event NAME comes from the central enum, never from a literal. `internal/eventname`'s header
+// states the reason: an invented name is a free-text field on the far side of a boundary.
+func axisSaveEvent(r *http.Request, name eventname.Name, level slog.Level, msg string, attrs ...any) {
+	traceID := traceIDFor(r)
+	base := []any{
+		"event", name.String(),
+		"request_id", telemetry.TraceIDFromContext(r.Context()),
+		"trace_id", traceID,
+		"span_id", telemetry.RequestSpanID(traceID),
+	}
+	slog.Default().Log(r.Context(), level, msg, append(base, attrs...)...)
 }

@@ -41,26 +41,74 @@ test("§5.10 every axis surface carries the projection panel", () => {
 // It is tempting to replace them now that the pages have real rows, and it would be wrong: a reader
 // meeting a refusal for the first time needs the APPLIED case beside it to read "declined" as a boundary
 // rather than as a failure. That is the stated reason those pages exist. 「UI 改版不得丢失既有功能」.
-test("§5.10 the worked examples are still there beside the projection", () => {
-  // Each page's example is named by what it ACTUALLY is, not by one component every page happens to
-  // share — two of these carry their vocabulary as data (`STRATEGIES`, `HARNESS_BOUNDARY`) rather than
-  // through the shared refusal card, and a fence that only knew about the card would have "passed" on
-  // those two by never looking.
+test("§5.10 every worked example is at a NAMED DESTINATION — the page, or a section it links to", () => {
+  // 🔴 THIS FENCE WAS MODIFIED BY P37, and the modification is recorded rather than slipped in.
+  //
+  // P29 wrote it as "every panel present before is still present ON THIS PAGE", to stop a redesign
+  // silently dropping panels off the axis surfaces. That protection is correct and is KEPT. What P29
+  // could not anticipate is a rewrite that RELOCATES a worked example rather than deleting it: a move
+  // fails the old assertion even though nothing was lost.
+  //
+  // P37's delta to `axis-node-projection` changes the requirement's UNIT from *the same page* to *a
+  // named destination*, and this is that requirement as a fence. An example may live:
+  //
+  //   · on the working surface — when its content varies with the reader's data; or
+  //   · on the reading surface, labelled as the platform's fixture, when it does not — and then the
+  //     working surface MUST carry a link to the section it landed in.
+  //
+  // A panel in NEITHER place fails, which is the protection P29 bought, unchanged.
   const withExamples = {
-    "src/app/app/graph/page.tsx": /AxisRefusal|AxisApplied/,
-    "src/app/app/context/page.tsx": /AxisRefusal|AxisApplied/,
-    "src/app/app/memory/page.tsx": /STRATEGIES|BOUNDARY/,
+    "src/app/app/graph/page.tsx": {
+      onPage: /AxisRefusal|AxisApplied/,
+      destination: "content/docs/en/concepts/graph-and-wiring.md",
+      marker: "## Worked examples",
+    },
+    "src/app/app/context/page.tsx": {
+      onPage: /AxisRefusal|AxisApplied/,
+      destination: "content/docs/en/concepts/context-policies.md",
+      marker: "## Worked examples",
+    },
+    "src/app/app/memory/page.tsx": {
+      onPage: /STRATEGIES|BOUNDARY/,
+      destination: "content/docs/en/concepts/memory-strategies.md",
+      marker: "## Worked example",
+    },
     // P34: the strategy vocabulary moved to `/app/loop` with the axis. `/app/harness` carries the
     // ENVELOPE's vocabulary instead — same discipline, different data.
-    "src/app/app/loop/page.tsx": /HARNESS_STRATEGIES|HARNESS_BOUNDARY/,
-    "src/app/app/harness/page.tsx": /ENVELOPE_FIELDS|ENVELOPE_BOUNDARY/,
+    "src/app/app/loop/page.tsx": {
+      onPage: /HARNESS_STRATEGIES|HARNESS_BOUNDARY/,
+      destination: null,
+      marker: null,
+    },
+    "src/app/app/harness/page.tsx": {
+      onPage: /ENVELOPE_FIELDS|ENVELOPE_BOUNDARY/,
+      destination: "content/docs/en/concepts/execution-envelope.md",
+      marker: "## The nine fields",
+    },
   };
-  for (const [page, pattern] of Object.entries(withExamples)) {
+
+  for (const [page, { onPage, destination, marker }] of Object.entries(withExamples)) {
+    const source = read(page);
+    if (onPage.test(source)) continue; // still on the working surface — the P29 case, unchanged.
+
+    assert.ok(
+      destination,
+      `${page} lost its worked example and this fence names no destination for it. A panel with no ` +
+        `destination is not removed.`,
+    );
+    const doc = read(destination);
+    assert.ok(
+      doc.includes(marker),
+      `${page}'s worked example is gone from the page and "${marker}" is not in ${destination}. ` +
+        `Nothing is deleted: it belongs on the working surface or in a named reading-surface section.`,
+    );
+    // 🔴 And the surface it LEFT must link to the section it landed in. A relocated explanation that
+    // cannot be reached from where it used to be is a capability nobody can find, which is
+    // indistinguishable from one that does not exist.
     assert.match(
-      read(page),
-      pattern,
-      `${page} lost its worked example. The projection is added BESIDE it, never instead of it: a ` +
-        `refusal with no applied case next to it reads as a failure rather than as a boundary.`,
+      source,
+      /ReadOn href=\{AXIS_DOC\.|NotConnected axis=|<AxisFrame axis=/,
+      `${page} moved its worked example and carries no route back to it`,
     );
   }
 });

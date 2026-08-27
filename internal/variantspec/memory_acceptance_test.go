@@ -128,10 +128,26 @@ func TestP17ConsoleEvidenceExists(t *testing.T) {
 			"file this thin is not proof of them", n)
 	}
 	// And the surface it audits must exist.
-	for _, f := range []string{"page.tsx", "authoring.tsx", "strategies.ts"} {
+	//
+	// 🔴 `strategies.ts` is NOT in this list any more, and its absence is the point rather than an
+	// omission. It MIRRORED `registry.BuiltinMemoryStrategies()` so the surface could render its
+	// vocabulary without a live platform — a second source of truth, kept honest by a gate.
+	//
+	// P37 binds the picker to `GET /api/v1/memory?language=`, which the platform derives from the
+	// registry AND from `transform.CoverageFor("memory")`. There is no copy left to drift, so the file is
+	// gone and `web/console/tests/memory.test.mjs` now asserts against the ENGINE and the handler that
+	// serves the vocabulary — including an assertion that the mirror does not come back.
+	//
+	// Requiring the mirror here would require the second source of truth to exist, which is the opposite
+	// of what this audit is for.
+	for _, f := range []string{"page.tsx", "authoring.tsx"} {
 		if _, err := os.Stat(filepath.Join(root, "web", "console", "src", "app", "app", "memory", f)); err != nil {
 			t.Errorf("the memory surface is missing %s: %v", f, err)
 		}
+	}
+	// The vocabulary must still reach the surface from somewhere, or the picker has nothing to bind to.
+	if _, err := os.Stat(filepath.Join(root, "internal", "api", "memory.go")); err != nil {
+		t.Errorf("the endpoint that replaced the mirror is gone: %v", err)
 	}
 }
 

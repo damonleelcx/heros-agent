@@ -39,7 +39,7 @@ function slotsOf(body: string): string[] {
   return [...out].sort();
 }
 
-export function StudioMatrix() {
+export function StudioMatrix({ workflowId }: { workflowId: string }) {
   /*
    * 🔴 ROWS OF OBJECTS, not a list of ids.
    *
@@ -53,8 +53,13 @@ export function StudioMatrix() {
    *
    * Only a browser could see this: `curl` gets the server shell, which is correct right up until hydration.
    */
-  const [workflows, setWorkflows] = useState<WorkflowRow[] | null>(null);
-  const [workflow, setWorkflow] = useState<string>("");
+  /*
+   * 🔴 P37 — the WORKFLOW is no longer this component's to choose. It arrives as `workflowId`, resolved
+   * once by the shell's subject resolver, so the reader is asked which workflow at most once across all
+   * seven axis surfaces instead of once per surface. The list state and its picker are gone; the loading
+   * state (`ready`) stays, because "we have not loaded yet" and "there is nothing" are still two facts.
+   */
+  const [ready, setReady] = useState(false);
   const [models, setModels] = useState<Model[]>([]);
   const [nodes, setNodes] = useState<Node[]>([]);
   const [bindings, setBindings] = useState<Record<string, Binding>>({});
@@ -64,18 +69,12 @@ export function StudioMatrix() {
   useEffect(() => {
     (async () => {
       try {
-        const [wf, mc] = await Promise.all([
-          getJSON<{ workflows: WorkflowRow[] }>("/api/console/studio/workflows"),
-          getJSON<{ models: Model[] }>("/api/console/studio/models"),
-        ]);
-        // A row with no `workflow_id` is dropped rather than rendered as a blank chip that opens nothing —
-        // the same rule §4.7 applies to a remembered subject the enumeration no longer lists.
-        const rows = (wf.workflows ?? []).filter((w) => Boolean(w?.workflow_id));
-        setWorkflows(rows);
+        const mc = await getJSON<{ models: Model[] }>("/api/console/studio/models");
         setModels(mc.models);
-        if (rows.length > 0) setWorkflow(rows[0].workflow_id);
       } catch (e) {
         setError(e instanceof Error ? e.message : "could not load the matrix");
+      } finally {
+        setReady(true);
       }
     })();
   }, []);
@@ -95,39 +94,20 @@ export function StudioMatrix() {
   }, []);
 
   useEffect(() => {
-    void loadWorkflow(workflow);
-  }, [workflow, loadWorkflow]);
+    void loadWorkflow(workflowId);
+  }, [workflowId, loadWorkflow]);
 
   const refreshBindings = useCallback(async () => {
-    if (!workflow) return;
-    const b = await getJSON<{ bindings: Record<string, Binding> }>(`/api/console/studio/bindings?workflow=${encodeURIComponent(workflow)}`);
+    if (!workflowId) return;
+    const b = await getJSON<{ bindings: Record<string, Binding> }>(`/api/console/studio/bindings?workflow=${encodeURIComponent(workflowId)}`);
     setBindings(b.bindings ?? {});
-  }, [workflow]);
+  }, [workflowId]);
 
   if (error) return <Banner tone="warn" title="Could not load the matrix">{error}</Banner>;
-  if (workflows === null) return <Loading rows={4} label="Loading the studio matrix" />;
+  if (!ready) return <Loading rows={4} label="Loading the studio matrix" />;
 
   return (
     <div className="flex flex-col gap-8">
-      <Section title="Workflow">
-        {workflows.length === 0 ? (
-          <Empty title="No workflows loaded">Discover a workflow to populate the matrix columns.</Empty>
-        ) : (
-          <Row>
-            {workflows.map((w) => (
-              <button key={w.workflow_id} type="button" onClick={() => setWorkflow(w.workflow_id)}
-                title={[w.source_revision_display, w.nodes !== undefined ? `${w.nodes} node(s)` : undefined]
-                  .filter(Boolean)
-                  .join(" · ")}
-                className={cx("chip cursor-pointer", workflow === w.workflow_id ? "border-primary/40 bg-primary/10 text-primary" : "")}>
-                {w.workflow_id}
-                {w.nodes !== undefined ? <span className="hint"> · {w.nodes} node(s)</span> : null}
-              </button>
-            ))}
-          </Row>
-        )}
-      </Section>
-
       <Section title="Matrix" aside={<span>nodes across · models down · nothing ranked</span>}>
         {models.length === 0 || nodes.length === 0 ? (
           <Empty title="Empty axis">
@@ -141,7 +121,7 @@ export function StudioMatrix() {
       {cell ? (
         <CellPanel
           key={`${cell.node.node_id}:${cell.model.version_id}`}
-          workflow={workflow}
+          workflow={workflowId}
           node={cell.node}
           model={cell.model}
           binding={bindings[cell.node.node_id]}

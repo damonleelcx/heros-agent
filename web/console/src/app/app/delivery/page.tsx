@@ -1,11 +1,14 @@
 import { loadDeliveryProjection, loadProjection } from "@/lib/projection";
+import { AxisFrame } from "@/components/axisFrame";
+import { loadAxisValues, valueFor } from "@/lib/axisRead";
+import { CurrentValue, ReadOn } from "@/components/editorKit";
+import { resolveSubject, subjectFromSearchParams } from "@/lib/subjectResolver";
+import { AXIS_DOC } from "@/lib/axisSubject";
 import type { DeliveryProjectionOutcome } from "@/lib/projection";
 import { AxisProjectionPanel } from "@/components/axisProjection";
 import Link from "next/link";
 import type { ChangeDeliveryView, DeliveriesView, DeliveryView } from "@/lib/types.generated";
 import { load } from "@/lib/view";
-import { platformFetch } from "@/lib/platformApi";
-import { requireSession } from "@/lib/session";
 import { Tabs, type TabItem } from "@/components/tabs";
 import {
   DeliveryRouteLedger,
@@ -47,7 +50,18 @@ import {
  */
 export const dynamic = "force-dynamic";
 
-export default async function DeliveryPage() {
+export default async function DeliveryPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  // 🔴 P37 — bound to the reader's own node like every other axis surface, so a reader arriving from
+  // `/app/context` is still looking at the same call site. The delivery LIST is workflow-wide and stays
+  // that way; the subject is what the `undeliverable` count and the axis panel are about.
+  const subjectOutcome = await resolveSubject(subjectFromSearchParams(await searchParams));
+  const values = await loadAxisValues(
+    subjectOutcome.state === "resolved" ? subjectOutcome.subject.workflow_id : undefined,
+  );
   const { outcome } = await load<DeliveriesView>((paths) => paths.deliveries(), ["route"]);
   const routes = await fetchDeliveryRoutes();
   // 🔴 P29 §5.10 — the delivery table crossed with THIS organization's nodes. The table above is a
@@ -86,9 +100,46 @@ export default async function DeliveryPage() {
     <PageFrame
       eyebrow="Delivery"
       title="How a change reaches your agent"
-      lede="Every verified optimization that reached a pull request on your repository — and, for the ones that cannot, which route was expected and why it refused. A human merges; the platform never does below the Autonomous level."
+      lede="Every verified optimization that reached a pull request on your repository, and — for the ones that cannot — which route refused and why. A human merges; the platform never does below Autonomous."
       wide
     >
+      {/*
+        🔴 Bound to the reader's own node like every other axis surface (FR1), so a reader arriving from
+        `/app/context` is still looking at the same call site. The delivery LIST is workflow-wide and
+        stays that way — a pull request is not a per-node fact — but the `undeliverable` count and the
+        axis panel are about the subject, and an unconnected reader must reach neither.
+      */}
+      {/*
+        🔴 The AXIS half is inside the frame; the DELIVERY LIST is not, and the split is deliberate.
+        FR4 requires that no fixture occupy the position the reader's own data would occupy — it does not
+        require the rest of the page to disappear. A reader with pull requests and no reported IR
+        structure still has pull requests, and gating them behind a subject would take a capability away
+        from exactly the reader who has least. Found by P12's own acceptance run, which went red when the
+        whole page was wrapped.
+      */}
+      <AxisFrame axis="delivery" outcome={subjectOutcome} returnTo="/app/delivery">
+        {(subject) => (
+          <div className="flex flex-col gap-4">
+            <Section title="This node's delivery routes">
+              <CurrentValue
+                {...(valueFor(values, subject.node_id, "model")
+                  ? {
+                      state: "observed" as const,
+                      current: `${subject.node_id} is reported`,
+                      detail: subject.language,
+                    }
+                  : {
+                      state: "not_measured" as const,
+                      missingInput: "unresolved_in_ir",
+                      because:
+                        "this node was not present in the structure this workflow reported, so it cannot be counted as deliverable or undeliverable either way",
+                    })}
+              />
+              <ReadOn href={AXIS_DOC.delivery}>The two routes, the six states, and whose move a refusal is</ReadOn>
+            </Section>
+          </div>
+        )}
+      </AxisFrame>
       <Tabs tabs={tabs} />
     </PageFrame>
   );
@@ -179,12 +230,34 @@ function YourNodesTab({ outcome }: { outcome: DeliveryProjectionOutcome }) {
  * would be the second delivery table the contract exists to prevent, and it would drift in the usual
  * direction — the copy is always the optimistic one. When the platform cannot be read, the tab says so
  * rather than rendering a plausible table nobody verified.
+ *
+ * # 🔴 It goes through `load()`, and it did not
+ *
+ * It called `platformFetch` directly and declared no `requires`, so a 200 whose body was missing fields
+ * came back as a NON-NULL view and rendered as a complete answer: an empty ledger, an empty legend, and
+ * `read against coverage table undefined`.
+ *
+ * The irony was in this file. `RoutesTab`'s own banner says *"Showing a partial answer would be worse
+ * than showing none, because a missing row reads as 'not applicable' — a claim about your code that
+ * nobody made"* — and the code implemented that for a FAILED fetch and not for an unusable 200, which is
+ * the case the sentence actually describes.
+ *
+ * `requires` names the fields the ledger and the three legends walk. An unusable body becomes an
+ * `upstream` outcome, which lands on the same `null` the tab already renders its banner for — so the
+ * copy that was already right about the intent is now also right about the behaviour.
+ *
+ * 🚫 It does NOT crash today, and the fix is not for a crash: every dereference in `deliveryRoutes.tsx`
+ * carries a `??`. Saying that plainly matters, because the two projection reads beside it DID crash and
+ * were fixed for a different reason (`lib/projection.ts`). Conflating them would file one defect twice
+ * and leave the reader unsure which fence protects which.
  */
 async function fetchDeliveryRoutes(): Promise<ChangeDeliveryView | null> {
-  const session = await requireSession();
-  const outcome = await platformFetch<ChangeDeliveryView>("/api/v1/change-delivery", {
-    tenantId: session.tenantId,
-  });
+  const { outcome } = await load<ChangeDeliveryView>(
+    () => "/api/v1/change-delivery",
+    // Every top-level array the ledger and the three legends walk, plus the version the heading states.
+    // A body missing any of them renders a table that reads as "nothing applies to you".
+    ["version", "routes", "cells", "source_cells", "languages", "states", "causes"],
+  );
   return outcome.ok ? outcome.data : null;
 }
 
@@ -207,11 +280,15 @@ function RoutesTab({ view }: { view: ChangeDeliveryView | null }) {
 
   return (
     <>
+      {/*
+        🔴 Kept, shortened. "A rollout is not a delivery" is a claim about what the platform will and will
+        not do to the reader's repository, so §8.1 reviews it as a customer-facing commitment. The
+        mechanism moved to the reading surface; the promise did not.
+      */}
       <Banner tone="info" title="A rollout is evidence, not delivery">
-        A gradual rollout runs inside your own process, assigns each unit of work to an arm
-        deterministically, expires to the parent arm, and reverts itself if a guard trips — without
-        reaching the platform. It never merges anything. Permanence still costs a codemod, a pull
-        request, and a human.
+        A gradual rollout runs inside your own process and never merges anything. Permanence still costs a
+        codemod, a pull request, and a human.
+        <ReadOn href={AXIS_DOC.delivery}>The two routes, the six states, and whose move a refusal is</ReadOn>
       </Banner>
 
       <Section title="What each route carries" aside={`read against coverage table ${view.version}`}>

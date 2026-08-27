@@ -29,7 +29,7 @@ PARITY_DIR ?= .parity
         sandbox-proof sandbox-proof-redcheck \
         classifier-calibration demo-patterngraph demo-proposals demo-billing demo-billing-states \
         release-rehearse release-rehearse-redcheck readme-install packaging-proof install-smoke install-smoke-refusals \
-        agent-rehearse agent-status repo-intake-hermes assessment-hermes axissplit-hermes agentgraph-hermes \
+        agent-rehearse agent-status repo-intake-hermes assessment-hermes axissplit-hermes agentgraph-hermes sourcebound-hermes \
         intent-holdout intent-holdout-strict attribution-holdout p31-fence-redcheck p33-fence-redcheck p34-fence-redcheck p35-fence-redcheck console-edge-proof assessment-holdout p35-live-four-step improve-hermes
 
 ## ci: the locally-provable gate (go + schema + console-types + discovery-ci + intent-holdout). Lint/db-proof run as their own CI jobs.
@@ -262,6 +262,39 @@ agentgraph-hermes:
 	GOWORK=off $(GO) run ./cmd/proof/agentgraph -local $(HERMES)
 
 HERMES ?= /tmp/hermes-agent
+
+## sourcebound-hermes: run P37's source-bound editors against a REAL repository's own call sites.
+##
+## Every P37 fence is green and every one has been drilled red. Green fences prove the parts, against a
+## two-node fixture this repository wrote with values chosen to make the assertion clean. That is the
+## right shape for a fence and it is not evidence about a customer.
+##
+## This proves the WALK, and the walk is the phase's whole claim: it discovers
+## `nousresearch/hermes-agent`'s actual call sites, builds the structure the platform would hold, and
+## reads each node's CURRENT value on each of the nine axes — so every value it prints is a reading of a
+## file this repository has never seen.
+##
+## 🔴 What it is looking for is NOT "everything resolved". It exits non-zero when a value was SUPPLIED
+## rather than read — a sentinel rendered as a model, an `observed` with nothing to show, a
+## `not_measured` that names nothing. A run where everything resolved would mean the sentinel check
+## never fired, which is a weaker result rather than a stronger one.
+##
+## 🔴 On 2026-08-27 it found that ALL 29 of hermes-agent's nodes carry `model_id = "unresolved"` —
+## discovery's own sentinel. A naive `!= ""` check would have rendered a model called "unresolved" as
+## the current value on every one of them. That is P37 §5.3's defect firing on 100% of a real
+## repository, and it is why the check exists.
+##
+## 🚫 It calls NO provider and costs nothing: every read P37 adds is a resolve-time read by construction.
+##
+## It needs a checkout; clone it first (a public repository needs no token):
+##
+##	git clone --depth 1 https://github.com/nousresearch/hermes-agent $(HERMES)
+##	make sourcebound-hermes
+sourcebound-hermes:
+	@test -d "$(HERMES)" || { echo "sourcebound-hermes: no checkout at $(HERMES)"; \
+		echo "  git clone --depth 1 https://github.com/nousresearch/hermes-agent $(HERMES)"; exit 2; }
+	GOWORK=off $(GO) run ./cmd/proof/sourcebound -local $(HERMES)
+
 axissplit-hermes:
 	@test -d "$(HERMES)" || { echo "axissplit-hermes: no checkout at $(HERMES)"; \
 		echo "  git clone --depth 1 https://github.com/nousresearch/hermes-agent $(HERMES)"; exit 2; }

@@ -70,6 +70,23 @@ export function scoped(session: Session) {
     studioRun: () => `/api/v1/studio/run`,
     studioBind: () => `/api/v1/studio/bind`,
 
+    // ── P13 / P37 · authoring: preflight, save, revert ────────────────────
+    //
+    // 🔴 P37 adds NO endpoint here. These four routes are P13's and have carried `config_hash` and
+    // `verification_state: unverified` since they shipped; what P37 changes is that a customer surface
+    // finally addresses them against the reader's OWN node instead of demonstrating them against a
+    // fixture. `decisions.md` D-37.4 records that this phase adds no new endpoint shape, and this is
+    // the block that would have had to grow if it did.
+    // The memory axis's CLOSED VOCABULARY and its boundary, both derived server-side from the transform
+    // engine's own coverage table. `language` is the reader's node's own and is never defaulted: the
+    // platform's handler fails closed on an empty one rather than guessing `go`, because a boundary
+    // computed for the wrong language is a claim about code the reader does not have.
+    memoryVocabulary: (language: string) => `/api/v1/memory?language=${encode(language)}`,
+    authoringPreflight: () => `/api/v1/authoring/preflight`,
+    authoringSubmit: () => `/api/v1/authoring/submit`,
+    authoringRevert: () => `/api/v1/authoring/revert`,
+    authoringHistory: () => `/api/v1/authoring/history`,
+
     // ── P32 · repository intake ───────────────────────────────────────────
     // The connection list carries the forge descriptions and the local-mode availability with it, so
     // the consent screen and the local-mode notice need no second round trip — and so their copy comes

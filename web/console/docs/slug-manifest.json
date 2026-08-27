@@ -4,12 +4,97 @@
   "note": "Anchors are a published contract. A removed or renamed slug fails the build unless the same change adds a redirect.",
   "pages": [
     {
+      "route": "/docs/concepts/authored-changes",
+      "source": "docs/en/concepts/authored-changes.md",
+      "content_hash": "51877645070e9a7a66b6a029913baa503ecf07e7b581678f5bab3987bcac699c",
+      "anchors": [
+        "one-spine-two-origins",
+        "you-do-not-author-the-evidence",
+        "the-three-verdicts",
+        "validation-happens-at-save",
+        "an-option-you-cannot-use-is-shown-not-hidden",
+        "applied-is-not-verified",
+        "what-an-unapplied-change-is-worth",
+        "every-change-has-an-exact-undo",
+        "there-is-no-override",
+        "worked-examples",
+        "where-to-go-next"
+      ]
+    },
+    {
+      "route": "/docs/concepts/context-policies",
+      "source": "docs/en/concepts/context-policies.md",
+      "content_hash": "7f9745eeee309a3173e8034bd95b1aa718040903a20a10b724153745ecb5df32",
+      "anchors": [
+        "what-a-context-policy-decides",
+        "why-applying-one-is-a-code-rewrite",
+        "two-different-reasons-a-policy-is-declined",
+        "not-in-source",
+        "not-yet-and-it-is-ours",
+        "what-each-policy-does-at-a-call-site",
+        "what-reaches-your-source",
+        "why-context-is-applied-inline",
+        "choosing-a-policy",
+        "what-it-costs-to-lose-context",
+        "a-proposal-that-would-lose-too-much-is-never-run",
+        "what-a-node-tolerates-by-default",
+        "what-the-gate-will-not-do",
+        "a-drop-ratio-is-not-a-saving",
+        "retrieval-tuning",
+        "offered-only-where-retrieval-happens",
+        "verified-on-cases-the-tuning-never-saw",
+        "the-same-configuration-asks-the-same-question-twice",
+        "worked-examples",
+        "an-applied-window",
+        "four-declines-in-the-order-the-engine-considers-them",
+        "a-run-time-policy-permanent-and-correct",
+        "a-call-that-unpacks-its-arguments-permanent-for-this-call-site",
+        "a-language-without-a-rewriter-the-one-decline-that-is-a-promise",
+        "a-run-time-message-list-yours-to-change",
+        "the-three-verdicts-a-preflight-returns",
+        "where-to-go-next"
+      ]
+    },
+    {
+      "route": "/docs/concepts/delivery-routes",
+      "source": "docs/en/concepts/delivery-routes.md",
+      "content_hash": "e83f7da0cbd6f46c20fb72541b6e22c71205ab41f284815c501f4ebab054ceab",
+      "anchors": [
+        "the-two-routes",
+        "a-rollout-is-not-a-delivery",
+        "whose-move-a-refusal-is",
+        "delivery-states",
+        "why-the-hazard-palette-is-not-used-here",
+        "where-the-source-actually-comes-from",
+        "the-one-number-this-axis-exists-to-produce",
+        "where-to-go-next"
+      ]
+    },
+    {
+      "route": "/docs/concepts/execution-envelope",
+      "source": "docs/en/concepts/execution-envelope.md",
+      "content_hash": "853136735939e9eb71c8ea32a3b44603e9d753dfe5d0584536d0500aa596b554",
+      "anchors": [
+        "imposed-versus-chosen",
+        "why-the-loop-lives-elsewhere",
+        "why-the-two-numbers-cannot-live-on-one-axis",
+        "the-nine-fields",
+        "refused-everywhere-is-not-unenforced",
+        "why-the-concurrency-limit-is-checked-twice",
+        "when-a-loop-needs-a-second-actor",
+        "where-to-go-next"
+      ]
+    },
+    {
       "route": "/docs/concepts/glossary",
       "source": "docs/en/concepts/glossary.md",
-      "content_hash": "0ed169fe123a4bc5f6595fd03865016c092114abfddb8b7998f3acc9e0ef194d",
+      "content_hash": "8d0a227c80957282bca5604229b598902b013635bcc654b2fedb980977670312",
       "anchors": [
         "workflow-ir",
         "node",
+        "axis",
+        "policy",
+        "strategy",
         "variant",
         "variant-spec",
         "confighash",
@@ -21,6 +106,29 @@
         "coverage",
         "automation-level",
         "delivery-record"
+      ]
+    },
+    {
+      "route": "/docs/concepts/graph-and-wiring",
+      "source": "docs/en/concepts/graph-and-wiring.md",
+      "content_hash": "0ab1fea2e0e2e6285938c93c2ba69a9a0a488afddcff9dced94837378d83e956",
+      "anchors": [
+        "the-shape-of-a-workflow",
+        "wiring-and-topology-are-not-synonyms",
+        "the-four-wiring-operations",
+        "the-five-gestures",
+        "what-reaches-your-source",
+        "before-you-move-anything",
+        "a-refusal-is-not-a-queue",
+        "the-three-topology-forms",
+        "why-a-fan-in-declares-its-merge",
+        "worked-examples",
+        "an-applied-transposition",
+        "a-declined-reorder",
+        "a-merge",
+        "a-rewired-edge",
+        "a-refusal-on-an-axis-this-console-carries-no-note-for",
+        "where-to-go-next"
       ]
     },
     {
@@ -39,14 +147,50 @@
       ]
     },
     {
+      "route": "/docs/concepts/memory-strategies",
+      "source": "docs/en/concepts/memory-strategies.md",
+      "content_hash": "4384c40fa88ca7ca52dbb15a891c48b5cf6b0a426e037a008c9ddf38ecb6672d",
+      "anchors": [
+        "memory-is-not-context",
+        "the-five-strategies",
+        "what-reaches-your-source",
+        "why-a-refusal-is-the-safe-half",
+        "what-an-unapplied-change-is-worth",
+        "proposals-on-this-axis",
+        "worked-example",
+        "where-to-go-next"
+      ]
+    },
+    {
+      "route": "/docs/concepts/prompt-and-model-studio",
+      "source": "docs/en/concepts/prompt-and-model-studio.md",
+      "content_hash": "febc4f6ac241d5fded5e48be8393ec6206222bc5d9742df9d17e50e6bd1c5c03",
+      "anchors": [
+        "nothing-here-is-ranked",
+        "bound-and-inline",
+        "when-the-resolver-is-degraded",
+        "why-the-model-list-is-short",
+        "authoring-a-model",
+        "provider-parameters",
+        "the-prompt-library",
+        "slots-and-impact",
+        "authoring-is-not-an-evaluator",
+        "worked-example",
+        "where-to-go-next"
+      ]
+    },
+    {
       "route": "/docs/concepts/refusals",
       "source": "docs/en/concepts/refusals.md",
-      "content_hash": "8e4d0dd347e167930c0dd4a54e68408e1ceec50ca3df2cf2def83cc9151987dd",
+      "content_hash": "dcb8d89feea133b73443b8f34dae0e023cb87688a58a589abca7ac79caf7c9ec",
       "anchors": [
         "why-this-design-exists",
         "the-shape-of-every-refusal",
         "seeing-them-all-at-once",
         "why-the-three-causes-are-kept-apart",
+        "a-refused-change-is-never-a-dropped-one",
+        "a-refusal-is-not-a-permission-problem",
+        "a-refusal-is-not-a-queue",
         "refusals-you-will-meet-elsewhere",
         "how-to-act-on-one",
         "what-this-page-does-not-do"
@@ -183,10 +327,12 @@
     {
       "route": "/docs/reference/metrics",
       "source": "docs/en/reference/metrics.md",
-      "content_hash": "1a7c65e9239bbc65330516f46ce8c72cba225c26532e2c2e7d6ab9f06f5fd057",
+      "content_hash": "bfe5b83747136694a54b30413af0b3ed23b3c3e6f8adbf0ad5583c4c91d33e08",
       "anchors": [
         "per-provider-call",
+        "per-node-event",
         "per-run",
+        "per-customer-period",
         "what-is-not-measured-and-why-that-is-stated"
       ]
     },

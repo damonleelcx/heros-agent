@@ -231,26 +231,32 @@ test("§4.2 the runs list never dereferences a field a linked row does not carry
 //
 // This fence exists because the class recurs: `/app/runs` ('slice'), `/app/transforms` ('trim'), and now
 // the studio. Every one is a consumer holding a stale claim about a payload's shape.
-test("§4.7 the studio's client picker reads enumeration ROWS, not a list of ids", () => {
+test("§4.7 the studio has NO workflow picker of its own — P37 removed the question", () => {
   const src = read("src/app/app/studio/matrix.tsx");
 
+  // 🔴 P29 §4.7 required this picker to read enumeration ROWS rather than a list of ids, because
+  // rendering a row object as a React child throws #31 at hydration and the whole matrix reports a
+  // transport failure that did not happen.
+  //
+  // P37 removes the defect's HOME rather than its symptom: the workflow arrives as `workflowId`,
+  // resolved once by the shell's subject resolver, so the matrix holds no workflow list and renders no
+  // row at all. That is strictly stronger than rendering rows correctly — there is nothing left to get
+  // wrong — and it is the same reasoning D1 gives for asking the question once instead of seven times.
   assert.doesNotMatch(
     src,
-    /useState<string\[\]\s*\|\s*null>/,
-    "the studio picker still holds `string[]`. /api/v1/workflows returns objects; rendering one as a " +
-      "React child throws #31 at hydration and the whole matrix reports a transport failure.",
+    /useState<WorkflowRow\[\]/,
+    "the studio holds a workflow list again. The subject is resolved in one place; a second list here " +
+      "is a second answer to a question the reader has already been asked.",
   );
   assert.match(
     src,
-    /useState<WorkflowRow\[\]\s*\|\s*null>/,
-    "the studio picker does not use the shared WorkflowRow type. A third local definition of this shape " +
-      "is a third thing that can fall behind the wire.",
+    /export function StudioMatrix\(\{ workflowId \}: \{ workflowId: string \}\)/,
+    "the matrix does not take its workflow from the resolved subject",
   );
-  // The row must be dereferenced, never rendered whole.
-  assert.match(src, /w\.workflow_id/, "the picker does not read `workflow_id` off the row");
-  assert.doesNotMatch(
-    src,
-    /\{w\}/,
-    "the picker renders a whole row as a child. That is exactly React #31.",
-  );
+  assert.doesNotMatch(src, /\{w\}/, "a whole enumeration row is rendered as a child. That is React #31.");
+
+  // The OTHER pickers still read rows, and still must. This assertion is what stops the removal above
+  // from being read as "P29 §4.7 was dropped".
+  const enumeration = read("src/lib/enumeration.ts");
+  assert.match(enumeration, /WorkflowRow/, "the shared row type is gone, so nothing else can read rows either");
 });

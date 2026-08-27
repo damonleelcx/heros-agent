@@ -160,6 +160,32 @@ const (
 	// rate of zero over a busy deployment means the idempotency path is never exercised, and an
 	// unexercised idempotency path is one nobody knows is broken.
 	DeliveryDeduplicated Name = "agentd.delivery.deduplicated"
+
+	// ── console · the axis surfaces' subject and its one write (P37) ─────────
+	//
+	// Four names for the four questions an operator asks about the source-bound editors, and they are
+	// four rather than one-with-an-attribute for a specific reason: the first two answer "is the
+	// resolver picking a node, or asking?", which is a UX question about D1's risk R4, and the second
+	// two answer "are saves landing?", which is a correctness question about a write. Merging them
+	// would make the ratio that matters — how often a reader is asked — a filter over a busier stream.
+
+	// ConsoleSubjectResolved — the shell resolved one `(workflow, node)` subject for the axis surfaces.
+	// 🔴 The `sole` attribute distinguishes "one candidate, so nothing was asked" from "the reader had
+	// already chosen". A rate of `sole` near 1 means the resolver is doing its job; a fall in it is the
+	// signal that readers are being asked a question P37 exists to remove.
+	ConsoleSubjectResolved Name = "console.subject.resolved"
+	// ConsoleSubjectAmbiguous — more than one candidate and none chosen, so the shell asked. Counted
+	// because it is the cost side of D1's trade, and an operator who cannot see it cannot tell whether
+	// the resolution order is working.
+	ConsoleSubjectAmbiguous Name = "console.subject.ambiguous"
+	// ConsoleAxisSaved — an axis change was written: a registry entry and a variant exist for it.
+	// 🔴 Emitted AFTER the write returns, never before. An event emitted on the way in counts intent
+	// rather than effect, and a 200 is not evidence of a write (P37 §9.3).
+	ConsoleAxisSaved Name = "console.axis.saved"
+	// ConsoleAxisSaveRefused — the save was refused, with the cause as an attribute. One name for every
+	// refusal reason, for `ConversationRefused`'s reason: a separate name per cause makes "how often does
+	// this surface say no" a question requiring the operator to know the list in advance.
+	ConsoleAxisSaveRefused Name = "console.axis.save_refused"
 )
 
 // names is the closure. Sorted output is produced by Names(); the declaration order here groups by
@@ -186,6 +212,10 @@ var names = []Name{
 	RunChangeWithdrawn,
 	DeliveryPROpened,
 	DeliveryDeduplicated,
+	ConsoleSubjectResolved,
+	ConsoleSubjectAmbiguous,
+	ConsoleAxisSaved,
+	ConsoleAxisSaveRefused,
 }
 
 // Names returns every event name, sorted. A copy, so no caller can widen the enum.

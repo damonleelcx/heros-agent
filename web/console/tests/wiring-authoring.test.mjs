@@ -40,8 +40,13 @@ test("19.10 every gesture carries its own verdict, decided before submission", a
   for (const outcome of ["admissible", "refused"]) {
     assert.ok(flatSrc.includes(`verdict: "${outcome}"`), `no ${outcome} gesture is shown`);
   }
-  assert.match(flatSrc, /before<\/strong> you submit|before you submit/i,
-    "the surface does not say the verdict comes before submission");
+  // 🔴 The CLAIM moved to the reading surface (P37, block-inventory G9); the PROPERTY it describes is
+  // still enforced here, by the section heading the reader sees and by the gate the editor calls.
+  assert.match(flatSrc, /Every gesture gets its verdict as you make it/i,
+    "the editor does not say the verdict arrives as the gesture is made");
+  const doc = await read("content/docs/en/concepts/graph-and-wiring.md");
+  assert.match(doc, /each one gets its verdict \*as you make it\*/i,
+    "the destination does not carry the before-submission claim");
 });
 
 test("19.10 the editor uses the same gate as the compiler, and says so", async () => {
@@ -75,7 +80,7 @@ test("19.12 a refused rearrangement is never shown as a variant or as pending", 
 
   assert.match(src, /is <strong>not<\/strong> a variant|not a variant/i,
     "the surface does not say a refused rearrangement is not a variant");
-  assert.match(src, /no configuration hash/i,
+  assert.match(src, /no\s*configuration hash/i,
     "the surface does not say a recorded intent has no configuration hash");
   assert.match(src, /never evaluated/i, "the surface does not say it is never evaluated");
 
@@ -90,9 +95,15 @@ test("19.12 a refused rearrangement is never shown as a variant or as pending", 
     }
   }
 
-  // And the reason must be the real one — a false measurement, not tidiness.
-  assert.match(src, /source that was never rearranged/i,
-    "the surface does not say why a refused draft is not evaluated");
+  // 🔴 And the REASON must be the real one — a false measurement, not tidiness. P37 moved the paragraph
+  // to the shared refusal page (it is identical for every reader) and the editor links to it, so the
+  // claim is asserted at both ends: the destination carries it, and the surface reaches it.
+  const refusals = await read("content/docs/en/concepts/refusals.md");
+  assert.match(refusals, /## A refusal is not a queue/i, "the destination lost the recorded-intent rule");
+  assert.match(refusals, /never \*\*scored\*\*|never be scored|never .{0,20}scored/i,
+    "the destination does not say why a refused draft is not evaluated");
+  assert.match(src, /refusals#a-refusal-is-not-a-queue/,
+    "the editor carries no link to the section its paragraph moved to");
 });
 
 test("19.12 each gesture states whether it can be evaluated at all", async () => {
@@ -126,24 +137,33 @@ test("19.13 an incoherence refusal names the consumer, the producer and the fiel
 
 // ── 19.14 capability parity + tokens ────────────────────────────────────────────────────────────
 
-test("19.14 adding the editor removed no existing capability from the wiring surface", async () => {
+test("19.14 P37 removed no capability from the wiring surface — each one has a destination", async () => {
   const page = await read(WIRING_PAGE);
+  const doc = await read("content/docs/en/concepts/graph-and-wiring.md");
 
-  // Everything the wiring surface already had must still be mounted.
-  for (const [id, marker] of [
-    ["axis", "<AxisTab />"],
-    ["applied", "<AppliedTab />"],
+  // 🔴 P15 required the axis and applied tabs to be PRESENT ON THE PAGE. P37's delta to
+  // `axis-node-projection` changes the unit from "the same page" to "a named destination": each one is
+  // on the reading surface, labelled as the platform's fixture, and the page links there.
+  for (const [gone, destination] of [
+    ["<AxisTab />", "## The four wiring operations"],
+    ["<AppliedTab />", "### An applied transposition"],
+    ["...EXAMPLES.map", "### A declined reorder"],
+    ["<TopologyTab />", "## The three topology forms"],
   ]) {
-    assert.ok(page.includes(`id: "${id}"`), `the wiring surface lost its "${id}" tab`);
-    assert.ok(page.includes(marker), `the wiring surface no longer renders ${marker}`);
+    assert.ok(!page.includes(gone), `${gone} is still on the working surface`);
+    assert.ok(doc.includes(destination), `${gone} has no destination — a panel with no destination is not cut`);
   }
-  // The worked refusal examples are generated from EXAMPLES — still there.
-  assert.match(page, /\.\.\.EXAMPLES\.map/, "the worked refusal examples were removed");
-  // And the shared refusal component is still used, so the page and Configure cannot drift.
-  assert.match(page, /AxisRefusal/, "the wiring surface no longer uses the shared refusal card");
+  // The engine's own sentences travelled verbatim; a paraphrase would be documenting a page that does
+  // not exist.
+  assert.match(doc, /control-flow surgery, not the value replacement this engine performs/,
+    "the engine's refusal wording was paraphrased on the way to its destination");
 
-  // The new tab is additive.
-  assert.match(page, /id: "editor"/, "the wiring surface did not gain the editor tab");
+  // 🔴 The EDITOR is not moved — it is interactive, and a markdown document cannot hold it. It stays,
+  // relabelled as the platform's fixture so it does not occupy the reader's data position (FR4).
+  assert.match(page, /id: "editor"/, "the wiring surface lost its editor");
+  assert.match(page, /the platform's fixture/i, "the editor is not labelled as a fixture");
+  assert.match(page, /<AxisFrame axis="graph"/, "the surface is not bound to the reader's own node");
+  assert.match(page, /id: "this-node"/, "the reader's own node has no tab");
 });
 
 test("19.14 the editor derives nothing and ranks nothing", async () => {

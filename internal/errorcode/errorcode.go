@@ -65,6 +65,16 @@ const (
 	TransportFailure Code = "TRANSPORT_FAILURE" // a dependency could not be reached at all
 	ProviderError    Code = "PROVIDER_ERROR"    // a model provider refused or failed the call
 
+	// ── Reading a customer's reported structure (P37) ────────────────────────
+	//
+	// 🔴 Its own class rather than `CONTRACT_MISMATCH`, and the distinction is the point. A contract
+	// mismatch means the two sides disagree about the SHAPE. This means the shape is right and a field
+	// that should carry a value carries discovery's `unresolved` sentinel — a fact about the customer's
+	// code that the platform must report as absence rather than resolve to a default. An operator
+	// watching its rate climb is watching discovery degrade on real repositories, which is a different
+	// investigation from a version skew.
+	AxisValueUnresolved Code = "AXIS_VALUE_UNRESOLVED"
+
 	// ── Browser (P24 wave 24c) ───────────────────────────────────────────────
 	//
 	// Four classes rather than one, because they have four different causes and three of them are
@@ -85,6 +95,7 @@ var All = []Code{
 	StoreNotMounted, StoreUnavailable, StoreWriteFailed, StoreReadFailed, MigrationFailed,
 	NotFound, RequestInvalid, AuthFailed, EntitlementDenied, RateLimited,
 	UpstreamError, TransportFailure, ProviderError,
+	AxisValueUnresolved,
 	BrowserUnhandledError, BrowserUnhandledRejection, BrowserChunkLoadFailed, BrowserHydrationFailed,
 }
 

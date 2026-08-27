@@ -18,6 +18,8 @@ import { dirname, join } from "node:path";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (rel) => readFile(join(root, rel), "utf8");
+/** readContent reads a reading-surface document — where P37 moved the fixtures this file used to assert. */
+const readContent = (rel) => readFile(join(root, rel), "utf8");
 
 const AUTHORING = "src/components/authoring.tsx";
 const PAGE = "src/app/app/authoring/page.tsx";
@@ -53,28 +55,53 @@ test("11.1 adding authoring to the studio removed no capability it already had",
 
 // ── 11.2 model + parameter authoring, and the stated boundary ───────────────────────────────────
 
-test("11.2 the studio offers model and provider-parameter authoring", async () => {
+test("11.2 the studio authors a MODEL for the reader's own node, not for a fixture", async () => {
   const src = await read(STUDIO_AUTHORING);
-  assert.match(src, /Set a model yourself/i, "no model authoring on the studio's authoring tab");
-  assert.match(src, /Provider parameters/i, "no provider-parameter authoring");
+
+  // 🔴 P13 11.2 asserted a fixture table — three nodes, a hard-coded model list, a fixture refusal.
+  // P37 bound the surface to the reader's own node, so what this test asserts moved from "the table is
+  // present" to "the table is the reader's". The capability did not change; its subject did.
+  assert.match(src, /subject: AxisSubject/, "the studio's authoring tab is not bound to a subject");
+  assert.match(src, /<AxisEditor/, "model authoring does not go through the shared editor kit");
   assert.match(src, /ApplyModeNote/, "the apply-mode boundary is not rendered at the point of choice");
-});
+  assert.match(src, /What this node can carry/i, "provider-parameter carriage is not stated per node");
 
-test("11.2 cross-provider models are absent AND the boundary is stated, not silently short", async () => {
-  const src = await read(STUDIO_AUTHORING);
-
-  // Every offered model must belong to the call site's provider. A single foreign model here would be
-  // a diff that compiles and then calls the wrong provider in production.
-  const offered = /const OFFERED = \[([^\]]*)\]/s.exec(src);
-  assert.ok(offered, "the offered model list is not declared where it can be checked");
-  for (const foreign of ["gpt-", "gemini", "llama", "mistral", "command-r"]) {
-    assert.ok(
-      !offered[1].toLowerCase().includes(foreign),
-      `a ${foreign} model is offered for an anthropic call site — a cross-provider swap would compile and call the wrong provider`,
-    );
+  // And the fixtures are gone from the reader's data position (FR4).
+  for (const fixture of ["const NODES", "const OFFERED", "const PARAM_REFUSAL"]) {
+    assert.ok(!src.includes(fixture), `${fixture} still occupies the reader's data position`);
   }
 
-  // A silently short list reads as an incomplete catalogue. The boundary must be stated.
+  // Their destination, because nothing is deleted.
+  const doc = await readContent("content/docs/en/concepts/prompt-and-model-studio.md");
+  assert.match(doc, /## Worked example/, "the fixture nodes have no destination section");
+  assert.match(doc, /claude-haiku-4-5/, "the offered-model fixture was lost rather than moved");
+  assert.match(doc, /## Provider parameters/, "the parameter refusal has no destination section");
+});
+
+test("11.2 cross-provider models are shown DISABLED, never offered and never hidden", async () => {
+  const src = await read(STUDIO_AUTHORING);
+
+  // 🔴 P13 checked a literal list for foreign model ids. After P37 the list is the platform's registered
+  // catalogue, so a literal check would be checking nothing — the rule has to be enforced where the
+  // options are BUILT. `modelVocabularyFrom` marks a foreign-provider model `unavailableReason`, and the
+  // kit renders `unavailableReason` as `disabled` with the reason beside it.
+  const shapes = await read("src/lib/axisVocabularyShapes.ts");
+  assert.match(
+    shapes,
+    /provider && m\.provider && m\.provider !== provider/,
+    "the model list is not filtered by the call site's own provider — a cross-provider swap would compile " +
+      "and then call the wrong provider in production",
+  );
+  assert.match(
+    shapes,
+    /a call site written against the \$\{m\.provider\} SDK/,
+    "an unavailable model does not name what it would need",
+  );
+  const kit = await read("src/components/editorKit.tsx");
+  assert.match(kit, /disabled=\{unavailable\}/, "an unavailable option is not rendered disabled");
+  assert.match(kit, /needs \{o\.unavailableReason\}/, "a disabled option does not name its reason");
+
+  // A silently short list reads as an incomplete catalogue. The boundary must still be stated.
   assert.match(src, /ProviderBoundary/, "the provider boundary is not stated where the choice is made");
   const boundary = await read(AUTHORING);
   assert.match(
@@ -193,9 +220,28 @@ test("11.6 the new surface is wired in all three places, so no slot goes silentl
   assert.match(routes, /authoring: \(\) => "\/app\/authoring"/, "the route is not canonical");
 });
 
-test("11.6 the authoring surface states there is no override, at any tier", async () => {
+test("11.6 there is no override, at any tier — and it is stated where a reader meets a refusal", async () => {
+  // 🔴 P13 asserted the sentence on `/app/authoring`, where it was one of five restatements of a rule
+  // that is identical on every axis. P37 moved the restatement to the shared document (it is the same
+  // for every reader) and the surface links to it — so the claim is asserted at BOTH ends: the document
+  // must carry it, and the surface must reach it. A claim with a link and no destination is the 404
+  // nobody reports.
+  const doc = await readContent("content/docs/en/concepts/authored-changes.md");
+  assert.match(doc, /## There is no override/i, "the shared contract no longer states that a refusal has no override");
+  assert.match(
+    doc,
+    /No plan, role or setting materialises a change the engine refuses/i,
+    "the sentence itself is gone; a heading with no claim under it is not a statement",
+  );
+  const refusals = await readContent("content/docs/en/concepts/refusals.md");
+  assert.match(refusals, /## A refusal is not a permission problem/i, "the shared refusal page lost the rule");
+
   const page = await read(PAGE);
-  assert.match(page, /no override/i, "the surface does not state that a refusal has no override");
+  assert.match(
+    page,
+    /AXIS_DOC\.prompt/,
+    "the authoring surface carries no link to the contract it stopped restating",
+  );
   // A capability row must not promise past a refusal either.
   const ents = await read("src/lib/entitlements.ts");
   const row = ents.slice(ents.indexOf('id: "authoring"'));
