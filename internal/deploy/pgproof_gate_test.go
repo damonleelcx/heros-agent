@@ -38,18 +38,38 @@ const makefilePath = "../../Makefile"
 
 // pgproofExceptions are packages with live-Postgres proofs that `make pg-proof` deliberately does not
 // run, each with the reason. An entry here is a debt with a name on it, not an exemption.
-var pgproofExceptions = map[string]string{
-	"internal/reportstore": "RED — its fixture inserts a `workflow` row with no `repo_url`, which a later " +
-		"migration made NOT NULL. The proof has been failing on its own seed; adding it to the gate would " +
-		"break the gate rather than fix the seed. Owner: whoever owns reportstore.",
-	"internal/deliveryrecord": "RED IN THE BATCH ONLY — passes when run alone, fails when run beside the " +
-		"other proofs, so the defect is shared-database interference and not the assertion. Diagnosing it " +
-		"means finding what another package's schema recreation disturbs.",
-	"internal/adminops": "GREEN and not yet added. It predates this fence and belongs to the operator " +
-		"domain; adding it is a one-word change somebody should make deliberately rather than as a " +
-		"side effect of an accounts phase.",
-	"internal/deliveryroute": "GREEN and not yet added, for the same reason as internal/adminops.",
-}
+//
+// # 🔴 IT IS EMPTY, and that is the point of writing debts down
+//
+// All four rows that stood here have been paid, and the mechanism is what collected them — each one
+// named a package, a symptom and an owner, so the work was findable instead of being a gap nobody
+// could see:
+//
+//	internal/reportstore     RED — its seed inserted a `workflow` row with no `repo_url`. The diagnosis
+//	                         in this list was right, and the seed turned out to be wrong in FOUR
+//	                         independent ways (three more columns, a `variant.config_hash` that has
+//	                         never existed, a missing `variant.label`, and `config` inserted before the
+//	                         `variant` its FK points at). Four mistakes do not survive one successful
+//	                         run, so there had never been one. Fixed; its six assertions now execute
+//	                         for the first time.
+//
+//	internal/deliveryrecord  "RED IN THE BATCH ONLY — passes alone, fails beside the other proofs, so
+//	                         the defect is shared-database interference." Correct, and the interference
+//	                         had a name: its trigger check queried `pg_trigger`/`pg_class` by NAME with
+//	                         no schema filter. The catalogs are database-wide and every test package
+//	                         gets its own schema, so it counted one `transform_immutable` per SCHEMA —
+//	                         `count=18` where it wanted 1. Fixed by binding `'transform'::regclass`,
+//	                         which is the rule the migration fence in internal/pgmigrate already
+//	                         enforced for migrations and now enforces for Go sources too.
+//
+//	internal/adminops        GREEN and not yet added. Added.
+//	internal/deliveryroute   GREEN and not yet added. Added.
+//
+// 🚫 The map is kept rather than deleted along with its rows. Deleting it would delete the MECHANISM —
+// the next red proof would have nowhere to be quarantined with a reason, and the choice would collapse
+// back to "break the gate for everybody" or "quietly leave it out", which is the pair this file exists
+// to avoid.
+var pgproofExceptions = map[string]string{}
 
 // packagesWithPgproofTests finds every package carrying a `pgproof`-tagged test file.
 func packagesWithPgproofTests(t *testing.T) []string {
@@ -106,36 +126,68 @@ func hasPgproofTag(src string) bool {
 	return false
 }
 
-// packagesInTheGate reads the `pg-proof` recipe out of the Makefile.
+// packagesInTheGate reads `PGPROOF_PKGS` out of the Makefile.
+//
+// 🔴 The VARIABLE, not the recipe. The recipe used to hold the package list inline; it now expands
+// `$(PGPROOF_PKGS)`, which CI also reads through `make -s pgproof-packages` — so the variable is the
+// single copy of this fact and is therefore the thing to judge. Parsing the recipe would find one
+// token and report that the gate runs nothing.
 func packagesInTheGate(t *testing.T) map[string]bool {
 	t.Helper()
 	b, err := os.ReadFile(makefilePath)
 	if err != nil {
 		t.Fatalf("read %s: %v", makefilePath, err)
 	}
-	inTarget := false
 	out := map[string]bool{}
+	inVar := false
 	for _, line := range strings.Split(string(b), "\n") {
-		if strings.HasPrefix(line, "pg-proof:") {
-			inTarget = true
+		if strings.HasPrefix(line, "PGPROOF_PKGS") {
+			inVar = true
+		} else if !inVar {
 			continue
 		}
-		if inTarget {
-			if !strings.HasPrefix(line, "\t") {
-				break // the recipe ended
+		for _, tok := range strings.Fields(line) {
+			if strings.HasPrefix(tok, "./internal/") {
+				out[strings.TrimSuffix(strings.TrimPrefix(tok, "./"), "/")] = true
 			}
-			for _, tok := range strings.Fields(line) {
-				if strings.HasPrefix(tok, "./internal/") {
-					out[strings.TrimSuffix(strings.TrimPrefix(tok, "./"), "/")] = true
-				}
-			}
+		}
+		// A trailing backslash continues the assignment; anything else ends it.
+		if !strings.HasSuffix(strings.TrimRight(line, " \t"), "\\") {
+			break
 		}
 	}
 	if len(out) == 0 {
-		t.Fatalf("no packages parsed out of the pg-proof recipe in %s — this fence cannot judge a target "+
+		t.Fatalf("no packages parsed out of PGPROOF_PKGS in %s — this fence cannot judge a target "+
 			"it cannot read", makefilePath)
 	}
 	return out
+}
+
+// 🔴 THE RECIPE AND CI BOTH READ THE VARIABLE. Without this, the fence above would keep judging a
+// variable that nothing runs — which is the same class of failure it was written for, one level up.
+func TestTheGateAndCIBothReadTheOneList(t *testing.T) {
+	mk, err := os.ReadFile(makefilePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(mk), "-tags pgproof -count=1 $(PGPROOF_PKGS)") {
+		t.Error("the `pg-proof` recipe no longer expands $(PGPROOF_PKGS), so the list this fence judges " +
+			"is not the list that runs")
+	}
+	ci, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "ci.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(ci), "make -s pgproof-packages") {
+		t.Error("CI no longer reads `pgproof-packages`. It kept its own hand-written list once and that " +
+			"list was missing fourteen of the twenty-six packages, including two whose proofs had never " +
+			"run at all — the comment standing beside it even said this would happen.")
+	}
+	// 🚫 And CI must not carry a literal package list beside the call, which is how the two would drift
+	// apart again while both looking present.
+	if strings.Contains(string(ci), "-tags pgproof -count=1 ./internal/") {
+		t.Error("CI passes literal packages to `go test -tags pgproof`. That is a second list.")
+	}
 }
 
 // TestEveryLivePostgresProofIsRunByTheGate is the assertion.

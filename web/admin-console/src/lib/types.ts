@@ -616,13 +616,45 @@ export type PlacementSource = "defaulted" | "explicit";
 export type AgentAxisStatus = "set" | "defaulted" | "not_in_effect";
 
 export type AgentAxisRow = {
+  /**
+   * The node this axis belongs to, or "" for the definition-level `graph` axis.
+   *
+   * 🔴 Present on EVERY row, including a single-node definition's. A field that appeared only once a
+   * definition had two nodes would make the row key change shape underneath the table, and "which
+   * node" is the one question this surface exists to answer after P36.
+   */
+  node_id: string;
   axis: string;
   status: AgentAxisStatus;
   value: string;
   /** Present when status is `not_in_effect`. An inert axis with no stated reason cannot be acted on. */
   reason?: string;
-  /** False for the wiring axis, which is fixed and rendered read-only rather than hidden. */
+  /** False for the `graph` axis on a single-node definition, which is rendered read-only with its reason
+   * rather than hidden — a hidden axis is indistinguishable from one that does not exist. */
   editable: boolean;
+};
+
+/**
+ * One node of the serving definition, with what it has actually done.
+ *
+ * 🔴 Per node and never only as an aggregate: an aggregate over a graph says the agent is slow, not
+ * WHICH NODE is slow, and that is the only form of the answer anybody can act on.
+ */
+export type AgentNodeRow = {
+  node_id: string;
+  prompt_ref: string;
+  model_ref: string;
+  loop_ref?: string;
+  harness_ref: string;
+  inferences: number;
+  provider_calls: number;
+  tokens_in: number;
+  tokens_out: number;
+  failures: number;
+  skips: number;
+  /** Mean over completed calls. 🔴 Zero with `inferences: 0` is NOT a fast node — the console renders
+   * "not yet run" for that reason. */
+  latency_ms: number;
 };
 
 /** One strategy's availability, with the host service it would need. */
@@ -638,12 +670,20 @@ export type Availability = {
 export type AgentVersionRow = {
   config_hash: string;
   display: string;
+  /** The DISTINCT set this version binds, comma-joined. Byte-identical to the single value for a
+   * single-node row, and the honest answer for a graph. */
   model_ref: string;
   credential_ref: string;
   rehearsal_state: string;
   /** True for at most one row, and never derived from recency. */
   active: boolean;
   created_at_ms: number;
+  /** How many nodes this version declares. Two versions differing only in TOPOLOGY are otherwise
+   * indistinguishable in this list — same model, same credential, different agent. */
+  nodes: number;
+  /** True when this version passed and is not serving, so it could be rolled back TO.
+   * 🔴 Decided by the PLATFORM, so the control is offered exactly where the backend would accept it. */
+  rollback_target: boolean;
 };
 
 export type AgentOverview = {
@@ -660,6 +700,10 @@ export type AgentOverview = {
   harness_availability: Availability[] | null;
   memory_availability: Availability[] | null;
   versions: AgentVersionRow[] | null;
+  /** The serving definition's nodes with their live numbers. */
+  nodes: AgentNodeRow[] | null;
+  /** False when no per-node source is wired — the numbers then render as unknown, never as zero. */
+  nodes_known: boolean;
   kill_switch_armed: boolean;
   kill_switch_note?: string;
   can_admin: boolean;

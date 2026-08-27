@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
+
+	"github.com/heros-foreal/agentd/internal/registry"
 )
 
 // readiness.go is task 9.1: what `/readyz` says about the analysis agent.
@@ -83,6 +86,17 @@ type ReadinessInput struct {
 	}
 	Credentials CredentialResolver
 	Caps        *CapChecker
+	// Runner is what the DEPLOYED BUILD can actually execute (P36 task 8.3).
+	//
+	// 🔴 It is `RunnerHosts` — the value already computed FROM the runner rather than declared as a
+	// policy — so this check cannot drift from what the process can do. D11's whole argument is that
+	// availability is computed from what the runner supplies; asserting it from a list here would be
+	// the config-file readiness this file's header spends four paragraphs refusing.
+	Runner RunnerHosts
+	// Axes resolves a loop ref, so "this build cannot run that strategy" is answerable. Nil means the
+	// check cannot be made, and a definition binding a loop is then reported as UNEXECUTABLE rather
+	// than as ready — the same fail-closed reading `Publisher.checkLoopAxis` takes.
+	Axes AxisRegistry
 }
 
 // Check resolves the agent's readiness by DOING what an inference does.
@@ -137,25 +151,45 @@ func Check(ctx context.Context, in ReadinessInput) Readiness {
 		return out
 	}
 
+	// 2b · CAN THIS BUILD RUN IT? (P36 task 8.3)
+	//
+	// 🔴 Before the credential check, deliberately. A definition this build cannot execute will never
+	// reach a provider, so reporting a credential fault first would send an operator to a secrets store
+	// over a definition that was never going to run — and they would fix the credential and see no
+	// change.
+	if state, detail := executableHere(ctx, active.Definition, in); state != "" {
+		out.State, out.Detail = state, detail
+		return out
+	}
+
 	// 3 · the credential, RESOLVED. Not "a reference is set" — the reference is resolved through the
 	// same source the gateway calls, because a reference pointing at a secret nobody provisioned looks
 	// identical to a working one until the first call.
+	//
+	// 🔴 EVERY node's credential, not the first one's. A graph whose second node binds a provider
+	// nobody provisioned is a deployment that reports ready and fails when the run reaches that node —
+	// which is the state this check exists to make impossible, and a first-node-only read would
+	// reintroduce it for every definition that is not single-node.
 	if in.Credentials != nil {
 		out.CredentialSource = in.Credentials.Describe()
-		if err := in.Credentials.Resolve(ctx, active.Definition.CredentialRef); err != nil {
-			out.State = ReadyCredentialUnresolved
-			out.Detail = fmt.Sprintf("The active definition binds the provider %q and its credential "+
-				"does not resolve from %s. Inference fails closed: zero provider calls, no substitution, "+
-				"and every surface falls back to rule-derived facts. Detail: %v",
-				active.Definition.CredentialRef, out.CredentialSource, err)
-			return out
+		for _, ref := range credentialRefsOf(active.Definition) {
+			if err := in.Credentials.Resolve(ctx, ref); err != nil {
+				out.State = ReadyCredentialUnresolved
+				out.Detail = fmt.Sprintf("The active definition binds the provider %q and its credential "+
+					"does not resolve from %s. Inference fails closed: zero provider calls, no substitution, "+
+					"and every surface falls back to rule-derived facts. Detail: %v",
+					ref, out.CredentialSource, err)
+				return out
+			}
 		}
 	}
 
 	// 4 · the ceiling, against the REAL meter. Checked for the fleet, which is the scope that stops
 	// everything; a single capped tenant is that tenant's state and not the deployment's.
 	if in.Caps != nil {
-		verdict, err := in.Caps.Check(ctx, FleetTenantID)
+		// 🔴 Zero pending: readiness asks whether the fleet ceiling is ALREADY reached, with nothing in
+		// flight of its own. It spends nothing, so it has nothing the meter cannot see.
+		verdict, err := in.Caps.Check(ctx, FleetTenantID, 0)
 		if err != nil {
 			return unresolvable(out, "the token ceiling could not be read: "+err.Error())
 		}
@@ -196,5 +230,71 @@ func unresolvable(out Readiness, detail string) Readiness {
 func ReadyStates() []ReadyState {
 	return []ReadyState{
 		ReadyDisabled, ReadyReady, ReadyCredentialUnresolved, ReadyCapped, ReadyNoDefinition,
+		ReadyUnexecutable,
 	}
+}
+
+// credentialRefsOf is every distinct provider name a definition binds, sorted — the node credentials
+// and the critic credentials both, because a critic call is a real call against a real provider.
+func credentialRefsOf(d Definition) []string {
+	refs := make([]string, 0, len(d.Nodes)*2)
+	for _, n := range d.Nodes {
+		refs = append(refs, n.CredentialRef, n.CriticCredentialRef)
+	}
+	return dedupeSorted(refs)
+}
+
+// executableHere answers whether the DEPLOYED BUILD can run this definition (P36 task 8.3).
+//
+// It returns ("", "") when it can. The two returns rather than a bool because the DETAIL is the whole
+// value: "unexecutable" sends an operator nowhere, and "this definition binds `react-loop` on node
+// `heros_analyst` and this build supplies no tool executor" sends them to a release note.
+//
+// # 🔴 Why this state exists at all, and why P36 creates it
+//
+// Before the graph axis, a definition was a set of refs and the only way a deployment could fail to run
+// one was a credential. Now a definition can bind a LOOP STRATEGY, a NODE KIND or a TOPOLOGY that a
+// given binary does not implement — publishable on the deployment that authored it, unrunnable on the
+// one that pulled an older image. Without this state that deployment reports `ready` and fails at the
+// first analysis, naming a strategy rather than naming the build.
+func executableHere(ctx context.Context, d Definition, in ReadinessInput) (ReadyState, string) {
+	for _, n := range d.Nodes {
+		if strings.TrimSpace(n.LoopRef) == "" {
+			continue
+		}
+		if in.Axes == nil {
+			// 🔴 FAIL CLOSED, exactly as publish does. A loop nobody can resolve is a loop whose host
+			// service is discovered by whoever the run reaches, and reporting `ready` here would make
+			// that discovery a customer's problem.
+			return ReadyUnexecutable, fmt.Sprintf(
+				"the active definition binds a loop on node %q and this deployment can resolve no loop "+
+					"registry, so whether this build can run it is unknown. It is reported as "+
+					"UNEXECUTABLE rather than ready: an unknown here is discovered by whoever the next "+
+					"analysis reaches.", n.NodeID)
+		}
+		loop, err := in.Axes.ResolveLoop(ctx, n.LoopRef)
+		if err != nil {
+			return ReadyUnexecutable, fmt.Sprintf(
+				"the active definition binds loop %q on node %q and it does not resolve on this "+
+					"deployment: %v. The definition is fine and this build cannot read it — look at the "+
+					"deployed version rather than at the definition.", n.LoopRef, n.NodeID, err)
+		}
+		need := registry.HostServicesForLoop(loop.Spec.Strategy)
+		var missing []string
+		for _, svc := range need {
+			if !in.Runner.supplies(svc) {
+				missing = append(missing, svc)
+			}
+		}
+		if len(missing) > 0 {
+			sort.Strings(missing)
+			return ReadyUnexecutable, fmt.Sprintf(
+				"the active definition binds the %q loop on node %q, which needs %s, and this build "+
+					"supplies none of them. It was publishable where it was authored and this deployment "+
+					"cannot execute it — nothing will run until the build catches up or the definition is "+
+					"rolled back.",
+				loop.Spec.Strategy, n.NodeID, registry.HostServiceDisplay(missing))
+		}
+	}
+	return "", ""
 }

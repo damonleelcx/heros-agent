@@ -12,13 +12,13 @@ import (
 // P30 workstream 3 — the agent definition.
 
 func goodDefinition() Definition {
-	return Definition{
+	return SingleNode(Node{
 		PromptRef:     "prompt-v1",
 		ModelRef:      "claude-opus-5",
 		CredentialRef: "anthropic",
 		ContextRef:    "ctx-v1",
 		HarnessRef:    "harness-single-shot-v1",
-	}
+	})
 }
 
 // fakeCatalogue is the operator model registry.
@@ -73,21 +73,21 @@ func registered(ids ...string) fakeCatalogue {
 
 func anthropicOnly() fakeSecrets { return fakeSecrets{known: map[string]bool{"anthropic": true}} }
 
-// Task 3.1 — the definition IS a Variant Spec over the six axes, hashed by internal/confighash.
-func TestTheDefinitionProjectsAsAVariantSpecOverTheSixAxes(t *testing.T) {
+// Task 3.1 — the definition IS a Variant Spec over its axes, hashed by internal/confighash.
+func TestTheDefinitionProjectsAsAVariantSpecOverItsAxes(t *testing.T) {
 	d := goodDefinition()
-	d.SkillRefs = []string{"skill-b", "skill-a"}
-	d.ToolNames = []string{"z-tool", "a-tool"}
-	d.MemoryRef = "mem-v1"
+	d.Nodes[0].SkillRefs = []string{"skill-b", "skill-a"}
+	d.Nodes[0].ToolNames = []string{"z-tool", "a-tool"}
+	d.Nodes[0].MemoryRef = "mem-v1"
 
 	spec := d.Spec()
-	node, ok := spec.Nodes[NodeID]
+	node, ok := spec.Nodes[DefaultNodeID]
 	if !ok {
-		t.Fatalf("the spec has no %s node: %+v", NodeID, spec.Nodes)
+		t.Fatalf("the spec has no %s node: %+v", DefaultNodeID, spec.Nodes)
 	}
-	if node.ModelRef != d.ModelRef || node.PromptRef != d.PromptRef ||
-		node.ContextPolicy != d.ContextRef || node.MemoryRef != d.MemoryRef ||
-		node.HarnessRef != d.HarnessRef {
+	if node.ModelRef != d.Primary().ModelRef || node.PromptRef != d.Primary().PromptRef ||
+		node.ContextPolicy != d.Primary().ContextRef || node.MemoryRef != d.Primary().MemoryRef ||
+		node.HarnessRef != d.Primary().HarnessRef {
 		t.Errorf("an axis did not reach the node override: %+v", node)
 	}
 	// Skill ORDER is identity-bearing (the call site binds them in that order); tools are a SET.
@@ -103,9 +103,9 @@ func TestTheDefinitionProjectsAsAVariantSpecOverTheSixAxes(t *testing.T) {
 // change moves it.
 func TestConfigHashIsContentAddressed(t *testing.T) {
 	a := goodDefinition()
-	a.ToolNames = []string{"one", "two"}
+	a.Nodes[0].ToolNames = []string{"one", "two"}
 	b := goodDefinition()
-	b.ToolNames = []string{"two", "one"} // same SET, different authoring order
+	b.Nodes[0].ToolNames = []string{"two", "one"} // same SET, different authoring order
 
 	ha, err := a.ConfigHash()
 	if err != nil {
@@ -122,8 +122,8 @@ func TestConfigHashIsContentAddressed(t *testing.T) {
 	// 🔴 The credential reference is part of what this agent IS. A definition pointed at another
 	// provider is a different agent, and it must not share a hash.
 	c := goodDefinition()
-	c.ToolNames = []string{"one", "two"}
-	c.CredentialRef = "openai"
+	c.Nodes[0].ToolNames = []string{"one", "two"}
+	c.Nodes[0].CredentialRef = "openai"
 	hc, err := c.ConfigHash()
 	if err != nil {
 		t.Fatal(err)
@@ -136,7 +136,7 @@ func TestConfigHashIsContentAddressed(t *testing.T) {
 	// Task 10.16 — a definition records the VERSION of the closed sets it references, and that version
 	// is hashed. Otherwise `single-shot` before and after the set gains a member are one identity.
 	d := goodDefinition()
-	d.ToolNames = []string{"one", "two"}
+	d.Nodes[0].ToolNames = []string{"one", "two"}
 	d.SetVersions = map[string]string{"harness": "2"}
 	hd, err := d.ConfigHash()
 	if err != nil {
@@ -180,7 +180,7 @@ func TestAnUnknownAxisIsRefusedRatherThanDropped(t *testing.T) {
 func TestAnUnregisteredModelIsRefusedAtPublish(t *testing.T) {
 	p, _ := testPublisher(t, registered("claude-opus-5"), anthropicOnly())
 	d := goodDefinition()
-	d.ModelRef = "gpt-9-turbo"
+	d.Nodes[0].ModelRef = "gpt-9-turbo"
 
 	_, err := p.Publish(context.Background(), d)
 	if !errors.Is(err, ErrModelUnregistered) {
@@ -282,7 +282,7 @@ func TestExactlyOneVersionIsActive(t *testing.T) {
 	var hashes []string
 	for _, m := range []string{"claude-opus-5", "claude-sonnet-5"} {
 		d := goodDefinition()
-		d.ModelRef = m
+		d.Nodes[0].ModelRef = m
 		res, err := p.Publish(ctx, d)
 		if err != nil {
 			t.Fatal(err)
@@ -332,9 +332,9 @@ func TestADeprecatedModelIsANoticeAndIsNeverAutoSwitched(t *testing.T) {
 		t.Errorf("no deprecation notice was raised: %+v", res)
 	}
 	v, _, _ := store.Get(ctx, res.ConfigHash)
-	if v.Definition.ModelRef != "claude-opus-5" {
+	if v.Definition.Primary().ModelRef != "claude-opus-5" {
 		t.Errorf("the model was AUTO-SWITCHED to %q. Swapping it changes the config_hash, so every "+
-			"stored inference would name a definition that ran something else.", v.Definition.ModelRef)
+			"stored inference would name a definition that ran something else.", v.Definition.Primary().ModelRef)
 	}
 }
 
@@ -347,7 +347,7 @@ func TestAKeyShapedCredentialIsRefused(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			d := goodDefinition()
-			d.CredentialRef = value
+			d.Nodes[0].CredentialRef = value
 			err := d.Validate()
 			if !errors.Is(err, ErrKeyValueOffered) {
 				t.Fatalf("a key-shaped credential was accepted: %v", err)

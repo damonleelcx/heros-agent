@@ -20,7 +20,7 @@ PARITY_DIR ?= .parity
 
 .DEFAULT_GOAL := ci
 
-.PHONY: ci go build vet fmt test schema lint db-proof pg-proof verifier-proof tidy-check clean help demo-evalboard \
+.PHONY: ci go build vet fmt test schema lint db-proof pg-proof pgproof-packages verifier-proof tidy-check clean help demo-evalboard \
         deploy-lint deploy-up deploy-down deploy-down-hard \
         console-types console-types-check console-tokens console-test operator-console-test operator-ledger operator-hermes docs-facts docs-facts-check \
         build-discover discovery-ci discovery-throughput \
@@ -29,7 +29,7 @@ PARITY_DIR ?= .parity
         sandbox-proof sandbox-proof-redcheck \
         classifier-calibration demo-patterngraph demo-proposals demo-billing demo-billing-states \
         release-rehearse release-rehearse-redcheck readme-install packaging-proof install-smoke install-smoke-refusals \
-        agent-rehearse agent-status repo-intake-hermes assessment-hermes axissplit-hermes \
+        agent-rehearse agent-status repo-intake-hermes assessment-hermes axissplit-hermes agentgraph-hermes \
         intent-holdout intent-holdout-strict attribution-holdout p31-fence-redcheck p33-fence-redcheck p34-fence-redcheck p35-fence-redcheck console-edge-proof assessment-holdout p35-live-four-step improve-hermes
 
 ## ci: the locally-provable gate (go + schema + console-types + discovery-ci + intent-holdout). Lint/db-proof run as their own CI jobs.
@@ -233,6 +233,34 @@ assessment-hermes:
 ##
 ##	git clone --depth 1 https://github.com/nousresearch/hermes-agent /tmp/hermes-agent
 ##	make axissplit-hermes
+## agentgraph-hermes: run P36's multi-node agent against a REAL repository's own call sites.
+##
+## Every P36 fence is green and every one has been drilled red. Green fences prove the parts, against a
+## definition this repository wrote over a hand-built IR chosen to make the assertion clean. That is the
+## right shape for a fence and it is not evidence about a customer.
+##
+## This proves the WALK. It discovers `nousresearch/hermes-agent`'s actual call sites and runs a
+## THREE-NODE agent over them — a triage, an analyst, and a critic behind a conditional edge — so every
+## node id in the per-node attribution is a symbol somebody else wrote. Fourteen steps: the single-node
+## hash held byte-identical, the fan-in refusal proved to be the CUSTOMER's own sentence from the
+## customer's own function, a predicate out of scope refused by the expression path, a loop refused at
+## publish, activation refused before rehearsal, the walk itself, per-node attribution on the
+## repository's ids, the conditional edge taken BOTH ways, twenty byte-identical repeats, rollback as
+## one act, the pin surviving two activations, and the per-node health document.
+##
+## 🚫 It calls NO provider and costs nothing. The models are a deterministic local stub: every claim is
+## about the SHAPE of the run — which node was entered, which was routed around, what each contributed —
+## and a version that called a real model would be measuring the model instead.
+##
+## It needs a checkout; clone it first (a public repository needs no token):
+##
+##	git clone --depth 1 https://github.com/nousresearch/hermes-agent /tmp/hermes-agent
+##	make agentgraph-hermes
+agentgraph-hermes:
+	@test -d "$(HERMES)" || { echo "agentgraph-hermes: no checkout at $(HERMES)"; \
+		echo "  git clone --depth 1 https://github.com/nousresearch/hermes-agent $(HERMES)"; exit 2; }
+	GOWORK=off $(GO) run ./cmd/proof/agentgraph -local $(HERMES)
+
 HERMES ?= /tmp/hermes-agent
 axissplit-hermes:
 	@test -d "$(HERMES)" || { echo "axissplit-hermes: no checkout at $(HERMES)"; \
@@ -435,8 +463,41 @@ db-proof:
 ##           Boots an ephemeral Postgres in Docker, so it needs only Docker (no local PG install).
 ##           These tests are behind the `pgproof` build tag, so `make go` does not compile them; with
 ##           no database they FAIL rather than skip.
+##
+## 🔴 THE PACKAGE LIST IS `PGPROOF_PKGS`, AND IT IS THE ONLY COPY. It used to be written twice — here
+##    and in .github/workflows/ci.yml — and both had drifted: `internal/reportstore` and
+##    `internal/deliveryrecord` were in NEITHER, so their proofs had never run anywhere. CI now reads
+##    this same variable through `pgproof-packages`, and `internal/deploy/pgproof_gate_test.go` asserts
+##    every package carrying a `pgproof` build tag appears in it or is excepted WITH A REASON.
 pg-proof:
-	bash db/migrations/postgres/run_pg_docker.sh $(GO) test -tags pgproof -count=1 ./internal/pgtest/ ./internal/pgmigrate/ ./internal/launch/ ./internal/billing/ ./internal/proposalstore/ ./internal/registry/ ./internal/variantspec/ ./internal/worktree/ ./internal/executor/ ./internal/runqueue/ ./internal/submit/ ./internal/e2e/ ./internal/telemetry/ ./internal/evalrun/ ./internal/metering/ ./internal/legal/ ./internal/api/ ./internal/tenancy/ ./internal/signup/ ./internal/herosagent/ ./internal/sourceingest/ ./internal/assessment/
+	bash db/migrations/postgres/run_pg_docker.sh $(GO) test -tags pgproof -count=1 $(PGPROOF_PKGS)
+
+## pgproof-packages: print PGPROOF_PKGS, one per line — what CI runs.
+##
+## 🔴 CI reads THIS rather than keeping its own list. The comment that used to stand in ci.yml said the
+## quiet part out loud — "This list is maintained BY HAND and does not read the pg-proof make target,
+## so a new pgproof package must be added here as well or its migration ships untested in CI" — and
+## that is exactly what went wrong. Two hand-maintained copies of one fact drift; the only question is
+## when.
+pgproof-packages:
+	@printf '%s\n' $(PGPROOF_PKGS)
+
+## PGPROOF_PKGS: every package with live-Postgres proofs. `internal/pgmigrate` FIRST, because it is the
+## one that applies the whole EMBEDDED set in order, exactly as a booting deployment does, while every
+## other proof hand-lists the few migrations its own tables need.
+##
+## 🔴 Written out rather than discovered by grep, deliberately. Auto-discovery would silently pull a
+## NEW and RED proof into the gate, and "adding a red package to the gate would break the gate for
+## everybody, which is how a gate gets bypassed" — the reasoning `pgproof_gate_test.go` already
+## records. Adding a package here stays a decision somebody makes; the fence is what makes forgetting
+## impossible.
+PGPROOF_PKGS = ./internal/pgmigrate/ ./internal/adminops/ ./internal/api/ \
+	./internal/assessment/ ./internal/billing/ ./internal/deliveryrecord/ \
+	./internal/deliveryroute/ ./internal/e2e/ ./internal/evalrun/ ./internal/executor/ \
+	./internal/herosagent/ ./internal/launch/ ./internal/legal/ ./internal/metering/ \
+	./internal/pgtest/ ./internal/proposalstore/ ./internal/registry/ ./internal/reportstore/ \
+	./internal/runqueue/ ./internal/signup/ ./internal/sourceingest/ ./internal/submit/ \
+	./internal/telemetry/ ./internal/tenancy/ ./internal/variantspec/ ./internal/worktree/
 
 ## demo-evalboard: stand up the P4 eval board against a live fan-out with a stubbed provider.
 ##                Everything between the queue and the pixel is the shipped path: the eval set comes

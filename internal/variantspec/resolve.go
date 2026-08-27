@@ -339,7 +339,12 @@ func Resolve(ctx context.Context, spec *VariantSpec, ir *discovery.IR, regs Regi
 	//
 	// 🔴 It is also before any codemod exists, which is FR15: every new topology form is gated by
 	// `internal/typedcontract`, unchanged, rather than discovered at apply time.
-	graphGroups, graphAdapters, err := resolveGraph(ctx, spec, ir, nil)
+	//
+	// 🔴 Through `ValidateTopology`, the same EXPORTED entry point the platform's own agent uses
+	// (P36 design D1). It re-runs `validateGraph`, which `spec.Validate()` above already ran — the
+	// check is pure, so the cost is nothing and the gain is that there is one function to point at
+	// when somebody asks whether the agent and a customer are held to the same rule.
+	graphGroups, graphAdapters, err := ValidateTopology(ctx, spec, ir, nil)
 	if err != nil {
 		return nil, err
 	}

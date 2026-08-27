@@ -86,11 +86,11 @@ func TestBothPlacementsProduceTheSameEdgeSet(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	fromPlatform, err := platform.Infer(context.Background(), in, configHash, PlacementPlatform)
+	fromPlatform, err := platform.Infer(context.Background(), in, BindHash(configHash), PlacementPlatform)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fromCustomer, err := customer.Infer(context.Background(), in, configHash, PlacementCustomer)
+	fromCustomer, err := customer.Infer(context.Background(), in, BindHash(configHash), PlacementCustomer)
 	if err != nil {
 		t.Fatal(err)
 	}

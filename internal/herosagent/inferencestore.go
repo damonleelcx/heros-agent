@@ -35,14 +35,19 @@ func (s *PGInferenceStore) Get(parent context.Context, workflowID, sourceRevisio
 	var st Stored
 	var edges, labels string
 	var narrative sql.NullString
+	// 🔴 NULL-able, and read into a NullString rather than a string. A row written before per-node
+	// attribution existed has no record, and NULL means NOT RECORDED — see the migration's header for
+	// why it is not backfilled. `sql.NullString` is what keeps that distinguishable from `[]`.
+	var nodes sql.NullString
 	err := s.db.QueryRowContext(ctx,
 		`SELECT inference_id, tenant_id, workflow_id, source_revision, agent_config_hash, placement,
-		        edges_json, labels_json, narrative, tokens_in, tokens_out, created_at_ms
+		        edges_json, labels_json, narrative, tokens_in, tokens_out, created_at_ms, nodes_json
 		   FROM heros_inference
 		  WHERE workflow_id = $1 AND source_revision = $2 AND agent_config_hash = $3`,
 		workflowID, sourceRevision, hash).
 		Scan(&st.InferenceID, &st.TenantID, &st.WorkflowID, &st.SourceRevision, &st.AgentConfigHash,
-			&st.Placement, &edges, &labels, &narrative, &st.TokensIn, &st.TokensOut, &st.CreatedAtMS)
+			&st.Placement, &edges, &labels, &narrative, &st.TokensIn, &st.TokensOut, &st.CreatedAtMS,
+			&nodes)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return Stored{}, false, nil
@@ -57,6 +62,15 @@ func (s *PGInferenceStore) Get(parent context.Context, workflowID, sourceRevisio
 		return Stored{}, false, fmt.Errorf("herosagent: decoding labels for %s: %w", st.InferenceID, err)
 	}
 	st.Narrative = narrative.String
+	if nodes.Valid && nodes.String != "" {
+		if err := json.Unmarshal([]byte(nodes.String), &st.Nodes); err != nil {
+			// 🔴 LOUD. A per-node record that will not decode is a provenance answer this deployment
+			// cannot give, and returning the inference without it would render "which node produced
+			// this" as "one node, unattributed" — a claim rather than an absence.
+			return Stored{}, false, fmt.Errorf("herosagent: decoding the per-node record for %s: %w",
+				st.InferenceID, err)
+		}
+	}
 
 	abst, err := s.abstentions(ctx, st.InferenceID)
 	if err != nil {
@@ -108,6 +122,10 @@ func (s *PGInferenceStore) Put(parent context.Context, st Stored) error {
 	if err != nil {
 		return err
 	}
+	nodesJSON, err := encodeNodeRuns(st)
+	if err != nil {
+		return err
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("herosagent: begin: %w", err)
@@ -117,12 +135,12 @@ func (s *PGInferenceStore) Put(parent context.Context, st Stored) error {
 	res, err := tx.ExecContext(ctx,
 		`INSERT INTO heros_inference
 		   (inference_id, workflow_id, source_revision, agent_config_hash, tenant_id, placement,
-		    edges_json, labels_json, narrative, tokens_in, tokens_out, created_at_ms)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+		    edges_json, labels_json, narrative, tokens_in, tokens_out, created_at_ms, nodes_json)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
 		 ON CONFLICT ON CONSTRAINT uq_heros_inference_key DO NOTHING`,
 		st.InferenceID, st.WorkflowID, st.SourceRevision, st.AgentConfigHash, st.TenantID,
 		st.Placement, edges, labels, nullString(st.Narrative),
-		st.TokensIn, st.TokensOut, st.CreatedAtMS)
+		st.TokensIn, st.TokensOut, st.CreatedAtMS, nodesJSON)
 	if err != nil {
 		return fmt.Errorf("herosagent: recording inference %s: %w", st.InferenceID, err)
 	}
@@ -147,6 +165,10 @@ func (s *PGInferenceStore) Replace(parent context.Context, st Stored) error {
 	if err != nil {
 		return err
 	}
+	nodesJSON, err := encodeNodeRuns(st)
+	if err != nil {
+		return err
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("herosagent: begin: %w", err)
@@ -156,10 +178,10 @@ func (s *PGInferenceStore) Replace(parent context.Context, st Stored) error {
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE heros_inference
 		    SET edges_json = $1, labels_json = $2, narrative = $3,
-		        tokens_in = $4, tokens_out = $5, created_at_ms = $6
+		        tokens_in = $4, tokens_out = $5, created_at_ms = $6, nodes_json = $8
 		  WHERE inference_id = $7`,
 		edges, labels, nullString(st.Narrative), st.TokensIn, st.TokensOut,
-		st.CreatedAtMS, st.InferenceID); err != nil {
+		st.CreatedAtMS, st.InferenceID, nodesJSON); err != nil {
 		return fmt.Errorf("herosagent: replacing inference %s: %w", st.InferenceID, err)
 	}
 	// Abstentions are REPLACED, not merged: a re-inference that declined different things must not
@@ -184,6 +206,23 @@ func encodeFacts(st Stored) (string, string, error) {
 		return "", "", fmt.Errorf("herosagent: encoding labels: %w", err)
 	}
 	return string(edges), string(labels), nil
+}
+
+// encodeNodeRuns renders the per-node record, or SQL NULL when there is none.
+//
+// 🔴 `nil` rather than `"[]"` for an inference with no per-node record. NULL means NOT RECORDED; `[]`
+// would mean "recorded, and no node ran", which is a different and false claim. The distinction is what
+// keeps a row written before this column existed distinguishable from a definition that produced
+// nothing — see the migration's header.
+func encodeNodeRuns(st Stored) (any, error) {
+	if len(st.Nodes) == 0 {
+		return nil, nil
+	}
+	b, err := json.Marshal(st.Nodes)
+	if err != nil {
+		return nil, fmt.Errorf("herosagent: encoding the per-node record: %w", err)
+	}
+	return string(b), nil
 }
 
 func nonNilEdges(e []ProvenancedEdge) []ProvenancedEdge {

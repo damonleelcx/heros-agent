@@ -548,25 +548,112 @@ export async function publishPlatformPrompt(_p: ActionResult | null, fd: FormDat
  * that resolves to something already published creates nothing. Calling that "published" would leave an
  * operator waiting for a version that was never made — the same failure the instruction control avoids.
  */
-export async function publishAgentDefinition(_p: ActionResult | null, fd: FormData): Promise<ActionResult> {
-  const axes: Record<string, string> = {};
-  // Only NON-EMPTY axes are sent. An empty string is a real edit meaning "unset this axis", and
-  // submitting one for every field an operator left blank would silently clear axes they never touched.
-  for (const axis of ["prompt", "model", "context", "memory", "harness"]) {
-    const v = String(fd.get(axis) ?? "").trim();
-    if (v !== "") axes[axis] = v;
-  }
-  const list = (name: string) =>
-    String(fd.get(name) ?? "")
-      .split(",")
-      .map((s) => s.trim())
-      .filter((s) => s !== "");
+/**
+ * PER_NODE_AXES are the eight axes an operator sets ON A NODE.
+ *
+ * 🔴 `graph` is NOT here. Topology is a property BETWEEN nodes, so it is declared once for the
+ * definition — and the platform REFUSES it inside a node's axis map by name rather than hoisting it,
+ * because silently moving it would let an operator believe one node owns the graph.
+ *
+ * 🔴 The list is asserted against the platform's own `AuthorableAxes()` by `agent-publish.test.mjs`.
+ * If the form sends an axis the platform does not author, every publish fails; if it sends a
+ * valid-but-wrong one, the operator publishes something they did not compose. Neither is visible from
+ * either side alone.
+ */
+const PER_NODE_AXES = ["prompt", "model", "context", "memory", "harness", "loop"] as const;
 
-  const credentialRef = String(fd.get("credential_ref") ?? "").trim();
+/** listOf splits a comma-separated field, dropping empties. */
+function listOf(fd: FormData, name: string): string[] {
+  return String(fd.get(name) ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s !== "");
+}
+
+/**
+ * nodeEditsFrom reads the repeated per-node fields the publish form submits.
+ *
+ * The form names them `node.<i>.<field>`, so a definition of any size arrives as one flat FormData —
+ * which is what lets the control be a progressively-added fieldset rather than a JSON textarea.
+ *
+ * 🔴 A node whose every field is blank is DROPPED rather than submitted. An operator who pressed
+ * "add a node" and changed their mind would otherwise publish a node with no bindings, which the
+ * platform refuses with a message about the prompt axis rather than about the empty node.
+ */
+function nodeEditsFrom(fd: FormData): Array<Record<string, unknown>> {
+  const out: Array<Record<string, unknown>> = [];
+  for (let i = 0; ; i++) {
+    const prefix = `node.${i}.`;
+    if (!Array.from(fd.keys()).some((k) => k.startsWith(prefix))) break;
+    const axes: Record<string, string> = {};
+    for (const axis of PER_NODE_AXES) {
+      const v = String(fd.get(prefix + axis) ?? "").trim();
+      if (v !== "") axes[axis] = v;
+    }
+    const skills = listOf(fd, prefix + "skill_refs");
+    const tools = listOf(fd, prefix + "tool_names");
+    const credential = String(fd.get(prefix + "credential_ref") ?? "").trim();
+    const nodeId = String(fd.get(prefix + "node_id") ?? "").trim();
+    if (Object.keys(axes).length === 0 && skills.length === 0 && tools.length === 0 && credential === "") {
+      continue;
+    }
+    out.push({
+      node_id: nodeId,
+      axes,
+      skill_refs: skills,
+      tool_names: tools,
+      credential_ref: credential,
+    });
+  }
+  return out;
+}
+
+/** parseTopology reads the definition-level `graph` axis. Empty fields mean "no topology declared". */
+function parseTopology(fd: FormData): Record<string, unknown> | undefined {
+  const order = listOf(fd, "topology.order");
+  const edgesRaw = String(fd.get("topology.edges") ?? "").trim();
+  const groupsRaw = String(fd.get("topology.graph_groups") ?? "").trim();
+  if (order.length === 0 && edgesRaw === "" && groupsRaw === "") return undefined;
+  // 🔴 Parsed here so a malformed declaration is refused with the operator still looking at the form.
+  // Sending it through would produce a 400 whose message is about JSON rather than about the graph.
+  const parse = (raw: string, field: string): unknown[] => {
+    if (raw === "") return [];
+    const v = JSON.parse(raw);
+    if (!Array.isArray(v)) throw new SyntaxError(`${field} must be a JSON array`);
+    return v;
+  };
+  return {
+    order,
+    edges: parse(edgesRaw, "edges"),
+    graph_groups: parse(groupsRaw, "graph_groups"),
+  };
+}
+
+export async function publishAgentDefinition(_p: ActionResult | null, fd: FormData): Promise<ActionResult> {
+  const nodes = nodeEditsFrom(fd);
+  let topology: Record<string, unknown> | undefined;
+  try {
+    topology = parseTopology(fd);
+  } catch (error) {
+    return {
+      ok: false,
+      kind: "request",
+      message:
+        `The topology could not be read: ${error instanceof Error ? error.message : String(error)}. ` +
+        `Edges and graph groups are JSON arrays — nothing was published.`,
+    };
+  }
+
   const reason = String(fd.get("reason") ?? "");
+  const firstModel = nodes.length > 0 ? String((nodes[0].axes as Record<string, string>).model ?? "") : "";
   const command: Command = {
     action: "agent.publish",
-    target: axes.model ? `model ${axes.model}` : "definition",
+    target:
+      nodes.length > 1
+        ? `${nodes.length}-node definition`
+        : firstModel !== ""
+          ? `model ${firstModel}`
+          : "definition",
     reason,
     undo: "Publish the previous definition again — versions are immutable and content-addressed, so " +
       "the earlier one is still there and republishing it creates nothing",
@@ -579,10 +666,11 @@ export async function publishAgentDefinition(_p: ActionResult | null, fd: FormDa
       const view = await adminFetch<PublishPreview>("/admin/api/agent/publish", {
         method: "POST",
         body: {
-          axes,
-          skill_refs: list("skill_refs"),
-          tool_names: list("tool_names"),
-          credential_ref: credentialRef,
+          // 🔴 `nodes` alone. The platform REFUSES a request carrying both the single-node axis fields
+          // and a node list rather than merging them, because whether the top-level axes describe the
+          // first node or override every node is a question with two answers.
+          nodes,
+          topology,
           reason,
         },
         sessionToken: token,
@@ -849,6 +937,79 @@ export async function setAgentCap(_p: ActionResult | null, fd: FormData): Promis
           : `${what} stops before the provider call once ${count(tokens)} tokens are spent, and emits ` +
             `an event.`;
       return { ok: true, command, message };
+    } catch (error) {
+      return toResult(error, command);
+    }
+  });
+}
+
+/**
+ * rollbackAgentDefinition returns a PREVIOUSLY SERVING definition to service.
+ *
+ * # 🔴 Why this control exists at all
+ *
+ * Rollback is one act: activating a version that already exists. Without a control it is a capability
+ * with no way to press it — and this console has shipped three of those (`agent/prompt`,
+ * `agent/publish`, `agent/activate`), each found by a person going to do the thing and discovering
+ * there was no thing to press. During an incident is the worst possible time to discover the fourth.
+ *
+ * # 🔴 Why it is not "activate, again"
+ *
+ * The same database write and two different events. An operator reconstructing an incident reads the
+ * audit log, and "rolled back to X" and "activated X" answer different questions — the first says
+ * something went wrong, the second says somebody shipped. A shared action would erase that distinction
+ * at exactly the moment it matters most.
+ *
+ * 🚫 It sends NO definition. Re-authoring the older shape means retyping a configuration under
+ * pressure; any transcription error produces a different `config_hash`, which is a THIRD configuration
+ * nobody has measured, activated in place of the one known to work. A shape that can no longer be
+ * authored cannot be retyped at all — and that is precisely the version somebody most wants back.
+ *
+ * 🚫 It does not re-run the rehearsal. The version already passed; that verdict is on its immutable
+ * row. Re-measuring during an incident spends provider tokens to reproduce a recorded number and makes
+ * rollback slow at the moment speed is the point.
+ */
+export async function rollbackAgentDefinition(_p: ActionResult | null, fd: FormData): Promise<ActionResult> {
+  const configHash = String(fd.get("config_hash") ?? "").trim();
+  const reason = String(fd.get("reason") ?? "");
+  const command: Command = {
+    action: "agent.rollback",
+    target: configHash === "" ? "definition" : configHash.slice(0, 12),
+    reason,
+    undo: "Roll back again to whichever definition was serving before this one — every published " +
+      "version stays addressable by its hash, so there is always something to return to",
+  };
+  if (configHash === "") {
+    return {
+      ok: false,
+      kind: "request",
+      message:
+        "A rollback names the version to return to, and nothing was sent. It is a config_hash from " +
+        "the Versions tab — a rollback never re-authors a definition, so there is no other way to " +
+        "say which one.",
+      command,
+    };
+  }
+  return withSession(async (token) => {
+    const jar = await cookies();
+    const impersonationId = jar.get("heros_admin_impersonation")?.value;
+    try {
+      await adminFetch<unknown>("/admin/api/agent/rollback", {
+        method: "POST",
+        body: { config_hash: configHash, reason },
+        sessionToken: token,
+        impersonationId,
+      });
+      revalidatePath("/agent");
+      return {
+        ok: true,
+        command,
+        message:
+          `${configHash.slice(0, 12)} is serving inference again. Nothing was re-authored and no ` +
+          `version was created — this is the definition that was already published, returned to ` +
+          `service. Pinned inferences are untouched: a configuration change is a pinning event, not a ` +
+          `re-inference.`,
+      };
     } catch (error) {
       return toResult(error, command);
     }

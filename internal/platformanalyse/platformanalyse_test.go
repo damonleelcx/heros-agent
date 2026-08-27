@@ -25,11 +25,43 @@ type fakeDefs struct {
 	err error
 	// calls counts resolutions, so a test can prove one did NOT happen.
 	calls int
+	// binding is the platform-side view. Defaults to a SINGLE-NODE definition mirroring `def`, so every
+	// pre-P36 test exercises the path it always did.
+	binding herosagent.AssessmentBinding
+	// nodes resolves one node's prompt and model for a graph.
+	nodes map[string]struct {
+		prompt string
+		model  herosagent.ResolvedModel
+	}
 }
 
 func (f *fakeDefs) ActiveDefinition(context.Context) (runlink.AgentDefinition, bool, error) {
 	f.calls++
 	return f.def, f.ok, f.err
+}
+
+func (f *fakeDefs) ActiveBinding(context.Context) (herosagent.AssessmentBinding, bool, error) {
+	f.calls++
+	if len(f.binding.Definition.Nodes) > 0 {
+		return f.binding, f.ok, f.err
+	}
+	// The single-node mirror of the wire projection. `Runnable()` is what the wire type calls "usable",
+	// and a definition with no nodes reads as "nothing published" — the same state the wire type reports.
+	if !f.ok {
+		return herosagent.AssessmentBinding{}, false, f.err
+	}
+	return herosagent.BindDefinition(f.def.ConfigHash, herosagent.SingleNode(herosagent.Node{
+		PromptRef: f.def.Prompt, ModelRef: f.def.ModelID, CredentialRef: f.def.Provider,
+		ContextRef: "ctx", HarnessRef: "harness",
+	})), true, f.err
+}
+
+func (f *fakeDefs) RenderNode(_ context.Context, n herosagent.Node) (string, herosagent.ResolvedModel, bool, error) {
+	e, ok := f.nodes[n.NodeID]
+	if !ok {
+		return "", herosagent.ResolvedModel{}, false, nil
+	}
+	return e.prompt, e.model, true, nil
 }
 
 type fakePlaces struct {

@@ -40,10 +40,10 @@ func agentSeamWithModel(t *testing.T, models fixedModel) (*Server, *herosagent.M
 	const hash = "cfg-seam"
 	if err := versions.Put(ctx, herosagent.Version{
 		ConfigHash: hash, RehearsalState: herosagent.RehearsalPassed, CreatedAtMS: 1,
-		Definition: herosagent.Definition{
+		Definition: herosagent.SingleNode(herosagent.Node{
 			PromptRef: "prm-1", ModelRef: "mdl-1", CredentialRef: models.provider,
 			ContextRef: "ctx-1", HarnessRef: "hrn-1",
-		},
+		}),
 	}); err != nil {
 		t.Fatal(err)
 	}

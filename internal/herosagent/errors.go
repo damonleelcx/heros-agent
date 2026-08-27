@@ -150,6 +150,18 @@ const (
 	// ReadyNoDefinition: nothing is published and activated. Distinct from `disabled` — somebody has
 	// enabled a tenant and there is no agent to run for it, which is a configuration half-done.
 	ReadyNoDefinition ReadyState = "no_active_definition"
+	// ReadyUnexecutable: a definition IS active and THIS BUILD CANNOT RUN IT (P36 task 8.3).
+	//
+	// 🔴 Its own state, and not `credential_unresolved` or `no_active_definition`. The three send an
+	// operator to three different places: a credential that does not resolve is a secrets problem, no
+	// active definition is a configuration half-done, and this one is a DEPLOYMENT MISMATCH — the
+	// definition is fine and the binary is older than it.
+	//
+	// It is the state P36 makes reachable. A definition binding a node kind, a loop strategy or a
+	// topology this build does not implement is publishable on one deployment and unrunnable on
+	// another; without this, that deployment reports `ready` and fails at the first analysis, and the
+	// failure names a strategy rather than the build.
+	ReadyUnexecutable ReadyState = "definition_unexecutable"
 )
 
 // Event is the closed set of things worth emitting to telemetry.
@@ -171,8 +183,21 @@ const (
 // Sentinel errors. Every one is matchable with errors.Is, because a caller deciding between "fall back
 // to rule-derived facts" and "tell the operator to fix their configuration" cannot do it on a string.
 var (
-	// ErrWiringOverride refuses a wiring (P15) override at publish (task 3.2).
-	ErrWiringOverride = errors.New("herosagent: the wiring axis is fixed and cannot be overridden")
+	// ErrWiringOverride refuses a TOPOLOGY on a definition that has nothing to order (P30 task 3.2,
+	// NARROWED by P36 task 3.4 / design D3).
+	//
+	// 🔴 It NARROWED; it was not deleted. Before P36 it refused unconditionally, because HEROS was one
+	// node and there was no second node to order it against. That reason is STILL TRUE for a
+	// single-node definition — which is still the default (D2) — so the rule now applies to the cases
+	// where its premise holds instead of being dropped because a new case appeared.
+	//
+	// This is the small version of the discipline ADR-014 applies at scale. Deleting a rule whose
+	// premise stopped holding in SOME cases discards a correct check for the majority of definitions.
+	//
+	// It also carries the refusal of the legacy `wiring` SPELLING: the axis is called `graph` now, and
+	// an edit naming `wiring` is refused BY NAME with the rename stated rather than silently
+	// translated — a rename that quietly accepts the old spelling never finishes.
+	ErrWiringOverride = errors.New("herosagent: a topology needs a second node to order against")
 	// ErrModelUnregistered refuses a model the operator registry does not carry (task 3.4).
 	ErrModelUnregistered = errors.New("herosagent: that model is not in the operator model registry")
 	// ErrCredentialUnresolved is the fail-closed path (task 3.6).
@@ -180,6 +205,14 @@ var (
 	// ErrKeyValueOffered refuses anything that looks like a key where a REFERENCE belongs (D5).
 	ErrKeyValueOffered = errors.New("herosagent: a credential is bound by provider NAME, never entered as a value")
 	// ErrHostServiceMissing refuses a strategy whose host service the runner does not supply.
+	//
+	// 🔴 Extended by P36 task 3.5 to the LOOP axis, and refused at PUBLISH rather than at run. D11's
+	// argument, one axis later: a loop whose host service nothing supplies, discovered when an analysis
+	// reaches the node, is discovered by somebody who did not choose it and cannot tell whether it is a
+	// bug or a configuration — while the operator who bound it has moved on.
+	//
+	// 🚫 It never degrades to a strategy that needs no second actor. `critic-loop` without a critic IS
+	// `reflexion`, and running it under critic-loop's config_hash would report one strategy as another.
 	ErrHostServiceMissing = errors.New("herosagent: that strategy needs a host service this runner does not supply")
 	// ErrAlreadyActive is returned when a second definition would be activated.
 	ErrAlreadyActive = errors.New("herosagent: another definition is already active")

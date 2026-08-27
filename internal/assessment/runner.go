@@ -8,6 +8,7 @@ import (
 
 	"github.com/heros-foreal/agentd/internal/errorcode"
 	"github.com/heros-foreal/agentd/internal/eventname"
+	"github.com/heros-foreal/agentd/internal/herosagent"
 	"github.com/heros-foreal/agentd/internal/telemetry"
 )
 
@@ -239,6 +240,38 @@ func (r *Runner) Run(ctx context.Context, cfg Config, s Subject) (Assessment, er
 		}
 
 		inferred, spent, err := r.inference.Infer(ctx, f.Axis(), s)
+		if errors.Is(err, herosagent.ErrCapReached) || errors.Is(err, ErrInferenceBudgetExhausted) {
+			// 🔴 P36 task 5.3 — A CEILING REACHED INSIDE THE AGENT DEGRADES TO THE SAME STATE AS THIS
+			// ASSESSMENT'S OWN CAP, rather than to a generic inference failure.
+			//
+			// The two are the same fact reached from two directions: this loop's `SpendCapUSD` bounds
+			// what ONE assessment may spend, and `herosagent.CapChecker` bounds what a TENANT or the
+			// FLEET may spend across assessments. Either one stopping the call means the axis was not
+			// measured because we stopped paying — which is what `MissingBudgetExhausted` says, and what
+			// `Assessment.Partial()` reads to tell a reader the report is incomplete rather than clean.
+			//
+			// 🚫 Falling through to the branch below would leave the STRUCTURAL finding in place with a
+			// WARN, and the report would render as a complete assessment that simply found nothing on
+			// that axis — an absence rendered as a measurement, which is the substitution this file
+			// spends most of its comments refusing.
+			//
+			// 🔴 P36 makes this reachable in a new way: a multi-node definition may exhaust the tenant
+			// ceiling MID-ASSESSMENT (decisions.md D-36.6), because the ceiling is per assessment and
+			// adding a node does not raise it. The runner's refusal names the node it stopped at, and
+			// that sentence travels into the claim below.
+			budgetExhausted = true
+			degraded, derr := NotMeasured(f.Axis(), MissingBudgetExhausted, fmt.Sprintf(
+				"the analysis of %s stopped at a spend ceiling before it could be answered: %s",
+				f.Axis(), err.Error()), s.Evidence())
+			if derr != nil {
+				return Assessment{}, derr
+			}
+			findings[i] = degraded
+			r.warn(ctx, eventname.AssessmentAxisNotMeasured, errorcode.ProviderError,
+				"an axis was not measured because a spend ceiling was reached",
+				"axis", string(f.Axis()), "workflow_id", s.WorkflowID, "error", err.Error())
+			continue
+		}
 		if err != nil {
 			// 🔴 An inference failure leaves the STRUCTURAL finding in place. It does not fail the
 			// assessment and it does not blank the axis: stage 1's answer is still true, and losing

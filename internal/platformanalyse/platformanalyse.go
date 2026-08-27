@@ -44,8 +44,19 @@ import (
 )
 
 // Definitions resolves the active agent definition. *herosagent.PlatformSource satisfies it.
+//
+// 🔴 TWO methods, two audiences (P36 §4). `ActiveDefinition` is the single-node WIRE projection a
+// customer's machine receives; `ActiveBinding` is the whole definition, read in process, which is what
+// the platform-side runner needs to walk a graph. The difference between them is exactly the difference
+// decisions.md D-36.2 (the producing node is operator-side only) and D-36.3 (the customer link stays
+// single-node) draw.
 type Definitions interface {
 	ActiveDefinition(ctx context.Context) (runlink.AgentDefinition, bool, error)
+	// ActiveBinding returns the whole active definition. ok=false is NOTHING ACTIVE, a state.
+	ActiveBinding(ctx context.Context) (herosagent.AssessmentBinding, bool, error)
+	// RenderNode resolves ONE node's instruction and model. Rendering stays platform-side for the
+	// reason it always has: two renderers is two prompts.
+	RenderNode(ctx context.Context, n herosagent.Node) (string, herosagent.ResolvedModel, bool, error)
 }
 
 // Placements answers what a tenant is allowed to have done. *herosagent.PlatformSource satisfies it.
@@ -183,6 +194,25 @@ func (s *Service) Analyse(ctx context.Context, ref sourceingest.Ref) (Outcome, e
 		}, nil
 	}
 
+	// 🔴 THE BINDING IS READ ONCE, HERE, and carried through the whole assessment (decisions.md
+	// D-36.4). Nothing below this line asks for "the active definition" again, which is what makes
+	// "an in-flight assessment finishes under the definition it started with" structural rather than a
+	// rule somebody has to remember.
+	binding, ok, err := s.defs.ActiveBinding(ctx)
+	if err != nil {
+		return Outcome{}, fmt.Errorf("platformanalyse: reading the active definition: %w", err)
+	}
+	if !ok || len(binding.Definition.Nodes) == 0 {
+		return Outcome{
+			Reason: ReasonNoDefinition,
+			Detail: "this deployment has published no active agent definition, so there is nothing to run",
+		}, nil
+	}
+
+	if binding.Graph() {
+		return s.analyseGraph(ctx, ref, binding)
+	}
+
 	def, ok, err := s.defs.ActiveDefinition(ctx)
 	if err != nil {
 		return Outcome{}, fmt.Errorf("platformanalyse: reading the active definition: %w", err)
@@ -217,6 +247,7 @@ func (s *Service) Analyse(ctx context.Context, ref sourceingest.Ref) (Outcome, e
 		return Outcome{}, fmt.Errorf("platformanalyse: wiring the runner: %w", err)
 	}
 
+	binding = herosagent.BindDefinition(def.ConfigHash, binding.Definition)
 	out := Outcome{ConfigHash: def.ConfigHash}
 	serr := s.source.WithSource(ctx, ref, func(_ string, ir *discovery.IR) error {
 		// An empty DiscoveryReport, exactly as the customer path passes: its only contribution to a
@@ -230,7 +261,10 @@ func (s *Service) Analyse(ctx context.Context, ref sourceingest.Ref) (Outcome, e
 			RuleIR:         ir,
 			Residue:        residue,
 			Budget:         s.budget,
-		}, def.ConfigHash, herosagent.PlacementPlatform)
+			// 🔴 THE DEFINITION TRAVELS WITH THE RUN (decisions.md D-36.4). Resolved once, above, and
+			// carried as a value — so a definition activated while this assessment is in flight cannot
+			// change what it is executing. There is no read of "the active definition" below this line.
+		}, binding, herosagent.PlacementPlatform)
 		if rerr != nil {
 			return rerr
 		}
@@ -282,6 +316,33 @@ func modelParams(def runlink.AgentDefinition) (registry.ModelParams, error) {
 	return out, nil
 }
 
+// modelParamsOf is `modelParams` for a node's RESOLVED model rather than for the wire projection.
+//
+// 🔴 The two share the `max_tokens` refusal deliberately: an Anthropic model with no pinned max_tokens
+// is refused by the gateway, so the check has to exist wherever a model is assembled — and there are
+// two such places now, one per audience. The SENTENCE differs only in naming the node, because a graph
+// with five nodes needs to say which one.
+func modelParamsOf(m herosagent.ResolvedModel) (registry.ModelParams, error) {
+	var out registry.ModelParams
+	if p := m.Params; p != nil {
+		out = registry.ModelParams{
+			MaxTokens:      p.MaxTokens,
+			Temperature:    p.Temperature,
+			ThinkingBudget: p.ThinkingBudget,
+			Seed:           p.Seed,
+			TimeoutSeconds: p.TimeoutSeconds,
+		}
+	}
+	if equalFoldASCII(m.Provider, providergateway.ProviderAnthropic) && out.MaxTokens == nil {
+		return registry.ModelParams{}, fmt.Errorf("this node binds %q, served by %s, and the model "+
+			"version pins no max_tokens. The gateway refuses that call rather than choosing a ceiling on "+
+			"this deployment's bill — publish a model catalog entry carrying "+
+			`"params": {"max_tokens": <n>} and re-seed, or bind a model that needs none`,
+			m.ModelID, m.Provider)
+	}
+	return out, nil
+}
+
 // equalFoldASCII avoids pulling strings in for one comparison whose inputs are both ASCII identifiers.
 func equalFoldASCII(a, b string) bool {
 	if len(a) != len(b) {
@@ -300,4 +361,97 @@ func equalFoldASCII(a, b string) bool {
 		}
 	}
 	return true
+}
+
+// analyseGraph runs a MULTI-NODE definition platform-side (P36 §4).
+//
+// # 🔴 Why this is a separate function and not a branch inside Analyse
+//
+// The single-node path assembles ONE model from the wire projection. A graph assembles one per node,
+// each from that node's own prompt ref, model ref and credential ref — and the resolution can fail per
+// node, with a reason that names the node. Threading that through the single-node path as conditionals
+// would produce a function whose failure messages have to say "or, if this is a graph, …".
+//
+// Everything the two paths SHARE stays shared: the same `herosagent.NewRunner`, the same durable store,
+// the same floor, the same budget, the same runner options. A second runner is what design D6 says
+// produces two agents that diverge in the first month.
+func (s *Service) analyseGraph(ctx context.Context, ref sourceingest.Ref,
+	binding herosagent.AssessmentBinding) (Outcome, error) {
+
+	d := binding.Definition
+	out := Outcome{ConfigHash: binding.ConfigHash}
+
+	// 🔴 EVERY node is resolved BEFORE the first provider call, and a failure to resolve any one of them
+	// aborts. Resolving lazily per node would spend real money on the nodes before the broken one and
+	// then stop — a partial assessment that is charged for and stored as nothing.
+	models := make(map[string]herosagent.Model, len(d.Nodes))
+	for _, n := range d.Nodes {
+		prompt, resolved, ok, err := s.defs.RenderNode(ctx, n)
+		if err != nil {
+			return Outcome{Reason: ReasonFailed, ConfigHash: binding.ConfigHash,
+				Detail: fmt.Sprintf("node %q could not be resolved: %v", n.NodeID, err)}, nil
+		}
+		if !ok {
+			return Outcome{Reason: ReasonNoDefinition, ConfigHash: binding.ConfigHash,
+				Detail: fmt.Sprintf("node %q binds a prompt that is not published or a model that is not "+
+					"registered, so this definition cannot run. Nothing was spent.", n.NodeID)}, nil
+		}
+		params, perr := modelParamsOf(resolved)
+		if perr != nil {
+			return Outcome{Reason: ReasonFailed, ConfigHash: binding.ConfigHash,
+				Detail: fmt.Sprintf("node %q: %v", n.NodeID, perr)}, nil
+		}
+		m, merr := herosagent.NewGatewayModel(s.gateway, &registry.ModelEntry{
+			Name: resolved.ModelID,
+			Spec: registry.ModelSpec{Provider: resolved.Provider, ModelID: resolved.ModelID, Params: params},
+		}, prompt)
+		if merr != nil {
+			return Outcome{Reason: ReasonFailed, ConfigHash: binding.ConfigHash,
+				Detail: fmt.Sprintf("node %q: %v", n.NodeID, merr)}, nil
+		}
+		models[n.NodeID] = m
+	}
+
+	// The runner's own `model` is the FIRST node's, so the constructor's "a model is required" refusal
+	// stays meaningful; the graph path never reads it — `WithNodeModels` answers for every node,
+	// including the first.
+	opts := append(append([]herosagent.RunnerOption(nil), s.runnerOpt...),
+		herosagent.WithNodeModels(func(n herosagent.Node) (herosagent.Model, error) {
+			m, ok := models[n.NodeID]
+			if !ok {
+				return nil, fmt.Errorf("no model was resolved for node %q", n.NodeID)
+			}
+			return m, nil
+		}))
+	runner, err := herosagent.NewRunner(models[d.Nodes[0].NodeID], s.store, s.floor, s.nowMS, opts...)
+	if err != nil {
+		return Outcome{}, fmt.Errorf("platformanalyse: wiring the runner: %w", err)
+	}
+
+	serr := s.source.WithSource(ctx, ref, func(_ string, ir *discovery.IR) error {
+		residue := herosagent.SelectResidue(ir, discovery.DiscoveryReport{}, nil)
+		res, rerr := runner.Infer(ctx, herosagent.Input{
+			TenantID:       ref.TenantID,
+			WorkflowID:     ref.WorkflowID,
+			SourceRevision: ref.SourceRevision,
+			RuleIR:         ir,
+			Residue:        residue,
+			Budget:         s.budget,
+		}, binding, herosagent.PlacementPlatform)
+		if rerr != nil {
+			return rerr
+		}
+		out.Result = res
+		if res.Code == herosagent.CodeNothingToInfer {
+			out.Reason = ReasonNothingToInfer
+			out.Detail = "every call site this revision declares is already covered by the rule " +
+				"detectors, so the agent was asked nothing and spent nothing"
+		}
+		return nil
+	})
+	if serr != nil {
+		out.Reason, out.Detail = ReasonFailed, serr.Error()
+		return out, nil
+	}
+	return out, nil
 }

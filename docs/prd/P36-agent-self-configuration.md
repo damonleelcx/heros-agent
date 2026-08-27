@@ -446,9 +446,71 @@ require re-authoring the older shape.
 
 ---
 
-## 14. Open questions
+## 14. Open questions — ANSWERED
 
-| # | Question | Why it is open |
+**Status: all five answered and folded in (2026-08-27).** The reasoning is in
+[`decisions.md`](../../openspec/changes/p36-agent-self-configuration/decisions.md); this table records
+the answer and where it is enforced, so a reader of the PRD is not sent to a second document to learn
+what was decided.
+
+| # | Question | **Answer** | Enforced by |
+|---|---|---|---|
+| **Q1** | Per-node credentials, or one per definition? | **Per node** (D-36.1). A node binds a model and a model is served by one vendor; a definition-level credential would force every node onto one vendor, which is a routing decision made by a field that is not about routing — and it removes the main reason to want a graph. `CriticModelRef`/`CriticCredentialRef` already put a second model and a second credential on one definition, so this GENERALISES what P30 shipped rather than extending it. | `Node.CredentialRef`; `Publish` resolves every node's; `Readiness` resolves every node's; the reflective key fence walks `Node` |
+| **Q2** | Is the producing node ever shown to a customer? | **Operator-side only** (D-36.2). A node id is meaningless to a customer and *actionable-looking*: `heros_critic` beside a finding invites "your critic is wrong", which is a conversation about our implementation instead of about their code. The evidence is complete without it. | `TestTheCustomerProjectionCarriesNoNodeAttribution`, behavioural and structural |
+| **Q3** | Should `placement` be per node? | **No** (D-36.3). The function would survive and the PROPERTY would not: "may this run here" is answered once for the whole assessment today; per node it is answered N times, and a definition split across hosts mid-run is not a placement — it is a distributed execution with a security boundary inside it. 🚫 The capability (cheap extraction customer-side, analysis platform-side) is **deferred, not refused**: it needs a data-crossing story, and inventing one as a side effect of a topology change is how a boundary gets moved by accident. | `placement.go`'s header records the review; the customer link REFUSES a multi-node definition rather than flattening it |
+| **Q4** | Activation during an in-flight assessment? | **It finishes under the definition it started with, and the report records which** (D-36.4). Made structural rather than intended: the definition is resolved ONCE into an `AssessmentBinding` and carried as a value, so there is no read of "the active definition" inside a run that could return a different answer. | `TestAnInFlightAssessmentFinishesUnderTheDefinitionItStartedWith`, which stages an activation from inside the first node's provider call |
+| **Q5** | Must the calibration set grow? | **Yes — and expressed as a REFUSAL rather than a fixture count** (D-36.5). "Add two fixtures" is satisfied by two that exercise neither capability, and then rehearsal passes without testing the new one. 🔴 Not a warning either: `RehearsalPassed` arms the activation gate, so a warning beside a passing verdict is a warning that arms the gate. **Finding:** a conditional edge IS already exercised, by an accident of the existing set — the near-miss fixtures have an empty true edge set, so a `produced_edges` predicate is taken in both directions in one run. That property is now pinned. | `RehearsalCoverage` → `Failures`; `TestARehearsalThatCannotExerciseTheCapabilityIsRefused`; `TestTheCalibrationSetExercisesAConditionalEdgeAndAFanIn` |
+
+---
+
+## 15. Sign-off
+
+### 15.1 · Task 1.1's finding, which decided the size of the phase
+
+**A nested `nodes` array cannot preserve the `config_hash`. A compatibility encoding is required, and
+with it the phase is ADDITIVE.** ([D-36.0](../../openspec/changes/p36-agent-self-configuration/decisions.md))
+
+`confighash.SumBytes` canonicalises key order and number spelling, not structure — `{"nodes":[{…}]}` and
+`{…}` are different documents. No arrangement of `omitempty` reaches across that: it removes keys, it
+does not un-nest them.
+
+The consequence is the one that mattered for scheduling: **no pin is migrated and no `spec_json` row is
+rewritten.** A single-node definition with the default node id, no `loop_ref` and no topology marshals
+and hashes exactly as it did before; `UnmarshalJSON` reads both documents, discriminating on the
+presence of `nodes` rather than on a version field, because the rows that need reading were written
+before anybody could have set one.
+
+Evidence: `internal/herosagent/testdata/p36-pre-confighash.json`, recorded **by the pre-P36 tree** before
+any P36 code existed — not reconstructed afterwards, which would only have asserted that the new code is
+a function of its input.
+
+### 15.2 · D5 re-confirmed at the end of the phase
+
+🚫 **The agent does not propose changes to its own definition.** Re-confirmed on 2026-08-27, with the
+phase complete and a self-optimizing agent looking exactly as much like the obvious next step as the task
+list predicted it would.
+
+Nothing built in this phase weakens the argument. The agent is now a graph, it is rehearsed per node, its
+topology goes through the customer's validator, and every one of those makes it *more* tempting to let it
+tune itself — and none of them changes the fact that verification is performed by measurements the agent
+produces. An agent proposing a change to its own configuration is an evaluator grading its own
+configuration, and no gate fixes the circularity: whatever gates it is running on the configuration being
+judged.
+
+It is enforced rather than written down: `proposalgen` refuses a pass whose subject is the platform's own
+agent **before it reads any store**, so the path whose entire purpose is to propose changes never loads
+the platform's own graph.
+
+The thing to overturn, if anyone does, is the CIRCULARITY — not the gating. A proposal that a person
+authors and the agent measures is the shape that works, and it is the shape we already have.
+
+---
+
+## Appendix · the questions as they were originally posed
+
+> Kept for the record. The answers are in §14 above.
+
+| # | Question | Why it was open |
 |---|---|---|
 | **Q1** | Does a multi-node HEROS have **per-node credentials**, or one credential for the definition? | Per-node lets a cheap model triage and an expensive one analyse — the main reason to want a graph. It also multiplies the credential surface and complicates `CapChecker`'s per-assessment ceiling. **Recommendation: per-node, since `CriticModelRef` already established the precedent for a second model.** |
 | **Q2** | Is the customer ever shown that a finding came from a specific agent node? | FR22 keeps it operator-side. Showing it is more transparent and leaks the platform's internal topology. **Recommendation: operator-side only; the customer sees evidence, not our architecture.** |

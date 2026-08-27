@@ -161,7 +161,7 @@ func main() {
 	log.Printf("LIVE     provider=%s model=%s floors P>=%.2f R>=%.2f — one provider call per fixture",
 		*provider, *modelID, *minPrecision, *minRecall)
 	start := time.Now()
-	rep, err := reh.Run(ctx, configHash)
+	rep, err := reh.Run(ctx, herosagent.BindHash(configHash))
 	elapsed := time.Since(start)
 	if err != nil {
 		// 🚫 NOT a score of zero. Rehearsal.Run refuses to report numbers it did not measure, and a
@@ -207,7 +207,7 @@ func main() {
 // answer would turn that into a report of nines zeros rather than a loud bug.
 type unreachableAnalyser struct{}
 
-func (unreachableAnalyser) Infer(context.Context, herosagent.Input, string, herosagent.Placement) (
+func (unreachableAnalyser) Infer(context.Context, herosagent.Input, herosagent.AssessmentBinding, herosagent.Placement) (
 	herosagent.Result, error) {
 	panic("rehearsal: -dry-run reached the analyser; Preview must stop before the provider")
 }

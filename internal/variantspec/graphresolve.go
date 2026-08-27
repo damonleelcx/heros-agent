@@ -302,3 +302,47 @@ func describeMismatches(res typedcontract.SatisfyResult) string {
 	}
 	return strings.Join(out, "; ")
 }
+
+// ValidateTopology is the ONE topology validator, exported so the platform's own agent goes through it
+// (P36 design D1, task 4.1).
+//
+// # 🔴 Why this is exported rather than reimplemented for the agent
+//
+// HEROS's definition is a graph now, and the tempting shape was a small topology check inside
+// `internal/herosagent` — an operator is trusted, the surface is smaller, the deadline is closer. That
+// is exactly where a rule gets quietly weaker, and the failure mode is that a customer discovers the
+// platform does not hold itself to a rule it enforces on them.
+//
+// There is a second, more practical reason. HEROS is the only agentic workflow the platform can change
+// and measure freely, so routing it through this path means every fan-in, conditional edge and merge is
+// exercised by our own agent BEFORE a customer's repository reaches it.
+//
+// # What it checks, and what it deliberately does not
+//
+// It runs the structural half (`validateGraph` — edge kinds, predicates present, group membership,
+// fan-in without a merge, two merges into one node) and the IR half (`resolveGraph` — a predicate's
+// lexical scope, a merge against the downstream node's typed input contract via
+// `internal/typedcontract`).
+//
+// It does NOT check `source_revision`, refs resolving, or anything else `Validate`/`Resolve` own. A
+// spec has a topology whether or not it targets a commit, and requiring one here would make the agent's
+// definition — which targets no commit, because it IS the analyser — unvalidatable.
+func ValidateTopology(ctx context.Context, spec *VariantSpec, ir *discovery.IR,
+	catalog *typedcontract.Catalog) ([]ResolvedGraphGroup, []InsertedAdapter, error) {
+	if spec == nil {
+		return nil, nil, specErr("", graphDim, ErrInvalidSpec, "no spec was given")
+	}
+	inOrder := map[string]bool{}
+	for _, id := range spec.Order {
+		inOrder[id] = true
+	}
+	if err := spec.validateGraph(inOrder); err != nil {
+		return nil, nil, err
+	}
+	if ir == nil {
+		return nil, nil, specErr("", graphDim, ErrInvalidSpec,
+			"no IR was given. A predicate's scope and a merge's typed contract are both properties of the "+
+				"nodes being wired, so a topology validated without one would be validated against nothing")
+	}
+	return resolveGraph(ctx, spec, ir, catalog)
+}

@@ -59,6 +59,18 @@ func (s *Server) SetAgentReadiness(fn func(context.Context) herosagent.Readiness
 	s.agentReadiness = fn
 }
 
+// SetAgentNodeHealth wires the PER-NODE counters onto `/readyz` (P36 task 8.1).
+//
+// 🔴 Separate from SetAgentReadiness, and the separation is the same one that already exists there: a
+// deployment can know its agent's STATE without observing per-node numbers, and one that reported node
+// health from the fact that a definition is active would be asserting from configuration.
+//
+// 🚫 Nil OMITS the key. It does not report zeros: "nobody is counting" and "every node has done
+// nothing" are different facts, and the second is a claim about the agent.
+func (s *Server) SetAgentNodeHealth(fn func() herosagent.NodeHealthDocument) {
+	s.agentNodeHealth = fn
+}
+
 // MountHerosAgent registers the definition read. The INGEST half needs no route of its own — it rides
 // the structure ingest, which is the whole of task 7.3.
 // The path is written as a LITERAL rather than as `"GET "+runlink.AgentDefinitionPath`, matching

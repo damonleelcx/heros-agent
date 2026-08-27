@@ -127,11 +127,11 @@ func main() {
 		func() int64 { return time.Now().UnixMilli() })
 	must(err, "publisher")
 
-	def := herosagent.Definition{
+	def := herosagent.SingleNode(herosagent.Node{
 		PromptRef: "acceptance-prompt", ModelRef: *modelID, CredentialRef: *provider,
 		ContextRef: "inline_messages", HarnessRef: "single-shot",
-		SetVersions: map[string]string{"harness": "v1", "memory": "v1", "context": "v1"},
-	}
+	})
+	def.SetVersions = map[string]string{"harness": "v1", "memory": "v1", "context": "v1"}
 	res, err := pub.Publish(ctx, def)
 	must(err, "publish")
 	log.Printf("acceptance: published %s (created=%v)", res.ConfigHash[:12], res.Created)
@@ -172,7 +172,7 @@ func main() {
 		must(herr, "rehearsal")
 
 		log.Printf("acceptance: running the rehearsal gate against the calibration set (LIVE MODEL)…")
-		report, gerr := reh.Run(ctx, res.ConfigHash)
+		report, gerr := reh.Run(ctx, herosagent.BindDefinition(res.ConfigHash, def))
 		must(gerr, "rehearsal run")
 
 		blob, _ := json.MarshalIndent(report, "", "  ")

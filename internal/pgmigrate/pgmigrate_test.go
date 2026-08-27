@@ -1,6 +1,11 @@
 package pgmigrate
 
 import (
+	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -213,5 +218,150 @@ func TestFreshInstallDistinguishesAnEmptyDatabaseFromACurrentOne(t *testing.T) {
 	}
 	if (Result{}).FreshInstall() {
 		t.Error("an empty result is not a fresh install")
+	}
+}
+
+// TestNoGoSourceQueriesACatalogWithoutScopingIt extends the rule above from MIGRATIONS to GO SOURCES.
+//
+// # Why the migration-only fence was not enough
+//
+// The rule — a catalog query must be scoped, because the catalogs are database-wide and
+// `internal/pgtest` gives every test package its own schema in one shared database — was learned in
+// P7, written down, and fenced. The fence iterates the MIGRATION SET.
+//
+// The same mistake in a `_test.go` file was invisible to it, and one had been sitting in
+// `internal/deliveryrecord/schema_pgproof_test.go` counting `transform_immutable` triggers across every
+// schema in the database. It passed alone and went red as soon as any other package had run first —
+// reporting `count=18` where it wanted 1, which reads as a wild answer rather than as a schema count.
+//
+// That is the failure mode the original fence's own comment predicts, arriving through the one door it
+// does not watch. So the fence follows the rule rather than the file type.
+//
+// 🚫 It scans SQL LITERALS, not prose. Only backtick-quoted strings containing `SELECT` are considered,
+// so a comment explaining the rule — this one included — cannot trip it. A fence that fires on the
+// documentation of itself is a fence somebody deletes.
+func TestNoGoSourceQueriesACatalogWithoutScopingIt(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The same catalogs the migration fence names, plus the two this defect used. `pg_trigger` was not
+	// on the original list, which is the other half of why the query got through.
+	catalogs := []string{
+		"pg_constraint", "pg_class", "pg_indexes", "pg_index", "pg_attribute", "pg_trigger", "pg_proc",
+	}
+	// The same two spellings, and for the same reasons — see the comment on the migration fence above.
+	scoped := func(sql string) bool {
+		return strings.Contains(sql, "current_schema()") ||
+			strings.Contains(sql, "::regclass") ||
+			// `information_schema` views are already scoped to the current database and are filtered by
+			// `table_schema` where it matters; a query against one that names `current_schema()` is
+			// caught by the first clause, and one that does not is not a catalog query in this sense.
+			strings.Contains(sql, "table_schema =")
+	}
+
+	var scanned, checked int
+	var offenders []string
+	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			// 🚫 Other people's trees and vendored code. `.claude/worktrees` holds checkouts this
+			// repository does not own — flagging a line in one would report a finding nobody here can
+			// act on, against a file that may not even be on this branch.
+			switch d.Name() {
+			case ".git", "node_modules", "testdata", ".claude", "vendor":
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") {
+			return nil
+		}
+		// The fence's own file. Its error strings quote the rule, and a self-match would make this
+		// permanently red for describing what it checks.
+		if strings.HasSuffix(path, filepath.Join("internal", "pgmigrate", "pgmigrate_test.go")) {
+			return nil
+		}
+		b, rerr := os.ReadFile(path)
+		if rerr != nil {
+			return rerr
+		}
+		scanned++
+		for _, lit := range backtickLiterals(string(b)) {
+			if !strings.Contains(strings.ToUpper(lit), "SELECT") {
+				continue
+			}
+			var named string
+			for _, cat := range catalogs {
+				if strings.Contains(lit, cat) {
+					named = cat
+					break
+				}
+			}
+			if named == "" {
+				continue
+			}
+			checked++
+			if scoped(lit) {
+				continue
+			}
+			rel, _ := filepath.Rel(root, path)
+			offenders = append(offenders, fmt.Sprintf("%s queries %s unscoped: %s",
+				rel, named, strings.Join(strings.Fields(lit), " ")))
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(offenders) > 0 {
+		sort.Strings(offenders)
+		t.Errorf("these Go sources query a catalog without scoping it:\n  %s\n\n"+
+			"  The catalogs are DATABASE-WIDE and `internal/pgtest` gives every test package its own "+
+			"schema in one shared database, so an unscoped query counts or matches objects belonging to "+
+			"OTHER packages. It passes when the package runs alone and fails as soon as anything else "+
+			"has run first — which is green locally and red in CI, with a number that reads as a wild "+
+			"answer rather than as a schema count.\n\n"+
+			"  Scope it with `current_schema()` (join pg_class/pg_namespace on n.nspname) or bind the "+
+			"relation with `'table'::regclass` — the latter is REQUIRED wherever a catalog function like "+
+			"pg_get_constraintdef is applied, because the planner may run it before a namespace filter.",
+			strings.Join(offenders, "\n  "))
+	}
+
+	// 🔴 ANTI-VACUITY, both halves. A walk that reached no files, or found no catalog queries at all,
+	// would report clean forever — and this fence exists precisely because a clean report meant nothing.
+	if scanned < 200 {
+		t.Errorf("the walk inspected %d Go file(s) — it is not reaching the tree", scanned)
+	}
+	if checked < 3 {
+		t.Errorf("the walk found %d catalog quer(ies) to check. There are several in this repository, "+
+			"so finding almost none means the literal extraction is broken and every future one will "+
+			"pass unexamined.", checked)
+	}
+}
+
+// backtickLiterals returns the raw-string literals in a Go source, which is where its SQL lives.
+//
+// A scan for backticks rather than a full parse: the question is what SQL text ships in this file, and
+// `go/ast` would answer it more precisely at the cost of resolving concatenations and constants —
+// which is more machinery than a rule about one-line queries needs.
+func backtickLiterals(src string) []string {
+	var out []string
+	for {
+		i := strings.Index(src, "`")
+		if i < 0 {
+			return out
+		}
+		rest := src[i+1:]
+		j := strings.Index(rest, "`")
+		if j < 0 {
+			return out
+		}
+		out = append(out, rest[:j])
+		src = rest[j+1:]
 	}
 }

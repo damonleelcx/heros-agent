@@ -57,7 +57,7 @@ func TestTheRunnerTellsTheModelWhichDefinitionIsRunning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRunner: %v", err)
 	}
-	if _, err := r.Infer(context.Background(), runnerInput(), "cfg-alpha", PlacementPlatform); err != nil {
+	if _, err := r.Infer(context.Background(), runnerInput(), BindHash("cfg-alpha"), PlacementPlatform); err != nil {
 		t.Fatalf("Infer: %v", err)
 	}
 	if m.got.AgentConfigHash != "cfg-alpha" {

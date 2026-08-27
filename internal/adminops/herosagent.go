@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/heros-foreal/agentd/internal/adminaudit"
@@ -56,6 +57,12 @@ const (
 
 // AgentAxisRow is one axis as the console renders it.
 type AgentAxisRow struct {
+	// NodeID is the node this axis belongs to, or "" for the definition-level `graph` axis.
+	//
+	// 🔴 Carried on every row, including a single-node definition's. A field that appeared only when a
+	// definition had two nodes would make the console's row key change shape underneath it, and the one
+	// question this surface exists to answer after P36 is WHICH NODE.
+	NodeID string     `json:"node_id"`
 	Axis   string     `json:"axis"`
 	Status AxisStatus `json:"status"`
 	// Value is the bound reference, or the default's name. Never a secret and never a key.
@@ -98,12 +105,44 @@ type AgentOverview struct {
 	MemoryAvailability  []herosagent.Availability `json:"memory_availability"`
 	// Versions is every published definition, newest first.
 	Versions []AgentVersionRow `json:"versions"`
+	// Nodes is the SERVING definition's node list with its live per-node numbers (P36 tasks 6.4, 8.1).
+	//
+	// 🔴 Per node and never only as an aggregate. An aggregate over a graph says the agent is slow; it
+	// does not say WHICH NODE is slow, and that is the only form of the answer anybody can act on.
+	Nodes []AgentNodeRow `json:"nodes"`
+	// NodesKnown is false when no per-node source is wired: the numbers are then meaningless and render
+	// as unknown rather than as zero. Same discipline as InferencesKnown.
+	NodesKnown bool `json:"nodes_known"`
 	// KillSwitchArmed reports whether HEROS is halted through the platform's existing durable switch
 	// (task 6.8). Carried on this view so the agent surface cannot show a healthy agent that is in
 	// fact halted.
 	KillSwitchArmed bool   `json:"kill_switch_armed"`
 	KillSwitchNote  string `json:"kill_switch_note,omitempty"`
 	CanAdmin        bool   `json:"can_admin"`
+}
+
+// AgentNodeRow is one node of the serving definition, with what it has done (P36 tasks 6.4, 8.1).
+type AgentNodeRow struct {
+	NodeID string `json:"node_id"`
+	// The axis bindings, so the operator surface can answer "which node is which" without a second read.
+	PromptRef  string `json:"prompt_ref"`
+	ModelRef   string `json:"model_ref"`
+	LoopRef    string `json:"loop_ref,omitempty"`
+	HarnessRef string `json:"harness_ref"`
+	// Inferences, ProviderCalls, TokensIn, TokensOut, Failures, Skips and LatencyMS are the live
+	// counters. 🔴 They are IN-PROCESS, not a database aggregate: a per-request query over
+	// `heros_inference.nodes_json` would be the real-time read against the events table a CQRS split
+	// exists to prevent, and a health surface that goes slow when the database does reports the wrong
+	// thing at the worst moment.
+	Inferences    int64 `json:"inferences"`
+	ProviderCalls int64 `json:"provider_calls"`
+	TokensIn      int64 `json:"tokens_in"`
+	TokensOut     int64 `json:"tokens_out"`
+	Failures      int64 `json:"failures"`
+	Skips         int64 `json:"skips"`
+	// LatencyMS is the mean over this node's completed calls. 🔴 Zero with `Inferences == 0` is NOT a
+	// fast node; the console renders it as "not yet run" for that reason.
+	LatencyMS int64 `json:"latency_ms"`
 }
 
 // AgentVersionRow is one published definition in the list.
@@ -118,6 +157,15 @@ type AgentVersionRow struct {
 	// derive activity from recency.
 	Active      bool  `json:"active"`
 	CreatedAtMS int64 `json:"created_at_ms"`
+	// Nodes is how many nodes this version declares (P36). Two versions differing only in TOPOLOGY are
+	// otherwise indistinguishable in this list — same model, same credential, different agent.
+	Nodes int `json:"nodes"`
+	// RollbackTarget is true when this version could be rolled back TO: it passed and is not serving.
+	//
+	// 🔴 Computed here rather than in the console, so the control is offered exactly where the backend
+	// would accept it. A console that decided this itself would eventually offer a button the backend
+	// refuses, which is the "offered and then refused" failure the surfaces map exists to prevent.
+	RollbackTarget bool `json:"rollback_target"`
 }
 
 // AgentSpendRow is one tenant's meter (task 6.5).
@@ -190,6 +238,8 @@ type PublishPreview struct {
 
 // AxisChange is one axis moving between two definitions.
 type AxisChange struct {
+	// Node names the node this change is on, or "" for the definition-level `graph` axis.
+	Node string `json:"node_id,omitempty"`
 	Axis string `json:"axis"`
 	From string `json:"from"`
 	To   string `json:"to"`
@@ -218,6 +268,28 @@ type AgentSpendSource interface {
 	SetFleetCap(ctx context.Context, tokens int64) error
 	SetTenantCap(ctx context.Context, tenantID string, tokens int64) error
 	SetPlacement(ctx context.Context, tenantID, placement string) error
+}
+
+// AgentNodeHealth reports the live per-node counters (P36 tasks 6.4, 8.1).
+//
+// 🔴 Nil is legal and reads as UNKNOWN rather than as zero — a deployment with no observation sink has
+// no numbers, and a zero would say "this node has never run", which is a different and false claim.
+//
+// 🔴 It returns `herosagent.NodeCounters` rather than a type of its own. A second counter struct here
+// would be a second definition of the same six numbers, and the two would drift the first time one of
+// them gained a field — with the symptom being a console column that is always zero.
+type AgentNodeHealth interface {
+	NodeHealth(nodeID string) herosagent.NodeCounters
+}
+
+func nodeCountersInto(c herosagent.NodeCounters, row AgentNodeRow) AgentNodeRow {
+	row.Inferences, row.ProviderCalls = c.Inferences, c.ProviderCalls
+	row.TokensIn, row.TokensOut = c.TokensIn, c.TokensOut
+	row.Failures, row.Skips = c.Failures, c.Skips
+	if c.ProviderCalls > 0 {
+		row.LatencyMS = c.LatencyTotalMS / c.ProviderCalls
+	}
+	return row
 }
 
 // AgentInferenceCounter reports how many pinned inferences exist. Nil is legal and reads as unknown.
@@ -265,10 +337,21 @@ type AgentService struct {
 	kill      AgentKillSwitch
 	hosts     herosagent.RunnerHosts
 	rehearse  RehearseFunc
+	// nodes is the live per-node counter source (P36 task 8.1). Nil reads as unknown.
+	nodes AgentNodeHealth
 	// prompts is the platform's OWN prompt-authoring path (see platformprompt.go). Optional for the
 	// same reason `rehearse` is: a deployment with no platform database has no registry to write to,
 	// and that is an absence the surface reports rather than a construction error.
 	prompts PlatformPromptRegistrar
+}
+
+// WithNodeHealth wires the live per-node counters.
+//
+// Separate from NewAgentService, like WithRehearsal: a deployment that observes nothing is correct
+// without one, and it then renders the numbers as unknown rather than as zero.
+func (s *AgentService) WithNodeHealth(n AgentNodeHealth) *AgentService {
+	s.nodes = n
+	return s
 }
 
 // WithPlatformPrompts wires the platform prompt-authoring path.
@@ -345,6 +428,10 @@ func (s *AgentService) Overview(ctx context.Context) (AgentOverview, error) {
 			// 🔴 From the STORE's activation timestamp, never derived from recency or from
 			// rehearsal_state. A `passed` definition nobody activated is not serving anything.
 			Active: v.Active(), CreatedAtMS: v.CreatedAtMS,
+			Nodes: len(v.Definition.Nodes),
+			// Passed AND not serving. A pending version is not a state to return to, and the serving one
+			// is not something to roll back to.
+			RollbackTarget: v.RehearsalState == herosagent.RehearsalPassed && !v.Active(),
 		})
 	}
 
@@ -354,7 +441,10 @@ func (s *AgentService) Overview(ctx context.Context) (AgentOverview, error) {
 	}
 	out.State, out.Sentence = agentState(hasActive, versions)
 	if hasActive {
-		out.Serving, out.ServingSinceMS = active.ConfigHash, active.ActivatedAtMS
+		// `ActivatedAtOrZero` rather than a dereference: the store has already told us this version is
+		// active (`hasActive`), so the timestamp is there — and the accessor means a future path that
+		// reaches here without that guarantee gets 0 rather than a panic on an operator surface.
+		out.Serving, out.ServingSinceMS = active.ConfigHash, active.ActivatedAtOrZero()
 		out.RehearsalState = string(active.RehearsalState)
 		out.RehearsalReport = active.RehearsalReport
 		out.Axes = axisRows(active.Definition, s.hosts)
@@ -368,6 +458,21 @@ func (s *AgentService) Overview(ctx context.Context) (AgentOverview, error) {
 		} else {
 			out.Axes = axisRows(herosagent.Definition{}, s.hosts)
 		}
+	}
+
+	// The serving definition's nodes, with their live numbers.
+	shape := active.Definition
+	if !hasActive && len(versions) > 0 {
+		shape = versions[0].Definition
+	}
+	for _, n := range shape.Nodes {
+		row := AgentNodeRow{NodeID: n.NodeID, PromptRef: n.PromptRef, ModelRef: n.ModelRef,
+			LoopRef: n.LoopRef, HarnessRef: n.HarnessRef}
+		if s.nodes != nil {
+			row = nodeCountersInto(s.nodes.NodeHealth(n.NodeID), row)
+			out.NodesKnown = true
+		}
+		out.Nodes = append(out.Nodes, row)
 	}
 
 	if s.counter != nil {
@@ -470,38 +575,89 @@ func rehearsalFailureSentence(report string) string {
 	}
 }
 
-// axisRows renders every axis with the three-valued status task 6.10 requires.
+// axisRows renders every axis of every node with the three-valued status task 6.10 requires.
 //
 // 🔴 `not_in_effect` ALWAYS carries a reason. An axis that is inert for an unstated reason is a
-// configuration an operator cannot act on — and the two ways to be inert here are quite different: a
-// wiring override that could never apply, and a memory or harness strategy whose host service this
+// configuration an operator cannot act on — and the ways to be inert are quite different: a topology
+// on a definition with nothing to order, and a memory or harness strategy whose host service this
 // runner does not supply.
+//
+// 🔴 EIGHT PER-NODE AXES AND ONE DEFINITION-LEVEL ONE (P36 task 6.2). Collapse, do not omit: every
+// node contributes its eight rows, and `graph` is emitted exactly once because topology is a property
+// BETWEEN nodes. A console that rendered only the first node's axes would be showing a configuration
+// that is not the one running, and nothing on the page would say so.
 func axisRows(d herosagent.Definition, hosts herosagent.RunnerHosts) []AgentAxisRow {
-	row := func(axis herosagent.Axis, value, dflt string) AgentAxisRow {
-		if strings.TrimSpace(value) == "" {
-			return AgentAxisRow{Axis: string(axis), Status: AxisDefaulted, Value: dflt, Editable: true}
+	out := []AgentAxisRow{}
+	nodes := d.Nodes
+	if len(nodes) == 0 {
+		// Nothing published yet. One node's worth of defaulted rows, so the editor has the same shape
+		// before and after the first publish rather than appearing from nowhere.
+		nodes = []herosagent.Node{{NodeID: herosagent.DefaultNodeID}}
+	}
+	for _, n := range nodes {
+		row := func(axis herosagent.Axis, value, dflt string) AgentAxisRow {
+			if strings.TrimSpace(value) == "" {
+				return AgentAxisRow{NodeID: n.NodeID, Axis: string(axis), Status: AxisDefaulted,
+					Value: dflt, Editable: true}
+			}
+			return AgentAxisRow{NodeID: n.NodeID, Axis: string(axis), Status: AxisSet,
+				Value: value, Editable: true}
 		}
-		return AgentAxisRow{Axis: string(axis), Status: AxisSet, Value: value, Editable: true}
+		out = append(out,
+			row(herosagent.AxisPrompt, n.PromptRef, "none — the agent has no instruction"),
+			row(herosagent.AxisModel, n.ModelRef, "none — no model is bound"),
+			row(herosagent.AxisSkills, strings.Join(n.SkillRefs, ", "), "none bound"),
+			row(herosagent.AxisTools, strings.Join(n.ToolNames, ", "), "none bound"),
+			row(herosagent.AxisContext, n.ContextRef, "none — no context policy is bound"),
+			row(herosagent.AxisMemory, n.MemoryRef, "none"),
+			row(herosagent.AxisHarness, n.HarnessRef, "single-shot"),
+			row(herosagent.AxisLoop, n.LoopRef, "none — this node runs one turn"),
+		)
 	}
-	out := []AgentAxisRow{
-		row(herosagent.AxisPrompt, d.PromptRef, "none — the agent has no instruction"),
-		row(herosagent.AxisModel, d.ModelRef, "none — no model is bound"),
-		row(herosagent.AxisSkills, strings.Join(d.SkillRefs, ", "), "none bound"),
-		row(herosagent.AxisTools, strings.Join(d.ToolNames, ", "), "none bound"),
-		row(herosagent.AxisContext, d.ContextRef, "none — no context policy is bound"),
-		row(herosagent.AxisMemory, d.MemoryRef, "none"),
-		row(herosagent.AxisHarness, d.HarnessRef, "single-shot"),
-		{
-			// 🔴 SHOWN, and read-only (tasks 6b.13, 3.2). Hiding it would make it indistinguishable
-			// from an axis that does not exist, and an operator would keep looking for it.
-			Axis: string(herosagent.AxisWiring), Status: AxisNotInEffect, Value: "fixed",
-			Reason: "HEROS is a single node, so there is no ordering to author. A wiring override " +
-				"would hash a configuration nothing can execute, and is refused at publish rather than " +
-				"accepted and ignored.",
-			Editable: false,
-		},
-	}
+	out = append(out, graphAxisRow(d))
 	return out
+}
+
+// graphAxisRow is the definition-level topology axis.
+//
+// 🔴 It is SHOWN in both states, and the single-node reason text is NOT removed merely because
+// multi-node definitions now exist (P36 task 6.3, D3). Hiding it would make it indistinguishable from
+// an axis that does not exist, and an operator would keep looking for it; deleting the reason would
+// discard a correct explanation for what is still the default shape.
+func graphAxisRow(d herosagent.Definition) AgentAxisRow {
+	if !d.MultiNode() {
+		return AgentAxisRow{
+			Axis: string(herosagent.AxisGraph), Status: AxisNotInEffect, Value: "fixed",
+			Reason: "This definition declares one node, so there is no ordering to author. A topology " +
+				"would hash a configuration nothing can execute, and is refused at publish rather than " +
+				"accepted and ignored. Declare a second node to author one.",
+			Editable: false,
+		}
+	}
+	return AgentAxisRow{
+		Axis: string(herosagent.AxisGraph), Status: AxisSet, Value: topologySummary(d), Editable: true,
+	}
+}
+
+// topologySummary is the one-line rendering of a definition's graph.
+func topologySummary(d herosagent.Definition) string {
+	parts := []string{strings.Join(d.Ordering(), " → ")}
+	if n := len(d.Edges); n > 0 {
+		parts = append(parts, fmt.Sprintf("%d edge(s)", n))
+	}
+	for _, g := range d.GraphGroups {
+		what := "group"
+		if g.Concurrent {
+			what = "concurrent group"
+		}
+		if g.Merge != nil {
+			parts = append(parts, fmt.Sprintf("%s [%s] → %s merged %s on %s", what,
+				strings.Join(g.Nodes, ", "), g.Merge.Into, g.Merge.Strategy, g.Merge.OnNodeFailure))
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%s [%s]", what, strings.Join(g.Nodes, ", ")))
+	}
+	return strings.Join(parts, "; ")
 }
 
 // Spend returns the per-tenant meter (task 6.5).
@@ -595,23 +751,74 @@ func (s *AgentService) Preview(ctx context.Context, d herosagent.Definition) (Pu
 }
 
 // diffDefinitions is the resolved, axis-by-axis diff the confirmation renders.
+//
+// 🔴 Keyed by NODE as well as axis (P36). A diff that compared two definitions axis-by-axis without
+// naming the node would report "model: A → B" for a change on one node of five, and an operator would
+// approve a change to the wrong call site believing they had read it.
+//
+// A node that appears on one side only is rendered as an ADDED or REMOVED node rather than as eight
+// axis changes from `none`: adding a node is one act with one consequence, and spelling it as eight
+// unrelated rows buries the only fact that matters.
 func diffDefinitions(from, to herosagent.Definition) []AxisChange {
 	out := []AxisChange{}
-	add := func(axis herosagent.Axis, a, b string) {
-		if a != b {
-			out = append(out, AxisChange{Axis: string(axis), From: orNone(a), To: orNone(b)})
+	fromIDs, toIDs := nodeIDsOf(from), nodeIDsOf(to)
+	for _, id := range union(fromIDs, toIDs) {
+		fn, inFrom := from.NodeByID(id)
+		tn, inTo := to.NodeByID(id)
+		switch {
+		case !inFrom:
+			out = append(out, AxisChange{Node: id, Axis: "node", From: "absent", To: "declared"})
+			continue
+		case !inTo:
+			out = append(out, AxisChange{Node: id, Axis: "node", From: "declared", To: "absent"})
+			continue
+		}
+		add := func(axis herosagent.Axis, a, b string) {
+			if a != b {
+				out = append(out, AxisChange{Node: id, Axis: string(axis), From: orNone(a), To: orNone(b)})
+			}
+		}
+		add(herosagent.AxisPrompt, fn.PromptRef, tn.PromptRef)
+		add(herosagent.AxisModel, fn.ModelRef, tn.ModelRef)
+		add(herosagent.AxisSkills, strings.Join(fn.SkillRefs, ", "), strings.Join(tn.SkillRefs, ", "))
+		add(herosagent.AxisTools, strings.Join(sortedCopy(fn.ToolNames), ", "),
+			strings.Join(sortedCopy(tn.ToolNames), ", "))
+		add(herosagent.AxisContext, fn.ContextRef, tn.ContextRef)
+		add(herosagent.AxisMemory, fn.MemoryRef, tn.MemoryRef)
+		add(herosagent.AxisHarness, fn.HarnessRef, tn.HarnessRef)
+		add(herosagent.AxisLoop, fn.LoopRef, tn.LoopRef)
+		// The credential is an axis-adjacent identity fact and a change to it changes the agent. It is
+		// shown as a change so an operator cannot repoint the credential without seeing that they did.
+		add("credential", fn.CredentialRef, tn.CredentialRef)
+	}
+	// The definition-level topology, once.
+	if a, b := topologySummary(from), topologySummary(to); a != b {
+		out = append(out, AxisChange{Axis: string(herosagent.AxisGraph), From: orNone(a), To: orNone(b)})
+	}
+	return out
+}
+
+func nodeIDsOf(d herosagent.Definition) []string {
+	out := make([]string, 0, len(d.Nodes))
+	for _, n := range d.Nodes {
+		out = append(out, n.NodeID)
+	}
+	return out
+}
+
+// union is the sorted set of node ids across both sides of a diff.
+func union(a, b []string) []string {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, xs := range [][]string{a, b} {
+		for _, x := range xs {
+			if !seen[x] {
+				seen[x] = true
+				out = append(out, x)
+			}
 		}
 	}
-	add(herosagent.AxisPrompt, from.PromptRef, to.PromptRef)
-	add(herosagent.AxisModel, from.ModelRef, to.ModelRef)
-	add(herosagent.AxisSkills, strings.Join(from.SkillRefs, ", "), strings.Join(to.SkillRefs, ", "))
-	add(herosagent.AxisTools, strings.Join(sortedCopy(from.ToolNames), ", "), strings.Join(sortedCopy(to.ToolNames), ", "))
-	add(herosagent.AxisContext, from.ContextRef, to.ContextRef)
-	add(herosagent.AxisMemory, from.MemoryRef, to.MemoryRef)
-	add(herosagent.AxisHarness, from.HarnessRef, to.HarnessRef)
-	// The credential is an axis-adjacent identity fact and a change to it changes the agent. It is
-	// shown as a change so an operator cannot repoint the credential without seeing that they did.
-	add("credential", from.CredentialRef, to.CredentialRef)
+	sort.Strings(out)
 	return out
 }
 
@@ -659,12 +866,62 @@ func (s *AgentService) Publish(ctx context.Context, d herosagent.Definition, rea
 	if _, aerr := s.exec.Audit().Append(adminaudit.Entry{
 		ActorAdminID: sess.AdminID, Target: TargetGlobal, Action: adminaudit.ActionCrossTenantView,
 		Reason: reason, Result: result,
-		Evidence:  map[string]string{"config_hash": res.ConfigHash, "model_ref": d.ModelRef},
+		Evidence: map[string]string{"config_hash": res.ConfigHash,
+			// The DISTINCT set of models this definition binds, not the first node's. An audit row naming
+			// one model for a five-node graph records a change nobody made.
+			"model_ref": herosagent.DenormalisedModelRef(d), "nodes": strconv.Itoa(len(d.Nodes))},
 		CreatedAt: s.exec.Now(),
 	}); aerr != nil {
 		return out, errors.New("adminops: the definition was published and the action could not be logged: " + aerr.Error())
 	}
 	return out, nil
+}
+
+// Rollback returns a PREVIOUSLY SERVING definition to service (P36 task 5.5).
+//
+// 🔴 It is a separate ACTION from Activate rather than the same one with a different label, and the
+// reason is the audit trail. "An operator activated version X" and "an operator rolled back to version
+// X" are the same database write and two different events, and the second is the one somebody
+// reconstructs an incident from. A single action would make a rollback indistinguishable from a routine
+// activation in the record — at exactly the moment the record matters most.
+//
+// 🚫 It takes no definition. Rollback activates a version that already exists; re-authoring the older
+// shape means retyping a configuration under pressure, and any transcription error produces a different
+// `config_hash` — a third configuration nobody has measured, activated in place of the one known to
+// work.
+func (s *AgentService) Rollback(ctx context.Context, configHash, reason string) error {
+	sess, _, err := s.exec.Authorize(ctx, adminrbac.CapAgentAdmin, TargetGlobal)
+	if err != nil {
+		return err
+	}
+	if s.publisher == nil {
+		return errors.New("adminops: this deployment mounts no agent publisher")
+	}
+	if strings.TrimSpace(reason) == "" {
+		return errors.New("adminops: rolling back an agent definition requires a reason — it changes " +
+			"what the platform infers about every customer's source, and a rollback with no stated cause " +
+			"is the hardest kind of change to reconstruct afterwards")
+	}
+	roller, ok := s.publisher.(interface {
+		Rollback(ctx context.Context, configHash string) error
+	})
+	if !ok {
+		// 🔴 Named rather than silently falling back to Activate. The two are the same write and
+		// different events; a fallback would record a rollback as a routine activation.
+		return errors.New("adminops: this deployment's publisher cannot roll back")
+	}
+	if err := roller.Rollback(ctx, configHash); err != nil {
+		return err
+	}
+	if _, aerr := s.exec.Audit().Append(adminaudit.Entry{
+		ActorAdminID: sess.AdminID, Target: TargetGlobal, Action: adminaudit.ActionCrossTenantView,
+		Reason: reason, Result: "rolled_back",
+		Evidence:  map[string]string{"config_hash": configHash, "act": "rollback"},
+		CreatedAt: s.exec.Now(),
+	}); aerr != nil {
+		return errors.New("adminops: the rollback succeeded and could not be logged: " + aerr.Error())
+	}
+	return nil
 }
 
 // Activate makes a rehearsed definition the one serving inference.

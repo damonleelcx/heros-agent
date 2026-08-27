@@ -162,14 +162,32 @@ func TestRejectsUnsoundRows(t *testing.T) {
 //     The seed is the real chain; if any shape drifts the seed fails loudly rather than skipping.
 func TestTransformImmutabilityStillHolds(t *testing.T) {
 	// (1) The trigger survives delivery's migration.
+	//
+	// 🔴 `'transform'::regclass` rather than a join on `c.relname = 'transform'`, and this is the whole
+	// of the defect this line used to carry.
+	//
+	// The catalogs are DATABASE-WIDE. `internal/pgtest` gives every test package its own schema in one
+	// shared database, and every package applies the migration chain — so by the time `make pg-proof`
+	// has run a few packages there are a dozen `transform` tables, each with its own
+	// `transform_immutable` trigger, and an unscoped count returns the number of SCHEMAS rather than
+	// the number of triggers on the one this connection is bound to.
+	//
+	// It passed alone every time and went red the moment anything else had run first, which is the
+	// worst shape a fence can have: green on the developer's machine, red in CI, and the number in the
+	// message ("count=18") reads as a wild answer rather than as a schema count.
+	//
+	// `regclass` resolves the name through THIS connection's `search_path` and narrows to one relation
+	// before anything else is evaluated. `internal/pgmigrate/pgmigrate_test.go` fences exactly this rule
+	// for migrations and now for Go sources too — see TestNoGoSourceQueriesACatalogWithoutScopingIt.
 	var n int
 	if err := testDB.QueryRow(
-		`SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid
-		 WHERE c.relname = 'transform' AND t.tgname = 'transform_immutable'`).Scan(&n); err != nil {
+		`SELECT count(*) FROM pg_trigger
+		  WHERE tgrelid = 'transform'::regclass AND tgname = 'transform_immutable'`).Scan(&n); err != nil {
 		t.Fatalf("pg_trigger lookup: %v", err)
 	}
 	if n != 1 {
-		t.Fatalf("the transform_immutable trigger is not present after delivery installed (count=%d)", n)
+		t.Fatalf("the transform_immutable trigger is not present on this schema's `transform` after "+
+			"delivery installed (count=%d)", n)
 	}
 
 	// (2) End-to-end rejection through the real FK chain.
