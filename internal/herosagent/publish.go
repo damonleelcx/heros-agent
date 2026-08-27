@@ -643,9 +643,63 @@ func (p *Publisher) Activate(ctx context.Context, configHash string) error {
 		return fmt.Errorf("%w: no published definition has hash %s", ErrInvalidDefinition, configHash)
 	}
 	if v.RehearsalState != RehearsalPassed {
+		// 🔴 P36 task 5.4 — the gate is UNCHANGED IN FORCE for a multi-node definition, and the sentence
+		// says why it matters more there. It is the same rule; a graph is where somebody would want an
+		// exception, because rehearsing five nodes costs five times as much.
+		graph := ""
+		if v.Definition.MultiNode() {
+			graph = fmt.Sprintf(" This definition declares %d nodes, so it is %d configurations' worth "+
+				"of behaviour that nothing has measured — and the blast radius is every tenant at once, "+
+				"because this is the platform's own agent rather than a per-tenant configuration.",
+				len(v.Definition.Nodes), len(v.Definition.Nodes))
+		}
 		return fmt.Errorf("%w: %s is %q. A published definition is INACTIVE until it has run against the "+
 			"pinned fixtures and met the floor on EVERY ONE INDIVIDUALLY — the mean is reported, the gate "+
-			"reads the minimum", ErrRehearsalNotPassed, confighashDisplay(configHash), v.RehearsalState)
+			"reads the minimum.%s", ErrRehearsalNotPassed, confighashDisplay(configHash),
+			v.RehearsalState, graph)
+	}
+	return p.store.Activate(ctx, configHash, p.nowMS())
+}
+
+// Rollback makes a PREVIOUSLY PUBLISHED version the one serving inference again (P36 task 5.5).
+//
+// # 🔴 It is ONE ACT, and it is deliberately a thin call rather than a new mechanism
+//
+// Rolling back is activating a version that already exists. It is NOT re-authoring the older shape,
+// and the difference is the whole requirement: re-authoring means an operator retypes a configuration
+// under pressure, during an incident, from a rendering of it — and any transcription error produces a
+// DIFFERENT `config_hash`, which is a third configuration nobody has ever measured, activated in place
+// of the one that was known to work.
+//
+// It also would not be the same definition even when retyped perfectly: a shape that can no longer be
+// authored (`ClassifyPin` reports this as `authorable: false`) cannot be retyped at all, so
+// re-authoring is not merely risky, it is sometimes impossible for exactly the version somebody most
+// wants back.
+//
+// 🚫 It does NOT re-run the rehearsal. The version already passed — that is why it was serving — and
+// its verdict is on its immutable row. Re-measuring it would spend provider tokens during an incident
+// to reproduce a number that is already recorded, and it would make rollback slow at the moment speed
+// is the point.
+//
+// 🚫 It does NOT re-run pinned inferences, for the reason activation never does (D4): a configuration
+// change is a pinning event, not a re-inference.
+func (p *Publisher) Rollback(ctx context.Context, configHash string) error {
+	v, ok, err := p.store.Get(ctx, configHash)
+	if err != nil {
+		return fmt.Errorf("herosagent: reading %s: %w", configHash, err)
+	}
+	if !ok {
+		// 🔴 Named as a ROLLBACK failure rather than as "no such definition". An operator reaching for
+		// a rollback has a hash from a version list or an incident note, and "that version does not
+		// exist on this deployment" sends them somewhere quite different from "that hash is malformed".
+		return fmt.Errorf("%w: no published definition on this deployment has hash %s, so there is "+
+			"nothing to roll back TO. Rollback activates a version that already exists; it never "+
+			"re-authors one, because a retyped configuration is a third configuration nobody has "+
+			"measured", ErrInvalidDefinition, confighashDisplay(configHash))
+	}
+	if v.RehearsalState != RehearsalPassed {
+		return fmt.Errorf("%w: %s is %q, so it never served and is not a state to return to",
+			ErrRehearsalNotPassed, confighashDisplay(configHash), v.RehearsalState)
 	}
 	return p.store.Activate(ctx, configHash, p.nowMS())
 }

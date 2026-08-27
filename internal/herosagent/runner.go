@@ -426,7 +426,8 @@ func (r *Runner) Infer(ctx context.Context, in Input, binding AssessmentBinding,
 	// slightly faster stop on the NEXT run — which is the behaviour of having no cap at all on the run
 	// that mattered.
 	if r.caps != nil {
-		verdict, err := r.caps.Check(ctx, in.TenantID)
+		// Nothing has been spent yet on this assessment, so there is nothing the meter cannot see.
+		verdict, err := r.caps.Check(ctx, in.TenantID, 0)
 		if err != nil {
 			return Result{Code: CodeProviderFailed, Cause: "the token ceiling could not be read"}, err
 		}
@@ -748,11 +749,18 @@ func (r *Runner) inferGraph(ctx context.Context, in Input, binding AssessmentBin
 		// 🔴 THE CEILING, BEFORE EVERY PROVIDER CALL ON EVERY NODE (task 5.2).
 		//
 		// Re-checked per node rather than once for the assessment, and the two are not the same check:
-		// the first node's spend is recorded before the second node's check reads it, so a definition
-		// that would blow the ceiling stops AT the node that crosses it instead of after the last one.
-		// A cap enforced once at the top is an accounting record for every node after the first.
+		// what the earlier nodes cost is passed as PENDING spend, so a definition that would blow the
+		// ceiling stops AT the node that crosses it instead of after the last one. A cap enforced once
+		// at the top is an accounting record for every node after the first.
+		//
+		// 🔴 The pending argument is load-bearing and was found by a fence rather than by review. The
+		// meter is written ONCE, after the assessment — `Spend` is keyed by inference, and a
+		// half-finished assessment has no inference id — so without it every node read the same stale
+		// total and passed. A four-node definition under a ten-token ceiling spent thirty-two: the check
+		// ran four times and learned nothing between them.
 		if r.caps != nil {
-			verdict, cerr := r.caps.Check(ctx, in.TenantID)
+			pending := int64(totalUsage.InputTokens + totalUsage.OutputTokens)
+			verdict, cerr := r.caps.Check(ctx, in.TenantID, pending)
 			if cerr != nil {
 				return Result{Code: CodeProviderFailed, ProviderCalls: res.ProviderCalls,
 					Cause: "the token ceiling could not be read"}, cerr

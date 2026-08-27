@@ -162,7 +162,9 @@ func Check(ctx context.Context, in ReadinessInput) Readiness {
 	// 4 · the ceiling, against the REAL meter. Checked for the fleet, which is the scope that stops
 	// everything; a single capped tenant is that tenant's state and not the deployment's.
 	if in.Caps != nil {
-		verdict, err := in.Caps.Check(ctx, FleetTenantID)
+		// 🔴 Zero pending: readiness asks whether the fleet ceiling is ALREADY reached, with nothing in
+		// flight of its own. It spends nothing, so it has nothing the meter cannot see.
+		verdict, err := in.Caps.Check(ctx, FleetTenantID, 0)
 		if err != nil {
 			return unresolvable(out, "the token ceiling could not be read: "+err.Error())
 		}

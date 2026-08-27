@@ -42,6 +42,24 @@ import (
 // visibly a change in the model rather than a change in the repository. A row id would make every
 // re-run a different address and the diff meaningless.
 
+// ErrInferenceBudgetExhausted is what an `Inference` seam returns when a SPEND CEILING stopped the
+// call — not a provider failure, not an abstention (P36 task 5.3).
+//
+// # 🔴 Why it is its own sentinel and not just an error
+//
+// The runner treats a generic inference failure by leaving the STRUCTURAL finding in place and warning:
+// stage 1's answer is still true, and losing eight good findings because a ninth provider call timed
+// out is the wrong trade. That is right for an outage and WRONG for a ceiling — a report that renders
+// as complete when we simply stopped paying is an absence rendered as a measurement.
+//
+// So a ceiling degrades the axis to `not_measured` with `budget_exhausted`, exactly as this
+// assessment's own `SpendCapUSD` does, and `Assessment.Partial()` then reports the whole thing as
+// incomplete. Two ceilings, two directions, one honest state.
+//
+// 🔴 `herosagent.ErrCapReached` is recognised alongside it, so a seam that does not know about this
+// package still degrades correctly. A seam that DOES know wraps this one.
+var ErrInferenceBudgetExhausted = errors.New("assessment: a spend ceiling stopped this inference")
+
 // ErrNoModel is returned when an inference is asked for and no provider seam is wired.
 var ErrNoModel = errors.New("assessment: no model is wired for inference")
 

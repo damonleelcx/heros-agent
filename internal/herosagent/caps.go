@@ -156,7 +156,27 @@ func NewCapChecker(caps CapStore, spend SpendReader, nowMS func() int64) (*CapCh
 // 🔴 Both, and the tenant's is checked first so its own reason reaches whoever hit it. A fleet ceiling
 // reached by one noisy tenant stops every other tenant too — which is correct and is the reason the
 // verdict names the scope: an operator raising the wrong one has changed nothing.
-func (c *CapChecker) Check(ctx context.Context, tenantID string) (CapVerdict, error) {
+//
+// # 🔴 `pendingTokens` — what the CALLER has already spent that the meter has not seen yet
+//
+// This parameter exists because P36's multi-node runner found the hole it closes, and the hole was
+// invisible until a definition had more than one node.
+//
+// The meter is written ONCE per assessment, after it completes — deliberately, because `Spend` is keyed
+// by inference and a half-finished assessment has no inference id. So inside one assessment, every
+// node's cap check read the same stale total and every node passed. A four-node definition under a
+// ten-token ceiling spent thirty-two: the check ran four times and learned nothing between them, which
+// is precisely "a cap enforced once at the top is an accounting record for every node after the first"
+// — the failure this file's header claims to prevent, reintroduced by a shape change.
+//
+// 🔴 It is a REQUIRED parameter rather than an optional variant, and that is the point: the compiler
+// makes every caller answer "what have I spent that the meter cannot see". A `CheckWithPending`
+// alongside `Check` would leave the old call sites answering `nothing` by omission — which is the
+// answer that was already wrong.
+//
+// 🚫 It is NOT added to the meter. Nothing about this call records spend; it only refuses to ignore
+// spend that has already happened.
+func (c *CapChecker) Check(ctx context.Context, tenantID string, pendingTokens int64) (CapVerdict, error) {
 	since := c.nowMS() - c.window.Milliseconds()
 
 	for _, scope := range []struct {
@@ -181,6 +201,7 @@ func (c *CapChecker) Check(ctx context.Context, tenantID string) (CapVerdict, er
 		if err != nil {
 			return CapVerdict{}, err
 		}
+		spent += pendingTokens
 		if spent >= cap.MaxTokens {
 			return CapVerdict{
 				Allowed: false, Scope: scope.name,
@@ -188,7 +209,28 @@ func (c *CapChecker) Check(ctx context.Context, tenantID string) (CapVerdict, er
 			}, nil
 		}
 	}
-	return CapVerdict{Allowed: true}, nil
+	// 🔴 An ALLOWED verdict carries the tenant's ceiling and spend too, not just `true`. A surface
+	// asking "how much headroom is there" would otherwise have to read the cap store itself, which is a
+	// second reader of the same two numbers — and two readers of one fact eventually disagree about the
+	// window they are measured over.
+	return c.allowedVerdict(ctx, tenantID, pendingTokens, since)
+}
+
+// allowedVerdict fills in the numbers behind an allowed answer. A read failure here does NOT turn an
+// allowance into a refusal: the decision was already made from the same values, and failing now would
+// deny a call for want of a display figure.
+func (c *CapChecker) allowedVerdict(ctx context.Context, tenantID string, pending, since int64) (CapVerdict, error) {
+	out := CapVerdict{Allowed: true, Scope: CapScopeTenant}
+	cap, ok, err := c.caps.Get(ctx, tenantID)
+	if err != nil || !ok {
+		return CapVerdict{Allowed: true}, nil
+	}
+	spent, err := c.spend.SpentSince(ctx, tenantID, since)
+	if err != nil {
+		return CapVerdict{Allowed: true}, nil
+	}
+	out.Limit, out.Spent, out.Reason = cap.MaxTokens, spent+pending, cap.Reason
+	return out, nil
 }
 
 // CapError renders a refusal as the sentence an operator and a customer both read.

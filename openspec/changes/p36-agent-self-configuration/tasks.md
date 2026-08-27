@@ -114,11 +114,42 @@
 
 ## 5. Cost and control
 
-- [ ] 5.1 `CapChecker` ceiling scoped **per assessment, not per node**; adding a node does not raise the budget.
-- [ ] 5.2 Ceiling enforced before every provider call on every node.
-- [ ] 5.3 Ceiling exhaustion degrades to `not_measured` with `budget exhausted`, the state P33 already defines.
-- [ ] 5.4 Rehearsal required before activating a multi-node definition.
-- [ ] 5.5 Rollback = activating a previous version, as **one act**; never re-authoring the older shape.
+- [x] 5.1 `CapChecker` ceiling scoped **per assessment, not per node**; adding a node does not raise the budget.
+      → nothing in `caps.go` is keyed by node, and that absence is the mechanism: there is no node parameter to
+      pass. `TestAddingANodeDoesNotRaiseTheAssessmentBudget` asserts the three things this can actually mean —
+      the ceiling reads the same for 1, 4 and 8 nodes; spend does not grow past it; and the overshoot is bounded
+      by ONE call rather than by N. (No pre-call cap can promise "never exceeds": the call's cost is unknown
+      until it returns, and the single-node runner has always had that property.)
+- [x] 5.2 Ceiling enforced before every provider call on every node.
+      → 🔴 **This found a real defect in the first implementation.** The check ran per node and learned nothing
+      between runs: the meter is written ONCE per assessment (`Spend` is keyed by inference, and a half-finished
+      assessment has no inference id), so every node read the same stale total and passed. A four-node
+      definition under a ten-token ceiling spent thirty-two. `CapChecker.Check` now takes `pendingTokens` as a
+      REQUIRED parameter, so the compiler makes every caller answer "what have I spent that the meter cannot
+      see" — a `CheckWithPending` alongside `Check` would have left the old call sites answering `nothing` by
+      omission, which is the answer that was already wrong.
+      `TestTheCeilingIsCheckedBeforeEveryNodesProviderCall` asserts the run stops PART WAY — not at all, and not
+      at the start. Drill: setting `pending` back to 0 turns it red.
+- [x] 5.3 Ceiling exhaustion degrades to `not_measured` with `budget exhausted`, the state P33 already defines.
+      → `internal/assessment/runner.go` recognises `herosagent.ErrCapReached` and `ErrInferenceBudgetExhausted`
+      and degrades the axis, instead of falling through to the outage branch that leaves the STRUCTURAL finding
+      standing. `TestACeilingInsideTheAgentDegradesToBudgetExhausted` + the counter-case
+      `TestAnOrdinaryInferenceFailureIsNotReportedAsABudgetCeiling`.
+      The drill's own output is the argument: with the branch disabled, the report claims *"no topology was
+      read, and that is a limit of our python frontend"* — an absence rendered as a measurement — while
+      `Partial()` returns false and nothing looks wrong.
+- [x] 5.4 Rehearsal required before activating a multi-node definition.
+      → unchanged in force; the refusal now names the node count and the blast radius, because a graph is where
+      somebody wants an exception. `TestActivatingAMultiNodeDefinitionRequiresARehearsal`, with the anti-vacuity
+      half (it activates once passed). Drill: disabling the publisher's gate still leaves the STORE's
+      independent gate refusing — which is `Activate`'s documented "they fail independently on purpose",
+      observed rather than assumed.
+- [x] 5.5 Rollback = activating a previous version, as **one act**; never re-authoring the older shape.
+      → `Publisher.Rollback(ctx, configHash)`. One call, one argument, and it is a HASH rather than a
+      definition. `TestRollbackIsOneActAndRequiresNoReAuthoring` asserts no version row is created and exactly
+      one version is active afterwards. 🚫 It does not re-run the rehearsal (the verdict is on the immutable
+      row, and re-measuring during an incident spends tokens to reproduce a recorded number) and does not
+      re-run pins.
 
 ## 6. Frontend Dev — the operator surface
 
