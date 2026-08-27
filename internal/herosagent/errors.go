@@ -150,6 +150,18 @@ const (
 	// ReadyNoDefinition: nothing is published and activated. Distinct from `disabled` — somebody has
 	// enabled a tenant and there is no agent to run for it, which is a configuration half-done.
 	ReadyNoDefinition ReadyState = "no_active_definition"
+	// ReadyUnexecutable: a definition IS active and THIS BUILD CANNOT RUN IT (P36 task 8.3).
+	//
+	// 🔴 Its own state, and not `credential_unresolved` or `no_active_definition`. The three send an
+	// operator to three different places: a credential that does not resolve is a secrets problem, no
+	// active definition is a configuration half-done, and this one is a DEPLOYMENT MISMATCH — the
+	// definition is fine and the binary is older than it.
+	//
+	// It is the state P36 makes reachable. A definition binding a node kind, a loop strategy or a
+	// topology this build does not implement is publishable on one deployment and unrunnable on
+	// another; without this, that deployment reports `ready` and fails at the first analysis, and the
+	// failure names a strategy rather than the build.
+	ReadyUnexecutable ReadyState = "definition_unexecutable"
 )
 
 // Event is the closed set of things worth emitting to telemetry.

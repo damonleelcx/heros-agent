@@ -189,6 +189,10 @@ type Server struct {
 	// at boot would report the credential that resolved at boot, which is the readiness signal that
 	// cannot go red — the exact failure P19 Decision 9 records for `components.postgres`.
 	agentReadiness func(context.Context) herosagent.Readiness
+	// agentNodeHealth is the P36 per-node counter source (task 8.1). Nil means this deployment
+	// observes nothing per node, and `/readyz` then omits the key rather than reporting zeros —
+	// "nobody is counting" and "every node has done nothing" are different facts.
+	agentNodeHealth func() herosagent.NodeHealthDocument
 
 	// p10 is the Postgres-backed prompt-authoring write surface (publish + timeline/diff/impact read
 	// models), mounted by MountPromptRegistry when available. The platform API's first WRITE surface.
@@ -797,6 +801,23 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 		// and taking a platform down because an optional subsystem cannot reach its vendor is a bigger
 		// outage than the one being reported.
 		body["heros_agent"] = s.agentReadiness(r.Context())
+	}
+	if s.agentNodeHealth != nil {
+		// 🔴 P36 TASK 8.1 — PER NODE, ON A READABLE ENDPOINT.
+		//
+		// "An aggregate over a graph says the agent is slow, not which node is." `heros_agent` above is
+		// the aggregate — a state and a sentence for the whole agent — and it is the wrong shape for the
+		// question a graph creates. A five-node definition whose latency doubled did so at ONE node.
+		//
+		// 🚫 Beside `heros_agent` and NOT inside it, and not in `components`. Same reason: none of the
+		// agent's states may take a deployment down, and per-node numbers are diagnostic rather than a
+		// gate. A node failing every call is a real problem and it is not this deployment being unready.
+		//
+		// 🔴 It reads IN-PROCESS COUNTERS. A read that aggregated `heros_inference.nodes_json` per
+		// request would be a real-time query against the events table, and the specific failure is
+		// nasty: the endpoint goes slow exactly when the database does, so the signal degrades at the
+		// moment it is most needed and a monitor times out on the one call that would have explained why.
+		body["heros_agent_nodes"] = s.agentNodeHealth()
 	}
 	if s.billingCapability != nil {
 		// Which processor, and where its credentials come from. Absent rather than "unknown" when

@@ -224,9 +224,31 @@
 
 ## 8. DevOps
 
-- [ ] 8.1 Per-node inference counts, latency, spend and failure rates on a **readable health endpoint** — per node, because an aggregate over a graph says the agent is slow, not which node is.
-- [ ] 8.2 Staged rollout and kill switch exercised against a multi-node definition; blast radius here is every tenant at once.
-- [ ] 8.3 Readiness reflects a definition that cannot be executed by the deployed build.
+- [x] 8.1 Per-node inference counts, latency, spend and failure rates on a **readable health endpoint** — per node, because an aggregate over a graph says the agent is slow, not which node is.
+      → `herosagent.NodeHealthRegistry` → `/readyz` as `heros_agent_nodes`, beside `heros_agent` and NOT inside
+      it: that key is the aggregate, which is the wrong shape for the question a graph creates.
+      🔴 IN-PROCESS counters, not a query over `heros_inference.nodes_json`. A per-request aggregate against the
+      events table goes slow exactly when the database does — the signal degrades at the moment it is most
+      needed, and a monitor times out on the one call that would have explained why.
+      🔴 Three ways to produce no work stay distinguishable: `unknown` (nothing wired — the key is OMITTED, not
+      zeroed), skipped (a predicate routed around it — no latency, no call, because adding a zero to the
+      latency sum reports a node as FAST), and failed. Failure rate is over ATTEMPTS, not calls.
+      `TestNodeHealthIsPerNodeAndDistinguishesTheThreeZeros`. Drill: folding a skip into inferences turns it red.
+- [x] 8.2 Staged rollout and kill switch exercised against a multi-node definition; blast radius here is every tenant at once.
+      → `TestTheRolloutLadderAndTheKillSwitchHoldForAGraph`. The point is that **P36 introduced no exemption**:
+      a graph that never passed cannot advance a rung, the fleet ceiling is still required before the first
+      customer, and **retreat is still ungated** — an operator pulling back during an incident must never be
+      stopped by the thing that is failing, and on a graph that matters more rather than less.
+- [x] 8.3 Readiness reflects a definition that cannot be executed by the deployed build.
+      → new state `ReadyUnexecutable`, checked **before** the credential — a definition this build cannot run
+      never reaches a provider, so reporting a credential fault first sends an operator to a secrets store over
+      a definition that was never going to run, and they would fix it and see no change.
+      🔴 Its own state rather than reusing `credential_unresolved` or `no_active_definition`: those are a
+      secrets problem and a half-done configuration, and this is a DEPLOYMENT MISMATCH — the definition is fine
+      and the binary is older than it. It is the state P36 makes reachable.
+      Fails CLOSED when the loop cannot be resolved at all, on the same terms publish does.
+      `TestReadinessReportsADefinitionThisBuildCannotExecute` + `TestReadinessFailsClosedWhenALoopCannotBeResolved`,
+      both with anti-vacuity halves. Drill: skipping the check turns 2 assertions red.
 
 ## 9. QA — fences that can go red
 
