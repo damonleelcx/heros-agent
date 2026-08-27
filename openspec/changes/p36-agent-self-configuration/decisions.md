@@ -64,6 +64,40 @@ inference to undo.
 
 ---
 
+## D-36.0b — What the agent's first real fan-in found
+
+**Not a planned decision. A finding, recorded because the obvious version of it is wrong in a way that
+only shows up on a graph — which is exactly what D1 predicted would happen when HEROS went through the
+customer's validator first.**
+
+The first `AgentIR` declared a HEROS node's REQUIRED input as `workflow_id`, `source_revision` and
+`residue`. That is what a node genuinely needs to run, and it made **every fan-in unsatisfiable**: a
+`namespaced` merge delivers `{left: …, right: …}`, which supplies none of those names, so the shared
+validator refused a topology that runs perfectly well.
+
+**The validator was right and the contract was wrong.** In `internal/typedcontract` a node's input
+contract is *what its predecessors must supply* — that is the whole meaning of checking a merge against
+it. The assessment input is **ambient**: the runner hands the same `Input` to every node, in every
+topology, including the single-node one where there is no predecessor at all. Declaring it as required
+input asserts a delivery obligation that no topology can meet, on any edge, ever.
+
+So the input contract requires nothing, and the OUTPUT contract is where the force lives:
+
+| merge strategy between two HEROS nodes | outcome |
+|---|---|
+| `all-fields` | **refused** — both declare `edges` and `labels`, so they collide, and precedence would be the platform deciding which of two answers is real |
+| `namespaced` | accepted — "cannot collide by construction, which is why it is the answer for a fan-in whose nodes genuinely produce the same field names" |
+
+🔴 "The input requires nothing" is one letter away from "the check does nothing", so it is not left as a
+claim: `TestAnAllFieldsMergeBetweenTwoAgentNodesIsRefused` asserts the collision refusal names the
+colliding field and both producers, with the `namespaced` case as its anti-vacuity half.
+
+**This is D1 paying for itself on the first try.** Had the agent been given its own topology validator,
+the wrong contract would have been written into it, no fan-in would ever have been refused, and the
+error would have surfaced the first time a customer's repository reached the graph axis.
+
+---
+
 ## D-36.1 — Q1: credentials are PER NODE
 
 **Answer: per node.** `Node.CredentialRef`, alongside `Node.ModelRef`.

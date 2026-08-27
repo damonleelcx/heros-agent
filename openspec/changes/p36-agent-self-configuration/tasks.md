@@ -83,12 +83,34 @@
 
 ## 4. Backend Dev — topology
 
-- [ ] 4.1 Route the agent's topology through the **same** typed-contract validator a customer's Variant Spec uses. Assert one code path; a lookalike is the failure design D1 is about.
-- [ ] 4.2 Concurrency declared over the ordering; ordering still contains every node.
-- [ ] 4.3 Fan-in without a declared merge refused at publish.
-- [ ] 4.4 Conditional edges validated at publish through the existing expression path.
-- [ ] 4.5 Pinned result must not depend on interleaving — anything order-dependent in a merge is a defect.
-- [ ] 4.6 In-flight assessments complete under the definition they started with, and the report records which.
+- [x] 4.1 Route the agent's topology through the **same** typed-contract validator a customer's Variant Spec uses. Assert one code path; a lookalike is the failure design D1 is about.
+      → `variantspec.ValidateTopology` is EXPORTED and `variantspec.Resolve` now calls it too, so there is one
+      function to point at. `TestTheAgentsTopologyGoesThroughTheCustomersValidator` asserts the agent's refusal
+      **contains the customer's verbatim** — two implementations do not produce the same sentence by coincidence.
+      Drill: replacing the wrapped sentence with a lookalike ("the agent's topology is invalid") turns it red.
+      🔴 It paid for itself immediately — see [`decisions.md` D-36.0b](decisions.md): the agent's first fan-in
+      found that the node IO contract was wrong, which a private validator would have enshrined instead.
+- [x] 4.2 Concurrency declared over the ordering; ordering still contains every node.
+      → `Definition.validateTopologyShape` + `variantspec.validateGraph`.
+      `TestConcurrencyIsDeclaredOverTheOrderingRatherThanInsteadOfIt`.
+- [x] 4.3 Fan-in without a declared merge refused at publish.
+      → `TestAFanInWithoutAMergeIsRefusedAtPublish`, which also asserts **no version row is written** — a
+      refused publish that wrote one would leave a `config_hash` pointing at something nothing can run.
+- [x] 4.4 Conditional edges validated at publish through the existing expression path.
+      → `AgentIR` RECORDS the closed predicate vocabulary as the call site's `in_scope`, so
+      `variantspec.validatePredicates` — the same check that governs a prompt slot's `expr` — refuses an
+      unknown symbol with no new code. `TestAConditionalEdgeIsValidatedAtPublishByTheExpressionPath` and
+      `TestTheAgentIRRecordsItsPredicateVocabularyRatherThanDeferring`.
+      Drill: recording a NIL scope makes the check DEFER rather than pass — 3 assertions red.
+- [x] 4.5 Pinned result must not depend on interleaving — anything order-dependent in a merge is a defect.
+      → `mergeOutputs` walks the ORDERING and emits edges sorted by content; nothing is appended in completion
+      order anywhere. `TestARepeatedPinnedInferenceUnderConcurrencyIsByteIdentical` runs the same pinned
+      inference **40 times** against jittering models. Drill: iterating the output map instead of the ordering
+      turns it red.
+- [x] 4.6 In-flight assessments complete under the definition they started with, and the report records which.
+      → `AssessmentBinding`, resolved once and carried as a value; there is no read of "the active definition"
+      inside a run. `TestAnInFlightAssessmentFinishesUnderTheDefinitionItStartedWith` **stages an activation
+      from inside the first node's provider call** and asserts both nodes still ran under the original.
 
 ## 5. Cost and control
 

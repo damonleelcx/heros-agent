@@ -334,7 +334,21 @@ func AgentIR(d Definition) *discovery.IR {
 	for _, n := range d.Nodes {
 		nodes = append(nodes, discovery.IRNode{
 			NodeID: n.NodeID, Kind: "static_definition",
-			CallSite:   discovery.IRCallSite{Symbol: n.NodeID, File: "internal/herosagent/runner.go"},
+			CallSite: discovery.IRCallSite{
+				Symbol: n.NodeID, File: "internal/herosagent/runner.go",
+				// 🔴 TASK 4.4 — THE PREDICATE VOCABULARY, RECORDED AS SCOPE.
+				//
+				// This is what makes a conditional edge in the agent's definition validated by the
+				// EXISTING expression path rather than by a second one. `variantspec.validatePredicates`
+				// refuses a predicate the producing call site does not record as in scope — the same rule
+				// that governs a prompt slot's `expr` binding (ADR-004) — so declaring the closed set here
+				// makes `analyst.made_up_thing` a publish-time refusal with no new code.
+				//
+				// 🚫 Recording a NIL scope would DEFER the check rather than pass it: `InScopeRecorded()`
+				// is false for nil, and resolve then accepts every predicate. That is the vacuous pass
+				// this phase keeps finding, arriving through an empty slice.
+				InScope: AgentPredicateSymbols(),
+			},
 			IOContract: agentIOContract(),
 		})
 	}
@@ -357,26 +371,49 @@ func AgentIR(d Definition) *discovery.IR {
 	return &discovery.IR{Workflow: discovery.IRWorkflow{ID: "heros"}, Nodes: nodes, Edges: edges}
 }
 
-// agentIOContract is what every HEROS node consumes and produces. One contract because every node runs
-// the same kind of call — a different prompt and model over the same assessment input.
+// agentIOContract is what every HEROS node consumes FROM UPSTREAM and produces.
+//
+// # 🔴 The input contract describes what a PREDECESSOR delivers, not what the node needs to run
+//
+// This is the correction the agent's first real fan-in forced, and it is worth the paragraph because
+// the obvious version is wrong in a way that only shows up on a graph.
+//
+// The first attempt declared `workflow_id`, `source_revision` and `residue` as REQUIRED input — which
+// is what a HEROS node genuinely needs. That made every fan-in unsatisfiable: a `namespaced` merge
+// delivers `{left: …, right: …}`, which supplies none of those names, so the shared validator refused
+// a topology that is perfectly runnable.
+//
+// The validator was right and the contract was wrong. In `internal/typedcontract`, a node's input
+// contract is what its PREDECESSORS must supply — that is the whole meaning of checking a merge against
+// it. The assessment input is AMBIENT: the runner hands the same `Input` to every node, in every
+// topology, including the single-node one where there is no predecessor at all. Declaring it as
+// required input asserts a delivery obligation no topology can meet, on any edge, ever.
+//
+// 🚫 So the input requires NOTHING, and that is not the trivially-satisfiable contract D1 warns about.
+// The OUTPUT contract is where the force is, and the check it powers is live: two HEROS nodes both
+// declare `edges` and `labels`, so an `all-fields` merge between them COLLIDES and is refused —
+// `namespaced` is the answer for a fan-in whose nodes produce the same field names, which is exactly
+// what `MergeNamespaced`'s own comment says it is for. `TestAnAllFieldsMergeBetweenTwoAgentNodesIsRefused`
+// asserts the refusal, so the contract's teeth are proved rather than assumed.
 func agentIOContract() discovery.IRIOContract {
+	nodeFacts := map[string]any{
+		"edges":     map[string]any{"type": "array"},
+		"labels":    map[string]any{"type": "array"},
+		"narrative": map[string]any{"type": "string"},
+	}
 	return discovery.IRIOContract{
 		InputSchema: map[string]any{
 			"type": "object",
-			"properties": map[string]any{
-				"workflow_id":     map[string]any{"type": "string"},
-				"source_revision": map[string]any{"type": "string"},
-				"residue":         map[string]any{"type": "object"},
-			},
-			"required": []any{"workflow_id", "source_revision"},
+			// What an upstream node can hand this one. Optional, because a node with no predecessor is
+			// the DEFAULT shape and it runs on the ambient assessment input alone.
+			"properties": nodeFacts,
+			"required":   []any{},
 		},
 		OutputSchema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"edges":     map[string]any{"type": "array"},
-				"labels":    map[string]any{"type": "array"},
-				"narrative": map[string]any{"type": "string"},
-			},
+			"type":       "object",
+			"properties": nodeFacts,
+			// 🔴 REQUIRED, and this is what makes the merge check bite. A node that declared no required
+			// output would collide with nothing and satisfy anything.
 			"required": []any{"edges", "labels"},
 		},
 	}
