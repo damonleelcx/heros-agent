@@ -126,7 +126,7 @@ type NodeHealthEntry struct {
 type NodeHealthDocument struct {
 	// SinceMS is when this process started counting. 🔴 Required reading beside every zero: a node with
 	// no inferences and a `since` of a minute ago is a restarted process, not an idle node.
-	SinceMS int64 `json:"since_ms"`
+	SinceMS int64             `json:"since_ms"`
 	Nodes   []NodeHealthEntry `json:"nodes"`
 }
 

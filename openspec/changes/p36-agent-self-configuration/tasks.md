@@ -330,6 +330,46 @@
 
 ## 11. Sign-off
 
-- [ ] 11.1 PRD §14 Q1–Q5 answered and folded in.
-- [ ] 11.2 Task 1.1's finding reviewed **before** the phase is scheduled — it decides whether this is additive or a migration of every pin.
-- [ ] 11.3 D5 re-confirmed at the end of the phase, when a self-optimizing agent looks like the obvious next step.
+→ [`docs/prd/P36-agent-self-configuration.md` §14–15](../../../docs/prd/P36-agent-self-configuration.md),
+fenced by `TestThePRDCarriesTheSignOffAndTheFindingThatSizedThePhase`.
+
+- [x] 11.1 PRD §14 Q1–Q5 answered and folded in.
+      → §14 is now **ANSWERED**: each question carries its answer, its reasoning in one sentence, and where it
+      is enforced. The original wording is kept as an appendix. A reader of the PRD no longer has to open a
+      second document to learn what was decided.
+- [x] 11.2 Task 1.1's finding reviewed **before** the phase is scheduled — it decides whether this is additive or a migration of every pin.
+      → §15.1 states it as a finding rather than a reference: a nested `nodes` array cannot preserve the hash,
+      a compatibility encoding is required, **and with it no pin is migrated and no `spec_json` row is
+      rewritten**. The fence requires the PRD to say that the evidence was recorded by the **pre-P36 tree** —
+      a fixture reconstructed afterwards asserts only that the new code is a function of its input, and that
+      distinction is the entire value of the evidence.
+- [x] 11.3 D5 re-confirmed at the end of the phase, when a self-optimizing agent looks like the obvious next step.
+      → §15.2, dated, and it does the thing that makes a re-confirmation worth more than the original:
+      it names what the phase built and says why none of it weakens the argument. *The agent is now a graph, it
+      is rehearsed per node, its topology goes through the customer's validator — and every one of those makes
+      it more tempting to let it tune itself, while none changes the fact that verification is performed by
+      measurements the agent produces.*
+      It also names what would have to be overturned: the **circularity**, not the gating.
+
+---
+
+## Phase status
+
+**Complete.** Eleven sections, every task checked, every fence drilled — mutated to fail, observed red,
+restored, observed green. `go test ./...` green; `go vet` green under all five build tags (`pgproof`,
+`holdout`, `live`, `realrepo`, `verifiers`); 130/130 console tests and `npm run build` green.
+
+**The phase is additive** ([D-36.0](decisions.md)): no pinned inference is migrated and no stored
+definition is rewritten.
+
+Three things this phase found that review had not:
+
+1. **The per-node spend ceiling was vacuous.** It was re-checked before every node and learned nothing
+   between checks, because the meter is written once per assessment. A four-node definition under a
+   ten-token ceiling spent thirty-two. Found by a fence, not by reading (§5.2).
+2. **The agent's node IO contract was wrong**, and the shared validator said so on the first fan-in. A
+   private validator would have enshrined the error and surfaced it on a customer's repository instead
+   ([D-36.0b](decisions.md)).
+3. **The calibration set already exercises a conditional edge**, by an accident of having
+   deliberately-empty near-miss fixtures. Now pinned, so removing them fails a test that names the
+   consequence (§7.4).
