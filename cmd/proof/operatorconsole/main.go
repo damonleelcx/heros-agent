@@ -52,6 +52,7 @@ import (
 	"github.com/heros-foreal/agentd/internal/providergateway"
 	"github.com/heros-foreal/agentd/internal/runqueue"
 	"github.com/heros-foreal/agentd/internal/telemetry"
+	"github.com/heros-foreal/agentd/internal/variantspec"
 )
 
 const (
@@ -336,13 +337,116 @@ func wire(repoDir string) (api.AdminDeps, error) {
 	}); err != nil {
 		return api.AdminDeps{}, err
 	}
-	agentSvc, err := adminops.NewAgentService(exec, agentVersions, nil, newDemoAgentSpend(), nil, nil,
+
+	// ── P36 · a MULTI-NODE definition, activated, so the node dimension can actually be seen ──
+	//
+	// 🔴 This one IS active, and that is not a contradiction of the note above. The pending single-node
+	// version stays pending so the GATE is visible; this one is serving so the NODE DIMENSION is. A demo
+	// with only the first would render the P36 surfaces empty and prove nothing about them — which is
+	// the same "a fence that cannot go red" failure, applied to a demonstration.
+	//
+	// It is the smallest definition that exercises every new surface: three nodes, a CONCURRENT group
+	// with a declared merge, and a PREDICATE edge — so the console shows a fan-in, a conditional route,
+	// and per-node numbers rather than one node's worth of each.
+	graphDef := herosagent.Definition{
+		Nodes: []herosagent.Node{
+			{
+				NodeID: "heros_triage", PromptRef: "prompt/heros-triage@1", ModelRef: "claude-haiku-4-5",
+				CredentialRef: "anthropic", ContextRef: "context/residue-only@1",
+				HarnessRef: "harness/envelope-standard@1",
+			},
+			{
+				NodeID: "heros_analyst", PromptRef: "prompt/heros-residue@3", ModelRef: "claude-opus-5",
+				CredentialRef: "anthropic", ContextRef: "context/residue-only@1",
+				HarnessRef: "harness/envelope-standard@1",
+			},
+			{
+				NodeID: "heros_critic", PromptRef: "prompt/heros-critic@2", ModelRef: "claude-sonnet-5",
+				// 🔴 A DIFFERENT PROVIDER, deliberately. Per-node credentials are the main reason to
+				// want a graph — a cheap model triaging for an expensive one is usually two vendors —
+				// and a demo where every node named `anthropic` would render the column as decoration.
+				CredentialRef: "openai", ContextRef: "context/residue-only@1",
+				HarnessRef: "harness/envelope-standard@1", LoopRef: "loop/reflexion@2",
+			},
+		},
+		Order: []string{"heros_triage", "heros_analyst", "heros_critic"},
+		Edges: []variantspec.Edge{
+			{FromNodeID: "heros_triage", ToNodeID: "heros_analyst", Kind: "data"},
+			// The conditional route: the critic runs only when the analyst DECLINED something. That is
+			// the obvious use of a predicate and it is why `abstained` is in the vocabulary — not
+			// knowing is an OUTPUT, so it is routable.
+			{FromNodeID: "heros_analyst", ToNodeID: "heros_critic",
+				Kind: variantspec.EdgeKindPredicate, Predicate: "abstained"},
+		},
+		GraphGroups: []variantspec.GraphGroup{{
+			Nodes: []string{"heros_triage", "heros_analyst"}, Concurrent: true,
+		}},
+	}
+	graphHash, err := graphDef.ConfigHash()
+	if err != nil {
+		return api.AdminDeps{}, err
+	}
+	if err := agentVersions.Put(context.Background(), herosagent.Version{
+		ConfigHash: graphHash, Definition: graphDef,
+		ModelRef:      herosagent.DenormalisedModelRef(graphDef),
+		CredentialRef: herosagent.DenormalisedCredentialRef(graphDef),
+		// 🔴 `passed` with a REPORT. A version rendered as serving with no report would show the state
+		// this console's own rule forbids: "a definition that has not been rehearsed has no numbers —
+		// which is different from having bad ones".
+		RehearsalState:  herosagent.RehearsalPassed,
+		RehearsalReport: `{"passed":true,"min_precision":0.9,"min_recall":0.7,"scores":[{"fixture":"py_linear_chain","precision":0.96,"recall":0.81},{"fixture":"go_chain","precision":0.93,"recall":0.78}]}`,
+		CreatedAtMS:     now().UnixMilli(),
+	}); err != nil {
+		return api.AdminDeps{}, err
+	}
+	if err := agentVersions.Activate(context.Background(), graphHash, now().UnixMilli()); err != nil {
+		return api.AdminDeps{}, err
+	}
+
+	// The per-node counters, seeded so the Nodes tab shows the distinction it exists for: a node that
+	// has run, a node that has FAILED, and a node a predicate SKIPPED are three different situations
+	// and only one of them is a problem.
+	nodeHealth := herosagent.NewNodeHealthRegistry(now().UnixMilli())
+	for _, run := range []herosagent.NodeRun{
+		{NodeID: "heros_triage", ProviderCalls: 1, TokensIn: 1_840, TokensOut: 210, LatencyMS: 620, Edges: 0, Labels: 2},
+		{NodeID: "heros_triage", ProviderCalls: 1, TokensIn: 1_910, TokensOut: 198, LatencyMS: 590, Edges: 0, Labels: 3},
+		{NodeID: "heros_analyst", ProviderCalls: 1, TokensIn: 12_400, TokensOut: 1_820, LatencyMS: 4_310, Edges: 7, Abstentions: 1},
+		{NodeID: "heros_analyst", ProviderCalls: 1, TokensIn: 11_960, TokensOut: 1_740, LatencyMS: 4_020, Edges: 5},
+		{NodeID: "heros_analyst", ProviderCalls: 1, Failed: true, Cause: "the provider returned 429", LatencyMS: 1_200},
+		// Skipped, because the analyst abstained on only one of the three runs — so the predicate held
+		// once and routed around the critic twice.
+		{NodeID: "heros_critic", ProviderCalls: 1, TokensIn: 3_100, TokensOut: 640, LatencyMS: 2_180, Edges: 1},
+		{NodeID: "heros_critic", Skipped: true, SkipReason: `"abstained" did not hold after heros_analyst`},
+		{NodeID: "heros_critic", Skipped: true, SkipReason: `"abstained" did not hold after heros_analyst`},
+	} {
+		nodeHealth.Observe(run)
+	}
+
+	// 🔴 A REAL Publisher, so the publish and rollback controls are exercisable rather than merely
+	// rendered. A demo whose write path is nil renders every control and proves nothing about any of
+	// them — which is the shape of the three unreachable routes this console has already shipped.
+	//
+	// The model catalogue and the secrets source are the demo's, and they are honest about being so:
+	// no provider is contacted, and a publish validates exactly what a real one validates.
+	agentPub, err := herosagent.NewPublisher(
+		demoModels{},
+		providergateway.StaticSecrets{
+			"anthropic": {APIKey: "demo-not-a-real-key"},
+			"openai":    {APIKey: "demo-not-a-real-key"},
+		},
+		agentVersions, herosagent.RunnerHosts{}, func() int64 { return now().UnixMilli() })
+	if err != nil {
+		return api.AdminDeps{}, err
+	}
+
+	agentSvc, err := adminops.NewAgentService(exec, agentVersions, agentPub, newDemoAgentSpend(), nil, nil,
 		// P30's runner supplies NO host services, so `react-loop`, `plan-execute` and `critic-loop`
 		// render unavailable WITH what each would need — which is the half of D11 worth seeing.
 		herosagent.RunnerHosts{})
 	if err != nil {
 		return api.AdminDeps{}, err
 	}
+	agentSvc = agentSvc.WithNodeHealth(nodeHealth)
 
 	crossSvc, err := adminops.NewCrossTenantService(exec, adminops.CrossTenantConfig{
 		Accounts: accounts, Meter: meter, Ledger: billSvc.Ledger(), Admission: admission,
@@ -747,4 +851,19 @@ func (d *demoAgentSpend) SetPlacement(_ context.Context, tenantID, placement str
 	defer d.mu.Unlock()
 	d.placements[tenantID] = placement
 	return nil
+}
+
+// demoModels is the operator model registry the demo publishes against.
+//
+// 🚫 It contacts nothing. A publish validates that a model is REGISTERED — the same check a real
+// deployment makes — and the list is the three the seeded definitions bind, so a publish naming
+// anything else is refused by name exactly as it would be in production.
+type demoModels struct{}
+
+func (demoModels) Models(context.Context) ([]herosagent.RegisteredModel, error) {
+	return []herosagent.RegisteredModel{
+		{ModelID: "claude-opus-5", Provider: "anthropic"},
+		{ModelID: "claude-haiku-4-5", Provider: "anthropic"},
+		{ModelID: "claude-sonnet-5", Provider: "openai"},
+	}, nil
 }

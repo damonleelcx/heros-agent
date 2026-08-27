@@ -105,12 +105,44 @@ type AgentOverview struct {
 	MemoryAvailability  []herosagent.Availability `json:"memory_availability"`
 	// Versions is every published definition, newest first.
 	Versions []AgentVersionRow `json:"versions"`
+	// Nodes is the SERVING definition's node list with its live per-node numbers (P36 tasks 6.4, 8.1).
+	//
+	// 🔴 Per node and never only as an aggregate. An aggregate over a graph says the agent is slow; it
+	// does not say WHICH NODE is slow, and that is the only form of the answer anybody can act on.
+	Nodes []AgentNodeRow `json:"nodes"`
+	// NodesKnown is false when no per-node source is wired: the numbers are then meaningless and render
+	// as unknown rather than as zero. Same discipline as InferencesKnown.
+	NodesKnown bool `json:"nodes_known"`
 	// KillSwitchArmed reports whether HEROS is halted through the platform's existing durable switch
 	// (task 6.8). Carried on this view so the agent surface cannot show a healthy agent that is in
 	// fact halted.
 	KillSwitchArmed bool   `json:"kill_switch_armed"`
 	KillSwitchNote  string `json:"kill_switch_note,omitempty"`
 	CanAdmin        bool   `json:"can_admin"`
+}
+
+// AgentNodeRow is one node of the serving definition, with what it has done (P36 tasks 6.4, 8.1).
+type AgentNodeRow struct {
+	NodeID string `json:"node_id"`
+	// The axis bindings, so the operator surface can answer "which node is which" without a second read.
+	PromptRef  string `json:"prompt_ref"`
+	ModelRef   string `json:"model_ref"`
+	LoopRef    string `json:"loop_ref,omitempty"`
+	HarnessRef string `json:"harness_ref"`
+	// Inferences, ProviderCalls, TokensIn, TokensOut, Failures, Skips and LatencyMS are the live
+	// counters. 🔴 They are IN-PROCESS, not a database aggregate: a per-request query over
+	// `heros_inference.nodes_json` would be the real-time read against the events table a CQRS split
+	// exists to prevent, and a health surface that goes slow when the database does reports the wrong
+	// thing at the worst moment.
+	Inferences    int64 `json:"inferences"`
+	ProviderCalls int64 `json:"provider_calls"`
+	TokensIn      int64 `json:"tokens_in"`
+	TokensOut     int64 `json:"tokens_out"`
+	Failures      int64 `json:"failures"`
+	Skips         int64 `json:"skips"`
+	// LatencyMS is the mean over this node's completed calls. 🔴 Zero with `Inferences == 0` is NOT a
+	// fast node; the console renders it as "not yet run" for that reason.
+	LatencyMS int64 `json:"latency_ms"`
 }
 
 // AgentVersionRow is one published definition in the list.
@@ -125,6 +157,15 @@ type AgentVersionRow struct {
 	// derive activity from recency.
 	Active      bool  `json:"active"`
 	CreatedAtMS int64 `json:"created_at_ms"`
+	// Nodes is how many nodes this version declares (P36). Two versions differing only in TOPOLOGY are
+	// otherwise indistinguishable in this list — same model, same credential, different agent.
+	Nodes int `json:"nodes"`
+	// RollbackTarget is true when this version could be rolled back TO: it passed and is not serving.
+	//
+	// 🔴 Computed here rather than in the console, so the control is offered exactly where the backend
+	// would accept it. A console that decided this itself would eventually offer a button the backend
+	// refuses, which is the "offered and then refused" failure the surfaces map exists to prevent.
+	RollbackTarget bool `json:"rollback_target"`
 }
 
 // AgentSpendRow is one tenant's meter (task 6.5).
@@ -229,6 +270,28 @@ type AgentSpendSource interface {
 	SetPlacement(ctx context.Context, tenantID, placement string) error
 }
 
+// AgentNodeHealth reports the live per-node counters (P36 tasks 6.4, 8.1).
+//
+// 🔴 Nil is legal and reads as UNKNOWN rather than as zero — a deployment with no observation sink has
+// no numbers, and a zero would say "this node has never run", which is a different and false claim.
+//
+// 🔴 It returns `herosagent.NodeCounters` rather than a type of its own. A second counter struct here
+// would be a second definition of the same six numbers, and the two would drift the first time one of
+// them gained a field — with the symptom being a console column that is always zero.
+type AgentNodeHealth interface {
+	NodeHealth(nodeID string) herosagent.NodeCounters
+}
+
+func nodeCountersInto(c herosagent.NodeCounters, row AgentNodeRow) AgentNodeRow {
+	row.Inferences, row.ProviderCalls = c.Inferences, c.ProviderCalls
+	row.TokensIn, row.TokensOut = c.TokensIn, c.TokensOut
+	row.Failures, row.Skips = c.Failures, c.Skips
+	if c.ProviderCalls > 0 {
+		row.LatencyMS = c.LatencyTotalMS / c.ProviderCalls
+	}
+	return row
+}
+
 // AgentInferenceCounter reports how many pinned inferences exist. Nil is legal and reads as unknown.
 type AgentInferenceCounter interface {
 	CountFor(ctx context.Context, tenantID string) (int, error)
@@ -274,10 +337,21 @@ type AgentService struct {
 	kill      AgentKillSwitch
 	hosts     herosagent.RunnerHosts
 	rehearse  RehearseFunc
+	// nodes is the live per-node counter source (P36 task 8.1). Nil reads as unknown.
+	nodes AgentNodeHealth
 	// prompts is the platform's OWN prompt-authoring path (see platformprompt.go). Optional for the
 	// same reason `rehearse` is: a deployment with no platform database has no registry to write to,
 	// and that is an absence the surface reports rather than a construction error.
 	prompts PlatformPromptRegistrar
+}
+
+// WithNodeHealth wires the live per-node counters.
+//
+// Separate from NewAgentService, like WithRehearsal: a deployment that observes nothing is correct
+// without one, and it then renders the numbers as unknown rather than as zero.
+func (s *AgentService) WithNodeHealth(n AgentNodeHealth) *AgentService {
+	s.nodes = n
+	return s
 }
 
 // WithPlatformPrompts wires the platform prompt-authoring path.
@@ -354,6 +428,10 @@ func (s *AgentService) Overview(ctx context.Context) (AgentOverview, error) {
 			// 🔴 From the STORE's activation timestamp, never derived from recency or from
 			// rehearsal_state. A `passed` definition nobody activated is not serving anything.
 			Active: v.Active(), CreatedAtMS: v.CreatedAtMS,
+			Nodes: len(v.Definition.Nodes),
+			// Passed AND not serving. A pending version is not a state to return to, and the serving one
+			// is not something to roll back to.
+			RollbackTarget: v.RehearsalState == herosagent.RehearsalPassed && !v.Active(),
 		})
 	}
 
@@ -377,6 +455,21 @@ func (s *AgentService) Overview(ctx context.Context) (AgentOverview, error) {
 		} else {
 			out.Axes = axisRows(herosagent.Definition{}, s.hosts)
 		}
+	}
+
+	// The serving definition's nodes, with their live numbers.
+	shape := active.Definition
+	if !hasActive && len(versions) > 0 {
+		shape = versions[0].Definition
+	}
+	for _, n := range shape.Nodes {
+		row := AgentNodeRow{NodeID: n.NodeID, PromptRef: n.PromptRef, ModelRef: n.ModelRef,
+			LoopRef: n.LoopRef, HarnessRef: n.HarnessRef}
+		if s.nodes != nil {
+			row = nodeCountersInto(s.nodes.NodeHealth(n.NodeID), row)
+			out.NodesKnown = true
+		}
+		out.Nodes = append(out.Nodes, row)
 	}
 
 	if s.counter != nil {
@@ -779,6 +872,53 @@ func (s *AgentService) Publish(ctx context.Context, d herosagent.Definition, rea
 		return out, errors.New("adminops: the definition was published and the action could not be logged: " + aerr.Error())
 	}
 	return out, nil
+}
+
+// Rollback returns a PREVIOUSLY SERVING definition to service (P36 task 5.5).
+//
+// 🔴 It is a separate ACTION from Activate rather than the same one with a different label, and the
+// reason is the audit trail. "An operator activated version X" and "an operator rolled back to version
+// X" are the same database write and two different events, and the second is the one somebody
+// reconstructs an incident from. A single action would make a rollback indistinguishable from a routine
+// activation in the record — at exactly the moment the record matters most.
+//
+// 🚫 It takes no definition. Rollback activates a version that already exists; re-authoring the older
+// shape means retyping a configuration under pressure, and any transcription error produces a different
+// `config_hash` — a third configuration nobody has measured, activated in place of the one known to
+// work.
+func (s *AgentService) Rollback(ctx context.Context, configHash, reason string) error {
+	sess, _, err := s.exec.Authorize(ctx, adminrbac.CapAgentAdmin, TargetGlobal)
+	if err != nil {
+		return err
+	}
+	if s.publisher == nil {
+		return errors.New("adminops: this deployment mounts no agent publisher")
+	}
+	if strings.TrimSpace(reason) == "" {
+		return errors.New("adminops: rolling back an agent definition requires a reason — it changes " +
+			"what the platform infers about every customer's source, and a rollback with no stated cause " +
+			"is the hardest kind of change to reconstruct afterwards")
+	}
+	roller, ok := s.publisher.(interface {
+		Rollback(ctx context.Context, configHash string) error
+	})
+	if !ok {
+		// 🔴 Named rather than silently falling back to Activate. The two are the same write and
+		// different events; a fallback would record a rollback as a routine activation.
+		return errors.New("adminops: this deployment's publisher cannot roll back")
+	}
+	if err := roller.Rollback(ctx, configHash); err != nil {
+		return err
+	}
+	if _, aerr := s.exec.Audit().Append(adminaudit.Entry{
+		ActorAdminID: sess.AdminID, Target: TargetGlobal, Action: adminaudit.ActionCrossTenantView,
+		Reason: reason, Result: "rolled_back",
+		Evidence:  map[string]string{"config_hash": configHash, "act": "rollback"},
+		CreatedAt: s.exec.Now(),
+	}); aerr != nil {
+		return errors.New("adminops: the rollback succeeded and could not be logged: " + aerr.Error())
+	}
+	return nil
 }
 
 // Activate makes a rehearsed definition the one serving inference.

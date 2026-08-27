@@ -153,12 +153,45 @@
 
 ## 6. Frontend Dev — the operator surface
 
-- [ ] 6.1 **Inventory the current axis editor first.** Every control has a named destination or is deliberately removed with agreement. This is the highest-risk UI revision in the program.
-- [ ] 6.2 Nine axes and a node dimension. Collapse, do not omit — a hidden axis is indistinguishable from one that does not exist.
-- [ ] 6.3 Wiring becomes editable for multi-node and keeps its refusal text for single-node (3.4). Do not delete the reason; render it conditionally.
-- [ ] 6.4 Node-level view: which node produced which inference.
-- [ ] 6.5 Extend P26's operator build fence to every new axis and node kind — remove an operator surface and the build must fail.
-- [ ] 6.6 `scan:tokens` stays green; operator chrome unchanged so the two consoles are never confused.
+- [x] 6.1 **Inventory the current axis editor first.** Every control has a named destination or is deliberately removed with agreement. This is the highest-risk UI revision in the program.
+      → [`axis-editor-inventory.md`](axis-editor-inventory.md), written BEFORE the redesign. 26 controls, each with a
+      destination. **Nothing is deliberately removed.** The one thing that changes rather than moves is the axis
+      NAME `wiring` → `graph` (task 10.3), and the old spelling is refused by name with the new one stated.
+- [x] 6.2 Nine axes and a node dimension. Collapse, do not omit — a hidden axis is indistinguishable from one that does not exist.
+      → the Configuration tab groups by node: every node's eight rows are rendered, plus one definition-level
+      `graph` row. `groupByNode` preserves the definition's own ordering — the sequence the runner walks — rather
+      than sorting. Drill: `.slice(0, 1)` on the groups (render only the first node) turns the fence red.
+- [x] 6.3 Wiring becomes editable for multi-node and keeps its refusal text for single-node (3.4). Do not delete the reason; render it conditionally.
+      → `graphAxisRow` renders the axis in BOTH states, and the topology fieldset carries the reason. Drill:
+      rewording "no second node to order it against" out of the page turns the fence red.
+- [x] 6.4 Node-level view: which node produced which inference.
+      → the **Nodes** tab. Per node: inferences, tokens, latency, failures and **skips** — skips in their own
+      column, never folded into failures, because a node a predicate routed around did not fail. 🔴 Three
+      distinct renderings for zero: `unknown` (no source wired), `not yet run`, and a measured number.
+- [x] 6.5 Extend P26's operator build fence to every new axis and node kind — remove an operator surface and the build must fail.
+      → `agent-publish.test.mjs` gains three fences that DERIVE the nine axes from `variantspec.Dimensions()` +
+      `AxisGraph` and assert each has a surface, that the node dimension is rendered, and that the `graph` axis
+      appears in both states. 🔴 The old parser broke LOUDLY when `AuthorableAxes()` became derived — on its
+      anti-vacuity assertion rather than by returning an empty set and passing.
+- [x] 6.6 `scan:tokens` stays green; operator chrome unchanged so the two consoles are never confused.
+      → `npm run build` (which runs `scan:origins`, `scan:events`, `scan:tokens`, `scan:ledger` and
+      `scan:bundle`) passes; 130/130 console tests pass, including the P26 floor, craft and viewport suites.
+      No dependency was added and the chrome is untouched.
+
+**Verified in Chrome against a live stack** (`cmd/proof/operatorconsole` + the console BFF), not only in tests:
+
+- the header reads `serving 3cf6e2892ed4` **3 NODES**;
+- Configuration renders 3 nodes × 8 axes + one `graph` row reading
+  `heros_triage → heros_analyst → heros_critic; 2 edge(s); concurrent group [heros_triage, heros_analyst]`;
+- Nodes shows the three distinct situations — a node that ran, one that **failed once**, and one a predicate
+  **skipped twice**;
+- Versions shows the DISTINCT model and credential sets (`anthropic, openai`) and the shape per version;
+- a **two-node definition was published through the form** — "TARGET: 2-node definition … Published as
+  a21081d5… It is PENDING and serving nothing";
+- a **fan-in with no merge was refused**, and the operator was shown the shared validator's own sentence
+  verbatim: *"variantspec: spec is malformed: node \"merge\", dimension \"graph\": graph_groups[0]: 2 nodes
+  converge on \"merge\" and no merge is declared…"* under **"NOTHING HAPPENED"**. That is D1 end-to-end: the
+  agent's topology went through the customer's validator and the customer's words reached the operator.
 
 ## 7. AI Engineer
 

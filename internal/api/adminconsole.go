@@ -21,6 +21,7 @@ import (
 	"github.com/heros-foreal/agentd/internal/metering"
 	"github.com/heros-foreal/agentd/internal/plancfg"
 	"github.com/heros-foreal/agentd/internal/providergateway"
+	"github.com/heros-foreal/agentd/internal/variantspec"
 )
 
 // p8.go is the operator console's API — and it is deliberately NOT mounted on Server.
@@ -285,6 +286,7 @@ func (a *AdminAPI) routes() {
 	// this the operator console could compose a definition it could never publish.
 	m.HandleFunc("POST /admin/api/agent/prompt", a.session(a.mounted(a.deps.Agent != nil, "analysis agent", a.handleAgentPrompt)))
 	m.HandleFunc("POST /admin/api/agent/publish", a.session(a.mounted(a.deps.Agent != nil, "analysis agent", a.handleAgentPublish)))
+	m.HandleFunc("POST /admin/api/agent/rollback", a.session(a.mounted(a.deps.Agent != nil, "analysis agent", a.handleAgentRollback)))
 	m.HandleFunc("POST /admin/api/agent/activate", a.session(a.mounted(a.deps.Agent != nil, "analysis agent", a.handleAgentActivate)))
 	m.HandleFunc("POST /admin/api/agent/cap", a.session(a.mounted(a.deps.Agent != nil, "analysis agent", a.handleAgentCap)))
 	m.HandleFunc("POST /admin/api/agent/placement", a.session(a.mounted(a.deps.Agent != nil, "analysis agent", a.handleAgentPlacement)))
@@ -1016,20 +1018,90 @@ func (a *AdminAPI) handleAgentSpend(w http.ResponseWriter, r *http.Request) {
 // produces is a definition published without the thing the operator thought they set. An unknown axis
 // — including `wiring` — is refused BY NAME.
 type agentEditRequest struct {
+	// The SINGLE-NODE fields, unchanged and still the default (design D2). A console that has not been
+	// updated, a script, and every existing caller keep working byte-for-byte.
 	Axes          map[string]string `json:"axes"`
 	SkillRefs     []string          `json:"skill_refs"`
 	ToolNames     []string          `json:"tool_names"`
 	CredentialRef string            `json:"credential_ref"`
 	Reason        string            `json:"reason"`
+
+	// ── P36: the multi-node form ──────────────────────────────────────────────────────────────────
+	//
+	// 🔴 ADDITIVE and omitempty-shaped: a request carrying no `nodes` is read exactly as it was before
+	// P36. That is what keeps a single-node publish producing the same `config_hash` it always did.
+	//
+	// 🚫 The two forms are MUTUALLY EXCLUSIVE and a request carrying both is REFUSED rather than
+	// merged. Merging would have to decide whether the top-level `axes` describe a first node or an
+	// override of every node, and either reading silently publishes something the caller did not write.
+	Nodes    []agentNodeEdit `json:"nodes,omitempty"`
+	Topology *agentTopology  `json:"topology,omitempty"`
+}
+
+// agentNodeEdit is ONE node as the console submits it.
+type agentNodeEdit struct {
+	NodeID string `json:"node_id"`
+	// Axes carries the eight PER-NODE axes. `graph` is definition-level and is refused here by name.
+	Axes          map[string]string `json:"axes"`
+	SkillRefs     []string          `json:"skill_refs"`
+	ToolNames     []string          `json:"tool_names"`
+	CredentialRef string            `json:"credential_ref"`
+}
+
+// agentTopology is the definition-level `graph` axis.
+//
+// 🔴 It carries `variantspec.Edge` and `variantspec.GraphGroup` — the CUSTOMER's own types, unchanged
+// (design D1). A private wire shape here would be the conversion step where the agent's topology could
+// acquire different semantics from a customer's, and it would have to be kept in sync by hand.
+type agentTopology struct {
+	Order       []string                 `json:"order"`
+	Edges       []variantspec.Edge       `json:"edges"`
+	GraphGroups []variantspec.GraphGroup `json:"graph_groups"`
 }
 
 func (req agentEditRequest) definition() (herosagent.Definition, error) {
-	edit := herosagent.AxisEdit{}
-	for k, v := range req.Axes {
-		edit[herosagent.Axis(k)] = v
+	if len(req.Nodes) == 0 {
+		if req.Topology != nil && (len(req.Topology.Order) > 0 || len(req.Topology.Edges) > 0 ||
+			len(req.Topology.GraphGroups) > 0) {
+			return herosagent.Definition{}, errors.New("this edit declares a topology and no nodes. A " +
+				"topology is a statement about how nodes relate to EACH OTHER, so declaring one without " +
+				"them describes a graph over nothing")
+		}
+		edit := herosagent.AxisEdit{}
+		for k, v := range req.Axes {
+			edit[herosagent.Axis(k)] = v
+		}
+		return herosagent.DefinitionFromAxes(edit,
+			herosagent.ListEdit{SkillRefs: req.SkillRefs, ToolNames: req.ToolNames}, req.CredentialRef)
 	}
-	return herosagent.DefinitionFromAxes(edit,
-		herosagent.ListEdit{SkillRefs: req.SkillRefs, ToolNames: req.ToolNames}, req.CredentialRef)
+	if len(req.Axes) > 0 || len(req.SkillRefs) > 0 || len(req.ToolNames) > 0 ||
+		strings.TrimSpace(req.CredentialRef) != "" {
+		// 🚫 REFUSED, not merged. Neither reading of "top-level axes beside a node list" is obviously
+		// right, and both silently publish something the caller did not write.
+		return herosagent.Definition{}, errors.New("this edit carries BOTH the single-node axis fields " +
+			"and a node list. They are two ways to say the same thing and it is refused rather than " +
+			"merged: whether the top-level axes describe the first node or override every node is a " +
+			"question with two answers, and picking one would publish a definition nobody authored. " +
+			"Send `nodes` alone for a graph, or the top-level fields alone for a single node")
+	}
+	nodes := make([]herosagent.NodeEdit, 0, len(req.Nodes))
+	for _, n := range req.Nodes {
+		edit := herosagent.AxisEdit{}
+		for k, v := range n.Axes {
+			edit[herosagent.Axis(k)] = v
+		}
+		nodes = append(nodes, herosagent.NodeEdit{
+			NodeID: n.NodeID, Axes: edit,
+			Lists:         herosagent.ListEdit{SkillRefs: n.SkillRefs, ToolNames: n.ToolNames},
+			CredentialRef: n.CredentialRef,
+		})
+	}
+	var topo herosagent.TopologyEdit
+	if req.Topology != nil {
+		topo = herosagent.TopologyEdit{Order: req.Topology.Order, Edges: req.Topology.Edges,
+			GraphGroups: req.Topology.GraphGroups}
+	}
+	return herosagent.DefinitionFromNodes(nodes, topo, nil)
 }
 
 func (a *AdminAPI) handleAgentPreview(w http.ResponseWriter, r *http.Request) {
@@ -1099,6 +1171,26 @@ func (a *AdminAPI) handleAgentActivate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"activated": req.ConfigHash})
+}
+
+// handleAgentRollback returns a previously serving definition to service (P36 task 5.5).
+//
+// 🔴 Its own route rather than a flag on `activate`, for the reason `AgentService.Rollback` gives: the
+// two are the same database write and two different events, and a flag would make a rollback
+// indistinguishable from a routine activation in the audit record.
+func (a *AdminAPI) handleAgentRollback(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ConfigHash string `json:"config_hash"`
+		Reason     string `json:"reason"`
+	}
+	if !decodeAdminJSON(w, r, &req) {
+		return
+	}
+	if err := a.deps.Agent.Rollback(r.Context(), req.ConfigHash, req.Reason); err != nil {
+		writeCapabilityError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"rolled_back": req.ConfigHash})
 }
 
 func (a *AdminAPI) handleAgentCap(w http.ResponseWriter, r *http.Request) {
