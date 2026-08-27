@@ -496,7 +496,15 @@ func TestPG_ZZ_DownMigrationRemovesTransformOnly(t *testing.T) {
 	}
 	var fn bool
 	if err := testDB.QueryRowContext(ctx,
-		`SELECT count(*) > 0 FROM pg_proc WHERE proname = 'registry_reject_mutation'`).Scan(&fn); err != nil {
+		// 🔴 Scoped to THIS schema. `pg_proc` is database-wide and `internal/pgtest` gives every test
+		// package its own schema, so an unscoped `count(*) > 0` is satisfied by ANOTHER package's copy
+		// of the function — and this assertion is that the rollback did NOT drop ours. Unscoped it is a
+		// FALSE GREEN: 0004 could drop the function in this schema and the test would still pass,
+		// because somebody else's exists. (The `to_regclass` check above is already search_path-scoped,
+		// which is why it never had this problem.)
+		`SELECT count(*) > 0 FROM pg_proc
+		  WHERE proname = 'registry_reject_mutation'
+		    AND pronamespace = current_schema()::regnamespace`).Scan(&fn); err != nil {
 		t.Fatalf("check function: %v", err)
 	}
 	if !fn {

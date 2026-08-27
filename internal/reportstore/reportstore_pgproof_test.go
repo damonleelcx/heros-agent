@@ -62,6 +62,21 @@ func TestMain(m *testing.M) {
 
 // seed inserts the FK targets the report rows reference (read-side integrity), so the tests exercise
 // the report CHECKs rather than tripping on a missing parent.
+//
+// # 🔴 This seed had never once run, and that is the finding rather than the typo
+//
+// It was committed with the P4.5 feature and was wrong against the schema in four ways at the same
+// time: it omitted `workflow`'s four NOT NULL columns, it gave `variant` a `config_hash` column that
+// has never existed, it omitted `variant.label`, and it inserted `config` BEFORE the `variant` its FK
+// points at. Four independent mistakes do not survive a single successful run — so there was never one.
+//
+// That is what a `pgproof` test costs: it needs a live Postgres and `HEROS_TEST_POSTGRES_URL`, so a
+// contributor without one writes it, sees the package skip or the build pass, and ships. The file was
+// green in every ordinary `go test ./...` because the build tag excluded it.
+//
+// 🚫 The seed is deliberately NOT written against a hand-copied column list. Every value below exists
+// because the SCHEMA requires it, and the ordering below is the FK order — `workflow` → `variant` →
+// `config`, because `config.variant_id` references `variant(variant_id)`.
 func seed(db *sql.DB) {
 	must := func(q string, args ...any) {
 		if _, err := db.Exec(q, args...); err != nil {
@@ -69,11 +84,22 @@ func seed(db *sql.DB) {
 			os.Exit(1)
 		}
 	}
-	must(`INSERT INTO workflow (workflow_id) VALUES ($1) ON CONFLICT DO NOTHING`, pgWF)
-	must(`INSERT INTO config (config_hash, lineage_json) VALUES ($1, '{}') ON CONFLICT DO NOTHING`, pgConfig)
-	must(`INSERT INTO variant (variant_id, workflow_id, config_hash) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`, pgVariant, pgWF, pgConfig)
-	must(`INSERT INTO eval_set (eval_set_hash, workflow_id, version) VALUES ($1,$2,'v1') ON CONFLICT DO NOTHING`, pgSet, pgWF)
-	must(`INSERT INTO eval_case (case_id, workflow_id, suite) VALUES ($1,$2,'s') ON CONFLICT DO NOTHING`, pgCase, pgWF)
+	// `workflow` carries four NOT NULL columns beyond its key. They are the identity of the code under
+	// measurement, so there is no default for any of them — a row without them would be a workflow
+	// nobody could resolve back to a revision.
+	must(`INSERT INTO workflow (workflow_id, repo_url, commit_sha, language, ir_version)
+	      VALUES ($1, 'https://example.invalid/reportstore', 'rev-pg', 'python', '1')
+	      ON CONFLICT DO NOTHING`, pgWF)
+	// 🔴 BEFORE `config`, which references it. The previous order inserted `config` first and would have
+	// failed on the FK even had its column list been right.
+	must(`INSERT INTO variant (variant_id, workflow_id, label)
+	      VALUES ($1, $2, 'reportstore proof') ON CONFLICT DO NOTHING`, pgVariant, pgWF)
+	must(`INSERT INTO config (config_hash, variant_id, workflow_id, ir_version, lineage_json)
+	      VALUES ($1, $2, $3, '1', '{}'::jsonb) ON CONFLICT DO NOTHING`, pgConfig, pgVariant, pgWF)
+	must(`INSERT INTO eval_set (eval_set_hash, workflow_id, version)
+	      VALUES ($1, $2, 'v1') ON CONFLICT DO NOTHING`, pgSet, pgWF)
+	must(`INSERT INTO eval_case (case_id, workflow_id, suite)
+	      VALUES ($1, $2, 's') ON CONFLICT DO NOTHING`, pgCase, pgWF)
 }
 
 // Task 8.4: an ablation row CANNOT be stored as non-ephemeral — the DB refuses to let a measurement

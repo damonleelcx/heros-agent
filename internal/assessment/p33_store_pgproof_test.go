@@ -391,6 +391,29 @@ func TestSpendIsExportedPerTenant(t *testing.T) {
 
 // TestTheHealthBreakdownIsPerAxisAndPerState is DevOps task 6.1's query, proved against the real
 // index rather than asserted about.
+//
+// # 🔴 What P34 changed here, and why the previous version of this test was pinning a dead alarm
+//
+// `AllNotMeasuredRate` exists because "the rate of assessments returning NINE `not_measured` findings
+// is the earliest signal that a language frontend or the sandbox broke". It is the query that has to
+// keep working when nobody is looking at it.
+//
+// While P34 was pending, `loop` and `graph` were REFUSED on every assessment — `Axis.P34Pending()`
+// returned true for both, and the extractors refused rather than reporting on a configuration that did
+// not exist yet. That was correct at the time and it had a consequence nobody wrote down: **no
+// assessment could ever have nine `not_measured` findings**, because two of the nine were always
+// refused. The alarm could not fire. Its rate was structurally zero.
+//
+// This test asserted `allNM == 0` on an empty repository and called that "the correct answer" — so it
+// was pinning the vacuity rather than the property. When P34 landed and both axes started reporting,
+// the assertion went red, which is the fence doing the one useful thing it could still do: telling
+// somebody the world had changed underneath it.
+//
+// So it now asserts BOTH directions, with subjects chosen so neither can go vacuous again:
+//
+//	an empty repository        → nine not_measured  → COUNTS. The alarm is live.
+//	an unreadable language     → nine refused       → does NOT count. A refusal is not a failure to
+//	                                                  measure, and the alarm must not fire on one.
 func TestTheHealthBreakdownIsPerAxisAndPerState(t *testing.T) {
 	db := liveDB(t)
 	store, err := NewPGStore(db)
@@ -403,8 +426,8 @@ func TestTheHealthBreakdownIsPerAxisAndPerState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRunner: %v", err)
 	}
-	// An assessment of a repository with NO call sites: every axis but `loop` comes back
-	// `not_measured`. This is DevOps task 6.2's alarm condition, produced rather than simulated.
+	// An assessment of a repository with NO call sites: every axis comes back `not_measured`. This is
+	// DevOps task 6.2's alarm condition, produced rather than simulated.
 	empty := Subject{WorkflowID: "wf-empty", IR: &discovery.IR{}}
 	if _, err := r.Run(context.Background(), Config{
 		AssessmentID: "as-h1", TenantID: "tn-h", SourceRevision: "rev-h",
@@ -437,11 +460,58 @@ func TestTheHealthBreakdownIsPerAxisAndPerState(t *testing.T) {
 	if total != 1 {
 		t.Fatalf("counted %d assessments, want 1", total)
 	}
-	// `loop` is refused, not not_measured, so this assessment is NOT nine-not-measured. That is the
-	// correct answer and it is the one worth asserting: the alarm must not fire on a report that
-	// contains a legitimate refusal.
-	if allNM != 0 {
-		t.Fatalf("an assessment with eight not_measured findings and one refusal counted as "+
-			"all-not-measured (%d) — the alarm would fire on every assessment until P34 lands", allNM)
+	// 🔴 THE ALARM FIRES, and that it can is the point. A repository the platform could measure nothing
+	// about is exactly what this rate is for; while two of the nine axes were permanently refused, this
+	// number could not leave zero however broken the frontends were.
+	if allNM != 1 {
+		t.Fatalf("an assessment whose nine findings are ALL not_measured counted as all-not-measured "+
+			"%d time(s), want 1. This is the alarm condition, and a rate that cannot reach it is a "+
+			"monitor that reports health by construction.", allNM)
+	}
+
+	// ── the other direction: a REFUSAL is not a failure to measure ───────────────────────────────
+	//
+	// 🔴 The subject is a repository in a language this build has no frontend for, which refuses every
+	// axis with `RefusalLanguage`. That is a gap on OUR side, stated as one — and an alarm that counted
+	// it would page somebody about a customer's Ruby repository every time one was assessed.
+	refusedSubject := subjectForLocal(t, "unsupported-language")
+	if len(refusedSubject.IR.Nodes) != 0 {
+		t.Skipf("this build now reads %d node(s) from the fixture's language, so it no longer produces "+
+			"a refusal and this half of the test has no subject", len(refusedSubject.IR.Nodes))
+	}
+	refusedSubject.WorkflowID = "wf-refused"
+	got, err := r.Run(context.Background(), Config{
+		AssessmentID: "as-h2", TenantID: "tn-h", SourceRevision: "rev-h2",
+		AgentConfigHash: "cfg-h", SpendCapUSD: 1.00,
+	}, refusedSubject)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	// The subject really does refuse — asserted rather than assumed, so a fixture that stopped
+	// refusing would fail HERE instead of quietly making the assertion below vacuous.
+	var refused int
+	for _, f := range got.Findings {
+		if f.State() == StateRefused {
+			refused++
+		}
+	}
+	if refused != len(Axes()) {
+		t.Fatalf("the unreadable-language subject produced %d refused finding(s) of %d, so the "+
+			"assertion below would pass over an assessment that is not the case it is about",
+			refused, len(Axes()))
+	}
+
+	total, allNM, err = store.AllNotMeasuredRate(context.Background(), 0)
+	if err != nil {
+		t.Fatalf("AllNotMeasuredRate: %v", err)
+	}
+	if total != 2 {
+		t.Fatalf("counted %d assessments, want 2", total)
+	}
+	if allNM != 1 {
+		t.Fatalf("an assessment whose nine findings are all REFUSED counted as all-not-measured "+
+			"(total all-not-measured is now %d, want still 1). A refusal is this build saying it "+
+			"cannot read something, which is a gap on our side and a state somebody chose to report — "+
+			"not a failure to measure, and not the thing this alarm watches for.", allNM)
 	}
 }

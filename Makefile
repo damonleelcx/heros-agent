@@ -20,7 +20,7 @@ PARITY_DIR ?= .parity
 
 .DEFAULT_GOAL := ci
 
-.PHONY: ci go build vet fmt test schema lint db-proof pg-proof verifier-proof tidy-check clean help demo-evalboard \
+.PHONY: ci go build vet fmt test schema lint db-proof pg-proof pgproof-packages verifier-proof tidy-check clean help demo-evalboard \
         deploy-lint deploy-up deploy-down deploy-down-hard \
         console-types console-types-check console-tokens console-test operator-console-test operator-ledger operator-hermes docs-facts docs-facts-check \
         build-discover discovery-ci discovery-throughput \
@@ -463,8 +463,41 @@ db-proof:
 ##           Boots an ephemeral Postgres in Docker, so it needs only Docker (no local PG install).
 ##           These tests are behind the `pgproof` build tag, so `make go` does not compile them; with
 ##           no database they FAIL rather than skip.
+##
+## 🔴 THE PACKAGE LIST IS `PGPROOF_PKGS`, AND IT IS THE ONLY COPY. It used to be written twice — here
+##    and in .github/workflows/ci.yml — and both had drifted: `internal/reportstore` and
+##    `internal/deliveryrecord` were in NEITHER, so their proofs had never run anywhere. CI now reads
+##    this same variable through `pgproof-packages`, and `internal/deploy/pgproof_gate_test.go` asserts
+##    every package carrying a `pgproof` build tag appears in it or is excepted WITH A REASON.
 pg-proof:
-	bash db/migrations/postgres/run_pg_docker.sh $(GO) test -tags pgproof -count=1 ./internal/pgtest/ ./internal/pgmigrate/ ./internal/launch/ ./internal/billing/ ./internal/proposalstore/ ./internal/registry/ ./internal/variantspec/ ./internal/worktree/ ./internal/executor/ ./internal/runqueue/ ./internal/submit/ ./internal/e2e/ ./internal/telemetry/ ./internal/evalrun/ ./internal/metering/ ./internal/legal/ ./internal/api/ ./internal/tenancy/ ./internal/signup/ ./internal/herosagent/ ./internal/sourceingest/ ./internal/assessment/
+	bash db/migrations/postgres/run_pg_docker.sh $(GO) test -tags pgproof -count=1 $(PGPROOF_PKGS)
+
+## pgproof-packages: print PGPROOF_PKGS, one per line — what CI runs.
+##
+## 🔴 CI reads THIS rather than keeping its own list. The comment that used to stand in ci.yml said the
+## quiet part out loud — "This list is maintained BY HAND and does not read the pg-proof make target,
+## so a new pgproof package must be added here as well or its migration ships untested in CI" — and
+## that is exactly what went wrong. Two hand-maintained copies of one fact drift; the only question is
+## when.
+pgproof-packages:
+	@printf '%s\n' $(PGPROOF_PKGS)
+
+## PGPROOF_PKGS: every package with live-Postgres proofs. `internal/pgmigrate` FIRST, because it is the
+## one that applies the whole EMBEDDED set in order, exactly as a booting deployment does, while every
+## other proof hand-lists the few migrations its own tables need.
+##
+## 🔴 Written out rather than discovered by grep, deliberately. Auto-discovery would silently pull a
+## NEW and RED proof into the gate, and "adding a red package to the gate would break the gate for
+## everybody, which is how a gate gets bypassed" — the reasoning `pgproof_gate_test.go` already
+## records. Adding a package here stays a decision somebody makes; the fence is what makes forgetting
+## impossible.
+PGPROOF_PKGS = ./internal/pgmigrate/ ./internal/adminops/ ./internal/api/ \
+	./internal/assessment/ ./internal/billing/ ./internal/deliveryrecord/ \
+	./internal/deliveryroute/ ./internal/e2e/ ./internal/evalrun/ ./internal/executor/ \
+	./internal/herosagent/ ./internal/launch/ ./internal/legal/ ./internal/metering/ \
+	./internal/pgtest/ ./internal/proposalstore/ ./internal/registry/ ./internal/reportstore/ \
+	./internal/runqueue/ ./internal/signup/ ./internal/sourceingest/ ./internal/submit/ \
+	./internal/telemetry/ ./internal/tenancy/ ./internal/variantspec/ ./internal/worktree/
 
 ## demo-evalboard: stand up the P4 eval board against a live fan-out with a stubbed provider.
 ##                Everything between the queue and the pixel is the shipped path: the eval set comes
