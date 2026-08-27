@@ -304,9 +304,29 @@
 
 ## 10. Sales Operations
 
-- [ ] 10.1 Sayable: the platform's own agent is configured through the same nine axes we expose to you — including its topology — and it is rehearsed and version-pinned before activation.
-- [ ] 10.2 Not sayable: that it optimizes itself. State the reason out loud — an evaluator that grades its own configuration is not an evaluator — because naming the circularity is more credible than marketing past it.
-- [ ] 10.3 Noun dictionary: the nine axes are named identically on the operator console, the customer console, the CLI and the docs.
+→ [`docs/sales/P36-agent-self-configuration-claims.md`](../../../docs/sales/P36-agent-self-configuration-claims.md)
+
+- [x] 10.1 Sayable: the platform's own agent is configured through the same nine axes we expose to you — including its topology — and it is rehearsed and version-pinned before activation.
+      → §2, with every clause traced to where it is true. The demo that lands is the **refusal**, not the graph:
+      publish a fan-in with no merge, let them read the sentence, then say *that is the same sentence your spec
+      would get, from the same function.*
+- [x] 10.2 Not sayable: that it optimizes itself. State the reason out loud — an evaluator that grades its own configuration is not an evaluator — because naming the circularity is more credible than marketing past it.
+      → §3, written as a paragraph to say **unprompted**, the first time anyone asks.
+      🔴 The argument for saying it first is written down too, because without it the refusal reads as an
+      apology for a missing feature: *the customer is buying an evaluator; if we let our own evaluator grade
+      its own configuration, they have no reason to believe our evaluation of theirs — the credibility we
+      spend defending self-optimization is the exact credibility the product is sold on.*
+      Four further not-sayables are tabled with what to say instead.
+      Fenced by `TestTheClaimsDocumentRefusesSelfOptimizationAndSaysWhy`, which asserts the REASON and not
+      just the prohibition: a refusal with no reason is an instruction, and an instruction does not survive a
+      scoping call. Enforced in code by `proposalgen`'s refusal (9.14).
+- [x] 10.3 Noun dictionary: the nine axes are named identically on the operator console, the customer console, the CLI and the docs.
+      → §5. `TestTheNineAxesAreNamedIdenticallyOnEverySurface` reads all three sources — `herosagent.AuthorableAxes()`
+      (operator), `assessment.Axes()` (the generated union the customer console and CLI use), and the claims
+      document's own table — and fails if any disagrees.
+      🔴 It also asserts the document RECORDS that `wiring` is retired: a rename that lives only in code is one
+      somebody undoes the next time they read an old deck.
+      Drill: pointing `AuthorableAxes()` back at `AxisWiring` turns it red.
 
 ## 11. Sign-off
 
