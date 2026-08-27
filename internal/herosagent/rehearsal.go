@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/heros-foreal/agentd/internal/discovery"
+	"github.com/heros-foreal/agentd/internal/variantspec"
 )
 
 // rehearsal.go is D7: a published definition is INACTIVE until it runs against the pinned fixtures and
@@ -125,7 +126,69 @@ type RehearsalReport struct {
 	Passed         bool    `json:"passed"`
 	// Failures name the failing fixture, its language and its numbers (task 5.5).
 	Failures []string `json:"failures"`
+
+	// ── P36: the per-NODE half (task 7.1, decisions.md D-36.7) ────────────────────────────────────
+
+	// Nodes is what each node CONTRIBUTED across the calibration set, empty for a single-node
+	// definition.
+	//
+	// 🔴 A definition whose critic never disagrees SCORES WELL AS A WHOLE and is broken in the half
+	// that matters: the analyst carries the score, the critic contributes nothing, and one number
+	// cannot tell you which. So the gate reads the minimum across nodes as well as across fixtures —
+	// the same argument D7 makes about per-fixture minima, one dimension further in.
+	Nodes []NodeScore `json:"nodes,omitempty"`
+	// Coverage records whether the calibration set could exercise this definition's CAPABILITIES at
+	// all (task 7.4, decisions.md D-36.5).
+	Coverage RehearsalCoverage `json:"coverage"`
 }
+
+// NodeScore is one node's contribution across the whole calibration set.
+type NodeScore struct {
+	NodeID string `json:"node_id"`
+	// Fixtures is how many fixtures this node was ENTERED on. 🔴 A node a predicate routed around on
+	// every fixture has zero, which is the finding — not a zero score.
+	Fixtures int `json:"fixtures"`
+	Skipped  int `json:"skipped"`
+	Failed   int `json:"failed"`
+	// Edges and Labels are what it contributed. A node that ran on every fixture and contributed
+	// nothing is the "critic that never disagrees" case, and it is visible here and nowhere else.
+	Edges  int `json:"edges"`
+	Labels int `json:"labels"`
+	// Contributed is false when this node produced nothing on any fixture it was entered on.
+	Contributed bool `json:"contributed"`
+}
+
+// RehearsalCoverage answers whether the calibration set can exercise what this definition declares
+// (task 7.4 / D-36.5).
+//
+// # 🔴 Why this is a REFUSAL and not a fixture count
+//
+// "Add two fixtures" is satisfied by two fixtures that exercise neither a fan-in nor a conditional
+// edge — and then the rehearsal passes without testing the new capability, which is a fence that
+// cannot go red.
+//
+// And it must not be a WARNING beside a `passed` verdict, because `RehearsalPassed` arms the
+// activation gate: a warning that arms the gate is a warning nothing acts on, and the gate is the only
+// thing between an unmeasured configuration and every tenant at once.
+type RehearsalCoverage struct {
+	// DeclaresFanIn / DeclaresConditional are what the DEFINITION asks for.
+	DeclaresFanIn       bool `json:"declares_fan_in"`
+	DeclaresConditional bool `json:"declares_conditional"`
+	// ExercisedFanIn / ExercisedConditional are what the calibration set actually reached.
+	ExercisedFanIn       bool `json:"exercised_fan_in"`
+	ExercisedConditional bool `json:"exercised_conditional"`
+	// Gaps names each capability the set could not exercise, in words. Empty means covered.
+	Gaps []string `json:"gaps,omitempty"`
+
+	// sawSkip / sawNoSkip are the two directions a conditional edge has to be taken in. Unexported:
+	// they are accumulation state, not a fact about the definition, and a stored report carrying them
+	// would invite somebody to read them as one.
+	sawSkip   bool
+	sawNoSkip bool
+}
+
+// Sufficient reports whether the set exercised everything the definition declares.
+func (c RehearsalCoverage) Sufficient() bool { return len(c.Gaps) == 0 }
 
 // JSON renders the report for storage on the version row (task 5.6).
 func (r RehearsalReport) JSON() (string, error) {
@@ -221,6 +284,14 @@ func (r *Rehearsal) Run(ctx context.Context, binding AssessmentBinding) (Rehears
 			"threshold vacuously, which is a gate that reports success for an agent nothing measured")
 	}
 
+	// Per-node accumulation, in the DEFINITION's ordering so the report reads in the order the runner
+	// walks — not in the order a map happened to iterate.
+	nodeIdx := map[string]int{}
+	for _, id := range binding.Definition.Ordering() {
+		nodeIdx[id] = len(rep.Nodes)
+		rep.Nodes = append(rep.Nodes, NodeScore{NodeID: id})
+	}
+
 	for _, f := range fixtures {
 		p, perr := r.prepare(f)
 		if perr != nil {
@@ -234,9 +305,94 @@ func (r *Rehearsal) Run(ctx context.Context, binding AssessmentBinding) (Rehears
 		sc := scoreEdges(f, res.Edges, res.Abstentions)
 		sc.HeldOutEdges = p.held
 		rep.Scores = append(rep.Scores, sc)
+
+		// 🔴 TASK 7.1 — PER NODE, not as one agent. The runner already recorded what each node did;
+		// this accumulates it across the set so "which half is broken" is answerable.
+		for _, run := range resultNodeRuns(res) {
+			i, ok := nodeIdx[run.NodeID]
+			if !ok {
+				continue
+			}
+			n := &rep.Nodes[i]
+			switch {
+			case run.Skipped:
+				n.Skipped++
+			case run.Failed:
+				n.Failed++
+			default:
+				n.Fixtures++
+			}
+			n.Edges += run.Edges
+			n.Labels += run.Labels
+		}
+		rep.Coverage.observe(res)
 	}
+	for i := range rep.Nodes {
+		rep.Nodes[i].Contributed = rep.Nodes[i].Edges > 0 || rep.Nodes[i].Labels > 0
+	}
+	rep.Coverage.declare(binding.Definition)
 
 	return r.verdict(rep), nil
+}
+
+// resultNodeRuns is the per-node record a Result carries, or a single implicit entry for a
+// single-node definition whose runner recorded one.
+func resultNodeRuns(res Result) []NodeRun { return res.Nodes }
+
+// declare records what the DEFINITION asks the calibration set to exercise.
+func (c *RehearsalCoverage) declare(d Definition) {
+	for _, g := range d.GraphGroups {
+		if g.Merge != nil {
+			c.DeclaresFanIn = true
+		}
+	}
+	for _, e := range d.Edges {
+		if e.Kind == variantspec.EdgeKindPredicate {
+			c.DeclaresConditional = true
+		}
+	}
+	if c.DeclaresFanIn && !c.ExercisedFanIn {
+		c.Gaps = append(c.Gaps, "this definition declares a FAN-IN and no calibration fixture reached "+
+			"it: every node of the converging group would have to run on one fixture, and none did. A "+
+			"rehearsal that cannot exercise the capability is not a rehearsal of it — add a fixture "+
+			"whose expected graph contains a fan-in")
+	}
+	if c.DeclaresConditional && !c.ExercisedConditional {
+		c.Gaps = append(c.Gaps, "this definition declares a CONDITIONAL EDGE and no calibration fixture "+
+			"took it in both directions: the predicate either held on every fixture or on none, so the "+
+			"route was never compared against its alternative. Add a fixture that makes it hold and one "+
+			"that makes it not")
+	}
+}
+
+// observe records what one fixture's run actually reached.
+//
+// 🔴 A fan-in is exercised when TWO OR MORE nodes ran and contributed on the same fixture — not when
+// the definition declares one. The declaration is what we are checking; reading it as evidence would
+// make the check a restatement of the thing it validates.
+func (c *RehearsalCoverage) observe(res Result) {
+	ran, skipped := 0, 0
+	for _, n := range res.Nodes {
+		switch {
+		case n.Skipped:
+			skipped++
+		case !n.Failed:
+			ran++
+		}
+	}
+	if ran >= 2 {
+		c.ExercisedFanIn = true
+	}
+	// The conditional edge is exercised in BOTH directions across the set: at least one fixture where
+	// a node was skipped by a predicate, and at least one where every node ran. One direction alone is
+	// a route nobody compared against its alternative.
+	if skipped > 0 {
+		c.sawSkip = true
+	}
+	if skipped == 0 && ran > 0 {
+		c.sawNoSkip = true
+	}
+	c.ExercisedConditional = c.sawSkip && c.sawNoSkip
 }
 
 // prepared is one fixture turned into the exact question the gate asks about it.
@@ -438,6 +594,48 @@ func (r *Rehearsal) verdict(rep RehearsalReport) RehearsalReport {
 		// REPORTED, and nothing branches on it.
 		rep.MeanPrecision, rep.MeanRecall = sumP/n, sumR/n
 	}
+	// 🔴 P36 TASK 7.1 — THE GATE ALSO READS THE MINIMUM ACROSS NODES.
+	//
+	// A definition whose critic never disagrees scores well as a whole and is broken in the half that
+	// matters: the analyst carries every fixture, the critic contributes nothing, and the per-fixture
+	// numbers above cannot tell you — they are the MERGED result, which is exactly the aggregate that
+	// hides it.
+	//
+	// 🚫 A node the definition declares and the run never ENTERED is a failure too, and a different
+	// one. Zero contribution from a node that ran is a bad node; zero contribution from a node that was
+	// never entered is a predicate that never held — and those send somebody to two different places.
+	for _, n := range rep.Nodes {
+		switch {
+		case n.Fixtures == 0 && n.Skipped > 0:
+			rep.Failures = append(rep.Failures, fmt.Sprintf(
+				"node %q was SKIPPED on every one of the %d fixtures and never ran. Its predicate did "+
+					"not hold once, so nothing about this node was measured — activating this definition "+
+					"would serve a node the gate never saw.", n.NodeID, n.Skipped))
+		case n.Fixtures == 0 && n.Failed > 0:
+			rep.Failures = append(rep.Failures, fmt.Sprintf(
+				"node %q FAILED on every one of the %d fixtures it was entered on. Nothing about it was "+
+					"measured either — a node that cannot complete is not a node that scored badly.",
+				n.NodeID, n.Failed))
+		case n.Fixtures == 0:
+			rep.Failures = append(rep.Failures, fmt.Sprintf(
+				"node %q was never entered on any fixture. The definition declares it and the "+
+					"calibration set never reached it.", n.NodeID))
+		case !n.Contributed:
+			rep.Failures = append(rep.Failures, fmt.Sprintf(
+				"node %q ran on %d fixture(s) and contributed NO edge and NO label. A node that runs and "+
+					"produces nothing is a second model call on every analysis, paid for, with nothing to "+
+					"show — and the merged per-fixture numbers above cannot see it, because the other "+
+					"nodes carry them.", n.NodeID, n.Fixtures))
+		}
+	}
+
+	// 🔴 P36 TASK 7.4 / D-36.5 — A REHEARSAL THAT COULD NOT EXERCISE THE CAPABILITY IS REFUSED.
+	//
+	// Not warned about. `RehearsalPassed` arms the activation gate, so a warning beside a passing
+	// verdict is a warning that arms the gate — and the gate is the only thing standing between an
+	// unmeasured configuration and every tenant at once.
+	rep.Failures = append(rep.Failures, rep.Coverage.Gaps...)
+
 	// 🔴 THE GATE READS THE MINIMUM, expressed as "no fixture failed" — which is the same statement and
 	// is the one that can name WHICH.
 	rep.Passed = len(rep.Failures) == 0

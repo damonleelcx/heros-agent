@@ -120,6 +120,12 @@ type Result struct {
 	// Cause carries a failure's reason. 🚫 A failed inference is `analysis failed` WITH THIS — never an
 	// empty graph, which reads as a finding about the customer's workflow (task 4.10).
 	Cause string
+	// Nodes is what each node of the producing definition did (P36 task 3.8).
+	//
+	// 🔴 On the RESULT and not only on the stored row, because the rehearsal reads it: a gate that had
+	// to re-read the store to find out which node contributed would be measuring a row it just wrote
+	// rather than the run it just performed.
+	Nodes []NodeRun
 }
 
 // RawEdge and RawLabel are what the MODEL returns, BEFORE validation — the pattern as a plain string,
@@ -505,6 +511,7 @@ func (r *Runner) Infer(ctx context.Context, in Input, binding AssessmentBinding,
 			Edges: len(res.Edges), Labels: len(res.Labels), Abstentions: len(res.Abstentions),
 		}
 		nodeRuns = []NodeRun{run}
+		res.Nodes = nodeRuns
 		r.observe(run)
 	}
 
@@ -804,6 +811,7 @@ func (r *Runner) inferGraph(ctx context.Context, in Input, binding AssessmentBin
 	edges, labels, abstentions, narrative, runs := mergeOutputs(d, outputs)
 	res.Edges, res.Labels, res.Abstentions, res.Narrative = edges, labels, abstentions, narrative
 	res.Usage = totalUsage
+	res.Nodes = runs
 
 	stored := Stored{
 		InferenceID:     r.newID(in.WorkflowID, in.SourceRevision, binding.ConfigHash),

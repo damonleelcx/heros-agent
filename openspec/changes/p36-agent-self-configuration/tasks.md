@@ -195,10 +195,32 @@
 
 ## 7. AI Engineer
 
-- [ ] 7.1 Evaluate a multi-node definition **per node**, not as one agent. A definition whose critic never disagrees scores well as a whole and is broken in the half that matters.
-- [ ] 7.2 Rehearsal compares against the active definition per node and per axis.
-- [ ] 7.3 Determinism check: execute the same pinned inference repeatedly under a concurrent definition and assert byte-identical output. Run it repeatedly — this failure is intermittent.
-- [ ] 7.4 Establish whether the calibration set exercises a fan-in and a conditional edge at all (2.5).
+- [x] 7.1 Evaluate a multi-node definition **per node**, not as one agent. A definition whose critic never disagrees scores well as a whole and is broken in the half that matters.
+      → `RehearsalReport.Nodes []NodeScore`, and the gate reads the minimum across NODES as well as across
+      fixtures. `TestADefinitionWhoseSecondNodeContributesNothingFailsTheGate` first asserts the MERGED numbers
+      are still good — that is the point — and then that the gate refuses anyway and names the node.
+      🔴 Four distinct node failures, because they send somebody to four different places: skipped on every
+      fixture (a predicate that never held), failed on every fixture (a node that cannot complete), never
+      entered at all, and ran-and-contributed-nothing.
+      Anti-vacuity: `TestADefinitionWhoseNodesBothContributePasses`.
+- [x] 7.2 Rehearsal compares against the active definition per node and per axis.
+      → `TestTheRehearsalReportsPerNodeAndPerFixture`, including that the stored JSON carries both and that the
+      node order is the definition's ordering rather than a map's.
+- [x] 7.3 Determinism check: execute the same pinned inference repeatedly under a concurrent definition and assert byte-identical output. Run it repeatedly — this failure is intermittent.
+      → `TestARepeatedPinnedInferenceUnderConcurrencyIsByteIdentical` (§4.5), **40 runs** against models with
+      varying delays. Drill: iterating the output map instead of the declared ordering turns it red.
+- [x] 7.4 Establish whether the calibration set exercises a fan-in and a conditional edge at all (2.5).
+      **Established, and the answer was not the expected one.** → `TestTheCalibrationSetExercisesAConditionalEdgeAndAFanIn`.
+      A conditional edge IS exercised, by an accident of the existing set worth writing down: the near-miss
+      fixtures have an EMPTY true edge set, so a truthful analyst produces nothing on those and edges on the
+      others — which takes a `produced_edges` predicate in **both** directions in one run. The set was not
+      designed for that. The test pins it, so removing the empty-truth fixtures fails HERE, naming the
+      consequence, rather than silently making every conditional-edge rehearsal one-directional.
+      A fan-in is exercised too, and that one is not an accident.
+      🔴 Where the set CANNOT reach a capability, the rehearsal is **REFUSED** rather than passed with a
+      warning (`RehearsalCoverage.Gaps` → `Failures`): `RehearsalPassed` arms the activation gate, so a warning
+      beside a passing verdict is a warning that arms the gate.
+      `TestARehearsalThatCannotExerciseTheCapabilityIsRefused`, with the no-gap anti-vacuity half.
 
 ## 8. DevOps
 
