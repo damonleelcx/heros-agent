@@ -199,6 +199,19 @@ spec:
         # it fails quietly at 04:23 on a Sunday, and a retention job that silently never connects is
         # indistinguishable from one that found nothing to remove.
         - podSelector: { matchLabels: { app.kubernetes.io/name: legal-retention } }
+        # Opportunity Bridge (jobs.heros-agent.space), which lives in its OWN namespace and shares this
+        # instance's `oba` database — a separate database with its own role, not tables in `heros`.
+        #
+        # This is the only cross-namespace entry in this file, so it is worth saying what it does and
+        # does not open. namespaceSelector and podSelector inside ONE list item are ANDed: the source
+        # must be in the opportunity-bridge namespace AND carry that pod label. Written as two separate
+        # list items they would be ORed, which would admit every pod in that namespace and every pod
+        # anywhere carrying the label — the usual way this rule is got wrong.
+        #
+        # It stays an allowlist entry rather than a relaxation: postgres is still default-deny to
+        # everything not named in this block, and the `oba` role has no rights in the heros database.
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: opportunity-bridge } }
+          podSelector: { matchLabels: { app.kubernetes.io/name: opportunity-bridge } }
       ports: [{ protocol: TCP, port: 5432 }]
 ---
 apiVersion: networking.k8s.io/v1
