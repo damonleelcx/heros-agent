@@ -146,16 +146,27 @@ spec:
                     sleep 2
                   done
                   ts="$(date -u +%Y%m%dT%H%M%SZ)"
-                  out="/backups/heros-${ts}.dump"; tmp="${out}.partial"
-                  if ! pg_dump --format=custom --file="$tmp"; then
-                    echo "backup: pg_dump FAILED at ${ts}" >&2; rm -f "$tmp"; exit 1
-                  fi
-                  size="$(wc -c < "$tmp" 2>/dev/null || echo 0)"
-                  if [ "$size" -lt 512 ]; then
-                    echo "backup: dump ${size}B < 512B; treating as FAILED" >&2; rm -f "$tmp"; exit 1
-                  fi
-                  mv "$tmp" "$out"; echo "backup: OK ${out} (${size}B)"
-                  find /backups -name 'heros-*.dump' -type f -mtime +14 -delete 2>/dev/null || true
+                  # 🔴 EVERY DATABASE ON THIS INSTANCE IS NAMED HERE, and the list is the whole point
+                  # of this loop. `pg_dump` with no -d dumps the ONE database in PGDATABASE, so when a
+                  # second product's database was added to this instance it was not backed up — and
+                  # this CronJob went on reporting OK, because it was faithfully backing up the one
+                  # database it had been told about. An unbacked-up database behind a green backup job
+                  # is worse than an obviously missing backup: nobody goes looking.
+                  #
+                  # A database added to this instance and NOT added here is silently unprotected.
+                  # PGUSER=heros is a superuser, so it can dump any of them.
+                  for db in heros oba; do
+                    out="/backups/${db}-${ts}.dump"; tmp="${out}.partial"
+                    if ! pg_dump --format=custom --dbname="$db" --file="$tmp"; then
+                      echo "backup: pg_dump FAILED for ${db} at ${ts}" >&2; rm -f "$tmp"; exit 1
+                    fi
+                    size="$(wc -c < "$tmp" 2>/dev/null || echo 0)"
+                    if [ "$size" -lt 512 ]; then
+                      echo "backup: ${db} dump ${size}B < 512B; treating as FAILED" >&2; rm -f "$tmp"; exit 1
+                    fi
+                    mv "$tmp" "$out"; echo "backup: OK ${out} (${size}B)"
+                    find /backups -name "${db}-*.dump" -type f -mtime +14 -delete 2>/dev/null || true
+                  done
               env:
                 - { name: PGHOST, value: postgres }
                 - { name: PGUSER, value: heros }
