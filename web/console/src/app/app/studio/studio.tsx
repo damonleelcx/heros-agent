@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Section, Card, Row, Chip, Banner, Loading, Empty } from "@/components/primitives";
 import { cx } from "@/lib/cx";
+import { ReadOn } from "@/components/editorKit";
+import { AXIS_DOC } from "@/lib/axisSubject";
 import { BoundNodePanel, DegradedBanner, type BoundNode, type ResolverHealth } from "./boundmode";
 
 /**
@@ -669,7 +671,7 @@ function BindingEditor({ slots, nodesJSON }: { slots: string[]; nodesJSON: strin
     <div className="rounded-lg border border-border p-3">
       <h3 className="mb-2 text-sm font-medium text-foreground">Bindings</h3>
       <p className="mb-3 text-xs text-muted-foreground">
-        Bind each slot to a literal, an in-scope expression, an environment variable, or a typed input.
+        Bind each slot to a literal, an expression, an environment variable, or an input.
         The kind is recorded explicitly — it is never guessed from the value.
       </p>
       <div className="flex flex-col gap-2">
@@ -766,12 +768,10 @@ function RuntimeChangeableStatement() {
     <Card>
       <h3 className="mb-2 text-sm font-medium text-foreground">What is runtime-changeable</h3>
       <p className="text-sm text-muted-foreground">
-        These nodes use <span className="font-mono">inline</span> apply mode (the default). In inline
-        mode, changing any configured fact — the model, the prompt version, a binding — requires a new
-        source change: a reviewed diff, a build, and a merge. Runtime reconfiguration of the model and
-        prompt requires switching a node to <span className="font-mono">bound</span> apply mode, which
-        is opt-in per node.
+        These nodes use <span className="font-mono">inline</span> apply mode, so changing any configured
+        fact needs a new source change.
       </p>
+      <ReadOn href={AXIS_DOC.model}>Bound and inline, and what each one lets you change</ReadOn>
     </Card>
   );
 }

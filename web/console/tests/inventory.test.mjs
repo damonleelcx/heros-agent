@@ -36,6 +36,13 @@ const SRC = {
   // SAME element — a preview of a re-implementation would check a page no customer sees.
   axisRefusal: "src/components/axisRefusal.tsx",
   wiring: "src/app/app/graph/page.tsx",
+  wiringEditor: "src/app/app/graph/editor.tsx",
+  // 🔴 P37 destinations. `axis-node-projection`'s modified requirement changes the unit of "still
+  // present" from THE SAME PAGE to A NAMED DESTINATION, so a capability whose explanation moved to the
+  // reading surface is re-pointed here rather than struck off the register. Striking it off is how a
+  // register stops recording a capability the product still has — the P26 failure this file exists for.
+  wiringDoc: "content/docs/en/concepts/graph-and-wiring.md",
+  contextDoc: "content/docs/en/concepts/context-policies.md",
   shell: "src/app/app/layout.tsx",
   transform: "src/app/app/transforms/[configHash]/[sourceRevision]/page.tsx",
   run: "src/app/app/runs/[runId]/page.tsx",
@@ -190,25 +197,33 @@ item("P15-4", "an axis with no console note still renders the platform's own sen
 item("P15-5", "the wiring axis has a surface in the console app, reachable from the navigation", "shell",
   '{ href: "/app/graph", label: "Graph"', '"s:graph"');
 item("P15-6", "the wiring surface splits its sections into a real tablist, not a stack", "wiring",
-  /<Tabs tabs=\{tabs\}/, /id: "axis"/, /EXAMPLES\.map/);
-item("P15-7", "the wiring surface renders the SAME refusal card the submit path renders", "wiring",
-  "AxisRefusal", '@/components/axisRefusal');
-item("P15-8", "the wiring surface says its examples are not the tenant's data", "wiring",
-  /worked examples/i, /this tenant/i);
+  /<Tabs tabs=\{tabs\}/, /id: "this-node"/, /id: "editor"/);
+// P37 — the surface's own refusals now come from the PLATFORM through the shared three-state panel
+// rather than from four fixture cards. `PreflightPanel` is the same component `AxisRefusal` fed, and it
+// is what the editor and every axis surface render, so the page and Configure still cannot drift.
+item("P15-7", "a wiring refusal renders through the shared verdict component, not a local one", "wiringEditor",
+  "PreflightPanel", '@/components/authoring');
+// P37 — STRONGER than saying so. The examples are no longer in the reader's data position at all
+// (FR4): the surface's first tab is their own node, and the fixture editor is a tab that names itself.
+item("P15-8", "no fixture occupies the position the reader's own data occupies", "wiring",
+  /<AxisFrame axis="graph"/, /the platform's fixture/i);
 // 15c — the axis stopped being wholly declined, and the surface has to show that or it teaches the
 // wrong thing: a page of four refusals reads as a broken feature however carefully each one is worded.
-item("P15-9", "the wiring surface shows an APPLIED reorder, not only declined ones", "wiring",
-  "AxisApplied", /id: "applied"/, /An applied reorder/);
-item("P15-10", "the applied state carries the engine's REAL diff, not a description of one", "wiring",
-  "APPLIED_DIFF", "--- a/wiring.go", "+++ b/wiring.go");
+// P15-9 and P15-10 exist because a page of four refusals reads as a broken feature however carefully
+// each one is worded. That is still true and still guarded — at the destination the applied case moved
+// to, with the engine's own diff carried across byte for byte.
+item("P15-9", "an APPLIED reorder is shown, not only declined ones", "wiringDoc",
+  /### An applied transposition/, /### A declined reorder/);
+item("P15-10", "the applied state carries the engine's REAL diff, not a description of one", "wiringDoc",
+  "--- a/wiring.go", "+++ b/wiring.go");
 // P16 moved this sentence from the COMPONENT to the CALLER, and the move is the point. The invariant
 // was hard-coded to the wiring axis, so the first applied change from another axis (a context window,
 // which DELETES list elements) rendered "the file's lines were reordered" over a diff where that is
 // simply false. A safety claim asserted on behalf of a change the component knows nothing about is the
 // sentence a reviewer stops reading the diff because of. The wiring page still states it — that is what
 // this item guards — and `AxisApplied` now REQUIRES each caller to supply its own.
-item("P15-11", "the applied card states the permutation invariant that makes the change safe", "wiring",
-  "reordered and nothing else changed", /same lines/i);
+item("P15-11", "the applied card states the permutation invariant that makes the change safe", "wiringDoc",
+  "reordered and nothing else changed", /same line count, same lines/i);
 item("P16-1", "the applied card takes its invariant from the caller rather than asserting one", "axisRefusal",
   "invariant: ReactNode");
 

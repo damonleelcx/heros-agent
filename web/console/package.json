@@ -5,7 +5,7 @@
   "description": "P9 customer console \u2014 the tenant-facing dashboard and its BFF, plus the public home page.",
   "scripts": {
     "dev": "next dev --port 4320",
-    "build": "npm run gen && npm run scan:origins && npm run scan:events && npm run scan:tokens && npm run scan:strings && npm run scan:markup && npm run scan:claims && npm run scan:docs && next build && npm run release:sourcemaps && npm run scan:bundle",
+    "build": "npm run gen && npm run scan:origins && npm run scan:events && npm run scan:tokens && npm run scan:prose && npm run scan:strings && npm run scan:markup && npm run scan:claims && npm run scan:docs && next build && npm run release:sourcemaps && npm run scan:bundle",
     "start": "next start --port 4320",
     "scan:bundle": "node scripts/scan-bundle.mjs",
     "scan:tokens": "node scripts/scan-tokens.mjs",
@@ -41,7 +41,8 @@
     "scan:origins": "node ../design-system/scan-origins.mjs",
     "release:sourcemaps": "node scripts/upload-sourcemaps.mjs",
     "scan:events": "node ../design-system/scan-events.mjs",
-    "dev:connections": "node scripts/dev-connections.mjs"
+    "dev:connections": "node scripts/dev-connections.mjs",
+    "scan:prose": "node scripts/scan-prose.mjs"
   },
   "dependencies": {
     "@tailwindcss/postcss": "4.1.12",

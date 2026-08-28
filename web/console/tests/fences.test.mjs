@@ -108,6 +108,17 @@ const CASES = [
     expect: /says `latency_total_ms` is in seconds; the harness emits it in ms/,
   },
   {
+    // 🔴 The fixture for a NARROWING. `scan-metric` stopped reading source paths as metric claims, because
+    // citing `internal/telemetry/context_assembly.go` — the citation the fence itself requires — was
+    // being matched as a metric called `context_assembly`, which made `context_drop_ratio`
+    // undocumentable in prose no matter what the catalogue said. This proves the narrowing did not reach
+    // the case the fence is actually for: a metric-shaped word in PROSE that nothing emits.
+    name: "scan-metric still refuses a metric-shaped word in prose that nothing emits",
+    script: "scan-metric.mjs",
+    fixture: "metric-uncatalogued",
+    expect: /names `context_hallucinated_ratio`, which the harness does not emit/,
+  },
+  {
     name: "scan-api refuses a documented endpoint while the artifact is absent",
     script: "scan-api.mjs",
     fixture: "undocumented-endpoint",

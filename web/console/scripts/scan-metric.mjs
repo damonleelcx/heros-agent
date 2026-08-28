@@ -53,7 +53,20 @@ async function main() {
 
     for (const line of document.lines) {
       if (fenced.has(line.number)) continue;
-      for (const match of line.text.matchAll(METRIC_SHAPED)) {
+      /*
+       * 🔴 A CITATION is not a claim, and this scan used to be unable to tell the difference.
+       *
+       * The rule below requires a page naming a metric to cite the site that computes it. Several of
+       * those sites are files named after what they compute — `internal/telemetry/context_assembly.go`
+       * — and the metric-shaped pattern matched `context_assembly` inside the path. The consequence was
+       * circular and total: citing the site the fence demanded was itself a finding, so
+       * `context_drop_ratio` could not be documented in prose AT ALL, whatever the catalogue said.
+       *
+       * Source paths are therefore removed before the line is scanned. This narrows nothing that matters:
+       * a path is evidence a reader opens, never a sentence claiming a number exists.
+       */
+      const text = line.text.replace(/\b(?:internal|cmd|web)\/[\w./-]+(?::[\w.]+)?/g, " ");
+      for (const match of text.matchAll(METRIC_SHAPED)) {
         const name = match[0];
         mentions += 1;
         const definition = catalogue.get(name);
@@ -69,7 +82,7 @@ async function main() {
         // Unit parity, when the page states one. A page may mention a metric without restating its unit;
         // it may not state a DIFFERENT one.
         const unitClaim = new RegExp(`${name}[^\\n]{0,80}?\\bin (milliseconds|ms|seconds|usd|dollars|tokens|calls|a ratio|count)\\b`, "i");
-        const stated = unitClaim.exec(line.text)?.[1]?.toLowerCase();
+        const stated = unitClaim.exec(text)?.[1]?.toLowerCase();
         if (stated) {
           const normalised = { milliseconds: "ms", seconds: "s", dollars: "usd", "a ratio": "ratio" }[stated] ?? stated;
           if (normalised !== definition.unit) {

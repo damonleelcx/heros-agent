@@ -32,6 +32,20 @@ Emitted once for every call to a model provider.
 | `reliability_timeout` | `count` | 1 when the terminal error was a timeout, 0 otherwise. A subset of reliability_error, not a separate failure. | `internal/telemetry/metrics.go:derive` |
 | `reliability_retry_count` | `count` | HTTP attempts beyond the first. A call that succeeded first time is 0, not 1. | `internal/telemetry/metrics.go:derive` |
 | `reliability_rate_limit_hit` | `count` | 1 when the provider returned a rate-limit response at any point during the call, 0 otherwise. | `internal/telemetry/metrics.go:derive` |
+| `context_assembled_tokens` | `tokens` | Tokens in the message list the policy actually assembled for this node invocation. It is what the model was given, not what was available to give. | `internal/telemetry/context_assembly.go:EmitContextAssembly` |
+| `context_source_messages` | `count` | How many messages the policy had to select from, before assembly. The denominator the drop ratio is taken against. | `internal/telemetry/context_assembly.go:EmitContextAssembly` |
+| `context_drop_ratio` | `ratio` | The fraction of the source context a LOSSY policy discarded. Emitted only for a lossy policy (summarization, semantic-compaction); a lossless policy emits nothing on this axis rather than a zero, because a zero from a summariser and a zero from a window mean opposite things. | `internal/telemetry/context_assembly.go:EmitContextAssembly` |
+| `context_retrieved_chunks` | `count` | Passages a retrieval policy added. Emitted only when the count is above zero, and recorded as retrieval rather than as loss — augmentation counted as loss would make the drop-tolerance gate reject retrieval for doing exactly what it is for. | `internal/telemetry/context_assembly.go:EmitContextAssembly` |
+
+## Per node event
+
+Emitted when something happens TO a node that is not a provider call — a sandbox denial, an isolate lifecycle transition, a tool or skill failing closed. These carry a real `node_id`, unlike a run-scoped metric, and none of them needs a call to be in flight.
+
+| Metric | Unit | Computation | Computed in |
+|---|---|---|---|
+| `sandbox_denial` | `count` | 1 per action the sandbox denied — egress, credential, filesystem, resource, or a brokered call that was refused. The class rides as the `denial_kind` dimension so a consumer can filter without the value becoming a series label. An ALLOWED brokered call is not counted: it is not an anomaly and would inflate the denial rate. | `internal/sandboxaudit/adapter.go` |
+| `sandbox_lifecycle` | `count` | 1 per isolate lifecycle transition, with the transition as the `phase` dimension. | `internal/sandboxaudit/adapter.go` |
+| `tool_error` | `count` | 1 when a skill or tool call fails closed, with the contract-error class as `reason` and the skill as `skill_name`. It counts failures that were REFUSED, not failures that were retried. | `internal/sandboxaudit/adapter.go:RecordSkillFailure` |
 
 ## Per run
 
@@ -41,6 +55,19 @@ Emitted once per run window. These carry a reserved `node_id` sentinel, because 
 |---|---|---|---|
 | `concurrency_calls_in_flight` | `calls` | Concurrent provider calls observed during the run window. Run-scoped, so it carries the reserved node_id sentinel rather than a node's. | `internal/telemetry/monitor.go` |
 | `throughput_calls_per_sec` | `calls/s` | Provider calls per second over the run window. | `internal/telemetry/monitor.go` |
+
+## Per customer period
+
+Emitted for a customer's billing period rather than for a run. A customer's spend is not attributable to a run, a node or a case, so these carry the reserved tag sentinels and ride the customer and period as dimensions — never as labels, because a series per customer is a cardinality explosion.
+
+| Metric | Unit | Computation | Computed in |
+|---|---|---|---|
+| `revenue_sum_under_management` | `usd` | A customer's derived spend under management for a period. | `internal/metering/observe.go:SUMRecorded` |
+| `revenue_metered_reported` | `count` | A metered quantity as handed to the billing provider, with the meter as the `meter_name` dimension. It is what we REPORTED, which is the half of a reconciliation that is ours. | `internal/metering/observe.go:UsageReported` |
+| `revenue_invoice_state` | `count` | 1 per observed invoice or subscription state transition, with the state as the `billing_state` dimension. The value is 1 rather than an encoded state, because a state is not a quantity and averaging one is meaningless. | `internal/metering/observe.go:InvoiceState` |
+| `revenue_charge_failed` | `count` | 1 per charge that did not settle, with the kind as the `charge_kind` dimension. It also raises an alert: a failed charge is revenue that silently did not happen. | `internal/metering/observe.go:ChargeFailed` |
+| `revenue_gainshare_billed` | `usd` | A gainshare charge's billed quantity, over VERIFIED savings only. An unverified change contributes nothing to it. | `internal/metering/observe.go:GainshareBilled` |
+| `revenue_reconciliation_drift` | `count` | 1 per drift finding, with the kind as `drift_kind` and the meter as `meter_name`. It also raises an alert: drift is the meter and the provider disagreeing, which is how month-end becomes a reconstruction. | `internal/metering/observe.go:DriftDetected` |
 
 ## What is not measured, and why that is stated
 

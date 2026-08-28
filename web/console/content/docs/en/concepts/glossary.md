@@ -28,6 +28,37 @@ attribution is per node, and a change applies to one node at a time.
 If a single function calls a model three times, that is three nodes, because they can be configured and
 measured independently.
 
+## Axis
+
+One of the surfaces a configuration can be changed on: `model`, `prompt`, `skills`, `context`, `tools`,
+`memory`, `harness`, `loop`, `graph`. An axis is a *kind* of change, not a place — the same axis is
+proposed by the optimizer, authored by a person and refused by the engine, and it is called the same
+thing in all three.
+
+Each axis has its own closed vocabulary and its own coverage: what the platform can write into your
+source on that axis, per language and per call-site form. Two axes are never averaged into one number,
+because a build that can rewrite a model string and cannot rewrite a message list has two different
+answers and one of them would be lost.
+
+## Policy
+
+The value on the `context` axis: which of a call's messages survive, what is summarised, what is
+retrieved. A policy is *how the surrounding code builds the message list*, which is why applying one is a
+code rewrite rather than an argument swap.
+
+The registered set is closed. A name outside it is not a lesser choice — nothing resolves it — so no
+surface offers free text where a policy goes. See [Context policies](/docs/concepts/context-policies).
+
+## Strategy
+
+The value on the `memory` axis: what a node keeps *across* invocations. Also closed, also never free
+text. See [Memory strategies](/docs/concepts/memory-strategies).
+
+🔴 **A strategy is not a policy.** They belong to different axes, hash separately and are scored
+separately: a policy decides what one call reads, a strategy decides what survives between calls. The
+console keeps the two words apart everywhere for that reason, and a memory reference used where a context
+policy is expected does not quietly bind the wrong thing — it fails to resolve.
+
 ## Variant
 
 One named alternative to your current configuration — a different model on one node, a different prompt,

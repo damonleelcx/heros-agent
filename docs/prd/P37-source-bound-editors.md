@@ -9,7 +9,7 @@
 | **Support roles** | Backend Dev, System Designer, AI Engineer, QA, DevOps, Sales Operations |
 | **Upstream** | P32 (a repository the platform can read) · P9 (console shell, BFF, viewport rule) · P23 (`reading-surface`) · P13–P18 (the axis registries and their vocabularies) · P31 (a conversation that links here) |
 | **Unblocks** | P33's findings having a place to be acted on · P35 proposing a change against a node the reader has already seen |
-| **Status** | Proposed — awaiting sign-off on §14 |
+| **Status** | **Implemented (2026-08-27)**, §14 answered in §15. Two sign-off items open — see §16. |
 
 ---
 
@@ -552,3 +552,52 @@ engine's coverage are all real by the time P37 starts.
 | **Q4** | Where does `/app/studio` sit? It is the prompt-and-model surface and is already interactive. | It may already satisfy most of P37, in which case it gets the subject binding and nothing else. **Needs an inspection before it is scoped in.** |
 | **Q5** | Does the subject selection persist server-side (per person) or in the browser? | Server-side survives a device change and is a new per-person record. Browser-side is free and forgets. **Recommendation: browser-side for this phase; it is UI state, and D1's benefit does not depend on it surviving devices.** |
 | **Q6** | Does the reading surface's moved content need i18n treatment now, given MVP is English-only? | Moving text is the cheapest moment to structure it for translation, and doing it later means editing every document twice. **Open — depends on whether translation is on the roadmap within two phases.** |
+
+
+---
+
+## 15. §14, answered
+
+Answered with the user on 2026-08-27, before any code was written, and folded into the change set rather
+than left in this table. Each answer names where it now lives.
+
+| # | Answer | Where it lives |
+|---|---|---|
+| **Q1** | **Both.** The subject is `(workflow_id, node_id)`; a `node_id` is unique *within* a workflow only, and two workflows in one repository routinely contain a node called `answer`. Identity is not display: the node is named alone, and the workflow is added only when two candidates share a display name. | [`decisions.md` D-37.1](../../openspec/changes/p37-source-bound-editors/decisions.md), `web/console/src/lib/axisSubject.ts` |
+| **Q2** | **Lede 60 words** (unchanged), **route total = the measured count rounded up to the next 50** — *not* the flat 350 first agreed. 🔴 That number was chosen against a ruler later found to be counting TypeScript generics as prose; the ruler was corrected before the fence was enforced, exactly as task 1.5 requires, and the ceilings were re-derived. The replacement is **stricter where it matters**: every route sits within 50 words of its own ceiling, so a 70-word addition fails on **every** route rather than on one the drill picked. | [`block-inventory.md` §1.5](../../openspec/changes/p37-source-bound-editors/block-inventory.md), `web/console/scripts/lib/prose-budgets.mjs` |
+| **Q3** | **Budget every working route; the subject resolver only on the axis surfaces.** A route this phase did not rewrite gets its measured count as a ratchet — not a free pass: it may not grow, and the next person who wants it to changes a number in front of a reviewer. | `prose-budgets.mjs`, `tests/p37-inventory.test.mjs` |
+| **Q4** | **`/app/studio` is in FULL scope** — seven surfaces, not six. It was the console's largest working route (2,890 words) and carried its own workflow picker, a second answer to the question the shell now answers once. Its matrix is not deleted; its picker is replaced by the resolved subject. | [`block-inventory.md` §1.6](../../openspec/changes/p37-source-bound-editors/block-inventory.md) |
+| **Q5** | **Browser-side** — and specifically a **cookie**, not `localStorage`. Both are browser-side and both forget; only one is readable while the page is being rendered, and the shell must name the node on the first byte. `localStorage` would need a blocking inline `<script>`, which this console's CSP does not admit. **No table, no migration.** | [`decisions.md` D-37.4](../../openspec/changes/p37-source-bound-editors/decisions.md) |
+| **Q6** | **English only**, under the existing `content/docs/en/**` tree. The reading surface is already locale-partitioned, so a later `zh/` tree is an added directory rather than a rewrite. No structure invented now. | `web/console/content/docs/en/concepts/` |
+
+### One decision §14 did not anticipate
+
+**D-37.6 — "in the shell" means one resolver, not `app/app/layout.tsx`.** Design D1 says the subject is
+resolved *in the shell*; the console's shell says, in its own words, that it *"holds no fetch at all — so
+a slow platform cannot delay the chrome."* Both are right and they are about different things. The
+resolution lives in `AxisFrame`, the component the seven axis surfaces share: one resolver, one call per
+request, and the chrome still renders while the platform is slow. Recorded rather than left as an
+undocumented divergence.
+
+---
+
+## 16. Sign-off still owed
+
+Two items in §9 of the task list require a **person**, and neither is something an implementation can
+close for itself. Both artifacts are prepared; both are listed here so their absence is visible rather
+than assumed.
+
+**§9.2 — the `axis-node-projection` modification.** P29 wrote *"The worked examples on each axis surface
+SHALL be retained"* to stop a redesign silently dropping panels. P37 changes its **unit** from *the same
+page* to *a named destination*. The phase that needs a requirement relaxed is the phase proposing the
+relaxation, which is the shape that should never pass on its own authority — so whoever signed off P29
+reviews it. The delta restates the header verbatim, strengthens the second scenario (a worked example may
+not appear in the reader's data position **at all**), and the enforcement is now a build fence rather
+than a scenario a panel can satisfy by sitting still.
+
+**§9.3 — the removal of `TestContextCoverageTableMatchesEngine`.** Reviewed **on its own**, separately
+from the surface rewrite that motivates it. The fence guarded a hand-transcribed table against the
+engine; FR17 replaced the transcription with a live per-node read, so there is no transcription left to
+drift. Removing a fence whose subject still exists is a different act with the same diff — the artifact
+that review reads is the header of `web/console/tests/context.test.mjs`, which names the four assertions
+that replaced it.

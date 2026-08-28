@@ -86,6 +86,15 @@ const PATH_TEMPLATES: Array<[RegExp, string]> = [
   // during a security review rather than during an incident. An unlisted route answers it with
   // `/unknown`.
   [/^\/api\/v1\/repo-connections$/, "/api/v1/repo-connections"],
+  // P13 / P37 — the authoring path. `submit` is the ONE WRITE the axis surfaces make, so its latency
+  // and its refusal rate are the two numbers that say whether the editors are usable; `preflight` runs
+  // on every keystroke-settled change, so an unlisted one would hide the busiest upstream call the
+  // console makes. Both were unlisted until P37 gave a customer surface a reason to address them.
+  [/^\/api\/v1\/memory$/, "/api/v1/memory"],
+  [/^\/api\/v1\/authoring\/preflight$/, "/api/v1/authoring/preflight"],
+  [/^\/api\/v1\/authoring\/submit$/, "/api/v1/authoring/submit"],
+  [/^\/api\/v1\/authoring\/revert$/, "/api/v1/authoring/revert"],
+  [/^\/api\/v1\/authoring\/history$/, "/api/v1/authoring/history"],
   // Anchored to the bare path: `scope.ts` appends `?connection_id=…`, and `template()` strips the
   // query before matching, so the anchor is safe and keeps this from shadowing anything.
   [/^\/api\/v1\/repo-connection-reads$/, "/api/v1/repo-connection-reads"],

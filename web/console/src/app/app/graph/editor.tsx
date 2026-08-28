@@ -1,4 +1,6 @@
 import { Banner, Card, Chip, Row, Section } from "@/components/primitives";
+import { ReadOn } from "@/components/editorKit";
+import { AXIS_DOC } from "@/lib/axisSubject";
 import { PreflightPanel, UnverifiedLabel, type PreflightResult } from "@/components/authoring";
 
 /**
@@ -48,7 +50,7 @@ const GESTURES: Gesture[] = [
   {
     id: "swap",
     label: "Swap two adjacent nodes",
-    did: "You exchanged two adjacent, independent statements in the same function.",
+    did: "Two adjacent, independent statements exchanged.",
     result: {
       verdict: "admissible",
       config_hash: "3ac91f0b52de",
@@ -60,7 +62,7 @@ const GESTURES: Gesture[] = [
   {
     id: "adapted",
     label: "Swap, reconciled by an adapter",
-    did: "You reordered two nodes whose schemas do not line up.",
+    did: "Two nodes reordered; their schemas do not line up.",
     result: {
       verdict: "admissible",
       config_hash: "8be2740fa19c",
@@ -79,7 +81,7 @@ const GESTURES: Gesture[] = [
   {
     id: "incoherent",
     label: "Move a consumer before its producer",
-    did: "You dragged a node ahead of the one that produces a field it reads.",
+    did: "A consumer dragged ahead of its producer.",
     result: {
       verdict: "refused",
       node_id: "summarize",
@@ -94,7 +96,7 @@ const GESTURES: Gesture[] = [
   {
     id: "merge",
     label: "Merge two nodes into one",
-    did: "You fused two adjacent calls.",
+    did: "Two adjacent calls fused.",
     result: {
       verdict: "refused",
       node_id: "classify",
@@ -124,11 +126,10 @@ export function WiringEditor() {
     <div className="flex flex-col gap-6">
       <Section title="Every gesture gets its verdict as you make it">
         <p className="max-w-3xl text-sm leading-relaxed text-muted-foreground">
-          You are told what a rearrangement would do <strong>before</strong> you submit it — whether it
-          can be applied, whether it breaks the graph, or whether the shape is one no rewriter emits yet.
           The check runs the same coherence gate the compiler runs, so the editor cannot bless something
           the compiler will reject.
         </p>
+        <ReadOn href={AXIS_DOC.graph}>The five gestures, and what each one is refused for</ReadOn>
       </Section>
 
       {GESTURES.map((g) => (
@@ -144,15 +145,10 @@ export function WiringEditor() {
       <Section title="A refused rearrangement is not a variant">
         <Banner tone="info" title="Kept as a recorded intent, not queued for anything">
           <p>
-            A rearrangement the platform cannot apply is retained so you do not lose it — but it is{" "}
-            <strong>not</strong> a variant. It has no configuration hash, it is never evaluated, and it is
-            not waiting for a number. Calling it pending would imply somebody is working on it.
+            It is retained so you do not lose it, and it is <strong>not</strong> a variant: no
+            configuration hash, never evaluated, not waiting for a number.
           </p>
-          <p>
-            The reason it is not evaluated is not tidiness. Scoring a rearranged configuration against
-            source that was never rearranged would produce a number for a change that did not happen —
-            which is worse than no number at all.
-          </p>
+          <ReadOn href="/docs/concepts/refusals#a-refusal-is-not-a-queue">Why a refusal is not a queue</ReadOn>
         </Banner>
       </Section>
     </div>
@@ -206,8 +202,8 @@ function AdapterNodes({
     <Card>
       <p className="text-sm leading-relaxed text-muted-foreground">
         <strong>This ordering is legal only because an adapter would be inserted.</strong> It is a real
-        node in your graph and ships as generated source in the same diff — not a hidden runtime
-        coercion. It is shown here so the change you submit is the change you saw.
+        node, generated into the same diff — not a hidden runtime coercion — and it is shown before
+        submission so the change you submit is the change you saw.
       </p>
       {adapters.map((a) => (
         <Row key={a.node_id}>

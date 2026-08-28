@@ -90,6 +90,8 @@ func TestEveryPhaseOwnsItsNames(t *testing.T) {
 		"agentd.assessment.":    "P33 — surface assessment",
 		"agentd.run.":           "P35 — the improvement run",
 		"agentd.delivery.":      "P35 — the improvement run (delivery half; P12 owns the mechanism)",
+		"console.subject.":      "P37 — source-bound editors (the shell's subject resolver)",
+		"console.axis.":         "P37 — source-bound editors (the one write path)",
 	}
 	for _, n := range Names() {
 		owned := false
@@ -202,6 +204,32 @@ func TestP32NamesAreTheSevenTheContractPromises(t *testing.T) {
 		}
 		if !w.Valid() {
 			t.Errorf("%q is not Valid(), so the emitting helper would write nothing for it", w)
+		}
+	}
+}
+
+// TestP37NamesAreTheFourTheContractPromises is P37 task 5.6.
+//
+// Written out rather than ranged over, for the reason P31's and P32's are: a test that ranged over the
+// enum would pass for any set, including one where a name was quietly renamed. These four are named in
+// the task list, so they are named here.
+func TestP37NamesAreTheFourTheContractPromises(t *testing.T) {
+	for _, want := range []Name{
+		ConsoleSubjectResolved, ConsoleSubjectAmbiguous, ConsoleAxisSaved, ConsoleAxisSaveRefused,
+	} {
+		if !want.Valid() {
+			t.Errorf("%q is not a member of the enum", want)
+		}
+	}
+	// The literal spellings, because the task list promises these strings to a dashboard.
+	for name, want := range map[Name]string{
+		ConsoleSubjectResolved:  "console.subject.resolved",
+		ConsoleSubjectAmbiguous: "console.subject.ambiguous",
+		ConsoleAxisSaved:        "console.axis.saved",
+		ConsoleAxisSaveRefused:  "console.axis.save_refused",
+	} {
+		if string(name) != want {
+			t.Errorf("event name is %q, the contract promises %q", name, want)
 		}
 	}
 }

@@ -2,6 +2,7 @@ import { identityHealth, identitySecretsSource } from "@/lib/identity";
 import { platformApiBase, upstreamTimeoutMs } from "@/lib/platformApi";
 import { loadLegalCorpus } from "@/lib/reading/legal";
 import { describeSessionStore } from "@/lib/sessionStore";
+import { subjectResolverHealth } from "@/lib/subjectHealth";
 
 /**
  * The console component's machine-readable health (FR25, 🔴 `health-signal-surface`).
@@ -111,6 +112,21 @@ export async function GET() {
        */
       session_store: describeSessionStore(),
       upstream_timeout_ms: upstreamTimeoutMs(),
+      /*
+       * What the axis surfaces' subject resolver ANSWERED, per state (P37 §7.1).
+       *
+       * 🔴 It is here rather than only in logs because the number that matters is not an error rate.
+       * `ambiguous` is the cost side of design D1 — the reader being asked which node — and nothing
+       * FAILS when it rises: no error, no retry, no 5xx. An operator watching only failures would see a
+       * healthy surface asking every reader a question this whole phase exists to remove.
+       *
+       * `not_connected` is the second: the customer's own boundary, not a fault, and a deployment where
+       * it dominates is one where the connection flow is not landing.
+       *
+       * The `scope` field travels with the numbers because they are PER PROCESS and reset on rollout;
+       * a reader who took them for a fleet total would be comparing two different processes.
+       */
+      subject_resolver: subjectResolverHealth(),
       // Which legal text is live on THIS deployment. The full manifest, with every historical version,
       // is at /legal/manifest.json.
       legal_documents: documents,

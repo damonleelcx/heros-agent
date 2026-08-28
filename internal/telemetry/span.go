@@ -77,6 +77,18 @@ func TraceID(runID string) string { return deriveID("heros.trace.v1", runID)[:32
 // RunSpanID is the root span of the trace. 8 bytes = 16 hex chars, the OTel span-id width.
 func RunSpanID(runID string) string { return deriveID("heros.span.run.v1", runID)[:16] }
 
+// RequestSpanID is the root span of a REQUEST that is not a run — a console read, say.
+//
+// 🔴 Its own derivation rather than reusing RunSpanID with a trace id in place of a run id. The domain
+// separator is what stops a request span and a run span colliding, and passing a non-run key to a
+// function named for runs is how the two eventually do: the value would still be a valid span id, the
+// join would still look correct, and the first sign of trouble would be two unrelated spans sharing a
+// parent in a trace viewer.
+//
+// P37 §5.5 requires every WARN and ERROR on the axis-read paths to carry `request_id`, `trace_id` and
+// `span_id`, and those paths have no run to derive one from.
+func RequestSpanID(traceID string) string { return deriveID("heros.span.request.v1", traceID)[:16] }
+
 // NodeSpanID is one node execution's span, keyed on the idempotency identity so a retry reuses it.
 func NodeSpanID(idempotencyKey string) string {
 	return deriveID("heros.span.node.v1", idempotencyKey)[:16]

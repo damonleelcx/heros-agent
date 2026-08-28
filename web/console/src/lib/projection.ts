@@ -28,6 +28,35 @@ import type { Projection, ProjectionOutcome } from "@/components/axisProjection"
 type ProjectionEnvelope = { state?: string; projection?: Projection; detail?: string; fill_with?: string };
 
 /**
+ * renderable reports whether a projection body carries the arrays its view walks.
+ *
+ * # 🔴 Why this is here and not a `??` at each dereference
+ *
+ * `view.ts` states the rule and the reason: *"Guarding each dereference at each call site was the first
+ * attempt, and it is the wrong shape: there are dozens of them, a new field arrives with every
+ * read-model change, and the one that gets missed fails the same way. The boundary is the place where
+ * 'this is not something I can render' is expressible ONCE."*
+ *
+ * `load`'s own `requires` list checks TOP-LEVEL fields, and it is doing its job: `projection` is present.
+ * What it cannot see is that the object inside it is empty — and `ProjectionBody` opens with
+ * `projection.totals.find(...)`.
+ *
+ * The consequence, measured rather than reasoned about: a platform answering
+ * `200 {"state":"ok","projection":{}}` threw during server render and Next replaced the WHOLE PAGE with
+ * its error output — on `/app/context`, `/app/memory`, `/app/harness`, `/app/graph`, `/app/studio`,
+ * `/app/authoring`, `/app/delivery` and `/app/coverage`, because every one of them renders this panel.
+ * No frame, no heading, no subject: exactly the failure FR27 and `load`'s `requires` exist to prevent,
+ * arriving one level below where `requires` can reach.
+ *
+ * An unusable body becomes `read-failed`, which every one of those surfaces already renders as *"your
+ * reported structure could not be read — this is NOT the same as having sent none"*. That is the honest
+ * sentence: the platform answered and we cannot render what it said.
+ */
+function renderable(p: Projection | undefined): p is Projection {
+  return Boolean(p) && Array.isArray(p?.totals) && Array.isArray(p?.nodes);
+}
+
+/**
  * loadProjection resolves the workflow to project and reads it.
  *
  * The enumeration's own three states pass straight through: a reader whose workflow list could not be
@@ -65,6 +94,16 @@ export async function loadProjection(): Promise<ProjectionOutcome> {
       workflow_id: workflowId,
       detail: body.detail,
       fill_with: body.fill_with ?? "heros link --with-ir",
+    };
+  }
+  if (!renderable(body.projection)) {
+    // 🚫 NOT `not-reported`. The platform answered `ok` — telling the reader they have reported nothing
+    // would be a claim about them drawn from a defect on our side, and it names the wrong next action.
+    return {
+      state: "read-failed",
+      detail:
+        "The platform answered with a projection this view cannot render — it carries no per-axis totals " +
+        "or no node rows. Nothing has been lost, and retrying is safe.",
     };
   }
   return { state: "ok", projection: body.projection };
@@ -118,6 +157,17 @@ export async function loadDeliveryProjection(): Promise<DeliveryProjectionOutcom
   }
   if (outcome.data.state === "not-reported") {
     return { state: "not-reported", detail: outcome.data.detail, fill_with: "heros link --with-ir" };
+  }
+  // 🔴 The same boundary check, for the same reason, over this view's own arrays. `YourNodesTab` opens
+  // with `p.rows.filter(...)`, so a body with no `rows` took `/app/delivery` down entirely — measured,
+  // not supposed: a stub answering `200 {}` here returned HTTP 500 for the whole page.
+  if (!Array.isArray(outcome.data.rows)) {
+    return {
+      state: "read-failed",
+      detail:
+        "The platform answered with a delivery projection this view cannot render — it carries no node " +
+        "rows. Nothing has been lost, and retrying is safe.",
+    };
   }
   return { state: "ok", projection: outcome.data };
 }

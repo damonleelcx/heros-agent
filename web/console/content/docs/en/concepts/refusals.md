@@ -87,6 +87,48 @@ The middle row is the important one. Told "unsupported", you would go and wait f
 never going to fix it. Told `call-site-cannot-carry-it`, you know the change is in reach and it is yours
 to make.
 
+## A refused change is never a dropped one
+
+This is the property that makes a refusal safe to meet, and it is worth stating on its own because the
+alternative is so easy to build by accident.
+
+If a change could not be written into your source and the platform applied it as a **no-op**, the run
+would use your original code while reporting the new configuration's hash. The number would be wrong
+**and would look exactly like a number that is right** — a false measurement rather than a missing
+feature.
+
+So every override on every axis ends in one of three states, and never in a fourth:
+
+| State | What it means |
+|---|---|
+| **applied** | the change is in the diff |
+| **refused** | nothing was persisted, and the reason names the axis and the node |
+| **equivalent** | your source already does what the change asks, so no diff is the correct diff |
+
+A refusal is also never **scored**. Evaluating a hash against source that was never changed would be a
+false measurement, not a partial one.
+
+## A refusal is not a permission problem
+
+No plan, role, flag or setting materialises a change the engine refuses. There is no Force, no advanced
+mode, and no upsell beside a boundary.
+
+Refusals exist because the change would be wrong in a way that is not visible at the moment of choosing
+it — a model string swapped across SDKs, a parameter a call site cannot carry, a prompt slot that stops
+binding. Asking for it more forcefully does not make the SDK match, so there is no button that does.
+
+Where a cell does not materialize, what is missing is an **artifact we owe you** — and no argument, role
+or plan builds one.
+
+## A refusal is not a queue
+
+A refused change is kept as a **recorded intent**. It is not a variant, it is not pending, and nothing
+will retry it.
+
+What it is, is a thing you meant, written down where you can find it when the shape becomes
+materialisable. The distinction matters because "pending" implies somebody is working on it, and for the
+permanent refusals nobody is, ever.
+
 ## Refusals you will meet elsewhere
 
 **A change that is refused rather than applied.** `heros author` answers with one of three verdicts —
