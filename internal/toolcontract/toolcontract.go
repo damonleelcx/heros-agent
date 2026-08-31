@@ -150,6 +150,24 @@ func (r *Registry) Register(t Tool, v Verifier) error {
 	return nil
 }
 
+// Replace rebinds a kind to a new tool, applying the same refusals as Register.
+//
+// # 🔴 Why replacing is a first-class operation rather than a second Register
+//
+// A tool's CONFIGURATION can legitimately change while a process runs — the assessment tool is bound to
+// one repository, and which repository is chosen after startup. Making that a mutation of the map from
+// outside would skip the checks; making it an error would force a deployment to restart to look at a
+// second repository.
+//
+// So it re-runs Register's refusals. An effect-bearing tool still cannot be installed without a verifier,
+// and a tool still cannot be installed without a timeout — the escape hatch does not become an exemption.
+func (r *Registry) Replace(t Tool, v Verifier) error {
+	s := t.Spec()
+	delete(r.tools, s.Kind)
+	delete(r.verifiers, s.Kind)
+	return r.Register(t, v)
+}
+
 // Kinds returns the registered kinds.
 func (r *Registry) Kinds() []string {
 	out := make([]string, 0, len(r.tools))

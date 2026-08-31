@@ -146,6 +146,26 @@ Verified against two real repositories, which corrected two things reasoning had
 
 `Corpus.LooksLikeAnAgent()` separates "this repository has nine weaknesses" from "this is not an agent".
 
+### [x] P17 · The console, wired to the engine
+`internal/router` turns a sentence into one of the nineteen intents, a named redirection, or an
+abstention — deterministically, because a component that decides whether to spend money should not
+itself cost money on every keystroke, and because it must be testable against a fixed holdout that a
+model's answers would move under. 70 held-out questions, ≥80% recall per intent, 100% abstention
+precision.
+
+`internal/api` serves subject intake, routing, and a live SSE stream of run progress.
+`cmd/herosd` serves the console and drives goals with `context.Background()` — a durable goal's lifetime
+is not the browser request's, or a refresh would cancel an hour of work.
+
+Three bugs the wiring exposed:
+- **"remember" contains "member"**, so a memory question redirected to the members page. Redirect
+  matching is word-boundary now, not substring.
+- **Nine axes rescanned the corpus nine times** — 26 seconds to load a 2,541-file repository.
+  `discovery.Index` scans once, and the reuse is a TYPE rather than a hidden cache, because a hidden
+  cache on a value type is a lie about aliasing.
+- **The scope in a sentence was thrown away.** "How to improve prompt?" planned a nine-axis run. The
+  principle was already written in `goal.Axes` and was a comment rather than a code path.
+
 ## !!! Not started, and deliberately so
 
 ### [ ] P11 · Tier-A `compare` execution
@@ -159,12 +179,39 @@ Kill workers mid-task, duplicate events, stale data, unavailable APIs; assert co
 
 ### [ ] P14 · Gradual autonomy rollout
 
+### [x] P17 · The console, wired to the engine
+`internal/router` turns a sentence into one of the nineteen intents, a named redirection, or an
+abstention — deterministically, because a component that decides whether to spend money should not
+itself cost money on every keystroke, and because it must be testable against a fixed holdout that a
+model's answers would move under. 70 held-out questions, ≥80% recall per intent, 100% abstention
+precision.
+
+`internal/api` serves subject intake, routing, and a live SSE stream of run progress.
+`cmd/herosd` serves the console and drives goals with `context.Background()` — a durable goal's lifetime
+is not the browser request's, or a refresh would cancel an hour of work.
+
+Three bugs the wiring exposed:
+- **"remember" contains "member"**, so a memory question redirected to the members page. Redirect
+  matching is word-boundary now, not substring.
+- **Nine axes rescanned the corpus nine times** — 26 seconds to load a 2,541-file repository.
+  `discovery.Index` scans once, and the reuse is a TYPE rather than a hidden cache, because a hidden
+  cache on a value type is a lie about aliasing.
+- **The scope in a sentence was thrown away.** "How to improve prompt?" planned a nine-axis run. The
+  principle was already written in `goal.Axes` and was a comment rather than a code path.
+
 ## !!! Not started, and deliberately so
 
 - **Discovery is heuristic, not a parser.** It finds candidate evidence by pattern, so a false positive
   is cheap (the model discards it) and a false negative is expensive (the axis reports absence). Python,
   TypeScript, JavaScript and Go only. Every report states that it shows what was found, not everything
   that exists.
+- **Discovery is slow on large repositories.** Profiled: 345ms to walk 2,541 files, 1.1s to find call
+  sites, and **16.7s** matching ~30 case-insensitive regexes across 1.1M lines. A single combined gate
+  regex did not help (the union is as expensive as the parts). The fix is lowercasing each line once and
+  dropping `(?i)`, or a literal prefilter per pattern — not attempted yet. Small repositories load in
+  0.4s.
+- **Tier-C effect intents are routed but not built.** `author`, `prompt`, `model` and `deliver` return a
+  refusal naming why, rather than a generic failure.
 - **`internal/memory` is written and untested.** The four classes and the promotion rules compile; there
   is no store implementation and no test. It is not wired into anything.
 - **Console / HTTP surface.** No API and no UI in this tree.

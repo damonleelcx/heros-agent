@@ -108,6 +108,29 @@ var axisPatterns = map[string][]pattern{
 	},
 }
 
+// anySignal is the union of every axis pattern, used as a GATE.
+//
+// 🔴 Why a gate rather than just running the patterns
+//
+// The axis table holds about thirty case-insensitive regexes. Running all of them against every line of
+// a large repository is ~30 million regex evaluations, and it took 17 seconds on a 2,541-file tree. The
+// overwhelming majority of lines match nothing at all, so one combined pattern answers "is this line
+// worth looking at?" in a single pass, and the thirty only run on the few percent that survive.
+//
+// It is built FROM the same table it gates, at init, so a pattern added to an axis is automatically in
+// the gate. A hand-maintained gate would eventually omit a signal, and the symptom — one axis quietly
+// finding less than it should — is invisible without a fixture that already knows the answer.
+var anySignal = func() *regexp.Regexp {
+	var alts []string
+	for _, pats := range axisPatterns {
+		for _, p := range pats {
+			alts = append(alts, "(?:"+p.re.String()+")")
+		}
+	}
+	sort.Strings(alts) // deterministic construction, so the compiled program is identical every run
+	return regexp.MustCompile(strings.Join(alts, "|"))
+}()
+
 // callSite matches a line that calls a model. Used to locate NODES, which is a different question from
 // axis evidence: a node is a place the agent thinks, and the axes describe how it thinks there.
 var callSite = regexp.MustCompile(`(?i)\b(` +
@@ -171,32 +194,6 @@ func isComment(line string, lang Language) bool {
 	return false
 }
 
-// LooksLikeAnAgent reports whether the repository calls a model at all in non-test code.
-//
-// 🔴 A first-class answer rather than something a caller infers from an empty node list, because it is
-// the one conclusion that changes what every other conclusion MEANS. A nine-axis report over a
-// repository that never calls a model is nine paragraphs about nothing — and every axis would honestly
-// report "no signal found", which reads as nine weaknesses rather than one wrong subject.
-//
-// Verified against two real repositories: a Go detector service returned false (correct — it is a
-// service, not an agent), and an agent framework returned true with 987 call sites.
-func (c Corpus) LooksLikeAnAgent() (bool, string) {
-	nodes := Nodes(c)
-	if len(nodes) > 0 {
-		files := map[string]bool{}
-		for _, n := range nodes {
-			files[n.Span.Path] = true
-		}
-		return true, fmt.Sprintf("%d call sites across %d files", len(nodes), len(files))
-	}
-	note := fmt.Sprintf("No code in %d non-test files calls a model.", len(c.Files))
-	if n := c.Skipped["test-file"]; n > 0 {
-		note += fmt.Sprintf(" %d test files were excluded; if the only model calls live in tests, "+
-			"there is no agent in production code to assess.", n)
-	}
-	return false, note
-}
-
 // maxSpansPerAxis bounds how much of the customer's code goes into one prompt.
 //
 // 🔴 A bound rather than "everything that matched", because the excerpt becomes input tokens on a call
@@ -206,111 +203,17 @@ func (c Corpus) LooksLikeAnAgent() (bool, string) {
 const maxSpansPerAxis = 12
 
 // ForAxis extracts evidence for one axis.
-func ForAxis(c Corpus, axis string) Evidence {
-	pats, ok := axisPatterns[axis]
-	if !ok {
-		return Evidence{Axis: axis, Note: fmt.Sprintf("%q is not one of the nine axes", axis)}
-	}
-	seen := map[string]bool{}
-	ev := Evidence{Axis: axis}
-
-	for _, f := range c.Files {
-		for i, line := range f.Lines {
-			if isComment(line, f.Language) {
-				continue
-			}
-			for _, p := range pats {
-				if !p.re.MatchString(line) {
-					continue
-				}
-				start := max(0, i-p.before)
-				end := min(len(f.Lines), i+p.after+1)
-				key := fmt.Sprintf("%s:%d", f.Path, start)
-				if seen[key] {
-					continue
-				}
-				seen[key] = true
-				ev.Spans = append(ev.Spans, Span{
-					Path: f.Path, Line: start + 1,
-					Text: strings.Join(f.Lines[start:end], "\n"), Why: p.why,
-				})
-				break // one span per line; the first matching pattern names it
-			}
-		}
-	}
-
-	if len(ev.Spans) == 0 {
-		// 🔴 The note distinguishes the two absences a reader must never confuse: nothing governs this
-		// axis, versus we could not read this repository. The corpus knows which, so it says.
-		ev.Note = fmt.Sprintf(
-			"No code matching any %s signal was found in %d files. That is a finding: this agent may "+
-				"have no explicit %s handling at all.", axis, len(c.Files), axis)
-		if c.Truncated {
-			ev.Note = fmt.Sprintf(
-				"No %s signal was found, but the walk hit its limits and read only %d files — so this "+
-					"is an absence of evidence rather than evidence of absence.", axis, len(c.Files))
-		}
-		return ev
-	}
-	ev.Found = true
-
-	// 🔴 Rank by proximity to a call site BEFORE truncating, and the ordering is the whole value of the
-	// sample.
-	//
-	// The first version of this sorted by path and truncated to the first twelve. On a large repository
-	// that hits the file budget, every sample then came from whichever directory sorts first —
-	// `acp_adapter/` in the repository this was caught on — regardless of where the agent actually
-	// lives. The report still read as "here is your memory strategy", with real file:line references,
-	// drawn from a directory chosen by the alphabet.
-	//
-	// A biased sample presented as evidence is worse than no sample, because it is checkable and still
-	// wrong: the reader follows the reference, finds real code, and concludes the report understood
-	// their repository.
-	callFiles := map[string]bool{}
-	for _, n := range Nodes(c) {
-		callFiles[n.Span.Path] = true
-	}
-	sort.SliceStable(ev.Spans, func(i, j int) bool {
-		a, b := callFiles[ev.Spans[i].Path], callFiles[ev.Spans[j].Path]
-		if a != b {
-			return a // a file that calls a model comes first
-		}
-		return ev.Spans[i].Path < ev.Spans[j].Path
-	})
-
-	if len(ev.Spans) > maxSpansPerAxis {
-		near := 0
-		for _, s := range ev.Spans[:maxSpansPerAxis] {
-			if callFiles[s.Path] {
-				near++
-			}
-		}
-		ev.Note = fmt.Sprintf(
-			"%d spans matched; showing %d, ranked by proximity to a call site (%d of those are in a "+
-				"file that calls a model).", len(ev.Spans), maxSpansPerAxis, near)
-		ev.Spans = ev.Spans[:maxSpansPerAxis]
-	}
-	return ev
-}
-
-// Excerpt renders an axis's evidence as the text a model reads.
 //
-// It is the AxisSource contract: the second return is false when there is nothing to assess, which is
-// what makes an unreadable axis fail loudly instead of quietly assessing an empty string.
-func (c Corpus) Excerpt(axis string) (string, bool) {
-	ev := ForAxis(c, axis)
-	if !ev.Found {
-		return "", false
-	}
-	var b strings.Builder
-	for _, s := range ev.Spans {
-		fmt.Fprintf(&b, "%s  (%s)\n%s\n\n", s.Ref(), s.Why, s.Text)
-	}
-	if ev.Note != "" {
-		fmt.Fprintf(&b, "[%s]\n", ev.Note)
-	}
-	return strings.TrimSpace(b.String()), true
-}
+// 🔴 Convenience only. It builds a one-shot Index, which rescans the corpus for call sites — fine for a
+// single axis, quadratic across nine. Anything asking about more than one axis must build an Index once
+// and reuse it; the server does.
+func ForAxis(c Corpus, axis string) Evidence { return NewIndex(c).ForAxis(axis) }
+
+// Excerpt satisfies AxisSource for a bare Corpus. Same caveat as ForAxis: prefer Index.
+func (c Corpus) Excerpt(axis string) (string, bool) { return NewIndex(c).Excerpt(axis) }
+
+// LooksLikeAnAgent reports whether this repository calls a model. Same caveat as ForAxis: prefer Index.
+func (c Corpus) LooksLikeAnAgent() (bool, string) { return NewIndex(c).LooksLikeAnAgent() }
 
 func max(a, b int) int {
 	if a > b {
