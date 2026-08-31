@@ -49,8 +49,16 @@ func (s State) Terminal() bool {
 type CriterionKind string
 
 const (
-	// AllTasksTerminal — every task in the DAG reached a terminal state.
-	AllTasksTerminal CriterionKind = "all_tasks_terminal"
+	// AllTasksSucceeded — every task in the DAG succeeded.
+	//
+	// 🔴 NOT "all tasks terminal". Terminal includes failed, blocked and cancelled, so a criterion
+	// phrased that way is satisfied by TOTAL FAILURE: every task fails, every task is therefore
+	// terminal, and the goal reports Succeeded. That is not a hypothetical — it is what this criterion
+	// did until a test asserted a goal could not complete on unverified work and caught it.
+	//
+	// A goal that tolerates some failures expresses that with a counting criterion (`AxesAssessed >= 7`),
+	// which states the tolerance instead of hiding it inside the word "terminal".
+	AllTasksSucceeded CriterionKind = "all_tasks_succeeded"
 	// ProposalsAccepted — at least Threshold proposals were approved by a human.
 	ProposalsAccepted CriterionKind = "proposals_accepted"
 	// EvalCasesGenerated — at least Threshold eval cases were generated and passed quality gates.

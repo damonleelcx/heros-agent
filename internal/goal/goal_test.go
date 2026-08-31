@@ -190,3 +190,40 @@ func TestAxesComeFromTheRequestButAreValidated(t *testing.T) {
 		t.Fatalf("unknown axis accepted, which would silently widen the run: %v", err)
 	}
 }
+
+// TestTerminalIsNotAnAchievement is a regression fence.
+//
+// The criterion this asserts on used to be spelled `AllTasksTerminal`, and "terminal" includes failed,
+// blocked and cancelled. A goal whose every task FAILED therefore satisfied it and reported Succeeded.
+// The name is the fix — a counting criterion states its tolerance instead of hiding it inside a word —
+// and this test exists so nobody restores the shorter, wronger spelling.
+func TestTerminalIsNotAnAchievement(t *testing.T) {
+	now := time.Now()
+	g := draft()
+	g.Criteria = []Criterion{{Kind: AllTasksSucceeded, Threshold: 1}}
+
+	// A run in which everything reached a terminal state but nothing succeeded.
+	if g.EvaluateCompletion(map[CriterionKind]int{AxesAssessed: 0}, now) {
+		t.Fatal("a goal in which every task failed reported success")
+	}
+	if g.EvaluateCompletion(map[CriterionKind]int{AllTasksSucceeded: 1}, now) != true {
+		t.Fatal("a goal in which every task succeeded did not report success")
+	}
+}
+
+// TestPartialSuccessMustBeStatedAsANumber. The tolerance belongs in the criterion, where a reader can
+// see it, rather than in the semantics of a word.
+func TestPartialSuccessMustBeStatedAsANumber(t *testing.T) {
+	now := time.Now()
+	g := draft()
+	g.Criteria = []Criterion{{Kind: AxesAssessed, Threshold: 7}}
+	if g.EvaluateCompletion(map[CriterionKind]int{AxesAssessed: 6}, now) {
+		t.Fatal("6 of a required 7 reported complete")
+	}
+	if !g.EvaluateCompletion(map[CriterionKind]int{AxesAssessed: 7}, now) {
+		t.Fatal("7 of a required 7 did not report complete")
+	}
+	if g.Criteria[0].Observed != 7 {
+		t.Error("the observed count is not recorded, so the completion decision cannot be audited")
+	}
+}

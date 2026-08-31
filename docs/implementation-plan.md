@@ -59,9 +59,21 @@ code, which loses the race it exists to win.
 Closes on: the conformance suite passes against a live Postgres, and the skip-is-not-a-pass fence
 confirms the Postgres leg actually ran.
 
-### [ ] P4 · Worker loop
-observe → plan → execute → verify → persist → continue, against a real provider.
-**Blocked on:** nothing. Next phase to build.
+### [x] P4 · Worker loop + tool contracts
+`RunOnce` performs exactly one bounded cycle: observe → plan → execute → verify → persist → continue.
+The loop belongs to the CALLER, so "test recovery explicitly" is a matter of not calling RunOnce again —
+which is what a crash is.
+
+Tools are contracts, not functions: declared permissions, a required timeout, retry-safety, and a
+SEPARATE verifier. A tool verifying itself asks the component that may have failed whether it failed.
+An effect-bearing tool with no verifier is refused at registration.
+Closes on: verification failure fails the task; an unconfirmable effect is never retried; the retry
+ladder is bounded; cancellation releases the lease; the approval gate parks without holding one; a
+crashed worker is recovered by another from persisted Postgres state.
+
+**!!! Uses fakes at the tool boundary only.** No real model provider is wired yet, so the loop is proven
+against a substituted external world. That is the correct seam to fake, but it means no token or cost
+figure in this repo has yet come from a real call.
 
 ### [ ] P5 · Tier-B query surfaces
 Eleven read-only intents over the store.
@@ -69,8 +81,10 @@ Eleven read-only intents over the store.
 ### [ ] P6 · Tier-A `assess`
 Nine-axis assessment of a subject repository. Requires P4 + subject-repo discovery (not yet scoped).
 
-### [ ] P7 · Tier-C effects + approval gates
-`author`, `prompt`, `model`, `deliver`. Idempotency keys, human gates.
+### [~] P7 · Tier-C effects + approval gates
+The GATE is built and tested (`GateEffectsOutsideThePlatform`, default-deny on anything touching the
+customer's world). The four effect intents and the approval *surface* — where a human actually sees and
+answers the request — are not.
 
 ### [ ] P9 · Tier-A `evalset`
 Generated eval sets. Four generators: seed-from-real-traces, schema-driven, LLM-driven,
