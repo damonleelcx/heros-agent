@@ -39,9 +39,10 @@ type Call struct {
 // 🔴 Spend is reported by the TOOL rather than estimated by the caller. A caller estimating tokens is a
 // caller whose ceiling drifts from reality in whichever direction is least convenient to notice.
 type Result struct {
-	Output    []byte
-	Tokens    int64
-	CostCents int64
+	Output []byte
+	Tokens int64
+	// CostMicroCents is millionths of a cent; see provider.Price.CostMicroCents for why.
+	CostMicroCents int64
 	// ToolCalls counts underlying calls, which may exceed one for a tool that loops internally.
 	ToolCalls int
 }

@@ -50,7 +50,7 @@ func TestEveryCeilingActuallyTrips(t *testing.T) {
 		"MaxTasks":      {Tasks: 50},
 		"MaxToolCalls":  {ToolCalls: 100},
 		"MaxTokens":     {Tokens: 1_000_000},
-		"MaxCostCents":  {CostCents: 500},
+		"MaxCostCents":  {CostMicroCents: 500 * MicroCentsPerCent},
 		"MaxWallClock":  {Elapsed: time.Hour},
 		"MaxSpawnDepth": {SpawnDepth: 3},
 	}
@@ -73,10 +73,10 @@ func TestEveryCeilingActuallyTrips(t *testing.T) {
 // silently moves the real cost of a ceiling a customer agreed to in money.
 func TestTokensAndMoneyAreSeparateCeilings(t *testing.T) {
 	c := full()
-	if _, exceeded := (Spend{CostCents: 500, Tokens: 1}).Exceeded(c); !exceeded {
+	if _, exceeded := (Spend{CostMicroCents: 500 * MicroCentsPerCent, Tokens: 1}).Exceeded(c); !exceeded {
 		t.Error("money ceiling must trip on its own, with tokens far below their limit")
 	}
-	if _, exceeded := (Spend{Tokens: 1_000_000, CostCents: 1}).Exceeded(c); !exceeded {
+	if _, exceeded := (Spend{Tokens: 1_000_000, CostMicroCents: 1}).Exceeded(c); !exceeded {
 		t.Error("token ceiling must trip on its own, with cost far below its limit")
 	}
 }

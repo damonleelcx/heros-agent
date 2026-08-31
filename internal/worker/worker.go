@@ -202,7 +202,7 @@ func (w *Worker) RunOnce(ctx context.Context, goalID goal.ID) (Outcome, error) {
 	g.Spend.Iterations++
 	g.Spend.ToolCalls += res.ToolCalls
 	g.Spend.Tokens += res.Tokens
-	g.Spend.CostCents += res.CostCents
+	g.Spend.CostMicroCents += res.CostMicroCents
 	if saveErr := w.Store.SaveGoal(g); saveErr != nil {
 		return Outcome{Did: DidStop}, saveErr
 	}

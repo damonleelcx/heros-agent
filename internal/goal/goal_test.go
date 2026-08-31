@@ -162,7 +162,7 @@ func TestACeilingStopsTheGoalAndSaysWhich(t *testing.T) {
 	if _, hit := g.CheckCeilings(now); hit {
 		t.Fatal("a fresh goal reported a ceiling")
 	}
-	g.Spend.CostCents = 500
+	g.Spend.CostMicroCents = 500 * bounds.MicroCentsPerCent
 	which, hit := g.CheckCeilings(now)
 	if !hit || which != "MaxCostCents" {
 		t.Fatalf("got (%q,%v), want MaxCostCents", which, hit)

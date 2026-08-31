@@ -43,9 +43,14 @@ type Ceilings struct {
 	MaxToolCalls int
 	// MaxTokens bounds model spend in tokens.
 	MaxTokens int64
-	// MaxCostCents bounds model spend in money. Carried ALONGSIDE tokens rather than derived from them:
-	// a price change would silently move a token ceiling's real cost, and the ceiling a customer agreed
-	// to was denominated in money.
+	// MaxCostCents bounds model spend in money, in whole CENTS — the unit a person sets ("$5.00").
+	// Carried alongside tokens rather than derived from them: a price change would silently move a token
+	// ceiling's real cost, and the ceiling a customer agreed to was denominated in money.
+	//
+	// 🔴 The ceiling is in cents and the LEDGER is in micro-cents (see Spend.CostMicroCents). The units
+	// differ on purpose: a person sets a bound at a resolution they can reason about, and the system
+	// accumulates at a resolution that does not distort. MicroCentsPerCent below is the only place the
+	// two meet.
 	MaxCostCents int64
 	// MaxWallClock bounds elapsed time from goal start, including time spent asleep between wake-ups.
 	MaxWallClock time.Duration
@@ -81,6 +86,9 @@ func (c Ceilings) Validate() error {
 	return nil
 }
 
+// MicroCentsPerCent converts the ledger's unit to the ceiling's unit. The single conversion point.
+const MicroCentsPerCent = 1_000_000
+
 // Spend is what a goal has consumed so far. It is persisted with the goal and reconstructed on every
 // wake-up: an in-memory counter would reset on restart, and a ceiling that resets is not a ceiling.
 type Spend struct {
@@ -88,9 +96,10 @@ type Spend struct {
 	Tasks      int
 	ToolCalls  int
 	Tokens     int64
-	CostCents  int64
-	Elapsed    time.Duration
-	SpawnDepth int
+	// CostMicroCents is spend in MILLIONTHS of a cent. See Ceilings.MaxCostCents for why the units differ.
+	CostMicroCents int64
+	Elapsed        time.Duration
+	SpawnDepth     int
 }
 
 // Exceeded reports the first ceiling this spend has reached, and whether any has.
@@ -108,7 +117,7 @@ func (s Spend) Exceeded(c Ceilings) (string, bool) {
 		return "MaxToolCalls", true
 	case s.Tokens >= c.MaxTokens:
 		return "MaxTokens", true
-	case s.CostCents >= c.MaxCostCents:
+	case s.CostMicroCents >= c.MaxCostCents*MicroCentsPerCent:
 		return "MaxCostCents", true
 	case s.Elapsed >= c.MaxWallClock:
 		return "MaxWallClock", true

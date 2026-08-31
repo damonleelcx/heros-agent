@@ -39,7 +39,7 @@ func (f *fakeTool) Execute(_ context.Context, c toolcontract.Call) (toolcontract
 	if f.fn != nil {
 		return f.fn(c)
 	}
-	return toolcontract.Result{Output: []byte("ok"), Tokens: 10, CostCents: 1, ToolCalls: 1}, nil
+	return toolcontract.Result{Output: []byte("ok"), Tokens: 10, CostMicroCents: 12_700, ToolCalls: 1}, nil
 }
 
 type fakeVerifier struct {
@@ -226,7 +226,7 @@ func TestAnUnconfirmableEffectIsNotRetried(t *testing.T) {
 func TestTheRetryLadderIsBoundedAndThenTerminal(t *testing.T) {
 	tool := readOnlyTool()
 	tool.fn = func(toolcontract.Call) (toolcontract.Result, error) {
-		return toolcontract.Result{Tokens: 5, CostCents: 1, ToolCalls: 1}, errors.New("transient")
+		return toolcontract.Result{Tokens: 5, CostMicroCents: 5_000, ToolCalls: 1}, errors.New("transient")
 	}
 	h := setup(t, store.NewMemory(), tool, nil, analyse("a"))
 
@@ -254,14 +254,14 @@ func TestTheRetryLadderIsBoundedAndThenTerminal(t *testing.T) {
 func TestAFailedAttemptStillCostsMoney(t *testing.T) {
 	tool := readOnlyTool()
 	tool.fn = func(toolcontract.Call) (toolcontract.Result, error) {
-		return toolcontract.Result{Tokens: 100, CostCents: 7, ToolCalls: 1}, errors.New("nope")
+		return toolcontract.Result{Tokens: 100, CostMicroCents: 7_000, ToolCalls: 1}, errors.New("nope")
 	}
 	h := setup(t, store.NewMemory(), tool, nil, analyse("a"))
 	if _, err := h.w.RunOnce(context.Background(), h.id); err != nil {
 		t.Fatalf("cycle: %v", err)
 	}
 	g, _ := h.s.LoadGoal(h.id)
-	if g.Spend.CostCents != 7 || g.Spend.Tokens != 100 {
+	if g.Spend.CostMicroCents != 7_000 || g.Spend.Tokens != 100 {
 		t.Fatalf("spend after a FAILED attempt = %+v; a failed call still cost money", g.Spend)
 	}
 }
@@ -272,7 +272,7 @@ func TestACeilingStopsTheWorkerBeforeItClaims(t *testing.T) {
 	tool := readOnlyTool()
 	h := setup(t, store.NewMemory(), tool, nil, analyse("a"))
 	g, _ := h.s.LoadGoal(h.id)
-	g.Spend.CostCents = g.Ceilings.MaxCostCents
+	g.Spend.CostMicroCents = g.Ceilings.MaxCostCents * bounds.MicroCentsPerCent
 	if err := h.s.SaveGoal(g); err != nil {
 		t.Fatalf("save: %v", err)
 	}

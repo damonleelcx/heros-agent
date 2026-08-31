@@ -111,9 +111,24 @@ pull-request idempotency keys are stable across replans and clocks.
 ### [x] P6/P10 · `assess` and `improve` end to end
 Proven against live Postgres, including a mid-run process death and resume.
 
-**!!! The tool boundary is still substituted.** No real model provider, and subject-repository discovery
-does not exist — the assessment tools return fixtures. What is proven is the ORCHESTRATION: the ordering,
-the gates, the bounds, the persistence and the resume.
+### [x] P15 · A real model provider
+DeepSeek, called for real. `internal/provider` is the boundary; `internal/provider/deepseek` is the
+client; `internal/tools` is the first tool that actually calls a model.
+
+Measured on 2026-08-31, `deepseek-v4-flash`, nine axes over a real Postgres: **8 model calls, 4,397
+tokens, $0.0016, 24.4s.** The `graph` axis failed because topology cannot be read without executing the
+customer's code, and the synthesis blocked behind it — both as designed.
+
+Spend is a **micro-cent** ledger against a **cent** ceiling. A real call proved why: 300 tokens cost
+0.0127 cents, and rounding up to the cent — the correct instinct, since under-reporting is the dangerous
+direction — overstated it 79x.
+
+DeepSeek prices **double during peak hours** (01:00–04:00 and 06:00–10:00 UTC, Mon–Fri), so the price is
+selected per call from the call's own clock, defaulting to peak when uncertain.
+
+**!!! The tool boundary is real; the SUBJECT is not.** Subject-repository discovery does not exist, so
+`tools.FixtureSource` supplies the code excerpts. The model call, the tokens, the cost and the findings
+are genuine; the repository they describe is a fixture.
 
 ### [ ] P11 · Tier-A `compare` execution
 

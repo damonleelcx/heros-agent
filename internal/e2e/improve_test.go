@@ -66,7 +66,7 @@ func (v verifyFn) Verify(_ context.Context, c toolcontract.Call, r toolcontract.
 }
 
 func spend() toolcontract.Result {
-	return toolcontract.Result{Tokens: 100, CostCents: 1, ToolCalls: 1}
+	return toolcontract.Result{Tokens: 100, CostMicroCents: 12_700, ToolCalls: 1}
 }
 
 // registry wires one tool per kind the improve plan emits.
@@ -310,7 +310,7 @@ func TestImproveRunsEndToEndAndStopsAtTheApprovalGate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reload goal: %v", err)
 	}
-	if after.Spend.CostCents == 0 || after.Spend.Tokens == 0 {
+	if after.Spend.CostMicroCents == 0 || after.Spend.Tokens == 0 {
 		t.Error("the run cost nothing, which means spend was never recorded")
 	}
 	if which, hit := after.Spend.Exceeded(after.Ceilings); hit {
