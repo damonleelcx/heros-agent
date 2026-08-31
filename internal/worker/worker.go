@@ -61,6 +61,17 @@ const (
 	DidStall Did = "stall"
 	// DidStop — a ceiling was reached, or the goal is not claimable (paused, cancelled, finished).
 	DidStop Did = "stop"
+	// DidReplan — the plan grew because results justified new work. No task ran this cycle.
+	DidReplan Did = "replan"
+	// DidBlockedOnApproval — every remaining task is waiting for a person. Terminal FOR THIS WORKER: no
+	// amount of further polling changes anything until a human answers.
+	//
+	// 🔴 A distinct outcome rather than DidNothing, and the distinction is the whole reason it exists.
+	// Both mean "I claimed nothing this cycle", but DidNothing says "try again shortly" and this says
+	// "the ball is in your court". Collapsing them produces a goal that reports `no claimable task` on
+	// every cycle forever — which reads to an operator as a healthy, busy run, while it is in fact
+	// waiting on them and will wait until the wall-clock ceiling kills it.
+	DidBlockedOnApproval Did = "blocked_on_approval"
 	// DidAwaitApproval — the task's effect is gated on a human. The lease is RELEASED: a person may take
 	// a week, and a week-long lease is indistinguishable from a hung worker.
 	DidAwaitApproval Did = "await_approval"
@@ -87,6 +98,15 @@ func (GateEffectsOutsideThePlatform) NeedsApproval(_ *goal.Goal, t *task.Task) (
 	return false, ""
 }
 
+// Reviser revises a plan from what the DAG has produced. Optional: a worker with no reviser executes a
+// fixed plan, which is correct for goals whose shape is known up front.
+//
+// An interface rather than the concrete planner registry so this package does not depend on it —
+// worker executes tasks and must not acquire an opinion about how they are chosen.
+type Reviser interface {
+	Revise(g *goal.Goal, d *task.DAG, now time.Time) ([]*task.Task, error)
+}
+
 // Clock is injected so tests can move time without sleeping. A worker that calls time.Now() directly
 // cannot have its lease-expiry behaviour tested except by waiting, and a test that waits is a test that
 // gets deleted.
@@ -102,7 +122,10 @@ type Worker struct {
 	Store  store.Store
 	Tools  *toolcontract.Registry
 	Policy ApprovalPolicy
-	Clock  Clock
+	// Reviser is optional. A worker without one executes a fixed plan, which is correct for goals whose
+	// shape is known from the goal alone.
+	Reviser Reviser
+	Clock   Clock
 	// Lease is how long a claim is held. Short on purpose: a worker doing long work RENEWS. A long lease
 	// is indistinguishable from a hung worker, and the reclaim logic cannot tell them apart.
 	Lease time.Duration
@@ -258,12 +281,64 @@ func (w *Worker) idle(goalID goal.ID, g *goal.Goal, now time.Time) (Outcome, err
 		return Outcome{Did: DidNothing, More: true}, nil //nolint:nilerr // a goal may have no DAG yet
 	}
 
-	done, total := d.Progress()
-	succeeded := 0
-	for _, t := range d.Tasks {
-		if t.State == task.Succeeded {
-			succeeded++
+	// ── replan ───────────────────────────────────────────────────────────────────────────────────
+	//
+	// 🔴 BEFORE the completion check, and the order is load-bearing. An `improve` goal's initial plan is
+	// an assessment; when every assessment task succeeds, every task is terminal and "all tasks
+	// succeeded" is TRUE — so a completion check that ran first would declare victory at exactly the
+	// moment the real work became possible, and the customer would receive an empty improvement run
+	// reported as a success.
+	//
+	// Replanning is a comparison of the goal against what the tasks actually produced, not a question
+	// put to a model. Its bounds live in the reviser.
+	if w.Reviser != nil {
+		added, err := w.Reviser.Revise(g, d, now)
+		if err != nil {
+			// A reviser that cannot bound its additions stops the goal rather than truncating silently.
+			g.State = goal.Failed
+			g.Refusal = &bounds.Refusal{Cause: bounds.CeilingExceeded, Detail: err.Error()}
+			g.UpdatedAt = now
+			if serr := w.Store.SaveGoal(g); serr != nil {
+				return Outcome{Did: DidStop}, serr
+			}
+			return Outcome{Did: DidStop, Detail: "replanning refused: " + err.Error()}, nil
 		}
+		if len(added) > 0 {
+			merged := make([]*task.Task, 0, len(d.Tasks)+len(added))
+			for _, t := range d.Tasks {
+				merged = append(merged, t)
+			}
+			merged = append(merged, added...)
+			grown, err := task.NewDAG(string(goalID), merged)
+			if err != nil {
+				return Outcome{Did: DidStop}, err
+			}
+			if err := w.Store.SaveDAG(grown); err != nil {
+				return Outcome{Did: DidStop}, err
+			}
+			return Outcome{Did: DidReplan,
+				Detail: fmt.Sprintf("%d task(s) added from what the run has found so far", len(added)),
+				More:   true}, nil
+		}
+	}
+
+	done, total := d.Progress()
+	succeeded, awaiting := 0, 0
+	for _, t := range d.Tasks {
+		switch t.State {
+		case task.Succeeded:
+			succeeded++
+		case task.AwaitingApproval:
+			awaiting++
+		}
+	}
+
+	// 🔴 Checked before completion and before the stall arms, because a goal waiting on a person is
+	// neither finished nor broken. It is the one no-progress state whose resolution is somebody else's
+	// action, so the worker must stop polling and SAY SO.
+	if awaiting > 0 {
+		return Outcome{Did: DidBlockedOnApproval,
+			Detail: fmt.Sprintf("%d task(s) waiting for a person; %d/%d done", awaiting, done, total)}, nil
 	}
 
 	observed := map[goal.CriterionKind]int{}

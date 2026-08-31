@@ -90,7 +90,32 @@ answers the request — are not.
 Generated eval sets. Four generators: seed-from-real-traces, schema-driven, LLM-driven,
 adversarial-perturbation.
 
-### [ ] P10 · Tier-A `improve` · [ ] P11 · Tier-A `compare`
+### [x] P4b · Planner / executor split + replanning
+One component owns the plan; workers own one task each and know nothing about the shape around them.
+The plan exists as ROWS, so it can be shown to a person before it costs anything, rather than as control
+flow that can only be read by running it.
+
+`assess` fans out one task per axis and joins on a synthesis — so an unmeasurable axis is one blocked
+row in a report that still has eight, rather than an assessment that did not happen. `improve` plans an
+assessment and grows proposal chains from findings that actually exist. `evalset` gates quality between
+generation and publication, because a generator scoring its own output marks its own homework.
+`compare` waits for both runs.
+
+Replanning is a DIFF, not a conversation: the plan changes because facts arrived, not because a model
+was asked what it fancied next. Bounded three ways — task ceiling, spawn depth, and never re-adding an
+existing id (which would reset attempt counters and let a failing task retry forever while every
+individual round stayed inside its limits).
+Closes on: every durable intent has a planner or the registry refuses to build; replanning is idempotent;
+pull-request idempotency keys are stable across replans and clocks.
+
+### [x] P6/P10 · `assess` and `improve` end to end
+Proven against live Postgres, including a mid-run process death and resume.
+
+**!!! The tool boundary is still substituted.** No real model provider, and subject-repository discovery
+does not exist — the assessment tools return fixtures. What is proven is the ORCHESTRATION: the ordering,
+the gates, the bounds, the persistence and the resume.
+
+### [ ] P11 · Tier-A `compare` execution
 
 ### [~] P12 · Timeline / observability
 Event model and recording exist and are written by the kernel. The *query* side — "what happened, why,
