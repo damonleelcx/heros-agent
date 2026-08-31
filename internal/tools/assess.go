@@ -64,7 +64,8 @@ Rules:
 - "actionable" means a specific change could be made to this excerpt. A true observation that implies no
   change is actionable=false.
 - If the excerpt shows no weakness on this axis, say so with actionable=false rather than inventing one.
-- Reply with a JSON object only, no prose around it.`
+- Reply with a JSON object only, no prose around it.
+- Keep "weakness" to at most two sentences. You are naming one problem, not writing a report.`
 
 // findingWire is the shape the model is asked for. Kept beside the prompt that requests it.
 type findingWire struct {
@@ -140,9 +141,10 @@ func (a AssessAxis) Execute(ctx context.Context, c toolcontract.Call) (toolcontr
 
 // FixtureSource is an AxisSource backed by literal excerpts.
 //
-// 🔴 It exists because subject-repository discovery is NOT BUILT. It is named for what it is rather than
-// called something like `DefaultSource`, so that no reader mistakes the current state for a finished
-// one, and so a search for "fixture" finds every place the system is still pretending.
+// 🔴 It existed because subject-repository discovery was not built. Discovery now exists —
+// `discovery.Corpus` satisfies AxisSource directly — so this is TEST SCAFFOLDING, kept because a unit
+// test of the model-facing half should not need a repository on disk. It is named for what it is so
+// that a search for "fixture" still finds every place the system is pretending.
 type FixtureSource struct{ Excerpts map[string]string }
 
 func (f FixtureSource) Excerpt(axis string) (string, bool) {

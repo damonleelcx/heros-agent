@@ -126,9 +126,27 @@ direction — overstated it 79x.
 DeepSeek prices **double during peak hours** (01:00–04:00 and 06:00–10:00 UTC, Mon–Fri), so the price is
 selected per call from the call's own clock, defaulting to peak when uncertain.
 
-**!!! The tool boundary is real; the SUBJECT is not.** Subject-repository discovery does not exist, so
-`tools.FixtureSource` supplies the code excerpts. The model call, the tokens, the cost and the findings
-are genuine; the repository they describe is a fixture.
+### [x] P16 · Repository intake and discovery
+The fixture is gone. `internal/intake` resolves what a person types — a local path or a GitHub link — to
+a PINNED revision, and refuses when it cannot: without a revision, "did my change help?" compares against
+something that has moved. A dirty working tree is recorded and surfaced rather than silently pinned.
+
+`internal/discovery` reads the repository within four bounds (containment, skipped trees, file size, file
+count) and extracts per-axis EVIDENCE: real spans of the customer's code with file and line. It finds
+evidence and stops; a model judges it. The two halves fail differently — extraction fails the same way
+every time and can be fixed, judgement fails by being wrong in a plausible sentence — so keeping them
+apart means a false claim can be traced to which half produced it.
+
+Verified against two real repositories, which corrected two things reasoning had not:
+- **Test files dominate.** Nearly every call site and axis span landed in test code, because tests
+  instantiate models and set temperatures more explicitly than production code does. Excluded and
+  counted.
+- **Alphabetical sampling is a biased sample presented as evidence.** Spans are now ranked by proximity
+  to a call site before truncation, and the sample discloses how it was ranked.
+
+`Corpus.LooksLikeAnAgent()` separates "this repository has nine weaknesses" from "this is not an agent".
+
+## !!! Not started, and deliberately so
 
 ### [ ] P11 · Tier-A `compare` execution
 
@@ -143,7 +161,10 @@ Kill workers mid-task, duplicate events, stale data, unavailable APIs; assert co
 
 ## !!! Not started, and deliberately so
 
-- **Subject-repository discovery / IR.** Every Tier-A goal depends on parsing the customer's agent
-  chain. It is the largest single upstream dependency and is not yet scoped. `assess`, `evalset`,
-  `improve` and `compare` cannot complete without it.
+- **Discovery is heuristic, not a parser.** It finds candidate evidence by pattern, so a false positive
+  is cheap (the model discards it) and a false negative is expensive (the axis reports absence). Python,
+  TypeScript, JavaScript and Go only. Every report states that it shows what was found, not everything
+  that exists.
+- **`internal/memory` is written and untested.** The four classes and the promotion rules compile; there
+  is no store implementation and no test. It is not wired into anything.
 - **Console / HTTP surface.** No API and no UI in this tree.

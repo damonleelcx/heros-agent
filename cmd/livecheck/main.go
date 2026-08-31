@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -15,7 +16,9 @@ import (
 	migrations "github.com/heros-foreal/heros/db/migrations"
 	"github.com/heros-foreal/heros/internal/bounds"
 	"github.com/heros-foreal/heros/internal/config"
+	"github.com/heros-foreal/heros/internal/discovery"
 	"github.com/heros-foreal/heros/internal/goal"
+	"github.com/heros-foreal/heros/internal/intake"
 	"github.com/heros-foreal/heros/internal/intent"
 	"github.com/heros-foreal/heros/internal/planner"
 	"github.com/heros-foreal/heros/internal/provider"
@@ -27,24 +30,34 @@ import (
 	"github.com/heros-foreal/heros/internal/worker"
 )
 
-// excerpts are a real-shaped agent: a support bot with the weaknesses the prototype describes.
-// 🔴 Fixtures. Subject-repository discovery is not built; see tools.FixtureSource.
-var excerpts = map[string]string{
-	"model":   "Every node calls model='deepseek-v4-pro', temperature=0.7, including a classifier whose\noutput is one of three fixed labels.",
-	"prompt":  "SYSTEM_PROMPT is a 1,400-word string literal in agents/triage.py, edited in place, no versioning.",
-	"skills":  "No skills are bound at any call site. Capabilities are inlined into the system prompt as prose.",
-	"context": "def build_messages(self, history):\n    return [SYSTEM] + history   # no truncation, no summarisation",
-	"tools":   "triage offers 4 tools, calls 4.\nlookup_order offers 6 tools, calls 5 — refund_tool has never been called in 30 days of traces.\nescalate offers 2, calls 2.",
-	"memory":  "Nothing persists between sessions. Each conversation starts empty; returning customers re-explain\ntheir order number every time.",
-	"harness": "No timeout, no retry, no token ceiling on any call. A hung provider call hangs the request thread.",
-	"loop":    "while True:\n    resp = call_model(...)\n    if 'DONE' in resp: break   # no max_turns, no other stop condition",
-	// 🔴 `graph` is deliberately absent: the topology is built at runtime, so it cannot be read without
-	// executing the customer's code. The axis fails, and saying so is the point.
-}
-
 func main() {
+	if len(os.Args) < 2 {
+		fmt.Println("usage: livecheck <path-or-github-ref>")
+		os.Exit(2)
+	}
 	if err := config.LoadDotEnv(".env.local"); err != nil {
 		die("dotenv", err)
+	}
+
+	// ── intake: resolve what was typed to a pinned revision ──────────────────────────────────────
+	cache, _ := os.UserCacheDir()
+	src, err := intake.NewResolver(filepath.Join(cache, "heros", "repos")).Resolve(os.Args[1])
+	if err != nil {
+		die("intake", err)
+	}
+	fmt.Printf("source   %s\n", src.Describe())
+
+	// ── discovery: read the repository, bounded ──────────────────────────────────────────────────
+	corpus, err := discovery.Walk(src.Root, discovery.Limits{})
+	if err != nil {
+		die("discovery", err)
+	}
+	isAgent, why := corpus.LooksLikeAnAgent()
+	fmt.Printf("read     %d files, %d test files excluded\n", len(corpus.Files), corpus.Skipped["test-file"])
+	fmt.Printf("agent    %v — %s\n", isAgent, why)
+	if !isAgent {
+		fmt.Println("\nRefusing to assess: there is no agent here to assess.")
+		os.Exit(1)
 	}
 	key, err := config.DeepSeekKey()
 	if err != nil {
@@ -70,7 +83,7 @@ func main() {
 		ID: goal.ID(fmt.Sprintf("live-%d", now.UnixNano())), Tenant: "acme",
 		Intent: intent.Assess, State: goal.Draft,
 		Objective: "look at my repository and tell me what is weak",
-		Subject:   goal.Subject{RepoURL: "git@github.com:acme/support-bot.git", Revision: "rev-a41c9"},
+		Subject:   goal.Subject{RepoURL: src.RemoteURL, Revision: src.Revision},
 		Ceilings: bounds.Ceilings{MaxIterations: 40, MaxTasks: 20, MaxAttemptsPerTask: 2,
 			MaxToolCalls: 40, MaxTokens: 200_000, MaxCostCents: 500,
 			MaxWallClock: 10 * time.Minute, MaxSpawnDepth: 2},
@@ -99,7 +112,7 @@ func main() {
 	reg := toolcontract.NewRegistry()
 	if err := reg.Register(tools.AssessAxis{
 		Provider: client, Model: deepseek.ModelFlash,
-		Source: tools.FixtureSource{Excerpts: excerpts}, MaxTokens: 700,
+		Source: corpus, MaxTokens: 1200,
 	}, nil); err != nil {
 		die("register", err)
 	}
@@ -107,9 +120,8 @@ func main() {
 	w := worker.New("livecheck", s, reg)
 	w.Lease = 2 * time.Minute
 
-	fmt.Printf("goal   %s\n", g.ID)
-	fmt.Printf("model  %s   ceiling $%.2f / %d tokens\n\n",
-		deepseek.ModelFlash, float64(g.Ceilings.MaxCostCents)/100, g.Ceilings.MaxTokens)
+	fmt.Printf("goal     %s\nmodel    %s   ceiling $%.2f / %d tokens\n\n",
+		g.ID, deepseek.ModelFlash, float64(g.Ceilings.MaxCostCents)/100, g.Ceilings.MaxTokens)
 
 	start := time.Now()
 	for i := 0; i < 40; i++ {
