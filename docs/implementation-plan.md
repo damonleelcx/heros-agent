@@ -50,6 +50,15 @@ Hard ceilings (iterations, tokens, tool calls, cost, wall-clock, spawn depth) an
 set. Unbounded requests are refused, never defaulted.
 Closes on: each ceiling trips; each refusal names a next action.
 
+### [x] P2b · Postgres store
+Baseline schema, embedded idempotent migrations, and a Postgres `Store`. The claim is ONE
+`UPDATE … FOR UPDATE SKIP LOCKED` statement: a read-then-write claim has a window in which two workers
+both see a task as free, and the window is small enough to reach production and rare enough to be
+blamed on something else. Idempotency is enforced by a partial unique index rather than in application
+code, which loses the race it exists to win.
+Closes on: the conformance suite passes against a live Postgres, and the skip-is-not-a-pass fence
+confirms the Postgres leg actually ran.
+
 ### [ ] P4 · Worker loop
 observe → plan → execute → verify → persist → continue, against a real provider.
 **Blocked on:** nothing. Next phase to build.
@@ -83,7 +92,4 @@ Kill workers mid-task, duplicate events, stale data, unavailable APIs; assert co
 - **Subject-repository discovery / IR.** Every Tier-A goal depends on parsing the customer's agent
   chain. It is the largest single upstream dependency and is not yet scoped. `assess`, `evalset`,
   `improve` and `compare` cannot complete without it.
-- **Postgres store.** The store interface is defined and exercised by an in-memory implementation.
-  Nothing persists across a process restart yet, which means principle 5 is *designed for* but not
-  *delivered*. This is the highest-priority gap.
 - **Console / HTTP surface.** No API and no UI in this tree.
