@@ -1,8 +1,0 @@
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: heros
-  labels:
-    # The NetworkPolicy's cross-namespace rules select on this label, so the namespace naming its own
-    # identity is load-bearing, not decoration.
-    kubernetes.io/metadata.name: heros

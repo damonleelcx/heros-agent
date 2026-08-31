@@ -1,4 +1,0 @@
-version: "1.0.0"
-entrypoints:
-  - symbol: "dev.langchain4j.model.chat.(*ChatLanguageModel).generate"
-    provider: anthropic

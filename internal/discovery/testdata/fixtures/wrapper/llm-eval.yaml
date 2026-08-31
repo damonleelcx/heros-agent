@@ -1,6 +1,0 @@
-version: "1.0.0"
-entrypoints:
-  - symbol: "example.com/wrapper/internal/llm.Complete"
-    provider: anthropic
-    args:
-      prompt: { index: 1 }
