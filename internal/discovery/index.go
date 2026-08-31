@@ -50,13 +50,19 @@ func NewIndex(c Corpus) *Index {
 			if isComment(line, f.Language) {
 				continue
 			}
-			// The gate: one regex instead of thirty on the lines that match nothing, which is most of them.
-			if !anySignal.MatchString(line) {
+			// 🔴 Lowercased ONCE per line, then gated on plain literals. The thirty case-insensitive
+			// patterns are the cost — 1.1M lines by 30 expressions is 33M matches, and it took 16.7s.
+			// Almost no line contains any signal word, so one literal scan rejects it and the expensive
+			// patterns never run.
+			// One pass finds every hint in the line; a pattern whose hints are absent cannot match and is
+			// never run. This replaced a regex gate that cost 3.2s of automaton time on this corpus.
+			mask := lineMask(toLower(line))
+			if !mayMatch(mask) {
 				continue
 			}
 			for axis, pats := range axisPatterns {
-				for _, p := range pats {
-					if !p.re.MatchString(line) {
+				for pi, p := range pats {
+					if !hintedBy(mask, axis, pi) || !p.re.MatchString(line) {
 						continue
 					}
 					start := max(0, i-p.before)

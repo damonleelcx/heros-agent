@@ -166,6 +166,28 @@ Three bugs the wiring exposed:
 - **The scope in a sentence was thrown away.** "How to improve prompt?" planned a nine-axis run. The
   principle was already written in `goal.Axes` and was a comment rather than a code path.
 
+### [x] P18 · Discovery performance
+A 2,541-file repository took **17.2 seconds** to index and now takes **764ms** — 22.6x — with evidence
+proven byte-identical before and after. End to end over HTTP: 26s at the start of this work, **1.1s** now.
+
+The route there was three wrong guesses and one profile:
+1. A gate regex made of the union of all thirty axis patterns: **no change at all.** A union of complex
+   expressions costs what its parts cost — it is the same automaton.
+2. A bitmask index so a gated line only runs patterns whose hints it contains: **no change.** The
+   per-pattern work was never the bottleneck.
+3. The profile said the *gate itself* was 3.2s of `regexp.(*machine)` plus 1.9s of GC pressure from its
+   allocations. Go's regexp is a general automaton and pays general-automaton costs even when every
+   branch is a constant string.
+
+The fix is a two-byte prefix index over the hint literals (`internal/discovery/literals.go`): one pass,
+no automaton, no allocation. Applied to the axis patterns and then to the call-site scan.
+
+**The optimisation is fenced, not trusted.** A hint that is too narrow does not fail loudly — it silently
+drops findings, and this package reports absence AS a finding, so a dropped signal becomes a confident
+claim that a customer's agent has no memory strategy. `TestTheLiteralGateChangesNothing` and
+`TestTheCallSiteGateChangesNothing` run every pattern with the gate on and off over a real
+2,541-file repository and assert the results are identical.
+
 ## !!! Not started, and deliberately so
 
 ### [ ] P11 · Tier-A `compare` execution
@@ -199,17 +221,34 @@ Three bugs the wiring exposed:
 - **The scope in a sentence was thrown away.** "How to improve prompt?" planned a nine-axis run. The
   principle was already written in `goal.Axes` and was a comment rather than a code path.
 
+### [x] P18 · Discovery performance
+A 2,541-file repository took **17.2 seconds** to index and now takes **764ms** — 22.6x — with evidence
+proven byte-identical before and after. End to end over HTTP: 26s at the start of this work, **1.1s** now.
+
+The route there was three wrong guesses and one profile:
+1. A gate regex made of the union of all thirty axis patterns: **no change at all.** A union of complex
+   expressions costs what its parts cost — it is the same automaton.
+2. A bitmask index so a gated line only runs patterns whose hints it contains: **no change.** The
+   per-pattern work was never the bottleneck.
+3. The profile said the *gate itself* was 3.2s of `regexp.(*machine)` plus 1.9s of GC pressure from its
+   allocations. Go's regexp is a general automaton and pays general-automaton costs even when every
+   branch is a constant string.
+
+The fix is a two-byte prefix index over the hint literals (`internal/discovery/literals.go`): one pass,
+no automaton, no allocation. Applied to the axis patterns and then to the call-site scan.
+
+**The optimisation is fenced, not trusted.** A hint that is too narrow does not fail loudly — it silently
+drops findings, and this package reports absence AS a finding, so a dropped signal becomes a confident
+claim that a customer's agent has no memory strategy. `TestTheLiteralGateChangesNothing` and
+`TestTheCallSiteGateChangesNothing` run every pattern with the gate on and off over a real
+2,541-file repository and assert the results are identical.
+
 ## !!! Not started, and deliberately so
 
 - **Discovery is heuristic, not a parser.** It finds candidate evidence by pattern, so a false positive
   is cheap (the model discards it) and a false negative is expensive (the axis reports absence). Python,
   TypeScript, JavaScript and Go only. Every report states that it shows what was found, not everything
   that exists.
-- **Discovery is slow on large repositories.** Profiled: 345ms to walk 2,541 files, 1.1s to find call
-  sites, and **16.7s** matching ~30 case-insensitive regexes across 1.1M lines. A single combined gate
-  regex did not help (the union is as expensive as the parts). The fix is lowercasing each line once and
-  dropping `(?i)`, or a literal prefilter per pattern — not attempted yet. Small repositories load in
-  0.4s.
 - **Tier-C effect intents are routed but not built.** `author`, `prompt`, `model` and `deliver` return a
   refusal naming why, rather than a generic failure.
 - **`internal/memory` is written and untested.** The four classes and the promotion rules compile; there
