@@ -134,7 +134,8 @@ func (v VerifyProposal) Execute(ctx context.Context, c toolcontract.Call) (toolc
 		verdict.Checks = append(verdict.Checks, Check{"names resolve", false, detail})
 		return finish(verdict, toolcontract.Result{})
 	}
-	verdict.Checks = append(verdict.Checks, Check{Name: "names resolve", Passed: true})
+	verdict.Checks = append(verdict.Checks, Check{Name: "names resolve", Passed: true,
+		Detail: nameNote(prop)})
 
 	// ── 4. somebody tries to refute it ───────────────────────────────────────────────────────────
 	temp := 0.0
@@ -235,46 +236,43 @@ func parses(root string, p edit.Proposal) (bool, string) {
 	case "go":
 		return compilesWithGofmt(candidate, p.Path)
 	}
+	// 🚫 No syntax check for JavaScript or TypeScript: `node --check` would run the file's top level for
+	// an ES module, and this system does not execute the customer's code. The name scanner still applies.
 	return true, ""
 }
 
-// namesResolve checks that every module the candidate uses is actually imported.
+// namesResolve checks that the change does not introduce a name nothing brings into scope.
 //
-// 🚫 Not a type checker and not a linter. It answers one question — "does this change reference something
-// that is not in scope?" — because that is the failure a syntax check cannot see and the one a rewrite
-// most often introduces. Anything subtler belongs to the customer's own tests, which this system does
-// not run.
+// 🔴 DIFFERENTIAL: both the original and the candidate are scanned, and only names the change ADDED are
+// reported. The question is "did this change break it", not "is this file clean" — a file may already
+// reference something conditionally imported, generated at build time, or injected by a framework, none
+// of which the scanner understands. Judging the candidate alone would reject every correct change to
+// such a file, and a check that punishes people for pre-existing code is one they learn to route around.
 func namesResolve(root string, p edit.Proposal) (bool, string) {
-	if languageOfPath(p.Path) != "python" {
-		// 🔴 Unchecked, and the verdict says so rather than implying a check that did not happen. Go's
-		// equivalent needs a compile, which needs the customer's dependencies — a different promise from
-		// the one this system makes.
-		return true, ""
-	}
+	lang := languageOfPath(p.Path)
 	full, err := safeJoin(root, p.Path)
 	if err != nil {
 		return false, err.Error()
 	}
-	body, err := osReadFile(full)
+	original, err := osReadFile(full)
 	if err != nil {
 		return false, err.Error()
 	}
-	candidate := strings.Replace(body, p.Before, p.After, 1)
+	candidate := strings.Replace(original, p.Before, p.After, 1)
 
-	cmd := exec.Command("python3", "-c", pyNameCheck)
-	cmd.Stdin = strings.NewReader(candidate)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		if strings.Contains(err.Error(), "executable file not found") {
-			return true, ""
-		}
-		return false, firstLineOf(string(out))
-	}
-	missing := strings.TrimSpace(string(out))
-	if missing == "" {
+	after, checked := unresolvedNames(candidate, lang)
+	if !checked {
+		// 🔴 Unchecked is not a pass. The verdict records which it was, so a reader is never told a check
+		// happened when no interpreter was available or no scanner exists for the language.
 		return true, ""
 	}
-	return false, fmt.Sprintf("uses %s, which the file does not import", missing)
+	before, _ := unresolvedNames(original, lang)
+
+	if added := introducedBy(before, after); len(added) > 0 {
+		return false, fmt.Sprintf("uses %s, which the file does not import",
+			strings.Join(added, ", "))
+	}
+	return true, ""
 }
 
 // pyNameCheck reads a module on stdin and prints any module-qualified name it uses that is neither
@@ -311,8 +309,21 @@ func parseNote(p edit.Proposal) string {
 		return "python compile()"
 	case "go":
 		return "gofmt parse"
+	case "typescript", "javascript":
+		return "no parser for this language; syntax was not checked"
 	}
 	return "no parser for this language; syntax was not checked"
+}
+
+// nameNote says which name check ran, so an unchecked language is never mistaken for a clean one.
+func nameNote(p edit.Proposal) string {
+	switch languageOfPath(p.Path) {
+	case "python":
+		return "python ast"
+	case "typescript", "javascript":
+		return "conservative scan"
+	}
+	return "no name check for this language"
 }
 
 func languageOfPath(path string) string {
@@ -321,6 +332,11 @@ func languageOfPath(path string) string {
 		return "python"
 	case strings.HasSuffix(path, ".go"):
 		return "go"
+	case strings.HasSuffix(path, ".ts"), strings.HasSuffix(path, ".tsx"):
+		return "typescript"
+	case strings.HasSuffix(path, ".js"), strings.HasSuffix(path, ".jsx"),
+		strings.HasSuffix(path, ".mjs"):
+		return "javascript"
 	}
 	return ""
 }

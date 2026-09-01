@@ -353,3 +353,83 @@ def answer(history):
 		t.Fatalf("a change using locally-defined names was rejected: %v", err)
 	}
 }
+
+// TestATypeScriptChangeUsingAnUnimportedModuleIsRejected.
+//
+// 🔴 The same failure as the Python case, in a language with no parser available. TypeScript gets no
+// SYNTAX check — `node --check` would execute an ES module's top level, and this system does not run the
+// customer's code — so the name scanner is the only deterministic gate here, and the model is configured
+// to approve.
+func TestATypeScriptChangeUsingAnUnimportedModuleIsRejected(t *testing.T) {
+	root := t.TempDir()
+	src := `import { OpenAI } from "openai";
+
+const client = new OpenAI();
+
+export async function answer(history) {
+  return client.chat.completions.create({
+    model: "gpt-4o",
+    messages: history,
+  });
+}
+`
+	if err := os.WriteFile(filepath.Join(root, "client.ts"), []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	approving := &fakeProvider{reply: `{"refuted":false,"reason":""}`}
+	broken := edit.Proposal{
+		Path: "client.ts", Line: 7, Axis: "model",
+		Before:    `    model: "gpt-4o",`,
+		After:     `    model: process_env.MODEL ?? "gpt-4o",`,
+		Rationale: "make the model configurable",
+	}
+	v, err := runVerify(t, root, approving, broken)
+	if err == nil {
+		t.Fatal("a TypeScript change using an unimported name verified successfully")
+	}
+	if v.Passed {
+		t.Fatal("the verdict passed")
+	}
+	for _, c := range v.Checks {
+		if c.Name == "names resolve" && !strings.Contains(c.Detail, "process_env") {
+			t.Errorf("the rejection does not name what is missing: %q", c.Detail)
+		}
+	}
+}
+
+// TestATypeScriptChangeUsingAnImportedModulePasses. The check must not reject correct work — measured at
+// zero false positives over 3,504 simulated edits, and asserted here on the shape that matters most: a
+// property chain, which the first version of the scanner misread as three separate modules.
+func TestATypeScriptChangeUsingAnImportedModulePasses(t *testing.T) {
+	root := t.TempDir()
+	src := `import { OpenAI } from "openai";
+import path from "path";
+
+const client = new OpenAI();
+
+export async function answer(history) {
+  return client.chat.completions.create({ messages: history });
+}
+`
+	if err := os.WriteFile(filepath.Join(root, "client.ts"), []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	approving := &fakeProvider{reply: `{"refuted":false,"reason":""}`}
+	good := edit.Proposal{
+		Path: "client.ts", Line: 7, Axis: "context",
+		Before: `  return client.chat.completions.create({ messages: history });`,
+		After:  `  return client.chat.completions.create({ messages: history.slice(-6) });`,
+	}
+	v, err := runVerify(t, root, approving, good)
+	if err != nil {
+		t.Fatalf("a correct TypeScript change was rejected: %v", err)
+	}
+	if !v.Passed {
+		t.Fatalf("verdict did not pass: %+v", v.Checks)
+	}
+	for _, c := range v.Checks {
+		if c.Name == "names resolve" && c.Detail != "conservative scan" {
+			t.Errorf("the verdict does not say which name check ran: %q", c.Detail)
+		}
+	}
+}

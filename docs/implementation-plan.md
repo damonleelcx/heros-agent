@@ -465,6 +465,11 @@ Two bugs the wiring exposed:
 
 ## !!! Not started, and deliberately so
 
+- **Name resolution is exact for Python, conservative for JS/TS, absent for Go.** Python uses its own
+  AST. JavaScript and TypeScript use a hand-written scanner measured at **0 false positives over 3,504
+  simulated edits on 1,438 real files** — the differential rule is what makes that possible. Go would
+  need a compile, which needs the customer's dependencies; the verdict says "no name check for this
+  language" rather than implying one ran.
 - **Discovery is heuristic, not a parser.** It finds candidate evidence by pattern, so a false positive
   is cheap (the model discards it) and a false negative is expensive (the axis reports absence). Python,
   TypeScript, JavaScript and Go only. Every report states that it shows what was found, not everything
