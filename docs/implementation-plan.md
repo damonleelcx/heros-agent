@@ -3,6 +3,17 @@
 **Status of this document:** live. It is the single source of truth for what is built and what is not.
 Every phase must close on its own — it is not done until its own tests pass without the next phase.
 
+🔴 **When a later phase finishes an earlier one, come back and say so here.** Work in this project is
+often numbered by when it was done rather than by what it completes, so P17 finished P5, P21 finished P7,
+and P23 finished P9 — and for a long time this file said all three were unstarted while the code had
+shipped. A source of truth that disagrees with the tree is worse than no source of truth, because people
+act on it. Each of those now carries a `Completed by` line rather than a silently flipped marker, so the
+reconciliation is auditable rather than just tidy.
+
+⚠️ **Numbering is historical and has gaps.** There is no P24, and P10 and P11 have no headings of their
+own — they are recorded inside `P6/P10` and P23. Nothing is renumbered: these ids appear in commit
+messages and in code comments, and renaming them here would break every reference that points at them.
+
 ## Legend
 
 `[x]` done and tested · `[~]` partially done, gap named · `[ ]` not started
@@ -75,20 +86,37 @@ crashed worker is recovered by another from persisted Postgres state.
 against a substituted external world. That is the correct seam to fake, but it means no token or cost
 figure in this repo has yet come from a real call.
 
-### [ ] P5 · Tier-B query surfaces
+### [x] P5 · Tier-B query surfaces
 Eleven read-only intents over the store.
 
-### [ ] P6 · Tier-A `assess`
+**Completed by P17**, which wired the console to the engine. `intent.go` declares exactly eleven
+`TierQuery` intents and the router answers all of them. The marker sat at `[ ]` for months after the work
+landed, because the phase that finished it was written under its own number and nobody came back here.
+
+### [x] P6 · Tier-A `assess`
 Nine-axis assessment of a subject repository. Requires P4 + subject-repo discovery (not yet scoped).
 
-### [~] P7 · Tier-C effects + approval gates
+**Completed by P16 and P6/P10.** The discovery this entry called "not yet scoped" became P16; the
+assessment itself is proven end to end below. Note that P6 appears twice in this document — here, and
+again in the merged `P6/P10` heading that records the work. That is why the marker went stale: the second
+heading was marked done and this one was never revisited.
+
+### [x] P7 · Tier-C effects + approval gates
 The GATE is built and tested (`GateEffectsOutsideThePlatform`, default-deny on anything touching the
 customer's world). The four effect intents and the approval *surface* — where a human actually sees and
-answers the request — are not.
+answers the request — were not, when this was written.
 
-### [ ] P9 · Tier-A `evalset`
+**Completed by P21**, which built the four effect intents (`author`, `prompt`, `model`, `deliver`) and
+the approval surface: `POST /api/decide`, the console's approval card, and a task parked in
+`AwaitingApproval` holding no lease. **P14** later made the gate itself configurable per organization
+rather than always-on.
+
+### [x] P9 · Tier-A `evalset`
 Generated eval sets. Four generators: seed-from-real-traces, schema-driven, LLM-driven,
 adversarial-perturbation.
+
+**Completed by P23** (`evalset` and `compare`), which is where the four generators, the quality gate and
+the four defects that work exposed are recorded.
 
 ### [x] P4b · Planner / executor split + replanning
 One component owns the plan; workers own one task each and know nothing about the shape around them.
@@ -566,8 +594,6 @@ name the wrong one gets used under. The rename was done with a checked regex and
 what should no longer exist — the lesson from P30, where a `sed` using `\b` changed nothing at all and
 left the build green.
 
-## !!! Not started, and deliberately so
-
 ### [x] P23 · `evalset` and `compare`
 **heros never executes the customer's code** — stated in `internal/tools/boundary.go` because it was
 implicit until it forced a decision. Running a customer's agent means arbitrary code, with their
@@ -709,169 +735,6 @@ whatever the level — the person is right there, watching a diff they requested
 conversation is not autonomy, it is a surprise. Gradual autonomy is about long runs proceeding without
 somebody sitting over them.
 
-### [x] P17 · The console, wired to the engine
-`internal/router` turns a sentence into one of the nineteen intents, a named redirection, or an
-abstention — deterministically, because a component that decides whether to spend money should not
-itself cost money on every keystroke, and because it must be testable against a fixed holdout that a
-model's answers would move under. 70 held-out questions, ≥80% recall per intent, 100% abstention
-precision.
-
-`internal/api` serves subject intake, routing, and a live SSE stream of run progress.
-`cmd/herosd` serves the console and drives goals with `context.Background()` — a durable goal's lifetime
-is not the browser request's, or a refresh would cancel an hour of work.
-
-Three bugs the wiring exposed:
-- **"remember" contains "member"**, so a memory question redirected to the members page. Redirect
-  matching is word-boundary now, not substring.
-- **Nine axes rescanned the corpus nine times** — 26 seconds to load a 2,541-file repository.
-  `discovery.Index` scans once, and the reuse is a TYPE rather than a hidden cache, because a hidden
-  cache on a value type is a lie about aliasing.
-- **The scope in a sentence was thrown away.** "How to improve prompt?" planned a nine-axis run. The
-  principle was already written in `goal.Axes` and was a comment rather than a code path.
-
-### [x] P18 · Discovery performance
-A 2,541-file repository took **17.2 seconds** to index and now takes **764ms** — 22.6x — with evidence
-proven byte-identical before and after. End to end over HTTP: 26s at the start of this work, **1.1s** now.
-
-The route there was three wrong guesses and one profile:
-1. A gate regex made of the union of all thirty axis patterns: **no change at all.** A union of complex
-   expressions costs what its parts cost — it is the same automaton.
-2. A bitmask index so a gated line only runs patterns whose hints it contains: **no change.** The
-   per-pattern work was never the bottleneck.
-3. The profile said the *gate itself* was 3.2s of `regexp.(*machine)` plus 1.9s of GC pressure from its
-   allocations. Go's regexp is a general automaton and pays general-automaton costs even when every
-   branch is a constant string.
-
-The fix is a two-byte prefix index over the hint literals (`internal/discovery/literals.go`): one pass,
-no automaton, no allocation. Applied to the axis patterns and then to the call-site scan.
-
-**The optimisation is fenced, not trusted.** A hint that is too narrow does not fail loudly — it silently
-drops findings, and this package reports absence AS a finding, so a dropped signal becomes a confident
-claim that a customer's agent has no memory strategy. `TestTheLiteralGateChangesNothing` and
-`TestTheCallSiteGateChangesNothing` run every pattern with the gate on and off over a real
-2,541-file repository and assert the results are identical.
-
-### [x] P19 · Truncation, and the default nobody chose
-Three axes truncated on every real repository and none on fixtures. It was never a budgeting problem.
-
-The provider enables chain-of-thought **by default, at `high` effort**. Reasoning tokens are billed as
-output and consume `MaxTokens` before the answer begins — measured on a real excerpt: **243 of 296
-output tokens were reasoning, leaving 53 for the answer.** Raising the ceiling would have bought more
-thinking, not more answer.
-
-Thinking mode also silently disables `temperature`: the provider documents that it "will not trigger an
-error but will also have no effect". Every call had been setting temperature 0 for determinism and
-getting neither the determinism nor an error.
-
-`provider.Reasoning` now has **no usable zero value** — `ValidateRequest` refuses an unset one, the same
-way it refuses an unset ceiling. A forgotten field must not silently buy the expensive option.
-
-Per-axis budgets are measured (50–120 output tokens for the fixed reply shape, budgeted at ~4x) and
-**escalate with the attempt number**, because a retry that repeats an identical request is not a retry.
-Two escalations, then a failure that says the budget was raised and still ran out — a different report
-from "it truncated", and the one that says the prompt is wrong rather than the number.
-
-Same repository, before and after: 12 model calls → **9**; 22,750 tokens → **9,244**; $0.0085 →
-**$0.0045**; 2m8s → **15.3s**; 6 of 9 axes assessed → **9 of 9**.
-
-### [x] P20 · The synthesis
-The join that answers "what is weak here?". First fully green run: **10 of 10 tasks**, 9 of 9 axes,
-7 actionable, $0.0015, 14.4s.
-
-**The ordering, the counts and the unmeasured list are COMPUTED; only the connective sentence comes from
-a model.** The two halves fail differently and only one is survivable: a miscomputed ranking is wrong the
-same way every time and can be fixed, while a generated summary is wrong by being *plausible* — it will
-state that an agent has no memory strategy when the memory axis was never assessed, in a well-formed
-sentence, next to eight true ones.
-
-So the model may connect the findings it was given and may not add one. `validate` rejects a synthesis
-naming any axis that produced no finding, and the unmeasured axes are never shown to it in the first
-place. Refusing costs one retry; publishing costs a customer acting on a weakness never observed in
-their code.
-
-A join needs its edges, so `toolcontract.Call` gained `Inputs` — the results of *declared* dependencies
-only. A tool that could read any result would make the DAG's edges decorative: the graph would say what
-waits for what while the data flowed wherever a tool reached.
-
-### [x] P21 · Tier-C effects — the first writes to somebody's code
-`author`, `prompt`, `model`, `deliver`. They run IN-TURN rather than as durable goals, because the
-tiering says so and the tiering is right: a bounded change is one model call and a diff, and a queue
-would add every failure mode of a distributed run to something that finishes in two seconds.
-
-`internal/edit` is built to REFUSE. A refused edit costs one exchange; a wrong edit costs a corrupted
-file discovered later and attributed to us. So every ambiguity resolves to a refusal: text that occurs
-more than once, a replacement that re-indents (in Python indentation IS block structure — a statement
-moved one level out is valid, parseable, and in a different scope), a path leaving the repository, a
-no-op, or a file that changed between proposing and approving.
-
-Line numbers are never identity — the anchor is the text. An unrelated edit above moves every line
-below it, and an edit applied by line number rewrites whatever now sits there.
-
-**Nothing is pushed.** Approval writes the change on a new branch and commits it, then hands back the
-exact `git push` command. Pushing would need a credential with write access to somebody's repository,
-held by this process, used while they are not present — the standing grant that repository connection is
-deliberately out of scope for. One more step for them, one fewer credential for us.
-
-Proven against a disposable repository: proposal → minimal diff (1 file, 1 insertion, 1 deletion) →
-branch → commit; decline leaves the file byte-identical and HEAD unmoved; a second decision on the same
-change is refused.
-
-`deliver`'s QUESTION was corrected, not its tier. It read "how does an approved change reach my
-repository?" — explanatory wording on an effect-bearing intent, which would eventually have been
-implemented as whichever half the reader noticed.
-
-### [x] P22 · Memory, wired
-Four classes, four tables, because they differ in lifetime, in who may write, and in what a row must
-carry to be trustworthy. One table forces one shape and one write path onto all four, and the concrete
-failure is knowledge: an agent able to INSERT there launders its own speculation into fact, and the next
-goal reads it as if somebody had established it.
-
-- **Knowledge cannot be written, only PROMOTED**, citing episodes, and only observations or effects — a
-  decision is the agent's own reasoning, and promoting one is the laundering step. The schema requires
-  evidence; it is not a convention.
-- **Preferences require a human author.** The Go type refuses system identities, the column refuses an
-  empty one. An agent that infers "they seem to prefer aggressive refactors" has invented a mandate.
-- **Compression never folds a failure or an effect**, and never deletes its source. What broke and what
-  changed in the world are the two things a reader most needs from an old run.
-
-The payoff is that **`run_history` is now a real answer** rather than a placeholder: "what happened in
-that run?" is a SELECT over what a durable run wrote down, and it costs nothing. That is what persisting
-everything was for.
-
-Two bugs the wiring exposed:
-- `MAX(seq)+1` inside an INSERT is **not** atomic — 16 concurrent writers produced 6 sequences and 10
-  errors. Now a per-goal advisory lock, released on rollback or a dropped connection so a dying worker
-  cannot wedge a goal's log.
-- Run history answered about **the lexically-last goal**, not the newest — ids carry the prefix of
-  whatever created them (`g-`, `live-`, `e2e-`), so a leftover test goal sorted last and the real run
-  reported "no episodes" while holding nine. `store.LatestGoal` now asks the question that was meant.
-
-### [x] P25 · Authentication and multi-tenancy
-**Isolation is structural, not remembered.** Twelve of the fourteen store methods take a goal id and
-nothing else, so before this a goal id was sufficient to read, mutate, claim or approve any customer's
-work. `store.Root.For(tenant)` closes over the tenant and every query carries it; a handler is given a
-scoped store and never holds the root, so it cannot construct a query for another tenant — not because
-it is careful, but because it has nothing to be careless with.
-
-`TestATenantCannotReachAnotherTenantsData` exercises **every** method against a goal owned by somebody
-else, on both implementations. A sample would prove only that the sampled methods were fixed, and the
-one that was missed is the one that gets used.
-
-A cross-tenant row is **invisible**, not forbidden: returning "forbidden" would confirm the id exists and
-turn a guessable identifier into an enumeration of everybody's data.
-
-**The loaded repository was a single global field** — one customer's question was answered about
-whichever repository another customer had opened last, with real file:line references, about code they
-have never seen. A cross-tenant leak wearing the shape of a cache. It is per-tenant now.
-
-Authentication is argon2id (RFC 9106 parameters, encoded per hash so the cost can be raised later),
-sessions stored as SHA-256 so a leaked dump yields nothing usable, HttpOnly + SameSite=Lax cookies, and
-a **default-deny** mux: adding a route makes it protected, exposing one takes an edit to a list called
-`public`. A missing user and a wrong password are indistinguishable, in message and in timing.
-
-Bootstrap **refuses to start** when no user exists and no credentials are given. A built-in default
-password is a published credential.
-
 ## !!! Not started, and deliberately so
 
 - **Name resolution is exact for Python, conservative for JS/TS, absent for Go.** Python uses its own
@@ -883,7 +746,6 @@ password is a published credential.
   is cheap (the model discards it) and a false negative is expensive (the axis reports absence). Python,
   TypeScript, JavaScript and Go only. Every report states that it shows what was found, not everything
   that exists.
-- **Console / HTTP surface.** No API and no UI in this tree.
 - **`memory.Store` is not tenant-scoped.** `Episodes(goalID)` returns whatever goal it is handed, for
   any customer — the same shape `store.Root.For(tenant)` structurally removed from the goal store. Both
   call sites today reach it only with a goal id already proven to belong to the caller, so nothing leaks;
@@ -902,9 +764,9 @@ password is a published credential.
   whoever is asking. A per-IP limit needs to know which proxies to trust, and this product has no such
   configuration; getting it wrong behind a load balancer gives every customer in the deployment one
   shared bucket, which is an outage rather than a limit. Left undone deliberately, not overlooked.
-- **Shedding is per process, like the limits.** With several replicas the peak is the ceiling times the
-  replica count, which is the number to size a container against.
-- **The limiter is per process.** With more than one replica each holds its own buckets, so the
-  effective ceiling is the configured one times the number of replicas. Stated rather than solved: the
-  alternative is a write to shared storage on every unauthenticated request, keyed on a string the caller
-  chooses, which is a worse thing to expose than a limit that is N times looser than it says.
+- **Every limit and every ceiling is per PROCESS.** Rate-limit buckets and the argon2id ceiling both
+  live in memory, so with several replicas the effective figure is the configured one times the replica
+  count — which is the number to size a container against, and the number an attacker actually faces.
+  Stated rather than solved: sharing them means a write to shared storage on every unauthenticated
+  request, keyed on a string the caller chooses, which is a worse thing to expose than a limit that is N
+  times looser than it says.
