@@ -146,6 +146,14 @@ func (s *Server) handleSubject(w http.ResponseWriter, r *http.Request) {
 		}, nil)
 		_ = s.ToolRegistry.Replace(tools.PublishEvalSet{Root: src.Root},
 			tools.NewPublishVerifier(src.Root))
+		_ = s.ToolRegistry.Replace(tools.ProposeChange{
+			Provider: s.Provider, Model: s.Model, Source: ix, Root: src.Root,
+		}, nil)
+		_ = s.ToolRegistry.Replace(tools.VerifyProposal{
+			Provider: s.Provider, Model: s.Model, Root: src.Root,
+		}, nil)
+		_ = s.ToolRegistry.Replace(tools.OpenPullRequest{Root: src.Root},
+			tools.NewDeliveryVerifier(src.Root))
 	}
 
 	writeJSON(w, http.StatusOK, s.describeSubject(src, ix, isAgent, why))
@@ -404,9 +412,14 @@ func criteriaFor(i intent.Intent, axis string) []goal.Criterion {
 		return []goal.Criterion{{Kind: goal.EvalCasesGenerated, Threshold: 1}}
 	case intent.Compare:
 		return []goal.Criterion{{Kind: goal.ComparisonDrawn, Threshold: 1}}
+	case intent.Improve:
+		// 🔴 A delivered change, not an assessment. Scoring improve on axes assessed let a run that
+		// proposed a change, failed to verify it, and delivered nothing report SUCCESS — the same
+		// "terminal is not an achievement" mistake in a third place.
+		return []goal.Criterion{{Kind: goal.ChangesDelivered, Threshold: 1}}
 	default:
-		// assess and improve. A narrowed run needs its one axis; a whole-repository run needs most of
-		// them, because a report over two axes is not the report that was asked for.
+		// assess. A narrowed run needs its one axis; a whole-repository run needs most of them, because
+		// a report over two axes is not the report that was asked for.
 		if axis != "" {
 			return []goal.Criterion{{Kind: goal.AxesAssessed, Threshold: 1}}
 		}

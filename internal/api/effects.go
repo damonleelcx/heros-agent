@@ -2,10 +2,8 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
-	"os/exec"
 	"strings"
 	"sync"
 	"time"
@@ -13,8 +11,8 @@ import (
 	"github.com/heros-foreal/heros/internal/edit"
 	"github.com/heros-foreal/heros/internal/goal"
 	"github.com/heros-foreal/heros/internal/intent"
-	"github.com/heros-foreal/heros/internal/provider"
 	"github.com/heros-foreal/heros/internal/task"
+	"github.com/heros-foreal/heros/internal/tools"
 )
 
 // effects.go serves the Tier-C intents: author, prompt, model, deliver.
@@ -78,74 +76,13 @@ func (a *approvals) take(id string) (*pending, error) {
 
 // ── proposing ────────────────────────────────────────────────────────────────────────────────────
 
-const proposeSystem = `You rewrite ONE span of a developer's source code to fix a specific weakness.
-
-Rules:
-- Return the replacement for the given span ONLY. Not the whole file, not an explanation.
-- Preserve the EXACT leading whitespace of the first line. Indentation is block structure.
-- Change as little as possible. A smaller diff is a better one.
-- If the span cannot be improved without seeing more code, say so with "can_change": false.
-- Reply with a JSON object only: {"can_change": boolean, "replacement": string, "rationale": string}`
-
-type proposeWire struct {
-	CanChange   bool   `json:"can_change"`
-	Replacement string `json:"replacement"`
-	Rationale   string `json:"rationale"`
-}
-
-// propose asks the model to rewrite one span, then validates the result against the file on disk.
-//
-// 🔴 The model's output is never trusted as an edit. It is a candidate replacement string; `Validate`
-// decides whether it can be applied, and refuses ambiguity, re-indentation, and no-ops. The model
-// suggests; this package decides.
+// propose delegates to the shared core, so the in-turn path and the improvement run enforce ONE set of
+// safety rules. What differs between them is only how the result is delivered.
 func (s *Server) propose(ctx context.Context, sub *subjectState, axis, instruction string) (*pending, error) {
-	ev := sub.Index.ForAxis(axis)
-	if !ev.Found || len(ev.Spans) == 0 {
-		return nil, fmt.Errorf("there is no %s code in this repository to change — %s", axis, ev.Note)
-	}
-	// The highest-ranked span: evidence nearest a call site, which is where the live path is.
-	target := ev.Spans[0]
-
-	temp := 0.0
-	resp, err := s.Provider.Complete(ctx, provider.Request{
-		Model: s.Model, MaxTokens: 600, Reasoning: provider.NoReasoning, Temperature: &temp,
-		JSONObject: true,
-		Messages: []provider.Message{
-			{Role: "system", Content: proposeSystem},
-			{Role: "user", Content: fmt.Sprintf(
-				"Axis: %s\nFile: %s\nWhat to change: %s\n\nSpan to rewrite:\n%s\n\n"+
-					"Reply as JSON: {\"can_change\":boolean,\"replacement\":string,\"rationale\":string}",
-				axis, target.Ref(), instruction, target.Text)},
-		},
-	})
+	p, _, err := tools.ProposeSpanChange(ctx, s.Provider, s.Model, sub.Index, sub.Source.Root,
+		axis, instruction)
 	if err != nil {
 		return nil, err
-	}
-	if resp.Truncated() {
-		return nil, fmt.Errorf("the proposed change was cut off; the span at %s is too large to rewrite "+
-			"in one step", target.Ref())
-	}
-	var w proposeWire
-	if err := json.Unmarshal([]byte(strings.TrimSpace(resp.Content)), &w); err != nil {
-		return nil, fmt.Errorf("the model did not return a usable change: %w", err)
-	}
-	if !w.CanChange || strings.TrimSpace(w.Replacement) == "" {
-		reason := w.Rationale
-		if reason == "" {
-			reason = "the model could not improve this span from what it was shown"
-		}
-		return nil, fmt.Errorf("no change proposed for %s at %s: %s", axis, target.Ref(), reason)
-	}
-
-	p := edit.Proposal{
-		Path: target.Path, Line: target.Line, Axis: axis,
-		Before: target.Text, After: strings.TrimRight(w.Replacement, "\n"),
-		Rationale: w.Rationale,
-	}
-	// 🔴 Validated against the file on disk BEFORE a person is shown a diff. Showing somebody a change
-	// that cannot be applied wastes their decision, and they will not find out until they approve it.
-	if err := p.Validate(sub.Source.Root); err != nil {
-		return nil, fmt.Errorf("the proposed change cannot be applied safely: %w", err)
 	}
 	return &pending{
 		ID:       fmt.Sprintf("chg-%d", time.Now().UnixNano()),
@@ -237,36 +174,22 @@ func (s *Server) handleDecide(w http.ResponseWriter, req decideReq) {
 		return
 	}
 
-	branch := "heros/" + strings.ReplaceAll(p.Proposal.Axis, " ", "-") + "-" + p.ID[len(p.ID)-6:]
-	if out, err := git(p.Root, "checkout", "-b", branch); err != nil {
-		writeJSON(w, 200, decideResp{Message: fmt.Sprintf("could not create a branch: %v: %s", err, out)})
-		return
-	}
-	if err := p.Proposal.Apply(p.Root); err != nil {
-		// Leave the branch: a half-applied state a person can inspect beats a tidy one that hides what
-		// happened. The message says where they are.
-		writeJSON(w, 200, decideResp{
-			Message: fmt.Sprintf("the change was not applied: %v. You are on branch %s; "+
-				"`git checkout -` returns you.", err, branch)})
-		return
-	}
-	if out, err := git(p.Root, "add", p.Proposal.Path); err != nil {
-		writeJSON(w, 200, decideResp{Message: fmt.Sprintf("git add failed: %v: %s", err, out)})
-		return
-	}
+	branch := fmt.Sprintf("heros/%s-%s", p.Proposal.Axis, p.ID[len(p.ID)-6:])
 	msg := fmt.Sprintf("%s: %s\n\nProposed by heros against %s.\nIdempotency key: %s\n",
-		p.Proposal.Axis, firstSentence(p.Proposal.Rationale), p.Revision[:min(8, len(p.Revision))], p.Key)
-	if out, err := git(p.Root, "commit", "-m", msg); err != nil {
-		writeJSON(w, 200, decideResp{Message: fmt.Sprintf("git commit failed: %v: %s", err, out)})
+		p.Proposal.Axis, firstSentence(p.Proposal.Rationale),
+		p.Revision[:min(8, len(p.Revision))], p.Key)
+
+	// The SAME commit path the improvement run uses. Two implementations of "put a change in somebody's
+	// repository" would be enforced twice and eventually differently.
+	d, err := tools.CommitChange(p.Root, p.Proposal, branch, msg)
+	if err != nil {
+		writeJSON(w, http.StatusOK, decideResp{Message: err.Error()})
 		return
 	}
-	sha, _ := git(p.Root, "rev-parse", "--short", "HEAD")
-
-	writeJSON(w, 200, decideResp{
-		Applied: true, Branch: branch, Commit: strings.TrimSpace(sha),
-		Push: fmt.Sprintf("git push -u origin %s", branch),
+	writeJSON(w, http.StatusOK, decideResp{
+		Applied: true, Branch: d.Branch, Commit: d.Commit, Push: d.Push,
 		Message: fmt.Sprintf("Committed to %s. Nothing has been pushed — run the command above when "+
-			"you are ready, and open the pull request yourself.", branch),
+			"you are ready, and open the pull request yourself.", d.Branch),
 	})
 }
 
@@ -290,14 +213,6 @@ func (s *Server) decideTask(w http.ResponseWriter, req decideReq) {
 	writeJSON(w, http.StatusOK, decideResp{
 		Applied: true,
 		Message: fmt.Sprintf("Approved. %s is running again.", req.TaskID)})
-}
-
-func git(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	cmd.Env = append(cmd.Environ(), "GIT_TERMINAL_PROMPT=0")
-	out, err := cmd.CombinedOutput()
-	return string(out), err
 }
 
 func firstSentence(s string) string {

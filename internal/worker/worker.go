@@ -429,6 +429,8 @@ func (w *Worker) idle(goalID goal.ID, g *goal.Goal, now time.Time) (Outcome, err
 			observed[goal.EvalCasesGenerated]++
 		case "compare_results":
 			observed[goal.ComparisonDrawn]++
+		case "open_pull_request", "write_source", "deliver_change":
+			observed[goal.ChangesDelivered]++
 		}
 	}
 

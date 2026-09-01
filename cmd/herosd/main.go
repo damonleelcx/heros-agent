@@ -20,6 +20,7 @@ import (
 	"github.com/heros-foreal/heros/internal/api"
 	"github.com/heros-foreal/heros/internal/bounds"
 	"github.com/heros-foreal/heros/internal/config"
+	"github.com/heros-foreal/heros/internal/discovery"
 	"github.com/heros-foreal/heros/internal/intake"
 	"github.com/heros-foreal/heros/internal/memory"
 	"github.com/heros-foreal/heros/internal/planner"
@@ -108,12 +109,26 @@ func main() {
 	if err := reg.Register(tools.CompareAssessments{Store: st, Tenant: "local"}, nil); err != nil {
 		log.Fatalf("tools: %v", err)
 	}
+	// The improvement run's chain: propose, verify, deliver. Source- and root-bound tools are REBOUND
+	// when a repository loads; registering here proves at startup that they satisfy the contract's
+	// refusals — an effect-bearing tool without a verifier should stop the process, not the customer.
+	if err := reg.Register(tools.ProposeChange{
+		Provider: client, Model: deepseek.ModelFlash, Source: &discovery.Index{}, Root: ".",
+	}, nil); err != nil {
+		log.Fatalf("tools: %v", err)
+	}
+	if err := reg.Register(tools.VerifyProposal{
+		Provider: client, Model: deepseek.ModelFlash, Root: ".",
+	}, nil); err != nil {
+		log.Fatalf("tools: %v", err)
+	}
+	if err := reg.Register(tools.OpenPullRequest{Root: "."}, tools.NewDeliveryVerifier(".")); err != nil {
+		log.Fatalf("tools: %v", err)
+	}
 
 	mem := memory.NewPG(db)
 
-	w := worker.New("herosd", st, reg)
-	w.Lease = 2 * time.Minute
-	w.Episodes = mem
+	w := buildWorker(st, reg, mem, plans)
 
 	cache, _ := os.UserCacheDir()
 	srv := &api.Server{
@@ -156,6 +171,27 @@ func main() {
 	if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("serve: %v", err)
 	}
+}
+
+// buildWorker assembles the worker with everything it needs.
+//
+// # 🔴 Why this is a function rather than four lines in main
+//
+// Because it was four lines in main, and one of them was missing. `Reviser` was never set, so every
+// improvement run stopped after its assessment: the plan never grew into proposals, and the goal
+// reported SUCCESS because its completion criterion was satisfied by the assessment alone. Nothing was
+// red. The end-to-end test passed throughout, because the test wires its own worker — so the tested path
+// and the shipped path were different objects assembled by different code.
+//
+// Extracted so `TestTheDaemonsWorkerIsFullyWired` can assemble the same object the daemon runs.
+func buildWorker(st store.Store, reg *toolcontract.Registry, mem memory.Store,
+	plans *planner.Registry) *worker.Worker {
+	w := worker.New("herosd", st, reg)
+	w.Lease = 2 * time.Minute
+	w.Episodes = mem
+	// Without this an improvement run assesses and stops, and reports success for doing so.
+	w.Reviser = plans
+	return w
 }
 
 // redact hides a password in a DSN before it reaches a terminal or a log.

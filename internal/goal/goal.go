@@ -65,6 +65,14 @@ const (
 	EvalCasesGenerated CriterionKind = "eval_cases_generated"
 	// ComparisonDrawn — a comparison against an earlier assessment was produced.
 	ComparisonDrawn CriterionKind = "comparison_drawn"
+	// ChangesDelivered — at least Threshold changes reached the customer's repository.
+	//
+	// 🔴 What `improve` is FOR. Scoring it on axes assessed lets a run that proposed a change, failed to
+	// verify it, and delivered nothing report SUCCESS — because the assessment happened. The assessment
+	// is not the point; it is the first step. A run that found something and could not fix it safely is
+	// a real and useful outcome, and it is not a success: the reason it could not is what the person
+	// needs to read.
+	ChangesDelivered CriterionKind = "changes_delivered"
 	// AxesAssessed — at least Threshold of the nine axes produced a finding with evidence.
 	AxesAssessed CriterionKind = "axes_assessed"
 )

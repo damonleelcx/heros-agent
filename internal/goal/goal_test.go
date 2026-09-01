@@ -227,3 +227,26 @@ func TestPartialSuccessMustBeStatedAsANumber(t *testing.T) {
 		t.Error("the observed count is not recorded, so the completion decision cannot be audited")
 	}
 }
+
+// TestImproveIsNotSatisfiedByAssessingAlone.
+//
+// 🔴 Regression fence, and the THIRD place this mistake appeared. `improve` was scored on axes assessed,
+// so a run that assessed, proposed a change, failed to verify it, and delivered nothing reported
+// SUCCESS — because the assessment happened. The assessment is the first step, not the point.
+//
+// A run that found something and could not fix it safely is a real and useful outcome. It is not a
+// success: the reason it could not is what the person needs to read.
+func TestImproveIsNotSatisfiedByAssessingAlone(t *testing.T) {
+	now := time.Now()
+	g := draft()
+	g.Intent = intent.Improve
+	g.Criteria = []Criterion{{Kind: ChangesDelivered, Threshold: 1}}
+
+	// Nine axes assessed, a proposal written, nothing delivered.
+	if g.EvaluateCompletion(map[CriterionKind]int{AxesAssessed: 9}, now) {
+		t.Fatal("an improvement run that delivered nothing reported success")
+	}
+	if !g.EvaluateCompletion(map[CriterionKind]int{AxesAssessed: 9, ChangesDelivered: 1}, now) {
+		t.Fatal("an improvement run that delivered a change did not report success")
+	}
+}

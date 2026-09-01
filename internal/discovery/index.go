@@ -151,6 +151,20 @@ func (ix *Index) ForAxis(axis string) Evidence {
 	return ev
 }
 
+// TopSpan returns the highest-ranked span for an axis: the evidence nearest a call site.
+//
+// 🔴 Separate from Excerpt because they are used for different things and only one is safe to rewrite.
+// Excerpt joins several spans with `file:line (why)` headers for a model to READ; a caller that rewrote
+// that string would write the headers into the customer's source. A change targets one contiguous
+// region, and this is how it gets one.
+func (ix *Index) TopSpan(axis string) (Span, bool) {
+	ev := ix.ForAxis(axis)
+	if !ev.Found || len(ev.Spans) == 0 {
+		return Span{}, false
+	}
+	return ev.Spans[0], true
+}
+
 // Excerpt renders an axis's evidence as the text a model reads, satisfying the AxisSource contract.
 //
 // The second return is false when there is nothing to assess, which is what makes an unreadable axis

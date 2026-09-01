@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/heros-foreal/heros/internal/discovery"
 	"github.com/heros-foreal/heros/internal/planner"
 	"github.com/heros-foreal/heros/internal/provider"
 	"github.com/heros-foreal/heros/internal/toolcontract"
@@ -25,6 +26,20 @@ import (
 // 🔴 An interface, because subject-repository discovery does not exist yet. The seam is drawn HERE so
 // that when it does, the model-facing half of assessment does not change — and so that the honest
 // current state (fixtures) is visible as a named implementation rather than hidden inside a tool.
+// SpanSource is an AxisSource that can name ONE span to rewrite.
+//
+// 🔴 A separate, narrower interface rather than a method on AxisSource, because the two answer different
+// questions and only one of them is safe to edit. `Excerpt` returns several spans joined with headers —
+// exactly right for a model to read and catastrophic to rewrite, since the replacement would put those
+// headers into the customer's file. A proposal needs a single contiguous region with a file and a line,
+// and a source that cannot provide one cannot be the target of a change.
+type SpanSource interface {
+	AxisSource
+	// TopSpan returns the highest-ranked span for an axis: the evidence nearest a call site, and so the
+	// most likely to be on the live path rather than in a script nobody runs.
+	TopSpan(axis string) (discovery.Span, bool)
+}
+
 type AxisSource interface {
 	// Excerpt returns what the repository does at this axis, or false when it cannot be determined.
 	// 🔴 The boolean matters: "we could not read this" is a finding, and inventing an excerpt to avoid
@@ -233,3 +248,8 @@ func (f FixtureSource) Excerpt(axis string) (string, bool) {
 	e, ok := f.Excerpts[axis]
 	return e, ok
 }
+
+// 🔴 Compile-time proof that the real discovery index can be the target of a change. Without this the
+// interface and its only implementation drift silently — the build stays green because nothing asserts
+// the relationship, and the failure appears when a proposal task is first claimed.
+var _ SpanSource = (*discovery.Index)(nil)
