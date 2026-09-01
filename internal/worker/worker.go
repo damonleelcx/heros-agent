@@ -194,13 +194,27 @@ func (w *Worker) RunOnce(ctx context.Context, goalID goal.ID) (Outcome, error) {
 	// and the lease is released immediately so the human's thinking time is not a held claim.
 	// 🔴 `!t.Approved` is the whole of the fix for a gate that re-fired forever. The policy is asked
 	// whether this KIND of work needs a person; the task remembers whether one has answered.
-	if need, why := w.Policy.NeedsApproval(g, t); need && !t.Approved {
+	need, why := w.Policy.NeedsApproval(g, t)
+	if need && !t.Approved {
 		w.record(goalID, t, memory.EpisodeDecision,
 			fmt.Sprintf("%s parked for approval", t.ID), why, now)
 		if err := w.Store.Complete(goalID, t.ID, w.ID, task.AwaitingApproval, nil, why, now); err != nil {
 			return Outcome{Did: DidStop}, err
 		}
 		return Outcome{Did: DidAwaitApproval, TaskID: t.ID, Detail: why, More: true}, nil
+	}
+	// 🔴 An effect that goes ahead WITHOUT a person leaves a record saying so, and saying which setting
+	// allowed it. Otherwise "who approved this change to our repository?" has no answer at all — not
+	// "nobody, because the organization is set to autonomous", but silence, which reads as an approval
+	// somebody has forgotten giving.
+	//
+	// 🔴 Recorded as an EFFECT and not a DECISION, though it is literally a decision. Decisions are
+	// compressible and effects are not, and this is exactly the line a summariser must never fold away:
+	// the record that the world was changed with nobody asked is the one a reader most needs from an old
+	// run. See memory.Episode.Compressible.
+	if !need && task.EffectBearingKinds[t.Kind] {
+		w.record(goalID, t, memory.EpisodeEffect,
+			fmt.Sprintf("%s proceeded without approval", t.ID), why, now)
 	}
 
 	// ── execute ──────────────────────────────────────────────────────────────────────────────────

@@ -68,11 +68,19 @@ const (
 	ManageMembers Capability = "member.manage"
 	// TransferOwnership is making somebody an owner, and by extension acting on one.
 	TransferOwnership Capability = "org.transfer"
+	// SetAutonomy is choosing how much of a run proceeds without a person.
+	//
+	// 🔴 Owner only, and deliberately not shared with an admin. Every other capability an admin holds is
+	// about who may act; this one is about whether a person is asked before the product writes to the
+	// organization's repository. That is the kind of decision the person accountable for the account
+	// should make, and it is one click to undo either way.
+	SetAutonomy Capability = "org.autonomy"
 )
 
 // Capabilities is every capability. The fence walks it; nothing else should.
 var Capabilities = []Capability{
 	ReadGoals, LoadSubject, RunGoals, ApproveChange, InviteMember, ManageMembers, TransferOwnership,
+	SetAutonomy,
 }
 
 // grants is the whole authorization model.
@@ -82,7 +90,7 @@ var Capabilities = []Capability{
 var grants = map[Role]map[Capability]bool{
 	Owner: {
 		ReadGoals: true, LoadSubject: true, RunGoals: true, ApproveChange: true,
-		InviteMember: true, ManageMembers: true, TransferOwnership: true,
+		InviteMember: true, ManageMembers: true, TransferOwnership: true, SetAutonomy: true,
 	},
 	Admin: {
 		ReadGoals: true, LoadSubject: true, RunGoals: true, ApproveChange: true,
@@ -90,6 +98,8 @@ var grants = map[Role]map[Capability]bool{
 		// 🔴 An admin cannot create an owner. Without this an admin promotes themselves to owner and the
 		// distinction between the two roles lasts exactly as long as it takes somebody to notice.
 		TransferOwnership: false,
+		// Nor set the autonomy level: an admin manages who may act, not whether anybody is asked.
+		SetAutonomy: false,
 	},
 	Member: {
 		ReadGoals: true, LoadSubject: true, RunGoals: true,
@@ -97,7 +107,7 @@ var grants = map[Role]map[Capability]bool{
 		// rejected: the person who understands the diff is usually not the person who administers the
 		// organization, and a gate the wrong person holds gets worked around rather than obeyed.
 		ApproveChange: true,
-		InviteMember:  false, ManageMembers: false, TransferOwnership: false,
+		InviteMember:  false, ManageMembers: false, TransferOwnership: false, SetAutonomy: false,
 	},
 	Viewer: {
 		ReadGoals: true,
@@ -106,7 +116,7 @@ var grants = map[Role]map[Capability]bool{
 		LoadSubject: false,
 		// Nor run anything, which spends money, nor approve anything, which writes code.
 		RunGoals: false, ApproveChange: false,
-		InviteMember: false, ManageMembers: false, TransferOwnership: false,
+		InviteMember: false, ManageMembers: false, TransferOwnership: false, SetAutonomy: false,
 	},
 }
 

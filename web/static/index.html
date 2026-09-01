@@ -195,6 +195,18 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .send{background:var(--accent);color:var(--accent-ink);border:0;border-radius:var(--radius);
   padding:.45rem .9rem;font-weight:600;font-size:.8rem;cursor:pointer}
 .send:disabled{opacity:.35;cursor:not-allowed}
+/* ── autonomy ────────────────────────────────────────────────────────────── */
+.auto{border:1px solid var(--border);border-radius:var(--radius);padding:.85rem;margin-top:1.2rem}
+.auto h4{margin:0 0 .15rem;font-family:var(--mono);font-size:.625rem;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--ink-muted);font-weight:400}
+.auto .now{font-size:.85rem;color:var(--ink);margin:0 0 .7rem}
+.auto .now b{color:var(--accent);font-weight:500}
+.auto label{display:flex;gap:.6rem;align-items:flex-start;padding:.45rem .1rem;cursor:pointer;
+  font-size:.82rem;color:var(--ink-muted)}
+.auto label b{color:var(--ink);font-weight:500;font-family:var(--mono);font-size:.75rem}
+.auto input[type=radio]{margin-top:.25rem;accent-color:var(--accent)}
+.auto .warn{color:var(--warn);font-size:.78rem;margin:.6rem 0 0}
+
 /* ── timeline ────────────────────────────────────────────────────────────── */
 .tl{display:flex;flex-direction:column;gap:0}
 .tl-row{display:grid;grid-template-columns:auto 1fr auto;gap:.7rem;align-items:baseline;
@@ -1017,6 +1029,56 @@ async function renderOrganization(card){
     form.querySelector('#invsend').onclick = send;
     form.querySelector('#invemail').onkeydown = e => { if (e.key === 'Enter') send(); };
   }
+
+  await renderAutonomy(body);
+}
+
+// renderAutonomy shows how much a run may do without a person, and lets an owner change it.
+//
+// 🔴 Everybody sees it, only an owner can change it — and which of those applies comes from the server's
+// `may_change`, not from the console's own reading of the role. A second implementation of the rule here
+// would eventually disagree with the real one, and the way it disagrees is a control that appears and
+// then refuses.
+async function renderAutonomy(body){
+  let a;
+  try { a = await api('/api/autonomy'); } catch { return; }
+
+  const box = el(`<div class="auto"><h4>autonomy</h4></div>`);
+  const now = el(`<p class="now"></p>`);
+  now.innerHTML = `Runs are <b>${esc(a.level)}</b> — ${esc(a.describes)}`;
+  box.appendChild(now);
+
+  if (a.may_change) {
+    const name = 'autonomy-' + Math.random().toString(36).slice(2);
+    for (const c of a.choices) {
+      const label = document.createElement('label');
+      const radio = document.createElement('input');
+      radio.type = 'radio'; radio.name = name; radio.value = c.level;
+      radio.checked = c.level === a.level;
+      const text = document.createElement('span');
+      const b = document.createElement('b'); b.textContent = c.level;
+      text.appendChild(b);
+      text.appendChild(document.createTextNode(' — ' + c.describes));
+      label.appendChild(radio); label.appendChild(text);
+      radio.onchange = async () => {
+        try {
+          await api('/api/autonomy', {level: c.level});
+          renderOrganization(box.closest('.card'));
+        } catch (e) {
+          radio.checked = false;
+          note(box, e.message, 'bad');
+        }
+      };
+      box.appendChild(label);
+    }
+    // 🔴 Said plainly at the moment of choosing, not buried in documentation. This is the setting that
+    // decides whether the product writes to their repository with nobody watching.
+    const warn = el(`<p class="warn"></p>`);
+    warn.textContent = 'Under “autonomous” a run can open pull requests against your repository ' +
+      'without asking. Every one is still recorded, and the record says nobody was asked.';
+    box.appendChild(warn);
+  }
+  body.appendChild(box);
 }
 
 function note(parent, text, kind='none'){

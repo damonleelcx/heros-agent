@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/heros-foreal/heros/internal/auth"
+	"github.com/heros-foreal/heros/internal/autonomy"
 	"github.com/heros-foreal/heros/internal/tenancy"
 )
 
@@ -1241,5 +1242,76 @@ func TestEveryTokenEndpointIsLimited(t *testing.T) {
 		if !limited {
 			t.Errorf("%s %s accepted twelve attempts on one token without limiting any of them", r.method, r.path)
 		}
+	}
+}
+
+// ── autonomy ─────────────────────────────────────────────────────────────────────────────────────
+
+// TestAutonomyStartsSupervisedAndAnOwnerCanChangeIt.
+//
+// 🔴 The default is asserted, not assumed. Every organization begins where the product behaved before
+// this setting existed — every effect waits for a person — so the migration that added the column
+// changed nobody's behaviour on the day it ran. A default of `assisted` would have silently widened what
+// every existing customer's runs may do, in a schema change, with nobody choosing it.
+//
+// That an admin is REFUSED is covered by the route table fence, which walks every route against every
+// role; there is nothing to repeat here.
+func TestAutonomyStartsSupervisedAndAnOwnerCanChangeIt(t *testing.T) {
+	hz := newHarness(t)
+	owner, _ := hz.user(t, tenancy.Owner)
+	member, _ := hz.user(t, tenancy.Member)
+
+	before := decode(t, hz.do(t, "GET", "/api/autonomy", "", owner))
+	if before["level"] != string(autonomy.Supervised) {
+		t.Fatalf("a new organization starts at %v, not supervised", before["level"])
+	}
+	if before["may_change"] != true {
+		t.Error("an owner is told they may not change it")
+	}
+
+	// A member can SEE it — it governs work they are watching, and hiding it would only stop the console
+	// explaining why their task is parked.
+	asMember := decode(t, hz.do(t, "GET", "/api/autonomy", "", member))
+	if asMember["level"] != string(autonomy.Supervised) {
+		t.Errorf("a member cannot read the setting: %v", asMember)
+	}
+	if asMember["may_change"] != false {
+		t.Error("a member is told they may change it, so the console will offer a control that refuses")
+	}
+
+	if rec := hz.do(t, "POST", "/api/autonomy",
+		`{"level":"autonomous"}`, owner); rec.Code != http.StatusOK {
+		t.Fatalf("an owner could not change it: %d %s", rec.Code, rec.Body.String())
+	}
+	after := decode(t, hz.do(t, "GET", "/api/autonomy", "", member))
+	if after["level"] != string(autonomy.Autonomous) {
+		t.Errorf("the change did not stick: %v", after["level"])
+	}
+
+	// A level this build does not know is refused rather than stored.
+	for _, bad := range []string{`{"level":"full"}`, `{"level":""}`, `{"level":"AUTONOMOUS"}`} {
+		if rec := hz.do(t, "POST", "/api/autonomy", bad, owner); rec.Code != http.StatusBadRequest {
+			t.Errorf("%s answered %d, want 400", bad, rec.Code)
+		}
+	}
+}
+
+// TestOneOrganizationsAutonomyDoesNotLeakIntoAnother.
+//
+// 🔴 The setting decides whether the product writes to a repository unattended. An organization that
+// turned it on must not turn it on for anybody else.
+func TestOneOrganizationsAutonomyDoesNotLeakIntoAnother(t *testing.T) {
+	a := newHarness(t)
+	aOwner, _ := a.user(t, tenancy.Owner)
+	if rec := a.do(t, "POST", "/api/autonomy", `{"level":"autonomous"}`, aOwner); rec.Code != http.StatusOK {
+		t.Fatalf("set: %d %s", rec.Code, rec.Body.String())
+	}
+
+	b := newHarness(t)
+	bOwner, _ := b.user(t, tenancy.Owner)
+	got := decode(t, b.do(t, "GET", "/api/autonomy", "", bOwner))
+	if got["level"] != string(autonomy.Supervised) {
+		t.Fatalf("a second organization reads %v — one customer switching autonomy on switched it on "+
+			"for another", got["level"])
 	}
 }

@@ -668,7 +668,46 @@ to the approval gate, takes the delivery task, and refuses to proceed if the key
 drill skips without a database, so an unset DSN turned the whole recovery suite green having injected no
 fault at all; `TestZZDrillsActuallyRan` counts, mirroring the store's Postgres-leg gate.
 
-### [ ] P14 · Gradual autonomy rollout
+### [x] P14 · Gradual autonomy rollout
+A per-organization LEVEL, and each level names which CLASSES of effect no longer need a person.
+`supervised` (the default) gates everything; `assisted` lets a run change files in its own workspace and
+still stops before anything reaches the customer's repository; `autonomous` gates nothing and is bounded
+only by ceilings. An owner sets it — not an admin: every other capability an admin holds is about who may
+act, and this one is about whether a person is asked before the product writes to somebody's repository.
+
+🚫 **Autonomy never widens on its own.** The obvious "gradual" design lets it: after N proposals approved
+unedited, stop asking for that class. It was considered and rejected. A system that grants itself
+authority from its own record is exactly what should need a human, and a run of easy approvals is not
+evidence about the hard change — the twenty diffs somebody waved through were the twenty that were
+obviously fine, which is why they were waved through. "Gradual" describes an operator turning a dial as
+confidence grows, not software deciding it has earned more room.
+
+🔴 **Every failure gates.** The permissive branch is reached only when the setting was read successfully
+AND is a level this build knows AND the kind has a declared class. A database that is down, a tenant that
+does not exist, an unrecognised level, an unclassified effect, a policy wired with no source — each ends
+in "wait for a person". `TestEveryFailureGates` walks all of them.
+
+🔴 **Two effect classes, and every effect-bearing kind must have one.**
+`TestEveryEffectBearingKindHasAClass` fails the build otherwise, because the alternative to a build
+failure is a default — and a default is a decision in the permissive direction for whichever kind
+somebody forgot. A future "push to production" landing in `workspace` would go out unapproved under the
+level an organization chose for editing files in a checkout.
+
+🔴 **An effect that proceeds with nobody asked leaves a record saying so, and naming the setting that
+allowed it.** Otherwise "who approved this change to our repository?" has no answer at all — not "nobody,
+because the organization is set to autonomous", but silence, which reads like an approval somebody has
+forgotten giving. It is written as an EFFECT episode, not a decision, because decisions are compressible
+and effects are not: a summariser must never be free to fold away the one line saying the world was
+changed unattended.
+
+**The default is the restrictive one**, so migration 0007 changed nobody's behaviour on the day it ran.
+A default of `assisted` would have silently widened what every existing customer's runs may do, in a
+schema change, with nobody choosing it.
+
+🚫 **Scope: the durable run's gate only.** The in-turn Tier-C path (`/api/decide`) still always asks,
+whatever the level — the person is right there, watching a diff they requested, and auto-applying in a
+conversation is not autonomy, it is a surprise. Gradual autonomy is about long runs proceeding without
+somebody sitting over them.
 
 ### [x] P17 · The console, wired to the engine
 `internal/router` turns a sentence into one of the nineteen intents, a named redirection, or an

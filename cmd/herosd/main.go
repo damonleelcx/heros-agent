@@ -19,6 +19,7 @@ import (
 	migrations "github.com/heros-foreal/heros/db/migrations"
 	"github.com/heros-foreal/heros/internal/api"
 	"github.com/heros-foreal/heros/internal/auth"
+	"github.com/heros-foreal/heros/internal/autonomy"
 	"github.com/heros-foreal/heros/internal/bounds"
 	"github.com/heros-foreal/heros/internal/config"
 	"github.com/heros-foreal/heros/internal/discovery"
@@ -137,10 +138,12 @@ func main() {
 
 	mem := memory.NewPG(db)
 
-	w := buildWorker(st.For(defaultTenant), reg, mem, plans)
-
 	cache, _ := os.UserCacheDir()
 	authStore := auth.NewStore(db)
+
+	// The worker is built AFTER the identity store, because its approval policy reads each organization's
+	// autonomy setting from it.
+	w := buildWorker(st.For(defaultTenant), reg, mem, plans, autonomy.Policy{Source: authStore})
 
 	// 🔴 Mail is resolved BEFORE the first request, and a half-configured relay stops the process. A
 	// relay with a missing credential accepts connections and delivers nothing, which is indistinguishable
@@ -312,12 +315,17 @@ func bootstrapIdentity(ctx context.Context, a *auth.Store, mail mailer.Mailer, l
 //
 // Extracted so `TestTheDaemonsWorkerIsFullyWired` can assemble the same object the daemon runs.
 func buildWorker(st store.Store, reg *toolcontract.Registry, mem memory.Store,
-	plans *planner.Registry) *worker.Worker {
+	plans *planner.Registry, policy worker.ApprovalPolicy) *worker.Worker {
 	w := worker.New("herosd", st, reg)
 	w.Lease = 2 * time.Minute
 	w.Episodes = mem
 	// Without this an improvement run assesses and stops, and reports success for doing so.
 	w.Reviser = plans
+	// 🔴 Passed in rather than defaulted, so the daemon's policy is visible at the call site and the
+	// fence below can assemble the same object the daemon runs. worker.New's default gates EVERY effect;
+	// that is the right default for a worker built without an opinion, and the wrong thing to leave in
+	// place silently once the product has a setting for it.
+	w.Policy = policy
 	return w
 }
 

@@ -82,6 +82,13 @@ var apiRoutes = []route{
 		Handler: func(s *Server) http.HandlerFunc { return s.handleListInvitations }},
 	{Method: "POST", Path: "/api/invitations/revoke", Needs: tenancy.InviteMember,
 		Handler: func(s *Server) http.HandlerFunc { return s.handleRevokeInvitation }},
+	// Anybody in the organization may SEE how much runs are allowed to do without a person — it governs
+	// work they are watching, and hiding it would only stop the console explaining why a task is parked.
+	// Changing it is an owner's decision.
+	{Method: "GET", Path: "/api/autonomy",
+		Handler: func(s *Server) http.HandlerFunc { return s.handleGetAutonomy }},
+	{Method: "POST", Path: "/api/autonomy", Needs: tenancy.SetAutonomy,
+		Handler: func(s *Server) http.HandlerFunc { return s.handleSetAutonomy }},
 
 	// ── the work ──────────────────────────────────────────────────────────────────────────────────
 	{Method: "POST", Path: "/api/subject", Needs: tenancy.LoadSubject,
@@ -166,6 +173,8 @@ func refusalFor(need tenancy.Capability, have tenancy.Role) string {
 		return "Only owners and administrators can change roles or remove people."
 	case tenancy.TransferOwnership:
 		return "Only an owner can make somebody else an owner."
+	case tenancy.SetAutonomy:
+		return "Only an owner can change how much a run does without a person."
 	default:
 		if have == "" {
 			return "This request carries no role, so it holds no permissions."

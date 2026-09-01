@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/heros-foreal/heros/internal/autonomy"
 	"github.com/heros-foreal/heros/internal/memory"
 	"github.com/heros-foreal/heros/internal/planner"
 	"github.com/heros-foreal/heros/internal/store"
@@ -25,7 +26,8 @@ func TestTheDaemonsWorkerIsFullyWired(t *testing.T) {
 	if err != nil {
 		t.Fatalf("planners: %v", err)
 	}
-	w := buildWorker(store.NewMemory(), toolcontract.NewRegistry(), memory.NewMem(), plans)
+	w := buildWorker(store.NewMemory(), toolcontract.NewRegistry(), memory.NewMem(), plans,
+		autonomy.Policy{})
 
 	if w.Store == nil {
 		t.Error("no store: the worker cannot claim anything")
@@ -35,6 +37,14 @@ func TestTheDaemonsWorkerIsFullyWired(t *testing.T) {
 	}
 	if w.Policy == nil {
 		t.Error("no approval policy: effect-bearing tasks would run ungated")
+	}
+	// 🔴 And it is the AUTONOMY policy, not the built-in default. The default gates every effect, which
+	// is safe — so a daemon that silently kept it would pass every safety test while the organization's
+	// setting did nothing at all, and the only symptom would be customers reporting that a feature they
+	// turned on has no effect.
+	if _, ok := w.Policy.(autonomy.Policy); !ok {
+		t.Errorf("the daemon's approval policy is %T, not autonomy.Policy: the per-organization "+
+			"autonomy setting would be read by nobody", w.Policy)
 	}
 	if w.Clock == nil {
 		t.Error("no clock: lease expiry cannot be evaluated")

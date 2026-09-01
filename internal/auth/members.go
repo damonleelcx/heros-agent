@@ -5,9 +5,11 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
+	"github.com/heros-foreal/heros/internal/autonomy"
 	"github.com/heros-foreal/heros/internal/tenancy"
 )
 
@@ -269,4 +271,51 @@ func (s *Store) OrgName(ctx context.Context, tenant string) (string, error) {
 		return "", fmt.Errorf("auth: no such organization")
 	}
 	return name, err
+}
+
+// ── autonomy ─────────────────────────────────────────────────────────────────────────────────────
+
+// AutonomyFor reports how much this organization allows to proceed without a person.
+//
+// 🔴 A missing organization is an ERROR, never a default. Returning "supervised" for a tenant that does
+// not exist would make a typo in a goal's tenant read as a valid, conservatively-configured customer —
+// and the caller would proceed on a setting nobody chose. The caller gates on the error, so the failure
+// is that work waits, which somebody reports.
+func (s *Store) AutonomyFor(tenant string) (autonomy.Level, error) {
+	var level string
+	err := s.db.QueryRowContext(context.Background(),
+		`SELECT autonomy FROM tenants WHERE id = $1`, tenant).Scan(&level)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", fmt.Errorf("auth: no organization %q", tenant)
+	}
+	if err != nil {
+		return "", fmt.Errorf("auth: reading autonomy for %q: %w", tenant, err)
+	}
+	if !autonomy.Valid(level) {
+		// The database has a CHECK constraint, so reaching this means something is wrong that a person
+		// needs to see. Returning an error rather than a level makes the policy gate, which is the safe
+		// direction.
+		log.Printf("WARN auth.autonomy.unknown tenant=%s level=%q — every effect will wait for a person "+
+			"until the row is corrected", tenant, level)
+		return "", fmt.Errorf("auth: organization %q has an unrecognised autonomy setting", tenant)
+	}
+	return autonomy.Level(level), nil
+}
+
+// SetAutonomy records an organization's choice.
+//
+// The capability to call this is declared on the route (owner only); the level itself is validated here
+// and by a CHECK constraint, so a value this build does not know cannot be stored by any path.
+func (s *Store) SetAutonomy(ctx context.Context, tenant string, level autonomy.Level) error {
+	if !autonomy.Valid(string(level)) {
+		return fmt.Errorf("%w: %q is not an autonomy level", ErrBadRole, level)
+	}
+	res, err := s.db.ExecContext(ctx, `UPDATE tenants SET autonomy = $1 WHERE id = $2`, string(level), tenant)
+	if err != nil {
+		return fmt.Errorf("auth: setting autonomy: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("auth: no organization %q", tenant)
+	}
+	return nil
 }

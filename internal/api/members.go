@@ -3,9 +3,11 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 
 	"github.com/heros-foreal/heros/internal/auth"
+	"github.com/heros-foreal/heros/internal/autonomy"
 	"github.com/heros-foreal/heros/internal/mailer"
 	"github.com/heros-foreal/heros/internal/tenancy"
 )
@@ -230,4 +232,76 @@ func orDefault(s, fallback string) string {
 		return fallback
 	}
 	return s
+}
+
+// ── autonomy ─────────────────────────────────────────────────────────────────────────────────────
+
+type autonomyLevelOut struct {
+	Level     string `json:"level"`
+	Describes string `json:"describes"`
+}
+
+type autonomyResp struct {
+	Level string `json:"level"`
+	// Describes says in a sentence what the current level means, so the console does not carry a second
+	// copy of the explanation that would drift from the one the worker records.
+	Describes string `json:"describes"`
+	// Choices is every level with its description, for rendering the menu.
+	Choices []autonomyLevelOut `json:"choices"`
+	// MayChange tells the console whether to render the control at all. The server refuses either way;
+	// this only decides what is worth showing.
+	MayChange bool `json:"may_change"`
+}
+
+func (s *Server) handleGetAutonomy(w http.ResponseWriter, r *http.Request) {
+	p, err := tenancy.From(r.Context())
+	if err != nil {
+		unauthorized(w, "You are not signed in.")
+		return
+	}
+	level, err := s.Auth.AutonomyFor(p.Tenant)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	out := autonomyResp{
+		Level: string(level), Describes: autonomy.Describe(level),
+		MayChange: p.May(tenancy.SetAutonomy),
+	}
+	for _, l := range autonomy.Levels {
+		out.Choices = append(out.Choices, autonomyLevelOut{Level: string(l), Describes: autonomy.Describe(l)})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+type setAutonomyReq struct {
+	Level string `json:"level"`
+}
+
+func (s *Server) handleSetAutonomy(w http.ResponseWriter, r *http.Request) {
+	p, err := tenancy.From(r.Context())
+	if err != nil {
+		unauthorized(w, "You are not signed in.")
+		return
+	}
+	var req setAutonomyReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		badRequest(w, "unreadable request")
+		return
+	}
+	if !autonomy.Valid(req.Level) {
+		badRequest(w, "Choose a level: supervised, assisted, or autonomous.")
+		return
+	}
+	if err := s.Auth.SetAutonomy(r.Context(), p.Tenant, autonomy.Level(req.Level)); err != nil {
+		writeAuthErr(w, err)
+		return
+	}
+	// 🔴 Logged, at the level of a real event. Widening what a run may do without a person is the single
+	// most consequential setting in the product, and "when did this change, and who changed it" must be
+	// answerable from the record rather than from somebody's memory.
+	log.Printf("autonomy.changed tenant=%s by=%s level=%s", p.Tenant, p.Subject, req.Level)
+	writeJSON(w, http.StatusOK, map[string]string{
+		"level": req.Level, "describes": autonomy.Describe(autonomy.Level(req.Level)),
+	})
 }

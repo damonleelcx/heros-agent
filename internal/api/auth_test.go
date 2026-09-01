@@ -153,6 +153,7 @@ func TestEveryRouteDeclaresWhatItNeeds(t *testing.T) {
 		"POST /api/auth/logout":       true,
 		"POST /api/auth/email/resend": true,
 		"GET /api/members":            true,
+		"GET /api/autonomy":           true,
 	}
 	for _, r := range apiRoutes {
 		if r.Public || r.Needs != "" {

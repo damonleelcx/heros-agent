@@ -128,6 +128,24 @@ in front of them at all.
 An overloaded server answers `503` and never `401` — telling somebody their correct password is wrong
 sends them to reset a password that was fine — and the shed attempt is refunded to their sign-in budget.
 
+### Autonomy
+
+How much of a run proceeds without a person, set per organization by an **owner**.
+
+| | |
+|---|---|
+| `supervised` | Every change waits for a person, including edits inside the workspace. **The default.** |
+| `assisted` | Edits inside the workspace go ahead; anything reaching your repository waits. |
+| `autonomous` | Nothing waits — runs are bounded only by their ceilings. |
+
+Every failure gates: an unreadable setting, an unknown level, or an effect this build has no class for
+all end in "wait for a person". An effect that proceeds with nobody asked is recorded as an effect
+episode naming the setting that allowed it, so "who approved this?" always has an answer — even when the
+answer is "nobody, and here is the setting that said so".
+
+It governs the **durable run's** approval gate. A Tier-C change proposed in conversation still always
+asks, whatever the level: the person is right there looking at the diff.
+
 An invitation is the only way to join an organization, and it cannot create an owner — ownership is
 transferred inside the console to somebody who already has an account, never by a link in an email that
 travels through a mailbox the organization does not control.
