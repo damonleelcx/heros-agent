@@ -1,0 +1,144 @@
+/* heros.css — the token system and the furniture every page shares.
+ *
+ * 🔴 ONE copy of the palette. The console carried its own `:root` block, transcribed from
+ * heros-agent.space; adding three more pages each with their own copy is four places for a colour to
+ * drift and no way to tell which one is right. The console now links this file too, and its inline
+ * block is gone.
+ *
+ * The system is dark-committed — that is inherited from the original design, not a shortcut — so
+ * every surface paints its own background rather than borrowing the host's.
+ */
+:root{
+  --canvas:#080d17; --panel:#0a1020; --card:#0e1422; --secondary:#151d2e; --muted:#141b2b;
+  --ink:#dde2f0; --ink-muted:#8b95b5; --border:#ffffff1a; --border-strong:#ffffff29;
+  --accent:#2ecfa8; --accent-ink:#051a14;
+  --ok:#34d399; --warn:#fbbf24; --bad:#fb7185; --info:#38bdf8; --gated:#a78bfa; --none:#7f8aa8;
+  --radius:.5rem; --pill:9999px;
+  --fast:.12s; --base:.18s; --slow:.32s;
+  --prose:44rem;
+  --display:"Newsreader",Georgia,"Times New Roman",serif;
+  --body:"Plus Jakarta Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"JetBrains Mono",SFMono-Regular,Menlo,monospace;
+  /* One spacing rhythm, so pages cannot invent their own gaps. */
+  --s1:.25rem; --s2:.5rem; --s3:.75rem; --s4:1rem; --s5:1.5rem; --s6:2rem; --s7:3rem; --s8:4.5rem;
+}
+
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0; background:var(--canvas); color:var(--ink);
+  font-family:var(--body); font-size:16px; line-height:1.6;
+  /* The faint grid the product's surfaces carry, including the avatar's own background. */
+  background-image:
+    linear-gradient(to right,#ffffff08 1px,transparent 1px),
+    linear-gradient(to bottom,#ffffff08 1px,transparent 1px);
+  background-size:64px 64px;
+}
+img,svg{max-width:100%; height:auto; display:block}
+a{color:var(--accent); text-decoration:none}
+a:hover{text-decoration:underline}
+
+/* 🔴 A visible focus ring on every interactive element, and it is never removed. Keyboard users are
+   the ones who cannot see where they are without it, and `outline:none` is the single most common way
+   a design system becomes unusable for them. */
+:where(a,button,input,select,textarea,[tabindex]):focus-visible{
+  outline:2px solid var(--accent); outline-offset:2px; border-radius:var(--radius);
+}
+
+.wrap{width:min(100% - 2rem, 68rem); margin-inline:auto}
+.prose{max-width:var(--prose)}
+
+/* ── nav ─────────────────────────────────────────────────────────────────── */
+.nav{
+  display:flex; align-items:center; gap:var(--s4);
+  padding:var(--s4) 0; border-bottom:1px solid var(--border);
+}
+.nav .brand{display:flex; align-items:center; gap:var(--s3); font-weight:600; color:var(--ink)}
+.nav .brand:hover{text-decoration:none}
+.nav .brand img{width:34px; height:34px; border-radius:var(--pill)}
+.nav .spacer{flex:1}
+.nav-links{display:flex; align-items:center; gap:var(--s2); flex-wrap:wrap}
+
+/* ── buttons ─────────────────────────────────────────────────────────────── */
+.btn{
+  display:inline-flex; align-items:center; justify-content:center; gap:var(--s2);
+  padding:.7rem 1.15rem; border-radius:var(--radius); border:1px solid var(--border-strong);
+  background:var(--secondary); color:var(--ink); font:inherit; font-weight:500;
+  cursor:pointer; transition:background var(--fast), border-color var(--fast), transform var(--fast);
+  /* 44px minimum touch target — a 32px button is a coin toss on a phone. */
+  min-height:44px;
+}
+.btn:hover{background:#1b2540; text-decoration:none}
+.btn:active{transform:translateY(1px)}
+.btn-primary{background:var(--accent); color:var(--accent-ink); border-color:transparent; font-weight:600}
+.btn-primary:hover{background:#48e0bc}
+.btn-quiet{background:transparent; border-color:transparent; color:var(--ink-muted)}
+.btn-quiet:hover{background:var(--secondary); color:var(--ink)}
+.btn[disabled]{opacity:.55; cursor:not-allowed}
+
+/* ── forms ───────────────────────────────────────────────────────────────── */
+.field{
+  width:100%; padding:.7rem .85rem; border-radius:var(--radius);
+  border:1px solid var(--border-strong); background:var(--panel); color:var(--ink);
+  font:inherit; min-height:44px;
+}
+/* 🔴 A readable placeholder. This was #63709026 — 15% alpha — which is roughly 1.3:1 against the
+   field and effectively invisible on a phone in daylight. A placeholder nobody can read is a form
+   with no hints, and it fails WCAG 1.4.3 outright. */
+.field::placeholder{color:#7c88a8}
+.field:focus{border-color:var(--accent)}
+.label{display:block; font-size:.85rem; color:var(--ink-muted); margin-bottom:var(--s2)}
+.hint{font-size:.83rem; color:var(--ink-muted); margin-top:var(--s2)}
+.msg{font-size:.88rem; margin-top:var(--s3); min-height:1.3em}
+.msg.bad{color:var(--bad)}
+.msg.ok{color:var(--ok)}
+
+/* ── cards ───────────────────────────────────────────────────────────────── */
+.card{
+  background:var(--card); border:1px solid var(--border); border-radius:var(--radius);
+  padding:var(--s5);
+}
+.grid{display:grid; gap:var(--s4)}
+/* auto-fit + minmax is the whole responsive story for these grids: they reflow at any width without
+   a breakpoint, so there is no width at which the layout is merely untested. */
+.grid-3{grid-template-columns:repeat(auto-fit,minmax(16rem,1fr))}
+.grid-2{grid-template-columns:repeat(auto-fit,minmax(20rem,1fr))}
+
+h1,h2,h3{font-family:var(--display); font-weight:400; line-height:1.15; margin:0}
+h1{font-size:clamp(2rem,6vw,3.4rem); letter-spacing:-.01em}
+h2{font-size:clamp(1.45rem,3.6vw,2.1rem)}
+h3{font-size:1.1rem; font-family:var(--body); font-weight:600}
+p{margin:0 0 var(--s4)}
+.lede{font-size:clamp(1.02rem,2.2vw,1.2rem); color:var(--ink-muted)}
+.k{font-family:var(--mono); font-size:.85em; color:var(--ink-muted)}
+.eyebrow{
+  font-family:var(--mono); font-size:.75rem; letter-spacing:.14em; text-transform:uppercase;
+  color:var(--accent); margin-bottom:var(--s3);
+}
+.foot{
+  border-top:1px solid var(--border); margin-top:var(--s8); padding:var(--s5) 0;
+  color:var(--ink-muted); font-size:.87rem;
+  display:flex; gap:var(--s4); flex-wrap:wrap; align-items:center;
+}
+
+/* ── auth pages ──────────────────────────────────────────────────────────── */
+.auth{
+  min-height:100dvh; display:grid; place-items:center; padding:var(--s5) var(--s4);
+}
+.auth-card{width:min(100%,26rem)}
+.auth-card .card{padding:var(--s6)}
+.auth-head{text-align:center; margin-bottom:var(--s5)}
+.auth-head img{width:64px; height:64px; margin:0 auto var(--s3); border-radius:var(--pill)}
+.stack{display:grid; gap:var(--s4)}
+.alt{text-align:center; margin-top:var(--s5); color:var(--ink-muted); font-size:.9rem}
+
+@media (max-width:34rem){
+  .nav{flex-wrap:wrap; gap:var(--s3)}
+  .nav .spacer{display:none}
+  .nav-links{width:100%; justify-content:flex-start}
+}
+
+/* Anybody who has asked their system not to animate gets no animation. */
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.01ms !important; transition-duration:.01ms !important}
+}

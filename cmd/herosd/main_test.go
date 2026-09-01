@@ -62,7 +62,7 @@ func TestTheDaemonsWorkerIsFullyWired(t *testing.T) {
 	}
 }
 
-// TestTheDefaultConsoleDirectoryHasAConsoleInIt.
+// TestTheDefaultWebRootServesEveryPageTheProductHas.
 //
 // # 🔴 The bug this exists for
 //
@@ -71,18 +71,38 @@ func TestTheDaemonsWorkerIsFullyWired(t *testing.T) {
 // returned 200. It just was not the product. Every set of instructions had to carry `-web web/static`,
 // and the one that forgot looked like a broken build rather than a wrong flag.
 //
+// ⚠️ IT USED TO CHECK ONLY THE ROOT index.html, and that stopped being enough the moment the console
+// moved. `/` is the public home page now and the console lives at `/app/`; a check on the root alone
+// stays green while `app/index.html` is missing and `/app/` serves a directory listing — the same bug,
+// one directory down, and invisible in exactly the same way.
+//
+// Every page the file server is expected to answer is named here. A page added to the product and not
+// added to this list is a page whose absence nothing reports.
+//
 // The check is on `defaultWebRoot`, the constant the flag declaration uses, rather than on the string
 // "web/static" — asserting a copy of the value would pass happily while the daemon used another one.
-func TestTheDefaultConsoleDirectoryHasAConsoleInIt(t *testing.T) {
+func TestTheDefaultWebRootServesEveryPageTheProductHas(t *testing.T) {
 	root := repoRoot(t)
-	index := filepath.Join(root, defaultWebRoot, "index.html")
-	info, err := os.Stat(index)
-	if err != nil {
-		t.Fatalf("the default -web directory (%s) has no index.html, so the daemon's default flags serve "+
-			"a directory listing instead of the console: %v", defaultWebRoot, err)
-	}
-	if info.IsDir() || info.Size() == 0 {
-		t.Fatalf("%s is not a file with content in it", index)
+	for _, page := range []struct{ path, what string }{
+		{"index.html", "the public home page, at /"},
+		{"app/index.html", "the console, at /app/"},
+		{"signin/index.html", "the sign-in page, at /signin/"},
+		{"signup/index.html", "the sign-up page, at /signup/"},
+		{"heros.css", "the shared token stylesheet every page links"},
+		{"heros-auth.js", "the script both auth pages load"},
+		{"avatar.jpg", "her portrait, shown on every page"},
+		{"favicon.png", "the tab icon every page links"},
+	} {
+		full := filepath.Join(root, defaultWebRoot, page.path)
+		info, err := os.Stat(full)
+		if err != nil {
+			t.Errorf("%s is missing from the default -web directory (%s), so %s does not exist: %v",
+				page.path, defaultWebRoot, page.what, err)
+			continue
+		}
+		if info.IsDir() || info.Size() == 0 {
+			t.Errorf("%s is not a file with content in it — %s", page.path, page.what)
+		}
 	}
 }
 
