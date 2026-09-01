@@ -362,6 +362,13 @@ password reset, which is a complete account takeover.
 reachable, authenticated, authorised, and then panicked on any server not assembled by `main`.
 `ValidRole` trimmed whitespace and `Can` did not, so `" owner"` passed validation and then held nothing.
 
+**And one the console work surfaced.** `web/console.html` and `web/static/index.html` were byte-identical
+tracked duplicates with nothing keeping them in sync, and `-web` defaulted to `web`, which holds no
+`index.html` — so the daemon's default flags served a **directory listing**. Nothing was red: the process
+started, the port answered, `/` returned 200. It simply was not the product. The duplicate is deleted, the
+default is `web/static`, and `TestTheDefaultConsoleDirectoryHasAConsoleInIt` asserts the constant the flag
+declaration actually uses rather than a copy of it.
+
 ## !!! Not started, and deliberately so
 
 ### [x] P23 · `evalset` and `compare`

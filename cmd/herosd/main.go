@@ -37,7 +37,7 @@ import (
 
 func main() {
 	addr := flag.String("addr", "127.0.0.1:8080", "listen address")
-	web := flag.String("web", "web", "directory holding the console")
+	web := flag.String("web", defaultWebRoot, "directory holding the console")
 	dsn := flag.String("dsn", "", "postgres DSN (default $HEROS_DATABASE_URL)")
 	flag.Parse()
 
@@ -217,6 +217,17 @@ func main() {
 
 // defaultTenant is the organization a single-deployment install acts as.
 const defaultTenant = "local"
+
+// defaultWebRoot is the directory holding the console.
+//
+// 🔴 It pointed at `web`, which holds no index.html — so running the daemon with default flags served a
+// DIRECTORY LISTING rather than the console, and every instruction anywhere had to remember to pass
+// `-web web/static`. A default that does not work is worse than no default: it fails in a way that looks
+// like the product, so the reaction is to doubt the build rather than the flag.
+//
+// A constant rather than a literal in the flag declaration, so `TestTheDefaultConsoleDirectoryHasAConsole
+// InIt` checks the value the daemon actually uses instead of a copy of it.
+const defaultWebRoot = "web/static"
 
 // bootstrapIdentity creates the first organization and user, once.
 //

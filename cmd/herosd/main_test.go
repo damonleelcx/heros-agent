@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/heros-foreal/heros/internal/memory"
@@ -47,5 +49,52 @@ func TestTheDaemonsWorkerIsFullyWired(t *testing.T) {
 	if w.Reviser == nil {
 		t.Fatal("no reviser: an improvement run assesses, stops, and reports SUCCESS for doing so — " +
 			"the plan never grows into proposals and nothing goes red")
+	}
+}
+
+// TestTheDefaultConsoleDirectoryHasAConsoleInIt.
+//
+// # 🔴 The bug this exists for
+//
+// `-web` defaulted to `web`, which contains no index.html — so `go run ./cmd/herosd` with no flags
+// served a **directory listing**. Nothing was red: the process started, the port answered, `curl /`
+// returned 200. It just was not the product. Every set of instructions had to carry `-web web/static`,
+// and the one that forgot looked like a broken build rather than a wrong flag.
+//
+// The check is on `defaultWebRoot`, the constant the flag declaration uses, rather than on the string
+// "web/static" — asserting a copy of the value would pass happily while the daemon used another one.
+func TestTheDefaultConsoleDirectoryHasAConsoleInIt(t *testing.T) {
+	root := repoRoot(t)
+	index := filepath.Join(root, defaultWebRoot, "index.html")
+	info, err := os.Stat(index)
+	if err != nil {
+		t.Fatalf("the default -web directory (%s) has no index.html, so the daemon's default flags serve "+
+			"a directory listing instead of the console: %v", defaultWebRoot, err)
+	}
+	if info.IsDir() || info.Size() == 0 {
+		t.Fatalf("%s is not a file with content in it", index)
+	}
+}
+
+// repoRoot walks up from the test's working directory to the module root.
+//
+// 🚫 Not an environment variable and not a path relative to a checkout somewhere else: a fence anchored
+// on an absolute repository path judges whichever tree that path names, which in a worktree is not the
+// tree being tested.
+func repoRoot(t *testing.T) string {
+	t.Helper()
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Fatal("no go.mod above the working directory; cannot locate the module root")
+		}
+		dir = parent
 	}
 }

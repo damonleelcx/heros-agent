@@ -26,7 +26,7 @@ make test
 
 ```
 make pg-up
-go run ./cmd/herosd -web web/static
+go run ./cmd/herosd
 ```
 
 Configuration is environment only — never a flag, never a committed file, because a credential in git
