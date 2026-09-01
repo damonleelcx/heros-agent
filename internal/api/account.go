@@ -168,8 +168,8 @@ func (s *Server) handleResetPassword(w http.ResponseWriter, r *http.Request) {
 	if ok, wait := s.RedeemLimit.Allow(auth.TokenKey(req.Token)); !ok {
 		w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())))
 		writeJSON(w, http.StatusTooManyRequests, map[string]string{
-			"error": "That reset link is being used too often. Try again in " + humanWait(wait) +
-				". It has not been used up.",
+			"error": "That reset link is being tried too often. Try again in " + humanWait(wait) +
+				" — being refused here does not use it up.",
 		})
 		return
 	}
@@ -237,8 +237,8 @@ func (s *Server) handleAcceptInvitation(w http.ResponseWriter, r *http.Request) 
 	if ok, wait := s.AcceptLimit.Allow(auth.TokenKey(req.Token)); !ok {
 		w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())))
 		writeJSON(w, http.StatusTooManyRequests, map[string]string{
-			"error": "That invitation is being used too often. Try again in " + humanWait(wait) +
-				". Your link has not been used up.",
+			"error": "That invitation is being tried too often. Try again in " + humanWait(wait) +
+				" — being refused here does not use up your link.",
 		})
 		return
 	}
@@ -275,6 +275,21 @@ func (s *Server) handleVerifyEmail(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, "unreadable request")
 		return
 	}
+	// 🔴 Keyed on the token's hash, like the other two link endpoints. 🚫 And doing less than they do:
+	// nothing here hashes a password, so a request costs a transaction and an indexed lookup rather than
+	// 64 MiB. What it bounds is hammering of one live link; an attacker sending invented tokens gets a
+	// fresh key each time, exactly as with the others.
+	if ok, wait := s.ConfirmLimit.Allow(auth.TokenKey(req.Token)); !ok {
+		w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())))
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{
+			"error": "That confirmation link is being tried too often. Try again in " + humanWait(wait) +
+				" — being refused here does not use it up.",
+		})
+		return
+	}
+	// 🚫 No refund branch for ErrBusy, unlike the endpoints either side of this one: nothing on this path
+	// runs argon2id, so there is no gate to be shed by and that error cannot arrive. A refund written for
+	// symmetry would be a line nobody could ever make execute.
 	email, err := s.Auth.VerifyEmail(r.Context(), req.Token)
 	if err != nil {
 		writeAuthErr(w, err)
@@ -308,7 +323,7 @@ func (s *Server) handleResendVerification(w http.ResponseWriter, r *http.Request
 	// 🚫 Not refunded on a send failure. The mail did not arrive, which is our fault and not theirs — but
 	// refunding invites an immediate retry, and a retry storm against a relay that is already failing
 	// helps nobody. The message says how long to wait.
-	if ok, wait := s.VerifyLimit.Allow(auth.EmailKey(p.Subject)); !ok {
+	if ok, wait := s.ResendLimit.Allow(auth.EmailKey(p.Subject)); !ok {
 		w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())))
 		writeJSON(w, http.StatusTooManyRequests, map[string]string{
 			"error": "A confirmation link has already been sent to that address more than once. Try " +

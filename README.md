@@ -68,6 +68,7 @@ log file.
 | `POST /api/auth/login` | per account (organization + address) | **10 wrong passwords**, then one a minute. A correct password costs nothing. |
 | `POST /api/auth/invitation/accept` | per invitation | **5**, then one a minute |
 | `POST /api/auth/password/reset` | per reset link | **5**, then one a minute |
+| `POST /api/auth/email/verify` | per confirmation link | **5**, then one a minute |
 | `POST /api/auth/email/resend` | per address | **3**, then one every 20 minutes |
 
 All answer `429` with a `Retry-After`. The first two spend the budget **before** looking anything up — so
@@ -89,10 +90,11 @@ account unblockable — an attacker holding the budget at zero still gets the ow
 removes the accumulation, so the owner gets in after some retries rather than waiting for somebody to
 intervene.
 
-⚠️ **The two token limits bound abuse of one live link, not a flood of invented tokens** — each invented
-token is a fresh key with a fresh budget, so no limit keyed on the token can close that. What closes it is
-that both endpoints check the token before hashing a password, so a garbage string costs an indexed lookup
-instead of 64 MiB and a hashing slot.
+⚠️ **The token limits bound abuse of one live link, not a flood of invented tokens** — each invented token
+is a fresh key with a fresh budget, so no limit keyed on the token can close that. What closes it is that
+`invitation/accept` and `password/reset` check the token before hashing a password, so a garbage string
+costs an indexed lookup instead of 64 MiB and a hashing slot. (`email/verify` hashes nothing either way;
+its limit is there so every link endpoint behaves alike, not because that path was expensive.)
 
 Both limits are held in memory: with several replicas each keeps its own buckets, so the real ceiling is
 that number times the replica count. Nothing is limited per caller — see the implementation plan for why

@@ -543,6 +543,29 @@ BSD sed does not support, and a python edit whose anchor no longer matched. Both
 and the build green, which is exactly why they were easy to miss — the check that caught them was
 grepping for what should no longer exist, not the compiler.
 
+### [x] P31 · The last unlimited endpoint, and why it was the weakest case
+`email/verify` was the one endpoint left without a limit, and the honest assessment — stated before it was
+added and kept in the code — is that it needed one least. It runs no argon2id: a request costs one
+transaction and an indexed lookup, so what a limit bounds is connection-pool churn against a single link
+rather than anything expensive. Like every token-keyed limit here, it cannot bound a flood of invented
+tokens, because each invented token is a fresh key.
+
+**It was added for consistency, and consistency is a real argument.** Every path that redeems a one-time
+token now behaves the same way — same key (the token's SHA-256), same numbers, same refusal — so nobody
+has to remember which one is the exception, and the exception is what gets used.
+`TestEveryTokenEndpointIsLimited` walks the three and asserts it, rather than trusting that each handler
+remembered.
+
+🚫 And what was NOT written: a refund branch for `ErrBusy`, which the endpoints either side of it carry.
+Nothing on this path runs argon2id, so there is no gate to be shed by and that error cannot arrive. A
+refund added for symmetry would be a line nobody could ever make execute.
+
+**`VerifyLimit` is now `ResendLimit`**, the same rename `ResetLimit` → `ForgotLimit` needed and for the
+same reason: one limit bounds sending a link and one bounds using it, and a name either could wear is a
+name the wrong one gets used under. The rename was done with a checked regex and verified by grepping for
+what should no longer exist — the lesson from P30, where a `sed` using `\b` changed nothing at all and
+left the build green.
+
 ## !!! Not started, and deliberately so
 
 ### [x] P23 · `evalset` and `compare`
@@ -769,8 +792,6 @@ password is a published credential.
   lockout — including for the one account that could fix the mail.
   `TestAnUnconfirmedAddressBlocksNothing` asserts the non-property, so gating something on it later is a
   decision made in the open rather than a default nobody chose.
-- **`POST /api/auth/email/verify` is not rate-limited.** It hashes nothing and only marks a row, so the
-  cost of abusing it is an indexed lookup.
 - **Nothing is limited per CALLER.** Guessing at a thousand accounts once each is not limited by anything,
   because every limit here is keyed on the thing being protected — an inbox, an account — rather than on
   whoever is asking. A per-IP limit needs to know which proxies to trust, and this product has no such

@@ -80,9 +80,21 @@ type Server struct {
 	// hashes anything, rather than relying on this. A limit and a cheap rejection close different halves,
 	// and only one of them was ever going to close that half.
 	AcceptLimit *ratelimit.Limiter
-	// VerifyLimit caps confirmation mail, keyed on the ADDRESS — like ForgotLimit, and for the same
-	// reason: an inbox is what fills up.
-	VerifyLimit *ratelimit.Limiter
+	// ResendLimit caps how often confirmation mail is SENT, keyed on the address — like ForgotLimit, and
+	// for the same reason: an inbox is what fills up.
+	//
+	// 🔴 Named for sending, not for the feature. It was `VerifyLimit`, which had the same problem
+	// `ResetLimit` had: with a second limit in the same flow, one bounds sending a link and the other
+	// bounds using one, and a field either could be named after is a field the wrong one gets used for.
+	ResendLimit *ratelimit.Limiter
+	// ConfirmLimit caps how hard one confirmation link can be used, keyed on the TOKEN's hash.
+	//
+	// 🚫 The weakest of the four token limits, and worth saying so rather than dressing it up. This path
+	// runs no argon2id — a request costs one transaction and an indexed lookup — so what it bounds is
+	// connection-pool churn against a single link, not anything expensive. It exists mostly so that every
+	// token-redemption endpoint behaves the same way and nobody has to remember which one is the
+	// exception. Like the others, it cannot bound a flood of invented tokens: each is a fresh key.
+	ConfirmLimit *ratelimit.Limiter
 	// RedeemLimit caps how hard one password-reset link can be used, keyed on the TOKEN's hash.
 	//
 	// 🔴 The counterpart to AcceptLimit, and with the same blind spot: it bounds hammering of one live
@@ -124,13 +136,14 @@ type Server struct {
 // careless, but because remembering is not a property a codebase keeps.
 func NewServer() *Server {
 	return &Server{
-		subjects:    map[string]*subjectState{},
-		Approvals:   NewApprovals(),
-		ForgotLimit: ratelimit.New(ForgotBurst, ForgotRefill, ForgotKeyCeiling),
-		LoginLimit:  ratelimit.New(LoginBurst, LoginRefill, LoginKeyCeiling),
-		AcceptLimit: ratelimit.New(AcceptBurst, AcceptRefill, AcceptKeyCeiling),
-		VerifyLimit: ratelimit.New(VerifyBurst, VerifyRefill, VerifyKeyCeiling),
-		RedeemLimit: ratelimit.New(RedeemBurst, RedeemRefill, RedeemKeyCeiling),
+		subjects:     map[string]*subjectState{},
+		Approvals:    NewApprovals(),
+		ForgotLimit:  ratelimit.New(ForgotBurst, ForgotRefill, ForgotKeyCeiling),
+		LoginLimit:   ratelimit.New(LoginBurst, LoginRefill, LoginKeyCeiling),
+		AcceptLimit:  ratelimit.New(AcceptBurst, AcceptRefill, AcceptKeyCeiling),
+		ResendLimit:  ratelimit.New(ResendBurst, ResendRefill, ResendKeyCeiling),
+		RedeemLimit:  ratelimit.New(RedeemBurst, RedeemRefill, RedeemKeyCeiling),
+		ConfirmLimit: ratelimit.New(ConfirmBurst, ConfirmRefill, ConfirmKeyCeiling),
 	}
 }
 
@@ -189,15 +202,21 @@ const (
 	AcceptRefill     = time.Minute
 	AcceptKeyCeiling = 50_000
 
-	VerifyBurst      = 3
-	VerifyRefill     = 20 * time.Minute
-	VerifyKeyCeiling = 50_000
+	ResendBurst      = 3
+	ResendRefill     = 20 * time.Minute
+	ResendKeyCeiling = 50_000
 
 	// Redeeming a password-reset link. The same numbers as accepting an invitation, because it is the
 	// same act: somebody holding a one-time token, using it once, with room for a flaky connection.
 	RedeemBurst      = 5
 	RedeemRefill     = time.Minute
 	RedeemKeyCeiling = 50_000
+
+	// Following a confirmation link. Same numbers again: one person, one token, used once, with room for
+	// a mail client that follows links and a person who clicks twice.
+	ConfirmBurst      = 5
+	ConfirmRefill     = time.Minute
+	ConfirmKeyCeiling = 50_000
 )
 
 func loginKey(tenant, email string) string {

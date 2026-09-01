@@ -874,10 +874,19 @@ func TestAnInvitationCannotBeHammered(t *testing.T) {
 	if ra := rec.Header().Get("Retry-After"); ra == "" || ra == "0" {
 		t.Errorf("Retry-After is %q", ra)
 	}
-	// 🔴 The refusal must not suggest the invitation is spent — it is not, and telling somebody their
-	// link is dead sends them to ask for a replacement they do not need.
-	if msg, _ := decode(t, rec)["error"].(string); !strings.Contains(msg, "not been used up") {
-		t.Errorf("the refusal does not say the link is still good: %q", msg)
+	// 🔴 The refusal must say the REFUSAL costs nothing, and must not claim anything about whether the
+	// link is still live.
+	//
+	// ⚠️ It used to read "Your link has not been used up", which a live run showed to be a lie in the
+	// commonest way of reaching this message: click a link six times, and the first use consumes it, the
+	// next four answer "no longer valid", and then this one insists it has not been used. Asserting only
+	// what the refusal itself does is true either way, and still tells somebody mid-flow that they have
+	// not just burned their invitation on a typo.
+	if msg, _ := decode(t, rec)["error"].(string); !strings.Contains(msg, "does not use up your link") {
+		t.Errorf("the refusal does not say that being refused costs nothing: %q", msg)
+	}
+	if msg, _ := decode(t, rec)["error"].(string); strings.Contains(msg, "has not been used up") {
+		t.Errorf("the refusal claims the link is still live, which it cannot know: %q", msg)
 	}
 }
 
@@ -951,7 +960,7 @@ func TestConfirmationMailCannotBeAskedForRepeatedly(t *testing.T) {
 	hz := newHarness(t)
 	owner, _ := hz.user(t, tenancy.Owner)
 
-	for i := range VerifyBurst {
+	for i := range ResendBurst {
 		if rec := hz.do(t, "POST", "/api/auth/email/resend", `{}`, owner); rec.Code != http.StatusOK {
 			t.Fatalf("request %d of the burst answered %d: %s", i+1, rec.Code, rec.Body.String())
 		}
@@ -959,7 +968,7 @@ func TestConfirmationMailCannotBeAskedForRepeatedly(t *testing.T) {
 	before := hz.mail.count()
 	rec := hz.do(t, "POST", "/api/auth/email/resend", `{}`, owner)
 	if rec.Code != http.StatusTooManyRequests {
-		t.Fatalf("request %d answered %d, not 429", VerifyBurst+1, rec.Code)
+		t.Fatalf("request %d answered %d, not 429", ResendBurst+1, rec.Code)
 	}
 	if hz.mail.count() != before {
 		t.Errorf("a rate-limited request still sent mail: %d became %d", before, hz.mail.count())
@@ -975,7 +984,7 @@ func TestOneAddressAskingForConfirmationDoesNotBlockAnother(t *testing.T) {
 	owner, _ := hz.user(t, tenancy.Owner)
 	other, _ := hz.user(t, tenancy.Admin)
 
-	for range VerifyBurst + 3 {
+	for range ResendBurst + 3 {
 		hz.do(t, "POST", "/api/auth/email/resend", `{}`, owner)
 	}
 	if rec := hz.do(t, "POST", "/api/auth/email/resend", `{}`, other); rec.Code != http.StatusOK {
@@ -996,7 +1005,7 @@ func TestConfirmationAndResetHaveSeparateBudgets(t *testing.T) {
 	owner, _ := hz.user(t, tenancy.Owner)
 	me := decode(t, hz.do(t, "GET", "/api/auth/status", "", owner))["email"].(string)
 
-	for range VerifyBurst {
+	for range ResendBurst {
 		hz.do(t, "POST", "/api/auth/email/resend", `{}`, owner)
 	}
 	if rec := hz.do(t, "POST", "/api/auth/email/resend", `{}`, owner); rec.Code != http.StatusTooManyRequests {
@@ -1113,10 +1122,10 @@ func TestAResetLinkCannotBeHammered(t *testing.T) {
 	if ra := rec.Header().Get("Retry-After"); ra == "" || ra == "0" {
 		t.Errorf("Retry-After is %q", ra)
 	}
-	// 🔴 And the refusal must not suggest the link is spent — it is not, and saying so sends somebody to
-	// ask for another reset mail they do not need.
-	if msg, _ := decode(t, rec)["error"].(string); !strings.Contains(msg, "not been used up") {
-		t.Errorf("the refusal does not say the link is still good: %q", msg)
+	// 🔴 Says what the refusal costs, and claims nothing about the link's state — see the note in
+	// TestAnInvitationCannotBeHammered for the lie this replaced.
+	if msg, _ := decode(t, rec)["error"].(string); !strings.Contains(msg, "does not use it up") {
+		t.Errorf("the refusal does not say that being refused costs nothing: %q", msg)
 	}
 }
 
@@ -1143,5 +1152,94 @@ func TestOneResetLinkBeingHammeredDoesNotBlockAnother(t *testing.T) {
 		`{"token":"`+quietToken+`","password":"a-brand-new-long-password"}`, nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("hammering one reset link blocked a different one: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// ── limits on following a confirmation link ──────────────────────────────────────────────────────
+
+// confirmTokenFor asks for a confirmation mail and returns the token out of it.
+func (hz *harness) confirmTokenFor(t *testing.T, as *http.Cookie) string {
+	t.Helper()
+	before := hz.mail.count()
+	if rec := hz.do(t, "POST", "/api/auth/email/resend", `{}`, as); rec.Code != http.StatusOK {
+		t.Fatalf("resend: %d %s", rec.Code, rec.Body.String())
+	}
+	waitForMail(t, hz, before+1)
+	return tokenFromLink(t, hz.mail.last(t), "verify")
+}
+
+// TestAConfirmationLinkCannotBeHammered.
+//
+// 🚫 The weakest of the four token limits, and the test says so on purpose. This path runs no argon2id,
+// so a request costs a transaction and an indexed lookup — what is bounded is churn against one live
+// link, not anything expensive. It is here so every token-redemption endpoint behaves alike and nobody
+// has to remember which one is the exception.
+func TestAConfirmationLinkCannotBeHammered(t *testing.T) {
+	hz := newHarness(t)
+	owner, _ := hz.user(t, tenancy.Owner)
+	token := hz.confirmTokenFor(t, owner)
+
+	// The first use consumes the link; the rest answer 410. Both are charged, which is what the ceiling
+	// is counting.
+	for i := range ConfirmBurst {
+		if rec := hz.do(t, "POST", "/api/auth/email/verify",
+			`{"token":"`+token+`"}`, nil); rec.Code == http.StatusTooManyRequests {
+			t.Fatalf("attempt %d was rate-limited inside the burst", i+1)
+		}
+	}
+	rec := hz.do(t, "POST", "/api/auth/email/verify", `{"token":"`+token+`"}`, nil)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("attempt %d answered %d, not 429", ConfirmBurst+1, rec.Code)
+	}
+	if ra := rec.Header().Get("Retry-After"); ra == "" || ra == "0" {
+		t.Errorf("Retry-After is %q", ra)
+	}
+}
+
+// TestOneConfirmationLinkBeingHammeredDoesNotBlockAnother.
+func TestOneConfirmationLinkBeingHammeredDoesNotBlockAnother(t *testing.T) {
+	hz := newHarness(t)
+	owner, _ := hz.user(t, tenancy.Owner)
+	other, _ := hz.user(t, tenancy.Admin)
+	busy := hz.confirmTokenFor(t, owner)
+	quiet := hz.confirmTokenFor(t, other)
+
+	for range ConfirmBurst + 3 {
+		hz.do(t, "POST", "/api/auth/email/verify", `{"token":"`+busy+`"}`, nil)
+	}
+	if rec := hz.do(t, "POST", "/api/auth/email/verify",
+		`{"token":"`+quiet+`"}`, nil); rec.Code != http.StatusOK {
+		t.Fatalf("hammering one confirmation link blocked a different one: %d %s",
+			rec.Code, rec.Body.String())
+	}
+}
+
+// TestEveryTokenEndpointIsLimited.
+//
+// 🔴 The point of adding a limit to the cheapest of these endpoints was consistency: every path that
+// takes a one-time token now behaves the same way, so nobody has to remember which one is the exception —
+// and the one somebody forgets is the one that gets used. This walks the route table and asserts it,
+// rather than trusting that four handlers each remembered.
+func TestEveryTokenEndpointIsLimited(t *testing.T) {
+	hz := newHarness(t)
+	_, _ = hz.user(t, tenancy.Owner)
+
+	// Every public route that redeems a token, with a body carrying one.
+	for _, r := range []struct{ method, path, body string }{
+		{"POST", "/api/auth/invitation/accept", `{"token":"tok-a","password":"a-sufficiently-long-pw"}`},
+		{"POST", "/api/auth/password/reset", `{"token":"tok-b","password":"a-sufficiently-long-pw"}`},
+		{"POST", "/api/auth/email/verify", `{"token":"tok-c"}`},
+	} {
+		var limited bool
+		// Well past any of the bursts, all on the SAME token, so a limit keyed on it must eventually bite.
+		for range 12 {
+			if hz.do(t, r.method, r.path, r.body, nil).Code == http.StatusTooManyRequests {
+				limited = true
+				break
+			}
+		}
+		if !limited {
+			t.Errorf("%s %s accepted twelve attempts on one token without limiting any of them", r.method, r.path)
+		}
 	}
 }
