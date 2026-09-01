@@ -1370,6 +1370,44 @@ async function confirmAddress(token){
 }
 
 /* ── opening ─────────────────────────────────────────────────────────────── */
+/* ── rebuilding the thread ────────────────────────────────────────────────
+   🔴 A refresh used to empty the conversation: the stream lived in browser memory and nothing was ever
+   read back. Runs are durable — they are rows — so they come back.
+
+   What does NOT come back, and is said out loud rather than quietly omitted: answers to questions that
+   cost nothing (they are computed from the index on demand and never written down), refusals, and
+   sentences that did not route. A thread that silently restores half of what was said, and looks
+   complete, is worse than one that states its own shape. */
+async function replayHistory(){
+  let h;
+  try { h = await api('/api/history'); } catch { return false; }
+  const goals = (h && h.goals) || [];
+  if (!goals.length) return false;
+
+  const t = turn('heros');
+  say(t, `<p>Picking up where we left off — here ${goals.length === 1 ? 'is the run' : 'are the '
+    + goals.length + ' runs'} from this organization.</p>
+    <p style="color:var(--ink-muted)">Questions I answered for free are not in here. I do not write those
+    down: they are read straight off the index each time, so there is nothing to restore.</p>`);
+
+  for (const g of goals) {
+    const u = turn('you');
+    u.appendChild(el(`<div class="ask">${esc(g.objective || g.intent)}</div>`));
+    const h2 = turn('heros');
+    const spent = money(g.cost_micro_cents || 0);
+    const state = g.state === 'succeeded' ? 'b-ok' : (g.state === 'failed' ? 'b-bad' : 'b-warn');
+    const card = el(`<div class="card"><div class="card-head">
+        <span class="card-title"><span class="k">goal</span> ${esc(g.intent)}${
+          g.axes && g.axes.length ? ' · ' + esc(g.axes.join(', ')) : ''}</span>
+        <span class="spacer"></span><span class="badge ${state}">${esc(g.state)}</span></div>
+      <div class="card-body"><p style="margin:0;font-size:.9rem;color:var(--ink-muted)">
+        ${g.done}/${g.tasks} task${g.tasks === 1 ? '' : 's'} · ${spent} of $${(g.ceiling_cents/100).toFixed(2)}
+        </p></div></div>`);
+    h2.appendChild(card); scroll();
+  }
+  return true;
+}
+
 async function start(){
   const t = turn('heros');
   try {
@@ -1386,6 +1424,7 @@ async function start(){
         guess at it — there are nineteen things I do, and I will show you the list any time you ask.</p>`);
     } else {
       t.remove();
+      await replayHistory();
       renderSubject(s);
     }
   } catch (e) {

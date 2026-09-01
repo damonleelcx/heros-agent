@@ -128,3 +128,41 @@ func (s *Store) OrganizationOf(ctx context.Context, email string) (string, error
 	}
 	return tenant, err
 }
+
+// RememberSubject records which repository an organization has loaded.
+//
+// # 🔴 Why this lives in the identity store
+//
+// It is a column on `tenants`, and this package owns that table. Putting the accessor anywhere else
+// would mean a second package writing to a table it does not own — which is how a schema ends up with
+// two writers and no agreed shape.
+//
+// What is stored is the REFERENCE the person typed and the revision it resolved to, never the corpus:
+// the clone and the index are rebuilt from it. See migration 0009.
+func (s *Store) RememberSubject(ctx context.Context, tenant, ref, revision string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE tenants SET subject_ref = $2, subject_revision = $3 WHERE id = $1`,
+		tenant, ref, revision)
+	if err != nil {
+		return fmt.Errorf("auth: remembering the subject: %w", err)
+	}
+	return nil
+}
+
+// RememberedSubject returns the repository an organization last loaded, if any.
+//
+// An organization that has never loaded one returns empty strings and no error — that is a normal
+// state, not a fault, and making the caller distinguish it from a failure would push a nil check into
+// every path that just wants to know whether to offer a restore.
+func (s *Store) RememberedSubject(ctx context.Context, tenant string) (ref, revision string, err error) {
+	var r, v sql.NullString
+	err = s.db.QueryRowContext(ctx,
+		`SELECT subject_ref, subject_revision FROM tenants WHERE id = $1`, tenant).Scan(&r, &v)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", "", nil
+	}
+	if err != nil {
+		return "", "", fmt.Errorf("auth: reading the remembered subject: %w", err)
+	}
+	return r.String, v.String, nil
+}

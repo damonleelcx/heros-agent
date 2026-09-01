@@ -205,3 +205,53 @@ func TestAShortPasswordIsRefusedBeforeAnythingIsCreated(t *testing.T) {
 // unique keeps these tests independent of each other and of whatever the database already holds — the
 // address is now globally unique, so a fixed literal would make the second run of any test fail.
 func unique(prefix string) string { return prefix + "-" + randomID() + "@example.test" }
+
+// 🔴 The loaded repository must survive a restart. It lived only in a Go map on the server, so every
+// deploy silently emptied it for every organization — the header went blank and the next question was
+// refused for having no subject, exactly as though nobody had ever loaded one.
+func TestTheLoadedRepositoryIsRememberedAcrossRestarts(t *testing.T) {
+	s := NewStore(testDB(t))
+	ctx := context.Background()
+	_, p, err := s.SignUp(ctx, "Recall Org", unique("recall"), "a-long-enough-password")
+	if err != nil {
+		t.Fatalf("sign up: %v", err)
+	}
+
+	// Nothing loaded yet is a normal state, not a fault.
+	ref, rev, err := s.RememberedSubject(ctx, p.Tenant)
+	if err != nil {
+		t.Fatalf("recalling before anything was loaded: %v", err)
+	}
+	if ref != "" || rev != "" {
+		t.Errorf("a fresh organization already remembers %q@%q", ref, rev)
+	}
+
+	if err := s.RememberSubject(ctx, p.Tenant, "github.com/acme/bot", "abc1234"); err != nil {
+		t.Fatalf("remembering: %v", err)
+	}
+	ref, rev, err = s.RememberedSubject(ctx, p.Tenant)
+	if err != nil {
+		t.Fatalf("recalling: %v", err)
+	}
+	if ref != "github.com/acme/bot" || rev != "abc1234" {
+		t.Errorf("recalled %q@%q, want github.com/acme/bot@abc1234", ref, rev)
+	}
+
+	// Loading a different repository replaces it rather than accumulating.
+	if err := s.RememberSubject(ctx, p.Tenant, "github.com/acme/other", "def5678"); err != nil {
+		t.Fatalf("re-remembering: %v", err)
+	}
+	ref, _, _ = s.RememberedSubject(ctx, p.Tenant)
+	if ref != "github.com/acme/other" {
+		t.Errorf("after loading a second repository the organization remembers %q", ref)
+	}
+
+	// 🔴 Scoped to the organization. Another organization must not see it.
+	_, q, err := s.SignUp(ctx, "Other Org", unique("other"), "a-long-enough-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r2, _, _ := s.RememberedSubject(ctx, q.Tenant); r2 != "" {
+		t.Errorf("a different organization sees %q — the remembered subject leaks across tenants", r2)
+	}
+}

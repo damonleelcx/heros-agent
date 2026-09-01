@@ -26,6 +26,7 @@ import (
 	"github.com/heros-foreal/heros/internal/tenancy"
 	"github.com/heros-foreal/heros/internal/toolcontract"
 	"github.com/heros-foreal/heros/internal/tools"
+	"log"
 )
 
 // Server is the console's HTTP surface.
@@ -354,7 +355,7 @@ func (s *Server) handleSubject(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unreadable request"})
 		return
 	}
-	src, err := s.Resolver.Resolve(req.Ref)
+	src, ix, err := s.loadSubject(tenant, req.Ref)
 	if err != nil {
 		// 🔴 The intake error text is returned VERBATIM. Every one of them names a next action — run git
 		// init, check the repository is public, give a path or a link — and replacing them with a generic
@@ -362,14 +363,34 @@ func (s *Server) handleSubject(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	corpus, err := discovery.Walk(src.Root, discovery.Limits{})
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-		return
-	}
-	ix := discovery.NewIndex(corpus)
 	isAgent, why := ix.LooksLikeAnAgent()
 
+	writeJSON(w, http.StatusOK, s.describeSubject(src, ix, isAgent, why))
+}
+
+// loadSubject resolves a reference, indexes it, binds the tools to it and remembers it.
+//
+// # 🔴 Extracted so a RESTART can replay it
+//
+// This used to be the body of handleSubject, which meant loading a repository was something only an
+// inbound HTTP request could do. The loaded state lived in a Go map and nowhere else, so every deploy
+// emptied it for every organization — and nothing said so: the header went blank and the next question
+// was refused for having no subject, exactly as though nobody had ever loaded one.
+//
+// With the work in a function, restoreSubject can run the same path from the reference stored by
+// migration 0009. One code path, so a restored subject is bound identically to a freshly loaded one —
+// two paths would eventually differ, and the difference would be a tool still pointing at the previous
+// repository.
+func (s *Server) loadSubject(tenant, ref string) (intake.Source, *discovery.Index, error) {
+	src, err := s.Resolver.Resolve(ref)
+	if err != nil {
+		return intake.Source{}, nil, err
+	}
+	corpus, err := discovery.Walk(src.Root, discovery.Limits{})
+	if err != nil {
+		return intake.Source{}, nil, err
+	}
+	ix := discovery.NewIndex(corpus)
 	s.setSubject(tenant, &subjectState{Source: src, Corpus: corpus, Index: ix})
 
 	// Rebind every source-bound tool to this repository. Without this they would act on whatever was
@@ -393,7 +414,47 @@ func (s *Server) handleSubject(w http.ResponseWriter, r *http.Request) {
 			tools.NewDeliveryVerifier(src.Root))
 	}
 
-	writeJSON(w, http.StatusOK, s.describeSubject(src, ix, isAgent, why))
+	// 🔴 Best effort, and NOT fatal. Failing to write the note would otherwise turn a healthy load into
+	// an error, which is a strictly worse outcome than forgetting it across the next restart.
+	if s.Auth != nil {
+		if err := s.Auth.RememberSubject(context.Background(), tenant, ref, src.Revision); err != nil {
+			log.Printf("WARN api.subject.remember_failed tenant=%s: %v", tenant, err)
+		}
+	}
+	return src, ix, nil
+}
+
+// restoreSubject rebuilds the in-memory subject from the reference stored for this organization.
+//
+// Returns nil when there is nothing remembered, which is the ordinary state for an organization that
+// has not loaded a repository yet.
+func (s *Server) restoreSubject(tenant string) *subjectState {
+	if s.Auth == nil || s.Resolver == nil {
+		return nil
+	}
+	ref, _, err := s.Auth.RememberedSubject(context.Background(), tenant)
+	if err != nil || ref == "" {
+		if err != nil {
+			log.Printf("WARN api.subject.recall_failed tenant=%s: %v", tenant, err)
+		}
+		return nil
+	}
+	if _, _, err := s.loadSubject(tenant, ref); err != nil {
+		// The repository may have moved, gone private, or been deleted since. That is a real answer to
+		// give the person, not a reason to fail the request they actually made.
+		log.Printf("WARN api.subject.restore_failed tenant=%s ref=%q: %v", tenant, ref, err)
+		return nil
+	}
+	log.Printf("api.subject.restored tenant=%s ref=%q", tenant, ref)
+	return s.subjectFor(tenant)
+}
+
+// subjectOrRestore returns this organization's loaded repository, rebuilding it after a restart.
+func (s *Server) subjectOrRestore(tenant string) *subjectState {
+	if sub := s.subjectFor(tenant); sub != nil {
+		return sub
+	}
+	return s.restoreSubject(tenant)
 }
 
 func (s *Server) describeSubject(src intake.Source, ix *discovery.Index, isAgent bool, why string) subjectResp {
@@ -425,7 +486,7 @@ func (s *Server) handleGetSubject(w http.ResponseWriter, r *http.Request) {
 		unauthorized(w, "You are not signed in.")
 		return
 	}
-	sub := s.subjectFor(tenant)
+	sub := s.subjectOrRestore(tenant)
 	if sub == nil {
 		writeJSON(w, http.StatusOK, map[string]any{"loaded": false})
 		return
@@ -533,7 +594,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 
 	spec, _ := intent.Lookup(out.Intent)
 
-	sub := s.subjectFor(tenant)
+	sub := s.subjectOrRestore(tenant)
 	if sub == nil {
 		ref := bounds.Refusal{Cause: bounds.NoSubject}
 		writeJSON(w, http.StatusOK, askResp{

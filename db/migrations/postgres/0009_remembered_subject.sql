@@ -1,0 +1,24 @@
+-- 0009 — remember which repository an organization loaded.
+--
+-- # The bug this closes
+--
+-- The loaded repository lived ONLY in a Go map on the server (`api.Server.subjects`). A browser refresh
+-- kept it because the process was still up, which is exactly what made the gap invisible — but every
+-- restart wiped it for every organization at once. Six deploys in one afternoon silently emptied it six
+-- times, and the product said nothing: the header simply went blank and the next question was refused
+-- for having no subject, as though the person had never loaded anything.
+--
+-- # Why two columns on `tenants` and not a table
+--
+-- This is one small fact per organization with a strict 1:1 to a row that already exists. A table would
+-- add a second place to look for it, a join, and a lifecycle to keep in step with tenant deletion — for
+-- data that is a reference and a revision string.
+--
+-- # 🔴 The REFERENCE, never the corpus
+--
+-- What is stored is what the person typed and the revision it pinned to. The clone, the file corpus and
+-- the index are rebuilt from it on first use after a restart. Storing the corpus would mean this
+-- database accumulating copies of customers' source code, which is a materially different promise about
+-- what this deployment holds — and it would go stale against the revision the moment anybody pushed.
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS subject_ref TEXT;
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS subject_revision TEXT;

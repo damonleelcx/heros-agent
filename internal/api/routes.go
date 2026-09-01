@@ -97,6 +97,9 @@ var apiRoutes = []route{
 	// ── the work ──────────────────────────────────────────────────────────────────────────────────
 	{Method: "POST", Path: "/api/subject", Needs: tenancy.LoadSubject,
 		Handler: func(s *Server) http.HandlerFunc { return s.handleSubject }},
+	// The organization's past runs, so a refresh does not empty the conversation.
+	{Method: "GET", Path: "/api/history", Needs: tenancy.ReadGoals,
+		Handler: func(s *Server) http.HandlerFunc { return s.handleHistory }},
 	{Method: "GET", Path: "/api/subject", Needs: tenancy.ReadGoals,
 		Handler: func(s *Server) http.HandlerFunc { return s.handleGetSubject }},
 	{Method: "POST", Path: "/api/ask", Needs: tenancy.RunGoals,
