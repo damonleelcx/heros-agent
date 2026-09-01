@@ -277,7 +277,13 @@ async function api(path, body){
   if (!r.ok) {
     let msg = `HTTP ${r.status}`;
     try { const j = await r.json(); if (j.error) msg = j.error; } catch {}
-    throw new Error(msg);
+    const err = new Error(msg);
+    // 🔴 429 and 503 are "come back shortly", not "you got it wrong". Carried through so a caller can
+    // say so — the sign-in card in particular must never let an overloaded server read as a rejected
+    // password, because the next thing somebody does is reset a password that was fine.
+    err.transient = (r.status === 429 || r.status === 503);
+    err.retryAfter = Number(r.headers.get('Retry-After')) || 0;
+    throw err;
   }
   return r.json();
 }

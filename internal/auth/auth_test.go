@@ -14,11 +14,11 @@ import (
 // password — which is enough to prioritise the guessing.
 func TestAPasswordHashIsSaltedAndSlow(t *testing.T) {
 	const pw = "correct horse battery staple"
-	a, err := HashPassword(pw)
+	a, err := HashPassword(t.Context(), pw)
 	if err != nil {
 		t.Fatalf("hash: %v", err)
 	}
-	b, err := HashPassword(pw)
+	b, err := HashPassword(t.Context(), pw)
 	if err != nil {
 		t.Fatalf("hash: %v", err)
 	}
@@ -31,17 +31,17 @@ func TestAPasswordHashIsSaltedAndSlow(t *testing.T) {
 	if !strings.Contains(a, "m=65536,t=3") {
 		t.Errorf("hash does not carry its parameters, so the cost can never be raised: %q", a)
 	}
-	if err := VerifyPassword(pw, a); err != nil {
+	if err := VerifyPassword(t.Context(), pw, a); err != nil {
 		t.Errorf("a correct password did not verify: %v", err)
 	}
-	if err := VerifyPassword(pw, b); err != nil {
+	if err := VerifyPassword(t.Context(), pw, b); err != nil {
 		t.Errorf("a correct password did not verify against the second hash: %v", err)
 	}
 
 	// Slow enough to matter. 🔴 Asserted as a FLOOR, because the whole defence is that a guess costs the
 	// attacker what it costs the server.
 	start := time.Now()
-	_ = VerifyPassword(pw, a)
+	_ = VerifyPassword(t.Context(), pw, a)
 	if d := time.Since(start); d < 5*time.Millisecond {
 		t.Errorf("verification took %s; a fast hash is the property an attacker with a stolen table wants", d)
 	}
@@ -49,7 +49,7 @@ func TestAPasswordHashIsSaltedAndSlow(t *testing.T) {
 
 // TestAWrongPasswordIsRejected, including near misses.
 func TestAWrongPasswordIsRejected(t *testing.T) {
-	hash, err := HashPassword("correct horse battery staple")
+	hash, err := HashPassword(t.Context(), "correct horse battery staple")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestAWrongPasswordIsRejected(t *testing.T) {
 		"correct horse battery stapl", "correct horse battery staple ",
 		"Correct horse battery staple", "", "x",
 	} {
-		if err := VerifyPassword(wrong, hash); !errors.Is(err, ErrWrongPassword) {
+		if err := VerifyPassword(t.Context(), wrong, hash); !errors.Is(err, ErrWrongPassword) {
 			t.Errorf("%q was accepted (%v)", wrong, err)
 		}
 	}
@@ -69,11 +69,11 @@ func TestAWrongPasswordIsRejected(t *testing.T) {
 // guessable, and satisfying every rule anybody writes. Length is what actually costs an attacker.
 func TestShortPasswordsAreRefusedAtTheDoor(t *testing.T) {
 	for _, weak := range []string{"", "short", "Passw0rd!", strings.Repeat("a", MinPasswordLength-1)} {
-		if _, err := HashPassword(weak); !errors.Is(err, ErrWeakPassword) {
+		if _, err := HashPassword(t.Context(), weak); !errors.Is(err, ErrWeakPassword) {
 			t.Errorf("%q was accepted as a password", weak)
 		}
 	}
-	if _, err := HashPassword(strings.Repeat("a", MinPasswordLength)); err != nil {
+	if _, err := HashPassword(t.Context(), strings.Repeat("a", MinPasswordLength)); err != nil {
 		t.Errorf("a password at the floor was refused: %v", err)
 	}
 }
@@ -91,7 +91,7 @@ func TestAMalformedHashIsNotAPass(t *testing.T) {
 		"bad base64":     "$argon2id$v=19$m=65536,t=3,p=2$!!!!$!!!!",
 		"missing params": "$argon2id$v=19$$c2FsdA$aGFzaA",
 	} {
-		if err := VerifyPassword("anything at all", bad); err == nil {
+		if err := VerifyPassword(t.Context(), "anything at all", bad); err == nil {
 			t.Errorf("%s: a malformed hash accepted a password — it is a universal login", name)
 		}
 	}

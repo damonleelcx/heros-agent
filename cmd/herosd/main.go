@@ -201,6 +201,17 @@ func main() {
 	fmt.Printf("model          %s\n", deepseek.ModelFlash)
 	fmt.Printf("database       %s\n", redact(url))
 	fmt.Printf("mail           %s\n", mail.Describe())
+	// 🔴 Printed because it is a memory budget, not a tuning detail, and an operator sizing a container
+	// needs to see it rather than derive it.
+	//
+	// ⚠️ "live at once", NOT peak RSS. The first version of this line said "peak" and was wrong by more
+	// than a factor of two: Go returns freed memory to the operating system lazily, so RSS climbs to a
+	// plateau well above the live bound and stays there. Measured on this machine: a ceiling of 9 (576 MiB
+	// live) settles at about 1.4 GB resident and does not grow with further load. A number labelled "peak"
+	// is read as a promise about what the container needs, and that promise would have been broken by the
+	// first flood.
+	fmt.Printf("password work  %d concurrent argon2id verifications (%d MiB live at once)\n",
+		auth.Concurrency(), auth.Concurrency()*64)
 	if links.Origin() != "" {
 		fmt.Printf("public url     %s\n", links.Origin())
 	}

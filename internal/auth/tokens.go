@@ -225,7 +225,7 @@ func (s *Store) AcceptInvitation(ctx context.Context, token, password string) (
 
 	// Hashed BEFORE the transaction: argon2id is deliberately slow, and holding a row lock for the tens
 	// of milliseconds it takes would serialise every acceptance behind it.
-	hash, err := HashPassword(password)
+	hash, err := HashPassword(ctx, password)
 	if err != nil {
 		return "", tenancy.Principal{}, err
 	}
@@ -321,7 +321,7 @@ func (s *Store) CreatePasswordReset(ctx context.Context, tenant, email string) (
 // Every OTHER outstanding reset token for the same account is destroyed too, so a second link mailed
 // during a confused ten minutes cannot be used afterwards to take the account back.
 func (s *Store) ResetPassword(ctx context.Context, token, newPassword string) error {
-	hash, err := HashPassword(newPassword)
+	hash, err := HashPassword(ctx, newPassword)
 	if err != nil {
 		return err
 	}

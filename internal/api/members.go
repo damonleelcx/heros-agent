@@ -212,6 +212,14 @@ func writeAuthErr(w http.ResponseWriter, err error) {
 		writeJSON(w, http.StatusGone, map[string]string{"error": err.Error()})
 	case errors.Is(err, mailer.ErrNotConfigured):
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
+	case errors.Is(err, auth.ErrBusy):
+		// 🔴 Never folded into a 4xx. This is the server saying it is overloaded, on a path — accepting an
+		// invitation, choosing a new password — where a 4xx would read as "your link is no longer valid"
+		// and send somebody to ask for another one they do not need.
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "The server is busy and could not process that just now. Your link is still valid — " +
+				"try again in a few seconds.",
+		})
 	default:
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}

@@ -425,6 +425,58 @@ memory bound: flood `capacity` invented addresses, the victim's bucket is evicte
 from a full allowance. Refusing costs availability under attack; evicting costs the protection itself.
 Fully-refilled buckets are swept first, since one is indistinguishable from a key never seen.
 
+### [x] P28 · A ceiling on concurrent argon2id
+**The cost that makes the hash good is the cost that makes it a weapon.** Every verification allocates
+64 MiB and holds it for tens of milliseconds, so two hundred simultaneous requests ask for thirteen
+gigabytes and the kernel ends the process — taking with it every unrelated request in flight, the
+console, and the worker.
+
+**The rate limits do not close this**, which is why it needed its own mechanism. They are keyed on an
+account and on an inbox, so an attacker spreads across a thousand invented addresses and trips neither —
+and an address with **no account still runs a full verification against a decoy hash**, deliberately, so
+that a missing user costs what a wrong password costs. Every one of those is 64 MiB. So is every password
+reset and every invitation accepted with a garbage token, both of which hash before they check anything.
+
+**The gate is inside `HashPassword` and `VerifyPassword`, not in middleware.** Middleware would bound the
+one path somebody remembered; the paths that hash — accepting an invitation, resetting a password,
+creating a user — are precisely the ones with no rate limit in front of them.
+
+**The ceiling is derived, not configured**: `GOMAXPROCS / Parallelism`, floored at two. argon2id runs
+Parallelism threads per call, so that many already saturate the CPU and more adds only memory and
+latency. It follows a container's CPU limit instead of being a constant that is wrong on a laptop and
+wrong again on a large host. The daemon prints it as a memory budget at startup, because it is one.
+
+⚠️ **The banner first said "peak" and was wrong by more than a factor of two.** Go returns freed memory
+to the operating system lazily, so resident memory climbs to a plateau well above the live bound. A flood
+of 120 concurrent sign-ins against a ceiling of 9 (576 MiB live) settled at 1.4 GB resident — and stayed
+there across three more rounds, which is the part that matters: it is a plateau, not growth. The line now
+says "live at once", because a number labelled "peak" is read as a promise about how much the container
+needs.
+
+**Requests queue for up to three seconds, then are shed.** Shedding beats dying: an out-of-memory kill
+takes down the requests that were fine along with the ones that were not. A caller whose context is
+already done is refused without taking a slot — and that is checked *before* the `select`, because
+`select` chooses at random among ready cases and would otherwise hand a slot to a client that had already
+disconnected about half the time.
+
+🔴 **Overload is never reported as a wrong password.** The handler had one error path, so shedding would
+have told people their correct password was wrong — and they would reset it, spending their reset budget
+and sending mail over a server that was merely busy, with nothing in the logs but ordinary failed logins.
+It answers 503, and the shed attempt is **refunded** to the login budget: the budget is for wrong
+passwords, not for the server's bad afternoon.
+
+🔴 **And the trap that made this more than a semaphore.** `Login` runs a decoy verification when no
+account matches, and discarded its result — correctly, since checking a password nobody has is
+meaningless. Shedding made that discard a leak: the real branch propagated `ErrBusy` as 503 while the
+decoy branch swallowed it and answered 401, so **making the server busy was how you found out which
+addresses were real**. `TestOverloadLooksTheSameForAKnownAndAnUnknownAddress` covers all three cases and
+was observed red against the discard.
+
+One interaction, deliberate and stated: a token is held for the duration of a verification, so more than
+`LoginBurst` simultaneous sign-ins **for one account** answer 429 even with the right password. At most
+ten verifications for one account are ever in flight, which is the intended reading; it needs eleven
+sign-ins inside fifty milliseconds to notice.
+
 ## !!! Not started, and deliberately so
 
 ### [x] P23 · `evalset` and `compare`
@@ -658,10 +710,8 @@ password is a published credential.
   whoever is asking. A per-IP limit needs to know which proxies to trust, and this product has no such
   configuration; getting it wrong behind a load balancer gives every customer in the deployment one
   shared bucket, which is an outage rather than a limit. Left undone deliberately, not overlooked.
-- **argon2id remains a resource-exhaustion surface.** Each verification is 64 MiB and tens of
-  milliseconds, by design, and the login limit only caps attempts per account. Concurrent attempts spread
-  across many accounts still cost what they cost. A cap on simultaneous verifications would address it
-  without keying on anything, and is the right next step if it ever matters.
+- **Shedding is per process, like the limits.** With several replicas the peak is the ceiling times the
+  replica count, which is the number to size a container against.
 - **The limiter is per process.** With more than one replica each holds its own buckets, so the
   effective ceiling is the configured one times the number of replicas. Stated rather than solved: the
   alternative is a write to shared storage on every unauthenticated request, keyed on a string the caller

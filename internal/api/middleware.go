@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -115,6 +116,22 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	token, p, err := s.Auth.Login(r.Context(), req.Tenant, req.Email, req.Password)
+	if errors.Is(err, auth.ErrBusy) {
+		// 🔴 503, never 401. Telling somebody their correct password is wrong because the server is busy
+		// sends them to reset a password that was fine — which spends their reset budget, sends mail, and
+		// leaves a log full of ordinary failed logins with nothing to explain the wave.
+		//
+		// 🔴 And the guess is REFUNDED. The attempt was never evaluated, so charging for it means an
+		// overloaded server quietly eats people's sign-in budget and then locks them out for a minute on
+		// top of being slow. The budget is for wrong passwords, not for the server's bad afternoon.
+		s.LoginLimit.Restore(key)
+		w.Header().Set("Retry-After", "5")
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "The server is busy checking passwords and could not get to yours. Nothing is " +
+				"wrong with your account or your password. Try again in a few seconds.",
+		})
+		return
+	}
 	if err != nil {
 		// 🔴 One message, and a deliberate pause is NOT added here — the constant-time password path in
 		// auth.Login already makes a missing user cost what a wrong password costs.

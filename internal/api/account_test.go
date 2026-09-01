@@ -6,9 +6,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/heros-foreal/heros/internal/auth"
 	"github.com/heros-foreal/heros/internal/tenancy"
 )
 
@@ -723,5 +725,123 @@ func TestTheLoginLimitCannotBeBypassedByChangingCase(t *testing.T) {
 		if rec := hz.signInAttempt(t, hz.tenant, spelling, "wrong-but-long-enough"); rec.Code != http.StatusTooManyRequests {
 			t.Errorf("respelling the address as %q got a fresh allowance (%d)", spelling, rec.Code)
 		}
+	}
+}
+
+// ── shedding when the server is saturated ────────────────────────────────────────────────────────
+
+// saturate narrows the argon2id ceiling to one slot with almost no patience, so that concurrent requests
+// are shed rather than queued. Restored on cleanup.
+//
+// 🔴 Called AFTER the harness has created its accounts. Creating a user hashes a password, so a gate
+// narrowed first would shed the test's own setup and the failure would look like the feature.
+func saturate(t *testing.T) {
+	t.Helper()
+	oldConcurrency := auth.Concurrency()
+	t.Cleanup(func() {
+		auth.SetConcurrency(oldConcurrency)
+		auth.SetMaxWait(3 * time.Second)
+	})
+	auth.SetConcurrency(1)
+	auth.SetMaxWait(20 * time.Millisecond)
+}
+
+// TestABusyServerNeverReportsACorrectPasswordAsWrong.
+//
+// # 🔴 Why this is worth a test of its own
+//
+// The handler had one error path: anything `auth.Login` returned became 401, "that email and password do
+// not match". Shedding under load produces an error too — so an overloaded server would have told people
+// their correct password was wrong. They would go and reset it, which spends their reset budget, sends
+// mail, and changes a password that was never the problem. The logs would show a wave of ordinary failed
+// logins and nothing to explain it.
+func TestABusyServerNeverReportsACorrectPasswordAsWrong(t *testing.T) {
+	hz := newHarness(t)
+	_, _ = hz.user(t, tenancy.Owner)
+	email := "busy-" + randSuffix() + "@example.test"
+	if _, err := hz.Auth.CreateUser(context.Background(), hz.tenant, email, testPassword,
+		tenancy.Member); err != nil {
+		t.Fatal(err)
+	}
+	saturate(t)
+
+	// 🔴 Fewer concurrent attempts than LoginBurst, deliberately.
+	//
+	// The limiter is spent before the lookup and refunded after it, so a token is HELD for the duration of
+	// the verification. Twenty simultaneous sign-ins for one account therefore exhaust a budget of ten and
+	// answer 429 — correct behaviour (at most LoginBurst verifications for one account are ever in
+	// flight), and not the mechanism under test here. Staying under the budget isolates shedding from
+	// limiting, so a failure below means what it says.
+	const attempts = LoginBurst - 2
+	codes := make([]int, attempts)
+	var wg sync.WaitGroup
+	for i := range attempts {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			codes[i] = hz.signInAttempt(t, hz.tenant, email, testPassword).Code
+		}()
+	}
+	wg.Wait()
+
+	shed := 0
+	for i, code := range codes {
+		switch code {
+		case http.StatusOK:
+		case http.StatusServiceUnavailable:
+			shed++
+		case http.StatusUnauthorized:
+			t.Errorf("attempt %d answered 401 for the CORRECT password — an overloaded server is telling "+
+				"people their password is wrong, and they will go and reset a password that was fine", i+1)
+		default:
+			t.Errorf("attempt %d answered %d; a shed request must be 503", i+1, code)
+		}
+	}
+	if shed == 0 {
+		t.Fatal("nothing was shed, so this test exercised none of the path it exists for")
+	}
+}
+
+// TestAShedAttemptIsNotChargedToTheLoginBudget.
+//
+// 🔴 The budget is for WRONG passwords. An attempt the server never evaluated is not a wrong password,
+// and charging for it means a busy minute quietly spends somebody's allowance and then rate-limits them
+// on top of being slow — two failures for the price of one, neither of them theirs.
+func TestAShedAttemptIsNotChargedToTheLoginBudget(t *testing.T) {
+	hz := newHarness(t)
+	_, _ = hz.user(t, tenancy.Owner)
+	email := "unspent-" + randSuffix() + "@example.test"
+	if _, err := hz.Auth.CreateUser(context.Background(), hz.tenant, email, testPassword,
+		tenancy.Member); err != nil {
+		t.Fatal(err)
+	}
+
+	func() {
+		saturate(t)
+		var wg sync.WaitGroup
+		for range LoginBurst + 10 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				hz.signInAttempt(t, hz.tenant, email, testPassword)
+			}()
+		}
+		wg.Wait()
+	}()
+	// The gate is restored by the cleanup registered in saturate; give it back explicitly for the rest of
+	// this test, since cleanups do not run until the test ends.
+	auth.SetConcurrency(4)
+	auth.SetMaxWait(3 * time.Second)
+
+	// The whole budget must still be there: LoginBurst wrong guesses, all evaluated, none rate-limited.
+	for i := range LoginBurst {
+		rec := hz.signInAttempt(t, hz.tenant, email, "wrong-but-long-enough")
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("guess %d answered %d, not 401 — the attempts the server shed were charged to this "+
+				"account's budget: %s", i+1, rec.Code, rec.Body.String())
+		}
+	}
+	if rec := hz.signInAttempt(t, hz.tenant, email, "wrong-but-long-enough"); rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("the budget did not run out where expected: %d", rec.Code)
 	}
 }

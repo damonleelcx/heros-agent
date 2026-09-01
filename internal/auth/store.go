@@ -71,7 +71,7 @@ func (s *Store) CreateUser(ctx context.Context, tenant, email, password string, 
 	if !tenancy.ValidRole(string(role)) {
 		return "", fmt.Errorf("%w: %q", ErrBadRole, role)
 	}
-	hash, err := HashPassword(password)
+	hash, err := HashPassword(ctx, password)
 	if err != nil {
 		return "", err
 	}
@@ -94,7 +94,7 @@ func (s *Store) CreateUser(ctx context.Context, tenant, email, password string, 
 // 🔴 Without it, "no such user" returns in microseconds and "wrong password" in tens of milliseconds,
 // and the difference is a free oracle for enumerating who has an account. The comparison is thrown away;
 // the time it takes is the point.
-var dummyHash, _ = HashPassword("a-password-nobody-has-ever-used")
+var dummyHash, _ = HashPassword(context.Background(), "a-password-nobody-has-ever-used")
 
 // Login verifies a password and issues a session, returning the TOKEN — the only time it exists outside
 // the customer's browser.
@@ -105,12 +105,25 @@ func (s *Store) Login(ctx context.Context, tenant, email, password string) (toke
 		tenant, normalizeEmail(email))
 	switch scanErr := row.Scan(&userID, &hash, &role); {
 	case errors.Is(scanErr, sql.ErrNoRows):
-		_ = VerifyPassword(password, dummyHash) // spend the same time
+		// 🔴 The decoy's error is INSPECTED, not discarded, and only for ErrBusy.
+		//
+		// It used to be `_ = VerifyPassword(...)`, because the result of checking a password nobody has is
+		// meaningless. Once verification can be SHED under load that stopped being true: a busy server
+		// would answer 503 for an address that exists (the real branch, below, propagates it) and 401 for
+		// one that does not — and the whole point of running this decoy is that those two cases must be
+		// indistinguishable. Overload has to look the same on both branches or it becomes the oracle the
+		// decoy exists to prevent, readable by anybody willing to make the server busy.
+		if err := VerifyPassword(ctx, password, dummyHash); errors.Is(err, ErrBusy) {
+			return "", tenancy.Principal{}, err
+		}
 		return "", tenancy.Principal{}, ErrNoSuchUser
 	case scanErr != nil:
 		return "", tenancy.Principal{}, fmt.Errorf("auth: login: %w", scanErr)
 	}
-	if err := VerifyPassword(password, hash); err != nil {
+	if err := VerifyPassword(ctx, password, hash); err != nil {
+		if errors.Is(err, ErrBusy) {
+			return "", tenancy.Principal{}, err
+		}
 		// 🔴 The SAME error for a missing user and a wrong password. Distinguishing them tells an
 		// attacker which emails are real, which is the first half of the work.
 		return "", tenancy.Principal{}, ErrNoSuchUser

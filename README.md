@@ -87,6 +87,26 @@ Both limits are held in memory: with several replicas each keeps its own buckets
 that number times the replica count. Nothing is limited per caller — see the implementation plan for why
 a per-IP limit is deliberately absent.
 
+### Password hashing is capped
+
+argon2id costs 64 MiB and tens of milliseconds **per call**, by design — which is also what makes it a
+way to exhaust the server. The number that may run at once is capped at `GOMAXPROCS / 2`, floored at two,
+and the daemon prints it at startup. Beyond the cap, requests queue for up to three seconds and are then
+shed with `503`.
+
+⚠️ **Size the container above `ceiling × 64 MiB`, not at it.** That figure is the memory *live at once*;
+Go returns freed memory to the operating system lazily, so resident memory climbs to a plateau
+considerably higher and stays there. Measured here: a ceiling of 9 (576 MiB live) settles at about 1.4 GB
+resident and does not grow under continued load.
+
+The rate limits above do not cover this: they are keyed on an account and an inbox, and an address with
+**no account** still runs a full verification against a decoy hash so that a missing user costs what a
+wrong password costs. Accepting an invitation and resetting a password also hash, and have no rate limit
+in front of them at all.
+
+An overloaded server answers `503` and never `401` — telling somebody their correct password is wrong
+sends them to reset a password that was fine — and the shed attempt is refunded to their sign-in budget.
+
 An invitation is the only way to join an organization, and it cannot create an owner — ownership is
 transferred inside the console to somebody who already has an account, never by a link in an email that
 travels through a mailbox the organization does not control.

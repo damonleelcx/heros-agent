@@ -2,12 +2,16 @@
 package auth
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"runtime"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	"golang.org/x/crypto/argon2"
 )
@@ -46,6 +50,14 @@ var (
 	ErrBadHash       = errors.New("auth: password hash is malformed")
 	ErrWrongPassword = errors.New("auth: password does not match")
 	ErrWeakPassword  = errors.New("auth: password is too short")
+	// ErrBusy means the server is already running as many password hashes as it can afford and this one
+	// waited too long for a turn.
+	//
+	// 🔴 A DISTINCT error, and never folded into ErrWrongPassword. Reporting overload as "that password
+	// is wrong" tells somebody their correct password is incorrect — so they go and reset it, which spends
+	// their reset budget and sends mail, over a server that was merely busy. One outage would become a
+	// wave of unnecessary password changes, and the logs would show nothing but ordinary failed logins.
+	ErrBusy = errors.New("auth: too many password checks are already running")
 )
 
 // MinPasswordLength is the floor.
@@ -56,10 +68,19 @@ var (
 const MinPasswordLength = 12
 
 // HashPassword returns an encoded argon2id hash carrying its own salt and parameters.
-func HashPassword(password string) (string, error) {
+//
+// The length check happens BEFORE the gate: refusing a short password costs nothing and should not queue
+// behind work that costs 64 MiB.
+func HashPassword(ctx context.Context, password string) (string, error) {
 	if len([]rune(password)) < MinPasswordLength {
 		return "", fmt.Errorf("%w: passwords must be at least %d characters", ErrWeakPassword, MinPasswordLength)
 	}
+	release, err := acquire(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer release()
+
 	p := DefaultParams()
 	salt := make([]byte, p.SaltLength)
 	if _, err := rand.Read(salt); err != nil {
@@ -76,7 +97,7 @@ func HashPassword(password string) (string, error) {
 //
 // 🔴 The comparison is constant-time. A byte-by-byte comparison leaks, through timing, how much of the
 // hash matched — which is enough to reconstruct it one byte at a time given enough attempts.
-func VerifyPassword(password, encoded string) error {
+func VerifyPassword(ctx context.Context, password, encoded string) error {
 	parts := strings.Split(encoded, "$")
 	if len(parts) != 6 || parts[1] != "argon2id" {
 		return ErrBadHash
@@ -97,9 +118,134 @@ func VerifyPassword(password, encoded string) error {
 	if err != nil {
 		return ErrBadHash
 	}
+	// 🔴 The gate is taken here, AFTER parsing and before the only expensive step. Parsing is free; what
+	// has to be bounded is the 64 MiB allocation on the next line.
+	release, err := acquire(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	got := argon2.IDKey([]byte(password), salt, p.Iterations, p.Memory, p.Parallelism, uint32(len(want)))
 	if subtle.ConstantTimeCompare(got, want) != 1 {
 		return ErrWrongPassword
 	}
 	return nil
+}
+
+// ── bounding how much of this runs at once ───────────────────────────────────────────────────────
+
+// # 🔴 Why argon2id needs a ceiling on concurrency and not just a rate limit
+//
+// The cost that makes this hash good is the cost that makes it a weapon. Every call allocates 64 MiB and
+// holds it for tens of milliseconds, so two hundred simultaneous requests ask for THIRTEEN GIGABYTES —
+// and the process is killed by the kernel, taking every unrelated in-flight request with it.
+//
+// The rate limits do not close this. They are keyed on an account and an inbox, so an attacker spreads
+// across a thousand invented addresses and never trips one; and an address with no account still runs a
+// full verification against a decoy hash, deliberately, so that a missing user costs what a wrong
+// password costs. Every one of those requests is 64 MiB. So is every password reset and every invitation
+// accepted with a garbage token, both of which hash before they check anything.
+//
+// A ceiling turns that from "the server dies" into "the server is slow, and then says so". Shedding beats
+// dying: an out-of-memory kill takes down the requests that were perfectly fine, and the ones that would
+// have completed in a millisecond, and the console, and the worker.
+//
+// 🔴 The gate lives INSIDE these two functions rather than in middleware on the login route. Middleware
+// would bound the one path somebody remembered, and the paths that hash — accepting an invitation,
+// resetting a password, creating a user — are the ones with no rate limit in front of them at all.
+
+// maxWait is how long a request will queue for a turn before being shed.
+//
+// Long enough that an ordinary burst is absorbed invisibly — a handful of simultaneous sign-ins queue for
+// a few hundred milliseconds and nobody notices — and short enough that under a real flood the queue does
+// not become its own exhaustion, with thousands of connections held open waiting for a slot that is
+// always taken.
+var maxWait = 3 * time.Second
+
+// SetMaxWait changes how long a request queues before being shed. Call before serving.
+//
+// A knob rather than a constant because the right value depends on what is in front of the server: with
+// a proxy that gives up after two seconds, queueing for three produces work nobody is waiting for any
+// more.
+func SetMaxWait(d time.Duration) { maxWait = d }
+
+// gate is a counting semaphore. A buffered channel rather than a sync primitive, because the select below
+// is what allows waiting to be abandoned when the caller goes away.
+type gate struct{ slots chan struct{} }
+
+func newGate(n int) *gate { return &gate{slots: make(chan struct{}, n)} }
+
+// current is swapped by SetConcurrency. Atomic so a swap cannot race a request; a caller that entered
+// through one gate leaves through the same one, because release closes over it.
+var current atomic.Pointer[gate]
+
+// gateNow returns the gate, installing the default on first use.
+//
+// 🔴 Lazily, and NOT from an init function. `dummyHash` is a package-level variable whose initialiser
+// calls HashPassword, and Go initialises package variables BEFORE it runs init functions — so an init
+// that installed the gate would run after the first call that needed it, and the process would panic on
+// a nil pointer at startup, on every deployment, in a way no test that imports this package normally
+// would reach. Installing on demand removes the ordering question rather than answering it correctly
+// once and hoping the next edit preserves it.
+func gateNow() *gate {
+	if g := current.Load(); g != nil {
+		return g
+	}
+	fresh := newGate(defaultConcurrency())
+	if current.CompareAndSwap(nil, fresh) {
+		return fresh
+	}
+	return current.Load() // somebody else won the race; use theirs
+}
+
+// defaultConcurrency is how many hashes this machine can genuinely run at once.
+//
+// argon2id is configured with Parallelism threads per call, so GOMAXPROCS/Parallelism calls already
+// saturate the CPU; more than that adds memory and latency without adding a single hash per second. That
+// makes the right number derivable rather than a thing an operator has to know — and it moves with the
+// container's CPU limit instead of being a constant that is wrong on both a laptop and a large host.
+func defaultConcurrency() int {
+	n := runtime.GOMAXPROCS(0) / int(DefaultParams().Parallelism)
+	// Never below two: at one, a single slow hash serialises every sign-in in the deployment, and the
+	// remedy for a busy server would be a server that can only ever do one thing.
+	return max(n, 2)
+}
+
+// SetConcurrency changes the ceiling. Call before serving; exported for tests and for an operator whose
+// memory budget differs from what the CPU count implies.
+func SetConcurrency(n int) {
+	if n < 1 {
+		panic("auth: a concurrency below 1 would refuse every password check")
+	}
+	current.Store(newGate(n))
+}
+
+// Concurrency reports the ceiling, for a startup banner or a health endpoint.
+func Concurrency() int { return cap(gateNow().slots) }
+
+// acquire waits for a turn, and returns the function that gives it back.
+func acquire(ctx context.Context) (release func(), err error) {
+	g := gateNow()
+	// 🔴 The caller's context is honoured as well as the deadline. A client that has given up and
+	// disconnected should free its place in the queue immediately, rather than holding it — under a flood
+	// that is the difference between a queue that drains and one that only grows.
+	wait := maxWait
+	ctx, cancel := context.WithTimeout(ctx, wait)
+	defer cancel()
+
+	// 🔴 Checked before the select, not only inside it. A `select` chooses at RANDOM among cases that are
+	// both ready, so a context that has already expired would still take a slot about half the time — and
+	// the half that matters is the one where the client has already gone and the server is about to spend
+	// 64 MiB producing an answer for nobody. Checking first makes "the caller is no longer waiting" mean
+	// what it says.
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("%w: the request was no longer waiting after %s", ErrBusy, wait)
+	}
+	select {
+	case g.slots <- struct{}{}:
+		return func() { <-g.slots }, nil
+	case <-ctx.Done():
+		return nil, fmt.Errorf("%w: waited %s for one of %d slots", ErrBusy, wait, cap(g.slots))
+	}
 }

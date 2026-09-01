@@ -27,20 +27,8 @@ import (
 // actual database, through the actual login path, whether it considers each spelling the same person —
 // and requires `EmailKey` to have said the same thing.
 func TestEmailKeyMatchesHowTheDatabaseCompares(t *testing.T) {
-	dsn := os.Getenv("HEROS_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("HEROS_TEST_DATABASE_URL unset")
-	}
-	db, err := sql.Open("pgx", dsn)
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	db := testDB(t)
 	ctx := context.Background()
-	if err := migrations.Apply(ctx, db); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-
 	s := NewStore(db)
 	tenant := fmt.Sprintf("t-emailkey-%d", time.Now().UnixNano())
 	if err := s.CreateTenant(ctx, tenant, "Acme"); err != nil {
@@ -84,4 +72,22 @@ func TestEmailKeyMatchesHowTheDatabaseCompares(t *testing.T) {
 	if len(m) != 1 || m[0].Email != stored {
 		t.Errorf("the address was stored as %q, not as typed (%q)", m[0].Email, stored)
 	}
+}
+
+// testDB opens the test database and brings its schema up to date.
+func testDB(t *testing.T) *sql.DB {
+	t.Helper()
+	dsn := os.Getenv("HEROS_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("HEROS_TEST_DATABASE_URL unset")
+	}
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := migrations.Apply(context.Background(), db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	return db
 }
