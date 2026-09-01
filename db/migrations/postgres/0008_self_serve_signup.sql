@@ -1,0 +1,40 @@
+-- 0008 — self-serve sign-up: one organization per person, resolved by email address.
+--
+-- # What this changes and why
+--
+-- Until now an organization was created once, at boot, from the environment, and every other account
+-- arrived by invitation into that same organization. Sign-in therefore always knew which organization
+-- it was signing into: there was only one.
+--
+-- Self-serve sign-up removes that certainty. Anybody may create an organization, so a sign-in form
+-- carrying only an address and a password has to resolve WHICH organization that address belongs to.
+--
+-- The index below is what makes that resolvable: an address identifies exactly one account across the
+-- whole deployment, so `WHERE lower(email) = ...` returns one row or none, and sign-in stays the two
+-- fields everybody expects rather than growing an "organization" box people would have to remember.
+--
+-- # 🔴 What it costs, stated plainly
+--
+-- A person can now belong to exactly ONE organization. `users_email_per_tenant` permitted the same
+-- address in two organizations, which is how an invitation to somebody who already had an account
+-- worked. That case now fails at accept time with ErrEmailTaken.
+--
+-- This was a deliberate decision, not an oversight: the alternative that preserves multi-organization
+-- membership is a separate identity table with membership rows beside it, and that refactor was
+-- weighed and declined for now. Invitations still work for their main case — somebody with no account
+-- anywhere — and the accept path reports the other case in words rather than as a constraint violation.
+--
+-- # ⚠️ If this migration fails
+--
+-- It fails when two organizations already share an address, with Postgres naming the duplicate. There
+-- is no automatic resolution: which of the two accounts is "the" account for that person is a question
+-- only a human can answer. Remove or re-address one of them and start the process again.
+--
+-- The per-tenant index is deliberately LEFT IN PLACE. It is implied by the global one and costs a few
+-- pages; dropping it would be a second irreversible step in a migration whose first step is already
+-- the one that matters, and it is what makes this reversible by dropping one index.
+CREATE UNIQUE INDEX IF NOT EXISTS users_email_global ON users (lower(email));
+
+-- Organizations created by sign-up carry the name the person typed. Nothing reads it yet beyond the
+-- console header, but a column added later would have to backfill names nobody recorded at the time.
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS created_by TEXT;

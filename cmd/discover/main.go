@@ -1,163 +1,93 @@
-// Command discover runs the P1 Discovery Engine over a Go repo and emits the Workflow IR + run report.
-//
-//	discover --repo <path> --config llm-eval.yaml --out ir.json
-//
-// It reads the repo as untrusted text and NEVER executes it (invariant I1). Repo URL and commit are
-// derived from .git files (plain reads, no `git` subprocess) unless overridden by flags.
+// Command discover resolves a repository reference and prints what discovery found, without calling a
+// model. It answers "did the extraction work?" separately from "was the judgement any good?", which is
+// the whole reason those two halves are separate packages.
 package main
 
 import (
-	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
+	"sort"
 	"strings"
 
-	"github.com/heros-foreal/agentd/internal/discovery"
+	"github.com/heros-foreal/heros/internal/discovery"
+	"github.com/heros-foreal/heros/internal/intake"
+	"github.com/heros-foreal/heros/internal/intent"
 )
 
 func main() {
-	repo := flag.String("repo", ".", "path to the target Go repo (read-only)")
-	config := flag.String("config", "", "path to llm-eval.yaml (optional; declares in-house wrappers)")
-	out := flag.String("out", "ir.json", "output path for the Workflow IR")
-	reportOut := flag.String("report", "discovery-report.json", "output path for the discovery run report")
-	repoURL := flag.String("repo-url", "", "workflow.repo.url (default: derived from .git/config)")
-	commit := flag.String("commit", "", "workflow.repo.commit_sha (default: derived from .git/HEAD)")
-	workflowID := flag.String("workflow-id", "", "workflow.id (default: the module path)")
-	flag.Parse()
-
-	if err := run(*repo, *config, *out, *reportOut, *repoURL, *commit, *workflowID); err != nil {
-		fmt.Fprintln(os.Stderr, "discover: "+err.Error())
+	if len(os.Args) < 2 {
+		fmt.Println("usage: discover <path-or-github-ref>")
+		os.Exit(2)
+	}
+	cache, _ := os.UserCacheDir()
+	r := intake.NewResolver(filepath.Join(cache, "heros", "repos"))
+	src, err := r.Resolve(os.Args[1])
+	if err != nil {
+		fmt.Println(err)
 		os.Exit(1)
 	}
-}
+	fmt.Printf("source   %s\nkind     %s\n\n", src.Describe(), src.Kind)
 
-var hex7to64 = regexp.MustCompile(`^[0-9a-fA-F]{7,64}$`)
+	corpus, err := discovery.Walk(src.Root, discovery.Limits{})
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+	var parts []string
+	for l, n := range corpus.LanguageCounts() {
+		parts = append(parts, fmt.Sprintf("%s %d", l, n))
+	}
+	sort.Strings(parts)
+	fmt.Printf("read     %d files (%s)", len(corpus.Files), strings.Join(parts, ", "))
+	if corpus.Truncated {
+		fmt.Printf("  ** TRUNCATED")
+	}
+	fmt.Println()
+	if len(corpus.Skipped) > 0 {
+		var sk []string
+		for reason, n := range corpus.Skipped {
+			sk = append(sk, fmt.Sprintf("%s %d", reason, n))
+		}
+		sort.Strings(sk)
+		fmt.Printf("skipped  %s\n", strings.Join(sk, ", "))
+	}
 
-func run(repo, config, out, reportOut, repoURL, commit, workflowID string) error {
-	url := repoURL
-	if url == "" {
-		if u := gitRemoteURL(repo); u != "" {
-			url = u
+	nodes := discovery.Nodes(corpus)
+	fmt.Printf("\n--- call sites (%d) ---\n", len(nodes))
+	shown := map[string]bool{}
+	n := 0
+	for _, nd := range nodes {
+		if shown[nd.ID] || n >= 10 {
+			continue
+		}
+		shown[nd.ID] = true
+		n++
+		fmt.Printf("  %-30s %s\n", trunc(nd.ID, 30), nd.Span.Ref())
+	}
+	if len(nodes) > n {
+		fmt.Printf("  ... and %d more call sites\n", len(nodes)-n)
+	}
+
+	fmt.Printf("\n--- axis evidence ---\n")
+	for _, axis := range intent.Axes() {
+		ev := discovery.ForAxis(corpus, axis)
+		if ev.Found {
+			files := map[string]bool{}
+			for _, s := range ev.Spans {
+				files[s.Path] = true
+			}
+			fmt.Printf("  OK   %-9s %2d spans / %d file(s)   e.g. %s -- %s\n",
+				axis, len(ev.Spans), len(files), ev.Spans[0].Ref(), ev.Spans[0].Why)
 		} else {
-			url = "local://" + filepath.Base(mustAbs(repo))
+			fmt.Printf("  MISS %-9s %s\n", axis, trunc(ev.Note, 100))
 		}
 	}
-	sha := commit
-	if sha == "" {
-		sha = gitCommit(repo)
-	}
-	if !hex7to64.MatchString(sha) {
-		// The IR schema requires a 7–64 hex commit; use a clearly-fake placeholder when unknown, and say so.
-		fmt.Fprintln(os.Stderr, "discover: warning: no commit resolved from .git; emitting placeholder commit_sha (pass --commit for a real one)")
-		sha = "0000000"
-	}
-
-	res, err := discovery.Run(discovery.Options{
-		Repo:       repo,
-		ConfigPath: config,
-		WorkflowID: workflowID,
-		RepoURL:    url,
-		CommitSHA:  sha,
-	})
-	if err != nil {
-		return err
-	}
-
-	irBytes, err := discovery.MarshalIR(res.IR)
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(out, irBytes, 0o644); err != nil {
-		return fmt.Errorf("write %s: %w", out, err)
-	}
-	repBytes, err := discovery.MarshalReport(res.Report)
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(reportOut, repBytes, 0o644); err != nil {
-		return fmt.Errorf("write %s: %w", reportOut, err)
-	}
-
-	s := res.Report.Summary
-	d := res.Report.DetectionsBySource
-	fmt.Printf("discovered %d node(s) across %d package(s) — registry:%d declared:%d framework:%d\n",
-		s.NodesEmitted, s.PackagesScanned, d["registry"], d["declared"], d["framework"])
-	fmt.Printf("edges:%d  ambiguity-flags:%d  files-skipped:%d\n", s.EdgesEmitted, s.AmbiguityFlags, s.FilesSkipped)
-	if d["declared"] == 0 && config == "" {
-		fmt.Println("note: no llm-eval.yaml given — in-house SDK wrappers may be undetected (see docs/discovery/05).")
-	}
-	fmt.Printf("wrote %s and %s\n", out, reportOut)
-	return nil
 }
 
-func mustAbs(p string) string {
-	if a, err := filepath.Abs(p); err == nil {
-		return a
+func trunc(s string, n int) string {
+	if len(s) <= n {
+		return s
 	}
-	return p
-}
-
-// gitCommit resolves HEAD to a commit sha by reading .git files only (no `git` subprocess — I1).
-func gitCommit(repo string) string {
-	head, err := os.ReadFile(filepath.Join(repo, ".git", "HEAD"))
-	if err != nil {
-		return ""
-	}
-	s := strings.TrimSpace(string(head))
-	if ref, ok := strings.CutPrefix(s, "ref: "); ok {
-		if b, err := os.ReadFile(filepath.Join(repo, ".git", filepath.FromSlash(ref))); err == nil {
-			return strings.TrimSpace(string(b))
-		}
-		// Fall back to packed-refs.
-		if sha := packedRef(repo, ref); sha != "" {
-			return sha
-		}
-		return ""
-	}
-	return s // detached HEAD: the sha itself
-}
-
-func packedRef(repo, ref string) string {
-	b, err := os.ReadFile(filepath.Join(repo, ".git", "packed-refs"))
-	if err != nil {
-		return ""
-	}
-	for _, line := range strings.Split(string(b), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "^") {
-			continue
-		}
-		fields := strings.Fields(line)
-		if len(fields) == 2 && fields[1] == ref {
-			return fields[0]
-		}
-	}
-	return ""
-}
-
-// gitRemoteURL reads the origin remote url from .git/config (plain read — no `git` subprocess).
-func gitRemoteURL(repo string) string {
-	b, err := os.ReadFile(filepath.Join(repo, ".git", "config"))
-	if err != nil {
-		return ""
-	}
-	inOrigin := false
-	for _, line := range strings.Split(string(b), "\n") {
-		t := strings.TrimSpace(line)
-		if strings.HasPrefix(t, "[") {
-			inOrigin = t == `[remote "origin"]`
-			continue
-		}
-		if inOrigin {
-			if u, ok := strings.CutPrefix(t, "url = "); ok {
-				return strings.TrimSpace(u)
-			}
-			if u, ok := strings.CutPrefix(t, "url="); ok {
-				return strings.TrimSpace(u)
-			}
-		}
-	}
-	return ""
+	return s[:n-1] + "..."
 }

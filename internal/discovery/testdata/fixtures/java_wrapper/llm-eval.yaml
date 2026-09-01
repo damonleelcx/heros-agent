@@ -1,4 +1,0 @@
-version: "1.0.0"
-entrypoints:
-  - symbol: "com.myco.llm.(*LlmService).complete"
-    provider: anthropic

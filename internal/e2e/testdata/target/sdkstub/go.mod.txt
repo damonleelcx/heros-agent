@@ -1,3 +1,0 @@
-module github.com/anthropics/anthropic-sdk-go
-
-go 1.22

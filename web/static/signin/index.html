@@ -1,0 +1,66 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in — Heros</title>
+<link rel="icon" href="/favicon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,300;6..72,400&family=Plus+Jakarta+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/heros.css">
+
+<main class="auth">
+  <div class="auth-card">
+    <div class="auth-head">
+      <a href="/"><img src="/avatar.jpg" alt="Heros"></a>
+      <h2>Sign in</h2>
+      <!-- 🔴 No organization field. An address identifies exactly one organization since migration
+           0008, so asking for one would be asking people to remember something the server already
+           knows. -->
+      <p class="hint">Your email address is enough — it tells her which organization you are in.</p>
+    </div>
+    <div class="card">
+      <form class="stack" id="form" novalidate>
+        <div>
+          <label class="label" for="email">Email</label>
+          <input class="field" id="email" type="email" autocomplete="username" required
+                 autocapitalize="none" spellcheck="false" placeholder="you@example.com">
+        </div>
+        <div>
+          <label class="label" for="password">Password</label>
+          <input class="field" id="password" type="password" autocomplete="current-password" required
+                 placeholder="your password">
+        </div>
+        <button class="btn btn-primary" id="go" type="submit">Sign in</button>
+        <p class="msg" id="msg" role="status" aria-live="polite"></p>
+      </form>
+      <p style="margin:var(--s4) 0 0">
+        <button class="btn btn-quiet" id="forgot" type="button" style="padding-inline:0">Forgotten your password?</button>
+      </p>
+    </div>
+    <p class="alt">No organization yet? <a href="/signup/">Create one</a>.</p>
+  </div>
+</main>
+
+<script src="/heros-reveal.js"></script>
+<script src="/heros-auth.js"></script>
+<script>
+  const msg = document.getElementById('msg');
+  document.getElementById('form').addEventListener('submit', async e => {
+    e.preventDefault();
+    const go = document.getElementById('go');
+    const email = document.getElementById('email').value.trim();
+    const password = document.getElementById('password').value;
+    if (!email || !password) { say(msg, 'Fill in both fields.', 'bad'); return; }
+    await submit(go, msg, '/api/auth/login', {email, password}, 'Signing in…');
+  });
+
+  /* 🔴 The answer is the same whether or not the address has an account, so the page must not report
+     anything more specific than the server did. Rendering "we could not find that address" here would
+     hand back the enumeration oracle the endpoint spends real effort denying. */
+  document.getElementById('forgot').addEventListener('click', async () => {
+    const email = document.getElementById('email').value.trim();
+    if (!email) { say(msg, 'Type your email address first, then ask for a link.', 'bad'); return; }
+    const r = await post('/api/auth/password/forgot', {email});
+    say(msg, r.body.status || r.body.error || 'Something went wrong.', r.ok ? 'ok' : 'bad');
+  });
+</script>

@@ -1,0 +1,16 @@
+# The eval deployment gets its OWN namespace rather than joining `heros`.
+#
+# Why: `heros` is being emptied of the product it was named for, and its remaining contents —
+# postgres and the mail relay — are now shared infrastructure serving three tenants
+# (opportunity-bridge, this, and whatever comes next). Putting a tenant back into the
+# infrastructure namespace would make "delete the app" and "delete the database" the same blast
+# radius again, which is the thing that made this removal delicate in the first place.
+#
+# It also makes the postgres NetworkPolicy able to name this tenant explicitly, the same way it
+# already names opportunity-bridge.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: heros-eval
+  labels:
+    app.kubernetes.io/part-of: heros-eval

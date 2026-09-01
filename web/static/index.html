@@ -1,0 +1,374 @@
+<!doctype html>
+<!-- The public home page.
+     Structure follows a reference damon supplied: a dark rounded shell inside a lighter frame, a huge
+     centred headline, a three-column hero with the figure in an arch, a stat column, and an accent band
+     the figure overlaps. Palette and subject are ours.
+
+     🔴 THE NUMBERS ARE REAL. The reference's stat column reads "42K+ User Active / 8K+ Artworks /
+     2K+ Artist". Copying that shape with invented figures would put fabricated metrics on a public
+     page. Every number here is a fact from the code: nineteen intents in internal/intent, nine axes in
+     internal/discovery, and MaxCostCents:100 in cmd/herosd. Same for the band — no fake bids, no
+     countdown, no App Store badge for an app that does not exist. -->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Heros — she reads your agent and tells you what is weak</title>
+<meta name="description" content="Heros assesses an AI agent's repository across nine axes, proposes changes, and opens a pull request. The plan is written down before anything is spent, and she refuses rather than guesses.">
+<link rel="icon" href="favicon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,300;6..72,400&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="heros.css">
+<style>
+  /* The lighter frame the shell sits in, straight from the reference. */
+  body{background:#141a24; background-image:none; padding:clamp(0px,2vw,26px)}
+  .shell{
+    background:var(--canvas); border-radius:clamp(0px,2.4vw,28px); overflow:hidden;
+    padding:clamp(1rem,3vw,2rem) clamp(1rem,3.4vw,2.6rem) 0;
+    background-image:
+      linear-gradient(to right,#ffffff06 1px,transparent 1px),
+      linear-gradient(to bottom,#ffffff06 1px,transparent 1px);
+    background-size:64px 64px;
+  }
+
+  /* ── nav ── */
+  .bar{display:flex; align-items:center; gap:var(--s5); flex-wrap:wrap}
+  .logo{display:flex; align-items:center; gap:.6rem; font-weight:700; letter-spacing:.02em; color:var(--ink)}
+  .logo:hover{text-decoration:none}
+  .logo img{width:36px; height:36px; border-radius:var(--pill)}
+  .menu{display:flex; gap:clamp(1rem,3vw,2.4rem); flex:1; justify-content:center; flex-wrap:wrap}
+  .menu a{color:var(--ink-muted); font-weight:500}
+  .menu a.on{color:var(--ink)}
+  /* The reference's search pill: a rounded field with a filled circular button at its end. Ours holds
+     the two things a stranger can actually do. */
+  .pill{
+    display:flex; align-items:center; gap:.5rem; padding:.3rem .3rem .3rem 1.1rem;
+    background:var(--panel); border:1px solid var(--border); border-radius:var(--pill);
+  }
+  .pill a.sign{color:var(--ink-muted); font-size:.95rem; padding:.4rem .3rem}
+  .pill a.sign:hover{color:var(--ink); text-decoration:none}
+  .round{
+    display:grid; place-items:center; width:44px; height:44px; border-radius:var(--pill);
+    background:var(--accent); color:var(--accent-ink); font-weight:700; flex:none;
+    box-shadow:0 0 0 6px #2ecfa81f;
+  }
+  .round:hover{text-decoration:none; background:#48e0bc}
+  /* 🔴 Below the point where three things stop fitting on one line, the anchor menu takes its own row.
+     Left as-is it wrapped INTO the logo — the links reflowed around it and the whole bar read as a
+     jumble. Logo and the sign-in pill stay paired on the first row, because those are the two controls
+     a stranger needs; the section anchors are secondary and can sit underneath. */
+  @media (max-width:60rem){
+    .bar{row-gap:var(--s3)}
+    .menu{order:3; width:100%; flex:1 0 100%; justify-content:flex-start; gap:1.2rem; font-size:.94rem}
+    .pill{margin-left:auto}
+  }
+
+  /* ── headline ── */
+  .title{
+    text-align:center; margin:clamp(2rem,6vw,4.5rem) auto clamp(1.5rem,4vw,2.5rem); max-width:20ch;
+    font-size:clamp(2.1rem,7.2vw,4.4rem); font-weight:400; line-height:1.06; letter-spacing:-.02em;
+  }
+
+  /* ── hero ── */
+  .hero{display:grid; gap:clamp(1.5rem,4vw,2rem); align-items:center; grid-template-columns:1fr}
+  @media (min-width:64rem){ .hero{grid-template-columns:minmax(0,1fr) auto minmax(0,1fr)} }
+
+  .say{color:var(--ink-muted); max-width:34ch; margin:0 0 var(--s5)}
+  .glow{box-shadow:0 10px 34px -10px #2ecfa899}
+  .aside{margin-top:var(--s5); color:var(--ink-muted); font-size:.86rem; max-width:30ch}
+
+  /* The arch. A stadium top and square feet, so the figure stands in it.
+     🔴 The decorative arch behind lives on the WRAPPER, not on .arch itself. On .arch it was invisible:
+     `overflow:hidden` clips a pseudo-element that deliberately sticks out past the edges, so the thing
+     drawn to peek behind was being cut off exactly where it peeked. */
+  .archwrap{
+    position:relative; z-index:2; justify-self:center;
+    width:clamp(13rem,36vw,18.5rem);
+    /* 🔴 clamp(MIN, val, MAX) — with negatives the smaller number is the MIN. Written the other way
+       round (clamp(-30px, -4vw, -64px)) the min exceeds the max and clamp returns the min, so the
+       overlap silently pinned at 30px however wide the window got. It is meant to grow. */
+    margin-bottom:clamp(-72px,-4.5vw,-28px);
+  }
+  .archwrap::before{
+    content:""; position:absolute; inset:auto -13% 7% -13%; height:80%;
+    border-radius:999px 999px 1.6rem 1.6rem; background:#101b2e; border:1px solid var(--border);
+  }
+  .arch{
+    /* 1:2 — the new figure is a full standing pose on a studio backdrop, so the arch is taller
+       and narrower than the previous three-quarter crop. The backdrop is light, which makes the arch
+       a bright panel against the dark page rather than a hole in it. */
+    position:relative; aspect-ratio:420/840;
+    border-radius:999px 999px 1.6rem 1.6rem; overflow:hidden;
+    background:#0d1626; border:1px solid var(--border);
+  }
+  .arch img{width:100%; height:100%; object-fit:cover; display:block}
+
+  /* ── stats ── */
+  .stats{display:grid; gap:clamp(1rem,2.6vw,1.8rem); justify-items:start}
+  @media (min-width:64rem){ .stats{justify-items:end; text-align:right} }
+  .stat b{display:block; font-size:clamp(1.7rem,3.4vw,2.5rem); font-weight:700; letter-spacing:-.02em; line-height:1}
+  .stat span{color:var(--ink-muted); font-size:.9rem}
+
+  /* ── the accent band ── */
+  .band{
+    position:relative; z-index:1; background:var(--accent); color:var(--accent-ink);
+    border-radius:1.6rem 1.6rem 0 0; margin:0 calc(clamp(1rem,3.4vw,2.6rem) * -1);
+    padding:clamp(1.2rem,3vw,1.8rem) clamp(1.4rem,3.4vw,2.6rem) clamp(1.4rem,3vw,2rem);
+  }
+  .band h2{font-family:var(--body); font-weight:700; font-size:clamp(1.15rem,2.4vw,1.5rem)}
+  .band-top{display:flex; align-items:center; justify-content:space-between; gap:var(--s4); flex-wrap:wrap}
+  .band-open{display:inline-flex; align-items:center; gap:.6rem; color:var(--accent-ink); font-weight:700;
+    font-size:clamp(1.15rem,2.4vw,1.5rem)}
+  .dash{border:0; border-top:2px dashed #05261d59; margin:var(--s4) 0}
+  .facts{display:grid; gap:var(--s4); grid-template-columns:repeat(auto-fit,minmax(11rem,1fr))}
+  .fact b{display:block; font-size:clamp(1.05rem,2.2vw,1.35rem); font-weight:700}
+  .fact span{font-size:.84rem; opacity:.75}
+  /* Dividers between facts, as in the reference — but only where a fact actually follows. */
+  @media (min-width:48rem){ .fact + .fact{border-left:1px solid #05261d33; padding-left:var(--s5)} }
+
+  .below{padding:clamp(2.5rem,7vw,5rem) 0 0}
+  .rule{border:0; border-top:1px solid var(--border); margin:clamp(2rem,5vw,3.5rem) 0}
+  .list{list-style:none; padding:0; margin:var(--s3) 0 0; display:grid; gap:var(--s2)}
+  .list li{padding-left:1.15rem; position:relative; color:var(--ink-muted)}
+  .list li::before{content:"·"; position:absolute; left:.35rem; color:var(--accent)}
+  .said{font-family:var(--display); font-size:clamp(1.05rem,2.4vw,1.35rem); line-height:1.45;
+    border-left:2px solid var(--accent); padding-left:var(--s4); margin:0 0 var(--s4)}
+  .said span{display:block; margin-top:var(--s2); color:var(--ink-muted); font-family:var(--body); font-size:.84rem}
+
+  /* ── the fancier lower half ──────────────────────────────────────────────
+     Devices taken from the reference: oversized display type the content sits over, hard colour
+     blocks rather than bordered cards, small decorative marks, and a big circular arrow. */
+  .ghosted{position:relative; padding:clamp(3rem,8vw,6.5rem) 0 clamp(2rem,5vw,3.5rem)}
+  /* The giant numeral, behind everything, clipped by the shell. It is DECORATION, so it is
+     aria-hidden and it must never intercept a click. */
+  .ghost{
+    /* Centred behind the index and bleeding past it, the way the reference sets its giant word behind
+       the product shots — rather than tucked in a corner, where it read as a stray artifact. */
+    position:absolute; left:50%; top:46%; transform:translate(-50%,-50%); z-index:0;
+    pointer-events:none; user-select:none;
+    font-family:var(--body); font-weight:700; font-size:clamp(14rem,38vw,32rem); line-height:.75;
+    letter-spacing:-.06em; color:transparent; -webkit-text-stroke:1px #ffffff1a;
+  }
+  .ghosted > *:not(.ghost){position:relative; z-index:1}
+
+  .sechead{display:flex; align-items:flex-start; gap:var(--s4); margin-bottom:clamp(1.5rem,4vw,2.5rem)}
+  /* The eyebrow sits beside the heading only while there is room for it on one line. Narrower than
+     that it wrapped to two lines and crowded the heading it is supposed to label. */
+  .sechead .eyebrow{flex:none; margin:.55rem 0 0}
+  @media (max-width:44rem){
+    .sechead{flex-wrap:wrap}
+    .sechead .eyebrow{width:100%; margin:0 0 var(--s2)}
+    .spark{order:3}
+  }
+  .sechead h2{font-size:clamp(1.8rem,5vw,3.2rem); line-height:1.05; letter-spacing:-.02em}
+  .spark{color:var(--accent); font-size:clamp(1rem,2vw,1.5rem); line-height:1; margin-top:.4rem}
+
+  /* The index. Numbers are generated by the counter, so they cannot drift from the order on screen —
+     hand-typed 01..19 beside a reordered list is a lie that survives review. */
+  .index{
+    list-style:none; counter-reset:n; padding:0; margin:0;
+    columns:3; column-gap:clamp(1.5rem,4vw,3rem);
+  }
+  @media (max-width:64rem){ .index{columns:2} }
+  @media (max-width:40rem){ .index{columns:1} }
+  .index li{
+    counter-increment:n; break-inside:avoid; display:flex; gap:.85rem; align-items:baseline;
+    padding:.62rem 0; border-top:1px solid var(--border); color:var(--ink-muted); font-size:.95rem;
+  }
+  .index li::before{
+    content:counter(n,decimal-leading-zero);
+    font-family:var(--mono); font-size:.72rem; color:var(--accent); flex:none; letter-spacing:.04em;
+  }
+  .index li:hover{color:var(--ink)}
+
+  /* Hard colour block, no borders — the reference's cream-against-orange, in our two colours. */
+  .block{display:grid; gap:0; grid-template-columns:1fr; border-radius:1.6rem; overflow:hidden;
+    margin:clamp(2rem,6vw,4rem) 0}
+  @media (min-width:56rem){ .block{grid-template-columns:1.15fr .85fr} }
+  .block-dark{background:#0d1626; padding:clamp(1.6rem,4vw,3rem)}
+  .block-accent{background:var(--accent); color:var(--accent-ink); padding:clamp(1.6rem,4vw,3rem);
+    display:flex; flex-direction:column; justify-content:center}
+  .huge{font-size:clamp(1.9rem,5.4vw,3.4rem); line-height:1.03; letter-spacing:-.02em}
+  .one{color:var(--ink-muted); max-width:44ch; margin:var(--s5) 0 0}
+  .block-accent blockquote{
+    margin:0; font-family:var(--display); font-size:clamp(1.25rem,2.8vw,1.9rem); line-height:1.2;
+  }
+  .hair{border:0; border-top:1px solid #05261d33; margin:clamp(.9rem,2vw,1.3rem) 0}
+  .said-note{margin:var(--s5) 0 0; font-size:.82rem; opacity:.7}
+
+  .steps{display:grid; gap:clamp(1rem,3vw,2rem); grid-template-columns:repeat(auto-fit,minmax(13rem,1fr))}
+  .step{border-top:1px solid var(--border); padding-top:var(--s4)}
+  .step b{display:block; font-family:var(--mono); font-size:clamp(2.2rem,5vw,3.4rem); font-weight:500;
+    color:var(--accent); line-height:1; letter-spacing:-.03em}
+  .step span{display:block; margin-top:var(--s3); color:var(--ink-muted)}
+
+  .cta-row{display:flex; align-items:center; gap:var(--s4); margin-top:clamp(2rem,5vw,3rem); flex-wrap:wrap}
+  .round.big{width:56px; height:56px; font-size:1.3rem}
+</style>
+
+<div class="shell">
+  <nav class="bar">
+    <a class="logo" href="/"><img src="avatar.jpg" alt=""> HEROS</a>
+    <span class="menu">
+      <a class="on" href="/">Home</a>
+      <a href="#does">What she does</a>
+      <a href="#who">Who she is</a>
+      <a href="#start">Get started</a>
+    </span>
+    <span class="pill">
+      <a class="sign" href="/signin/" data-signed-out>Sign in</a><a class="sign" href="/app/" data-signed-in hidden>Console</a>
+      <a class="round" href="/signup/" title="Create an organization" aria-label="Create an organization">→</a>
+    </span>
+  </nav>
+
+  <h1 class="title">She reads your agent and tells you what is weak</h1>
+
+  <div class="hero">
+    <div>
+      <p class="say">
+        Point her at a repository. She works out whether there is an agent in it, assesses it across
+        nine axes, and tells you what she measured and what she did not.
+      </p>
+      <a class="btn btn-primary glow" href="/signup/">Create an organization</a>
+      <p class="aside">Works with any public GitHub repository. Paste a link and she reports what she found.</p>
+    </div>
+
+    <div class="archwrap"><div class="arch"><img src="heros-figure.jpg" alt="Heros" width="420" height="840"></div></div>
+
+    <div class="stats">
+      <div class="stat"><b>19</b><span>things she does</span></div>
+      <div class="stat"><b>9</b><span>axes assessed</span></div>
+      <div class="stat"><b>$1.00</b><span>ceiling on a run</span></div>
+    </div>
+  </div>
+
+  <section class="band">
+    <div class="band-top">
+      <h2>Every run, before anything is spent</h2>
+      <a class="band-open" href="/signup/">Get started <span aria-hidden="true">→</span></a>
+    </div>
+    <hr class="dash">
+    <div class="facts">
+      <div class="fact"><b>The plan, written down</b><span>every task named up front</span></div>
+      <div class="fact"><b>10 tasks</b><span>for a full assessment</span></div>
+      <div class="fact"><b>Ceiling $1.00</b><span>and each task reports its cost</span></div>
+      <div class="fact"><b>Nothing spent on a refusal</b><span>and the refusal says why</span></div>
+    </div>
+  </section>
+
+  <div class="below">
+
+    <!-- ── what she does ─────────────────────────────────────────────────────
+         🔴 All nineteen are still here. The heading claims this is "the list rather than a sample", so
+         cutting it to six elegant ones would make the sentence beside them false. The wordiness is
+         solved by STRUCTURE instead: a numbered index, 01–19, in three tight columns, with a giant
+         ghost numeral behind it. It reads as one designed object rather than three bullet lists, and
+         the prose that used to introduce it is gone — the number does that job. -->
+    <section id="does" class="ghosted">
+      <span class="ghost" aria-hidden="true">19</span>
+      <div class="sechead">
+        <p class="eyebrow">What she does</p>
+        <h2>Nineteen things.<br>That is the list, not a sample.</h2>
+        <span class="spark" aria-hidden="true">✳</span>
+      </div>
+
+      <ol class="index">
+        <li><span>What does my agent actually do, step by step?</span></li>
+        <li><span>What conversation history does this node get?</span></li>
+        <li><span>What does this node remember between calls?</span></li>
+        <li><span>What tools is it offered, and which does it call?</span></li>
+        <li><span>What skills are bound at this call site?</span></li>
+        <li><span>How many turns does it take, and in what loop?</span></li>
+        <li><span>What can it reach, and what can it spend?</span></li>
+        <li><span>Should these nodes run in this order?</span></li>
+        <li><span>Look at my repository and tell me what is weak.</span></li>
+        <li><span>Build me an evaluation set for this agent.</span></li>
+        <li><span>Is this version better than the last one?</span></li>
+        <li><span>What did you measure, and what did you not?</span></li>
+        <li><span>What happened in that run?</span></li>
+        <li><span>Change what this node is told.</span></li>
+        <li><span>Change which model this node calls.</span></li>
+        <li><span>Change something on an axis and show me the diff.</span></li>
+        <li><span>What exactly would you write into my source?</span></li>
+        <li><span>Fix it, and open a pull request.</span></li>
+        <li><span>Put an approved change into my repository.</span></li>
+      </ol>
+    </section>
+
+    <!-- ── who she is ────────────────────────────────────────────────────────
+         Three paragraphs became one. The character is in the refusals, so the refusals are the display
+         type and the explanation is a single line under them. -->
+    <section id="who" class="block">
+      <div class="block-dark">
+        <p class="eyebrow">Who she is</p>
+        <h2 class="huge">She would rather<br>refuse than guess.</h2>
+        <p class="one">An abstention costs one exchange. A wrong route spends your money on work you did
+          not ask for — and a conversation is exactly where you are least equipped to notice.</p>
+      </div>
+      <div class="block-accent">
+        <blockquote>“I cannot route that.”</blockquote>
+        <hr class="hair">
+        <blockquote>“Nothing was spent.”</blockquote>
+        <hr class="hair">
+        <blockquote>“Give the run a limit.”</blockquote>
+        <p class="said-note">Three things she says, verbatim.</p>
+      </div>
+    </section>
+
+    <!-- ── getting started ───────────────────────────────────────────────────
+         Card chrome and sentence-long descriptions replaced by three numerals and four words each. -->
+    <section id="start" class="ghosted">
+      <div class="sechead">
+        <p class="eyebrow">Getting started</p>
+        <h2>Three steps.<br>The first one is free.</h2>
+        <span class="spark" aria-hidden="true">✳</span>
+      </div>
+      <div class="steps">
+        <div class="step"><b>01</b><span>Create an organization</span></div>
+        <div class="step"><b>02</b><span>Paste a GitHub link</span></div>
+        <div class="step"><b>03</b><span>Ask her a question</span></div>
+      </div>
+      <p class="cta-row">
+        <a class="btn btn-primary glow" href="/signup/">Create an organization</a>
+        <a class="round big" href="/signup/" aria-label="Create an organization">→</a>
+      </p>
+    </section>
+
+    <footer class="foot">
+      <span>Heros</span><span style="flex:1"></span>
+      <a href="/signin/">Sign in</a><a href="/signup/">Create an organization</a>
+    </footer>
+  </div><!-- /.below -->
+</div><!-- /.shell -->
+
+<script>
+  /* 🔴 Mail links point at the ORIGIN with a query parameter — /?invite=, /?reset=, /?verify= — because
+     that is where the console used to live. Every one already sent is in somebody's inbox, so this page
+     forwards those three to /app/ rather than the mailer being repointed: repointing fixes new mail and
+     breaks all the old. Nothing else is forwarded. */
+  (function(){
+    var q = new URLSearchParams(location.search);
+    for (var i = 0, k = ['invite','reset','verify']; i < k.length; i++) {
+      if (q.has(k[i])) { location.replace('/app/' + location.search); return; }
+    }
+  })();
+
+  /* 🔴 Show a signed-in visitor that they are signed in.
+     Clicking the console's logo used to land here on "Sign in / Create an organization", which reads as
+     having been signed OUT — the session was fine, but the page said otherwise, and a page that
+     contradicts your actual state is indistinguishable from a bug. The console's logo no longer leaves
+     the app, and this covers every other way of arriving here with a live session. */
+  (function(){
+    fetch('/api/auth/status', {credentials:'same-origin'})
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(me){
+        if (!me || !me.signed_in) return;
+        document.querySelectorAll('[data-signed-out]').forEach(function(n){ n.hidden = true; });
+        document.querySelectorAll('[data-signed-in]').forEach(function(n){ n.hidden = false; });
+        document.querySelectorAll('a[href="/signup/"]').forEach(function(a){
+          a.setAttribute('href', '/app/');
+          if (/create an organization/i.test(a.textContent)) a.textContent = 'Open the console';
+        });
+      })
+      .catch(function(){ /* signed out, or offline: the page is already correct for that */ });
+  })();
+</script>

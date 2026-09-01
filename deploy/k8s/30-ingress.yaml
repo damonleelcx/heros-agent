@@ -1,0 +1,61 @@
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: redirect-https
+  namespace: heros-eval
+spec:
+  redirectScheme:
+    scheme: https
+    permanent: true
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: heros-eval
+  namespace: heros-eval
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: eval.heros-agent.space
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: heros-eval
+                port: {number: 8080}
+  tls:
+    - hosts: [eval.heros-agent.space]
+      secretName: heros-eval-tls
+---
+# A separate Ingress on the plain-HTTP entrypoint that redirects. Same shape as the two hosts
+# already served by this cluster.
+#
+# 🔴 It must NOT redirect /.well-known/acme-challenge — but it does not have to avoid it explicitly:
+# cert-manager creates its own higher-priority Ingress for the challenge path while a certificate is
+# being issued, and Traefik matches the more specific rule first. This is the arrangement already
+# proven on heros-agent.space and jobs.heros-agent.space.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: heros-eval-http-redirect
+  namespace: heros-eval
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+    traefik.ingress.kubernetes.io/router.middlewares: heros-eval-redirect-https@kubernetescrd
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: eval.heros-agent.space
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: heros-eval
+                port: {number: 8080}

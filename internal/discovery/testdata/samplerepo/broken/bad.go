@@ -1,3 +1,0 @@
-package broken
-
-func oops( {

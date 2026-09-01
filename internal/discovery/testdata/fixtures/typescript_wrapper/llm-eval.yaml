@@ -1,6 +1,0 @@
-version: "1.0.0"
-entrypoints:
-  - symbol: "@myco/llm.complete"
-    provider: anthropic
-    args:
-      prompt: { name: prompt }

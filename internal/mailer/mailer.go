@@ -1,38 +1,16 @@
-// Package mailer is the one way this platform sends a message to a person.
+// Package mailer sends the three mails this product depends on: an invitation, a password reset, and an
+// address confirmation.
 //
-// # Why a seam, and why the fallback is not a no-op
+// # 🔴 Why partial configuration is a startup failure
 //
-// Confirmation links, password-reset links and invitations all need a channel to a human. Before P28 there was
-// none — grep the repository for `net/smtp` outside an import fence and there are zero hits, which is also why
-// `tenancy.Invitation` has been a complete data model with no way to tell the invitee it exists.
+// A previous deployment of this product ran for days with a mailer that reported itself configured and
+// sent nothing: the host was set, the username and password were empty, the health endpoint was green,
+// and a proof script passed on a build machine that was not where the product runs. Mail was not
+// degraded, it was absent, and every signal said otherwise.
 //
-// The obvious shape is "send if configured, otherwise return nil". 🔴 That is the shape this package refuses.
-// A person waiting for a reset link cannot distinguish a discarded message from a broken product, and neither
-// can the operator, so a silent no-op converts a configuration gap into an unfalsifiable support ticket. The
-// unconfigured path here RECORDS the message — link included — logs at WARN naming the recipient and the
-// purpose, and reports `Configured() == false` so `/readyz` can say so out loud. A deployment with no mail
-// server still works; its operator hands the link over, and nothing pretends otherwise.
-//
-// # Mail failure never fails the act that produced it
-//
-// A sign-up whose confirmation bounces is still a sign-up. Rolling back an account because a mail server was
-// down loses a customer for an outage that is ours. Callers log the send error and carry on; the person can
-// ask for the message again.
-//
-// # 🔴 What a message may contain
-//
-// One link, carrying one single-use, purpose-bound, expiring token. No password, no API credential and no
-// session token.
-//
-// ⚠️ This said "and no HTML — plain text only". That is no longer true: a message now carries BOTH a text
-// part and a styled HTML part matching the console (see render.go). The sentence is corrected rather than
-// deleted because the two REASONS it gave still bind, and they are what the HTML part is built to satisfy:
-//
-//   - "no rendering context in which a value could be interpreted" — every interpolated value is escaped,
-//     and the only values interpolated are our own copy and a link we minted;
-//   - "no image loads that would report when a person opened it" — there is no remote resource of ANY kind
-//     in the HTML part. The wordmark is text. A hosted logo would be a read receipt on a password-reset
-//     email, which is the thing that sentence was protecting against rather than HTML as such.
+// So `FromEnv` refuses halves. Either every SMTP variable is present, or none is and the operator has
+// said in so many words which no-mail behaviour they want. A server that will not start is a far better
+// outcome than one that starts and silently drops every password reset.
 package mailer
 
 import (
@@ -44,369 +22,387 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/mail"
 	"net/smtp"
-	"sort"
+	"os"
+	"strconv"
 	"strings"
-	"sync"
 	"time"
 )
 
-// Purpose names why a message is being sent. It reaches the log and the operator record, and never the
-// message body — a recipient does not need our word for what they are looking at.
-type Purpose string
-
-const (
-	PurposeVerifyEmail    Purpose = "verify_email"
-	PurposeResetPassword  Purpose = "reset_password"
-	PurposeSignupAttempt  Purpose = "signup_attempt_on_existing_address"
-	PurposeInvitation     Purpose = "invitation"
-	PurposeOwnerBootstrap Purpose = "owner_bootstrap"
-)
-
-// Message is one message to one person.
+// ErrNotConfigured means no mail transport exists, so an operation that must send cannot proceed.
 //
-// One recipient, no CC, no BCC, no attachments. Every one of those is a capability nothing in this product
-// needs and each is a way for a bug to reach somebody it was not addressed to.
+// 🔴 Returned rather than swallowed. Creating an invitation and failing to send it produces a person
+// waiting for a mail that will never come, and an inviter who believes the job is done. The caller is
+// told, and tells the customer.
+var ErrNotConfigured = errors.New("mailer: no mail transport is configured")
+
+// Message is one mail.
+//
+// Text and HTML are two renderings of the SAME message, sent as multipart/alternative. The client shows
+// one of them, so they must say the same thing — which is why every template here produces both from one
+// struct rather than being written twice.
 type Message struct {
 	To      string
 	Subject string
-	// TextBody is the plain-text part, and it is NOT a downgrade — it is what a screen reader, a terminal
-	// client and every client that refuses HTML actually get, so it is written to read on its own.
-	TextBody string
-	// HTMLBody is the styled part, matching the console's sign-in surface. Empty sends a text-only message,
-	// which is what the two of them were before P28's styling and what a caller building a message by hand
-	// still gets.
-	//
-	// 🔴 Both parts are generated from ONE declaration (see render.go). A `multipart/alternative` message
-	// asserts that its parts say the same thing, and the client picks one — so hand-writing them separately
-	// is how an expiry says one hour in the part nobody read and twenty-four in the part they did.
-	HTMLBody string
-	Purpose  Purpose
+	Text    string
+	HTML    string
 }
 
-func (m Message) validate() error {
-	if strings.TrimSpace(m.To) == "" {
-		return errors.New("mailer: a message needs a recipient")
-	}
-	if strings.ContainsAny(m.To, "\r\n") || strings.ContainsAny(m.Subject, "\r\n") {
-		// 🔴 Header injection. A newline in a recipient or a subject is how one message becomes two, with a
-		// `Bcc:` the caller never wrote. The address reaching here came from a person's own sign-up form.
-		return errors.New("mailer: a recipient or subject containing a line break is refused")
-	}
-	if strings.TrimSpace(m.Subject) == "" || strings.TrimSpace(m.TextBody) == "" {
-		// The TEXT part is what is required, even when an HTML part exists: it is the fallback, and a
-		// multipart message whose text half is empty renders as a blank email in every client that prefers
-		// text — including the ones a security-conscious reader uses on purpose.
-		return errors.New("mailer: a message needs a subject and a plain-text body")
-	}
-	return nil
-}
-
-// Mailer is the seam. Two implementations and no third: SMTP, and the operator-visible fallback.
+// Mailer sends mail.
 type Mailer interface {
 	Send(ctx context.Context, m Message) error
-	// Configured reports whether this deployment can actually deliver. 🔴 It is a fact, never a guess: the
-	// readiness surface reports it, and a deployment that answers `true` while dropping mail is the exact
-	// dishonesty this package exists to prevent.
-	Configured() bool
-	// From is the sender address, for a caller that wants to name it in a message body ("if you did not
-	// request this, reply to …"). Empty on the unconfigured path.
-	From() string
+	// Describe says what this mailer is, for the startup banner. The operator should never have to guess
+	// whether mail is real in this deployment.
+	Describe() string
 }
 
-// TLSMode is how the SMTP connection is secured.
-type TLSMode string
+// ── configuration ────────────────────────────────────────────────────────────────────────────────
 
-const (
-	// TLSStartTLS connects in the clear and upgrades. Port 587's convention.
-	TLSStartTLS TLSMode = "starttls"
-	// TLSImplicit connects inside TLS from the first byte. Port 465's convention.
-	TLSImplicit TLSMode = "implicit"
-	// TLSNone is refused unless the host is a loopback address — see New.
-	TLSNone TLSMode = "none"
-)
-
-// Config is the deployment's mail configuration.
+// Config is an SMTP relay.
 type Config struct {
 	Host     string
 	Port     int
 	Username string
 	Password string
 	From     string
-	TLS      TLSMode
-	Timeout  time.Duration
 }
 
-// Configured reports whether enough is present to attempt delivery. Host and sender are the two that cannot
-// be defaulted; a username is optional because a relay inside a customer's own network often has none.
-func (c Config) Configured() bool {
-	return strings.TrimSpace(c.Host) != "" && strings.TrimSpace(c.From) != ""
-}
-
-// New returns the mailer this configuration describes: SMTP when it is complete, the operator fallback when
-// it is not.
+// FromEnv builds the mailer this deployment should use, or explains what is missing.
 //
-// 🔴 It REFUSES `TLSNone` to a non-loopback host rather than honouring it. A reset link travelling in clear
-// text across a network is the credential this whole phase exists to protect, and "the operator asked for it"
-// is not a reason — the operator asking for it is the mistake. Loopback is allowed because that is a local
-// test relay, where there is no network to be on.
-func New(cfg Config, l *log.Logger) (Mailer, error) {
-	if !cfg.Configured() {
-		return NewOperatorMailer(l), nil
-	}
-	if cfg.TLS == "" {
-		cfg.TLS = TLSStartTLS
-	}
-	switch cfg.TLS {
-	case TLSStartTLS, TLSImplicit:
-	case TLSNone:
-		if !isLoopback(cfg.Host) {
-			return nil, fmt.Errorf("mailer: TLS mode %q is refused for host %q — a reset link in clear text is "+
-				"the credential this protects; use starttls or implicit", cfg.TLS, cfg.Host)
-		}
-	default:
-		return nil, fmt.Errorf("mailer: unknown TLS mode %q", cfg.TLS)
-	}
-	if cfg.Port == 0 {
-		switch cfg.TLS {
-		case TLSImplicit:
-			cfg.Port = 465
+// HEROS_SMTP_HOST, _PORT, _USERNAME, _PASSWORD and HEROS_MAIL_FROM configure a relay. With none of them
+// set, HEROS_MAIL_MODE decides what happens instead:
+//
+//	log  — write the whole mail, links included, to the server log. For development.
+//	off  — refuse to send. Any operation needing mail fails with a message saying why.
+//
+// 🚫 There is no default mode when nothing is set. The operator states which one they mean, because the
+// two differ in whether password-reset links end up in a log file, and that is not a question to answer
+// by whichever branch happened to be written first.
+func FromEnv() (Mailer, error) {
+	host := strings.TrimSpace(os.Getenv("HEROS_SMTP_HOST"))
+	user := strings.TrimSpace(os.Getenv("HEROS_SMTP_USERNAME"))
+	pass := os.Getenv("HEROS_SMTP_PASSWORD")
+	from := strings.TrimSpace(os.Getenv("HEROS_MAIL_FROM"))
+	portRaw := strings.TrimSpace(os.Getenv("HEROS_SMTP_PORT"))
+
+	anySet := host != "" || user != "" || pass != "" || from != "" || portRaw != ""
+	if !anySet {
+		switch strings.TrimSpace(os.Getenv("HEROS_MAIL_MODE")) {
+		case "log":
+			return LogMailer{}, nil
+		case "off":
+			return Unconfigured{}, nil
 		default:
-			cfg.Port = 587
+			return nil, fmt.Errorf("no mail transport is configured, and HEROS_MAIL_MODE does not say " +
+				"what to do instead.\n" +
+				"  For a real deployment set HEROS_SMTP_HOST, HEROS_SMTP_PORT, HEROS_SMTP_USERNAME, " +
+				"HEROS_SMTP_PASSWORD and HEROS_MAIL_FROM.\n" +
+				"  For development set HEROS_MAIL_MODE=log, which writes invitation and reset links to " +
+				"this log instead of mailing them.\n" +
+				"  To run with no mail at all set HEROS_MAIL_MODE=off; invitations and password resets " +
+				"will be refused with an explanation")
 		}
 	}
-	if cfg.Timeout <= 0 {
-		cfg.Timeout = 15 * time.Second
+
+	// 🔴 Every field, named individually. "SMTP is misconfigured" sends somebody to read source; naming
+	// the empty variable ends the investigation.
+	var missing []string
+	for _, f := range []struct {
+		name  string
+		value string
+	}{
+		{"HEROS_SMTP_HOST", host},
+		{"HEROS_SMTP_USERNAME", user},
+		{"HEROS_SMTP_PASSWORD", pass},
+		{"HEROS_MAIL_FROM", from},
+	} {
+		if strings.TrimSpace(f.value) == "" {
+			missing = append(missing, f.name)
+		}
 	}
-	return &SMTPMailer{cfg: cfg, log: logger(l)}, nil
+	if len(missing) > 0 {
+		return nil, fmt.Errorf("SMTP is half configured: %s %s not set.\n"+
+			"  A relay with a missing credential accepts the connection and delivers nothing, which "+
+			"looks identical to working until a customer cannot reset their password. Set the missing "+
+			"variables, or unset all of them and choose HEROS_MAIL_MODE",
+			strings.Join(missing, ", "), plural(len(missing)))
+	}
+
+	port := 587
+	if portRaw != "" {
+		n, err := strconv.Atoi(portRaw)
+		if err != nil || n <= 0 || n > 65535 {
+			return nil, fmt.Errorf("HEROS_SMTP_PORT is %q, which is not a port number", portRaw)
+		}
+		port = n
+	}
+	if _, err := mail.ParseAddress(from); err != nil {
+		return nil, fmt.Errorf("HEROS_MAIL_FROM is %q, which is not an email address: %w", from, err)
+	}
+	return &SMTP{Config: Config{Host: host, Port: port, Username: user, Password: pass, From: from}}, nil
 }
 
-func isLoopback(host string) bool {
-	h := strings.ToLower(strings.TrimSpace(host))
-	if h == "localhost" {
-		return true
+func plural(n int) string {
+	if n == 1 {
+		return "is"
 	}
-	ip := net.ParseIP(h)
-	return ip != nil && ip.IsLoopback()
+	return "are"
 }
 
-func logger(l *log.Logger) *log.Logger {
-	if l != nil {
-		return l
-	}
-	return log.Default()
+// ── SMTP ─────────────────────────────────────────────────────────────────────────────────────────
+
+// SMTP sends through a relay.
+type SMTP struct {
+	Config
+	// Timeout bounds the whole conversation. Zero means 30 seconds. A relay that accepts a connection and
+	// then stops talking would otherwise hold an HTTP handler open until the customer gives up.
+	Timeout time.Duration
 }
 
-// ─────────────────────────────────────────────────────────────────────────────────────────────────────
-// SMTP
-// ─────────────────────────────────────────────────────────────────────────────────────────────────────
+func (s *SMTP) Describe() string {
+	return fmt.Sprintf("smtp %s:%d as %s, from %s", s.Host, s.Port, s.Username, s.From)
+}
 
-// SMTPMailer delivers over SMTP.
+// Send delivers one message.
 //
-// # The connection is constructed explicitly, never defaulted
+// # 🔴 Why the connection must be encrypted before the password is offered
 //
-// This repository has no egress-lane registry, so "declare the lane" is honoured the way it can be here: the
-// dialer, the timeout, the TLS configuration and the server name are all written down at the one place the
-// connection is made. There is no package-level client, no `http.DefaultTransport`, and no path by which this
-// reaches a host other than the configured one.
-type SMTPMailer struct {
-	cfg Config
-	log *log.Logger
-}
-
-func (s *SMTPMailer) Configured() bool { return true }
-func (s *SMTPMailer) From() string     { return s.cfg.From }
-
-func (s *SMTPMailer) Send(ctx context.Context, m Message) error {
-	if err := m.validate(); err != nil {
+// `smtp.PlainAuth` refuses to hand credentials to an unencrypted connection, which is the right default
+// and is also the whole protection — so this code does not work around it. On 465 the socket is TLS from
+// the first byte; on every other port STARTTLS is required, and a relay that does not offer it is an
+// error rather than a fallback to cleartext. A fallback would mean the relay decides whether this
+// product's mail credentials cross the network in the clear.
+func (s *SMTP) Send(ctx context.Context, m Message) error {
+	if err := validateHeaders(m); err != nil {
 		return err
 	}
-	addr := net.JoinHostPort(s.cfg.Host, fmt.Sprint(s.cfg.Port))
-	dialer := &net.Dialer{Timeout: s.cfg.Timeout}
-	tlsCfg := &tls.Config{ServerName: s.cfg.Host, MinVersion: tls.VersionTLS12}
+	timeout := s.Timeout
+	if timeout == 0 {
+		timeout = 30 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 
+	addr := net.JoinHostPort(s.Host, strconv.Itoa(s.Port))
 	var conn net.Conn
 	var err error
-	if s.cfg.TLS == TLSImplicit {
-		conn, err = tls.DialWithDialer(dialer, "tcp", addr, tlsCfg)
+	d := &net.Dialer{}
+	if s.Port == 465 {
+		conn, err = (&tls.Dialer{NetDialer: d, Config: &tls.Config{ServerName: s.Host, MinVersion: tls.VersionTLS12}}).
+			DialContext(ctx, "tcp", addr)
 	} else {
-		conn, err = dialer.DialContext(ctx, "tcp", addr)
+		conn, err = d.DialContext(ctx, "tcp", addr)
 	}
 	if err != nil {
-		return fmt.Errorf("mailer: cannot reach %s: %w", addr, err)
+		return fmt.Errorf("mailer: connecting to %s: %w", addr, err)
 	}
-	defer func() { _ = conn.Close() }()
-	if dl, ok := ctx.Deadline(); ok {
-		_ = conn.SetDeadline(dl)
-	} else {
-		_ = conn.SetDeadline(time.Now().Add(s.cfg.Timeout))
+	defer conn.Close()
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = conn.SetDeadline(deadline)
 	}
 
-	c, err := smtp.NewClient(conn, s.cfg.Host)
+	c, err := smtp.NewClient(conn, s.Host)
 	if err != nil {
-		return fmt.Errorf("mailer: SMTP handshake with %s failed: %w", addr, err)
+		return fmt.Errorf("mailer: smtp handshake with %s: %w", addr, err)
 	}
 	defer func() { _ = c.Quit() }()
 
-	if s.cfg.TLS == TLSStartTLS {
-		if ok, _ := c.Extension("STARTTLS"); !ok {
-			// 🔴 Refuse rather than continue in the clear. A server that will not upgrade is a server this
-			// message must not be handed to, and "we tried" is not a property anybody can audit later.
-			return fmt.Errorf("mailer: %s does not offer STARTTLS and this message will not be sent in clear text", addr)
+	if s.Port != 465 {
+		ok, _ := c.Extension("STARTTLS")
+		if !ok {
+			return fmt.Errorf("mailer: %s does not offer STARTTLS. Refusing to continue: the next step "+
+				"sends this product's mail password, and an unencrypted relay would put it on the wire "+
+				"in clear text", addr)
 		}
-		if err := c.StartTLS(tlsCfg); err != nil {
-			return fmt.Errorf("mailer: STARTTLS with %s failed: %w", addr, err)
-		}
-	}
-	if s.cfg.Username != "" {
-		if err := c.Auth(smtp.PlainAuth("", s.cfg.Username, s.cfg.Password, s.cfg.Host)); err != nil {
-			return fmt.Errorf("mailer: authentication to %s failed: %w", addr, err)
+		if err := c.StartTLS(&tls.Config{ServerName: s.Host, MinVersion: tls.VersionTLS12}); err != nil {
+			return fmt.Errorf("mailer: starting TLS with %s: %w", addr, err)
 		}
 	}
-	if err := c.Mail(s.cfg.From); err != nil {
-		return fmt.Errorf("mailer: sender refused by %s: %w", addr, err)
+	if err := c.Auth(smtp.PlainAuth("", s.Username, s.Password, s.Host)); err != nil {
+		// 🔴 The error is wrapped without the password anywhere near it, and net/smtp does not include it.
+		return fmt.Errorf("mailer: authenticating to %s as %s: %w", addr, s.Username, err)
+	}
+	if err := c.Mail(s.From); err != nil {
+		return fmt.Errorf("mailer: MAIL FROM %s: %w", s.From, err)
 	}
 	if err := c.Rcpt(m.To); err != nil {
-		return fmt.Errorf("mailer: recipient refused by %s: %w", addr, err)
+		return fmt.Errorf("mailer: RCPT TO %s: %w", m.To, err)
 	}
 	w, err := c.Data()
 	if err != nil {
-		return fmt.Errorf("mailer: %s refused the message body: %w", addr, err)
+		return fmt.Errorf("mailer: DATA: %w", err)
 	}
-	if _, err := w.Write([]byte(render(s.cfg.From, m))); err != nil {
-		return fmt.Errorf("mailer: writing to %s failed: %w", addr, err)
+	body, err := Compose(s.From, m)
+	if err != nil {
+		return err
+	}
+	if _, err := w.Write([]byte(body)); err != nil {
+		return fmt.Errorf("mailer: writing message: %w", err)
 	}
 	if err := w.Close(); err != nil {
-		return fmt.Errorf("mailer: %s rejected the message: %w", addr, err)
+		return fmt.Errorf("mailer: closing message: %w", err)
 	}
 	return nil
 }
 
-// render builds the RFC 5322 message: text-only, or `multipart/alternative` when an HTML part exists.
+// ── the no-relay mailers ─────────────────────────────────────────────────────────────────────────
+
+// LogMailer writes mail to the server log instead of sending it. For development.
 //
-// 🔴 The TEXT part comes FIRST. In `multipart/alternative` the parts are ordered least-preferred to
-// most-preferred, so a client shows the LAST one it understands. Text first, HTML second means an
-// HTML-capable client shows the styled version and everything else falls back cleanly — reversing them
-// makes every rich client show plain text, which looks like the styling silently failed.
-func render(from string, m Message) string {
+// 🔴 It prints the link. That is the point — without it a developer with no relay cannot complete an
+// invitation — and it is also why this is never the default: anybody who can read the log can take over
+// any account. Choosing it takes HEROS_MAIL_MODE=log, and the daemon says so loudly at startup.
+type LogMailer struct{}
+
+func (LogMailer) Describe() string {
+	return "log — mail is written to this log, links included. Development only."
+}
+
+func (LogMailer) Send(_ context.Context, m Message) error {
+	log.Printf("MAIL (not sent — HEROS_MAIL_MODE=log)\n  to:      %s\n  subject: %s\n%s\n"+
+		"  ^ anybody who can read this log can use any link above.", m.To, m.Subject, indent(m.Text))
+	return nil
+}
+
+// Unconfigured refuses to send, and says so.
+//
+// The alternative — accepting and discarding — is what makes a broken deployment look like a working
+// one. An invitation nobody receives should fail where the person clicking "invite" can see it.
+type Unconfigured struct{}
+
+func (Unconfigured) Describe() string {
+	return "off — mail is not configured; invitations and password resets will be refused"
+}
+
+func (Unconfigured) Send(context.Context, Message) error { return ErrNotConfigured }
+
+func indent(s string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "From: %s\r\n", from)
-	fmt.Fprintf(&b, "To: %s\r\n", m.To)
-	fmt.Fprintf(&b, "Subject: %s\r\n", m.Subject)
-	b.WriteString("MIME-Version: 1.0\r\n")
-	// 🔴 Tells well-behaved clients and gateways not to fetch anything on the recipient's behalf. It stays
-	// true with the HTML part in place, because that part references NO remote resource — the wordmark is
-	// text, and a hosted logo would report the moment somebody opened a password-reset email.
-	b.WriteString("Auto-Submitted: auto-generated\r\n")
-
-	if strings.TrimSpace(m.HTMLBody) == "" {
-		b.WriteString("Content-Type: text/plain; charset=utf-8\r\n\r\n")
-		b.WriteString(crlf(m.TextBody))
-		b.WriteString("\r\n")
-		return b.String()
+	for _, line := range strings.Split(strings.TrimRight(s, "\n"), "\n") {
+		b.WriteString("  | ")
+		b.WriteString(line)
+		b.WriteString("\n")
 	}
-
-	// A fixed boundary would be a bug the day a body contains it. This one is drawn from the same source
-	// every other unguessable value here comes from.
-	boundary := newBoundary()
-	fmt.Fprintf(&b, "Content-Type: multipart/alternative; boundary=\"%s\"\r\n\r\n", boundary)
-	// A line for clients that render neither part. Almost nothing reaches it; it costs one line.
-	b.WriteString("This is a message in MIME format.\r\n")
-
-	fmt.Fprintf(&b, "\r\n--%s\r\n", boundary)
-	b.WriteString("Content-Type: text/plain; charset=utf-8\r\n\r\n")
-	b.WriteString(crlf(m.TextBody))
-
-	fmt.Fprintf(&b, "\r\n--%s\r\n", boundary)
-	b.WriteString("Content-Type: text/html; charset=utf-8\r\n\r\n")
-	b.WriteString(crlf(m.HTMLBody))
-
-	fmt.Fprintf(&b, "\r\n--%s--\r\n", boundary)
 	return b.String()
 }
 
-// crlf normalises line endings for the wire.
-func crlf(s string) string {
-	return strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\n", "\r\n")
-}
+// ── composing ────────────────────────────────────────────────────────────────────────────────────
 
-// newBoundary mints a MIME boundary that cannot collide with a body.
-func newBoundary() string {
-	var raw [18]byte
-	if _, err := rand.Read(raw[:]); err != nil {
-		// A CSPRNG that cannot be read is not something to paper over with a constant: a predictable
-		// boundary that appears in a body splits the message. Refusing is louder, and the caller turns a
-		// send failure into a WARN rather than a corrupted mail.
-		panic("mailer: cannot mint a MIME boundary: " + err.Error())
-	}
-	return "heros-" + base64.RawURLEncoding.EncodeToString(raw[:])
-}
-
-// ─────────────────────────────────────────────────────────────────────────────────────────────────────
-// The operator fallback
-// ─────────────────────────────────────────────────────────────────────────────────────────────────────
-
-// Record is one message a deployment could not send.
-type Record struct {
-	At      time.Time
-	To      string
-	Subject string
-	Purpose Purpose
-	// Body is kept IN FULL, link included. That is the whole point: the operator is the delivery mechanism
-	// on this path, and a record that omitted the link would be a log line pretending to be a mailbox.
-	Body string
-}
-
-// OperatorMailer is what a deployment with no SMTP configuration uses.
+// validateHeaders refuses anything that could add a header.
 //
-// 🔴 It is not a discard. Every message is recorded and logged at WARN, and `Configured()` answers false so
-// the readiness surface reports the deployment as degraded rather than healthy. See the package doc.
-type OperatorMailer struct {
-	mu      sync.Mutex
-	records []Record
-	log     *log.Logger
-	// max bounds the record so a deployment left unconfigured for a year does not grow without limit. The
-	// OLDEST are dropped and the drop is logged — a silent eviction here would be the same defect one layer
-	// down.
-	max int
-	now func() time.Time
-}
-
-// NewOperatorMailer builds the fallback.
-func NewOperatorMailer(l *log.Logger) *OperatorMailer {
-	return &OperatorMailer{log: logger(l), max: 200, now: func() time.Time { return time.Now().UTC() }}
-}
-
-func (o *OperatorMailer) Configured() bool { return false }
-func (o *OperatorMailer) From() string     { return "" }
-
-func (o *OperatorMailer) Send(_ context.Context, m Message) error {
-	if err := m.validate(); err != nil {
-		return err
+// # 🔴 Why an address is parsed rather than trimmed
+//
+// A newline in a recipient or a subject does not corrupt the mail, it EXTENDS it: `victim@example.com\nBcc:
+// attacker@evil` is a valid-looking address that silently copies every invitation to somebody else.
+// Everything that reaches a header line is checked for CR and LF, and the recipient is parsed as an
+// address rather than merely inspected, so a form that mostly looks like an address is still refused.
+func validateHeaders(m Message) error {
+	if _, err := mail.ParseAddress(m.To); err != nil {
+		return fmt.Errorf("mailer: %q is not a deliverable address: %w", m.To, err)
 	}
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	rec := Record{At: o.now(), To: m.To, Subject: m.Subject, Purpose: m.Purpose, Body: m.TextBody}
-	o.records = append(o.records, rec)
-	if len(o.records) > o.max {
-		dropped := len(o.records) - o.max
-		o.log.Printf("WARN mail: dropping %d undelivered message(s) from the operator record — it holds the "+
-			"most recent %d. Configure SMTP, or these links cannot be handed over at all.", dropped, o.max)
-		o.records = append([]Record(nil), o.records[dropped:]...)
+	for _, f := range []struct{ name, value string }{{"recipient", m.To}, {"subject", m.Subject}} {
+		if strings.ContainsAny(f.value, "\r\n") {
+			return fmt.Errorf("mailer: refusing to send: the %s contains a line break, which would add "+
+				"headers to the message", f.name)
+		}
 	}
-	// 🔴 WARN, naming the recipient and the purpose — and NOT the body. The link is in the record, which is
-	// an authenticated operator surface; putting it in the log would copy a live credential into whatever
-	// aggregator ships these lines, under a different retention policy and a wider audience.
-	o.log.Printf("WARN mail: not configured — a %s message to %s was NOT sent. It is held on the operator "+
-		"surface; hand the link over or configure SMTP.", m.Purpose, m.To)
 	return nil
 }
 
-// Undelivered returns the held messages, newest first.
-func (o *OperatorMailer) Undelivered() []Record {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	out := append([]Record(nil), o.records...)
-	sort.SliceStable(out, func(i, j int) bool { return out[i].At.After(out[j].At) })
-	return out
+// Compose renders the wire form of a message.
+//
+// # 🔴 Why the text part comes first
+//
+// multipart/alternative is ordered least-preferred to most-preferred, and clients show the LAST part
+// they understand. Putting HTML first shows plain text to everybody, which reads as the styling having
+// failed rather than as a deliberate choice — and the bug survives review because both parts are
+// present and correct.
+func Compose(from string, m Message) (string, error) {
+	if err := validateHeaders(m); err != nil {
+		return "", err
+	}
+	boundary, err := randomBoundary()
+	if err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "From: %s\r\n", from)
+	fmt.Fprintf(&b, "To: %s\r\n", m.To)
+	fmt.Fprintf(&b, "Subject: %s\r\n", encodeSubject(m.Subject))
+	fmt.Fprintf(&b, "Date: %s\r\n", time.Now().UTC().Format(time.RFC1123Z))
+	b.WriteString("MIME-Version: 1.0\r\n")
+	// 🚫 No List-Unsubscribe, no tracking pixel, no remote anything. These are transactional mails about
+	// somebody's account; a hosted image in a password-reset mail is a read receipt telling whoever
+	// controls that host when the victim opened it.
+	fmt.Fprintf(&b, "Content-Type: multipart/alternative; boundary=%q\r\n\r\n", boundary)
+
+	fmt.Fprintf(&b, "--%s\r\n", boundary)
+	b.WriteString("Content-Type: text/plain; charset=utf-8\r\n")
+	b.WriteString("Content-Transfer-Encoding: quoted-printable\r\n\r\n")
+	b.WriteString(quotedPrintable(m.Text))
+	b.WriteString("\r\n")
+
+	fmt.Fprintf(&b, "--%s\r\n", boundary)
+	b.WriteString("Content-Type: text/html; charset=utf-8\r\n")
+	b.WriteString("Content-Transfer-Encoding: quoted-printable\r\n\r\n")
+	b.WriteString(quotedPrintable(m.HTML))
+	b.WriteString("\r\n")
+
+	fmt.Fprintf(&b, "--%s--\r\n", boundary)
+	return b.String(), nil
+}
+
+// encodeSubject uses RFC 2047 when the subject is not plain ASCII, so an organization name with an
+// accent in it does not arrive as mojibake.
+func encodeSubject(s string) string {
+	for i := 0; i < len(s); i++ {
+		if s[i] > 127 {
+			return "=?utf-8?B?" + base64.StdEncoding.EncodeToString([]byte(s)) + "?="
+		}
+	}
+	return s
+}
+
+// quotedPrintable encodes a body so no line exceeds the 998-octet limit and no bare CR or LF survives.
+//
+// 🔴 A line beginning with a lone "." would end the DATA command early, truncating the message at that
+// point — the encoder escapes it, along with everything else outside printable ASCII.
+func quotedPrintable(s string) string {
+	var b strings.Builder
+	lineLen := 0
+	writeRaw := func(chunk string) {
+		if lineLen+len(chunk) > 74 {
+			b.WriteString("=\r\n")
+			lineLen = 0
+		}
+		b.WriteString(chunk)
+		lineLen += len(chunk)
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c == '\r':
+			continue
+		case c == '\n':
+			b.WriteString("\r\n")
+			lineLen = 0
+		case c == '=' || c < 32 || c > 126:
+			writeRaw(fmt.Sprintf("=%02X", c))
+		case c == '.' && lineLen == 0:
+			// Escaped so the SMTP dot-stuffing rule can never see a lone "." on its own line.
+			writeRaw("=2E")
+		default:
+			writeRaw(string(c))
+		}
+	}
+	return b.String()
+}
+
+func randomBoundary() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("mailer: no entropy available: %w", err)
+	}
+	return "heros-" + base64.RawURLEncoding.EncodeToString(b), nil
 }

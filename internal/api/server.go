@@ -1,862 +1,907 @@
-// Package api serves the agentd HTTP surface.
-//
-// This is the minimal foundation left after the pivot to the LLM Agentic
-// Workflow Evaluation & Configuration System: a health/readiness surface
-// behind the existing auth policy. The retired agent's large route set
-// (memory, collective, harness, vaults, catalog sync, …) has been removed.
-// Discovery / config / runtime / eval endpoints are added per phase — see
-// openspec/changes/* and docs/prd/.
 package api
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
+	"sort"
+	"sync"
 	"time"
 
-	"github.com/heros-foreal/agentd/internal/adminidentity"
-	"github.com/heros-foreal/agentd/internal/assessment"
-	"github.com/heros-foreal/agentd/internal/auth"
-	"github.com/heros-foreal/agentd/internal/config"
-	"github.com/heros-foreal/agentd/internal/erroreport"
-	"github.com/heros-foreal/agentd/internal/herosagent"
-	"github.com/heros-foreal/agentd/internal/improvementrun"
-	"github.com/heros-foreal/agentd/internal/linkingest"
-	"github.com/heros-foreal/agentd/internal/mailer"
-	"github.com/heros-foreal/agentd/internal/providergateway"
-	"github.com/heros-foreal/agentd/internal/sandbox"
-	"github.com/heros-foreal/agentd/internal/sourceingest"
-	"github.com/heros-foreal/agentd/internal/tenancy"
+	"github.com/heros-foreal/heros/internal/auth"
+	"github.com/heros-foreal/heros/internal/bounds"
+	"github.com/heros-foreal/heros/internal/discovery"
+	"github.com/heros-foreal/heros/internal/goal"
+	"github.com/heros-foreal/heros/internal/intake"
+	"github.com/heros-foreal/heros/internal/intent"
+	"github.com/heros-foreal/heros/internal/mailer"
+	"github.com/heros-foreal/heros/internal/memory"
+	"github.com/heros-foreal/heros/internal/planner"
+	"github.com/heros-foreal/heros/internal/provider"
+	"github.com/heros-foreal/heros/internal/ratelimit"
+	"github.com/heros-foreal/heros/internal/router"
+	"github.com/heros-foreal/heros/internal/store"
+	"github.com/heros-foreal/heros/internal/task"
+	"github.com/heros-foreal/heros/internal/tenancy"
+	"github.com/heros-foreal/heros/internal/toolcontract"
+	"github.com/heros-foreal/heros/internal/tools"
+	"log"
 )
 
-// Server is the agentd HTTP API.
+// Server is the console's HTTP surface.
 type Server struct {
-	// deviceSecrets holds an issued credential's plaintext between the approval that minted it and the
-	// poll that collects it — in memory, on this process, and nowhere else. See internal/api/deviceauth.go
-	// for why it is not a column.
-	deviceSecrets deviceSecrets
+	// Root hands out tenant-scoped stores. 🔴 The server never holds an unscoped Store, so no handler can
+	// construct a query for a tenant other than the caller's — not because it is careful, but because it
+	// has nothing to be careless with.
+	Root     store.Root
+	Auth     *auth.Store
+	Planners *planner.Registry
+	// SupervisorFor builds the supervisor for one organization, against that organization's slice of
+	// the store. Supplied by the caller rather than constructed here, because building one needs a
+	// worker, which needs the tool registry and the approval policy — all of which are the daemon's to
+	// assemble. See supervisors.go for why there is one per organization rather than one per server.
+	SupervisorFor func(tenant string) *Supervisor
+	// sups caches them. Never read directly — use supFor, which builds on first use.
+	sups     supervisorSet
+	Resolver *intake.Resolver
+	Router   router.Router
+	Ceilings bounds.Ceilings
+	// DefaultTenant is used when a login omits one, for single-organization deployments.
+	DefaultTenant string
 
-	// DB is the SQLite dev ledger (auth keys, memory). NOT P2's store — see p2.go.
-	DB      *sql.DB
-	Cfg     config.Config
-	Mux     *http.ServeMux
-	Handler http.Handler
-
-	// p2 is the Postgres-backed P2 read surface, mounted by MountConfigRuntime when available.
-	configRuntime ConfigRuntimeStores
-
-	// monitor is the P2.5 live run-monitoring read model, mounted by MountMonitor when available.
-	monitor MonitorSource
-	// monitorAbsent is why this deployment serves no live monitor. See MountMonitorAbsent.
-	monitorAbsent string
-
-	// p35 is the P3.5 pattern-classifier read model, mounted by MountPatternGraph when available.
-	patternGraph PatternSource
-
-	// p4 is the P4 eval-board read model, mounted by MountEvalBoard when available.
-	evalBoard BoardSource
-	// evalSet is the P30 eval-set read model, mounted by MountEvalSet when available.
-	evalSet EvalSetSource
-
-	// p45 is the P4.5 read-only scorecard read model, mounted by MountScorecard when available.
-	scorecard ScorecardSource
-
-	// assessments is the P33 surface-assessment runner, mounted by MountAssessments when available.
-	// nil is a deployment that does not ship it, and every route answers 503 rather than 404 — the
-	// distinction P9 draws throughout: "mount the subsystem" and "check the identifier" are two
-	// different people's next actions.
-	assessments AssessmentRunner
-	// improvementRuns is the P35 improvement-run surface, mounted by MountImprovementRuns when
-	// available. Nil in a deployment that does not run improvements, which answers 503 with a reason
-	// rather than 404 — a customer told "not found" goes and checks an identifier that is correct.
-	improvementRuns ImprovementRunner
-	// improvementHealth publishes the P35 run/proposal/delivery counters on /readyz (task 9.1).
-	improvementHealth ImprovementHealthSource
-	// assessmentHealth publishes the P33 per-axis, per-state health document on /readyz.
-	assessmentHealth AssessmentHealthSource
-	// sandboxConcurrency publishes the P34 isolate-concurrency gauge on /readyz (task 8.3).
-	sandboxConcurrency SandboxConcurrencySource
-
-	// p5 is the P5 interactive-graph-editor read+validate model, mounted by MountGraphEditor when available.
-	graphEditor GraphEditorSource
-
-	// p55 is the P5.5 ranked-recommendation + verification read model, mounted by MountProposals.
-	proposals ProposalsSource
-
-	// p6 is the P6 autonomous-optimizer governance surface (live monitor + grant/stop/rollback),
-	// mounted by MountOptimizer when available.
-	optimizer OptimizerSource
-
-	// p7 is the P7 billing/usage read model (SUM, plan + entitlements, invoice breakdown, verified
-	// gainshare evidence), mounted by MountBilling when available.
-	billingView BillingSource
-
-	// billing describes the live P7 rollout state (billing on/off, provider mode, gainshare,
-	// auto-merge entitlement), reported by /readyz.
+	// Mail sends invitations, password resets and address confirmations.
 	//
-	// The rollout state is a HEALTH SIGNAL, not a startup log line: "is this box charging real money"
-	// is a question an operator asks about the box that is misbehaving, now — and a log line that
-	// scrolled past three restarts ago cannot answer it.
-	billing BillingRolloutDescriber
-
-	// billingCapability names the live billing PROVIDER and the source its credentials come from
-	// (P21 task 3.1), reported by /readyz.
+	// 🔴 An interface rather than an SMTP client, so a deployment with no relay is a DIFFERENT
+	// implementation that refuses loudly rather than a client that silently drops. See internal/mailer:
+	// a mailer that reports itself healthy and delivers nothing has already cost this product days.
+	Mail mailer.Mailer
+	// Links builds the URLs that go in that mail, from a configured origin.
 	//
-	// It is separate from `billing` above because the two answer different questions and can disagree in
-	// a way that matters: the rollout says which gates are open, this says WHICH PROCESSOR is behind
-	// them and WHERE its credential resolves from. The failure mode this makes checkable is the one
-	// billing/secrets.go names — a deployment whose LLM credentials come from a manager while its
-	// BILLING credentials quietly come from an environment variable, with a health endpoint confidently
-	// wrong about both.
-	billingCapability BillingCapabilityDescriber
-
-	// billingWebhook is the ONE inbound-from-internet path — Stripe's webhook endpoint, mounted by
-	// MountBillingWebhook when a deployment exposes it (P21 task 4.2). See p21.go for the posture.
-	billingWebhook BillingWebhookSink
-
-	// p21 is the P21 collection surface (plans by name, payment-method status, checkout), mounted by
-	// MountPayments when available.
-	payments PaymentsSource
-
-	// p23 is the P23 consent surface — the ONLY new authenticated surface this phase adds, mounted by
-	// RegisterConsent when available. Two endpoints, three fields, the caller's own tenant only (task 11.4).
-	consent ConsentSource
-
-	// secrets is the live provider-credential source, reported by /readyz.
+	// 🔴 Never from the request's Host header. Whoever asks for a password reset chooses that request's
+	// headers, and would choose to have the link point at themselves.
+	Links mailer.Links
+	// ForgotLimit caps how often a password reset can be ASKED FOR, per address.
 	//
-	// The SOURCE, never a credential: this holds the thing that can produce secrets precisely so the
-	// endpoint can name it without anyone re-deriving it from configuration and getting a different
-	// answer than the gateway did.
-	secrets providergateway.Secrets
-
-	// identity is the CUSTOMER identity provider's reachability, reported as its own /readyz component
-	// (P22 task 7.1). Separate from `probes` because the answer is richer than up/down: an operator
-	// diagnosing "nobody can sign in" needs the KIND and the ISSUER as well as the verdict, and a
-	// component that reports only "degraded" sends them to read three dashboards to learn what this
-	// response already knew.
-	identity IdentityProbe
-
-	// adminIdentity names the live OPERATOR identity provider (P22 task 6.4). The DOOR, never anything
-	// behind it — no key, no secret id, no assertion.
-	adminIdentity AdminIdentityDescriber
-
-	// accounts is P27's identity surface: organizations, members, invitations and credentials. Nil means
-	// this deployment does not mount the account system, and the routes are not registered at all — a
-	// deployment answers 404 for a route it does not have rather than 503 for one it does.
-	accounts AccountSurface
-
-	// fallbackMail is the operator-visible mailer used when the mounted surface supplies none (P28).
+	// 🔴 Named for the endpoint, not for the feature. It was `ResetLimit`, which stopped being a name the
+	// moment a second limit appeared in the same flow: this one bounds requesting a link and is keyed on
+	// an address, RedeemLimit bounds using one and is keyed on a token. Two fields that could both
+	// reasonably be called "the reset limit" is how the wrong one gets used.
 	//
-	// 🔴 It exists so there is NO nil-mailer path. A `if m != nil { send }` at six call sites is six places
-	// a confirmation or reset link can be silently discarded, which is the single failure mode
-	// `internal/mailer` was written to make impossible.
-	fallbackMail mailer.Mailer
-
-	// authRegistry is the ONE registry every authenticated request resolves against. Exposed so the boot
-	// path can point it at the durable identity store after the schema is up.
-	authRegistry *auth.Registry
-
-	// accountSystem is the P27 posture: which identity store is live, whether self-serve sign-up is on,
-	// and what the boot seed did. Reported as a VALUE beside `secrets_source` rather than as a gate,
-	// because a deployment with self-serve off is configured, not degraded. Nil means this deployment
-	// mounts no account system, which is stated by omission rather than by inventing a status for it.
-	accountSystem *tenancy.Posture
-
-	// errorReporter is the P24 error-reporting boundary. Nil means absent, which is the default and the
-	// correct state on every substrate except the platform's own hosted deployment.
-	errorReporter erroreport.Reporter
-	// probes are the dependent components aggregated into /readyz (P9 FR25, P19 topology FR).
+	// 🔴 Per address rather than per caller, because what is being protected is somebody's INBOX. An
+	// unauthenticated endpoint that sends mail to any address on request is a way to flood a person the
+	// attacker dislikes, and the victim is the address, not whoever made the request.
+	ForgotLimit *ratelimit.Limiter
+	// LoginLimit caps password guesses, per ACCOUNT — tenant AND address.
 	//
-	// The moment a second process sits in the request path, readiness has to cover it or it is
-	// measuring the wrong thing: a Go service that reports "ready" while the surface users actually
-	// reach is dead is a LYING HEALTH SIGNAL, and 🔴 health-signal-surface is explicit that a UI
-	// dashboard is never itself the health judgement. A slice, because P19 deploys more than one
-	// dependent component (customer console, operator console, object store, queue, vector/graph
-	// stores, the air-gapped secret gateway) and the deployment must aggregate EVERY component it
-	// ships — a partial aggregation is the lying signal again, one degraded store below the fold.
-	// Empty when a deployment ships no dependent components — saying so by omission beats inventing a
-	// status for one that does not exist.
-	probes []ComponentProbe
-
-	// agentReadiness resolves the P30 analysis agent's state by DOING what an inference does — reading
-	// the active definition, resolving the credential through the gateway's own secrets source, and
-	// comparing the real meter against the real ceiling (task 9.1).
+	// 🔴 A different key from ForgotLimit, because a different thing is being protected. A reset floods an
+	// inbox, and an inbox is one mailbox however many organizations write to it, so that limit is keyed on
+	// the address alone. A login guesses at an ACCOUNT, and the same address in two organizations is two
+	// accounts with two passwords — keyed on the address alone, guessing at one customer's user would
+	// spend the budget of a different customer's user, which is one tenant degrading another.
+	LoginLimit *ratelimit.Limiter
+	// SignupLimit caps how often an organization can be created for one address. Its ceiling and the
+	// gap it does not close are documented beside the handler, in signup.go.
+	SignupLimit *ratelimit.Limiter
+	// AcceptLimit caps how hard one invitation can be redeemed, keyed on the TOKEN's hash.
 	//
-	// 🔴 A FUNCTION rather than a value, because every one of those is a live fact. A struct filled in
-	// at boot would report the credential that resolved at boot, which is the readiness signal that
-	// cannot go red — the exact failure P19 Decision 9 records for `components.postgres`.
-	agentReadiness func(context.Context) herosagent.Readiness
-	// agentNodeHealth is the P36 per-node counter source (task 8.1). Nil means this deployment
-	// observes nothing per node, and `/readyz` then omits the key rather than reporting zeros —
-	// "nobody is counting" and "every node has done nothing" are different facts.
-	agentNodeHealth func() herosagent.NodeHealthDocument
-
-	// p10 is the Postgres-backed prompt-authoring write surface (publish + timeline/diff/impact read
-	// models), mounted by MountPromptRegistry when available. The platform API's first WRITE surface.
-	promptRegistry PromptStore
-
-	// p10matrix is the P10 studio MATRIX surface (node × model grid: models/nodes/run/bind), mounted by
-	// MountStudioMatrix when available.
-	studioMatrix StudioMatrix
-
-	// p11 is the P11 run-linking ingest surface (POST /api/v1/run-links + GET /api/v1/whoami), mounted by
-	// MountRunLinking when available. It attributes a linked run to the authenticated tenant server-side and
-	// lands its events in the existing P2.5 substrate. The platform API's authenticated ingest surface.
-	runLinking LinkIngestSource
-	// workflowIR is the OPT-IN structure store, mounted by MountWorkflowIR when a deployment accepts it.
-	// Separate from runLinking on purpose: accepting a run and accepting a workflow's shape are two
-	// different policy decisions, and one mount must not imply the other.
-	workflowIR WorkflowIRSource
-	// herosAgent is the P30 analysis agent, mounted by MountHerosAgent. A SIXTH separate decision: a
-	// deployment can accept structure and run no agent, which is the default — Q2 makes `disabled` the
-	// default placement, so an unmounted agent and a mounted one with nobody enabled behave the same
-	// way from a customer's terminal, and both are correct.
-	herosAgent HerosAgentSource
-	// verdicts is the P5.5 verdict ingest, mounted by MountVerdictIngest. A fourth separate decision:
-	// this one accepts a MEASUREMENT that decides whether a change may be recommended and delivered, so
-	// a deployment that serves the recommendation surface read-only leaves it nil and answers 503.
-	verdicts VerdictSink
-	// transformReceipts is the P29 opt-in transform-receipt store, mounted by MountTransformReceipts. A
-	// FIFTH separate decision, and separate for the same reason as the other four: a deployment can
-	// accept a run's numbers and refuse to hold what a customer's change did to their own tree.
-	transformReceipts TransformReceiptSource
-	// workflowIndex and linkedRuns are the P29 §4 enumerations — "what does this organization have?".
-	// Mounted separately from the ingests they read, because a deployment can accept structure and not
-	// serve a catalog, and because the read side must not be able to acquire a write.
-	workflowIndex WorkflowIRIndex
-	linkedRuns    linkingest.Store
-	// accountProvisioner creates a Free account at the FIRST AUTHENTICATED ACT (P29 §7.1). Before it,
-	// only organizations the config seed made had one — so a self-serve sign-up linked a run and the
-	// billing read model could not find the customer it was attributed to.
-	accountProvisioner AccountProvisioner
-	// proposalGen is the platform-side generator, mounted by MountProposalGeneration. Separate from
-	// MountProposals for the reason every other pair here is separate: reading a recommendation surface
-	// and running a pass that WRITES proposals are different things to enable.
-	proposalGen ProposalGenerator
-	// proposalCompile is the codemod, mounted by MountProposalCompile. Separate from proposalGen: one
-	// reads metrics and a graph, the other extracts a source snapshot and re-parses a repository, and a
-	// caller who only wants to see what was found should not pay for the second.
-	proposalCompile ProposalCompiler
-	// sourcePush is the customer-pushed SOURCE snapshot store, mounted by MountSourcePush. A third
-	// separate policy decision, and the largest one: accepting a run's numbers, accepting a workflow's
-	// allowlisted shape, and accepting the customer's source are three different things to agree to, so
-	// no mount implies another. A deployment that will not hold customer source leaves this nil.
-	sourcePush SourcePushStore
-	// sourceDiscovery runs discovery over a pushed snapshot. Independently nillable from sourcePush:
-	// they need different collaborators and fail for different reasons.
-	sourceDiscovery SourceDiscovery
-
-	// p12 is the P12 forge-delivery surface (console delivery read model + CI-mediated fetch/report),
-	// mounted by MountForgeDelivery when available. It holds no forge credential.
-	forgeDelivery ForgeDeliverySource
-	// connections is the P32 repository-connection surface, mounted by MountConnections. Nil on a
-	// deployment that does not offer connections — the routes then answer 503, which is a policy
-	// answer a customer can read where a 404 would read as a broken URL.
-	connections ConnectionSource
-	// ingestMetrics and ingestRetention are the P32 source-ingest health signals, reported by
-	// /readyz. Both nil on a deployment that does not clone.
-	ingestMetrics   IngestMetricsSource
-	ingestRetention RetentionHealthSource
-	// pairings is the P32 §4 local-mode bridge, mounted by MountLocalPairing.
-	pairings PairingSource
-	// deploymentURL is this deployment's own public address, or "" when it has not been told. Read
-	// only by the local-mode availability answer — see SetDeploymentURL for why "" is reported as
-	// unavailable rather than assumed to match.
-	deploymentURL string
-
-	// conversations is P31's conversational surface, mounted by MountConversations. Nil means this
-	// deployment ships no conversational console and the five routes are NOT REGISTERED — a 404 for a
-	// route that does not exist, rather than a 503 for one that does. The distinction matters here more
-	// than it does for a read model: this is a whole product surface, and a console whose navigation
-	// offers it while the platform answers 503 is a console advertising something nobody installed.
-	conversations *ConversationMount
-
-	// p13authoring is the P13 13c user-authoring surface (preflight / submit / revert / history),
-	// mounted by MountAuthoring when available. A deployment without it behaves exactly as it did
-	// before 13c — which is what makes the wave independently revertible.
-	authoring AuthoringSource
-}
-
-// ComponentProbe reports whether a dependent component is reachable.
-//
-// A one-method interface rather than an import of the console's client: /readyz needs the ANSWER, not
-// the type. It also keeps the aggregation testable without a network — the failure case that matters
-// most here is the one where the component is unreachable, and that must be exercisable.
-type ComponentProbe interface {
-	// Name is the component's name as it appears on /readyz. Machine-readable, so a monitor can alert
-	// on the specific component rather than on "not ready".
-	Name() string
-	// Probe returns nil when the component is reachable, or the reason it is not.
-	Probe(ctx context.Context) error
-}
-
-// SetConsoleProbe wires the customer console into the readiness signal (P9 FR25). It is a thin alias
-// for AddComponentProbe kept because P9's launch path and tests already call it by this name.
-func (s *Server) SetConsoleProbe(p ComponentProbe) { s.AddComponentProbe(p) }
-
-// AddComponentProbe registers one dependent component in the readiness aggregation (P19). Order of
-// registration is the order components are reported; a nil probe is ignored so a launch path can wire
-// a component conditionally without a guard at every call site.
-func (s *Server) AddComponentProbe(p ComponentProbe) {
-	if p == nil {
-		return
-	}
-	s.probes = append(s.probes, p)
-}
-
-// HTTPComponentProbe probes a component's health endpoint over HTTP.
-//
-// The timeout is explicit and short. A readiness probe that can hang is not a readiness probe: the
-// orchestrator's own probe deadline would fire first, and the answer an operator gets would be
-// "timeout" rather than "the console is unreachable" — the same outcome with none of the information.
-type HTTPComponentProbe struct {
-	ComponentName string
-	URL           string
-	Client        *http.Client
-}
-
-// DBComponentProbe reports a database's reachability under its own name.
-//
-// It exists so the platform database is probed rather than described. The alternative this replaces was
-// naming the local ledger's ping "postgres" from an environment variable, which produced a component
-// that reported ready while the database it named was down — a signal structurally incapable of failing.
-// A probe is a connection or it is decoration.
-type DBComponentProbe struct {
-	ComponentName string
-	DB            *sql.DB
-}
-
-// NewDBComponentProbe builds a probe over an open pool.
-func NewDBComponentProbe(name string, db *sql.DB) *DBComponentProbe {
-	return &DBComponentProbe{ComponentName: name, DB: db}
-}
-
-// Name reports the component's name.
-func (p *DBComponentProbe) Name() string { return p.ComponentName }
-
-// Probe pings the pool. Reachability, not traffic freshness, and it does not depend on the traffic
-// /readyz gates — so readiness cannot deadlock on the very requests it admits (task 3.3).
-func (p *DBComponentProbe) Probe(ctx context.Context) error {
-	if p.DB == nil {
-		return fmt.Errorf("no connection pool")
-	}
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
-	if err := p.DB.PingContext(ctx); err != nil {
-		return fmt.Errorf("unreachable: %w", err)
-	}
-	return nil
-}
-
-// NewHTTPComponentProbe builds a probe with a bounded client.
-func NewHTTPComponentProbe(name, url string) *HTTPComponentProbe {
-	return &HTTPComponentProbe{
-		ComponentName: name,
-		URL:           url,
-		Client:        &http.Client{Timeout: 2 * time.Second},
-	}
-}
-
-// Name reports the component's name.
-func (p *HTTPComponentProbe) Name() string { return p.ComponentName }
-
-// Probe performs one GET against the component's health endpoint.
-func (p *HTTPComponentProbe) Probe(ctx context.Context) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.URL, nil)
-	if err != nil {
-		return err
-	}
-	client := p.Client
-	if client == nil {
-		client = &http.Client{Timeout: 2 * time.Second}
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("unreachable: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("health endpoint returned %d", resp.StatusCode)
-	}
-	return nil
-}
-
-// IdentityStatus is what /readyz reports about the customer identity provider.
-//
-// Kind, issuer, reachability — and nothing else. Never a client id, never a redirect allowlist, never
-// a secret's logical name: a readiness endpoint is public by necessity (a probe behind authentication
-// cannot be probed by the thing that most needs to probe it), so everything it says is said to
-// everybody.
-type IdentityStatus struct {
-	Kind      string `json:"kind"`
-	Issuer    string `json:"issuer"`
-	Reachable bool   `json:"reachable"`
-	// Detail is why it is unreachable, when it is. Absent when it is fine.
-	Detail string `json:"detail,omitempty"`
-}
-
-// IdentityProbe reports the customer identity provider's reachability.
-//
-// # The two properties this signal must have, and why they are stated here
-//
-// It measures REACHABILITY — can the IdP's discovery/JWKS or metadata be fetched and validated — and
-// not traffic freshness. A console with no sign-ins all night is not unhealthy; a console whose IdP
-// died an hour ago is, and a signal derived from sign-in volume gets both backwards.
-//
-// And it does not depend on the traffic it gates. The probe is an HTTP GET against a health endpoint,
-// so readiness can never deadlock on the very logins it is meant to admit.
-type IdentityProbe interface {
-	Identity(ctx context.Context) IdentityStatus
-}
-
-// SetIdentityProbe wires the customer identity provider into the readiness signal (P22 task 7.1).
-func (s *Server) SetIdentityProbe(p IdentityProbe) { s.identity = p }
-
-// AdminIdentityDescriber names the live operator IdP for /readyz. Satisfied by
-// *adminidentity.Authenticator, whose Describe reports the DOOR — kind, issuer, test mode — and never
-// a key, a secret id, or an assertion.
-type AdminIdentityDescriber interface {
-	Describe() adminidentity.ProviderInfo
-}
-
-// SetAdminIdentity records the live operator IdP so /readyz can report it (P22 task 6.4).
-//
-// # Why the operator IdP appears on the PLATFORM's readiness endpoint as well as the admin surface's
-//
-// The admin surface already reports it at `/admin/api/readyz`, and that endpoint is behind the
-// operator console's own origin and its platform credential. The question "is this deployment pointed
-// at the real operator IdP, or still at the test-mode fixture" is asked by whoever is looking at the
-// deployment, not by whoever is already inside the operator console — and 🔴 health-signal-surface
-// wants that answer readable from the box in question, by a monitor, without a credential.
-func (s *Server) SetAdminIdentity(d AdminIdentityDescriber) { s.adminIdentity = d }
-
-// SetAccountSystem records the P27 posture for /readyz (task 3.5).
-//
-// The seed result is passed in rather than recomputed: the endpoint must report what the seed ACTUALLY
-// did on this boot, and a second run to find out would both lie and write.
-func (s *Server) SetAccountSystem(p tenancy.Posture) { s.accountSystem = &p }
-
-// AuthRegistry returns the registry this server authenticates against, so the boot path can point it at
-// the durable identity store. It is never nil.
-func (s *Server) AuthRegistry() *auth.Registry { return s.authRegistry }
-
-// HTTPIdentityProbe reads the customer console's health endpoint and extracts its identity block.
-//
-// # Why the platform asks the console rather than resolving the IdP itself
-//
-// The customer identity provider is the CONSOLE's dependency — the console holds the seam, performs
-// the flow and verifies the assertion (ADR-008). A Go service that independently probed the customer's
-// IdP would be measuring a dependency it does not have, and would report healthy or degraded for
-// reasons the console does not share. Asking the component that actually depends on it keeps one
-// answer rather than two that can disagree.
-type HTTPIdentityProbe struct {
-	URL    string
-	Client *http.Client
-}
-
-// NewHTTPIdentityProbe builds a probe with a bounded client. A readiness probe that can hang is not a
-// readiness probe.
-func NewHTTPIdentityProbe(url string) *HTTPIdentityProbe {
-	return &HTTPIdentityProbe{URL: url, Client: &http.Client{Timeout: 2 * time.Second}}
-}
-
-// Identity performs one GET and reads the console's `identity_provider` block.
-func (p *HTTPIdentityProbe) Identity(ctx context.Context) IdentityStatus {
-	unreachable := func(detail string) IdentityStatus {
-		// The console being unreachable is reported as the IDENTITY provider being unreachable, and
-		// that is correct rather than sloppy: from this endpoint's point of view the question is "can a
-		// customer sign in", and the answer is no either way. The `customer_console` component names
-		// the other half, so an operator reading both learns which layer is down.
-		return IdentityStatus{Reachable: false, Detail: detail}
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.URL, nil)
-	if err != nil {
-		return unreachable(err.Error())
-	}
-	client := p.Client
-	if client == nil {
-		client = &http.Client{Timeout: 2 * time.Second}
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return unreachable("unreachable: " + err.Error())
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return unreachable(fmt.Sprintf("health endpoint returned %d", resp.StatusCode))
-	}
-	var body struct {
-		Identity IdentityStatus `json:"identity_provider"`
-	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&body); err != nil {
-		return unreachable("health endpoint did not report an identity provider")
-	}
-	if body.Identity.Kind == "" {
-		// A console too old to report the block. Named as such rather than assumed healthy: an
-		// unreported signal is not a green one.
-		return unreachable("health endpoint reported no identity provider kind")
-	}
-	return body.Identity
-}
-
-// BillingRolloutDescriber reports the P7 rollout gates. A one-method interface rather than an import
-// of the billing package: /readyz needs the words, not the type.
-type BillingRolloutDescriber interface {
-	Describe() map[string]string
-}
-
-// SetBillingRollout records the live P7 rollout so /readyz can report which gates are open.
-func (s *Server) SetBillingRollout(d BillingRolloutDescriber) { s.billing = d }
-
-// BillingCapabilityDescriber names the live billing provider and its credential source. Satisfied by
-// *billing.Service.Describe; a one-method interface rather than an import, for the same reason
-// BillingRolloutDescriber is one: /readyz needs the words, not the type.
-type BillingCapabilityDescriber interface {
-	Describe() map[string]string
-}
-
-// SetBillingCapability records the live billing capability so /readyz can report which processor is
-// wired and which source its credentials resolve from (P21 task 3.1).
-//
-// It reports the source's IDENTITY, never a credential and never a credential's id — the same rule
-// SetSecretsSource follows, and the reason billing.Service.Describe has no field that could carry one.
-func (s *Server) SetBillingCapability(d BillingCapabilityDescriber) { s.billingCapability = d }
-
-// SetSecretsSource records which secrets source is live so /readyz can report it.
-//
-// This exists because health-signal-surface is not satisfied by a log line at boot: "the deployment
-// is on AWS Secrets Manager" is only useful if it can be checked NOW, by a monitor, on the box that
-// is actually misbehaving — and a log line scrolled past three restarts ago cannot be checked at all.
-func (s *Server) SetSecretsSource(src providergateway.Secrets) { s.secrets = src }
-
-// New builds the minimal agentd HTTP surface. Health/readiness are public;
-// future /api/* routes are gated by API-key auth when auth_mode=required.
-func New(db *sql.DB, cfg config.Config) *Server {
-	s := &Server{DB: db, Cfg: cfg, Mux: http.NewServeMux()}
-	s.Mux.HandleFunc("GET /healthz", s.handleHealthz)
-	s.Mux.HandleFunc("GET /readyz", s.handleReadyz)
-	// P13 13d — the total coverage read model. Registered beside health because, like health, it is a
-	// property of this BUILD rather than of a tenant: it takes no tenant, no plan and no role, which is
-	// what makes "coverage is identical on every plan" structural instead of a policy.
-	s.Mux.HandleFunc("GET /api/v1/coverage", s.handleCoverage)
-	s.Mux.HandleFunc("GET /api/v1/change-delivery", s.handleDelivery)
-	// P17 20c — the memory-authoring read model, registered here for the same reason: the strategy
-	// vocabulary and the applicability boundary are properties of this BUILD, not of a tenant, so no
-	// plan or role can move them. It is a READ only; a memory change is authored through the existing
-	// /api/v1/authoring routes, because there is one spine and two origins.
-	s.Mux.HandleFunc("GET /api/v1/memory", s.handleMemory)
-	// P20 — the install/distribution read model, registered here for the same reason: the supported-target
-	// matrix, the install channels and the trust posture are properties of the RELEASE, not of a tenant, so no
-	// entitlement can move a row. It takes no tenant, no plan and no role.
-	s.Mux.HandleFunc("GET /api/v1/install", s.handleInstall)
-
-	var h http.Handler = s.Mux
-	// The registry is KEPT, not just used. P27's boot path points it at the durable identity store with
-	// `AuthRegistry().WithSource(...)` — which mutates this same object, so the composed handler needs no
-	// rebuilding and there is exactly one registry a request can be resolved against. Two registries is
-	// how a deployment ends up authenticating against the configuration file on one path and the
-	// database on another.
-	s.authRegistry = auth.NewRegistry(cfg)
-	if cfg.AuthMode == "required" {
-		h = auth.Compose(s.authRegistry, h) // gates /api/*; health paths stay open
-	}
-	// OUTERMOST, so a panic in the auth layer is reported too and every response — including a refusal
-	// — carries the trace id a customer can quote back.
-	h = s.traceAndReport(h)
-	s.Handler = h
-	return s
-}
-
-// IngestMetricsSource publishes per-forge ingest outcomes. One method rather than an import of the
-// ingest package's type: /readyz needs the ANSWER, not the type.
-type IngestMetricsSource interface {
-	Health() sourceingest.IngestHealth
-}
-
-// RetentionHealthSource publishes the retention job's last successful run.
-type RetentionHealthSource interface {
-	Health() sourceingest.RetentionHealth
-}
-
-// AssessmentHealthSource publishes the P33 assessment signal.
-type AssessmentHealthSource interface {
-	Health() assessment.Health
-}
-
-// ImprovementHealthSource publishes the P35 signal.
-type ImprovementHealthSource interface {
-	Health() improvementrun.Health
-}
-
-// SetImprovementHealth wires the P35 signal into /readyz (task 9.1).
-//
-// 🔴 Reported at the TOP LEVEL beside `assessment`, not inside `components`, and for the same reason:
-// every entry in `components` is a GATE, and none of the improvement run's states may take a
-// deployment down. A run that stopped on its budget is the product working.
-//
-// The field to page on is `improvement_run.alerting`, and the reason is task 9.1's own: a DASHBOARD
-// reads historical aggregates and can look completely healthy while the pipeline is broken. The signal
-// underneath it is the withdrawal rate — a withdrawal is a change that failed to reproduce its verified
-// delta and was stopped before it reached a customer's repository, so every conventional metric goes
-// the RIGHT way while it happens: the run completed, the API returned 201, nothing errored.
-func (s *Server) SetImprovementHealth(src ImprovementHealthSource) { s.improvementHealth = src }
-
-// SetAssessmentHealth wires the P33 signal into /readyz (task 6.1).
-//
-// # 🔴 Why this is NOT in `components`
-//
-// The same argument `SetSourceIngestHealth` makes below, with one addition that is specific to this
-// signal and worth stating: an assessment returning nine `not_measured` findings is a SUCCESSFUL run
-// by every conventional measure — it completed, it answered 201, it wrote nine rows. Nothing about it
-// is an outage, and pulling the process out of its Service endpoints because a language frontend stopped
-// emitting nodes would take the platform down for every customer who is not affected.
-//
-// So it is reported at the TOP LEVEL, where a monitor can alert on `assessment.alerting` specifically.
-// That field is the one to page on: it is a VALUE, computed where the threshold's reasoning is written
-// down, rather than a condition a dashboard re-derives from two counters.
-func (s *Server) SetAssessmentHealth(src AssessmentHealthSource) { s.assessmentHealth = src }
-
-// SandboxConcurrencySource publishes the isolate-concurrency gauge (P34 task 8.3).
-type SandboxConcurrencySource interface {
-	Concurrency() sandbox.ConcurrencyHealth
-}
-
-// SetSandboxConcurrency wires P34's concurrency gauge into /readyz (task 8.3).
-//
-// # 🔴 Why this has to be READABLE rather than logged
-//
-// P34 lets a spec declare that members of a group may run concurrently, and concurrency multiplies a
-// run's PEAK resource use by the group's width — one isolate's bounds are per-isolate, so four
-// overlapping isolates is four times the address space and four times the PIDs. That makes the width a
-// blast-radius statement, and a blast-radius statement nobody can read is a policy nobody can audit.
-//
-// Two of the four fields are the ones worth an operator's attention:
-//
-//   - `peak` and `peak_group_width` answer "how loaded did this box actually get", which a CURRENT
-//     gauge structurally cannot: by the time anybody looks, the moment has passed.
-//   - `capped` is the interesting one. A non-zero value means a spec reached EXECUTION asking for a
-//     wider group than the sandbox allows — and a spec that had been resolved would have been refused
-//     before it got there, against its envelope's limit. So `capped > 0` is the signal that the
-//     resolve-time gate was bypassed, which is invisible in every aggregate: nothing errors, nothing
-//     retries, the work simply runs narrower than it asked to.
-//
-// # 🔴 Why this is NOT in `components`
-//
-// The same argument SetAssessmentHealth makes: every entry in that map is a GATE, and a box whose
-// isolates are merely busy is not a box that should be pulled out of its Service endpoints. Busy is the
-// normal state of a working sandbox.
-func (s *Server) SetSandboxConcurrency(src SandboxConcurrencySource) { s.sandboxConcurrency = src }
-
-// SetSourceIngestHealth wires the P32 signals into /readyz (tasks 5.2, 5.4).
-//
-// # 🔴 Why these are NOT in `components`
-//
-// Every entry in the `components` map is a GATE: a degraded one makes the whole signal not-ready and
-// pulls the process out of its Service endpoints. Neither of these may do that.
-//
-// A forge whose adapter is failing is a real problem for the customers using that forge and is not a
-// reason to take the platform down for everyone else — Mode 1 is unaffected, and the whole posture of
-// this phase is that no feature is gated on a connection. A retention sweep that has not run yet is
-// likewise not an outage; it is a job that needs looking at.
-//
-// So both are reported at the TOP LEVEL beside `secrets_source`, where a monitor can alert on them
-// specifically. `escalated` is the field to page on, and it is a value rather than a log-line regex.
-func (s *Server) SetSourceIngestHealth(metrics IngestMetricsSource, retention RetentionHealthSource) {
-	s.ingestMetrics = metrics
-	s.ingestRetention = retention
-}
-
-// handleHealthz reports liveness — the process is up and serving.
-func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
-}
-
-// handleReadyz reports readiness — dependencies (the SQLite ledger) are reachable — and which
-// secrets source is live.
-//
-// The secrets source is reported HERE rather than from a new endpoint on purpose (careful-api-
-// creation: a new endpoint is new surface area, and this is one field on a document that already
-// answers "what state is this process in"). It reports the source's IDENTITY, not its health: probing
-// the secrets manager on every readiness check would make an AWS latency spike look like an agentd
-// outage, and would fetch a credential to prove we can fetch a credential.
-//
-// It is absent rather than "unknown" when unset — a deployment that never wired a source has no
-// secrets source, and saying so by omission beats inventing a status for it.
-func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
-	body := map[string]any{"status": "ready"}
-	components := map[string]any{}
-	degraded := make([]string, 0, 1)
-
-	// The local ledger is the first aggregated component, NAMED, not a bare "db_unavailable" status on
-	// the whole document.
+	// 🔴 It bounds hammering of a single valid invitation. It cannot bound a flood of INVENTED tokens,
+	// because each invented token is a fresh key — which is why the store checks the token before it
+	// hashes anything, rather than relying on this. A limit and a cheap rejection close different halves,
+	// and only one of them was ever going to close that half.
+	AcceptLimit *ratelimit.Limiter
+	// ResendLimit caps how often confirmation mail is SENT, keyed on the address — like ForgotLimit, and
+	// for the same reason: an inbox is what fills up.
 	//
-	// 🔴 The name is FIXED, and that is the point. It used to come from HEROS_DATASTORE_NAME, which the
-	// deploy manifests set to "postgres" — so this ping of the SQLite ledger was reported as
-	// `components.postgres: ready` on a process that had never opened a Postgres connection. That signal
-	// could not go red no matter what happened to Postgres, which is the one thing a readiness signal may
-	// never be. A component's name on /readyz now always identifies the dependency actually probed
-	// (P19 Decision 9); the platform database reports separately, under `postgres`, from its own probe.
-	if s.DB != nil {
-		const name = "ledger"
-		if err := s.DB.PingContext(r.Context()); err != nil {
-			components[name] = map[string]any{"status": "degraded", "detail": "ping failed: " + err.Error()}
-			degraded = append(degraded, name)
-		} else {
-			components[name] = map[string]any{"status": "ready"}
+	// 🔴 Named for sending, not for the feature. It was `VerifyLimit`, which had the same problem
+	// `ResetLimit` had: with a second limit in the same flow, one bounds sending a link and the other
+	// bounds using one, and a field either could be named after is a field the wrong one gets used for.
+	ResendLimit *ratelimit.Limiter
+	// ConfirmLimit caps how hard one confirmation link can be used, keyed on the TOKEN's hash.
+	//
+	// 🚫 The weakest of the four token limits, and worth saying so rather than dressing it up. This path
+	// runs no argon2id — a request costs one transaction and an indexed lookup — so what it bounds is
+	// connection-pool churn against a single link, not anything expensive. It exists mostly so that every
+	// token-redemption endpoint behaves the same way and nobody has to remember which one is the
+	// exception. Like the others, it cannot bound a flood of invented tokens: each is a fresh key.
+	ConfirmLimit *ratelimit.Limiter
+	// RedeemLimit caps how hard one password-reset link can be used, keyed on the TOKEN's hash.
+	//
+	// 🔴 The counterpart to AcceptLimit, and with the same blind spot: it bounds hammering of one live
+	// link and cannot bound a flood of invented tokens, because each invented token is a fresh key. What
+	// closes that is the store checking the token before it hashes anything.
+	RedeemLimit *ratelimit.Limiter
+
+	// ToolRegistry, Provider and Model let the server rebind the assessment tool to the LOADED corpus.
+	//
+	// 🔴 The tool needs the repository the conversation is about, and that is chosen after the process
+	// starts. A registry built once at boot holds a tool bound to no source — so the source is injected
+	// when a subject is loaded, through Registry.Replace, which re-runs the same refusals rather than
+	// mutating the map from outside.
+	ToolRegistry *toolcontract.Registry
+	Provider     provider.Provider
+	Model        string
+	// Approvals holds Tier-C changes between proposing and deciding.
+	Approvals *approvals
+	// Episodes is the episodic record, read by run history and by the timeline.
+	//
+	// 🔴 A Root, not a Store: a handler is handed a view bound to the caller's tenant and never holds
+	// the unscoped store, so it cannot ask for another customer's history.
+	Episodes memory.Root
+
+	mu sync.RWMutex
+	// subjects is the loaded repository PER TENANT.
+	//
+	// 🔴 It was a single field, shared by every caller. Loading a repository replaced it globally, so one
+	// customer's question was answered about whichever repository another customer had opened most
+	// recently — with real file:line references, confidently, about code they have never seen. That is a
+	// cross-tenant data leak wearing the shape of a cache.
+	subjects map[string]*subjectState
+}
+
+// NewServer builds a server with everything that has to exist before the first request.
+//
+// 🔴 Approvals is created HERE and not by the caller. It was assembled in main alongside a dozen other
+// fields, and any server built without that one line — a test, a future entry point — answered
+// `POST /api/decide` by dereferencing nil. The route was reachable, authenticated, authorised, and then
+// panicked. A constructor that returns a half-built object makes correct assembly a thing each caller
+// has to remember, which is the same argument as every other one in this package: not because they are
+// careless, but because remembering is not a property a codebase keeps.
+func NewServer() *Server {
+	return &Server{
+		subjects:     map[string]*subjectState{},
+		Approvals:    NewApprovals(),
+		ForgotLimit:  ratelimit.New(ForgotBurst, ForgotRefill, ForgotKeyCeiling),
+		LoginLimit:   ratelimit.New(LoginBurst, LoginRefill, LoginKeyCeiling),
+		SignupLimit:  ratelimit.New(SignupBurst, SignupRefill, SignupKeyCeiling),
+		AcceptLimit:  ratelimit.New(AcceptBurst, AcceptRefill, AcceptKeyCeiling),
+		ResendLimit:  ratelimit.New(ResendBurst, ResendRefill, ResendKeyCeiling),
+		RedeemLimit:  ratelimit.New(RedeemBurst, RedeemRefill, RedeemKeyCeiling),
+		ConfirmLimit: ratelimit.New(ConfirmBurst, ConfirmRefill, ConfirmKeyCeiling),
+	}
+}
+
+// The password-reset ceiling.
+//
+// Three back to back covers the real case — somebody asks, the mail lands in spam, they ask again — and
+// then one every twenty minutes, which is far more than anyone needs and far less than a flood. The
+// numbers are here rather than inline so that a deployment arguing about them has one place to look.
+const (
+	ForgotBurst  = 3
+	ForgotRefill = 20 * time.Minute
+	// ForgotKeyCeiling bounds memory: the limiter is keyed on an address the CALLER supplies, so an
+	// unbounded map would be a memory-exhaustion vector reachable by anybody who can send a POST. Fully
+	// refilled buckets are swept before this is consulted, so reaching it means fifty thousand distinct
+	// addresses inside twenty minutes — a flood, not a busy afternoon.
+	ForgotKeyCeiling = 50_000
+)
+
+// The login ceiling.
+//
+// # 🔴 Why these are loose where the reset numbers are tight
+//
+// A wrong password is something people do — three times, then they check caps lock, then they get it.
+// The limit has to sit far above that and still far below what makes online guessing worth attempting.
+// Ten back to back and one a minute afterwards is roughly 1,500 guesses a day against one account; the
+// same account with no limit is bounded only by how fast the server can run argon2id, which is nearer a
+// million. Against the twelve-character minimum, 1,500 a day is not an attack, it is a hobby.
+//
+// 🔴 And the ceiling is only ever charged for FAILURES — see handleLogin. Ten is therefore not "ten
+// sign-ins an hour", which would break anybody with several devices; it is ten WRONG ones.
+const (
+	LoginBurst  = 10
+	LoginRefill = time.Minute
+	// LoginKeyCeiling bounds memory: the key contains a tenant and an address, both supplied by the
+	// caller, so both are attacker-chosen.
+	LoginKeyCeiling = 50_000
+)
+
+// loginKey identifies one account for the purpose of counting guesses.
+//
+// 🔴 The address is folded to auth.EmailKey, the form the database compares by — keyed on what was
+// typed, the ceiling would be "ten wrong passwords per capitalisation". The NUL separator cannot appear
+// in either half, so no pair of (tenant, address) values can collide with another pair by concatenation.
+// Redeeming an invitation, and asking for another confirmation mail.
+//
+// Accepting is something a person does once. Five back to back covers a flaky connection and a double
+// click; one a minute afterwards is far more than anybody needs to redeem a link they already hold.
+//
+// Confirmation mail matches the reset numbers, because it is the same inbox being protected. 🔴 They are
+// SEPARATE buckets, so the total this deployment will send to one address is the sum of the two — six an
+// hour. Sharing one bucket would model the inbox more exactly and would also mean somebody who asked for
+// three password resets could not then confirm their address, which is two unrelated journeys tangled
+// together for a ceiling nobody was near.
+const (
+	AcceptBurst      = 5
+	AcceptRefill     = time.Minute
+	AcceptKeyCeiling = 50_000
+
+	ResendBurst      = 3
+	ResendRefill     = 20 * time.Minute
+	ResendKeyCeiling = 50_000
+
+	// Redeeming a password-reset link. The same numbers as accepting an invitation, because it is the
+	// same act: somebody holding a one-time token, using it once, with room for a flaky connection.
+	RedeemBurst      = 5
+	RedeemRefill     = time.Minute
+	RedeemKeyCeiling = 50_000
+
+	// Following a confirmation link. Same numbers again: one person, one token, used once, with room for
+	// a mail client that follows links and a person who clicks twice.
+	ConfirmBurst      = 5
+	ConfirmRefill     = time.Minute
+	ConfirmKeyCeiling = 50_000
+)
+
+// loginKey identifies the account a sign-in attempt is guessing at.
+//
+// # 🔴 The ADDRESS ALONE, since migration 0008 — and the organization must not be mixed back in
+//
+// It used to be organization + address, because the same address could name different accounts in
+// different organizations, and keying on the address alone would have let guessing at one customer's
+// user spend a different customer's user's budget.
+//
+// An address now identifies exactly one account across the whole deployment, so that reason is gone —
+// and including the organization actively creates a BYPASS. The organization arrives in the request
+// body and is optional: a caller who omits it gets one bucket, a caller who invents a value gets
+// another, and the same account can therefore be guessed at without limit by varying a field the
+// attacker controls and the account owner never sees.
+//
+// The rule: this key may only be built from values that identify the account, never from values the
+// caller supplies freely.
+func loginKey(email string) string { return auth.EmailKey(email) }
+
+// subjectFor returns the repository loaded by this tenant, if any.
+func (s *Server) subjectFor(tenant string) *subjectState {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.subjects[tenant]
+}
+
+func (s *Server) setSubject(tenant string, sub *subjectState) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.subjects == nil {
+		s.subjects = map[string]*subjectState{}
+	}
+	s.subjects[tenant] = sub
+}
+
+// subjectState is the currently-loaded repository. One at a time, deliberately: a conversation is about
+// one repository, and "which repo did that answer describe?" is not a question a person should have to ask.
+type subjectState struct {
+	Source intake.Source
+	Corpus discovery.Corpus
+	// Index holds the call sites, computed ONCE. Asking a Corpus for nine axes rescans it nine times —
+	// 26 seconds on a 2,541-file repository, for an answer identical every time.
+	Index *discovery.Index
+}
+
+// Routes returns the API mux WITHOUT authentication. Use Handler for anything served to a network.
+//
+// 🔴 Every route is registered from `apiRoutes` and each one's capability wrapper is applied HERE, at
+// registration. A handler cannot be reached except through the wrapper its row declared, so "the check
+// was forgotten" is not a state this mux can be in — the row either names a capability or is visibly
+// blank in a table a reviewer reads top to bottom.
+func (s *Server) Routes() *http.ServeMux {
+	m := http.NewServeMux()
+	for _, r := range apiRoutes {
+		h := r.Handler(s)
+		if !r.Public && r.Needs != "" {
+			h = requireCapability(r.Needs, h)
 		}
+		m.Handle(r.Method+" "+r.Path, h)
 	}
-	if s.secrets != nil {
-		body["secrets_source"] = s.secrets.Describe()
-	}
-	if s.adminIdentity != nil {
-		// The operator IdP, named on the platform's own readiness surface. Absent rather than "unknown"
-		// when this deployment ships no operator console.
-		body["admin_idp"] = s.adminIdentity.Describe()
-	}
-	if s.identity != nil {
-		// P22 task 7.1. An unreachable customer IdP makes the whole signal not-ready and NAMES itself,
-		// because "not ready" without a subject sends an operator to read three dashboards to learn
-		// what this response already knew.
-		status := s.identity.Identity(r.Context())
-		entry := map[string]any{"status": "ready", "kind": status.Kind, "issuer": status.Issuer, "reachable": status.Reachable}
-		if !status.Reachable {
-			entry["status"] = "not_ready"
-			if status.Detail != "" {
-				entry["detail"] = status.Detail
-			}
-			degraded = append(degraded, "identity_provider")
-		}
-		components["identity_provider"] = entry
-	}
-	if s.billing != nil {
-		// Absent rather than "unknown" when unset: a deployment that wired no billing rollout has none,
-		// and saying so by omission beats inventing a status for it.
-		body["billing_rollout"] = s.billing.Describe()
-	}
-	if s.accountSystem != nil {
-		// P27 task 3.5. Which identity store is live, whether self-serve sign-up is on, and what the
-		// boot seed did — as values, so nobody has to read the process environment during an incident
-		// to learn whether this deployment can create an organization.
-		body["account_system"] = s.accountSystem.Describe()
-	}
-	// The error-reporting integration's three-state entry. Reported at the top level beside
-	// `secrets_source` rather than inside `components`, because it is deliberately NOT a gate — see
-	// errorReporterState.
-	// P31 §5.4 · the long-lived connections, as COUNTS on a readable endpoint rather than as log lines.
-	//
-	// 🔴 Reported by READING a gauge, never by acquiring a stream slot. A readiness endpoint behind the
-	// same exhaustible resource as the streams would be measuring its own starvation — the exact failure
-	// task 5.3 names, and the one where a box reports unhealthy for a reason unrelated to its health.
-	if s.conversations != nil && s.conversations.streams != nil {
-		body["conversation_streams"] = s.conversations.streams.Health()
-	}
-	if s.ingestMetrics != nil {
-		// P32 task 5.4 · clone duration, bytes and failure cause, BROKEN OUT PER FORGE. The aggregate
-		// is present as `total` and is never the only figure available: three forges behind one
-		// success rate is the shape where a completely broken adapter reads as 96% overall.
-		body["source_ingest"] = s.ingestMetrics.Health()
-	}
-	if s.ingestRetention != nil {
-		// P32 task 5.2 · the retention job's last SUCCESSFUL run. Zero deletions is the normal
-		// result, so "did it delete anything" cannot be the signal — "when did it last complete" is,
-		// and only the job can publish it.
-		body["source_retention"] = s.ingestRetention.Health()
-	}
-	if s.improvementHealth != nil {
-		// P35 task 9.1 · runs started / bounded-out / cancelled, proposals generated / verified /
-		// approved / delivered, deliveries deduplicated — PER AXIS and PER BOUND.
-		//
-		// 🔴 `improvement_run.alerting` is the field to page on. See SetImprovementHealth for why the
-		// signal underneath it (the withdrawal rate) is invisible to every conventional metric.
-		body["improvement_run"] = s.improvementHealth.Health()
-	}
-	if s.assessmentHealth != nil {
-		// P33 task 6.1 · assessments started/completed/refused, PER AXIS AND PER STATE.
-		//
-		// 🔴 `assessment.alerting` is the field to page on, and the reason is task 6.2: an assessment
-		// that returns nine `not_measured` findings is a success by every aggregate measure — it
-		// completed, it answered 201, it wrote nine rows — and it is the earliest evidence that a
-		// language frontend or the sandbox has broken. There is no conventional metric that goes the
-		// wrong way when the product silently stops saying anything.
-		body["assessment"] = s.assessmentHealth.Health()
-	}
-	if s.sandboxConcurrency != nil {
-		// P34 task 8.3 · overlapping isolates, as counts. `sandbox_concurrency.capped` is the field worth
-		// an alert: it is non-zero only when a spec reached execution asking for a wider concurrent group
-		// than the sandbox allows, which means the resolve-time gate was bypassed. See
-		// SetSandboxConcurrency.
-		body["sandbox_concurrency"] = s.sandboxConcurrency.Concurrency()
-	}
-	body["error_reporting"] = s.errorReporterState()
-	if s.agentReadiness != nil {
-		// P30 task 9.1. Top level beside `secrets_source`, and 🚫 NOT in `components` — every entry in
-		// that map is a GATE, and none of the agent's states may take a deployment down.
-		//
-		// `disabled` is the default (Q2), so gating on it would page somebody about the configuration
-		// every deployment ships with. `capped` is a ceiling working as intended. Even
-		// `credential_unresolved` is contained: HEROS is optional, every other surface is rule-derived,
-		// and taking a platform down because an optional subsystem cannot reach its vendor is a bigger
-		// outage than the one being reported.
-		body["heros_agent"] = s.agentReadiness(r.Context())
-	}
-	if s.agentNodeHealth != nil {
-		// 🔴 P36 TASK 8.1 — PER NODE, ON A READABLE ENDPOINT.
-		//
-		// "An aggregate over a graph says the agent is slow, not which node is." `heros_agent` above is
-		// the aggregate — a state and a sentence for the whole agent — and it is the wrong shape for the
-		// question a graph creates. A five-node definition whose latency doubled did so at ONE node.
-		//
-		// 🚫 Beside `heros_agent` and NOT inside it, and not in `components`. Same reason: none of the
-		// agent's states may take a deployment down, and per-node numbers are diagnostic rather than a
-		// gate. A node failing every call is a real problem and it is not this deployment being unready.
-		//
-		// 🔴 It reads IN-PROCESS COUNTERS. A read that aggregated `heros_inference.nodes_json` per
-		// request would be a real-time query against the events table, and the specific failure is
-		// nasty: the endpoint goes slow exactly when the database does, so the signal degrades at the
-		// moment it is most needed and a monitor times out on the one call that would have explained why.
-		body["heros_agent_nodes"] = s.agentNodeHealth()
-	}
-	if s.billingCapability != nil {
-		// Which processor, and where its credentials come from. Absent rather than "unknown" when
-		// unset, exactly like the two signals above.
-		body["billing_provider"] = s.billingCapability.Describe()
-	}
+	return m
+}
 
-	// Component aggregation (P9 FR25, P19 topology). The service's OWN health is not the deployment's
-	// health once a second process sits in the request path, so a degraded component makes the whole
-	// signal not-ready — and it is NAMED, because "not ready" without a subject sends an operator to
-	// read three dashboards to learn what this response already knew. Every wired component is probed;
-	// a partial aggregation is the same lying signal, just one store below the fold.
-	//
-	// Probes read REACHABILITY, not traffic freshness, and none of them depends on the traffic /readyz
-	// gates — an HTTP GET against a health endpoint, a datastore ping — so readiness can never deadlock
-	// on the very traffic it is meant to admit (task 3.3).
-	for _, p := range s.probes {
-		if err := p.Probe(r.Context()); err != nil {
-			components[p.Name()] = map[string]any{"status": "degraded", "detail": err.Error()}
-			degraded = append(degraded, p.Name())
-		} else {
-			components[p.Name()] = map[string]any{"status": "ready"}
-		}
+// Handler is the API with authentication applied.
+//
+// 🔴 The ONLY thing that should be served. `Routes` exists so a test can exercise a handler directly;
+// mounting it on a listener would serve every endpoint unauthenticated, which is why this wrapper is a
+// separate, obviously-named method rather than an option on the other one.
+func (s *Server) Handler(static http.Handler) http.Handler {
+	mux := s.Routes()
+	if static != nil {
+		mux.Handle("/", static)
 	}
-	if len(components) > 0 {
-		body["components"] = components
-	}
-	if len(degraded) > 0 {
-		body["status"] = "degraded"
-		body["degraded_components"] = degraded
-		writeJSON(w, http.StatusServiceUnavailable, body)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, body)
+	return s.authenticate(mux)
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+// ── subject ──────────────────────────────────────────────────────────────────────────────────────
+
+type subjectReq struct {
+	Ref string `json:"ref"`
+}
+
+type subjectResp struct {
+	Reference string        `json:"reference"`
+	Describe  string        `json:"describe"`
+	Kind      string        `json:"kind"`
+	Revision  string        `json:"revision"`
+	Dirty     bool          `json:"dirty"`
+	Files     int           `json:"files"`
+	TestFiles int           `json:"test_files"`
+	Truncated bool          `json:"truncated"`
+	IsAgent   bool          `json:"is_agent"`
+	Why       string        `json:"why"`
+	Axes      []axisSummary `json:"axes"`
+}
+
+type axisSummary struct {
+	Axis  string `json:"axis"`
+	Found bool   `json:"found"`
+	Spans int    `json:"spans"`
+	Files int    `json:"files"`
+	First string `json:"first,omitempty"`
+	Why   string `json:"why,omitempty"`
+	Note  string `json:"note,omitempty"`
+}
+
+func (s *Server) handleSubject(w http.ResponseWriter, r *http.Request) {
+	tenant, err := tenancy.MustTenant(r.Context())
+	if err != nil {
+		unauthorized(w, "You are not signed in.")
+		return
+	}
+	var req subjectReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unreadable request"})
+		return
+	}
+	src, ix, err := s.loadSubject(tenant, req.Ref)
+	if err != nil {
+		// 🔴 The intake error text is returned VERBATIM. Every one of them names a next action — run git
+		// init, check the repository is public, give a path or a link — and replacing them with a generic
+		// "could not load repository" would throw away the only part the person can act on.
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	isAgent, why := ix.LooksLikeAnAgent()
+
+	writeJSON(w, http.StatusOK, s.describeSubject(src, ix, isAgent, why))
+}
+
+// loadSubject resolves a reference, indexes it, binds the tools to it and remembers it.
+//
+// # 🔴 Extracted so a RESTART can replay it
+//
+// This used to be the body of handleSubject, which meant loading a repository was something only an
+// inbound HTTP request could do. The loaded state lived in a Go map and nowhere else, so every deploy
+// emptied it for every organization — and nothing said so: the header went blank and the next question
+// was refused for having no subject, exactly as though nobody had ever loaded one.
+//
+// With the work in a function, restoreSubject can run the same path from the reference stored by
+// migration 0009. One code path, so a restored subject is bound identically to a freshly loaded one —
+// two paths would eventually differ, and the difference would be a tool still pointing at the previous
+// repository.
+func (s *Server) loadSubject(tenant, ref string) (intake.Source, *discovery.Index, error) {
+	src, err := s.Resolver.Resolve(ref)
+	if err != nil {
+		return intake.Source{}, nil, err
+	}
+	corpus, err := discovery.Walk(src.Root, discovery.Limits{})
+	if err != nil {
+		return intake.Source{}, nil, err
+	}
+	ix := discovery.NewIndex(corpus)
+	s.setSubject(tenant, &subjectState{Source: src, Corpus: corpus, Index: ix})
+
+	// Rebind every source-bound tool to this repository. Without this they would act on whatever was
+	// loaded last, which is the worst kind of wrong: confident, well-formed, and about someone else's code.
+	if s.ToolRegistry != nil && s.Provider != nil {
+		_ = s.ToolRegistry.Replace(tools.AssessAxis{
+			Provider: s.Provider, Model: s.Model, Source: ix,
+		}, nil)
+		_ = s.ToolRegistry.Replace(tools.GenerateCases{
+			Provider: s.Provider, Model: s.Model, Source: ix,
+		}, nil)
+		_ = s.ToolRegistry.Replace(tools.PublishEvalSet{Root: src.Root},
+			tools.NewPublishVerifier(src.Root))
+		_ = s.ToolRegistry.Replace(tools.ProposeChange{
+			Provider: s.Provider, Model: s.Model, Source: ix, Root: src.Root,
+		}, nil)
+		_ = s.ToolRegistry.Replace(tools.VerifyProposal{
+			Provider: s.Provider, Model: s.Model, Root: src.Root,
+		}, nil)
+		_ = s.ToolRegistry.Replace(tools.OpenPullRequest{Root: src.Root},
+			tools.NewDeliveryVerifier(src.Root))
+	}
+
+	// 🔴 Best effort, and NOT fatal. Failing to write the note would otherwise turn a healthy load into
+	// an error, which is a strictly worse outcome than forgetting it across the next restart.
+	if s.Auth != nil {
+		if err := s.Auth.RememberSubject(context.Background(), tenant, ref, src.Revision); err != nil {
+			log.Printf("WARN api.subject.remember_failed tenant=%s: %v", tenant, err)
+		}
+	}
+	return src, ix, nil
+}
+
+// restoreSubject rebuilds the in-memory subject from the reference stored for this organization.
+//
+// Returns nil when there is nothing remembered, which is the ordinary state for an organization that
+// has not loaded a repository yet.
+func (s *Server) restoreSubject(tenant string) *subjectState {
+	if s.Auth == nil || s.Resolver == nil {
+		return nil
+	}
+	ref, _, err := s.Auth.RememberedSubject(context.Background(), tenant)
+	if err != nil || ref == "" {
+		if err != nil {
+			log.Printf("WARN api.subject.recall_failed tenant=%s: %v", tenant, err)
+		}
+		return nil
+	}
+	if _, _, err := s.loadSubject(tenant, ref); err != nil {
+		// The repository may have moved, gone private, or been deleted since. That is a real answer to
+		// give the person, not a reason to fail the request they actually made.
+		log.Printf("WARN api.subject.restore_failed tenant=%s ref=%q: %v", tenant, ref, err)
+		return nil
+	}
+	log.Printf("api.subject.restored tenant=%s ref=%q", tenant, ref)
+	return s.subjectFor(tenant)
+}
+
+// subjectOrRestore returns this organization's loaded repository, rebuilding it after a restart.
+func (s *Server) subjectOrRestore(tenant string) *subjectState {
+	if sub := s.subjectFor(tenant); sub != nil {
+		return sub
+	}
+	return s.restoreSubject(tenant)
+}
+
+func (s *Server) describeSubject(src intake.Source, ix *discovery.Index, isAgent bool, why string) subjectResp {
+	resp := subjectResp{
+		Reference: src.Reference, Describe: src.Describe(), Kind: string(src.Kind),
+		Revision: src.Revision, Dirty: src.Dirty, Files: len(ix.Corpus.Files),
+		TestFiles: ix.Corpus.Skipped["test-file"], Truncated: ix.Corpus.Truncated,
+		IsAgent: isAgent, Why: why,
+	}
+	for _, axis := range intent.Axes() {
+		ev := ix.ForAxis(axis)
+		sum := axisSummary{Axis: axis, Found: ev.Found, Spans: len(ev.Spans), Note: ev.Note}
+		files := map[string]bool{}
+		for _, sp := range ev.Spans {
+			files[sp.Path] = true
+		}
+		sum.Files = len(files)
+		if len(ev.Spans) > 0 {
+			sum.First, sum.Why = ev.Spans[0].Ref(), ev.Spans[0].Why
+		}
+		resp.Axes = append(resp.Axes, sum)
+	}
+	return resp
+}
+
+func (s *Server) handleGetSubject(w http.ResponseWriter, r *http.Request) {
+	tenant, err := tenancy.MustTenant(r.Context())
+	if err != nil {
+		unauthorized(w, "You are not signed in.")
+		return
+	}
+	sub := s.subjectOrRestore(tenant)
+	if sub == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"loaded": false})
+		return
+	}
+	isAgent, why := sub.Index.LooksLikeAnAgent()
+	writeJSON(w, http.StatusOK, s.describeSubject(sub.Source, sub.Index, isAgent, why))
+}
+
+// ── ask ──────────────────────────────────────────────────────────────────────────────────────────
+
+type askReq struct {
+	Text string `json:"text"`
+}
+
+// askResp is what the console renders. Exactly one of the shapes below is populated, and `kind` says
+// which — a response that could be two things at once is one the client has to guess about.
+type askResp struct {
+	Kind string `json:"kind"` // answer | goal | refusal | redirect | abstain
+
+	Intent string `json:"intent,omitempty"`
+	Tier   string `json:"tier,omitempty"`
+
+	// answer
+	Text     string       `json:"text,omitempty"`
+	Episodes []episodeOut `json:"episodes,omitempty"`
+	Axis     *axisSummary `json:"axis,omitempty"`
+	Spans    []spanOut    `json:"spans,omitempty"`
+
+	// goal
+	// Scope is the axis the run was narrowed to, empty when it covers all nine. Sent so the console can
+	// SHOW what it understood — a run that silently narrowed is as confusing as one that silently widened.
+	Scope        string   `json:"scope,omitempty"`
+	GoalID       string   `json:"goal_id,omitempty"`
+	Tasks        []string `json:"tasks,omitempty"`
+	CeilingCents int64    `json:"ceiling_cents,omitempty"`
+
+	// proposal — a Tier-C change waiting for a person
+	ChangeID       string `json:"change_id,omitempty"`
+	Path           string `json:"path,omitempty"`
+	Ref            string `json:"ref,omitempty"`
+	Diff           string `json:"diff,omitempty"`
+	IdempotencyKey string `json:"idempotency_key,omitempty"`
+
+	// refusal
+	Cause      string `json:"cause,omitempty"`
+	NextAction string `json:"next_action,omitempty"`
+
+	// redirect
+	Surface string `json:"surface,omitempty"`
+	Does    string `json:"does,omitempty"`
+
+	// abstain
+	CanDo []string `json:"can_do,omitempty"`
+}
+
+type episodeOut struct {
+	Seq     int64  `json:"seq"`
+	Kind    string `json:"kind"`
+	TaskID  string `json:"task_id,omitempty"`
+	Summary string `json:"summary"`
+	Detail  string `json:"detail,omitempty"`
+	At      string `json:"at"`
+}
+
+type spanOut struct {
+	Ref  string `json:"ref"`
+	Why  string `json:"why"`
+	Text string `json:"text"`
+}
+
+func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
+	tenant, err := tenancy.MustTenant(r.Context())
+	if err != nil {
+		unauthorized(w, "You are not signed in.")
+		return
+	}
+	var req askReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unreadable request"})
+		return
+	}
+
+	// 🔴 Unbounded is checked BEFORE routing. The refusal has to happen before anything is planned, which
+	// is the entire point of refusing — "keep going until it is perfect" must not first become a goal.
+	if router.Unbounded(req.Text) {
+		ref := bounds.Refusal{Cause: bounds.UnboundedRequested, Detail: req.Text}
+		writeJSON(w, http.StatusOK, askResp{
+			Kind: "refusal", Cause: string(ref.Cause), Text: req.Text, NextAction: ref.NextAction(),
+		})
+		return
+	}
+
+	out := s.Router.Route(req.Text)
+	switch {
+	case out.Redirect != nil:
+		writeJSON(w, http.StatusOK, askResp{
+			Kind: "redirect", Surface: out.Redirect.Surface, Does: out.Redirect.Does,
+			Text: out.Redirect.Topic,
+		})
+		return
+	case out.Abstained():
+		writeJSON(w, http.StatusOK, askResp{Kind: "abstain", CanDo: intent.CanDo()})
+		return
+	}
+
+	spec, _ := intent.Lookup(out.Intent)
+
+	sub := s.subjectOrRestore(tenant)
+	if sub == nil {
+		ref := bounds.Refusal{Cause: bounds.NoSubject}
+		writeJSON(w, http.StatusOK, askResp{
+			Kind: "refusal", Intent: out.Intent.String(), Cause: string(ref.Cause),
+			NextAction: ref.NextAction(),
+		})
+		return
+	}
+
+	switch spec.Tier {
+	case intent.TierQuery:
+		s.answerQuery(w, tenant, spec, sub)
+	case intent.TierGoal:
+		s.startGoal(w, tenant, spec, sub, out.Axis)
+	default:
+		s.handleEffect(w, spec, sub, out.Axis, req.Text)
+	}
+}
+
+// answerQuery serves a Tier-B intent from what discovery already read. No model call, no cost.
+func (s *Server) answerQuery(w http.ResponseWriter, tenant string, spec intent.Spec, sub *subjectState) {
+	resp := askResp{Kind: "answer", Intent: spec.Intent.String(), Tier: string(spec.Tier)}
+
+	if spec.Intent == intent.RunHistory {
+		s.answerRunHistory(w, tenant, resp)
+		return
+	}
+	if spec.Axis == "" {
+		// Queries about the platform's own record rather than an axis, other than run history. Honest
+		// placeholder: the record exists, the rendering does not.
+		resp.Text = fmt.Sprintf("I can answer %q from what I have stored, but that view is not built yet. "+
+			"Ask me about one of the nine axes and I will show you the code.", spec.Question)
+		writeJSON(w, http.StatusOK, resp)
+		return
+	}
+
+	ev := sub.Index.ForAxis(spec.Axis)
+	sum := axisSummary{Axis: spec.Axis, Found: ev.Found, Spans: len(ev.Spans), Note: ev.Note}
+	files := map[string]bool{}
+	for _, sp := range ev.Spans {
+		files[sp.Path] = true
+		if len(resp.Spans) < 6 {
+			resp.Spans = append(resp.Spans, spanOut{Ref: sp.Ref(), Why: sp.Why, Text: sp.Text})
+		}
+	}
+	sum.Files = len(files)
+	if len(ev.Spans) > 0 {
+		sum.First, sum.Why = ev.Spans[0].Ref(), ev.Spans[0].Why
+	}
+	resp.Axis = &sum
+
+	if !ev.Found {
+		resp.Text = ev.Note
+	} else {
+		resp.Text = fmt.Sprintf("Found %d span(s) across %d file(s) governing %s in %s. "+
+			"This is read from what I already parsed — nothing ran just now, and it cost nothing.",
+			len(ev.Spans), len(files), spec.Axis, shortRef(sub.Source.Reference))
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// answerRunHistory reads the most recent run's episodes.
+//
+// 🔴 A query over what a durable run WROTE DOWN, not a re-derivation. That is the whole payoff of
+// persisting everything: "what happened in that run?" is a SELECT, and it costs nothing.
+func (s *Server) answerRunHistory(w http.ResponseWriter, tenant string, resp askResp) {
+	if s.Episodes == nil {
+		resp.Text = "No run history is being recorded on this deployment."
+		writeJSON(w, http.StatusOK, resp)
+		return
+	}
+	last, ok, err := s.Root.For(tenant).LatestGoal(tenant)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if !ok {
+		resp.Text = "Nothing has run yet. Ask me to look at your repository and I will start something."
+		writeJSON(w, http.StatusOK, resp)
+		return
+	}
+	eps, err := s.Episodes.For(tenant).Episodes(string(last.ID))
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if len(eps) == 0 {
+		resp.Text = fmt.Sprintf("The last run (%s, %s) recorded no episodes.", last.Intent, last.State)
+		writeJSON(w, http.StatusOK, resp)
+		return
+	}
+	for _, e := range eps {
+		resp.Episodes = append(resp.Episodes, episodeOut{
+			Seq: e.Seq, Kind: string(e.Kind), TaskID: e.TaskID,
+			Summary: e.Summary, Detail: e.Detail, At: e.At.Format(time.RFC3339),
+		})
+	}
+	resp.Text = fmt.Sprintf("The last run was %s (%s): %d steps, %s spent.",
+		last.Intent, last.State, len(eps), provider.FormatCents(last.Spend.CostMicroCents))
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// criteriaFor returns what it means for THIS goal to be finished.
+//
+// # 🔴 Why this is per-intent rather than one default
+//
+// It was one default — "six of nine axes assessed" — applied to every Tier-A goal. An eval-set run has
+// no axes, so it could never satisfy it: three generators succeeded, the quality gate passed, the
+// artefact was written to the customer's repository, and the goal reported FAILED. Every visible sign
+// said the work was done and the record said otherwise.
+//
+// A completion criterion has to describe the goal it belongs to. An objective borrowed from a different
+// intent is not a weaker measure, it is a measure of something else.
+func criteriaFor(i intent.Intent, axis string) []goal.Criterion {
+	switch i {
+	case intent.EvalSet:
+		// The published artefact is the product. The gate already enforces its own floors on case count
+		// and generator diversity, so the goal only has to see it reach publication.
+		return []goal.Criterion{{Kind: goal.EvalCasesGenerated, Threshold: 1}}
+	case intent.Compare:
+		return []goal.Criterion{{Kind: goal.ComparisonDrawn, Threshold: 1}}
+	case intent.Improve:
+		// 🔴 A delivered change, not an assessment. Scoring improve on axes assessed let a run that
+		// proposed a change, failed to verify it, and delivered nothing report SUCCESS — the same
+		// "terminal is not an achievement" mistake in a third place.
+		return []goal.Criterion{{Kind: goal.ChangesDelivered, Threshold: 1}}
+	default:
+		// assess. A narrowed run needs its one axis; a whole-repository run needs most of them, because
+		// a report over two axes is not the report that was asked for.
+		if axis != "" {
+			return []goal.Criterion{{Kind: goal.AxesAssessed, Threshold: 1}}
+		}
+		return []goal.Criterion{{Kind: goal.AxesAssessed, Threshold: 6}}
+	}
+}
+
+// startGoal admits a durable goal, plans it, and starts driving it.
+func (s *Server) startGoal(w http.ResponseWriter, tenant string, spec intent.Spec, sub *subjectState, axis string) {
+	now := time.Now().UTC()
+	g := &goal.Goal{
+		ID: goal.ID(fmt.Sprintf("g-%d", now.UnixNano())), Tenant: tenant,
+		Intent: spec.Intent, State: goal.Draft, Objective: spec.Question,
+		Subject: goal.Subject{
+			RepoURL:  firstNonEmpty(sub.Source.RemoteURL, sub.Source.Root),
+			Revision: sub.Source.Revision,
+		},
+		Ceilings:  s.Ceilings,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	// 🔴 The scope the person named is CARRIED, not discarded. "How do I improve the prompt?" names one
+	// axis; planning nine spends nine times what was asked for, and the run reads as incoherent because
+	// it is answering a question nobody put.
+	//
+	// The completion threshold moves with the scope for the same reason: a one-axis goal that requires
+	// six assessed axes can never complete, so it would run to exhaustion and report a stall.
+	if axis != "" {
+		g.Axes = []string{axis}
+		g.Objective = fmt.Sprintf("%s — scoped to the %s axis", spec.Question, axis)
+	}
+	g.Criteria = criteriaFor(spec.Intent, axis)
+	if err := g.Admit(now); err != nil {
+		var ref bounds.Refusal
+		if asRefusal(err, &ref) {
+			writeJSON(w, http.StatusOK, askResp{
+				Kind: "refusal", Intent: spec.Intent.String(), Cause: string(ref.Cause),
+				Text: ref.Detail, NextAction: ref.NextAction(),
+			})
+			return
+		}
+		writeJSON(w, http.StatusOK, askResp{
+			Kind: "refusal", Intent: spec.Intent.String(), Cause: "not_admitted", NextAction: err.Error()})
+		return
+	}
+	scoped := s.Root.For(tenant)
+	if err := scoped.CreateGoal(g); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	d, err := s.Planners.Build(g, now)
+	if err != nil {
+		writeJSON(w, http.StatusOK, askResp{
+			Kind: "refusal", Intent: spec.Intent.String(), Cause: "could_not_plan", NextAction: err.Error()})
+		return
+	}
+	if err := scoped.SaveDAG(d); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	ids := sortedTaskIDs(d)
+	// 🔴 Driven with context.Background(), NOT the request's context. The request ends when the browser
+	// has its goal id; the run outlives it by design. Tying a durable goal's lifetime to one HTTP request
+	// is how a refresh cancels an hour of work.
+	s.supFor(tenant).Start(context.Background(), g.ID)
+
+	writeJSON(w, http.StatusOK, askResp{
+		Kind: "goal", Intent: spec.Intent.String(), Tier: string(spec.Tier),
+		GoalID: string(g.ID), Tasks: ids, CeilingCents: g.Ceilings.MaxCostCents,
+		Text: g.Objective, Scope: axis,
+	})
+}
+
+// handleDecideRequest decodes an approval decision.
+func (s *Server) handleDecideRequest(w http.ResponseWriter, r *http.Request) {
+	tenant, err := tenancy.MustTenant(r.Context())
+	if err != nil {
+		unauthorized(w, "You are not signed in.")
+		return
+	}
+	var req decideReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unreadable request"})
+		return
+	}
+	s.handleDecide(w, tenant, req)
+}
+
+// ── events ───────────────────────────────────────────────────────────────────────────────────────
+
+func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
+	// 🔴 The stream is scoped: a goal id alone must not be enough to watch somebody else's run, which
+	// would leak its findings, its spend and its file paths in real time.
+	tenant, err := tenancy.MustTenant(r.Context())
+	if err != nil {
+		unauthorized(w, "You are not signed in.")
+		return
+	}
+	id := goal.ID(r.PathValue("id"))
+	if _, err := s.Root.For(tenant).LoadGoal(id); err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such run"})
+		return
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.WriteHeader(http.StatusOK)
+	flusher.Flush()
+
+	sup := s.supFor(tenant)
+	ch := sup.Subscribe(id)
+	defer sup.Unsubscribe(id, ch)
+
+	// A heartbeat keeps intermediaries from closing an idle stream, and lets the browser tell "the run is
+	// quiet" from "the connection died" — which look identical without it.
+	beat := time.NewTicker(15 * time.Second)
+	defer beat.Stop()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-beat.C:
+			fmt.Fprint(w, ": heartbeat\n\n")
+			flusher.Flush()
+		case e, open := <-ch:
+			if !open {
+				return
+			}
+			b, err := json.Marshal(e)
+			if err != nil {
+				continue
+			}
+			fmt.Fprintf(w, "data: %s\n\n", b)
+			flusher.Flush()
+			if e.Terminal {
+				return
+			}
+		}
+	}
+}
+
+// ── helpers ──────────────────────────────────────────────────────────────────────────────────────
+
+// sortedTaskIDs returns the plan's task ids in a stable order, so the console renders the same ledger
+// on every load rather than a set in map order.
+func sortedTaskIDs(d *task.DAG) []string {
+	out := make([]string, 0, len(d.Tasks))
+	for id := range d.Tasks {
+		out = append(out, string(id))
+	}
+	sort.Strings(out)
+	return out
+}
+
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
+}
+
+func shortRef(s string) string {
+	if len(s) > 48 {
+		return "…" + s[len(s)-47:]
+	}
+	return s
+}
+
+func asRefusal(err error, out *bounds.Refusal) bool {
+	r, ok := err.(bounds.Refusal)
+	if ok {
+		*out = r
+	}
+	return ok
 }
