@@ -632,8 +632,41 @@ first version of the what-next list came back in a different order on every call
 the run churning. `TestWhatNextIsStableAcrossCalls` calls it sixty times; one call could never have
 caught it.
 
-### [ ] P13 · Eval scenarios + recovery drills
-Kill workers mid-task, duplicate events, stale data, unavailable APIs; assert correct resume.
+### [x] P13 · Eval scenarios + recovery drills
+Five drills in `internal/e2e/drills_test.go`, one per fault P13 names, injected through the store API
+the product uses — a recovery path exercised only through a test-only back door is a recovery path that
+was never exercised.
+
+The mechanisms were already covered: the store proves `AnExpiredLeaseIsReclaimable` and
+`AZombieWorkerCannotWriteItsResult`, the worker proves `ACrashedWorkerIsRecoveredByAnother`, and
+`TheRunResumesAfterTheProcessDies` proves a killed process resumes without redoing finished work. What a
+drill asks is different, and is the question an operator has: after the fault, is the RESULT still
+correct — was anything lost, done twice, or reported untruthfully?
+
+- **A killed worker hands over the same idempotency key.** A worker that opens a pull request and dies
+  before recording it is retried from scratch, and the only thing between that and a second pull request
+  in the customer's repository is that the retry presents a key the remote already knows.
+- **Duplicate completions are refused**, and the second does not overwrite the first's result with an
+  outcome that happened earlier.
+- **Duplicate episodes are recorded, not merged** — a deliberate non-deduplication. A retried task
+  genuinely ran twice, and collapsing that makes a three-attempt run look like a one-attempt run to
+  whoever is reading the timeline after an incident.
+- **A zombie's late write does not destroy a good result.** "The write is refused" is half the property;
+  the half that matters is that the success another worker recorded is still there afterwards.
+- **An unavailable provider fails loudly.** Every tool call errors; the run must end bounded, terminal,
+  with reasons on the failed tasks, and must never report COMPLETE. This project has already shipped a
+  run that announced success for doing almost nothing, and "the provider was down and the run finished
+  successfully" is the worst sentence this system could produce, because nobody checks it.
+
+Each drill was observed RED against the defect it names — regenerating the key per claim, dropping the
+held-lease guard, and a provider that was not actually down.
+
+⚠️ **Two ways the drills were nearly worthless, both caught and fixed.** The first version of the key
+drill claimed whatever was ready, which is an ASSESS task carrying no idempotency key — so it compared
+`""` with `""` and would have passed against a system that regenerated keys on every claim. It now drives
+to the approval gate, takes the delivery task, and refuses to proceed if the key is empty. And every
+drill skips without a database, so an unset DSN turned the whole recovery suite green having injected no
+fault at all; `TestZZDrillsActuallyRan` counts, mirroring the store's Postgres-leg gate.
 
 ### [ ] P14 · Gradual autonomy rollout
 
