@@ -10,8 +10,17 @@ INSTANCE=${INSTANCE:-i-05f4712279b04fac5}
 if [[ $# -ge 1 ]]; then SCRIPT_BODY="$1"; else SCRIPT_BODY=$(cat); fi
 
 B64=$(printf '%s\n' "export KUBECONFIG=/etc/rancher/k3s/k3s.yaml" "$SCRIPT_BODY" | base64 | tr -d '\n')
+
+# 🔴 The script is written to a FILE and run with stdin closed — it is NOT piped into `bash`.
+#
+# Piping it means bash reads the script from stdin, so any command inside that also reads stdin
+# CONSUMES THE REST OF THE SCRIPT. `kubectl exec -i` does exactly that. The symptom is brutal: the
+# swallowed lines never run, nothing is logged about them, and the script exits 0 — so a
+# verification step at the end of a deploy silently does not happen and reports success. Measured
+# here: a database-isolation check lost its final assertion this way and still passed.
+REMOTE_CMD="echo $B64 | base64 -d > /tmp/ssm-run.\$\$.sh && bash /tmp/ssm-run.\$\$.sh < /dev/null; rc=\$?; rm -f /tmp/ssm-run.\$\$.sh; exit \$rc"
 CMD=$(aws ssm send-command --instance-ids "$INSTANCE" --document-name AWS-RunShellScript \
-  --parameters "commands=[\"echo $B64 | base64 -d | bash\"]" \
+  --parameters "commands=[\"$REMOTE_CMD\"]" \
   --query 'Command.CommandId' --output text)
 
 STATUS=Pending
