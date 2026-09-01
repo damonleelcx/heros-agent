@@ -218,12 +218,27 @@ func (s *Store) inTx(ctx context.Context, fn func(*sql.Tx) error) error {
 	return nil
 }
 
-// normalizeEmail is the one place an address is canonicalised, so a lookup and an insert cannot disagree
-// about what "the same address" means.
+// normalizeEmail is the one place an address is canonicalised for STORAGE, so a lookup and an insert
+// cannot disagree about what "the same address" means.
 //
-// 🚫 Only trimmed and compared case-insensitively — NOT stripped of dots or plus-suffixes. Those rules
-// are one provider's, applying them to every provider merges addresses that belong to different people.
+// 🚫 Only trimmed. Case is preserved, because `Firstname.Lastname@example.com` is how somebody writes
+// their own name and it should be shown back to them that way. 🚫 And NOT stripped of dots or
+// plus-suffixes: those rules belong to one provider, and applying them everywhere merges addresses that
+// belong to different people.
 func normalizeEmail(s string) string { return strings.TrimSpace(s) }
+
+// EmailKey is the form two addresses are compared BY — trimmed and lowercased.
+//
+// # 🔴 Why this is exported and named
+//
+// Every query here matches on `lower(email)`, so as far as identity is concerned `Foo@x.test` and
+// `foo@x.test` are one person. Anything OUTSIDE this package that keys on an address — a rate limiter,
+// a cache, an audit index — has to agree, and if it does not the disagreement is silent and usually
+// exploitable: a per-address rate limit keyed on the raw string is bypassed by pressing shift.
+//
+// ⚠️ This is a second expression of a rule the SQL also states. They are checked against each other by
+// TestEmailKeyMatchesHowTheDatabaseCompares rather than trusted to stay aligned.
+func EmailKey(s string) string { return strings.ToLower(normalizeEmail(s)) }
 
 // Member looks up one person in one organization.
 //

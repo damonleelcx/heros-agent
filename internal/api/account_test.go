@@ -423,3 +423,134 @@ func waitForMail(t *testing.T, hz *harness, n int) {
 	}
 	t.Fatalf("waited for %d messages, saw %d", n, hz.mail.count())
 }
+
+// ── the reset limit ──────────────────────────────────────────────────────────────────────────────
+
+// TestTheResetLimitIsIdenticalForAKnownAndAnUnknownAddress.
+//
+// # 🔴 The reason this test matters more than the limit does
+//
+// A rate limiter is the classic way an enumeration oracle is reopened after being closed. The natural
+// implementation counts what it did — a mail sent, a token issued — and therefore only limits addresses
+// that exist. Then 429-versus-200 answers, for anybody who cares to ask, exactly the question the
+// constant reply was built to refuse: the addresses that can be rate-limited are the addresses that have
+// accounts.
+//
+// So both addresses are pushed past the ceiling and compared at every step: the same status, the same
+// body, and the same request number at which each trips.
+func TestTheResetLimitIsIdenticalForAKnownAndAnUnknownAddress(t *testing.T) {
+	hz := newHarness(t)
+	_, _ = hz.user(t, tenancy.Owner)
+	known := "limited-known-" + randSuffix() + "@example.test"
+	if _, err := hz.Auth.CreateUser(context.Background(), hz.tenant, known, testPassword,
+		tenancy.Member); err != nil {
+		t.Fatal(err)
+	}
+	unknown := "limited-unknown-" + randSuffix() + "@example.test"
+
+	// One past the burst, so both must cross the boundary.
+	const attempts = ResetBurst + 2
+	type reply struct {
+		code int
+		body string
+	}
+	seen := map[string][]reply{}
+	for _, addr := range []string{known, unknown} {
+		for range attempts {
+			rec := hz.do(t, "POST", "/api/auth/password/forgot",
+				`{"tenant":"`+hz.tenant+`","email":"`+addr+`"}`, nil)
+			seen[addr] = append(seen[addr], reply{rec.Code, rec.Body.String()})
+		}
+	}
+	for i := range attempts {
+		k, u := seen[known][i], seen[unknown][i]
+		if k.code != u.code || k.body != u.body {
+			t.Fatalf("request %d distinguishes a real address from an invented one:\n"+
+				"  known:   %d %s\n  unknown: %d %s", i+1, k.code, k.body, u.code, u.body)
+		}
+	}
+	// And the limit is actually doing something, or the test above compares two identical non-events.
+	if seen[known][ResetBurst].code != http.StatusTooManyRequests {
+		t.Fatalf("request %d was %d, not 429 — nothing is being limited",
+			ResetBurst+1, seen[known][ResetBurst].code)
+	}
+	if seen[known][0].code != http.StatusOK {
+		t.Fatalf("the first request was already refused (%d)", seen[known][0].code)
+	}
+}
+
+// TestTheResetLimitCannotBeBypassedByChangingCase.
+//
+// 🔴 Identity here is case-insensitive — every query matches on `lower(email)`, so `Foo@x.test` and
+// `foo@x.test` are one account and one inbox. A limiter keyed on the raw string would give each spelling
+// its own allowance, and the ceiling would be "three per capitalisation" — which is not a ceiling.
+func TestTheResetLimitCannotBeBypassedByChangingCase(t *testing.T) {
+	hz := newHarness(t)
+	_, _ = hz.user(t, tenancy.Owner)
+	addr := "MixedCase-" + randSuffix() + "@Example.Test"
+
+	for i := range ResetBurst {
+		if rec := hz.do(t, "POST", "/api/auth/password/forgot",
+			`{"email":"`+addr+`"}`, nil); rec.Code != http.StatusOK {
+			t.Fatalf("request %d of the burst was refused: %d", i+1, rec.Code)
+		}
+	}
+	for _, spelling := range []string{
+		strings.ToLower(addr), strings.ToUpper(addr), "  " + addr + "  ",
+	} {
+		rec := hz.do(t, "POST", "/api/auth/password/forgot",
+			`{"email":"`+spelling+`"}`, nil)
+		if rec.Code != http.StatusTooManyRequests {
+			t.Errorf("respelling the address as %q got a fresh allowance (%d)", spelling, rec.Code)
+		}
+	}
+}
+
+// TestOneFloodedAddressDoesNotLockOutEverybodyElse.
+//
+// 🔴 A limit that is not per-address hands an attacker something better than what it prevents: flood one
+// endpoint and nobody in the deployment can recover their account. The thing being protected is an inbox,
+// so the bucket belongs to the address.
+func TestOneFloodedAddressDoesNotLockOutEverybodyElse(t *testing.T) {
+	hz := newHarness(t)
+	_, _ = hz.user(t, tenancy.Owner)
+	victim := "flooded-" + randSuffix() + "@example.test"
+	for range ResetBurst + 5 {
+		hz.do(t, "POST", "/api/auth/password/forgot", `{"email":"`+victim+`"}`, nil)
+	}
+	rec := hz.do(t, "POST", "/api/auth/password/forgot",
+		`{"email":"bystander-`+randSuffix()+`@example.test"}`, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("flooding one address refused a different one (%d): %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestARefusedResetSendsNoMailAndSaysWhenToReturn.
+func TestARefusedResetSendsNoMailAndSaysWhenToReturn(t *testing.T) {
+	hz := newHarness(t)
+	_, _ = hz.user(t, tenancy.Owner)
+	addr := "quiet-" + randSuffix() + "@example.test"
+	if _, err := hz.Auth.CreateUser(context.Background(), hz.tenant, addr, testPassword,
+		tenancy.Member); err != nil {
+		t.Fatal(err)
+	}
+	for range ResetBurst {
+		hz.do(t, "POST", "/api/auth/password/forgot", `{"email":"`+addr+`"}`, nil)
+	}
+	waitForMail(t, hz, ResetBurst)
+	before := hz.mail.count()
+
+	rec := hz.do(t, "POST", "/api/auth/password/forgot", `{"email":"`+addr+`"}`, nil)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429, got %d", rec.Code)
+	}
+	if ra := rec.Header().Get("Retry-After"); ra == "" || ra == "0" {
+		t.Errorf("Retry-After is %q; a client cannot tell when to come back", ra)
+	}
+	// The refusal must be a refusal to SEND, not merely a refusal to reply. Mail is dispatched on a
+	// goroutine, so give it the same chance to arrive that a successful request would have.
+	time.Sleep(200 * time.Millisecond)
+	if hz.mail.count() != before {
+		t.Errorf("a rate-limited request still sent mail: %d messages became %d", before, hz.mail.count())
+	}
+}

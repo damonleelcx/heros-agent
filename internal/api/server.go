@@ -19,6 +19,7 @@ import (
 	"github.com/heros-foreal/heros/internal/memory"
 	"github.com/heros-foreal/heros/internal/planner"
 	"github.com/heros-foreal/heros/internal/provider"
+	"github.com/heros-foreal/heros/internal/ratelimit"
 	"github.com/heros-foreal/heros/internal/router"
 	"github.com/heros-foreal/heros/internal/store"
 	"github.com/heros-foreal/heros/internal/task"
@@ -53,6 +54,12 @@ type Server struct {
 	// 🔴 Never from the request's Host header. Whoever asks for a password reset chooses that request's
 	// headers, and would choose to have the link point at themselves.
 	Links mailer.Links
+	// ResetLimit caps how often a password reset can be asked for, per ADDRESS.
+	//
+	// 🔴 Per address rather than per caller, because what is being protected is somebody's INBOX. An
+	// unauthenticated endpoint that sends mail to any address on request is a way to flood a person the
+	// attacker dislikes, and the victim is the address, not whoever made the request.
+	ResetLimit *ratelimit.Limiter
 
 	// ToolRegistry, Provider and Model let the server rebind the assessment tool to the LOADED corpus.
 	//
@@ -87,8 +94,27 @@ type Server struct {
 // has to remember, which is the same argument as every other one in this package: not because they are
 // careless, but because remembering is not a property a codebase keeps.
 func NewServer() *Server {
-	return &Server{subjects: map[string]*subjectState{}, Approvals: NewApprovals()}
+	return &Server{
+		subjects:   map[string]*subjectState{},
+		Approvals:  NewApprovals(),
+		ResetLimit: ratelimit.New(ResetBurst, ResetRefill, ResetKeyCeiling),
+	}
 }
+
+// The password-reset ceiling.
+//
+// Three back to back covers the real case — somebody asks, the mail lands in spam, they ask again — and
+// then one every twenty minutes, which is far more than anyone needs and far less than a flood. The
+// numbers are here rather than inline so that a deployment arguing about them has one place to look.
+const (
+	ResetBurst  = 3
+	ResetRefill = 20 * time.Minute
+	// ResetKeyCeiling bounds memory: the limiter is keyed on an address the CALLER supplies, so an
+	// unbounded map would be a memory-exhaustion vector reachable by anybody who can send a POST. Fully
+	// refilled buckets are swept before this is consulted, so reaching it means fifty thousand distinct
+	// addresses inside twenty minutes — a flood, not a busy afternoon.
+	ResetKeyCeiling = 50_000
+)
 
 // subjectFor returns the repository loaded by this tenant, if any.
 func (s *Server) subjectFor(tenant string) *subjectState {

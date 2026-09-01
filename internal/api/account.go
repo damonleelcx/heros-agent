@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/heros-foreal/heros/internal/auth"
@@ -76,6 +77,27 @@ func (s *Server) handleForgotPassword(w http.ResponseWriter, r *http.Request) {
 	if req.Tenant == "" {
 		req.Tenant = s.DefaultTenant
 	}
+
+	// 🔴 The limit is consumed HERE — before the lookup, and told nothing about what the lookup finds.
+	//
+	// This ordering is the whole safety of adding a rate limit to this endpoint. Count only the requests
+	// that matched an account, or refuse only those, and 429-versus-200 becomes precisely the oracle the
+	// constant answer below exists to deny: the addresses that can be rate-limited would be the addresses
+	// that exist. Spending the token first means a real address and an invented one are limited on the
+	// same schedule, and the limiter never learns which is which.
+	//
+	// Keyed on auth.EmailKey rather than the raw string, because identity here is case-insensitive — a
+	// limit keyed on what was typed is bypassed by pressing shift.
+	if ok, wait := s.ResetLimit.Allow(auth.EmailKey(req.Email)); !ok {
+		w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())))
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{
+			"error": fmt.Sprintf("Too many password reset requests for that address. Try again in "+
+				"%s. If you asked for one recently, the link is still valid — check your spam folder "+
+				"before asking for another.", humanWait(wait)),
+		})
+		return
+	}
+
 	// The constant answer, decided before anything is looked up so no branch can forget to give it.
 	const answer = "If that address has an account here, a link to choose a new password is on its way. " +
 		"It works once and expires in an hour."
@@ -98,6 +120,18 @@ func (s *Server) handleForgotPassword(w http.ResponseWriter, r *http.Request) {
 			"this deployment cannot send mail", req.Tenant)
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": answer})
+}
+
+// humanWait renders a delay the way somebody would say it, because "1200s" is a unit, not an answer.
+func humanWait(d time.Duration) string {
+	switch {
+	case d < 90*time.Second:
+		return "a minute"
+	case d < time.Hour:
+		return fmt.Sprintf("%d minutes", int(d.Round(time.Minute).Minutes()))
+	default:
+		return fmt.Sprintf("%d hours", int(d.Round(time.Hour).Hours()))
+	}
 }
 
 // sendInBackground sends without the caller waiting, and without the request's context.

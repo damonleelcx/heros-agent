@@ -1006,7 +1006,16 @@ function forgotPasswordCard(){
       // Saying "we sent it" only when the address is real would answer, for anybody who asks, whether a
       // given person has an account here.
       note(card.querySelector('.card-body'), r.status, 'ok');
-    } catch (e) { msg.style.color = 'var(--bad)'; msg.textContent = e.message; }
+    } catch (e) {
+      // 🔴 Into a paragraph, not the `.evidence` span. That span is sized for "checking…"; the refusal
+      // this endpoint gives when it is rate-limited is two sentences of advice — "the link you already
+      // asked for still works, check your spam folder" — and advice nobody can read is advice nobody
+      // takes, which turns a limit into a support ticket. The form stays, so a different address can be
+      // tried without starting over.
+      msg.textContent = '';
+      card.querySelectorAll('.said-error').forEach(n => n.remove());
+      note(card.querySelector('.card-body'), e.message, 'bad').classList.add('said-error');
+    }
   };
   card.querySelector('#go').onclick = go;
   card.querySelector('#fe').onkeydown = e => { if (e.key === 'Enter') go(); };

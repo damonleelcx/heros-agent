@@ -369,6 +369,39 @@ started, the port answered, `/` returned 200. It simply was not the product. The
 default is `web/static`, and `TestTheDefaultConsoleDirectoryHasAConsoleInIt` asserts the constant the flag
 declaration actually uses rather than a copy of it.
 
+### [x] P27 · Rate limiting the password-reset endpoint
+**The limit is spent before the lookup, and the limiter is never told what the lookup found.** That
+ordering is the entire safety of adding a limit here. `password/forgot` was built to answer identically
+for a real address and an invented one — same body, same status, same timing — because it takes an
+address, needs no credential, and can be called at any rate. A limiter is the classic way that property
+is quietly reopened: count what was *done* (a mail sent, a token issued) and only real addresses can ever
+be limited, so 429-versus-200 answers exactly the question the constant reply refuses.
+`TestTheResetLimitIsIdenticalForAKnownAndAnUnknownAddress` pushes both past the ceiling and compares
+every reply; it was observed red against the natural, wrong implementation, which reported
+`429` for the real address and `200` for the invented one.
+
+**Keyed per address, because what is being protected is an inbox.** Not per caller: the victim of a
+reset flood is the person whose mailbox fills, not whoever sent the requests. Per-address also means
+flooding one address cannot lock the rest of the deployment out of its own recovery path, which a global
+or per-endpoint limit would.
+
+The key is `auth.EmailKey` — trimmed and lowercased, the form the SQL compares by. A limit keyed on the
+raw string is bypassed by pressing shift, so the ceiling would be "three per capitalisation".
+`TestEmailKeyMatchesHowTheDatabaseCompares` asks the real database, through the real login path, whether
+it considers each spelling the same person, and requires `EmailKey` to have said the same — because two
+statements of one rule drift, and this drift is exploitable in both directions.
+
+**A token bucket, not a fixed window.** A window lets six through across a boundary, which for a
+mail-sending endpoint is six messages in two seconds — the burst the limit exists to prevent, arriving at
+a moment nobody chose. Tokens are fractional: truncating them means a caller arriving every nineteen
+minutes regains nothing, ever.
+
+**At the memory ceiling it refuses rather than evicting.** The map is keyed on a value the caller
+supplies, so it must be bounded — and least-recently-used eviction is a bypass wearing the costume of a
+memory bound: flood `capacity` invented addresses, the victim's bucket is evicted, and the flood resumes
+from a full allowance. Refusing costs availability under attack; evicting costs the protection itself.
+Fully-refilled buckets are swept first, since one is indistinguishable from a key never seen.
+
 ## !!! Not started, and deliberately so
 
 ### [x] P23 · `evalset` and `compare`
@@ -595,6 +628,11 @@ password is a published credential.
   lockout — including for the one account that could fix the mail.
   `TestAnUnconfirmedAddressBlocksNothing` asserts the non-property, so gating something on it later is a
   decision made in the open rather than a default nobody chose.
-- **No rate limiting.** `password/forgot` and `invitation/accept` are bounded only by their tokens being
-  single-use and short-lived. Somebody who can reach the API can ask for unlimited reset mails to an
-  address they do not control.
+- **Rate limiting covers `password/forgot` only** (see P27). `invitation/accept`, `email/verify`,
+  `email/resend` and `login` are bounded only by their tokens being single-use and short-lived. Login in
+  particular has no lockout and no backoff — argon2id makes each guess expensive, which is a cost, not a
+  limit.
+- **The limiter is per process.** With more than one replica each holds its own buckets, so the
+  effective ceiling is the configured one times the number of replicas. Stated rather than solved: the
+  alternative is a write to shared storage on every unauthenticated request, keyed on a string the caller
+  chooses, which is a worse thing to expose than a limit that is N times looser than it says.

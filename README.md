@@ -60,6 +60,17 @@ log file.
 | `member` | Loads repositories, starts runs, approves the changes those runs propose. |
 | `viewer` | Reads goals and their history. Cannot start runs, which cost money, or approve changes, which write to the repository. |
 
+### Rate limits
+
+`POST /api/auth/password/forgot` allows **3 requests per address**, then one every 20 minutes, and
+answers `429` with a `Retry-After`. The bucket is spent before the address is looked up, so a real
+address and an invented one are limited on the same schedule — a limit that applied only to addresses
+with accounts would turn `429`-versus-`200` into an answer to "does this person have an account here",
+which is the one question this endpoint is built to refuse.
+
+The limit is per address, because what it protects is somebody's inbox, and it is held in memory: with
+several replicas each keeps its own buckets, so the real ceiling is that number times the replica count.
+
 An invitation is the only way to join an organization, and it cannot create an owner — ownership is
 transferred inside the console to somebody who already has an account, never by a link in an email that
 travels through a mailbox the organization does not control.
