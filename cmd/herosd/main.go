@@ -85,6 +85,11 @@ func main() {
 	}, nil); err != nil {
 		log.Fatalf("tools: %v", err)
 	}
+	if err := reg.Register(tools.SynthesiseAssessment{
+		Provider: client, Model: deepseek.ModelFlash,
+	}, nil); err != nil {
+		log.Fatalf("tools: %v", err)
+	}
 
 	w := worker.New("herosd", st, reg)
 	w.Lease = 2 * time.Minute

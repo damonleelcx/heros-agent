@@ -211,6 +211,25 @@ from "it truncated", and the one that says the prompt is wrong rather than the n
 Same repository, before and after: 12 model calls → **9**; 22,750 tokens → **9,244**; $0.0085 →
 **$0.0045**; 2m8s → **15.3s**; 6 of 9 axes assessed → **9 of 9**.
 
+### [x] P20 · The synthesis
+The join that answers "what is weak here?". First fully green run: **10 of 10 tasks**, 9 of 9 axes,
+7 actionable, $0.0015, 14.4s.
+
+**The ordering, the counts and the unmeasured list are COMPUTED; only the connective sentence comes from
+a model.** The two halves fail differently and only one is survivable: a miscomputed ranking is wrong the
+same way every time and can be fixed, while a generated summary is wrong by being *plausible* — it will
+state that an agent has no memory strategy when the memory axis was never assessed, in a well-formed
+sentence, next to eight true ones.
+
+So the model may connect the findings it was given and may not add one. `validate` rejects a synthesis
+naming any axis that produced no finding, and the unmeasured axes are never shown to it in the first
+place. Refusing costs one retry; publishing costs a customer acting on a weakness never observed in
+their code.
+
+A join needs its edges, so `toolcontract.Call` gained `Inputs` — the results of *declared* dependencies
+only. A tool that could read any result would make the DAG's edges decorative: the graph would say what
+waits for what while the data flowed wherever a tool reached.
+
 ## !!! Not started, and deliberately so
 
 ### [ ] P11 · Tier-A `compare` execution
@@ -289,14 +308,31 @@ from "it truncated", and the one that says the prompt is wrong rather than the n
 Same repository, before and after: 12 model calls → **9**; 22,750 tokens → **9,244**; $0.0085 →
 **$0.0045**; 2m8s → **15.3s**; 6 of 9 axes assessed → **9 of 9**.
 
+### [x] P20 · The synthesis
+The join that answers "what is weak here?". First fully green run: **10 of 10 tasks**, 9 of 9 axes,
+7 actionable, $0.0015, 14.4s.
+
+**The ordering, the counts and the unmeasured list are COMPUTED; only the connective sentence comes from
+a model.** The two halves fail differently and only one is survivable: a miscomputed ranking is wrong the
+same way every time and can be fixed, while a generated summary is wrong by being *plausible* — it will
+state that an agent has no memory strategy when the memory axis was never assessed, in a well-formed
+sentence, next to eight true ones.
+
+So the model may connect the findings it was given and may not add one. `validate` rejects a synthesis
+naming any axis that produced no finding, and the unmeasured axes are never shown to it in the first
+place. Refusing costs one retry; publishing costs a customer acting on a weakness never observed in
+their code.
+
+A join needs its edges, so `toolcontract.Call` gained `Inputs` — the results of *declared* dependencies
+only. A tool that could read any result would make the DAG's edges decorative: the graph would say what
+waits for what while the data flowed wherever a tool reached.
+
 ## !!! Not started, and deliberately so
 
 - **Discovery is heuristic, not a parser.** It finds candidate evidence by pattern, so a false positive
   is cheap (the model discards it) and a false negative is expensive (the axis reports absence). Python,
   TypeScript, JavaScript and Go only. Every report states that it shows what was found, not everything
   that exists.
-- **`synthesise_assessment` has no tool.** The nine axis tasks succeed and the synthesis that joins them
-  fails with "no tool registered for this kind". The DAG shape is right; the tool is not written.
 - **Tier-C effect intents are routed but not built.** `author`, `prompt`, `model` and `deliver` return a
   refusal naming why, rather than a generic failure.
 - **`internal/memory` is written and untested.** The four classes and the promotion rules compile; there

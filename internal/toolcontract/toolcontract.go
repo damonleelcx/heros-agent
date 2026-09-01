@@ -29,6 +29,18 @@ type Call struct {
 	// tool cannot be the place the requirement is forgotten.
 	IdempotencyKey string
 	Input          []byte
+	// Inputs are the results of this task's dependencies, keyed by their task id.
+	//
+	// # 🔴 Why a join needs this, and why it is not the same as Input
+	//
+	// `Input` is the task's own carried state. A JOIN task — a synthesis over nine axes, a comparison
+	// over two runs — is defined by reading what OTHER tasks produced, and without this it would have to
+	// reach into the store itself. A tool that can query the store is a tool that can read anything,
+	// which makes its declared permissions a fiction and its unit tests require a database.
+	//
+	// The worker fills this from the DAG at claim time, so a tool sees exactly the results its declared
+	// dependencies produced and nothing else. That is the contract: a join reads its edges.
+	Inputs map[string][]byte
 	// Attempt is which try this is, passed through so a tool can log it and a verifier can distinguish
 	// "already done by my own earlier attempt" from "done by somebody else".
 	Attempt int

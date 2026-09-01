@@ -192,9 +192,15 @@ func (w *Worker) RunOnce(ctx context.Context, goalID goal.ID) (Outcome, error) {
 	}
 
 	// ── execute ──────────────────────────────────────────────────────────────────────────────────
+	// A join reads its edges. Gathered from the store rather than carried in memory, because the worker
+	// that produced a dependency's result may have been a different process on a different machine.
+	inputs, err := w.dependencyResults(goalID, t)
+	if err != nil {
+		return Outcome{Did: DidStop, TaskID: t.ID}, err
+	}
 	res, execErr := w.Tools.Invoke(ctx, toolcontract.Call{
 		TaskID: string(t.ID), GoalID: string(goalID), Kind: t.Kind,
-		IdempotencyKey: t.IdempotencyKey, Input: t.Result, Attempt: t.Attempt,
+		IdempotencyKey: t.IdempotencyKey, Input: t.Result, Inputs: inputs, Attempt: t.Attempt,
 	})
 
 	// Spend is recorded whether the call succeeded or failed. 🔴 A failed attempt still cost money, and
@@ -232,6 +238,31 @@ func (w *Worker) RunOnce(ctx context.Context, goalID goal.ID) (Outcome, error) {
 		return Outcome{Did: DidStop, TaskID: t.ID}, err
 	}
 	return Outcome{Did: DidWork, TaskID: t.ID, More: true}, nil
+}
+
+// dependencyResults collects what this task's prerequisites produced.
+//
+// 🔴 Only DECLARED dependencies, and only successful ones. A task that could read any result would make
+// the DAG's edges decorative — the graph would say what waits for what, while the data flowed wherever
+// a tool reached. Restricting it to the declared edges is what keeps "why did this task see that value"
+// answerable from the plan alone.
+func (w *Worker) dependencyResults(goalID goal.ID, t *task.Task) (map[string][]byte, error) {
+	if len(t.DependsOn) == 0 {
+		return nil, nil
+	}
+	d, err := w.Store.LoadDAG(goalID)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string][]byte, len(t.DependsOn))
+	for _, dep := range t.DependsOn {
+		dt := d.Tasks[dep]
+		if dt == nil || dt.State != task.Succeeded {
+			continue
+		}
+		out[string(dep)] = dt.Result
+	}
+	return out, nil
 }
 
 // handleFailure runs the retry ladder.

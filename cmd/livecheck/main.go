@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -116,6 +117,11 @@ func main() {
 	}, nil); err != nil {
 		die("register", err)
 	}
+	if err := reg.Register(tools.SynthesiseAssessment{
+		Provider: client, Model: deepseek.ModelFlash,
+	}, nil); err != nil {
+		die("register", err)
+	}
 	// The synthesis has no tool yet, so it will fail when reached. Stated rather than hidden.
 	w := worker.New("livecheck", s, reg)
 	w.Lease = 2 * time.Minute
@@ -176,11 +182,26 @@ func main() {
 			provider.FormatCents(final.Spend.CostMicroCents/int64(final.Spend.ToolCalls)))
 	}
 
+	if syn := synthesisOf(fresh); syn != nil {
+		fmt.Printf("\n─── what is weak here ───────────────────────────────────\n")
+		fmt.Printf("  %s\n\n", wrap(syn.Overall, 76, "  "))
+		fmt.Printf("  %d of %d axes assessed, %d actionable\n",
+			len(syn.Assessed), len(syn.Assessed)+len(syn.Unmeasured), syn.ActionableCount)
+		if len(syn.Unmeasured) > 0 {
+			fmt.Printf("  not measured: %s\n", strings.Join(syn.Unmeasured, ", "))
+		}
+	}
+
 	fmt.Printf("\n─── findings ────────────────────────────────────────────\n")
 	for _, id := range order(fresh) {
 		t := fresh.Tasks[id]
 		switch t.State {
 		case task.Succeeded:
+			// The synthesis is rendered above as the conclusion; it is not a finding, and decoding it as
+			// one prints "(unparsed)" beside a task that succeeded.
+			if t.Kind == planner.KindSynthesise {
+				continue
+			}
 			fmt.Printf("  ✓ %-24s %s\n", t.ID, firstWeakness(t.Result))
 		case task.Failed:
 			fmt.Printf("  ✕ %-24s %s\n", t.ID, t.Failure)
@@ -188,6 +209,37 @@ func main() {
 			fmt.Printf("  ⊘ %-24s %s\n", t.ID, t.Failure)
 		}
 	}
+}
+
+// synthesisOf returns the run's conclusion, if the synthesis task succeeded.
+func synthesisOf(d *task.DAG) *tools.Synthesis {
+	t := d.Tasks["synthesise"]
+	if t == nil || t.State != task.Succeeded || len(t.Result) == 0 {
+		return nil
+	}
+	var s tools.Synthesis
+	if json.Unmarshal(t.Result, &s) != nil {
+		return nil
+	}
+	return &s
+}
+
+// wrap breaks a paragraph at a column, indenting continuations.
+func wrap(s string, width int, indent string) string {
+	var out, line []string
+	n := 0
+	for _, w := range strings.Fields(s) {
+		if n > 0 && n+1+len(w) > width {
+			out = append(out, strings.Join(line, " "))
+			line, n = nil, 0
+		}
+		line = append(line, w)
+		n += len(w) + 1
+	}
+	if len(line) > 0 {
+		out = append(out, strings.Join(line, " "))
+	}
+	return strings.Join(out, "\n"+indent)
 }
 
 func order(d *task.DAG) []task.ID {
