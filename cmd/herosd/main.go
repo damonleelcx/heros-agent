@@ -48,6 +48,12 @@ func main() {
 	if err != nil {
 		log.Fatalf("%v", err)
 	}
+	// 🔴 Before anything hashes a password — bootstrap creates the first account, which does. Applying the
+	// ceiling afterwards would leave that one call running under a different limit from every call after
+	// it, which is the kind of difference nobody finds by reading.
+	if err := auth.ConfigureFromEnv(); err != nil {
+		log.Fatalf("password hashing: %v", err)
+	}
 	url := *dsn
 	if url == "" {
 		url = os.Getenv("HEROS_DATABASE_URL")
@@ -210,8 +216,8 @@ func main() {
 	// live) settles at about 1.4 GB resident and does not grow with further load. A number labelled "peak"
 	// is read as a promise about what the container needs, and that promise would have been broken by the
 	// first flood.
-	fmt.Printf("password work  %d concurrent argon2id verifications (%d MiB live at once)\n",
-		auth.Concurrency(), auth.Concurrency()*64)
+	fmt.Printf("password work  %d concurrent argon2id verifications (%d MiB live at once), "+
+		"shed after %s\n", auth.Concurrency(), auth.Concurrency()*64, auth.MaxWait())
 	if links.Origin() != "" {
 		fmt.Printf("public url     %s\n", links.Origin())
 	}

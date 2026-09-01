@@ -241,3 +241,127 @@ func TestOverloadLooksTheSameForAKnownAndAnUnknownAddress(t *testing.T) {
 		}
 	}
 }
+
+// ── configuration ────────────────────────────────────────────────────────────────────────────────
+
+// withEnvGate isolates a configuration test: the gate and the wait are package-level, so a test that
+// changed them and returned early would leave every later test in the package running against them.
+func withEnvGate(t *testing.T) {
+	t.Helper()
+	oldWait, oldGate := maxWait, current.Load()
+	t.Cleanup(func() {
+		maxWait = oldWait
+		current.Store(oldGate)
+	})
+	t.Setenv(EnvConcurrency, "")
+	t.Setenv(EnvMaxWait, "")
+}
+
+// TestConfigureFromEnvRefusesValuesThatWouldBreakTheDeployment.
+//
+// # 🔴 Why these are refusals and not "best effort"
+//
+// These two numbers ARE the protection. A wait of zero sheds every password check in the deployment —
+// sign-in, invitations, resets — reporting that the server is busy while it sits idle; a ceiling of zero
+// does the same. Both are one typo away, and neither is diagnosable from the symptom, because the symptom
+// is a server confidently blaming load it does not have.
+//
+// Refusing at startup puts the mistake in front of the person who made it, seconds after they made it.
+func TestConfigureFromEnvRefusesValuesThatWouldBreakTheDeployment(t *testing.T) {
+	for name, c := range map[string]struct{ key, value, mustMention string }{
+		"concurrency is not a number": {EnvConcurrency, "lots", EnvConcurrency},
+		"concurrency is zero":         {EnvConcurrency, "0", EnvConcurrency},
+		"concurrency is negative":     {EnvConcurrency, "-4", EnvConcurrency},
+		"concurrency is a duration":   {EnvConcurrency, "3s", EnvConcurrency},
+		"wait has no unit":            {EnvMaxWait, "3", EnvMaxWait},
+		"wait is not a duration":      {EnvMaxWait, "soon", EnvMaxWait},
+		"wait is zero":                {EnvMaxWait, "0s", EnvMaxWait},
+		"wait is negative":            {EnvMaxWait, "-1s", EnvMaxWait},
+	} {
+		t.Run(name, func(t *testing.T) {
+			withEnvGate(t)
+			t.Setenv(c.key, c.value)
+			err := ConfigureFromEnv()
+			if err == nil {
+				t.Fatalf("%s=%q was accepted", c.key, c.value)
+			}
+			// 🔴 The error must name the variable. "invalid configuration" sends somebody to read source;
+			// naming the variable and the value they set ends the investigation at the first line.
+			if !strings.Contains(err.Error(), c.mustMention) {
+				t.Errorf("the error does not name %s: %v", c.mustMention, err)
+			}
+			if !strings.Contains(err.Error(), c.value) {
+				t.Errorf("the error does not quote the value that was set: %v", err)
+			}
+		})
+	}
+}
+
+// TestConfigureFromEnvAppliesValidValues.
+func TestConfigureFromEnvAppliesValidValues(t *testing.T) {
+	withEnvGate(t)
+	t.Setenv(EnvConcurrency, "3")
+	t.Setenv(EnvMaxWait, "250ms")
+	if err := ConfigureFromEnv(); err != nil {
+		t.Fatalf("a perfectly ordinary configuration was refused: %v", err)
+	}
+	if got := Concurrency(); got != 3 {
+		t.Errorf("concurrency is %d, not the configured 3", got)
+	}
+	if got := MaxWait(); got != 250*time.Millisecond {
+		t.Errorf("max wait is %s, not the configured 250ms", got)
+	}
+	// And it is really in force, not merely reported: with one slot held out of three, two more fit and
+	// the fourth is shed.
+	var held []func()
+	for range 3 {
+		release, err := acquire(context.Background())
+		if err != nil {
+			t.Fatalf("the configured ceiling of 3 did not admit 3: %v", err)
+		}
+		held = append(held, release)
+	}
+	if _, err := acquire(context.Background()); !errors.Is(err, ErrBusy) {
+		t.Errorf("a fourth was admitted against a configured ceiling of 3: %v", err)
+	}
+	for _, release := range held {
+		release()
+	}
+}
+
+// TestAnUnsetEnvironmentLeavesTheDerivedDefault.
+//
+// The overwhelmingly common case. Almost no deployment should set these, and the derived value follows a
+// container's CPU limit rather than being a constant that is wrong on both a laptop and a large host.
+func TestAnUnsetEnvironmentLeavesTheDerivedDefault(t *testing.T) {
+	withEnvGate(t)
+	SetConcurrency(defaultConcurrency())
+	SetMaxWait(3 * time.Second)
+	if err := ConfigureFromEnv(); err != nil {
+		t.Fatalf("an unset environment was an error: %v", err)
+	}
+	if got, want := Concurrency(), defaultConcurrency(); got != want {
+		t.Errorf("concurrency is %d, not the derived %d", got, want)
+	}
+	if got := MaxWait(); got != 3*time.Second {
+		t.Errorf("max wait is %s, not the default 3s", got)
+	}
+}
+
+// TestSetMaxWaitRefusesAValueThatWouldShedEverything.
+//
+// Defence in depth behind ConfigureFromEnv: any caller reaching the setter directly gets the same answer,
+// so the guard cannot be walked around by a second configuration path added later.
+func TestSetMaxWaitRefusesAValueThatWouldShedEverything(t *testing.T) {
+	withEnvGate(t)
+	for _, d := range []time.Duration{0, -time.Second} {
+		func() {
+			defer func() {
+				if recover() == nil {
+					t.Errorf("SetMaxWait(%s) was accepted; every password check would be shed", d)
+				}
+			}()
+			SetMaxWait(d)
+		}()
+	}
+}

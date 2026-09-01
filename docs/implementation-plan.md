@@ -453,6 +453,14 @@ there across three more rounds, which is the part that matters: it is a plateau,
 says "live at once", because a number labelled "peak" is read as a promise about how much the container
 needs.
 
+**Both numbers are settable** (`HEROS_PASSWORD_CONCURRENCY`, `HEROS_PASSWORD_MAX_WAIT`) and validated at
+startup, because they ARE the protection: a ceiling of 200 re-opens the exhaustion this closes, and a
+wait of zero sheds every password check in the deployment while the server sits idle — a total outage
+that confidently blames load it does not have. Nonsense is refused where an operator is watching; a value
+that is merely surprising is applied with a warning naming what it costs. The distinction is whether this
+code can know the answer: it cannot know how much memory the container has, so a high ceiling warns; it
+knows for certain that a wait of zero is never intended, so that refuses.
+
 **Requests queue for up to three seconds, then are shed.** Shedding beats dying: an out-of-memory kill
 takes down the requests that were fine along with the ones that were not. A caller whose context is
 already done is refused without taking a slot — and that is checked *before* the `select`, because

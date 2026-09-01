@@ -99,6 +99,14 @@ Go returns freed memory to the operating system lazily, so resident memory climb
 considerably higher and stays there. Measured here: a ceiling of 9 (576 MiB live) settles at about 1.4 GB
 resident and does not grow under continued load.
 
+Both numbers can be set, though almost no deployment should need to — the default follows the CPU count,
+including a container's CPU limit.
+
+| | |
+|---|---|
+| `HEROS_PASSWORD_CONCURRENCY` | How many hashes may run at once. Default `GOMAXPROCS / 2`, floored at 2. A value well above that warns, naming the memory it implies and the fact that it buys no extra throughput. Zero or less is refused. |
+| `HEROS_PASSWORD_MAX_WAIT` | How long a request queues before being shed. Default `3s`; needs a unit (`3s`, `1500ms`, `1m`). Zero or less is **refused at startup** — it would shed every sign-in, invitation and password reset in the deployment, reporting that the server is busy while it sat idle. |
+
 The rate limits above do not cover this: they are keyed on an account and an inbox, and an address with
 **no account** still runs a full verification against a decoy hash so that a missing user costs what a
 wrong password costs. Accepting an invitation and resetting a password also hash, and have no rate limit

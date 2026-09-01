@@ -8,7 +8,10 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log"
+	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -168,7 +171,18 @@ var maxWait = 3 * time.Second
 // A knob rather than a constant because the right value depends on what is in front of the server: with
 // a proxy that gives up after two seconds, queueing for three produces work nobody is waiting for any
 // more.
-func SetMaxWait(d time.Duration) { maxWait = d }
+//
+// 🔴 Refuses a non-positive value, the same way SetConcurrency refuses a ceiling below one. At zero or
+// below, `acquire` finds its deadline already passed and sheds EVERY password check — so sign-in,
+// invitations and resets would all fail, reporting that the server is busy, on a server doing nothing.
+// Failing here means that mistake stops the process at startup instead of presenting as a total outage
+// with a misleading explanation.
+func SetMaxWait(d time.Duration) {
+	if d <= 0 {
+		panic("auth: a max wait of zero or less would shed every password check")
+	}
+	maxWait = d
+}
 
 // gate is a counting semaphore. A buffered channel rather than a sync primitive, because the select below
 // is what allows waiting to be abandoned when the caller goes away.
@@ -249,3 +263,78 @@ func acquire(ctx context.Context) (release func(), err error) {
 		return nil, fmt.Errorf("%w: waited %s for one of %d slots", ErrBusy, wait, cap(g.slots))
 	}
 }
+
+// MaxWait reports how long a request will queue before being shed, for a startup banner.
+func MaxWait() time.Duration { return maxWait }
+
+// ConfigureFromEnv applies HEROS_PASSWORD_CONCURRENCY and HEROS_PASSWORD_MAX_WAIT.
+//
+// # 🔴 Why this validates rather than accepting what it is given
+//
+// These two numbers ARE the protection. A concurrency of 200 re-opens the exhaustion the ceiling exists
+// to close, and a wait of zero refuses every password check in the deployment — sign-in, invitation,
+// reset, all of it — with an error about the server being busy while it sits idle. Both are one typo
+// away, both fail at the worst possible moment, and neither would be obvious from the symptom.
+//
+// So: nonsense is refused at startup, where an operator is watching, and a value that is merely
+// surprising is applied with a warning that says what it will cost. A server that will not boot is a far
+// better outcome than one that boots wrong — the same argument the bootstrap credentials make.
+//
+// Unset means the derived default, which is what almost every deployment should use.
+func ConfigureFromEnv() error {
+	if raw := strings.TrimSpace(os.Getenv(EnvConcurrency)); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil {
+			return fmt.Errorf("%s is %q, which is not a whole number. It is how many password hashes may "+
+				"run at once; leave it unset to use %d, derived from this machine's CPU count",
+				EnvConcurrency, raw, defaultConcurrency())
+		}
+		if n < 1 {
+			return fmt.Errorf("%s is %d. At zero or below, every sign-in, invitation and password reset "+
+				"in this deployment would be refused as 'server busy' while the server sat idle",
+				EnvConcurrency, n)
+		}
+		// 🔴 A warning, not a refusal. Only the operator knows how much memory the container has, and
+		// refusing a large value on a large host would be this code overruling somebody who knows better.
+		// What it can do is state the two facts they need: what it will cost, and that beyond the derived
+		// figure it buys no throughput, because argon2id already runs Parallelism threads per call.
+		if derived := defaultConcurrency(); n > derived*2 {
+			log.Printf("WARN auth.concurrency.above_cpu %s=%d — that is %d MiB of argon2id live at once "+
+				"(resident memory settles well above that), and beyond %d it adds no hashes per second "+
+				"on a machine with %d CPUs. Set it lower unless you know the memory is there",
+				EnvConcurrency, n, n*64, derived, runtime.GOMAXPROCS(0))
+		}
+		SetConcurrency(n)
+		log.Printf("auth: password concurrency set to %d by %s", n, EnvConcurrency)
+	}
+
+	if raw := strings.TrimSpace(os.Getenv(EnvMaxWait)); raw != "" {
+		d, err := time.ParseDuration(raw)
+		if err != nil {
+			return fmt.Errorf("%s is %q, which is not a duration. Write it with a unit — 3s, 1500ms, 1m",
+				EnvMaxWait, raw)
+		}
+		if d <= 0 {
+			return fmt.Errorf("%s is %s. At zero or below, no request would ever wait for a free slot, so "+
+				"every password check beyond the first few would be refused as 'server busy'",
+				EnvMaxWait, d)
+		}
+		// Long waits are not wrong, but they trade one exhaustion for another: nothing is hashing, and
+		// thousands of connections are held open waiting for a slot.
+		if d > 30*time.Second {
+			log.Printf("WARN auth.maxwait.long %s=%s — under load that many requests will sit holding "+
+				"connections rather than being shed, which is its own way to run out of resources",
+				EnvMaxWait, d)
+		}
+		SetMaxWait(d)
+		log.Printf("auth: password max wait set to %s by %s", d, EnvMaxWait)
+	}
+	return nil
+}
+
+// The environment variables ConfigureFromEnv reads. Named constants so the error messages, the tests and
+// the documentation cannot drift from what is actually read.
+const (
+	EnvConcurrency = "HEROS_PASSWORD_CONCURRENCY"
+	EnvMaxWait     = "HEROS_PASSWORD_MAX_WAIT"
+)
