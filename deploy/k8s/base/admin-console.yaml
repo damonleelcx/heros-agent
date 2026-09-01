@@ -1,0 +1,109 @@
+# Operator console (P8) — SECOND ORIGIN (admin-console-deploy, Decision 5; P8 Decision 11).
+#
+# Its OWN Service/origin (`admin-console`), a DISJOINT cookie jar (different origin => the browser will
+# not send the customer console's cookie here, and vice-versa), its OWN credential distinct from the
+# customer BFF's, and unreachable from a customer-console route by construction. It is NOT a route
+# inside the customer console — a role-gated /admin tree would put cross-tenant operator capability one
+# authorization bug away from a customer session. Stateless BFF, replicas 2 + PDB.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: admin-console
+  labels:
+    app.kubernetes.io/name: admin-console
+    heros.dev/plane: control
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: admin-console
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: admin-console
+        heros.dev/plane: control
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        # 🔴 runAsUser is REQUIRED, not hardening. Without it the kubelet cannot verify the image's
+        # string user is non-root and refuses to start the container:
+        #   Error: container has runAsNonRoot and image has non-numeric user
+        # The pod then sits in CreateContainerConfigError forever, on every substrate.
+        # 1000 is the node image's `node` user.
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: admin-console
+          image: ghcr.io/heros-foreal/heros-admin-console
+          ports:
+            - { name: http, containerPort: 4310 }
+          env:
+            # 🔴 4311, not 4321. The customer API on 4321 serves no `/admin/api/*` route and never did —
+            # the admin surface is a separate handler on a separate listener (P8 Decision 11), so this
+            # pointed at a port that 404'd every admin call. Nothing reported it: the BFF turns an
+            # upstream failure into one sign-in message, so it read as a rejected sign-in.
+            - { name: ADMIN_API_BASE, value: "http://agentd:4311" }
+            # 🔴 `oidc`, not `configured`. `isFederated()` (src/lib/idpConfig.ts) accepts only `oidc` and
+            # `saml`; with `configured` here, GET /auth/login 303s straight to /signin?reason=not_federated
+            # and the operator can never leave the sign-in page. Two readers disagreed about this one
+            # variable — identity.ts only ever refused `dev` — so the value satisfied one and broke the
+            # other. It is set in the OVERLAY, because whether a cluster federates is the cluster's fact.
+            - { name: ADMIN_IDENTITY_MODE, value: "" }
+            - { name: NODE_ENV, value: "production" }
+            # The operator BFF's OWN credential — a DIFFERENT external-store key than the customer BFF's.
+            - name: ADMIN_PLATFORM_CREDENTIAL
+              valueFrom: { secretKeyRef: { name: heros-admin-console, key: platform-credential } }
+            # The operator IdP's callback URL. An absolute URL on the OPERATOR origin — pointing it at
+            # the customer origin would land an operator's assertion in the customer console's jar.
+            - { name: ADMIN_IDP_CALLBACK_URL, value: "" }
+            # Build identity for the release surface. The P24 reporting switches are deliberately NOT
+            # here (P24 task 7.4) — see the note in agentd.yaml.
+            - { name: HEROS_VERSION, value: "" }
+            - { name: HEROS_EDITION, value: "kubernetes" }
+          livenessProbe:
+            httpGet: { path: /api/health, port: http }
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /api/health, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests: { cpu: "100m", memory: "192Mi" }
+            limits: { cpu: "500m", memory: "384Mi" }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - { name: tmp, emptyDir: {} }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: admin-console
+  labels: { app.kubernetes.io/name: admin-console }
+spec:
+  selector: { app.kubernetes.io/name: admin-console }
+  ports:
+    - { name: http, port: 4310, targetPort: http }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: admin-console
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: admin-console

@@ -1,0 +1,411 @@
+# The mail relay, as a workload in this cluster.
+#
+# ⚠️ READ THIS BEFORE THE REST OF THE FILE. The comments below repeatedly say "agentd". That workload has
+# been REMOVED. Everything they explain is still true — why the relay is in-cluster, why submission is
+# not exposed on the LoadBalancer, why the credential lives apart from the relay provider's key, why
+# `support@` is a real account rather than an alias — but the sender they describe is now whichever
+# tenant authenticates as `support@`, today herosd at eval.heros-agent.space.
+#
+# The names were deliberately not search-and-replaced: each of those comments records a decision and the
+# evidence for it, and rewriting the subject of a sentence whose reasoning you did not make is how the
+# reasoning quietly changes meaning. The one place it MATTERED — the NetworkPolicy at the foot of this
+# file, which actually decides who may connect — has been updated, and now names tenants by namespace.
+#
+# 🔴 WHY THIS IS IN THE PROD OVERLAY AND NOT THE BASE. The base ships NO mail server, and that is the
+# honest default: `internal/mailer` returns its operator-visible fallback when no SMTP is configured,
+# records every undelivered message with its link, and reports `Configured() == false` on /readyz. An
+# air-gapped or evaluation install should get exactly that. This deployment is the hosted product, it
+# sends confirmation and reset links to strangers, and it therefore needs a relay — which makes the
+# relay a property of THIS deployment, like the Ingresses and the SecretStore beside it.
+#
+# It also keeps `check-image-parity` honest: that gate compares deploy/images.env against the k8s
+# BASE, so an image introduced only here needs no Compose counterpart that nobody would ever run.
+# The digest below satisfies `check-digest-pins`, which renders every overlay and rejects a tag.
+#
+# ─────────────────────────────────────────────────────────────────────────────────────────────────
+# WHAT REPLACED WHAT
+#
+# This supersedes a dedicated EC2 mail host (deploy/mail/, written for Ubuntu). That host was built
+# and then torn down: the platform runs k3s on ONE node, and a second instance bought nothing this
+# cluster does not already provide — cert-manager issues the certificate that certbot would have
+# fought Traefik for, external-secrets carries the credential, and agentd reaches the relay through a
+# podSelector instead of an egress rule pinned to a public address it would hairpin out to and back.
+#
+# ⚠️ deploy/mail/ is NOT dead: its README is the reasoning (SPF/DKIM/DMARC, the two delivery modes,
+# what fails silently), and `dns-records.sh` / `verify-mail.sh` still apply — run against this
+# workload rather than against a host. What does NOT apply is `bootstrap-mailserver.sh`, which is
+# apt/Debian throughout, and `provision-ec2.sh`, which built the host this replaces.
+---
+# ── The certificate ──────────────────────────────────────────────────────────────────────────────
+#
+# 🔴 THE SMTP CLIENT PINS THE NAME. `internal/mailer` sets `tls.Config{ServerName: cfg.Host}` from
+# HEROS_SMTP_HOST, so the certificate must be valid for exactly that name — and Let's Encrypt will
+# not sign `.svc.cluster.local`. That is why HEROS_SMTP_HOST stays `mail.heros-agent.space` and the
+# in-cluster resolution is fixed in CoreDNS below, rather than the obvious-looking alternative of
+# pointing agentd at the Service DNS name and watching every handshake fail on a name mismatch.
+#
+# HTTP-01 through Traefik, like the two consoles. The `acme-http01-solver` NetworkPolicy already in
+# this namespace is what lets the solver pod be reached; without it the order would hang on a
+# challenge that is served but unreachable.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: mail-tls
+  labels:
+    app.kubernetes.io/name: mail
+spec:
+  secretName: mail-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames: [mail.heros-agent.space]
+#
+# ⚠️ NO ACCOMPANYING INGRESS, and an earlier draft of this file had one. `letsencrypt-prod` solves
+# HTTP-01 with `{http01: {ingress: {ingressClassName: traefik}}}`, which means cert-manager creates
+# its OWN temporary Ingress for the challenge and deletes it afterwards. A hand-written one is not
+# just redundant — the draft pointed its backend at the mail Service on port 587, i.e. an HTTP route
+# to an SMTP port, which is a live route to a protocol mismatch for anything that ever hits it.
+---
+# ── Storage ──────────────────────────────────────────────────────────────────────────────────────
+#
+# One claim, three subPaths. 🔴 THE DKIM PRIVATE KEY LIVES HERE. It is generated once, on first boot,
+# and the public half is published in DNS — so losing this volume invalidates every signature the
+# domain has published until somebody regenerates the key AND republishes the record. `local-path` is
+# node-local with `Delete` reclaim: it does not survive the node. That is the same exposure postgres
+# already carries here, and it is stated rather than implied.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mail-data
+  labels:
+    app.kubernetes.io/name: mail
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mail
+  labels:
+    app.kubernetes.io/name: mail
+spec:
+  type: ClusterIP
+  # 🔴 PINNED, not allocated. agentd reaches this Service through a `hostAliases` entry (see the
+  # patch in kustomization.yaml), which is a literal address in that pod's /etc/hosts — so it must
+  # be a value declared here rather than whatever the allocator happened to hand out. If the Service
+  # were ever deleted and recreated without this, it would come back on a different ClusterIP and
+  # agentd would keep dialling the old one: connection refused, from a manifest that still looks
+  # correct. This address was already allocated to this Service, so pinning it is a no-op on the
+  # running cluster.
+  clusterIP: 10.43.120.55
+  selector:
+    app.kubernetes.io/name: mail
+  ports:
+    - { name: submission, port: 587, targetPort: 587, protocol: TCP }
+---
+# ── The externally-reachable ports ───────────────────────────────────────────────────────────────
+#
+# 🔴 25 AND 993 ONLY — SUBMISSION IS DELIBERATELY NOT HERE. agentd is in this cluster, so 587 needs
+# no path from the internet, and publishing it would expose the credential-bearing port to every
+# scanner on the internet for no capability at all. The one above is ClusterIP for that reason.
+#
+# 25 must be world-reachable: it is how bounces come back, how the DMARC reports this domain asks for
+# arrive, and how a reply to support@ lands. A send-only deployment that refuses 25 is one that
+# cannot see its own delivery failing.
+#
+# ⚠️ k3s implements type=LoadBalancer with svclb, which binds these as HOST ports on the node. So
+# these two lines also consume 25 and 993 on heros-prod itself, and the EC2 security group must
+# allow them — neither is opened by applying this file.
+apiVersion: v1
+kind: Service
+metadata:
+  name: mail-external
+  labels:
+    app.kubernetes.io/name: mail
+spec:
+  type: LoadBalancer
+  externalTrafficPolicy: Local
+  selector:
+    app.kubernetes.io/name: mail
+  ports:
+    - { name: smtp,  port: 25,  targetPort: 25,  protocol: TCP }
+    - { name: imaps, port: 993, targetPort: 993, protocol: TCP }
+---
+# ── The relay credential ─────────────────────────────────────────────────────────────────────────
+#
+# 🔴 THE SUBMISSION CREDENTIAL IS READ FROM `heros/platform`, THE SAME TWO PROPERTIES AGENTD READS.
+# Not a copy under `heros/mail`, and that is the point. The password agentd authenticates with and
+# the password this relay accepts must be identical; two properties that must agree is a drift
+# hazard with no detector — they diverge, agentd fails at AUTH, `Configured()` still answers true,
+# /readyz stays green, and the only symptom is mail that stops arriving. One property consumed twice
+# cannot drift.
+#
+# Only the SMARTHOST credential is new, and it lives under `heros/mail` because it belongs to this
+# workload alone; agentd has no business being able to read the relay provider's API key.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: heros-mail
+  labels:
+    app.kubernetes.io/name: mail
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: heros-store
+    kind: SecretStore
+  target:
+    name: heros-mail
+  data:
+    - secretKey: relay-user
+      remoteRef: { key: heros/mail, property: relay-user }
+    - secretKey: relay-password
+      remoteRef: { key: heros/mail, property: relay-password }
+    # The same two agentd projects — see above.
+    - secretKey: submission-user
+      remoteRef: { key: heros/platform, property: smtp-username }
+    - secretKey: submission-password
+      remoteRef: { key: heros/platform, property: smtp-password }
+    # The Opportunity Bridge service's own submission credential — a separate login on the same relay,
+    # seeded by the init container above. Its own value under heros/mail rather than a second copy of
+    # the one above, so either can be rotated or revoked without touching the other.
+    - secretKey: jobs-password
+      remoteRef: { key: heros/mail, property: jobs-password }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mail
+  labels:
+    app.kubernetes.io/name: mail
+spec:
+  replicas: 1
+  # 🔴 Recreate, NOT RollingUpdate. The claim above is ReadWriteOnce on `local-path`. A rolling update
+  # starts the new pod BEFORE terminating the old one, the new pod blocks forever waiting for a volume
+  # the old one still holds, and the rollout deadlocks with the old pod still serving — which reads as
+  # "the deploy is taking a while" rather than as a failure. Every stateful workload on this node has
+  # the same constraint; postgres avoids it by being a StatefulSet.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mail
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mail
+    spec:
+      # ⚠️ NOT the restricted securityContext the rest of this namespace runs under, and this is a
+      # real exception rather than an oversight. Postfix and Dovecot fork per-connection processes
+      # that drop to their own unprivileged users, bind 25/587/993, and chown the maildir — so the
+      # supervisor needs root inside the container plus the capabilities below. What IS dropped is
+      # everything else: no privilege escalation beyond these caps, and the container cannot write
+      # outside its volumes.
+      securityContext:
+        fsGroup: 5000
+      # ── Seeding the accounts ───────────────────────────────────────────────────────────────────
+      #
+      # 🔴 WITHOUT THIS THE POD STARTS PERFECTLY AND IS USELESS. docker-mailserver reads its accounts
+      # from a file on the config volume; a fresh volume has none, so Dovecot comes up with an empty
+      # userdb, agentd fails at AUTH, and every inbound message is rejected for an unknown recipient.
+      # Every process is RUNNING and the liveness probe is green throughout.
+      #
+      # ⚠️ ONE ACCOUNT, AND IT IS BOTH THE SUBMISSION CREDENTIAL AND THE REPLY MAILBOX. The
+      # standalone build kept those separate on the principle that the credential agentd carries
+      # should not also read the domain mail. That separation is given up here, deliberately:
+      # SPOOF_PROTECTION maps an authenticated login to the sender it may use, agentd sends as
+      # `support@`, and making `support@` an alias of a separate `agentd@` account would change where
+      # inbound mail for support@ is DELIVERED as a side effect of a sender-authorisation change.
+      # The cost is real and bounded — that mailbox holds replies, bounces and DMARC reports, no
+      # credentials — and IMAPS is reachable only from the admin range in the security group.
+      #
+      # postmaster@, abuse@ and dmarc@ are aliases to it. They are not decoration: RFC 2142 requires
+      # the first two, receivers probe them, and dmarc@ is the address this domain publishes in its
+      # own DMARC record — publishing `rua=` at an address that does not exist generates a bounce to
+      # every reporting provider on the internet, daily.
+      #
+      # Idempotent: it writes nothing that is already there, so a restart never rotates a password
+      # out from under agentd.
+      initContainers:
+        - name: seed-accounts
+          image: ghcr.io/docker-mailserver/docker-mailserver:15.1.0@sha256:af51b15dd3fc72153c0e90eb7692bb5e3a463212d87959a80fa7aa89b617d44a
+          command: [/bin/bash, -c]
+          args:
+            - |
+              set -euo pipefail
+              cfg=/tmp/docker-mailserver
+              mkdir -p "$cfg"
+              acct="$cfg/postfix-accounts.cf"
+              virt="$cfg/postfix-virtual.cf"
+              touch "$acct" "$virt"
+
+              # The password never reaches argv: `doveadm pw` is given it on stdin via an env var
+              # expansion inside this shell, and this shell is not visible in any process listing
+              # with the value attached. `kubectl describe pod` shows the command, not the secret.
+              if ! grep -q "^${SUBMISSION_USER}|" "$acct"; then
+                hash="$(doveadm pw -s SHA512-CRYPT -p "$SUBMISSION_PASSWORD")"
+                printf '%s|%s\n' "$SUBMISSION_USER" "$hash" >> "$acct"
+                echo "seeded account ${SUBMISSION_USER}"
+              else
+                echo "account ${SUBMISSION_USER} already present — leaving it alone"
+              fi
+
+              # A second submission account, for the Opportunity Bridge service in
+              # the `opportunity-bridge` namespace.
+              #
+              # ⚠️ ITS OWN LOGIN, NOT A COPY OF THE FIRST. Sharing the support@
+              # credential would mean one rotation to coordinate across two
+              # deployments and no way to revoke one without breaking the other.
+              # It sends as its own address; SPOOF_PROTECTION binds it to that,
+              # which is why the other service's From is `jobs@` and its
+              # Reply-To carries `support@` instead. Making support@ an alias of
+              # this account would also change where inbound support@ mail is
+              # DELIVERED — the same trade the comment above declines.
+              #
+              # Optional and idempotent: with no password in the secret this
+              # block does nothing, and the pod is unchanged.
+              if [ -n "${JOBS_PASSWORD:-}" ] && ! grep -q "^${JOBS_USER}|" "$acct"; then
+                hash="$(doveadm pw -s SHA512-CRYPT -p "$JOBS_PASSWORD")"
+                printf '%s|%s\n' "$JOBS_USER" "$hash" >> "$acct"
+                echo "seeded account ${JOBS_USER}"
+              fi
+
+              for a in postmaster abuse dmarc; do
+                if ! grep -q "^${a}@heros-agent.space " "$virt"; then
+                  printf '%s@heros-agent.space %s\n' "$a" "$SUBMISSION_USER" >> "$virt"
+                  echo "aliased ${a}@ -> ${SUBMISSION_USER}"
+                fi
+              done
+              chmod 600 "$acct"
+          env:
+            - name: SUBMISSION_USER
+              valueFrom: { secretKeyRef: { name: heros-mail, key: submission-user } }
+            - name: SUBMISSION_PASSWORD
+              valueFrom: { secretKeyRef: { name: heros-mail, key: submission-password } }
+            - { name: JOBS_USER, value: jobs@heros-agent.space }
+            # `optional: true` so the relay still starts on a deployment with no second tenant; the
+            # seeding block above is a no-op when this is unset.
+            - name: JOBS_PASSWORD
+              valueFrom: { secretKeyRef: { name: heros-mail, key: jobs-password, optional: true } }
+          volumeMounts:
+            - { name: data, mountPath: /tmp/docker-mailserver, subPath: config }
+      containers:
+        - name: mail
+          image: ghcr.io/docker-mailserver/docker-mailserver:15.1.0@sha256:af51b15dd3fc72153c0e90eb7692bb5e3a463212d87959a80fa7aa89b617d44a
+          securityContext:
+            capabilities:
+              add: [NET_BIND_SERVICE, SYS_CHROOT, CHOWN, DAC_OVERRIDE, SETUID, SETGID, KILL, FOWNER, NET_RAW]
+              drop: [ALL]
+          ports:
+            - { name: smtp,       containerPort: 25 }
+            - { name: submission, containerPort: 587 }
+            - { name: imaps,      containerPort: 993 }
+          env:
+            # 🔴 The pod's hostname is a random Deployment suffix. Postfix derives its HELO name and
+            # the Message-ID domain from the hostname, and a HELO that does not resolve to the
+            # connecting address is one of the cheapest spam signals there is. This overrides it.
+            - { name: OVERRIDE_HOSTNAME, value: mail.heros-agent.space }
+            - { name: POSTMASTER_ADDRESS, value: postmaster@heros-agent.space }
+            # Smarthost. The relay's egress is the relay's problem; nothing here ever opens 25
+            # outbound, which is why this deployment needs no AWS port-25 removal. See
+            # deploy/mail/README.md §1 for the mode this corresponds to and what it costs.
+            - { name: RELAY_HOST, value: smtp.resend.com }
+            - { name: RELAY_PORT, value: "587" }
+            - name: RELAY_USER
+              valueFrom: { secretKeyRef: { name: heros-mail, key: relay-user } }
+            - name: RELAY_PASSWORD
+              valueFrom: { secretKeyRef: { name: heros-mail, key: relay-password } }
+            # cert-manager's Secret, mounted below. `manual` means "use these files"; the image's
+            # other SSL_TYPEs either self-sign or run their own ACME client, and both would duplicate
+            # what cert-manager is already doing for the two consoles.
+            - { name: SSL_TYPE, value: manual }
+            - { name: SSL_CERT_PATH, value: /tmp/dms/tls/tls.crt }
+            - { name: SSL_KEY_PATH,  value: /tmp/dms/tls/tls.key }
+            # 🔴 The equivalent of smtpd_sender_login_maps: an authenticated account may only put its
+            # OWN address in From. Without it the credential agentd carries could send as anybody at
+            # this domain, with our own DKIM signature on it.
+            - { name: SPOOF_PROTECTION, value: "1" }
+            - { name: ENABLE_OPENDKIM, value: "1" }
+            # ⚠️ OFF, deliberately. This relay sends four kinds of transactional message and receives
+            # bounces and reports. Antivirus and full spam-scanning are for a mailbox host with human
+            # correspondence; here they would cost about a gigabyte of RSS on a node also running
+            # Postgres and the platform, to scan mail nobody reads.
+            - { name: ENABLE_CLAMAV, value: "0" }
+            - { name: ENABLE_AMAVIS, value: "0" }
+            - { name: ENABLE_RSPAMD, value: "0" }
+            - { name: ENABLE_FAIL2BAN, value: "0" }
+            - { name: PERMIT_DOCKER, value: "none" }
+            - { name: LOG_LEVEL, value: "info" }
+          volumeMounts:
+            - { name: data, mountPath: /var/mail,       subPath: mail }
+            - { name: data, mountPath: /var/mail-state, subPath: state }
+            - { name: data, mountPath: /var/log/mail,   subPath: log }
+            - { name: data, mountPath: /tmp/docker-mailserver, subPath: config }
+            - { name: tls,  mountPath: /tmp/dms/tls, readOnly: true }
+          resources:
+            requests: { cpu: 100m, memory: 512Mi }
+            limits:   { memory: 1Gi }
+          livenessProbe:
+            exec:
+              command: [/bin/bash, -c, "supervisorctl status | grep -qE 'postfix.*RUNNING'"]
+            initialDelaySeconds: 60
+            periodSeconds: 30
+      volumes:
+        - name: data
+          persistentVolumeClaim: { claimName: mail-data }
+        - name: tls
+          secret: { secretName: mail-tls }
+---
+# ── NetworkPolicy ────────────────────────────────────────────────────────────────────────────────
+#
+# This namespace is default-deny in both directions, so every line below is load-bearing.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mail
+  labels:
+    app.kubernetes.io/name: mail
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: mail
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # Submission, from the named tenants and nothing else. A podSelector rather than an address: this is
+    # the whole reason the relay moved into the cluster.
+    #
+    # 🔴 Each entry ANDs its namespaceSelector with its podSelector by living in ONE list item. As two
+    # items they would be ORed — every pod in that namespace, plus every pod anywhere carrying the
+    # label. The two forms look identical in `kubectl get`.
+    #
+    # A tenant missing from this list does not fail at apply. It boots, serves, signs people in, and
+    # never delivers an invitation or a password reset.
+    - from:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: opportunity-bridge } }
+          podSelector: { matchLabels: { app.kubernetes.io/name: opportunity-bridge } }
+      ports: [{ protocol: TCP, port: 587 }]
+    - from:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: heros-eval } }
+          podSelector: { matchLabels: { app.kubernetes.io/name: heros-eval } }
+      ports: [{ protocol: TCP, port: 587 }]
+    # ⚠️ 25 and 993 arrive via k3s's svclb, which SNATs from outside the pod network, so there is no
+    # podSelector that describes the sender. Inbound 25 is genuinely from the whole internet — that is
+    # what an MX is — and 993 is narrowed at the EC2 security group instead, which is the only layer
+    # that can see the real source address.
+    - ports:
+        - { protocol: TCP, port: 25 }
+        - { protocol: TCP, port: 993 }
+  egress:
+    - to: [{ namespaceSelector: {}, podSelector: { matchLabels: { k8s-app: kube-dns } } }]
+      ports: [{ protocol: UDP, port: 53 }, { protocol: TCP, port: 53 }]
+    # The smarthost. 🔴 587 ONLY, and no port 25 egress rule anywhere in this policy — so if the
+    # relay configuration were ever lost, Postfix would fail to reach anything rather than silently
+    # falling back to delivering directly from an address with no rDNS, no SPF and no reputation.
+    # The refusal is the feature.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.169.254/32]
+      ports: [{ protocol: TCP, port: 587 }]

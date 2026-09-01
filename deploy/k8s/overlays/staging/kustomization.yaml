@@ -1,0 +1,37 @@
+# staging overlay — a real multi-node cluster mirroring prod's shape at smaller size. Differences from
+# base: staging-sized resources and a cloud SecretStore reached by an AMBIENT workload identity (no
+# bootstrap secret).
+#
+# 🔴 agentd's replica count is NOT patched here — it stays at the base's 1, for the reason recorded on
+# the base Deployment: its ledger is one SQLite file on a ReadWriteOnce claim, so a second replica is a
+# second database, not a second server. Staging mirroring prod's SHAPE is the point of this overlay, and
+# the shape now includes that.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# 🔴 namespace, and its absence was a real defect rather than a tidiness issue. The BASE sets
+# `namespace: heros`, but a kustomize namespace transformer only applies to the resources of the
+# kustomization that declares it — an overlay's own sibling files (secretstore.yaml here, plus
+# ingress.yaml under prod) inherit nothing. They therefore landed in `default`, where the SecretStore is
+# invisible to the ExternalSecrets in `heros` ("SecretStore heros-store not found") and an Ingress points
+# at Services that do not exist beside it. Both apply cleanly and neither says why.
+namespace: heros
+
+resources:
+  - ../../base
+  - secretstore.yaml
+
+patches:
+  - target: { kind: Deployment, name: agentd }
+    patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata: { name: agentd }
+      spec:
+        template:
+          spec:
+            containers:
+              - name: agentd
+                resources:
+                  requests: { cpu: "250m", memory: "256Mi" }
+                  limits: { cpu: "1", memory: "512Mi" }

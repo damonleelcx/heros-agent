@@ -1,0 +1,251 @@
+# prod overlay — the production deployment: **k3s on a single EC2 VM**, not EKS.
+#
+# ── Why not EKS, recorded here because the manifests look like they want it ──────────────────────────
+#
+# The EKS floor is $73/mo for the control plane plus ~$33/mo for the two ALBs Decision 5 requires — about
+# $106 before a single node, byte or database. The budget for this deployment is $100/mo all-in, so EKS
+# is not a sizing problem that a smaller nodegroup solves; it is excluded by its fixed costs. k3s was
+# chosen over Docker Compose at the same price because **Compose has no network segmentation at all**
+# (docker-compose.platform.yml declares no `networks:`; every container can reach every other one), which
+# would silently discard Decisions 3 and 4 — default-deny, the control/data-plane seam and the model-call
+# egress allowlist. k3s enforces NetworkPolicy out of the box via its embedded kube-router, so every
+# policy in the base is a runtime boundary here exactly as it is on EKS.
+#
+# AWS.md remains the EKS runbook and is still correct for that substrate. What differs here: Traefik +
+# cert-manager instead of two ALBs, no IRSA, and one node.
+#
+# ── What this overlay encodes ────────────────────────────────────────────────────────────────────────
+#
+# 🔴 THE APPLICATION THIS OVERLAY WAS WRITTEN FOR NO LONGER EXISTS HERE. agentd, the customer console
+# and the admin console were removed, along with the two public hostnames they served. What is left is
+# SHARED INFRASTRUCTURE for tenants that live in other namespaces: Postgres with its backup CronJob, and
+# the SMTP relay.
+#
+# That changes how to read this file. It is no longer "the production deployment of the platform"; it is
+# the deployment of the things several products depend on. A tenant's own manifests live with that
+# tenant — eval.heros-agent.space is on the rebuild/durable-agent branch under deploy/k8s, and
+# jobs.heros-agent.space is in its own repository. What stays here is only what a tenant cannot own: the
+# database server, its backups, the relay, and the ingress rules naming who may reach them.
+#
+# (a) POSTGRES IS IN-CLUSTER, as the base ships it — a single replica on its own volume, WITH the backup
+#     CronJob. That pairing is the point: Decision 6 permits the single point of failure only because the
+#     backup ships alongside it. (An earlier revision of this overlay used RDS; at $14–26/mo it did not
+#     survive the budget, and moving to RDS would have moved the backup obligation onto an RDS setting
+#     rather than onto something in this deploy.)
+#
+#     🔴 The backup CronJob's `for db in …` loop in the base is the register of which databases exist on
+#     this server. A database absent from it is unprotected behind a job that still reports OK.
+#
+# (b) THE FOUR PROVISIONED-AHEAD-OF-USE STORES ARE GONE — object store, queue, vector store, graph store.
+#     Nothing dials them. They are deleted by the patches below rather than removed from the base,
+#     because the base is also what an air-gapped customer renders.
+#
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# 🔴 namespace, and its absence was a real defect rather than a tidiness issue. The BASE sets
+# `namespace: heros`, but a kustomize namespace transformer only applies to the resources of the
+# kustomization that declares it — an overlay's own sibling files (secretstore.yaml here, plus
+# ingress.yaml under prod) inherit nothing. They therefore landed in `default`, where the SecretStore is
+# invisible to the ExternalSecrets in `heros` ("SecretStore heros-store not found") and an Ingress points
+# at Services that do not exist beside it. Both apply cleanly and neither says why.
+namespace: heros
+
+resources:
+  - ../../base
+  - secretstore.yaml
+  # The policy that lets cert-manager's ephemeral solver pods be reached at all. Without it the
+  - acme-solver-policy.yaml
+  # 🔴 STILL LISTED, AND THEN DELETED BY A PATCH BELOW. That looks redundant and is not.
+  #
+  # ingress.yaml is not merely "prod's Ingress". It is the only place in this repository that declares
+  # the platform's PUBLIC ROUTE SURFACE — which paths reach agentd, which are Exact rather than Prefix,
+  # which are deliberately never published — and NINE fences in internal/api read it to check that
+  # every route the CLI addresses is published, that no Prefix rule quietly publishes its siblings,
+  # and that both substrates publish the same set.
+  #
+  # Deleting the file removes those nine fences, which is not what "stop serving two hostnames" should
+  # cost. So the declaration stays and the OBJECTS are deleted, the same way the workloads above are:
+  # rendering produces no Ingress, and the route surface remains reviewable and fenced.
+  - ingress.yaml
+  - http-redirect.yaml
+  # This deployment's SMTP relay. Overlay-only on purpose: the base ships no mail server, because
+  # `internal/mailer`'s operator fallback is the honest default for an install that has none. See
+  # the file's header, and deploy/mail/README.md for the delivery reasoning behind it.
+  - mail.yaml
+  # ⚠️ `coredns-mail.yaml` DECLARES NO RESOURCES ANY MORE — it is a record of a fix that was wrong.
+  # A cluster-wide CoreDNS rewrite for `mail.heros-agent.space` kept SMTP traffic in the cluster and, in
+  # the same stroke, broke cert-manager's HTTP-01 self-check for that hostname — so no certificate was
+  # ever issued and the mail pod never started. Read that file before reaching for a DNS override again.
+  # The replacement is a per-pod `hostAliases` entry, which each tenant now sets in its own manifests.
+
+patches:
+  # ── The console platform, removed from THIS deployment ───────────────────────────────────────────
+  #
+  # 🔴 DELETED HERE RATHER THAN REMOVED FROM THE BASE, and the distinction is the whole point.
+  #
+  # The base is what EVERY substrate renders — Docker Compose, an air-gapped install, the release
+  # pipeline. Deleting agentd and the two consoles from it would not remove them from this cluster; it
+  # would discontinue them everywhere, which is a product decision and not a deployment one. What was
+  # asked for, and what this expresses, is that THIS deployment no longer runs them.
+  #
+  # The same mechanism the four unused stores already use, for the same reason: the base stays a
+  # complete description of the platform, and each overlay says what it does not run.
+  #
+  # Their two public hostnames go with them — see the note beside ingress.yaml in `resources` for why
+  # those two files stay in the tree while the objects they declare are deleted here.
+  #
+  # ⚠️ What remains in this namespace is INFRASTRUCTURE SHARED WITH OTHER NAMESPACES: Postgres with its
+  # backup CronJob, and the relay. Nothing below deletes those, and the patches after this block adjust
+  # them for a server whose clients are now all somewhere else.
+  - target: { kind: Deployment, name: "^(agentd|console|admin-console)$" }
+    patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata: { name: unused }
+      $patch: delete
+  - target: { kind: Service, name: "^(agentd|console|admin-console)$" }
+    patch: |
+      apiVersion: v1
+      kind: Service
+      metadata: { name: unused }
+      $patch: delete
+  # 🔴 And their PodDisruptionBudgets, which are the easiest of these to forget because nothing
+  # references them by name. A PDB whose selector matches no pod is not merely untidy: it blocks a
+  # voluntary node drain while protecting nothing, so the first time somebody tries to cordon this
+  # node for maintenance it refuses for the sake of a workload that was deleted months earlier.
+  - target: { kind: PodDisruptionBudget, name: "^(agentd|console|admin-console)$" }
+    patch: |
+      apiVersion: policy/v1
+      kind: PodDisruptionBudget
+      metadata: { name: unused }
+      $patch: delete
+  - target: { kind: CronJob, name: legal-retention }
+    patch: |
+      apiVersion: batch/v1
+      kind: CronJob
+      metadata: { name: unused }
+      $patch: delete
+  # agentd's ledger volume. Deleted with the workload; there is no other reader.
+  - target: { kind: PersistentVolumeClaim, name: agentd-ledger }
+    patch: |
+      apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata: { name: unused }
+      $patch: delete
+  # The two public hostnames. heros-agent.space and admin.heros-agent.space are no longer served.
+  - target: { kind: Ingress }
+    patch: |
+      apiVersion: networking.k8s.io/v1
+      kind: Ingress
+      metadata: { name: unused }
+      $patch: delete
+  # And the redirect middleware, whose only users were the two redirect Ingresses above.
+  - target: { kind: Middleware, name: redirect-https }
+    patch: |
+      apiVersion: traefik.io/v1alpha1
+      kind: Middleware
+      metadata: { name: unused }
+      $patch: delete
+  # 🔴 Their NetworkPolicies too. A policy selecting pods that do not exist is inert, but it is also a
+  # register of who is on this cluster, and a register that names the departed is one nobody trusts.
+  - target: { kind: NetworkPolicy, name: "^(agentd|console|admin-console|legal-retention)$" }
+    patch: |
+      apiVersion: networking.k8s.io/v1
+      kind: NetworkPolicy
+      metadata: { name: unused }
+      $patch: delete
+  # And their secrets. An ExternalSecret left behind syncs forever for a pod that will never read it.
+  - target: { kind: ExternalSecret, name: "^(heros-console|heros-admin-console)$" }
+    patch: |
+      apiVersion: external-secrets.io/v1
+      kind: ExternalSecret
+      metadata: { name: unused }
+      $patch: delete
+  # ── Postgres, now a shared server ────────────────────────────────────────────────────────────────
+  #
+  # 🔴 The ingress list is REPLACED, not appended to, so it names exactly the clients that exist on
+  # this deployment. The base's list includes agentd and legal-retention, which this overlay has just
+  # deleted; leaving them would leave the security-relevant register describing a cluster that is no
+  # longer this one.
+  - target: { kind: NetworkPolicy, name: postgres }
+    patch: |
+      apiVersion: networking.k8s.io/v1
+      kind: NetworkPolicy
+      metadata: { name: postgres }
+      spec:
+        ingress:
+          - from:
+              - podSelector: { matchLabels: { app.kubernetes.io/name: postgres-backup } }
+              - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: opportunity-bridge } }
+                podSelector: { matchLabels: { app.kubernetes.io/name: opportunity-bridge } }
+              - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: heros-eval } }
+                podSelector: { matchLabels: { app.kubernetes.io/name: heros-eval } }
+            ports: [{ protocol: TCP, port: 5432 }]
+  # 🔴 PGDATABASE names the MAINTENANCE database here, not a product's. It does not select what gets
+  # dumped — the CronJob's own loop does that — it only decides which database the connection opens
+  # against, and the `heros` database it names in the base was DROPPED from this instance with the
+  # platform that owned it.
+  #
+  # That did not break the job, which is why it is worth pinning down rather than leaving: `pg_isready`
+  # reports a server that answers, even when what it answers is "no such database", so the readiness
+  # gate stayed green over a name that no longer resolves. A variable that is wrong and harmless today
+  # is a variable that is wrong and load-bearing the first time something uses the default connection.
+  #
+  # The base keeps `heros`, correctly: on a substrate where the platform runs, that database exists.
+  - target: { kind: CronJob, name: postgres-backup }
+    patch: |
+      apiVersion: batch/v1
+      kind: CronJob
+      metadata: { name: postgres-backup }
+      spec:
+        jobTemplate:
+          spec:
+            template:
+              spec:
+                containers:
+                  # 🔴 `pg-backup`, the container's REAL name. A strategic merge keys `containers` by
+                  # `name`, so a name that does not match does not patch anything — it APPENDS a
+                  # second container with no image. That renders cleanly and is rejected only at
+                  # apply, which is how this exact line was wrong the first time it was written.
+                  - name: pg-backup
+                    env:
+                      - { name: PGDATABASE, value: postgres }
+                      # 🔴 `heros` is NOT in this list. That database was dropped from this instance
+                      # with the platform that owned it, and pg_dump of a database that does not exist
+                      # fails the job — so this is not tidiness, it is the difference between a nightly
+                      # backup that runs and one that errors every night at 03:17.
+                      #
+                      # Its final dump is on the backups volume as heros-FINAL-<ts>.dump. Being outside
+                      # this list it is also outside the 14-day prune, so it stays until removed by hand.
+                      - { name: BACKUP_DATABASES, value: "oba heros_eval" }
+  # The four stores this deployment does not run.
+  - target: { kind: StatefulSet, name: "^(objectstore|queue|vectorstore|graphstore)$" }
+    patch: |
+      apiVersion: apps/v1
+      kind: StatefulSet
+      metadata: { name: unused }
+      $patch: delete
+  - target: { kind: Service, name: "^(objectstore|queue|vectorstore|graphstore)$" }
+    patch: |
+      apiVersion: v1
+      kind: Service
+      metadata: { name: unused }
+      $patch: delete
+  # Their secrets go too. Each is referenced ONLY by a workload deleted above; `heros-platform` and
+  # `heros-postgres` stay. An ExternalSecret left behind would sit un-synced forever, reporting a fault
+  # for a pod that does not exist.
+  - target: { kind: ExternalSecret, name: "^(heros-objectstore|heros-graphstore)$" }
+    patch: |
+      apiVersion: external-secrets.io/v1
+      kind: ExternalSecret
+      metadata: { name: unused }
+      $patch: delete
+  # And their NetworkPolicies, which would otherwise select pods that no longer exist — inert, but a
+  # policy that appears to guard something absent is a lie an auditor has to disprove.
+  - target: { kind: NetworkPolicy, name: "^(objectstore|queue|vectorstore|graphstore)$" }
+    patch: |
+      apiVersion: networking.k8s.io/v1
+      kind: NetworkPolicy
+      metadata: { name: unused }
+      $patch: delete

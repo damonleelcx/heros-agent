@@ -1,0 +1,78 @@
+# The platform Kubernetes base (P19 kubernetes-delivery, Decision 1).
+#
+# A COMPLETE, applyable description of the platform — `kubectl kustomize base/` renders the whole thing,
+# and what it renders IS what applies. Kustomize over Helm precisely so the artifact you audit is the
+# artifact that runs (Decision 1): no values, no conditionals, no named templates hiding the manifest
+# behind indirection a private-deploy customer's security review cannot read.
+#
+# The overlays under ../overlays/{dev,staging,prod,airgapped} express ONLY their differences from this
+# base (replica counts, resource sizes, the secret backend, the egress target). This base references
+# nothing an overlay must supply EXCEPT secrets — which come from the operator's external store, never
+# from a committed manifest.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: heros
+
+resources:
+  - namespace.yaml
+  - agentd.yaml
+  - postgres.yaml
+  - objectstore.yaml
+  - queue.yaml
+  - vectorstore.yaml
+  - graphstore.yaml
+  - console.yaml
+  - admin-console.yaml
+  - legal-retention.yaml
+  - networkpolicy.yaml
+  - externalsecrets.yaml
+
+# 🔴 EVERY IMAGE PINNED BY DIGEST — the SAME digest set deploy/images.env gives Docker Compose (D2).
+# A CI check (scripts/deploy/check-image-parity.sh) fails the build if these digests diverge from
+# images.env, and scripts/deploy/check-digest-pins.sh fails if any of these is a floating tag. The
+# `newTag`-less `digest:` form is what makes an apply reproducible: the same digest is the same image.
+images:
+  # The platform's own three, built for linux/arm64 and pushed to this account's ECR.
+  #
+  # agentd is at b5175c4 (PRs #106, #107, #109, #110, #112, #113), the admin console at 125df81 (PR #105), and the
+  # customer console at 63a3a03. All three differ, and that is the pins working rather than drift: each names the tree
+  # its own bytes were built from, and repinning an image whose code did not change would make the pin
+  # stop meaning "the tree this was built from".
+  #
+  # 🔴 PR #105 moved agentd AND the admin console together because it spanned the wire — a field on the
+  # `/agent/spend` read model plus the editor rendering it — and shipping one half would have left the
+  # control with no options to offer. #106 and #107 are Go-only and touch no console, so only agentd
+  # moves; nothing since has touched the wire either. When one side of a wire field moves, both pins
+  # move; otherwise each moves on its own evidence.
+  #
+  # v0.22.0 moved all three at once for a third reason again: internal/api/install.go serves its install
+  # surface from distribution.DocumentedRelease, so a console-only push would leave the API answering an
+  # older version than the page showed.
+  #
+  # `newName` retargets the registry; the digest is the artifact. Both must match deploy/images.env
+  # exactly or check-image-parity.sh fails the build.
+  - name: ghcr.io/heros-foreal/agentd
+    newName: 373468206837.dkr.ecr.us-east-1.amazonaws.com/agentd
+    digest: sha256:e2e976c68cd700318ff52705bd89bb647b02c05175dd829714d87c8cedf5e4e4
+  - name: ghcr.io/heros-foreal/heros-console
+    newName: 373468206837.dkr.ecr.us-east-1.amazonaws.com/heros-console
+    digest: sha256:e882d793d83d442fbd1a39e7ff7fa1450ff6173105a7cd4b2cd4c30a027b751e
+  - name: ghcr.io/heros-foreal/heros-admin-console
+    newName: 373468206837.dkr.ecr.us-east-1.amazonaws.com/heros-admin-console
+    digest: sha256:ffc4e33b963208618744b45eb7e5a0086184c71fe39c25994a53cc24f0156a54
+  - name: postgres
+    digest: sha256:6efd0df010dc3cb40d5e33e3ef84acecc5e73161bd3df06029ee8698e5e12c60
+  - name: minio/minio
+    digest: sha256:0e0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f
+  - name: nats
+    digest: sha256:1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a
+  - name: qdrant/qdrant
+    digest: sha256:2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b
+  - name: neo4j
+    digest: sha256:3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c
+
+labels:
+  - includeSelectors: false
+    pairs:
+      app.kubernetes.io/part-of: heros-platform

@@ -1,0 +1,67 @@
+# Graph store — Neo4j. Stateful with a named claim; replicas:1 => no PDB required. The HTTP port :7474
+# is aggregated as `graph_store`.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: graphstore
+  labels:
+    app.kubernetes.io/name: graphstore
+    heros.dev/plane: data
+spec:
+  serviceName: graphstore
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: graphstore
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: graphstore
+        heros.dev/plane: data
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: neo4j
+          image: neo4j
+          ports:
+            - { name: http, containerPort: 7474 }
+            - { name: bolt, containerPort: 7687 }
+          env:
+            # NEO4J_AUTH is neo4j/<password>; the password comes from the ExternalSecret, never a
+            # committed plaintext Secret. The projected file is assembled into the env at start.
+            - name: NEO4J_AUTH
+              valueFrom: { secretKeyRef: { name: heros-graphstore, key: auth } }
+          readinessProbe:
+            httpGet: { path: /, port: http }
+            initialDelaySeconds: 20
+            periodSeconds: 15
+          livenessProbe:
+            httpGet: { path: /, port: http }
+            initialDelaySeconds: 20
+            periodSeconds: 15
+          resources:
+            requests: { cpu: "250m", memory: "512Mi" }
+            limits: { cpu: "1", memory: "1Gi" }
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: data, mountPath: /data }
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources: { requests: { storage: 10Gi } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: graphstore
+  labels: { app.kubernetes.io/name: graphstore }
+spec:
+  selector: { app.kubernetes.io/name: graphstore }
+  ports:
+    - { name: http, port: 7474, targetPort: http }
+    - { name: bolt, port: 7687, targetPort: bolt }

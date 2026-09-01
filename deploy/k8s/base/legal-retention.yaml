@@ -1,0 +1,81 @@
+# Consent-record retention (P23 task 9.7, P19 FR31).
+#
+# Retention is a legal obligation with a clock on it. Before this it existed only as a binary
+# (cmd/legalretention) that no deployment ran and no runbook mentioned, which satisfies nothing — a
+# retention policy nobody executes is a retention policy the deployment does not have.
+#
+# Two refusals are built into the job itself, and this manifest preserves both rather than configuring
+# around them:
+#
+#   • `-window 0` (the value below) makes the job report what it WOULD remove and remove nothing. The
+#     retention period is a LEGAL answer — seven years, per docs/decisions/p23-one-way-doors.md §1.4 —
+#     not an engineering default, and a job that invented one would delete the wrong things confidently.
+#     An overlay sets the real window once counsel has stated it.
+#   • `-apply` is absent, so every run is a dry run until an operator adds it deliberately. A deletion
+#     job whose first production run is also its first run ever is a defect waiting for a quiet weekend.
+#
+# The image is agentd's — one image set (Decision 2), second entrypoint. A separate image would be a
+# second digest, a second parity row, and a second thing to forget to publish.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: legal-retention
+  labels:
+    app.kubernetes.io/name: legal-retention
+    heros.dev/plane: control
+spec:
+  # Weekly. Retention is a boundary measured in years; running it hourly would add load and change
+  # nothing, and running it monthly would let a boundary sit crossed for weeks.
+  schedule: "23 4 * * 0"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  # Kept deliberately: a failed retention run is a compliance signal, and three of them in `kubectl get
+  # jobs` is the difference between noticing and not.
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 3600
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: legal-retention
+            heros.dev/plane: control
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            # 🔴 Same defect the Deployments had, and it is WORSE on a CronJob because it is
+            # invisible: the schedule fires, the pod cannot start, and it retries silently
+            # forever. This one failed 6,000+ times over 22 hours while `kubectl get cronjob`
+            # showed a healthy schedule. A job that never runs and a job that found nothing to
+            # do look identical from outside — which is exactly what the base's own
+            # NetworkPolicy comment warns about for this same workload.
+            # 65532 is the agentd image's distroless `nonroot`, the same uid agentd itself runs as.
+            runAsUser: 65532
+            runAsGroup: 65532
+            seccompProfile: { type: RuntimeDefault }
+          containers:
+            - name: legal-retention
+              image: ghcr.io/heros-foreal/agentd
+              command: ["/app/legalretention"]
+              args: ["-window", "0"]
+              env:
+                - name: DATABASE_URL
+                  valueFrom: { secretKeyRef: { name: heros-platform, key: database-url } }
+                # Same pair as agentd — see the note there on why the password may live apart from the DSN.
+                - name: PGUSER
+                  valueFrom: { secretKeyRef: { name: heros-platform, key: postgres-user, optional: true } }
+                - name: PGPASSWORD
+                  valueFrom: { secretKeyRef: { name: heros-platform, key: postgres-password, optional: true } }
+              resources:
+                requests: { cpu: "50m", memory: "64Mi" }
+                limits: { cpu: "500m", memory: "256Mi" }
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: { drop: ["ALL"] }
+              volumeMounts:
+                - { name: tmp, mountPath: /tmp }
+          volumes:
+            - { name: tmp, emptyDir: {} }
