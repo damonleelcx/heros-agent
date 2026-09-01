@@ -620,6 +620,32 @@ function renderProposal(t, r){
   card.querySelector('[data-decline]').onclick = () => decide(false);
 }
 
+
+/* ── finding a repository reference in a sentence ────────────────────────── */
+
+/* repoRef pulls a repository out of whatever was typed, or returns null.
+ *
+ * 🔴 Ordered most specific first, and deliberately CONSERVATIVE about the bare `owner/name` shorthand.
+ * That shape is also how people write file paths, fractions and dates, so it is accepted only when it
+ * is the entire message — exactly the rule that applied before. A full URL or a `github.com/...` is
+ * unambiguous, so that one is found anywhere in the sentence.
+ *
+ * A leading path (`./thing`, `~/thing`, `/thing`) likewise stays a whole-message rule: "look at /api
+ * and tell me what is weak" names a directory inside a question, and loading it as the subject would
+ * be answering a question nobody asked.
+ */
+function repoRef(text){
+  const url = text.match(/\bhttps?:\/\/github\.com\/([\w.-]+\/[\w.-]+?)(?:\.git)?(?=[\s,;)\]]|\/?$)/i);
+  if (url) return url[1];
+  const bare = text.match(/\bgithub\.com\/([\w.-]+\/[\w.-]+?)(?:\.git)?(?=[\s,;)\]]|\/?$)/i);
+  if (bare) return bare[1];
+  const only = text.trim();
+  if (/\s/.test(only)) return null;
+  if (/^[.~/]/.test(only)) return only;
+  if (/^[\w.-]+\/[\w.-]+$/.test(only)) return only;
+  return null;
+}
+
 /* ── input ───────────────────────────────────────────────────────────────── */
 
 let busy = false;
@@ -630,9 +656,18 @@ async function ask(text){
   const you = turn('you');
   you.appendChild(el(`<div class="ask">${esc(text)}</div>`));
 
-  // A bare path or a repo link loads a subject rather than asking a question.
-  if (/^[.~/]|^[\w.-]+\/[\w.-]+$|github\.com/.test(text) && !/\s/.test(text)) {
-    await loadSubject(text);
+  // A path or a repository link loads a subject rather than asking a question.
+  //
+  // 🔴 The reference is EXTRACTED from the sentence, not matched against the whole of it. This used to
+  // require the message to be nothing but the reference — `!/\s/.test(text)` — so pasting a link with
+  // any words around it fell through to /api/ask, which correctly abstained, and the person was shown
+  // the list of nineteen things none of which is "load this repository". The reference was right there
+  // in the message and the answer was "I cannot route that".
+  //
+  // Typing a sentence around a link is what people actually do, so the sentence is where we look.
+  const ref = repoRef(text);
+  if (ref) {
+    await loadSubject(ref);
     busy = false; send.disabled = false; input.focus();
     return;
   }

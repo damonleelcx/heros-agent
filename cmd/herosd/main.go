@@ -141,9 +141,9 @@ func main() {
 	cache, _ := os.UserCacheDir()
 	authStore := auth.NewStore(db)
 
-	// The worker is built AFTER the identity store, because its approval policy reads each organization's
-	// autonomy setting from it.
-	w := buildWorker(st.For(defaultTenant), reg, mem, plans, autonomy.Policy{Source: authStore})
+	// Workers are built inside SupervisorFor below, one per organization — but they are built AFTER the
+	// identity store either way, because a worker's approval policy reads each organization's autonomy
+	// setting from it.
 
 	// 🔴 Mail is resolved BEFORE the first request, and a half-configured relay stops the process. A
 	// relay with a missing credential accepts connections and delivers nothing, which is indistinguishable
@@ -173,7 +173,17 @@ func main() {
 	{
 		cfg := &api.Server{
 			Planners: plans,
-			Sup:      api.NewSupervisor(st.For(defaultTenant), w),
+			// 🔴 A supervisor PER ORGANIZATION, built on first use, each against its own slice of the
+			// store. A single one bound to a single organization was correct only while there was
+			// exactly one; with self-serve sign-up a goal would be written in the caller's scope and
+			// looked for in the boot organization's, and the run would silently never happen.
+			//
+			// The worker is built per organization too, and for the same reason: it reads and writes
+			// tasks through the scope it was constructed with.
+			SupervisorFor: func(tenant string) *api.Supervisor {
+				return api.NewSupervisor(st.For(tenant),
+					buildWorker(st.For(tenant), reg, mem, plans, autonomy.Policy{Source: authStore}))
+			},
 			Resolver: intake.NewResolver(filepath.Join(cache, "heros", "repos")),
 			Router:   router.New(),
 			Ceilings: bounds.Ceilings{
@@ -181,9 +191,8 @@ func main() {
 				MaxTokens: 400_000, MaxCostCents: 100, MaxWallClock: 20 * time.Minute, MaxSpawnDepth: 3,
 			},
 		}
-		srv.Planners, srv.Sup, srv.Resolver = cfg.Planners, cfg.Sup, cfg.Resolver
+		srv.Planners, srv.SupervisorFor, srv.Resolver = cfg.Planners, cfg.SupervisorFor, cfg.Resolver
 		srv.Router, srv.Ceilings = cfg.Router, cfg.Ceilings
-		srv.DefaultTenant = defaultTenant
 	}
 	srv.ToolRegistry = reg
 	srv.Provider = client

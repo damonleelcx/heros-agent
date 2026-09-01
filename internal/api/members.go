@@ -204,6 +204,16 @@ func writeAuthErr(w http.ResponseWriter, err error) {
 	case errors.Is(err, auth.ErrAlreadyMember), errors.Is(err, auth.ErrEmailTaken),
 		errors.Is(err, auth.ErrAlreadyVerified):
 		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+	case errors.Is(err, auth.ErrAccountElsewhere):
+		// 🔴 Written out rather than passed through, because this is the one error here whose remedy is
+		// not obvious from the fact. An address belongs to one organization now, so somebody invited
+		// into a second cannot accept — and the useful thing to tell them is what they can do about it,
+		// not that a constraint was violated.
+		writeJSON(w, http.StatusConflict, map[string]string{
+			"error": "That email address already has an account in another organization. An address can " +
+				"belong to one organization, so this invitation cannot be accepted with it. Use a " +
+				"different address, or leave the other organization first.",
+		})
 	case errors.Is(err, auth.ErrBadRole):
 		badRequest(w, err.Error())
 	case errors.Is(err, auth.ErrWeakPassword):

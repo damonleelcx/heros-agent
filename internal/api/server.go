@@ -36,7 +36,13 @@ type Server struct {
 	Root     store.Root
 	Auth     *auth.Store
 	Planners *planner.Registry
-	Sup      *Supervisor
+	// SupervisorFor builds the supervisor for one organization, against that organization's slice of
+	// the store. Supplied by the caller rather than constructed here, because building one needs a
+	// worker, which needs the tool registry and the approval policy — all of which are the daemon's to
+	// assemble. See supervisors.go for why there is one per organization rather than one per server.
+	SupervisorFor func(tenant string) *Supervisor
+	// sups caches them. Never read directly — use supFor, which builds on first use.
+	sups     supervisorSet
 	Resolver *intake.Resolver
 	Router   router.Router
 	Ceilings bounds.Ceilings
@@ -73,6 +79,9 @@ type Server struct {
 	// accounts with two passwords — keyed on the address alone, guessing at one customer's user would
 	// spend the budget of a different customer's user, which is one tenant degrading another.
 	LoginLimit *ratelimit.Limiter
+	// SignupLimit caps how often an organization can be created for one address. Its ceiling and the
+	// gap it does not close are documented beside the handler, in signup.go.
+	SignupLimit *ratelimit.Limiter
 	// AcceptLimit caps how hard one invitation can be redeemed, keyed on the TOKEN's hash.
 	//
 	// 🔴 It bounds hammering of a single valid invitation. It cannot bound a flood of INVENTED tokens,
@@ -143,6 +152,7 @@ func NewServer() *Server {
 		Approvals:    NewApprovals(),
 		ForgotLimit:  ratelimit.New(ForgotBurst, ForgotRefill, ForgotKeyCeiling),
 		LoginLimit:   ratelimit.New(LoginBurst, LoginRefill, LoginKeyCeiling),
+		SignupLimit:  ratelimit.New(SignupBurst, SignupRefill, SignupKeyCeiling),
 		AcceptLimit:  ratelimit.New(AcceptBurst, AcceptRefill, AcceptKeyCeiling),
 		ResendLimit:  ratelimit.New(ResendBurst, ResendRefill, ResendKeyCeiling),
 		RedeemLimit:  ratelimit.New(RedeemBurst, RedeemRefill, RedeemKeyCeiling),
@@ -222,9 +232,23 @@ const (
 	ConfirmKeyCeiling = 50_000
 )
 
-func loginKey(tenant, email string) string {
-	return tenant + "\x00" + auth.EmailKey(email)
-}
+// loginKey identifies the account a sign-in attempt is guessing at.
+//
+// # 🔴 The ADDRESS ALONE, since migration 0008 — and the organization must not be mixed back in
+//
+// It used to be organization + address, because the same address could name different accounts in
+// different organizations, and keying on the address alone would have let guessing at one customer's
+// user spend a different customer's user's budget.
+//
+// An address now identifies exactly one account across the whole deployment, so that reason is gone —
+// and including the organization actively creates a BYPASS. The organization arrives in the request
+// body and is optional: a caller who omits it gets one bucket, a caller who invents a value gets
+// another, and the same account can therefore be guessed at without limit by varying a field the
+// attacker controls and the account owner never sees.
+//
+// The rule: this key may only be built from values that identify the account, never from values the
+// caller supplies freely.
+func loginKey(email string) string { return auth.EmailKey(email) }
 
 // subjectFor returns the repository loaded by this tenant, if any.
 func (s *Server) subjectFor(tenant string) *subjectState {
@@ -703,7 +727,7 @@ func (s *Server) startGoal(w http.ResponseWriter, tenant string, spec intent.Spe
 	// 🔴 Driven with context.Background(), NOT the request's context. The request ends when the browser
 	// has its goal id; the run outlives it by design. Tying a durable goal's lifetime to one HTTP request
 	// is how a refresh cancels an hour of work.
-	s.Sup.Start(context.Background(), g.ID)
+	s.supFor(tenant).Start(context.Background(), g.ID)
 
 	writeJSON(w, http.StatusOK, askResp{
 		Kind: "goal", Intent: spec.Intent.String(), Tier: string(spec.Tier),
@@ -753,8 +777,9 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
 
-	ch := s.Sup.Subscribe(id)
-	defer s.Sup.Unsubscribe(id, ch)
+	sup := s.supFor(tenant)
+	ch := sup.Subscribe(id)
+	defer sup.Unsubscribe(id, ch)
 
 	// A heartbeat keeps intermediaries from closing an idle stream, and lets the browser tell "the run is
 	// quiet" from "the connection died" — which look identical without it.

@@ -93,9 +93,9 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unreadable request"})
 		return
 	}
-	if req.Tenant == "" {
-		req.Tenant = s.DefaultTenant
-	}
+	// 🔴 The organization is NOT defaulted. Since self-serve sign-up there is no "the" organization to
+	// default to, and an empty tenant tells the store to resolve it from the address (migration 0008
+	// makes that unambiguous). A request that names one explicitly is still honoured.
 
 	// 🔴 Spent BEFORE the lookup, and the limiter is told nothing about what the lookup found.
 	//
@@ -103,7 +103,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	// answers identically for a wrong password and an unknown address, in message and in timing; a limit
 	// that only counted attempts against accounts that EXIST would undo it, because then being refused at
 	// all would mean the address is real.
-	key := loginKey(req.Tenant, req.Email)
+	key := loginKey(req.Email)
 	if ok, wait := s.LoginLimit.Allow(key); !ok {
 		w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())))
 		writeJSON(w, http.StatusTooManyRequests, map[string]string{

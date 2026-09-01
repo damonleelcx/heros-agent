@@ -211,7 +211,7 @@ func (s *Server) decideTask(w http.ResponseWriter, tenant string, req decideReq)
 	// 🔴 The run is restarted explicitly. The worker that parked this task returned
 	// DidBlockedOnApproval and stopped polling — deliberately, so a goal waiting on a person does not
 	// look like a busy one. Something has to say the person answered, and that something is this.
-	s.Sup.Start(context.Background(), goal.ID(req.GoalID))
+	s.supFor(tenant).Start(context.Background(), goal.ID(req.GoalID))
 	writeJSON(w, http.StatusOK, decideResp{
 		Applied: true,
 		Message: fmt.Sprintf("Approved. %s is running again.", req.TaskID)})

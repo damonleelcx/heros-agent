@@ -12,6 +12,7 @@ import (
 
 	migrations "github.com/heros-foreal/heros/db/migrations"
 	"github.com/heros-foreal/heros/internal/tenancy"
+	"strings"
 )
 
 // TestEmailKeyMatchesHowTheDatabaseCompares.
@@ -35,21 +36,25 @@ func TestEmailKeyMatchesHowTheDatabaseCompares(t *testing.T) {
 		t.Fatalf("tenant: %v", err)
 	}
 	const password = "a-sufficiently-long-password"
-	stored := "Firstname.Lastname@Example.Test"
+	// 🔴 Unique per run, like the tenant above, and the uniqueness lives in the DOMAIN so that every
+	// spelling below stays an exact variant of this one address. Addresses are unique across the whole
+	// deployment since migration 0008; a fixed address here passes once and fails on every later run.
+	domain := fmt.Sprintf("Example%d.Test", time.Now().UnixNano())
+	stored := "Firstname.Lastname@" + domain
 	if _, err := s.CreateUser(ctx, tenant, stored, password, tenancy.Owner); err != nil {
 		t.Fatalf("user: %v", err)
 	}
 
 	for _, spelling := range []string{
 		stored,
-		"firstname.lastname@example.test",
-		"FIRSTNAME.LASTNAME@EXAMPLE.TEST",
-		"  Firstname.Lastname@Example.Test  ",
+		strings.ToLower(stored),
+		strings.ToUpper(stored),
+		"  " + stored + "  ",
 		// 🚫 A plus-suffix and a dotless local part are DIFFERENT people as far as this product is
 		// concerned — those normalisations belong to one mail provider, and applying them everywhere
 		// merges accounts that belong to different humans.
-		"firstname.lastname+work@example.test",
-		"firstnamelastname@example.test",
+		"firstname.lastname+work@" + strings.ToLower(domain),
+		"firstnamelastname@" + strings.ToLower(domain),
 	} {
 		_, _, loginErr := s.Login(ctx, tenant, spelling, password)
 		databaseSaysSamePerson := loginErr == nil

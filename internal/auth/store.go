@@ -23,6 +23,14 @@ var (
 	ErrNoSession  = errors.New("auth: no such session")
 	ErrExpired    = errors.New("auth: session has expired")
 	ErrEmailTaken = errors.New("auth: that email already exists in this organization")
+	// ErrAccountElsewhere means the address already has an account in a DIFFERENT organization.
+	//
+	// 🔴 A separate error from ErrAlreadyMember, which means "already in THIS organization". They read
+	// alike and are not: one person needs to sign in here, the other needs to know their address is
+	// spoken for somewhere they may not remember. Since migration 0008 an address belongs to exactly one
+	// organization, so this is the case an invitation now hits whenever the person already has an
+	// account anywhere.
+	ErrAccountElsewhere = errors.New("auth: that email already has an account in another organization")
 	// ErrBadRole means a role string is not one this build knows.
 	ErrBadRole = errors.New("auth: unknown role")
 	// ErrLastOwner means an operation would leave an organization with nobody who can administer it.
@@ -80,7 +88,12 @@ func (s *Store) CreateUser(ctx context.Context, tenant, email, password string, 
 		INSERT INTO users (id, tenant, email, password_hash, role, created_at) VALUES ($1,$2,$3,$4,$5,$6)`,
 		id, tenant, normalizeEmail(email), hash, string(role), time.Now().UTC())
 	if err != nil {
-		if strings.Contains(err.Error(), "users_email_per_tenant") {
+		// 🔴 BOTH address indexes, not just the per-organization one. Migration 0008 added a global
+		// unique index, and that is the one this collides with when somebody who already has an account
+		// is invited into another organization — the common case now. Matching only the old name
+		// returned the raw driver error to the caller, so an invited person saw a Postgres constraint
+		// message instead of being told the address is already in use.
+		if isDuplicateEmail(err) {
 			return "", ErrEmailTaken
 		}
 		return "", fmt.Errorf("auth: create user: %w", err)
@@ -100,10 +113,28 @@ var dummyHash, _ = HashPassword(context.Background(), "a-password-nobody-has-eve
 // the customer's browser.
 func (s *Store) Login(ctx context.Context, tenant, email, password string) (token string, p tenancy.Principal, err error) {
 	var userID, hash, role string
-	row := s.db.QueryRowContext(ctx,
-		`SELECT id, password_hash, role FROM users WHERE tenant = $1 AND lower(email) = lower($2)`,
-		tenant, normalizeEmail(email))
-	switch scanErr := row.Scan(&userID, &hash, &role); {
+
+	// 🔴 An EMPTY tenant means "resolve it from the address", which is what self-serve sign-up made
+	// necessary: anybody can create an organization, so a sign-in form carrying two fields cannot say
+	// which one it is for. Migration 0008 makes an address unique across the whole deployment, so this
+	// query returns one row or none — never an ambiguous set.
+	//
+	// 🔴 It is ONE query either way, and that is deliberate. The obvious shape — look the address up,
+	// then log in to whatever came back — reintroduces exactly the oracle the decoy below exists to
+	// deny: the lookup would answer "no such address" in microseconds, before any password work, and
+	// the constant-cost guarantee would hold only for addresses that exist. Resolving inside the same
+	// statement keeps both branches on the identical path.
+	//
+	// A non-empty tenant still pins the lookup, so an explicit organization is honoured and every
+	// existing caller behaves as it did.
+	query := `SELECT id, tenant, password_hash, role FROM users WHERE lower(email) = lower($1)`
+	args := []any{normalizeEmail(email)}
+	if tenant != "" {
+		query += ` AND tenant = $2`
+		args = append(args, tenant)
+	}
+	row := s.db.QueryRowContext(ctx, query, args...)
+	switch scanErr := row.Scan(&userID, &tenant, &hash, &role); {
 	case errors.Is(scanErr, sql.ErrNoRows):
 		// 🔴 The decoy's error is INSPECTED, not discarded, and only for ErrBusy.
 		//

@@ -44,6 +44,10 @@ var apiRoutes = []route{
 	// ── signing in, and the three ways in without a password ──────────────────────────────────────
 	{Method: "POST", Path: "/api/auth/login", Public: true,
 		Handler: func(s *Server) http.HandlerFunc { return s.handleLogin }},
+	// Self-serve sign-up: creates an organization and its first account. Public by necessity — the
+	// caller has no account yet, which is the point.
+	{Method: "POST", Path: "/api/auth/signup", Public: true,
+		Handler: func(s *Server) http.HandlerFunc { return s.handleSignup }},
 	{Method: "GET", Path: "/api/auth/status", Public: true,
 		Handler: func(s *Server) http.HandlerFunc { return s.handleAuthStatus }},
 	{Method: "POST", Path: "/api/auth/logout",

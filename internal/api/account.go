@@ -74,9 +74,9 @@ func (s *Server) handleForgotPassword(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, "unreadable request")
 		return
 	}
-	if req.Tenant == "" {
-		req.Tenant = s.DefaultTenant
-	}
+	// 🔴 The organization is NOT defaulted. Since self-serve sign-up there is no "the" organization to
+	// default to, and an empty tenant tells the store to resolve it from the address (migration 0008
+	// makes that unambiguous). A request that names one explicitly is still honoured.
 
 	// 🔴 The limit is consumed HERE — before the lookup, and told nothing about what the lookup finds.
 	//

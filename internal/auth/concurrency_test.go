@@ -214,7 +214,10 @@ func TestOverloadLooksTheSameForAKnownAndAnUnknownAddress(t *testing.T) {
 		t.Fatal(err)
 	}
 	const password = "a-sufficiently-long-password"
-	known := "known@example.test"
+	// 🔴 Unique per run, like the tenant above. Addresses are unique across the WHOLE deployment since
+	// migration 0008, so a fixed address makes this test pass once and fail for everybody afterwards —
+	// including on the next run on the same machine. The address is incidental to what is asserted here.
+	known := fmt.Sprintf("known-%d@example.test", time.Now().UnixNano())
 	if _, err := s.CreateUser(ctx, tenant, known, password, tenancy.Owner); err != nil {
 		t.Fatal(err)
 	}

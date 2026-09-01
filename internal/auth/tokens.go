@@ -267,10 +267,23 @@ func (s *Store) AcceptInvitation(ctx context.Context, token, password string) (
 			INSERT INTO users (id, tenant, email, password_hash, role, created_at, email_verified_at)
 			VALUES ($1,$2,$3,$4,$5,$6,$6)`, userID, tenant, email, hash, role, now)
 		if err != nil {
+			// 🔴 The two address indexes mean DIFFERENT things and must not be collapsed.
+			//
+			// users_email_per_tenant: this address is already in THIS organization — the person is
+			// already a member, and ErrAlreadyMember says so.
+			//
+			// users_email_global (migration 0008): this address has an account in a DIFFERENT
+			// organization. Reporting that as "already a member" would send somebody to look for an
+			// account in an organization they are not in. It is a genuinely different situation with a
+			// different remedy, and it is the one that appeared when addresses became globally unique.
+			//
+			// Either way the whole transaction rolls back, so the invitation stays unaccepted rather
+			// than being spent on an acceptance that did not happen.
 			if strings.Contains(err.Error(), "users_email_per_tenant") {
-				// The whole transaction rolls back, so the invitation stays unaccepted rather than being
-				// spent on an acceptance that did not happen.
 				return ErrAlreadyMember
+			}
+			if strings.Contains(err.Error(), "users_email_global") {
+				return ErrAccountElsewhere
 			}
 			return fmt.Errorf("auth: creating the invited account: %w", err)
 		}
@@ -304,11 +317,23 @@ func (s *Store) AcceptInvitation(ctx context.Context, token, password string) (
 func (s *Store) CreatePasswordReset(ctx context.Context, tenant, email string) (
 	token, toAddress, orgName string, err error) {
 
+	// 🔴 An EMPTY tenant resolves the organization from the address, exactly as Login does — and for the
+	// same reason. Since self-serve sign-up, the person typing their address into "forgotten password"
+	// cannot be assumed to be in the one organization this deployment used to have. Migration 0008
+	// makes the address unique across the deployment, so this returns one row or none.
+	//
+	// The caller's constant answer is unaffected: this still reports ErrNoSuchUser for an address that
+	// does not exist, and the endpoint still says the same sentence either way.
 	var userID string
-	err = s.db.QueryRowContext(ctx, `
-		SELECT u.id, u.email, t.name FROM users u JOIN tenants t ON t.id = u.tenant
-		WHERE u.tenant = $1 AND lower(u.email) = lower($2)`,
-		tenant, normalizeEmail(email)).Scan(&userID, &toAddress, &orgName)
+	query := `
+		SELECT u.id, u.tenant, u.email, t.name FROM users u JOIN tenants t ON t.id = u.tenant
+		WHERE lower(u.email) = lower($1)`
+	args := []any{normalizeEmail(email)}
+	if tenant != "" {
+		query += ` AND u.tenant = $2`
+		args = append(args, tenant)
+	}
+	err = s.db.QueryRowContext(ctx, query, args...).Scan(&userID, &tenant, &toAddress, &orgName)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", "", "", ErrNoSuchUser
 	}

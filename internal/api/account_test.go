@@ -664,11 +664,21 @@ func TestACorrectPasswordDoesNotSpendTheLoginBudget(t *testing.T) {
 
 // TestGuessingAtOneAccountDoesNotAffectAnother.
 //
-// Two axes at once, because the key has two halves. A different address in the same organization is a
-// different account, and — the one that is easy to get wrong — the SAME address in a different
-// organization is also a different account, with a different password. Keyed on the address alone,
-// guessing at one customer's user would spend a different customer's user's budget, which is one tenant
-// degrading another through an endpoint neither of them controls.
+// A different address is a different account, and its sign-in budget is its own: guessing at one must
+// not refuse another.
+//
+// ⚠️ THIS TEST USED TO HAVE A SECOND AXIS, and what happened to it is the point of this note. It also
+// asserted that the SAME address in a DIFFERENT organization was a different account with its own
+// budget — which was true while an address was unique only within an organization.
+//
+// Migration 0008 made an address unique across the whole deployment, so that scenario cannot be
+// constructed any more; the setup for it now fails on the unique index. The axis is not deleted
+// quietly — it is replaced below by an assertion that the situation is genuinely impossible, so that
+// if global uniqueness is ever dropped this test says what changed rather than silently covering less.
+//
+// The rate-limit key changed with it: it is now the address alone. Keeping the organization in the key
+// would have been a bypass, because the organization is an optional field in the request body that the
+// attacker chooses and the account owner never sees.
 func TestGuessingAtOneAccountDoesNotAffectAnother(t *testing.T) {
 	hz := newHarness(t)
 	_, _ = hz.user(t, tenancy.Owner)
@@ -677,14 +687,18 @@ func TestGuessingAtOneAccountDoesNotAffectAnother(t *testing.T) {
 		tenancy.Member); err != nil {
 		t.Fatal(err)
 	}
-	// A second organization holding the SAME address.
+	// 🔴 The same address in a second organization is now REFUSED, and that refusal is what makes the
+	// address a safe rate-limit key. If this ever stops being an error, the key must grow back the
+	// organization half and the axis removed from this test must come back with it.
 	other := "t-" + randSuffix()
 	if err := hz.Auth.CreateTenant(context.Background(), other, "Other"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := hz.Auth.CreateUser(context.Background(), other, victim, testPassword,
-		tenancy.Owner); err != nil {
-		t.Fatal(err)
+		tenancy.Owner); !errors.Is(err, auth.ErrEmailTaken) {
+		t.Fatalf("the same address was accepted into a second organization (%v).\n"+
+			"  An address must identify exactly one account for the sign-in rate limit to be keyed on "+
+			"it, and for sign-in to resolve an organization from it at all.", err)
 	}
 	bystander := "bystander-" + randSuffix() + "@example.test"
 	if _, err := hz.Auth.CreateUser(context.Background(), hz.tenant, bystander, testPassword,
@@ -702,8 +716,11 @@ func TestGuessingAtOneAccountDoesNotAffectAnother(t *testing.T) {
 		t.Errorf("guessing at one account refused a different one in the same organization: %d %s",
 			rec.Code, rec.Body.String())
 	}
-	if rec := hz.signInAttempt(t, other, victim, testPassword); rec.Code != http.StatusOK {
-		t.Errorf("guessing at an account in one organization refused the same address in another: %d %s",
+	// 🔴 And the limit cannot be shaken off by naming a different organization in the request. The
+	// budget belongs to the account, and the organization field is the caller's to invent.
+	if rec := hz.signInAttempt(t, other, victim, testPassword); rec.Code != http.StatusTooManyRequests {
+		t.Errorf("supplying a different organization gave the same account a fresh sign-in budget "+
+			"(%d %s).\n  That is a bypass: the field is chosen by whoever is guessing.",
 			rec.Code, rec.Body.String())
 	}
 }
