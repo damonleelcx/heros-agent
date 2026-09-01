@@ -123,11 +123,22 @@ type wireReq struct {
 	Temperature    *float64     `json:"temperature,omitempty"`
 	ResponseFormat *wireRespFmt `json:"response_format,omitempty"`
 	Stream         bool         `json:"stream"`
+	// Thinking is the documented toggle: {"thinking":{"type":"enabled"|"disabled"}}.
+	Thinking *wireThinking `json:"thinking,omitempty"`
+	// ReasoningEffort is only meaningful when thinking is enabled.
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+}
+
+type wireThinking struct {
+	Type string `json:"type"`
 }
 
 type wireMsg struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
+	// ReasoningContent is the chain of thought, returned beside Content when thinking is on. Read so the
+	// caller can see WHY a budget was consumed; never sent back.
+	ReasoningContent string `json:"reasoning_content,omitempty"`
 }
 
 type wireRespFmt struct {
@@ -145,6 +156,10 @@ type wireResp struct {
 		CompletionTokens     int64 `json:"completion_tokens"`
 		TotalTokens          int64 `json:"total_tokens"`
 		PromptCacheHitTokens int64 `json:"prompt_cache_hit_tokens"`
+		// CompletionTokensDetails carries the reasoning split when thinking is on.
+		CompletionTokensDetails struct {
+			ReasoningTokens int64 `json:"reasoning_tokens"`
+		} `json:"completion_tokens_details"`
 	} `json:"usage"`
 	Error *struct {
 		Message string `json:"message"`
@@ -166,8 +181,20 @@ func (c *Client) Complete(ctx context.Context, req provider.Request) (provider.R
 	for _, m := range req.Messages {
 		msgs = append(msgs, wireMsg{Role: m.Role, Content: m.Content})
 	}
-	body := wireReq{Model: req.Model, Messages: msgs, MaxTokens: req.MaxTokens,
-		Temperature: req.Temperature, Stream: false}
+	body := wireReq{Model: req.Model, Messages: msgs, MaxTokens: req.MaxTokens, Stream: false}
+
+	// 🔴 Thinking is enabled by default at HIGH effort, so it is always sent explicitly. Omitting the
+	// field is not neutral — it buys the expensive option.
+	if req.Reasoning == provider.NoReasoning {
+		body.Thinking = &wireThinking{Type: "disabled"}
+		// Temperature is only honoured with thinking off. The provider documents that it "will not
+		// trigger an error but will also have no effect" otherwise, so sending it in thinking mode would
+		// give a caller a determinism they did not get and no way to notice.
+		body.Temperature = req.Temperature
+	} else {
+		body.Thinking = &wireThinking{Type: "enabled"}
+		body.ReasoningEffort = string(req.Reasoning)
+	}
 	if req.JSONObject {
 		body.ResponseFormat = &wireRespFmt{Type: "json_object"}
 		// 🔴 DeepSeek rejects json_object unless the word "json" appears in the prompt. Enforced here
@@ -231,6 +258,7 @@ func (c *Client) Complete(ctx context.Context, req provider.Request) (provider.R
 		InputTokens:       out.Usage.PromptTokens,
 		OutputTokens:      out.Usage.CompletionTokens,
 		CachedInputTokens: out.Usage.PromptCacheHitTokens,
+		ReasoningTokens:   out.Usage.CompletionTokensDetails.ReasoningTokens,
 	}
 	// Price on the model that ANSWERED, not the one requested. An unknown model would price at zero,
 	// silently under-reporting spend, so it is an error instead.

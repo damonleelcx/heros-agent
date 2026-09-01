@@ -37,9 +37,54 @@ type Request struct {
 	// Temperature is a pointer so "unset" is distinguishable from "deliberately zero". Zero is a real,
 	// commonly-wanted value, and a plain float64 makes it indistinguishable from a forgotten field.
 	Temperature *float64
+	// Reasoning controls chain-of-thought.
+	//
+	// # 🔴 Why this has no usable zero value
+	//
+	// DeepSeek enables thinking BY DEFAULT at `high` effort. A caller who does not think about this
+	// silently buys a high-effort chain of thought on every call — billed as output tokens, at the output
+	// rate, consuming the output budget before a single character of the answer is written. That is
+	// exactly how a structured-extraction call that needs 80 tokens of JSON hits a 1,200-token ceiling
+	// and reports itself truncated.
+	//
+	// It also silently disables `temperature`: the provider documents that temperature, top_p,
+	// presence_penalty and frequency_penalty "will not trigger an error but will also have no effect" in
+	// thinking mode. So a caller setting temperature 0 for determinism gets neither the determinism nor
+	// an error saying why.
+	//
+	// So the empty value is REFUSED by ValidateRequest. Every call site has to state what it wants, the
+	// same way a ceiling has to be stated: a forgotten field must not silently buy the expensive option.
+	Reasoning Reasoning
 	// JSONObject asks the provider to constrain output to a JSON object. Not a substitute for parsing
 	// defensively — it is a hint that improves the odds, not a guarantee that changes them to one.
 	JSONObject bool
+}
+
+// Reasoning is how much chain-of-thought a call should do.
+type Reasoning string
+
+const (
+	// NoReasoning disables thinking. The right choice for structured extraction: the model is filling in
+	// a fixed shape from text it was given, not solving anything, and reasoning tokens here are pure cost
+	// against the output ceiling.
+	//
+	// It also makes `temperature` effective again, which is what makes a run reproducible.
+	NoReasoning Reasoning = "none"
+	// LowReasoning, HighReasoning and MaxReasoning enable thinking at increasing effort. Reasoning tokens
+	// are billed as OUTPUT and count against MaxTokens, so raising effort narrows the room left for the
+	// answer.
+	LowReasoning  Reasoning = "low"
+	HighReasoning Reasoning = "high"
+	MaxReasoning  Reasoning = "max"
+)
+
+// Valid reports membership of the closed set.
+func (r Reasoning) Valid() bool {
+	switch r {
+	case NoReasoning, LowReasoning, HighReasoning, MaxReasoning:
+		return true
+	}
+	return false
 }
 
 // Usage is what a call actually consumed, as reported by the provider.
@@ -50,6 +95,13 @@ type Usage struct {
 	// separately because it is priced differently, and folding it into InputTokens would overstate cost
 	// by the cache discount on every cached call.
 	CachedInputTokens int64
+	// ReasoningTokens is the part of OutputTokens spent on chain-of-thought.
+	//
+	// 🔴 Reported separately although it is billed identically, because it answers a question the total
+	// cannot: "did this call spend its budget thinking or answering?" A truncated response with 900
+	// reasoning tokens and 60 of answer needs thinking turned down, not a bigger ceiling — and those two
+	// fixes are indistinguishable from the total alone.
+	ReasoningTokens int64
 }
 
 // Total is every token the call touched.
@@ -181,6 +233,12 @@ func ValidateRequest(r Request) error {
 	if r.MaxTokens <= 0 {
 		return fmt.Errorf("%w: MaxTokens is %d — a completion with no output bound is an unbounded "+
 			"spend inside a single call, which no outer ceiling can interrupt", ErrBudget, r.MaxTokens)
+	}
+	if !r.Reasoning.Valid() {
+		return fmt.Errorf("%w: Reasoning is %q — the provider enables thinking by default at high "+
+			"effort, so leaving this unset silently buys chain-of-thought that is billed as output and "+
+			"consumes MaxTokens before the answer starts. State one of: none, low, high, max",
+			ErrBudget, r.Reasoning)
 	}
 	return nil
 }

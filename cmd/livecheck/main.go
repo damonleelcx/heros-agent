@@ -112,7 +112,7 @@ func main() {
 	reg := toolcontract.NewRegistry()
 	if err := reg.Register(tools.AssessAxis{
 		Provider: client, Model: deepseek.ModelFlash,
-		Source: corpus, MaxTokens: 1200,
+		Source: discovery.NewIndex(corpus),
 	}, nil); err != nil {
 		die("register", err)
 	}

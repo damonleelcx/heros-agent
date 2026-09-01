@@ -188,6 +188,29 @@ claim that a customer's agent has no memory strategy. `TestTheLiteralGateChanges
 `TestTheCallSiteGateChangesNothing` run every pattern with the gate on and off over a real
 2,541-file repository and assert the results are identical.
 
+### [x] P19 · Truncation, and the default nobody chose
+Three axes truncated on every real repository and none on fixtures. It was never a budgeting problem.
+
+The provider enables chain-of-thought **by default, at `high` effort**. Reasoning tokens are billed as
+output and consume `MaxTokens` before the answer begins — measured on a real excerpt: **243 of 296
+output tokens were reasoning, leaving 53 for the answer.** Raising the ceiling would have bought more
+thinking, not more answer.
+
+Thinking mode also silently disables `temperature`: the provider documents that it "will not trigger an
+error but will also have no effect". Every call had been setting temperature 0 for determinism and
+getting neither the determinism nor an error.
+
+`provider.Reasoning` now has **no usable zero value** — `ValidateRequest` refuses an unset one, the same
+way it refuses an unset ceiling. A forgotten field must not silently buy the expensive option.
+
+Per-axis budgets are measured (50–120 output tokens for the fixed reply shape, budgeted at ~4x) and
+**escalate with the attempt number**, because a retry that repeats an identical request is not a retry.
+Two escalations, then a failure that says the budget was raised and still ran out — a different report
+from "it truncated", and the one that says the prompt is wrong rather than the number.
+
+Same repository, before and after: 12 model calls → **9**; 22,750 tokens → **9,244**; $0.0085 →
+**$0.0045**; 2m8s → **15.3s**; 6 of 9 axes assessed → **9 of 9**.
+
 ## !!! Not started, and deliberately so
 
 ### [ ] P11 · Tier-A `compare` execution
@@ -243,12 +266,37 @@ claim that a customer's agent has no memory strategy. `TestTheLiteralGateChanges
 `TestTheCallSiteGateChangesNothing` run every pattern with the gate on and off over a real
 2,541-file repository and assert the results are identical.
 
+### [x] P19 · Truncation, and the default nobody chose
+Three axes truncated on every real repository and none on fixtures. It was never a budgeting problem.
+
+The provider enables chain-of-thought **by default, at `high` effort**. Reasoning tokens are billed as
+output and consume `MaxTokens` before the answer begins — measured on a real excerpt: **243 of 296
+output tokens were reasoning, leaving 53 for the answer.** Raising the ceiling would have bought more
+thinking, not more answer.
+
+Thinking mode also silently disables `temperature`: the provider documents that it "will not trigger an
+error but will also have no effect". Every call had been setting temperature 0 for determinism and
+getting neither the determinism nor an error.
+
+`provider.Reasoning` now has **no usable zero value** — `ValidateRequest` refuses an unset one, the same
+way it refuses an unset ceiling. A forgotten field must not silently buy the expensive option.
+
+Per-axis budgets are measured (50–120 output tokens for the fixed reply shape, budgeted at ~4x) and
+**escalate with the attempt number**, because a retry that repeats an identical request is not a retry.
+Two escalations, then a failure that says the budget was raised and still ran out — a different report
+from "it truncated", and the one that says the prompt is wrong rather than the number.
+
+Same repository, before and after: 12 model calls → **9**; 22,750 tokens → **9,244**; $0.0085 →
+**$0.0045**; 2m8s → **15.3s**; 6 of 9 axes assessed → **9 of 9**.
+
 ## !!! Not started, and deliberately so
 
 - **Discovery is heuristic, not a parser.** It finds candidate evidence by pattern, so a false positive
   is cheap (the model discards it) and a false negative is expensive (the axis reports absence). Python,
   TypeScript, JavaScript and Go only. Every report states that it shows what was found, not everything
   that exists.
+- **`synthesise_assessment` has no tool.** The nine axis tasks succeed and the synthesis that joins them
+  fails with "no tool registered for this kind". The DAG shape is right; the tool is not written.
 - **Tier-C effect intents are routed but not built.** `author`, `prompt`, `model` and `deliver` return a
   refusal naming why, rather than a generic failure.
 - **`internal/memory` is written and untested.** The four classes and the promotion rules compile; there
