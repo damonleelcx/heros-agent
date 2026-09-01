@@ -258,11 +258,26 @@ func acquire(ctx context.Context) (release func(), err error) {
 	}
 	select {
 	case g.slots <- struct{}{}:
+		hashesRun.Add(1)
 		return func() { <-g.slots }, nil
 	case <-ctx.Done():
 		return nil, fmt.Errorf("%w: waited %s for one of %d slots", ErrBusy, wait, cap(g.slots))
 	}
 }
+
+// hashesRun counts argon2id computations that actually started.
+//
+// Counted at the gate rather than at the call, so it means "this much 64 MiB work happened" and not
+// "this many callers asked" — a request shed before it got a slot did none.
+var hashesRun atomic.Uint64
+
+// HashesRun reports how many argon2id computations this process has performed.
+//
+// The number an operator wants when deciding whether the ceiling is the right one: hashes per second
+// against the ceiling says whether the server is saturated or idle. It also lets a test assert that a
+// code path did NOT hash — which is the whole claim of checking a token before spending 64 MiB on it,
+// and is not a claim that can be made by timing.
+func HashesRun() uint64 { return hashesRun.Load() }
 
 // MaxWait reports how long a request will queue before being shed, for a startup banner.
 func MaxWait() time.Duration { return maxWait }

@@ -845,3 +845,167 @@ func TestAShedAttemptIsNotChargedToTheLoginBudget(t *testing.T) {
 		t.Fatalf("the budget did not run out where expected: %d", rec.Code)
 	}
 }
+
+// ── limits on redeeming an invitation and on confirmation mail ───────────────────────────────────
+
+// TestAnInvitationCannotBeHammered.
+//
+// 🚫 And the limit it is NOT: an attacker sending invented tokens gets a fresh key and a fresh budget for
+// every one, so this bounds abuse of a single valid invitation and nothing else. What closes the flood of
+// invented tokens is that the store rejects a token before it hashes a password — see
+// TestAGarbageInvitationTokenCostsNoArgon2id.
+func TestAnInvitationCannotBeHammered(t *testing.T) {
+	hz := newHarness(t)
+	owner, _ := hz.user(t, tenancy.Owner)
+	token := hz.invite(t, owner, "hammered-"+randSuffix()+"@example.test", tenancy.Member)
+
+	// Wrong passwords: the token stays live, and each attempt is charged.
+	body := `{"token":"` + token + `","password":"short"}`
+	for i := range AcceptBurst {
+		rec := hz.do(t, "POST", "/api/auth/invitation/accept", body, nil)
+		if rec.Code == http.StatusTooManyRequests {
+			t.Fatalf("attempt %d was rate-limited inside the burst", i+1)
+		}
+	}
+	rec := hz.do(t, "POST", "/api/auth/invitation/accept", body, nil)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("attempt %d answered %d, not 429", AcceptBurst+1, rec.Code)
+	}
+	if ra := rec.Header().Get("Retry-After"); ra == "" || ra == "0" {
+		t.Errorf("Retry-After is %q", ra)
+	}
+	// 🔴 The refusal must not suggest the invitation is spent — it is not, and telling somebody their
+	// link is dead sends them to ask for a replacement they do not need.
+	if msg, _ := decode(t, rec)["error"].(string); !strings.Contains(msg, "not been used up") {
+		t.Errorf("the refusal does not say the link is still good: %q", msg)
+	}
+}
+
+// TestOneInvitationBeingHammeredDoesNotBlockAnother.
+func TestOneInvitationBeingHammeredDoesNotBlockAnother(t *testing.T) {
+	hz := newHarness(t)
+	owner, _ := hz.user(t, tenancy.Owner)
+	hammered := hz.invite(t, owner, "busy-"+randSuffix()+"@example.test", tenancy.Member)
+	quiet := hz.invite(t, owner, "quiet-"+randSuffix()+"@example.test", tenancy.Member)
+
+	for range AcceptBurst + 3 {
+		hz.do(t, "POST", "/api/auth/invitation/accept",
+			`{"token":"`+hammered+`","password":"short"}`, nil)
+	}
+	rec := hz.do(t, "POST", "/api/auth/invitation/accept",
+		`{"token":"`+quiet+`","password":"`+testPassword+`"}`, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("hammering one invitation blocked a different one: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestAGarbageInvitationTokenCostsNoArgon2id.
+//
+// # 🔴 The exposure a rate limit could never close
+//
+// This endpoint is unauthenticated, and it used to hash the password before looking at the token — so any
+// garbage string cost a full argon2id, 64 MiB and tens of milliseconds, before anything checked it. That
+// is the cheapest possible way to occupy every hashing slot the server has and starve real sign-ins, and
+// no limit keyed on the token can stop it, because the attacker picks a new token every time.
+//
+// The check is the fix. This asserts it by holding every hashing slot: with the token checked first, a
+// garbage token is still rejected as a bad link; if the password were hashed first, it would be shed as
+// "server busy" instead — a different answer, and 64 MiB it should never have asked for.
+func TestAGarbageInvitationTokenCostsNoArgon2id(t *testing.T) {
+	hz := newHarness(t)
+	owner, _ := hz.user(t, tenancy.Owner)
+	real := hz.invite(t, owner, "real-"+randSuffix()+"@example.test", tenancy.Member)
+
+	// ⚠️ Counted, not timed and not inferred from saturating the gate. The first version of this test
+	// held the ceiling at one slot and hammered it from a goroutine, expecting a garbage token to be shed
+	// if it reached argon2id — and it passed against the ordering it was supposed to catch, because the
+	// hammering goroutine releases its slot between calls and the request slipped through a gap. A fence
+	// built on "probably contended" is a fence that reports whatever the scheduler felt like.
+	before := auth.HashesRun()
+	rec := hz.do(t, "POST", "/api/auth/invitation/accept",
+		`{"token":"not-a-real-token-at-all","password":"`+testPassword+`"}`, nil)
+	if rec.Code != http.StatusGone {
+		t.Fatalf("a garbage token answered %d, want 410: %s", rec.Code, rec.Body.String())
+	}
+	if n := auth.HashesRun() - before; n != 0 {
+		t.Fatalf("a garbage token ran %d argon2id computation(s). The password is being hashed before the "+
+			"token is checked, so any string an attacker sends costs 64 MiB and a hashing slot — and no "+
+			"rate limit can close that, because they pick a fresh token every time", n)
+	}
+
+	// And the control: a REAL token does hash, or the test above would pass on a handler that never
+	// hashes anything at all.
+	before = auth.HashesRun()
+	if rec := hz.do(t, "POST", "/api/auth/invitation/accept",
+		`{"token":"`+real+`","password":"`+testPassword+`"}`, nil); rec.Code != http.StatusOK {
+		t.Fatalf("a real invitation was refused: %d %s", rec.Code, rec.Body.String())
+	}
+	if n := auth.HashesRun() - before; n == 0 {
+		t.Fatal("accepting a real invitation ran no argon2id at all; the counter is not measuring what " +
+			"this test claims it measures")
+	}
+}
+
+// TestConfirmationMailCannotBeAskedForRepeatedly.
+func TestConfirmationMailCannotBeAskedForRepeatedly(t *testing.T) {
+	hz := newHarness(t)
+	owner, _ := hz.user(t, tenancy.Owner)
+
+	for i := range VerifyBurst {
+		if rec := hz.do(t, "POST", "/api/auth/email/resend", `{}`, owner); rec.Code != http.StatusOK {
+			t.Fatalf("request %d of the burst answered %d: %s", i+1, rec.Code, rec.Body.String())
+		}
+	}
+	before := hz.mail.count()
+	rec := hz.do(t, "POST", "/api/auth/email/resend", `{}`, owner)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("request %d answered %d, not 429", VerifyBurst+1, rec.Code)
+	}
+	if hz.mail.count() != before {
+		t.Errorf("a rate-limited request still sent mail: %d became %d", before, hz.mail.count())
+	}
+	if ra := rec.Header().Get("Retry-After"); ra == "" || ra == "0" {
+		t.Errorf("Retry-After is %q", ra)
+	}
+}
+
+// TestOneAddressAskingForConfirmationDoesNotBlockAnother.
+func TestOneAddressAskingForConfirmationDoesNotBlockAnother(t *testing.T) {
+	hz := newHarness(t)
+	owner, _ := hz.user(t, tenancy.Owner)
+	other, _ := hz.user(t, tenancy.Admin)
+
+	for range VerifyBurst + 3 {
+		hz.do(t, "POST", "/api/auth/email/resend", `{}`, owner)
+	}
+	if rec := hz.do(t, "POST", "/api/auth/email/resend", `{}`, other); rec.Code != http.StatusOK {
+		t.Fatalf("one member exhausting their confirmation budget blocked another: %d %s",
+			rec.Code, rec.Body.String())
+	}
+}
+
+// TestConfirmationAndResetHaveSeparateBudgets.
+//
+// Stated as a test because it is a design decision that could reasonably have gone the other way: one
+// bucket per address would model the inbox more exactly, and would also mean somebody who asked for three
+// password resets could not then confirm their address. Two unrelated journeys, tangled for a ceiling
+// nobody was near. The cost of separating them is that the mail this deployment will send to one address
+// is the SUM of the two budgets, which is what this pins down.
+func TestConfirmationAndResetHaveSeparateBudgets(t *testing.T) {
+	hz := newHarness(t)
+	owner, _ := hz.user(t, tenancy.Owner)
+	me := decode(t, hz.do(t, "GET", "/api/auth/status", "", owner))["email"].(string)
+
+	for range VerifyBurst {
+		hz.do(t, "POST", "/api/auth/email/resend", `{}`, owner)
+	}
+	if rec := hz.do(t, "POST", "/api/auth/email/resend", `{}`, owner); rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("the confirmation budget is not exhausted: %d", rec.Code)
+	}
+	// The reset budget for the SAME address is untouched.
+	rec := hz.do(t, "POST", "/api/auth/password/forgot", `{"email":"`+me+`"}`, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("exhausting the confirmation budget also exhausted the password-reset budget for the "+
+			"same address: %d %s", rec.Code, rec.Body.String())
+	}
+}

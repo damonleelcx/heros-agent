@@ -953,7 +953,13 @@ function acceptInvitationCard(token){
         note(body, `Welcome to ${inv.org_name}.`, 'ok');
         await refreshMe();
         start();
-      } catch (e) { msg.style.color = 'var(--bad)'; msg.textContent = e.message; }
+      } catch (e) {
+        // A refusal here is two sentences saying the link is still good — it must be readable, or
+        // somebody goes and asks for a replacement invitation they do not need.
+        msg.textContent = '';
+        body.querySelectorAll('.said-error').forEach(n => n.remove());
+        note(body, e.message, 'bad').classList.add('said-error');
+      }
     };
     form.querySelector('#go').onclick = go;
     form.querySelector('#np').onkeydown = e => { if (e.key === 'Enter') go(); };
@@ -1057,7 +1063,12 @@ function unconfirmedBanner(){
       const r = await api('/api/auth/email/resend', {});
       card.querySelector('.card-body').innerHTML = '';
       note(card.querySelector('.card-body'), r.status, 'ok');
-    } catch (e) { msg.style.color = 'var(--bad)'; msg.textContent = e.message; }
+    } catch (e) {
+      msg.textContent = '';
+      const b = card.querySelector('.card-body');
+      b.querySelectorAll('.said-error').forEach(n => n.remove());
+      note(b, e.message, 'bad').classList.add('said-error');
+    }
   };
 }
 

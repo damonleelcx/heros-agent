@@ -62,15 +62,20 @@ log file.
 
 ### Rate limits
 
-| | |
-|---|---|
-| `POST /api/auth/password/forgot` | **3 per address**, then one every 20 minutes. |
-| `POST /api/auth/login` | **10 wrong passwords per account**, then one a minute. A correct password costs nothing. |
+| | | |
+|---|---|---|
+| `POST /api/auth/password/forgot` | per address | **3**, then one every 20 minutes |
+| `POST /api/auth/login` | per account (organization + address) | **10 wrong passwords**, then one a minute. A correct password costs nothing. |
+| `POST /api/auth/invitation/accept` | per invitation | **5**, then one a minute |
+| `POST /api/auth/email/resend` | per address | **3**, then one every 20 minutes |
 
-Both answer `429` with a `Retry-After`, and both spend the budget **before** looking anything up — so a
-real address and an invented one are limited on the same schedule. A limit that applied only where an
+All answer `429` with a `Retry-After`. The first two spend the budget **before** looking anything up — so
+a real address and an invented one are limited on the same schedule. A limit that applied only where an
 account exists would turn `429`-versus-`200` into an answer to "does this person have an account here",
-which is the one question these endpoints are built to refuse.
+which is the one question those endpoints are built to refuse.
+
+Confirmation mail and password resets have **separate** budgets, so the most this deployment will send to
+one address is the sum: six an hour.
 
 They are keyed differently on purpose. A reset flood damages an **inbox**, and an inbox is one mailbox
 however many organizations write to it, so that limit is keyed on the address alone. A sign-in guesses at
@@ -82,6 +87,11 @@ weapon: fail to sign in as somebody often enough and they cannot sign in either.
 account unblockable — an attacker holding the budget at zero still gets the owner refused — but it
 removes the accumulation, so the owner gets in after some retries rather than waiting for somebody to
 intervene.
+
+⚠️ **The invitation limit bounds abuse of one invitation, not a flood of invented tokens** — each invented
+token is a fresh key with a fresh budget, so no limit keyed on the token can close that. What closes it is
+that the store checks the token before it hashes a password, so a garbage string costs an indexed lookup
+instead of 64 MiB and a hashing slot.
 
 Both limits are held in memory: with several replicas each keeps its own buckets, so the real ceiling is
 that number times the replica count. Nothing is limited per caller — see the implementation plan for why

@@ -211,7 +211,16 @@ func newToken() (token, id string) {
 }
 
 // tokenID is the SHA-256 of a token. What the database stores.
-func tokenID(token string) string {
+func tokenID(token string) string { return TokenKey(token) }
+
+// TokenKey is the SHA-256 of a token, hex encoded — the form this package stores and looks up by.
+//
+// 🔴 Exported so that anything outside this package needing to key on a token (a rate limiter, a log
+// line) keys on the same value the database does, and never on the raw token. A map key lives for as
+// long as the map does, and a raw invitation or reset token sitting in a long-lived map is a credential
+// kept somewhere nobody decided to keep it. The hash identifies the token exactly as well and is worth
+// nothing to whoever reads it.
+func TokenKey(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(sum[:])
 }

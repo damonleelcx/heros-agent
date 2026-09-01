@@ -485,6 +485,39 @@ One interaction, deliberate and stated: a token is held for the duration of a ve
 ten verifications for one account are ever in flight, which is the intended reading; it needs eleven
 sign-ins inside fifty milliseconds to notice.
 
+### [x] P29 · Limits on redeeming an invitation and on confirmation mail
+**Two endpoints, two shapes, and only one of them is really a rate-limiting problem.**
+
+`email/resend` is the straightforward one: keyed on the ADDRESS, like the password-reset limit and for
+the same reason — an inbox is what fills up. Not on the account, even though the endpoint is
+authenticated and the two are the same thing today: if an address ever becomes changeable, keying on the
+account would let somebody walk a full budget from one inbox to the next. Separate bucket from the reset
+limit, so the mail this deployment will send to one address is the sum of the two — stated in a test,
+because sharing one bucket would model the inbox more exactly and would also mean somebody who asked for
+three password resets could not then confirm their address.
+
+`invitation/accept` is the interesting one, because **a rate limit there cannot close the actual
+exposure**. The only thing to key on is the token, and an attacker varies the token, so every request
+arrives with a fresh budget. The limit is still worth having — it bounds hammering of one valid
+invitation — but the real hole was elsewhere: the handler hashed the password BEFORE looking at the
+token, so any garbage string cost a full argon2id, 64 MiB and tens of milliseconds, on an unauthenticated
+endpoint. That is the cheapest possible way to occupy every hashing slot the server has and starve real
+sign-ins.
+
+🔴 So the store now checks the token first. 🚫 That lookup is **not** authoritative and must not become
+so — the conditional UPDATE inside the transaction is still what decides, atomically, whether an
+acceptance happens. The check buys only that known-bad input is rejected for the price of an indexed
+lookup.
+
+⚠️ **The fence for that could not fire, and had to be rebuilt.** It held the argon2id ceiling at one slot
+and hammered it from a goroutine, expecting a garbage token to be shed if it reached argon2id — and it
+passed against the exact ordering it existed to catch, because the hammering goroutine releases its slot
+between calls and the request slipped through a gap. A fence built on "probably contended" reports
+whatever the scheduler felt like. Replaced with a counter of argon2id computations actually started
+(`auth.HashesRun`, useful in its own right for deciding whether the ceiling is the right one), which
+makes the claim directly: this path ran zero. Observed red, with a control asserting a real token does
+hash — or the test would pass against a handler that never hashed anything.
+
 ## !!! Not started, and deliberately so
 
 ### [x] P23 · `evalset` and `compare`
@@ -711,8 +744,13 @@ password is a published credential.
   lockout — including for the one account that could fix the mail.
   `TestAnUnconfirmedAddressBlocksNothing` asserts the non-property, so gating something on it later is a
   decision made in the open rather than a default nobody chose.
-- **Rate limiting covers `password/forgot` and `login`** (see P27). `invitation/accept`,
-  `email/verify` and `email/resend` are bounded only by their tokens being single-use and short-lived.
+- **`POST /api/auth/password/reset` is not rate-limited, and hashes before it claims the token** — the
+  same shape `invitation/accept` had before P29, so a garbage reset token still costs 64 MiB and a hashing
+  slot. The argon2id ceiling bounds the memory; what remains is that an attacker can occupy hashing slots
+  through it. The fix is the same four lines. Left alone because it was not asked for, not because it is
+  fine.
+- **`POST /api/auth/email/verify` is not rate-limited.** It hashes nothing and only marks a row, so the
+  cost of abusing it is an indexed lookup.
 - **Nothing is limited per CALLER.** Guessing at a thousand accounts once each is not limited by anything,
   because every limit here is keyed on the thing being protected — an inbox, an account — rather than on
   whoever is asking. A per-IP limit needs to know which proxies to trust, and this product has no such

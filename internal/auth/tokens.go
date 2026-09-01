@@ -223,6 +223,23 @@ func (s *Store) LookupInvitation(ctx context.Context, token string) (PendingInvi
 func (s *Store) AcceptInvitation(ctx context.Context, token, password string) (
 	sessionToken string, p tenancy.Principal, err error) {
 
+	// 🔴 The token is checked BEFORE the password is hashed, and this ordering is a defence, not a
+	// tidiness.
+	//
+	// It used to hash first. That made an unauthenticated endpoint where any garbage string cost a full
+	// argon2id — 64 MiB and tens of milliseconds — before anything looked at it, which is the cheapest
+	// possible way to occupy every hashing slot the server has and starve real sign-ins. A rate limit
+	// cannot close it: the only thing to key on here is the token, and an attacker varies the token, so
+	// every request would arrive with a fresh budget.
+	//
+	// 🚫 This lookup is NOT authoritative and must not be treated as one. The claim below — a conditional
+	// UPDATE — is what actually decides, atomically, whether this acceptance happens; a token can be
+	// accepted by somebody else in the microseconds between the two, and the claim will refuse it. What
+	// this check buys is only that known-bad input is rejected for the price of an indexed lookup.
+	if _, err := s.LookupInvitation(ctx, token); err != nil {
+		return "", tenancy.Principal{}, err
+	}
+
 	// Hashed BEFORE the transaction: argon2id is deliberately slow, and holding a row lock for the tens
 	// of milliseconds it takes would serialise every acceptance behind it.
 	hash, err := HashPassword(ctx, password)

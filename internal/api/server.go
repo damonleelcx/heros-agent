@@ -68,6 +68,16 @@ type Server struct {
 	// accounts with two passwords — keyed on the address alone, guessing at one customer's user would
 	// spend the budget of a different customer's user, which is one tenant degrading another.
 	LoginLimit *ratelimit.Limiter
+	// AcceptLimit caps how hard one invitation can be redeemed, keyed on the TOKEN's hash.
+	//
+	// 🔴 It bounds hammering of a single valid invitation. It cannot bound a flood of INVENTED tokens,
+	// because each invented token is a fresh key — which is why the store checks the token before it
+	// hashes anything, rather than relying on this. A limit and a cheap rejection close different halves,
+	// and only one of them was ever going to close that half.
+	AcceptLimit *ratelimit.Limiter
+	// VerifyLimit caps confirmation mail, keyed on the ADDRESS — like the reset limit, and for the same
+	// reason: an inbox is what fills up.
+	VerifyLimit *ratelimit.Limiter
 
 	// ToolRegistry, Provider and Model let the server rebind the assessment tool to the LOADED corpus.
 	//
@@ -103,10 +113,12 @@ type Server struct {
 // careless, but because remembering is not a property a codebase keeps.
 func NewServer() *Server {
 	return &Server{
-		subjects:   map[string]*subjectState{},
-		Approvals:  NewApprovals(),
-		ResetLimit: ratelimit.New(ResetBurst, ResetRefill, ResetKeyCeiling),
-		LoginLimit: ratelimit.New(LoginBurst, LoginRefill, LoginKeyCeiling),
+		subjects:    map[string]*subjectState{},
+		Approvals:   NewApprovals(),
+		ResetLimit:  ratelimit.New(ResetBurst, ResetRefill, ResetKeyCeiling),
+		LoginLimit:  ratelimit.New(LoginBurst, LoginRefill, LoginKeyCeiling),
+		AcceptLimit: ratelimit.New(AcceptBurst, AcceptRefill, AcceptKeyCeiling),
+		VerifyLimit: ratelimit.New(VerifyBurst, VerifyRefill, VerifyKeyCeiling),
 	}
 }
 
@@ -150,6 +162,26 @@ const (
 // 🔴 The address is folded to auth.EmailKey, the form the database compares by — keyed on what was
 // typed, the ceiling would be "ten wrong passwords per capitalisation". The NUL separator cannot appear
 // in either half, so no pair of (tenant, address) values can collide with another pair by concatenation.
+// Redeeming an invitation, and asking for another confirmation mail.
+//
+// Accepting is something a person does once. Five back to back covers a flaky connection and a double
+// click; one a minute afterwards is far more than anybody needs to redeem a link they already hold.
+//
+// Confirmation mail matches the reset numbers, because it is the same inbox being protected. 🔴 They are
+// SEPARATE buckets, so the total this deployment will send to one address is the sum of the two — six an
+// hour. Sharing one bucket would model the inbox more exactly and would also mean somebody who asked for
+// three password resets could not then confirm their address, which is two unrelated journeys tangled
+// together for a ceiling nobody was near.
+const (
+	AcceptBurst      = 5
+	AcceptRefill     = time.Minute
+	AcceptKeyCeiling = 50_000
+
+	VerifyBurst      = 3
+	VerifyRefill     = 20 * time.Minute
+	VerifyKeyCeiling = 50_000
+)
+
 func loginKey(tenant, email string) string {
 	return tenant + "\x00" + auth.EmailKey(email)
 }

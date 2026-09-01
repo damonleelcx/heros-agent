@@ -211,8 +211,31 @@ func (s *Server) handleAcceptInvitation(w http.ResponseWriter, r *http.Request) 
 		badRequest(w, "unreadable request")
 		return
 	}
+	// 🔴 Keyed on the token's HASH, not the token. A limiter map outlives the request, and a raw
+	// invitation token sitting in one is a live credential kept somewhere nobody decided to keep it. The
+	// hash identifies it exactly as well and is worth nothing to whoever reads it.
+	//
+	// 🚫 This bounds hammering of ONE invitation. It cannot bound a flood of invented tokens — each is a
+	// fresh key with a fresh budget — which is why the store checks the token before it hashes a password
+	// rather than leaning on this.
+	if ok, wait := s.AcceptLimit.Allow(auth.TokenKey(req.Token)); !ok {
+		w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())))
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{
+			"error": "That invitation is being used too often. Try again in " + humanWait(wait) +
+				". Your link has not been used up.",
+		})
+		return
+	}
+
 	token, p, err := s.Auth.AcceptInvitation(r.Context(), req.Token, req.Password)
 	if err != nil {
+		// 🔴 Refunded when the server refused to do the work — a shed request and a malformed body are not
+		// attempts to redeem the link, and charging for them means an overloaded minute quietly spends an
+		// invitation's budget. A genuinely wrong or spent token IS charged: that is the case worth
+		// slowing down.
+		if errors.Is(err, auth.ErrBusy) {
+			s.AcceptLimit.Restore(auth.TokenKey(req.Token))
+		}
 		writeAuthErr(w, err)
 		return
 	}
@@ -259,6 +282,23 @@ func (s *Server) handleResendVerification(w http.ResponseWriter, r *http.Request
 	}
 	if err := s.mailAvailable(); err != nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
+		return
+	}
+	// 🔴 Keyed on the ADDRESS, like the reset limit, because the thing that fills up is an inbox — not on
+	// the account, even though this endpoint is authenticated and the two are the same today. If an
+	// address ever becomes changeable, keying on the account would let somebody walk a full budget from
+	// one inbox to the next.
+	//
+	// 🚫 Not refunded on a send failure. The mail did not arrive, which is our fault and not theirs — but
+	// refunding invites an immediate retry, and a retry storm against a relay that is already failing
+	// helps nobody. The message says how long to wait.
+	if ok, wait := s.VerifyLimit.Allow(auth.EmailKey(p.Subject)); !ok {
+		w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())))
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{
+			"error": "A confirmation link has already been sent to that address more than once. Try " +
+				"again in " + humanWait(wait) + ", and check your spam folder in the meantime — the " +
+				"most recent link is still valid.",
+		})
 		return
 	}
 	token, to, org, err := s.Auth.CreateEmailVerification(r.Context(), p.Tenant, p.UserID)
