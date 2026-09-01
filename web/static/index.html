@@ -82,7 +82,7 @@
      drawn to peek behind was being cut off exactly where it peeked. */
   .archwrap{
     position:relative; z-index:2; justify-self:center;
-    width:clamp(15rem,42vw,20.5rem);
+    width:clamp(13rem,36vw,18.5rem);
     /* 🔴 clamp(MIN, val, MAX) — with negatives the smaller number is the MIN. Written the other way
        round (clamp(-30px, -4vw, -64px)) the min exceeds the max and clamp returns the min, so the
        overlap silently pinned at 30px however wide the window got. It is meant to grow. */
@@ -93,7 +93,10 @@
     border-radius:999px 999px 1.6rem 1.6rem; background:#101b2e; border:1px solid var(--border);
   }
   .arch{
-    position:relative; aspect-ratio:560/862;
+    /* 1:2 — the new figure is a full standing pose on a studio backdrop, so the arch is taller
+       and narrower than the previous three-quarter crop. The backdrop is light, which makes the arch
+       a bright panel against the dark page rather than a hole in it. */
+    position:relative; aspect-ratio:420/840;
     border-radius:999px 999px 1.6rem 1.6rem; overflow:hidden;
     background:#0d1626; border:1px solid var(--border);
   }
@@ -229,7 +232,7 @@
       <p class="aside">Works with any public GitHub repository. Paste a link and she reports what she found.</p>
     </div>
 
-    <div class="archwrap"><div class="arch"><img src="heros-figure.jpg" alt="Heros" width="560" height="862"></div></div>
+    <div class="archwrap"><div class="arch"><img src="heros-figure.jpg" alt="Heros" width="420" height="840"></div></div>
 
     <div class="stats">
       <div class="stat"><b>19</b><span>things she does</span></div>
