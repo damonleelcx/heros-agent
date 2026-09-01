@@ -113,8 +113,11 @@ type Server struct {
 	Model        string
 	// Approvals holds Tier-C changes between proposing and deciding.
 	Approvals *approvals
-	// Episodes is the episodic record, read by run history.
-	Episodes memory.Store
+	// Episodes is the episodic record, read by run history and by the timeline.
+	//
+	// 🔴 A Root, not a Store: a handler is handed a view bound to the caller's tenant and never holds
+	// the unscoped store, so it cannot ask for another customer's history.
+	Episodes memory.Root
 
 	mu sync.RWMutex
 	// subjects is the loaded repository PER TENANT.
@@ -588,7 +591,7 @@ func (s *Server) answerRunHistory(w http.ResponseWriter, tenant string, resp ask
 		writeJSON(w, http.StatusOK, resp)
 		return
 	}
-	eps, err := s.Episodes.Episodes(string(last.ID))
+	eps, err := s.Episodes.For(tenant).Episodes(string(last.ID))
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return

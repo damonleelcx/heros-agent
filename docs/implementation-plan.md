@@ -735,10 +735,11 @@ whatever the level — the person is right there, watching a diff they requested
 conversation is not autonomy, it is a surprise. Gradual autonomy is about long runs proceeding without
 somebody sitting over them.
 
-### [ ] P32 · Tenant-scoping the episodic memory
-**Scoped, decided, not built.** Hardening rather than a fix: nothing leaks today, and that is the
-problem — the guarantee is handler discipline rather than construction, which is the property the
-tenancy work removed from the goal store and left in place here.
+### [x] P32 · Tenant-scoping the episodic memory
+Hardening rather than a fix: nothing leaked, and that was the problem — the guarantee was handler
+discipline rather than construction, which is the property the tenancy work removed from the goal store
+and left in place here. `memory.Root.For(tenant)` now mirrors `store.Root.For(tenant)` exactly, and
+handlers and the worker hold a Root rather than a Store.
 
 **The surface is narrower than the gap bullet suggested.** `knowledge` and `preferences` already carry a
 `tenant` column and take a tenant argument. Unscoped: `AppendEpisode`, `Episodes`, `SaveSummary`,
@@ -772,11 +773,37 @@ same way by `LatestGoalIgnoresACallerSuppliedTenant`.
 `_ *goal.Goal` and deliberately ignores it today. Roughly 300–400 mostly mechanical lines. The
 dual-implementation conformance suite and its `ZZPostgresLegActuallyRan` gate already exist.
 
-🔴 **The fence must cover WRITES, not just reads.** `record()` is fire-and-forget, so a scoping bug there
-is silent. The scoped view must IMPOSE the tenant rather than trust the `Episode` it is handed, exactly
-as `CreateGoal` does — and the cross-tenant fence must exercise every method, mirroring
-`TestATenantCannotReachAnotherTenantsData`, not the two with callers. One unscoped method inside a
-"scoped" store is the exception somebody later relies on.
+🔴 **The fence covers WRITES as well as reads.** `record()` is fire-and-forget, so a scoping bug there is
+silent by construction — which is exactly why the store refuses a cross-tenant append rather than
+absorbing it. Reads are INVISIBLE (a cross-tenant goal returns what a missing one returns, because an
+error would confirm the id is real); writes are REFUSED. All four methods are exercised, not the two with
+callers.
+
+**Built as scoped, with three things found on the way:**
+
+- ⚠️ **The conformance suite was testing the unscoped path.** `pgScoped.AppendEpisode` writes its own
+  INSERT — it must, since the ownership test is part of the statement — so sequence assignment is now
+  implemented twice, and the suite was asserting against the copy production does not run. Both helpers
+  now return a scoped store. Same shape as the bug `buildWorker` exists to prevent: the tested object and
+  the shipped object being different objects assembled by different code.
+- ⚠️ **Fixed tenant names made the fence lie on Postgres.** The Postgres leg shares one database across
+  every test and run, so knowledge and preferences written under a constant tenant ACCUMULATE — and
+  "the attacker sees none of the victim's claims" read the attacker's own leftovers from the previous
+  test and reported a leak that had not happened. Fresh ids per run. Any assertion that COUNTS rows in a
+  shared database needs a key nothing else has used.
+- **One existing test was seeding through the unscoped path** and correctly went red once the read was
+  scoped, because the in-memory store then had no record of whose goal it was.
+
+⚠️ **The two implementations answer "whose goal is this?" differently, and that is the honest limit.**
+Postgres asks `goals`, which is the authority. The in-memory store has no goals table, so it records the
+association on the first write and refuses a later write for the same goal under a different tenant —
+first writer wins. It is weaker, it is what an implementation for tests and local runs can offer, and the
+conformance suite asserts both refuse the same crossings.
+
+Each fence observed red against the defect it names — reads ignoring the tenant, the write path
+accepting a foreign goal, and trusting the tenant on the object instead of imposing it — on both legs.
+Verified live: an owner reading another organization's run by id gets `404 no such run`, and the planted
+phrase appears nowhere in the response.
 
 ## !!! Not started, and deliberately so
 
@@ -789,8 +816,6 @@ as `CreateGoal` does — and the cross-tenant fence must exercise every method, 
   is cheap (the model discards it) and a false negative is expensive (the axis reports absence). Python,
   TypeScript, JavaScript and Go only. Every report states that it shows what was found, not everything
   that exists.
-- **`memory.Store` is not tenant-scoped** — scoped and decided as P32 above, not yet built. Nothing
-  leaks today; the guarantee is handler discipline rather than construction.
 - **Authorization within a tenant is role-based only.** There are no per-object permissions, no
   per-repository access, and no audit log of who changed whose role. Every member of an organization
   sees every goal in it.

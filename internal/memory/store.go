@@ -29,6 +29,11 @@ type Mem struct {
 	knowledge map[string][]Knowledge // keyed tenant\x00subject
 	prefs     map[string]map[string]Preference
 	nextSum   int64
+	// tenantOf records which tenant a goal's history belongs to, first writer wins.
+	//
+	// 🔴 Only the SCOPED view reads or writes this. Postgres answers the same question from `goals`,
+	// which is the authority; this store has no goals to ask, so it remembers instead. See scoped.go.
+	tenantOf map[string]string
 }
 
 // NewMem builds an empty in-process store.
@@ -36,6 +41,7 @@ func NewMem() *Mem {
 	return &Mem{
 		episodes: map[string][]Episode{}, summaries: map[string][]Summary{},
 		knowledge: map[string][]Knowledge{}, prefs: map[string]map[string]Preference{},
+		tenantOf: map[string]string{},
 	}
 }
 

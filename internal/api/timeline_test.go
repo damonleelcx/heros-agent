@@ -285,7 +285,10 @@ func TestATimelineAnswersWhatHappenedAndWhatNext(t *testing.T) {
 	} {
 		e.GoalID = string(gid)
 		e.At = base.Add(time.Duration(-i) * time.Minute)
-		if _, err := mem.AppendEpisode(e); err != nil {
+		// 🔴 Written through the SCOPED view, because that is what the worker does since P32. Seeding
+		// through the unscoped store leaves the in-memory implementation with no record of whose goal it
+		// is, and the scoped read then correctly returns nothing — which is how this test first failed.
+		if _, err := mem.For(hz.tenant).AppendEpisode(e); err != nil {
 			t.Fatalf("append: %v", err)
 		}
 	}

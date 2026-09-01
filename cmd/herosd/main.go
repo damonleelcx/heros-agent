@@ -314,7 +314,7 @@ func bootstrapIdentity(ctx context.Context, a *auth.Store, mail mailer.Mailer, l
 // and the shipped path were different objects assembled by different code.
 //
 // Extracted so `TestTheDaemonsWorkerIsFullyWired` can assemble the same object the daemon runs.
-func buildWorker(st store.Store, reg *toolcontract.Registry, mem memory.Store,
+func buildWorker(st store.Store, reg *toolcontract.Registry, mem memory.Root,
 	plans *planner.Registry, policy worker.ApprovalPolicy) *worker.Worker {
 	w := worker.New("herosd", st, reg)
 	w.Lease = 2 * time.Minute

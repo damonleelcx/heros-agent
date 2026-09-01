@@ -129,7 +129,7 @@ type Worker struct {
 	// history is a record OF the work, not part of it, and a run that dies because its diary was
 	// unavailable has inverted which one matters. Failures to record are surfaced in the outcome detail
 	// rather than swallowed entirely.
-	Episodes memory.Store
+	Episodes memory.Root
 	// Reviser is optional. A worker without one executes a fixed plan, which is correct for goals whose
 	// shape is known from the goal alone.
 	Reviser Reviser
@@ -196,7 +196,7 @@ func (w *Worker) RunOnce(ctx context.Context, goalID goal.ID) (Outcome, error) {
 	// whether this KIND of work needs a person; the task remembers whether one has answered.
 	need, why := w.Policy.NeedsApproval(g, t)
 	if need && !t.Approved {
-		w.record(goalID, t, memory.EpisodeDecision,
+		w.record(g.Tenant, goalID, t, memory.EpisodeDecision,
 			fmt.Sprintf("%s parked for approval", t.ID), why, now)
 		if err := w.Store.Complete(goalID, t.ID, w.ID, task.AwaitingApproval, nil, why, now); err != nil {
 			return Outcome{Did: DidStop}, err
@@ -213,7 +213,7 @@ func (w *Worker) RunOnce(ctx context.Context, goalID goal.ID) (Outcome, error) {
 	// the record that the world was changed with nobody asked is the one a reader most needs from an old
 	// run. See memory.Episode.Compressible.
 	if !need && task.EffectBearingKinds[t.Kind] {
-		w.record(goalID, t, memory.EpisodeEffect,
+		w.record(g.Tenant, goalID, t, memory.EpisodeEffect,
 			fmt.Sprintf("%s proceeded without approval", t.ID), why, now)
 	}
 
@@ -256,7 +256,7 @@ func (w *Worker) RunOnce(ctx context.Context, goalID goal.ID) (Outcome, error) {
 	}
 
 	// ── persist ──────────────────────────────────────────────────────────────────────────────────
-	w.record(goalID, t, memory.EpisodeObservation,
+	w.record(g.Tenant, goalID, t, memory.EpisodeObservation,
 		fmt.Sprintf("%s succeeded", t.ID),
 		fmt.Sprintf("%d tokens, %d micro-cents", res.Tokens, res.CostMicroCents), now)
 	if err := w.Store.Complete(goalID, t.ID, w.ID, task.Succeeded, res.Output, "", now); err != nil {
@@ -275,15 +275,24 @@ func (w *Worker) RunOnce(ctx context.Context, goalID goal.ID) (Outcome, error) {
 // the diary is not. Silently dropping it would be worse — a record that is sometimes absent and never
 // says so is one nobody can reason about — so the error is counted in the outcome detail by the caller
 // that cares.
-func (w *Worker) record(goalID goal.ID, t *task.Task, kind memory.EpisodeKind, summary, detail string, now time.Time) {
-	if w.Episodes == nil {
+// record writes one episode, for the tenant that owns the goal.
+//
+// 🔴 The TENANT is a parameter, not something this function digs out. Every call site already holds the
+// goal — `fail` was even taking it and ignoring it — so passing it costs nothing and makes the scoping
+// visible at each site rather than hidden in a lookup here.
+//
+// 🚫 Errors are still discarded. A run must not fail because its narration did, and that was true before
+// scoping. It is also exactly why the scoped store REFUSES a cross-tenant append rather than absorbing
+// it: a mistake here is silent by construction, so the store has to be the thing that will not do it.
+func (w *Worker) record(tenant string, goalID goal.ID, t *task.Task, kind memory.EpisodeKind, summary, detail string, now time.Time) {
+	if w.Episodes == nil || tenant == "" {
 		return
 	}
 	taskID := ""
 	if t != nil {
 		taskID = string(t.ID)
 	}
-	_, _ = w.Episodes.AppendEpisode(memory.Episode{
+	_, _ = w.Episodes.For(tenant).AppendEpisode(memory.Episode{
 		GoalID: string(goalID), TaskID: taskID, Kind: kind,
 		Summary: summary, Detail: detail, At: now,
 	})
@@ -345,8 +354,9 @@ func (w *Worker) handleFailure(goalID goal.ID, t *task.Task, g *goal.Goal, now t
 
 // fail marks a task terminally failed. Downstream blocking is the store's job, so a worker cannot
 // forget to do it.
-func (w *Worker) fail(goalID goal.ID, t *task.Task, _ *goal.Goal, now time.Time, why string) (Outcome, error) {
-	w.record(goalID, t, memory.EpisodeFailure, fmt.Sprintf("%s failed", t.ID), why, now)
+func (w *Worker) fail(goalID goal.ID, t *task.Task, g *goal.Goal, now time.Time, why string) (Outcome, error) {
+	// The goal was already a parameter here and deliberately ignored; it carries the tenant.
+	w.record(g.Tenant, goalID, t, memory.EpisodeFailure, fmt.Sprintf("%s failed", t.ID), why, now)
 	if err := w.Store.Complete(goalID, t.ID, w.ID, task.Failed, nil, why, now); err != nil {
 		return Outcome{Did: DidStop, TaskID: t.ID}, err
 	}
@@ -386,7 +396,7 @@ func (w *Worker) idle(goalID goal.ID, g *goal.Goal, now time.Time) (Outcome, err
 			return Outcome{Did: DidStop, Detail: "replanning refused: " + err.Error()}, nil
 		}
 		if len(added) > 0 {
-			w.record(goalID, nil, memory.EpisodeDecision, "the plan grew",
+			w.record(g.Tenant, goalID, nil, memory.EpisodeDecision, "the plan grew",
 				fmt.Sprintf("%d task(s) added from what the run found", len(added)), now)
 			merged := make([]*task.Task, 0, len(d.Tasks)+len(added))
 			for _, t := range d.Tasks {

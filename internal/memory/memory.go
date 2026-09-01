@@ -247,6 +247,29 @@ func Compress(goalID string, episodes []Episode, content string, now time.Time) 
 // 🔴 There is deliberately no generic `Get(class, key)`. A single accessor is how the classes get
 // confused at the call site, and the whole value of separating them is that a caller must NAME which
 // kind of memory it is asking for — and therefore must have thought about whether that is the right kind.
+// Root hands out tenant-scoped stores. It is the ONLY way to obtain a Store.
+//
+// # 🔴 Why this exists, given that nothing leaks today
+//
+// The four episodic methods below take a goal id and nothing else. A goal id is therefore sufficient to
+// read — or write — any customer's history, and the only thing preventing it is that both call sites
+// happen to reach them with an id already proven to belong to the caller. That is handler discipline,
+// which is the exact property `store.Root` was introduced to stop relying on, in a package whose methods
+// have the same shape and for the same reason.
+//
+// `For` closes over the tenant and every query it produces carries it. A handler is given a scoped store
+// and never holds the root, so it cannot construct a query for another tenant: not because it is
+// careful, but because it has nothing to be careless with.
+//
+// 🔴 The write path matters most here. `worker.record` is fire-and-forget (`_, _ =`), so a scoping
+// mistake on the way IN would never surface as an error — it would surface as one customer's run
+// narrated into another's timeline. Appending to a goal that is not yours is refused, not absorbed.
+type Root interface {
+	// For returns a store bound to one tenant. An empty tenant is refused rather than treated as "all",
+	// because "all" is the value an unset variable has.
+	For(tenant string) Store
+}
+
 type Store interface {
 	// AppendEpisode assigns the next sequence number and stores the episode.
 	AppendEpisode(e Episode) (int64, error)
@@ -261,9 +284,16 @@ type Store interface {
 	// the only way to construct one is through the function that enforces the evidence rule.
 	PromoteKnowledge(k Knowledge) error
 	// KnowledgeFor returns claims for a tenant and subject, most recent first, excluding superseded ones.
+	//
+	// 🔴 On a scoped store the tenant argument is IGNORED in favour of the one the store is bound to.
+	// The parameter is kept rather than removed so that call sites do not churn — the same choice
+	// `store.LatestGoal(_ string)` made, and fenced the same way by a test that passes somebody else's
+	// tenant and asserts it changes nothing.
 	KnowledgeFor(tenant, subject string) ([]Knowledge, error)
 
 	// SetPreference stores a user-authored preference.
 	SetPreference(p Preference) error
+	// Preferences returns a tenant's preferences. On a scoped store the argument is ignored, as with
+	// KnowledgeFor.
 	Preferences(tenant string) ([]Preference, error)
 }

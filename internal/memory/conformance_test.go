@@ -41,10 +41,21 @@ func uniqueID(prefix string) string {
 	return fmt.Sprintf("%s-%d-%d", prefix, time.Now().UnixNano(), seq.n)
 }
 
+// 🔴 Both helpers return a SCOPED store, because that is what production holds since P32.
+//
+// `pgScoped.AppendEpisode` writes its own INSERT — it has to, since the ownership test is part of the
+// statement — so the sequence assignment these tests are about is now implemented twice. Pointing the
+// conformance suite at the unscoped path would leave the shipped one untested, which is the exact shape
+// of the bug `buildWorker` exists to prevent: the tested object and the shipped object being different
+// objects assembled by different code.
 func newMem(t *testing.T) (memory.Store, string) {
 	t.Helper()
-	return memory.NewMem(), uniqueID("g")
+	return memory.NewMem().For(conformanceTenant), uniqueID("g")
 }
+
+// conformanceTenant is the one organization these behaviour tests act as. Isolation between tenants is
+// not their subject — see isolation_test.go, which uses a fresh pair per run.
+const conformanceTenant = "t1"
 
 // newPG creates a real goal first, because episodes reference goals(id) — a foreign key the in-memory
 // store does not have, and exactly the kind of difference a conformance suite exists to surface.
@@ -65,7 +76,7 @@ func newPG(t *testing.T) (memory.Store, string) {
 	id := goal.ID(uniqueID("g"))
 	now := time.Now().UTC()
 	g := &goal.Goal{
-		ID: id, Tenant: "t1", Intent: intent.Assess, State: goal.Draft,
+		ID: id, Tenant: conformanceTenant, Intent: intent.Assess, State: goal.Draft,
 		Subject: goal.Subject{RepoURL: "git@github.com:acme/bot.git", Revision: "abc"},
 		Ceilings: bounds.Ceilings{MaxIterations: 10, MaxTasks: 10, MaxAttemptsPerTask: 2,
 			MaxToolCalls: 10, MaxTokens: 1e6, MaxCostCents: 100,
@@ -80,7 +91,7 @@ func newPG(t *testing.T) (memory.Store, string) {
 		t.Fatalf("create goal: %v", err)
 	}
 	pgRan()
-	return memory.NewPG(db), string(id)
+	return memory.NewPG(db).For(conformanceTenant), string(id)
 }
 
 func implementations() []impl {

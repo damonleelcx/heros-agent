@@ -15,13 +15,18 @@ import (
 //
 // # 🔴 Every query names the tenant; none of them trusts a caller to have checked
 //
-// Tasks, checkpoints and episodes are keyed by goal id, and a goal belongs to a tenant. So the scoping
-// clause is the same everywhere — `goal_id IN (SELECT id FROM goals WHERE tenant = $n)` — which makes
+// Tasks and checkpoints are keyed by goal id, and a goal belongs to a tenant. So the scoping clause is
+// the same everywhere — `goal_id IN (SELECT id FROM goals WHERE tenant = $n)` — which makes
 // it checkable by reading rather than by tracing which caller validated what.
 //
 // A row belonging to another tenant is not merely unreadable; it is INVISIBLE. A query that returned
 // "forbidden" would confirm the id exists, turning a guessable identifier into an enumeration of
 // everybody's data. Cross-tenant reads return exactly what a missing row returns.
+//
+// ⚠️ This comment used to say "tasks, checkpoints and episodes". Episodes live in `internal/memory` and
+// were not scoped at all — the design was written down here and the work landed in a different package,
+// where it stayed unscoped until P32. Corrected rather than deleted, because a doc comment describing a
+// guarantee the package does not provide is worse than no comment.
 
 // For returns a tenant-scoped view of the Postgres store.
 func (p *Postgres) For(tenant string) Store { return &pgScoped{p: p, tenant: tenant} }

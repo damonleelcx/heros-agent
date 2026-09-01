@@ -98,7 +98,7 @@ func (s *Server) handleTimeline(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	out, err := buildTimeline(scoped, s.Episodes, g)
+	out, err := buildTimeline(scoped, s.Episodes.For(tenant), g)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -108,16 +108,15 @@ func (s *Server) handleTimeline(w http.ResponseWriter, r *http.Request) {
 
 // buildTimeline assembles the answer from a goal that has ALREADY been proven to belong to the caller.
 //
-// # 🔴 Why it takes a loaded goal and a scoped store rather than a tenant and an id
+// # 🔴 Why it takes a loaded goal and two scoped stores rather than a tenant and an id
 //
-// Everything it reads is keyed by goal id. `store.Store` is tenant-scoped, so the DAG read below cannot
-// cross a boundary. `memory.Store` is NOT — `Episodes(goalID)` will return whatever goal it is given,
-// for any customer, exactly the shape the tenancy work removed from the goal store. Passing the loaded
-// goal instead of an id means the only way to call this is to have already gone through a scoped load.
+// Everything it reads is keyed by goal id, and BOTH stores handed in are already bound to one tenant —
+// `store.Store` by `Root.For`, and `memory.Store` by `memory.Root.For` since P32. Neither can cross a
+// boundary whatever id it is given, so this function cannot either.
 //
-// ⚠️ That is a convention, not a wall: nothing stops somebody constructing a `goal.Goal` by hand. The
-// wall would be scoping `memory.Store` the way `store.Root.For` scopes the other one, which is a real
-// refactor and is named in the plan rather than pretended away.
+// The loaded goal is passed rather than an id for the same reason: obtaining one means having gone
+// through a scoped load. That was the only guard here before the memory store was scoped, and it was a
+// convention rather than a wall; it is now the belt beside the braces.
 func buildTimeline(st store.Store, eps memory.Store, g *goal.Goal) (timelineResp, error) {
 	out := timelineResp{Goal: timelineGoal{
 		ID: string(g.ID), Intent: string(g.Intent), State: string(g.State),
