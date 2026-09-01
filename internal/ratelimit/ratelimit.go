@@ -125,6 +125,38 @@ func (l *Limiter) Allow(key string) (ok bool, retryAfter time.Duration) {
 	return true, 0
 }
 
+// Restore gives one token back.
+//
+// # 🔴 Why a limiter needs this at all
+//
+// Login spends a token before it knows anything, then gives it back if the password was CORRECT. The
+// difference that makes is the difference between a limit and a weapon: charged for every attempt, a
+// per-account login limit lets anybody lock anybody out of their own account by making failed attempts
+// with their address. Charged only for failures, an attacker holding the bucket empty can make the real
+// owner retry — because the owner's correct attempt costs nothing the moment it lands — but cannot shut
+// them out.
+//
+// It is spend-then-restore rather than check-then-charge-on-failure because the check and the spend must
+// be one atomic step. Two concurrent callers that both merely LOOK at a bucket with one token left will
+// both proceed, and a limit that leaks a little under concurrency leaks most under attack, which is the
+// only time it matters.
+//
+// A key that has been swept is not recreated: it had refilled completely, so there is nothing owed to it.
+func (l *Limiter) Restore(key string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	b, ok := l.keys[key]
+	if !ok {
+		return
+	}
+	// 🔴 Clamped. Every Restore follows an Allow that spent one, so this cannot legitimately overflow —
+	// but an unclamped counter is one mispaired call away from a bucket that grows without bound and a
+	// key that is never limited again.
+	if b.tokens++; b.tokens > float64(l.burst) {
+		b.tokens = float64(l.burst)
+	}
+}
+
 // Len reports how many keys are held. For tests and for a health signal.
 func (l *Limiter) Len() int {
 	l.mu.Lock()

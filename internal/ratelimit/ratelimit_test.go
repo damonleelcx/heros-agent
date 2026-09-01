@@ -205,3 +205,75 @@ func TestConcurrentCallersCannotExceedTheBurst(t *testing.T) {
 		t.Fatalf("%d of 200 concurrent requests were allowed; the burst is 5", allowed)
 	}
 }
+
+// TestRestoreGivesOneTokenBackAndNoMore.
+//
+// 🔴 The clamp matters more than the restore. Every Restore is meant to follow an Allow that spent one,
+// so the count cannot legitimately exceed the burst — but an unclamped counter is one mispaired call
+// away from a bucket that grows without bound, and a key that grows without bound is a key that is never
+// limited again. That failure is silent: nothing errors, the endpoint simply stops being protected.
+func TestRestoreGivesOneTokenBackAndNoMore(t *testing.T) {
+	c := newClock()
+	l := New(3, 20*time.Minute, 100).WithClock(c.now)
+
+	// Spend and restore, over and over. The budget must neither drain nor grow.
+	for range 50 {
+		if ok, _ := l.Allow("k"); !ok {
+			t.Fatal("spend-then-restore drained the bucket; a caller that always succeeds is being charged")
+		}
+		l.Restore("k")
+	}
+	// Still exactly the burst, no more: three failures, then refused.
+	for i := range 3 {
+		if ok, _ := l.Allow("k"); !ok {
+			t.Fatalf("only %d tokens survived a long run of restores", i)
+		}
+	}
+	if ok, _ := l.Allow("k"); ok {
+		t.Fatal("spend-and-restore left more than the burst behind")
+	}
+
+	// ⚠️ Everything above pairs each Restore with an Allow, so the count can never legitimately exceed
+	// the burst — and the clamp is therefore never reached. The first version of this test stopped here
+	// and claimed to be testing the clamp; removing the clamp did not make it fail, so it was testing
+	// nothing of the sort.
+	//
+	// 🔴 A MISPAIRED restore is the case the clamp exists for, and is one refactor away at any time: a
+	// handler that restores on a path where it did not spend, or spends once and restores in a retry
+	// loop. Unclamped, that bucket grows without bound and the key stops being limited — silently,
+	// because nothing errors and the endpoint simply stops being protected.
+	l.Allow("mispaired")
+	for range 20 {
+		l.Restore("mispaired")
+	}
+	allowed := 0
+	for range 20 {
+		if ok, _ := l.Allow("mispaired"); ok {
+			allowed++
+		}
+	}
+	if allowed > 3 {
+		t.Fatalf("after twenty restores that were never paired with a spend, the key allowed %d requests "+
+			"against a burst of 3; the bucket has grown and this key is no longer limited", allowed)
+	}
+}
+
+// TestRestoringAnUnknownKeyDoesNothing.
+//
+// A key that has been swept had refilled completely, so nothing is owed to it — recreating one on
+// Restore would let a caller conjure buckets, and a bucket conjured at full is a bucket that starts by
+// forgiving whatever came before it.
+func TestRestoringAnUnknownKeyDoesNothing(t *testing.T) {
+	c := newClock()
+	l := New(2, time.Minute, 100).WithClock(c.now)
+	l.Restore("never-seen")
+	if l.Len() != 0 {
+		t.Fatalf("restoring an unknown key created %d bucket(s)", l.Len())
+	}
+	// And the key still gets exactly its burst, not more.
+	l.Allow("never-seen")
+	l.Allow("never-seen")
+	if ok, _ := l.Allow("never-seen"); ok {
+		t.Fatal("the key was allowed more than its burst")
+	}
+}

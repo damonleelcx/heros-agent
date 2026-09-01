@@ -60,6 +60,14 @@ type Server struct {
 	// unauthenticated endpoint that sends mail to any address on request is a way to flood a person the
 	// attacker dislikes, and the victim is the address, not whoever made the request.
 	ResetLimit *ratelimit.Limiter
+	// LoginLimit caps password guesses, per ACCOUNT — tenant AND address.
+	//
+	// 🔴 A different key from ResetLimit, because a different thing is being protected. A reset floods an
+	// inbox, and an inbox is one mailbox however many organizations write to it, so that limit is keyed on
+	// the address alone. A login guesses at an ACCOUNT, and the same address in two organizations is two
+	// accounts with two passwords — keyed on the address alone, guessing at one customer's user would
+	// spend the budget of a different customer's user, which is one tenant degrading another.
+	LoginLimit *ratelimit.Limiter
 
 	// ToolRegistry, Provider and Model let the server rebind the assessment tool to the LOADED corpus.
 	//
@@ -98,6 +106,7 @@ func NewServer() *Server {
 		subjects:   map[string]*subjectState{},
 		Approvals:  NewApprovals(),
 		ResetLimit: ratelimit.New(ResetBurst, ResetRefill, ResetKeyCeiling),
+		LoginLimit: ratelimit.New(LoginBurst, LoginRefill, LoginKeyCeiling),
 	}
 }
 
@@ -115,6 +124,35 @@ const (
 	// addresses inside twenty minutes — a flood, not a busy afternoon.
 	ResetKeyCeiling = 50_000
 )
+
+// The login ceiling.
+//
+// # 🔴 Why these are loose where the reset numbers are tight
+//
+// A wrong password is something people do — three times, then they check caps lock, then they get it.
+// The limit has to sit far above that and still far below what makes online guessing worth attempting.
+// Ten back to back and one a minute afterwards is roughly 1,500 guesses a day against one account; the
+// same account with no limit is bounded only by how fast the server can run argon2id, which is nearer a
+// million. Against the twelve-character minimum, 1,500 a day is not an attack, it is a hobby.
+//
+// 🔴 And the ceiling is only ever charged for FAILURES — see handleLogin. Ten is therefore not "ten
+// sign-ins an hour", which would break anybody with several devices; it is ten WRONG ones.
+const (
+	LoginBurst  = 10
+	LoginRefill = time.Minute
+	// LoginKeyCeiling bounds memory: the key contains a tenant and an address, both supplied by the
+	// caller, so both are attacker-chosen.
+	LoginKeyCeiling = 50_000
+)
+
+// loginKey identifies one account for the purpose of counting guesses.
+//
+// 🔴 The address is folded to auth.EmailKey, the form the database compares by — keyed on what was
+// typed, the ceiling would be "ten wrong passwords per capitalisation". The NUL separator cannot appear
+// in either half, so no pair of (tenant, address) values can collide with another pair by concatenation.
+func loginKey(tenant, email string) string {
+	return tenant + "\x00" + auth.EmailKey(email)
+}
 
 // subjectFor returns the repository loaded by this tenant, if any.
 func (s *Server) subjectFor(tenant string) *subjectState {

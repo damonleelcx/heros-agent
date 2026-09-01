@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -70,6 +71,9 @@ func credentialFrom(r *http.Request) string {
 	return ""
 }
 
+// qq quotes a phrase the customer sees on screen, so a message naming a button reads as naming a button.
+func qq(s string) string { return "\u201c" + s + "\u201d" }
+
 func unauthorized(w http.ResponseWriter, msg string) {
 	writeJSON(w, http.StatusUnauthorized, map[string]string{"error": msg})
 }
@@ -91,6 +95,25 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if req.Tenant == "" {
 		req.Tenant = s.DefaultTenant
 	}
+
+	// 🔴 Spent BEFORE the lookup, and the limiter is told nothing about what the lookup found.
+	//
+	// The same rule as the password-reset limit next door, for the same reason. This endpoint already
+	// answers identically for a wrong password and an unknown address, in message and in timing; a limit
+	// that only counted attempts against accounts that EXIST would undo it, because then being refused at
+	// all would mean the address is real.
+	key := loginKey(req.Tenant, req.Email)
+	if ok, wait := s.LoginLimit.Allow(key); !ok {
+		w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())))
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{
+			"error": "Too many sign-in attempts for that account. Try again in " + humanWait(wait) +
+				". If this was not you, somebody is guessing at the password — it has not been " +
+				"changed, and choosing a new one from " + qq("Forgotten your password?") +
+				" will end the attempt.",
+		})
+		return
+	}
+
 	token, p, err := s.Auth.Login(r.Context(), req.Tenant, req.Email, req.Password)
 	if err != nil {
 		// 🔴 One message, and a deliberate pause is NOT added here — the constant-time password path in
@@ -98,6 +121,23 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		unauthorized(w, "That email and password do not match.")
 		return
 	}
+
+	// 🔴 A CORRECT password costs nothing. This is what keeps the limit from being a weapon: charged for
+	// every attempt, anybody could lock anybody out of their own account by failing to sign in as them
+	// often enough — and with the reset endpoint also limited per address, both ways in would close at
+	// once.
+	//
+	// Charging only for failures does not make the account unblockable, and the claim is worth stating
+	// exactly: an attacker who keeps the bucket at zero still gets the owner refused, because the refusal
+	// happens before the password is looked at. What it removes is the RATCHET. Every refilled token is a
+	// fresh chance, the owner needs to win exactly one of those races, and the attempt that wins costs
+	// nothing — so the owner gets in after some retries instead of being shut out until somebody
+	// intervenes.
+	//
+	// It is spend-then-restore rather than look-then-charge because the check and the spend have to be
+	// one atomic step; two concurrent attempts that merely LOOK at the last token both proceed.
+	s.LoginLimit.Restore(key)
+
 	setSessionCookie(w, r, token)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"tenant": p.Tenant, "email": p.Subject, "role": p.Role,

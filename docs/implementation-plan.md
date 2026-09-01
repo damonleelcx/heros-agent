@@ -369,7 +369,7 @@ started, the port answered, `/` returned 200. It simply was not the product. The
 default is `web/static`, and `TestTheDefaultConsoleDirectoryHasAConsoleInIt` asserts the constant the flag
 declaration actually uses rather than a copy of it.
 
-### [x] P27 · Rate limiting the password-reset endpoint
+### [x] P27 · Rate limiting the password-reset and sign-in endpoints
 **The limit is spent before the lookup, and the limiter is never told what the lookup found.** That
 ordering is the entire safety of adding a limit here. `password/forgot` was built to answer identically
 for a real address and an invented one — same body, same status, same timing — because it takes an
@@ -395,6 +395,29 @@ statements of one rule drift, and this drift is exploitable in both directions.
 mail-sending endpoint is six messages in two seconds — the burst the limit exists to prevent, arriving at
 a moment nobody chose. Tokens are fractional: truncating them means a caller arriving every nineteen
 minutes regains nothing, ever.
+
+**Login is limited too, and its key and its accounting are both different — because a different thing is
+being protected.** The reset limit is keyed on the ADDRESS, since what a reset flood damages is an inbox,
+and an inbox is one mailbox however many organizations write to it. A sign-in guesses at an ACCOUNT, and
+the same address in two organizations is two accounts with two passwords — keyed on the address alone,
+guessing at one customer's user would spend a different customer's user's budget, which is one tenant
+degrading another through an endpoint neither controls. So login is keyed on tenant **and** address.
+
+🔴 **A correct password costs nothing.** Charged for every attempt, a per-account login limit is an
+account-lockout weapon: fail to sign in as somebody often enough and they cannot sign in either — and
+with the reset endpoint also limited per address, both ways into the account close at once for the price
+of a few dozen requests an hour. Spend-then-restore removes the ratchet. It does not make an account
+unblockable, and the claim is worth stating exactly: an attacker holding the bucket at zero still gets
+the owner refused, because the refusal happens before the password is looked at. What it removes is the
+accumulation — every refilled token is a fresh chance, the owner needs to win one of those races, and the
+attempt that wins costs nothing. Retries instead of a lockout.
+
+It is spend-then-restore rather than look-then-charge-on-failure because the check and the spend must be
+one atomic step: two concurrent attempts that merely LOOK at a bucket with one token left both proceed,
+and a limit that leaks under concurrency leaks most under attack, which is the only time it matters.
+
+Ten wrong passwords back to back, then one a minute — about 1,500 guesses a day against one account,
+against a bound of roughly a million when the only limit is how fast the server runs argon2id.
 
 **At the memory ceiling it refuses rather than evicting.** The map is keyed on a value the caller
 supplies, so it must be bounded — and least-recently-used eviction is a bypass wearing the costume of a
@@ -628,10 +651,17 @@ password is a published credential.
   lockout — including for the one account that could fix the mail.
   `TestAnUnconfirmedAddressBlocksNothing` asserts the non-property, so gating something on it later is a
   decision made in the open rather than a default nobody chose.
-- **Rate limiting covers `password/forgot` only** (see P27). `invitation/accept`, `email/verify`,
-  `email/resend` and `login` are bounded only by their tokens being single-use and short-lived. Login in
-  particular has no lockout and no backoff — argon2id makes each guess expensive, which is a cost, not a
-  limit.
+- **Rate limiting covers `password/forgot` and `login`** (see P27). `invitation/accept`,
+  `email/verify` and `email/resend` are bounded only by their tokens being single-use and short-lived.
+- **Nothing is limited per CALLER.** Guessing at a thousand accounts once each is not limited by anything,
+  because every limit here is keyed on the thing being protected — an inbox, an account — rather than on
+  whoever is asking. A per-IP limit needs to know which proxies to trust, and this product has no such
+  configuration; getting it wrong behind a load balancer gives every customer in the deployment one
+  shared bucket, which is an outage rather than a limit. Left undone deliberately, not overlooked.
+- **argon2id remains a resource-exhaustion surface.** Each verification is 64 MiB and tens of
+  milliseconds, by design, and the login limit only caps attempts per account. Concurrent attempts spread
+  across many accounts still cost what they cost. A cap on simultaneous verifications would address it
+  without keying on anything, and is the right next step if it ever matters.
 - **The limiter is per process.** With more than one replica each holds its own buckets, so the
   effective ceiling is the configured one times the number of replicas. Stated rather than solved: the
   alternative is a write to shared storage on every unauthenticated request, keyed on a string the caller

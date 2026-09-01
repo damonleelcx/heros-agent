@@ -62,14 +62,30 @@ log file.
 
 ### Rate limits
 
-`POST /api/auth/password/forgot` allows **3 requests per address**, then one every 20 minutes, and
-answers `429` with a `Retry-After`. The bucket is spent before the address is looked up, so a real
-address and an invented one are limited on the same schedule — a limit that applied only to addresses
-with accounts would turn `429`-versus-`200` into an answer to "does this person have an account here",
-which is the one question this endpoint is built to refuse.
+| | |
+|---|---|
+| `POST /api/auth/password/forgot` | **3 per address**, then one every 20 minutes. |
+| `POST /api/auth/login` | **10 wrong passwords per account**, then one a minute. A correct password costs nothing. |
 
-The limit is per address, because what it protects is somebody's inbox, and it is held in memory: with
-several replicas each keeps its own buckets, so the real ceiling is that number times the replica count.
+Both answer `429` with a `Retry-After`, and both spend the budget **before** looking anything up — so a
+real address and an invented one are limited on the same schedule. A limit that applied only where an
+account exists would turn `429`-versus-`200` into an answer to "does this person have an account here",
+which is the one question these endpoints are built to refuse.
+
+They are keyed differently on purpose. A reset flood damages an **inbox**, and an inbox is one mailbox
+however many organizations write to it, so that limit is keyed on the address alone. A sign-in guesses at
+an **account**, and the same address in two organizations is two accounts — so that limit is keyed on the
+organization and the address together.
+
+A correct password is not charged, because a limit charged for every attempt is an account-lockout
+weapon: fail to sign in as somebody often enough and they cannot sign in either. That does not make an
+account unblockable — an attacker holding the budget at zero still gets the owner refused — but it
+removes the accumulation, so the owner gets in after some retries rather than waiting for somebody to
+intervene.
+
+Both limits are held in memory: with several replicas each keeps its own buckets, so the real ceiling is
+that number times the replica count. Nothing is limited per caller — see the implementation plan for why
+a per-IP limit is deliberately absent.
 
 An invitation is the only way to join an organization, and it cannot create an owner — ownership is
 transferred inside the console to somebody who already has an account, never by a link in an email that

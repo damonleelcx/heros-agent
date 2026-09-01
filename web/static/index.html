@@ -671,8 +671,12 @@ function askToSignIn(){
       unconfirmedBanner();
       start();
     } catch (e) {
-      msg.style.color = 'var(--bad)';
-      msg.textContent = e.message;
+      // 🔴 A paragraph, not the `.evidence` span. That span is sized for "checking…", and the refusal
+      // this endpoint gives when it is rate-limited is three lines explaining that somebody is guessing
+      // at the password and what to do about it. Advice nobody can read is advice nobody takes.
+      msg.textContent = '';
+      card.querySelectorAll('.said-error').forEach(n => n.remove());
+      note(card.querySelector('.card-body'), e.message, 'bad').classList.add('said-error');
     }
   };
   card.querySelector('#signin').onclick = go;

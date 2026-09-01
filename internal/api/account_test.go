@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -552,5 +553,175 @@ func TestARefusedResetSendsNoMailAndSaysWhenToReturn(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 	if hz.mail.count() != before {
 		t.Errorf("a rate-limited request still sent mail: %d messages became %d", before, hz.mail.count())
+	}
+}
+
+// ── the login limit ──────────────────────────────────────────────────────────────────────────────
+
+// signInAttempt makes one login request and returns the recorder, without asserting anything.
+func (hz *harness) signInAttempt(t *testing.T, tenant, email, password string) *httptest.ResponseRecorder {
+	t.Helper()
+	return hz.do(t, "POST", "/api/auth/login",
+		`{"tenant":"`+tenant+`","email":"`+email+`","password":"`+password+`"}`, nil)
+}
+
+// TestTheLoginLimitIsIdenticalForAKnownAndAnUnknownAddress.
+//
+// 🔴 The same fence as the reset endpoint's, for the same reason. Login already answers identically for
+// a wrong password and an address with no account — in message and in timing, which is why auth.Login
+// verifies against a decoy hash when nothing matches. A limit that only counted attempts against
+// accounts that exist would give all of that away again: being refused at all would mean the address is
+// real.
+func TestTheLoginLimitIsIdenticalForAKnownAndAnUnknownAddress(t *testing.T) {
+	hz := newHarness(t)
+	_, _ = hz.user(t, tenancy.Owner)
+	known := "login-known-" + randSuffix() + "@example.test"
+	if _, err := hz.Auth.CreateUser(context.Background(), hz.tenant, known, testPassword,
+		tenancy.Member); err != nil {
+		t.Fatal(err)
+	}
+	unknown := "login-unknown-" + randSuffix() + "@example.test"
+
+	const attempts = LoginBurst + 2
+	type reply struct {
+		code int
+		body string
+	}
+	seen := map[string][]reply{}
+	for _, addr := range []string{known, unknown} {
+		for range attempts {
+			rec := hz.signInAttempt(t, hz.tenant, addr, "a-wrong-password-of-ample-length")
+			seen[addr] = append(seen[addr], reply{rec.Code, rec.Body.String()})
+		}
+	}
+	for i := range attempts {
+		k, u := seen[known][i], seen[unknown][i]
+		if k.code != u.code || k.body != u.body {
+			t.Fatalf("attempt %d distinguishes a real account from an invented one:\n"+
+				"  known:   %d %s\n  unknown: %d %s", i+1, k.code, k.body, u.code, u.body)
+		}
+	}
+	if seen[known][LoginBurst].code != http.StatusTooManyRequests {
+		t.Fatalf("attempt %d was %d, not 429 — nothing is being limited",
+			LoginBurst+1, seen[known][LoginBurst].code)
+	}
+	if seen[known][0].code != http.StatusUnauthorized {
+		t.Fatalf("the first wrong password was %d, not 401", seen[known][0].code)
+	}
+}
+
+// TestACorrectPasswordDoesNotSpendTheLoginBudget.
+//
+// # 🔴 What this is really protecting
+//
+// A per-account login limit charged for every attempt hands an attacker an account-lockout weapon:
+// fail to sign in as somebody often enough and they cannot sign in either. With the reset endpoint also
+// limited per address, both ways into the account close at once, for the price of a few dozen requests
+// an hour.
+//
+// Charging only for FAILURES removes the ratchet. Somebody with several devices, or a script, can sign
+// in successfully without limit; the budget is ten WRONG passwords, not ten sign-ins.
+func TestACorrectPasswordDoesNotSpendTheLoginBudget(t *testing.T) {
+	hz := newHarness(t)
+	_, _ = hz.user(t, tenancy.Owner)
+	email := "budget-" + randSuffix() + "@example.test"
+	if _, err := hz.Auth.CreateUser(context.Background(), hz.tenant, email, testPassword,
+		tenancy.Member); err != nil {
+		t.Fatal(err)
+	}
+
+	// Spend all but one token on wrong guesses.
+	for i := range LoginBurst - 1 {
+		if rec := hz.signInAttempt(t, hz.tenant, email, "wrong-but-long-enough-1"); rec.Code != http.StatusUnauthorized {
+			t.Fatalf("wrong guess %d answered %d, want 401", i+1, rec.Code)
+		}
+	}
+	// Now sign in correctly, many more times than there are tokens. Every one must work: each spends the
+	// last token and hands it straight back.
+	for i := range LoginBurst * 5 {
+		rec := hz.signInAttempt(t, hz.tenant, email, testPassword)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("correct sign-in %d was refused with %d — a correct password is consuming the "+
+				"budget, so anybody with several devices is one busy morning from being locked out: %s",
+				i+1, rec.Code, rec.Body.String())
+		}
+	}
+	// And the last token is still there for one more wrong guess, after which the ceiling holds.
+	if rec := hz.signInAttempt(t, hz.tenant, email, "wrong-but-long-enough-2"); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("the final token was missing: %d", rec.Code)
+	}
+	rec := hz.signInAttempt(t, hz.tenant, email, "wrong-but-long-enough-3")
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("guessing continued past the ceiling: %d", rec.Code)
+	}
+	if ra := rec.Header().Get("Retry-After"); ra == "" || ra == "0" {
+		t.Errorf("Retry-After is %q; a client cannot tell when to come back", ra)
+	}
+}
+
+// TestGuessingAtOneAccountDoesNotAffectAnother.
+//
+// Two axes at once, because the key has two halves. A different address in the same organization is a
+// different account, and — the one that is easy to get wrong — the SAME address in a different
+// organization is also a different account, with a different password. Keyed on the address alone,
+// guessing at one customer's user would spend a different customer's user's budget, which is one tenant
+// degrading another through an endpoint neither of them controls.
+func TestGuessingAtOneAccountDoesNotAffectAnother(t *testing.T) {
+	hz := newHarness(t)
+	_, _ = hz.user(t, tenancy.Owner)
+	victim := "victim-" + randSuffix() + "@example.test"
+	if _, err := hz.Auth.CreateUser(context.Background(), hz.tenant, victim, testPassword,
+		tenancy.Member); err != nil {
+		t.Fatal(err)
+	}
+	// A second organization holding the SAME address.
+	other := "t-" + randSuffix()
+	if err := hz.Auth.CreateTenant(context.Background(), other, "Other"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := hz.Auth.CreateUser(context.Background(), other, victim, testPassword,
+		tenancy.Owner); err != nil {
+		t.Fatal(err)
+	}
+	bystander := "bystander-" + randSuffix() + "@example.test"
+	if _, err := hz.Auth.CreateUser(context.Background(), hz.tenant, bystander, testPassword,
+		tenancy.Member); err != nil {
+		t.Fatal(err)
+	}
+
+	for range LoginBurst + 3 {
+		hz.signInAttempt(t, hz.tenant, victim, "wrong-but-long-enough")
+	}
+	if rec := hz.signInAttempt(t, hz.tenant, victim, testPassword); rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("the flooded account is not limited (%d); the premise of this test is wrong", rec.Code)
+	}
+	if rec := hz.signInAttempt(t, hz.tenant, bystander, testPassword); rec.Code != http.StatusOK {
+		t.Errorf("guessing at one account refused a different one in the same organization: %d %s",
+			rec.Code, rec.Body.String())
+	}
+	if rec := hz.signInAttempt(t, other, victim, testPassword); rec.Code != http.StatusOK {
+		t.Errorf("guessing at an account in one organization refused the same address in another: %d %s",
+			rec.Code, rec.Body.String())
+	}
+}
+
+// TestTheLoginLimitCannotBeBypassedByChangingCase.
+func TestTheLoginLimitCannotBeBypassedByChangingCase(t *testing.T) {
+	hz := newHarness(t)
+	_, _ = hz.user(t, tenancy.Owner)
+	addr := "LoginCase-" + randSuffix() + "@Example.Test"
+	if _, err := hz.Auth.CreateUser(context.Background(), hz.tenant, addr, testPassword,
+		tenancy.Member); err != nil {
+		t.Fatal(err)
+	}
+	for range LoginBurst {
+		hz.signInAttempt(t, hz.tenant, addr, "wrong-but-long-enough")
+	}
+	for _, spelling := range []string{
+		strings.ToLower(addr), strings.ToUpper(addr), "  " + addr + "  ",
+	} {
+		if rec := hz.signInAttempt(t, hz.tenant, spelling, "wrong-but-long-enough"); rec.Code != http.StatusTooManyRequests {
+			t.Errorf("respelling the address as %q got a fresh allowance (%d)", spelling, rec.Code)
+		}
 	}
 }
