@@ -1,0 +1,9 @@
+# 🔴 .env.local holds the DeepSeek key. `COPY . .` in the build stage would put it in a layer, and a
+# discarded build stage is not the same as a value that was never there — anyone with the build cache
+# has it. Excluded first, and by exact name, so a new deploy/ file cannot quietly re-include it.
+.env.local
+
+.git
+.github
+*.test
+docs

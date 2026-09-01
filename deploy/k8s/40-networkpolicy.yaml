@@ -1,0 +1,115 @@
+# Default deny, then name every flow. Mirrors the arrangement in the `heros` namespace.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: heros-eval
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-egress
+  namespace: heros-eval
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+---
+# 🔴 Without this, certificate issuance fails and the site never gets TLS. cert-manager solves the
+# HTTP-01 challenge with a pod IN THIS NAMESPACE, which default-deny-all would otherwise make
+# unreachable from Traefik. The failure is quiet: the Challenge sits `pending`, no Secret appears,
+# and the Ingress serves the default certificate.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: acme-http01-solver
+  namespace: heros-eval
+spec:
+  podSelector:
+    matchLabels:
+      acme.cert-manager.io/http01-solver: "true"
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+      ports:
+        - {protocol: TCP, port: 8089}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: heros-eval
+  namespace: heros-eval
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: heros-eval
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # 🔴 namespaceSelector and podSelector in ONE list item. Two items would be ORed — "anything in
+    # kube-system" OR "any pod labelled traefik anywhere" — which is far wider than intended and
+    # looks identical in `kubectl get`.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+      ports:
+        - {protocol: TCP, port: 8080}
+  egress:
+    # Postgres, in the `heros` namespace. Same one-item AND as above.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: heros
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: postgres
+      ports:
+        - {protocol: TCP, port: 5432}
+    # The mail relay, also in `heros`.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: heros
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: mail
+      ports:
+        - {protocol: TCP, port: 587}
+    # 🔴 The public internet on 443, for two distinct reasons that must not be narrowed to one:
+    # the DeepSeek API (api.deepseek.com) and `git clone` of whatever repository a customer asks
+    # about. The second has no fixed destination by design, so this cannot become an allowlist of
+    # hosts without breaking the product's central feature.
+    #
+    # The private ranges are excluded so a repository URL pointing at 10.x or at the metadata
+    # service cannot turn repository intake into a request from inside the cluster. 169.254.169.254
+    # is named separately from the RFC1918 blocks because it is not one of them.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 169.254.169.254/32
+      ports:
+        - {protocol: TCP, port: 443}

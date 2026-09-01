@@ -1,0 +1,122 @@
+# herosd — one replica behind Traefik.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: heros-eval-work
+  namespace: heros-eval
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: local-path
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: heros-eval
+  namespace: heros-eval
+  labels:
+    app.kubernetes.io/name: heros-eval
+spec:
+  replicas: 1
+  # 🔴 Recreate, not RollingUpdate. The working directory is a ReadWriteOnce volume on a
+  # single-node cluster, so a second pod cannot mount it while the first still holds it — a rolling
+  # update would wedge with the new pod Pending on the volume and the old one never drained. The
+  # cost is a few seconds of downtime per deploy, which is the honest trade for one replica sharing
+  # one disk.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: heros-eval
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: heros-eval
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+      containers:
+        - name: herosd
+          image: 373468206837.dkr.ecr.us-east-1.amazonaws.com/heros-eval:REPLACED_BY_DEPLOY
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            # Mail. The relay in the `heros` namespace, reached by its Service name.
+            #
+            # 🔴 herosd REFUSES TO START on a half-configured relay (mailer.FromEnv), so these five
+            # move together. That is deliberate upstream: a relay missing one credential accepts
+            # connections and delivers nothing, which looks identical to working until somebody
+            # cannot reset their password.
+            - name: HEROS_SMTP_HOST
+              value: mail.heros.svc.cluster.local
+            - name: HEROS_SMTP_PORT
+              value: "587"
+            - name: HEROS_MAIL_FROM
+              value: support@heros-agent.space
+            # 🔴 Sends as support@, and the relay's SPOOF_PROTECTION binds the login to that address,
+            # so the From above and the smtp-username in the secret are not independent choices.
+            # This account is INHERITED from the deleted console, not shared with it — the relay's
+            # own seeding script declines to share one login across two live services, and after the
+            # removal this is the only service using it.
+            - name: HEROS_PUBLIC_URL
+              value: https://eval.heros-agent.space
+            - name: HEROS_MAIL_MODE
+              # Belt and braces. With the SMTP variables above set this value is never consulted;
+              # if somebody removes them, the process refuses to start rather than silently falling
+              # back to writing password-reset links into the log, which on a public deployment is
+              # account takeover for anybody who can read it.
+              value: "off"
+          envFrom:
+            - secretRef:
+                name: heros-eval
+          volumeMounts:
+            - name: work
+              mountPath: /var/lib/heros
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            # 🔴 The memory limit is a password-hashing budget, not a guess. argon2id costs 64 MiB
+            # per verification and herosd sizes its concurrency from GOMAXPROCS, which Go 1.25
+            # derives from this cpu limit: 1 CPU => 2 concurrent hashes => 128 MiB live at once.
+            # Resident settles well above "live" because Go returns memory lazily, so 1Gi is the
+            # plateau plus headroom, not the live figure.
+            limits: {cpu: "1", memory: 1Gi}
+          # Startup, liveness and readiness all probe the same public endpoint. It is the cheapest
+          # route that proves the mux is mounted rather than that a port is open.
+          #
+          # 🔴 The startup probe exists because migrations run BEFORE the listener does. Without it
+          # the liveness probe starts counting against a process that is legitimately busy applying
+          # schema on an empty database, and kills it mid-migration.
+          startupProbe:
+            httpGet: {path: /api/auth/status, port: http}
+            periodSeconds: 3
+            failureThreshold: 40
+          readinessProbe:
+            httpGet: {path: /api/auth/status, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /api/auth/status, port: http}
+            periodSeconds: 20
+            failureThreshold: 3
+      volumes:
+        - name: work
+          persistentVolumeClaim:
+            claimName: heros-eval-work
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: heros-eval
+  namespace: heros-eval
+spec:
+  selector:
+    app.kubernetes.io/name: heros-eval
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
