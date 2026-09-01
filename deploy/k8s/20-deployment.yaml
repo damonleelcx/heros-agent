@@ -35,6 +35,28 @@ spec:
       labels:
         app.kubernetes.io/name: heros-eval
     spec:
+      # 🔴 The mail relay is reached by its PUBLIC name, resolved to its in-cluster Service address
+      # here and nowhere else.
+      #
+      # Why not just point HEROS_SMTP_HOST at mail.heros.svc.cluster.local: the relay presents a
+      # certificate for `mail.heros-agent.space` and nothing else, so connecting by Service name
+      # fails TLS verification. The product does not stop — it boots, serves, signs people in, and
+      # then silently never delivers an invitation or a password reset. That is the failure this
+      # deployment is most likely to ship without noticing, so it is fixed at the name.
+      #
+      # Why not a CoreDNS rewrite, which would fix it once for the whole cluster: a cluster-wide
+      # rewrite of that name ALSO answers cert-manager's own HTTP-01 self-check for it, pointing the
+      # issuer at an SMTP port. The challenge then sits pending forever and the relay's certificate
+      # cannot be renewed. CoreDNS has no per-workload view; every controller resolving the name
+      # gets the same answer, including the one whose job is to prove the name points elsewhere.
+      # This was learned the hard way on this cluster; hostAliases scopes the answer to this pod.
+      #
+      # ⚠️ The address is the mail Service's ClusterIP. It is stable for the life of the Service but
+      # NOT if somebody deletes and recreates it, in which case mail stops with a TLS error naming
+      # a host that looks correct.
+      hostAliases:
+        - ip: 10.43.120.55
+          hostnames: [mail.heros-agent.space]
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
@@ -54,7 +76,7 @@ spec:
             # connections and delivers nothing, which looks identical to working until somebody
             # cannot reset their password.
             - name: HEROS_SMTP_HOST
-              value: mail.heros.svc.cluster.local
+              value: mail.heros-agent.space
             - name: HEROS_SMTP_PORT
               value: "587"
             - name: HEROS_MAIL_FROM
