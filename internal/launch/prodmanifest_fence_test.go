@@ -55,9 +55,57 @@ func prodOverlay(t *testing.T) string {
 	return b.String()
 }
 
+// prodStillDeploysThePlatform reports whether the prod overlay deploys agentd and the consoles at all.
+//
+// # 🔴 Why this exists, and why it ASSERTS rather than just returning false
+//
+// The prod overlay no longer runs the platform: eval.heros-agent.space replaced it on that cluster, and
+// the overlay deletes the three Deployments. Every assertion below is about how those workloads are
+// CONFIGURED, so on a deployment that does not run them the assertions have nothing to be true of — and
+// a fence with nothing to be true of passes for the wrong reason. That is the shape this codebase has
+// been bitten by before: an empty set satisfies every claim about its members.
+//
+// So the guard is not "did we find the config" — absence of config is exactly what a broken overlay
+// looks like too, and the two must never be conflated. It is "does the overlay POSITIVELY DECLARE that
+// it deletes these workloads". A missing delete patch and a missing config read very differently: the
+// first means the platform is deployed and unconfigured, which is the original defect, and the fence
+// then runs in full.
+//
+// Put another way: put the Deployments back and these fences come back with them, automatically.
+func prodStillDeploysThePlatform(t *testing.T, overlay string) bool {
+	t.Helper()
+	const deleteTarget = `- target: { kind: Deployment, name: "^(agentd|console|admin-console)$" }`
+	if !strings.Contains(overlay, deleteTarget) {
+		return true
+	}
+	// The delete target alone is not enough — it must actually carry a delete directive, or it is a
+	// target selecting three workloads and doing nothing to them.
+	after := overlay[strings.Index(overlay, deleteTarget)+len(deleteTarget):]
+	if idx := strings.Index(after, "$patch: delete"); idx < 0 || idx > 200 {
+		t.Fatalf("the prod overlay targets the platform Deployments for deletion but the target carries " +
+			"no `$patch: delete` within it.\n  That is a patch selecting three workloads and doing " +
+			"nothing to them: the platform is still deployed, and unconfigured, which is precisely the " +
+			"defect the fences in this file exist to catch.")
+	}
+	return false
+}
+
 // 🔴 Operator SSO must be ON in the manifest that is applied.
 func TestTheProdOverlayDoesNotTurnOperatorSSOOff(t *testing.T) {
 	overlay := prodOverlay(t)
+	if !prodStillDeploysThePlatform(t, overlay) {
+		// Not a silent skip. There is a positive claim to make about an overlay that deletes the
+		// operator console: it must not leave the console's SSO settings lying around either, because
+		// an orphaned ADMIN_* patch targeting a deleted Deployment is a kustomize build error waiting
+		// for whoever next renders this tree.
+		if strings.Contains(overlay, "ADMIN_IDENTITY_MODE") {
+			t.Error("the prod overlay deletes the operator console but still patches ADMIN_IDENTITY_MODE " +
+				"onto it — a patch whose target no longer exists")
+		}
+		t.Skip("the prod overlay no longer deploys agentd or the consoles; it deletes them. These " +
+			"assertions are about how those workloads are configured, and they resume automatically if " +
+			"the Deployments are ever put back.")
+	}
 
 	// `oidc` on BOTH workloads. They read separate copies of this variable, and the two disagreeing is
 	// its own documented defect: agentd serving an admin API the console will not federate into, or the
@@ -163,7 +211,11 @@ func TestTheAirgappedPackageShipsOnlyWhatACustomerRuns(t *testing.T) {
 // install must not grow a registration form by upgrading.
 func TestSelfServeIsOnInProdAndOffInTheBase(t *testing.T) {
 	overlay := prodOverlay(t)
-	if !strings.Contains(overlay, `{ name: HEROS_SELF_SERVE_SIGNUP, value: "1" }`) {
+	// 🔴 The BASE half of this test still matters and still runs below — that an air-gapped install must
+	// not grow a registration form by upgrading is a claim about the base, and is unaffected by what prod
+	// deploys. Only the prod half is conditional.
+	if prodStillDeploysThePlatform(t, overlay) &&
+		!strings.Contains(overlay, `{ name: HEROS_SELF_SERVE_SIGNUP, value: "1" }`) {
 		t.Error("the prod overlay does not enable self-serve sign-up, so /create-account refuses every " +
 			"visitor on the hosted product")
 	}

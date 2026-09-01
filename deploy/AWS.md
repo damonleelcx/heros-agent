@@ -351,7 +351,17 @@ Now run §3's enforcement probe.
 ## 7. Expose the two consoles
 
 The manifests ship in **[`deploy/k8s/overlays/prod/ingress.yaml`](k8s/overlays/prod/ingress.yaml)** and are
-already in the prod overlay's `resources:`, along with the two patches they depend on (§7.4). What is
+already in the prod overlay's `resources:`, along with the two patches they depend on (§7.4).
+
+> ⚠️ **The prod overlay declares these Ingresses and then deletes them.** `heros-agent.space` and
+> `admin.heros-agent.space` are no longer served — the hosted deployment of this platform was removed,
+> and that k3s cluster now runs shared infrastructure for other products instead. The file stays because
+> it is the only declaration of the platform's public route surface and nine fences in `internal/api`
+> read it; the overlay deletes the objects so nothing is applied.
+>
+> **For an EKS deploy, remove those two `$patch: delete` entries from `overlays/prod/kustomization.yaml`.**
+> Everything else in this section applies unchanged. Renaming this from a gap to a footnote rather than
+> deleting the section: the routes below are still what the platform publishes. What is
 *not* automatic is the controller that reconciles them and its IAM role — §7.2 — and two values you must
 edit before applying: the **certificate ARN** and, if you are not deploying to `heros-agent.space`, the
 **hostnames**. The target origins are:
