@@ -1,184 +1,280 @@
+<!doctype html>
 <!-- The public home page.
-     🔴 Every capability named below is one of the nineteen the router actually routes, in the product's
-     own words. The old marketing page described forge delivery, eval boards and four named plans; none
-     of those exist here, and inheriting its copy would have advertised a different product. -->
+     Structure follows a reference damon supplied: a dark rounded shell inside a lighter frame, a huge
+     centred headline, a three-column hero with the figure in an arch, a stat column, and an accent band
+     the figure overlaps. Palette and subject are ours.
+
+     🔴 THE NUMBERS ARE REAL. The reference's stat column reads "42K+ User Active / 8K+ Artworks /
+     2K+ Artist". Copying that shape with invented figures would put fabricated metrics on a public
+     page. Every number here is a fact from the code: nineteen intents in internal/intent, nine axes in
+     internal/discovery, and MaxCostCents:100 in cmd/herosd. Same for the band — no fake bids, no
+     countdown, no App Store badge for an app that does not exist. -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Heros — she reads your agent and tells you what is weak</title>
-<meta name="description" content="Heros assesses an AI agent's repository across nine axes, proposes changes, and opens a pull request. She writes the plan down before anything is spent, and refuses rather than guesses.">
+<meta name="description" content="Heros assesses an AI agent's repository across nine axes, proposes changes, and opens a pull request. The plan is written down before anything is spent, and she refuses rather than guesses.">
 <link rel="icon" href="favicon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,300;6..72,400&family=Plus+Jakarta+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,300;6..72,400&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
 <link rel="stylesheet" href="heros.css">
 <style>
-  .hero{display:grid; grid-template-columns:1fr; gap:var(--s6); padding:var(--s8) 0 var(--s7)}
-  @media (min-width:56rem){ .hero{grid-template-columns:1.25fr .75fr; align-items:center} }
-  .hero-art{justify-self:center; position:relative; width:min(72vw,17rem)}
-  .hero-art img{width:100%; border-radius:var(--pill)}
-  .hero-art::after{
-    content:""; position:absolute; inset:-8%; border-radius:var(--pill);
-    border:1px solid #2ecfa833; pointer-events:none;
+  /* The lighter frame the shell sits in, straight from the reference. */
+  body{background:#141a24; background-image:none; padding:clamp(0px,2vw,26px)}
+  .shell{
+    background:var(--canvas); border-radius:clamp(0px,2.4vw,28px); overflow:hidden;
+    padding:clamp(1rem,3vw,2rem) clamp(1rem,3.4vw,2.6rem) 0;
+    background-image:
+      linear-gradient(to right,#ffffff06 1px,transparent 1px),
+      linear-gradient(to bottom,#ffffff06 1px,transparent 1px);
+    background-size:64px 64px;
   }
-  .cta{display:flex; gap:var(--s3); flex-wrap:wrap; margin-top:var(--s5)}
-  .said{
-    font-family:var(--display); font-size:clamp(1.1rem,2.6vw,1.45rem); line-height:1.4;
-    border-left:2px solid var(--accent); padding-left:var(--s4); margin:0 0 var(--s4);
+
+  /* ── nav ── */
+  .bar{display:flex; align-items:center; gap:var(--s5); flex-wrap:wrap}
+  .logo{display:flex; align-items:center; gap:.6rem; font-weight:700; letter-spacing:.02em; color:var(--ink)}
+  .logo:hover{text-decoration:none}
+  .logo img{width:36px; height:36px; border-radius:var(--pill)}
+  .menu{display:flex; gap:clamp(1rem,3vw,2.4rem); flex:1; justify-content:center; flex-wrap:wrap}
+  .menu a{color:var(--ink-muted); font-weight:500}
+  .menu a.on{color:var(--ink)}
+  /* The reference's search pill: a rounded field with a filled circular button at its end. Ours holds
+     the two things a stranger can actually do. */
+  .pill{
+    display:flex; align-items:center; gap:.5rem; padding:.3rem .3rem .3rem 1.1rem;
+    background:var(--panel); border:1px solid var(--border); border-radius:var(--pill);
   }
-  .said span{color:var(--ink-muted); font-family:var(--body); font-size:.85rem; display:block; margin-top:var(--s2)}
-  .list{list-style:none; padding:0; margin:0; display:grid; gap:var(--s2)}
+  .pill a.sign{color:var(--ink-muted); font-size:.95rem; padding:.4rem .3rem}
+  .pill a.sign:hover{color:var(--ink); text-decoration:none}
+  .round{
+    display:grid; place-items:center; width:44px; height:44px; border-radius:var(--pill);
+    background:var(--accent); color:var(--accent-ink); font-weight:700; flex:none;
+    box-shadow:0 0 0 6px #2ecfa81f;
+  }
+  .round:hover{text-decoration:none; background:#48e0bc}
+  /* 🔴 Below the point where three things stop fitting on one line, the anchor menu takes its own row.
+     Left as-is it wrapped INTO the logo — the links reflowed around it and the whole bar read as a
+     jumble. Logo and the sign-in pill stay paired on the first row, because those are the two controls
+     a stranger needs; the section anchors are secondary and can sit underneath. */
+  @media (max-width:60rem){
+    .bar{row-gap:var(--s3)}
+    .menu{order:3; width:100%; flex:1 0 100%; justify-content:flex-start; gap:1.2rem; font-size:.94rem}
+    .pill{margin-left:auto}
+  }
+
+  /* ── headline ── */
+  .title{
+    text-align:center; margin:clamp(2rem,6vw,4.5rem) auto clamp(1.5rem,4vw,2.5rem); max-width:20ch;
+    font-size:clamp(2.1rem,7.2vw,4.4rem); font-weight:400; line-height:1.06; letter-spacing:-.02em;
+  }
+
+  /* ── hero ── */
+  .hero{display:grid; gap:clamp(1.5rem,4vw,2rem); align-items:center; grid-template-columns:1fr}
+  @media (min-width:64rem){ .hero{grid-template-columns:minmax(0,1fr) auto minmax(0,1fr)} }
+
+  .say{color:var(--ink-muted); max-width:34ch; margin:0 0 var(--s5)}
+  .glow{box-shadow:0 10px 34px -10px #2ecfa899}
+  .aside{margin-top:var(--s5); color:var(--ink-muted); font-size:.86rem; max-width:30ch}
+
+  /* The arch. A stadium top and square feet, so the figure stands in it.
+     🔴 The decorative arch behind lives on the WRAPPER, not on .arch itself. On .arch it was invisible:
+     `overflow:hidden` clips a pseudo-element that deliberately sticks out past the edges, so the thing
+     drawn to peek behind was being cut off exactly where it peeked. */
+  .archwrap{
+    position:relative; z-index:2; justify-self:center;
+    width:clamp(15rem,42vw,20.5rem);
+    /* 🔴 clamp(MIN, val, MAX) — with negatives the smaller number is the MIN. Written the other way
+       round (clamp(-30px, -4vw, -64px)) the min exceeds the max and clamp returns the min, so the
+       overlap silently pinned at 30px however wide the window got. It is meant to grow. */
+    margin-bottom:clamp(-72px,-4.5vw,-28px);
+  }
+  .archwrap::before{
+    content:""; position:absolute; inset:auto -13% 7% -13%; height:80%;
+    border-radius:999px 999px 1.6rem 1.6rem; background:#101b2e; border:1px solid var(--border);
+  }
+  .arch{
+    position:relative; aspect-ratio:560/862;
+    border-radius:999px 999px 1.6rem 1.6rem; overflow:hidden;
+    background:#0d1626; border:1px solid var(--border);
+  }
+  .arch img{width:100%; height:100%; object-fit:cover; display:block}
+
+  /* ── stats ── */
+  .stats{display:grid; gap:clamp(1rem,2.6vw,1.8rem); justify-items:start}
+  @media (min-width:64rem){ .stats{justify-items:end; text-align:right} }
+  .stat b{display:block; font-size:clamp(1.7rem,3.4vw,2.5rem); font-weight:700; letter-spacing:-.02em; line-height:1}
+  .stat span{color:var(--ink-muted); font-size:.9rem}
+
+  /* ── the accent band ── */
+  .band{
+    position:relative; z-index:1; background:var(--accent); color:var(--accent-ink);
+    border-radius:1.6rem 1.6rem 0 0; margin:0 calc(clamp(1rem,3.4vw,2.6rem) * -1);
+    padding:clamp(1.2rem,3vw,1.8rem) clamp(1.4rem,3.4vw,2.6rem) clamp(1.4rem,3vw,2rem);
+  }
+  .band h2{font-family:var(--body); font-weight:700; font-size:clamp(1.15rem,2.4vw,1.5rem)}
+  .band-top{display:flex; align-items:center; justify-content:space-between; gap:var(--s4); flex-wrap:wrap}
+  .band-open{display:inline-flex; align-items:center; gap:.6rem; color:var(--accent-ink); font-weight:700;
+    font-size:clamp(1.15rem,2.4vw,1.5rem)}
+  .dash{border:0; border-top:2px dashed #05261d59; margin:var(--s4) 0}
+  .facts{display:grid; gap:var(--s4); grid-template-columns:repeat(auto-fit,minmax(11rem,1fr))}
+  .fact b{display:block; font-size:clamp(1.05rem,2.2vw,1.35rem); font-weight:700}
+  .fact span{font-size:.84rem; opacity:.75}
+  /* Dividers between facts, as in the reference — but only where a fact actually follows. */
+  @media (min-width:48rem){ .fact + .fact{border-left:1px solid #05261d33; padding-left:var(--s5)} }
+
+  .below{padding:clamp(2.5rem,7vw,5rem) 0 0}
+  .rule{border:0; border-top:1px solid var(--border); margin:clamp(2rem,5vw,3.5rem) 0}
+  .list{list-style:none; padding:0; margin:var(--s3) 0 0; display:grid; gap:var(--s2)}
   .list li{padding-left:1.15rem; position:relative; color:var(--ink-muted)}
   .list li::before{content:"·"; position:absolute; left:.35rem; color:var(--accent)}
-  section{padding:var(--s7) 0}
-  .rule{border:0; border-top:1px solid var(--border); margin:0}
+  .said{font-family:var(--display); font-size:clamp(1.05rem,2.4vw,1.35rem); line-height:1.45;
+    border-left:2px solid var(--accent); padding-left:var(--s4); margin:0 0 var(--s4)}
+  .said span{display:block; margin-top:var(--s2); color:var(--ink-muted); font-family:var(--body); font-size:.84rem}
 </style>
 
-<div class="wrap">
-  <nav class="nav">
-    <a class="brand" href="/"><img src="avatar.jpg" alt=""> Heros</a>
-    <span class="spacer"></span>
-    <span class="nav-links">
-      <a class="btn btn-quiet" href="/signin/">Sign in</a>
-      <a class="btn btn-primary" href="/signup/">Create an organization</a>
+<div class="shell">
+  <nav class="bar">
+    <a class="logo" href="/"><img src="avatar.jpg" alt=""> HEROS</a>
+    <span class="menu">
+      <a class="on" href="/">Home</a>
+      <a href="#does">What she does</a>
+      <a href="#who">Who she is</a>
+      <a href="#start">Get started</a>
+    </span>
+    <span class="pill">
+      <a class="sign" href="/signin/">Sign in</a>
+      <a class="round" href="/signup/" title="Create an organization" aria-label="Create an organization">→</a>
     </span>
   </nav>
 
-  <header class="hero">
+  <h1 class="title">She reads your agent and tells you what is weak</h1>
+
+  <div class="hero">
     <div>
-      <p class="eyebrow">An agent that reads agents</p>
-      <h1>She reads your agent and tells you what is weak.</h1>
-      <p class="lede prose">
-        Point Heros at a repository. She works out whether there is an agent in it, assesses it across
-        nine axes — model, prompt, tools, skills, memory, context, loop, harness, graph — and tells you
-        what she measured and what she did not. Then, if you want, she proposes the change and opens the
-        pull request.
+      <p class="say">
+        Point her at a repository. She works out whether there is an agent in it, assesses it across
+        nine axes, and tells you what she measured and what she did not.
       </p>
-      <div class="cta">
-        <a class="btn btn-primary" href="/signup/">Create an organization</a>
-        <a class="btn" href="/signin/">Sign in</a>
-      </div>
-      <p class="hint">Free to start. One organization per address.</p>
+      <a class="btn btn-primary glow" href="/signup/">Create an organization</a>
+      <p class="aside">Works with any public GitHub repository. Paste a link and she reports what she found.</p>
     </div>
-    <div class="hero-art"><img src="avatar.jpg" alt="Heros" width="272" height="272"></div>
-  </header>
 
-  <hr class="rule">
+    <div class="archwrap"><div class="arch"><img src="heros-figure.jpg" alt="Heros" width="560" height="862"></div></div>
 
-  <section>
-    <p class="eyebrow">What she does</p>
-    <h2>Nineteen things, and that is the list rather than a sample.</h2>
-    <p class="lede prose">
-      She routes a sentence to one of them or says she cannot. There is no twentieth thing she will
-      attempt badly.
-    </p>
-    <div class="grid grid-3" style="margin-top:var(--s5)">
-      <div class="card">
-        <h3>Understand it</h3>
-        <ul class="list" style="margin-top:var(--s3)">
-          <li>what does my agent actually do, step by step?</li>
-          <li>what conversation history does this node get?</li>
-          <li>what does this node remember between calls?</li>
-          <li>what tools is this node offered, and which does it actually call?</li>
-          <li>what skills are bound at this call site?</li>
-          <li>how many turns does it take, and in what loop?</li>
-          <li>what is this node allowed to do — what can it reach, and what can it spend?</li>
-        </ul>
-      </div>
-      <div class="card">
-        <h3>Judge it</h3>
-        <ul class="list" style="margin-top:var(--s3)">
-          <li>look at my repository and tell me what is weak</li>
-          <li>build me an evaluation set for this agent</li>
-          <li>is this version better than the last one?</li>
-          <li>what did you measure, and what did you not?</li>
-          <li>what happened in that run?</li>
-          <li>should these nodes run in this order?</li>
-        </ul>
-      </div>
-      <div class="card">
-        <h3>Change it</h3>
-        <ul class="list" style="margin-top:var(--s3)">
-          <li>change what this node is told</li>
-          <li>change which model this node calls</li>
-          <li>change something on an axis and show me the diff</li>
-          <li>what exactly would you write into my source?</li>
-          <li>fix it, and open a pull request</li>
-          <li>put an approved change into my repository</li>
-        </ul>
-      </div>
+    <div class="stats">
+      <div class="stat"><b>19</b><span>things she does</span></div>
+      <div class="stat"><b>9</b><span>axes assessed</span></div>
+      <div class="stat"><b>$1.00</b><span>ceiling on a run</span></div>
+    </div>
+  </div>
+
+  <section class="band">
+    <div class="band-top">
+      <h2>Every run, before anything is spent</h2>
+      <a class="band-open" href="/signup/">Get started <span aria-hidden="true">→</span></a>
+    </div>
+    <hr class="dash">
+    <div class="facts">
+      <div class="fact"><b>The plan, written down</b><span>every task named up front</span></div>
+      <div class="fact"><b>10 tasks</b><span>for a full assessment</span></div>
+      <div class="fact"><b>Ceiling $1.00</b><span>and each task reports its cost</span></div>
+      <div class="fact"><b>Nothing spent on a refusal</b><span>and the refusal says why</span></div>
     </div>
   </section>
 
-  <hr class="rule">
-
-  <section>
-    <p class="eyebrow">Who she is</p>
-    <h2>She would rather refuse than guess.</h2>
-    <div class="grid grid-2" style="margin-top:var(--s5)">
-      <div>
-        <p class="said">
-          “I cannot route that. Here is the whole of what I do — nineteen things, and this is the list
-          rather than a sample.”
-          <span>when a sentence is outside what she does</span>
-        </p>
-        <p class="said">
-          “The plan is written down before anything is spent: ten tasks, ceiling $1.00.”
-          <span>before every run</span>
-        </p>
-        <p class="said">
-          “Give the run a limit — a number of proposals, a spend, or a deadline.”
-          <span>asked to keep improving until it is perfect</span>
-        </p>
+  <div class="below">
+    <section id="does">
+      <p class="eyebrow">What she does</p>
+      <h2>Nineteen things, and that is the list rather than a sample.</h2>
+      <p class="lede prose">She routes a sentence to one of them or says she cannot. There is no twentieth
+        thing she will attempt badly.</p>
+      <div class="grid grid-3" style="margin-top:var(--s5)">
+        <div class="card"><h3>Understand it</h3>
+          <ul class="list">
+            <li>what does my agent actually do, step by step?</li>
+            <li>what conversation history does this node get?</li>
+            <li>what does this node remember between calls?</li>
+            <li>what tools is this node offered, and which does it actually call?</li>
+            <li>what skills are bound at this call site?</li>
+            <li>how many turns does it take, and in what loop?</li>
+            <li>what is this node allowed to do — what can it reach, and what can it spend?</li>
+          </ul></div>
+        <div class="card"><h3>Judge it</h3>
+          <ul class="list">
+            <li>look at my repository and tell me what is weak</li>
+            <li>build me an evaluation set for this agent</li>
+            <li>is this version better than the last one?</li>
+            <li>what did you measure, and what did you not?</li>
+            <li>what happened in that run?</li>
+            <li>should these nodes run in this order?</li>
+          </ul></div>
+        <div class="card"><h3>Change it</h3>
+          <ul class="list">
+            <li>change what this node is told</li>
+            <li>change which model this node calls</li>
+            <li>change something on an axis and show me the diff</li>
+            <li>what exactly would you write into my source?</li>
+            <li>fix it, and open a pull request</li>
+            <li>put an approved change into my repository</li>
+          </ul></div>
       </div>
-      <div class="prose">
-        <p>
-          Most assistants guess when they are unsure, because guessing looks like helpfulness. The cost
-          of the two mistakes is not symmetric. An abstention costs one exchange. A wrong route spends
-          your money on work you did not ask for, and a conversation is exactly where you are least
-          equipped to notice you were sent somewhere else.
-        </p>
-        <p>
-          So Heros routes deterministically, publishes the whole list of what she can do, and says
-          nothing was spent when nothing was. Every refusal names the next action, because “no” without
-          a next step is just a door.
-        </p>
-        <p>
-          When she does run, the plan and its ceiling are written down first, every task reports what it
-          cost, and an effect on your repository waits for you to approve it.
-        </p>
+    </section>
+
+    <hr class="rule">
+
+    <section id="who">
+      <p class="eyebrow">Who she is</p>
+      <h2>She would rather refuse than guess.</h2>
+      <div class="grid grid-2" style="margin-top:var(--s5)">
+        <div>
+          <p class="said">“I cannot route that. Here is the whole of what I do — nineteen things, and this
+            is the list rather than a sample.”<span>when a sentence is outside what she does</span></p>
+          <p class="said">“The plan is written down before anything is spent.”<span>before every run</span></p>
+          <p class="said">“Give the run a limit — a number of proposals, a spend, or a deadline.”
+            <span>asked to keep improving until it is perfect</span></p>
+        </div>
+        <div class="prose">
+          <p>Most assistants guess when they are unsure, because guessing looks like helpfulness. The cost
+            of the two mistakes is not symmetric. An abstention costs one exchange. A wrong route spends
+            your money on work you did not ask for, and a conversation is exactly where you are least
+            equipped to notice you were sent somewhere else.</p>
+          <p>So she routes deterministically, publishes the whole list of what she can do, and says nothing
+            was spent when nothing was. Every refusal names the next action, because “no” without a next
+            step is just a door.</p>
+          <p>When she does run, the plan and its ceiling are written down first, every task reports what it
+            cost, and an effect on your repository waits for you to approve it.</p>
+        </div>
       </div>
-    </div>
-  </section>
+    </section>
 
-  <hr class="rule">
+    <hr class="rule">
 
-  <section>
-    <p class="eyebrow">Getting started</p>
-    <h2>Three steps, and the first one is free.</h2>
-    <div class="grid grid-3" style="margin-top:var(--s5)">
-      <div class="card"><h3>1 · Create an organization</h3>
-        <p class="hint">An address and a password. You own it, and you can invite people into it.</p></div>
-      <div class="card"><h3>2 · Give her a repository</h3>
-        <p class="hint">Paste a GitHub link. She reports what she found, and says plainly when there is
-          no agent in it to assess.</p></div>
-      <div class="card"><h3>3 · Ask</h3>
-        <p class="hint">In a sentence. She routes it, or tells you she cannot and shows you the list.</p></div>
-    </div>
-    <div class="cta"><a class="btn btn-primary" href="/signup/">Create an organization</a></div>
-  </section>
+    <section id="start">
+      <p class="eyebrow">Getting started</p>
+      <h2>Three steps, and the first one is free.</h2>
+      <div class="grid grid-3" style="margin-top:var(--s5)">
+        <div class="card"><h3>1 · Create an organization</h3>
+          <p class="hint">An address and a password. You own it.</p></div>
+        <div class="card"><h3>2 · Give her a repository</h3>
+          <p class="hint">Paste a GitHub link. She says plainly when there is no agent in it to assess.</p></div>
+        <div class="card"><h3>3 · Ask</h3>
+          <p class="hint">In a sentence. She routes it, or tells you she cannot and shows you the list.</p></div>
+      </div>
+      <p style="margin-top:var(--s5)"><a class="btn btn-primary glow" href="/signup/">Create an organization</a></p>
+    </section>
 
-  <footer class="foot">
-    <span>Heros</span><span class="spacer" style="flex:1"></span>
-    <a href="/signin/">Sign in</a><a href="/signup/">Create an organization</a>
-  </footer>
+    <footer class="foot">
+      <span>Heros</span><span style="flex:1"></span>
+      <a href="/signin/">Sign in</a><a href="/signup/">Create an organization</a>
+    </footer>
+  </div>
 </div>
 
 <script>
-  /* 🔴 Mail links point at the ORIGIN with a query parameter — /?invite=…, /?reset=…, /?verify=… —
-     because that is where the console used to live. The console has moved to /app, and every link
-     already sent is still in somebody's inbox, so this page forwards those three rather than the
-     mailer being repointed. Repointing would fix new mail and break all the old.
-     Nothing else is forwarded: a stranger landing on the home page should see the home page. */
+  /* 🔴 Mail links point at the ORIGIN with a query parameter — /?invite=, /?reset=, /?verify= — because
+     that is where the console used to live. Every one already sent is in somebody's inbox, so this page
+     forwards those three to /app/ rather than the mailer being repointed: repointing fixes new mail and
+     breaks all the old. Nothing else is forwarded. */
   (function(){
     var q = new URLSearchParams(location.search);
     for (var i = 0, k = ['invite','reset','verify']; i < k.length; i++) {
