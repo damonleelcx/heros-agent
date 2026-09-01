@@ -600,9 +600,37 @@ Four bugs the run exposed:
   published the artefact and reported FAILED. A criterion borrowed from another intent is not a weaker
   measure, it is a measure of something else.
 
-### [~] P12 · Timeline / observability
-Event model and recording exist and are written by the kernel. The *query* side — "what happened, why,
-when, what next" as a rendered timeline — is not built.
+### [x] P12 · Timeline / observability
+The kernel already RECORDED all of this — episodes, task states, checkpoints. What was missing was the
+ability to ask, and a record nobody can read is not observability, it is storage.
+`GET /api/goals/{id}/timeline` reads the episodes, the DAG and the goal state together, and the console
+renders it.
+
+🔴 **What-next leads, above the history.** The question somebody actually has is never "show me the log",
+it is "this has been running for twenty minutes, what is it waiting for" — and if the answer is "you", it
+is the only line on the page they can act on. Every unfinished task gets a sentence naming why it is not
+running; a state with no case would render as "no reason" rather than "nobody wrote one".
+
+🔴 **Ordered by the store's sequence, not by wall clock.** Seq is a total order assigned by the store;
+timestamps are not, because workers write concurrently and clocks step backwards. Sorted by `At`, a
+timeline puts an effect before the decision that caused it — rarely, unreproducibly, and only under the
+concurrency that makes it matter.
+
+🔴 **Truncation drops observations and decisions first, never failures and effects**, inheriting the rule
+the memory package enforces for compression: the two things a reader most needs from an old run are what
+broke and what it changed. Oldest-first truncation would undo that at the last step, dropping exactly the
+early failure that explains everything after it. Whatever is dropped is counted and said out loud.
+
+**Isolation:** the goal id comes from the URL, so ownership is checked against a tenant-scoped store
+before anything is read, and another tenant's run is indistinguishable from one that never existed.
+⚠️ `memory.Store` is still keyed by goal id with no tenant — the shape the tenancy work removed from the
+goal store. `buildTimeline` takes an already-loaded goal rather than an id, which is a convention rather
+than a wall; scoping that store properly is named below.
+
+⚠️ **A defect found while writing it:** `DAG.Tasks` is a map and Go randomises map iteration, so the
+first version of the what-next list came back in a different order on every call. On screen that reads as
+the run churning. `TestWhatNextIsStableAcrossCalls` calls it sixty times; one call could never have
+caught it.
 
 ### [ ] P13 · Eval scenarios + recovery drills
 Kill workers mid-task, duplicate events, stale data, unavailable APIs; assert correct resume.
@@ -784,6 +812,11 @@ password is a published credential.
   TypeScript, JavaScript and Go only. Every report states that it shows what was found, not everything
   that exists.
 - **Console / HTTP surface.** No API and no UI in this tree.
+- **`memory.Store` is not tenant-scoped.** `Episodes(goalID)` returns whatever goal it is handed, for
+  any customer — the same shape `store.Root.For(tenant)` structurally removed from the goal store. Both
+  call sites today reach it only with a goal id already proven to belong to the caller, so nothing leaks;
+  the guarantee is handler discipline rather than construction. Scoping it is a real refactor across the
+  memory package, the worker and the API.
 - **Authorization within a tenant is role-based only.** There are no per-object permissions, no
   per-repository access, and no audit log of who changed whose role. Every member of an organization
   sees every goal in it.

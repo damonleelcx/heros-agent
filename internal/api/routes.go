@@ -92,6 +92,10 @@ var apiRoutes = []route{
 		Handler: func(s *Server) http.HandlerFunc { return s.handleAsk }},
 	{Method: "GET", Path: "/api/goals/{id}/events", Needs: tenancy.ReadGoals,
 		Handler: func(s *Server) http.HandlerFunc { return s.handleEvents }},
+	// The events stream is what is happening NOW; the timeline is what happened, why, and what the run
+	// is waiting for. Both take a goal id from the URL, so both check ownership before reading anything.
+	{Method: "GET", Path: "/api/goals/{id}/timeline", Needs: tenancy.ReadGoals,
+		Handler: func(s *Server) http.HandlerFunc { return s.handleTimeline }},
 	// 🔴 The sharpest route in the product: approving a Tier-C change writes to the customer's own
 	// repository. A viewer must not reach it, and neither must the system principal.
 	{Method: "POST", Path: "/api/decide", Needs: tenancy.ApproveChange,

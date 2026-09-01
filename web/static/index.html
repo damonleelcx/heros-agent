@@ -195,6 +195,26 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .send{background:var(--accent);color:var(--accent-ink);border:0;border-radius:var(--radius);
   padding:.45rem .9rem;font-weight:600;font-size:.8rem;cursor:pointer}
 .send:disabled{opacity:.35;cursor:not-allowed}
+/* ── timeline ────────────────────────────────────────────────────────────── */
+.tl{display:flex;flex-direction:column;gap:0}
+.tl-row{display:grid;grid-template-columns:auto 1fr auto;gap:.7rem;align-items:baseline;
+  padding:.45rem 0;border-bottom:1px solid #ffffff0d;font-size:.82rem}
+.tl-row:last-child{border-bottom:0}
+.tl-k{font-family:var(--mono);font-size:.6rem;letter-spacing:.1em;text-transform:uppercase;
+  padding:.12rem .4rem;border-radius:var(--pill);border:1px solid;white-space:nowrap}
+.tl-observation{color:var(--none);border-color:#7f8aa855}
+.tl-decision{color:var(--info);border-color:#38bdf855}
+.tl-failure{color:var(--bad);border-color:#fb718555}
+.tl-effect{color:var(--accent);border-color:#2ecfa855}
+.tl-when{font-family:var(--mono);font-size:.65rem;color:var(--none);white-space:nowrap}
+.tl-what strong{color:var(--ink);font-weight:500}
+.tl-detail{color:var(--ink-muted);font-size:.76rem;margin-top:.2rem;white-space:pre-wrap}
+.tl-next{border:1px solid #a78bfa33;background:#a78bfa0a;border-radius:var(--radius);
+  padding:.7rem .85rem;margin-bottom:.9rem}
+.tl-next.none{border-color:var(--border);background:transparent}
+.tl-next b{color:var(--gated);font-weight:500}
+.tl-drop{font-family:var(--mono);font-size:.65rem;color:var(--warn);margin-bottom:.6rem}
+
 /* ── organization ────────────────────────────────────────────────────────── */
 .people{width:100%;border-collapse:collapse;font-size:.8rem}
 .people td,.people th{padding:.5rem .4rem;border-bottom:1px solid #ffffff0d;text-align:left}
@@ -428,7 +448,9 @@ function renderGoal(t, r){
     <div class="card-head">
       <span class="card-title"><span class="k">goal</span> ${esc(r.intent)}${
         r.scope ? ` <span class="k">·</span> ${esc(r.scope)}` : ''}</span>
-      <span class="spacer"></span><span class="badge b-run" data-goalstate>running</span></div>
+      <span class="spacer"></span>
+      <button class="linky" data-timeline>timeline</button>
+      <span class="badge b-run" data-goalstate>running</span></div>
     <div class="card-body"><div class="ledger">${rows}</div></div>
     <div class="meters">
       <div class="meter"><div class="lab">tasks</div>
@@ -441,6 +463,8 @@ function renderGoal(t, r){
       <div class="meter"><div class="lab">elapsed</div><div class="val" data-elapsed>0s</div></div>
     </div></div>`);
   t.appendChild(card); scroll();
+
+  card.querySelector('[data-timeline]').onclick = () => showTimeline(r.goal_id);
 
   const started = Date.now();
   const tick = setInterval(() => {
@@ -689,6 +713,127 @@ function askToSignIn(){
   card.querySelector('#forgot').onclick = forgotPasswordCard;
   card.querySelector('#password').onkeydown = e => { if (e.key === 'Enter') go(); };
   card.querySelector('#email').focus();
+}
+
+/* ── timeline ────────────────────────────────────────────────────────────── */
+
+// showTimeline answers "what happened, why, when, what next" for one run.
+//
+// 🔴 What-next is rendered FIRST, above the history. The history is what somebody reads once; what the
+// run is waiting for is what they came to find out — and if it is waiting on a person, that is the only
+// line on the page they can act on. Burying it under four hundred episodes is the same as not having it.
+async function showTimeline(goalID){
+  const t = turn('heros');
+  const card = el(`<div class="card"><div class="card-head">
+      <span class="card-title"><span class="k">timeline</span> ${esc(goalID)}</span>
+      <span class="spacer"></span><span class="badge b-run" data-tlstate>reading</span></div>
+    <div class="card-body"><p style="margin:0;color:var(--ink-muted);font-size:.85rem">reading the record…</p></div>
+  </div>`);
+  t.appendChild(card); scroll();
+  const body = card.querySelector('.card-body');
+  const badge = card.querySelector('[data-tlstate]');
+
+  let tl;
+  try {
+    tl = await api(`/api/goals/${encodeURIComponent(goalID)}/timeline`);
+  } catch (e) {
+    badge.className = 'badge b-bad'; badge.textContent = 'unavailable';
+    body.innerHTML = ''; note(body, e.message, 'bad');
+    return;
+  }
+
+  const STATE_CLASS = {running:'b-run', succeeded:'b-ok', failed:'b-bad', cancelled:'b-bad',
+                       refused:'b-bad', paused:'b-warn', draft:'b-gate'};
+  badge.className = 'badge ' + (STATE_CLASS[tl.goal.state] || 'b-gate');
+  badge.textContent = tl.goal.state;
+  body.innerHTML = '';
+
+  // ── what next ──────────────────────────────────────────────────────────
+  const waiting = (tl.next || []).filter(n => n.needs_a_person);
+  const nextBox = el(`<div class="tl-next${(tl.next||[]).length ? '' : ' none'}"></div>`);
+  if (!(tl.next || []).length) {
+    const done = ['succeeded','failed','cancelled','refused'].includes(tl.goal.state);
+    nextBox.textContent = done
+      ? `Nothing left — this run is ${tl.goal.state}.`
+      : 'Nothing is outstanding, and the run has not finished. It should move on the next pass.';
+  } else {
+    const head = document.createElement('div');
+    head.innerHTML = waiting.length
+      ? `<b>${waiting.length} task${waiting.length===1?'':'s'} waiting for a person.</b> Nothing here moves until somebody answers.`
+      : `${tl.next.length} task${tl.next.length===1?'':'s'} outstanding.`;
+    nextBox.appendChild(head);
+    for (const n of tl.next) {
+      const row = document.createElement('div');
+      row.style.cssText = 'margin-top:.45rem;font-size:.8rem;color:var(--ink-muted)';
+      // textContent for the parts that came from a plan somebody else wrote.
+      const name = document.createElement('code'); name.textContent = n.task_id;
+      row.appendChild(name);
+      row.appendChild(document.createTextNode(' — ' + n.why));
+      nextBox.appendChild(row);
+    }
+  }
+  body.appendChild(nextBox);
+
+  // 🔴 Truncation is stated, never silent. A shortened history that does not say it is shortened reads
+  // as the whole story, which is how somebody concludes a run did nothing untoward.
+  if (tl.dropped) {
+    const d = el(`<div class="tl-drop"></div>`);
+    d.textContent = `${tl.dropped} earlier entr${tl.dropped===1?'y':'ies'} not shown. ` +
+      `Failures and effects are kept first, so what broke and what changed are still here.`;
+    body.appendChild(d);
+  }
+
+  // ── what happened ──────────────────────────────────────────────────────
+  if (!(tl.entries || []).length) {
+    note(body, 'Nothing has been recorded for this run yet.');
+  } else {
+    const list = el(`<div class="tl"></div>`);
+    for (const e of tl.entries) {
+      const row = el(`<div class="tl-row"></div>`);
+      const kind = el(`<span class="tl-k tl-${esc(e.kind)}"></span>`);
+      kind.textContent = e.kind;
+      const what = document.createElement('div');
+      what.className = 'tl-what';
+      const line = document.createElement('div');
+      const strong = document.createElement('strong');
+      strong.textContent = e.summary;
+      line.appendChild(strong);
+      if (e.task_id) {
+        const tag = document.createElement('span');
+        tag.style.cssText = 'color:var(--none);font-family:var(--mono);font-size:.68rem;margin-left:.5rem';
+        tag.textContent = e.task_id;
+        line.appendChild(tag);
+      }
+      what.appendChild(line);
+      if (e.detail) {
+        const d = document.createElement('div');
+        d.className = 'tl-detail';
+        d.textContent = e.detail;
+        what.appendChild(d);
+      }
+      if (e.summarised) {
+        const s2 = document.createElement('div');
+        s2.className = 'tl-detail';
+        s2.style.color = 'var(--none)';
+        // The episode is deliberately kept after being summarised, so that "what did the summary leave
+        // out" stays answerable. Saying so is the point of showing the marker at all.
+        s2.textContent = 'covered by a later summary — kept so nothing is lost to compression';
+        what.appendChild(s2);
+      }
+      const when = el(`<span class="tl-when"></span>`);
+      when.textContent = new Date(e.at).toLocaleTimeString('en-US', {hour12:false});
+      when.title = new Date(e.at).toLocaleString('en-US');
+      row.appendChild(kind); row.appendChild(what); row.appendChild(when);
+      list.appendChild(row);
+    }
+    body.appendChild(list);
+  }
+
+  const foot = el(`<div class="tl-drop" style="color:var(--none);margin:.8rem 0 0"></div>`);
+  foot.textContent = `${tl.goal.done}/${tl.goal.total} tasks · iteration ${tl.goal.iteration}` +
+    (tl.goal.stalled ? ' · stalled: nothing is claimable and nothing is running' : '');
+  body.appendChild(foot);
+  scroll();
 }
 
 /* ── the organization ────────────────────────────────────────────────────── */
