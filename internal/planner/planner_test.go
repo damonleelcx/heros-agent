@@ -336,8 +336,16 @@ func TestEvalSetGatesQualityBeforePublishing(t *testing.T) {
 	if gate == nil || pub == nil {
 		t.Fatal("missing the gate or the publish step")
 	}
-	if len(gate.DependsOn) != len(planner.Generators) {
-		t.Fatalf("the gate sees %d generators, want %d", len(gate.DependsOn), len(planner.Generators))
+	// 🔴 CONTRIBUTORY, not required. Each generator is blind to what the others find, so one failing —
+	// seeding from real traces fails whenever no trace source is connected — must degrade the set rather
+	// than destroy it. That bug shipped: a run with three generators' worth of good cases delivered
+	// nothing, because the gate was blocked behind the fourth.
+	if len(gate.Contributes) != len(planner.Generators) {
+		t.Fatalf("the gate sees %d generators, want %d", len(gate.Contributes), len(planner.Generators))
+	}
+	if len(gate.DependsOn) != 0 {
+		t.Errorf("the gate REQUIRES %d generators; one failing would block the whole set",
+			len(gate.DependsOn))
 	}
 	if len(pub.DependsOn) != 1 || pub.DependsOn[0] != "quality-gate" {
 		t.Fatal("publication does not sit behind the quality gate")
@@ -347,19 +355,65 @@ func TestEvalSetGatesQualityBeforePublishing(t *testing.T) {
 	}
 }
 
-// TestCompareWaitsForBothRuns. A comparison against a half-finished run is a number that looks like a
-// measurement and is not one.
-func TestCompareWaitsForBothRuns(t *testing.T) {
+// TestCompareAssessesAndThenDiffs.
+//
+// 🔴 The plan CHANGED, and this test changed with it rather than the other way round. It used to assert
+// `run-baseline` and `run-candidate` running concurrently — a plan that encoded running the customer's
+// agent, which this system has decided not to do (tools/boundary.go). A plan describing a capability the
+// system does not have gets implemented by whoever reaches it first.
+//
+// The property that matters now: the comparison waits for EVERY axis, so a failed axis blocks it. A diff
+// over an unknown subset would report axes as "unchanged" when they were simply not looked at, and a run
+// that got worse on an unmeasured axis would read as stable.
+func TestCompareAssessesAndThenDiffs(t *testing.T) {
 	r, _ := planner.Default()
 	g := goalFor(intent.Compare)
-	d, _ := r.Build(g, time.Now().UTC())
-	if got := len(d.ReadySet()); got != 2 {
-		t.Fatalf("%d ready, want both runs concurrent", got)
+	d, err := r.Build(g, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("build: %v", err)
 	}
-	d.Tasks["run-baseline"].State = task.Succeeded
-	for _, tk := range d.ReadySet() {
-		if tk.ID == "compare" {
-			t.Fatal("the comparison became runnable with only one of its two runs finished")
+	if got, want := len(d.Tasks), len(intent.Axes())+1; got != want {
+		t.Fatalf("%d tasks, want one per axis plus the comparison (%d)", got, want)
+	}
+	cmp := d.Tasks["compare"]
+	if cmp == nil {
+		t.Fatal("no comparison task")
+	}
+	if len(cmp.DependsOn) != len(intent.Axes()) {
+		t.Fatalf("the comparison depends on %d axes, want %d", len(cmp.DependsOn), len(intent.Axes()))
+	}
+	// Every axis runs concurrently; the comparison waits.
+	if got := len(d.ReadySet()); got != len(intent.Axes()) {
+		t.Fatalf("%d ready, want all %d axis tasks", got, len(intent.Axes()))
+	}
+	// 🔴 One failed axis blocks the diff.
+	d.Tasks["assess-tools"].State = task.Failed
+	d.PropagateFailure()
+	if got := d.Tasks["compare"].State; got != task.Blocked {
+		t.Fatalf("the comparison is %s after an axis failed; a diff over an unknown subset would report "+
+			"that axis as unchanged when nobody looked at it", got)
+	}
+}
+
+// TestNoPlanAsksToRunTheCustomersAgent.
+//
+// 🔴 A fence on the boundary itself. `run_eval_set` was a planned task kind, and the only way to serve it
+// is to execute the customer's code with their credentials on our infrastructure while they are absent.
+// The kind is gone; this keeps it gone, because the next person to want a stronger `compare` will reach
+// for exactly that.
+func TestNoPlanAsksToRunTheCustomersAgent(t *testing.T) {
+	r, _ := planner.Default()
+	now := time.Now().UTC()
+	for _, i := range intent.InTier(intent.TierGoal) {
+		d, err := r.Build(goalFor(i), now)
+		if err != nil {
+			t.Fatalf("%s: %v", i, err)
+		}
+		for _, tk := range d.Tasks {
+			if strings.Contains(tk.Kind, "run_eval") || strings.Contains(tk.Kind, "execute") {
+				t.Errorf("%s plans task kind %q, which would require running the customer's agent",
+					i, tk.Kind)
+			}
 		}
 	}
 }

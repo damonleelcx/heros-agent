@@ -135,12 +135,17 @@ func (s *Server) handleSubject(w http.ResponseWriter, r *http.Request) {
 	s.subject = &subjectState{Source: src, Corpus: corpus, Index: ix}
 	s.mu.Unlock()
 
-	// Rebind the assessment tool to this repository. Without this the tool would assess whatever was
+	// Rebind every source-bound tool to this repository. Without this they would act on whatever was
 	// loaded last, which is the worst kind of wrong: confident, well-formed, and about someone else's code.
 	if s.ToolRegistry != nil && s.Provider != nil {
 		_ = s.ToolRegistry.Replace(tools.AssessAxis{
-			Provider: s.Provider, Model: s.Model, Source: ix, MaxTokens: 1200,
+			Provider: s.Provider, Model: s.Model, Source: ix,
 		}, nil)
+		_ = s.ToolRegistry.Replace(tools.GenerateCases{
+			Provider: s.Provider, Model: s.Model, Source: ix,
+		}, nil)
+		_ = s.ToolRegistry.Replace(tools.PublishEvalSet{Root: src.Root},
+			tools.NewPublishVerifier(src.Root))
 	}
 
 	writeJSON(w, http.StatusOK, s.describeSubject(src, ix, isAgent, why))
@@ -380,6 +385,35 @@ func (s *Server) answerRunHistory(w http.ResponseWriter, resp askResp) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// criteriaFor returns what it means for THIS goal to be finished.
+//
+// # 🔴 Why this is per-intent rather than one default
+//
+// It was one default — "six of nine axes assessed" — applied to every Tier-A goal. An eval-set run has
+// no axes, so it could never satisfy it: three generators succeeded, the quality gate passed, the
+// artefact was written to the customer's repository, and the goal reported FAILED. Every visible sign
+// said the work was done and the record said otherwise.
+//
+// A completion criterion has to describe the goal it belongs to. An objective borrowed from a different
+// intent is not a weaker measure, it is a measure of something else.
+func criteriaFor(i intent.Intent, axis string) []goal.Criterion {
+	switch i {
+	case intent.EvalSet:
+		// The published artefact is the product. The gate already enforces its own floors on case count
+		// and generator diversity, so the goal only has to see it reach publication.
+		return []goal.Criterion{{Kind: goal.EvalCasesGenerated, Threshold: 1}}
+	case intent.Compare:
+		return []goal.Criterion{{Kind: goal.ComparisonDrawn, Threshold: 1}}
+	default:
+		// assess and improve. A narrowed run needs its one axis; a whole-repository run needs most of
+		// them, because a report over two axes is not the report that was asked for.
+		if axis != "" {
+			return []goal.Criterion{{Kind: goal.AxesAssessed, Threshold: 1}}
+		}
+		return []goal.Criterion{{Kind: goal.AxesAssessed, Threshold: 6}}
+	}
+}
+
 // startGoal admits a durable goal, plans it, and starts driving it.
 func (s *Server) startGoal(w http.ResponseWriter, spec intent.Spec, sub *subjectState, axis string) {
 	now := time.Now().UTC()
@@ -402,10 +436,8 @@ func (s *Server) startGoal(w http.ResponseWriter, spec intent.Spec, sub *subject
 	if axis != "" {
 		g.Axes = []string{axis}
 		g.Objective = fmt.Sprintf("%s — scoped to the %s axis", spec.Question, axis)
-		g.Criteria = []goal.Criterion{{Kind: goal.AxesAssessed, Threshold: 1}}
-	} else {
-		g.Criteria = []goal.Criterion{{Kind: goal.AxesAssessed, Threshold: 6}}
 	}
+	g.Criteria = criteriaFor(spec.Intent, axis)
 	if err := g.Admit(now); err != nil {
 		var ref bounds.Refusal
 		if asRefusal(err, &ref) {

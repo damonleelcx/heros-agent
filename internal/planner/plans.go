@@ -125,7 +125,14 @@ func (EvalSet) Plan(g *goal.Goal, now time.Time) ([]*task.Task, error) {
 	// 🔴 The quality gate is its own task between generation and publication. A generator scoring its own
 	// output is marking its own homework, and the failure is silent: a set full of cases the agent finds
 	// easy looks exactly like a set the agent is good at.
-	tasks = append(tasks, newTask(g, "quality-gate", KindQualityGate, 0, now, deps...))
+	//
+	// 🔴 The generators CONTRIBUTE rather than being required. Each is blind to what the others find, and
+	// one failing — seeding from real traces fails whenever no trace source is connected — must degrade
+	// the set rather than destroy it. The gate enforces its own floors on what survived, and the artefact
+	// records which strategies contributed nothing.
+	gate := newTask(g, "quality-gate", KindQualityGate, 0, now)
+	gate.Contributes = deps
+	tasks = append(tasks, gate)
 
 	publish := newTask(g, "publish", KindPublishEvalSet, 0, now, task.ID("quality-gate"))
 	publish.IdempotencyKey = fmt.Sprintf("%s:%s:evalset", g.ID, g.Subject.Revision)
@@ -137,23 +144,40 @@ func (EvalSet) Replan(*goal.Goal, *task.DAG, time.Time) ([]*task.Task, error) { 
 
 // ── compare ──────────────────────────────────────────────────────────────────────────────────────
 
-// Compare runs one eval set against two revisions and compares the results.
+// Compare answers "is this version better than the last one?" by assessing the current revision and
+// diffing the findings against the most recent stored assessment of the same subject.
 //
-// 🔴 Tier A rather than Tier B — a durable goal rather than a query — because answering honestly means
-// RUNNING an eval set twice, which costs money and takes time. Presenting that as a page load would make
-// a paid, slow operation look like a free, instant one.
+// # 🔴 It does NOT run an eval set twice, and that is a product decision rather than a gap
+//
+// The plan used to be `run-baseline` and `run-candidate`, both of kind `run_eval_set`. Running an eval
+// set means running the CUSTOMER'S AGENT — arbitrary code, with their credentials, against their
+// providers, on our infrastructure, while they are not present. heros does not do that; see
+// tools/boundary.go. The plan encoded a capability the system had decided not to have, and would have
+// been implemented by whoever reached it first.
+//
+// So the comparison is over ASSESSMENTS. That is an honestly weaker claim — "the findings changed" is
+// not "it got better" — and the surface says so rather than dressing it up as a measurement.
+//
+// 🔴 Tier A rather than Tier B, still: it assesses, which costs money and takes time. Presenting that as
+// a page load would make a paid, slow operation look like a free, instant one.
 type Compare struct{}
 
 func (Compare) Intent() intent.Intent { return intent.Compare }
 
 func (Compare) Plan(g *goal.Goal, now time.Time) ([]*task.Task, error) {
-	// Both runs must SUCCEED before a comparison is drawn: a comparison against a half-finished run is a
-	// number that looks like a measurement and is not one.
-	return []*task.Task{
-		newTask(g, "run-baseline", KindRunEvalSet, 0, now),
-		newTask(g, "run-candidate", KindRunEvalSet, 0, now),
-		newTask(g, "compare", KindCompare, 0, now, "run-baseline", "run-candidate"),
-	}, nil
+	// Assess the current revision, then compare. The comparison depends on every axis task, so a failed
+	// axis blocks it: a diff over an unknown subset would report axes as "unchanged" when they were
+	// simply not looked at this time.
+	axes := axesOf(g)
+	tasks := make([]*task.Task, 0, len(axes)+1)
+	deps := make([]task.ID, 0, len(axes))
+	for _, a := range axes {
+		id := "assess-" + a
+		tasks = append(tasks, newTask(g, id, KindAssessAxis, 0, now))
+		deps = append(deps, task.ID(id))
+	}
+	tasks = append(tasks, newTask(g, "compare", KindCompare, 0, now, deps...))
+	return tasks, nil
 }
 
 func (Compare) Replan(*goal.Goal, *task.DAG, time.Time) ([]*task.Task, error) { return nil, nil }

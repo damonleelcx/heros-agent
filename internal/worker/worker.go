@@ -192,7 +192,9 @@ func (w *Worker) RunOnce(ctx context.Context, goalID goal.ID) (Outcome, error) {
 	//
 	// Before the effect, not after. Checked after claiming because the policy may depend on the task,
 	// and the lease is released immediately so the human's thinking time is not a held claim.
-	if need, why := w.Policy.NeedsApproval(g, t); need {
+	// 🔴 `!t.Approved` is the whole of the fix for a gate that re-fired forever. The policy is asked
+	// whether this KIND of work needs a person; the task remembers whether one has answered.
+	if need, why := w.Policy.NeedsApproval(g, t); need && !t.Approved {
 		w.record(goalID, t, memory.EpisodeDecision,
 			fmt.Sprintf("%s parked for approval", t.ID), why, now)
 		if err := w.Store.Complete(goalID, t.ID, w.ID, task.AwaitingApproval, nil, why, now); err != nil {
@@ -280,15 +282,16 @@ func (w *Worker) record(goalID goal.ID, t *task.Task, kind memory.EpisodeKind, s
 // a tool reached. Restricting it to the declared edges is what keeps "why did this task see that value"
 // answerable from the plan alone.
 func (w *Worker) dependencyResults(goalID goal.ID, t *task.Task) (map[string][]byte, error) {
-	if len(t.DependsOn) == 0 {
+	edges := append(append([]task.ID(nil), t.DependsOn...), t.Contributes...)
+	if len(edges) == 0 {
 		return nil, nil
 	}
 	d, err := w.Store.LoadDAG(goalID)
 	if err != nil {
 		return nil, err
 	}
-	out := make(map[string][]byte, len(t.DependsOn))
-	for _, dep := range t.DependsOn {
+	out := make(map[string][]byte, len(edges))
+	for _, dep := range edges {
 		dt := d.Tasks[dep]
 		if dt == nil || dt.State != task.Succeeded {
 			continue
@@ -408,11 +411,26 @@ func (w *Worker) idle(goalID goal.ID, g *goal.Goal, now time.Time) (Outcome, err
 			Detail: fmt.Sprintf("%d task(s) waiting for a person; %d/%d done", awaiting, done, total)}, nil
 	}
 
+	// Observations are counted from what the tasks actually produced, per kind. 🔴 Counting by TASK KIND
+	// rather than by name: a criterion satisfied by "any succeeded task" would be satisfied by the wrong
+	// ones, and the goal would report success on work nobody asked for.
 	observed := map[goal.CriterionKind]int{}
 	if total > 0 && succeeded == total {
 		observed[goal.AllTasksSucceeded] = 1
 	}
-	observed[goal.AxesAssessed] = succeeded
+	for _, t := range d.Tasks {
+		if t.State != task.Succeeded {
+			continue
+		}
+		switch t.Kind {
+		case "assess_axis":
+			observed[goal.AxesAssessed]++
+		case "publish_eval_set":
+			observed[goal.EvalCasesGenerated]++
+		case "compare_results":
+			observed[goal.ComparisonDrawn]++
+		}
+	}
 
 	if g.EvaluateCompletion(observed, now) {
 		g.State = goal.Succeeded

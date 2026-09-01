@@ -80,6 +80,12 @@ type Store interface {
 	Complete(goalID goal.ID, id task.ID, worker string, next task.State, result []byte, failure string, now time.Time) error
 	// Release returns a task to the ready set without consuming an attempt — a graceful yield.
 	Release(goalID goal.ID, id task.ID, worker string, now time.Time) error
+	// Decide answers a task parked awaiting approval: back to Ready, or Cancelled.
+	//
+	// 🔴 No worker id, because a parked task holds NO LEASE — a person may take a week, and a week-long
+	// lease is indistinguishable from a hung worker. The state itself is the guard: only a task actually
+	// in AwaitingApproval can be decided, so a second click cannot approve it twice.
+	Decide(goalID goal.ID, id task.ID, approve bool, now time.Time) error
 
 	Checkpoint(cp Checkpoint) error
 	LatestCheckpoint(goalID goal.ID) (Checkpoint, bool, error)
@@ -286,6 +292,36 @@ func (m *Memory) Release(goalID goal.ID, id task.ID, worker string, now time.Tim
 		return err
 	}
 	t.LeasedBy, t.LeaseExpiry = "", time.Time{}
+	return nil
+}
+
+// Decide answers a parked task.
+func (m *Memory) Decide(goalID goal.ID, id task.ID, approve bool, now time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	d, ok := m.dags[goalID]
+	if !ok {
+		return fmt.Errorf("%w: %q", ErrGoalNotFound, goalID)
+	}
+	t, ok := d.Tasks[id]
+	if !ok {
+		return fmt.Errorf("%w: %q", ErrTaskNotFound, id)
+	}
+	if t.State != task.AwaitingApproval {
+		return fmt.Errorf("%w: %q is %s, not awaiting approval", ErrNotClaimable, id, t.State)
+	}
+	next := task.Cancelled
+	if approve {
+		next = task.Ready
+	}
+	if err := t.Transition(next, now); err != nil {
+		return err
+	}
+	t.Approved = approve
+	if !approve {
+		t.Failure = "declined"
+		d.PropagateFailure()
+	}
 	return nil
 }
 

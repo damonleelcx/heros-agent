@@ -196,16 +196,18 @@ func (p *Postgres) SaveDAG(d *task.DAG) error {
 		if err := t.RequireIdempotency(); err != nil {
 			return err
 		}
-		deps := marshalArray(t.DependsOn)
+		deps, contributes := marshalArray(t.DependsOn), marshalArray(t.Contributes)
 		if _, err := tx.ExecContext(context.Background(), `
-			INSERT INTO tasks (goal_id, id, kind, depends_on, state, attempt, spawn_depth,
+			INSERT INTO tasks (goal_id, id, kind, depends_on, contributes, state, attempt, spawn_depth,
 			                   idempotency_key, result, failure, leased_by, lease_expiry,
 			                   created_at, updated_at)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'',NULL,$11,$12)
+			VALUES ($1,$2,$3,$4,$13,$5,$6,$7,$8,$9,$10,'',NULL,$11,$12)
 			ON CONFLICT (goal_id, id) DO UPDATE
-			  SET kind=EXCLUDED.kind, depends_on=EXCLUDED.depends_on, updated_at=EXCLUDED.updated_at`,
+			  SET kind=EXCLUDED.kind, depends_on=EXCLUDED.depends_on,
+			      contributes=EXCLUDED.contributes, updated_at=EXCLUDED.updated_at`,
 			d.GoalID, t.ID, t.Kind, deps, string(t.State), t.Attempt, t.SpawnDepth,
-			t.IdempotencyKey, t.Result, t.Failure, nz(t.CreatedAt), nz(t.UpdatedAt)); err != nil {
+			t.IdempotencyKey, t.Result, t.Failure, nz(t.CreatedAt), nz(t.UpdatedAt),
+			contributes); err != nil {
 			return fmt.Errorf("store: save task %q: %w", t.ID, err)
 		}
 	}
@@ -214,8 +216,8 @@ func (p *Postgres) SaveDAG(d *task.DAG) error {
 
 func (p *Postgres) LoadDAG(goalID goal.ID) (*task.DAG, error) {
 	rows, err := p.db.QueryContext(context.Background(), `
-		SELECT id, kind, depends_on, state, attempt, spawn_depth, idempotency_key, result, failure,
-		       leased_by, lease_expiry, created_at, updated_at
+		SELECT id, kind, depends_on, contributes, state, attempt, spawn_depth, idempotency_key, result,
+		       failure, leased_by, lease_expiry, created_at, updated_at, approved
 		FROM tasks WHERE goal_id = $1 ORDER BY id`, goalID)
 	if err != nil {
 		return nil, fmt.Errorf("store: load dag: %w", err)
@@ -224,14 +226,15 @@ func (p *Postgres) LoadDAG(goalID goal.ID) (*task.DAG, error) {
 	var tasks []*task.Task
 	for rows.Next() {
 		var (
-			t        task.Task
-			deps     []byte
-			stateStr string
-			expiry   sql.NullTime
+			t           task.Task
+			deps        []byte
+			contributes []byte
+			stateStr    string
+			expiry      sql.NullTime
 		)
-		if err := rows.Scan(&t.ID, &t.Kind, &deps, &stateStr, &t.Attempt, &t.SpawnDepth,
+		if err := rows.Scan(&t.ID, &t.Kind, &deps, &contributes, &stateStr, &t.Attempt, &t.SpawnDepth,
 			&t.IdempotencyKey, &t.Result, &t.Failure, &t.LeasedBy, &expiry,
-			&t.CreatedAt, &t.UpdatedAt); err != nil {
+			&t.CreatedAt, &t.UpdatedAt, &t.Approved); err != nil {
 			return nil, err
 		}
 		t.GoalID, t.State = string(goalID), task.State(stateStr)
@@ -239,6 +242,7 @@ func (p *Postgres) LoadDAG(goalID goal.ID) (*task.DAG, error) {
 			t.LeaseExpiry = expiry.Time
 		}
 		_ = json.Unmarshal(deps, &t.DependsOn)
+		_ = json.Unmarshal(contributes, &t.Contributes)
 		tasks = append(tasks, &t)
 	}
 	if err := rows.Err(); err != nil {
@@ -270,25 +274,39 @@ func (p *Postgres) Claim(goalID goal.ID, worker string, lease time.Duration, now
 			WHERE t.goal_id = $1
 			  AND (t.state IN ('pending','ready')
 			       OR (t.state = 'running' AND (t.lease_expiry IS NULL OR t.lease_expiry <= $4)))
+			  -- Required dependencies must have SUCCEEDED.
 			  AND NOT EXISTS (
 			      SELECT 1 FROM jsonb_array_elements_text(t.depends_on) AS dep(id)
 			      JOIN tasks d ON d.goal_id = t.goal_id AND d.id = dep.id
 			      WHERE d.state <> 'succeeded')
+			  -- Contributory dependencies must merely be TERMINAL. The gate needs its generators
+			  -- finished, not successful; see task.Task.Contributes.
+			  AND NOT EXISTS (
+			      SELECT 1 FROM jsonb_array_elements_text(t.contributes) AS dep(id)
+			      JOIN tasks d ON d.goal_id = t.goal_id AND d.id = dep.id
+			      WHERE d.state NOT IN ('succeeded','failed','blocked','cancelled'))
 			ORDER BY t.id
 			FOR UPDATE OF t SKIP LOCKED
 			LIMIT 1)
-		RETURNING id, kind, depends_on, state, attempt, spawn_depth, idempotency_key, result,
-		          failure, leased_by, lease_expiry, created_at, updated_at`,
+		RETURNING id, kind, depends_on, contributes, state, attempt, spawn_depth, idempotency_key,
+		          result, failure, leased_by, lease_expiry, created_at, updated_at, approved`,
 		goalID, worker, now.Add(lease), now)
 
+	// 🔴 `contributes` is returned here as well as in LoadDAG. It was missed the first time, and the
+	// symptom was silent: a claimed task arrived with no contributory edges, so the quality gate was
+	// handed zero generator results and refused a set that had three generators' worth of cases sitting
+	// in the database. A column added to a table has to be added to every query that builds the struct,
+	// and there are three.
 	var (
-		t        task.Task
-		deps     []byte
-		stateStr string
-		expiry   sql.NullTime
+		t           task.Task
+		deps        []byte
+		contributes []byte
+		stateStr    string
+		expiry      sql.NullTime
 	)
-	err := row.Scan(&t.ID, &t.Kind, &deps, &stateStr, &t.Attempt, &t.SpawnDepth, &t.IdempotencyKey,
-		&t.Result, &t.Failure, &t.LeasedBy, &expiry, &t.CreatedAt, &t.UpdatedAt)
+	err := row.Scan(&t.ID, &t.Kind, &deps, &contributes, &stateStr, &t.Attempt, &t.SpawnDepth,
+		&t.IdempotencyKey, &t.Result, &t.Failure, &t.LeasedBy, &expiry, &t.CreatedAt, &t.UpdatedAt,
+		&t.Approved)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNoWork
 	}
@@ -300,6 +318,7 @@ func (p *Postgres) Claim(goalID goal.ID, worker string, lease time.Duration, now
 		t.LeaseExpiry = expiry.Time
 	}
 	_ = json.Unmarshal(deps, &t.DependsOn)
+	_ = json.Unmarshal(contributes, &t.Contributes)
 	return &t, nil
 }
 
@@ -338,6 +357,30 @@ func (p *Postgres) Release(goalID goal.ID, id task.ID, worker string, now time.T
 	return affectedOrLeaseLost(res, err, id, "release")
 }
 
+// Decide answers a parked task. The WHERE clause carries the guard: only a row still in
+// awaiting_approval is updated, so a second decision affects nothing and is reported as such.
+func (p *Postgres) Decide(goalID goal.ID, id task.ID, approve bool, now time.Time) error {
+	next := "cancelled"
+	failure := "declined"
+	if approve {
+		next, failure = "ready", ""
+	}
+	res, err := p.db.ExecContext(context.Background(), `
+		UPDATE tasks SET state=$3, failure=$4, approved=$6, updated_at=$5
+		WHERE goal_id=$1 AND id=$2 AND state='awaiting_approval'`,
+		goalID, id, next, failure, now, approve)
+	if err != nil {
+		return fmt.Errorf("store: decide %q: %w", id, err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("%w: %q is not awaiting approval", ErrNotClaimable, id)
+	}
+	if !approve {
+		return p.propagateFailure(goalID, now)
+	}
+	return nil
+}
+
 // propagateFailure blocks everything transitively downstream of a failed task.
 //
 // It loops because blocking one task can block its dependents in turn; the loop terminates because each
@@ -349,6 +392,8 @@ func (p *Postgres) propagateFailure(goalID goal.ID, now time.Time) error {
 			       failure='a dependency failed, was blocked, or was cancelled'
 			WHERE t.goal_id=$1
 			  AND t.state NOT IN ('succeeded','failed','blocked','cancelled')
+			  -- 🔴 depends_on only. A failed CONTRIBUTOR is a gap in the result, recorded by whatever
+			  -- consumes it, not a reason to abandon the branch.
 			  AND EXISTS (
 			      SELECT 1 FROM jsonb_array_elements_text(t.depends_on) AS dep(id)
 			      JOIN tasks d ON d.goal_id = t.goal_id AND d.id = dep.id

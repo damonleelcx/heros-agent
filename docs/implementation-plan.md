@@ -285,7 +285,37 @@ Two bugs the wiring exposed:
 
 ## !!! Not started, and deliberately so
 
-### [ ] P11 · Tier-A `compare` execution
+### [x] P23 · `evalset` and `compare`
+**heros never executes the customer's code** — stated in `internal/tools/boundary.go` because it was
+implicit until it forced a decision. Running a customer's agent means arbitrary code, with their
+credentials, against their providers, on our infrastructure, while they are absent.
+
+That costs the product something real and it is written down rather than hidden: `evalset` GENERATES a
+set and hands it over (`heros-evalset.json`, in their repo, so they own it); `compare` cannot run an
+eval set twice and diff the scores, so it diffs ASSESSMENTS — an honestly weaker claim, and the report
+says so in the claim itself.
+
+The `compare` plan used to be `run-baseline` / `run-candidate` of kind `run_eval_set`. That kind is gone,
+and `TestNoPlanAsksToRunTheCustomersAgent` keeps it gone — a plan encoding a capability the system has
+decided not to have gets implemented by whoever reaches it first.
+
+Proven end to end on a disposable repository: **15 cases from 3 generators, `missing:
+[seed_from_real_traces]` recorded in the artefact**, parked for approval, approved, published, goal
+succeeded.
+
+Four bugs the run exposed:
+- **A failed generator killed the whole set.** Each strategy is blind to what the others find, so one
+  failing must degrade rather than destroy. `task.Contributes` — dependencies that must be TERMINAL, not
+  SUCCESSFUL — is the distinction the graph could not express.
+- **`Claim` did not return the new column**, so the gate was handed zero results while three generators'
+  cases sat in the database. A column added to a table has to be added to all three queries that build
+  the struct.
+- **Approval did not stick.** The policy ran on every claim, so an approved task parked again forever
+  and each re-approval reported success. The policy answers "does this KIND need a person"; whether one
+  has answered is a different fact and was nowhere.
+- **Every Tier-A goal inherited an assess-shaped criterion.** An eval-set run has no axes, so it
+  published the artefact and reported FAILED. A criterion borrowed from another intent is not a weaker
+  measure, it is a measure of something else.
 
 ### [~] P12 · Timeline / observability
 Event model and recording exist and are written by the kernel. The *query* side — "what happened, why,

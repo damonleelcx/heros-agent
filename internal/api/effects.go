@@ -11,8 +11,10 @@ import (
 	"time"
 
 	"github.com/heros-foreal/heros/internal/edit"
+	"github.com/heros-foreal/heros/internal/goal"
 	"github.com/heros-foreal/heros/internal/intent"
 	"github.com/heros-foreal/heros/internal/provider"
+	"github.com/heros-foreal/heros/internal/task"
 )
 
 // effects.go serves the Tier-C intents: author, prompt, model, deliver.
@@ -186,8 +188,15 @@ func (s *Server) handleEffect(w http.ResponseWriter, spec intent.Spec, sub *subj
 // ── deciding ─────────────────────────────────────────────────────────────────────────────────────
 
 type decideReq struct {
+	// ChangeID names a Tier-C proposal held in memory.
 	ChangeID string `json:"change_id"`
-	Approve  bool   `json:"approve"`
+	// GoalID and TaskID name a durable-goal task parked awaiting approval. 🔴 Two shapes because they are
+	// two different things: a Tier-C proposal is a diff this process is holding, and a parked task is a
+	// row in the database that a worker will pick up again. Collapsing them would make one of the two
+	// pretend to be the other.
+	GoalID  string `json:"goal_id"`
+	TaskID  string `json:"task_id"`
+	Approve bool   `json:"approve"`
 }
 
 type decideResp struct {
@@ -211,6 +220,10 @@ type decideResp struct {
 // more step for them and one fewer credential for us, and it is the right trade for a system whose
 // entire pitch is that it does not change your code without asking.
 func (s *Server) handleDecide(w http.ResponseWriter, req decideReq) {
+	if req.GoalID != "" && req.TaskID != "" {
+		s.decideTask(w, req)
+		return
+	}
 	p, err := s.Approvals.take(req.ChangeID)
 	if err != nil {
 		writeJSON(w, 200, decideResp{Message: err.Error()})
@@ -255,6 +268,28 @@ func (s *Server) handleDecide(w http.ResponseWriter, req decideReq) {
 		Message: fmt.Sprintf("Committed to %s. Nothing has been pushed — run the command above when "+
 			"you are ready, and open the pull request yourself.", branch),
 	})
+}
+
+// decideTask answers a parked durable-goal task and, on approval, wakes the run.
+func (s *Server) decideTask(w http.ResponseWriter, req decideReq) {
+	if err := s.Store.Decide(goal.ID(req.GoalID), task.ID(req.TaskID), req.Approve,
+		time.Now().UTC()); err != nil {
+		writeJSON(w, http.StatusOK, decideResp{Message: err.Error()})
+		return
+	}
+	if !req.Approve {
+		writeJSON(w, http.StatusOK, decideResp{
+			Applied: false,
+			Message: "Declined. Nothing was written, and the run has stopped there."})
+		return
+	}
+	// 🔴 The run is restarted explicitly. The worker that parked this task returned
+	// DidBlockedOnApproval and stopped polling — deliberately, so a goal waiting on a person does not
+	// look like a busy one. Something has to say the person answered, and that something is this.
+	s.Sup.Start(context.Background(), goal.ID(req.GoalID))
+	writeJSON(w, http.StatusOK, decideResp{
+		Applied: true,
+		Message: fmt.Sprintf("Approved. %s is running again.", req.TaskID)})
 }
 
 func git(dir string, args ...string) (string, error) {

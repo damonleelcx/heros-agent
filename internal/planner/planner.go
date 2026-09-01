@@ -40,8 +40,10 @@ const (
 	KindProposeChange  = "propose_change"
 	KindVerifyProposal = "verify_proposal"
 	KindOpenPR         = "open_pull_request"
-	KindRunEvalSet     = "run_eval_set"
-	KindCompare        = "compare_results"
+	// 🚫 There is deliberately no `run_eval_set`. Serving it means executing the customer's agent —
+	// arbitrary code, with their credentials, on our infrastructure, while they are not present. See
+	// tools/boundary.go. `TestNoPlanAsksToRunTheCustomersAgent` keeps it absent.
+	KindCompare = "compare_results"
 )
 
 // Planner builds the initial DAG for one intent and revises it as results arrive.

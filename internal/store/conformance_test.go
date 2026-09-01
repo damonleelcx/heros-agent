@@ -547,3 +547,53 @@ func TestLatestGoalOnAnEmptyTenantIsNotAnError(t *testing.T) {
 		})
 	}
 }
+
+// TestAClaimedTaskCarriesItsContributoryEdges.
+//
+// 🔴 Regression fence. `contributes` was added to SaveDAG and LoadDAG but not to Claim's RETURNING, so a
+// claimed task arrived with no contributory edges. The symptom was entirely silent: the quality gate
+// was handed zero generator results and refused to publish a set whose three generators' worth of cases
+// were sitting in the database the whole time.
+//
+// A column added to a table must be added to every query that builds the struct, and there are three.
+func TestAClaimedTaskCarriesItsContributoryEdges(t *testing.T) {
+	for _, im := range implementations() {
+		t.Run(im.name, func(t *testing.T) {
+			postgresRan(im.name)
+			s := im.open(t)
+			gate := pending("gate", "quality_gate")
+			gate.Contributes = []task.ID{"gen-a", "gen-b"}
+			id, _ := seed(t, s, "contrib", pending("gen-a", "generate"), pending("gen-b", "generate"), gate)
+			now := time.Now().UTC()
+
+			// Finish both generators: one succeeds, one fails.
+			first, err := s.Claim(id, "w", time.Minute, now)
+			if err != nil {
+				t.Fatalf("claim: %v", err)
+			}
+			if err := s.Complete(id, first.ID, "w", task.Succeeded, []byte(`["case"]`), "", now); err != nil {
+				t.Fatalf("complete: %v", err)
+			}
+			second, err := s.Claim(id, "w", time.Minute, now)
+			if err != nil {
+				t.Fatalf("claim 2: %v", err)
+			}
+			if err := s.Complete(id, second.ID, "w", task.Failed, nil, "nothing to seed from", now); err != nil {
+				t.Fatalf("complete 2: %v", err)
+			}
+
+			// The gate is now claimable, and must arrive KNOWING what it contributes from.
+			claimed, err := s.Claim(id, "w", time.Minute, now)
+			if err != nil {
+				t.Fatalf("the gate did not become claimable once its contributors were terminal: %v", err)
+			}
+			if claimed.ID != "gate" {
+				t.Fatalf("claimed %q, want the gate", claimed.ID)
+			}
+			if len(claimed.Contributes) != 2 {
+				t.Fatalf("the claimed gate carries %d contributory edges, want 2 — it would be handed no "+
+					"generator results at all", len(claimed.Contributes))
+			}
+		})
+	}
+}

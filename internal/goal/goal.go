@@ -61,8 +61,10 @@ const (
 	AllTasksSucceeded CriterionKind = "all_tasks_succeeded"
 	// ProposalsAccepted — at least Threshold proposals were approved by a human.
 	ProposalsAccepted CriterionKind = "proposals_accepted"
-	// EvalCasesGenerated — at least Threshold eval cases were generated and passed quality gates.
+	// EvalCasesGenerated — at least Threshold eval cases were generated and passed the quality gate.
 	EvalCasesGenerated CriterionKind = "eval_cases_generated"
+	// ComparisonDrawn — a comparison against an earlier assessment was produced.
+	ComparisonDrawn CriterionKind = "comparison_drawn"
 	// AxesAssessed — at least Threshold of the nine axes produced a finding with evidence.
 	AxesAssessed CriterionKind = "axes_assessed"
 )

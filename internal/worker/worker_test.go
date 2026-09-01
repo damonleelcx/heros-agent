@@ -458,3 +458,77 @@ func TestACrashedWorkerIsRecoveredByAnother(t *testing.T) {
 			"worker it touches retries forever", tk.Attempt)
 	}
 }
+
+// TestAnApprovalSticks.
+//
+// 🔴 Regression fence for a bug that made the approval gate an infinite loop. The policy ran on every
+// claim, so an approved task parked again the moment a worker picked it up: park, approve, claim, park,
+// forever. The run never progressed, and every re-approval reported success because the task genuinely
+// was awaiting approval each time anybody looked.
+//
+// The policy answers "does this KIND of work need a person?" — a property of the task that never
+// changes. Whether a person has already answered is a different fact, and it was nowhere.
+func TestAnApprovalSticks(t *testing.T) {
+	tool := &fakeTool{spec: toolcontract.Spec{Kind: "open_pull_request", Timeout: time.Second,
+		EffectBearing: true, Permissions: []toolcontract.Permission{toolcontract.WriteRemoteRepo}}}
+	gated := &task.Task{ID: "pr", Kind: "open_pull_request", State: task.Pending, IdempotencyKey: "k1"}
+	h := setup(t, store.NewMemory(), tool, &fakeVerifier{}, gated)
+
+	out, err := h.w.RunOnce(context.Background(), h.id)
+	if err != nil {
+		t.Fatalf("cycle: %v", err)
+	}
+	if out.Did != worker.DidAwaitApproval {
+		t.Fatalf("got %+v, want the task to park", out)
+	}
+	if tool.calls != 0 {
+		t.Fatal("the effect happened before approval")
+	}
+
+	// A person answers.
+	if err := h.s.Decide(h.id, "pr", true, h.clock.Now()); err != nil {
+		t.Fatalf("decide: %v", err)
+	}
+
+	// The next cycle must RUN it, not park it again.
+	out, err = h.w.RunOnce(context.Background(), h.id)
+	if err != nil {
+		t.Fatalf("cycle after approval: %v", err)
+	}
+	if out.Did == worker.DidAwaitApproval {
+		t.Fatal("an approved task parked again; the gate re-fires forever and the run never progresses")
+	}
+	if tool.calls != 1 {
+		t.Fatalf("the tool ran %d times after approval, want 1", tool.calls)
+	}
+	d, _ := h.s.LoadDAG(h.id)
+	if got := d.Tasks["pr"].State; got != task.Succeeded {
+		t.Fatalf("task is %s after an approved run", got)
+	}
+}
+
+// TestADeclinedTaskIsCancelledAndBlocksWhatFollows.
+func TestADeclinedTaskIsCancelledAndBlocksWhatFollows(t *testing.T) {
+	tool := &fakeTool{spec: toolcontract.Spec{Kind: "open_pull_request", Timeout: time.Second,
+		EffectBearing: true, Permissions: []toolcontract.Permission{toolcontract.WriteRemoteRepo}}}
+	gated := &task.Task{ID: "pr", Kind: "open_pull_request", State: task.Pending, IdempotencyKey: "k1"}
+	h := setup(t, store.NewMemory(), tool, &fakeVerifier{}, gated)
+
+	if _, err := h.w.RunOnce(context.Background(), h.id); err != nil {
+		t.Fatalf("cycle: %v", err)
+	}
+	if err := h.s.Decide(h.id, "pr", false, h.clock.Now()); err != nil {
+		t.Fatalf("decide: %v", err)
+	}
+	d, _ := h.s.LoadDAG(h.id)
+	if got := d.Tasks["pr"].State; got != task.Cancelled {
+		t.Fatalf("a declined task is %s, want cancelled", got)
+	}
+	if tool.calls != 0 {
+		t.Fatal("a declined task still ran")
+	}
+	// And a second decision changes nothing.
+	if err := h.s.Decide(h.id, "pr", true, h.clock.Now()); err == nil {
+		t.Error("a decided task was decided again; consent is answered once")
+	}
+}

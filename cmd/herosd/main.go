@@ -91,6 +91,23 @@ func main() {
 	}, nil); err != nil {
 		log.Fatalf("tools: %v", err)
 	}
+	// Eval-set generation and comparison. The source-bound ones are REBOUND when a repository loads;
+	// registering here proves at startup that they satisfy the contract's refusals rather than
+	// discovering it on a customer's first question.
+	if err := reg.Register(tools.GenerateCases{
+		Provider: client, Model: deepseek.ModelFlash, Source: tools.FixtureSource{},
+	}, nil); err != nil {
+		log.Fatalf("tools: %v", err)
+	}
+	if err := reg.Register(tools.QualityGate{}, nil); err != nil {
+		log.Fatalf("tools: %v", err)
+	}
+	if err := reg.Register(tools.PublishEvalSet{Root: "."}, tools.NewPublishVerifier(".")); err != nil {
+		log.Fatalf("tools: %v", err)
+	}
+	if err := reg.Register(tools.CompareAssessments{Store: st, Tenant: "local"}, nil); err != nil {
+		log.Fatalf("tools: %v", err)
+	}
 
 	mem := memory.NewPG(db)
 
