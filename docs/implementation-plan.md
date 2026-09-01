@@ -735,6 +735,49 @@ whatever the level — the person is right there, watching a diff they requested
 conversation is not autonomy, it is a surprise. Gradual autonomy is about long runs proceeding without
 somebody sitting over them.
 
+### [ ] P32 · Tenant-scoping the episodic memory
+**Scoped, decided, not built.** Hardening rather than a fix: nothing leaks today, and that is the
+problem — the guarantee is handler discipline rather than construction, which is the property the
+tenancy work removed from the goal store and left in place here.
+
+**The surface is narrower than the gap bullet suggested.** `knowledge` and `preferences` already carry a
+`tenant` column and take a tenant argument. Unscoped: `AppendEpisode`, `Episodes`, `SaveSummary`,
+`Summaries`, over `episodes` and `episode_summaries`. Three production call sites — and two of the four
+methods have none at all, because compression is built, tested and wired to nothing.
+
+| call site | today |
+|---|---|
+| `api/server.go` run history | safe — the goal id comes from a tenant-scoped `LatestGoal` |
+| `api/timeline.go` | safe — the goal is loaded through a scoped store |
+| `worker.go` `record()` | the write path, and fire-and-forget (`_, _ =`) |
+
+**The pattern already exists in this repository**, and `store/scoped_pg.go`'s doc comment already names
+episodes — "Tasks, checkpoints and episodes are keyed by goal id, and a goal belongs to a tenant" — while
+that package handles none. Somebody wrote the design down and the work landed elsewhere. The clause to
+reuse verbatim is `goal_id IN (SELECT id FROM goals WHERE tenant = $n)`.
+
+**Decision taken:** derive in SQL, index in Mem. Postgres scopes with the clause above; `memory.Mem`
+records goal→tenant on append in its scoped view, because it holds no goals and cannot resolve the
+association otherwise. 🔴 Deliberately NOT a denormalised `tenant` column on the episode tables: that
+would put tenancy in a second place that can disagree with `goals.tenant`, and a split source of truth is
+the thing this codebase argues against everywhere else. No migration and no backfill follow from that
+choice.
+
+The four signatures do not change — scoping lives in the view, not the parameters. `KnowledgeFor(tenant,
+subject)` keeps its now-redundant argument and ignores it, mirroring `LatestGoal(_ string)` and fenced the
+same way by `LatestGoalIgnoresACallerSuppliedTenant`.
+
+**Work:** `Root` and two scoped views in `memory`; `Server.Episodes` and `Worker.Episodes` become roots;
+`record()` takes the tenant, which every one of its five call sites already has in scope — `fail()` takes
+`_ *goal.Goal` and deliberately ignores it today. Roughly 300–400 mostly mechanical lines. The
+dual-implementation conformance suite and its `ZZPostgresLegActuallyRan` gate already exist.
+
+🔴 **The fence must cover WRITES, not just reads.** `record()` is fire-and-forget, so a scoping bug there
+is silent. The scoped view must IMPOSE the tenant rather than trust the `Episode` it is handed, exactly
+as `CreateGoal` does — and the cross-tenant fence must exercise every method, mirroring
+`TestATenantCannotReachAnotherTenantsData`, not the two with callers. One unscoped method inside a
+"scoped" store is the exception somebody later relies on.
+
 ## !!! Not started, and deliberately so
 
 - **Name resolution is exact for Python, conservative for JS/TS, absent for Go.** Python uses its own
@@ -746,11 +789,8 @@ somebody sitting over them.
   is cheap (the model discards it) and a false negative is expensive (the axis reports absence). Python,
   TypeScript, JavaScript and Go only. Every report states that it shows what was found, not everything
   that exists.
-- **`memory.Store` is not tenant-scoped.** `Episodes(goalID)` returns whatever goal it is handed, for
-  any customer — the same shape `store.Root.For(tenant)` structurally removed from the goal store. Both
-  call sites today reach it only with a goal id already proven to belong to the caller, so nothing leaks;
-  the guarantee is handler discipline rather than construction. Scoping it is a real refactor across the
-  memory package, the worker and the API.
+- **`memory.Store` is not tenant-scoped** — scoped and decided as P32 above, not yet built. Nothing
+  leaks today; the guarantee is handler discipline rather than construction.
 - **Authorization within a tenant is role-based only.** There are no per-object permissions, no
   per-repository access, and no audit log of who changed whose role. Every member of an organization
   sees every goal in it.
