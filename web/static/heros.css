@@ -93,6 +93,25 @@ a:hover{text-decoration:underline}
 .msg.bad{color:var(--bad)}
 .msg.ok{color:var(--ok)}
 
+/* ── password reveal ─────────────────────────────────────────────────────────
+ * The button sits INSIDE the field's box, so the field keeps its own focus ring and the control reads
+ * as part of it rather than as a second widget beside it. The input gets right padding to match, or
+ * long passwords run underneath the button.
+ */
+.field-wrap{position:relative; display:block}
+.field-wrap .field{padding-right:3.1rem}
+.reveal{
+  position:absolute; right:.35rem; top:50%; transform:translateY(-50%);
+  display:grid; place-items:center; width:2.4rem; height:2.4rem;
+  background:none; border:0; border-radius:var(--radius); padding:0;
+  color:var(--ink-muted); cursor:pointer;
+}
+.reveal:hover{color:var(--ink); background:var(--secondary)}
+.reveal svg{width:20px; height:20px; display:block}
+/* 🔴 The button is 2.4rem inside a 44px field rather than a 44px target of its own. Making it 44px
+   would overflow the field it sits in. It is a convenience next to a field that is itself a full-size
+   target, and it is reachable by keyboard, which is the part that matters most. */
+
 /* ── cards ───────────────────────────────────────────────────────────────── */
 .card{
   background:var(--card); border:1px solid var(--border); border-radius:var(--radius);

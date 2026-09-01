@@ -215,7 +215,7 @@
       <a href="#start">Get started</a>
     </span>
     <span class="pill">
-      <a class="sign" href="/signin/">Sign in</a>
+      <a class="sign" href="/signin/" data-signed-out>Sign in</a><a class="sign" href="/app/" data-signed-in hidden>Console</a>
       <a class="round" href="/signup/" title="Create an organization" aria-label="Create an organization">→</a>
     </span>
   </nav>
@@ -350,5 +350,25 @@
     for (var i = 0, k = ['invite','reset','verify']; i < k.length; i++) {
       if (q.has(k[i])) { location.replace('/app/' + location.search); return; }
     }
+  })();
+
+  /* 🔴 Show a signed-in visitor that they are signed in.
+     Clicking the console's logo used to land here on "Sign in / Create an organization", which reads as
+     having been signed OUT — the session was fine, but the page said otherwise, and a page that
+     contradicts your actual state is indistinguishable from a bug. The console's logo no longer leaves
+     the app, and this covers every other way of arriving here with a live session. */
+  (function(){
+    fetch('/api/auth/status', {credentials:'same-origin'})
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(me){
+        if (!me || !me.signed_in) return;
+        document.querySelectorAll('[data-signed-out]').forEach(function(n){ n.hidden = true; });
+        document.querySelectorAll('[data-signed-in]').forEach(function(n){ n.hidden = false; });
+        document.querySelectorAll('a[href="/signup/"]').forEach(function(a){
+          a.setAttribute('href', '/app/');
+          if (/create an organization/i.test(a.textContent)) a.textContent = 'Open the console';
+        });
+      })
+      .catch(function(){ /* signed out, or offline: the page is already correct for that */ });
   })();
 </script>

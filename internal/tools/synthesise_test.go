@@ -242,3 +242,88 @@ func TestCollectionIsDeterministic(t *testing.T) {
 		}
 	}
 }
+
+// scriptedProvider answers a different thing on each call, so a repair round-trip can be exercised.
+type scriptedProvider struct {
+	replies []string
+	calls   int
+}
+
+func (s *scriptedProvider) Name() string { return "scripted" }
+func (s *scriptedProvider) Complete(_ context.Context, _ provider.Request) (provider.Response, error) {
+	i := s.calls
+	s.calls++
+	if i >= len(s.replies) {
+		i = len(s.replies) - 1
+	}
+	return provider.Response{
+		Content: s.replies[i], FinishReason: "stop",
+		Usage: provider.Usage{InputTokens: 400, OutputTokens: 60},
+	}, nil
+}
+
+// 🔴 A synthesis that trips the fence on an ORDINARY use of an axis word must be repaired, not failed.
+//
+// Observed in production: a run scoped to the prompt axis found "can silently degrade context"; the
+// synthesis reused the word "context", which is also an axis name, and was rejected for commenting on
+// an axis it was not shown. Both attempts sent identical input, so the retry could only fail the same
+// way, and the goal died having spent twice.
+func TestASynthesisTrippedByAnOrdinaryWordIsRepairedRatherThanFailed(t *testing.T) {
+	p := &scriptedProvider{replies: []string{
+		`{"overall":"The prompt is built without checking it, which degrades context downstream."}`,
+		`{"overall":"The prompt is built without checking it, which weakens what the agent is told."}`,
+	}}
+	tool := SynthesiseAssessment{Provider: p, Model: "test", MaxTokens: 400}
+	res, err := tool.Execute(context.Background(), toolcontract.Call{
+		TaskID: "synthesise", Kind: "synthesise_assessment", Attempt: 1,
+		Inputs: map[string][]byte{
+			"assess-prompt": axisResult(t, "prompt", "the system prompt falls back to an empty string", true),
+		},
+	})
+	if err != nil {
+		t.Fatalf("the run failed instead of repairing: %v", err)
+	}
+	if p.calls != 2 {
+		t.Errorf("provider was called %d time(s), want 2 — one synthesis and one repair", p.calls)
+	}
+	var s Synthesis
+	if uerr := json.Unmarshal(res.Output, &s); uerr != nil {
+		t.Fatalf("undecodable synthesis: %v", uerr)
+	}
+	if mentionsWord(strings.ToLower(s.Overall), "context") {
+		t.Errorf("the published synthesis still names an unassessed axis: %q", s.Overall)
+	}
+	// 🔴 The repair's tokens are on the bill. A repair that were free to the ledger would make the run's
+	// ceiling a lie about what it spent.
+	if res.ToolCalls != 2 {
+		t.Errorf("ToolCalls=%d, want 2 — the repair must be counted", res.ToolCalls)
+	}
+	if res.Tokens != 920 {
+		t.Errorf("Tokens=%d, want 920 (both calls) — the repair's tokens must be on the bill", res.Tokens)
+	}
+}
+
+// 🔴 The fence still holds. One repair, and if that also names an unassessed axis the task fails with
+// the ORIGINAL complaint — the repair widens what can succeed, never what is accepted.
+func TestARepairThatAlsoTripsTheFenceStillFails(t *testing.T) {
+	p := &scriptedProvider{replies: []string{
+		`{"overall":"The prompt degrades context."}`,
+		`{"overall":"The prompt still degrades context."}`,
+	}}
+	tool := SynthesiseAssessment{Provider: p, Model: "test", MaxTokens: 400}
+	_, err := tool.Execute(context.Background(), toolcontract.Call{
+		TaskID: "synthesise", Kind: "synthesise_assessment", Attempt: 1,
+		Inputs: map[string][]byte{
+			"assess-prompt": axisResult(t, "prompt", "the system prompt falls back to an empty string", true),
+		},
+	})
+	if err == nil {
+		t.Fatal("a synthesis naming an unassessed axis twice was accepted")
+	}
+	if !strings.Contains(err.Error(), "context") {
+		t.Errorf("the error does not name the offending axis: %v", err)
+	}
+	if p.calls != 2 {
+		t.Errorf("provider was called %d time(s), want exactly 2 — one repair, not a loop", p.calls)
+	}
+}

@@ -12,6 +12,7 @@ import (
 	"github.com/heros-foreal/heros/internal/planner"
 	"github.com/heros-foreal/heros/internal/provider"
 	"github.com/heros-foreal/heros/internal/toolcontract"
+	"strconv"
 )
 
 // synthesise.go answers the question the whole assessment exists for: what is weak here?
@@ -89,6 +90,10 @@ would matter most to fix first.
 
 Rules:
 - Refer ONLY to axes present in the findings. Never mention an axis that is not listed.
+- 🔴 Axis names are ordinary English words, so this rule catches everyday usage too. Do not name ANY
+  aspect of the agent with a single-word label unless that exact word appears in the findings above.
+  Describe it instead: "the surrounding information it is given" rather than a one-word noun. One stray
+  word gets the whole answer rejected.
 - Never invent a weakness. If two findings share a root cause, say so; if they do not, say that.
 - No preamble, no restating the list, no recommendations beyond naming which to fix first.
 - Reply with a JSON object only: {"overall": string}`
@@ -155,8 +160,29 @@ func (s SynthesiseAssessment) Execute(ctx context.Context, c toolcontract.Call) 
 	}
 	syn.Overall = strings.TrimSpace(w.Overall)
 
+	// 🔴 ONE repair attempt, and the reason it has to exist.
+	//
+	// validate rejects a synthesis that names an axis which produced no finding. That fence is right,
+	// and it stays. But the axis names are ordinary English words, and the findings themselves use them:
+	// a prompt finding that says "can silently degrade context" invites a synthesis that says "context",
+	// which is then rejected for commenting on an axis it was not shown.
+	//
+	// Observed in production on a run scoped to ONE axis: assess-prompt succeeded, synthesise failed
+	// twice and the goal died. Both attempts sent byte-identical input, so the second could only fail
+	// the same way — a retry that cannot succeed is not a retry, it is the same spend twice.
+	//
+	// So the complaint is fed back once and the model is asked to rewrite. If it fails again the fence
+	// holds and the error is returned unchanged: the repair widens what can succeed, never what is
+	// accepted.
 	if err := validate(syn); err != nil {
-		return res, err
+		repaired, rerr := s.repair(ctx, syn, err, budget, &res)
+		if rerr != nil {
+			return res, err // the ORIGINAL complaint; the repair's own trouble is not the useful one
+		}
+		syn.Overall = repaired
+		if err := validate(syn); err != nil {
+			return res, err
+		}
 	}
 	out, err := json.Marshal(syn)
 	if err != nil {
@@ -248,6 +274,46 @@ func renderFindings(s Synthesis) string {
 	}
 	b.WriteString("\nReply as JSON: {\"overall\": string}")
 	return b.String()
+}
+
+// repair asks once for a rewrite that does not trip the fence, telling the model exactly what tripped
+// it. It returns the new paragraph, or an error if the model could not be reached.
+//
+// The cost is added to the same Result, so the run's spend still reports every token this task used —
+// a repair that were free to the ledger would make the ceiling a lie.
+func (s SynthesiseAssessment) repair(ctx context.Context, syn Synthesis, complaint error, budget int,
+	res *toolcontract.Result) (string, error) {
+
+	temp := 0.0
+	resp, err := s.Provider.Complete(ctx, provider.Request{
+		Model:       s.Model,
+		MaxTokens:   budget,
+		Reasoning:   provider.NoReasoning,
+		Temperature: &temp,
+		JSONObject:  true,
+		Messages: []provider.Message{
+			{Role: "system", Content: synthesiseSystem},
+			{Role: "user", Content: renderFindings(syn)},
+			{Role: "assistant", Content: `{"overall": ` + strconv.Quote(syn.Overall) + `}`},
+			{Role: "user", Content: "That was rejected: " + complaint.Error() +
+				".\n\nRewrite the paragraph so it says the same thing without using that word at all. " +
+				"Keep to the findings you were given. Reply as JSON: {\"overall\": string}"},
+		},
+	})
+	res.ToolCalls++
+	if err != nil {
+		return "", err
+	}
+	res.Tokens += resp.Usage.Total()
+	res.CostMicroCents += resp.CostMicroCents
+	if resp.Truncated() {
+		return "", fmt.Errorf("the rewritten synthesis was cut off at %d tokens", budget)
+	}
+	var w synthesisWire
+	if err := json.Unmarshal([]byte(strings.TrimSpace(resp.Content)), &w); err != nil {
+		return "", fmt.Errorf("the rewritten synthesis was not the requested JSON object: %w", err)
+	}
+	return strings.TrimSpace(w.Overall), nil
 }
 
 // validate refuses a synthesis that talks about an axis nobody assessed.

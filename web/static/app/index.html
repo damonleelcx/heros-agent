@@ -3,6 +3,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="/heros.css">
+<script src="/heros-reveal.js" defer></script>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,300;6..72,400&family=Plus+Jakarta+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
 
 <style>
@@ -44,6 +45,8 @@ header.top{
   color:var(--ink-muted);display:flex;align-items:center;gap:.5rem;
 }
 .who .dot{width:5px;height:5px;border-radius:50%;background:var(--accent)}
+.who .face{width:22px;height:22px;border-radius:50%;display:block;
+  box-shadow:0 0 0 1px var(--border), 0 0 0 3px #2ecfa81f}
 .who.user .dot{background:var(--ink-muted)}
 .said{max-width:var(--prose)}
 .said p{margin:0 0 .7rem}
@@ -159,10 +162,17 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .wrap{overflow-x:auto}
 
 /* ── composer ────────────────────────────────────────────────────────────── */
+/* 🔴 The composer is FIXED, so it reserves no space and sits on top of the conversation. The last
+   thing Heros said was disappearing behind the suggestion chips — worst on the reply to the message
+   you just sent, which is the one you are waiting to read.
+   Its height is not a constant either: the chips wrap to two or three rows depending on width, so a
+   hardcoded padding is right at exactly one window size. The height is measured and published as
+   --dock-h, and the shell reserves exactly that. See the ResizeObserver at the foot of this file. */
 .composer{
   position:fixed;left:0;right:0;bottom:0;z-index:30;
   background:linear-gradient(180deg,transparent,var(--canvas) 22%);padding:2.5rem 1.25rem 1.25rem;
 }
+.shell{padding-bottom:calc(var(--dock-h, 12rem) + 1.5rem)}
 .composer-in{max-width:56rem;margin:0 auto}
 .chips{display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.7rem}
 .chip{
@@ -250,7 +260,7 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
 <div class="shell">
   <header class="top">
-    <a href="/" class="homelink" title="Heros"><img src="/avatar.jpg" alt="Heros" width="28" height="28"></a>
+    <a href="/app/" class="homelink" title="Heros — back to the top of this conversation"><img src="/avatar.jpg" alt="Heros" width="28" height="28"></a>
     <span class="wordmark">HEROS</span>
     <span class="subject">acme/support-bot <b>@ rev-a41c9</b></span>
     <span class="spacer"></span>
@@ -294,8 +304,9 @@ const esc = s => String(s??'').replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','
 const money = mc => '$' + (mc/1e6/100).toFixed(4);
 
 function turn(who, cls=''){
-  const t = el(`<div class="turn ${cls}"><div class="who ${who==='you'?'user':''}">
-    <span class="dot"></span>${who}</div></div>`);
+  const mine = who === 'you';
+  const t = el(`<div class="turn ${cls}"><div class="who ${mine?'user':''}">${
+    mine ? '<span class="dot"></span>' : '<img class="face" src="/avatar.jpg" alt="">'}${who}</div></div>`);
   stream.appendChild(t); scroll(); return t;
 }
 function say(t, html){ t.appendChild(el(`<div class="said">${html}</div>`)); scroll(); return t; }
@@ -333,14 +344,14 @@ function renderSubject(s){
       <td class="dim">${a.found ? esc(a.first) : ''}</td>
     </tr>`).join('');
 
-  say(t, `<p>Read <strong>${esc(s.files)}</strong> files at <code>${esc(s.revision.slice(0,8))}</code>${
+  say(t, `<p>Right — I have read <strong>${esc(s.files)}</strong> files at <code>${esc(s.revision.slice(0,8))}</code>${
     s.dirty ? ' — <span style="color:var(--warn)">with uncommitted changes, so this revision does not '+
     'describe exactly what I read</span>' : ''}.
     ${s.test_files ? esc(s.test_files)+' test files were excluded: tests set temperatures and build message '+
     'lists more explicitly than production code, so assessing them describes your test suite while looking '+
     'like it describes your agent.' : ''}</p>
     <p>${s.is_agent
-      ? `This looks like an agent — <strong>${esc(s.why)}</strong>.`
+      ? `This is an agent, and I can work with it — <strong>${esc(s.why)}</strong>.`
       : `<strong style="color:var(--warn)">This does not look like an agent.</strong> ${esc(s.why)} `+
         `I would rather say that than give you nine findings about nothing.`}</p>`);
 
@@ -353,9 +364,10 @@ function renderSubject(s){
   t.appendChild(card); scroll();
 
   if (s.is_agent) {
-    say(t, `<p style="color:var(--ink-muted)">Ask me about any axis and I will show you the code — that is
-      a read, and it costs nothing. Ask me to look at what is weak and I will plan a run, with a ceiling,
-      before spending anything.</p>`);
+    say(t, `<p>So: ask me about any axis and I will show you the code. That is a read, and it costs you
+      nothing.</p>
+      <p style="color:var(--ink-muted)">Or ask me what is weak, and I will write down the plan and its
+      ceiling before I spend a cent of it.</p>`);
   }
 }
 
@@ -366,7 +378,8 @@ function shortName(d){
 
 async function loadSubject(ref){
   const t = turn('heros');
-  say(t, `<p>Reading <code>${esc(ref)}</code>…</p>`);
+  say(t, `<p>Let me read <code>${esc(ref)}</code>. One moment — I clone it and pin the revision
+    before I say anything about it.</p>`);
   try {
     const s = await api('/api/subject', {ref});
     t.remove();
@@ -464,7 +477,7 @@ function renderGoal(t, r){
     <div class="card-body"><div class="ledger">${rows}</div></div>
     <div class="meters">
       <div class="meter"><div class="lab">tasks</div>
-        <div class="val"><span data-done>0</span><span class="of"> / ${r.tasks.length}</span></div>
+        <div class="val"><span data-done>0</span><span class="of"> / <span data-total>${r.tasks.length}</span></span></div>
         <div class="bar"><i data-bar-tasks></i></div></div>
       <div class="meter"><div class="lab">spend</div>
         <div class="val"><span data-cost>$0.0000</span><span class="of"> / $${(r.ceiling_cents/100).toFixed(2)}</span></div>
@@ -509,6 +522,12 @@ function renderGoal(t, r){
     }
 
     card.querySelector('[data-done]').textContent = e.done;
+    /* 🔴 The DENOMINATOR moves too. It was printed once from the original plan and never updated, while
+       the numerator tracked live events — so a run whose plan grew from 2 tasks to 5 displayed "4 / 2",
+       a completed count larger than the total. The plan growing is a designed behaviour here (a replan
+       adds tasks from what the run found), so the total is not a constant and must not be rendered as
+       one. Observed in production on an improve run scoped to one axis. */
+    if (e.total) card.querySelector('[data-total]').textContent = e.total;
     card.querySelector('[data-tokens]').textContent = (e.tokens||0).toLocaleString();
     card.querySelector('[data-cost]').textContent = money(e.cost_micro_cents||0);
     if (e.total) card.querySelector('[data-bar-tasks]').style.width = (e.done/e.total*100)+'%';
@@ -1058,6 +1077,7 @@ async function renderOrganization(card){
           <span class="evidence" id="invmsg"></span></div>
       </div></div>`);
     body.appendChild(form);
+    wirePasswordReveals(form);  // rendered after DOMContentLoaded, so wire it explicitly
     // 🚫 No "owner" option. Ownership is transferred to somebody who already has an account, in the
     // table above — never by a link in an email, which travels through a mailbox this organization does
     // not control. The server and the database both refuse it too.
@@ -1199,6 +1219,7 @@ function acceptInvitationCard(token){
           <span class="evidence" id="m"></span></div>
       </div>`);
     body.appendChild(form);
+    wirePasswordReveals(form);  // rendered after DOMContentLoaded, so wire it explicitly
     note(form, `At least ${info.min_password_length} characters. Length is the only rule — it is the ` +
       `property that actually costs an attacker anything.`);
 
@@ -1355,10 +1376,14 @@ async function start(){
     const s = await api('/api/subject');
     if (s.loaded === false) {
       subjEl.textContent = 'no repository loaded';
-      say(t, `<p>Point me at a repository and I will read it. A path on this machine
-        (<code>../hermes-agent</code>) or a GitHub link (<code>github.com/acme/bot</code>).</p>
+      say(t, `<p><strong>I am Heros.</strong> I read agents — yours, if you point me at one — and tell
+        you what is weak in it.</p>
+        <p>Give me a repository and I will start by reading it: a GitHub link
+        (<code>github.com/acme/bot</code>) or a path on this machine (<code>../hermes-agent</code>).
+        You can paste it in a sentence; I will find it.</p>
         <p style="color:var(--ink-muted)">I pin it to a revision, because without one I cannot tell you
-        later whether a change actually helped.</p>`);
+        later whether a change actually helped. And I would rather tell you I cannot do something than
+        guess at it — there are nineteen things I do, and I will show you the list any time you ask.</p>`);
     } else {
       t.remove();
       renderSubject(s);
@@ -1394,4 +1419,17 @@ async function start(){
   }
 })();
 
+
+/* ── keeping the conversation clear of the composer ───────────────────────── */
+/* Publishes the composer's real height as --dock-h. A ResizeObserver rather than a one-off
+   measurement, because the chips rewrap whenever the window changes and the correct reservation
+   changes with them. */
+(function(){
+  const dock = document.querySelector('.composer');
+  if (!dock) return;
+  const publish = () => document.documentElement.style.setProperty('--dock-h', dock.offsetHeight + 'px');
+  publish();
+  if (window.ResizeObserver) new ResizeObserver(publish).observe(dock);
+  else window.addEventListener('resize', publish);
+})();
 </script>
