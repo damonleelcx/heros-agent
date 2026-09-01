@@ -481,3 +481,69 @@ func TestZZPostgresLegActuallyRan(t *testing.T) {
 			"reported green while testing only the in-memory implementation")
 	}
 }
+
+// TestLatestGoalIsTheNewestNotTheLexicallyLast.
+//
+// 🔴 Regression fence. Run history used the last element of an id-ordered ListGoals, on the assumption
+// that ids sort by time. They do not: ids carry the prefix of whatever created them — `g-`, `live-`,
+// `e2e-` — so the lexically-last goal is whichever prefix sorts highest. In practice run history
+// answered about a leftover test goal while the real run sat one row above it, and reported "recorded
+// no episodes" for a run that had nine.
+func TestLatestGoalIsTheNewestNotTheLexicallyLast(t *testing.T) {
+	for _, im := range implementations() {
+		t.Run(im.name, func(t *testing.T) {
+			postgresRan(im.name)
+			s := im.open(t)
+			base := time.Now().UTC().Truncate(time.Millisecond)
+
+			// `zzz-` sorts after `aaa-` lexically, but is OLDER.
+			older, _ := seed(t, s, "zzz")
+			g1, err := s.LoadGoal(older)
+			if err != nil {
+				t.Fatalf("load: %v", err)
+			}
+			g1.CreatedAt = base.Add(-time.Hour)
+			g1.Tenant = "latest-test"
+			if err := s.SaveGoal(g1); err != nil {
+				t.Fatalf("save: %v", err)
+			}
+
+			newer, _ := seed(t, s, "aaa")
+			g2, err := s.LoadGoal(newer)
+			if err != nil {
+				t.Fatalf("load: %v", err)
+			}
+			g2.CreatedAt = base
+			g2.Tenant = "latest-test"
+			if err := s.SaveGoal(g2); err != nil {
+				t.Fatalf("save: %v", err)
+			}
+
+			got, ok, err := s.LatestGoal("latest-test")
+			if err != nil || !ok {
+				t.Fatalf("latest: ok=%v err=%v", ok, err)
+			}
+			if got.ID != newer {
+				t.Fatalf("latest goal is %q, want %q — the lexically-last id was returned instead of "+
+					"the most recent goal", got.ID, newer)
+			}
+		})
+	}
+}
+
+// TestLatestGoalOnAnEmptyTenantIsNotAnError. "Nothing has run yet" is a real state, not a failure.
+func TestLatestGoalOnAnEmptyTenantIsNotAnError(t *testing.T) {
+	for _, im := range implementations() {
+		t.Run(im.name, func(t *testing.T) {
+			postgresRan(im.name)
+			s := im.open(t)
+			_, ok, err := s.LatestGoal("tenant-that-has-never-run-anything")
+			if err != nil {
+				t.Fatalf("an empty tenant produced an error: %v", err)
+			}
+			if ok {
+				t.Fatal("an empty tenant returned a goal")
+			}
+		})
+	}
+}

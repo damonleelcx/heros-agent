@@ -168,6 +168,24 @@ func (p *Postgres) ListGoals(state goal.State) ([]*goal.Goal, error) {
 // 🔴 It deliberately does NOT overwrite lease or execution columns. A DAG object in one worker's memory
 // is a snapshot; writing its idea of `attempt` or `leased_by` back would clobber whatever another
 // worker has done since. Only the structural fields are the planner's to write.
+// LatestGoal returns the newest goal by creation time, tie-broken by id so the answer is stable.
+func (p *Postgres) LatestGoal(tenant string) (*goal.Goal, bool, error) {
+	q := goalColumns + ` ORDER BY created_at DESC, id DESC LIMIT 1`
+	args := []any{}
+	if tenant != "" {
+		q = goalColumns + ` WHERE tenant = $1 ORDER BY created_at DESC, id DESC LIMIT 1`
+		args = append(args, tenant)
+	}
+	g, err := scanGoal(p.db.QueryRowContext(context.Background(), q, args...))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("store: latest goal: %w", err)
+	}
+	return g, true, nil
+}
+
 func (p *Postgres) SaveDAG(d *task.DAG) error {
 	tx, err := p.db.BeginTx(context.Background(), nil)
 	if err != nil {

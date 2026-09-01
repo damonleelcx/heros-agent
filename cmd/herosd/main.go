@@ -21,6 +21,7 @@ import (
 	"github.com/heros-foreal/heros/internal/bounds"
 	"github.com/heros-foreal/heros/internal/config"
 	"github.com/heros-foreal/heros/internal/intake"
+	"github.com/heros-foreal/heros/internal/memory"
 	"github.com/heros-foreal/heros/internal/planner"
 	"github.com/heros-foreal/heros/internal/provider/deepseek"
 	"github.com/heros-foreal/heros/internal/router"
@@ -91,8 +92,11 @@ func main() {
 		log.Fatalf("tools: %v", err)
 	}
 
+	mem := memory.NewPG(db)
+
 	w := worker.New("herosd", st, reg)
 	w.Lease = 2 * time.Minute
+	w.Episodes = mem
 
 	cache, _ := os.UserCacheDir()
 	srv := &api.Server{
@@ -111,6 +115,7 @@ func main() {
 	srv.Provider = client
 	srv.Model = deepseek.ModelFlash
 	srv.Approvals = api.NewApprovals()
+	srv.Episodes = mem
 
 	mux := srv.Routes()
 	mux.Handle("/", http.FileServer(http.Dir(*web)))

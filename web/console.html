@@ -321,6 +321,7 @@ async function loadSubject(ref){
 
 function renderAnswer(t, r){
   say(t, `<p>${esc(r.text)}</p>`);
+  if (r.episodes && r.episodes.length) { renderEpisodes(t, r); return; }
   if (!r.spans || !r.spans.length) return;
   const body = r.spans.map(sp =>
     `<div class="hd">${esc(sp.ref)} — ${esc(sp.why)}</div>` +
@@ -331,6 +332,21 @@ function renderAnswer(t, r){
       <span class="spacer"></span><span class="badge b-ok">your code · no model call</span></div>
     <div class="card-body" style="padding:0"><div class="diff" style="margin:0;border:0">${body}</div></div>
     </div>`);
+  t.appendChild(card); scroll();
+}
+
+// The execution timeline: what happened, in order, with what it cost.
+function renderEpisodes(t, r){
+  const mark = {observation:'·', decision:'◆', failure:'✕', effect:'→'};
+  const cls  = {observation:'', decision:'gate', failure:'fail', effect:'done'};
+  const rows = r.episodes.map(e => `<div class="row ${cls[e.kind]||''}">
+      <span class="mark">${mark[e.kind]||'·'}</span>
+      <span class="name">${esc(e.summary)}${e.detail?` <span style="color:var(--none)">— ${esc(e.detail)}</span>`:''}</span>
+      <span class="state">${esc(e.kind)}</span></div>`).join('');
+  const card = el(`<div class="card"><div class="card-head">
+      <span class="card-title"><span class="k">timeline</span> ${r.episodes.length} steps</span>
+      <span class="spacer"></span><span class="badge b-ok">recorded, not re-derived</span></div>
+    <div class="card-body"><div class="ledger">${rows}</div></div></div>`);
   t.appendChild(card); scroll();
 }
 
@@ -573,6 +589,7 @@ const SUGGESTIONS = [
   'look at my repo and tell me what is weak',
   'keep improving until it is perfect',
   'change the model on this node',
+  'what happened in that run?',
   'connect my other repo',
 ];
 SUGGESTIONS.forEach(label => {

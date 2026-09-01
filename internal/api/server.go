@@ -14,6 +14,7 @@ import (
 	"github.com/heros-foreal/heros/internal/goal"
 	"github.com/heros-foreal/heros/internal/intake"
 	"github.com/heros-foreal/heros/internal/intent"
+	"github.com/heros-foreal/heros/internal/memory"
 	"github.com/heros-foreal/heros/internal/planner"
 	"github.com/heros-foreal/heros/internal/provider"
 	"github.com/heros-foreal/heros/internal/router"
@@ -44,6 +45,8 @@ type Server struct {
 	Model        string
 	// Approvals holds Tier-C changes between proposing and deciding.
 	Approvals *approvals
+	// Episodes is the episodic record, read by run history.
+	Episodes memory.Store
 
 	mu      sync.RWMutex
 	subject *subjectState
@@ -193,9 +196,10 @@ type askResp struct {
 	Tier   string `json:"tier,omitempty"`
 
 	// answer
-	Text  string       `json:"text,omitempty"`
-	Axis  *axisSummary `json:"axis,omitempty"`
-	Spans []spanOut    `json:"spans,omitempty"`
+	Text     string       `json:"text,omitempty"`
+	Episodes []episodeOut `json:"episodes,omitempty"`
+	Axis     *axisSummary `json:"axis,omitempty"`
+	Spans    []spanOut    `json:"spans,omitempty"`
 
 	// goal
 	// Scope is the axis the run was narrowed to, empty when it covers all nine. Sent so the console can
@@ -222,6 +226,15 @@ type askResp struct {
 
 	// abstain
 	CanDo []string `json:"can_do,omitempty"`
+}
+
+type episodeOut struct {
+	Seq     int64  `json:"seq"`
+	Kind    string `json:"kind"`
+	TaskID  string `json:"task_id,omitempty"`
+	Summary string `json:"summary"`
+	Detail  string `json:"detail,omitempty"`
+	At      string `json:"at"`
 }
 
 type spanOut struct {
@@ -288,9 +301,13 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 func (s *Server) answerQuery(w http.ResponseWriter, spec intent.Spec, sub *subjectState) {
 	resp := askResp{Kind: "answer", Intent: spec.Intent.String(), Tier: string(spec.Tier)}
 
+	if spec.Intent == intent.RunHistory {
+		s.answerRunHistory(w, resp)
+		return
+	}
 	if spec.Axis == "" {
-		// Queries about the platform's own record rather than an axis. Honest placeholder: the record is
-		// there, the rendering is not.
+		// Queries about the platform's own record rather than an axis, other than run history. Honest
+		// placeholder: the record exists, the rendering does not.
 		resp.Text = fmt.Sprintf("I can answer %q from what I have stored, but that view is not built yet. "+
 			"Ask me about one of the nine axes and I will show you the code.", spec.Question)
 		writeJSON(w, http.StatusOK, resp)
@@ -319,6 +336,47 @@ func (s *Server) answerQuery(w http.ResponseWriter, spec intent.Spec, sub *subje
 			"This is read from what I already parsed — nothing ran just now, and it cost nothing.",
 			len(ev.Spans), len(files), spec.Axis, shortRef(sub.Source.Reference))
 	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// answerRunHistory reads the most recent run's episodes.
+//
+// 🔴 A query over what a durable run WROTE DOWN, not a re-derivation. That is the whole payoff of
+// persisting everything: "what happened in that run?" is a SELECT, and it costs nothing.
+func (s *Server) answerRunHistory(w http.ResponseWriter, resp askResp) {
+	if s.Episodes == nil {
+		resp.Text = "No run history is being recorded on this deployment."
+		writeJSON(w, http.StatusOK, resp)
+		return
+	}
+	last, ok, err := s.Store.LatestGoal(s.Tenant)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if !ok {
+		resp.Text = "Nothing has run yet. Ask me to look at your repository and I will start something."
+		writeJSON(w, http.StatusOK, resp)
+		return
+	}
+	eps, err := s.Episodes.Episodes(string(last.ID))
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if len(eps) == 0 {
+		resp.Text = fmt.Sprintf("The last run (%s, %s) recorded no episodes.", last.Intent, last.State)
+		writeJSON(w, http.StatusOK, resp)
+		return
+	}
+	for _, e := range eps {
+		resp.Episodes = append(resp.Episodes, episodeOut{
+			Seq: e.Seq, Kind: string(e.Kind), TaskID: e.TaskID,
+			Summary: e.Summary, Detail: e.Detail, At: e.At.Format(time.RFC3339),
+		})
+	}
+	resp.Text = fmt.Sprintf("The last run was %s (%s): %d steps, %s spent.",
+		last.Intent, last.State, len(eps), provider.FormatCents(last.Spend.CostMicroCents))
 	writeJSON(w, http.StatusOK, resp)
 }
 

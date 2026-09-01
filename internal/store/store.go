@@ -60,6 +60,13 @@ type Store interface {
 	LoadGoal(id goal.ID) (*goal.Goal, error)
 	SaveGoal(g *goal.Goal) error
 	ListGoals(state goal.State) ([]*goal.Goal, error)
+	// LatestGoal returns the most recently created goal for a tenant.
+	//
+	// 🔴 Its own method rather than "the last element of ListGoals". ListGoals is ordered by ID for
+	// stable rendering, and IDs are prefixed by whatever created them — `g-`, `live-`, `e2e-` — so the
+	// lexically-last goal is whichever prefix sorts highest, not the newest. That bug shipped: run
+	// history answered about a leftover test goal while the real run sat one row above it.
+	LatestGoal(tenant string) (*goal.Goal, bool, error)
 
 	SaveDAG(d *task.DAG) error
 	LoadDAG(goalID goal.ID) (*task.DAG, error)
@@ -136,6 +143,22 @@ func (m *Memory) ListGoals(state goal.State) ([]*goal.Goal, error) {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out, nil
+}
+
+// LatestGoal returns the newest goal by creation time.
+func (m *Memory) LatestGoal(tenant string) (*goal.Goal, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var best *goal.Goal
+	for _, g := range m.goals {
+		if tenant != "" && g.Tenant != tenant {
+			continue
+		}
+		if best == nil || g.CreatedAt.After(best.CreatedAt) {
+			best = g
+		}
+	}
+	return best, best != nil, nil
 }
 
 func (m *Memory) SaveDAG(d *task.DAG) error {

@@ -257,6 +257,32 @@ change is refused.
 repository?" — explanatory wording on an effect-bearing intent, which would eventually have been
 implemented as whichever half the reader noticed.
 
+### [x] P22 · Memory, wired
+Four classes, four tables, because they differ in lifetime, in who may write, and in what a row must
+carry to be trustworthy. One table forces one shape and one write path onto all four, and the concrete
+failure is knowledge: an agent able to INSERT there launders its own speculation into fact, and the next
+goal reads it as if somebody had established it.
+
+- **Knowledge cannot be written, only PROMOTED**, citing episodes, and only observations or effects — a
+  decision is the agent's own reasoning, and promoting one is the laundering step. The schema requires
+  evidence; it is not a convention.
+- **Preferences require a human author.** The Go type refuses system identities, the column refuses an
+  empty one. An agent that infers "they seem to prefer aggressive refactors" has invented a mandate.
+- **Compression never folds a failure or an effect**, and never deletes its source. What broke and what
+  changed in the world are the two things a reader most needs from an old run.
+
+The payoff is that **`run_history` is now a real answer** rather than a placeholder: "what happened in
+that run?" is a SELECT over what a durable run wrote down, and it costs nothing. That is what persisting
+everything was for.
+
+Two bugs the wiring exposed:
+- `MAX(seq)+1` inside an INSERT is **not** atomic — 16 concurrent writers produced 6 sequences and 10
+  errors. Now a per-goal advisory lock, released on rollback or a dropped connection so a dying worker
+  cannot wedge a goal's log.
+- Run history answered about **the lexically-last goal**, not the newest — ids carry the prefix of
+  whatever created them (`g-`, `live-`, `e2e-`), so a leftover test goal sorted last and the real run
+  reported "no episodes" while holding nine. `store.LatestGoal` now asks the question that was meant.
+
 ## !!! Not started, and deliberately so
 
 ### [ ] P11 · Tier-A `compare` execution
@@ -381,12 +407,36 @@ change is refused.
 repository?" — explanatory wording on an effect-bearing intent, which would eventually have been
 implemented as whichever half the reader noticed.
 
+### [x] P22 · Memory, wired
+Four classes, four tables, because they differ in lifetime, in who may write, and in what a row must
+carry to be trustworthy. One table forces one shape and one write path onto all four, and the concrete
+failure is knowledge: an agent able to INSERT there launders its own speculation into fact, and the next
+goal reads it as if somebody had established it.
+
+- **Knowledge cannot be written, only PROMOTED**, citing episodes, and only observations or effects — a
+  decision is the agent's own reasoning, and promoting one is the laundering step. The schema requires
+  evidence; it is not a convention.
+- **Preferences require a human author.** The Go type refuses system identities, the column refuses an
+  empty one. An agent that infers "they seem to prefer aggressive refactors" has invented a mandate.
+- **Compression never folds a failure or an effect**, and never deletes its source. What broke and what
+  changed in the world are the two things a reader most needs from an old run.
+
+The payoff is that **`run_history` is now a real answer** rather than a placeholder: "what happened in
+that run?" is a SELECT over what a durable run wrote down, and it costs nothing. That is what persisting
+everything was for.
+
+Two bugs the wiring exposed:
+- `MAX(seq)+1` inside an INSERT is **not** atomic — 16 concurrent writers produced 6 sequences and 10
+  errors. Now a per-goal advisory lock, released on rollback or a dropped connection so a dying worker
+  cannot wedge a goal's log.
+- Run history answered about **the lexically-last goal**, not the newest — ids carry the prefix of
+  whatever created them (`g-`, `live-`, `e2e-`), so a leftover test goal sorted last and the real run
+  reported "no episodes" while holding nine. `store.LatestGoal` now asks the question that was meant.
+
 ## !!! Not started, and deliberately so
 
 - **Discovery is heuristic, not a parser.** It finds candidate evidence by pattern, so a false positive
   is cheap (the model discards it) and a false negative is expensive (the axis reports absence). Python,
   TypeScript, JavaScript and Go only. Every report states that it shows what was found, not everything
   that exists.
-- **`internal/memory` is written and untested.** The four classes and the promotion rules compile; there
-  is no store implementation and no test. It is not wired into anything.
 - **Console / HTTP surface.** No API and no UI in this tree.

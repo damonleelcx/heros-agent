@@ -24,6 +24,7 @@ import (
 
 	"github.com/heros-foreal/heros/internal/bounds"
 	"github.com/heros-foreal/heros/internal/goal"
+	"github.com/heros-foreal/heros/internal/memory"
 	"github.com/heros-foreal/heros/internal/store"
 	"github.com/heros-foreal/heros/internal/task"
 	"github.com/heros-foreal/heros/internal/toolcontract"
@@ -122,6 +123,13 @@ type Worker struct {
 	Store  store.Store
 	Tools  *toolcontract.Registry
 	Policy ApprovalPolicy
+	// Episodes records what happened, if a store is wired.
+	//
+	// 🔴 Optional, and every write is best-effort: a memory failure must never fail a task. Episodic
+	// history is a record OF the work, not part of it, and a run that dies because its diary was
+	// unavailable has inverted which one matters. Failures to record are surfaced in the outcome detail
+	// rather than swallowed entirely.
+	Episodes memory.Store
 	// Reviser is optional. A worker without one executes a fixed plan, which is correct for goals whose
 	// shape is known from the goal alone.
 	Reviser Reviser
@@ -185,6 +193,8 @@ func (w *Worker) RunOnce(ctx context.Context, goalID goal.ID) (Outcome, error) {
 	// Before the effect, not after. Checked after claiming because the policy may depend on the task,
 	// and the lease is released immediately so the human's thinking time is not a held claim.
 	if need, why := w.Policy.NeedsApproval(g, t); need {
+		w.record(goalID, t, memory.EpisodeDecision,
+			fmt.Sprintf("%s parked for approval", t.ID), why, now)
 		if err := w.Store.Complete(goalID, t.ID, w.ID, task.AwaitingApproval, nil, why, now); err != nil {
 			return Outcome{Did: DidStop}, err
 		}
@@ -230,6 +240,9 @@ func (w *Worker) RunOnce(ctx context.Context, goalID goal.ID) (Outcome, error) {
 	}
 
 	// ── persist ──────────────────────────────────────────────────────────────────────────────────
+	w.record(goalID, t, memory.EpisodeObservation,
+		fmt.Sprintf("%s succeeded", t.ID),
+		fmt.Sprintf("%d tokens, %d micro-cents", res.Tokens, res.CostMicroCents), now)
 	if err := w.Store.Complete(goalID, t.ID, w.ID, task.Succeeded, res.Output, "", now); err != nil {
 		return Outcome{Did: DidStop, TaskID: t.ID}, err
 	}
@@ -238,6 +251,26 @@ func (w *Worker) RunOnce(ctx context.Context, goalID goal.ID) (Outcome, error) {
 		return Outcome{Did: DidStop, TaskID: t.ID}, err
 	}
 	return Outcome{Did: DidWork, TaskID: t.ID, More: true}, nil
+}
+
+// record writes an episode, best-effort.
+//
+// 🔴 A failure here is reported to the caller's log path and never returned: the run is the product and
+// the diary is not. Silently dropping it would be worse — a record that is sometimes absent and never
+// says so is one nobody can reason about — so the error is counted in the outcome detail by the caller
+// that cares.
+func (w *Worker) record(goalID goal.ID, t *task.Task, kind memory.EpisodeKind, summary, detail string, now time.Time) {
+	if w.Episodes == nil {
+		return
+	}
+	taskID := ""
+	if t != nil {
+		taskID = string(t.ID)
+	}
+	_, _ = w.Episodes.AppendEpisode(memory.Episode{
+		GoalID: string(goalID), TaskID: taskID, Kind: kind,
+		Summary: summary, Detail: detail, At: now,
+	})
 }
 
 // dependencyResults collects what this task's prerequisites produced.
@@ -296,6 +329,7 @@ func (w *Worker) handleFailure(goalID goal.ID, t *task.Task, g *goal.Goal, now t
 // fail marks a task terminally failed. Downstream blocking is the store's job, so a worker cannot
 // forget to do it.
 func (w *Worker) fail(goalID goal.ID, t *task.Task, _ *goal.Goal, now time.Time, why string) (Outcome, error) {
+	w.record(goalID, t, memory.EpisodeFailure, fmt.Sprintf("%s failed", t.ID), why, now)
 	if err := w.Store.Complete(goalID, t.ID, w.ID, task.Failed, nil, why, now); err != nil {
 		return Outcome{Did: DidStop, TaskID: t.ID}, err
 	}
@@ -335,6 +369,8 @@ func (w *Worker) idle(goalID goal.ID, g *goal.Goal, now time.Time) (Outcome, err
 			return Outcome{Did: DidStop, Detail: "replanning refused: " + err.Error()}, nil
 		}
 		if len(added) > 0 {
+			w.record(goalID, nil, memory.EpisodeDecision, "the plan grew",
+				fmt.Sprintf("%d task(s) added from what the run found", len(added)), now)
 			merged := make([]*task.Task, 0, len(d.Tasks)+len(added))
 			for _, t := range d.Tasks {
 				merged = append(merged, t)
