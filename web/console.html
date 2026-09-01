@@ -474,6 +474,65 @@ function reportFindings(e, findings){
   }
 }
 
+/* ── a Tier-C change, waiting for a person ──────────────────────────────── */
+
+function renderProposal(t, r){
+  say(t, `<p>I have written the change but <strong>not applied it</strong>. It touches
+    <code>${esc(r.ref)}</code> on the <strong>${esc(r.scope)}</strong> axis.</p>
+    ${r.text ? `<p style="color:var(--ink-muted)">${esc(r.text)}</p>` : ''}`);
+
+  const body = r.diff.split('\n').filter(Boolean).map(line => {
+    const cls = line.startsWith('+++') || line.startsWith('---') || line.startsWith('@@') ? 'hd'
+              : line.startsWith('+') ? 'add'
+              : line.startsWith('-') ? 'del' : 'ctx';
+    return `<div class="${cls}">${esc(line)}</div>`;
+  }).join('');
+
+  const card = el(`<div class="card gatecard">
+    <div class="card-head">
+      <span class="card-title"><span class="k">waiting for you</span> ${esc(r.scope)} · ${esc(r.path)}</span>
+      <span class="spacer"></span><span class="badge b-gate">needs approval</span></div>
+    <div class="card-body">
+      <div class="diff">${body}</div>
+      <div class="actions">
+        <button class="btn-go" data-approve>Approve and commit to a branch</button>
+        <button class="btn-no" data-decline>Not this one</button>
+        <span class="evidence">key ${esc((r.idempotency_key||'').slice(0,24))}… — a retry reuses it</span>
+      </div>
+    </div></div>`);
+  t.appendChild(card); scroll();
+
+  const actions = card.querySelector('.actions');
+  const badge = card.querySelector('.card-head .badge');
+
+  async function decide(approve){
+    actions.innerHTML = `<span class="evidence">${approve ? 'applying…' : 'discarding…'}</span>`;
+    try {
+      const d = await api('/api/decide', {change_id: r.change_id, approve});
+      if (!d.applied) {
+        badge.className = 'badge b-bad'; badge.textContent = approve ? 'not applied' : 'declined';
+        actions.innerHTML = `<span class="badge b-bad">${approve?'not applied':'declined'}</span>
+          <span class="evidence">${esc(d.message)}</span>`;
+        return;
+      }
+      badge.className = 'badge b-ok'; badge.textContent = 'committed';
+      actions.innerHTML = `<span class="badge b-ok">${esc(d.branch)} · ${esc(d.commit)}</span>
+        <span class="evidence">nothing was pushed</span>`;
+      const t2 = turn('heros');
+      say(t2, `<p>Committed to <code>${esc(d.branch)}</code> as <code>${esc(d.commit)}</code>.
+        <strong>Nothing has been pushed.</strong> I do not hold a credential for your repository, and I
+        would rather hand you the command than keep one:</p>
+        <div class="diff"><div class="ctx">${esc(d.push)}</div></div>
+        <p style="color:var(--ink-muted)">Open the pull request yourself when you are ready.
+        <code>git checkout -</code> takes you back if you would rather not.</p>`);
+    } catch (e) {
+      actions.innerHTML = `<span class="evidence" style="color:var(--bad)">${esc(e.message)}</span>`;
+    }
+  }
+  card.querySelector('[data-approve]').onclick = () => decide(true);
+  card.querySelector('[data-decline]').onclick = () => decide(false);
+}
+
 /* ── input ───────────────────────────────────────────────────────────────── */
 
 let busy = false;
@@ -497,6 +556,7 @@ async function ask(text){
     switch (r.kind) {
       case 'answer':   renderAnswer(t, r); break;
       case 'goal':     renderGoal(t, r); break;
+      case 'proposal': renderProposal(t, r); break;
       case 'refusal':  t.remove(); renderRefusal(turn('heros'), r); break;
       case 'redirect': renderRedirect(t, r); break;
       default:         renderAbstain(t, r); break;
@@ -512,6 +572,7 @@ const SUGGESTIONS = [
   'what does this node remember between calls?',
   'look at my repo and tell me what is weak',
   'keep improving until it is perfect',
+  'change the model on this node',
   'connect my other repo',
 ];
 SUGGESTIONS.forEach(label => {

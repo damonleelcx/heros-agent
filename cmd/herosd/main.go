@@ -110,6 +110,7 @@ func main() {
 	srv.ToolRegistry = reg
 	srv.Provider = client
 	srv.Model = deepseek.ModelFlash
+	srv.Approvals = api.NewApprovals()
 
 	mux := srv.Routes()
 	mux.Handle("/", http.FileServer(http.Dir(*web)))

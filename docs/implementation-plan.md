@@ -230,6 +230,33 @@ A join needs its edges, so `toolcontract.Call` gained `Inputs` — the results o
 only. A tool that could read any result would make the DAG's edges decorative: the graph would say what
 waits for what while the data flowed wherever a tool reached.
 
+### [x] P21 · Tier-C effects — the first writes to somebody's code
+`author`, `prompt`, `model`, `deliver`. They run IN-TURN rather than as durable goals, because the
+tiering says so and the tiering is right: a bounded change is one model call and a diff, and a queue
+would add every failure mode of a distributed run to something that finishes in two seconds.
+
+`internal/edit` is built to REFUSE. A refused edit costs one exchange; a wrong edit costs a corrupted
+file discovered later and attributed to us. So every ambiguity resolves to a refusal: text that occurs
+more than once, a replacement that re-indents (in Python indentation IS block structure — a statement
+moved one level out is valid, parseable, and in a different scope), a path leaving the repository, a
+no-op, or a file that changed between proposing and approving.
+
+Line numbers are never identity — the anchor is the text. An unrelated edit above moves every line
+below it, and an edit applied by line number rewrites whatever now sits there.
+
+**Nothing is pushed.** Approval writes the change on a new branch and commits it, then hands back the
+exact `git push` command. Pushing would need a credential with write access to somebody's repository,
+held by this process, used while they are not present — the standing grant that repository connection is
+deliberately out of scope for. One more step for them, one fewer credential for us.
+
+Proven against a disposable repository: proposal → minimal diff (1 file, 1 insertion, 1 deletion) →
+branch → commit; decline leaves the file byte-identical and HEAD unmoved; a second decision on the same
+change is refused.
+
+`deliver`'s QUESTION was corrected, not its tier. It read "how does an approved change reach my
+repository?" — explanatory wording on an effect-bearing intent, which would eventually have been
+implemented as whichever half the reader noticed.
+
 ## !!! Not started, and deliberately so
 
 ### [ ] P11 · Tier-A `compare` execution
@@ -327,14 +354,39 @@ A join needs its edges, so `toolcontract.Call` gained `Inputs` — the results o
 only. A tool that could read any result would make the DAG's edges decorative: the graph would say what
 waits for what while the data flowed wherever a tool reached.
 
+### [x] P21 · Tier-C effects — the first writes to somebody's code
+`author`, `prompt`, `model`, `deliver`. They run IN-TURN rather than as durable goals, because the
+tiering says so and the tiering is right: a bounded change is one model call and a diff, and a queue
+would add every failure mode of a distributed run to something that finishes in two seconds.
+
+`internal/edit` is built to REFUSE. A refused edit costs one exchange; a wrong edit costs a corrupted
+file discovered later and attributed to us. So every ambiguity resolves to a refusal: text that occurs
+more than once, a replacement that re-indents (in Python indentation IS block structure — a statement
+moved one level out is valid, parseable, and in a different scope), a path leaving the repository, a
+no-op, or a file that changed between proposing and approving.
+
+Line numbers are never identity — the anchor is the text. An unrelated edit above moves every line
+below it, and an edit applied by line number rewrites whatever now sits there.
+
+**Nothing is pushed.** Approval writes the change on a new branch and commits it, then hands back the
+exact `git push` command. Pushing would need a credential with write access to somebody's repository,
+held by this process, used while they are not present — the standing grant that repository connection is
+deliberately out of scope for. One more step for them, one fewer credential for us.
+
+Proven against a disposable repository: proposal → minimal diff (1 file, 1 insertion, 1 deletion) →
+branch → commit; decline leaves the file byte-identical and HEAD unmoved; a second decision on the same
+change is refused.
+
+`deliver`'s QUESTION was corrected, not its tier. It read "how does an approved change reach my
+repository?" — explanatory wording on an effect-bearing intent, which would eventually have been
+implemented as whichever half the reader noticed.
+
 ## !!! Not started, and deliberately so
 
 - **Discovery is heuristic, not a parser.** It finds candidate evidence by pattern, so a false positive
   is cheap (the model discards it) and a false negative is expensive (the axis reports absence). Python,
   TypeScript, JavaScript and Go only. Every report states that it shows what was found, not everything
   that exists.
-- **Tier-C effect intents are routed but not built.** `author`, `prompt`, `model` and `deliver` return a
-  refusal naming why, rather than a generic failure.
 - **`internal/memory` is written and untested.** The four classes and the promotion rules compile; there
   is no store implementation and no test. It is not wired into anything.
 - **Console / HTTP surface.** No API and no UI in this tree.

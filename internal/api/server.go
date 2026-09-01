@@ -42,6 +42,8 @@ type Server struct {
 	ToolRegistry *toolcontract.Registry
 	Provider     provider.Provider
 	Model        string
+	// Approvals holds Tier-C changes between proposing and deciding.
+	Approvals *approvals
 
 	mu      sync.RWMutex
 	subject *subjectState
@@ -64,6 +66,7 @@ func (s *Server) Routes() *http.ServeMux {
 	m.HandleFunc("GET /api/subject", s.handleGetSubject)
 	m.HandleFunc("POST /api/ask", s.handleAsk)
 	m.HandleFunc("GET /api/goals/{id}/events", s.handleEvents)
+	m.HandleFunc("POST /api/decide", s.handleDecideRequest)
 	return m
 }
 
@@ -202,6 +205,13 @@ type askResp struct {
 	Tasks        []string `json:"tasks,omitempty"`
 	CeilingCents int64    `json:"ceiling_cents,omitempty"`
 
+	// proposal — a Tier-C change waiting for a person
+	ChangeID       string `json:"change_id,omitempty"`
+	Path           string `json:"path,omitempty"`
+	Ref            string `json:"ref,omitempty"`
+	Diff           string `json:"diff,omitempty"`
+	IdempotencyKey string `json:"idempotency_key,omitempty"`
+
 	// refusal
 	Cause      string `json:"cause,omitempty"`
 	NextAction string `json:"next_action,omitempty"`
@@ -270,12 +280,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	case intent.TierGoal:
 		s.startGoal(w, spec, sub, out.Axis)
 	default:
-		// Tier C effects are not wired yet, and saying so beats a generic failure.
-		writeJSON(w, http.StatusOK, askResp{
-			Kind: "refusal", Intent: out.Intent.String(), Cause: "not_built",
-			NextAction: fmt.Sprintf("%q is a change to your source. Changes are planned by an improvement "+
-				"run — ask me to look at the repository first, then to fix what it finds.", spec.Question),
-		})
+		s.handleEffect(w, spec, sub, out.Axis, req.Text)
 	}
 }
 
@@ -382,6 +387,16 @@ func (s *Server) startGoal(w http.ResponseWriter, spec intent.Spec, sub *subject
 		GoalID: string(g.ID), Tasks: ids, CeilingCents: g.Ceilings.MaxCostCents,
 		Text: g.Objective, Scope: axis,
 	})
+}
+
+// handleDecideRequest decodes an approval decision.
+func (s *Server) handleDecideRequest(w http.ResponseWriter, r *http.Request) {
+	var req decideReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unreadable request"})
+		return
+	}
+	s.handleDecide(w, req)
 }
 
 // ── events ───────────────────────────────────────────────────────────────────────────────────────

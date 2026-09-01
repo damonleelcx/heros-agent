@@ -84,7 +84,12 @@ const (
 	// reader is least equipped to notice they were sent to the wrong place.
 	Prompt Intent = "prompt"
 	Model  Intent = "model"
-	// Deliver — how an approved change reaches the repository.
+	// Deliver — put an approved change into the repository.
+	//
+	// 🔴 Its QUESTION was corrected, not its tier. It used to read "how does an approved change reach my
+	// repository?", which is explanatory — a Tier-B question wearing a Tier-C label. An intent whose
+	// wording asks for an explanation and whose tier says it writes to a repository will eventually be
+	// implemented as whichever half the reader noticed, and the two are not close.
 	Deliver Intent = "deliver"
 )
 
@@ -139,7 +144,7 @@ var specs = []Spec{
 	{Author, TierEffect, "", "change something on an axis and show me the diff"},
 	{Prompt, TierEffect, "prompt", "change what this node is told"},
 	{Model, TierEffect, "model", "change which model this node calls"},
-	{Deliver, TierEffect, "", "how does an approved change reach my repository?"},
+	{Deliver, TierEffect, "", "put an approved change into my repository"},
 }
 
 // Axes are the nine surfaces of a SUBJECT agent.
