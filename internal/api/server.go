@@ -15,6 +15,7 @@ import (
 	"github.com/heros-foreal/heros/internal/goal"
 	"github.com/heros-foreal/heros/internal/intake"
 	"github.com/heros-foreal/heros/internal/intent"
+	"github.com/heros-foreal/heros/internal/mailer"
 	"github.com/heros-foreal/heros/internal/memory"
 	"github.com/heros-foreal/heros/internal/planner"
 	"github.com/heros-foreal/heros/internal/provider"
@@ -41,6 +42,18 @@ type Server struct {
 	// DefaultTenant is used when a login omits one, for single-organization deployments.
 	DefaultTenant string
 
+	// Mail sends invitations, password resets and address confirmations.
+	//
+	// 🔴 An interface rather than an SMTP client, so a deployment with no relay is a DIFFERENT
+	// implementation that refuses loudly rather than a client that silently drops. See internal/mailer:
+	// a mailer that reports itself healthy and delivers nothing has already cost this product days.
+	Mail mailer.Mailer
+	// Links builds the URLs that go in that mail, from a configured origin.
+	//
+	// 🔴 Never from the request's Host header. Whoever asks for a password reset chooses that request's
+	// headers, and would choose to have the link point at themselves.
+	Links mailer.Links
+
 	// ToolRegistry, Provider and Model let the server rebind the assessment tool to the LOADED corpus.
 	//
 	// 🔴 The tool needs the repository the conversation is about, and that is chosen after the process
@@ -65,8 +78,17 @@ type Server struct {
 	subjects map[string]*subjectState
 }
 
-// NewServer builds a server with its per-tenant state initialised.
-func NewServer() *Server { return &Server{subjects: map[string]*subjectState{}} }
+// NewServer builds a server with everything that has to exist before the first request.
+//
+// 🔴 Approvals is created HERE and not by the caller. It was assembled in main alongside a dozen other
+// fields, and any server built without that one line — a test, a future entry point — answered
+// `POST /api/decide` by dereferencing nil. The route was reachable, authenticated, authorised, and then
+// panicked. A constructor that returns a half-built object makes correct assembly a thing each caller
+// has to remember, which is the same argument as every other one in this package: not because they are
+// careless, but because remembering is not a property a codebase keeps.
+func NewServer() *Server {
+	return &Server{subjects: map[string]*subjectState{}, Approvals: NewApprovals()}
+}
 
 // subjectFor returns the repository loaded by this tenant, if any.
 func (s *Server) subjectFor(tenant string) *subjectState {
@@ -94,18 +116,21 @@ type subjectState struct {
 	Index *discovery.Index
 }
 
-// Routes returns the mux.
 // Routes returns the API mux WITHOUT authentication. Use Handler for anything served to a network.
+//
+// 🔴 Every route is registered from `apiRoutes` and each one's capability wrapper is applied HERE, at
+// registration. A handler cannot be reached except through the wrapper its row declared, so "the check
+// was forgotten" is not a state this mux can be in — the row either names a capability or is visibly
+// blank in a table a reviewer reads top to bottom.
 func (s *Server) Routes() *http.ServeMux {
 	m := http.NewServeMux()
-	m.HandleFunc("POST /api/auth/login", s.handleLogin)
-	m.HandleFunc("POST /api/auth/logout", s.handleLogout)
-	m.HandleFunc("GET /api/auth/status", s.handleAuthStatus)
-	m.HandleFunc("POST /api/subject", s.handleSubject)
-	m.HandleFunc("GET /api/subject", s.handleGetSubject)
-	m.HandleFunc("POST /api/ask", s.handleAsk)
-	m.HandleFunc("GET /api/goals/{id}/events", s.handleEvents)
-	m.HandleFunc("POST /api/decide", s.handleDecideRequest)
+	for _, r := range apiRoutes {
+		h := r.Handler(s)
+		if !r.Public && r.Needs != "" {
+			h = requireCapability(r.Needs, h)
+		}
+		m.Handle(r.Method+" "+r.Path, h)
+	}
 	return m
 }
 

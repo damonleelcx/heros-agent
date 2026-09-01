@@ -309,6 +309,59 @@ a **default-deny** mux: adding a route makes it protected, exposing one takes an
 Bootstrap **refuses to start** when no user exists and no credentials are given. A built-in default
 password is a published credential.
 
+### [x] P26 · Roles, invitations, password reset, address confirmation
+**Authority is a table, not a rank.** Four roles — `owner`, `admin`, `member`, `viewer` — against seven
+capabilities, every pair written out including the falses. The obvious implementation is an ordered rank
+and a `role >= admin` comparison; it is shorter and it is wrong the first time somebody inserts a role in
+the middle, because the ordering silently becomes load-bearing for decisions nobody wrote down.
+`TestTheCapabilityTableIsExhaustive` fails the build if a capability is added without a decision for
+every role, and `Can` fails closed on anything it does not recognise.
+
+**Authorization is declared beside the route and applied at registration.** `apiRoutes` is one table
+carrying method, path, public-or-not, and the capability needed; the mux, the default-deny middleware and
+the fences are all derived from it. A handler cannot be reached except through the wrapper its row asked
+for, and the previous hand-written list of routes in the fence — a mirror that could fall behind what the
+server serves — is gone.
+
+**The role is read from the user row on every request, never stamped onto the session.** Authority cached
+in a credential can only be withdrawn by destroying the credential, so somebody demoted this morning
+would keep this morning's access for up to a fortnight.
+`TestDemotionTakesEffectOnTheNextRequest` uses the same cookie either side of the change.
+
+**Two rules close the escalation path an admin would otherwise have.** An admin cannot grant `owner`, and
+cannot act on one — you may act on somebody only if you could have granted the role they hold. Without
+the second, an admin demotes the owner and then holds the organization. An organization can never be
+left without an owner: the owner set is row-locked before any operation that could shrink it, because
+"there must always be an owner" is an invariant across rows and two owners demoting each other at the
+same moment would each see the other still in place.
+
+**An invitation is the only way somebody joins**, it cannot mint an owner (refused in the store, enforced
+by a `CHECK` constraint), and the accepting party sends nothing but a token and a password — no role, no
+address, so there is no field to forget to validate. Accepting **proves the address**, because the token
+arrived in mail sent to it.
+
+**A password reset destroys every session for that account.** The commonest reason to reset is that
+somebody else may have the password; sessions that survive mean the reset changes the lock and leaves the
+intruder inside. The reset issues no session of its own — a forwarded link must not become a login.
+
+**`POST /api/auth/password/forgot` answers identically for a known and an unknown address**, including in
+time: the mail is sent on a background goroutine so the response cannot be timed. For a product that
+reads customers' private source code, the customer list is itself worth having.
+
+**Mail is a seam with three implementations and no silent third state.** A half-configured relay stops
+the process at startup — this product has run for days with a mailer reporting itself healthy and
+delivering nothing. Links are built from `HEROS_PUBLIC_URL` and never from the request's `Host` header,
+which an attacker requesting a reset chooses. `HEROS_MAIL_MODE=log` prints links to the log for
+development and says so loudly at every boot; `off` refuses to send rather than discarding.
+
+Three separate token tables rather than one with a `purpose` column: a lookup that forgets to filter on
+purpose turns a confirmation link — sent liberally, to unproven addresses, worth nothing — into a
+password reset, which is a complete account takeover.
+
+**Two defects the fences found.** `NewServer()` left `Approvals` nil, so `POST /api/decide` was
+reachable, authenticated, authorised, and then panicked on any server not assembled by `main`.
+`ValidRole` trimmed whitespace and `Can` did not, so `" owner"` passed validation and then held nothing.
+
 ## !!! Not started, and deliberately so
 
 ### [x] P23 · `evalset` and `compare`
@@ -527,3 +580,14 @@ password is a published credential.
   TypeScript, JavaScript and Go only. Every report states that it shows what was found, not everything
   that exists.
 - **Console / HTTP surface.** No API and no UI in this tree.
+- **Authorization within a tenant is role-based only.** There are no per-object permissions, no
+  per-repository access, and no audit log of who changed whose role. Every member of an organization
+  sees every goal in it.
+- **A confirmed address gates nothing.** It is recorded and shown. Mail is the least reliable component
+  in this deployment, and making a session, a run or an approval depend on it turns a mail outage into a
+  lockout — including for the one account that could fix the mail.
+  `TestAnUnconfirmedAddressBlocksNothing` asserts the non-property, so gating something on it later is a
+  decision made in the open rather than a default nobody chose.
+- **No rate limiting.** `password/forgot` and `invitation/accept` are bounded only by their tokens being
+  single-use and short-lived. Somebody who can reach the API can ask for unlimited reset mails to an
+  address they do not control.

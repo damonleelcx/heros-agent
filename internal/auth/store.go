@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -22,6 +23,16 @@ var (
 	ErrNoSession  = errors.New("auth: no such session")
 	ErrExpired    = errors.New("auth: session has expired")
 	ErrEmailTaken = errors.New("auth: that email already exists in this organization")
+	// ErrBadRole means a role string is not one this build knows.
+	ErrBadRole = errors.New("auth: unknown role")
+	// ErrLastOwner means an operation would leave an organization with nobody who can administer it.
+	ErrLastOwner = errors.New("auth: an organization must always have an owner")
+	// ErrNoSuchMember means the person named is not in this tenant. 🔴 Also returned when they exist in
+	// ANOTHER tenant, so a member id cannot be used to probe for the existence of other customers'
+	// accounts.
+	ErrNoSuchMember = errors.New("auth: no such member in this organization")
+	// ErrRefused means the caller's role does not permit acting on the target.
+	ErrRefused = errors.New("auth: your role does not permit that")
 )
 
 // SessionLifetime is how long a login lasts.
@@ -50,16 +61,24 @@ func (s *Store) CreateTenant(ctx context.Context, id, name string) error {
 	return nil
 }
 
-// CreateUser adds a person to a tenant.
-func (s *Store) CreateUser(ctx context.Context, tenant, email, password string) (string, error) {
+// CreateUser adds a person to a tenant in a given role.
+//
+// 🔴 The role is a required argument with no default. A default would have to be one of "member", which
+// silently under-privileges the founding account until somebody notices nobody can invite anyone, or
+// "owner", which silently over-privileges every account created by any path added later. Making every
+// call site say which it means costs one word and removes the class.
+func (s *Store) CreateUser(ctx context.Context, tenant, email, password string, role tenancy.Role) (string, error) {
+	if !tenancy.ValidRole(string(role)) {
+		return "", fmt.Errorf("%w: %q", ErrBadRole, role)
+	}
 	hash, err := HashPassword(password)
 	if err != nil {
 		return "", err
 	}
 	id := "usr_" + randomID()
 	_, err = s.db.ExecContext(ctx, `
-		INSERT INTO users (id, tenant, email, password_hash, created_at) VALUES ($1,$2,$3,$4,$5)`,
-		id, tenant, strings.TrimSpace(email), hash, time.Now().UTC())
+		INSERT INTO users (id, tenant, email, password_hash, role, created_at) VALUES ($1,$2,$3,$4,$5,$6)`,
+		id, tenant, normalizeEmail(email), hash, string(role), time.Now().UTC())
 	if err != nil {
 		if strings.Contains(err.Error(), "users_email_per_tenant") {
 			return "", ErrEmailTaken
@@ -80,11 +99,11 @@ var dummyHash, _ = HashPassword("a-password-nobody-has-ever-used")
 // Login verifies a password and issues a session, returning the TOKEN — the only time it exists outside
 // the customer's browser.
 func (s *Store) Login(ctx context.Context, tenant, email, password string) (token string, p tenancy.Principal, err error) {
-	var userID, hash string
+	var userID, hash, role string
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, password_hash FROM users WHERE tenant = $1 AND lower(email) = lower($2)`,
-		tenant, strings.TrimSpace(email))
-	switch scanErr := row.Scan(&userID, &hash); {
+		`SELECT id, password_hash, role FROM users WHERE tenant = $1 AND lower(email) = lower($2)`,
+		tenant, normalizeEmail(email))
+	switch scanErr := row.Scan(&userID, &hash, &role); {
 	case errors.Is(scanErr, sql.ErrNoRows):
 		_ = VerifyPassword(password, dummyHash) // spend the same time
 		return "", tenancy.Principal{}, ErrNoSuchUser
@@ -104,7 +123,9 @@ func (s *Store) Login(ctx context.Context, tenant, email, password string) (toke
 		id, tenant, userID, now, now.Add(SessionLifetime)); err != nil {
 		return "", tenancy.Principal{}, fmt.Errorf("auth: creating session: %w", err)
 	}
-	return tok, tenancy.Principal{Tenant: tenant, Subject: email, SessionID: id}, nil
+	return tok, tenancy.Principal{
+		Tenant: tenant, Subject: email, SessionID: id, UserID: userID, Role: roleOf(role, userID),
+	}, nil
 }
 
 // Authenticate turns a token into a principal.
@@ -113,11 +134,15 @@ func (s *Store) Login(ctx context.Context, tenant, email, password string) (toke
 // return early before, and the row would then authorise a request on a credential that has lapsed.
 func (s *Store) Authenticate(ctx context.Context, token string) (tenancy.Principal, error) {
 	id := tokenID(token)
-	var tenant, email string
+	var tenant, userID, email, role string
+	// 🔴 The ROLE is read here, on every request, rather than being stamped onto the session at login.
+	// Authority that lives in a credential can only be withdrawn by destroying the credential, so
+	// somebody demoted this morning would keep yesterday's access for up to a fortnight. One join makes
+	// a demotion true on their next click.
 	err := s.db.QueryRowContext(ctx, `
-		SELECT s.tenant, u.email FROM sessions s
+		SELECT s.tenant, u.id, u.email, u.role FROM sessions s
 		JOIN users u ON u.id = s.user_id
-		WHERE s.id = $1 AND s.expires_at > now()`, id).Scan(&tenant, &email)
+		WHERE s.id = $1 AND s.expires_at > now()`, id).Scan(&tenant, &userID, &email, &role)
 	if errors.Is(err, sql.ErrNoRows) {
 		// An expired session and an unknown one are the same answer: neither tells the holder whether
 		// the token was ever real.
@@ -126,7 +151,24 @@ func (s *Store) Authenticate(ctx context.Context, token string) (tenancy.Princip
 	if err != nil {
 		return tenancy.Principal{}, fmt.Errorf("auth: authenticate: %w", err)
 	}
-	return tenancy.Principal{Tenant: tenant, Subject: email, SessionID: id}, nil
+	return tenancy.Principal{
+		Tenant: tenant, Subject: email, SessionID: id, UserID: userID, Role: roleOf(role, userID),
+	}, nil
+}
+
+// roleOf converts a stored role, refusing anything this build does not know.
+//
+// 🔴 An unrecognised role becomes the EMPTY role, which holds no capabilities — not "member", which
+// would quietly grant whatever member holds today. The database has a CHECK constraint that should make
+// this impossible, so reaching it means something is wrong that a person needs to look at: it is logged
+// with the user id and never silently absorbed.
+func roleOf(stored, userID string) tenancy.Role {
+	if tenancy.ValidRole(stored) {
+		return tenancy.Role(stored)
+	}
+	log.Printf("WARN auth.role.unknown user=%s role=%q — this account has been granted no capabilities "+
+		"until the row is corrected", userID, stored)
+	return ""
 }
 
 // Logout ends one session.

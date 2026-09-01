@@ -195,6 +195,26 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .send{background:var(--accent);color:var(--accent-ink);border:0;border-radius:var(--radius);
   padding:.45rem .9rem;font-weight:600;font-size:.8rem;cursor:pointer}
 .send:disabled{opacity:.35;cursor:not-allowed}
+/* ── organization ────────────────────────────────────────────────────────── */
+.people{width:100%;border-collapse:collapse;font-size:.8rem}
+.people td,.people th{padding:.5rem .4rem;border-bottom:1px solid #ffffff0d;text-align:left}
+.people th{font-family:var(--mono);font-size:.625rem;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--ink-muted);font-weight:400}
+.people tr:last-child td{border-bottom:0}
+.people .who-email{color:var(--ink)}
+.people .you{color:var(--accent);font-family:var(--mono);font-size:.625rem;margin-left:.4rem}
+.pick{background:var(--secondary);color:var(--ink);border:1px solid var(--border-strong);
+  border-radius:var(--radius);padding:.28rem .45rem;font-family:var(--mono);font-size:.72rem}
+.pick:disabled{opacity:.45}
+.linky{background:none;border:0;padding:0;color:var(--ink-muted);font-family:var(--mono);
+  font-size:.7rem;cursor:pointer;text-decoration:underline;text-underline-offset:3px}
+.linky:hover{color:var(--accent)}
+.linky.danger:hover{color:var(--bad)}
+.stack{display:flex;flex-direction:column;gap:.6rem;max-width:26rem}
+.stack input{padding:.6rem .8rem;background:var(--card);color:var(--ink);
+  border:1px solid var(--border-strong);border-radius:var(--radius);font-family:var(--body)}
+.tenant{cursor:pointer}
+.tenant:hover{color:var(--accent)}
 .hint{font-family:var(--mono);font-size:.625rem;color:var(--none);margin-top:.5rem;text-align:center}
 .hint b{color:var(--ink-muted);font-weight:400}
 </style>
@@ -230,6 +250,15 @@ const subjEl = document.querySelector('.subject');
 
 const AXES = ["model","prompt","skills","context","tools","memory","harness","loop","graph"];
 const el = h => { const d=document.createElement('div'); d.innerHTML=h.trim(); return d.firstElementChild; };
+// 🔴 Table rows are BUILT, not parsed from a string. `el()` parses into a <div>, and the HTML parser
+// discards <tr>/<td> that appear outside a table — so `el('<tr>…</tr>')` silently returns null and the
+// caller dereferences it. The markup was correct; the parser is not obliged to keep it where it was put.
+// Same family as the mail bug next door: assert on what the consumer keeps, not on what you emitted.
+const rowOf = n => {
+  const tr = document.createElement('tr');
+  for (let i = 0; i < n; i++) tr.appendChild(document.createElement('td'));
+  return tr;
+};
 const scroll = () => window.scrollTo({top:document.body.scrollHeight,behavior:'smooth'});
 const esc = s => String(s??'').replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 const money = mc => '$' + (mc/1e6/100).toFixed(4);
@@ -617,6 +646,7 @@ function askToSignIn(){
         <input class="field" id="password" type="password" placeholder="password" autocomplete="current-password"
           style="padding:.6rem .8rem;background:var(--card);color:var(--ink);border:1px solid var(--border-strong);border-radius:var(--radius);font-family:var(--body)">
         <div class="actions"><button class="btn-go" id="signin">Sign in</button>
+          <button class="linky" id="forgot">Forgotten your password?</button>
           <span class="evidence" id="signinmsg"></span></div>
       </div>
     </div></div>`);
@@ -637,12 +667,8 @@ function askToSignIn(){
         `<p style="margin:0;font-size:.9rem;color:var(--ink-muted)">Signed in.</p>`;
       // Re-read status so the header names who is acting. The login response says the same thing, but
       // reading it back proves the credential the browser will actually send is the one that works.
-      try {
-        const st = await api('/api/auth/status');
-        if (st.signed_in) {
-          document.getElementById('whoami').textContent = `${st.email} · ${st.tenant}`;
-        }
-      } catch {}
+      await refreshMe();
+      unconfirmedBanner();
       start();
     } catch (e) {
       msg.style.color = 'var(--bad)';
@@ -650,8 +676,381 @@ function askToSignIn(){
     }
   };
   card.querySelector('#signin').onclick = go;
+  card.querySelector('#forgot').onclick = forgotPasswordCard;
   card.querySelector('#password').onkeydown = e => { if (e.key === 'Enter') go(); };
   card.querySelector('#email').focus();
+}
+
+/* ── the organization ────────────────────────────────────────────────────── */
+
+// `me` is the server's answer about who is signed in and what they may do.
+//
+// 🔴 The console renders its controls from `me.can`, which the server computes from the one capability
+// table. It deliberately holds no copy of the rules: a second implementation in JavaScript would
+// disagree with the real one eventually, and the way it disagrees is a button that appears and then
+// refuses — which reads to the person as the product being broken rather than as them lacking
+// permission. When in doubt the server refuses anyway; this only decides what is worth showing.
+let me = null;
+
+const ROLE_BLURB = {
+  owner:  'runs the organization; can appoint other owners',
+  admin:  'invites people and changes roles; cannot appoint owners',
+  member: 'loads repositories, starts runs, approves changes',
+  viewer: 'reads runs and history; cannot start or approve anything',
+};
+
+async function refreshMe(){
+  try { me = await api('/api/auth/status'); } catch { me = null; }
+  const who = document.getElementById('whoami');
+  if (me && me.signed_in) {
+    who.textContent = `${me.email} · ${me.role} · ${me.tenant}`;
+    who.title = 'Show this organization';
+  } else {
+    who.textContent = '';
+    who.title = '';
+  }
+  return me;
+}
+
+function openOrganization(){
+  if (!me || !me.signed_in) return;
+  const t = turn('heros');
+  const card = el(`<div class="card"><div class="card-head">
+      <span class="card-title"><span class="k">organization</span> ${esc(me.tenant)}</span>
+      <span class="spacer"></span><span class="badge b-run">${esc(me.role)}</span></div>
+    <div class="card-body"><p style="margin:0;color:var(--ink-muted);font-size:.85rem">loading…</p></div>
+  </div>`);
+  t.appendChild(card); scroll();
+  renderOrganization(card);
+}
+
+async function renderOrganization(card){
+  const body = card.querySelector('.card-body');
+  let people, pending = {invitations: []};
+  try {
+    people = await api('/api/members');
+    if (me.can['member.invite']) pending = await api('/api/invitations');
+  } catch (e) {
+    body.innerHTML = `<p style="margin:0;color:var(--bad)">${esc(e.message)}</p>`;
+    return;
+  }
+  body.innerHTML = '';
+
+  const table = el(`<table class="people"><thead><tr>
+      <th>person</th><th>role</th><th></th></tr></thead><tbody></tbody></table>`);
+  const tbody = table.querySelector('tbody');
+  // An organization must always keep an owner. The server refuses the last one being removed or demoted
+  // and says why; not offering it is the difference between a rule and a trap.
+  const owners = (people.members || []).filter(m => m.role === 'owner');
+  const isLastOwner = m => m.role === 'owner' && owners.length === 1;
+  for (const m of (people.members || [])) {
+    const row = rowOf(3);
+    const [nameCell, roleCell, actionCell] = row.children;
+    actionCell.style.textAlign = 'right';
+
+    // textContent, not interpolation — an address is data somebody else chose.
+    const name = document.createElement('span');
+    name.className = 'who-email';
+    name.textContent = m.email;
+    nameCell.appendChild(name);
+    if (m.id === people.you) nameCell.appendChild(el(`<span class="you">you</span>`));
+    if (!m.email_verified) {
+      nameCell.appendChild(el(`<span class="you" style="color:var(--warn)">unconfirmed</span>`));
+    }
+
+    if (me.can['member.manage']) {
+      const pick = document.createElement('select');
+      pick.className = 'pick';
+      for (const r of ['owner','admin','member','viewer']) {
+        const opt = document.createElement('option');
+        opt.value = r; opt.textContent = r; opt.selected = (r === m.role);
+        // Only an owner may create an owner. The server enforces it; disabling the option keeps
+        // somebody from choosing a thing that was always going to be refused.
+        if (r === 'owner' && !me.can['org.transfer']) opt.disabled = true;
+        pick.appendChild(opt);
+      }
+      // An admin cannot act on an owner at all, and nobody can demote the last one.
+      if (m.role === 'owner' && !me.can['org.transfer']) pick.disabled = true;
+      if (isLastOwner(m)) {
+        pick.disabled = true;
+        pick.title = 'Appoint another owner first — an organization must always have one.';
+      }
+      pick.onchange = async () => {
+        const chosen = pick.value;
+        try {
+          await api('/api/members/role', {user_id: m.id, role: chosen});
+          await refreshMe();
+          renderOrganization(card);
+        } catch (e) {
+          pick.value = m.role;
+          note(body, e.message, 'bad');
+        }
+      };
+      roleCell.appendChild(pick);
+
+      if (!(m.role === 'owner' && !me.can['org.transfer']) && !isLastOwner(m)) {
+        const rm = el(`<button class="linky danger">remove</button>`);
+        rm.onclick = async () => {
+          if (!confirm(`Remove ${m.email} from ${me.tenant}? Their sessions end immediately.`)) return;
+          try {
+            await api('/api/members/remove', {user_id: m.id});
+            renderOrganization(card);
+          } catch (e) { note(body, e.message, 'bad'); }
+        };
+        actionCell.appendChild(rm);
+      }
+    } else {
+      roleCell.textContent = m.role;
+    }
+    tbody.appendChild(row);
+  }
+  body.appendChild(table);
+
+  if ((pending.invitations || []).length) {
+    body.appendChild(el(`<p style="margin:1.1rem 0 .4rem;font-family:var(--mono);font-size:.625rem;
+      letter-spacing:.14em;text-transform:uppercase;color:var(--ink-muted)">invited, not yet accepted</p>`));
+    const inv = el(`<table class="people"><tbody></tbody></table>`);
+    for (const i of pending.invitations) {
+      const row = rowOf(3);
+      row.children[2].style.textAlign = 'right';
+      row.children[0].textContent = i.email;
+      row.children[1].textContent = i.expired ? `${i.role} · expired` : i.role;
+      const w = el(`<button class="linky danger">withdraw</button>`);
+      w.onclick = async () => {
+        try { await api('/api/invitations/revoke', {id: i.id}); renderOrganization(card); }
+        catch (e) { note(body, e.message, 'bad'); }
+      };
+      row.children[2].appendChild(w);
+      inv.querySelector('tbody').appendChild(row);
+    }
+    body.appendChild(inv);
+  }
+
+  if (me.can['member.invite']) {
+    const form = el(`<div style="margin-top:1.2rem">
+      <div class="stack">
+        <input id="invemail" type="email" placeholder="colleague@example.com" autocomplete="off">
+        <select class="pick" id="invrole" style="align-self:flex-start">
+          <option value="member" selected>member — ${esc(ROLE_BLURB.member)}</option>
+          <option value="admin">admin — ${esc(ROLE_BLURB.admin)}</option>
+          <option value="viewer">viewer — ${esc(ROLE_BLURB.viewer)}</option>
+        </select>
+        <div class="actions"><button class="btn-go" id="invsend">Send invitation</button>
+          <span class="evidence" id="invmsg"></span></div>
+      </div></div>`);
+    body.appendChild(form);
+    // 🚫 No "owner" option. Ownership is transferred to somebody who already has an account, in the
+    // table above — never by a link in an email, which travels through a mailbox this organization does
+    // not control. The server and the database both refuse it too.
+    if (me.mail_configured === false) {
+      form.querySelector('#invsend').disabled = true;
+      note(form, 'This deployment cannot send mail, so invitations are unavailable. An operator needs ' +
+        'to configure SMTP and restart.', 'warn');
+    }
+    const send = async () => {
+      const msg = form.querySelector('#invmsg');
+      msg.style.color = 'var(--none)'; msg.textContent = 'sending…';
+      try {
+        await api('/api/members/invite', {
+          email: form.querySelector('#invemail').value,
+          role:  form.querySelector('#invrole').value,
+        });
+        form.querySelector('#invemail').value = '';
+        renderOrganization(card);
+      } catch (e) { msg.style.color = 'var(--bad)'; msg.textContent = e.message; }
+    };
+    form.querySelector('#invsend').onclick = send;
+    form.querySelector('#invemail').onkeydown = e => { if (e.key === 'Enter') send(); };
+  }
+}
+
+function note(parent, text, kind='none'){
+  const colour = {bad:'var(--bad)', warn:'var(--warn)', ok:'var(--ok)', none:'var(--ink-muted)'}[kind];
+  const p = el(`<p style="margin:.7rem 0 0;font-size:.8rem;color:${colour}"></p>`);
+  p.textContent = text;
+  parent.appendChild(p); scroll();
+  return p;
+}
+
+/* ── links that arrive by mail ───────────────────────────────────────────── */
+
+// takeToken reads a one-time token out of the address bar AND removes it.
+//
+// 🔴 Removed immediately, before anything else runs. A token left in the address bar goes into browser
+// history, into a screenshot, into the URL somebody pastes into a bug report — and into the Referer
+// header of any request the page makes afterwards. It is single-use and short-lived, which is the real
+// defence; this is the cheap half of it.
+function takeToken(name){
+  const params = new URLSearchParams(location.search);
+  const token = params.get(name);
+  if (!token) return null;
+  params.delete(name);
+  const rest = params.toString();
+  history.replaceState(null, '', location.pathname + (rest ? '?' + rest : ''));
+  return token;
+}
+
+function acceptInvitationCard(token){
+  const t = turn('heros');
+  const card = el(`<div class="card"><div class="card-head">
+      <span class="card-title"><span class="k">invitation</span></span>
+      <span class="spacer"></span><span class="badge b-gate">checking</span></div>
+    <div class="card-body"><p style="margin:0;color:var(--ink-muted);font-size:.85rem">reading your invitation…</p></div>
+  </div>`);
+  t.appendChild(card); scroll();
+  const body = card.querySelector('.card-body');
+  const badge = card.querySelector('.badge');
+
+  (async () => {
+    let info;
+    try {
+      const r = await fetch('/api/auth/invitation?token=' + encodeURIComponent(token));
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      info = j;
+    } catch (e) {
+      badge.className = 'badge b-bad'; badge.textContent = 'expired';
+      body.innerHTML = '';
+      note(body, e.message + ' Ask whoever invited you to send another one.', 'bad');
+      askToSignIn();
+      return;
+    }
+    const inv = info.invitation;
+    badge.className = 'badge b-run'; badge.textContent = inv.role;
+    body.innerHTML = '';
+    const intro = el(`<p style="margin:0 0 .9rem;font-size:.9rem"></p>`);
+    intro.textContent = (inv.invited_by ? `${inv.invited_by} invited you` : 'You have been invited') +
+      ` to join ${inv.org_name} as ${inv.role} — ${ROLE_BLURB[inv.role] || ''}. ` +
+      `Choose a password for ${inv.email}.`;
+    body.appendChild(intro);
+    const form = el(`<div class="stack">
+        <input id="np" type="password" placeholder="a password you have not used elsewhere"
+          autocomplete="new-password">
+        <div class="actions"><button class="btn-go" id="go">Join ${esc(inv.org_name)}</button>
+          <span class="evidence" id="m"></span></div>
+      </div>`);
+    body.appendChild(form);
+    note(form, `At least ${info.min_password_length} characters. Length is the only rule — it is the ` +
+      `property that actually costs an attacker anything.`);
+
+    const go = async () => {
+      const msg = form.querySelector('#m');
+      msg.style.color = 'var(--none)'; msg.textContent = 'joining…';
+      try {
+        await api('/api/auth/invitation/accept', {token, password: form.querySelector('#np').value});
+        badge.className = 'badge b-ok'; badge.textContent = 'joined';
+        body.innerHTML = '';
+        note(body, `Welcome to ${inv.org_name}.`, 'ok');
+        await refreshMe();
+        start();
+      } catch (e) { msg.style.color = 'var(--bad)'; msg.textContent = e.message; }
+    };
+    form.querySelector('#go').onclick = go;
+    form.querySelector('#np').onkeydown = e => { if (e.key === 'Enter') go(); };
+    form.querySelector('#np').focus();
+  })();
+}
+
+function resetPasswordCard(token){
+  const t = turn('heros');
+  const card = el(`<div class="card"><div class="card-head">
+      <span class="card-title"><span class="k">new password</span></span>
+      <span class="spacer"></span><span class="badge b-gate">one use</span></div>
+    <div class="card-body"><div class="stack">
+      <input id="np" type="password" placeholder="a password you have not used elsewhere"
+        autocomplete="new-password">
+      <div class="actions"><button class="btn-go" id="go">Set password</button>
+        <span class="evidence" id="m"></span></div>
+    </div></div></div>`);
+  t.appendChild(card); scroll();
+  const body = card.querySelector('.card-body');
+  note(body, 'Setting a new password also signs you out everywhere else, so a session somebody ' +
+    'else is holding ends immediately.');
+
+  const go = async () => {
+    const msg = card.querySelector('#m');
+    msg.style.color = 'var(--none)'; msg.textContent = 'saving…';
+    try {
+      const r = await api('/api/auth/password/reset', {token, password: card.querySelector('#np').value});
+      card.querySelector('.badge').className = 'badge b-ok';
+      card.querySelector('.badge').textContent = 'changed';
+      body.innerHTML = '';
+      note(body, r.status, 'ok');
+      // 🔴 No session was issued by the reset, deliberately — a forwarded link must not become a login.
+      // So the next thing is signing in with the password just chosen.
+      askToSignIn();
+    } catch (e) { msg.style.color = 'var(--bad)'; msg.textContent = e.message; }
+  };
+  card.querySelector('#go').onclick = go;
+  card.querySelector('#np').onkeydown = e => { if (e.key === 'Enter') go(); };
+  card.querySelector('#np').focus();
+}
+
+function forgotPasswordCard(){
+  const t = turn('heros');
+  const card = el(`<div class="card"><div class="card-head">
+      <span class="card-title"><span class="k">forgotten password</span></span></div>
+    <div class="card-body"><div class="stack">
+      <input id="fe" type="email" placeholder="you@example.com" autocomplete="username">
+      <div class="actions"><button class="btn-go" id="go">Send a link</button>
+        <span class="evidence" id="m"></span></div>
+    </div></div></div>`);
+  t.appendChild(card); scroll();
+  const go = async () => {
+    const msg = card.querySelector('#m');
+    msg.style.color = 'var(--none)'; msg.textContent = 'sending…';
+    try {
+      const r = await api('/api/auth/password/forgot', {email: card.querySelector('#fe').value});
+      card.querySelector('.card-body').innerHTML = '';
+      // 🔴 The server answers identically whether or not that address has an account, and so does this.
+      // Saying "we sent it" only when the address is real would answer, for anybody who asks, whether a
+      // given person has an account here.
+      note(card.querySelector('.card-body'), r.status, 'ok');
+    } catch (e) { msg.style.color = 'var(--bad)'; msg.textContent = e.message; }
+  };
+  card.querySelector('#go').onclick = go;
+  card.querySelector('#fe').onkeydown = e => { if (e.key === 'Enter') go(); };
+  card.querySelector('#fe').focus();
+}
+
+// unconfirmedBanner offers to send a confirmation link.
+//
+// 🚫 It does not block anything, and says so. An unconfirmed address is a fact about whether mail
+// reaches somebody — gating a session on it would turn a mail outage into a lockout, including for the
+// one account that could fix the mail.
+function unconfirmedBanner(){
+  if (!me || me.email_verified !== false || me.mail_configured === false) return;
+  const t = turn('heros');
+  const card = el(`<div class="card"><div class="card-head">
+      <span class="card-title"><span class="k">address</span> ${esc(me.email)}</span>
+      <span class="spacer"></span><span class="badge b-warn">unconfirmed</span></div>
+    <div class="card-body">
+      <p style="margin:0 0 .8rem;font-size:.85rem;color:var(--ink-muted)">Nothing is blocked by this.
+      Confirming the address is how we know a password reset would actually reach you.</p>
+      <div class="actions"><button class="btn-go" id="go">Send a confirmation link</button>
+        <span class="evidence" id="m"></span></div>
+    </div></div>`);
+  t.appendChild(card); scroll();
+  card.querySelector('#go').onclick = async () => {
+    const msg = card.querySelector('#m');
+    msg.style.color = 'var(--none)'; msg.textContent = 'sending…';
+    try {
+      const r = await api('/api/auth/email/resend', {});
+      card.querySelector('.card-body').innerHTML = '';
+      note(card.querySelector('.card-body'), r.status, 'ok');
+    } catch (e) { msg.style.color = 'var(--bad)'; msg.textContent = e.message; }
+  };
+}
+
+async function confirmAddress(token){
+  const t = turn('heros');
+  try {
+    const r = await api('/api/auth/email/verify', {token});
+    say(t, `<p><strong>${esc(r.email)}</strong> is confirmed.</p>`);
+  } catch (e) {
+    say(t, `<p style="color:var(--bad)">${esc(e.message)} You can ask for another link from the console
+      once you are signed in.</p>`);
+  }
 }
 
 /* ── opening ─────────────────────────────────────────────────────────────── */
@@ -675,10 +1074,25 @@ async function start(){
 }
 
 (async () => {
+  // Tokens are lifted out of the address bar FIRST, before any request is made, so none of them can be
+  // sent onwards as a Referer or left in history behind a page that then reloads.
+  const invite = takeToken('invite');
+  const reset  = takeToken('reset');
+  const verify = takeToken('verify');
+
+  document.getElementById('whoami').onclick = openOrganization;
+
   try {
-    const st = await api('/api/auth/status');
-    if (!st.signed_in) { askToSignIn(); return; }
-    document.getElementById('whoami').textContent = `${st.email} · ${st.tenant}`;
+    if (verify) await confirmAddress(verify);
+    await refreshMe();
+
+    // An invitation outranks an existing session: somebody clicking an invite link on a shared machine
+    // means to join as themselves, not to keep acting as whoever was signed in.
+    if (invite) { acceptInvitationCard(invite); return; }
+    if (reset)  { resetPasswordCard(reset);     return; }
+    if (!me || !me.signed_in) { askToSignIn(); return; }
+
+    unconfirmedBanner();
     start();
   } catch (e) {
     turn('heros').appendChild(el(`<div class="said"><p style="color:var(--bad)">Cannot reach herosd: ${esc(e.message)}</p></div>`));

@@ -23,11 +23,13 @@ import (
 	"github.com/heros-foreal/heros/internal/config"
 	"github.com/heros-foreal/heros/internal/discovery"
 	"github.com/heros-foreal/heros/internal/intake"
+	"github.com/heros-foreal/heros/internal/mailer"
 	"github.com/heros-foreal/heros/internal/memory"
 	"github.com/heros-foreal/heros/internal/planner"
 	"github.com/heros-foreal/heros/internal/provider/deepseek"
 	"github.com/heros-foreal/heros/internal/router"
 	"github.com/heros-foreal/heros/internal/store"
+	"github.com/heros-foreal/heros/internal/tenancy"
 	"github.com/heros-foreal/heros/internal/toolcontract"
 	"github.com/heros-foreal/heros/internal/tools"
 	"github.com/heros-foreal/heros/internal/worker"
@@ -133,7 +135,26 @@ func main() {
 
 	cache, _ := os.UserCacheDir()
 	authStore := auth.NewStore(db)
-	if err := bootstrapIdentity(ctx, authStore); err != nil {
+
+	// 🔴 Mail is resolved BEFORE the first request, and a half-configured relay stops the process. A
+	// relay with a missing credential accepts connections and delivers nothing, which is indistinguishable
+	// from working until a customer cannot reset their password — this product has already run that way
+	// for days once. Failing at startup puts the discovery in front of the operator who caused it.
+	mail, err := mailer.FromEnv()
+	if err != nil {
+		log.Fatalf("mail: %v", err)
+	}
+	var links mailer.Links
+	if _, off := mail.(mailer.Unconfigured); !off {
+		// Only required when there is something to put a link in. A deployment that has chosen to run
+		// without mail should not also have to declare its public address.
+		links, err = mailer.NewLinks(os.Getenv("HEROS_PUBLIC_URL"))
+		if err != nil {
+			log.Fatalf("mail: %v", err)
+		}
+	}
+
+	if err := bootstrapIdentity(ctx, authStore, mail, links); err != nil {
 		log.Fatalf("identity: %v", err)
 	}
 
@@ -158,8 +179,8 @@ func main() {
 	srv.ToolRegistry = reg
 	srv.Provider = client
 	srv.Model = deepseek.ModelFlash
-	srv.Approvals = api.NewApprovals()
 	srv.Episodes = mem
+	srv.Mail, srv.Links = mail, links
 
 	httpSrv := &http.Server{
 		// 🔴 Handler, not Routes. Routes is unauthenticated by construction and exists for tests;
@@ -179,6 +200,16 @@ func main() {
 	fmt.Printf("heros console  http://%s\n", *addr)
 	fmt.Printf("model          %s\n", deepseek.ModelFlash)
 	fmt.Printf("database       %s\n", redact(url))
+	fmt.Printf("mail           %s\n", mail.Describe())
+	if links.Origin() != "" {
+		fmt.Printf("public url     %s\n", links.Origin())
+	}
+	if _, isLog := mail.(mailer.LogMailer); isLog {
+		// Loud, every boot. This mode prints invitation and reset links into the log, which is a complete
+		// account takeover for anybody who can read it — fine on a laptop, catastrophic anywhere else.
+		fmt.Println("⚠️  HEROS_MAIL_MODE=log — invitation and password-reset links are written to this " +
+			"log instead of being sent. Development only; do not run a deployment this way.")
+	}
 	if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("serve: %v", err)
 	}
@@ -193,7 +224,11 @@ const defaultTenant = "local"
 // published credential: it is in the source, it is in every deployment, and it is the first thing
 // anybody tries. If the variable is unset and no user exists, the process REFUSES TO START and says what
 // to set — a server that will not boot is a far better outcome than one that boots with a known login.
-func bootstrapIdentity(ctx context.Context, a *auth.Store) error {
+//
+// 🔴 The first account is an OWNER. It is the only account that can be created without an invitation, so
+// if it were anything less the organization would start with nobody able to invite anybody — locked out
+// of its own administration by the moment it was created, and recoverable only with database access.
+func bootstrapIdentity(ctx context.Context, a *auth.Store, mail mailer.Mailer, links mailer.Links) error {
 	n, err := a.CountUsers(ctx)
 	if err != nil {
 		return err
@@ -211,10 +246,29 @@ func bootstrapIdentity(ctx context.Context, a *auth.Store) error {
 	if err := a.CreateTenant(ctx, defaultTenant, "Local"); err != nil {
 		return err
 	}
-	if _, err := a.CreateUser(ctx, defaultTenant, email, password); err != nil {
+	userID, err := a.CreateUser(ctx, defaultTenant, email, password, tenancy.Owner)
+	if err != nil {
 		return err
 	}
-	log.Printf("created the first account for %s in organization %q", email, defaultTenant)
+	log.Printf("created the first account for %s in organization %q, as owner", email, defaultTenant)
+
+	// A confirmation link, if this deployment can send one. 🔴 Best effort and NOT fatal: nobody has
+	// signed in yet, the address was typed by whoever is watching this log, and refusing to start over an
+	// unconfirmed address would make a mail outage into a deployment that cannot come up. Confirmation
+	// gates nothing — see migration 0006.
+	if links.Origin() == "" {
+		return nil
+	}
+	token, to, org, err := a.CreateEmailVerification(ctx, defaultTenant, userID)
+	if err != nil {
+		log.Printf("WARN auth.verification.create_failed user=%s: %v", userID, err)
+		return nil
+	}
+	msg := mailer.VerifyEmail(to, org, links.Verify(token), auth.EmailVerificationLifetime)
+	if err := mail.Send(ctx, msg); err != nil {
+		log.Printf("WARN mail.send_failed purpose=%q to=%s: %v — the account works; the address is "+
+			"simply unconfirmed, and can be confirmed later from the console", "email verification", to, err)
+	}
 	return nil
 }
 

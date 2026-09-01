@@ -20,25 +20,23 @@ import (
 //
 // So the mux is wrapped, every route is authenticated by default, and the exemptions are a short
 // explicit list that a reviewer can read in one sitting. Adding a route makes it protected; exposing one
-// takes a deliberate edit to a list called `public`.
+// takes a deliberate `Public: true` in the route table.
+//
+// What a principal may DO once authenticated is decided one layer in, at registration — see routes.go.
 
 // sessionCookie is the browser's credential.
 const sessionCookie = "heros_session"
 
-// public are the paths that do not require a principal, exhaustively.
-//
-// 🔴 A closed list, not a prefix rule. `/api/auth/` as a prefix would silently expose anything a later
-// phase files under it, and the whole point of a default-deny is that widening it is visible in a diff.
-var public = map[string]bool{
-	"/api/auth/login":  true,
-	"/api/auth/status": true,
-}
+// 🔴 The set of public paths is a closed list derived from `apiRoutes`, not a prefix rule. `/api/auth/`
+// as a prefix would silently expose anything a later phase files under it — and this feature files four
+// new endpoints there, three of which hand out sessions. The whole point of a default-deny is that
+// widening it is one visible `Public: true` in a diff.
 
 // authenticate wraps a handler so every request carries an identity, or is refused.
 func (s *Server) authenticate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Static assets are served by the file server, not the API, and carry no data.
-		if !strings.HasPrefix(r.URL.Path, "/api/") || public[r.URL.Path] {
+		if !strings.HasPrefix(r.URL.Path, "/api/") || publicPaths[r.URL.Path] {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -100,6 +98,19 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		unauthorized(w, "That email and password do not match.")
 		return
 	}
+	setSessionCookie(w, r, token)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"tenant": p.Tenant, "email": p.Subject, "role": p.Role,
+		"expires_in_hours": int(auth.SessionLifetime.Hours()),
+	})
+}
+
+// setSessionCookie is the ONE place a session reaches a browser.
+//
+// 🔴 Shared by signing in and by accepting an invitation, which both hand out a session. Two copies of
+// these flags is two places for `HttpOnly` to be true, and the one that is missing it is the one that
+// gets read by a script on the page.
+func setSessionCookie(w http.ResponseWriter, r *http.Request, token string) {
 	http.SetCookie(w, &http.Cookie{
 		Name:  sessionCookie,
 		Value: token,
@@ -113,9 +124,6 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		// production — so it follows the connection it was issued on.
 		Secure:  r.TLS != nil,
 		Expires: time.Now().Add(auth.SessionLifetime),
-	})
-	writeJSON(w, http.StatusOK, map[string]any{
-		"tenant": p.Tenant, "email": p.Subject, "expires_in_hours": int(auth.SessionLifetime.Hours()),
 	})
 }
 
@@ -143,7 +151,27 @@ func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"signed_in": false})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"signed_in": true, "tenant": p.Tenant, "email": p.Subject,
-	})
+	body := map[string]any{
+		"signed_in": true, "tenant": p.Tenant, "email": p.Subject, "role": p.Role,
+		// 🔴 The console renders its menus from THIS, not from its own copy of the rules. A second
+		// implementation of the capability table in JavaScript would disagree with the real one sooner or
+		// later, and the direction it disagrees in is a button that appears and then refuses.
+		"can": capabilitiesOf(p),
+	}
+	// email_verified needs one more read, and only the status call makes it — everything else that
+	// matters is on the principal. It gates nothing; the console shows a banner offering to resend.
+	if m, err := s.Auth.Member(r.Context(), p.Tenant, p.UserID); err == nil {
+		body["email_verified"] = m.EmailVerified
+	}
+	body["mail_configured"] = s.mailReady()
+	writeJSON(w, http.StatusOK, body)
+}
+
+// capabilitiesOf renders what this principal may do, as the console needs it.
+func capabilitiesOf(p tenancy.Principal) map[string]bool {
+	out := make(map[string]bool, len(tenancy.Capabilities))
+	for _, c := range tenancy.Capabilities {
+		out[string(c)] = p.May(c)
+	}
+	return out
 }

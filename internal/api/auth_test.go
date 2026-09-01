@@ -16,6 +16,7 @@ import (
 	migrations "github.com/heros-foreal/heros/db/migrations"
 	"github.com/heros-foreal/heros/internal/auth"
 	"github.com/heros-foreal/heros/internal/store"
+	"github.com/heros-foreal/heros/internal/tenancy"
 )
 
 func testServer(t *testing.T) (*Server, string, string) {
@@ -40,7 +41,7 @@ func testServer(t *testing.T) (*Server, string, string) {
 	}
 	email := "person@" + tenant + ".invalid"
 	const password = "a-sufficiently-long-password"
-	if _, err := a.CreateUser(context.Background(), tenant, email, password); err != nil {
+	if _, err := a.CreateUser(context.Background(), tenant, email, password, tenancy.Owner); err != nil {
 		t.Fatalf("user: %v", err)
 	}
 
@@ -70,36 +71,97 @@ func TestEveryApiRouteRequiresAuthenticationByDefault(t *testing.T) {
 	s, _, _ := testServer(t)
 	h := s.Handler(nil)
 
-	// Every API path the server registers, with a method that reaches it.
-	routes := []struct{ method, path string }{
-		{"POST", "/api/subject"},
-		{"GET", "/api/subject"},
-		{"POST", "/api/ask"},
-		{"GET", "/api/goals/g-1/events"},
-		{"POST", "/api/decide"},
-		{"POST", "/api/auth/logout"},
-	}
-	for _, r := range routes {
-		req := httptest.NewRequest(r.method, r.path, strings.NewReader(`{}`))
+	// 🔴 Walks `apiRoutes` — the same table the mux is built from — rather than a list written out here.
+	// The previous version of this test enumerated routes by hand, which means a route added to the
+	// server and not to the list is a route this fence silently never checks. A hand-maintained mirror of
+	// "everything we serve" fails in the direction where the gap is invisible.
+	for _, r := range apiRoutes {
+		if r.Public {
+			continue
+		}
+		req := httptest.NewRequest(r.Method, concretePath(r.Path), strings.NewReader(`{}`))
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, req)
 		if rec.Code != http.StatusUnauthorized {
 			t.Errorf("%s %s returned %d without a credential; it must be 401",
-				r.method, r.path, rec.Code)
+				r.Method, r.Path, rec.Code)
 		}
 	}
 
-	// And the public ones genuinely are reachable, or the console could never sign in.
-	for _, r := range []struct{ method, path string }{
-		{"POST", "/api/auth/login"},
-		{"GET", "/api/auth/status"},
-	} {
-		req := httptest.NewRequest(r.method, r.path, strings.NewReader(`{}`))
+	// And the public ones genuinely are reachable, or nobody could sign in, accept an invitation, or ask
+	// for a password reset — every one of which is done by somebody with no credential by definition.
+	//
+	// # 🔴 Why the body is deliberately MALFORMED
+	//
+	// A status code does not say which layer produced it. `POST /api/auth/login` with an empty body
+	// answers 401 from the HANDLER, because no such account matched — and a fence reading "401 means the
+	// gate refused" reports a route as unreachable when it is served correctly, which is a false alarm
+	// that gets the fence weakened rather than the bug fixed.
+	//
+	// Unparseable JSON is the discriminator that depends on no error prose: 400 means the handler ran and
+	// rejected the body, 401 means the request never reached it.
+	for _, r := range apiRoutes {
+		if !r.Public {
+			continue
+		}
+		req := httptest.NewRequest(r.Method, concretePath(r.Path), strings.NewReader(`{ not json`))
+		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, req)
-		if rec.Code == http.StatusUnauthorized && r.path == "/api/auth/status" {
-			t.Errorf("%s %s is not reachable without a credential", r.method, r.path)
+		if rec.Code == http.StatusUnauthorized {
+			t.Errorf("%s %s is marked public but answered 401, so the credential gate refused it before "+
+				"the handler saw a malformed body", r.Method, r.Path)
+		}
+	}
+}
+
+// concretePath fills in a wildcard so a pattern can be requested.
+func concretePath(pattern string) string {
+	if i := strings.Index(pattern, "{"); i >= 0 {
+		j := strings.Index(pattern[i:], "}")
+		return pattern[:i] + "x" + pattern[i+j+1:]
+	}
+	return pattern
+}
+
+// TestNoPathIsHalfPublic.
+//
+// 🔴 `authenticate` runs BEFORE the mux has matched a pattern, so it can only key its exemptions on the
+// URL path — not on the method. That approximation is exact as long as no path is public under one
+// method and protected under another. If one ever is, the protected method is silently exempted too, and
+// nothing else in the codebase would notice.
+func TestNoPathIsHalfPublic(t *testing.T) {
+	seen := map[string]bool{}
+	for _, r := range apiRoutes {
+		if prior, ok := seen[r.Path]; ok && prior != r.Public {
+			t.Errorf("%s is public under one method and protected under another; `authenticate` cannot "+
+				"tell them apart and would exempt both", r.Path)
+		}
+		seen[r.Path] = r.Public
+	}
+}
+
+// TestEveryRouteDeclaresWhatItNeeds.
+//
+// A protected route with no capability is reachable by anyone signed in, which is sometimes right — the
+// member list is — but must be a decision rather than an omission. This asserts the ones that write, run
+// or spend name a capability; the reader routes are listed as deliberate blanks.
+func TestEveryRouteDeclaresWhatItNeeds(t *testing.T) {
+	// Routes that intentionally need nothing beyond a valid session.
+	deliberatelyOpen := map[string]bool{
+		"POST /api/auth/logout":       true,
+		"POST /api/auth/email/resend": true,
+		"GET /api/members":            true,
+	}
+	for _, r := range apiRoutes {
+		if r.Public || r.Needs != "" {
+			continue
+		}
+		key := r.Method + " " + r.Path
+		if !deliberatelyOpen[key] {
+			t.Errorf("%s names no capability and is not in the deliberately-open list. Either give it "+
+				"one, or add it here so the decision is written down", key)
 		}
 	}
 }
