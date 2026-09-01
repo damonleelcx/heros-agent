@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/heros-foreal/heros/internal/auth"
 	"github.com/heros-foreal/heros/internal/bounds"
 	"github.com/heros-foreal/heros/internal/discovery"
 	"github.com/heros-foreal/heros/internal/goal"
@@ -20,19 +21,25 @@ import (
 	"github.com/heros-foreal/heros/internal/router"
 	"github.com/heros-foreal/heros/internal/store"
 	"github.com/heros-foreal/heros/internal/task"
+	"github.com/heros-foreal/heros/internal/tenancy"
 	"github.com/heros-foreal/heros/internal/toolcontract"
 	"github.com/heros-foreal/heros/internal/tools"
 )
 
 // Server is the console's HTTP surface.
 type Server struct {
-	Store    store.Store
+	// Root hands out tenant-scoped stores. 🔴 The server never holds an unscoped Store, so no handler can
+	// construct a query for a tenant other than the caller's — not because it is careful, but because it
+	// has nothing to be careless with.
+	Root     store.Root
+	Auth     *auth.Store
 	Planners *planner.Registry
 	Sup      *Supervisor
 	Resolver *intake.Resolver
 	Router   router.Router
 	Ceilings bounds.Ceilings
-	Tenant   string
+	// DefaultTenant is used when a login omits one, for single-organization deployments.
+	DefaultTenant string
 
 	// ToolRegistry, Provider and Model let the server rebind the assessment tool to the LOADED corpus.
 	//
@@ -48,8 +55,33 @@ type Server struct {
 	// Episodes is the episodic record, read by run history.
 	Episodes memory.Store
 
-	mu      sync.RWMutex
-	subject *subjectState
+	mu sync.RWMutex
+	// subjects is the loaded repository PER TENANT.
+	//
+	// 🔴 It was a single field, shared by every caller. Loading a repository replaced it globally, so one
+	// customer's question was answered about whichever repository another customer had opened most
+	// recently — with real file:line references, confidently, about code they have never seen. That is a
+	// cross-tenant data leak wearing the shape of a cache.
+	subjects map[string]*subjectState
+}
+
+// NewServer builds a server with its per-tenant state initialised.
+func NewServer() *Server { return &Server{subjects: map[string]*subjectState{}} }
+
+// subjectFor returns the repository loaded by this tenant, if any.
+func (s *Server) subjectFor(tenant string) *subjectState {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.subjects[tenant]
+}
+
+func (s *Server) setSubject(tenant string, sub *subjectState) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.subjects == nil {
+		s.subjects = map[string]*subjectState{}
+	}
+	s.subjects[tenant] = sub
 }
 
 // subjectState is the currently-loaded repository. One at a time, deliberately: a conversation is about
@@ -63,14 +95,31 @@ type subjectState struct {
 }
 
 // Routes returns the mux.
+// Routes returns the API mux WITHOUT authentication. Use Handler for anything served to a network.
 func (s *Server) Routes() *http.ServeMux {
 	m := http.NewServeMux()
+	m.HandleFunc("POST /api/auth/login", s.handleLogin)
+	m.HandleFunc("POST /api/auth/logout", s.handleLogout)
+	m.HandleFunc("GET /api/auth/status", s.handleAuthStatus)
 	m.HandleFunc("POST /api/subject", s.handleSubject)
 	m.HandleFunc("GET /api/subject", s.handleGetSubject)
 	m.HandleFunc("POST /api/ask", s.handleAsk)
 	m.HandleFunc("GET /api/goals/{id}/events", s.handleEvents)
 	m.HandleFunc("POST /api/decide", s.handleDecideRequest)
 	return m
+}
+
+// Handler is the API with authentication applied.
+//
+// 🔴 The ONLY thing that should be served. `Routes` exists so a test can exercise a handler directly;
+// mounting it on a listener would serve every endpoint unauthenticated, which is why this wrapper is a
+// separate, obviously-named method rather than an option on the other one.
+func (s *Server) Handler(static http.Handler) http.Handler {
+	mux := s.Routes()
+	if static != nil {
+		mux.Handle("/", static)
+	}
+	return s.authenticate(mux)
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
@@ -110,6 +159,11 @@ type axisSummary struct {
 }
 
 func (s *Server) handleSubject(w http.ResponseWriter, r *http.Request) {
+	tenant, err := tenancy.MustTenant(r.Context())
+	if err != nil {
+		unauthorized(w, "You are not signed in.")
+		return
+	}
 	var req subjectReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unreadable request"})
@@ -131,9 +185,7 @@ func (s *Server) handleSubject(w http.ResponseWriter, r *http.Request) {
 	ix := discovery.NewIndex(corpus)
 	isAgent, why := ix.LooksLikeAnAgent()
 
-	s.mu.Lock()
-	s.subject = &subjectState{Source: src, Corpus: corpus, Index: ix}
-	s.mu.Unlock()
+	s.setSubject(tenant, &subjectState{Source: src, Corpus: corpus, Index: ix})
 
 	// Rebind every source-bound tool to this repository. Without this they would act on whatever was
 	// loaded last, which is the worst kind of wrong: confident, well-formed, and about someone else's code.
@@ -182,10 +234,13 @@ func (s *Server) describeSubject(src intake.Source, ix *discovery.Index, isAgent
 	return resp
 }
 
-func (s *Server) handleGetSubject(w http.ResponseWriter, _ *http.Request) {
-	s.mu.RLock()
-	sub := s.subject
-	s.mu.RUnlock()
+func (s *Server) handleGetSubject(w http.ResponseWriter, r *http.Request) {
+	tenant, err := tenancy.MustTenant(r.Context())
+	if err != nil {
+		unauthorized(w, "You are not signed in.")
+		return
+	}
+	sub := s.subjectFor(tenant)
 	if sub == nil {
 		writeJSON(w, http.StatusOK, map[string]any{"loaded": false})
 		return
@@ -257,6 +312,11 @@ type spanOut struct {
 }
 
 func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
+	tenant, err := tenancy.MustTenant(r.Context())
+	if err != nil {
+		unauthorized(w, "You are not signed in.")
+		return
+	}
 	var req askReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unreadable request"})
@@ -288,9 +348,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 
 	spec, _ := intent.Lookup(out.Intent)
 
-	s.mu.RLock()
-	sub := s.subject
-	s.mu.RUnlock()
+	sub := s.subjectFor(tenant)
 	if sub == nil {
 		ref := bounds.Refusal{Cause: bounds.NoSubject}
 		writeJSON(w, http.StatusOK, askResp{
@@ -302,20 +360,20 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 
 	switch spec.Tier {
 	case intent.TierQuery:
-		s.answerQuery(w, spec, sub)
+		s.answerQuery(w, tenant, spec, sub)
 	case intent.TierGoal:
-		s.startGoal(w, spec, sub, out.Axis)
+		s.startGoal(w, tenant, spec, sub, out.Axis)
 	default:
 		s.handleEffect(w, spec, sub, out.Axis, req.Text)
 	}
 }
 
 // answerQuery serves a Tier-B intent from what discovery already read. No model call, no cost.
-func (s *Server) answerQuery(w http.ResponseWriter, spec intent.Spec, sub *subjectState) {
+func (s *Server) answerQuery(w http.ResponseWriter, tenant string, spec intent.Spec, sub *subjectState) {
 	resp := askResp{Kind: "answer", Intent: spec.Intent.String(), Tier: string(spec.Tier)}
 
 	if spec.Intent == intent.RunHistory {
-		s.answerRunHistory(w, resp)
+		s.answerRunHistory(w, tenant, resp)
 		return
 	}
 	if spec.Axis == "" {
@@ -356,13 +414,13 @@ func (s *Server) answerQuery(w http.ResponseWriter, spec intent.Spec, sub *subje
 //
 // 🔴 A query over what a durable run WROTE DOWN, not a re-derivation. That is the whole payoff of
 // persisting everything: "what happened in that run?" is a SELECT, and it costs nothing.
-func (s *Server) answerRunHistory(w http.ResponseWriter, resp askResp) {
+func (s *Server) answerRunHistory(w http.ResponseWriter, tenant string, resp askResp) {
 	if s.Episodes == nil {
 		resp.Text = "No run history is being recorded on this deployment."
 		writeJSON(w, http.StatusOK, resp)
 		return
 	}
-	last, ok, err := s.Store.LatestGoal(s.Tenant)
+	last, ok, err := s.Root.For(tenant).LatestGoal(tenant)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -428,10 +486,10 @@ func criteriaFor(i intent.Intent, axis string) []goal.Criterion {
 }
 
 // startGoal admits a durable goal, plans it, and starts driving it.
-func (s *Server) startGoal(w http.ResponseWriter, spec intent.Spec, sub *subjectState, axis string) {
+func (s *Server) startGoal(w http.ResponseWriter, tenant string, spec intent.Spec, sub *subjectState, axis string) {
 	now := time.Now().UTC()
 	g := &goal.Goal{
-		ID: goal.ID(fmt.Sprintf("g-%d", now.UnixNano())), Tenant: s.Tenant,
+		ID: goal.ID(fmt.Sprintf("g-%d", now.UnixNano())), Tenant: tenant,
 		Intent: spec.Intent, State: goal.Draft, Objective: spec.Question,
 		Subject: goal.Subject{
 			RepoURL:  firstNonEmpty(sub.Source.RemoteURL, sub.Source.Root),
@@ -464,7 +522,8 @@ func (s *Server) startGoal(w http.ResponseWriter, spec intent.Spec, sub *subject
 			Kind: "refusal", Intent: spec.Intent.String(), Cause: "not_admitted", NextAction: err.Error()})
 		return
 	}
-	if err := s.Store.CreateGoal(g); err != nil {
+	scoped := s.Root.For(tenant)
+	if err := scoped.CreateGoal(g); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
@@ -474,7 +533,7 @@ func (s *Server) startGoal(w http.ResponseWriter, spec intent.Spec, sub *subject
 			Kind: "refusal", Intent: spec.Intent.String(), Cause: "could_not_plan", NextAction: err.Error()})
 		return
 	}
-	if err := s.Store.SaveDAG(d); err != nil {
+	if err := scoped.SaveDAG(d); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
@@ -494,18 +553,34 @@ func (s *Server) startGoal(w http.ResponseWriter, spec intent.Spec, sub *subject
 
 // handleDecideRequest decodes an approval decision.
 func (s *Server) handleDecideRequest(w http.ResponseWriter, r *http.Request) {
+	tenant, err := tenancy.MustTenant(r.Context())
+	if err != nil {
+		unauthorized(w, "You are not signed in.")
+		return
+	}
 	var req decideReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unreadable request"})
 		return
 	}
-	s.handleDecide(w, req)
+	s.handleDecide(w, tenant, req)
 }
 
 // ── events ───────────────────────────────────────────────────────────────────────────────────────
 
 func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
+	// 🔴 The stream is scoped: a goal id alone must not be enough to watch somebody else's run, which
+	// would leak its findings, its spend and its file paths in real time.
+	tenant, err := tenancy.MustTenant(r.Context())
+	if err != nil {
+		unauthorized(w, "You are not signed in.")
+		return
+	}
 	id := goal.ID(r.PathValue("id"))
+	if _, err := s.Root.For(tenant).LoadGoal(id); err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such run"})
+		return
+	}
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)

@@ -204,7 +204,7 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
     <span class="wordmark">HEROS</span>
     <span class="subject">acme/support-bot <b>@ rev-a41c9</b></span>
     <span class="spacer"></span>
-    <span class="tenant">acme · 3 of 5 seats</span>
+    <span class="tenant" id="whoami"></span>
   </header>
   <div class="stream" id="stream"></div>
 </div>
@@ -601,8 +601,61 @@ SUGGESTIONS.forEach(label => {
 send.onclick = () => ask(input.value);
 input.onkeydown = e => { if (e.key === 'Enter') ask(input.value); };
 
+/* ── signing in ──────────────────────────────────────────────────────────── */
+
+function askToSignIn(){
+  const t = turn('heros');
+  say(t, `<p>Sign in to continue. Everything you load and every run you start belongs to your
+    organization and is visible to nobody else.</p>`);
+  const card = el(`<div class="card"><div class="card-head">
+      <span class="card-title"><span class="k">sign in</span></span>
+      <span class="spacer"></span><span class="badge b-gate">required</span></div>
+    <div class="card-body">
+      <div style="display:flex;flex-direction:column;gap:.6rem;max-width:26rem">
+        <input class="field" id="email" type="email" placeholder="you@example.com" autocomplete="username"
+          style="padding:.6rem .8rem;background:var(--card);color:var(--ink);border:1px solid var(--border-strong);border-radius:var(--radius);font-family:var(--body)">
+        <input class="field" id="password" type="password" placeholder="password" autocomplete="current-password"
+          style="padding:.6rem .8rem;background:var(--card);color:var(--ink);border:1px solid var(--border-strong);border-radius:var(--radius);font-family:var(--body)">
+        <div class="actions"><button class="btn-go" id="signin">Sign in</button>
+          <span class="evidence" id="signinmsg"></span></div>
+      </div>
+    </div></div>`);
+  t.appendChild(card); scroll();
+
+  const go = async () => {
+    const msg = card.querySelector('#signinmsg');
+    msg.style.color = 'var(--none)';
+    msg.textContent = 'checking…';
+    try {
+      await api('/api/auth/login', {
+        email: card.querySelector('#email').value,
+        password: card.querySelector('#password').value,
+      });
+      card.querySelector('.card-head .badge').className = 'badge b-ok';
+      card.querySelector('.card-head .badge').textContent = 'signed in';
+      card.querySelector('.card-body').innerHTML =
+        `<p style="margin:0;font-size:.9rem;color:var(--ink-muted)">Signed in.</p>`;
+      // Re-read status so the header names who is acting. The login response says the same thing, but
+      // reading it back proves the credential the browser will actually send is the one that works.
+      try {
+        const st = await api('/api/auth/status');
+        if (st.signed_in) {
+          document.getElementById('whoami').textContent = `${st.email} · ${st.tenant}`;
+        }
+      } catch {}
+      start();
+    } catch (e) {
+      msg.style.color = 'var(--bad)';
+      msg.textContent = e.message;
+    }
+  };
+  card.querySelector('#signin').onclick = go;
+  card.querySelector('#password').onkeydown = e => { if (e.key === 'Enter') go(); };
+  card.querySelector('#email').focus();
+}
+
 /* ── opening ─────────────────────────────────────────────────────────────── */
-(async () => {
+async function start(){
   const t = turn('heros');
   try {
     const s = await api('/api/subject');
@@ -618,6 +671,17 @@ input.onkeydown = e => { if (e.key === 'Enter') ask(input.value); };
     }
   } catch (e) {
     say(t, `<p style="color:var(--bad)">Cannot reach herosd: ${esc(e.message)}</p>`);
+  }
+}
+
+(async () => {
+  try {
+    const st = await api('/api/auth/status');
+    if (!st.signed_in) { askToSignIn(); return; }
+    document.getElementById('whoami').textContent = `${st.email} · ${st.tenant}`;
+    start();
+  } catch (e) {
+    turn('heros').appendChild(el(`<div class="said"><p style="color:var(--bad)">Cannot reach herosd: ${esc(e.message)}</p></div>`));
   }
 })();
 

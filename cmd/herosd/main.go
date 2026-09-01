@@ -18,6 +18,7 @@ import (
 
 	migrations "github.com/heros-foreal/heros/db/migrations"
 	"github.com/heros-foreal/heros/internal/api"
+	"github.com/heros-foreal/heros/internal/auth"
 	"github.com/heros-foreal/heros/internal/bounds"
 	"github.com/heros-foreal/heros/internal/config"
 	"github.com/heros-foreal/heros/internal/discovery"
@@ -128,20 +129,31 @@ func main() {
 
 	mem := memory.NewPG(db)
 
-	w := buildWorker(st, reg, mem, plans)
+	w := buildWorker(st.For(defaultTenant), reg, mem, plans)
 
 	cache, _ := os.UserCacheDir()
-	srv := &api.Server{
-		Store:    st,
-		Planners: plans,
-		Sup:      api.NewSupervisor(st, w),
-		Resolver: intake.NewResolver(filepath.Join(cache, "heros", "repos")),
-		Router:   router.New(),
-		Tenant:   "local",
-		Ceilings: bounds.Ceilings{
-			MaxIterations: 200, MaxTasks: 60, MaxAttemptsPerTask: 2, MaxToolCalls: 200,
-			MaxTokens: 400_000, MaxCostCents: 100, MaxWallClock: 20 * time.Minute, MaxSpawnDepth: 3,
-		},
+	authStore := auth.NewStore(db)
+	if err := bootstrapIdentity(ctx, authStore); err != nil {
+		log.Fatalf("identity: %v", err)
+	}
+
+	srv := api.NewServer()
+	srv.Root = st
+	srv.Auth = authStore
+	{
+		cfg := &api.Server{
+			Planners: plans,
+			Sup:      api.NewSupervisor(st.For(defaultTenant), w),
+			Resolver: intake.NewResolver(filepath.Join(cache, "heros", "repos")),
+			Router:   router.New(),
+			Ceilings: bounds.Ceilings{
+				MaxIterations: 200, MaxTasks: 60, MaxAttemptsPerTask: 2, MaxToolCalls: 200,
+				MaxTokens: 400_000, MaxCostCents: 100, MaxWallClock: 20 * time.Minute, MaxSpawnDepth: 3,
+			},
+		}
+		srv.Planners, srv.Sup, srv.Resolver = cfg.Planners, cfg.Sup, cfg.Resolver
+		srv.Router, srv.Ceilings = cfg.Router, cfg.Ceilings
+		srv.DefaultTenant = defaultTenant
 	}
 	srv.ToolRegistry = reg
 	srv.Provider = client
@@ -149,11 +161,10 @@ func main() {
 	srv.Approvals = api.NewApprovals()
 	srv.Episodes = mem
 
-	mux := srv.Routes()
-	mux.Handle("/", http.FileServer(http.Dir(*web)))
-
 	httpSrv := &http.Server{
-		Addr: *addr, Handler: mux,
+		// 🔴 Handler, not Routes. Routes is unauthenticated by construction and exists for tests;
+		// mounting it here would serve every endpoint to anybody who can reach the port.
+		Addr: *addr, Handler: srv.Handler(http.FileServer(http.Dir(*web))),
 		ReadHeaderTimeout: 10 * time.Second,
 		// 🚫 No WriteTimeout. The events endpoint is a long-lived stream, and a write deadline would cut
 		// every run off mid-flight at exactly the moment it became interesting.
@@ -171,6 +182,40 @@ func main() {
 	if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("serve: %v", err)
 	}
+}
+
+// defaultTenant is the organization a single-deployment install acts as.
+const defaultTenant = "local"
+
+// bootstrapIdentity creates the first organization and user, once.
+//
+// 🔴 The password comes from the environment and is never defaulted. A built-in default password is a
+// published credential: it is in the source, it is in every deployment, and it is the first thing
+// anybody tries. If the variable is unset and no user exists, the process REFUSES TO START and says what
+// to set — a server that will not boot is a far better outcome than one that boots with a known login.
+func bootstrapIdentity(ctx context.Context, a *auth.Store) error {
+	n, err := a.CountUsers(ctx)
+	if err != nil {
+		return err
+	}
+	if n > 0 {
+		return nil
+	}
+	email := os.Getenv("HEROS_BOOTSTRAP_EMAIL")
+	password := os.Getenv("HEROS_BOOTSTRAP_PASSWORD")
+	if email == "" || password == "" {
+		return fmt.Errorf("no users exist yet and no bootstrap credentials were given.\n"+
+			"Set HEROS_BOOTSTRAP_EMAIL and HEROS_BOOTSTRAP_PASSWORD (at least %d characters) and start "+
+			"again. They are used once, to create the first account", auth.MinPasswordLength)
+	}
+	if err := a.CreateTenant(ctx, defaultTenant, "Local"); err != nil {
+		return err
+	}
+	if _, err := a.CreateUser(ctx, defaultTenant, email, password); err != nil {
+		return err
+	}
+	log.Printf("created the first account for %s in organization %q", email, defaultTenant)
+	return nil
 }
 
 // buildWorker assembles the worker with everything it needs.

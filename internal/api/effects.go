@@ -156,9 +156,9 @@ type decideResp struct {
 // So the branch is prepared and the exact push command is handed back. The person runs it. That is one
 // more step for them and one fewer credential for us, and it is the right trade for a system whose
 // entire pitch is that it does not change your code without asking.
-func (s *Server) handleDecide(w http.ResponseWriter, req decideReq) {
+func (s *Server) handleDecide(w http.ResponseWriter, tenant string, req decideReq) {
 	if req.GoalID != "" && req.TaskID != "" {
-		s.decideTask(w, req)
+		s.decideTask(w, tenant, req)
 		return
 	}
 	p, err := s.Approvals.take(req.ChangeID)
@@ -194,8 +194,10 @@ func (s *Server) handleDecide(w http.ResponseWriter, req decideReq) {
 }
 
 // decideTask answers a parked durable-goal task and, on approval, wakes the run.
-func (s *Server) decideTask(w http.ResponseWriter, req decideReq) {
-	if err := s.Store.Decide(goal.ID(req.GoalID), task.ID(req.TaskID), req.Approve,
+func (s *Server) decideTask(w http.ResponseWriter, tenant string, req decideReq) {
+	// 🔴 Scoped to the CALLER's tenant. Approval is the act of authorising a write to somebody's
+	// repository, so reaching it across tenants would be the single worst thing in this system.
+	if err := s.Root.For(tenant).Decide(goal.ID(req.GoalID), task.ID(req.TaskID), req.Approve,
 		time.Now().UTC()); err != nil {
 		writeJSON(w, http.StatusOK, decideResp{Message: err.Error()})
 		return

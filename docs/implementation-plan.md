@@ -283,6 +283,32 @@ Two bugs the wiring exposed:
   whatever created them (`g-`, `live-`, `e2e-`), so a leftover test goal sorted last and the real run
   reported "no episodes" while holding nine. `store.LatestGoal` now asks the question that was meant.
 
+### [x] P25 · Authentication and multi-tenancy
+**Isolation is structural, not remembered.** Twelve of the fourteen store methods take a goal id and
+nothing else, so before this a goal id was sufficient to read, mutate, claim or approve any customer's
+work. `store.Root.For(tenant)` closes over the tenant and every query carries it; a handler is given a
+scoped store and never holds the root, so it cannot construct a query for another tenant — not because
+it is careful, but because it has nothing to be careless with.
+
+`TestATenantCannotReachAnotherTenantsData` exercises **every** method against a goal owned by somebody
+else, on both implementations. A sample would prove only that the sampled methods were fixed, and the
+one that was missed is the one that gets used.
+
+A cross-tenant row is **invisible**, not forbidden: returning "forbidden" would confirm the id exists and
+turn a guessable identifier into an enumeration of everybody's data.
+
+**The loaded repository was a single global field** — one customer's question was answered about
+whichever repository another customer had opened last, with real file:line references, about code they
+have never seen. A cross-tenant leak wearing the shape of a cache. It is per-tenant now.
+
+Authentication is argon2id (RFC 9106 parameters, encoded per hash so the cost can be raised later),
+sessions stored as SHA-256 so a leaked dump yields nothing usable, HttpOnly + SameSite=Lax cookies, and
+a **default-deny** mux: adding a route makes it protected, exposing one takes an edit to a list called
+`public`. A missing user and a wrong password are indistinguishable, in message and in timing.
+
+Bootstrap **refuses to start** when no user exists and no credentials are given. A built-in default
+password is a published credential.
+
 ## !!! Not started, and deliberately so
 
 ### [x] P23 · `evalset` and `compare`
@@ -462,6 +488,32 @@ Two bugs the wiring exposed:
 - Run history answered about **the lexically-last goal**, not the newest — ids carry the prefix of
   whatever created them (`g-`, `live-`, `e2e-`), so a leftover test goal sorted last and the real run
   reported "no episodes" while holding nine. `store.LatestGoal` now asks the question that was meant.
+
+### [x] P25 · Authentication and multi-tenancy
+**Isolation is structural, not remembered.** Twelve of the fourteen store methods take a goal id and
+nothing else, so before this a goal id was sufficient to read, mutate, claim or approve any customer's
+work. `store.Root.For(tenant)` closes over the tenant and every query carries it; a handler is given a
+scoped store and never holds the root, so it cannot construct a query for another tenant — not because
+it is careful, but because it has nothing to be careless with.
+
+`TestATenantCannotReachAnotherTenantsData` exercises **every** method against a goal owned by somebody
+else, on both implementations. A sample would prove only that the sampled methods were fixed, and the
+one that was missed is the one that gets used.
+
+A cross-tenant row is **invisible**, not forbidden: returning "forbidden" would confirm the id exists and
+turn a guessable identifier into an enumeration of everybody's data.
+
+**The loaded repository was a single global field** — one customer's question was answered about
+whichever repository another customer had opened last, with real file:line references, about code they
+have never seen. A cross-tenant leak wearing the shape of a cache. It is per-tenant now.
+
+Authentication is argon2id (RFC 9106 parameters, encoded per hash so the cost can be raised later),
+sessions stored as SHA-256 so a leaked dump yields nothing usable, HttpOnly + SameSite=Lax cookies, and
+a **default-deny** mux: adding a route makes it protected, exposing one takes an edit to a list called
+`public`. A missing user and a wrong password are indistinguishable, in message and in timing.
+
+Bootstrap **refuses to start** when no user exists and no credentials are given. A built-in default
+password is a published credential.
 
 ## !!! Not started, and deliberately so
 

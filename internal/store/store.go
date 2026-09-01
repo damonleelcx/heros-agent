@@ -54,7 +54,26 @@ type Checkpoint struct {
 	At        time.Time
 }
 
-// Store is the durable interface. Every method is safe for concurrent use by many workers.
+// Root hands out tenant-scoped stores. It is the ONLY way to obtain a Store.
+//
+// # 🔴 Why scoping is a type rather than a parameter
+//
+// Twelve of the fourteen methods below take a goal id and nothing else. With an unscoped store, a goal
+// id is therefore sufficient to read any customer's data, and isolation depends on every call site
+// remembering to check — which is a property no codebase keeps forever.
+//
+// `For` closes over the tenant, and every query it produces carries it. A request handler is given a
+// scoped Store and never holds the root, so it cannot construct a query for another tenant: not because
+// it is careful, but because it has nothing to be careless with.
+//
+// `TestATenantCannotReachAnotherTenantsData` proves it on a real database, method by method.
+type Root interface {
+	// For returns a store bound to one tenant. An empty tenant is refused rather than treated as "all",
+	// because "all" is the value an unset variable has.
+	For(tenant string) Store
+}
+
+// Store is the durable interface, ALWAYS scoped to one tenant. Every method is safe for concurrent use.
 type Store interface {
 	CreateGoal(g *goal.Goal) error
 	LoadGoal(id goal.ID) (*goal.Goal, error)
