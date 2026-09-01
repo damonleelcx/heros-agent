@@ -235,7 +235,11 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .stack{display:flex;flex-direction:column;gap:.6rem;max-width:26rem}
 .stack input{padding:.6rem .8rem;background:var(--card);color:var(--ink);
   border:1px solid var(--border-strong);border-radius:var(--radius);font-family:var(--body)}
-.tenant{cursor:pointer}
+/* It is a <button> now, not a <span>: it opens a panel, so it has to be reachable by keyboard and
+   announced as a control. These rules strip the browser's button chrome without stripping the focus
+   ring, which heros.css supplies. min-height keeps it a real touch target on a phone. */
+.tenant{cursor:pointer;background:none;border:0;padding:.35rem .2rem;min-height:44px;
+  font-family:var(--mono);font-size:.7rem;color:var(--ink-muted);text-align:right}
 .tenant:hover{color:var(--accent)}
 .hint{font-family:var(--mono);font-size:.625rem;color:var(--none);margin-top:.5rem;text-align:center}
 .hint b{color:var(--ink-muted);font-weight:400}
@@ -249,7 +253,7 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
     <span class="wordmark">HEROS</span>
     <span class="subject">acme/support-bot <b>@ rev-a41c9</b></span>
     <span class="spacer"></span>
-    <span class="tenant" id="whoami"></span>
+    <button class="tenant" id="whoami" title="Your account and organization"></button>
   </header>
   <div class="stream" id="stream"></div>
 </div>
@@ -867,7 +871,7 @@ async function refreshMe(){
   try { me = await api('/api/auth/status'); } catch { me = null; }
   const who = document.getElementById('whoami');
   if (me && me.signed_in) {
-    who.textContent = `${me.email} · ${me.role} · ${me.tenant}`;
+    who.textContent = `${me.email} · ${me.role}`;
     who.title = 'Show this organization';
   } else {
     who.textContent = '';
@@ -899,6 +903,56 @@ async function renderOrganization(card){
     return;
   }
   body.innerHTML = '';
+
+  /* ── your own account ─────────────────────────────────────────────────────
+     🔴 Added because this panel described the ORGANIZATION and nothing described the person reading
+     it. In particular there was NO WAY TO SIGN OUT anywhere in the product: /api/auth/logout existed
+     and nothing called it. On a shared machine that is not a missing convenience, it is a session that
+     stays valid for fourteen days because the only way to end it was to know the endpoint. */
+  const mine = el(`<div class="auto"><h4>your account</h4></div>`);
+  const row = el(`<div style="display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;
+      color:var(--ink-muted);font-size:.87rem;margin-bottom:.7rem"></div>`);
+  row.appendChild(el(`<span style="color:var(--ink)">${esc(me.email)}</span>`));
+  row.appendChild(el(`<span class="badge b-run">${esc(me.role)}</span>`));
+  row.appendChild(el(me.email_verified
+    ? `<span class="badge b-ok">address confirmed</span>`
+    : `<span class="badge b-warn">address unconfirmed</span>`));
+  mine.appendChild(row);
+
+  const acts = el(`<div class="actions"></div>`);
+  /* Changing a password goes through the emailed link rather than a field here. There is no
+     change-password endpoint, and inventing one that trusts an existing session would be a weaker
+     path to the same result: anybody who found an unlocked laptop could change the password without
+     knowing it. The reset link proves control of the address. */
+  const pw = el(`<button class="linky">Change your password</button>`);
+  pw.onclick = async () => {
+    pw.disabled = true;
+    try {
+      const r = await api('/api/auth/password/forgot', {email: me.email});
+      note(mine, r.status || 'A link is on its way.', 'ok');
+    } catch (e) { note(mine, e.message, 'bad'); pw.disabled = false; }
+  };
+  acts.appendChild(pw);
+
+  if (!me.email_verified && me.mail_configured !== false) {
+    const rs = el(`<button class="linky">Resend the confirmation</button>`);
+    rs.onclick = async () => {
+      rs.disabled = true;
+      try { const r = await api('/api/auth/email/resend', {}); note(mine, r.status || 'Sent.', 'ok'); }
+      catch (e) { note(mine, e.message, 'bad'); rs.disabled = false; }
+    };
+    acts.appendChild(rs);
+  }
+
+  const out = el(`<button class="linky" style="color:var(--bad)">Sign out</button>`);
+  out.onclick = async () => {
+    out.disabled = true;
+    try { await api('/api/auth/logout', {}); } catch (_) { /* ending a session locally either way */ }
+    location.href = '/signin/';
+  };
+  acts.appendChild(out);
+  mine.appendChild(acts);
+  body.appendChild(mine);
 
   const table = el(`<table class="people"><thead><tr>
       <th>person</th><th>role</th><th></th></tr></thead><tbody></tbody></table>`);
