@@ -995,7 +995,13 @@ function resetPasswordCard(token){
       // 🔴 No session was issued by the reset, deliberately — a forwarded link must not become a login.
       // So the next thing is signing in with the password just chosen.
       askToSignIn();
-    } catch (e) { msg.style.color = 'var(--bad)'; msg.textContent = e.message; }
+    } catch (e) {
+      // A refusal here says the link is still good and when to come back — the last card that should
+      // swallow its message into a span sized for "saving…".
+      msg.textContent = '';
+      body.querySelectorAll('.said-error').forEach(n => n.remove());
+      note(body, e.message, 'bad').classList.add('said-error');
+    }
   };
   card.querySelector('#go').onclick = go;
   card.querySelector('#np').onkeydown = e => { if (e.key === 'Enter') go(); };

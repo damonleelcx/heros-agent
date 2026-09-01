@@ -518,6 +518,31 @@ whatever the scheduler felt like. Replaced with a counter of argon2id computatio
 makes the claim directly: this path ran zero. Observed red, with a control asserting a real token does
 hash — or the test would pass against a handler that never hashed anything.
 
+### [x] P30 · The same fix for redeeming a password-reset link
+`password/reset` had exactly the shape `invitation/accept` had before P29 — unauthenticated, and hashing
+the new password **before** looking at the token, so any garbage string cost a full argon2id (64 MiB and a
+hashing slot) before anything checked it. Same fix, both halves: the store checks the token first, and the
+endpoint carries a limit keyed on the token's hash.
+
+🚫 The check is **not** authoritative, here as there: the conditional UPDATE that marks the token used is
+still what decides, atomically, whether the reset happens. It only makes known-bad input cost an indexed
+lookup. The helper is unexported and returns no row, so nothing outside the package can ask "is this reset
+token real" without redeeming it, and nothing inside is tempted to act on the answer instead of the claim.
+
+It also fixes the order the person experiences: somebody holding a dead link is told the link is dead,
+rather than being told their new password is too short, fixing that, and failing again on the thing that
+was actually wrong.
+
+**`ResetLimit` is now `ForgotLimit`.** The name stopped working the moment a second limit appeared in the
+same flow — one bounds requesting a link and is keyed on an address, the other bounds using one and is
+keyed on a token, and two fields that could both reasonably be called "the reset limit" is how the wrong
+one gets used.
+
+⚠️ Two edits in this change silently did nothing before being caught: a `sed` rename using `\b`, which
+BSD sed does not support, and a python edit whose anchor no longer matched. Both left the tree consistent
+and the build green, which is exactly why they were easy to miss — the check that caught them was
+grepping for what should no longer exist, not the compiler.
+
 ## !!! Not started, and deliberately so
 
 ### [x] P23 · `evalset` and `compare`
@@ -744,11 +769,6 @@ password is a published credential.
   lockout — including for the one account that could fix the mail.
   `TestAnUnconfirmedAddressBlocksNothing` asserts the non-property, so gating something on it later is a
   decision made in the open rather than a default nobody chose.
-- **`POST /api/auth/password/reset` is not rate-limited, and hashes before it claims the token** — the
-  same shape `invitation/accept` had before P29, so a garbage reset token still costs 64 MiB and a hashing
-  slot. The argon2id ceiling bounds the memory; what remains is that an attacker can occupy hashing slots
-  through it. The fix is the same four lines. Left alone because it was not asked for, not because it is
-  fine.
 - **`POST /api/auth/email/verify` is not rate-limited.** It hashes nothing and only marks a row, so the
   cost of abusing it is an indexed lookup.
 - **Nothing is limited per CALLER.** Guessing at a thousand accounts once each is not limited by anything,

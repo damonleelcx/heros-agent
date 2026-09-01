@@ -338,6 +338,21 @@ func (s *Store) CreatePasswordReset(ctx context.Context, tenant, email string) (
 // Every OTHER outstanding reset token for the same account is destroyed too, so a second link mailed
 // during a confused ten minutes cannot be used afterwards to take the account back.
 func (s *Store) ResetPassword(ctx context.Context, token, newPassword string) error {
+	// 🔴 The token is checked BEFORE the password is hashed — the same ordering, for the same reason, as
+	// AcceptInvitation. This is an unauthenticated endpoint, and hashing first made any garbage string
+	// cost a full argon2id (64 MiB, tens of milliseconds) before anything looked at it: the cheapest way
+	// to occupy every hashing slot the server has and starve real sign-ins. No rate limit closes it,
+	// because the only thing to key on is the token and an attacker picks a fresh one every time.
+	//
+	// 🚫 NOT authoritative. The conditional UPDATE below is what decides, atomically, whether this reset
+	// happens — a token can be spent in the microseconds between the two, and the claim will refuse it.
+	// This buys only that known-bad input is rejected for the price of an indexed lookup.
+	//
+	// It also puts the errors in the useful order: somebody holding a dead link is told the link is dead,
+	// rather than being told their new password is too short, fixing that, and failing again.
+	if err := s.resetTokenIsLive(ctx, token); err != nil {
+		return err
+	}
 	hash, err := HashPassword(ctx, newPassword)
 	if err != nil {
 		return err
@@ -369,6 +384,27 @@ func (s *Store) ResetPassword(ctx context.Context, token, newPassword string) er
 		}
 		return nil
 	})
+}
+
+// resetTokenIsLive reports whether a reset token exists, is unused and has not expired.
+//
+// Deliberately not exported and deliberately not returning the row: nothing outside this package should
+// be able to ask "is this reset token real" without redeeming it, and nothing inside should be tempted to
+// act on the answer instead of on the claim.
+func (s *Store) resetTokenIsLive(ctx context.Context, token string) error {
+	var ok bool
+	err := s.db.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM password_resets
+			WHERE token_hash = $1 AND used_at IS NULL AND expires_at > now())`,
+		tokenID(token)).Scan(&ok)
+	if err != nil {
+		return fmt.Errorf("auth: checking reset link: %w", err)
+	}
+	if !ok {
+		return ErrBadToken
+	}
+	return nil
 }
 
 // ── email verification ───────────────────────────────────────────────────────────────────────────

@@ -429,7 +429,7 @@ func waitForMail(t *testing.T, hz *harness, n int) {
 
 // ── the reset limit ──────────────────────────────────────────────────────────────────────────────
 
-// TestTheResetLimitIsIdenticalForAKnownAndAnUnknownAddress.
+// TestTheForgotLimitIsIdenticalForAKnownAndAnUnknownAddress.
 //
 // # 🔴 The reason this test matters more than the limit does
 //
@@ -441,7 +441,7 @@ func waitForMail(t *testing.T, hz *harness, n int) {
 //
 // So both addresses are pushed past the ceiling and compared at every step: the same status, the same
 // body, and the same request number at which each trips.
-func TestTheResetLimitIsIdenticalForAKnownAndAnUnknownAddress(t *testing.T) {
+func TestTheForgotLimitIsIdenticalForAKnownAndAnUnknownAddress(t *testing.T) {
 	hz := newHarness(t)
 	_, _ = hz.user(t, tenancy.Owner)
 	known := "limited-known-" + randSuffix() + "@example.test"
@@ -452,7 +452,7 @@ func TestTheResetLimitIsIdenticalForAKnownAndAnUnknownAddress(t *testing.T) {
 	unknown := "limited-unknown-" + randSuffix() + "@example.test"
 
 	// One past the burst, so both must cross the boundary.
-	const attempts = ResetBurst + 2
+	const attempts = ForgotBurst + 2
 	type reply struct {
 		code int
 		body string
@@ -473,26 +473,26 @@ func TestTheResetLimitIsIdenticalForAKnownAndAnUnknownAddress(t *testing.T) {
 		}
 	}
 	// And the limit is actually doing something, or the test above compares two identical non-events.
-	if seen[known][ResetBurst].code != http.StatusTooManyRequests {
+	if seen[known][ForgotBurst].code != http.StatusTooManyRequests {
 		t.Fatalf("request %d was %d, not 429 — nothing is being limited",
-			ResetBurst+1, seen[known][ResetBurst].code)
+			ForgotBurst+1, seen[known][ForgotBurst].code)
 	}
 	if seen[known][0].code != http.StatusOK {
 		t.Fatalf("the first request was already refused (%d)", seen[known][0].code)
 	}
 }
 
-// TestTheResetLimitCannotBeBypassedByChangingCase.
+// TestTheForgotLimitCannotBeBypassedByChangingCase.
 //
 // 🔴 Identity here is case-insensitive — every query matches on `lower(email)`, so `Foo@x.test` and
 // `foo@x.test` are one account and one inbox. A limiter keyed on the raw string would give each spelling
 // its own allowance, and the ceiling would be "three per capitalisation" — which is not a ceiling.
-func TestTheResetLimitCannotBeBypassedByChangingCase(t *testing.T) {
+func TestTheForgotLimitCannotBeBypassedByChangingCase(t *testing.T) {
 	hz := newHarness(t)
 	_, _ = hz.user(t, tenancy.Owner)
 	addr := "MixedCase-" + randSuffix() + "@Example.Test"
 
-	for i := range ResetBurst {
+	for i := range ForgotBurst {
 		if rec := hz.do(t, "POST", "/api/auth/password/forgot",
 			`{"email":"`+addr+`"}`, nil); rec.Code != http.StatusOK {
 			t.Fatalf("request %d of the burst was refused: %d", i+1, rec.Code)
@@ -518,7 +518,7 @@ func TestOneFloodedAddressDoesNotLockOutEverybodyElse(t *testing.T) {
 	hz := newHarness(t)
 	_, _ = hz.user(t, tenancy.Owner)
 	victim := "flooded-" + randSuffix() + "@example.test"
-	for range ResetBurst + 5 {
+	for range ForgotBurst + 5 {
 		hz.do(t, "POST", "/api/auth/password/forgot", `{"email":"`+victim+`"}`, nil)
 	}
 	rec := hz.do(t, "POST", "/api/auth/password/forgot",
@@ -537,10 +537,10 @@ func TestARefusedResetSendsNoMailAndSaysWhenToReturn(t *testing.T) {
 		tenancy.Member); err != nil {
 		t.Fatal(err)
 	}
-	for range ResetBurst {
+	for range ForgotBurst {
 		hz.do(t, "POST", "/api/auth/password/forgot", `{"email":"`+addr+`"}`, nil)
 	}
-	waitForMail(t, hz, ResetBurst)
+	waitForMail(t, hz, ForgotBurst)
 	before := hz.mail.count()
 
 	rec := hz.do(t, "POST", "/api/auth/password/forgot", `{"email":"`+addr+`"}`, nil)
@@ -1007,5 +1007,141 @@ func TestConfirmationAndResetHaveSeparateBudgets(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("exhausting the confirmation budget also exhausted the password-reset budget for the "+
 			"same address: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// ── limits on redeeming a password-reset link ────────────────────────────────────────────────────
+
+// resetTokenFor asks for a reset and returns the token out of the real mail.
+func (hz *harness) resetTokenFor(t *testing.T, email string) string {
+	t.Helper()
+	before := hz.mail.count()
+	if rec := hz.do(t, "POST", "/api/auth/password/forgot",
+		`{"tenant":"`+hz.tenant+`","email":"`+email+`"}`, nil); rec.Code != http.StatusOK {
+		t.Fatalf("forgot: %d %s", rec.Code, rec.Body.String())
+	}
+	waitForMail(t, hz, before+1)
+	return tokenFromLink(t, hz.mail.last(t), "reset")
+}
+
+// TestAGarbageResetTokenCostsNoArgon2id.
+//
+// # 🔴 The same hole invitation/accept had
+//
+// An unauthenticated endpoint that hashed the new password before looking at the token, so any garbage
+// string cost a full argon2id — 64 MiB and a hashing slot — before anything checked it. No rate limit
+// closes it: the only thing to key on is the token, and an attacker picks a fresh one every time.
+//
+// Counted rather than timed or inferred from contention, for the reason written out in
+// TestAGarbageInvitationTokenCostsNoArgon2id: a fence built on "probably contended" reports whatever the
+// scheduler felt like, and that one passed against the exact defect it existed to catch.
+func TestAGarbageResetTokenCostsNoArgon2id(t *testing.T) {
+	hz := newHarness(t)
+	_, _ = hz.user(t, tenancy.Owner)
+	email := "garbagereset-" + randSuffix() + "@example.test"
+	if _, err := hz.Auth.CreateUser(context.Background(), hz.tenant, email, testPassword,
+		tenancy.Member); err != nil {
+		t.Fatal(err)
+	}
+
+	before := auth.HashesRun()
+	rec := hz.do(t, "POST", "/api/auth/password/reset",
+		`{"token":"not-a-real-token-at-all","password":"`+testPassword+`"}`, nil)
+	if rec.Code != http.StatusGone {
+		t.Fatalf("a garbage reset token answered %d, want 410: %s", rec.Code, rec.Body.String())
+	}
+	if n := auth.HashesRun() - before; n != 0 {
+		t.Fatalf("a garbage reset token ran %d argon2id computation(s). The new password is being hashed "+
+			"before the token is checked, so any string an attacker sends costs 64 MiB and a hashing "+
+			"slot", n)
+	}
+
+	// The control: a real link does hash, or the assertion above would hold on a handler that never
+	// hashes anything at all.
+	token := hz.resetTokenFor(t, email)
+	before = auth.HashesRun()
+	if rec := hz.do(t, "POST", "/api/auth/password/reset",
+		`{"token":"`+token+`","password":"a-brand-new-long-password"}`, nil); rec.Code != http.StatusOK {
+		t.Fatalf("a real reset link was refused: %d %s", rec.Code, rec.Body.String())
+	}
+	if n := auth.HashesRun() - before; n == 0 {
+		t.Fatal("redeeming a real reset link ran no argon2id; the counter is not measuring what this " +
+			"test claims")
+	}
+}
+
+// TestADeadResetLinkIsReportedBeforeTheNewPasswordIsJudged.
+//
+// 🔴 A consequence of the ordering that is worth pinning down, because it is what the person on the
+// other end experiences. With the token checked first, somebody holding an expired link is told the link
+// is dead — rather than being told their new password is too short, fixing that, and failing again on
+// the thing that was actually wrong.
+func TestADeadResetLinkIsReportedBeforeTheNewPasswordIsJudged(t *testing.T) {
+	hz := newHarness(t)
+	_, _ = hz.user(t, tenancy.Owner)
+	rec := hz.do(t, "POST", "/api/auth/password/reset",
+		`{"token":"not-a-real-token-at-all","password":"short"}`, nil)
+	if rec.Code != http.StatusGone {
+		t.Fatalf("a dead link with a short password answered %d, want 410 — the password is being judged "+
+			"before the link, so the first thing the person is told is not the thing that is wrong: %s",
+			rec.Code, rec.Body.String())
+	}
+}
+
+// TestAResetLinkCannotBeHammered.
+func TestAResetLinkCannotBeHammered(t *testing.T) {
+	hz := newHarness(t)
+	_, _ = hz.user(t, tenancy.Owner)
+	email := "hammeredreset-" + randSuffix() + "@example.test"
+	if _, err := hz.Auth.CreateUser(context.Background(), hz.tenant, email, testPassword,
+		tenancy.Member); err != nil {
+		t.Fatal(err)
+	}
+	token := hz.resetTokenFor(t, email)
+
+	// Short passwords: the link stays live and every attempt is charged.
+	body := `{"token":"` + token + `","password":"short"}`
+	for i := range RedeemBurst {
+		if rec := hz.do(t, "POST", "/api/auth/password/reset", body, nil); rec.Code == http.StatusTooManyRequests {
+			t.Fatalf("attempt %d was rate-limited inside the burst", i+1)
+		}
+	}
+	rec := hz.do(t, "POST", "/api/auth/password/reset", body, nil)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("attempt %d answered %d, not 429", RedeemBurst+1, rec.Code)
+	}
+	if ra := rec.Header().Get("Retry-After"); ra == "" || ra == "0" {
+		t.Errorf("Retry-After is %q", ra)
+	}
+	// 🔴 And the refusal must not suggest the link is spent — it is not, and saying so sends somebody to
+	// ask for another reset mail they do not need.
+	if msg, _ := decode(t, rec)["error"].(string); !strings.Contains(msg, "not been used up") {
+		t.Errorf("the refusal does not say the link is still good: %q", msg)
+	}
+}
+
+// TestOneResetLinkBeingHammeredDoesNotBlockAnother.
+func TestOneResetLinkBeingHammeredDoesNotBlockAnother(t *testing.T) {
+	hz := newHarness(t)
+	_, _ = hz.user(t, tenancy.Owner)
+	busy := "busyreset-" + randSuffix() + "@example.test"
+	quiet := "quietreset-" + randSuffix() + "@example.test"
+	for _, e := range []string{busy, quiet} {
+		if _, err := hz.Auth.CreateUser(context.Background(), hz.tenant, e, testPassword,
+			tenancy.Member); err != nil {
+			t.Fatal(err)
+		}
+	}
+	busyToken := hz.resetTokenFor(t, busy)
+	quietToken := hz.resetTokenFor(t, quiet)
+
+	for range RedeemBurst + 3 {
+		hz.do(t, "POST", "/api/auth/password/reset",
+			`{"token":"`+busyToken+`","password":"short"}`, nil)
+	}
+	rec := hz.do(t, "POST", "/api/auth/password/reset",
+		`{"token":"`+quietToken+`","password":"a-brand-new-long-password"}`, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("hammering one reset link blocked a different one: %d %s", rec.Code, rec.Body.String())
 	}
 }

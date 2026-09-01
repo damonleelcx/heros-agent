@@ -88,7 +88,7 @@ func (s *Server) handleForgotPassword(w http.ResponseWriter, r *http.Request) {
 	//
 	// Keyed on auth.EmailKey rather than the raw string, because identity here is case-insensitive — a
 	// limit keyed on what was typed is bypassed by pressing shift.
-	if ok, wait := s.ResetLimit.Allow(auth.EmailKey(req.Email)); !ok {
+	if ok, wait := s.ForgotLimit.Allow(auth.EmailKey(req.Email)); !ok {
 		w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())))
 		writeJSON(w, http.StatusTooManyRequests, map[string]string{
 			"error": fmt.Sprintf("Too many password reset requests for that address. Try again in "+
@@ -162,7 +162,23 @@ func (s *Server) handleResetPassword(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, "unreadable request")
 		return
 	}
+	// 🔴 Keyed on the token's HASH, like the invitation limit, and with the same honest limitation: it
+	// bounds hammering of one live link, not a flood of invented ones. The store's check-before-hash is
+	// what makes an invented token cheap.
+	if ok, wait := s.RedeemLimit.Allow(auth.TokenKey(req.Token)); !ok {
+		w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())))
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{
+			"error": "That reset link is being used too often. Try again in " + humanWait(wait) +
+				". It has not been used up.",
+		})
+		return
+	}
 	if err := s.Auth.ResetPassword(r.Context(), req.Token, req.Password); err != nil {
+		// Refunded when the server refused to do the work; a shed request is not an attempt to use the
+		// link. A wrong or spent token IS charged.
+		if errors.Is(err, auth.ErrBusy) {
+			s.RedeemLimit.Restore(auth.TokenKey(req.Token))
+		}
 		writeAuthErr(w, err)
 		return
 	}

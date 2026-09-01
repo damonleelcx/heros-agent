@@ -54,15 +54,20 @@ type Server struct {
 	// 🔴 Never from the request's Host header. Whoever asks for a password reset chooses that request's
 	// headers, and would choose to have the link point at themselves.
 	Links mailer.Links
-	// ResetLimit caps how often a password reset can be asked for, per ADDRESS.
+	// ForgotLimit caps how often a password reset can be ASKED FOR, per address.
+	//
+	// 🔴 Named for the endpoint, not for the feature. It was `ResetLimit`, which stopped being a name the
+	// moment a second limit appeared in the same flow: this one bounds requesting a link and is keyed on
+	// an address, RedeemLimit bounds using one and is keyed on a token. Two fields that could both
+	// reasonably be called "the reset limit" is how the wrong one gets used.
 	//
 	// 🔴 Per address rather than per caller, because what is being protected is somebody's INBOX. An
 	// unauthenticated endpoint that sends mail to any address on request is a way to flood a person the
 	// attacker dislikes, and the victim is the address, not whoever made the request.
-	ResetLimit *ratelimit.Limiter
+	ForgotLimit *ratelimit.Limiter
 	// LoginLimit caps password guesses, per ACCOUNT — tenant AND address.
 	//
-	// 🔴 A different key from ResetLimit, because a different thing is being protected. A reset floods an
+	// 🔴 A different key from ForgotLimit, because a different thing is being protected. A reset floods an
 	// inbox, and an inbox is one mailbox however many organizations write to it, so that limit is keyed on
 	// the address alone. A login guesses at an ACCOUNT, and the same address in two organizations is two
 	// accounts with two passwords — keyed on the address alone, guessing at one customer's user would
@@ -75,9 +80,15 @@ type Server struct {
 	// hashes anything, rather than relying on this. A limit and a cheap rejection close different halves,
 	// and only one of them was ever going to close that half.
 	AcceptLimit *ratelimit.Limiter
-	// VerifyLimit caps confirmation mail, keyed on the ADDRESS — like the reset limit, and for the same
+	// VerifyLimit caps confirmation mail, keyed on the ADDRESS — like ForgotLimit, and for the same
 	// reason: an inbox is what fills up.
 	VerifyLimit *ratelimit.Limiter
+	// RedeemLimit caps how hard one password-reset link can be used, keyed on the TOKEN's hash.
+	//
+	// 🔴 The counterpart to AcceptLimit, and with the same blind spot: it bounds hammering of one live
+	// link and cannot bound a flood of invented tokens, because each invented token is a fresh key. What
+	// closes that is the store checking the token before it hashes anything.
+	RedeemLimit *ratelimit.Limiter
 
 	// ToolRegistry, Provider and Model let the server rebind the assessment tool to the LOADED corpus.
 	//
@@ -115,10 +126,11 @@ func NewServer() *Server {
 	return &Server{
 		subjects:    map[string]*subjectState{},
 		Approvals:   NewApprovals(),
-		ResetLimit:  ratelimit.New(ResetBurst, ResetRefill, ResetKeyCeiling),
+		ForgotLimit: ratelimit.New(ForgotBurst, ForgotRefill, ForgotKeyCeiling),
 		LoginLimit:  ratelimit.New(LoginBurst, LoginRefill, LoginKeyCeiling),
 		AcceptLimit: ratelimit.New(AcceptBurst, AcceptRefill, AcceptKeyCeiling),
 		VerifyLimit: ratelimit.New(VerifyBurst, VerifyRefill, VerifyKeyCeiling),
+		RedeemLimit: ratelimit.New(RedeemBurst, RedeemRefill, RedeemKeyCeiling),
 	}
 }
 
@@ -128,13 +140,13 @@ func NewServer() *Server {
 // then one every twenty minutes, which is far more than anyone needs and far less than a flood. The
 // numbers are here rather than inline so that a deployment arguing about them has one place to look.
 const (
-	ResetBurst  = 3
-	ResetRefill = 20 * time.Minute
-	// ResetKeyCeiling bounds memory: the limiter is keyed on an address the CALLER supplies, so an
+	ForgotBurst  = 3
+	ForgotRefill = 20 * time.Minute
+	// ForgotKeyCeiling bounds memory: the limiter is keyed on an address the CALLER supplies, so an
 	// unbounded map would be a memory-exhaustion vector reachable by anybody who can send a POST. Fully
 	// refilled buckets are swept before this is consulted, so reaching it means fifty thousand distinct
 	// addresses inside twenty minutes — a flood, not a busy afternoon.
-	ResetKeyCeiling = 50_000
+	ForgotKeyCeiling = 50_000
 )
 
 // The login ceiling.
@@ -180,6 +192,12 @@ const (
 	VerifyBurst      = 3
 	VerifyRefill     = 20 * time.Minute
 	VerifyKeyCeiling = 50_000
+
+	// Redeeming a password-reset link. The same numbers as accepting an invitation, because it is the
+	// same act: somebody holding a one-time token, using it once, with room for a flaky connection.
+	RedeemBurst      = 5
+	RedeemRefill     = time.Minute
+	RedeemKeyCeiling = 50_000
 )
 
 func loginKey(tenant, email string) string {
