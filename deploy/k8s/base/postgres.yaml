@@ -155,7 +155,26 @@ spec:
                   #
                   # A database added to this instance and NOT added here is silently unprotected.
                   # PGUSER=heros is a superuser, so it can dump any of them.
-                  for db in heros oba; do
+                  #
+                  # 🔴 The list is an ENV VAR, not a literal, because it differs per deployment and the
+                  # alternative is worse. An overlay cannot patch one line of an inline script: to
+                  # change which databases are dumped it would have to restate the WHOLE script, and
+                  # two copies of a backup script is how one of them quietly stops matching the other.
+                  # As a variable it is also greppable — "what is backed up here" is answerable from
+                  # `kubectl get cronjob -o yaml | grep BACKUP_DATABASES` instead of by reading shell.
+                  #
+                  # 🔴 REFUSED IF EMPTY. Unset or blank would make the loop body run zero times, and the
+                  # job would exit 0 having dumped nothing — a green backup job protecting no database
+                  # at all, which is the exact failure this whole block exists to prevent, in its worst
+                  # possible form.
+                  if [ -z "${BACKUP_DATABASES:-}" ]; then
+                    echo "backup: BACKUP_DATABASES is empty; refusing to report success having dumped nothing" >&2
+                    exit 1
+                  fi
+                  # Unquoted ON PURPOSE: the value is a space-separated list and word splitting is what
+                  # turns it into one.
+                  # shellcheck disable=SC2086
+                  for db in $BACKUP_DATABASES; do
                     out="/backups/${db}-${ts}.dump"; tmp="${out}.partial"
                     if ! pg_dump --format=custom --dbname="$db" --file="$tmp"; then
                       echo "backup: pg_dump FAILED for ${db} at ${ts}" >&2; rm -f "$tmp"; exit 1
@@ -171,6 +190,9 @@ spec:
                 - { name: PGHOST, value: postgres }
                 - { name: PGUSER, value: heros }
                 - { name: PGDATABASE, value: heros }
+                # Which databases this deployment holds. See the refusal in the script above: this may
+                # not be empty. Overlays override it; the prod overlay does.
+                - { name: BACKUP_DATABASES, value: "heros oba heros_eval" }
                 - name: PGPASSWORD
                   valueFrom: { secretKeyRef: { name: heros-postgres, key: password } }
               volumeMounts:

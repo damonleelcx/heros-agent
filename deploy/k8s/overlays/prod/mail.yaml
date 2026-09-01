@@ -1,4 +1,15 @@
-# The platform's mail relay, as a workload in this cluster.
+# The mail relay, as a workload in this cluster.
+#
+# ⚠️ READ THIS BEFORE THE REST OF THE FILE. The comments below repeatedly say "agentd". That workload has
+# been REMOVED. Everything they explain is still true — why the relay is in-cluster, why submission is
+# not exposed on the LoadBalancer, why the credential lives apart from the relay provider's key, why
+# `support@` is a real account rather than an alias — but the sender they describe is now whichever
+# tenant authenticates as `support@`, today herosd at eval.heros-agent.space.
+#
+# The names were deliberately not search-and-replaced: each of those comments records a decision and the
+# evidence for it, and rewriting the subject of a sentence whose reasoning you did not make is how the
+# reasoning quietly changes meaning. The one place it MATTERED — the NetworkPolicy at the foot of this
+# file, which actually decides who may connect — has been updated, and now names tenants by namespace.
 #
 # 🔴 WHY THIS IS IN THE PROD OVERLAY AND NOT THE BASE. The base ships NO mail server, and that is the
 # honest default: `internal/mailer` returns its operator-visible fallback when no SMTP is configured,
@@ -157,6 +168,11 @@ spec:
       remoteRef: { key: heros/platform, property: smtp-username }
     - secretKey: submission-password
       remoteRef: { key: heros/platform, property: smtp-password }
+    # The Opportunity Bridge service's own submission credential — a separate login on the same relay,
+    # seeded by the init container above. Its own value under heros/mail rather than a second copy of
+    # the one above, so either can be rotated or revoked without touching the other.
+    - secretKey: jobs-password
+      remoteRef: { key: heros/mail, property: jobs-password }
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -236,6 +252,26 @@ spec:
                 echo "account ${SUBMISSION_USER} already present — leaving it alone"
               fi
 
+              # A second submission account, for the Opportunity Bridge service in
+              # the `opportunity-bridge` namespace.
+              #
+              # ⚠️ ITS OWN LOGIN, NOT A COPY OF THE FIRST. Sharing the support@
+              # credential would mean one rotation to coordinate across two
+              # deployments and no way to revoke one without breaking the other.
+              # It sends as its own address; SPOOF_PROTECTION binds it to that,
+              # which is why the other service's From is `jobs@` and its
+              # Reply-To carries `support@` instead. Making support@ an alias of
+              # this account would also change where inbound support@ mail is
+              # DELIVERED — the same trade the comment above declines.
+              #
+              # Optional and idempotent: with no password in the secret this
+              # block does nothing, and the pod is unchanged.
+              if [ -n "${JOBS_PASSWORD:-}" ] && ! grep -q "^${JOBS_USER}|" "$acct"; then
+                hash="$(doveadm pw -s SHA512-CRYPT -p "$JOBS_PASSWORD")"
+                printf '%s|%s\n' "$JOBS_USER" "$hash" >> "$acct"
+                echo "seeded account ${JOBS_USER}"
+              fi
+
               for a in postmaster abuse dmarc; do
                 if ! grep -q "^${a}@heros-agent.space " "$virt"; then
                   printf '%s@heros-agent.space %s\n' "$a" "$SUBMISSION_USER" >> "$virt"
@@ -248,6 +284,11 @@ spec:
               valueFrom: { secretKeyRef: { name: heros-mail, key: submission-user } }
             - name: SUBMISSION_PASSWORD
               valueFrom: { secretKeyRef: { name: heros-mail, key: submission-password } }
+            - { name: JOBS_USER, value: jobs@heros-agent.space }
+            # `optional: true` so the relay still starts on a deployment with no second tenant; the
+            # seeding block above is a no-op when this is unset.
+            - name: JOBS_PASSWORD
+              valueFrom: { secretKeyRef: { name: heros-mail, key: jobs-password, optional: true } }
           volumeMounts:
             - { name: data, mountPath: /tmp/docker-mailserver, subPath: config }
       containers:
@@ -332,9 +373,22 @@ spec:
       app.kubernetes.io/name: mail
   policyTypes: [Ingress, Egress]
   ingress:
-    # Submission, from agentd and nothing else. A podSelector rather than an address: this is the
-    # whole reason the relay moved into the cluster.
-    - from: [{ podSelector: { matchLabels: { app.kubernetes.io/name: agentd } } }]
+    # Submission, from the named tenants and nothing else. A podSelector rather than an address: this is
+    # the whole reason the relay moved into the cluster.
+    #
+    # 🔴 Each entry ANDs its namespaceSelector with its podSelector by living in ONE list item. As two
+    # items they would be ORed — every pod in that namespace, plus every pod anywhere carrying the
+    # label. The two forms look identical in `kubectl get`.
+    #
+    # A tenant missing from this list does not fail at apply. It boots, serves, signs people in, and
+    # never delivers an invitation or a password reset.
+    - from:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: opportunity-bridge } }
+          podSelector: { matchLabels: { app.kubernetes.io/name: opportunity-bridge } }
+      ports: [{ protocol: TCP, port: 587 }]
+    - from:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: heros-eval } }
+          podSelector: { matchLabels: { app.kubernetes.io/name: heros-eval } }
       ports: [{ protocol: TCP, port: 587 }]
     # ⚠️ 25 and 993 arrive via k3s's svclb, which SNATs from outside the pod network, so there is no
     # podSelector that describes the sender. Inbound 25 is genuinely from the whole internet — that is
