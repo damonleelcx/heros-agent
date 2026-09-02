@@ -10,12 +10,17 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	migrations "github.com/heros-foreal/heros/db/migrations"
 	"github.com/heros-foreal/heros/internal/auth"
+	"github.com/heros-foreal/heros/internal/bounds"
+	"github.com/heros-foreal/heros/internal/intake"
 	"github.com/heros-foreal/heros/internal/mailer"
+	"github.com/heros-foreal/heros/internal/memory"
+	"github.com/heros-foreal/heros/internal/planner"
 	"github.com/heros-foreal/heros/internal/store"
 	"github.com/heros-foreal/heros/internal/tenancy"
 )
@@ -116,6 +121,29 @@ func newHarness(t *testing.T) *harness {
 	m := &captureMailer{}
 	s := NewServer()
 	s.Root = store.NewMemory()
+	// 🔴 The REAL Postgres episode/turn store, not a nil and not a substitute.
+	//
+	// It was nil here, and `Server.record` returns early when it is — so every transcript test passed
+	// vacuously by recording nothing, and the SQL that production runs was never exercised by an API
+	// test at all. That is the same shape as the bug `buildWorker` exists to prevent: the object under
+	// test and the object that ships being assembled by different code.
+	s.Episodes = memory.NewPG(db)
+	// 🔴 Ceilings and planners, matching what `cmd/herosd` assembles.
+	//
+	// They were unset, which meant `startGoal` could never admit a goal here — so every test that got
+	// as far as starting a run saw "not_admitted" and the whole run-starting path was untestable from
+	// the API. An unset ceiling is not a permissive default; `bounds` refuses it deliberately. Same
+	// shape as the nil episode store above: the object under test differing from the object that ships.
+	s.Ceilings = bounds.Ceilings{
+		MaxIterations: 200, MaxTasks: 60, MaxAttemptsPerTask: 2, MaxToolCalls: 200,
+		MaxTokens: 400_000, MaxCostCents: 100, MaxWallClock: 20 * time.Minute, MaxSpawnDepth: 3,
+	}
+	plans, err := planner.Default()
+	if err != nil {
+		t.Fatalf("planners: %v", err)
+	}
+	s.Planners = plans
+	s.Resolver = intake.NewResolver(t.TempDir())
 	s.Auth = a
 	s.DefaultTenant = tenant
 	s.Mail = m

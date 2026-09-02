@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -29,6 +30,10 @@ type Mem struct {
 	knowledge map[string][]Knowledge // keyed tenant\x00subject
 	prefs     map[string]map[string]Preference
 	nextSum   int64
+	// turns holds conversation transcripts, keyed tenant\x00conversation. turnOrder records the write
+	// order across all conversations so LatestConversation can answer without consulting timestamps.
+	turns     map[string][]Turn
+	turnOrder []string
 	// tenantOf records which tenant a goal's history belongs to, first writer wins.
 	//
 	// 🔴 Only the SCOPED view reads or writes this. Postgres answers the same question from `goals`,
@@ -41,6 +46,7 @@ func NewMem() *Mem {
 	return &Mem{
 		episodes: map[string][]Episode{}, summaries: map[string][]Summary{},
 		knowledge: map[string][]Knowledge{}, prefs: map[string]map[string]Preference{},
+		turns:    map[string][]Turn{},
 		tenantOf: map[string]string{},
 	}
 }
@@ -346,6 +352,144 @@ func (p *PG) Preferences(tenant string) ([]Preference, error) {
 		out = append(out, pr)
 	}
 	return out, rows.Err()
+}
+
+// ── conversation ─────────────────────────────────────────────────────────────────────────────────
+
+// AppendTurn assigns the next sequence for this conversation and writes the row.
+//
+// 🔴 The same advisory-lock reasoning as AppendEpisode, for the same reason and with the same bug
+// waiting behind the naive version: `COALESCE(MAX(seq),0)+1` inside the INSERT takes no lock that stops
+// another transaction reading the same maximum. Two browser tabs on one conversation are exactly the
+// concurrency that produces it. The lock is on the CONVERSATION, so one busy thread does not serialise
+// every other thread in the deployment.
+func (p *PG) AppendTurn(t Turn) (int64, error) {
+	if err := ValidateTurn(t); err != nil {
+		return 0, err
+	}
+	tx, err := p.db.BeginTx(context.Background(), nil)
+	if err != nil {
+		return 0, fmt.Errorf("memory: append turn: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// 🔴 The TWO-KEY form, locking on (tenant, conversation) as a pair rather than on a joined string.
+	//
+	// The obvious version — `hashtext(tenant || sep || conversation)` — has to choose a separator, and
+	// the separator this package uses everywhere else in Go is "\x00" (see subjectKey). Postgres TEXT
+	// cannot hold a NUL byte, so that version does not fail at a boundary or under load: it fails on
+	// the FIRST call, with `invalid byte sequence for encoding "UTF8"`. Caught by the Postgres leg of
+	// the conformance suite, which is the whole reason it exists.
+	//
+	// See workflow/CI/bugfix/20260901-heros-console-was-never-a-conversation.md
+	// Fenced by TestTurnsAreOrderedByTheStore on the Postgres leg.
+	//
+	// Two keys also removes the question entirely: there is no separator to collide across, so a tenant
+	// whose id ends where a conversation id begins cannot share a lock with a different pair.
+	if _, err := tx.ExecContext(context.Background(),
+		`SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))`,
+		t.Tenant, t.ConversationID); err != nil {
+		return 0, fmt.Errorf("memory: locking conversation %q: %w", t.ConversationID, err)
+	}
+	var seq int64
+	if err := tx.QueryRowContext(context.Background(), `
+		INSERT INTO conversation_turns
+		  (tenant, conversation_id, seq, role, body, kind, capability, decided_by, cost_micro_cents, at)
+		SELECT $1, $2, COALESCE(MAX(seq), 0) + 1, $3, $4, $5, $6, $7, $8, $9
+		  FROM conversation_turns WHERE tenant = $1 AND conversation_id = $2
+		RETURNING seq`,
+		t.Tenant, t.ConversationID, string(t.Role), t.Body, t.Kind, t.Capability,
+		string(t.Decided), t.CostMicroCents, nz(t.At)).Scan(&seq); err != nil {
+		return 0, fmt.Errorf("memory: append turn: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("memory: append turn: %w", err)
+	}
+	return seq, nil
+}
+
+const turnColumns = `SELECT tenant, conversation_id, seq, role, body, kind, capability,
+	decided_by, cost_micro_cents, at FROM conversation_turns`
+
+func scanTurns(rows *sql.Rows) ([]Turn, error) {
+	defer rows.Close()
+	var out []Turn
+	for rows.Next() {
+		var t Turn
+		var role, decided string
+		if err := rows.Scan(&t.Tenant, &t.ConversationID, &t.Seq, &role, &t.Body, &t.Kind,
+			&t.Capability, &decided, &t.CostMicroCents, &t.At); err != nil {
+			return nil, err
+		}
+		t.Role, t.Decided = TurnRole(role), Decider(decided)
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+func (p *PG) Turns(tenant, conversationID string) ([]Turn, error) {
+	rows, err := p.db.QueryContext(context.Background(),
+		turnColumns+` WHERE tenant = $1 AND conversation_id = $2 ORDER BY seq`, tenant, conversationID)
+	if err != nil {
+		return nil, fmt.Errorf("memory: turns: %w", err)
+	}
+	return scanTurns(rows)
+}
+
+func (p *PG) LatestConversation(tenant string) (string, bool, error) {
+	var id string
+	// Tie-broken by conversation_id so two turns written in the same instant resolve the same way on
+	// every call, rather than the answer flickering between two threads on consecutive refreshes.
+	err := p.db.QueryRowContext(context.Background(), `
+		SELECT conversation_id FROM conversation_turns WHERE tenant = $1
+		ORDER BY at DESC, conversation_id DESC LIMIT 1`, tenant).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("memory: latest conversation: %w", err)
+	}
+	return id, true, nil
+}
+
+func (m *Mem) AppendTurn(t Turn) (int64, error) {
+	if err := ValidateTurn(t); err != nil {
+		return 0, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	// 🔴 Assigned here, under the lock, for the reason AppendEpisode states: two writers choosing their
+	// own numbers is how the order of a conversation stops being one.
+	k := subjectKey(t.Tenant, t.ConversationID)
+	t.Seq = int64(len(m.turns[k])) + 1
+	t.At = nz(t.At)
+	m.turns[k] = append(m.turns[k], t)
+	m.turnOrder = append(m.turnOrder, k)
+	return t.Seq, nil
+}
+
+func (m *Mem) Turns(tenant, conversationID string) ([]Turn, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]Turn(nil), m.turns[subjectKey(tenant, conversationID)]...), nil
+}
+
+// LatestConversation answers from write ORDER rather than from timestamps.
+//
+// 🔴 Deliberately different from the Postgres implementation, and the conformance suite is what keeps
+// them honest. Turns written in one test run share a wall-clock instant at this resolution, so ordering
+// by `At` here would return an arbitrary one of them — a difference between the two stores that would
+// show up as a flaky test rather than as the bug it is.
+func (m *Mem) LatestConversation(tenant string) (string, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	prefix := tenant + "\x00"
+	for i := len(m.turnOrder) - 1; i >= 0; i-- {
+		if k := m.turnOrder[i]; strings.HasPrefix(k, prefix) {
+			return strings.TrimPrefix(k, prefix), true, nil
+		}
+	}
+	return "", false, nil
 }
 
 func nz(t time.Time) time.Time {

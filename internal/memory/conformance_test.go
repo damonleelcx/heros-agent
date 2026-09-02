@@ -13,6 +13,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	migrations "github.com/heros-foreal/heros/db/migrations"
+	"github.com/heros-foreal/heros/internal/auth"
 	"github.com/heros-foreal/heros/internal/bounds"
 	"github.com/heros-foreal/heros/internal/goal"
 	"github.com/heros-foreal/heros/internal/intent"
@@ -72,6 +73,18 @@ func newPG(t *testing.T) (memory.Store, string) {
 	t.Cleanup(func() { _ = db.Close() })
 	if err := migrations.Apply(context.Background(), db); err != nil {
 		t.Fatalf("migrate: %v", err)
+	}
+	// 🔴 The organization row has to exist before a turn can be written: `conversation_turns.tenant`
+	// carries a foreign key to `tenants(id)` ON DELETE CASCADE, so deleting an organization takes its
+	// transcripts with it. Verbatim customer sentences are the most sensitive thing in this package,
+	// and they must not outlive the org that produced them.
+	//
+	// ⚠️ `goals`, `knowledge` and `preferences` have a bare `tenant TEXT` with NO such key — they were
+	// written in 0001/0002, before `tenants` existed in 0005. Two conventions contradict here and this
+	// follows the newer one; the older tables keep their transcripts-equivalent alive after a deletion
+	// and are worth a separate look.
+	if err := auth.NewStore(db).CreateTenant(context.Background(), conformanceTenant, "Conformance"); err != nil {
+		t.Fatalf("create tenant: %v", err)
 	}
 	id := goal.ID(uniqueID("g"))
 	now := time.Now().UTC()
@@ -300,6 +313,184 @@ func TestCompressionKeepsTheSourceAndRefusesFailures(t *testing.T) {
 				if e.SummarisedBy == 0 {
 					t.Errorf("episode %d is not marked as covered", e.Seq)
 				}
+			}
+		})
+	}
+}
+
+// ── conversation ─────────────────────────────────────────────────────────────────────────────────
+
+func said(conv, body string) memory.Turn {
+	return memory.Turn{ConversationID: conv, Role: memory.TurnUser, Body: body,
+		At: time.Now().UTC().Truncate(time.Millisecond)}
+}
+
+// TestTurnsAreOrderedByTheStore.
+//
+// The same guarantee as episodes, for the same reason: two browser tabs posting to one conversation
+// must not choose their own sequence numbers. The order of a conversation is the whole point of keeping
+// one — an agent that reads its history out of order answers a question nobody asked.
+func TestTurnsAreOrderedByTheStore(t *testing.T) {
+	for _, im := range implementations() {
+		t.Run(im.name, func(t *testing.T) {
+			s, _ := im.open(t)
+			conv := uniqueID("c")
+			for i := 1; i <= 5; i++ {
+				got, err := s.AppendTurn(said(conv, fmt.Sprintf("turn %d", i)))
+				if err != nil {
+					t.Fatalf("append: %v", err)
+				}
+				if got != int64(i) {
+					t.Fatalf("append %d returned seq %d", i, got)
+				}
+			}
+			ts, err := s.Turns(conformanceTenant, conv)
+			if err != nil {
+				t.Fatalf("turns: %v", err)
+			}
+			if len(ts) != 5 {
+				t.Fatalf("%d turns, want 5", len(ts))
+			}
+			for i, tn := range ts {
+				if tn.Seq != int64(i+1) {
+					t.Errorf("turn %d has seq %d", i, tn.Seq)
+				}
+				if want := fmt.Sprintf("turn %d", i+1); tn.Body != want {
+					t.Errorf("turn %d reads %q, want %q — the transcript is out of order", i, tn.Body, want)
+				}
+			}
+		})
+	}
+}
+
+// TestConcurrentTurnWritersGetDistinctSequences. Run under -race.
+//
+// 🔴 This is the test that would have caught the naive `COALESCE(MAX(seq),0)+1`: under READ COMMITTED
+// two transactions read the same maximum and the second insert is rejected by the primary key. Two tabs
+// on one conversation is not a hypothetical concurrency — it is the normal way people use a browser.
+func TestConcurrentTurnWritersGetDistinctSequences(t *testing.T) {
+	for _, im := range implementations() {
+		t.Run(im.name, func(t *testing.T) {
+			s, _ := im.open(t)
+			conv := uniqueID("c")
+			const writers = 16
+			var wg sync.WaitGroup
+			seqs := make([]int64, writers)
+			errs := make([]error, writers)
+			for i := 0; i < writers; i++ {
+				wg.Add(1)
+				go func(i int) {
+					defer wg.Done()
+					seqs[i], errs[i] = s.AppendTurn(said(conv, fmt.Sprintf("concurrent %d", i)))
+				}(i)
+			}
+			wg.Wait()
+			seen := map[int64]bool{}
+			for i := range seqs {
+				if errs[i] != nil {
+					t.Fatalf("writer %d: %v", i, errs[i])
+				}
+				if seen[seqs[i]] {
+					t.Fatalf("sequence %d was handed out twice", seqs[i])
+				}
+				seen[seqs[i]] = true
+			}
+			if len(seen) != writers {
+				t.Fatalf("%d distinct sequences from %d writers", len(seen), writers)
+			}
+		})
+	}
+}
+
+// TestATurnNeedsAConversation.
+//
+// 🔴 An empty conversation id is REFUSED rather than defaulted. A default — "", "default", whatever —
+// is a single shared thread that every tab in every organization appends to, and the failure is silent:
+// the transcript simply grows sentences nobody in this browser typed.
+func TestATurnNeedsAConversation(t *testing.T) {
+	for _, im := range implementations() {
+		t.Run(im.name, func(t *testing.T) {
+			s, _ := im.open(t)
+			if _, err := s.AppendTurn(said("", "orphan")); !errors.Is(err, memory.ErrNoConversation) {
+				t.Fatalf("appending a turn with no conversation returned %v, want ErrNoConversation", err)
+			}
+			if _, err := s.AppendTurn(memory.Turn{
+				ConversationID: uniqueID("c"), Role: "narrator", Body: "hm",
+			}); !errors.Is(err, memory.ErrBadTurnRole) {
+				t.Fatalf("appending a turn with an unknown role returned %v, want ErrBadTurnRole", err)
+			}
+		})
+	}
+}
+
+// TestATurnRemembersHowItWasDecided.
+//
+// The reply path degrades: when the model is unavailable the deterministic router answers instead, and
+// the two are indistinguishable in the rendered transcript. If `decided_by` and the cost do not survive
+// a round trip, "why did it answer that?" has no answer and an evaluation cannot exclude degraded turns
+// from the population it is measuring.
+func TestATurnRemembersHowItWasDecided(t *testing.T) {
+	for _, im := range implementations() {
+		t.Run(im.name, func(t *testing.T) {
+			s, _ := im.open(t)
+			conv := uniqueID("c")
+			want := memory.Turn{
+				ConversationID: conv, Role: memory.TurnAgent, Body: "Nothing has run yet.",
+				Kind: "answer", Capability: "run_history", Decided: memory.DecidedByFallback,
+				CostMicroCents: 1270, At: time.Now().UTC().Truncate(time.Millisecond),
+			}
+			if _, err := s.AppendTurn(want); err != nil {
+				t.Fatalf("append: %v", err)
+			}
+			ts, err := s.Turns(conformanceTenant, conv)
+			if err != nil || len(ts) != 1 {
+				t.Fatalf("turns: %v (%d rows)", err, len(ts))
+			}
+			got := ts[0]
+			if got.Role != want.Role || got.Kind != want.Kind || got.Capability != want.Capability {
+				t.Errorf("shape did not round-trip: %+v", got)
+			}
+			if got.Decided != memory.DecidedByFallback {
+				t.Errorf("decided_by round-tripped as %q, want %q — a degraded turn that reads as a "+
+					"modelled one is worse than no record", got.Decided, memory.DecidedByFallback)
+			}
+			if got.CostMicroCents != 1270 {
+				t.Errorf("cost round-tripped as %d micro-cents, want 1270", got.CostMicroCents)
+			}
+		})
+	}
+}
+
+// TestLatestConversationFindsTheMostRecentThread.
+//
+// What a reconnecting browser calls to decide whether to resume or to start a new thread. Getting it
+// wrong is not an error anybody sees: the person simply gets an empty console and starts again beside
+// the conversation they were having.
+func TestLatestConversationFindsTheMostRecentThread(t *testing.T) {
+	for _, im := range implementations() {
+		t.Run(im.name, func(t *testing.T) {
+			s, _ := im.open(t)
+			if _, ok, err := s.LatestConversation(conformanceTenant); err != nil {
+				t.Fatalf("latest on an empty store: %v", err)
+			} else if ok {
+				// Not fatal for the shared-database Postgres leg, where earlier tests have written.
+				t.Logf("store was not empty at the start of this test")
+			}
+			first, second := uniqueID("c"), uniqueID("c")
+			if _, err := s.AppendTurn(said(first, "older")); err != nil {
+				t.Fatalf("append: %v", err)
+			}
+			// Postgres orders by `at`, so the two turns must be separable at timestamp resolution.
+			time.Sleep(2 * time.Millisecond)
+			if _, err := s.AppendTurn(said(second, "newer")); err != nil {
+				t.Fatalf("append: %v", err)
+			}
+			got, ok, err := s.LatestConversation(conformanceTenant)
+			if err != nil || !ok {
+				t.Fatalf("latest: %v (found=%v)", err, ok)
+			}
+			if got != second {
+				t.Errorf("latest conversation is %q, want %q", got, second)
 			}
 		})
 	}

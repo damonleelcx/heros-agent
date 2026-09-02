@@ -149,7 +149,72 @@ type Preference struct {
 	At         time.Time
 }
 
+// ── conversation ─────────────────────────────────────────────────────────────────────────────────
+
+// TurnRole is who spoke. A closed set of two: there is no third party to a conversation, and a role
+// the renderer does not recognise would be drawn as whichever side the default happens to be.
+type TurnRole string
+
+const (
+	TurnUser  TurnRole = "user"
+	TurnAgent TurnRole = "agent"
+)
+
+// Valid reports membership. Checked at write, so the database CHECK and the Go type agree by
+// construction rather than by both being remembered.
+func (r TurnRole) Valid() bool { return r == TurnUser || r == TurnAgent }
+
+// Decider says HOW an agent turn was produced.
+//
+// # 🔴 Why this is recorded rather than inferred
+//
+// Understanding is a model call now, and a model call can fail — rate limited, timed out, or answering
+// with JSON that will not parse. The product requirement is that the console keeps working by falling
+// back to the deterministic keyword router, which means two turns that read identically in the
+// transcript may have come from two completely different mechanisms.
+//
+// Without this, "why did it answer that?" is unanswerable, and an evaluation that cannot exclude
+// degraded turns is measuring a population it did not intend to measure.
+type Decider string
+
+const (
+	// DecidedByModel — the agent loop ran and chose this reply.
+	DecidedByModel Decider = "model"
+	// DecidedByFallback — the model was unavailable, so the deterministic router decided. The reply is
+	// today's keyword behaviour, and the person is told the surface is degraded.
+	DecidedByFallback Decider = "keyword-fallback"
+	// DecidedByFloor — the deterministic safety floor answered before any model was consulted: an
+	// unbounded request, or a topic that belongs to another surface. 🔴 These never reach the model by
+	// design; see internal/converse.
+	DecidedByFloor Decider = "floor"
+)
+
+// Turn is one utterance in one conversation.
+type Turn struct {
+	Tenant         string
+	ConversationID string
+	// Seq orders turns within a conversation. Assigned by the store, never by the caller: two tabs
+	// posting at once would otherwise choose the same number.
+	Seq  int64
+	Role TurnRole
+	Body string
+	// Kind mirrors the API response shape ("say", "answer", "goal", "confirm", …) so a replayed
+	// transcript renders as what the person originally saw rather than as flat text that drops the
+	// cards. Empty on a user turn, which has no shape but its words.
+	Kind string
+	// Capability is the named intent this turn resolved to, empty when the agent simply talked.
+	Capability string
+	Decided    Decider
+	// CostMicroCents is what this turn spent. 🔴 Micro-cents, matching provider.MicroCentsPerCent: a
+	// turn costs a small fraction of a cent, and a ledger in whole cents records every one as zero.
+	CostMicroCents int64
+	At             time.Time
+}
+
 var (
+	ErrNoConversation = errors.New("memory: turn has no conversation")
+	ErrBadTurnRole    = errors.New("memory: turn has an unknown role")
+
 	ErrNoEvidence     = errors.New("memory: knowledge promoted without citing evidence")
 	ErrNotPromotable  = errors.New("memory: episode is not a valid basis for a claim")
 	ErrNoAuthor       = errors.New("memory: preference has no human author")
@@ -176,6 +241,22 @@ func ValidatePreference(p Preference) error {
 	}
 	if p.Key == "" {
 		return fmt.Errorf("memory: preference has no key")
+	}
+	return nil
+}
+
+// ValidateTurn refuses a turn that cannot be ordered or attributed.
+//
+// 🔴 An empty conversation id is refused rather than defaulted to something like "default". A shared
+// implicit conversation is one where every tenant's tabs append to the same thread, and the failure is
+// silent: the transcript simply grows sentences nobody in this browser typed.
+func ValidateTurn(t Turn) error {
+	if strings.TrimSpace(t.ConversationID) == "" {
+		return ErrNoConversation
+	}
+	if !t.Role.Valid() {
+		return fmt.Errorf("%w: %q — a turn is spoken by %q or %q", ErrBadTurnRole, t.Role,
+			TurnUser, TurnAgent)
 	}
 	return nil
 }
@@ -296,4 +377,20 @@ type Store interface {
 	// Preferences returns a tenant's preferences. On a scoped store the argument is ignored, as with
 	// KnowledgeFor.
 	Preferences(tenant string) ([]Preference, error)
+
+	// AppendTurn assigns the next sequence number within the conversation and stores the turn.
+	AppendTurn(t Turn) (int64, error)
+	// Turns returns one conversation's turns in sequence order, oldest first. On a scoped store the
+	// tenant argument is ignored, as with KnowledgeFor and Preferences.
+	//
+	// 🔴 A conversation id does NOT imply a tenant the way a goal id does. Postgres could resolve one
+	// through `goals`, but there is no conversation owner table to join and the in-memory store has
+	// nothing to ask at all — so the tenant travels with the call and the scoped view overrides it.
+	Turns(tenant, conversationID string) ([]Turn, error)
+	// LatestConversation returns the id of the conversation this tenant spoke in most recently, so a
+	// reconnecting browser can resume rather than silently start a second thread beside the first.
+	//
+	// 🔴 Its own method rather than "read all turns and sort": the alternative reads every turn this
+	// tenant has ever spoken in order to discard all but one of them.
+	LatestConversation(tenant string) (string, bool, error)
 }

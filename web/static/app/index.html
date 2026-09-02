@@ -182,6 +182,13 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 }
 .chip:hover{color:var(--accent);border-color:#2ecfa855;background:#2ecfa812}
 .chip:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.chip[disabled]{opacity:.45;cursor:default}
+.chip[disabled]:hover{color:var(--ink-muted);border-color:var(--border);background:var(--secondary)}
+/* The confirm row reuses .chip rather than introducing a button style. 🔴 Only `.go` is tinted: the
+   affirmative is the one that spends money or writes, so it is the one that should be legible as a
+   commitment rather than the one that looks easiest to press. */
+.confirm-row{display:flex;gap:.5rem;flex-wrap:wrap}
+.confirm-row .go{color:var(--accent);border-color:#2ecfa855;background:#2ecfa812}
 .field{
   display:flex;gap:.75rem;align-items:center;background:var(--card);
   border:1px solid var(--border-strong);border-radius:var(--radius);padding:.7rem .9rem;
@@ -329,6 +336,21 @@ async function api(path, body){
   return r.json();
 }
 
+/* ── the conversation this tab is in ──────────────────────────────────────
+   🔴 The id is resolved from the SERVER, not minted here and not read from localStorage.
+
+   The server already knows which thread this organization spoke in most recently, so asking it is the
+   only answer that is right on a second device, in a second tab, and after clearing site data. A
+   locally-minted id is right exactly once — on the machine that minted it — and silently forks the
+   conversation everywhere else, which reads as "it forgot me" rather than as a bug.
+
+   Minting only happens when the server says there is no thread yet. */
+let conversationID = null;
+
+function newConversationID(){
+  return 'c-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+}
+
 /* ── subject ─────────────────────────────────────────────────────────────── */
 
 let subjectLoaded = false;
@@ -364,10 +386,16 @@ function renderSubject(s){
   t.appendChild(card); scroll();
 
   if (s.is_agent) {
-    say(t, `<p>So: ask me about any axis and I will show you the code. That is a read, and it costs you
-      nothing.</p>
-      <p style="color:var(--ink-muted)">Or ask me what is weak, and I will write down the plan and its
-      ceiling before I spend a cent of it.</p>`);
+    /* ⚠️ This used to end "That is a read, and it costs you nothing." It was true when a keyword table
+       did the routing and is not any more: reading the question is a model call. The distinction still
+       worth drawing is between a QUESTION and a RUN — one is answered from what was already parsed and
+       finishes, the other draws against a ceiling — so the sentence was corrected rather than dropped.
+       A console that quietly starts charging for something it described as free is the worst possible
+       version of this change, in a product whose whole pitch is telling people true things. */
+    say(t, `<p>So: ask me about any axis and I will show you the code. That is a read — it answers from
+      what I already parsed, and nothing keeps running afterwards.</p>
+      <p style="color:var(--ink-muted)">Or ask me what is weak, and I will tell you what I understood
+      and what it may cost before anything starts.</p>`);
   }
 }
 
@@ -444,6 +472,58 @@ function renderRedirect(t, r){
     <code>${esc(r.surface)}</code></strong>, which handles ${esc(r.does)}.</p>
     <p style="color:var(--ink-muted)">Connecting a repository creates a standing read grant — a credential
     I use when you are not here — and you have to see that disclosure before it is created, not after.</p>`);
+}
+
+/* ── the agent talking ─────────────────────────────────────────────────────
+   `say` and `ask` are both prose and are drawn the same way. They are kept as two shapes on the wire
+   because they are different acts — one ends a turn, the other is waiting for an answer — and the
+   transcript has to be able to tell them apart later even though the reader cannot. */
+function renderSay(t, r){
+  say(t, `<p>${esc(r.text)}</p>`);
+}
+
+/* ── asking before spending or writing ─────────────────────────────────────
+   🔴 The card shows the agent's OWN words for what it understood, not the capability's label. A person
+   confirming "look at my repository and tell me what is weak" is confirming a category they cannot
+   check; confirming "you want me to look at how this agent is prompted" is something they can catch as
+   wrong. That is the entire value of asking. */
+function renderConfirm(t, r){
+  const cost = r.spends
+    ? `<span class="badge b-warn">costs money · up to $${((r.ceiling_cents||0)/100).toFixed(2)}</span>`
+    : '';
+  const writes = r.writes ? `<span class="badge b-warn">changes your repository</span>` : '';
+  const c = el(`<div class="card"><div class="card-head">
+      <span class="card-title"><span class="k">confirm</span> ${esc(r.intent)}${
+        r.scope ? ' · ' + esc(r.scope) : ''}</span>
+      <span class="spacer"></span>${cost}${writes}</div>
+    <div class="card-body">
+      <p style="margin:0 0 .7rem">${esc(r.text)}</p>
+      <div class="confirm-row">
+        <button class="chip go">Go ahead</button>
+        <button class="chip no">Not that</button>
+      </div>
+    </div></div>`);
+  t.appendChild(c); scroll();
+
+  const decide = async (approve, btn) => {
+    c.querySelectorAll('button').forEach(b => b.disabled = true);
+    btn.textContent = approve ? 'starting…' : 'left alone';
+    try {
+      const out = await api('/api/confirm', {action_id: r.action_id, approve});
+      const t2 = turn('heros');
+      switch (out.kind) {
+        case 'goal':     renderGoal(t2, out); break;
+        case 'proposal': renderProposal(t2, out); break;
+        case 'answer':   renderAnswer(t2, out); break;
+        case 'refusal':  t2.remove(); renderRefusal(turn('heros'), out); break;
+        default:         renderSay(t2, out);
+      }
+    } catch (err) {
+      say(turn('heros'), `<p style="color:var(--bad)">${esc(err.message)}</p>`);
+    }
+  };
+  c.querySelector('.go').onclick = e => decide(true, e.target);
+  c.querySelector('.no').onclick = e => decide(false, e.target);
 }
 
 function renderAbstain(t, r){
@@ -691,8 +771,12 @@ async function ask(text){
 
   const t = turn('heros');
   try {
-    const r = await api('/api/ask', {text});
+    if (!conversationID) conversationID = newConversationID();
+    const r = await api('/api/ask', {text, conversation_id: conversationID});
     switch (r.kind) {
+      case 'say':
+      case 'ask':      renderSay(t, r); break;
+      case 'confirm':  t.remove(); renderConfirm(turn('heros'), r); break;
       case 'answer':   renderAnswer(t, r); break;
       case 'goal':     renderGoal(t, r); break;
       case 'proposal': renderProposal(t, r); break;
@@ -1372,23 +1456,59 @@ async function confirmAddress(token){
 /* ── opening ─────────────────────────────────────────────────────────────── */
 /* ── rebuilding the thread ────────────────────────────────────────────────
    🔴 A refresh used to empty the conversation: the stream lived in browser memory and nothing was ever
-   read back. Runs are durable — they are rows — so they come back.
+   read back. Runs came back, because runs are rows.
 
-   What does NOT come back, and is said out loud rather than quietly omitted: answers to questions that
-   cost nothing (they are computed from the index on demand and never written down), refusals, and
-   sentences that did not route. A thread that silently restores half of what was said, and looks
-   complete, is worse than one that states its own shape. */
-async function replayHistory(){
+   ⚠️ This comment used to go on to say that answers costing nothing were NOT restored — that they were
+   read off the index each time and never written down, so there was nothing to bring back. That was
+   true, and it was honest about a real hole rather than hiding it. It is no longer true: every
+   sentence and every reply is now a row in `conversation_turns`, so the whole thread returns.
+
+   Two sources, deliberately, because they have two lifetimes. A sentence is final the moment it is
+   said, so it replays verbatim from the transcript. A run keeps changing after the sentence that
+   started it, so its card is rebuilt from the durable goal record — never from a copy frozen into the
+   transcript, which would go stale against the run it describes. */
+async function replayTranscript(){
+  let c;
+  try { c = await api('/api/conversation'); } catch { return false; }
+  if (!c || !c.conversation_id) return false;
+
+  /* Adopt the server's thread. This is what makes a second tab, a second device and a cleared cache
+     all continue the SAME conversation instead of quietly starting new ones. */
+  conversationID = c.conversation_id;
+  const turns = c.turns || [];
+  if (!turns.length) return false;
+
+  for (const tn of turns) {
+    if (tn.role === 'user') {
+      turn('you').appendChild(el(`<div class="ask">${esc(tn.body)}</div>`));
+      continue;
+    }
+    const t = turn('heros');
+    /* 🔴 A replayed turn is labelled when it was NOT reasoned about. A reply the keyword fallback
+       produced while the model was unavailable reads exactly like one the agent thought about, and a
+       person re-reading the thread has no other way to tell. */
+    /* 🔴 Only a turn the model could NOT answer is labelled. Marking every turn would make the label
+       meaningless, and marking none would leave a person unable to tell a reasoned answer from one the
+       keyword fallback produced during an outage. */
+    const degraded = tn.decided === 'keyword-fallback'
+      ? `<p style="color:var(--ink-muted);font-size:.82rem">answered without the model, from keywords
+         alone</p>` : '';
+    say(t, `<p>${esc(tn.body)}</p>${degraded}`);
+  }
+  return true;
+}
+
+async function replayRuns(said){
   let h;
-  try { h = await api('/api/history'); } catch { return false; }
+  try { h = await api('/api/history'); } catch { return said; }
   const goals = (h && h.goals) || [];
-  if (!goals.length) return false;
+  if (!goals.length) return said;
 
   const t = turn('heros');
-  say(t, `<p>Picking up where we left off — here ${goals.length === 1 ? 'is the run' : 'are the '
-    + goals.length + ' runs'} from this organization.</p>
-    <p style="color:var(--ink-muted)">Questions I answered for free are not in here. I do not write those
-    down: they are read straight off the index each time, so there is nothing to restore.</p>`);
+  say(t, `<p>${said ? 'And here' : 'Picking up where we left off — here'} ${
+    goals.length === 1 ? 'is the run' : 'are the ' + goals.length + ' runs'} from this organization.</p>
+    <p style="color:var(--ink-muted)">These are rebuilt from the run record rather than from the
+    transcript, so what you see is where each run actually stands now.</p>`);
 
   for (const g of goals) {
     const u = turn('you');
@@ -1409,11 +1529,19 @@ async function replayHistory(){
 }
 
 async function start(){
+  /* 🔴 The transcript is replayed BEFORE the subject is looked at, and regardless of whether one is
+     loaded. It used to happen only on the branch where a repository was already there, so a person who
+     had been talking without loading one came back to an empty console — and, worse, to a NEW thread,
+     because adopting the server's conversation id is part of replaying it. The conversation is not a
+     property of having a repository. */
+  const resumed = await replayTranscript();
+
   const t = turn('heros');
   try {
     const s = await api('/api/subject');
     if (s.loaded === false) {
       subjEl.textContent = 'no repository loaded';
+      if (resumed) { t.remove(); return; }
       say(t, `<p><strong>I am Heros.</strong> I read agents — yours, if you point me at one — and tell
         you what is weak in it.</p>
         <p>Give me a repository and I will start by reading it: a GitHub link
@@ -1424,7 +1552,7 @@ async function start(){
         guess at it — there are nineteen things I do, and I will show you the list any time you ask.</p>`);
     } else {
       t.remove();
-      await replayHistory();
+      await replayRuns(resumed);
       renderSubject(s);
     }
   } catch (e) {

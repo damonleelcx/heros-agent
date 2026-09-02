@@ -69,22 +69,33 @@ func TestAFailedSignUpLeavesNoOrganizationBehind(t *testing.T) {
 	if _, _, err := s.SignUp(ctx, "Original", email, "a-long-enough-password"); err != nil {
 		t.Fatalf("first sign up: %v", err)
 	}
-	var before int
-	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM tenants`).Scan(&before); err != nil {
-		t.Fatal(err)
-	}
+	// 🔴 The doomed organization is named UNIQUELY, and the assertion counts only rows with that name.
+	//
+	// This used to snapshot `SELECT count(*) FROM tenants` before and after. That is a whole-table count
+	// on a database every package shares, and `go test ./...` runs packages CONCURRENTLY — so any other
+	// suite creating an organization between the two reads made this test report an orphan that did not
+	// exist. It went red the moment `internal/memory` started creating tenant rows, which it must now do
+	// because `conversation_turns` carries a foreign key to `tenants(id)`.
+	//
+	// The lesson was already written down next door, in memory/isolation_test.go: any assertion that
+	// COUNTS rows in a shared database needs a key nothing else has used. See
+	// workflow/CI/bugfix/20260901-heros-console-was-never-a-conversation.md. A count of one specific name
+	// is also a sharper statement of the property — "this failed sign-up left nothing" rather than "the
+	// total did not move".
+	doomed := "Doomed-" + email
 	// This one fails on the duplicate address, AFTER its tenant row has been inserted.
-	if _, _, err := s.SignUp(ctx, "Doomed", email, "a-long-enough-password"); !errors.Is(err, ErrEmailTaken) {
+	if _, _, err := s.SignUp(ctx, doomed, email, "a-long-enough-password"); !errors.Is(err, ErrEmailTaken) {
 		t.Fatalf("expected ErrEmailTaken, got %v", err)
 	}
-	var after int
-	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM tenants`).Scan(&after); err != nil {
+	var left int
+	if err := db.QueryRowContext(ctx,
+		`SELECT count(*) FROM tenants WHERE name = $1`, doomed).Scan(&left); err != nil {
 		t.Fatal(err)
 	}
-	if after != before {
+	if left != 0 {
 		t.Errorf("a failed sign-up left %d organization(s) behind. The tenant row is written before the "+
 			"user row, so without one transaction a duplicate address creates an organization nobody "+
-			"can ever enter", after-before)
+			"can ever enter", left)
 	}
 }
 

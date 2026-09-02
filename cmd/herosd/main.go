@@ -22,11 +22,13 @@ import (
 	"github.com/heros-foreal/heros/internal/autonomy"
 	"github.com/heros-foreal/heros/internal/bounds"
 	"github.com/heros-foreal/heros/internal/config"
+	"github.com/heros-foreal/heros/internal/converse"
 	"github.com/heros-foreal/heros/internal/discovery"
 	"github.com/heros-foreal/heros/internal/intake"
 	"github.com/heros-foreal/heros/internal/mailer"
 	"github.com/heros-foreal/heros/internal/memory"
 	"github.com/heros-foreal/heros/internal/planner"
+	"github.com/heros-foreal/heros/internal/provider"
 	"github.com/heros-foreal/heros/internal/provider/deepseek"
 	"github.com/heros-foreal/heros/internal/router"
 	"github.com/heros-foreal/heros/internal/store"
@@ -197,6 +199,12 @@ func main() {
 	srv.ToolRegistry = reg
 	srv.Provider = client
 	srv.Model = deepseek.ModelFlash
+	// The conversational agent. 🔴 Shares the provider and the model with the tools deliberately: a
+	// deployment where the console reasons on one model and the assessments run on another is one where
+	// "what did it use?" has two answers and the bill has two lines nobody can reconcile.
+	srv.Converse = &converse.Agent{
+		Provider: client, Model: deepseek.ModelFlash, Bounds: converse.DefaultBounds,
+	}
 	srv.Episodes = mem
 	srv.Mail, srv.Links = mail, links
 
@@ -217,6 +225,11 @@ func main() {
 
 	fmt.Printf("heros console  http://%s\n", *addr)
 	fmt.Printf("model          %s\n", deepseek.ModelFlash)
+	// 🔴 Printed because it is newly true. Answering a question used to cost nothing, and both the code
+	// and the console said so; an operator should see on the first line of a deploy that this changed.
+	fmt.Printf("conversation   agent on, up to %d model call(s) per turn, ceiling %s\n",
+		converse.DefaultBounds.MaxCalls,
+		provider.FormatCents(converse.DefaultBounds.MaxCostMicroCents))
 	fmt.Printf("database       %s\n", redact(url))
 	fmt.Printf("mail           %s\n", mail.Describe())
 	// 🔴 Printed because it is a memory budget, not a tuning detail, and an operator sizing a container

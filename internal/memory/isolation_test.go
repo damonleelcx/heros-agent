@@ -11,6 +11,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	migrations "github.com/heros-foreal/heros/db/migrations"
+	"github.com/heros-foreal/heros/internal/auth"
 	"github.com/heros-foreal/heros/internal/bounds"
 	"github.com/heros-foreal/heros/internal/goal"
 	"github.com/heros-foreal/heros/internal/intent"
@@ -50,6 +51,12 @@ func roots() []rootImpl {
 			pgRan()
 			return memory.NewPG(db), func(t *testing.T, tenant string) string {
 				t.Helper()
+				// The organization row first: `conversation_turns.tenant` references `tenants(id)`, so a
+				// turn for an organization that does not exist is refused. See newPG in
+				// conformance_test.go for why this table has the key and its siblings do not.
+				if err := auth.NewStore(db).CreateTenant(context.Background(), tenant, "Seeded"); err != nil {
+					t.Fatalf("create tenant: %v", err)
+				}
 				id := goal.ID(uniqueID("g"))
 				now := time.Now().UTC()
 				g := &goal.Goal{
@@ -311,3 +318,89 @@ func TestAnEmptyTenantCannotWriteAnything(t *testing.T) {
 }
 
 var _ = errors.Is
+
+// TestATenantCannotReachAnotherTenantsConversation.
+//
+// # 🔴 Why turns need their own fence rather than inheriting the episode one
+//
+// Episodes scope through `goals` — `goal_id IN (SELECT id FROM goals WHERE tenant = $n)` — so their
+// isolation is a property of that join. Turns have no goal to join to and scope on their own `tenant`
+// column instead. That is a SECOND mechanism, and a guarantee proven for one mechanism says nothing
+// about the other; the episodes-were-never-scoped bug recorded in store/scoped_pg.go is exactly what
+// happens when a package's isolation story is assumed to cover a record it does not.
+//
+// # What "isolated" means here, precisely
+//
+// A conversation id is chosen by the client. Two tenants can therefore name the SAME conversation id,
+// and the correct behaviour is not an error — it is that they are two different conversations. An
+// attacker who guesses a victim's conversation id must get their own empty thread, and anything they
+// write must land in it rather than in the victim's.
+func TestATenantCannotReachAnotherTenantsConversation(t *testing.T) {
+	for _, impl := range roots() {
+		t.Run(impl.name, func(t *testing.T) {
+			root, seed := impl.open(t)
+			victim, attacker := twoTenants()
+			conv := uniqueID("c")
+
+			// Both organizations must EXIST before either can speak: turns carry a foreign key to
+			// `tenants(id)`. seed creates the org (and, incidentally, a goal this test does not use) on
+			// Postgres, and is a no-op on the in-memory store.
+			seed(t, victim)
+			seed(t, attacker)
+
+			v := root.For(victim)
+			for i := 1; i <= 3; i++ {
+				if _, err := v.AppendTurn(memory.Turn{
+					ConversationID: conv, Role: memory.TurnUser, Body: "the victim's private question",
+					At: time.Now().UTC()}); err != nil {
+					t.Fatalf("seeding turn %d: %v", i, err)
+				}
+			}
+
+			a := root.For(attacker)
+
+			// ── reads are INVISIBLE, not forbidden ────────────────────────────────────────────────
+			got, err := a.Turns(victim, conv)
+			if err != nil {
+				t.Errorf("Turns across tenants errored (%v); it must be indistinguishable from a "+
+					"conversation that does not exist", err)
+			}
+			if len(got) != 0 {
+				t.Errorf("Turns returned %d of another tenant's turns", len(got))
+			}
+
+			// 🔴 The tenant ARGUMENT is ignored in favour of the bound one. A scoped store that honoured
+			// it would hand every caller a parameter that reads anybody's transcript.
+			if latest, ok, err := a.LatestConversation(victim); err != nil {
+				t.Errorf("LatestConversation across tenants errored: %v", err)
+			} else if ok && latest == conv {
+				t.Error("LatestConversation returned another tenant's thread id: passing somebody " +
+					"else's tenant must change nothing")
+			}
+
+			// ── writes land in the attacker's OWN thread, never the victim's ──────────────────────
+			if _, err := a.AppendTurn(memory.Turn{
+				Tenant: victim, ConversationID: conv, Role: memory.TurnAgent, Body: "planted",
+				At: time.Now().UTC()}); err != nil {
+				t.Fatalf("the attacker's own write was refused: %v", err)
+			}
+
+			after, err := v.Turns(victim, conv)
+			if err != nil {
+				t.Fatalf("re-reading the victim's turns: %v", err)
+			}
+			if len(after) != 3 {
+				t.Fatalf("the victim's conversation now has %d turns, not the 3 they wrote — a turn "+
+					"naming their tenant was obeyed rather than overwritten", len(after))
+			}
+			for _, tn := range after {
+				if tn.Body == "planted" {
+					t.Error("a planted turn reached the victim's transcript")
+				}
+				if tn.Tenant != victim {
+					t.Errorf("the victim's turn reports tenant %q", tn.Tenant)
+				}
+			}
+		})
+	}
+}

@@ -265,3 +265,43 @@ func (s *pgScoped) SetPreference(p Preference) error {
 }
 
 func (s *pgScoped) Preferences(string) ([]Preference, error) { return s.p.Preferences(s.tenant) }
+
+// ── conversation ─────────────────────────────────────────────────────────────────────────────────
+//
+// 🔴 Turns scope on the TENANT COLUMN, not through `goals` like episodes do. A conversation has no goal
+// — most turns never become one — so `ownedClause` does not apply and there is nothing to join to. The
+// tenant is imposed on write and bound on read, which is the same guarantee reached a shorter way.
+
+func (s *memScoped) AppendTurn(t Turn) (int64, error) {
+	if s.tenant == "" {
+		return 0, fmt.Errorf("memory: refusing to append a turn with no tenant")
+	}
+	// Imposed, not trusted from the object. A caller that sets the tenant themselves is a caller who can
+	// set it to somebody else's.
+	t.Tenant = s.tenant
+	return s.m.AppendTurn(t)
+}
+
+func (s *memScoped) Turns(_ string, conversationID string) ([]Turn, error) {
+	return s.m.Turns(s.tenant, conversationID)
+}
+
+func (s *memScoped) LatestConversation(string) (string, bool, error) {
+	return s.m.LatestConversation(s.tenant)
+}
+
+func (s *pgScoped) AppendTurn(t Turn) (int64, error) {
+	if s.tenant == "" {
+		return 0, fmt.Errorf("memory: refusing to append a turn with no tenant")
+	}
+	t.Tenant = s.tenant
+	return s.p.AppendTurn(t)
+}
+
+func (s *pgScoped) Turns(_ string, conversationID string) ([]Turn, error) {
+	return s.p.Turns(s.tenant, conversationID)
+}
+
+func (s *pgScoped) LatestConversation(string) (string, bool, error) {
+	return s.p.LatestConversation(s.tenant)
+}
