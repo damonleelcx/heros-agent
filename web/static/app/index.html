@@ -366,6 +366,40 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .sect[open] > summary .caret{transform:rotate(90deg)}
 .sect-body{padding:.2rem .9rem 1rem}
 
+/* ── the organization panel, in a 17.5rem rail ───────────────────────────── */
+/* 🔴 Scoped to `.sect-body`, NOT applied to `.stack` / `.pick` / `.people` themselves.
+   Those classes were written for a card in the conversation and are still used there — by the
+   invitation card, the password-reset card and the forgot-password card — where `max-width:26rem` is
+   the right measure for a 44rem reading column. Re-parenting this panel into the rail put the same
+   markup in a 279px box, where the member table wanted 352px and the invite role select 484px: it
+   needed 500px of a 279px column, so the role picker and the "unconfirmed" badge were cut off.
+   Narrowing the shared classes would have fixed the rail by breaking the cards. */
+.sect-body .stack{max-width:100%}
+.sect-body .pick{max-width:100%;width:100%}
+/* 🔴 The member rows STACK in the rail instead of staying a three-column table.
+   Constraining the columns was tried first and is not enough: the role picker needs ~7.5rem to show
+   "owner" and the remove link ~4.2rem, which out of a 15.6rem column leaves under 4rem for the person —
+   so the address truncated to "damon…" and its badges wrapped underneath into nonsense. There is no
+   division of 15.6rem that makes three columns work; the answer is not to have three.
+   Each member becomes: address, then the role picker, then remove — each on its own full-width line.
+   The header row is dropped with them: "person / role" labels a grid, and once the cells are stacked
+   the select shows the role and the link says "remove", so the labels describe nothing the reader
+   cannot already see. Applies to the pending-invitation table too, which reuses `.people`. */
+.sect-body .people,
+.sect-body .people tbody,
+.sect-body .people tr,
+.sect-body .people td{display:block;width:auto}
+.sect-body .people thead{display:none}
+.sect-body .people tr{padding:.5rem 0;border-bottom:1px solid var(--hairline)}
+.sect-body .people tr:last-child{border-bottom:0}
+.sect-body .people td{padding:.15rem 0;border:0}
+.sect-body .people td:empty{display:none}
+/* An address is long and somebody else's, so it truncates rather than forcing the rail wider. The full
+   value stays reachable as a title, set where the row is built. */
+.sect-body .who-email{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sect-body .you{margin-left:.4rem}
+.sect-body .auto{padding:.7rem .6rem}
+
 /* ── sessions ────────────────────────────────────────────────────────────── */
 .sessions{display:flex;flex-direction:column;gap:.1rem}
 .session{
@@ -1310,6 +1344,15 @@ for (const side of ['L','R']) {
   };
 }
 document.getElementById('scrim').onclick = () => { setRail('L', false); setRail('R', false); };
+
+/* 🔴 The permissions panel is filled from the SECTION's own toggle event.
+   It is the only wiring that covers every way the section can open — the summary being clicked, Enter
+   or Space on it, openOrganization(), and the browser restoring an open <details> across a reload. It
+   used to be filled by whoever opened it, which worked until the last such caller was repointed
+   elsewhere and the section started opening onto an empty box. See ensureOrganization. */
+document.getElementById('sectPerms').addEventListener('toggle', function(){
+  if (this.open) ensureOrganization();
+});
 // Escape closes a drawer. On a phone the drawer covers the conversation, and the only other way out is
 // a scrim somebody has to know is tappable.
 document.addEventListener('keydown', e => {
@@ -1684,11 +1727,49 @@ function renderAccount(target){
 function openOrganization(){
   if (!me || !me.signed_in) return;
   const sect = document.getElementById('sectPerms');
+  // Setting `open` fires `toggle`, which is what fills the panel. Nothing renders from here — see
+  // ensureOrganization for why the fill hangs off the element rather than off whoever opened it.
   sect.open = true;
   // Scrolled into view because on a short window the section can open below the fold, and a control
   // that appears to do nothing is indistinguishable from one that is broken.
   sect.scrollIntoView({block:'nearest', behavior:'smooth'});
   openRail('L');
+}
+
+/* ensureOrganization fills the panel the first time the section is opened.
+ *
+ * # ⚠️ The bug this fixes: the section opened onto NOTHING
+ *
+ * `renderOrganization` was reachable only through `openOrganization`, and when the rail's account
+ * button was pointed at the profile section instead, `openOrganization` lost its last caller. Clicking
+ * "Organization & permissions" expanded a panel that was never filled — an empty box under a heading,
+ * with no error and nothing in the console to explain it.
+ *
+ * 🔴 It hangs off the ELEMENT's own `toggle` event, not off whatever opened it. That is the difference
+ * between the two: a render triggered by the opener only works for openers somebody remembered to wire,
+ * and this section can be opened four ways — clicking the summary, Enter or Space on it while focused,
+ * `openOrganization()`, and the browser restoring an open `<details>` on reload. The element knows
+ * about all four; a caller knows about one.
+ *
+ * 🔴 Deliberately LAZY. Filling it costs three requests (`/api/members`, `/api/invitations`,
+ * `/api/autonomy`) and most sessions never open this section — a console that fetched the whole
+ * organization on every page load would be spending them on nobody's behalf.
+ *
+ * 🔴 The "already loaded" mark is set by a SUCCESSFUL render, so a failed one is retried by closing and
+ * reopening — which is the first thing anybody does when a panel looks wrong. A plain `drawn = true`
+ * flag set on entry would make one transient network failure permanent for the life of the tab. */
+function ensureOrganization(){
+  const body = document.getElementById('permsPanel');
+  if (!body || body.dataset.loaded === 'true') return;
+  /* 🔴 The rail exists before anybody is signed in — the signed-out console renders the whole shell and
+     puts a sign-in card in the conversation — so this section is clickable with no session. Without
+     this guard `renderOrganization` reads `me.can` off null and throws, which shows the same empty box
+     as the bug being fixed and buries a TypeError in the console. Unmarked, so it fills properly once
+     signing in has answered who this is. */
+  if (!me || !me.signed_in) {
+    body.innerHTML = `<p class="rail-empty">Sign in to see who is in this organization.</p>`;
+    return;
+  }
   renderOrganization();
 }
 
@@ -1701,6 +1782,10 @@ async function renderOrganization(){
     people = await api('/api/members');
     if (me.can['member.invite']) pending = await api('/api/invitations');
   } catch (e) {
+    // 🔴 NOT marked loaded. The panel keeps the error visible and ensureOrganization will try again the
+    // next time the section is opened — closing and reopening is what a person does when a panel looks
+    // wrong, and it should be the thing that fixes it.
+    delete body.dataset.loaded;
     body.innerHTML = `<p style="margin:0;color:var(--bad)">${esc(e.message)}</p>`;
     return;
   }
@@ -1716,12 +1801,17 @@ async function renderOrganization(){
   for (const m of (people.members || [])) {
     const row = rowOf(3);
     const [nameCell, roleCell, actionCell] = row.children;
-    actionCell.style.textAlign = 'right';
+    // ⚠️ No right-alignment. The cells STACK in the rail (see .sect-body .people), so each one is a
+    // full-width line — pushing "remove" to the right edge would strand it away from the row it acts
+    // on. It was right-aligned when this was a three-column table inside a card in the conversation.
 
     // textContent, not interpolation — an address is data somebody else chose.
     const name = document.createElement('span');
     name.className = 'who-email';
     name.textContent = m.email;
+    // The rail truncates this with an ellipsis (see .sect-body .who-email), so the full address has to
+    // remain readable somewhere — otherwise two colleagues on the same long domain become the same row.
+    name.title = m.email;
     nameCell.appendChild(name);
     if (m.id === people.you) nameCell.appendChild(el(`<span class="you">you</span>`));
     if (!m.email_verified) {
@@ -1782,7 +1872,6 @@ async function renderOrganization(){
     const inv = el(`<table class="people"><tbody></tbody></table>`);
     for (const i of pending.invitations) {
       const row = rowOf(3);
-      row.children[2].style.textAlign = 'right';
       row.children[0].textContent = i.email;
       row.children[1].textContent = i.expired ? `${i.role} · expired` : i.role;
       const w = el(`<button class="linky danger">withdraw</button>`);
@@ -1835,6 +1924,8 @@ async function renderOrganization(){
   }
 
   await renderAutonomy(body);
+  // Set LAST, so a panel that threw part-way through is not remembered as complete.
+  body.dataset.loaded = 'true';
 }
 
 // renderAutonomy shows how much a run may do without a person, and lets an owner change it.
