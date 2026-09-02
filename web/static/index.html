@@ -18,20 +18,63 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,300;6..72,400&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
 <link rel="stylesheet" href="heros.css">
+<!-- 🔴 Synchronous, and in the head. heros-theme.js sets the theme attribute BEFORE first paint;
+     deferring it paints the page in the wrong theme first, which is the flash. The arch is
+     decoration and can wait for the document. -->
+<script src="heros-theme.js"></script>
+<script src="heros-arc.js" defer></script>
 <style>
   /* The lighter frame the shell sits in, straight from the reference. */
-  body{background:#141a24; background-image:none; padding:clamp(0px,2vw,26px)}
+  body{background:var(--frame); background-image:none; padding:clamp(0px,2vw,26px)}
   .shell{
     background:var(--canvas); border-radius:clamp(0px,2.4vw,28px); overflow:hidden;
     padding:clamp(1rem,3vw,2rem) clamp(1rem,3.4vw,2.6rem) 0;
     background-image:
-      linear-gradient(to right,#ffffff06 1px,transparent 1px),
-      linear-gradient(to bottom,#ffffff06 1px,transparent 1px);
+      linear-gradient(to right,var(--grid-line-soft) 1px,transparent 1px),
+      linear-gradient(to bottom,var(--grid-line-soft) 1px,transparent 1px);
     background-size:64px 64px;
+    /* The panel is lifted off its frame rather than butted against it: a lit top rim and a long
+       cast shadow. Without these the rounded rectangle reads as a colour change, not an object. */
+    box-shadow:var(--edge-top), var(--lift-3);
   }
 
+  /* ── depth ───────────────────────────────────────────────────────────────
+     The page is built in PLANES, back to front, rather than on one flat sheet:
+
+       1. atmosphere   .shell::before — soft halos where the light is, a vignette at the edges
+       2. the arch     .arc-bg        — the pixel lattice, drifting slowest under scroll
+       3. ghost type   .ghost         — the giant numerals, drifting faster
+       4. content      everything else, static
+       5. chrome       .bar           — a glass panel floating over all of it
+
+     🔴 The parallax is DECORATION with no state of its own: if the script at the foot of this file
+     never runs, every plane simply sits at offset 0 and the page is exactly what it is now. That is
+     deliberate — nothing here is allowed to be the reason a paragraph fails to appear. */
+  .shell::before{
+    content:""; position:absolute; inset:0; z-index:0; pointer-events:none;
+    background:
+      radial-gradient(120% 58% at 50% -12%, var(--halo), transparent 62%),
+      radial-gradient(72% 42% at 8% 26%, var(--halo-soft), transparent 72%),
+      radial-gradient(64% 44% at 94% 34%, var(--halo-soft), transparent 72%),
+      radial-gradient(140% 90% at 50% 120%, var(--vignette), transparent 58%);
+  }
+
+  /* The arch and the ghost numerals are moved by transform only — no layout, no repaint of the
+     lattice — so the scroll handler stays on the compositor. */
+  .arc-bg,[data-parallax]{will-change:transform}
+
   /* ── nav ── */
-  .bar{display:flex; align-items:center; gap:var(--s5); flex-wrap:wrap}
+  /* 🔴 A floating glass panel, not a sticky one. `.shell` has `overflow:hidden` — which it needs, to
+     clip the accent band into the rounded corner — and an `overflow:hidden` ancestor silently makes
+     `position:sticky` a no-op. So the nav gets depth by lifting off the page rather than by
+     following it down. */
+  .bar{
+    display:flex; align-items:center; gap:var(--s5); flex-wrap:wrap;
+    background:color-mix(in srgb,var(--card) 62%,transparent);
+    -webkit-backdrop-filter:blur(14px) saturate(1.3); backdrop-filter:blur(14px) saturate(1.3);
+    border:1px solid var(--border); border-radius:var(--pill);
+    padding:.45rem .5rem .45rem 1rem; box-shadow:var(--edge-top), var(--lift-2);
+  }
   .logo{display:flex; align-items:center; gap:.6rem; font-weight:700; letter-spacing:.02em; color:var(--ink)}
   .logo:hover{text-decoration:none}
   .logo img{width:36px; height:36px; border-radius:var(--pill)}
@@ -40,26 +83,33 @@
   .menu a.on{color:var(--ink)}
   /* The reference's search pill: a rounded field with a filled circular button at its end. Ours holds
      the two things a stranger can actually do. */
+  /* Inside the glass bar the pill would be a bordered box inside a bordered box, so it loses its
+     own chrome and keeps only its spacing. */
   .pill{
-    display:flex; align-items:center; gap:.5rem; padding:.3rem .3rem .3rem 1.1rem;
-    background:var(--panel); border:1px solid var(--border); border-radius:var(--pill);
+    display:flex; align-items:center; gap:.5rem; padding:.3rem 0 .3rem 1.1rem;
+    background:transparent; border:0; border-radius:var(--pill);
   }
   .pill a.sign{color:var(--ink-muted); font-size:.95rem; padding:.4rem .3rem}
   .pill a.sign:hover{color:var(--ink); text-decoration:none}
   .round{
     display:grid; place-items:center; width:44px; height:44px; border-radius:var(--pill);
     background:var(--accent); color:var(--accent-ink); font-weight:700; flex:none;
-    box-shadow:0 0 0 6px #2ecfa81f;
+    box-shadow:0 0 0 6px color-mix(in srgb,var(--accent) 12%,transparent);
   }
-  .round:hover{text-decoration:none; background:#48e0bc}
+  .round:hover{text-decoration:none; background:var(--accent-hi)}
   /* 🔴 Below the point where three things stop fitting on one line, the anchor menu takes its own row.
      Left as-is it wrapped INTO the logo — the links reflowed around it and the whole bar read as a
      jumble. Logo and the sign-in pill stay paired on the first row, because those are the two controls
      a stranger needs; the section anchors are secondary and can sit underneath. */
   @media (max-width:60rem){
-    .bar{row-gap:var(--s3)}
+    /* 🔴 The gap shrinks and the theme switch takes the auto-margin, not the pill. With the bar's
+       original 1.5rem gaps a third control did not fit on the first row at 375px, and the sign-in
+       pill — the one thing a stranger is here to press — wrapped onto a row of its own below the
+       wordmark. Logo, then a gap, then switch and pill together. */
+    .bar{row-gap:var(--s3); gap:var(--s3); border-radius:1.4rem; padding:.55rem .7rem}
     .menu{order:3; width:100%; flex:1 0 100%; justify-content:flex-start; gap:1.2rem; font-size:.94rem}
-    .pill{margin-left:auto}
+    [data-theme-slot]{margin-left:auto}
+    .pill{margin-left:0; padding-left:.65rem}
   }
 
   /* ── headline ── */
@@ -73,7 +123,7 @@
   @media (min-width:64rem){ .hero{grid-template-columns:minmax(0,1fr) auto minmax(0,1fr)} }
 
   .say{color:var(--ink-muted); max-width:34ch; margin:0 0 var(--s5)}
-  .glow{box-shadow:0 10px 34px -10px #2ecfa899}
+  .glow{box-shadow:0 10px 34px -10px color-mix(in srgb,var(--accent) 60%,transparent)}
   .aside{margin-top:var(--s5); color:var(--ink-muted); font-size:.86rem; max-width:30ch}
 
   /* The arch. A stadium top and square feet, so the figure stands in it.
@@ -90,7 +140,15 @@
   }
   .archwrap::before{
     content:""; position:absolute; inset:auto -13% 7% -13%; height:80%;
-    border-radius:999px 999px 1.6rem 1.6rem; background:#101b2e; border:1px solid var(--border);
+    border-radius:999px 999px 1.6rem 1.6rem; background:var(--sunk-2); border:1px solid var(--border);
+    box-shadow:var(--lift-2);
+  }
+  /* The pool of light she stands in. Without something under her the figure floats: the arch behind
+     is a flat plate and she has no contact with it. */
+  .archwrap::after{
+    content:""; position:absolute; left:50%; bottom:2%; transform:translateX(-50%);
+    width:150%; height:26%; border-radius:50%; pointer-events:none; z-index:-1;
+    background:radial-gradient(closest-side, var(--halo), transparent 72%);
   }
   .arch{
     /* 1:2 — the new figure is a full standing pose on a studio backdrop, so the arch is taller
@@ -98,7 +156,8 @@
        a bright panel against the dark page rather than a hole in it. */
     position:relative; aspect-ratio:420/840;
     border-radius:999px 999px 1.6rem 1.6rem; overflow:hidden;
-    background:#0d1626; border:1px solid var(--border);
+    background:var(--sunk); border:1px solid var(--border);
+    box-shadow:var(--edge-top), var(--lift-3);
   }
   .arch img{width:100%; height:100%; object-fit:cover; display:block}
 
@@ -111,6 +170,8 @@
   /* ── the accent band ── */
   .band{
     position:relative; z-index:1; background:var(--accent); color:var(--accent-ink);
+    /* It is the brightest object on the page, so it lights what is above it and casts nothing. */
+    box-shadow:0 -28px 70px -34px color-mix(in srgb,var(--accent) 70%,transparent);
     border-radius:1.6rem 1.6rem 0 0; margin:0 calc(clamp(1rem,3.4vw,2.6rem) * -1);
     padding:clamp(1.2rem,3vw,1.8rem) clamp(1.4rem,3.4vw,2.6rem) clamp(1.4rem,3vw,2rem);
   }
@@ -118,14 +179,28 @@
   .band-top{display:flex; align-items:center; justify-content:space-between; gap:var(--s4); flex-wrap:wrap}
   .band-open{display:inline-flex; align-items:center; gap:.6rem; color:var(--accent-ink); font-weight:700;
     font-size:clamp(1.15rem,2.4vw,1.5rem)}
-  .dash{border:0; border-top:2px dashed #05261d59; margin:var(--s4) 0}
+  .dash{border:0; border-top:2px dashed var(--on-accent-line-soft); margin:var(--s4) 0}
   .facts{display:grid; gap:var(--s4); grid-template-columns:repeat(auto-fit,minmax(11rem,1fr))}
   .fact b{display:block; font-size:clamp(1.05rem,2.2vw,1.35rem); font-weight:700}
   .fact span{font-size:.84rem; opacity:.75}
   /* Dividers between facts, as in the reference — but only where a fact actually follows. */
-  @media (min-width:48rem){ .fact + .fact{border-left:1px solid #05261d33; padding-left:var(--s5)} }
+  @media (min-width:48rem){ .fact + .fact{border-left:1px solid var(--on-accent-line); padding-left:var(--s5)} }
 
-  .below{padding:clamp(2.5rem,7vw,5rem) 0 0}
+  /* 🔴 The page below the band was one flat sheet — every section on the same plane, on the same
+     colour, for two thousand pixels. The arch cannot reach down here (it is a viewport-tall canvas in
+     the hero, and a second one would be a second animation loop for decoration nobody scrolled to),
+     so the depth below the fold is painted: three soft pools of light where the three sections are,
+     and a horizon at the foot. Static gradients, no script, no cost. */
+  .below{padding:clamp(2.5rem,7vw,5rem) 0 0; position:relative}
+  .below::before{
+    content:""; position:absolute; inset:0; z-index:0; pointer-events:none;
+    background:
+      radial-gradient(58% 26% at 18% 14%, var(--halo-soft), transparent 68%),
+      radial-gradient(52% 24% at 86% 46%, var(--halo-soft), transparent 68%),
+      radial-gradient(64% 22% at 34% 82%, var(--halo-soft), transparent 70%),
+      linear-gradient(to bottom, transparent 78%, var(--vignette) 100%);
+  }
+  .below > *{position:relative; z-index:1}
   .rule{border:0; border-top:1px solid var(--border); margin:clamp(2rem,5vw,3.5rem) 0}
   .list{list-style:none; padding:0; margin:var(--s3) 0 0; display:grid; gap:var(--s2)}
   .list li{padding-left:1.15rem; position:relative; color:var(--ink-muted)}
@@ -146,7 +221,7 @@
     position:absolute; left:50%; top:46%; transform:translate(-50%,-50%); z-index:0;
     pointer-events:none; user-select:none;
     font-family:var(--body); font-weight:700; font-size:clamp(14rem,38vw,32rem); line-height:.75;
-    letter-spacing:-.06em; color:transparent; -webkit-text-stroke:1px #ffffff1a;
+    letter-spacing:-.06em; color:transparent; -webkit-text-stroke:1px var(--border);
   }
   .ghosted > *:not(.ghost){position:relative; z-index:1}
 
@@ -182,9 +257,9 @@
 
   /* Hard colour block, no borders — the reference's cream-against-orange, in our two colours. */
   .block{display:grid; gap:0; grid-template-columns:1fr; border-radius:1.6rem; overflow:hidden;
-    margin:clamp(2rem,6vw,4rem) 0}
+    margin:clamp(2rem,6vw,4rem) 0; box-shadow:var(--edge-top), var(--lift-2)}
   @media (min-width:56rem){ .block{grid-template-columns:1.15fr .85fr} }
-  .block-dark{background:#0d1626; padding:clamp(1.6rem,4vw,3rem)}
+  .block-dark{background:var(--sunk); padding:clamp(1.6rem,4vw,3rem)}
   .block-accent{background:var(--accent); color:var(--accent-ink); padding:clamp(1.6rem,4vw,3rem);
     display:flex; flex-direction:column; justify-content:center}
   .huge{font-size:clamp(1.9rem,5.4vw,3.4rem); line-height:1.03; letter-spacing:-.02em}
@@ -192,11 +267,19 @@
   .block-accent blockquote{
     margin:0; font-family:var(--display); font-size:clamp(1.25rem,2.8vw,1.9rem); line-height:1.2;
   }
-  .hair{border:0; border-top:1px solid #05261d33; margin:clamp(.9rem,2vw,1.3rem) 0}
+  .hair{border:0; border-top:1px solid var(--on-accent-line); margin:clamp(.9rem,2vw,1.3rem) 0}
   .said-note{margin:var(--s5) 0 0; font-size:.82rem; opacity:.7}
 
   .steps{display:grid; gap:clamp(1rem,3vw,2rem); grid-template-columns:repeat(auto-fit,minmax(13rem,1fr))}
-  .step{border-top:1px solid var(--border); padding-top:var(--s4)}
+  .step{
+    border:1px solid var(--border); border-radius:1rem; padding:var(--s5) var(--s5) var(--s5) var(--s5);
+    background:color-mix(in srgb,var(--card) 55%,transparent);
+    -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px);
+    box-shadow:var(--edge-top), var(--lift-1);
+    transition:transform var(--base), box-shadow var(--base), border-color var(--base);
+  }
+  .step:hover{transform:translateY(-3px); box-shadow:var(--edge-top), var(--lift-2);
+    border-color:var(--border-strong)}
   .step b{display:block; font-family:var(--mono); font-size:clamp(2.2rem,5vw,3.4rem); font-weight:500;
     color:var(--accent); line-height:1; letter-spacing:-.03em}
   .step span{display:block; margin-top:var(--s3); color:var(--ink-muted)}
@@ -205,7 +288,11 @@
   .round.big{width:56px; height:56px; font-size:1.3rem}
 </style>
 
-<div class="shell">
+<div class="shell arc-host">
+  <!-- The predictive arch, behind the top of the page. Decoration: no text, no pointer events,
+       and heros-arc.js is the only thing that touches it. -->
+  <canvas class="arc-bg" data-heros-arc aria-hidden="true"></canvas>
+
   <nav class="bar">
     <a class="logo" href="/"><img src="avatar.jpg" alt=""> HEROS</a>
     <span class="menu">
@@ -214,6 +301,7 @@
       <a href="#who">Who she is</a>
       <a href="#start">Get started</a>
     </span>
+    <span data-theme-slot></span>
     <span class="pill">
       <a class="sign" href="/signin/" data-signed-out>Sign in</a><a class="sign" href="/app/" data-signed-in hidden>Console</a>
       <a class="round" href="/signup/" title="Create an organization" aria-label="Create an organization">→</a>
@@ -232,9 +320,9 @@
       <p class="aside">Works with any public GitHub repository. Paste a link and she reports what she found.</p>
     </div>
 
-    <div class="archwrap"><div class="arch"><img src="heros-figure.jpg" alt="Heros" width="420" height="840"></div></div>
+    <div class="archwrap" data-parallax="-.05"><div class="arch"><img src="heros-figure.jpg" alt="Heros" width="420" height="840"></div></div>
 
-    <div class="stats">
+    <div class="stats" data-parallax=".05">
       <div class="stat"><b>19</b><span>things she does</span></div>
       <div class="stat"><b>9</b><span>axes assessed</span></div>
       <div class="stat"><b>$1.00</b><span>ceiling on a run</span></div>
@@ -264,7 +352,7 @@
          ghost numeral behind it. It reads as one designed object rather than three bullet lists, and
          the prose that used to introduce it is gone — the number does that job. -->
     <section id="does" class="ghosted">
-      <span class="ghost" aria-hidden="true">19</span>
+      <span class="ghost" aria-hidden="true" data-parallax=".07" data-parallax-base="translate(-50%,-50%)">19</span>
       <div class="sechead">
         <p class="eyebrow">What she does</p>
         <h2>Nineteen things.<br>That is the list, not a sample.</h2>
@@ -370,5 +458,64 @@
         });
       })
       .catch(function(){ /* signed out, or offline: the page is already correct for that */ });
+  })();
+</script>
+
+<script>
+  /* ── parallax ───────────────────────────────────────────────────────────────
+   * The page's planes drift at different rates under scroll, which is the whole of what makes it
+   * read as depth rather than as a picture of depth.
+   *
+   * 🔴 DECORATION, and structured so it can fail silently and correctly. Every layer's resting state
+   * is offset zero, which is exactly where the stylesheet already puts it — so if this never runs
+   * (no JavaScript, an exception, reduced motion, a crawler), the page is the page. Nothing here
+   * decides whether anything is VISIBLE; a scroll-driven reveal would, and that is why there is not
+   * one. See heros-arc.js for the same rule applied to a clock.
+   *
+   * 🔴 Transform only, and read-then-write. Reading getBoundingClientRect inside the scroll event and
+   * writing styles from the same handler is layout thrash on every wheel tick; the read is coalesced
+   * into one animation frame and the writes follow it.
+   */
+  (function () {
+    var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)');
+    if (reduce && reduce.matches) return;
+
+    var arc = document.querySelector('.arc-bg');
+    var planes = document.querySelectorAll('[data-parallax]');
+    if (!arc && !planes.length) return;
+
+    var queued = false;
+
+    function place() {
+      queued = false;
+      /* The arch lags the whole document. Clamped, because past the hero it has already left the top
+         of the shell and dragging it further only costs compositing. */
+      if (arc) {
+        var y = Math.min(window.pageYOffset || 0, 900) * 0.3;
+        arc.style.transform = 'translate3d(0,' + y.toFixed(1) + 'px,0)';
+      }
+      /* Everything else drifts against ITS OWN position as it crosses the viewport, not against the
+         top of the document — so a plane's offset is zero when you are looking straight at it and
+         the effect never accumulates into something visibly out of place further down the page. */
+      var mid = window.innerHeight / 2;
+      for (var i = 0; i < planes.length; i++) {
+        var el = planes[i];
+        var r = el.getBoundingClientRect();
+        var d = (mid - (r.top + r.height / 2)) * parseFloat(el.getAttribute('data-parallax'));
+        var base = el.getAttribute('data-parallax-base') || '';
+        el.style.transform = base + ' translate3d(0,' + d.toFixed(1) + 'px,0)';
+      }
+    }
+
+    function onScroll() {
+      if (queued) return;
+      queued = true;
+      requestAnimationFrame(place);
+    }
+
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll);
+    window.addEventListener('pageshow', onScroll);
+    place();
   })();
 </script>

@@ -5,14 +5,76 @@
  * drift and no way to tell which one is right. The console now links this file too, and its inline
  * block is gone.
  *
- * The system is dark-committed — that is inherited from the original design, not a shortcut — so
- * every surface paints its own background rather than borrowing the host's.
+ * The system was dark-committed. It is now dark-DEFAULT with a real light theme beside it, and every
+ * surface still paints its own background rather than borrowing the host's.
+ *
+ * ── how the two themes are resolved ────────────────────────────────────────────────────────────────
+ * Dark is the base `:root`. Light is stated twice, and deliberately:
+ *
+ *   :root[data-theme="light"]                          — somebody chose light in the switch
+ *   @media (prefers-color-scheme:light){ :root:not([data-theme="dark"]) }
+ *                                                      — nobody chose anything; their device did
+ *
+ * 🔴 The alternative — having heros-theme.js write the RESOLVED theme onto <html> — would let this
+ * be written once, and it is the wrong trade. It makes JavaScript load-bearing for a default, it
+ * freezes whichever answer was true at load if the OS flips at dusk, and it repaints after first
+ * paint, which is the flash. CSS answers the OS; the attribute is only for an override. The price is
+ * one duplicated block, and `TestTheTwoLightPalettesAgree` in cmd/herosd fails the build if the two
+ * copies ever disagree — see workflow/CI note in that test.
+ *
+ * ── why the washes are channels, not colours ───────────────────────────────────────────────────────
+ * 🔴 Hairlines and tints used to be written `#ffffff0d` — a colour with alpha digits appended. That
+ * form cannot be themed: `var(--x)0d` is not a colour, it is a silently DROPPED declaration, so the
+ * border simply vanishes and the page still renders. Surfaces are built from `rgba(var(--fg-rgb),α)`
+ * instead, and a theme moves the channel. Status tints use `color-mix(…, transparent)` for the same
+ * reason — change `--bad` and every tint of it follows.
  */
 :root{
+  color-scheme:dark;
+
+  --fg-rgb:255,255,255;
+
   --canvas:#080d17; --panel:#0a1020; --card:#0e1422; --secondary:#151d2e; --muted:#141b2b;
-  --ink:#dde2f0; --ink-muted:#8b95b5; --border:#ffffff1a; --border-strong:#ffffff29;
-  --accent:#2ecfa8; --accent-ink:#051a14;
+  --secondary-hi:#1b2540;
+  /* The lighter frame the home page's rounded shell sits in, the two sunken blocks inside it, and
+     the pit a diff is printed into. */
+  --frame:#141a24; --sunk:#0d1626; --sunk-2:#101b2e; --pit:#060a12;
+
+  --ink:#dde2f0; --ink-strong:#ffffff; --ink-muted:#8b95b5; --placeholder:#7c88a8;
+  --border:rgba(var(--fg-rgb),.102); --border-strong:rgba(var(--fg-rgb),.161);
+  --hairline:rgba(var(--fg-rgb),.051);
+  --wash-1:rgba(var(--fg-rgb),.016); --wash-2:rgba(var(--fg-rgb),.024);
+  --wash-3:rgba(var(--fg-rgb),.078);
+  --grid-line:rgba(var(--fg-rgb),.031); --grid-line-soft:rgba(var(--fg-rgb),.024);
+  /* The console's grid is tinted with the accent rather than the foreground; keeping it as a mix
+     means it follows the accent into light rather than freezing the dark theme's teal. */
+  --grid-line-accent:color-mix(in srgb,var(--accent) 4%,transparent);
+
+  --accent:#2ecfa8; --accent-ink:#051a14; --accent-hi:#48e0bc;
+  /* Rules drawn ON the accent band, where neither --ink nor --border is legible. */
+  --on-accent-line:rgba(5,38,29,.2); --on-accent-line-soft:rgba(5,38,29,.35);
+
   --ok:#34d399; --warn:#fbbf24; --bad:#fb7185; --info:#38bdf8; --gated:#a78bfa; --none:#7f8aa8;
+
+  /* The predictive arch — see heros-arc.js. Channels, because the canvas reads them as numbers.
+     Dark is green by direction. */
+  --arc-dim-rgb:38 190 140; --arc-core-rgb:214 255 236; --arc-alpha:1;
+
+  /* ── depth ──────────────────────────────────────────────────────────────────
+     🔴 Elevation is a TOKEN, not a shadow typed at each call site. A shadow is the one thing that
+     cannot survive a theme flip unchanged: `rgba(0,0,0,.85)` under a card is a soft lift on black
+     and a bruise on paper, and `--edge-top` — the 1px lit rim that makes a panel read as raised —
+     is white at 6% on black and white at 90% on paper. Both roles need to move with the theme, and
+     both are wrong if only one of them does.
+     `--halo` is the page's atmosphere and follows the ARCH, not the accent: green haze under a
+     violet arch reads as two unrelated light sources. */
+  --lift-1:0 1px 2px rgba(0,0,0,.55);
+  --lift-2:0 14px 34px -16px rgba(0,0,0,.75);
+  --lift-3:0 48px 100px -46px rgba(0,0,0,.9);
+  --edge-top:inset 0 1px 0 rgba(255,255,255,.06);
+  --halo:rgba(46,207,168,.14); --halo-soft:rgba(46,207,168,.07);
+  --vignette:rgba(0,0,0,.5);
+
   --radius:.5rem; --pill:9999px;
   --fast:.12s; --base:.18s; --slow:.32s;
   --prose:44rem;
@@ -23,6 +85,59 @@
   --s1:.25rem; --s2:.5rem; --s3:.75rem; --s4:1rem; --s5:1.5rem; --s6:2rem; --s7:3rem; --s8:4.5rem;
 }
 
+/* ── light ───────────────────────────────────────────────────────────────────
+ * Not the dark palette inverted. Two things genuinely change ROLE rather than value:
+ *
+ * 🔴 `--frame` is LIGHTER than the canvas in dark and DARKER than it in light. It is the surround the
+ *    home page's rounded shell sits on, and a surround only reads as a surround by stepping AWAY from
+ *    the page — which is up on black and down on paper.
+ * 🔴 `--accent` is not the same teal. `#2ecfa8` on white is 1.8:1; it is a fine fill on black and an
+ *    illegible link on paper. Light uses `#0a7d60` (4.5:1 on the canvas, and 4.9:1 for the white text
+ *    that sits on top of it when it is a fill), and `--accent-ink` flips from near-black to white to
+ *    match. Every status colour is darkened on the same grounds.
+ *
+ * The arch turns violet here. A "glow" on paper is not light, it is ink density: pale green at 8%
+ * alpha on white is not luminous, it is dirt. Violet has somewhere dark to go.
+ */
+:root[data-theme="light"]{
+  color-scheme:light;
+  --fg-rgb:15,23,42;
+  --canvas:#f7f8fc; --panel:#eef1f8; --card:#ffffff; --secondary:#e9edf6; --muted:#eef1f8;
+  --secondary-hi:#dee4f1;
+  --frame:#e3e7f2; --sunk:#edf0f8; --sunk-2:#e7ebf5; --pit:#f2f4fa;
+  --ink:#111a2e; --ink-strong:#000914; --ink-muted:#59637d; --placeholder:#7b849b;
+  --accent:#0a7d60; --accent-ink:#ffffff; --accent-hi:#086a51;
+  --on-accent-line:rgba(255,255,255,.3); --on-accent-line-soft:rgba(255,255,255,.5);
+  --ok:#0a7a53; --warn:#a05a00; --bad:#be123c; --info:#0a6ea8; --gated:#6d28d9; --none:#5f6880;
+  --arc-dim-rgb:139 121 246; --arc-core-rgb:60 24 145; --arc-alpha:.9;
+  --lift-1:0 1px 2px rgba(15,23,42,.07);
+  --lift-2:0 14px 34px -16px rgba(15,23,42,.16);
+  --lift-3:0 48px 100px -46px rgba(15,23,42,.3);
+  --edge-top:inset 0 1px 0 rgba(255,255,255,.9);
+  --halo:rgba(109,40,217,.1); --halo-soft:rgba(109,40,217,.05);
+  --vignette:rgba(15,23,42,.06);
+}
+@media (prefers-color-scheme:light){
+  :root:not([data-theme="dark"]){
+    color-scheme:light;
+    --fg-rgb:15,23,42;
+    --canvas:#f7f8fc; --panel:#eef1f8; --card:#ffffff; --secondary:#e9edf6; --muted:#eef1f8;
+    --secondary-hi:#dee4f1;
+    --frame:#e3e7f2; --sunk:#edf0f8; --sunk-2:#e7ebf5; --pit:#f2f4fa;
+    --ink:#111a2e; --ink-strong:#000914; --ink-muted:#59637d; --placeholder:#7b849b;
+    --accent:#0a7d60; --accent-ink:#ffffff; --accent-hi:#086a51;
+    --on-accent-line:rgba(255,255,255,.3); --on-accent-line-soft:rgba(255,255,255,.5);
+    --ok:#0a7a53; --warn:#a05a00; --bad:#be123c; --info:#0a6ea8; --gated:#6d28d9; --none:#5f6880;
+    --arc-dim-rgb:139 121 246; --arc-core-rgb:60 24 145; --arc-alpha:.9;
+    --lift-1:0 1px 2px rgba(15,23,42,.07);
+    --lift-2:0 14px 34px -16px rgba(15,23,42,.16);
+    --lift-3:0 48px 100px -46px rgba(15,23,42,.3);
+    --edge-top:inset 0 1px 0 rgba(255,255,255,.9);
+    --halo:rgba(109,40,217,.1); --halo-soft:rgba(109,40,217,.05);
+    --vignette:rgba(15,23,42,.06);
+  }
+}
+
 *,*::before,*::after{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%}
 body{
@@ -30,8 +145,8 @@ body{
   font-family:var(--body); font-size:16px; line-height:1.6;
   /* The faint grid the product's surfaces carry, including the avatar's own background. */
   background-image:
-    linear-gradient(to right,#ffffff08 1px,transparent 1px),
-    linear-gradient(to bottom,#ffffff08 1px,transparent 1px);
+    linear-gradient(to right,var(--grid-line) 1px,transparent 1px),
+    linear-gradient(to bottom,var(--grid-line) 1px,transparent 1px);
   background-size:64px 64px;
 }
 img,svg{max-width:100%; height:auto; display:block}
@@ -68,10 +183,10 @@ a:hover{text-decoration:underline}
   /* 44px minimum touch target — a 32px button is a coin toss on a phone. */
   min-height:44px;
 }
-.btn:hover{background:#1b2540; text-decoration:none}
+.btn:hover{background:var(--secondary-hi); text-decoration:none}
 .btn:active{transform:translateY(1px)}
 .btn-primary{background:var(--accent); color:var(--accent-ink); border-color:transparent; font-weight:600}
-.btn-primary:hover{background:#48e0bc}
+.btn-primary:hover{background:var(--accent-hi)}
 .btn-quiet{background:transparent; border-color:transparent; color:var(--ink-muted)}
 .btn-quiet:hover{background:var(--secondary); color:var(--ink)}
 .btn[disabled]{opacity:.55; cursor:not-allowed}
@@ -85,7 +200,7 @@ a:hover{text-decoration:underline}
 /* 🔴 A readable placeholder. This was #63709026 — 15% alpha — which is roughly 1.3:1 against the
    field and effectively invisible on a phone in daylight. A placeholder nobody can read is a form
    with no hints, and it fails WCAG 1.4.3 outright. */
-.field::placeholder{color:#7c88a8}
+.field::placeholder{color:var(--placeholder)}
 .field:focus{border-color:var(--accent)}
 .label{display:block; font-size:.85rem; color:var(--ink-muted); margin-bottom:var(--s2)}
 .hint{font-size:.83rem; color:var(--ink-muted); margin-top:var(--s2)}
@@ -116,6 +231,9 @@ a:hover{text-decoration:underline}
 .card{
   background:var(--card); border:1px solid var(--border); border-radius:var(--radius);
   padding:var(--s5);
+  /* A card is a surface ABOVE the page, and on the two auth pages it is the only object on it — so
+     it carries the lit rim and the cast shadow that say so. */
+  box-shadow:var(--edge-top), var(--lift-2);
 }
 .grid{display:grid; gap:var(--s4)}
 /* auto-fit + minmax is the whole responsive story for these grids: they reflow at any width without
@@ -143,6 +261,10 @@ p{margin:0 0 var(--s4)}
 /* ── auth pages ──────────────────────────────────────────────────────────── */
 .auth{
   min-height:100dvh; display:grid; place-items:center; padding:var(--s5) var(--s4);
+  /* 🔴 Positioned, with a z-index. The arch canvas behind it is position:fixed with z-index:0, and a
+     POSITIONED element at z-index 0 paints above ordinary in-flow text however late that text comes
+     in the document. Without this the card's words render underneath the background. */
+  position:relative; z-index:1;
 }
 .auth-card{width:min(100%,26rem)}
 .auth-card .card{padding:var(--s6)}
@@ -160,4 +282,56 @@ p{margin:0 0 var(--s4)}
 /* Anybody who has asked their system not to animate gets no animation. */
 @media (prefers-reduced-motion:reduce){
   *,*::before,*::after{animation-duration:.01ms !important; transition-duration:.01ms !important}
+}
+
+/* ── the theme switch ────────────────────────────────────────────────────────
+ * Built by heros-theme.js into whatever carries [data-theme-slot], so the markup exists once instead
+ * of once per page. It is a three-state cycle — System, Light, Dark — and the label names the state
+ * it is IN, with the accessible name carrying where pressing it goes.
+ */
+.theme-toggle{
+  display:inline-flex; align-items:center; gap:.45rem;
+  padding:.4rem .7rem; min-height:36px;
+  background:transparent; border:1px solid var(--border); border-radius:var(--pill);
+  color:var(--ink-muted); font:inherit; font-size:.8rem; font-weight:500;
+  cursor:pointer; transition:color var(--fast), border-color var(--fast), background var(--fast);
+  white-space:nowrap;
+}
+.theme-toggle:hover{color:var(--ink); border-color:var(--border-strong); background:var(--secondary)}
+.theme-toggle svg{flex:none}
+/* Under about 30rem the two words in the nav are what pushes the sign-in pill onto its own line, and
+   the icon alone still says which theme you are in. */
+@media (max-width:30rem){ .theme-toggle .theme-name{display:none} .theme-toggle{padding:.4rem .5rem} }
+
+/* A dock for pages with no nav to hang it in — the two auth pages. */
+.theme-dock{position:fixed; top:var(--s4); right:var(--s4); z-index:40}
+
+/* ── the predictive arch ─────────────────────────────────────────────────────
+ * The canvas is DECORATION: aria-hidden in the markup, and it must never take a pointer event or
+ * cover content. It is painted by heros-arc.js; this only positions it.
+ *
+ * 🔴 The mask is what keeps it a background rather than a picture with a hard edge. Without it the
+ * lattice stops dead at the bottom of the canvas and the seam is the first thing you see.
+ */
+.arc-bg{
+  position:absolute; inset:0 0 auto 0; height:min(98vh,54rem);
+  width:100%; display:block; pointer-events:none; user-select:none; z-index:0;
+  -webkit-mask-image:linear-gradient(to bottom,#000 0%,#000 74%,transparent 100%);
+  mask-image:linear-gradient(to bottom,#000 0%,#000 74%,transparent 100%);
+}
+.arc-host{position:relative}
+/* Everything the host holds sits above the arch. Stated on the host's children rather than by giving
+   each section its own z-index, so a section added later cannot forget and land underneath. */
+.arc-host > *:not(.arc-bg){position:relative; z-index:1}
+
+/* The auth pages have no shell to put it inside, so theirs is fixed to the viewport. */
+.arc-fixed{position:fixed; inset:0 0 auto 0; height:min(100vh,56rem)}
+
+/* 🔴 Quieter and shorter on a phone, and this is not taste. On a wide window the arch sits ABOVE and
+   BESIDE the copy — crown over the headline, feet out past the columns — so it never competes with a
+   sentence. Stacked into one narrow column every paragraph lands in the middle of the brightest part
+   of it, and the measured result is body text reading through a lattice. The background is decoration;
+   the sentence is the product. */
+@media (max-width:52rem){
+  .arc-bg{opacity:.4; height:min(70vh,32rem)}
 }
