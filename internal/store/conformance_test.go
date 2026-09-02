@@ -597,3 +597,284 @@ func TestAClaimedTaskCarriesItsContributoryEdges(t *testing.T) {
 		})
 	}
 }
+
+// ── cancelling a run ─────────────────────────────────────────────────────────────────────────────
+
+// TestCancelStopsTheGoalAndItsUnstartedTasks.
+//
+// The plain case, and the one the console's Cancel button produces most of the time: nothing is leased,
+// so everything that had not finished stops with the goal.
+func TestCancelStopsTheGoalAndItsUnstartedTasks(t *testing.T) {
+	for _, im := range implementations() {
+		t.Run(im.name, func(t *testing.T) {
+			postgresRan(im.name)
+			s := im.open(t)
+			id, _ := seed(t, s, "cancel", pending("a", "read"), pending("b", "read"))
+
+			took, err := s.Cancel(id, time.Now().UTC())
+			if err != nil {
+				t.Fatalf("cancel: %v", err)
+			}
+			if took != 2 {
+				t.Errorf("cancelled %d tasks, want 2", took)
+			}
+			g, err := s.LoadGoal(id)
+			if err != nil {
+				t.Fatalf("load goal: %v", err)
+			}
+			if g.State != goal.Cancelled {
+				t.Errorf("goal is %s after cancel, want cancelled", g.State)
+			}
+			d, err := s.LoadDAG(id)
+			if err != nil {
+				t.Fatalf("load dag: %v", err)
+			}
+			for _, tk := range d.Tasks {
+				if tk.State != task.Cancelled {
+					t.Errorf("task %s is %s, want cancelled", tk.ID, tk.State)
+				}
+			}
+		})
+	}
+}
+
+// TestCancelLeavesATaskAWorkerIsHolding.
+//
+// # 🔴 The reason store.Cancel is shaped the way it is, asserted rather than described
+//
+// `task.Cancelled` has NO outgoing transitions. So cancelling a task underneath a live worker does not
+// stop that worker — it makes its next `Complete` fail, and api.Supervisor.drive turns any error out of
+// RunOnce into a terminal {"goal","error"} event. The person who pressed Cancel would be told the run
+// ERRORED, which is untrue and sends somebody hunting a bug that is not there.
+//
+// So the leased task is left alone, the run stops at goal.Claimable() on the next cycle, and this test
+// is what stops a future "tidy-up" from cancelling everything uniformly — which would look simpler,
+// pass a naive test, and reintroduce exactly that false error.
+//
+// Fences: worker.RunOnce's `if !g.Claimable()` gate is the other half; if that goes, this design leaks.
+func TestCancelLeavesATaskAWorkerIsHolding(t *testing.T) {
+	for _, im := range implementations() {
+		t.Run(im.name, func(t *testing.T) {
+			postgresRan(im.name)
+			s := im.open(t)
+			now := time.Now().UTC().Truncate(time.Millisecond)
+			id, _ := seed(t, s, "cancel-leased", pending("a", "read"), pending("b", "read"))
+
+			held, err := s.Claim(id, "worker-1", time.Minute, now)
+			if err != nil {
+				t.Fatalf("claim: %v", err)
+			}
+
+			took, err := s.Cancel(id, now)
+			if err != nil {
+				t.Fatalf("cancel: %v", err)
+			}
+			if took != 1 {
+				t.Errorf("cancelled %d tasks, want 1 — the leased one must be left running", took)
+			}
+
+			d, err := s.LoadDAG(id)
+			if err != nil {
+				t.Fatalf("load dag: %v", err)
+			}
+			if got := d.Tasks[held.ID].State; got != task.Running {
+				t.Errorf("the leased task is %s, want running — cancelling it would make the worker's "+
+					"next Complete fail and the run would report an error instead of a cancellation", got)
+			}
+
+			// And the worker can still finish it. This is the half that proves the design works rather
+			// than merely that the task was skipped: if Complete failed here, the supervisor would
+			// publish a terminal error event and the person would see the wrong outcome.
+			if err := s.Complete(id, held.ID, "worker-1", task.Succeeded, []byte("done"), "", now); err != nil {
+				t.Fatalf("the worker could not finish its in-flight task after a cancel: %v", err)
+			}
+			// The goal stays cancelled — finishing the last task must not resurrect the run.
+			g, err := s.LoadGoal(id)
+			if err != nil {
+				t.Fatalf("load goal: %v", err)
+			}
+			if g.State != goal.Cancelled {
+				t.Errorf("goal is %s after its in-flight task completed, want cancelled", g.State)
+			}
+			if g.Claimable() {
+				t.Error("a cancelled goal is still claimable — workers would keep taking its tasks")
+			}
+		})
+	}
+}
+
+// TestCancelTakesATaskWhoseLeaseHasExpired.
+//
+// The exemption is for a LIVE lease, not for the presence of a worker id. An expired lease belongs to a
+// process that is gone; honouring it would leave a cancelled run with tasks pending forever behind a
+// worker that is never coming back.
+func TestCancelTakesATaskWhoseLeaseHasExpired(t *testing.T) {
+	for _, im := range implementations() {
+		t.Run(im.name, func(t *testing.T) {
+			postgresRan(im.name)
+			s := im.open(t)
+			now := time.Now().UTC().Truncate(time.Millisecond)
+			id, _ := seed(t, s, "cancel-expired", pending("a", "read"))
+
+			if _, err := s.Claim(id, "worker-1", time.Minute, now); err != nil {
+				t.Fatalf("claim: %v", err)
+			}
+			// Well past the lease.
+			later := now.Add(2 * time.Minute)
+			took, err := s.Cancel(id, later)
+			if err != nil {
+				t.Fatalf("cancel: %v", err)
+			}
+			if took != 1 {
+				t.Errorf("cancelled %d tasks, want 1 — an expired lease must not protect a task", took)
+			}
+		})
+	}
+}
+
+// TestCancelRefusesAFinishedRun.
+//
+// Cancelling something that already ended would silently rewrite the record of what happened, and
+// "cancelled" would stop meaning "a person stopped this". Two people watching one rail will both press
+// the button; the second must be told what the run actually did.
+func TestCancelRefusesAFinishedRun(t *testing.T) {
+	for _, im := range implementations() {
+		t.Run(im.name, func(t *testing.T) {
+			postgresRan(im.name)
+			s := im.open(t)
+			now := time.Now().UTC()
+			id, _ := seed(t, s, "cancel-twice", pending("a", "read"))
+
+			if _, err := s.Cancel(id, now); err != nil {
+				t.Fatalf("first cancel: %v", err)
+			}
+			_, err := s.Cancel(id, now)
+			if !errors.Is(err, goal.ErrIllegalState) {
+				t.Fatalf("cancelling an already-cancelled run returned %v, want ErrIllegalState", err)
+			}
+			g, _ := s.LoadGoal(id)
+			if g.State != goal.Cancelled {
+				t.Errorf("the refused second cancel changed the state to %s", g.State)
+			}
+		})
+	}
+}
+
+// TestCancelOnAGoalWithNoPlanStillStopsIt.
+//
+// A goal can exist with no DAG — refused at admission, or cancelled before planning finished. The run
+// must still stop; returning "no such thing" would leave a goal nobody can get rid of.
+func TestCancelOnAGoalWithNoPlanStillStopsIt(t *testing.T) {
+	for _, im := range implementations() {
+		t.Run(im.name, func(t *testing.T) {
+			postgresRan(im.name)
+			s := im.open(t)
+			id, _ := seed(t, s, "cancel-noplan")
+
+			took, err := s.Cancel(id, time.Now().UTC())
+			if err != nil {
+				t.Fatalf("cancel: %v", err)
+			}
+			if took != 0 {
+				t.Errorf("cancelled %d tasks on a goal with no plan", took)
+			}
+			g, _ := s.LoadGoal(id)
+			if g.State != goal.Cancelled {
+				t.Errorf("goal with no plan is %s after cancel, want cancelled", g.State)
+			}
+		})
+	}
+}
+
+// TestAFinishedRunCannotBeRelabelledByAStaleWriter.
+//
+// # 🔴 The bug, found by cancelling a real run in a browser and reading the database afterwards
+//
+// `Supervisor.drive` loops around `worker.RunOnce`, and RunOnce reads the goal ONCE at the top of a
+// cycle. Cancelling from the console writes `cancelled` while a cycle is already in flight holding a
+// copy that still says `running`. That cycle finished its task, found every remaining task cancelled —
+// so the DAG was stalled — and wrote `failed` from its stale copy, with a refusal explaining a stall
+// that was really a person pressing stop. The console said cancelled; the record said FAILED.
+//
+// This is the same class of bug that made `Cancel` a store method instead of a load / mutate / SaveDAG
+// round trip, arriving through the goal row instead of the DAG. The fix is in the same place, because
+// last-writer-wins is wrong whenever one of the writers is working from a state that has since changed.
+//
+// Fences: refuseTerminalOverwrite in store.go, and worker.endedElsewhere, which turns the refusal into
+// a quiet stop rather than the false {"goal","error"} event the supervisor would otherwise publish.
+func TestAFinishedRunCannotBeRelabelledByAStaleWriter(t *testing.T) {
+	for _, im := range implementations() {
+		t.Run(im.name, func(t *testing.T) {
+			postgresRan(im.name)
+			s := im.open(t)
+			now := time.Now().UTC()
+			id, _ := seed(t, s, "stale-writer", pending("a", "read"))
+
+			// A worker reads the goal, then a person cancels underneath it.
+			stale, err := s.LoadGoal(id)
+			if err != nil {
+				t.Fatalf("load: %v", err)
+			}
+			if _, err := s.Cancel(id, now); err != nil {
+				t.Fatalf("cancel: %v", err)
+			}
+
+			// The stale cycle now tries to conclude the run, exactly as the stall arm of RunOnce does.
+			stale.State = goal.Failed
+			stale.UpdatedAt = now
+			err = s.SaveGoal(stale)
+			if !errors.Is(err, store.ErrGoalTerminal) {
+				t.Fatalf("a stale writer relabelled a cancelled run: SaveGoal returned %v, "+
+					"want ErrGoalTerminal", err)
+			}
+			got, err := s.LoadGoal(id)
+			if err != nil {
+				t.Fatalf("reload: %v", err)
+			}
+			if got.State != goal.Cancelled {
+				t.Errorf("the run is %s; the person who cancelled it would be shown %s", got.State, got.State)
+			}
+		})
+	}
+}
+
+// TestAFinishedRunStillAcceptsWritesThatDoNotChangeItsState.
+//
+// 🔴 The other half, and the reason the guard is on the state CHANGE rather than on writing at all. A
+// terminal goal legitimately receives writes — the spend of the task that was in flight when it ended,
+// a final checkpoint, milestone annotations. Refusing those would lose the accounting for the last task
+// of every run, which is a quieter and more expensive bug than the one being fixed.
+func TestAFinishedRunStillAcceptsWritesThatDoNotChangeItsState(t *testing.T) {
+	for _, im := range implementations() {
+		t.Run(im.name, func(t *testing.T) {
+			postgresRan(im.name)
+			s := im.open(t)
+			now := time.Now().UTC()
+			id, _ := seed(t, s, "terminal-spend", pending("a", "read"))
+			if _, err := s.Cancel(id, now); err != nil {
+				t.Fatalf("cancel: %v", err)
+			}
+
+			g, err := s.LoadGoal(id)
+			if err != nil {
+				t.Fatalf("load: %v", err)
+			}
+			g.Spend.CostMicroCents += 4200
+			g.Spend.Tokens += 99
+			if err := s.SaveGoal(g); err != nil {
+				t.Fatalf("recording the final spend of a cancelled run was refused: %v", err)
+			}
+			got, err := s.LoadGoal(id)
+			if err != nil {
+				t.Fatalf("reload: %v", err)
+			}
+			if got.Spend.CostMicroCents != g.Spend.CostMicroCents {
+				t.Errorf("spend is %d, want %d — the last task's cost was lost",
+					got.Spend.CostMicroCents, g.Spend.CostMicroCents)
+			}
+			if got.State != goal.Cancelled {
+				t.Errorf("state changed to %s while only spend was written", got.State)
+			}
+		})
+	}
+}

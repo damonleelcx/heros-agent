@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 // store.go holds the two implementations of Store: one in memory, one on Postgres.
@@ -452,6 +453,52 @@ func (p *PG) LatestConversation(tenant string) (string, bool, error) {
 	return id, true, nil
 }
 
+// Conversations lists this tenant's threads, most recently active first.
+//
+// 🔴 One query, not one-per-thread. The obvious shape — group to get the ids, then read each thread's
+// first sentence — is a listing whose cost grows with the number of conversations, and it is the rail
+// that pays it on every poll. The LATERAL join asks Postgres for the opening turn alongside the
+// aggregate, so the whole rail is a single round trip whatever the thread count.
+//
+// 🔴 LEFT JOIN, not an inner one. A thread whose turns are all from the agent has no opening user
+// sentence; an inner join drops it from the list entirely, so a conversation that exists and can be
+// opened would not be listed — which reads as data loss, not as a missing title. It comes back with an
+// empty Title, exactly as the Mem leg returns it.
+//
+// Truncation is applied in Go, through the same Title() the Mem leg uses, rather than by a SQL
+// `left(body, …)`: two implementations of "how long is a title" is how the legs start disagreeing about
+// a sentence of exactly the limit's length, and SQL's left() counts differently from Go's rune walk on
+// any non-ASCII opening word.
+func (p *PG) Conversations(tenant string) ([]ConversationSummary, error) {
+	rows, err := p.db.QueryContext(context.Background(), `
+		SELECT c.conversation_id, c.n, c.last_at, COALESCE(f.body, '')
+		FROM (
+			SELECT conversation_id, COUNT(*) AS n, MAX(at) AS last_at
+			  FROM conversation_turns WHERE tenant = $1 GROUP BY conversation_id
+		) c
+		LEFT JOIN LATERAL (
+			SELECT body FROM conversation_turns
+			 WHERE tenant = $1 AND conversation_id = c.conversation_id AND role = 'user'
+			 ORDER BY seq LIMIT 1
+		) f ON TRUE
+		ORDER BY c.last_at DESC, c.conversation_id DESC`, tenant)
+	if err != nil {
+		return nil, fmt.Errorf("memory: conversations: %w", err)
+	}
+	defer rows.Close()
+	var out []ConversationSummary
+	for rows.Next() {
+		var c ConversationSummary
+		var body string
+		if err := rows.Scan(&c.ID, &c.Turns, &c.LastAt, &body); err != nil {
+			return nil, fmt.Errorf("memory: conversations: %w", err)
+		}
+		c.Title = Title(body)
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
 func (m *Mem) AppendTurn(t Turn) (int64, error) {
 	if err := ValidateTurn(t); err != nil {
 		return 0, err
@@ -490,6 +537,71 @@ func (m *Mem) LatestConversation(tenant string) (string, bool, error) {
 		}
 	}
 	return "", false, nil
+}
+
+func (m *Mem) Conversations(tenant string) ([]ConversationSummary, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	prefix := tenant + "\x00"
+	var out []ConversationSummary
+	for k, turns := range m.turns {
+		if !strings.HasPrefix(k, prefix) || len(turns) == 0 {
+			continue
+		}
+		out = append(out, summarise(strings.TrimPrefix(k, prefix), turns))
+	}
+	sortConversations(out)
+	return out, nil
+}
+
+// summarise reduces one thread's turns to its list entry.
+//
+// 🔴 Shared with the Postgres leg's row scan rather than written twice: "the title is the first user
+// turn" and "the timestamp is the newest turn" are the two facts the conformance suite compares across
+// the implementations, and two copies of them is how the legs start disagreeing about a thread whose
+// first sentence came from the agent.
+func summarise(id string, turns []Turn) ConversationSummary {
+	s := ConversationSummary{ID: id, Turns: len(turns)}
+	for _, t := range turns {
+		if t.At.After(s.LastAt) {
+			s.LastAt = t.At
+		}
+		if s.Title == "" && t.Role == TurnUser {
+			s.Title = Title(t.Body)
+		}
+	}
+	return s
+}
+
+// Title trims an opening sentence down to a rail row.
+//
+// Cuts on a rune boundary, not a byte one: truncating mid-rune produces the replacement character, and
+// a console that renders "�" in a list of the person's own sentences looks broken in a way that is
+// nobody's fault and hard to report.
+func Title(body string) string {
+	t := strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(body, "\n", " "), "\r", " "))
+	if utf8.RuneCountInString(t) <= TitleLimit {
+		return t
+	}
+	n := 0
+	for i := range t {
+		if n == TitleLimit {
+			return strings.TrimSpace(t[:i]) + "…"
+		}
+		n++
+	}
+	return t
+}
+
+// sortConversations imposes the one order both legs promise. See the interface comment on why the
+// second key is load-bearing rather than cosmetic.
+func sortConversations(c []ConversationSummary) {
+	sort.Slice(c, func(i, j int) bool {
+		if !c[i].LastAt.Equal(c[j].LastAt) {
+			return c[i].LastAt.After(c[j].LastAt)
+		}
+		return c[i].ID > c[j].ID
+	})
 }
 
 func nz(t time.Time) time.Time {

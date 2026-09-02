@@ -114,12 +114,29 @@ var apiRoutes = []route{
 		Handler: func(s *Server) http.HandlerFunc { return s.handleConfirm }},
 	{Method: "GET", Path: "/api/conversation", Needs: tenancy.ReadGoals,
 		Handler: func(s *Server) http.HandlerFunc { return s.handleConversation }},
+	// The threads themselves, for the console's session rail. Same capability as reading one of them:
+	// somebody who may replay a conversation may see that the others exist.
+	{Method: "GET", Path: "/api/conversations", Needs: tenancy.ReadGoals,
+		Handler: func(s *Server) http.HandlerFunc { return s.handleConversations }},
+	// 🔴 No capability. This is the caller's OWN profile — their name, how they work, what they have
+	// standing instructions about, and what language they want to be answered in. Requiring a role to
+	// read or write your own settings would mean a viewer could not tell the agent to answer them in
+	// their own language, which is not a permission anybody was trying to model.
+	{Method: "GET", Path: "/api/profile",
+		Handler: func(s *Server) http.HandlerFunc { return s.handleGetProfile }},
+	{Method: "POST", Path: "/api/profile",
+		Handler: func(s *Server) http.HandlerFunc { return s.handleSetProfile }},
 	{Method: "GET", Path: "/api/goals/{id}/events", Needs: tenancy.ReadGoals,
 		Handler: func(s *Server) http.HandlerFunc { return s.handleEvents }},
 	// The events stream is what is happening NOW; the timeline is what happened, why, and what the run
 	// is waiting for. Both take a goal id from the URL, so both check ownership before reading anything.
 	{Method: "GET", Path: "/api/goals/{id}/timeline", Needs: tenancy.ReadGoals,
 		Handler: func(s *Server) http.HandlerFunc { return s.handleTimeline }},
+	// 🔴 RunGoals, the same capability as starting a run — stopping work is the mirror of starting it.
+	// Not ApproveChange: that is reserved for the route that writes to the customer's repository, and a
+	// member who may start runs must be able to stop the one they just started.
+	{Method: "POST", Path: "/api/goals/{id}/cancel", Needs: tenancy.RunGoals,
+		Handler: func(s *Server) http.HandlerFunc { return s.handleCancelGoal }},
 	// 🔴 The sharpest route in the product: approving a Tier-C change writes to the customer's own
 	// repository. A viewer must not reach it, and neither must the system principal.
 	{Method: "POST", Path: "/api/decide", Needs: tenancy.ApproveChange,

@@ -151,6 +151,14 @@ func (s *pgScoped) Decide(goalID goal.ID, id task.ID, approve bool, now time.Tim
 	return s.p.Decide(goalID, id, approve, now)
 }
 
+// Cancel guards on ownership first — see the memScoped twin.
+func (s *pgScoped) Cancel(goalID goal.ID, now time.Time) (int, error) {
+	if err := s.guard(goalID); err != nil {
+		return 0, err
+	}
+	return s.p.Cancel(goalID, now)
+}
+
 func (s *pgScoped) Checkpoint(cp Checkpoint) error {
 	if err := s.guard(cp.GoalID); err != nil {
 		return err

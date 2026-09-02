@@ -596,18 +596,23 @@ type spanOut struct {
 }
 
 func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
-	tenant, err := tenancy.MustTenant(r.Context())
+	// 🔴 The principal, not just the tenant, because the agent is now told who it is talking to. The
+	// identity comes from the authenticated session and NEVER from the request body: a client-supplied
+	// address would let anybody load a colleague's standing instructions into their own prompt just by
+	// naming them.
+	p, err := tenancy.From(r.Context())
 	if err != nil {
 		unauthorized(w, "You are not signed in.")
 		return
 	}
+	tenant := p.Tenant
 	var req askReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unreadable request"})
 		return
 	}
 
-	resp, decided, err := s.decide(tenant, req)
+	resp, decided, err := s.decide(tenant, p.Subject, req)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -628,7 +633,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 // The second return says HOW the reply was reached, which the transcript records. See memory.Decider:
 // a reply produced by the deterministic floor, by a model, or by the fallback after a model failure are
 // three different things that look identical once rendered.
-func (s *Server) decide(tenant string, req askReq) (askResp, memory.Decider, error) {
+func (s *Server) decide(tenant, asker string, req askReq) (askResp, memory.Decider, error) {
 	// 🔴 Unbounded is checked BEFORE routing. The refusal has to happen before anything is planned, which
 	// is the entire point of refusing — "keep going until it is perfect" must not first become a goal.
 	if router.Unbounded(req.Text) {
@@ -661,7 +666,7 @@ func (s *Server) decide(tenant string, req askReq) (askResp, memory.Decider, err
 	// 🔴 Consulted AFTER the floor and BEFORE the keyword router. It may be persuaded, which is why
 	// nothing above this line depends on it; and it may fail, which is why nothing below this line
 	// depends on it either.
-	if resp, answered := s.converseOrFallback(tenant, req, sub); answered {
+	if resp, answered := s.converseOrFallback(tenant, asker, req, sub); answered {
 		return resp, memory.DecidedByModel, nil
 	}
 

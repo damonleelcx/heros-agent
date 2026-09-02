@@ -290,6 +290,10 @@ func (s *memScoped) LatestConversation(string) (string, bool, error) {
 	return s.m.LatestConversation(s.tenant)
 }
 
+func (s *memScoped) Conversations(string) ([]ConversationSummary, error) {
+	return s.m.Conversations(s.tenant)
+}
+
 func (s *pgScoped) AppendTurn(t Turn) (int64, error) {
 	if s.tenant == "" {
 		return 0, fmt.Errorf("memory: refusing to append a turn with no tenant")
@@ -304,4 +308,8 @@ func (s *pgScoped) Turns(_ string, conversationID string) ([]Turn, error) {
 
 func (s *pgScoped) LatestConversation(string) (string, bool, error) {
 	return s.p.LatestConversation(s.tenant)
+}
+
+func (s *pgScoped) Conversations(string) ([]ConversationSummary, error) {
+	return s.p.Conversations(s.tenant)
 }

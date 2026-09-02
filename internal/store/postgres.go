@@ -122,7 +122,34 @@ func (p *Postgres) SaveGoal(g *goal.Goal) error {
 		b, _ := json.Marshal(g.Refusal)
 		refusal = b
 	}
-	res, err := p.db.ExecContext(context.Background(), `
+	// 🔴 A transaction with the row LOCKED, because this is a read-then-write and the thing being read
+	// is what decides whether the write is legal. Without the lock two writers both read `running` and
+	// both proceed — which is precisely the race refuseTerminalOverwrite exists to stop, reintroduced
+	// one layer down. The Memory leg gets the same property from its mutex.
+	//
+	// 🔴 The terminal list is NOT retyped in SQL. Which states are terminal is a rule of the goal model;
+	// a `state NOT IN ('succeeded','failed',…)` here would be a second copy that stops agreeing with it
+	// the first time a state is added, and it would fail OPEN — silently allowing the overwrite.
+	tx, err := p.db.BeginTx(context.Background(), nil)
+	if err != nil {
+		return fmt.Errorf("store: save goal %q: %w", g.ID, err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var current string
+	err = tx.QueryRowContext(context.Background(),
+		`SELECT state FROM goals WHERE id=$1 FOR UPDATE`, g.ID).Scan(&current)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("%w: %q", ErrGoalNotFound, g.ID)
+	}
+	if err != nil {
+		return fmt.Errorf("store: save goal %q: %w", g.ID, err)
+	}
+	if err := refuseTerminalOverwrite(goal.State(current), g); err != nil {
+		return err
+	}
+
+	res, err := tx.ExecContext(context.Background(), `
 		UPDATE goals SET tenant=$2, intent=$3, objective=$4, repo_url=$5, revision=$6, workflow_id=$7,
 		       axes=$8, ceilings=$9, spend=$10, criteria=$11, milestones=$12, state=$13, refusal=$14,
 		       expected_duration_ns=$15, updated_at=$16, last_checkpoint=$17
@@ -135,6 +162,9 @@ func (p *Postgres) SaveGoal(g *goal.Goal) error {
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		return fmt.Errorf("%w: %q", ErrGoalNotFound, g.ID)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("store: save goal %q: %w", g.ID, err)
 	}
 	return nil
 }
@@ -379,6 +409,60 @@ func (p *Postgres) Decide(goalID goal.ID, id task.ID, approve bool, now time.Tim
 		return p.propagateFailure(goalID, now)
 	}
 	return nil
+}
+
+// Cancel stops a run. See the Store interface for why a leased task is left running.
+//
+// 🔴 One transaction, and the goal row is taken FOR UPDATE first. Two people clicking Cancel on the
+// same run, or a cancel racing the worker's own state write, must not both pass the "is it already
+// terminal?" guard — the row lock is what makes the guard mean anything on this leg. The Memory leg
+// gets the same property from its mutex.
+//
+// 🔴 The terminal guard is `goal.Cancel`, not a state list retyped here. Which states may be cancelled
+// is a rule of the goal model; a second copy in SQL is a copy that stops agreeing with it the first
+// time a state is added.
+func (p *Postgres) Cancel(goalID goal.ID, now time.Time) (int, error) {
+	tx, err := p.db.BeginTx(context.Background(), nil)
+	if err != nil {
+		return 0, fmt.Errorf("store: cancel %q: %w", goalID, err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var state string
+	err = tx.QueryRowContext(context.Background(),
+		`SELECT state FROM goals WHERE id=$1 FOR UPDATE`, goalID).Scan(&state)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, fmt.Errorf("%w: %q", ErrGoalNotFound, goalID)
+	}
+	if err != nil {
+		return 0, fmt.Errorf("store: cancel %q: %w", goalID, err)
+	}
+	g := &goal.Goal{State: goal.State(state)}
+	if err := g.Cancel(now); err != nil {
+		return 0, err
+	}
+	if _, err := tx.ExecContext(context.Background(),
+		`UPDATE goals SET state=$2, updated_at=$3 WHERE id=$1`, goalID, string(g.State), now); err != nil {
+		return 0, fmt.Errorf("store: cancel %q: %w", goalID, err)
+	}
+
+	// The exemption mirrors `heldClause` and `cancellable`: only a lease that has not expired protects a
+	// task. An expired lease belongs to a worker that is gone, and honouring it would leave a cancelled
+	// run with tasks stuck pending behind a process that will never come back.
+	res, err := tx.ExecContext(context.Background(), `
+		UPDATE tasks SET state='cancelled', updated_at=$2
+		WHERE goal_id=$1
+		  AND state NOT IN ('succeeded','failed','blocked','cancelled')
+		  AND NOT (leased_by IS NOT NULL AND leased_by <> ''
+		           AND lease_expiry IS NOT NULL AND lease_expiry > $2)`, goalID, now)
+	if err != nil {
+		return 0, fmt.Errorf("store: cancel %q: %w", goalID, err)
+	}
+	n, _ := res.RowsAffected()
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("store: cancel %q: %w", goalID, err)
+	}
+	return int(n), nil
 }
 
 // propagateFailure blocks everything transitively downstream of a failed task.

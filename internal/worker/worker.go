@@ -165,6 +165,9 @@ func (w *Worker) RunOnce(ctx context.Context, goalID goal.ID) (Outcome, error) {
 	// getting to the point of discovering it could not be paid for.
 	if which, hit := g.CheckCeilings(now); hit {
 		if err := w.Store.SaveGoal(g); err != nil {
+			if endedElsewhere(err) {
+				return Outcome{Did: DidStop, Detail: stoppedElsewhere}, nil
+			}
 			return Outcome{Did: DidStop}, err
 		}
 		return Outcome{Did: DidStop, Detail: "ceiling reached: " + which}, nil
@@ -236,6 +239,9 @@ func (w *Worker) RunOnce(ctx context.Context, goalID goal.ID) (Outcome, error) {
 	g.Spend.Tokens += res.Tokens
 	g.Spend.CostMicroCents += res.CostMicroCents
 	if saveErr := w.Store.SaveGoal(g); saveErr != nil {
+		if endedElsewhere(saveErr) {
+			return Outcome{Did: DidStop, Detail: stoppedElsewhere}, nil
+		}
 		return Outcome{Did: DidStop}, saveErr
 	}
 
@@ -391,6 +397,9 @@ func (w *Worker) idle(goalID goal.ID, g *goal.Goal, now time.Time) (Outcome, err
 			g.Refusal = &bounds.Refusal{Cause: bounds.CeilingExceeded, Detail: err.Error()}
 			g.UpdatedAt = now
 			if serr := w.Store.SaveGoal(g); serr != nil {
+				if endedElsewhere(serr) {
+					return Outcome{Did: DidStop, Detail: stoppedElsewhere}, nil
+				}
 				return Outcome{Did: DidStop}, serr
 			}
 			return Outcome{Did: DidStop, Detail: "replanning refused: " + err.Error()}, nil
@@ -462,6 +471,9 @@ func (w *Worker) idle(goalID goal.ID, g *goal.Goal, now time.Time) (Outcome, err
 		g.State = goal.Succeeded
 		g.UpdatedAt = now
 		if err := w.Store.SaveGoal(g); err != nil {
+			if endedElsewhere(err) {
+				return Outcome{Did: DidStop, Detail: stoppedElsewhere}, nil
+			}
 			return Outcome{Did: DidStop}, err
 		}
 		return Outcome{Did: DidComplete,
@@ -502,6 +514,9 @@ func (w *Worker) idle(goalID goal.ID, g *goal.Goal, now time.Time) (Outcome, err
 		g.Refusal = &bounds.Refusal{Cause: cause, Detail: detail}
 		g.UpdatedAt = now
 		if err := w.Store.SaveGoal(g); err != nil {
+			if endedElsewhere(err) {
+				return Outcome{Did: DidStop, Detail: stoppedElsewhere}, nil
+			}
 			return Outcome{Did: DidStop}, err
 		}
 		return Outcome{Did: DidStall, Detail: detail}, nil
@@ -537,3 +552,24 @@ func commonestFailure(d *task.DAG) string {
 	}
 	return fmt.Sprintf("%d tasks reported: %s", bestN, best)
 }
+
+// endedElsewhere reports whether a SaveGoal failed only because somebody already ended this run.
+//
+// 🔴 A cancel from the console lands while a cycle is in flight. That cycle is holding a goal it read
+// before the cancel, so its next write would relabel a cancelled run — `store.SaveGoal` refuses it
+// (see refuseTerminalOverwrite) and the refusal must NOT travel back to the supervisor as an error:
+// `Supervisor.drive` turns any error out of RunOnce into a terminal {"goal","error"} event, so the
+// person who pressed Cancel would be shown a run that ERRORED. It did not error. It was stopped, by
+// them, on purpose. The cycle simply lost a race it was never meant to win.
+func endedElsewhere(err error) bool { return errors.Is(err, store.ErrGoalTerminal) }
+
+// stoppedElsewhere is what the person READS when their cancellation beat a cycle that was in flight.
+//
+// 🔴 Written for the customer, not for the log. This detail travels through Supervisor.emit into the
+// run card in the console, so "goal write refused: terminal" or "this run was already stopped" arrives
+// underneath the sentence that already told them the run was cancelled — and "already" invites the
+// reading that something stopped it other than the button they just pressed.
+//
+// It closes the loop on the promise the cancel made instead: the console said one task was under way
+// and would finish first, and this is that task finishing.
+const stoppedElsewhere = "the task that was already under way has finished; nothing further will start"

@@ -378,6 +378,22 @@ func TestATenantCannotReachAnotherTenantsConversation(t *testing.T) {
 					"else's tenant must change nothing")
 			}
 
+			// 🔴 Conversations is the LISTING, and a listing is the easiest place to leak everything at
+			// once: it returns a plausible answer that happens to include somebody else's threads. Worse
+			// than Turns leaking, because the title of a thread is the customer's own opening sentence —
+			// the leak would be readable prose, not an opaque id.
+			if list, err := a.Conversations(victim); err != nil {
+				t.Errorf("Conversations across tenants errored (%v); it must be indistinguishable from "+
+					"an organization with no threads", err)
+			} else {
+				for _, c := range list {
+					if c.ID == conv {
+						t.Errorf("Conversations listed another tenant's thread %q titled %q — passing "+
+							"somebody else's tenant must change nothing", c.ID, c.Title)
+					}
+				}
+			}
+
 			// ── writes land in the attacker's OWN thread, never the victim's ──────────────────────
 			if _, err := a.AppendTurn(memory.Turn{
 				Tenant: victim, ConversationID: conv, Role: memory.TurnAgent, Body: "planted",

@@ -93,14 +93,14 @@ func (p *pendingActions) take(id string) (*pendingAction, error) {
 // limit, a timeout, JSON that will not parse, a capability it invented — returns false, and the caller
 // carries on with the behaviour the console had before this package existed. The worst outcome of a
 // provider having a bad afternoon is a blunter console, never a broken one.
-func (s *Server) converseOrFallback(tenant string, req askReq, sub *subjectState) (askResp, bool) {
+func (s *Server) converseOrFallback(tenant, asker string, req askReq, sub *subjectState) (askResp, bool) {
 	if s.Converse == nil {
 		return askResp{}, false
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	out, err := s.Converse.Interpret(ctx, s.history(tenant, req.ConversationID), req.Text, factsFor(sub))
+	out, err := s.Converse.Interpret(ctx, s.history(tenant, req.ConversationID), req.Text, s.factsFor(tenant, asker, sub))
 	if err != nil {
 		// 🔴 WARN with the error CLASS, not just the text. A rate limit and a prompt the model will
 		// never satisfy both degrade identically for the customer and need completely different
@@ -186,7 +186,36 @@ func (s *Server) history(tenant, conversationID string) []memory.Turn {
 // which the agent learns anything about the customer's code, so it is the only place a hallucinated
 // fact could enter — and a struct makes the set of things it can know enumerable, which a free-text
 // blob somebody appends to does not.
-func factsFor(sub *subjectState) converse.Facts {
+// factsFor assembles everything the agent is allowed to assert without looking it up.
+//
+// 🔴 A method now, and it reads the store. It used to be a pure function over the loaded subject; the
+// person's own profile is the second input, and a profile the console can edit but the agent never
+// reads would be a settings panel that changes nothing — the exact failure the product is built to
+// find in other people's agents.
+//
+// 🔴 A failed profile read is NOT an error. It degrades to "we know nothing about this person", which
+// is where the product was before profiles existed. Failing the whole turn because a preference row
+// could not be read would let a settings feature take down the conversation, and the conversation is
+// the product. The WARN is what keeps that from being silent.
+func (s *Server) factsFor(tenant, asker string, sub *subjectState) converse.Facts {
+	f := s.subjectFacts(sub)
+	if s.Episodes == nil || asker == "" {
+		return f
+	}
+	prefs, err := s.Episodes.For(tenant).Preferences(tenant)
+	if err != nil {
+		log.Printf("WARN heros.profile.unreadable tenant=%q asker=%q err=%v", tenant, asker, err)
+		return f
+	}
+	p := ProfileFor(prefs, asker)
+	f.Person = converse.Person{
+		DisplayName: p["display_name"], Role: p["role"],
+		Instructions: p["instructions"], ReplyLanguage: p["reply_language"],
+	}
+	return f
+}
+
+func (s *Server) subjectFacts(sub *subjectState) converse.Facts {
 	if sub == nil {
 		return converse.Facts{SubjectLoaded: false}
 	}
