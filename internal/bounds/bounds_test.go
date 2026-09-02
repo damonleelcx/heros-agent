@@ -2,6 +2,8 @@ package bounds
 
 import (
 	"errors"
+	"os"
+	"regexp"
 	"testing"
 	"time"
 )
@@ -117,4 +119,43 @@ func indexOf(hay, needle string) int {
 		}
 	}
 	return -1
+}
+
+// TestCausesListsEveryCauseThatExists.
+//
+// # 🔴 The bug this exists for
+//
+// Causes() is a hand-maintained register, and TestEveryRefusalNamesANextAction iterates IT rather
+// than the type. So a cause added to the type and forgotten here is not merely unlisted — it is
+// exempt from the one check that guarantees a refusal tells somebody what to do. The register rots
+// in the safe direction: everything it names stays correct, and the check quietly covers less and
+// less. That happened on the two causes added for plan_exhausted / plan_stalled.
+//
+// This reads the source of the declarations rather than the register, so the register cannot be both
+// the subject and the authority.
+func TestCausesListsEveryCauseThatExists(t *testing.T) {
+	src, err := os.ReadFile("bounds.go")
+	if err != nil {
+		t.Fatalf("bounds.go: %v", err)
+	}
+	declared := regexp.MustCompile(`(?m)^\s*(\w+)\s+RefusalCause\s*=\s*"([^"]+)"`).
+		FindAllStringSubmatch(string(src), -1)
+	if len(declared) == 0 {
+		t.Fatal("no RefusalCause declarations found — this fence is measuring nothing")
+	}
+
+	listed := map[RefusalCause]bool{}
+	for _, c := range Causes() {
+		listed[c] = true
+	}
+	for _, d := range declared {
+		if !listed[RefusalCause(d[2])] {
+			t.Errorf("%s (%q) is declared but missing from Causes(), so it is exempt from "+
+				"TestEveryRefusalNamesANextAction and can ship with no next action", d[1], d[2])
+		}
+	}
+	if len(declared) != len(Causes()) {
+		t.Errorf("%d causes declared, %d in Causes() — the register names something that is not a cause",
+			len(declared), len(Causes()))
+	}
 }

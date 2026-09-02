@@ -159,6 +159,20 @@ const (
 	// CeilingExceeded: a running goal reached a limit. Terminal for that goal, and the next action is to
 	// raise the ceiling deliberately or narrow the question.
 	CeilingExceeded RefusalCause = "ceiling_exceeded"
+	// PlanExhausted: every task in the plan reached a terminal state and the objective was still not
+	// met. Nothing was over-spent — usually nothing was spent at all.
+	//
+	// 🔴 This used to be reported as CeilingExceeded, and that sent every reader to the wrong place.
+	// A real run of it on eval: nine axis tasks, all failed, with 0/60 tasks, 0/400000 tokens, $0.00
+	// of $1.00 and 18/200 iterations — not one ceiling within sight of its limit. The cause named a
+	// budget problem for a run whose actual finding was "there is no agent in this repository", and
+	// the next action followed the cause, so the product told somebody to raise a ceiling that had
+	// never been touched.
+	PlanExhausted RefusalCause = "plan_exhausted"
+	// PlanStalled: work remains and none of it can ever become ready — every unfinished task depends
+	// on something that failed. Distinct from PlanExhausted because the plan did not run out: it
+	// seized partway.
+	PlanStalled RefusalCause = "plan_stalled"
 )
 
 // nextActions maps each cause to what the person should do about it.
@@ -173,6 +187,11 @@ var nextActions = map[RefusalCause]string{
 	UnknownAxis:        "name one of the nine axes: model, prompt, skills, context, tools, memory, harness, loop, graph",
 	NoBudget:           "add budget to this organization's plan, or run the read-only assessment instead",
 	CeilingExceeded:    "raise the ceiling for this goal deliberately, or narrow the question and run again",
+	// 🔴 Neither of these says "raise the ceiling". The run did not spend anything, so a bigger
+	// budget changes nothing; what it found is that the subject does not support the question.
+	PlanExhausted: "read what the tasks reported — if there is no agent in this repository there is " +
+		"nothing to assess, so point her at one, or ask a narrower question of this one",
+	PlanStalled: "read which task failed first — everything after it was waiting on it",
 }
 
 // Refusal is a request that could not be bounded, with what to do about it.
@@ -200,5 +219,5 @@ func (r Refusal) Error() string {
 // Causes returns the closed set, for the fence and for a surface that renders them.
 func Causes() []RefusalCause {
 	return []RefusalCause{NoSubject, NoSourceRevision, MultipleSubjects,
-		UnboundedRequested, UnknownAxis, NoBudget, CeilingExceeded}
+		UnboundedRequested, UnknownAxis, NoBudget, CeilingExceeded, PlanExhausted, PlanStalled}
 }

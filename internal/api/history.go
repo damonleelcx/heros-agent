@@ -20,6 +20,13 @@ type pastGoal struct {
 	CostMicro int64    `json:"cost_micro_cents"`
 	Ceiling   int64    `json:"ceiling_cents"`
 	Reference string   `json:"reference,omitempty"`
+	// 🔴 Why it ended that way, and what to do about it. A card that says "failed, 0/10 tasks, $0.00"
+	// and nothing else is not a report, it is a shrug: every fact needed to explain it was already in
+	// the run record, and none of it was sent. Optional fields rather than a new endpoint — the
+	// consumer is the same card.
+	Cause      string `json:"cause,omitempty"`
+	Detail     string `json:"detail,omitempty"`
+	NextAction string `json:"next_action,omitempty"`
 }
 
 // handleHistory lists this organization's runs, newest last, so the console can rebuild the
@@ -78,6 +85,11 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 			Objective: g.Objective, Axes: g.Axes,
 			CostMicro: g.Spend.CostMicroCents, Ceiling: g.Ceilings.MaxCostCents,
 			Reference: g.Subject.RepoURL,
+		}
+		if g.Refusal != nil {
+			p.Cause = string(g.Refusal.Cause)
+			p.Detail = g.Refusal.Detail
+			p.NextAction = g.Refusal.NextAction()
 		}
 		if d, derr := s.Root.For(tenant).LoadDAG(g.ID); derr == nil && d != nil {
 			p.Tasks = len(d.Tasks)
