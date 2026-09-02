@@ -11,6 +11,7 @@ import (
 
 	"github.com/heros-foreal/heros/internal/auth"
 	"github.com/heros-foreal/heros/internal/bounds"
+	"github.com/heros-foreal/heros/internal/converse"
 	"github.com/heros-foreal/heros/internal/discovery"
 	"github.com/heros-foreal/heros/internal/goal"
 	"github.com/heros-foreal/heros/internal/intake"
@@ -123,6 +124,15 @@ type Server struct {
 	Model        string
 	// Approvals holds Tier-C changes between proposing and deciding.
 	Approvals *approvals
+	// Converse is the agent that reads a sentence and decides what it means.
+	//
+	// 🔴 OPTIONAL, and the whole design depends on it staying optional. When it is nil — no provider
+	// configured, a deployment that has not been given a key — the console falls back to the
+	// deterministic keyword router and keeps working. A conversational surface that cannot start
+	// without its provider is one that goes down when the provider does.
+	Converse *converse.Agent
+	// Pending holds capabilities the agent chose that spend money or write, until a person confirms.
+	Pending *pendingActions
 	// Episodes is the episodic record, read by run history and by the timeline.
 	//
 	// 🔴 A Root, not a Store: a handler is handed a view bound to the caller's tenant and never holds
@@ -151,6 +161,7 @@ func NewServer() *Server {
 	return &Server{
 		subjects:     map[string]*subjectState{},
 		Approvals:    NewApprovals(),
+		Pending:      NewPendingActions(),
 		ForgotLimit:  ratelimit.New(ForgotBurst, ForgotRefill, ForgotKeyCeiling),
 		LoginLimit:   ratelimit.New(LoginBurst, LoginRefill, LoginKeyCeiling),
 		SignupLimit:  ratelimit.New(SignupBurst, SignupRefill, SignupKeyCeiling),
@@ -499,6 +510,17 @@ func (s *Server) handleGetSubject(w http.ResponseWriter, r *http.Request) {
 
 type askReq struct {
 	Text string `json:"text"`
+	// ConversationID threads one exchange to the next.
+	//
+	// 🔴 Chosen by the CLIENT, and scoped to the tenant on the way into the store. A server-minted id
+	// would need a round trip before the first sentence could be sent, and the browser already has to
+	// hold one anyway to survive a refresh. It is not a capability: naming another organization's
+	// conversation id yields an empty thread of your own, which `TestATenantCannotReachAnotherTenants
+	// Conversation` proves on a real database.
+	//
+	// Empty is allowed and means "do not record this exchange" — an older client, or a caller that has
+	// no conversation. The reply is identical either way; only the memory of it differs.
+	ConversationID string `json:"conversation_id"`
 }
 
 // askResp is what the console renders. Exactly one of the shapes below is populated, and `kind` says
@@ -540,6 +562,22 @@ type askResp struct {
 
 	// abstain
 	CanDo []string `json:"can_do,omitempty"`
+
+	// confirm — a capability the agent chose that spends money or writes, waiting for a person
+	ActionID string `json:"action_id,omitempty"`
+	// Spends and Writes say WHICH of the two consequences applies, so the card can name the one that
+	// matters rather than warning about both. 🔴 Separate booleans, not one "dangerous" flag: "this will
+	// cost money" and "this will change your repository" need different sentences and a person weighs
+	// them differently.
+	Spends bool `json:"spends,omitempty"`
+	Writes bool `json:"writes,omitempty"`
+
+	// CostMicroCents is what answering this turn cost.
+	//
+	// 🔴 Reported on every reply, because it used to be true that answering cost nothing and both this
+	// code and the console said so out loud. It is not true any more, and a surface that quietly started
+	// charging for something it had described as free would be the worst version of this change.
+	CostMicroCents int64 `json:"cost_micro_cents,omitempty"`
 }
 
 type episodeOut struct {
@@ -569,66 +607,152 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	resp, decided, err := s.decide(tenant, req)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	s.record(tenant, req, resp, decided)
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// decide turns one sentence into one reply, WITHOUT writing anything to the network.
+//
+// # 🔴 Why the decision is separated from the writing
+//
+// Every reply has to be appended to the transcript before it is sent, and there is exactly one correct
+// place for that: after the reply exists and before it leaves. When each branch wrote its own response,
+// recording would have had to be copied into eight of them — and the branch somebody forgot would drop
+// turns silently, producing a conversation with holes that nothing reports.
+//
+// The second return says HOW the reply was reached, which the transcript records. See memory.Decider:
+// a reply produced by the deterministic floor, by a model, or by the fallback after a model failure are
+// three different things that look identical once rendered.
+func (s *Server) decide(tenant string, req askReq) (askResp, memory.Decider, error) {
 	// 🔴 Unbounded is checked BEFORE routing. The refusal has to happen before anything is planned, which
 	// is the entire point of refusing — "keep going until it is perfect" must not first become a goal.
 	if router.Unbounded(req.Text) {
 		ref := bounds.Refusal{Cause: bounds.UnboundedRequested, Detail: req.Text}
-		writeJSON(w, http.StatusOK, askResp{
+		return askResp{
 			Kind: "refusal", Cause: string(ref.Cause), Text: req.Text, NextAction: ref.NextAction(),
-		})
-		return
+		}, memory.DecidedByFloor, nil
 	}
 
 	out := s.Router.Route(req.Text)
 	switch {
 	case out.Redirect != nil:
-		writeJSON(w, http.StatusOK, askResp{
+		// 🔴 Also the floor, and also before any model. Connecting a repository creates a standing read
+		// grant whose disclosure must be displayed before the grant exists, so this decision may never
+		// depend on something that can be talked out of it.
+		return askResp{
 			Kind: "redirect", Surface: out.Redirect.Surface, Does: out.Redirect.Does,
 			Text: out.Redirect.Topic,
-		})
-		return
-	case out.Abstained():
-		writeJSON(w, http.StatusOK, askResp{Kind: "abstain", CanDo: intent.CanDo()})
-		return
+		}, memory.DecidedByFloor, nil
 	}
-
-	spec, _ := intent.Lookup(out.Intent)
+	// 🔴 An abstention is NOT returned here. The whole defect being fixed is that "hi" scored zero and
+	// was answered with the catalogue — so a sentence the keyword vocabulary cannot score is precisely
+	// the one the agent must be given. The abstention is still reachable, further down, when the agent
+	// cannot answer either.
 
 	sub := s.subjectOrRestore(tenant)
+
+	// ── the agent ────────────────────────────────────────────────────────────────────────────────
+	//
+	// 🔴 Consulted AFTER the floor and BEFORE the keyword router. It may be persuaded, which is why
+	// nothing above this line depends on it; and it may fail, which is why nothing below this line
+	// depends on it either.
+	if resp, answered := s.converseOrFallback(tenant, req, sub); answered {
+		return resp, memory.DecidedByModel, nil
+	}
+
+	// ── the keyword router ───────────────────────────────────────────────────────────────────────
+	//
+	// Reached when no agent is configured, or when the one that is could not answer. This is exactly
+	// the console's behaviour before the agent existed, which is the point: degrading returns the
+	// product to a working state rather than to an error page.
+	if out.Abstained() {
+		return askResp{Kind: "abstain", CanDo: intent.CanDo()}, memory.DecidedByFallback, nil
+	}
+	spec, _ := intent.Lookup(out.Intent)
+
 	if sub == nil {
 		ref := bounds.Refusal{Cause: bounds.NoSubject}
-		writeJSON(w, http.StatusOK, askResp{
+		return askResp{
 			Kind: "refusal", Intent: out.Intent.String(), Cause: string(ref.Cause),
 			NextAction: ref.NextAction(),
-		})
-		return
+		}, memory.DecidedByFallback, nil
 	}
 
 	switch spec.Tier {
 	case intent.TierQuery:
-		s.answerQuery(w, tenant, spec, sub)
+		resp, err := s.answerQuery(tenant, spec, sub)
+		return resp, memory.DecidedByFallback, err
 	case intent.TierGoal:
-		s.startGoal(w, tenant, spec, sub, out.Axis)
+		resp, err := s.startGoal(tenant, spec, sub, out.Axis)
+		return resp, memory.DecidedByFallback, err
 	default:
-		s.handleEffect(w, spec, sub, out.Axis, req.Text)
+		resp, err := s.handleEffect(spec, sub, out.Axis, req.Text)
+		return resp, memory.DecidedByFallback, err
 	}
 }
 
-// answerQuery serves a Tier-B intent from what discovery already read. No model call, no cost.
-func (s *Server) answerQuery(w http.ResponseWriter, tenant string, spec intent.Spec, sub *subjectState) {
+// record appends the exchange to the transcript, so the next sentence has something to refer to.
+//
+// # 🔴 Why a failure here is logged and swallowed rather than returned
+//
+// The transcript is an ENHANCEMENT to the reply, never a precondition for it. A person who asked a
+// question and got a correct answer must not see an error because the record of that answer could not
+// be written — that would take a working main path down for the sake of a side one. The cost is stated
+// rather than hidden: a dropped turn means the next question has less context, and the WARN is what
+// makes that visible instead of mysterious.
+func (s *Server) record(tenant string, req askReq, resp askResp, decided memory.Decider) {
+	if s.Episodes == nil || req.ConversationID == "" {
+		return
+	}
+	store := s.Episodes.For(tenant)
+	now := time.Now().UTC()
+	if _, err := store.AppendTurn(memory.Turn{
+		ConversationID: req.ConversationID, Role: memory.TurnUser, Body: req.Text, At: now,
+	}); err != nil {
+		log.Printf("WARN heros.ask.turn_not_recorded role=user conversation=%q tenant=%q err=%v",
+			req.ConversationID, tenant, err)
+		return
+	}
+	if _, err := store.AppendTurn(memory.Turn{
+		ConversationID: req.ConversationID, Role: memory.TurnAgent, Body: transcriptBody(resp),
+		Kind: resp.Kind, Capability: resp.Intent, Decided: decided, At: now,
+	}); err != nil {
+		log.Printf("WARN heros.ask.turn_not_recorded role=agent conversation=%q tenant=%q err=%v",
+			req.ConversationID, tenant, err)
+	}
+}
+
+// answerQuery serves a Tier-B intent from what discovery already read.
+//
+// ⚠️ This used to say "No model call, no cost", and that was true when a keyword table did the routing.
+// It is only half true now: producing the ANSWER still reads the index and costs nothing, but
+// UNDERSTANDING the question is a model call. The distinction is worth keeping — it is the difference
+// between a question and a run — but the old sentence is not, and neither is the one the console used
+// to print. See §the cost sentence below.
+//
+// 🔴 Returns its answer rather than writing it. Every reply now has to be recorded in the transcript
+// before it is sent, and a function that writes to the ResponseWriter itself gives the caller nothing
+// to record — the recording would have to be duplicated into each branch, which is how one branch ends
+// up missing it. One writer, one recorder, at the top of handleAsk.
+//
+// A non-nil error means the request failed rather than being answered: the caller renders a 500.
+func (s *Server) answerQuery(tenant string, spec intent.Spec, sub *subjectState) (askResp, error) {
 	resp := askResp{Kind: "answer", Intent: spec.Intent.String(), Tier: string(spec.Tier)}
 
 	if spec.Intent == intent.RunHistory {
-		s.answerRunHistory(w, tenant, resp)
-		return
+		return s.answerRunHistory(tenant, resp)
 	}
 	if spec.Axis == "" {
 		// Queries about the platform's own record rather than an axis, other than run history. Honest
 		// placeholder: the record exists, the rendering does not.
 		resp.Text = fmt.Sprintf("I can answer %q from what I have stored, but that view is not built yet. "+
 			"Ask me about one of the nine axes and I will show you the code.", spec.Question)
-		writeJSON(w, http.StatusOK, resp)
-		return
+		return resp, nil
 	}
 
 	ev := sub.Index.ForAxis(spec.Axis)
@@ -649,42 +773,46 @@ func (s *Server) answerQuery(w http.ResponseWriter, tenant string, spec intent.S
 	if !ev.Found {
 		resp.Text = ev.Note
 	} else {
+		// 🔴 The cost sentence, corrected rather than deleted.
+		//
+		// It used to end "nothing ran just now, and it cost nothing", which was true and is not any
+		// more: understanding the question is a model call. What is still true — and is the thing worth
+		// telling somebody — is that no RUN started, so no ceiling was drawn against and nothing will
+		// keep spending after this reply. Leaving the old wording in place would have been the worst
+		// version of this change: a surface that quietly began charging for something it described as
+		// free, in a product whose entire pitch is telling people true things.
 		resp.Text = fmt.Sprintf("Found %d span(s) across %d file(s) governing %s in %s. "+
-			"This is read from what I already parsed — nothing ran just now, and it cost nothing.",
+			"This is read from what I already parsed, so no run started — only reading your question "+
+			"cost anything.",
 			len(ev.Spans), len(files), spec.Axis, shortRef(sub.Source.Reference))
 	}
-	writeJSON(w, http.StatusOK, resp)
+	return resp, nil
 }
 
 // answerRunHistory reads the most recent run's episodes.
 //
 // 🔴 A query over what a durable run WROTE DOWN, not a re-derivation. That is the whole payoff of
 // persisting everything: "what happened in that run?" is a SELECT, and it costs nothing.
-func (s *Server) answerRunHistory(w http.ResponseWriter, tenant string, resp askResp) {
+func (s *Server) answerRunHistory(tenant string, resp askResp) (askResp, error) {
 	if s.Episodes == nil {
 		resp.Text = "No run history is being recorded on this deployment."
-		writeJSON(w, http.StatusOK, resp)
-		return
+		return resp, nil
 	}
 	last, ok, err := s.Root.For(tenant).LatestGoal(tenant)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
+		return askResp{}, err
 	}
 	if !ok {
 		resp.Text = "Nothing has run yet. Ask me to look at your repository and I will start something."
-		writeJSON(w, http.StatusOK, resp)
-		return
+		return resp, nil
 	}
 	eps, err := s.Episodes.For(tenant).Episodes(string(last.ID))
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
+		return askResp{}, err
 	}
 	if len(eps) == 0 {
 		resp.Text = fmt.Sprintf("The last run (%s, %s) recorded no episodes.", last.Intent, last.State)
-		writeJSON(w, http.StatusOK, resp)
-		return
+		return resp, nil
 	}
 	for _, e := range eps {
 		resp.Episodes = append(resp.Episodes, episodeOut{
@@ -694,7 +822,7 @@ func (s *Server) answerRunHistory(w http.ResponseWriter, tenant string, resp ask
 	}
 	resp.Text = fmt.Sprintf("The last run was %s (%s): %d steps, %s spent.",
 		last.Intent, last.State, len(eps), provider.FormatCents(last.Spend.CostMicroCents))
-	writeJSON(w, http.StatusOK, resp)
+	return resp, nil
 }
 
 // criteriaFor returns what it means for THIS goal to be finished.
@@ -732,7 +860,7 @@ func criteriaFor(i intent.Intent, axis string) []goal.Criterion {
 }
 
 // startGoal admits a durable goal, plans it, and starts driving it.
-func (s *Server) startGoal(w http.ResponseWriter, tenant string, spec intent.Spec, sub *subjectState, axis string) {
+func (s *Server) startGoal(tenant string, spec intent.Spec, sub *subjectState, axis string) (askResp, error) {
 	now := time.Now().UTC()
 	g := &goal.Goal{
 		ID: goal.ID(fmt.Sprintf("g-%d", now.UnixNano())), Tenant: tenant,
@@ -758,43 +886,47 @@ func (s *Server) startGoal(w http.ResponseWriter, tenant string, spec intent.Spe
 	if err := g.Admit(now); err != nil {
 		var ref bounds.Refusal
 		if asRefusal(err, &ref) {
-			writeJSON(w, http.StatusOK, askResp{
+			return askResp{
 				Kind: "refusal", Intent: spec.Intent.String(), Cause: string(ref.Cause),
 				Text: ref.Detail, NextAction: ref.NextAction(),
-			})
-			return
+			}, nil
 		}
-		writeJSON(w, http.StatusOK, askResp{
-			Kind: "refusal", Intent: spec.Intent.String(), Cause: "not_admitted", NextAction: err.Error()})
-		return
+		return askResp{
+			Kind: "refusal", Intent: spec.Intent.String(), Cause: "not_admitted",
+			NextAction: err.Error()}, nil
 	}
 	scoped := s.Root.For(tenant)
 	if err := scoped.CreateGoal(g); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
+		return askResp{}, err
 	}
 	d, err := s.Planners.Build(g, now)
 	if err != nil {
-		writeJSON(w, http.StatusOK, askResp{
-			Kind: "refusal", Intent: spec.Intent.String(), Cause: "could_not_plan", NextAction: err.Error()})
-		return
+		return askResp{
+			Kind: "refusal", Intent: spec.Intent.String(), Cause: "could_not_plan",
+			NextAction: err.Error()}, nil
 	}
 	if err := scoped.SaveDAG(d); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
+		return askResp{}, err
 	}
 
 	ids := sortedTaskIDs(d)
 	// 🔴 Driven with context.Background(), NOT the request's context. The request ends when the browser
 	// has its goal id; the run outlives it by design. Tying a durable goal's lifetime to one HTTP request
 	// is how a refresh cancels an hour of work.
-	s.supFor(tenant).Start(context.Background(), g.ID)
+	if sup := s.supFor(tenant); sup != nil {
+		sup.Start(context.Background(), g.ID)
+	} else {
+		// The goal and its DAG are already written, so this is recoverable rather than lost — but
+		// nothing will pick it up until somebody notices, which is exactly what this line is for.
+		log.Printf("WARN heros.goal.not_driven goal=%q tenant=%q reason=%q",
+			g.ID, tenant, "this deployment has no supervisor factory")
+	}
 
-	writeJSON(w, http.StatusOK, askResp{
+	return askResp{
 		Kind: "goal", Intent: spec.Intent.String(), Tier: string(spec.Tier),
 		GoalID: string(g.ID), Tasks: ids, CeilingCents: g.Ceilings.MaxCostCents,
 		Text: g.Objective, Scope: axis,
-	})
+	}, nil
 }
 
 // handleDecideRequest decodes an approval decision.
@@ -904,4 +1036,131 @@ func asRefusal(err error, out *bounds.Refusal) bool {
 		*out = r
 	}
 	return ok
+}
+
+// ── conversation ─────────────────────────────────────────────────────────────────────────────────
+
+// conversationResp is a thread, replayed.
+type conversationResp struct {
+	// ConversationID is the thread these turns belong to. Echoed back because the client may not have
+	// named one: asking with no id resumes the most recent thread, and the client needs to know which
+	// one it got so its next question joins the same conversation rather than forking a new one.
+	ConversationID string    `json:"conversation_id"`
+	Turns          []turnOut `json:"turns"`
+}
+
+type turnOut struct {
+	Seq  int64  `json:"seq"`
+	Role string `json:"role"`
+	Body string `json:"body"`
+	// Kind is the response shape this turn was rendered as, so a replay draws the cards the person
+	// originally saw rather than flattening everything into prose.
+	Kind       string `json:"kind,omitempty"`
+	Capability string `json:"capability,omitempty"`
+	// Decided says how the reply was reached. Surfaced to the client rather than kept internal: a turn
+	// answered by the keyword fallback while the model was unavailable is a DIFFERENT thing from one
+	// the agent reasoned about, and a person re-reading the thread deserves to be able to tell.
+	Decided string `json:"decided,omitempty"`
+	At      string `json:"at"`
+}
+
+// handleConversation replays one thread.
+//
+// 🔴 What comes back is only what was WRITTEN DOWN. The cards a run produced — task lists, diffs, live
+// progress — are rebuilt from the durable goal record by /api/history, not from here. Two sources
+// because they have two lifetimes: a sentence is final the moment it is said, and a run keeps changing
+// after the sentence that started it.
+func (s *Server) handleConversation(w http.ResponseWriter, r *http.Request) {
+	tenant, err := tenancy.MustTenant(r.Context())
+	if err != nil {
+		unauthorized(w, "You are not signed in.")
+		return
+	}
+	if s.Episodes == nil {
+		writeJSON(w, http.StatusOK, conversationResp{})
+		return
+	}
+	store := s.Episodes.For(tenant)
+
+	id := r.URL.Query().Get("conversation_id")
+	if id == "" {
+		latest, ok, err := store.LatestConversation(tenant)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		if !ok {
+			// No thread yet is not an error. A browser opening the console for the first time asks this
+			// question and must get an empty conversation, not a 404 it has to special-case.
+			writeJSON(w, http.StatusOK, conversationResp{})
+			return
+		}
+		id = latest
+	}
+
+	turns, err := store.Turns(tenant, id)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	resp := conversationResp{ConversationID: id, Turns: []turnOut{}}
+	for _, t := range turns {
+		resp.Turns = append(resp.Turns, turnOut{
+			Seq: t.Seq, Role: string(t.Role), Body: t.Body, Kind: t.Kind,
+			Capability: t.Capability, Decided: string(t.Decided), At: t.At.Format(time.RFC3339),
+		})
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// transcriptBody is what an agent turn READS AS when the thread is replayed or re-read by the agent.
+//
+// # 🔴 Why this exists rather than storing resp.Text directly
+//
+// Several reply shapes carry no prose at all. An abstention's content is its `can_do` list; a redirect's
+// is a surface and what that surface does. Storing `resp.Text` for those writes an EMPTY body — which
+// replays as a blank bubble, and, worse, gives the agent an empty turn to reason from next time. "What
+// did you just tell me?" would be answered from nothing.
+//
+// 🚫 Deliberately NOT the whole response serialised. A diff, a span list and a task DAG all live
+// somewhere durable already; copying them here would duplicate data that can then go stale against its
+// source, and the transcript would quietly become a second, worse copy of the run record.
+func transcriptBody(resp askResp) string {
+	// 🔴 Shape FIRST, `Text` only as the fallback — not the other way round.
+	//
+	// `Text` does not mean the same thing in every shape. On an answer it is the reply; on an unbounded
+	// refusal it is the ECHO of what the person typed, which the console renders as "You asked: …". A
+	// version of this function that preferred Text wrote the person's own sentence into the transcript
+	// as the agent's reply, so the thread replayed as the agent repeating them back. Caught by driving
+	// the real endpoint, not by any unit test — which is why there is now one below.
+	//
+	// See workflow/CI/bugfix/20260901-heros-console-was-never-a-conversation.md
+	// Fenced by TestARefusalDoesNotReplayAsTheAgentRepeatingYou.
+	switch resp.Kind {
+	case "refusal":
+		if resp.NextAction != "" {
+			return fmt.Sprintf("I refused (%s). What to do instead: %s", resp.Cause, resp.NextAction)
+		}
+		return fmt.Sprintf("I refused (%s).", resp.Cause)
+	case "redirect":
+		return fmt.Sprintf("That is done at %s, which handles %s.", resp.Surface, resp.Does)
+	}
+	if resp.Text != "" {
+		return resp.Text
+	}
+	switch resp.Kind {
+	case "confirm":
+		return fmt.Sprintf("I asked whether to go ahead: %s", resp.Text)
+	case "abstain":
+		return "I could not route that, and offered the whole list of what I do."
+	case "proposal":
+		return fmt.Sprintf("I proposed a change to %s, waiting for approval.", resp.Path)
+	case "goal":
+		return fmt.Sprintf("I started a %s run.", resp.Intent)
+	default:
+		// 🔴 Named rather than blank. A shape added later that nobody taught this function about should
+		// read as an unrendered shape in the transcript, not as silence — silence is indistinguishable
+		// from the agent having said nothing at all.
+		return fmt.Sprintf("(%s)", resp.Kind)
+	}
 }

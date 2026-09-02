@@ -92,34 +92,35 @@ func (s *Server) propose(ctx context.Context, sub *subjectState, axis, instructi
 }
 
 // handleEffect serves author, prompt and model: propose a change and hand back a diff to approve.
-func (s *Server) handleEffect(w http.ResponseWriter, spec intent.Spec, sub *subjectState, axis, text string) {
+//
+// 🔴 Returns its reply rather than writing it, for the reason answerQuery states: every reply is
+// recorded in the transcript before it is sent, and that recording happens once, in handleAsk.
+func (s *Server) handleEffect(spec intent.Spec, sub *subjectState, axis, text string) (askResp, error) {
 	if axis == "" {
 		axis = spec.Axis
 	}
 	if axis == "" {
-		writeJSON(w, 200, askResp{
+		return askResp{
 			Kind: "refusal", Intent: spec.Intent.String(), Cause: "no_axis",
 			NextAction: "name which axis to change: " + strings.Join(intent.Axes(), ", "),
-		})
-		return
+		}, nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
 	p, err := s.propose(ctx, sub, axis, text)
 	if err != nil {
-		writeJSON(w, 200, askResp{
+		return askResp{
 			Kind: "refusal", Intent: spec.Intent.String(), Cause: "cannot_change",
 			NextAction: err.Error(),
-		})
-		return
+		}, nil
 	}
 	s.Approvals.put(p)
-	writeJSON(w, 200, askResp{
+	return askResp{
 		Kind: "proposal", Intent: spec.Intent.String(), Tier: string(spec.Tier),
 		Scope: axis, ChangeID: p.ID, Path: p.Proposal.Path, Ref: fmt.Sprintf("%s:%d", p.Proposal.Path, p.Proposal.Line),
 		Diff: p.Proposal.Diff(), Text: p.Proposal.Rationale, IdempotencyKey: p.Key,
-	})
+	}, nil
 }
 
 // ── deciding ─────────────────────────────────────────────────────────────────────────────────────

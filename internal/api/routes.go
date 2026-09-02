@@ -104,6 +104,16 @@ var apiRoutes = []route{
 		Handler: func(s *Server) http.HandlerFunc { return s.handleGetSubject }},
 	{Method: "POST", Path: "/api/ask", Needs: tenancy.RunGoals,
 		Handler: func(s *Server) http.HandlerFunc { return s.handleAsk }},
+	// The transcript itself, so a refresh resumes the conversation rather than starting a second one
+	// beside it. 🔴 ReadGoals rather than RunGoals: reading what was already said is not asking for
+	// anything, and a viewer who may look at runs may look at the sentences that produced them.
+	// 🔴 RunGoals, the same capability as asking. Confirming is what actually starts the run the agent
+	// proposed, so somebody who may not ask must not be able to say yes to a question put to a person
+	// who could.
+	{Method: "POST", Path: "/api/confirm", Needs: tenancy.RunGoals,
+		Handler: func(s *Server) http.HandlerFunc { return s.handleConfirm }},
+	{Method: "GET", Path: "/api/conversation", Needs: tenancy.ReadGoals,
+		Handler: func(s *Server) http.HandlerFunc { return s.handleConversation }},
 	{Method: "GET", Path: "/api/goals/{id}/events", Needs: tenancy.ReadGoals,
 		Handler: func(s *Server) http.HandlerFunc { return s.handleEvents }},
 	// The events stream is what is happening NOW; the timeline is what happened, why, and what the run

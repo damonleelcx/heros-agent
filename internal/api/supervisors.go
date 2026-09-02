@@ -35,8 +35,23 @@ type supervisorSet struct {
 	byOrg map[string]*Supervisor
 }
 
-// supFor returns this organization's supervisor, building it on first use.
+// supFor returns this organization's supervisor, building it on first use, or nil when this deployment
+// has no supervisor factory.
+//
+// # 🔴 Why nil is returned rather than dereferenced
+//
+// `SupervisorFor` is an injected function, and it was called without a nil check. On a server assembled
+// without one, `startGoal` wrote the goal, wrote the DAG, and THEN panicked — so the crash happened
+// after the durable writes, leaving a real run in the database that nothing would ever drive, and
+// taking down the request that would have reported it.
+//
+// A missing supervisor is a misconfiguration, not a user error, so the caller logs it loudly and still
+// hands back the goal it created. The alternative — panicking — turns a deployment mistake into an
+// outage and destroys the evidence of what was mid-flight.
 func (s *Server) supFor(tenant string) *Supervisor {
+	if s.SupervisorFor == nil {
+		return nil
+	}
 	s.sups.mu.Lock()
 	defer s.sups.mu.Unlock()
 	if s.sups.byOrg == nil {

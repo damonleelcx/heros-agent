@@ -31,13 +31,18 @@ type pastGoal struct {
 // Runs ARE durable — they are rows — so they come back with their question, their plan, their spend and
 // their outcome.
 //
-// Tier-B answers do NOT come back, and no endpoint can bring them: `answerQuery` computes them from the
-// discovery index on demand, costs nothing, and is never written down. Nor are refusals or sentences
-// that did not route. Storing them would mean a transcript table, which was weighed and declined.
+// ⚠️ This comment used to go on to say that Tier-B answers do NOT come back and that no endpoint could
+// bring them, because storing them "would mean a transcript table, which was weighed and declined".
+// That decision was REVERSED: `conversation_turns` exists, and `GET /api/conversation` replays the
+// whole thread. Corrected rather than deleted, because the argument it recorded — that a history
+// silently omitting half of what was said is worse than one that admits its shape — is still the reason
+// this endpoint says out loud what it is redrawing.
 //
-// So the console redraws the RUNS and says plainly that it is doing so, rather than redrawing a partial
-// thread that looks complete. A history that silently omits half of what was said is worse than one
-// that admits its shape.
+// 🔴 The two endpoints stay separate, and that is not redundancy. A sentence is FINAL the moment it is
+// said, so it replays verbatim from the transcript. A run keeps changing after the sentence that
+// started it, so its card must be rebuilt from the goal record — never from a copy frozen into the
+// transcript, which would go stale against the run it describes and show a finished run as pending
+// forever.
 func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 	tenant, err := tenancy.MustTenant(r.Context())
 	if err != nil {
