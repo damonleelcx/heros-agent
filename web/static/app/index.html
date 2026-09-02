@@ -1345,14 +1345,44 @@ for (const side of ['L','R']) {
 }
 document.getElementById('scrim').onclick = () => { setRail('L', false); setRail('R', false); };
 
-/* 🔴 The permissions panel is filled from the SECTION's own toggle event.
-   It is the only wiring that covers every way the section can open — the summary being clicked, Enter
-   or Space on it, openOrganization(), and the browser restoring an open <details> across a reload. It
-   used to be filled by whoever opened it, which worked until the last such caller was repointed
-   elsewhere and the section started opening onto an empty box. See ensureOrganization. */
-document.getElementById('sectPerms').addEventListener('toggle', function(){
-  if (this.open) ensureOrganization();
-});
+/* fillOnFirstOpen makes a rail section fill itself the first time it is opened.
+ *
+ * # ⚠️ Both sections have now shipped opening onto an empty box, for the same reason
+ *
+ * A panel filled by WHOEVER OPENS IT is only as good as the list of openers somebody remembered to
+ * wire. Permissions broke when its last caller was repointed elsewhere; the profile broke for anyone
+ * NOT SIGNED IN, because its only filler was `start()`, which never runs without a session. Two
+ * different causes, one shape: a heading that expands onto nothing, with no error to explain it.
+ *
+ * 🔴 So the trigger is the SECTION'S OWN `toggle` event. It covers every way a <details> can open —
+ * the summary clicked, Enter or Space on it while focused, code setting `.open`, and the browser
+ * restoring an open section across a reload. The element knows about all four; a caller knows one.
+ *
+ * 🔴 One definition, two sections, rather than the same logic written twice. The rules here are subtle
+ * enough to drift apart if copied: fill lazily, guard the signed-out case, and mark "loaded" only on
+ * SUCCESS so a transient failure retries on the next open instead of sticking for the life of the tab.
+ * The marking itself stays inside each render, which is the only place that knows whether it finished.
+ */
+function fillOnFirstOpen(sectionID, panelID, render, signedOutMessage){
+  const sect = document.getElementById(sectionID);
+  if (!sect) return;
+  sect.addEventListener('toggle', function(){
+    if (!this.open) return;
+    const body = document.getElementById(panelID);
+    if (!body || body.dataset.loaded === 'true') return;
+    /* The shell renders before anybody signs in — the signed-out console is the whole rail plus a
+       sign-in card in the conversation — so these sections are clickable with no session, and both
+       renders dereference `me`. Left unmarked, so the panel fills properly once signing in has
+       answered who this is. */
+    if (!me || !me.signed_in) { body.innerHTML = `<p class="rail-empty">${signedOutMessage}</p>`; return; }
+    render();
+  });
+}
+
+fillOnFirstOpen('sectProfile', 'profilePanel', renderProfile,
+  'Sign in to set how Heros should address you and what it should remember about how you work.');
+fillOnFirstOpen('sectPerms', 'permsPanel', renderOrganization,
+  'Sign in to see who is in this organization.');
 // Escape closes a drawer. On a phone the drawer covers the conversation, and the only other way out is
 // a scrim somebody has to know is tappable.
 document.addEventListener('keydown', e => {
@@ -1477,6 +1507,8 @@ async function renderProfile(){
   if (!box) return;
   try { const r = await api('/api/profile'); profile = (r && r.profile) || {}; }
   catch (e) {
+    // 🔴 NOT marked loaded — reopening the section retries. See fillOnFirstOpen.
+    delete box.dataset.loaded;
     box.innerHTML = `<p class="rail-empty">Could not load your profile: ${esc(e.message)}</p>`;
     return;
   }
@@ -1528,6 +1560,8 @@ async function renderProfile(){
     account.</span></div>`));
 
   renderAccount(box);
+  // Set LAST, so a panel that threw part-way through is not remembered as complete.
+  box.dataset.loaded = 'true';
 }
 
 async function saveProfile(patch){
@@ -1728,49 +1762,12 @@ function openOrganization(){
   if (!me || !me.signed_in) return;
   const sect = document.getElementById('sectPerms');
   // Setting `open` fires `toggle`, which is what fills the panel. Nothing renders from here — see
-  // ensureOrganization for why the fill hangs off the element rather than off whoever opened it.
+  // fillOnFirstOpen for why the fill hangs off the element rather than off whoever opened it.
   sect.open = true;
   // Scrolled into view because on a short window the section can open below the fold, and a control
   // that appears to do nothing is indistinguishable from one that is broken.
   sect.scrollIntoView({block:'nearest', behavior:'smooth'});
   openRail('L');
-}
-
-/* ensureOrganization fills the panel the first time the section is opened.
- *
- * # ⚠️ The bug this fixes: the section opened onto NOTHING
- *
- * `renderOrganization` was reachable only through `openOrganization`, and when the rail's account
- * button was pointed at the profile section instead, `openOrganization` lost its last caller. Clicking
- * "Organization & permissions" expanded a panel that was never filled — an empty box under a heading,
- * with no error and nothing in the console to explain it.
- *
- * 🔴 It hangs off the ELEMENT's own `toggle` event, not off whatever opened it. That is the difference
- * between the two: a render triggered by the opener only works for openers somebody remembered to wire,
- * and this section can be opened four ways — clicking the summary, Enter or Space on it while focused,
- * `openOrganization()`, and the browser restoring an open `<details>` on reload. The element knows
- * about all four; a caller knows about one.
- *
- * 🔴 Deliberately LAZY. Filling it costs three requests (`/api/members`, `/api/invitations`,
- * `/api/autonomy`) and most sessions never open this section — a console that fetched the whole
- * organization on every page load would be spending them on nobody's behalf.
- *
- * 🔴 The "already loaded" mark is set by a SUCCESSFUL render, so a failed one is retried by closing and
- * reopening — which is the first thing anybody does when a panel looks wrong. A plain `drawn = true`
- * flag set on entry would make one transient network failure permanent for the life of the tab. */
-function ensureOrganization(){
-  const body = document.getElementById('permsPanel');
-  if (!body || body.dataset.loaded === 'true') return;
-  /* 🔴 The rail exists before anybody is signed in — the signed-out console renders the whole shell and
-     puts a sign-in card in the conversation — so this section is clickable with no session. Without
-     this guard `renderOrganization` reads `me.can` off null and throws, which shows the same empty box
-     as the bug being fixed and buries a TypeError in the console. Unmarked, so it fills properly once
-     signing in has answered who this is. */
-  if (!me || !me.signed_in) {
-    body.innerHTML = `<p class="rail-empty">Sign in to see who is in this organization.</p>`;
-    return;
-  }
-  renderOrganization();
 }
 
 async function renderOrganization(){
@@ -1782,7 +1779,7 @@ async function renderOrganization(){
     people = await api('/api/members');
     if (me.can['member.invite']) pending = await api('/api/invitations');
   } catch (e) {
-    // 🔴 NOT marked loaded. The panel keeps the error visible and ensureOrganization will try again the
+    // 🔴 NOT marked loaded. The panel keeps the error visible and fillOnFirstOpen will try again the
     // next time the section is opened — closing and reopening is what a person does when a panel looks
     // wrong, and it should be the thing that fixes it.
     delete body.dataset.loaded;
@@ -2331,9 +2328,12 @@ async function start(){
      the replay `conversationID` is still null — the list would render with nothing selected and then
      need drawing a second time. */
   renderSessions();
-  renderProfile();
   renderRuns();
   pollRuns();
+  /* ⚠️ renderProfile() is NOT called here any more. It used to be, which is why the profile panel
+     worked when signed in and was an empty box when signed out — `start()` only runs with a session.
+     Both rail sections now fill on first open instead, which covers the signed-out case and spends no
+     request on a panel nobody opens. See fillOnFirstOpen. */
 }
 
 (async () => {
