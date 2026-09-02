@@ -19,6 +19,7 @@ import (
 	"github.com/heros-foreal/heros/internal/task"
 	"github.com/heros-foreal/heros/internal/toolcontract"
 	"github.com/heros-foreal/heros/internal/worker"
+	"strings"
 )
 
 // ── doubles ──────────────────────────────────────────────────────────────────────────────────────
@@ -530,5 +531,66 @@ func TestADeclinedTaskIsCancelledAndBlocksWhatFollows(t *testing.T) {
 	// And a second decision changes nothing.
 	if err := h.s.Decide(h.id, "pr", true, h.clock.Now()); err == nil {
 		t.Error("a decided task was decided again; consent is answered once")
+	}
+}
+
+// TestAFailedPlanIsNotReportedAsAnExceededCeiling.
+//
+// # 🔴 The bug this exists for
+//
+// A run whose every task failed was recorded as `ceiling_exceeded`. Observed on eval: nine axis tasks
+// against a repository with no agent in it, all failed, and the goal saved with
+//
+//	Cause:  "ceiling_exceeded"
+//	Detail: "10/10 tasks terminal, 0 succeeded; completion criteria not met"
+//	Spend:  0/60 tasks, 0/400000 tokens, $0.00 of $1.00, 18/200 iterations
+//
+// Not one ceiling within sight of its limit. The cause drives the next action, so this did not just
+// mislabel the run — it told the operator to raise a ceiling that had never been touched, about a run
+// whose actual finding was "there is no agent in this repository".
+//
+// The second half is the reason. Every task records why it failed and none of it reached the report:
+// ten rows in the database each held a sentence explaining the run, and the card said "0/10 tasks,
+// $0.00". A refusal that omits the one available explanation reads as a broken product rather than a
+// correct answer.
+func TestAFailedPlanIsNotReportedAsAnExceededCeiling(t *testing.T) {
+	const why = "the context axis could not be read from this repository, so there is nothing to assess"
+
+	tool := readOnlyTool()
+	tool.fn = func(toolcontract.Call) (toolcontract.Result, error) {
+		return toolcontract.Result{ToolCalls: 1}, errors.New(why)
+	}
+	h := setup(t, store.NewMemory(), tool, nil, analyse("a"), analyse("b"))
+	h.g.Criteria = []goal.Criterion{{Kind: goal.AxesAssessed, Threshold: 2}}
+	_ = h.s.SaveGoal(h.g)
+
+	var out worker.Outcome
+	for i := 0; i < 12 && out.Did != worker.DidStall; i++ {
+		out, _ = h.w.RunOnce(context.Background(), h.id)
+	}
+	if out.Did != worker.DidStall {
+		t.Fatalf("the goal never reached a terminal state: %+v", out)
+	}
+
+	g, err := h.s.LoadGoal(h.id)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if g.Refusal == nil {
+		t.Fatal("a failed goal carries no refusal, so the console has nothing to explain it with")
+	}
+	if g.Refusal.Cause == bounds.CeilingExceeded {
+		t.Errorf("a plan that ran out of tasks is reported as %q. Spend was %d micro-cents against a "+
+			"ceiling of %d cents — nothing was exceeded, and the next action for this cause tells the "+
+			"operator to raise a limit that was never reached.",
+			g.Refusal.Cause, g.Spend.CostMicroCents, g.Ceilings.MaxCostCents)
+	}
+	if g.Refusal.Cause != bounds.PlanExhausted && g.Refusal.Cause != bounds.PlanStalled {
+		t.Errorf("unexpected cause %q; want plan_exhausted or plan_stalled", g.Refusal.Cause)
+	}
+	if !strings.Contains(g.Refusal.Detail, why) {
+		t.Errorf("the refusal does not carry what the tasks reported.\n got: %s\nwant it to contain: %s\n"+
+			"Without it the run says only how many tasks failed, and the one sentence that explains "+
+			"the failure stays in the database.", g.Refusal.Detail, why)
 	}
 }

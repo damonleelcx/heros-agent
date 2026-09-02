@@ -478,13 +478,28 @@ func (w *Worker) idle(goalID goal.ID, g *goal.Goal, now time.Time) (Outcome, err
 	//      goal that is definitively over, which reads to an operator as a healthy idle goal.
 	exhausted := total > 0 && done == total
 	if d.Stalled() || exhausted {
+		// 🔴 NOT CeilingExceeded, which is what this reported for months. Neither of these states has
+		// anything to do with a limit: a real one on eval finished with 0/60 tasks, 0/400000 tokens,
+		// $0.00 of $1.00 and 18/200 iterations — every ceiling untouched — and told the operator to
+		// raise a ceiling. The cause drives the next action, so a wrong cause is a wrong instruction,
+		// not just a wrong label. See internal/bounds.PlanExhausted.
+		cause := bounds.PlanExhausted
 		detail := fmt.Sprintf("%d/%d tasks terminal, %d succeeded; completion criteria not met",
 			done, total, succeeded)
 		if !exhausted {
+			cause = bounds.PlanStalled
 			detail = fmt.Sprintf("%d/%d tasks terminal, none of the remainder can run", done, total)
 		}
+		// 🔴 Carry WHAT THE TASKS SAID. Every task records why it failed, and none of it reached the
+		// operator: the run reported "0/10 tasks, $0.00" and nothing else, while ten rows in the
+		// database each held the sentence that explained it ("the context axis could not be read from
+		// this repository, so there is nothing to assess"). A failure summary that omits the one
+		// available explanation is how a correct refusal reads as a broken product.
+		if why := commonestFailure(d); why != "" {
+			detail += "; " + why
+		}
 		g.State = goal.Failed
-		g.Refusal = &bounds.Refusal{Cause: bounds.CeilingExceeded, Detail: detail}
+		g.Refusal = &bounds.Refusal{Cause: cause, Detail: detail}
 		g.UpdatedAt = now
 		if err := w.Store.SaveGoal(g); err != nil {
 			return Outcome{Did: DidStop}, err
@@ -494,4 +509,31 @@ func (w *Worker) idle(goalID goal.ID, g *goal.Goal, now time.Time) (Outcome, err
 
 	// Not finished, not stalled: another worker holds the only claimable task.
 	return Outcome{Did: DidNothing, Detail: "no claimable task right now", More: true}, nil
+}
+
+// commonestFailure is the reason the most failed tasks gave, phrased for a person.
+//
+// Blocked tasks are skipped deliberately: their failure is always "a dependency failed", which is
+// true, uninteresting, and would outvote the real reason on any plan with a synthesis step hanging
+// off nine parallel ones. Ties break toward the first in task order, so the same DAG always produces
+// the same sentence.
+func commonestFailure(d *task.DAG) string {
+	counts := map[string]int{}
+	best, bestN := "", 0
+	for _, t := range d.Tasks {
+		if t.State != task.Failed || t.Failure == "" {
+			continue
+		}
+		counts[t.Failure]++
+		if counts[t.Failure] > bestN {
+			best, bestN = t.Failure, counts[t.Failure]
+		}
+	}
+	if bestN == 0 {
+		return ""
+	}
+	if bestN == 1 {
+		return best
+	}
+	return fmt.Sprintf("%d tasks reported: %s", bestN, best)
 }

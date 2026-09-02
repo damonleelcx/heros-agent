@@ -1552,13 +1552,30 @@ async function replayRuns(said){
     const h2 = turn('heros');
     const spent = money(g.cost_micro_cents || 0);
     const state = g.state === 'succeeded' ? 'b-ok' : (g.state === 'failed' ? 'b-bad' : 'b-warn');
+    /* 🔴 The repository, and why it ended that way.
+       This card used to read "goal assess · FAILED · 0/10 tasks · $0.0000 of $1.00" and nothing more.
+       Both of the things that explain it were already to hand and neither was shown: WHICH repository
+       the run was against — the header above the conversation shows the CURRENT subject, which is
+       often a different one, so the card was silently attributed to the wrong repo — and what the
+       tasks reported, which for a real failed run was "the context axis could not be read from this
+       repository, so there is nothing to assess". A run that is right about a repository and cannot
+       say so reads as a broken product. */
+    const repo = g.reference
+      ? `<p style="margin:0 0 .4rem;font-family:var(--mono);font-size:.72rem;color:var(--ink-muted)">${
+          esc(String(g.reference).replace(/^https?:\/\/(www\.)?/, '').replace(/\.git$/, ''))}</p>`
+      : '';
+    const why = g.detail
+      ? `<p style="margin:.55rem 0 0;font-size:.85rem">${esc(g.detail)}</p>` : '';
+    const next = g.next_action
+      ? `<p style="margin:.4rem 0 0;font-size:.82rem;color:var(--ink-muted)"><span class="k">next</span> ${
+          esc(g.next_action)}</p>` : '';
     const card = el(`<div class="card"><div class="card-head">
         <span class="card-title"><span class="k">goal</span> ${esc(g.intent)}${
           g.axes && g.axes.length ? ' · ' + esc(g.axes.join(', ')) : ''}</span>
         <span class="spacer"></span><span class="badge ${state}">${esc(g.state)}</span></div>
-      <div class="card-body"><p style="margin:0;font-size:.9rem;color:var(--ink-muted)">
+      <div class="card-body">${repo}<p style="margin:0;font-size:.9rem;color:var(--ink-muted)">
         ${g.done}/${g.tasks} task${g.tasks === 1 ? '' : 's'} · ${spent} of $${(g.ceiling_cents/100).toFixed(2)}
-        </p></div></div>`);
+        </p>${why}${next}</div></div>`);
     h2.appendChild(card); scroll();
   }
   return true;
