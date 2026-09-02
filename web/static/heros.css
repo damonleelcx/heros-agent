@@ -347,9 +347,11 @@ p{margin:0 0 var(--s4)}
    answer you are waiting for arrives at the top of it, over the brightest part of the arch, and a
    paragraph read through a lattice is a worse product than a plainer background. Half strength keeps
    the page recognisably the same page without competing with a sentence.
-   It is also ANCHORED TO THE DOCUMENT, not the viewport (no .arc-fixed) — so it sits behind the
-   opening of the conversation and scrolls away, and a long working session is on a clean field. */
-.arc-soft{--arc-veil:.5}
+   Paired with .arc-fixed on the console it stays under the whole conversation, so this value is not
+   a first impression — it is what every reply is read over. It was .5 and damon reported text as
+   hard to read against a real transcript; the fix is this AND the text halo in app/index.html, not
+   either alone. */
+.arc-soft{--arc-veil:.34}
 @media (max-width:52rem){
-  .arc-soft{--arc-veil:.26}
+  .arc-soft{--arc-veil:.2}
 }
