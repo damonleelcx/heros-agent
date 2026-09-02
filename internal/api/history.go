@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"sort"
 
+	"github.com/heros-foreal/heros/internal/goal"
 	"github.com/heros-foreal/heros/internal/task"
 	"github.com/heros-foreal/heros/internal/tenancy"
 )
@@ -70,12 +71,36 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 	// conversation does. Goal ids carry their creation time, so sorting by id is chronological.
 	sort.Slice(goals, func(i, j int) bool { return goals[i].ID < goals[j].ID })
 
-	// 🔴 Bounded. An organization that has run a hundred goals should not have a hundred cards pushed at
-	// it before it can type, and the browser should not have to lay them out. The most recent are the
-	// ones anybody is coming back to.
-	const most = 12
-	if len(goals) > most {
-		goals = goals[len(goals)-most:]
+	// ── `?state=live` — what is happening NOW ─────────────────────────────────────────────────────
+	//
+	// 🔴 An optional parameter on this endpoint rather than a second one beside it. The console's task
+	// rail wants exactly the fields this already produces; a `/api/runs/live` would be a second contract
+	// carrying the same struct, and the two would drift the first time a field was added to one of them.
+	// Omitting the parameter keeps the existing behaviour byte for byte, so no current caller changes.
+	//
+	// 🔴 The predicate is `!State.Terminal()`, not a list of live states retyped here. Which states are
+	// finished is a rule of the goal model, and a copy of it in this file is a copy that goes stale the
+	// next time a state is added — the rail would quietly stop showing a whole class of run.
+	if live := r.URL.Query().Get("state") == "live"; live {
+		var running []*goal.Goal
+		for _, g := range goals {
+			if !g.State.Terminal() {
+				running = append(running, g)
+			}
+		}
+		goals = running
+	} else {
+		// 🔴 Bounded. An organization that has run a hundred goals should not have a hundred cards pushed
+		// at it before it can type, and the browser should not have to lay them out. The most recent are
+		// the ones anybody is coming back to.
+		//
+		// The cap does NOT apply to the live list: "what is running now" is short by construction — a
+		// deployment with thirteen simultaneous runs has a capacity problem, and silently hiding the
+		// thirteenth from the only surface that can cancel it would turn that into an unstoppable run.
+		const most = 12
+		if len(goals) > most {
+			goals = goals[len(goals)-most:]
+		}
 	}
 
 	out := make([]pastGoal, 0, len(goals))

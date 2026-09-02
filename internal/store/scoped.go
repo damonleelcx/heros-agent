@@ -147,6 +147,15 @@ func (s *memScoped) Decide(goalID goal.ID, id task.ID, approve bool, now time.Ti
 	return s.m.Decide(goalID, id, approve, now)
 }
 
+// Cancel guards on ownership first: cancelling somebody else's run is exactly the cross-tenant write
+// `guard` exists to refuse, and it is aliased to not-found so a probe cannot confirm the id is real.
+func (s *memScoped) Cancel(goalID goal.ID, now time.Time) (int, error) {
+	if err := s.guard(goalID); err != nil {
+		return 0, err
+	}
+	return s.m.Cancel(goalID, now)
+}
+
 func (s *memScoped) Checkpoint(cp Checkpoint) error {
 	if err := s.guard(cp.GoalID); err != nil {
 		return err

@@ -39,6 +39,10 @@ var (
 	ErrNotClaimable = errors.New("store: task is not claimable")
 	ErrLeaseLost    = errors.New("store: lease is no longer held by this worker")
 	ErrNoWork       = errors.New("store: no claimable task")
+	// ErrGoalTerminal is a write that would change the state of a run that has already ended. It is a
+	// STALE WRITER, not a broken one — see refuseTerminalOverwrite — so callers stop quietly rather than
+	// reporting a failure the customer did not have.
+	ErrGoalTerminal = errors.New("store: this run has already ended")
 )
 
 // Checkpoint is a resumable point in a goal's execution.
@@ -106,6 +110,29 @@ type Store interface {
 	// in AwaitingApproval can be decided, so a second click cannot approve it twice.
 	Decide(goalID goal.ID, id task.ID, approve bool, now time.Time) error
 
+	// Cancel stops a run at a person's request: the goal moves to Cancelled and every task that has not
+	// finished and is NOT currently leased moves to Cancelled with it. Returns how many tasks it took.
+	//
+	// # 🔴 Why this is a store method and not load / mutate / SaveDAG in the handler
+	//
+	// SaveDAG writes the WHOLE graph. A handler that loads the DAG, cancels some tasks and saves it back
+	// has a window in which a worker completes a task, and the save then writes the stale copy over the
+	// top of it — a succeeded task silently reverts to running and its result is lost. Cancelling has to
+	// happen under the same lock (or transaction) that Claim and Complete take, which is here.
+	//
+	// # 🔴 Why a LEASED running task is deliberately left alone
+	//
+	// `task.Cancelled` has no outgoing transitions, and `Complete` transitions the task the worker holds.
+	// So cancelling underneath a live worker does not stop it — it makes its next `Complete` fail, and
+	// `api.Supervisor.drive` turns any error out of `RunOnce` into a terminal `{"goal","error"}` event.
+	// The person who pressed Cancel would be told the run ERRORED, which is both untrue and the one
+	// reading that sends somebody looking for a bug.
+	//
+	// Leaving it means the task finishes normally and the next cycle stops at `goal.Claimable()`, which
+	// already refuses a non-running goal (see worker.RunOnce). One stopping mechanism, not two racing.
+	// The cost is bounded by the lease: at worst the run stops one task later than the click.
+	Cancel(goalID goal.ID, now time.Time) (int, error)
+
 	Checkpoint(cp Checkpoint) error
 	LatestCheckpoint(goalID goal.ID) (Checkpoint, bool, error)
 }
@@ -137,6 +164,28 @@ func (m *Memory) CreateGoal(g *goal.Goal) error {
 	return nil
 }
 
+// LoadGoal returns a COPY of the goal.
+//
+// # 🔴 It used to return the live pointer, and that made this leg disagree with Postgres
+//
+// Handing out `m.goals[id]` means a caller who mutates what it loaded has already written to the store,
+// with no SaveGoal and no lock. Postgres cannot behave that way — it rebuilds a struct from rows — so
+// the two implementations had different semantics for the single most common sequence in the codebase:
+// load, mutate, save.
+//
+// It stayed invisible until something needed to compare the stored state against an incoming write.
+// `refuseTerminalOverwrite` does exactly that, and on the aliased version it was comparing the stored
+// goal with ITSELF — the caller's mutation was already applied — so the guard passed every time and the
+// memory leg silently kept the bug the Postgres leg was fixed for.
+//
+// The same reasoning applies more sharply to `Cancel`: with an alias, any worker holding a loaded goal
+// could undo a cancellation by writing to its own copy, without ever calling the store.
+//
+// The slices and the Refusal pointer are cloned too, not just the struct: a shallow copy still shares
+// them, so appending a milestone or rewriting a refusal would reach into the store through the back
+// door the struct copy just closed.
+//
+// Fenced by TestAFinishedRunCannotBeRelabelledByAStaleWriter, which fails on this leg without it.
 func (m *Memory) LoadGoal(id goal.ID) (*goal.Goal, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -144,17 +193,68 @@ func (m *Memory) LoadGoal(id goal.ID) (*goal.Goal, error) {
 	if !ok {
 		return nil, fmt.Errorf("%w: %q", ErrGoalNotFound, id)
 	}
-	return g, nil
+	return copyGoal(g), nil
+}
+
+func copyGoal(g *goal.Goal) *goal.Goal {
+	c := *g
+	c.Axes = append([]string(nil), g.Axes...)
+	c.Criteria = append([]goal.Criterion(nil), g.Criteria...)
+	c.Milestones = append([]goal.Milestone(nil), g.Milestones...)
+	for i := range c.Milestones {
+		c.Milestones[i].TaskIDs = append([]string(nil), g.Milestones[i].TaskIDs...)
+	}
+	if g.Refusal != nil {
+		r := *g.Refusal
+		c.Refusal = &r
+	}
+	return &c
 }
 
 func (m *Memory) SaveGoal(g *goal.Goal) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, ok := m.goals[g.ID]; !ok {
+	cur, ok := m.goals[g.ID]
+	if !ok {
 		return fmt.Errorf("%w: %q", ErrGoalNotFound, g.ID)
+	}
+	if err := refuseTerminalOverwrite(cur.State, g); err != nil {
+		return err
 	}
 	m.goals[g.ID] = g
 	return nil
+}
+
+// refuseTerminalOverwrite stops a stale writer resurrecting or relabelling a finished run.
+//
+// # 🔴 The bug this closes, which was found by cancelling a real run and reading the result
+//
+// `Supervisor.drive` is a loop around `worker.RunOnce`, and RunOnce reads the goal ONCE at the top of a
+// cycle. Cancelling from the console writes `cancelled` while a cycle is already in flight, holding a
+// copy that still says `running`. That cycle then finishes its task, finds every remaining task
+// cancelled — so the DAG is stalled — and writes `failed` from its stale copy. The console said the run
+// was cancelled and the record said it FAILED, complete with a refusal explaining a stall that was
+// really a person pressing stop.
+//
+// The DAG was already protected from exactly this by `Cancel` being a store method rather than a
+// load / mutate / SaveDAG round trip. The goal ROW had the same hole through SaveGoal, and this is the
+// same answer in the same place: last-writer-wins is wrong when one of the writers is working from a
+// state that has since changed underneath it.
+//
+// # 🔴 Why it forbids a state CHANGE and not every write
+//
+// A terminal goal still legitimately receives writes — final spend, a checkpoint timestamp, milestone
+// annotations — and refusing those would lose the accounting for the last task of every run. What must
+// not happen is the STATE moving: terminal means terminal, so `succeeded → failed`, `cancelled → failed`
+// and any resurrection are refused, while a save that leaves the state alone passes through.
+//
+// Fenced by TestAFinishedRunCannotBeRelabelledByAStaleWriter.
+func refuseTerminalOverwrite(current goal.State, incoming *goal.Goal) error {
+	if !current.Terminal() || incoming.State == current {
+		return nil
+	}
+	return fmt.Errorf("%w: %q is %s and cannot become %s", ErrGoalTerminal,
+		incoming.ID, current, incoming.State)
 }
 
 func (m *Memory) ListGoals(state goal.State) ([]*goal.Goal, error) {
@@ -342,6 +442,55 @@ func (m *Memory) Decide(goalID goal.ID, id task.ID, approve bool, now time.Time)
 		d.PropagateFailure()
 	}
 	return nil
+}
+
+// Cancel stops a run. See the interface for why a leased task is left running.
+func (m *Memory) Cancel(goalID goal.ID, now time.Time) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	g, ok := m.goals[goalID]
+	if !ok {
+		return 0, fmt.Errorf("%w: %q", ErrGoalNotFound, goalID)
+	}
+	// The goal moves FIRST. It is the gate workers read (goal.Claimable), so setting it before touching
+	// any task means there is no instant in which tasks are being cancelled while the goal still invites
+	// a worker to claim more of them.
+	if err := g.Cancel(now); err != nil {
+		return 0, err
+	}
+	d, ok := m.dags[goalID]
+	if !ok {
+		// A goal with no DAG is legitimate — Draft, refused at admission, or cancelled before planning.
+		// The goal is still cancelled; there was simply nothing under it.
+		return 0, nil
+	}
+	took := 0
+	for _, t := range d.Tasks {
+		if !cancellable(t, now) {
+			continue
+		}
+		if err := t.Transition(task.Cancelled, now); err != nil {
+			// Not fatal, and not silent. The task states are a closed machine and every source we select
+			// for has a legal edge to Cancelled, so this is unreachable unless that machine changes
+			// underneath us — which is exactly when a silent skip would be worst.
+			return took, fmt.Errorf("store: cancelling %q: %w", t.ID, err)
+		}
+		took++
+	}
+	return took, nil
+}
+
+// cancellable decides whether Cancel may take this task.
+//
+// 🔴 Shared by both implementations so the answer cannot differ between them. Two conditions, and the
+// second is the subtle one: a task is exempt only while a lease is genuinely LIVE. An expired lease
+// belongs to a worker that is gone — the same reading `held` takes — and leaving those behind would let
+// one dead worker keep a cancelled run's tasks pending forever.
+func cancellable(t *task.Task, now time.Time) bool {
+	if t.State.Terminal() {
+		return false
+	}
+	return !(t.LeasedBy != "" && t.LeaseExpiry.After(now))
 }
 
 func (m *Memory) Checkpoint(cp Checkpoint) error {

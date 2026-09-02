@@ -211,6 +211,40 @@ type Turn struct {
 	At             time.Time
 }
 
+// ConversationSummary is one thread as a list entry: enough to draw a row in the console's session
+// rail, and nothing more.
+//
+// # 🔴 Why there is no conversations table and no stored title
+//
+// `conversation_turns` already holds every fact this struct carries. A title column would be a second
+// place the name of a thread lives, written once at creation and never corrected when the first
+// sentence turns out not to be what the conversation was about — and a separate table would need an
+// owner row created before the first turn, which is a write that can fail and leave a thread nobody
+// can list. Deriving both from the turns means a conversation exists exactly when somebody has said
+// something in it, which is the only definition that cannot drift.
+//
+// The price is a GROUP BY per listing instead of a point read. Paid knowingly: the rail lists one
+// organization's threads, and a tenant with enough conversations for that to matter has a product
+// problem this struct would not have solved.
+type ConversationSummary struct {
+	ID string
+	// Title is the FIRST thing the person said, truncated. Empty when a thread somehow holds only agent
+	// turns — rendered by the console as "untitled", never as a blank row.
+	Title string
+	// Turns is how many utterances the thread holds, both roles counted.
+	Turns int
+	// LastAt is the most recent turn's timestamp — what the list is ordered by.
+	LastAt time.Time
+}
+
+// TitleLimit is how much of the opening sentence becomes a thread's title.
+//
+// Truncated in the STORE rather than in the browser so both legs agree on one answer and the console
+// cannot be the thing that decides it. A rail row is one line wide; sending a 4KB opening paragraph so
+// that CSS can hide all but forty characters of it is a listing that gets slower the more somebody
+// types.
+const TitleLimit = 80
+
 var (
 	ErrNoConversation = errors.New("memory: turn has no conversation")
 	ErrBadTurnRole    = errors.New("memory: turn has an unknown role")
@@ -393,4 +427,14 @@ type Store interface {
 	// 🔴 Its own method rather than "read all turns and sort": the alternative reads every turn this
 	// tenant has ever spoken in order to discard all but one of them.
 	LatestConversation(tenant string) (string, bool, error)
+	// Conversations lists every thread this tenant has spoken in, most recently active first. On a
+	// scoped store the tenant argument is ignored, as with Turns.
+	//
+	// 🔴 Ordered by (LastAt DESC, ID DESC) on BOTH implementations, and the tie-break is not decoration.
+	// Turns written in one test run share a wall-clock instant at this resolution — the reason
+	// Mem.LatestConversation answers from write order rather than from timestamps at all — so ordering
+	// on LastAt alone lets the two legs disagree about threads that are genuinely simultaneous, and the
+	// conformance suite would catch it as a flake rather than as a fact. The second key makes the answer
+	// total. It is the same tie-break PG.LatestConversation already uses.
+	Conversations(tenant string) ([]ConversationSummary, error)
 }

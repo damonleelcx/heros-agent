@@ -229,8 +229,39 @@ func (g *Goal) Resume(now time.Time) error {
 	return nil
 }
 
+// Cancel stops a goal for good, at a person's request.
+//
+// # 🔴 Why this existed as a state long before anything could reach it
+//
+// `Cancelled` has been in the state list since the beginning, and nothing in the product could produce
+// it: a run could be paused, could finish, could fail, could be refused — but a person who had started
+// something they did not want could only wait for it. The console now has a Cancel control, and this is
+// the transition behind it.
+//
+// # 🔴 Why Draft and Paused are legal sources and not just Running
+//
+// The whole point is to stop work that a person no longer wants. A Draft goal has not been admitted yet
+// and a Paused one has stopped without being finished — both are things somebody may reasonably want to
+// be rid of, and refusing them would leave the two states that most need an exit without one. What is
+// refused is a goal that has already ENDED: cancelling a run that succeeded would silently rewrite the
+// record of what happened, and "cancelled" would stop meaning "somebody stopped this".
+//
+// Terminal by design, like Refused: there is no Uncancel. Somebody who wants the work after all asks
+// again, which produces a new run with its own record, rather than resurrecting one whose tasks have
+// already been cancelled underneath it.
+func (g *Goal) Cancel(now time.Time) error {
+	if g.State.Terminal() {
+		return fmt.Errorf("%w: this run is already %s, so there is nothing to stop", ErrIllegalState, g.State)
+	}
+	g.State, g.UpdatedAt = Cancelled, now
+	return nil
+}
+
 // Claimable reports whether workers may take this goal's tasks. The single predicate a worker asks, so
 // pause takes effect without every worker knowing the state list.
+//
+// 🔴 This is also what makes cancelling safe against a worker mid-task — see store.Cancel, which
+// deliberately leaves a LEASED task alone and relies on this gate to stop the next cycle instead.
 func (g *Goal) Claimable() bool { return g.State == Running }
 
 // CheckCeilings stops a goal that reached a limit, recording which one.

@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
@@ -491,6 +493,186 @@ func TestLatestConversationFindsTheMostRecentThread(t *testing.T) {
 			}
 			if got != second {
 				t.Errorf("latest conversation is %q, want %q", got, second)
+			}
+		})
+	}
+}
+
+// saidAt is `said` with the timestamp pinned, for the ordering tests where "when" is the subject.
+func saidAt(conv, body string, at time.Time) memory.Turn {
+	tn := said(conv, body)
+	tn.At = at
+	return tn
+}
+
+func repliedAt(conv, body string, at time.Time) memory.Turn {
+	tn := saidAt(conv, body, at)
+	tn.Role = memory.TurnAgent
+	return tn
+}
+
+// only picks this test's own threads out of the listing.
+//
+// 🔴 Necessary because the Postgres leg shares one database across the whole suite, so the list contains
+// whatever every other test wrote. A test that asserted on the WHOLE list would pass alone and fail in
+// the suite — which reads as flakiness and gets the assertion weakened rather than the bug found.
+func only(t *testing.T, s memory.Store, want ...string) []memory.ConversationSummary {
+	t.Helper()
+	all, err := s.Conversations(conformanceTenant)
+	if err != nil {
+		t.Fatalf("conversations: %v", err)
+	}
+	keep := map[string]bool{}
+	for _, w := range want {
+		keep[w] = true
+	}
+	var out []memory.ConversationSummary
+	for _, c := range all {
+		if keep[c.ID] {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// TestAConversationIsTitledByItsOpeningSentence.
+//
+// The rail's rows are the only way to tell one thread from another, and the id is a random string. The
+// title is derived rather than stored — see memory.ConversationSummary — so this asserts the derivation
+// holds on both legs: the FIRST thing the person said, not the last, and not the agent's reply.
+func TestAConversationIsTitledByItsOpeningSentence(t *testing.T) {
+	for _, im := range implementations() {
+		t.Run(im.name, func(t *testing.T) {
+			s, _ := im.open(t)
+			conv := uniqueID("c")
+			at := time.Now().UTC().Truncate(time.Millisecond)
+			for i, tn := range []memory.Turn{
+				saidAt(conv, "what tools does this agent have?", at),
+				repliedAt(conv, "Four of them.", at.Add(time.Millisecond)),
+				saidAt(conv, "and what about memory?", at.Add(2*time.Millisecond)),
+			} {
+				if _, err := s.AppendTurn(tn); err != nil {
+					t.Fatalf("append %d: %v", i, err)
+				}
+			}
+			got := only(t, s, conv)
+			if len(got) != 1 {
+				t.Fatalf("%d summaries for one conversation, want 1", len(got))
+			}
+			if got[0].Title != "what tools does this agent have?" {
+				t.Errorf("title is %q — it must be the opening sentence, not a later one or the agent's",
+					got[0].Title)
+			}
+			if got[0].Turns != 3 {
+				t.Errorf("counted %d turns, want 3 — both roles count", got[0].Turns)
+			}
+		})
+	}
+}
+
+// TestAThreadWithNoUserTurnIsStillListed.
+//
+// 🔴 The Postgres leg reaches its title through a LEFT JOIN precisely for this case. An inner join
+// would drop such a thread from the list entirely — a conversation that exists, holds turns and can be
+// opened, but that the rail never shows. That reads as data loss, which is a far worse failure than a
+// blank title.
+func TestAThreadWithNoUserTurnIsStillListed(t *testing.T) {
+	for _, im := range implementations() {
+		t.Run(im.name, func(t *testing.T) {
+			s, _ := im.open(t)
+			conv := uniqueID("c")
+			at := time.Now().UTC().Truncate(time.Millisecond)
+			if _, err := s.AppendTurn(repliedAt(conv, "Picking up where we left off.", at)); err != nil {
+				t.Fatalf("append: %v", err)
+			}
+			got := only(t, s, conv)
+			if len(got) != 1 {
+				t.Fatalf("an agent-only thread was not listed at all (%d summaries)", len(got))
+			}
+			if got[0].Title != "" {
+				t.Errorf("title is %q, want empty — there was no user turn to take one from", got[0].Title)
+			}
+		})
+	}
+}
+
+// TestATitleIsTruncatedTheSameWayOnBothLegs.
+//
+// Truncation happens in Go, through memory.Title, on both legs rather than in SQL on one of them. This
+// is the assertion that keeps it that way: a `left(body, 80)` in the Postgres query would count BYTES
+// where Go counts runes, so the two legs would return different titles for the same opening sentence
+// the moment somebody wrote one in a language that is not ASCII.
+func TestATitleIsTruncatedTheSameWayOnBothLegs(t *testing.T) {
+	for _, im := range implementations() {
+		t.Run(im.name, func(t *testing.T) {
+			s, _ := im.open(t)
+			conv := uniqueID("c")
+			// Multi-byte on purpose: one rune, three bytes. A byte-counting truncation cuts this at 26
+			// characters instead of 80, and would also split a rune in half.
+			long := strings.Repeat("é", memory.TitleLimit+40)
+			if _, err := s.AppendTurn(said(conv, long)); err != nil {
+				t.Fatalf("append: %v", err)
+			}
+			got := only(t, s, conv)
+			if len(got) != 1 {
+				t.Fatalf("%d summaries, want 1", len(got))
+			}
+			want := strings.Repeat("é", memory.TitleLimit) + "…"
+			if got[0].Title != want {
+				t.Errorf("title is %q (%d runes), want %d runes plus an ellipsis",
+					got[0].Title, utf8.RuneCountInString(got[0].Title), memory.TitleLimit)
+			}
+		})
+	}
+}
+
+// TestConversationsAreOrderedNewestFirstAndTiesAreBroken.
+//
+// # 🔴 The tie is the point of this test, not an edge case bolted onto it
+//
+// Mem.LatestConversation deliberately answers from WRITE ORDER rather than from timestamps, because
+// turns written in one test run share a wall-clock instant and ordering on `At` alone would return an
+// arbitrary one of them. Conversations cannot do that — it has to order by activity — so it orders by
+// (LastAt DESC, ID DESC) on both legs, and the second key is what makes the answer total.
+//
+// Without that key this test is a coin flip that passes most of the time, which is the worst kind of
+// green: the assertion gets deleted as flaky rather than the ordering being fixed.
+func TestConversationsAreOrderedNewestFirstAndTiesAreBroken(t *testing.T) {
+	for _, im := range implementations() {
+		t.Run(im.name, func(t *testing.T) {
+			s, _ := im.open(t)
+			base := time.Now().UTC().Truncate(time.Millisecond)
+			newer := uniqueID("c")
+			// Two threads whose last activity is the SAME instant, to force the tie-break.
+			tieA, tieB := uniqueID("c-tie-a"), uniqueID("c-tie-b")
+
+			for _, tn := range []memory.Turn{
+				saidAt(tieA, "tied a", base),
+				saidAt(tieB, "tied b", base),
+				saidAt(newer, "most recent", base.Add(10*time.Millisecond)),
+			} {
+				if _, err := s.AppendTurn(tn); err != nil {
+					t.Fatalf("append: %v", err)
+				}
+			}
+
+			got := only(t, s, newer, tieA, tieB)
+			if len(got) != 3 {
+				t.Fatalf("%d summaries, want 3", len(got))
+			}
+			if got[0].ID != newer {
+				t.Errorf("first row is %q, want %q — the list is newest-first", got[0].ID, newer)
+			}
+			// tieB sorts above tieA under ID DESC. Asserting the exact order, not merely "both present":
+			// "both present" is what a coin flip also satisfies.
+			hi, lo := tieA, tieB
+			if tieB > tieA {
+				hi, lo = tieB, tieA
+			}
+			if got[1].ID != hi || got[2].ID != lo {
+				t.Errorf("tied threads came back %q then %q, want %q then %q — the (LastAt, ID) "+
+					"tie-break is what stops the two legs disagreeing about simultaneous threads",
+					got[1].ID, got[2].ID, hi, lo)
 			}
 		})
 	}

@@ -154,6 +154,16 @@ func TestEveryRouteDeclaresWhatItNeeds(t *testing.T) {
 		"POST /api/auth/email/resend": true,
 		"GET /api/members":            true,
 		"GET /api/autonomy":           true,
+		// 🔴 Your OWN profile — your name, what you do, your standing instructions, and the language you
+		// want to be answered in. There is no role that should be unable to read or change its own
+		// settings: gating it behind RunGoals would mean a viewer cannot ask to be answered in their own
+		// language, which is not a permission anybody set out to model.
+		//
+		// It is safe to leave open because the handler takes the identity from the authenticated
+		// principal and never from the request — there is no parameter with which to address somebody
+		// else's rows. See handleGetProfile / handleSetProfile in console.go.
+		"GET /api/profile":  true,
+		"POST /api/profile": true,
 	}
 	for _, r := range apiRoutes {
 		if r.Public || r.Needs != "" {

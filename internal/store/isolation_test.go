@@ -132,6 +132,12 @@ func TestATenantCannotReachAnotherTenantsData(t *testing.T) {
 			if err := attacker.Decide(victim, "t1", true, now); !errors.Is(err, store.ErrGoalNotFound) {
 				t.Errorf("Decide approved another tenant's gated task: %v", err)
 			}
+			// 🔴 Cancel is denial of service against another customer: one call halts a run they are
+			// paying for and waiting on, and the run's own record would say a person stopped it — so the
+			// customer would be looking for a colleague who did not do it.
+			if _, err := attacker.Cancel(victim, now); !errors.Is(err, store.ErrGoalNotFound) {
+				t.Errorf("Cancel stopped another tenant's run: %v", err)
+			}
 
 			// And the victim's data is untouched throughout.
 			owner := root.For("tenant-a")
