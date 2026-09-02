@@ -1073,6 +1073,22 @@ let busy = false;
 async function ask(text){
   text = (text||'').trim();
   if (busy || !text) return;
+  /* 🔴 Refuses without a session, and says what to do about it.
+     Signed out this used to accept the whole question, POST it, and answer with the server's bare
+     "You are not signed in." — true, but it arrives AFTER the typing, carries no next step, and by then
+     the sign-in card has usually scrolled out of view. A precondition that is missing has to come with
+     the way to satisfy it.
+     The composer is disabled in this state too; this is the guard that holds if it is ever re-enabled,
+     and it is what stops a suggestion chip or a stray call spending a request that cannot succeed. */
+  if (!me || !me.signed_in) {
+    const t = turn('heros');
+    say(t, `<p>I cannot look at anything until I know who you are — everything you load and every run
+      you start belongs to your organization.</p>
+      <p><a href="/signin/" style="color:var(--accent)">Go to sign in</a>, or
+      <a href="/signup/" style="color:var(--ink-muted)">create an organization</a> if you do not have
+      one yet.</p>`);
+    return;
+  }
   busy = true; send.disabled = true; input.value = '';
   const you = turn('you');
   you.appendChild(el(`<div class="ask">${esc(text)}</div>`));
@@ -2390,6 +2406,13 @@ async function start(){
       const nc = document.getElementById('newchat');
       nc.disabled = true;
       nc.title = 'Sign in to start a conversation';
+      /* Every path out of the composer needs a session — asking, and loading a repository — so leaving
+         it live only invites somebody to type a paragraph and then be told it was never going to work.
+         The placeholder carries the reason, so the control explains itself rather than just refusing. */
+      input.disabled = true;
+      input.placeholder = 'Sign in to ask about your agent…';
+      send.disabled = true;
+      for (const c of document.querySelectorAll('#chips .chip')) c.disabled = true;
     }
 
     // An invitation outranks an existing session: somebody clicking an invite link on a shared machine
