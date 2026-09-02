@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -307,5 +308,42 @@ func TestStaticAssetsAreAlwaysRevalidated(t *testing.T) {
 			t.Errorf("%s revalidated with %d, want 304 — every reload would re-download the whole file",
 				path, again.StatusCode)
 		}
+	}
+}
+
+// TestTheArchCannotSizeItselfFromItsOwnOutput.
+//
+// # 🔴 The bug this exists for
+//
+// A canvas's width/height ATTRIBUTES are also its intrinsic size, so they decide layout whenever CSS
+// does not. heros-arc.js measures getBoundingClientRect() and writes those attributes — correct only
+// while `.arc-bg` pins the box. With that rule missing the write feeds the next read and the canvas
+// doubles every frame. Measured live on eval on 2026-09-02, on a browser holding a pre-arch
+// heros.css from cache:
+//
+//	1200x600 -> 2400x1200 -> 4800x2400 -> 9600x4800 -> 19200x9600 -> 38400x19200
+//
+// which is 737 million pixels. Chrome abandons a canvas that large and renders a broken-image
+// placeholder in an enormous in-flow box — the whole page, gone. A stale stylesheet is only one way
+// in; a 404 on heros.css, a CSP rule, or any load-order hiccup does the same.
+//
+// The check is delegated to node because the defect is JavaScript behaviour and a Go test asserting
+// that the source CONTAINS a guard would pass on a guard that does nothing. The script stubs the one
+// DOM property that caused this — a canvas with no CSS box reporting its attribute size as its rect —
+// and asserts the module refuses, hides itself, and logs why.
+//
+// ⚠️ It covers the refusal path only. The independent MAX_PIXELS clamp in measure() is defence in
+// depth for a path nobody has thought of yet and is NOT exercised here; reaching it needs a full 2D
+// context stub, which would be more fixture than fence.
+func TestTheArchCannotSizeItselfFromItsOwnOutput(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is not installed; this fence cannot run here — it is the only thing standing " +
+			"between a missing heros.css and a canvas that eats the page")
+	}
+	script := filepath.Join(repoRoot(t), defaultWebRoot, "testdata", "arc_runaway_test.js")
+	out, err := exec.Command(node, script).CombinedOutput()
+	if err != nil {
+		t.Errorf("the arch does not survive its stylesheet going missing:\n%s", out)
 	}
 }

@@ -26,6 +26,14 @@
 (function () {
   'use strict';
 
+  /* Well under Chrome's own limits (65535 per side, ~2^28 px of area): the arch never legitimately
+     needs more than a viewport at dpr 2, so anything approaching these is a fault, not a big screen. */
+  var MAX_SIDE = 8192, MAX_PIXELS = 24000000;
+
+  function warn(message) {
+    if (window.console && console.warn) console.warn('heros-arc: ' + message);
+  }
+
   var reduceMQ = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
   var instances = [];
 
@@ -73,6 +81,26 @@
     };
   }
 
+  /* 🔴 THE STYLESHEET IS A HARD DEPENDENCY, AND IT USED TO BE AN UNCHECKED ONE.
+   *
+   * A canvas's width/height ATTRIBUTES are also its intrinsic size, so they decide layout whenever
+   * CSS does not. measure() reads getBoundingClientRect() and writes those attributes — which is
+   * correct only while `.arc-bg` pins the box. With the rule missing the write feeds the next read
+   * and the canvas DOUBLES every frame: 1200x600, 2400x1200, … 38400x19200. Chrome abandons a canvas
+   * that large and draws a broken-image placeholder in an enormous in-flow box, which is the whole
+   * page gone. Measured live on eval on 2026-09-02, where a browser was holding a pre-arch heros.css
+   * from cache (59 rules, no .arc-bg) — but a 404 on the stylesheet, a CSP rule, or any load-order
+   * hiccup does exactly the same thing.
+   *
+   * `.arc-bg` is absolute or fixed in every rule we ship, so `static` means our CSS is not applied.
+   * There is then no correct way to draw this and no reason to try: it is decoration. Hide it and say
+   * so once, rather than returning silently — a background that is missing with no explanation is the
+   * kind of thing nobody can diagnose from a screenshot.
+   */
+  function stylesheetIsApplied(canvas) {
+    return getComputedStyle(canvas).position !== 'static';
+  }
+
   function Arc(canvas) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
@@ -93,6 +121,19 @@
     var dpr = Math.min(window.devicePixelRatio || 1, 2);
     var w = Math.max(1, Math.round(r.width * dpr));
     var h = Math.max(1, Math.round(r.height * dpr));
+    /* 🔴 An independent ceiling on the backing store, deliberately NOT relying on the check above.
+     * This is the guard that holds if some future path inflates the box for a reason nobody has
+     * thought of yet: a canvas is capped by area as well as by side, and past the cap the browser
+     * does not clip or scale — it discards the canvas and renders a broken image. Refusing one
+     * oversized frame costs a background; not refusing costs the page. */
+    if (w * h > MAX_PIXELS || w > MAX_SIDE || h > MAX_SIDE) {
+      warn('refusing a ' + w + 'x' + h + ' backing store (cap ' + MAX_PIXELS + ' px): ' +
+           'the canvas is being sized from its own output. The arch is off on this page.');
+      this.stopped = true;
+      this.canvas.style.display = 'none';
+      return false;
+    }
+
     if (w === this.w && h === this.h) return false;
 
     this.w = w; this.h = h;
@@ -268,6 +309,12 @@
   function boot() {
     var nodes = document.querySelectorAll('canvas[data-heros-arc]');
     for (var i = 0; i < nodes.length; i++) {
+      if (!stylesheetIsApplied(nodes[i])) {
+        nodes[i].style.display = 'none';
+        warn('heros.css is not applied to this canvas (its position computes to static), so the ' +
+             'arch cannot be sized and is off on this page. A stale cached stylesheet does this.');
+        continue;
+      }
       var a = new Arc(nodes[i]);
       instances.push(a);
       a.frame(performance.now(), false);
