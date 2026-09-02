@@ -59,7 +59,26 @@ clean:
 # eval.heros-agent.space, on the k3s node i-05f4712279b04fac5. See deploy/README.md.
 
 INSTANCE   := i-05f4712279b04fac5
-ECR        := 373468206837.dkr.ecr.us-east-1.amazonaws.com/heros-eval
+# The repository name is stated once: `deploy` and `deploy-push` both ask ECR what digest a tag
+# resolved to, and two copies of the name is one rename away from a deploy that reads the digest of a
+# different repository and applies it.
+ECR_REPO   := heros-eval
+ECR        := 373468206837.dkr.ecr.us-east-1.amazonaws.com/$(ECR_REPO)
+# 🔴 Defaulted from the HOST's Go configuration, not left empty.
+#
+# The build runs `go mod download` inside the container, which reaches the module proxy on its own —
+# it does not inherit the developer's shell proxy. On a machine that needs a mirror (this repository
+# has been built on one where proxy.golang.org is unreachable), the empty default fails after a
+# two-minute timeout with `dial tcp …: i/o timeout`, which reads as a network blip rather than as a
+# missing flag, and the fix has to be rediscovered every time.
+#
+# Whatever the developer's own `go` is configured to use already works for them, so it is the right
+# default. On a normal machine this expands to `https://proxy.golang.org,direct` and passing it
+# explicitly changes nothing. Empty when Go is not installed, which restores the previous behaviour.
+#
+# NOT exported: this only feeds the --build-arg below. Exporting it would change what `go test` on
+# this machine resolves against, which is not this variable's business.
+GOPROXY    ?= $(shell go env GOPROXY 2>/dev/null)
 # 🔴 The node is aarch64. An image built for the builder's own architecture on a non-arm machine
 # lands in ECR, pulls successfully, and then CrashLoopBackOffs with `exec format error`.
 PLATFORM   := linux/arm64
@@ -69,6 +88,33 @@ TAG        := $(shell git rev-parse --short HEAD)$(shell git diff --quiet HEAD -
 
 .PHONY: deploy deploy-build deploy-push deploy-apply deploy-status
 
+# deploy is the whole path: build, push, and apply THE DIGEST THAT ACTUALLY LANDED IN ECR.
+#
+# ⚠️ It was named in .PHONY above and documented in deploy/README.md, and it did not exist. Anybody
+# following the runbook got `No rule to make target 'deploy'` and had to reconstruct the sequence,
+# which is how a hand-typed DIGEST from an earlier push ends up being applied.
+#
+# 🔴 The digest is read back from the REGISTRY, never taken from the local build. That is the rule
+# `deploy-apply` states, and it is preserved here rather than worked around: what a local build called
+# itself and what is addressable in ECR are two different facts, and only the second one is what the
+# cluster will pull. Reading it back also proves the push actually landed.
+#
+# 🔴 The VALUE is checked to be a digest, rather than the exit status being trusted. Asked for a tag
+# that is not there, `aws ecr describe-images` was observed to write ImageNotFoundException to stderr
+# and nothing to stdout; other CLI versions print the string `None`. Neither reliably fails the
+# assignment, so an unguarded version hands `apply.sh` an empty string or the word "None" and the
+# failure surfaces as a confusing manifest error instead of "the push did not land". Checking the
+# shape catches both without depending on which version is installed.
+deploy: deploy-push ## Build, push, and apply — the whole path in one command
+	@digest=$$(aws ecr describe-images --repository-name $(ECR_REPO) \
+	    --image-ids imageTag=$(TAG) --query 'imageDetails[0].imageDigest' --output text); \
+	  case "$$digest" in \
+	    sha256:*) ;; \
+	    *) echo "ECR has no digest for tag $(TAG) (got '$$digest') — did the push succeed?" >&2; exit 1;; \
+	  esac; \
+	  echo "applying $$digest"; \
+	  bash deploy/apply.sh "$$digest"
+
 deploy-build: ## Build the container for the deployment's architecture
 	docker build --platform $(PLATFORM) $(if $(GOPROXY),--build-arg GOPROXY=$(GOPROXY),) \
 	  -f deploy/Dockerfile -t $(ECR):$(TAG) .
@@ -77,7 +123,7 @@ deploy-push: deploy-build ## Push to ECR and print the digest
 	aws ecr get-login-password --region us-east-1 | \
 	  docker login --username AWS --password-stdin $(firstword $(subst /, ,$(ECR)))
 	docker push $(ECR):$(TAG)
-	@echo "digest: $$(aws ecr describe-images --repository-name heros-eval \
+	@echo "digest: $$(aws ecr describe-images --repository-name $(ECR_REPO) \
 	  --image-ids imageTag=$(TAG) --query 'imageDetails[0].imageDigest' --output text)"
 
 deploy-apply: ## Apply the manifests at the pushed digest (DIGEST=sha256:…)

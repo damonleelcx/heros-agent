@@ -62,14 +62,42 @@ existing user, and there is no default password anywhere in the source.
 ## Deploying a change
 
 ```bash
-make deploy            # build arm64, push to ECR by digest, apply, wait for rollout
+make deploy            # build arm64, push to ECR, apply the digest ECR reports, wait for rollout
 ```
 
 The node is **aarch64** (t4g.large), so the image must be built `--platform linux/arm64`. A local
 Docker on an Apple Silicon Mac matches natively.
 
 Deploys are pinned **by digest**, not by tag. A tag says what somebody called a build; a digest says
-what is running.
+what is running. `make deploy` reads the digest back **from ECR** rather than from the local build:
+what a build called itself and what is addressable in the registry are two different facts, and only
+the second is what the cluster will pull — so reading it back also proves the push landed.
+
+To stop between steps — to look at the `kubectl diff` before committing to it, or to redeploy a
+digest that is already in ECR:
+
+```bash
+make deploy-push                          # prints the digest
+make deploy-apply DIGEST=sha256:…         # apply.sh diffs against the live cluster before applying
+make deploy-status                        # pods, ingress, certificate
+```
+
+### If the build cannot reach the module proxy
+
+`go mod download` runs **inside the container**, which does not inherit your shell's proxy settings.
+On a machine where `proxy.golang.org` is unreachable the build fails after about two minutes with:
+
+```
+dial tcp 142.251.45.145:443: i/o timeout
+```
+
+That reads like a network blip and is not one. The Makefile now defaults `GOPROXY` to whatever your
+own `go env GOPROXY` says, so a machine already configured with a mirror works without any flag. If
+you need to override it for one build:
+
+```bash
+make deploy GOPROXY=https://goproxy.cn,direct
+```
 
 ## Access
 
