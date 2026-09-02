@@ -284,12 +284,17 @@ p{margin:0 0 var(--s4)}
   *,*::before,*::after{animation-duration:.01ms !important; transition-duration:.01ms !important}
 }
 
-/* ── the theme switch ────────────────────────────────────────────────────────
- * Built by heros-theme.js into whatever carries [data-theme-slot], so the markup exists once instead
- * of once per page. It is a three-state cycle — System, Light, Dark — and the label names the state
- * it is IN, with the accessible name carrying where pressing it goes.
+/* ── the small nav controls ──────────────────────────────────────────────────
+ * The theme switch and the GitHub link are two different elements — a <button> the script builds and
+ * a plain <a> in the markup — that have to look like ONE control repeated, because they sit side by
+ * side in the same glass bar. So the chrome is written once, for both selectors, rather than the
+ * anchor getting a copy of these six declarations that drifts the first time either is touched.
+ *
+ * The theme switch is built by heros-theme.js into whatever carries [data-theme-slot], so its markup
+ * exists once instead of once per page. It is a three-state cycle — System, Light, Dark — and the
+ * label names the state it is IN, with the accessible name carrying where pressing it goes.
  */
-.theme-toggle{
+.theme-toggle,.icon-link{
   display:inline-flex; align-items:center; gap:.45rem;
   padding:.4rem .7rem; min-height:36px;
   background:transparent; border:1px solid var(--border); border-radius:var(--pill);
@@ -297,11 +302,22 @@ p{margin:0 0 var(--s4)}
   cursor:pointer; transition:color var(--fast), border-color var(--fast), background var(--fast);
   white-space:nowrap;
 }
-.theme-toggle:hover{color:var(--ink); border-color:var(--border-strong); background:var(--secondary)}
-.theme-toggle svg{flex:none}
+.theme-toggle:hover,.icon-link:hover{color:var(--ink); border-color:var(--border-strong); background:var(--secondary)}
+.theme-toggle svg,.icon-link svg{flex:none}
+/* Icon-only, so it is square rather than a pill with room for a word beside the glyph. It keeps the
+   theme switch's 36px height, which is what makes the two read as a pair. */
+.icon-link{justify-content:center; width:36px; padding:.4rem; text-decoration:none}
+.icon-link:hover{text-decoration:none}
 /* Under about 30rem the two words in the nav are what pushes the sign-in pill onto its own line, and
    the icon alone still says which theme you are in. */
 @media (max-width:30rem){ .theme-toggle .theme-name{display:none} .theme-toggle{padding:.4rem .5rem} }
+/* 🔴 And under 30rem the bar is FULL: at 375px the wordmark, the switch and the sign-in pill leave
+   about 24px of room, so a fourth control — any fourth control — pushes the pill onto a row of its
+   own. That is the exact failure the 60rem rule in the page was written to stop, and buying the room
+   back by shaving the gap, the pill's padding and the icon at once leaves under 2px of slack, which
+   the first font that loads differently would spend. So the icon steps out of the bar on a phone and
+   the footer link carries the source instead — it is present on every width. */
+@media (max-width:30rem){ .bar .icon-link{display:none} }
 
 /* A dock for pages with no nav to hang it in — the two auth pages. */
 .theme-dock{position:fixed; top:var(--s4); right:var(--s4); z-index:40}
