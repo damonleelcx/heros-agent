@@ -7,6 +7,15 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,300;6..72,400&family=Plus+Jakarta+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
 <link rel="stylesheet" href="/heros.css">
+<!-- 🔴 Synchronous, and in the head: heros-theme.js sets the theme attribute BEFORE first paint.
+     Deferred, the page paints in the wrong theme first and then corrects itself. -->
+<script src="/heros-theme.js"></script>
+<script src="/heros-arc.js" defer></script>
+
+<!-- The predictive arch, behind the card. Decoration; heros-arc.js is the only thing that
+     touches it, and the dock holds the theme switch on a page with no nav to put it in. -->
+<canvas class="arc-bg arc-fixed" data-heros-arc aria-hidden="true"></canvas>
+<div class="theme-dock" data-theme-slot></div>
 
 <main class="auth">
   <div class="auth-card">

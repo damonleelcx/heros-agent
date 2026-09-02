@@ -89,6 +89,8 @@ func TestTheDefaultWebRootServesEveryPageTheProductHas(t *testing.T) {
 		{"signin/index.html", "the sign-in page, at /signin/"},
 		{"signup/index.html", "the sign-up page, at /signup/"},
 		{"heros.css", "the shared token stylesheet every page links"},
+		{"heros-theme.js", "the theme switch, loaded synchronously by all four pages"},
+		{"heros-arc.js", "the predictive arch behind the home and auth pages"},
 		{"heros-auth.js", "the script both auth pages load"},
 		{"avatar.jpg", "her portrait, shown on every page"},
 		{"favicon.png", "the tab icon every page links"},
