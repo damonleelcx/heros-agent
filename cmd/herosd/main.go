@@ -211,7 +211,7 @@ func main() {
 	httpSrv := &http.Server{
 		// 🔴 Handler, not Routes. Routes is unauthenticated by construction and exists for tests;
 		// mounting it here would serve every endpoint to anybody who can reach the port.
-		Addr: *addr, Handler: srv.Handler(http.FileServer(http.Dir(*web))),
+		Addr: *addr, Handler: srv.Handler(alwaysRevalidate(http.FileServer(http.Dir(*web)))),
 		ReadHeaderTimeout: 10 * time.Second,
 		// 🚫 No WriteTimeout. The events endpoint is a long-lived stream, and a write deadline would cut
 		// every run off mid-flight at exactly the moment it became interesting.
@@ -270,6 +270,39 @@ const defaultTenant = "local"
 // A constant rather than a literal in the flag declaration, so `TestTheDefaultConsoleDirectoryHasAConsole
 // InIt` checks the value the daemon actually uses instead of a copy of it.
 const defaultWebRoot = "web/static"
+
+// alwaysRevalidate makes every static response conditional.
+//
+// # 🔴 The bug this exists for
+//
+// http.FileServer sends `Last-Modified` and nothing else — no `Cache-Control`, no `ETag`. With no
+// `Cache-Control` a browser falls back to HEURISTIC freshness: it invents an expiry, commonly a
+// tenth of the file's age, and serves the file from cache for that long WITHOUT ASKING THE SERVER.
+//
+// The console is four files that have to agree with each other — index.html, heros.css,
+// heros-theme.js, heros-arc.js. Heuristic caching expires them independently, so a deploy can leave
+// an open tab with a new index.html and a cached old heros.css, or the reverse. The page then renders
+// as neither version. Nothing is logged, because THE SERVER NEVER SEES A REQUEST: the stale half is
+// served out of the browser. It is invisible from here and unreproducible on a cold load, which is
+// exactly what happened after three deploys in one hour on 2026-09-02.
+//
+// `no-cache` does not mean "do not store". It means "store it, but ask before reusing it" — the
+// browser keeps the bytes and sends If-Modified-Since, and an unchanged file comes back as a 304 with
+// an empty body. So the cost is one conditional request per file per load, and the guarantee is that
+// the set is always coherent.
+//
+// 🚫 NOT `no-store`, which forbids keeping the bytes at all and would re-download the 229KB portrait
+// on every navigation. The distinction is the whole point; see TestStaticAssetsAreAlwaysRevalidated.
+//
+// The stronger fix is content-hashed filenames, which make a stale file impossible rather than
+// merely detected — that needs a build step this project does not have, and would be the thing to do
+// if the console ever grows one.
+func alwaysRevalidate(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache")
+		h.ServeHTTP(w, r)
+	})
+}
 
 // bootstrapIdentity creates the first organization and user, once.
 //

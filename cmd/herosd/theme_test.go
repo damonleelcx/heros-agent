@@ -1,6 +1,8 @@
 package main
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -245,4 +247,65 @@ func union(a, b map[string]string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// TestStaticAssetsAreAlwaysRevalidated.
+//
+// # 🔴 The bug this exists for
+//
+// The console is four files that must agree with each other — index.html and the stylesheet and two
+// scripts it links. http.FileServer sends only `Last-Modified`, and with no `Cache-Control` a browser
+// invents its own expiry per file and serves each from cache without asking. The files then expire
+// INDEPENDENTLY, so a deploy can leave an open tab holding a new index.html and an old heros.css. The
+// page renders as neither version, and nothing is logged anywhere, because the server never sees a
+// request for the stale half — it came out of the browser. Reported on 2026-09-02 after three deploys
+// in one hour, and not reproducible on a cold load, which is what makes it worth a fence.
+//
+// Two ways to break this that both look like fixes:
+//
+//   - dropping the wrapper (back to heuristic caching — the original bug)
+//   - "hardening" it to `no-store`, which forbids STORING the bytes and re-downloads the 229KB
+//     portrait on every navigation. `no-cache` stores and revalidates; `no-store` does not store.
+//     The test asserts the exact token for that reason.
+//
+// It also asserts the 304, because a wrapper that set headers the wrong way round could suppress
+// conditional handling and turn every revalidation back into a full download — the cost this design
+// is spending one round trip to avoid.
+func TestStaticAssetsAreAlwaysRevalidated(t *testing.T) {
+	root := repoRoot(t)
+	srv := httptest.NewServer(alwaysRevalidate(http.FileServer(http.Dir(filepath.Join(root, defaultWebRoot)))))
+	defer srv.Close()
+
+	for _, path := range []string{"/", "/heros.css", "/heros-theme.js", "/heros-arc.js", "/avatar.jpg"} {
+		res, err := http.Get(srv.URL + path)
+		if err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		got := res.Header.Get("Cache-Control")
+		lastMod := res.Header.Get("Last-Modified")
+		res.Body.Close()
+
+		if got != "no-cache" {
+			t.Errorf("%s served Cache-Control %q, want \"no-cache\". Without it the browser invents an "+
+				"expiry per file and the console's files go stale independently of each other.", path, got)
+			continue
+		}
+		if lastMod == "" {
+			t.Errorf("%s has no Last-Modified, so \"revalidate\" has nothing to revalidate against", path)
+			continue
+		}
+
+		// The revalidation itself: an unchanged file must come back 304 with no body.
+		req, _ := http.NewRequest(http.MethodGet, srv.URL+path, nil)
+		req.Header.Set("If-Modified-Since", lastMod)
+		again, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("%s conditional: %v", path, err)
+		}
+		again.Body.Close()
+		if again.StatusCode != http.StatusNotModified {
+			t.Errorf("%s revalidated with %d, want 304 — every reload would re-download the whole file",
+				path, again.StatusCode)
+		}
+	}
 }
