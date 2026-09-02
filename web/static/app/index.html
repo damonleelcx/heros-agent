@@ -423,6 +423,11 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   border-radius:var(--radius);padding:.55rem .7rem;font-size:.82rem;cursor:pointer;
 }
 .newchat:hover{border-color:color-mix(in srgb,var(--accent) 45%,transparent);color:var(--accent)}
+/* Disabled while signed out. Matches .chip[disabled] and .mini[disabled] rather than inventing a third
+   look — and the hover is neutralised too, because a control that lights up under the cursor and then
+   does nothing reads as broken rather than as unavailable. */
+.newchat[disabled]{opacity:.45;cursor:default}
+.newchat[disabled]:hover{border-color:var(--border-strong);color:var(--ink)}
 
 /* ── settings fields ─────────────────────────────────────────────────────── */
 .setting{display:flex;flex-direction:column;gap:.3rem;margin-bottom:.8rem}
@@ -1394,6 +1399,14 @@ document.addEventListener('keydown', e => {
    localStorage is right on exactly one machine and silently disagrees everywhere else. */
 async function renderSessions(){
   const box = document.getElementById('sessions');
+  /* 🔴 The rail is part of the SHELL and renders before anybody signs in, so every surface in it has to
+     have something to say in that state. Left to itself this box was simply blank — not the "No
+     conversations yet" empty state it has for a signed-in person with no threads, but nothing at all,
+     which reads as a panel that failed rather than one with nothing to show. */
+  if (!me || !me.signed_in) {
+    box.innerHTML = `<p class="rail-empty">Sign in to see your conversations.</p>`;
+    return;
+  }
   let r;
   try { r = await api('/api/conversations'); }
   catch (e) {
@@ -1462,6 +1475,12 @@ async function openConversation(id){
    rail every time somebody clicked this and changed their mind. */
 function newConversation(){
   if (busy) return;
+  /* 🔴 Refuses without a session, and the reason is worse than a blank panel. This EMPTIES the stream —
+     which, signed out, is where the sign-in card lives. Clicking it replaced "Sign in to continue" with
+     "New conversation. What would you like to look at?", leaving somebody in a console with no way to
+     sign in short of reloading the page, and a composer whose every message would be refused.
+     The button is disabled in that state too; this is the guard that holds if it is ever re-enabled. */
+  if (!me || !me.signed_in) { openRail('L'); return; }
   stream.innerHTML = '';
   conversationID = newConversationID();
   renderSessions();
@@ -1595,6 +1614,11 @@ async function renderRuns(){
   const box = document.getElementById('runs');
   const count = document.getElementById('runcount');
   if (!box) return;
+  if (!me || !me.signed_in) {
+    count.textContent = '';
+    box.innerHTML = `<p class="rail-empty">Sign in to see what is running.</p>`;
+    return;
+  }
   let h;
   try { h = await api('/api/history?state=live'); }
   catch (e) {
@@ -2355,6 +2379,18 @@ async function start(){
   try {
     if (verify) await confirmAddress(verify);
     await refreshMe();
+
+    /* Every branch below this line can return before `start()` runs — an invitation, a reset link, or
+       no session at all — and `start()` is what fills the rails. Painting the signed-out state here
+       keeps the shell coherent on all of them. Costs nothing: both renderers answer from `me` and make
+       no request when there is nobody signed in. */
+    if (!me || !me.signed_in) {
+      renderSessions();
+      renderRuns();
+      const nc = document.getElementById('newchat');
+      nc.disabled = true;
+      nc.title = 'Sign in to start a conversation';
+    }
 
     // An invitation outranks an existing session: somebody clicking an invite link on a shared machine
     // means to join as themselves, not to keep acting as whoever was signed in.
