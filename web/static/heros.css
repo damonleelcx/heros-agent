@@ -316,6 +316,13 @@ p{margin:0 0 var(--s4)}
 .arc-bg{
   position:absolute; inset:0 0 auto 0; height:min(98vh,54rem);
   width:100%; display:block; pointer-events:none; user-select:none; z-index:0;
+  /* 🔴 Strength is a VARIABLE, not an opacity typed per rule. Three things want to move it — the
+     narrow-viewport rule below, the console's quieter setting, and any future surface — and as plain
+     `opacity` declarations they are three rules of identical specificity whose winner is decided by
+     source order. That is a coin toss nobody documents: adding the console's rule above the phone's
+     silently un-dims the phone. A custom property cascades the same way but composes, so each
+     surface states its own value and the narrow-viewport override lands on top of whichever applies. */
+  opacity:var(--arc-veil,1);
   -webkit-mask-image:linear-gradient(to bottom,#000 0%,#000 74%,transparent 100%);
   mask-image:linear-gradient(to bottom,#000 0%,#000 74%,transparent 100%);
 }
@@ -333,5 +340,16 @@ p{margin:0 0 var(--s4)}
    of it, and the measured result is body text reading through a lattice. The background is decoration;
    the sentence is the product. */
 @media (max-width:52rem){
-  .arc-bg{opacity:.4; height:min(70vh,32rem)}
+  .arc-bg{--arc-veil:.4; height:min(70vh,32rem)}
+}
+
+/* 🔴 Quieter again on a surface people READ rather than look at. The console is a conversation: the
+   answer you are waiting for arrives at the top of it, over the brightest part of the arch, and a
+   paragraph read through a lattice is a worse product than a plainer background. Half strength keeps
+   the page recognisably the same page without competing with a sentence.
+   It is also ANCHORED TO THE DOCUMENT, not the viewport (no .arc-fixed) — so it sits behind the
+   opening of the conversation and scrolls away, and a long working session is on a clean field. */
+.arc-soft{--arc-veil:.5}
+@media (max-width:52rem){
+  .arc-soft{--arc-veil:.26}
 }

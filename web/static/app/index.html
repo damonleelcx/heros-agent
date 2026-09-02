@@ -5,10 +5,14 @@
 <link rel="stylesheet" href="/heros.css">
 <!-- 🔴 Synchronous, and BEFORE the stylesheet has painted: heros-theme.js sets the theme attribute
      before first paint. Deferred like heros-reveal.js below, the console flashes the other theme.
-     The arch background is deliberately NOT loaded here — a lattice animating under a live
-     conversation costs readability on the surface people actually work on, and CPU on a tab that
-     stays open all day. -->
+
+     The arch IS loaded here, on damon's call, having been left off first for readability. It is
+     carried differently from the home page's to answer that: `.arc-soft` runs it at half strength,
+     and it is anchored to the DOCUMENT rather than the viewport, so it sits behind the opening of
+     the conversation and scrolls away instead of sitting under every reply for the life of the tab.
+     Reduced motion still gets one static frame and no loop — see heros-arc.js. -->
 <script src="/heros-theme.js"></script>
+<script src="/heros-arc.js" defer></script>
 <script src="/heros-reveal.js" defer></script>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,300;6..72,400&family=Plus+Jakarta+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
 
@@ -24,7 +28,11 @@ body{
   background-size:40px 40px;
 }
 /* ── shell ───────────────────────────────────────────────────────────────── */
-.shell{max-width:56rem;margin:0 auto;padding:0 1.25rem 10rem;}
+/* 🔴 Positioned, with a z-index. The arch canvas is position:absolute at z-index 0, and a POSITIONED
+   element at z-index 0 paints above ordinary in-flow text however late that text comes in the
+   document — so without this the conversation renders UNDERNEATH the background. The sticky header
+   (z-index 20) and the fixed composer (z-index 30) sit inside/above this and are unaffected. */
+.shell{max-width:56rem;margin:0 auto;padding:0 1.25rem 10rem;position:relative;z-index:1}
 header.top{
   position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:1rem;
   padding:.9rem 0;background:color-mix(in srgb,var(--canvas) 88%,transparent);
@@ -270,6 +278,11 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   .top .homelink{display:flex;align-items:center;margin-right:.6rem}
   .top .homelink img{border-radius:var(--pill);display:block}
 </style>
+
+<!-- Decoration: no text, no pointer events, and heros-arc.js is the only thing that touches it.
+     Outside .shell deliberately — inside, `absolute` would resolve against the 56rem reading
+     column and the arch would be a stripe down the middle of the page. -->
+<canvas class="arc-bg arc-soft" data-heros-arc aria-hidden="true"></canvas>
 
 <div class="shell">
   <header class="top">
