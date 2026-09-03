@@ -723,9 +723,21 @@ func (s *Server) record(tenant string, req askReq, resp askResp, decided memory.
 			req.ConversationID, tenant, err)
 		return
 	}
+	// 🔴 CostMicroCents is copied HERE and it was once forgotten, which cost nothing at the time and
+	// everything afterwards. The column, the struct field, the INSERT and the whole plumbing from
+	// converse.Outcome through askResp all existed and were correct; this literal simply did not name
+	// the field, so it defaulted to zero and every turn ever recorded — on both providers — said the
+	// conversation was free. The in-turn ceiling still worked, because that reads the live
+	// converse.Outcome; it is only the DURABLE record that was empty. So the failure was invisible
+	// exactly where you would look for it: spend was enforced, and unauditable.
+	//
+	// A zero here is now a real claim that a turn cost nothing, which is true only of the deterministic
+	// floor and the keyword fallback. Anything decided by the model must carry a figure.
+	// Fenced by TestARecordedTurnCarriesWhatItCost.
 	if _, err := store.AppendTurn(memory.Turn{
 		ConversationID: req.ConversationID, Role: memory.TurnAgent, Body: transcriptBody(resp),
-		Kind: resp.Kind, Capability: resp.Intent, Decided: decided, At: now,
+		Kind: resp.Kind, Capability: resp.Intent, Decided: decided,
+		CostMicroCents: resp.CostMicroCents, At: now,
 	}); err != nil {
 		log.Printf("WARN heros.ask.turn_not_recorded role=agent conversation=%q tenant=%q err=%v",
 			req.ConversationID, tenant, err)
