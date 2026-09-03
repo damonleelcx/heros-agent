@@ -24,7 +24,9 @@ what is done versus pending — it is the single source of truth for progress.
 ## How a sentence becomes work
 
 This is the centre of the product and the part with the most safety in it, so it is worth reading before
-anything else. Everything below happens on one `POST /api/ask`.
+anything else. Everything below happens on one `POST /api/ask` — or on `POST /api/ask/stream`,
+which is the same turn delivered as it is written. Same pipeline, same capability, same transcript;
+only the transport differs, and the console falls back to `/api/ask` if streaming fails.
 
 ```
   you type a sentence
@@ -244,6 +246,7 @@ row asked for — "somebody forgot the auth check" is not a state this mux can b
 | | needs | |
 |---|---|---|
 | `POST /api/ask` | `RunGoals` | One sentence in, one reply out. The pipeline at the top of this file. |
+| `POST /api/ask/stream` | `RunGoals` | The same turn as SSE: `delta` events as the reply is written, then an authoritative `final`. The console prefers this and falls back to `/api/ask`. |
 | `POST /api/confirm` | `RunGoals` | Say yes (or no) to a capability the agent chose. Same capability as asking: somebody who may not ask must not be able to answer a question put to somebody who could. |
 | `GET /api/conversation` | `ReadGoals` | Replays the thread. Optional `?conversation_id=`; without one it resumes the most recent. |
 | `POST /api/subject` · `GET /api/subject` | `LoadSubject` · `ReadGoals` | Point her at a repository; read what she found. |

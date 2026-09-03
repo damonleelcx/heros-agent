@@ -231,6 +231,29 @@ type wire struct {
 // The caller has ALREADY applied the deterministic floor. Anything reaching here is a sentence the
 // system is willing to let a model think about.
 func (a Agent) Interpret(ctx context.Context, history []memory.Turn, text string, facts Facts) (Outcome, error) {
+	return a.InterpretStream(ctx, history, text, facts, nil)
+}
+
+// InterpretStream is Interpret, plus best-effort prose deltas as the reply is written.
+//
+// # 🔴 onText is DECORATION. The Outcome is unchanged by it
+//
+// The turn is still decided by unmarshalling the COMPLETE object and validating every field, exactly as
+// it was before streaming existed. onText is fed by a scanner reading the same bytes on their way past
+// (see stream.go); if it emits nothing, or the provider cannot stream, or a delta is misread, the
+// caller still gets the identical Outcome. That is the only arrangement in which a display improvement
+// cannot cost somebody their answer.
+//
+// A nil onText, or a provider that does not implement provider.StreamingProvider, takes the ordinary
+// non-streaming path. Both remain first-class: the console streams, everything else does not, and
+// neither has a second copy of this loop.
+//
+// 🔴 The caller must treat the final Outcome as authoritative and REPLACE whatever it displayed from
+// deltas, not append to it. The loop may make more than one call — Bounds.MaxCalls is 4 so a read step
+// can be added — and text streamed by a call that then did not decide is text that was never part of
+// the answer.
+func (a Agent) InterpretStream(ctx context.Context, history []memory.Turn, text string, facts Facts,
+	onText func(string)) (Outcome, error) {
 	if a.Provider == nil || a.Model == "" {
 		return Outcome{}, fmt.Errorf("%w: no provider is configured", ErrUnavailable)
 	}
@@ -253,7 +276,7 @@ func (a Agent) Interpret(ctx context.Context, history []memory.Turn, text string
 		}
 
 		temp := 0.0
-		resp, err := a.Provider.Complete(ctx, provider.Request{
+		call := provider.Request{
 			Model:     a.Model,
 			MaxTokens: a.Bounds.MaxTokens,
 			// 🔴 No chain of thought, and temperature zero. This call chooses among a listed set and
@@ -268,7 +291,26 @@ func (a Agent) Interpret(ctx context.Context, history []memory.Turn, text string
 			Temperature: &temp,
 			JSONObject:  true,
 			Messages:    msgs,
-		})
+		}
+
+		// Streaming is taken only when BOTH the provider offers it and the caller wants it. A fresh
+		// scanner per call: text from a previous call in this loop is not part of this one's reply.
+		var resp provider.Response
+		var err error
+		streamer, canStream := a.Provider.(provider.StreamingProvider)
+		if canStream && onText != nil {
+			var scan textFieldStream
+			resp, err = streamer.CompleteStream(ctx, call, func(d provider.Delta) {
+				if d.Text == "" {
+					return
+				}
+				if piece := scan.Write(d.Text); piece != "" {
+					onText(piece)
+				}
+			})
+		} else {
+			resp, err = a.Provider.Complete(ctx, call)
+		}
 		out.Calls++
 		if err != nil {
 			// Usage is unknown on a failed call, so nothing is added to the ledger — but the attempt is

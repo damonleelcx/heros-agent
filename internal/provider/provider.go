@@ -141,6 +141,43 @@ type Provider interface {
 	Complete(ctx context.Context, req Request) (Response, error)
 }
 
+// Delta is one increment of a streamed completion.
+//
+// Text and Reasoning are carried SEPARATELY rather than concatenated. They are different things to a
+// reader — one is the answer, the other is the model working — and a surface that cannot tell them
+// apart either shows the chain of thought as if it were the reply, or hides that anything is happening
+// at all. They are also billed differently against MaxTokens, which is the other reason Usage splits
+// them.
+type Delta struct {
+	Text      string
+	Reasoning string
+}
+
+// StreamingProvider is a provider that can also deliver a completion incrementally.
+//
+// # 🔴 Why this is a SEPARATE, OPTIONAL interface rather than a method on Provider
+//
+// Provider is implemented by every fake in every test and by the scripted fixtures the whole system was
+// proven against. Widening it would force all of them to grow a method they have no use for, to satisfy
+// a capability only one caller wants — and the usual result of that is a pile of `panic("unimplemented")`
+// bodies, which is a compile-time promise that lies at run time.
+//
+// So callers type-assert, and a provider that cannot stream stays perfectly legal. The caller must have
+// a non-streaming path anyway: streaming is a DISPLAY improvement, and a display improvement that can
+// take the answer down with it is not one.
+//
+// # 🔴 The returned Response is the authority, not the deltas
+//
+// CompleteStream returns exactly what Complete would: the same content, the same provider-reported
+// Usage, the same cost, the same FinishReason. The sink is best-effort decoration — a caller that
+// accumulated the deltas itself and trusted that instead would be building its own copy of the answer,
+// and the two would drift on exactly the calls that matter (a truncated response, a mid-stream error).
+// Deltas are for showing; the Response is for acting on and for the ledger.
+type StreamingProvider interface {
+	Provider
+	CompleteStream(ctx context.Context, req Request, sink func(Delta)) (Response, error)
+}
+
 // Error classes. Typed because the retry ladder must treat them differently: retrying an authentication
 // failure burns the whole ladder to arrive at the same answer, and retrying a rate limit immediately is
 // how a rate limit becomes a longer rate limit.

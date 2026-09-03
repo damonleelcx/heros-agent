@@ -612,7 +612,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp, decided, err := s.decide(tenant, p.Subject, req)
+	resp, decided, err := s.decide(tenant, p.Subject, req, nil)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -633,7 +633,11 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 // The second return says HOW the reply was reached, which the transcript records. See memory.Decider:
 // a reply produced by the deterministic floor, by a model, or by the fallback after a model failure are
 // three different things that look identical once rendered.
-func (s *Server) decide(tenant, asker string, req askReq) (askResp, memory.Decider, error) {
+// decide runs the pipeline. onText, when non-nil, receives the agent's prose as it is written; it is
+// nil for the ordinary JSON endpoint. Threaded as a parameter rather than given its own pipeline
+// because there must be exactly ONE order of decisions — the floor, then the agent, then the keyword
+// router — and a second copy of it would drift on the first change either one of them.
+func (s *Server) decide(tenant, asker string, req askReq, onText func(string)) (askResp, memory.Decider, error) {
 	// 🔴 Unbounded is checked BEFORE routing. The refusal has to happen before anything is planned, which
 	// is the entire point of refusing — "keep going until it is perfect" must not first become a goal.
 	if router.Unbounded(req.Text) {
@@ -666,7 +670,7 @@ func (s *Server) decide(tenant, asker string, req askReq) (askResp, memory.Decid
 	// 🔴 Consulted AFTER the floor and BEFORE the keyword router. It may be persuaded, which is why
 	// nothing above this line depends on it; and it may fail, which is why nothing below this line
 	// depends on it either.
-	if resp, answered := s.converseOrFallback(tenant, asker, req, sub); answered {
+	if resp, answered := s.converseOrFallback(tenant, asker, req, sub, onText); answered {
 		return resp, memory.DecidedByModel, nil
 	}
 

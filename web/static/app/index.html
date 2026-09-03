@@ -660,6 +660,57 @@ async function api(path, body){
   return r.json();
 }
 
+/* ── asking, as it is written ──────────────────────────────────────────────
+   🔴 fetch + a reader, not EventSource. EventSource only issues GETs, and a question is a POST with a
+   body — using it would mean putting what somebody typed into a URL, where it lands in proxy logs and
+   browser history.
+
+   The contract with the server (see handleAskStream):
+     delta  prose as it arrives. DECORATION — may be partial, may be superseded.
+     final  the real answer. Rendered by the SAME switch the non-streaming path uses, and it REPLACES
+            whatever the deltas drew, because the agent loop may call the model more than once and text
+            from a call that did not decide was never part of the reply.
+     error  the turn failed.
+
+   🔴 onDelta is only ever called for display. Nothing downstream reads it. */
+async function askStreaming(path, body, onDelta){
+  const r = await fetch(path, {
+    method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)
+  });
+  if (!r.ok || !r.body) {
+    const err = new Error(`HTTP ${r.status}`);
+    err.transient = (r.status === 429 || r.status === 503);
+    throw err;
+  }
+  const reader = r.body.getReader();
+  const dec = new TextDecoder();
+  let buf = '', final = null, failed = null;
+  for (;;) {
+    const {value, done} = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, {stream:true});
+    // Frames are separated by a blank line. A frame split across reads stays in the buffer until the
+    // rest of it arrives — the network chooses these boundaries, not the server.
+    let i;
+    while ((i = buf.indexOf('\n\n')) >= 0) {
+      const frame = buf.slice(0, i); buf = buf.slice(i + 2);
+      let event = 'message', data = '';
+      for (const line of frame.split('\n')) {
+        if (line.startsWith('event:')) event = line.slice(6).trim();
+        else if (line.startsWith('data:')) data += line.slice(5).trim();
+      }
+      if (!data) continue;
+      let payload; try { payload = JSON.parse(data); } catch { continue; }
+      if (event === 'delta' && payload.text) onDelta(payload.text);
+      else if (event === 'final') final = payload;
+      else if (event === 'error') failed = new Error(payload.error || 'the turn failed');
+    }
+  }
+  if (failed) throw failed;
+  if (!final) throw new Error('the stream ended without an answer');
+  return final;
+}
+
 /* ── the conversation this tab is in ──────────────────────────────────────
    🔴 The id is resolved from the SERVER, not minted here and not read from localStorage.
 
@@ -1112,7 +1163,30 @@ async function ask(text){
   const t = turn('heros');
   try {
     if (!conversationID) conversationID = newConversationID();
-    const r = await api('/api/ask', {text, conversation_id: conversationID});
+    const body = {text, conversation_id: conversationID};
+
+    /* 🔴 A live region that exists only while the reply is being written, and is removed the moment
+       the real answer lands. It is never the thing the person ends up reading: `final` re-renders
+       through the same switch the non-streaming path uses, so what stays on screen came from the
+       validated response, not from characters scraped out of a half-finished JSON object. */
+    let live = null;
+    const onDelta = (piece) => {
+      if (!live) { live = el('<div class="said"><p></p></div>'); t.appendChild(live); }
+      live.firstChild.textContent += piece;
+      scroll();
+    };
+
+    let r;
+    try {
+      r = await askStreaming('/api/ask/stream', body, onDelta);
+    } catch (streamErr) {
+      /* 🔴 Falling back rather than failing. Streaming is a display improvement; a proxy that buffers
+         it, a browser without a readable body, or a bug in the frame parser must cost somebody a nicer
+         rendering, never their answer. The console people had before streaming is the floor. */
+      if (live) { live.remove(); live = null; }
+      r = await api('/api/ask', body);
+    }
+    if (live) live.remove();
     switch (r.kind) {
       case 'say':
       case 'ask':      renderSay(t, r); break;
