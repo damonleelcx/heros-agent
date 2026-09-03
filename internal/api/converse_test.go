@@ -9,6 +9,7 @@ import (
 
 	"github.com/heros-foreal/heros/internal/converse"
 	"github.com/heros-foreal/heros/internal/intent"
+	"github.com/heros-foreal/heros/internal/memory"
 	"github.com/heros-foreal/heros/internal/provider"
 	"github.com/heros-foreal/heros/internal/tenancy"
 )
@@ -368,6 +369,87 @@ func TestASuccessfulTurnIsRecordedAsReasonedRatherThanFallenBackTo(t *testing.T)
 	}
 	if body, _ := reply["body"].(string); !strings.Contains(body, "What are we looking at") {
 		t.Errorf("the agent's own words were not what got recorded: %q", body)
+	}
+}
+
+// TestARecordedTurnCarriesWhatItCost.
+//
+// # 🔴 What was broken, and why nothing noticed
+//
+// `record` built the agent's memory.Turn without naming CostMicroCents, so it defaulted to zero. Every
+// other part of the path was already correct — the column exists, the INSERT writes it, converse.Outcome
+// computes it and askResp carries it on every success path — which is precisely why this survived: there
+// was no missing plumbing to trip over, just a struct literal one field short.
+//
+// The consequence is narrow and nasty. The per-turn ceiling kept working, because it reads the live
+// converse.Outcome, so spend was correctly ENFORCED. Only the durable record was empty, so afterwards
+// nobody could answer "what did this conversation cost" — the one question a transcript with a cost
+// column exists to answer. It read as "every conversation was free" on both providers.
+func TestARecordedTurnCarriesWhatItCost(t *testing.T) {
+	hz := newHarness(t)
+	member, _ := hz.user(t, tenancy.Member)
+	hz.withAgent(`{"action":"say","text":"Hello. What are we looking at?"}`)
+	conv := "c-" + randSuffix()
+
+	hz.askIn(t, member, conv, "hi")
+
+	turns, err := hz.Server.Episodes.For(hz.tenant).Turns(hz.tenant, conv)
+	if err != nil {
+		t.Fatalf("read turns: %v", err)
+	}
+	if len(turns) != 2 {
+		t.Fatalf("got %d turns, want 2 (the question and the answer)", len(turns))
+	}
+
+	// The person's own sentence costs nothing — it is not a model call, and a figure here would be
+	// double counting.
+	if turns[0].CostMicroCents != 0 {
+		t.Errorf("the user's turn was billed %d micro-cents", turns[0].CostMicroCents)
+	}
+
+	// The agent's turn went through the model, so it must carry what the model charged. The scripted
+	// provider bills 120 per call.
+	if turns[1].CostMicroCents == 0 {
+		t.Fatal("the agent's turn was recorded as free. The ceiling still works (it reads the live " +
+			"outcome), so this fails silently: spend is enforced and then unauditable")
+	}
+	if turns[1].CostMicroCents != 120 {
+		t.Errorf("recorded cost = %d, want 120 — the figure must be what the provider actually "+
+			"reported, not a placeholder", turns[1].CostMicroCents)
+	}
+	if turns[1].Decided != memory.DecidedByModel {
+		t.Errorf("decided = %q, want model", turns[1].Decided)
+	}
+}
+
+// TestAFallenBackTurnIsRecordedAsFree is the other half, and it is not a formality: a zero cost has to
+// keep MEANING "this turn spent nothing". When the model is unavailable the keyword router answers,
+// which makes no call and charges nothing, so zero is the correct and honest figure there.
+//
+// Without this, the obvious "fix" for the bug above — writing a non-zero placeholder whenever a turn is
+// recorded — would pass its test and quietly invent spend that never happened.
+func TestAFallenBackTurnIsRecordedAsFree(t *testing.T) {
+	hz := newHarness(t)
+	member, _ := hz.user(t, tenancy.Member)
+	// No agent configured at all: converseOrFallback returns false and the keyword router answers.
+	hz.Server.Converse = nil
+	conv := "c-" + randSuffix()
+
+	hz.askIn(t, member, conv, "assess my agent")
+
+	turns, err := hz.Server.Episodes.For(hz.tenant).Turns(hz.tenant, conv)
+	if err != nil {
+		t.Fatalf("read turns: %v", err)
+	}
+	if len(turns) != 2 {
+		t.Fatalf("got %d turns, want 2", len(turns))
+	}
+	if turns[1].Decided == memory.DecidedByModel {
+		t.Fatalf("the turn was decided by %q; this test needs the fallback path", turns[1].Decided)
+	}
+	if turns[1].CostMicroCents != 0 {
+		t.Errorf("a turn answered without calling a model was billed %d micro-cents",
+			turns[1].CostMicroCents)
 	}
 }
 
