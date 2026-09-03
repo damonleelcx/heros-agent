@@ -29,7 +29,7 @@ import (
 	"github.com/heros-foreal/heros/internal/memory"
 	"github.com/heros-foreal/heros/internal/planner"
 	"github.com/heros-foreal/heros/internal/provider"
-	"github.com/heros-foreal/heros/internal/provider/deepseek"
+	"github.com/heros-foreal/heros/internal/provider/qwen"
 	"github.com/heros-foreal/heros/internal/router"
 	"github.com/heros-foreal/heros/internal/store"
 	"github.com/heros-foreal/heros/internal/tenancy"
@@ -47,7 +47,7 @@ func main() {
 	if err := config.LoadDotEnv(".env.local"); err != nil {
 		log.Fatalf("config: %v", err)
 	}
-	key, err := config.DeepSeekKey()
+	key, err := config.QwenKey()
 	if err != nil {
 		log.Fatalf("%v", err)
 	}
@@ -89,18 +89,18 @@ func main() {
 	// safely. That is why this is a fatal error rather than a per-request one: a deployment missing a
 	// verifier for an effect-bearing tool should fail to start, not fail on the first pull request.
 	reg := toolcontract.NewRegistry()
-	client := deepseek.New(key)
+	client := qwen.New(key)
 	// The assessment tool is registered with no source: it is REBOUND when a repository is loaded, by
 	// Registry.Replace, which re-runs the same refusals. Registering here proves at startup that the
 	// tool satisfies them, rather than discovering it on a customer's first question.
 	if err := reg.Register(tools.AssessAxis{
-		Provider: client, Model: deepseek.ModelFlash, MaxTokens: 1200,
+		Provider: client, Model: qwen.ModelFlash, MaxTokens: 1200,
 		Source: tools.FixtureSource{},
 	}, nil); err != nil {
 		log.Fatalf("tools: %v", err)
 	}
 	if err := reg.Register(tools.SynthesiseAssessment{
-		Provider: client, Model: deepseek.ModelFlash,
+		Provider: client, Model: qwen.ModelFlash,
 	}, nil); err != nil {
 		log.Fatalf("tools: %v", err)
 	}
@@ -108,7 +108,7 @@ func main() {
 	// registering here proves at startup that they satisfy the contract's refusals rather than
 	// discovering it on a customer's first question.
 	if err := reg.Register(tools.GenerateCases{
-		Provider: client, Model: deepseek.ModelFlash, Source: tools.FixtureSource{},
+		Provider: client, Model: qwen.ModelFlash, Source: tools.FixtureSource{},
 	}, nil); err != nil {
 		log.Fatalf("tools: %v", err)
 	}
@@ -125,12 +125,12 @@ func main() {
 	// when a repository loads; registering here proves at startup that they satisfy the contract's
 	// refusals — an effect-bearing tool without a verifier should stop the process, not the customer.
 	if err := reg.Register(tools.ProposeChange{
-		Provider: client, Model: deepseek.ModelFlash, Source: &discovery.Index{}, Root: ".",
+		Provider: client, Model: qwen.ModelFlash, Source: &discovery.Index{}, Root: ".",
 	}, nil); err != nil {
 		log.Fatalf("tools: %v", err)
 	}
 	if err := reg.Register(tools.VerifyProposal{
-		Provider: client, Model: deepseek.ModelFlash, Root: ".",
+		Provider: client, Model: qwen.ModelFlash, Root: ".",
 	}, nil); err != nil {
 		log.Fatalf("tools: %v", err)
 	}
@@ -198,12 +198,12 @@ func main() {
 	}
 	srv.ToolRegistry = reg
 	srv.Provider = client
-	srv.Model = deepseek.ModelFlash
+	srv.Model = qwen.ModelFlash
 	// The conversational agent. 🔴 Shares the provider and the model with the tools deliberately: a
 	// deployment where the console reasons on one model and the assessments run on another is one where
 	// "what did it use?" has two answers and the bill has two lines nobody can reconcile.
 	srv.Converse = &converse.Agent{
-		Provider: client, Model: deepseek.ModelFlash, Bounds: converse.DefaultBounds,
+		Provider: client, Model: qwen.ModelFlash, Bounds: converse.DefaultBounds,
 	}
 	srv.Episodes = mem
 	srv.Mail, srv.Links = mail, links
@@ -224,7 +224,7 @@ func main() {
 	}()
 
 	fmt.Printf("heros console  http://%s\n", *addr)
-	fmt.Printf("model          %s\n", deepseek.ModelFlash)
+	fmt.Printf("model          %s\n", qwen.ModelFlash)
 	// 🔴 Printed because it is newly true. Answering a question used to cost nothing, and both the code
 	// and the console said so; an operator should see on the first line of a deploy that this changed.
 	fmt.Printf("conversation   agent on, up to %d model call(s) per turn, ceiling %s\n",

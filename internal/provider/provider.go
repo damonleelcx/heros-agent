@@ -41,11 +41,15 @@ type Request struct {
 	//
 	// # 🔴 Why this has no usable zero value
 	//
-	// DeepSeek enables thinking BY DEFAULT at `high` effort. A caller who does not think about this
-	// silently buys a high-effort chain of thought on every call — billed as output tokens, at the output
-	// rate, consuming the output budget before a single character of the answer is written. That is
-	// exactly how a structured-extraction call that needs 80 tokens of JSON hits a 1,200-token ceiling
-	// and reports itself truncated.
+	// The qwen3.8 line enables thinking BY DEFAULT, and so did the DeepSeek provider this rule was first
+	// written against. A caller who does not think about this silently buys a chain of thought on every
+	// call — billed as output tokens, at the output rate, consuming the output budget before a single
+	// character of the answer is written. That is exactly how a structured-extraction call that needs 80
+	// tokens of JSON hits a 1,200-token ceiling and reports itself truncated.
+	//
+	// 🔴 The default differs PER MODEL, not per vendor, which is why this cannot be solved by picking a
+	// provider. Older Qwen ids do not think by default; the current ones do. An omitted field therefore
+	// means "whatever this particular model prefers", which is the silent spend difference this refuses.
 	//
 	// It also silently disables `temperature`: the provider documents that temperature, top_p,
 	// presence_penalty and frequency_penalty "will not trigger an error but will also have no effect" in

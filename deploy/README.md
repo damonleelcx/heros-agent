@@ -43,7 +43,7 @@ ROLE_PASSWORD=… deploy/bootstrap-db.sh
 # 2. Credentials. One JSON secret; every property below must be present or External Secrets
 #    fails the whole secret rather than one key.
 aws secretsmanager create-secret --name heros/eval --secret-string '{
-  "deepseek-api-key": "…",
+  "qwen-api-key": "…",
   "database-url": "postgres://heros_eval:…@postgres.heros.svc.cluster.local:5432/heros_eval?sslmode=disable",
   "bootstrap-email": "…",
   "bootstrap-password": "…",

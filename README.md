@@ -119,7 +119,7 @@ history is a credential that has leaked.
 
 | | |
 |---|---|
-| `DEEPSEEK_API_KEY` | Required. Read from the environment or `.env.local`, which is git-ignored. |
+| `QWEN_API_KEY` | Required. Read from the environment or `.env.local`, which is git-ignored. Regional: a Beijing key is rejected by the Singapore host. |
 | `HEROS_DATABASE_URL` | Postgres DSN. Defaults to the container `make pg-up` starts. |
 | `HEROS_BOOTSTRAP_EMAIL`, `HEROS_BOOTSTRAP_PASSWORD` | Used **once**, to create the first organization and its owner. If no user exists and these are unset, the process refuses to start: a built-in default password is a published credential. |
 
@@ -291,7 +291,7 @@ internal/
   memory              episodes, summaries, knowledge, preferences, conversation turns
   bounds              ceilings and refusals — the vocabulary for "no, and here is why"
   auth / tenancy      identity, roles, capabilities, per-organization isolation
-  provider            the boundary to a language model (DeepSeek today)
+  provider            the boundary to a language model (Qwen today)
 db/migrations         embedded SQL. every statement idempotent; the whole chain runs every boot
 web/static/app        the console — one page, no build step
 ```

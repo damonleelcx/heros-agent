@@ -96,7 +96,7 @@ spec:
       ports:
         - {protocol: TCP, port: 587}
     # 🔴 The public internet on 443, for two distinct reasons that must not be narrowed to one:
-    # the DeepSeek API (api.deepseek.com) and `git clone` of whatever repository a customer asks
+    # the Qwen API (dashscope.aliyuncs.com) and `git clone` of whatever repository a customer asks
     # about. The second has no fixed destination by design, so this cannot become an allowlist of
     # hosts without breaking the product's central feature.
     #

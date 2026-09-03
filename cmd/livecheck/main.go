@@ -1,4 +1,4 @@
-// Command livecheck runs one real durable goal end to end against DeepSeek and a real Postgres, and
+// Command livecheck runs one real durable goal end to end against Qwen and a real Postgres, and
 // prints what it actually cost. It is the answer to "no number in this repo came from a real call".
 package main
 
@@ -23,7 +23,7 @@ import (
 	"github.com/heros-foreal/heros/internal/intent"
 	"github.com/heros-foreal/heros/internal/planner"
 	"github.com/heros-foreal/heros/internal/provider"
-	"github.com/heros-foreal/heros/internal/provider/deepseek"
+	"github.com/heros-foreal/heros/internal/provider/qwen"
 	"github.com/heros-foreal/heros/internal/store"
 	"github.com/heros-foreal/heros/internal/task"
 	"github.com/heros-foreal/heros/internal/toolcontract"
@@ -60,7 +60,7 @@ func main() {
 		fmt.Println("\nRefusing to assess: there is no agent here to assess.")
 		os.Exit(1)
 	}
-	key, err := config.DeepSeekKey()
+	key, err := config.QwenKey()
 	if err != nil {
 		die("credential", err)
 	}
@@ -109,16 +109,16 @@ func main() {
 		die("save dag", err)
 	}
 
-	client := deepseek.New(key)
+	client := qwen.New(key)
 	reg := toolcontract.NewRegistry()
 	if err := reg.Register(tools.AssessAxis{
-		Provider: client, Model: deepseek.ModelFlash,
+		Provider: client, Model: qwen.ModelFlash,
 		Source: discovery.NewIndex(corpus),
 	}, nil); err != nil {
 		die("register", err)
 	}
 	if err := reg.Register(tools.SynthesiseAssessment{
-		Provider: client, Model: deepseek.ModelFlash,
+		Provider: client, Model: qwen.ModelFlash,
 	}, nil); err != nil {
 		die("register", err)
 	}
@@ -127,7 +127,7 @@ func main() {
 	w.Lease = 2 * time.Minute
 
 	fmt.Printf("goal     %s\nmodel    %s   ceiling $%.2f / %d tokens\n\n",
-		g.ID, deepseek.ModelFlash, float64(g.Ceilings.MaxCostCents)/100, g.Ceilings.MaxTokens)
+		g.ID, qwen.ModelFlash, float64(g.Ceilings.MaxCostCents)/100, g.Ceilings.MaxTokens)
 
 	start := time.Now()
 	for i := 0; i < 40; i++ {
