@@ -104,6 +104,11 @@ var apiRoutes = []route{
 		Handler: func(s *Server) http.HandlerFunc { return s.handleGetSubject }},
 	{Method: "POST", Path: "/api/ask", Needs: tenancy.RunGoals,
 		Handler: func(s *Server) http.HandlerFunc { return s.handleAsk }},
+	// The same turn, delivered as it is written. 🔴 The SAME capability as /api/ask, deliberately:
+	// this is one act with two transports, and a streaming route that asked for less would be a way
+	// to ask questions without permission to ask them.
+	{Method: "POST", Path: "/api/ask/stream", Needs: tenancy.RunGoals,
+		Handler: func(s *Server) http.HandlerFunc { return s.handleAskStream }},
 	// The transcript itself, so a refresh resumes the conversation rather than starting a second one
 	// beside it. 🔴 ReadGoals rather than RunGoals: reading what was already said is not asking for
 	// anything, and a viewer who may look at runs may look at the sentences that produced them.

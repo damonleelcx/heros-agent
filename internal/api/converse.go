@@ -93,14 +93,15 @@ func (p *pendingActions) take(id string) (*pendingAction, error) {
 // limit, a timeout, JSON that will not parse, a capability it invented — returns false, and the caller
 // carries on with the behaviour the console had before this package existed. The worst outcome of a
 // provider having a bad afternoon is a blunter console, never a broken one.
-func (s *Server) converseOrFallback(tenant, asker string, req askReq, sub *subjectState) (askResp, bool) {
+func (s *Server) converseOrFallback(tenant, asker string, req askReq, sub *subjectState, onText func(string)) (askResp, bool) {
 	if s.Converse == nil {
 		return askResp{}, false
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	out, err := s.Converse.Interpret(ctx, s.history(tenant, req.ConversationID), req.Text, s.factsFor(tenant, asker, sub))
+	out, err := s.Converse.InterpretStream(ctx, s.history(tenant, req.ConversationID), req.Text,
+		s.factsFor(tenant, asker, sub), onText)
 	if err != nil {
 		// 🔴 WARN with the error CLASS, not just the text. A rate limit and a prompt the model will
 		// never satisfy both degrade identically for the customer and need completely different
@@ -304,4 +305,100 @@ func (s *Server) handleConfirm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// ── streaming the reply ──────────────────────────────────────────────────────────────────────────
+
+// handleAskStream is POST /api/ask/stream: the same turn as /api/ask, delivered as it is written.
+//
+// # 🔴 Why this is a second route and not a change to /api/ask
+//
+// /api/ask is a published contract — the README documents it as the whole pipeline, the route table
+// pins its capability, and every test posts to it. Changing its response shape to serve a display
+// improvement would put an answer somebody needs behind a transport somebody's proxy might buffer. So
+// the streaming route is additive, the console prefers it, and falls back to /api/ask if it fails at
+// any point. The worst outcome of a streaming bug is the console people had yesterday.
+//
+// # 🔴 The events, and which one is authoritative
+//
+//	delta  {"text":"…"}  prose as it arrives. DECORATION. May be incomplete, may be superseded.
+//	final  {…askResp…}   the real answer. The console MUST render this and discard what it drew from
+//	                     deltas, because the loop may call the model more than once and text from a
+//	                     call that did not decide was never part of the reply.
+//	error  {"error":"…"} the turn failed; nothing was recorded.
+//
+// # 🔴 Why the turn is recorded here too
+//
+// Because it is the same turn. Recording only on the JSON route would mean a console that streams keeps
+// no transcript, and "and what about tools?" would stop working for exactly the people using the newer
+// path — a regression nobody would connect to streaming.
+func (s *Server) handleAskStream(w http.ResponseWriter, r *http.Request) {
+	p, err := tenancy.From(r.Context())
+	if err != nil {
+		unauthorized(w, "You are not signed in.")
+		return
+	}
+	var req askReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unreadable request"})
+		return
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		// 🔴 Refused rather than silently answering in one lump. A caller that asked for a stream and
+		// got a single frame at the end has no way to tell that from a very slow model, and would sit
+		// showing an empty bubble believing it was working.
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	// 🔴 Nginx and friends buffer text/event-stream by default, which turns a stream back into one lump
+	// at the end — the exact failure this route exists to remove, and invisible in local testing.
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+	flusher.Flush()
+
+	send := func(event string, v any) {
+		b, err := json.Marshal(v)
+		if err != nil {
+			return
+		}
+		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, b)
+		flusher.Flush()
+	}
+
+	// 🔴 Deltas are serialised onto the request goroutine through a channel rather than written from
+	// the provider's callback directly. The callback runs while the HTTP response body is being read,
+	// and an http.ResponseWriter is not safe for concurrent use — writing from both would be a data
+	// race that shows up as corrupted frames under load and never on one developer's machine.
+	type deltaMsg struct {
+		Text string `json:"text"`
+	}
+	deltas := make(chan string, 64)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for piece := range deltas {
+			send("delta", deltaMsg{Text: piece})
+		}
+	}()
+
+	resp, decided, derr := s.decide(p.Tenant, p.Subject, req, func(piece string) {
+		// Non-blocking: a console that has stopped reading must slow the turn down, never wedge it.
+		select {
+		case deltas <- piece:
+		default:
+		}
+	})
+	close(deltas)
+	<-done
+
+	if derr != nil {
+		send("error", map[string]string{"error": derr.Error()})
+		return
+	}
+	s.record(p.Tenant, req, resp, decided)
+	send("final", resp)
 }

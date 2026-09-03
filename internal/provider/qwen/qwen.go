@@ -16,6 +16,7 @@
 package qwen
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -94,18 +95,25 @@ func (c *Client) PriceFor(model string) (provider.Price, bool) {
 // ── wire types ───────────────────────────────────────────────────────────────────────────────────
 
 type wireReq struct {
-	Model          string       `json:"model"`
-	Messages       []wireMsg    `json:"messages"`
-	MaxTokens      int          `json:"max_tokens"`
-	Temperature    *float64     `json:"temperature,omitempty"`
-	ResponseFormat *wireRespFmt `json:"response_format,omitempty"`
-	Stream         bool         `json:"stream"`
+	Model          string             `json:"model"`
+	Messages       []wireMsg          `json:"messages"`
+	MaxTokens      int                `json:"max_tokens"`
+	Temperature    *float64           `json:"temperature,omitempty"`
+	ResponseFormat *wireRespFmt       `json:"response_format,omitempty"`
+	Stream         bool               `json:"stream"`
+	StreamOptions  *wireStreamOptions `json:"stream_options,omitempty"`
 	// EnableThinking is Qwen's chain-of-thought toggle. A plain bool on the wire, unlike DeepSeek's
 	// nested {"thinking":{"type":…}} object, and it is ALWAYS sent — see Complete for why.
 	EnableThinking *bool `json:"enable_thinking,omitempty"`
 	// ThinkingBudget caps chain-of-thought in TOKENS. Qwen has no "reasoning_effort" enum; the budget
 	// is the only dial, so the effort scale is translated into token counts by budgetFor.
 	ThinkingBudget *int `json:"thinking_budget,omitempty"`
+}
+
+// wireStreamOptions asks for a final frame carrying usage. Without it a streamed call reports NO usage
+// at all, which prices the turn at zero — the one direction of error nobody investigates.
+type wireStreamOptions struct {
+	IncludeUsage bool `json:"include_usage"`
 }
 
 type wireMsg struct {
@@ -197,39 +205,9 @@ func (c *Client) Complete(ctx context.Context, req provider.Request) (provider.R
 		return provider.Response{}, fmt.Errorf("%w: no API key configured", provider.ErrAuth)
 	}
 
-	msgs := make([]wireMsg, 0, len(req.Messages))
-	for _, m := range req.Messages {
-		msgs = append(msgs, wireMsg{Role: m.Role, Content: m.Content})
-	}
-	body := wireReq{Model: req.Model, Messages: msgs, MaxTokens: req.MaxTokens, Stream: false}
-
-	// 🔴 enable_thinking is sent EXPLICITLY in both directions rather than omitted when off. Qwen's
-	// default differs per model — the qwen3.8 line thinks by default, older ids do not — so an omitted
-	// field means "whatever this particular model prefers", which is exactly the silent, per-model
-	// spend difference the Reasoning field was introduced to eliminate.
-	thinking := req.Reasoning != provider.NoReasoning
-	body.EnableThinking = &thinking
-	if thinking {
-		if b := clampBudget(budgetFor(req.Reasoning), req.MaxTokens); b > 0 {
-			body.ThinkingBudget = &b
-		}
-	} else {
-		// Temperature is only meaningful with thinking off, which is what makes a run reproducible.
-		body.Temperature = req.Temperature
-	}
-
-	if req.JSONObject {
-		body.ResponseFormat = &wireRespFmt{Type: "json_object"}
-		// 🔴 Qwen rejects json_object unless the word "json" appears in the prompt, exactly as DeepSeek
-		// does — verified against the live service on 2026-09-03, which answered
-		// `'messages' must contain the word 'json' in some form`. Enforced here rather than left to each
-		// call site: the failure is a 400 on a task that has already been claimed and counted as an
-		// attempt, and the error text does not say which of our prompts did it.
-		if !mentionsJSON(req.Messages) {
-			return provider.Response{}, fmt.Errorf(
-				"%w: json_object was requested but no message mentions JSON, which this API rejects",
-				provider.ErrRequest)
-		}
+	body, err := c.buildBody(req)
+	if err != nil {
+		return provider.Response{}, err
 	}
 
 	raw, err := json.Marshal(body)
@@ -305,6 +283,51 @@ func (c *Client) Complete(ctx context.Context, req provider.Request) (provider.R
 		Latency:        time.Since(start),
 		FinishReason:   out.Choices[0].FinishReason,
 	}, nil
+}
+
+// buildBody turns one provider.Request into the wire request.
+//
+// 🔴 Shared by Complete and CompleteStream deliberately. These two differ in ONE field — `stream` — and
+// every other decision here (the explicit thinking toggle, the clamped budget, the json_object
+// precondition) is a correctness rule that would otherwise have to be remembered twice. A streaming
+// path that quietly stopped clamping the thinking budget would show a fast, truncated answer and bill
+// for the difference.
+func (c *Client) buildBody(req provider.Request) (wireReq, error) {
+	msgs := make([]wireMsg, 0, len(req.Messages))
+	for _, m := range req.Messages {
+		msgs = append(msgs, wireMsg{Role: m.Role, Content: m.Content})
+	}
+	body := wireReq{Model: req.Model, Messages: msgs, MaxTokens: req.MaxTokens}
+
+	// 🔴 enable_thinking is sent EXPLICITLY in both directions rather than omitted when off. Qwen's
+	// default differs per model — the qwen3.8 line thinks by default, older ids do not — so an omitted
+	// field means "whatever this particular model prefers", which is exactly the silent, per-model
+	// spend difference the Reasoning field was introduced to eliminate.
+	thinking := req.Reasoning != provider.NoReasoning
+	body.EnableThinking = &thinking
+	if thinking {
+		if b := clampBudget(budgetFor(req.Reasoning), req.MaxTokens); b > 0 {
+			body.ThinkingBudget = &b
+		}
+	} else {
+		// Temperature is only meaningful with thinking off, which is what makes a run reproducible.
+		body.Temperature = req.Temperature
+	}
+
+	if req.JSONObject {
+		body.ResponseFormat = &wireRespFmt{Type: "json_object"}
+		// 🔴 Qwen rejects json_object unless the word "json" appears in the prompt, exactly as DeepSeek
+		// does — verified against the live service on 2026-09-03, which answered
+		// `'messages' must contain the word 'json' in some form`. Enforced here rather than left to each
+		// call site: the failure is a 400 on a task that has already been claimed and counted as an
+		// attempt, and the error text does not say which of our prompts did it.
+		if !mentionsJSON(req.Messages) {
+			return wireReq{}, fmt.Errorf(
+				"%w: json_object was requested but no message mentions JSON, which this API rejects",
+				provider.ErrRequest)
+		}
+	}
+	return body, nil
 }
 
 // classify maps an HTTP status onto the typed error set the retry ladder reads.
@@ -383,3 +406,168 @@ func DefaultPrices() map[string]provider.Price {
 }
 
 var _ provider.Provider = (*Client)(nil)
+
+// ── streaming ────────────────────────────────────────────────────────────────────────────────────
+
+// streamChunk is one SSE frame. Shaped from the live wire, not from documentation.
+type streamChunk struct {
+	Model   string `json:"model"`
+	Choices []struct {
+		Delta struct {
+			Content          string `json:"content"`
+			ReasoningContent string `json:"reasoning_content"`
+		} `json:"delta"`
+		FinishReason string `json:"finish_reason"`
+	} `json:"choices"`
+	// Usage arrives in a FINAL frame whose choices list is EMPTY, which is why it is read outside the
+	// choices loop. Verified against the live service on 2026-09-03.
+	Usage *struct {
+		PromptTokens        int64 `json:"prompt_tokens"`
+		CompletionTokens    int64 `json:"completion_tokens"`
+		PromptTokensDetails struct {
+			CachedTokens int64 `json:"cached_tokens"`
+		} `json:"prompt_tokens_details"`
+		CompletionTokensDetails struct {
+			ReasoningTokens int64 `json:"reasoning_tokens"`
+		} `json:"completion_tokens_details"`
+	} `json:"usage"`
+	Error *struct {
+		Message string `json:"message"`
+		Code    string `json:"code"`
+	} `json:"error"`
+}
+
+// CompleteStream makes one call and delivers it incrementally.
+//
+// 🔴 The RETURNED Response is assembled from what the provider reported, exactly as Complete does —
+// same content, same usage, same price, same finish reason. The sink is decoration. A caller that
+// accumulated deltas itself and acted on those would have a second copy of the answer that disagrees
+// with the ledger on precisely the calls that matter.
+func (c *Client) CompleteStream(ctx context.Context, req provider.Request, sink func(provider.Delta)) (provider.Response, error) {
+	if err := provider.ValidateRequest(req); err != nil {
+		return provider.Response{}, err
+	}
+	if c.APIKey == "" {
+		return provider.Response{}, fmt.Errorf("%w: no API key configured", provider.ErrAuth)
+	}
+
+	body, err := c.buildBody(req)
+	if err != nil {
+		return provider.Response{}, err
+	}
+	body.Stream = true
+	body.StreamOptions = &wireStreamOptions{IncludeUsage: true}
+
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return provider.Response{}, fmt.Errorf("%w: %v", provider.ErrRequest, err)
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		strings.TrimRight(c.BaseURL, "/")+"/chat/completions", bytes.NewReader(raw))
+	if err != nil {
+		return provider.Response{}, fmt.Errorf("%w: %v", provider.ErrRequest, err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Accept", "text/event-stream")
+	httpReq.Header.Set("Authorization", "Bearer "+c.APIKey)
+
+	start := time.Now()
+	resp, err := c.HTTP.Do(httpReq)
+	if err != nil {
+		if ctx.Err() != nil {
+			return provider.Response{}, ctx.Err()
+		}
+		return provider.Response{}, fmt.Errorf("%w: %v", provider.ErrUpstream, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		payload, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
+		return provider.Response{}, classify(resp.StatusCode, payload)
+	}
+
+	var (
+		content  strings.Builder
+		usage    provider.Usage
+		model    = req.Model
+		finish   string
+		sawChunk bool
+	)
+	sc := bufio.NewScanner(resp.Body)
+	// 🔴 A bigger buffer than bufio's 64 KiB default. One SSE frame carrying a long reasoning burst can
+	// exceed it, and the failure mode of the default is `token too long` — an error that names the
+	// scanner rather than the cause, on a call that was working.
+	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" || !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if data == "[DONE]" {
+			break
+		}
+		var chunk streamChunk
+		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			return provider.Response{}, fmt.Errorf("%w: undecodable stream frame: %v", provider.ErrUpstream, err)
+		}
+		if chunk.Error != nil {
+			// 🔴 An error can arrive AFTER a 200, mid-stream. Checked here as well as on the status code,
+			// because by this point the caller may already have shown text that is now void.
+			return provider.Response{}, fmt.Errorf("%w: %s", provider.ErrUpstream, chunk.Error.Message)
+		}
+		sawChunk = true
+		if chunk.Model != "" {
+			model = chunk.Model
+		}
+		if u := chunk.Usage; u != nil {
+			usage = provider.Usage{
+				InputTokens:       u.PromptTokens,
+				OutputTokens:      u.CompletionTokens,
+				CachedInputTokens: u.PromptTokensDetails.CachedTokens,
+				ReasoningTokens:   u.CompletionTokensDetails.ReasoningTokens,
+			}
+		}
+		for _, ch := range chunk.Choices {
+			if ch.FinishReason != "" {
+				finish = ch.FinishReason
+			}
+			d := provider.Delta{Text: ch.Delta.Content, Reasoning: ch.Delta.ReasoningContent}
+			if d.Text != "" {
+				content.WriteString(d.Text)
+			}
+			if sink != nil && (d.Text != "" || d.Reasoning != "") {
+				sink(d)
+			}
+		}
+	}
+	if err := sc.Err(); err != nil {
+		return provider.Response{}, fmt.Errorf("%w: the stream ended badly: %v", provider.ErrUpstream, err)
+	}
+	if !sawChunk {
+		// 🔴 A 200 that carried no frames is NOT an empty answer. Treating it as one would let a turn
+		// "succeed" having produced nothing, and the emptiness would travel downstream as a fact.
+		return provider.Response{}, fmt.Errorf("%w: HTTP 200 with no stream frames", provider.ErrUpstream)
+	}
+
+	price, ok := c.PriceFor(model)
+	if !ok {
+		price, ok = c.PriceFor(req.Model)
+	}
+	if !ok {
+		return provider.Response{}, fmt.Errorf(
+			"%w: no price for model %q, and a call with no price would report zero spend against a "+
+				"money ceiling", provider.ErrRequest, model)
+	}
+
+	return provider.Response{
+		Content:        content.String(),
+		Usage:          usage,
+		CostMicroCents: price.CostMicroCents(usage),
+		Model:          model,
+		Latency:        time.Since(start),
+		FinishReason:   finish,
+	}, nil
+}
+
+var _ provider.StreamingProvider = (*Client)(nil)

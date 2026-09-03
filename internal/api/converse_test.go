@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"sync"
@@ -523,4 +524,208 @@ func (hz *harness) goalCount(t *testing.T) int {
 		t.Fatalf("list goals: %v", err)
 	}
 	return len(gs)
+}
+
+// ── streaming ────────────────────────────────────────────────────────────────────────────────────
+
+// streamingProvider is a scriptedProvider that also implements provider.StreamingProvider, delivering
+// its reply a few bytes at a time.
+//
+// 🔴 It streams in SMALL, uneven pieces on purpose. The whole risk in this path is a boundary landing
+// in the middle of something — a JSON escape, the `"text"` key itself — and a fake that emits its reply
+// in one frame would exercise none of it while looking like a streaming test.
+type streamingProvider struct {
+	*scriptedProvider
+	chunk int
+}
+
+func (p *streamingProvider) CompleteStream(ctx context.Context, req provider.Request,
+	sink func(provider.Delta)) (provider.Response, error) {
+	resp, err := p.scriptedProvider.Complete(ctx, req)
+	if err != nil {
+		return provider.Response{}, err
+	}
+	n := p.chunk
+	if n <= 0 {
+		n = 3
+	}
+	for i := 0; i < len(resp.Content); i += n {
+		end := i + n
+		if end > len(resp.Content) {
+			end = len(resp.Content)
+		}
+		sink(provider.Delta{Text: resp.Content[i:end]})
+	}
+	return resp, nil
+}
+
+// withStreamingAgent gives the harness an agent whose provider can stream.
+func (hz *harness) withStreamingAgent(reply string) *streamingProvider {
+	p := &streamingProvider{scriptedProvider: &scriptedProvider{reply: reply}}
+	hz.Server.Converse = &converse.Agent{
+		Provider: p, Model: "scripted", Bounds: converse.DefaultBounds,
+	}
+	return p
+}
+
+// sse posts to a streaming endpoint and returns the events in order.
+func (hz *harness) sse(t *testing.T, as *http.Cookie, path, body string) []sseEvent {
+	t.Helper()
+	rec := hz.do(t, "POST", path, body, as)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("%s: %d %s", path, rec.Code, rec.Body.String())
+	}
+	var out []sseEvent
+	for _, frame := range strings.Split(rec.Body.String(), "\n\n") {
+		var ev sseEvent
+		for _, line := range strings.Split(frame, "\n") {
+			switch {
+			case strings.HasPrefix(line, "event:"):
+				ev.Name = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+			case strings.HasPrefix(line, "data:"):
+				ev.Data += strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+			}
+		}
+		if ev.Name != "" {
+			out = append(out, ev)
+		}
+	}
+	return out
+}
+
+type sseEvent struct{ Name, Data string }
+
+// TestTheReplyIsStreamedAsItIsWritten.
+//
+// 🔴 The point of the assertion on delta COUNT: a route that emits one delta carrying the whole reply
+// and then `final` satisfies every other check here while being exactly the non-streaming behaviour
+// this exists to replace. "It streams" has to mean "it arrived in pieces".
+func TestTheReplyIsStreamedAsItIsWritten(t *testing.T) {
+	hz := newHarness(t)
+	member, _ := hz.user(t, tenancy.Member)
+	hz.withStreamingAgent(`{"action":"say","text":"Hello. What are we looking at?"}`)
+	conv := "c-" + randSuffix()
+
+	events := hz.sse(t, member, "/api/ask/stream",
+		`{"text":"hi","conversation_id":"`+conv+`"}`)
+
+	var deltas []string
+	var final string
+	for _, e := range events {
+		switch e.Name {
+		case "delta":
+			var d struct {
+				Text string `json:"text"`
+			}
+			if err := json.Unmarshal([]byte(e.Data), &d); err != nil {
+				t.Fatalf("undecodable delta %q: %v", e.Data, err)
+			}
+			deltas = append(deltas, d.Text)
+		case "final":
+			final = e.Data
+		case "error":
+			t.Fatalf("the turn failed: %s", e.Data)
+		}
+	}
+
+	if len(deltas) < 2 {
+		t.Fatalf("got %d delta(s) — one delta carrying everything is not streaming, it is the old "+
+			"behaviour wearing an event name", len(deltas))
+	}
+	if final == "" {
+		t.Fatal("no final event: the console would have nothing authoritative to render")
+	}
+
+	// 🔴 The prose must come out CLEAN. The model's reply is a JSON object, so a scanner that simply
+	// forwarded the raw completion would produce `{"action":"say","text":"Hel` here.
+	joined := strings.Join(deltas, "")
+	if joined != "Hello. What are we looking at?" {
+		t.Errorf("streamed prose = %q; it must be the text field's value, decoded, and nothing else",
+			joined)
+	}
+
+	var resp askResp
+	if err := json.Unmarshal([]byte(final), &resp); err != nil {
+		t.Fatalf("undecodable final: %v", err)
+	}
+	if resp.Kind != "say" || resp.Text != joined {
+		t.Errorf("final disagrees with what was streamed: kind=%q text=%q", resp.Kind, resp.Text)
+	}
+}
+
+// TestAStreamedTurnIsRecordedLikeAnyOther. The transcript is what makes "and what about tools?" work.
+// If only the JSON route recorded turns, conversation memory would quietly stop working for exactly
+// the people on the newer path, and nobody would connect that to streaming.
+func TestAStreamedTurnIsRecordedLikeAnyOther(t *testing.T) {
+	hz := newHarness(t)
+	member, _ := hz.user(t, tenancy.Member)
+	hz.withStreamingAgent(`{"action":"say","text":"Hello there."}`)
+	conv := "c-" + randSuffix()
+
+	hz.sse(t, member, "/api/ask/stream", `{"text":"hi","conversation_id":"`+conv+`"}`)
+
+	turns, err := hz.Server.Episodes.For(hz.tenant).Turns(hz.tenant, conv)
+	if err != nil {
+		t.Fatalf("read turns: %v", err)
+	}
+	if len(turns) != 2 {
+		t.Fatalf("got %d turns, want 2", len(turns))
+	}
+	if turns[1].Decided != memory.DecidedByModel {
+		t.Errorf("decided = %q, want model", turns[1].Decided)
+	}
+	if turns[1].CostMicroCents == 0 {
+		t.Error("a streamed turn was recorded as free — the cost must survive the streaming path too")
+	}
+}
+
+// TestADecisionStreamsNoProse. `{"action":"do",…}` carries no text field: there is nothing to show yet,
+// and the console must keep waiting rather than be handed fragments of a capability name.
+func TestADecisionStreamsNoProse(t *testing.T) {
+	hz := newHarness(t)
+	member, _ := hz.user(t, tenancy.Member)
+	hz.loadSelfAsSubject(t, member)
+	hz.withStreamingAgent(
+		`{"action":"do","capability":"assess","axis":"loop","why":"You asked about retries."}`)
+
+	events := hz.sse(t, member, "/api/ask/stream",
+		`{"text":"is my retry loop sound","conversation_id":"c-`+randSuffix()+`"}`)
+
+	for _, e := range events {
+		if e.Name == "delta" {
+			t.Errorf("a decision turn streamed prose: %s", e.Data)
+		}
+	}
+	if len(events) == 0 || events[len(events)-1].Name != "final" {
+		t.Error("a decision turn must still end with a final event")
+	}
+}
+
+// TestANonStreamingProviderStillAnswersOnTheStreamingRoute. StreamingProvider is optional, so the route
+// must work for a provider that cannot stream — just without deltas. Otherwise adding the route would
+// have quietly made the scripted fixtures, and any future provider, unusable through the console.
+func TestANonStreamingProviderStillAnswersOnTheStreamingRoute(t *testing.T) {
+	hz := newHarness(t)
+	member, _ := hz.user(t, tenancy.Member)
+	hz.withAgent(`{"action":"say","text":"Hello there."}`) // Complete only, no CompleteStream
+	conv := "c-" + randSuffix()
+
+	events := hz.sse(t, member, "/api/ask/stream", `{"text":"hi","conversation_id":"`+conv+`"}`)
+
+	var final string
+	for _, e := range events {
+		if e.Name == "final" {
+			final = e.Data
+		}
+	}
+	if final == "" {
+		t.Fatal("a provider that cannot stream got no answer at all on the streaming route")
+	}
+	var resp askResp
+	if err := json.Unmarshal([]byte(final), &resp); err != nil {
+		t.Fatalf("undecodable final: %v", err)
+	}
+	if resp.Text != "Hello there." {
+		t.Errorf("text = %q", resp.Text)
+	}
 }
