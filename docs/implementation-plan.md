@@ -151,8 +151,35 @@ Spend is a **micro-cent** ledger against a **cent** ceiling. A real call proved 
 0.0127 cents, and rounding up to the cent — the correct instinct, since under-reporting is the dangerous
 direction — overstated it 79x.
 
-DeepSeek prices **double during peak hours** (01:00–04:00 and 06:00–10:00 UTC, Mon–Fri), so the price is
+DeepSeek priced **double during peak hours** (01:00–04:00 and 06:00–10:00 UTC, Mon–Fri), so the price was
 selected per call from the call's own clock, defaulting to peak when uncertain.
+
+#### [x] P15a · Provider replaced with Qwen (2026-09-03)
+
+The default — and now only — provider is **Qwen** (`qwen3.8-flash`, with `qwen3.8-max` available) on
+Alibaba Cloud Model Studio's OpenAI-compatible endpoint. `internal/provider/deepseek` is gone;
+`internal/provider/qwen` replaces it. The measurements above are kept as the record that justified the
+ledger's resolution and `converse.DefaultBounds`, but they were taken on `deepseek-v4-flash` and have
+**not** been re-taken on Qwen.
+
+Three structural differences, each of which would be a silent wrong number if carried over unchanged:
+
+| | DeepSeek | Qwen |
+|---|---|---|
+| rate periods | peak / off-peak, 2x swing | **one flat rate**, so `Tariff` collapsed to `provider.Price` |
+| cache hits | `usage.prompt_cache_hit_tokens` | `usage.prompt_tokens_details.cached_tokens` (nested) |
+| reasoning dial | `reasoning_effort` enum | `thinking_budget` in **tokens**, clamped to half `MaxTokens` |
+
+Reading the cache field at its old path would decode cleanly as zero and price every cached token at the
+full input rate — an error that only ever overstates, and only on the workloads built to be cheap.
+
+‼️ **The Qwen prices are second-hand.** Alibaba does not publish machine-readable rates, so they were
+read from third-party trackers; `qwen3.8-flash`'s cached-input rate is not published at all and is set
+equal to full input price, which over-reports rather than under-reports. Good enough for a ceiling, not
+good enough to bill anyone.
+
+‼️ **The key is regional.** A Beijing key 401s on the Singapore host (`dashscope-intl`) exactly as a
+revoked key would. Region and credential change together.
 
 ### [x] P16 · Repository intake and discovery
 The fixture is gone. `internal/intake` resolves what a person types — a local path or a GitHub link — to

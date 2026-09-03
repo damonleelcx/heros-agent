@@ -10,7 +10,7 @@ import (
 	"github.com/heros-foreal/heros/internal/config"
 	"github.com/heros-foreal/heros/internal/discovery"
 	"github.com/heros-foreal/heros/internal/provider"
-	"github.com/heros-foreal/heros/internal/provider/deepseek"
+	"github.com/heros-foreal/heros/internal/provider/qwen"
 )
 
 func main() {
@@ -18,7 +18,7 @@ func main() {
 		fmt.Println(err)
 		os.Exit(1)
 	}
-	key, err := config.DeepSeekKey()
+	key, err := config.QwenKey()
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
@@ -39,7 +39,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	c := deepseek.New(key)
+	c := qwen.New(key)
 	temp := 0.0
 	msgs := []provider.Message{
 		{Role: "system", Content: "You assess one axis of an AI agent for weaknesses. Reply with a JSON object only. Keep \"weakness\" to at most two sentences."},
@@ -54,7 +54,7 @@ func main() {
 	for _, mode := range []provider.Reasoning{provider.HighReasoning, provider.NoReasoning} {
 		ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 		resp, err := c.Complete(ctx, provider.Request{
-			Model: deepseek.ModelFlash, MaxTokens: 1200, Temperature: &temp,
+			Model: qwen.ModelFlash, MaxTokens: 1200, Temperature: &temp,
 			JSONObject: true, Reasoning: mode, Messages: msgs,
 		})
 		cancel()

@@ -126,6 +126,35 @@ type Bounds struct {
 // 🚫 Do not "tidy" this to a round number without re-measuring. A ceiling below the real cost of one
 // call does not make anything cheaper — it makes the loop effectively one call long, silently, and the
 // read step P3 adds would never get to run.
+//
+// # Re-measured on qwen3.8-flash, 2026-09-03, and the figure still holds
+//
+// The DeepSeek numbers above are kept because they are the evidence for why this is 150,000 rather
+// than the 5,000 somebody guessed. But the provider changed, so the figure was re-measured against
+// the live service with `go run ./cmd/conversecheck` — which drives THIS agent with THIS system
+// prompt, because the prompt is most of the cost:
+//
+//	cold, no repository, first turn      1,123 in / 48 out    17,738 µ¢
+//	loaded repository, first turn        1,223 in / 27 out    18,256 µ¢
+//	full 12-turn history window          1,748 in / 84 out    28,000 µ¢   ← worst legitimate turn
+//
+// Repeated three times: the worst turn landed at 26,698 / 27,034 / 27,622 / 28,000 µ¢, so the figure
+// is stable and 28,000 is the conservative end of it, not a single lucky reading.
+//
+// So 150,000 is 5.4x the most expensive real turn, and a full four-call loop at that price is
+// 112,000 — under the ceiling, with MaxCalls binding first. That is the same arithmetic the DeepSeek
+// figure produced, which is why the number does not move.
+//
+// 🔴 The WORST case is the one that matters and it is NOT the first turn. HistoryWindow is 12, so a
+// conversation that has been going a while sends twelve prior turns with every sentence — that is the
+// 28,000 row, and it costs ~55% more than the two-turn case anyone would reach for when spot-checking.
+//
+// 🔴 These figures OVERSTATE the real bill, deliberately. Qwen served 1,024 cached input tokens on
+// every single call, but qwen.DefaultPrices charges cached input at the FULL input rate because the
+// cached rate is not published anywhere that could be found. Cached tokens are ~81% of the input cost
+// here, so the true bill is materially lower than what the ledger records. That is the safe direction
+// — and it is why the DeepSeek follow-up looked cheaper than its first turn (that price table DID
+// model a 30x cache discount) while these rows stay flat.
 var DefaultBounds = Bounds{
 	MaxCalls:          4,
 	MaxTokens:         700,

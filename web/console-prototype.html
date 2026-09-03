@@ -1,3 +1,5 @@
+<!doctype html>
+<meta charset="utf-8">
 <title>Heros Console</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -227,7 +229,10 @@ const send   = document.getElementById('send');
 const chips  = document.getElementById('chips');
 
 const AXES = ["model","prompt","skills","context","tools","memory","harness","loop","graph"];
-// Measured on a live run against deepseek-v4-flash on 2026-08-31: 8 calls, 4,397 tokens, $0.0016.
+// Token counts measured on a live run against deepseek-v4-flash on 2026-08-31: 8 calls, 4,397 tokens.
+// The provider became qwen3.8-flash on 2026-09-03. The TOKEN COUNTS are kept (they are a property of
+// the prompts and the corpus, not of the vendor); the COST is repriced below. This is a reprice, not
+// a re-measurement on Qwen.
 const REAL_TOKENS = {model:531,prompt:498,skills:602,context:544,tools:588,memory:512,harness:571,loop:551};
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const el = (html) => { const d=document.createElement('div'); d.innerHTML=html.trim(); return d.firstElementChild; };
@@ -279,7 +284,7 @@ async function goAssess(){
       <div class="meter"><div class="lab">tasks</div><div class="val"><span id="mt">0</span><span class="of"> / 10</span></div><div class="bar"><i id="bt"></i></div></div>
       <div class="meter"><div class="lab">spend</div><div class="val">$<span id="mc">0.0000</span><span class="of"> / $5.00</span></div><div class="bar"><i id="bc"></i></div></div>
       <div class="meter"><div class="lab">tokens</div><div class="val" id="mk">0</div></div>
-      <div class="meter"><div class="lab">model</div><div class="val" style="font-size:.72rem">deepseek-v4-flash</div></div>
+      <div class="meter"><div class="lab">model</div><div class="val" style="font-size:.72rem">qwen3.8-flash</div></div>
       <div class="meter"><div class="lab">elapsed</div><div class="val" id="me">0s</div></div>
     </div></div>`);
   t.appendChild(card); scroll();
@@ -315,9 +320,16 @@ async function goAssess(){
       setState(rows[a],'done','✓','succeeded');
       done++;
     }
-    // Real per-axis usage, measured on a live deepseek-v4-flash run: 4,397 tokens over 8 calls,
-    // 159,550 micro-cents total. Not illustrative numbers.
-    if (a !== 'graph'){ tok += REAL_TOKENS[a]; cost += REAL_TOKENS[a] * 0.000000363; }
+    // Real per-axis token usage, measured on a live deepseek-v4-flash run: 4,397 tokens over 8 calls.
+    // Not illustrative numbers.
+    //
+    // The $/token constant was 0.000000363 on DeepSeek. Qwen's flash rates are exactly 7/11 of the
+    // DeepSeek off-peak rates this was derived from -- $0.14/$0.22 input and $0.42/$0.66 output are
+    // both 0.63636 -- so the blended constant rescales EXACTLY, without needing to know the input /
+    // output mix of the original run: 0.000000363 * 7/11 = 0.000000231.
+    //
+    // That puts a nine-axis read at 101,571 micro-cents where DeepSeek billed 159,550.
+    if (a !== 'graph'){ tok += REAL_TOKENS[a]; cost += REAL_TOKENS[a] * 0.000000231; }
     card.querySelector('#mt').textContent = done;
     card.querySelector('#mc').textContent = cost.toFixed(4);
     card.querySelector('#mk').textContent = tok.toLocaleString();
@@ -484,6 +496,6 @@ input.onkeydown = e => { if (e.key==='Enter') ask(input.value); };
     tell you about any of them, change any of them, or measure whether a change actually helped.</p>
     <p style="color:var(--ink-muted)">Ask below. Anything that costs money gets a written plan and a
     ceiling first; anything that touches your repository waits for you. A full nine-axis read runs on
-    <code>deepseek-v4-flash</code> and costs about two tenths of a cent.</p>`);
+    <code>qwen3.8-flash</code> and costs about a tenth of a cent.</p>`);
 })();
 </script>

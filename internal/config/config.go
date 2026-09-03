@@ -69,5 +69,9 @@ func RequireKey(name string) (string, error) {
 		"(which is git-ignored)", ErrMissingKey, name, name)
 }
 
-// DeepSeekKey is the credential for the DeepSeek provider.
-func DeepSeekKey() (string, error) { return RequireKey("DEEPSEEK_API_KEY") }
+// QwenKey is the credential for the Qwen provider (Alibaba Cloud Model Studio / DashScope).
+//
+// 🔴 The key is REGIONAL. A key issued in the Beijing account namespace is rejected by the Singapore
+// host and vice versa, with a 401 indistinguishable from a revoked key. Changing region means changing
+// this credential and the client's BaseURL together — see internal/provider/qwen.DefaultBaseURL.
+func QwenKey() (string, error) { return RequireKey("QWEN_API_KEY") }
