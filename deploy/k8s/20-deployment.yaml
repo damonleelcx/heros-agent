@@ -94,6 +94,16 @@ spec:
               # back to writing password-reset links into the log, which on a public deployment is
               # account takeover for anybody who can read it.
               value: "off"
+            # 🔴 MOVES WITH `qwen-api-key` IN THE `heros/eval` SECRET, NEVER ALONE. The credential is
+            # issued against this one host; Model Studio's Beijing and Singapore hosts refuse it with a
+            # 401 whose body is indistinguishable from a revoked key. Changing one of the two and not
+            # the other takes evaluation off the air, and the pod stays Running and serves the console
+            # while it does — the failure only appears when somebody asks a question.
+            #
+            # This is a prepaid token plan, not the pay-as-you-go Model Studio endpoint, so exhausting
+            # the plan is a distinct failure from an invalid key. See internal/config.QwenBaseURL.
+            - name: QWEN_BASE_URL
+              value: https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
           envFrom:
             - secretRef:
                 name: heros-eval

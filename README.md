@@ -121,7 +121,8 @@ history is a credential that has leaked.
 
 | | |
 |---|---|
-| `QWEN_API_KEY` | Required. Read from the environment or `.env.local`, which is git-ignored. Regional: a Beijing key is rejected by the Singapore host. |
+| `QWEN_API_KEY` | Required. Read from the environment or `.env.local`, which is git-ignored. Issued against ONE host: a key for one endpoint is rejected by the others with a 401 that reads exactly like a revoked key. |
+| `QWEN_BASE_URL` | Optional; empty uses Model Studio Beijing. **Moves with `QWEN_API_KEY`, never alone** — the two name one credential, and changing either on its own takes the deployment off the air while the console keeps serving. The eval deployment sets it to the prepaid token plan at `token-plan.cn-beijing.maas.aliyuncs.com`, which serves a smaller model catalogue than Model Studio. |
 | `HEROS_DATABASE_URL` | Postgres DSN. Defaults to the container `make pg-up` starts. |
 | `HEROS_BOOTSTRAP_EMAIL`, `HEROS_BOOTSTRAP_PASSWORD` | Used **once**, to create the first organization and its owner. If no user exists and these are unset, the process refuses to start: a built-in default password is a published credential. |
 
