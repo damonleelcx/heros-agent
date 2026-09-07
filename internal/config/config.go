@@ -75,3 +75,23 @@ func RequireKey(name string) (string, error) {
 // host and vice versa, with a 401 indistinguishable from a revoked key. Changing region means changing
 // this credential and the client's BaseURL together — see internal/provider/qwen.DefaultBaseURL.
 func QwenKey() (string, error) { return RequireKey("QWEN_API_KEY") }
+
+// QwenBaseURL is the OpenAI-compatible endpoint the Qwen client talks to. Empty means "use the
+// provider package's documented default", which is Model Studio in the Beijing region.
+//
+// 🔴 THIS IS NOT A PERFORMANCE KNOB, AND IT IS NOT INDEPENDENT OF QwenKey. A credential is issued
+// against ONE host. Model Studio Beijing, Model Studio Singapore and the token-plan MaaS host
+// (token-plan.cn-beijing.maas.aliyuncs.com) each reject the others' keys with a 401 whose body is
+// indistinguishable from a revoked key, so pointing this at a new host without moving QWEN_API_KEY in
+// the SAME deployment change takes the service off the air with a misleading error. The two variables
+// travel together, always.
+//
+// Why an override existed nowhere until now: the endpoint was a constant because there had only ever
+// been one. When the deployment moved to a prepaid token plan on a different host, that constant was
+// the only thing standing between a credential rotation and a rebuild — the sibling service already
+// had OBA_QWEN_BASE_URL for exactly this reason, so this mirrors it rather than inventing a shape.
+//
+// Unset is deliberately the default rather than a region name that gets assembled into a URL: a
+// deployment that has not stated an endpoint gets the one the client documents, and can be read
+// literally instead of decoded.
+func QwenBaseURL() string { return strings.TrimSpace(os.Getenv("QWEN_BASE_URL")) }

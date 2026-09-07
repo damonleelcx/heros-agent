@@ -90,6 +90,13 @@ func main() {
 	// verifier for an effect-bearing tool should fail to start, not fail on the first pull request.
 	reg := toolcontract.NewRegistry()
 	client := qwen.New(key)
+	// The endpoint travels WITH the credential — a key issued for one Model Studio host is refused by
+	// the others with a 401 that reads like a revoked key. See config.QwenBaseURL for why this exists
+	// and why the two variables must move in the same deployment change. Overriding after New keeps
+	// qwen.DefaultBaseURL as the single place the default is written, rather than restating it here.
+	if base := config.QwenBaseURL(); base != "" {
+		client.BaseURL = base
+	}
 	// The assessment tool is registered with no source: it is REBOUND when a repository is loaded, by
 	// Registry.Replace, which re-runs the same refusals. Registering here proves at startup that the
 	// tool satisfies them, rather than discovering it on a customer's first question.
