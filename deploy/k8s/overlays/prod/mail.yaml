@@ -278,6 +278,12 @@ spec:
                   echo "aliased ${a}@ -> ${SUBMISSION_USER}"
                 fi
               done
+              # SynAgent's China site publishes support@zhiyuwujie.top; that domain's MX points
+              # here and its mail lands in the same support@ mailbox.
+              if ! grep -q "^support@zhiyuwujie.top " "$virt"; then
+                printf 'support@zhiyuwujie.top %s\n' "$SUBMISSION_USER" >> "$virt"
+                echo "aliased support@zhiyuwujie.top -> ${SUBMISSION_USER}"
+              fi
               chmod 600 "$acct"
           env:
             - name: SUBMISSION_USER
